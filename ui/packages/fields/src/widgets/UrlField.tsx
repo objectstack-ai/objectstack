@@ -1,5 +1,6 @@
 import React from 'react';
-import { Input, EmptyValue } from '@object-ui/components';
+import { Input, EmptyValue, cn } from '@object-ui/components';
+import { PHONE_TOUCH_HEIGHT } from './touchTarget.js';
 import { FieldWidgetComponentProps } from './types.js';
 import { toDomProps } from './toDomProps.js';
 
@@ -36,6 +37,7 @@ export function UrlField({ value, onChange, field, readonly, error, ...props }: 
     <Input
       {...domProps}
       type="url"
+      className={cn(PHONE_TOUCH_HEIGHT, domProps.className)}
       value={value || ''}
       onChange={(e) => onChange(e.target.value)}
       placeholder={config?.placeholder || 'https://example.com'}

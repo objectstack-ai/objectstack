@@ -70,6 +70,8 @@ const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
 /** A package the showcase composition really loads — the claim a caller must not be able to make. */
 const REAL_PACKAGE = 'com.example.showcase';
 const ASSERTION = { _packageId: REAL_PACKAGE, _provenance: 'package' };
+/** [#28149] The showcase's paired customization package — where a clone of its flow lands. */
+const PAIR_PACKAGE = `${REAL_PACKAGE}.custom`;
 
 const definition = (name: string) => ({
     name,
@@ -271,13 +273,22 @@ describe('a flow\'s package provenance is the server\'s fact at every door (show
         expect(put.status, JSON.stringify(put.json)).toBe(200);
     });
 
-    it('a clone of a shipped flow is saved as a tenant row that reads back on the metadata door', async () => {
+    it('a clone of a shipped flow is saved as a row of the base\'s pair that reads back on the metadata door', async () => {
         const res = await call('POST', `/automation/${SHIPPED}/clone`, { name: CLONE, label: 'Dogfood clone' });
         expect(res.status, JSON.stringify(res.json)).toBe(200);
+        // [#28149, ADR-0146 D3/D4] The copy lands in the base's paired
+        // customization package, never package-less.
+        expect(dataOf(res.json)?.packageId).toBe(PAIR_PACKAGE);
 
         const served = await metaRead(CLONE);
         expect(served.status, JSON.stringify(served.doc)).toBe(200);
-        expect(isCodeArtifactBody(served.doc)).toBe(false);
+        // MEASURED, as for META_BOUND above: the served body surfaces the row's
+        // binding as a package stamp, which reads as code-shipped on its own…
+        expect(served.doc?._packageId).toBe(PAIR_PACKAGE);
+        expect(isCodeArtifactBody(served.doc)).toBe(true);
+        // …and the copy is still the customer's to edit: its round trip saves.
+        const echoed = await call('PUT', `/meta/flow/${CLONE}?package=${PAIR_PACKAGE}`, served.doc);
+        expect(echoed.status, JSON.stringify(echoed.json)).toBe(200);
         // The clone is the customer's: the activation door refuses it too.
         const off = await call('POST', `/automation/${CLONE}/toggle`, { enabled: false });
         expect(off.status, JSON.stringify(off.json)).toBe(409);

@@ -286,7 +286,7 @@ describe('a recordId this route cannot honour FAILS CLOSED (ruling point 2)', ()
       ]),
     );
     renderInternal('?recordId=task-404');
-    await expectRefusal(/Could not open record "task-404".*404/s);
+    await expectRefusal(/^This record doesn't exist, or you don't have access to it\.$/);
   });
 
   /**
@@ -305,7 +305,7 @@ describe('a recordId this route cannot honour FAILS CLOSED (ruling point 2)', ()
       ]),
     );
     renderInternal('?recordId=task-42');
-    await expectRefusal(/Could not open record "task-42".*403/s);
+    await expectRefusal(/^You don't have access to this record\.$/);
   });
 
   it("an object mismatch in the payload ⇒ refuses to open the form", async () => {
@@ -342,7 +342,7 @@ describe('a recordId this route cannot honour FAILS CLOSED (ruling point 2)', ()
       ]),
     );
     renderInternal('?recordId=task-404');
-    await screen.findByText(/Could not open record/);
+    await screen.findByText(/This record doesn't exist/);
     expect(calls.filter((c) => c.method === 'POST' || c.method === 'PATCH')).toHaveLength(0);
   });
 });

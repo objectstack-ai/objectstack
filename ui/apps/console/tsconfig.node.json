@@ -70,6 +70,7 @@
     "vite.config.ts",
     "vitest.config.ts",
     "../../vitest.config.mts",
-    "../../scripts/vite-*.ts"
+    "../../scripts/vite-*.ts",
+    "../../packages/mobile/src/serviceWorkerSource.ts"
   ]
 }

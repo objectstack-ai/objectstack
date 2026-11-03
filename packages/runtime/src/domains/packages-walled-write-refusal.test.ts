@@ -30,6 +30,7 @@ function boot(posture: 'single' | 'isolated' | 'group' | null) {
         rollbackToPackageCommit: vi.fn().mockResolvedValue({ success: true }),
         reassignOrphanedMetadata: vi.fn().mockResolvedValue({ reassigned: 0 }),
         duplicatePackage: vi.fn().mockResolvedValue({ package: { id: 'com.example.pkg-b' } }),
+        ensureCustomizationPackage: vi.fn().mockResolvedValue({ basePackageId: PKG, packageId: `${PKG}.custom`, namespace: 'pkg_custom', dependencyRange: '^1', created: true, writable: true }),
         updatePackage: vi.fn().mockResolvedValue({ package: { manifest: { id: PKG } } }),
         deletePackage: vi.fn().mockResolvedValue({ deletedCount: 0 }),
         installPackage: vi.fn().mockResolvedValue({ package: { manifest: { id: 'com.example.new' } } }),
@@ -60,7 +61,7 @@ const TENANT_AUTHOR = { userId: 'u_tenant', tenantId: 'org_a', systemPermissions
 const OPERATOR = { userId: 'u_operator', systemPermissions: ['manage_metadata'], posture: 'PLATFORM_ADMIN' };
 const SYSTEM = { userId: 'u_system', isSystem: true };
 
-/** The thirteen write doors, with the message's subject each one names. */
+/** The fourteen write doors, with the message's subject each one names. */
 const DOORS: Array<{ method: string; path: string; body?: unknown; action: string }> = [
     { method: 'POST', path: '/', body: { manifest: { id: 'com.example.new', name: 'New', version: '1.0.0', type: 'app' } }, action: 'Installing a package' },
     { method: 'PATCH', path: `/${PKG}`, body: { description: 'x' }, action: `Updating package "${PKG}"` },
@@ -74,6 +75,7 @@ const DOORS: Array<{ method: string; path: string; body?: unknown; action: strin
     { method: 'POST', path: `/${PKG}/revert`, body: {}, action: `Reverting package "${PKG}"` },
     { method: 'POST', path: `/${PKG}/adopt-orphans`, body: {}, action: `Adopting orphaned metadata into package "${PKG}"` },
     { method: 'POST', path: `/${PKG}/duplicate`, body: { targetPackageId: 'com.example.pkg-b' }, action: `Duplicating package "${PKG}"` },
+    { method: 'POST', path: `/${PKG}/ensure-customization`, action: `Ensuring the customization package of "${PKG}"` },
     { method: 'DELETE', path: `/${PKG}`, action: `Deleting package "${PKG}"` },
 ];
 

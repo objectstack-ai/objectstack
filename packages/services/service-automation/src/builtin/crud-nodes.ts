@@ -17,7 +17,7 @@ import type {
     DeleteRecordConfigParsed,
 } from '@objectstack/spec/automation';
 import type { AutomationContext, IDataEngine } from '@objectstack/spec/contracts';
-import type { DroppedFieldsEvent } from '@objectstack/spec/data';
+import { isAcceptedFilterComparand, isListComparandOperator, type DroppedFieldsEvent } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { isStoredMetadataBodyObject, STORED_METADATA_BODY_PRESCRIPTION } from '@objectstack/spec/kernel';
 import {
@@ -37,6 +37,7 @@ import { refuseNode } from '../guard-refusal.js';
 import { parseNodeConfig } from './parse-config.js';
 import { resolveRunDataContext, stampSystemInsertOwner } from '../runtime-identity.js';
 import { refusalCarriedBy } from '../inner-refusal.js';
+import { staleSummaryAnswerLines, staleSummaryRefusalOrThrow } from '@objectstack/types';
 
 /**
  * Resolve a node's `filter` to the one the query runs (#19939, Fork R17 → A;
@@ -71,6 +72,26 @@ import { refusalCarriedBy } from '../inner-refusal.js';
  * empty": losing ONE of two conditions still widens the blast radius from "my
  * open records" to "all open records".
  *
+ * **A computed operand is a value, never filter structure.** The filter's
+ * structure — its fields, its operators, its `$and` / `$or` / `$not`
+ * conditions — is what the author wrote; an operand envelope supplies only
+ * what a condition compares against. So an operand must evaluate to a value
+ * the query takes as a literal ({@link operandValueRefusal}): a string, a
+ * number, a bigint, a boolean or a date, and, at the comparand of an operator
+ * whose comparand is a list (`$in`, `$nin`, `$between`), a list of them with
+ * no empty entry. Anything else — an object, a list where one value belongs,
+ * a list holding anything but values, a list with an entry that is nothing
+ * (like an operand that is nothing, it adds "the field is empty" to a
+ * condition the author never wrote that way) — REFUSES the node before any
+ * query, whatever the value's origin (a start input, an assignment, a node
+ * output) and whatever the key: handed to the query, a plain object at an
+ * operand position is read as structure (an operator map, a nested
+ * condition, a field reference), which changes
+ * which rows the filter matches instead of what it compares against. It is
+ * refused as the nothing guard above is, a guard {@link refuseNode}: the
+ * filter the author wrote is not the filter that would run. An operand the
+ * author wrote as a literal is not judged here; the query engine judges it.
+ *
  * `consequence` names the operation in the refusal, so the message says what
  * WOULD have happened ("would have matched every remaining row and deleted it").
  */
@@ -85,13 +106,19 @@ function resolveNodeFilter(
     const authored = rawFilter ?? {};
     const filter = copyFilter(authored) as Record<string, unknown>;
     const nothing: Array<{ path: string; source: string }> = [];
+    const notValues: Array<{ path: string; source: string; kind: string }> = [];
     for (const operand of flowFilterOperands(authored)) {
         if (!isExpressionEnvelopeShaped(operand.value)) continue;
         const at = filterOperandPath(operand.path);
         const value = engine.evaluateValueEnvelope(operand.value, variables, at, context);
+        const source = (operand.value as { source?: unknown }).source;
         if (value === null || value === undefined) {
-            const source = (operand.value as { source?: unknown }).source;
             nothing.push({ path: at, source: typeof source === 'string' ? source : '' });
+            continue;
+        }
+        const kind = operandValueRefusal(value, operand.path);
+        if (kind !== undefined) {
+            notValues.push({ path: at, source: typeof source === 'string' ? source : '', kind });
             continue;
         }
         setFilterOperand(filter, operand.path, value);
@@ -107,7 +134,57 @@ function resolveNodeFilter(
                 `with a \`decision\`. To match an empty field, write the literal \`null\` as the operand.`,
         };
     }
+    if (notValues.length > 0) {
+        const detail = notValues.map((e) => `\`${e.source}\` (at ${e.path}) evaluated to ${e.kind}`).join(', ');
+        return {
+            error:
+                `${nodeType}: refusing to run — ${notValues.length} filter operand(s) evaluated to something other ` +
+                `than a value: ${detail}. A computed filter operand is the value a condition compares against — a ` +
+                `string, number, bigint, boolean or date, or a list of them with no empty entry at an \`$in\` / ` +
+                `\`$nin\` / \`$between\` comparand — and is never read as part of the filter's structure, so the ` +
+                `query was not run. Make the expression evaluate to that value (for a record, read its \`id\`), and ` +
+                `check the input that feeds it; a condition the flow needs is written in the filter itself.`,
+        };
+    }
     return { filter };
+}
+
+/**
+ * What an evaluated filter operand is when it is NOT a value its position
+ * takes, worded for the refusal (`an object`, `a list`, `a list whose entry
+ * [1] is an object`); `undefined` when it is one ({@link resolveNodeFilter}).
+ *
+ * A value is a literal comparand of the accepted set
+ * (`isAcceptedFilterComparand`, `@objectstack/spec/data`: a string, number,
+ * bigint, boolean, `null` or `Date`); an operand that IS `null` never gets
+ * here, the nothing guard owns it. At the comparand of a list operator
+ * (`isListComparandOperator`, `@objectstack/spec/data`: the operand's path
+ * ends in that operator) a list of such values is one too, provided no entry
+ * is `null`: an entry that is nothing is refused as the nothing guard refuses an operand
+ * that is nothing, since it adds "the field is empty" to the condition, a
+ * match the author never wrote. Every other position takes one
+ * value: a field's implicit equality, a scalar operator's comparand, a list
+ * operator's single element, and a combinator's member or `$not`, which take
+ * a condition: a condition is written in the filter, never supplied by an
+ * expression, so there too only a value passes on, for the query engine to
+ * judge. The value itself is never echoed: an input may carry it from a
+ * caller.
+ */
+function operandValueRefusal(value: unknown, path: readonly (string | number)[]): string | undefined {
+    if (isAcceptedFilterComparand(value)) return undefined;
+    if (!Array.isArray(value)) return kindOfOperand(value);
+    const last = path[path.length - 1];
+    if (typeof last !== 'string' || !isListComparandOperator(last)) return 'a list';
+    const index = value.findIndex((member) => member === null || !isAcceptedFilterComparand(member));
+    return index < 0 ? undefined : `a list whose entry [${index}] is ${kindOfOperand(value[index])}`;
+}
+
+/** A non-value's kind, in words (`nothing`, `an object`, `a list`, `a function`). */
+function kindOfOperand(value: unknown): string {
+    if (value === null || value === undefined) return 'nothing';
+    if (Array.isArray(value)) return 'a list';
+    if (typeof value === 'object') return 'an object';
+    return `a ${typeof value}`;
 }
 
 /** A filter operand's path, in the ledger's spelling (`filter.id.$in[0]`). */
@@ -169,6 +246,29 @@ function droppedFieldsWarning(nodeType: string, e: DroppedFieldsEvent): string {
         return `${nodeType}(${e.object}): the requested value(s) for field(s) ${fields} were NOT stored — ${why}. The write succeeded with the computed value(s).`;
     }
     return `${nodeType}(${e.object}): requested field(s) ${fields} were NOT written — ${why}. The write succeeded without them.`;
+}
+
+/**
+ * [#28861] A record node's write that the data engine STORED, but whose parent
+ * roll-up summary it could not recompute after it, is the node's success
+ * (seat ruling 6570987196, seat 5's addendum 6567869052): the result the write
+ * earned, read off the engine's refusal (objectql's `SummaryRecomputeError`,
+ * `ERR_SUMMARY_RECOMPUTE`, "the triggering records WERE written", carrying as
+ * `written` exactly what the call returns on a healthy recompute). Answering
+ * it `success: false` failed the run at this node with the write committed —
+ * no transaction wraps a run — so every later node went unrun and a re-run
+ * wrote it twice.
+ *
+ * The stale column is said once per field per process at `error`, the line
+ * the data doors log (`staleSummaryAnswerLines`, `@objectstack/types`). Every
+ * other error, a refusal raised before the write was stored among them, is
+ * rethrown to the node's own `catch`, which answers it exactly as before.
+ * The node answers the same output on both paths; nothing is added to it.
+ */
+function landedWriteResult(e: unknown, nodeType: string, objectName: string, logger: PluginContext['logger']): unknown {
+    const stale = staleSummaryRefusalOrThrow(e);
+    for (const line of staleSummaryAnswerLines(stale, objectName)) logger.error(`[${nodeType}] ${line}`);
+    return stale.written;
 }
 
 /**
@@ -341,10 +441,12 @@ function projectionNamingId(fields: string[] | undefined): string[] | undefined 
  *    then the content-hash refusal (`storedMetadataHashEvaluateRefusal`).
  *
  * `query` is the option bag the node hands the engine, so the collector reads
- * exactly the filter the engine would run: the RESOLVED one, since an operand
- * envelope can evaluate to a comparand (a `{ $field }` reference among them)
- * whose columns the authored envelope does not show. The node configs declare
- * no sort and no grouping, so the refusals are fed filter fields only.
+ * exactly the filter the engine would run: the RESOLVED one. An operand
+ * envelope evaluates to a value only ({@link resolveNodeFilter} refuses
+ * anything else, a `{ $field }` reference among them), so the resolved filter
+ * names no column the authored one does not; reading it keeps the collector
+ * on what the engine runs. The node configs declare no sort and no grouping,
+ * so the refusals are fed filter fields only.
  *
  * The answer is a guard refusal ({@link refuseNode}: the metadata is wrong,
  * and re-running it unchanged never succeeds) carrying the door's own error
@@ -642,10 +744,16 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                     // over a column that never landed. Driven end to end in
                     // `create-record-readonly-drop.test.ts`.
                     const dropped: DroppedFieldsEvent[] = [];
-                    const created = await data.insert(objectName, fields, {
-                        context: dataCtx,
-                        onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); },
-                    });
+                    let created: unknown;
+                    try {
+                        created = await data.insert(objectName, fields, {
+                            context: dataCtx,
+                            onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); },
+                        });
+                    } catch (e) {
+                        // [#28861] A landed insert under a failing roll-up is this node's success.
+                        created = landedWriteResult(e, 'create_record', objectName, ctx.logger);
+                    }
                     const createdRecord = Array.isArray(created) ? created[0] : created;
                     const insertedId =
                         createdRecord && typeof createdRecord === 'object'
@@ -789,19 +897,25 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                     // requested fields never landed instead of reporting a clean
                     // success while the DB truth stayed unchanged.
                     const dropped: DroppedFieldsEvent[] = [];
-                    const result = await data.update(objectName, fields, {
-                        where: filter,
-                        // #5393 — the author's declared bulk intent, forwarded
-                        // to the engine's own word for it. Stated on EVERY call
-                        // rather than spread in when true: `multi: false` is the
-                        // half of the contract that makes the engine refuse a
-                        // predicate update, and a reader of this call should see
-                        // which half was asked for without inferring it from an
-                        // absent key.
-                        multi: cfg.multi === true,
-                        context: dataCtx,
-                        onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); },
-                    });
+                    let result: unknown;
+                    try {
+                        result = await data.update(objectName, fields, {
+                            where: filter,
+                            // #5393 — the author's declared bulk intent, forwarded
+                            // to the engine's own word for it. Stated on EVERY call
+                            // rather than spread in when true: `multi: false` is the
+                            // half of the contract that makes the engine refuse a
+                            // predicate update, and a reader of this call should see
+                            // which half was asked for without inferring it from an
+                            // absent key.
+                            multi: cfg.multi === true,
+                            context: dataCtx,
+                            onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); },
+                        });
+                    } catch (e) {
+                        // [#28861] A landed update under a failing roll-up is this node's success.
+                        result = landedWriteResult(e, 'update_record', objectName, ctx.logger);
+                    }
                     const droppedFields = dropped.flatMap((e) => e.fields);
                     return {
                         success: true,
@@ -883,7 +997,13 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 try {
                     // #5393 — `multi` is the author's declaration, forwarded to
                     // the engine's own word for it (see update_record above).
-                    const result = await data.delete(objectName, { where: filter, multi: cfg.multi === true, context: dataCtx });
+                    let result: unknown;
+                    try {
+                        result = await data.delete(objectName, { where: filter, multi: cfg.multi === true, context: dataCtx });
+                    } catch (e) {
+                        // [#28861] A landed delete under a failing roll-up is this node's success.
+                        result = landedWriteResult(e, 'delete_record', objectName, ctx.logger);
+                    }
                     return {
                         success: true,
                         output: { result, object: objectName },

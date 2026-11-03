@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 30 — spawns the real producer once per single-cause fixture: two spawns of the source CLI, os migrate plan on an absent database in its human and --json faces, each a distinct triple; slowest CI reading 16.2 s (run 41217827347) of the five scheduled CI runs 41199450735, 41217827347, 41237094739, 41255489006, 41271604267, x 1.25, rounded up
 
 /**
  * [#20821] `os migrate plan` against a database that does not exist yet prints

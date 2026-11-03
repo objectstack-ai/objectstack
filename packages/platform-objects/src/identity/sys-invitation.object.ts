@@ -49,18 +49,18 @@ export const SysInvitation = ObjectSchema.create({
   },
   description: 'Organization invitations for user onboarding',
   // [ADR-0079] The record title is `display_title`, a text formula over the
-  // columns `titleFormat` names. With no pointer declared, the registry's
+  // columns `titleFormat` named. With no pointer declared, the registry's
   // designate-only pass stamped `nameField: 'id'` (the first title-eligible
   // field), so a renderer honouring ADR-0079's order (an explicit `nameField`
-  // wins over `titleFormat`) drew the raw id as the record page's H1.
-  // `titleFormat` stays for renderers that still read it first;
-  // `identity-display-title.test.ts` holds the two to the same text.
+  // wins over `titleFormat`) drew the raw id as the record page's H1. The
+  // retired `titleFormat` template beside it is gone (refused at save and by
+  // `os validate`); `identity-display-title.test.ts` holds the formula to the
+  // text that template drew.
   displayNameField: 'display_title',
   nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   // Title by invitee email rather than organization_id: the latter is null in
   // single-org mode (renders "Invitation to null"), and the recipient email is
   // the more useful identifier in both modes anyway.
-  titleFormat: 'Invitation for {email}',
   highlightFields: ['email', 'organization_id', 'status'],
 
   // Custom actions — generic CRUD is suppressed (better-auth-managed).
@@ -126,6 +126,9 @@ export const SysInvitation = ObjectSchema.create({
       requiresFeature: 'organization',
       requiresMembershipReach: 'cancel_invitation',
       confirmText: 'Cancel this invitation? The recipient will no longer be able to accept it.',
+      // The dismiss button names what dismissing keeps: beside a "Cancel
+      // Invitation" confirm button, a bare "Cancel" reads as the same verb.
+      cancelText: 'Keep invitation',
       successMessage: 'Invitation canceled',
       refreshAfter: true,
       // ADR-0011 identity-actions note, bucket C: exposed, and the
@@ -145,7 +148,12 @@ export const SysInvitation = ObjectSchema.create({
       // carried over from the row. invite-member renews a pending invitation
       // with its stored role whatever role is sent, and another email would
       // invite a different person, so neither is the user's to edit here.
-      description: 'Resend the invitation to {{ record.email }}? Its expiry date starts over.',
+      // [#28540] True for both rows Resend is offered on: an unexpired
+      // invitation is renewed, and an expired one is replaced by a new
+      // invitation while the old row moves to `expired` (plugin-auth's
+      // `invitation-expired-supersede.ts`), so one pending row remains.
+      description:
+        'Resend the invitation to {{ record.email }}? The expiry date starts over, and an invitation that has already expired is replaced by a new one.',
       icon: 'send',
       variant: 'secondary',
       locations: ['list_item'],
@@ -170,7 +178,7 @@ export const SysInvitation = ObjectSchema.create({
       ai: {
         exposed: true,
         description:
-          'Send a pending invitation (the record) again (params: its email and role, copied from the invitation; the stored role is kept). Its expiry date starts over. Use when the invitee lost the invitation or never received it.',
+          'Send a pending invitation (the record) again (params: its email and role, copied from the invitation; the stored role is kept). The expiry date starts over, and an invitation that has already expired is replaced by a new one. Use when the invitee lost the invitation or never received it.',
       },
     },
     {
@@ -190,10 +198,13 @@ export const SysInvitation = ObjectSchema.create({
       target: 'copy_invitation_link',
       // The gates of `resend_invitation` (the organization capability and the
       // grades that reach invite-member), hidden while cloud-managed as the
-      // invite mirrors are, and offered on a pending row only. `has()` opens
-      // the status operand for the sparse `list_item` face (#8990), as on the
-      // recipient-side actions below.
-      visible: "features.cloudManaged != true && has(record.status) && record.status == 'pending'",
+      // invite mirrors are, and offered on a pending row only, before its
+      // `expires_at`: a row can still read `pending` after it expires, and
+      // its link admits no one (the handler refuses it too). `has()` opens
+      // each operand for the sparse `list_item` face (#8990), as on the
+      // recipient-side actions below; `expires_at` is compared by ordering,
+      // so it also needs its `!= null` half (`materializeDeclaredFields`).
+      visible: "features.cloudManaged != true && has(record.status) && record.status == 'pending' && has(record.expires_at) && record.expires_at != null && datetime(record.expires_at) > now()",
       requiresFeature: 'organization',
       requiresMembershipReach: 'invite_member',
       resultDialog: {

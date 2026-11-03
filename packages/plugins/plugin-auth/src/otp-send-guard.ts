@@ -63,6 +63,7 @@
  * Keys carry only the phone number and timestamps — never OTP codes.
  */
 
+import { serializePerKey } from './per-key-serial.js';
 import { InProcessCounterStore, type CounterStore } from './rate-limit-storage.js';
 
 /**
@@ -235,6 +236,12 @@ export class OtpSendGuard {
    * Check whether `phoneNumber` may receive another OTP now and, if so,
    * record the send. Never throws — a broken store fails OPEN (an SMS
    * throttle must not take sign-in down with it).
+   *
+   * Inside one process, checks for one number are serialised
+   * ({@link serializePerKey}): each reads the history the previous check
+   * wrote, so concurrent sends to one number are granted no more than the
+   * cooldown and the hourly cap allow. Across nodes the same caveat as the
+   * fixed-window counter holds (no atomic operation in the cache contract).
    */
   async checkAndRecord(phoneNumber: string): Promise<OtpSendDecision> {
     if (this.cooldownMs === 0 && this.maxPerHour === 0) return { ok: true };
@@ -242,33 +249,38 @@ export class OtpSendGuard {
     try {
       const store = await this.resolveStore();
       const key = KEY_PREFIX + phoneNumber;
-      // Retained for the LONGER of the two windows (#4808) …
-      const history = parseHistory(await store.get(key)).filter((t) => now - t < this.retentionMs);
-      // … but the hourly cap counts only its own rolling hour, so a cooldown
-      // above an hour can never make `maxPerHour` stricter than it was
-      // declared. Belt and braces today (a history entry inside the wider
-      // retention window is also inside the cooldown, which returns below
-      // before the cap is consulted) — stated explicitly so the cap's window
-      // does not silently become "whatever the cooldown retains" the next time
-      // either window moves.
-      const withinHour = history.filter((t) => now - t < HOUR_MS);
-
-      const last = history.length ? Math.max(...history) : undefined;
-      if (this.cooldownMs > 0 && last !== undefined && now - last < this.cooldownMs) {
-        return { ok: false, retryAfterSeconds: Math.ceil((this.cooldownMs - (now - last)) / 1000) };
-      }
-      if (this.maxPerHour > 0 && withinHour.length >= this.maxPerHour) {
-        const oldest = Math.min(...withinHour);
-        return { ok: false, retryAfterSeconds: Math.ceil((HOUR_MS - (now - oldest)) / 1000) };
-      }
-
-      history.push(now);
-      // TTL = the retention window, so the entry outlives the cooldown it is
-      // measured against and self-expires once no dimension can still need it.
-      await store.set(key, JSON.stringify(history), Math.ceil(this.retentionMs / 1000));
-      return { ok: true };
+      return await serializePerKey(key, () => this.checkAndRecordOnce(store, key, now));
     } catch {
       return { ok: true }; // fail open — see doc comment
     }
+  }
+
+  /** One read → decide → write; reached only through {@link checkAndRecord}. */
+  private async checkAndRecordOnce(store: CounterStore, key: string, now: number): Promise<OtpSendDecision> {
+    // Retained for the LONGER of the two windows (#4808) …
+    const history = parseHistory(await store.get(key)).filter((t) => now - t < this.retentionMs);
+    // … but the hourly cap counts only its own rolling hour, so a cooldown
+    // above an hour can never make `maxPerHour` stricter than it was
+    // declared. Belt and braces today (a history entry inside the wider
+    // retention window is also inside the cooldown, which returns below
+    // before the cap is consulted) — stated explicitly so the cap's window
+    // does not silently become "whatever the cooldown retains" the next time
+    // either window moves.
+    const withinHour = history.filter((t) => now - t < HOUR_MS);
+
+    const last = history.length ? Math.max(...history) : undefined;
+    if (this.cooldownMs > 0 && last !== undefined && now - last < this.cooldownMs) {
+      return { ok: false, retryAfterSeconds: Math.ceil((this.cooldownMs - (now - last)) / 1000) };
+    }
+    if (this.maxPerHour > 0 && withinHour.length >= this.maxPerHour) {
+      const oldest = Math.min(...withinHour);
+      return { ok: false, retryAfterSeconds: Math.ceil((HOUR_MS - (now - oldest)) / 1000) };
+    }
+
+    history.push(now);
+    // TTL = the retention window, so the entry outlives the cooldown it is
+    // measured against and self-expires once no dimension can still need it.
+    await store.set(key, JSON.stringify(history), Math.ceil(this.retentionMs / 1000));
+    return { ok: true };
   }
 }

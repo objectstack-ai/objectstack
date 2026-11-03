@@ -71,7 +71,6 @@ import { CONFIG_MISS_FAMILY, discoverConfigMissFamily } from './helpers/config-m
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 const COMMANDS_DIR = resolve(HERE, '../src/commands');
 const UTILS_DIR = resolve(HERE, '../src/utils');
 
@@ -101,6 +100,10 @@ const FAMILY: Record<string, string[]> = {
   // `sys_activity` and writes nothing. Its backfill logs through a sink of its
   // own, which `--json` points at stderr, as `audit-metadata-bodies` does.
   'migrate activity-changed-fields': [],
+  // Its dry run takes the `summary-nulls` shape: a read-only boot, no row written.
+  'migrate blank-single-values': [],
+  // Same shape as `blank-single-values`: a read-only boot, no row written.
+  'migrate option-codes': [],
   // [ADR-0139 E7] The same shape: a dry run by default, reading `sys_comment`
   // and writing nothing, its backfill logging through a sink `--json` points at
   // stderr.
@@ -135,6 +138,10 @@ const FAMILY: Record<string, string[]> = {
   // stack is shut down. A refused plan writes no plan file, so the fixture
   // directory gains nothing.
   'migrate organization-ownership': [],
+  // A preview is its DEFAULT and the only form driven here: without `--apply`
+  // it boots read-only and moves nothing. No table exists in the fixture, so
+  // the face driven here is its empty listing.
+  'migrate packageless-overlays': [],
   'migrate plan': [],
   // [ADR-0144] `--object`, `--field` and `--code` are all required, so without
   // them the run stops at flag parsing and never boots; the pair named here is
@@ -307,7 +314,7 @@ interface Run {
 function runCli(argv: string[], cwd: string, env: Record<string, string>): Promise<Omit<Run, 'id'>> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...argv],
       { cwd, maxBuffer: 32 * 1024 * 1024, env: childEnv({ NO_COLOR: '1', ...env }) },
       (err, stdout, stderr) => {

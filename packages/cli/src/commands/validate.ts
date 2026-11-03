@@ -26,6 +26,7 @@ import { resolveJsxGateManifest, printJsxGateNotices } from '../utils/sdui-manif
 import { preflightDeclaredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
 import { collectAndLintDocs, type DocIssue } from '../utils/collect-docs.js';
 import { collectSeedFiles } from '../utils/bundle-seed-files.js';
+import { collectConnectorSpecFiles } from '../utils/bundle-connector-spec-files.js';
 import { judgeSeedRecordValues } from '../utils/seed-record-values.js';
 import {
   printHeader,
@@ -73,6 +74,16 @@ import type { PermissionSetNameCollisionDiagnostic } from '@objectstack/plugin-s
 // over the parsed stack the way the load path registers it. The verdict is
 // `@objectstack/objectql`'s; see the module header.
 import { findViewContainerNameRefusals } from '../utils/view-container-names.js';
+// [ADR-0146 D2, #28410] The override write gate's author-time half: the publish
+// door's own judge, walked over the artifact's packages.
+import { findOverrideDeclarationRefusals } from '../utils/override-declarations.js';
+import { findExtensionFieldSuffixRefusals } from '../utils/extension-field-suffix.js';
+// [ADR-0146 D10, second rule] The field-patch target check's walk; the verdict
+// is the marketplace install door's own judge.
+import { findFieldPatchTargetRefusals } from '../utils/field-patch-targets.js';
+// [#29051] An undeclared top-level flow cycle (ADR-0044): the automation
+// engine's own judge (`findUndeclaredFlowCycle`, `@objectstack/metadata-core`).
+import { findFlowCycleRefusals } from '../utils/flow-undeclared-cycle.js';
 // A field `picklist` that names no picklist the stack declares — refused, or
 // reported when the declaring package depends on packages outside the stack.
 // Walked the way the load path registers, like the refusal above.
@@ -657,6 +668,127 @@ export default class Validate extends Command {
         }
       }
 
+      // 3a-iii. [ADR-0146 D2, #28410] The override write gate, at author time.
+      //     Only the base's paired `<base>.custom` declares an override; a
+      //     dependent's item bearing the name a package in its closure ships is
+      //     refused (rename), and an `overrides` declaration the gate does not
+      //     admit is refused. The verdict is the publish door's own
+      //     (`judgeOverrideWrite`), so a green validate is a publish the door
+      //     accepts; see `utils/override-declarations.ts` for the walk.
+      const overrideRefusals = findOverrideDeclarationRefusals(result.data as Record<string, unknown>);
+      if (overrideRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({
+            valid: false,
+            errors: overrideRefusals,
+            warnings: warningsSoFar(),
+            conversions: conversionNotices,
+            duration: timer.elapsed(),
+          });
+          this.exit(1);
+        }
+        const n = overrideRefusals.length;
+        console.log('');
+        printError(`The publish door would refuse ${n} item${n > 1 ? 's' : ''} under the override write gate (ADR-0146 D2)`);
+        printBulletList(
+          overrideRefusals.map((r) => `${r.path} [${r.code}] ${r.message}`),
+          { noun: 'override refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
+      }
+
+      // 3a-iv. [ADR-0146 D10, #28564] The `__c` extension-field reservation,
+      //     at author time: a field spelled `__c` only in a base's paired
+      //     `.custom` package, and every `objectExtensions[].fields` key of a
+      //     `.custom` pair suffixed. The verdict is the save and install doors'
+      //     own (`judgeExtensionFieldSuffix`), so a green validate is an
+      //     artifact they admit; see `utils/extension-field-suffix.ts`.
+      const suffixRefusals = findExtensionFieldSuffixRefusals(result.data as Record<string, unknown>);
+      if (suffixRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({
+            valid: false,
+            errors: suffixRefusals,
+            warnings: warningsSoFar(),
+            conversions: conversionNotices,
+            duration: timer.elapsed(),
+          });
+          this.exit(1);
+        }
+        const n = suffixRefusals.length;
+        console.log('');
+        printError(`${n} field${n > 1 ? 's break' : ' breaks'} the \`__c\` extension-field reservation (ADR-0146 D10)`);
+        printBulletList(
+          suffixRefusals.map((r) => `${r.path} [${r.code}] ${r.message}`),
+          { noun: 'extension-field refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
+      }
+
+      // 3a-v. [ADR-0146 D10, second rule] The field-patch target check, at
+      //     author time: an object extension's `fieldPatches` naming a field
+      //     its target does not have, or an option value the field does not
+      //     have, when the target is in this composed stack. The verdict is the
+      //     install door's own judge (`fieldPatchTargetRefusals`), so a green
+      //     validate is a patch the install door admits; see
+      //     `utils/field-patch-targets.ts` for the walk.
+      const patchTargetRefusals = findFieldPatchTargetRefusals(result.data as Record<string, unknown>);
+      if (patchTargetRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({
+            valid: false,
+            errors: patchTargetRefusals,
+            warnings: warningsSoFar(),
+            conversions: conversionNotices,
+            duration: timer.elapsed(),
+          });
+          this.exit(1);
+        }
+        const n = patchTargetRefusals.length;
+        console.log('');
+        printError(`${n} field patch${n > 1 ? 'es name' : ' names'} a field or option the extended object does not have (ADR-0146 D10)`);
+        printBulletList(
+          patchTargetRefusals.map((r) => `${r.path} ${r.message}`),
+          { noun: 'field-patch refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
+      }
+
+      // 3a-vi. [#28893] Flow region shape (ADR-0031) is judged by the rule
+      //     table above since #29049 (`flow-region-shape-invalid`,
+      //     `@objectstack/lint`'s `validate-flow-region-shape.ts`), so all
+      //     three authoring commands give the engine's registration verdict.
+
+      // 3a-vii. [#29051] An undeclared cycle in a flow's TOP-LEVEL graph
+      //     (ADR-0044): a cycle that survives setting the `type: 'back'` edges
+      //     aside. The verdict is the engine's registration judge
+      //     (`findUndeclaredFlowCycle`, `@objectstack/metadata-core`), the
+      //     one the publish doors run too, so a flow green here is one boot
+      //     registers; see `utils/flow-undeclared-cycle.ts`. It is a CLI step,
+      //     not a rule-table entry, because `@objectstack/lint` does not
+      //     depend on metadata-core.
+      const cycleRefusals = findFlowCycleRefusals(result.data as Record<string, unknown>);
+      if (cycleRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({
+            valid: false,
+            errors: cycleRefusals,
+            warnings: warningsSoFar(),
+            conversions: conversionNotices,
+            duration: timer.elapsed(),
+          });
+          this.exit(1);
+        }
+        const n = cycleRefusals.length;
+        console.log('');
+        printError(`The automation engine would refuse to register ${n} flow${n > 1 ? 's' : ''} for a cycle no back edge declares (ADR-0044)`);
+        printBulletList(
+          cycleRefusals.map((r) => `${r.path} [${r.code}] ${r.message}`),
+          { noun: 'flow cycle refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
+      }
+
       // 3b. [#3366] Installable-provider preflight — the shift-left of the
       //     `serve`-time capability check. `os validate` previously only checked
       //     the `requires` tokens against the vocabulary (ADR-0066), never
@@ -801,6 +933,29 @@ export default class Validate extends Command {
         console.log('');
         printError(`Seed file validation failed (${seedFiles.issues.length} issue${seedFiles.issues.length > 1 ? 's' : ''})`);
         for (const issue of seedFiles.issues) console.log(chalk.red(`  ✗ ${issue.location}: ${issue.message}`));
+        this.exit(1);
+      }
+
+      // 3d-ter. Connector spec files — the OpenAPI document a
+      //     `provider: 'openapi'` connector names by package-relative file must
+      //     name a JSON object under the directory holding the config. `os build`
+      //     refuses the same references before it carries the documents into the
+      //     artifact, where an installed copy has no package directory to read.
+      const connectorSpecs = collectConnectorSpecFiles(absolutePath, result.data as Record<string, unknown>);
+      if (connectorSpecs.issues.length > 0) {
+        if (flags.json) {
+          await emitJson({
+            valid: false,
+            errors: connectorSpecs.issues,
+            warnings: warningsSoFar(),
+            conversions: conversionNotices,
+            duration: timer.elapsed(),
+          });
+          this.exit(1);
+        }
+        console.log('');
+        printError(`Connector spec file validation failed (${connectorSpecs.issues.length} issue${connectorSpecs.issues.length > 1 ? 's' : ''})`);
+        for (const issue of connectorSpecs.issues) console.log(chalk.red(`  ✗ ${issue.location}: ${issue.message}`));
         this.exit(1);
       }
 

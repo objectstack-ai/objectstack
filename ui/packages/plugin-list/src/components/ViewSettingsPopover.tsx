@@ -6,11 +6,14 @@
  * here, in this order —
  *   - Layout (the visualization switcher; only when the list offers a choice)
  *   - Open records (how a row opens its record; only when the host passes it)
+ *   - Sort (below `sm` only, when the host passes it: the bar's Sort button
+ *     is not drawn there)
  *   - Group, Row color, Hide fields
  *   - Density
  *   - Row numbers (a session-only switch, grid only)
  *   - Edit inline (a switch, grid only, when the principal may edit)
- *   - footer: Reset to view default · Refresh · Export
+ *   - footer: Reset to view default · Refresh, then the export entries on a
+ *     row of their own that wraps, so every format stays inside the panel
  *
  * It began as UX Sprint 2 (P1-4)'s "View settings" gear behind
  * `compactToolbar: true`; the wide form — one toolbar button per control — is
@@ -55,6 +58,36 @@ import {
   Undo2,
 } from 'lucide-react';
 
+/**
+ * A bar or panel control's touch size below `sm`: 44 px on both sides (WCAG
+ * 2.5.5), so a phone's finger lands on it. At `sm` and up the compact sizes
+ * stay as they are.
+ */
+export const PHONE_TOUCH_TARGET = 'max-sm:h-11 max-sm:min-w-11';
+
+const BELOW_SM_QUERY = '(max-width: 639.98px)';
+
+/**
+ * Whether the viewport is below `sm`, for the one thing a class cannot carry:
+ * a popover's collision padding, which keeps a phone-width panel 16 px from
+ * both screen edges. `false` where `matchMedia` is missing (server, tests).
+ */
+export function useBelowSm(): boolean {
+  return React.useSyncExternalStore(
+    (onChange) => {
+      if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return () => {};
+      const mql = window.matchMedia(BELOW_SM_QUERY);
+      mql.addEventListener?.('change', onChange);
+      return () => mql.removeEventListener?.('change', onChange);
+    },
+    () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(BELOW_SM_QUERY).matches,
+    () => false,
+  );
+}
+
+/** The 16 px a phone-width popover keeps from each screen edge (`w-[calc(100vw-2rem)]`). */
+export const PHONE_POPOVER_GUTTER = 16;
+
 export interface ViewSettingsField {
   name: string;
   label?: string;
@@ -67,11 +100,11 @@ export interface ViewSettingsDensity {
 
 /**
  * How a reader prefers a drawer-mode record to open (objectstack#26681): the
- * pane beside the list (the default since objectstack#27545) or the drawer
- * over it. The full page is a third choice only a host that offers it draws
- * (`ViewSettingsRecordOpen.selectPage`).
+ * drawer over the list (the default), or the full page (objectstack#27545).
+ * The pane beside the list retired (objectstack#28915, maintainer ruling
+ * 2026-11-02: 「默认改抽屉，分屏彻底退役，只留抽屉和整页」).
  */
-export type ViewSettingsRecordOpenPreference = 'split' | 'drawer';
+export type ViewSettingsRecordOpenPreference = 'drawer' | 'page';
 
 /**
  * The Open records section (objectstack#26681): how a row opens its record.
@@ -81,10 +114,10 @@ export type ViewSettingsRecordOpenPreference = 'split' | 'drawer';
  * default) or `page` (maintainer ruling 2026-10-27, objectstack#26677). So the
  * section answers by the mode the host resolved for this object and view:
  *
- *   - `drawer`: two segments, Split | Drawer, writing the reader's preference
- *     through `setPreference` — and a third, Full page, when the host passes
- *     `selectPage` (objectstack#27545) — with a one-line note that the choice
- *     is the reader's own and that a record's `↗` always opens the full page;
+ *   - `drawer`: two segments, Drawer | Full page, writing the reader's
+ *     preference through `setPreference`, with a one-line note that the
+ *     choice is the reader's own and that a record's `↗` always opens the
+ *     full page;
  *   - `page`: one read-only line saying the object is declared to open as a
  *     full page — the declaration wins, so there is nothing to choose;
  *   - `new_window` / `none`: no section. The preference changes nothing there
@@ -95,18 +128,12 @@ export interface ViewSettingsRecordOpen {
   resolvedMode: 'drawer' | 'page' | 'new_window' | 'none';
   /**
    * The reader's current preference; read only when `resolvedMode` is
-   * `drawer`. `'page'` selects the Full page segment, drawn only with
-   * `selectPage`. Read, never handed back: a choice is written through
-   * `setPreference` or `selectPage`.
+   * `drawer`. Read, never handed back: a choice is written through
+   * `setPreference`.
    */
-  preference: ViewSettingsRecordOpenPreference | 'page';
-  /** Keep the reader's choice of Split or Drawer. The host owns where it is kept. */
+  preference: ViewSettingsRecordOpenPreference;
+  /** Keep the reader's choice of Drawer or Full page. The host owns where it is kept. */
   setPreference: (next: ViewSettingsRecordOpenPreference) => void;
-  /**
-   * Keep the reader's choice of the full page (objectstack#27545). The Full
-   * page segment is drawn only when the host passes it.
-   */
-  selectPage?: () => void;
 }
 
 export interface ViewSettingsPopoverProps {
@@ -137,6 +164,15 @@ export interface ViewSettingsPopoverProps {
    * (`compactToolbar: false`), so the wide form has no twin of it.
    */
   recordOpen?: ViewSettingsRecordOpen;
+
+  /**
+   * The Sort block, drawn below `sm` only (objectstack#28911): there the bar
+   * keeps Filter and Display, and the host's Sort button is hidden. From `sm`
+   * up that button carries Sort, so the panel draws nothing for it. The host
+   * passes the same panel its Sort popover draws, so both write through one
+   * door; it is not a display setting and does not count in `changedCount`.
+   */
+  sort?: React.ReactNode;
 
   showGroup?: boolean;
   groupingConfig?: any;
@@ -203,11 +239,11 @@ function Section({ title, badge, onClear, clearLabel, defaultOpen = true, childr
   const [open, setOpen] = React.useState(defaultOpen);
   return (
     <div className="border-b last:border-b-0">
-      <div className="flex items-center justify-between px-3 py-2">
+      <div className="flex items-center justify-between px-3 py-2 max-sm:py-0">
         <button
           type="button"
           onClick={() => setOpen((x) => !x)}
-          className="flex items-center gap-1.5 text-xs font-medium text-foreground/80 hover:text-foreground"
+          className="flex items-center gap-1.5 text-xs font-medium text-foreground/80 hover:text-foreground max-sm:min-h-11 max-sm:flex-1"
         >
           <ChevronDown
             className={cn('h-3.5 w-3.5 transition-transform', !open && '-rotate-90')}
@@ -223,7 +259,7 @@ function Section({ title, badge, onClear, clearLabel, defaultOpen = true, childr
           <button
             type="button"
             onClick={onClear}
-            className="text-[11px] text-muted-foreground hover:text-foreground"
+            className="text-[11px] text-muted-foreground hover:text-foreground max-sm:min-h-11 max-sm:px-2"
           >
             {clearLabel}
           </button>
@@ -270,7 +306,7 @@ function ColorFieldPicker({
         if (picked) onPick(picked.value);
       }}
     >
-      <SelectTrigger className="h-8 rounded px-2 text-xs" data-testid="color-field-select">
+      <SelectTrigger className="h-8 rounded px-2 text-xs max-sm:h-11" data-testid="color-field-select">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -303,8 +339,9 @@ function SwitchRow({
 }) {
   const id = React.useId();
   return (
-    <div className="flex items-center justify-between gap-3 border-b px-3 py-2 last:border-b-0">
-      <label htmlFor={id} className="text-xs font-medium text-foreground/80 cursor-pointer">
+    <div className="flex items-center justify-between gap-3 border-b px-3 py-2 last:border-b-0 max-sm:py-0">
+      {/* Below `sm` the words fill the row's 44 px, so the whole row is the switch's touch target. */}
+      <label htmlFor={id} className="text-xs font-medium text-foreground/80 cursor-pointer max-sm:flex max-sm:min-h-11 max-sm:flex-1 max-sm:items-center">
         {label}
       </label>
       <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} data-testid={testId} />
@@ -323,7 +360,7 @@ function RecordOpenSection({
   t: ViewSettingsPopoverProps['t'];
   recordOpen: ViewSettingsRecordOpen;
 }) {
-  const { resolvedMode, preference, setPreference, selectPage } = recordOpen;
+  const { resolvedMode, preference, setPreference } = recordOpen;
   if (resolvedMode !== 'drawer' && resolvedMode !== 'page') return null;
   const title = t('list.recordOpen', { defaultValue: 'Open records' });
   return (
@@ -340,36 +377,26 @@ function RecordOpenSection({
             // one segment is always the choice, so that writes nothing.
             onValueChange={(next) => {
               if (next === preference) return;
-              if (next === 'split' || next === 'drawer') setPreference(next);
-              else if (next === 'page') selectPage?.();
+              if (next === 'drawer' || next === 'page') setPreference(next);
             }}
             aria-label={title}
             className="gap-0"
             data-testid="display-record-open-choice"
           >
             <ToggleGroupItem
-              value="split"
-              className="h-7 rounded-r-none px-2.5 text-xs"
-              data-testid="display-record-open-split"
-            >
-              {t('list.recordOpenSplit', { defaultValue: 'Split' })}
-            </ToggleGroupItem>
-            <ToggleGroupItem
               value="drawer"
-              className={cn('-ml-px h-7 px-2.5 text-xs', selectPage ? 'rounded-none' : 'rounded-l-none')}
+              className="h-7 rounded-r-none px-2.5 text-xs"
               data-testid="display-record-open-drawer"
             >
               {t('list.recordOpenDrawer', { defaultValue: 'Drawer' })}
             </ToggleGroupItem>
-            {selectPage && (
-              <ToggleGroupItem
-                value="page"
-                className="-ml-px h-7 rounded-l-none px-2.5 text-xs"
-                data-testid="display-record-open-page"
-              >
-                {t('list.recordOpenPage', { defaultValue: 'Full page' })}
-              </ToggleGroupItem>
-            )}
+            <ToggleGroupItem
+              value="page"
+              className="-ml-px h-7 rounded-l-none px-2.5 text-xs"
+              data-testid="display-record-open-page"
+            >
+              {t('list.recordOpenPage', { defaultValue: 'Full page' })}
+            </ToggleGroupItem>
           </ToggleGroup>
         ) : (
           <span className="min-w-0 text-right text-xs text-muted-foreground" data-testid="display-record-open-declared">
@@ -457,6 +484,7 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
     allFields,
     layout,
     recordOpen,
+    sort,
     showGroup,
     groupingConfig,
     setGroupingConfig,
@@ -484,6 +512,7 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
   } = props;
 
   const [open, setOpen] = React.useState(false);
+  const belowSm = useBelowSm();
   // Closing through the controlled state lets Radix return focus to the
   // Display trigger, as Escape and an outside click do.
   const closeMenu = React.useCallback(() => setOpen(false), []);
@@ -505,6 +534,7 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
           title={triggerLabel}
           className={cn(
             'h-7 min-w-7 gap-1 px-1.5 text-muted-foreground hover:text-primary text-xs transition-colors duration-150',
+            PHONE_TOUCH_TARGET,
             changedCount > 0 && 'text-foreground font-medium',
           )}
           data-testid="toolbar-display-trigger"
@@ -521,7 +551,14 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-80 p-0" data-testid="view-settings-content">
+      {/* Below `sm` the panel takes the phone's width, as Filter and Sort do, so
+          the Sort block's rows keep their words. */}
+      <PopoverContent
+        align="end"
+        collisionPadding={belowSm ? PHONE_POPOVER_GUTTER : undefined}
+        className="w-[calc(100vw-2rem)] sm:w-80 p-0"
+        data-testid="view-settings-content"
+      >
         <div className="max-h-[min(70vh,560px)] overflow-y-auto">
           {layout && (
             <div className="flex items-center justify-between gap-3 border-b px-3 py-2" data-testid="display-layout-row">
@@ -533,6 +570,12 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
           )}
 
           {recordOpen && <RecordOpenSection t={t} recordOpen={recordOpen} />}
+
+          {sort && (
+            <div className="border-b px-3 py-2 sm:hidden" data-testid="display-sort">
+              {sort}
+            </div>
+          )}
 
           {showGroup && setGroupingConfig && (
             <Section
@@ -599,7 +642,7 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
                 {allFields.map((field) => (
                   <label
                     key={field.name}
-                    className="flex items-center gap-2 text-xs py-1 px-1 rounded hover:bg-muted cursor-pointer"
+                    className="flex items-center gap-2 text-xs py-1 px-1 rounded hover:bg-muted cursor-pointer max-sm:min-h-11"
                   >
                     <input
                       type="checkbox"
@@ -627,7 +670,7 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
               <Button
                 variant="outline"
                 size="sm"
-                className="h-7 gap-1.5"
+                className="h-7 gap-1.5 max-sm:h-11"
                 onClick={density.cycle}
                 title={t('grid.toolbar.densityCycleShortHint', { defaultValue: 'Click to cycle' })}
                 data-testid="view-settings-density-cycle"
@@ -669,7 +712,7 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-7 px-2 text-xs"
+                className="h-7 px-2 text-xs max-sm:h-11"
                 disabled={changedCount === 0}
                 onClick={onReset}
                 data-testid="display-reset-button"
@@ -678,28 +721,33 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
                 {t('list.resetToViewDefault', { defaultValue: 'Reset to view default' })}
               </Button>
             )}
-            <div className="ml-auto flex items-center gap-1">
-              {onRefresh && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 w-7 p-0 text-muted-foreground hover:text-primary"
-                  onClick={onRefresh}
-                  disabled={refreshing}
-                  title={t('list.refresh', { defaultValue: 'Refresh' })}
-                  aria-label={t('list.refresh', { defaultValue: 'Refresh' })}
-                  data-testid="refresh-button"
-                >
-                  <RotateCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
-                </Button>
-              )}
-              {hasExport &&
-                exportFormats!.map((format) => (
+            {onRefresh && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="ml-auto h-7 w-7 p-0 text-muted-foreground hover:text-primary max-sm:h-11 max-sm:w-11"
+                onClick={onRefresh}
+                disabled={refreshing}
+                title={t('list.refresh', { defaultValue: 'Refresh' })}
+                aria-label={t('list.refresh', { defaultValue: 'Refresh' })}
+                data-testid="refresh-button"
+              >
+                <RotateCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
+              </Button>
+            )}
+            {/* The export entries take a full row and wrap within it: the panel
+                is a fixed width, and one entry per format can outgrow it. */}
+            {hasExport && (
+              <div
+                className="flex basis-full flex-wrap items-center justify-end gap-1"
+                data-testid="display-export-group"
+              >
+                {exportFormats!.map((format) => (
                   <Button
                     key={format}
                     variant="ghost"
                     size="sm"
-                    className="h-7 px-2 text-xs"
+                    className="h-7 px-2 text-xs max-sm:h-11"
                     disabled={exportBusy}
                     onClick={() => onExport!(format)}
                     data-testid={`display-export-${format}`}
@@ -710,7 +758,8 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
                     {t('list.exportAs', { format: format.toUpperCase(), defaultValue: `Export as ${format.toUpperCase()}` })}
                   </Button>
                 ))}
-            </div>
+              </div>
+            )}
             {exportError && (
               <div className="basis-full px-1 pt-1 text-xs text-destructive" role="alert">
                 {exportError}

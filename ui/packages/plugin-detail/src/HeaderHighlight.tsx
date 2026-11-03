@@ -124,7 +124,15 @@ export const HeaderHighlight: React.FC<HeaderHighlightProps> = ({
       >
         <div
           data-highlights-face={gridFace ? 'grid' : undefined}
-          className={gridFace ? 'grid grid-cols-2 gap-x-4 gap-y-3 @lg:grid-cols-3 @3xl:grid-cols-6' : cn(
+          // The edit face stops at three columns: an editor needs the room a
+          // value does not, a lookup's picker drawing the chosen name beside
+          // its clear and browse buttons, and six cells in one row leave it a
+          // letter of the name. Six fields wrap to two rows of three instead.
+          // Only the read face widens to six in one row.
+          className={gridFace ? cn(
+            'grid grid-cols-2 gap-x-4 gap-y-3 @lg:grid-cols-3',
+            !editing && '@3xl:grid-cols-6',
+          ) : cn(
             'flex flex-wrap gap-y-4',
             // A chip's left border separates it from the chip BEFORE it on its
             // line (objectui#12523). The first chip of every WRAPPED line used
@@ -475,8 +483,10 @@ export const HeaderHighlight: React.FC<HeaderHighlightProps> = ({
                             variant="ghost"
                             size="icon"
                             // Revealed on keyboard focus too, as in the details
-                            // body (objectstack#25883).
-                            className="h-5 w-5 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity"
+                            // body (objectstack#25883). A touch screen has no
+                            // hover, so a coarse pointer always draws it, and
+                            // below `sm` it is a 44 px target (objectstack#29071).
+                            className="h-5 w-5 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100 transition-opacity"
                             aria-label={t('detail.editInlineHint')}
                             onClick={(e) => {
                               e.stopPropagation();

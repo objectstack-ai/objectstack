@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: a real ObjectQL engine and SecurityPlugin per (driver, using, check) policy on two SQL driver families (better-sqlite3 and sqlite-wasm, both :memory:), already shared by every cell that names the policy and warmed at module scope, each policy the subject of its cells; 104 cases, 1.6 s in a local run; slowest CI reading 12.8 s (scheduled full-battery run 41199450735, Test Core shard log) x 1.25, rounded up
 
 /**
  * [#21109, ruling A] The row-level write `check` judges a `date`, `datetime` or

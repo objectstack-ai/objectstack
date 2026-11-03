@@ -42,7 +42,7 @@ import {
   type RelatedRecordActionsValue,
   type RelatedRecordHandlers,
 } from '@object-ui/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { ComponentPropsMap } from '@objectstack/spec/ui';
 // Registers the REAL `list-view`.
 import '../index';
@@ -102,19 +102,20 @@ function node(properties: Row = {}): Row {
 }
 
 /** A `/me/permissions` payload; the object may be read, never created. */
-function me(systemPermissions: string[] | undefined): MePermissionsResponse {
+function me(systemPermissions: string[] | undefined): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u1',
     tenantId: 't1',
-    roles: [],
+    positions: [],
+    hasAnyQueue: false,
     permissionSets: [],
     ...(systemPermissions === undefined ? {} : { systemPermissions }),
     objects: {
       [OBJECT]: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
     },
     fields: {},
-  } as MePermissionsResponse;
+  } as MePermissionsAuthenticatedResponse;
 }
 
 interface MountOptions {
@@ -269,11 +270,11 @@ describe('objectui#13074 — `addRecord` on a page `list-view` node calls the `o
 });
 
 describe('objectui#13074 — `sharing` stays inert and unpublished (CONTROL)', () => {
-  it('the Share button still carries no click handler: a click changes nothing on the page', async () => {
-    const { dataSource } = mount({ sharing: { type: 'personal' } });
+  it('the lock indicator, the one thing `sharing` draws, carries no click handler: a click changes nothing on the page', async () => {
+    const { dataSource } = mount({ sharing: { lockedBy: 'admin' } });
     await listDrawn(dataSource);
     await settle();
-    const share = screen.getByTestId('share-button');
+    const share = screen.getByTestId('sharing-locked-by');
     const before = document.body.innerHTML;
     fireEvent.click(share);
     await settle();

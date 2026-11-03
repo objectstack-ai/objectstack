@@ -429,7 +429,8 @@ describe('AuthManager', () => {
       await manager.getAuthInstance();
       warnSpy.mockRestore();
 
-      expect(capturedConfig.plugins.map((p: any) => p.id)).toEqual(['bearer', 'organization']);
+      // [#28367] The agent forward view rides right after bearer(), on every instance.
+      expect(capturedConfig.plugins.map((p: any) => p.id)).toEqual(['bearer', 'objectstack-agent-forward-identity-view', 'organization']);
     });
 
     it('should register organization plugin with schema mapping when enabled', async () => {
@@ -1626,9 +1627,9 @@ describe('AuthManager', () => {
       await manager.getAuthInstance();
       warnSpy.mockRestore();
 
-      expect(capturedConfig.plugins).toHaveLength(4);
+      expect(capturedConfig.plugins).toHaveLength(5);
       expect(capturedConfig.plugins.map((p: any) => p.id).sort()).toEqual(
-        ['bearer', 'magic-link', 'organization', 'two-factor'],
+        ['bearer', 'magic-link', 'objectstack-agent-forward-identity-view', 'organization', 'two-factor'],
       );
     });
   });

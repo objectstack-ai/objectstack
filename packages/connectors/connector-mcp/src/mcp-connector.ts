@@ -21,7 +21,10 @@ import type { Connector } from '@objectstack/spec/integration';
  * **Credentials live with the MCP server, not in `ConnectorSchema`** (ADR-0024
  * §3). The operator supplies `env` (stdio) / `headers` (http) which we pass
  * straight to the transport; they are never copied into the serialized `def`
- * (which is exposed via discovery) and must never be logged.
+ * (which is exposed via discovery) and must never be logged. A declarative
+ * instance's resolved `auth` reaches them through the `mcp` provider factory:
+ * as a header over http, and over stdio in the variable its
+ * `transport.credentialEnv` names.
  *
  * **Trust:** launching a stdio server runs a local process. Sandboxed,
  * multi-tenant execution and managed secrets are the enterprise tier (ADR-0024
@@ -109,8 +112,13 @@ export interface McpConnectorOptions {
     icon?: string;
     /** How to reach the MCP server. */
     transport: McpTransport;
-    /** Only expose tools whose name matches (allowlist) — keeps the palette lean. */
-    include?: (toolName: string) => boolean;
+    /**
+     * Only expose tools whose name matches (allowlist) — keeps the palette lean.
+     * Called once per listed tool with its name and its `tools/list` entry as
+     * the server served it (the `mcp` provider hashes the entry to check a
+     * `toolsSnapshot` pin).
+     */
+    include?: (toolName: string, tool: McpToolDescriptor) => boolean;
     /** Identifies this client to the MCP server during the handshake. */
     clientInfo?: { name: string; version: string };
     /**
@@ -282,7 +290,7 @@ export async function createMcpConnector(opts: McpConnectorOptions): Promise<Mcp
     }
 
     const include = opts.include ?? (() => true);
-    const selected = tools.filter((t) => include(t.name));
+    const selected = tools.filter((t) => include(t.name, t));
 
     const name = opts.name ?? slugify(opts.label ?? 'mcp');
     const label = opts.label ?? titleize(name);

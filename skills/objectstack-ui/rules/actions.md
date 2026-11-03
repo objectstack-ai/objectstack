@@ -15,18 +15,15 @@
 
 ## Visibility, Disable & Feedback
 
-- `visible` — CEL predicate (prefer the `P\`...\`` tagged template); when false the action is **hidden**.
+- `visible` — a bare CEL predicate over the current record (prefer the `P\`...\`` template; `record.<field>` resolves identically on every surface, never `${…}`- or `{…}`-wrapped — see `objectstack-formula`); when false the action is **hidden**.
 - `disabled` — `boolean` **or** a CEL predicate; when true the action **shows but greys out**. Use this (not `visible`) when the action should stay discoverable but locked in the current state.
-- `disabledReason` — an I18nLabel (a plain sentence or an inline locale map) a greyed action shows as its hover title and accessible description. Display-only: never a predicate and never a gate (the hook or permission still refuses). Omit it to keep the console's default "Not available for this record"; a blank one is refused, and `disabledMessage` / `disabledTooltip` / `disabledHint` / `disabledText` are refused naming this key. The reason goes here, not in `description`.
-- `confirmText` — set for any destructive or irreversible operation.
-- `successMessage` / `errorMessage` — toast copy on success / failure. Always set `successMessage` for non-obvious outcomes; without it the UI shows a generic "Action completed" toast.
-- Copy holes are `{{ }}`: `confirmText` reads `record`, `successMessage` `record` and `result` (the handler's answer); `errorMessage` takes none. A `bulkActionDefs` entry's `confirmText` reads `{{ count }}` and its params by bare name (`{{ tier }}`). `${record.name}`, `{name}`, logic in a hole and a blank sentence fail `os validate`.
+- `disabledReason` — an I18nLabel (a sentence or an inline locale map) a greyed action shows as its hover title and accessible description. Display-only: never a predicate and never a gate (the hook or permission still refuses). Omit it to keep the console's default "Not available for this record"; a blank one is refused, and `disabledMessage` / `disabledTooltip` / `disabledHint` / `disabledText` are refused naming this key. The reason goes here, not in `description`.
+- `pressed` — a CEL predicate over the same scope as `visible` that marks the action as already done by this reader: while TRUE the record header draws it pressed (`aria-pressed`). Display-only, never a gate; a boolean literal is refused (a constant is a style, not a reader's state), and `active` / `activeWhen` / `pressedWhen` are refused naming this key. A per-reader fact (the reader's vote) is a block the object declares under `attachedOnRead`, filled per caller by a service or `afterFind` hook, read as `has(record.viewer) && record.viewer.vote == 'helpful'`.
+- `confirmText` — set for any destructive or irreversible operation; the confirm dialog of a param-less action. A registered action is refused it beside a non-empty `params` (put the question on `description`); a view's `bulkActionDefs` entry pairs the two by its own contract.
+- `submitText` — the verb on the param dialog's submit button ("Send", "Log Call") in place of "Confirm": an I18nLabel, refused blank and refused without a non-empty `params` (no dialog opens); `submitLabel` / `confirmLabel` are refused naming this key.
+- `successMessage` / `errorMessage` — toast copy on success / failure. Set `successMessage` for non-obvious outcomes; without it the UI shows a generic "Action completed" toast.
+- Copy holes are `{{ }}`: `confirmText`, `description` (`'Choose the new owner of {{ record.name }}.'`) and a param's `helpText` (`'Why {{ record.name }} is paused'`) read `record`; `successMessage` and each `outcomeMessages` entry (`resent: 'Invitation resent to {{ result.email }}'`) read `result` (the handler's answer) and `record`; `errorMessage` takes none. A `bulkActionDefs` entry's `confirmText` reads `{{ count }}` and its params by bare name (`{{ tier }}`). In all of them `${record.name}`, `{name}`, logic in a hole and a blank sentence fail `os validate`.
 - `undoable: true` — an **Undo** in the success toast (and `Ctrl+Z`). Snapshot: runtime on `operation: 'update'`, console on `type: 'api'`; else refused.
-
-Predicates are **bare CEL** — `record.status == "converted"`, evaluated against
-the current record. `record.<field>` resolves identically on every surface
-(`record_header`, `list_item`, …); prefer it over the bare-field form. Never
-wrap a predicate in `${…}` or `{…}` braces (see `objectstack-formula`).
 
 <!-- os:check -->
 ```typescript
@@ -43,6 +40,7 @@ export const ReassignLeadAction = defineAction({
   disabled: P`record.status == "converted"`,
   disabledReason: 'A converted lead is reassigned from its opportunity.',
   params: [{ field: 'assigned_to', required: true }],
+  submitText: 'Reassign',
   undoable: true,
   successMessage: 'Lead {{ record.name }} reassigned.',
   errorMessage: "Couldn't reassign this lead — try again.",
@@ -74,7 +72,7 @@ export const ConvertLeadAction = defineAction({
 });
 ```
 
-**Script-typed action** (collect params, then execute server body):
+**Script-typed action** (params, then a server body):
 
 <!-- os:check -->
 ```typescript
@@ -112,40 +110,22 @@ export const AddToCampaignAction = defineAction({
 
 ### Action body context (`ctx`)
 
-A server-side action `body` (and a registered function `handler`) receives a
-`ctx` with `input` (the modal params), `record` (the target row, when a
-`recordId` is in scope), `api` (scoped cross-object CRUD), and the caller
-identity. Read the caller's active organization under the **blessed**
-`organizationId` name — the same value as the `organization_id` column and
-`current_user.organizationId` in RLS:
-
-```typescript
-// ✅ Blessed — identical to the hook surface (ctx.user / ctx.session)
-const org = ctx.user?.organizationId ?? ctx.session?.organizationId;
-```
-
-Action bodies execute **trusted** (the `ctx.engine` / `ctx.api` facade bypasses
-RLS/FLS), so a body that must scope by org reads it from `ctx` explicitly.
-`ctx.user` is `undefined` for a context-less / self-invoked call. Same two
-isolation axes, same blessed name, same `undefined` cases as hooks — see the
-objectstack-data hooks reference.
-
-The caller's position names are on `ctx.session.positions` (absent, not empty,
-when the caller holds none). **This array is not an authorization input**:
-`positions.includes('admin')` is a defect under a blessed name — ask the
-security service for privilege (ADR-0095).
+A server-side `body` (or a registered `handler`) receives `ctx` with `input` (the dialog params), `record` (the target row, when a
+`recordId` is in scope), `api` (scoped cross-object CRUD) and the caller. Read
+the active organization as `ctx.user?.organizationId ?? ctx.session?.organizationId`
+— the blessed name (same axes and `undefined` cases as hooks, objectstack-data).
+Bodies execute **trusted** (`ctx.api` /
+`ctx.engine` bypass RLS/FLS), so a body that must scope by org reads it from
+`ctx` explicitly. `ctx.session.positions` (absent when the caller holds none) is
+**not an authorization input** — ask the security service for privilege (ADR-0095).
 
 ## Opening in a New Tab (`openIn` / `opensInNewTab` / `newTabUrl`)
 
-There are **two** mechanisms here. Pick by whether the URL is static or computed:
-
 ### `openIn: 'new-tab'` — simplest case (static `target`)
 
-When you have a **static** `target` URL (relative or absolute) you just want
-opened in a new tab, set `openIn: 'new-tab'` on a `type: 'url'` action. No
-handler, no synchronous pre-open. `openIn: 'self'` forces in-place navigation;
-omit it and external/absolute URLs open in a new tab while relative URLs
-navigate in place.
+A **static** `target` URL on a `type: 'url'` action: `openIn: 'new-tab'` opens
+it in a new tab, `'self'` forces in-place navigation; omitted, absolute URLs open
+in a new tab and relative ones navigate in place.
 
 <!-- os:check -->
 ```typescript
@@ -163,14 +143,12 @@ export const PrintA3Action = defineAction({
 
 ### `opensInNewTab` + `newTabUrl` — async / computed redirect (SSO)
 
-For actions whose redirect URL is **computed after a fetch** (SSO and SSO-like
-handlers), set `opensInNewTab: true`. The renderer pre-opens the tab
-**synchronously** on click so popup blockers don't fire, then navigates it to
-the handler's returned `redirectUrl`. To skip the round-trip, add `newTabUrl`
-— a backend path starting with `/` (`{recordId}` placeholder; an external URL
-is refused, use `openIn` above). Valid **only** with `opensInNewTab: true`; the
-endpoint must enforce its own auth (the new tab carries no in-app session
-context).
+A redirect URL **computed after a fetch** (SSO-like handlers): `opensInNewTab:
+true` pre-opens the tab synchronously on click (no popup blocker), then navigates
+it to the handler's `redirectUrl`. `newTabUrl` skips the round-trip — a backend
+path starting with `/` (`{recordId}` placeholder; an external URL is refused, use
+`openIn`), valid only with `opensInNewTab: true`; the endpoint enforces its own
+auth (the tab carries no in-app session).
 
 ```typescript
 export const OpenInvoicePdfAction = defineAction({
@@ -187,18 +165,15 @@ export const OpenInvoicePdfAction = defineAction({
 
 > A printable document (an invoice) is a page that declares `print` — [Print pages](./pages.md#print-pages).
 
-> ⚠️ **Never express new-tab behavior via `params`.** `params` is exclusively
-> `ActionParam[]` for collecting **user input**. Writing an object form like
-> `params: { newTab: true }` fails the zod build outright; the array form
-> `params: [{ name: 'newTab', type: 'checkbox' }]` *builds* but mis-renders as a
-> user-facing checkbox in the param-collection dialog. Use one of the two mechanisms above.
+> ⚠️ **Never express new-tab behavior via `params`** — it is `ActionParam[]` for
+> **user input** only: `params: [{ name: 'newTab', type: 'checkbox' }]` builds and
+> draws a checkbox in the dialog.
 
 ## Action Parameter Patterns
 
-Prefer **field-backed** params (`{ field: 'email' }`) over inline declarations
-— the runtime resolves label (i18n), type, validation, options, placeholder,
-and widget mapping from object metadata. Use `objectOverride` to reference a
-field from a different object. Set `defaultFromRow: true` to pre-fill from
-the selected row in `list_item` contexts.
+Prefer **field-backed** params (`{ field: 'email' }`): label (i18n), type,
+validation, options, placeholder and widget come from the object metadata;
+`objectOverride` borrows a field of another object, and `defaultFromRow: true`
+pre-fills from the selected row in `list_item` contexts.
 
-> **Best practice:** set `refreshAfter: true` whenever the action mutates the current record.
+> Set `refreshAfter: true` whenever the action mutates the current record.

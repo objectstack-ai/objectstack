@@ -295,12 +295,18 @@ export const RecordChatterRenderer: React.FC<RecordChatterRendererProps> = ({
         onEditComment={discussion?.onEditComment}
         onDeleteComment={discussion?.onDeleteComment}
         mentionSuggestions={mentionsEnabled ? (discussion?.mentionSuggestions as any) : undefined}
+        onMentionSuggestionsWanted={mentionsEnabled ? discussion?.onMentionSuggestionsWanted : undefined}
         onUploadAttachments={discussion?.onUploadAttachments as any}
         // objectui#11195: which of the host's two feed reads the server
         // REFUSED. The host that owns the fetch decides it, the same way it
         // decides `loading` above; the panel only renders it.
         activityDenied={discussion?.activityDenied}
         commentsDenied={discussion?.commentsDenied}
+        // objectstack#29188: which of them FAILED (5xx, network), and the
+        // host's re-read of those; the panel only renders it.
+        activityFailed={discussion?.activityFailed}
+        commentsFailed={discussion?.commentsFailed}
+        onRetryFeed={discussion?.onRetryFeed}
       />
     </div>
   );

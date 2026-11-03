@@ -32,7 +32,7 @@
 
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { EmailTemplateDefinitionSchema, type EmailTemplateDefinitionParsed } from '@objectstack/spec/system';
-import { DEFAULT_TEMPLATE_LOCALE, type EmailTemplateRow, type TemplateLoader } from './email-service.js';
+import { DEFAULT_TEMPLATE_LOCALE, TEMPLATE_BUNDLE_LOCALES, type EmailTemplateRow, type TemplateLoader, type TemplateBundleLocales } from './email-service.js';
 
 /**
  * The package the built-in auth templates are code-declared under: the email
@@ -171,7 +171,14 @@ export function createRegistryEmailTemplateLoader(
     return toRenderInput(parsed.data);
   };
 
-  return {
+  // [#28880] The bundle's tags, for the service's fold (module-private key,
+  // not on `TemplateLoader`): sorted, so variant expansion's "first match" is
+  // the lowest tag, whatever order the list carries.
+  const bundleLocales: TemplateBundleLocales = async (name) =>
+    [...new Set((await readBundle(name)).map(itemLocale))].sort();
+
+  const loader: TemplateLoader & { [TEMPLATE_BUNDLE_LOCALES]: TemplateBundleLocales } = {
+    [TEMPLATE_BUNDLE_LOCALES]: bundleLocales,
     async load(name, locale) {
       const bundle = await readBundle(name);
       if (locale) return render(pick(bundle, locale));
@@ -182,4 +189,5 @@ export function createRegistryEmailTemplateLoader(
       return lowest === undefined ? null : render(pick(bundle, lowest));
     },
   };
+  return loader;
 }

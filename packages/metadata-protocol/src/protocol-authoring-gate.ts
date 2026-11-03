@@ -48,7 +48,9 @@
 
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { permissionSetOwnerBindingRefusal, runtimeHookWithoutBodyRefusal } from './protocol.js';
+import { objectBodyExtensionFieldSuffixRefusal } from './protocol-extension-field-suffix.js';
 import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-credentials-ref.js';
+import { storedFlowVerdictBody } from './protocol-flow-save-replay.js';
 import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
 import type { PackagedRuleCopyRefusal, RuntimeAuthoringIssue, RuntimeAuthoringVerdict, RuntimePendingDeclarations } from './runtime-authoring-gate.js';
 import { savedItemNameRefusal } from '@objectstack/metadata/view-container-name';
@@ -78,6 +80,7 @@ export interface AuthoringGateHost {
     objectNamespacePrefixViolation: ObjectStackProtocolImplementation['objectNamespacePrefixViolation'];
     hierarchyResolverMounted: ObjectStackProtocolImplementation['hierarchyResolverMounted'];
     isArtifactBacked: ObjectStackProtocolImplementation['isArtifactBacked'];
+    objectExtensionItemRefusal: ObjectStackProtocolImplementation['objectExtensionItemRefusal'];
     orgWallEnforced: ObjectStackProtocolImplementation['orgWallEnforced'];
     permissionSetNameCollisionRefusal: ObjectStackProtocolImplementation['permissionSetNameCollisionRefusal'];
     refuseRestoredBodyTheSaveDoorRefuses: ObjectStackProtocolImplementation['refuseRestoredBodyTheSaveDoorRefuses'];
@@ -88,6 +91,8 @@ export interface AuthoringGateHost {
     runAuthoringGate: ObjectStackProtocolImplementation['runAuthoringGate'];
     tenancyPostureInForce: ObjectStackProtocolImplementation['tenancyPostureInForce'];
     unknownDatasourceSaveRefusal: ObjectStackProtocolImplementation['unknownDatasourceSaveRefusal'];
+    unknownGrantObjectSaveRefusal: ObjectStackProtocolImplementation['unknownGrantObjectSaveRefusal'];
+    seedExternalIdSaveRefusal: ObjectStackProtocolImplementation['seedExternalIdSaveRefusal'];
 }
 
 /** The body of `ObjectStackProtocolImplementation#restoredBodyDerivation`; the method's docblock there is its contract. */
@@ -100,7 +105,7 @@ export function restoredBodyDerivation(
 
 /** The body of `ObjectStackProtocolImplementation#restoredBodyWriter`; the method's docblock there is its contract. */
 export function restoredBodyWriter(
-    this: Pick<AuthoringGateHost, 'refuseRestoredBodyTheSaveDoorRefuses' | 'restoredBodyDerivation'>,
+    this: Pick<AuthoringGateHost, 'objectExtensionItemRefusal' | 'refuseRestoredBodyTheSaveDoorRefuses' | 'restoredBodyDerivation'>,
     type: string, name: string, binding: string | null, source: string): (historyBody: unknown) => Promise<unknown> {
     const derive = this.restoredBodyDerivation(type);
     return async (historyBody) => {
@@ -108,6 +113,12 @@ export function restoredBodyWriter(
         if (nameRefusal) throw nameRefusal;
         const ownerRefusal = permissionSetOwnerBindingRefusal(type, historyBody, name, binding, 'restore');
         if (ownerRefusal) throw ownerRefusal;
+        // [ADR-0146 D10, #28564] The `__c` reservation, on the same binding.
+        const suffixRefusal = objectBodyExtensionFieldSuffixRefusal(type, historyBody, name, binding);
+        if (suffixRefusal) throw suffixRefusal;
+        // [#28574] An `object_extension` version against its address, on the same binding.
+        const extensionRefusal = this.objectExtensionItemRefusal(type, historyBody, name, binding);
+        if (extensionRefusal) throw extensionRefusal;
         await this.refuseRestoredBodyTheSaveDoorRefuses(type, name, historyBody, binding, source);
         return derive ? derive(historyBody) : historyBody;
     };
@@ -115,7 +126,7 @@ export function restoredBodyWriter(
 
 /** The body of `ObjectStackProtocolImplementation#refuseRestoredBodyTheSaveDoorRefuses`; the method's docblock there is its contract. */
 export async function refuseRestoredBodyTheSaveDoorRefuses(
-    this: Pick<AuthoringGateHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'authoringChannel' | 'credentialChannelFor' | 'defaultRecordPageSaveRefusal' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'permissionSetNameCollisionRefusal' | 'runAuthoringGate' | 'unknownDatasourceSaveRefusal'>,
+    this: Pick<AuthoringGateHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'authoringChannel' | 'credentialChannelFor' | 'defaultRecordPageSaveRefusal' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'permissionSetNameCollisionRefusal' | 'runAuthoringGate' | 'seedExternalIdSaveRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal'>,
     type: string,
     name: string,
     body: unknown,
@@ -132,6 +143,10 @@ export async function refuseRestoredBodyTheSaveDoorRefuses(
     if (bindingRefusal) throw bindingRefusal;
     const datasourceRefusal = await this.unknownDatasourceSaveRefusal(type, body, name);
     if (datasourceRefusal) throw datasourceRefusal;
+    const grantRefusal = await this.unknownGrantObjectSaveRefusal(type, body, name);
+    if (grantRefusal) throw grantRefusal;
+    const seedKeyRefusal = await this.seedExternalIdSaveRefusal(type, body, name);
+    if (seedKeyRefusal) throw seedKeyRefusal;
     const repo = this.getOverlayRepo();
     const credentialsRefRefusal = await datasourceCredentialsRefSaveRefusal({
         headAt: (...a) => repo.headAt(...a), type, name, item: body,
@@ -145,7 +160,11 @@ export async function refuseRestoredBodyTheSaveDoorRefuses(
         type,
         name,
         state: 'active',
-        body,
+        // [#29696] A flow version is judged in its D2-converted spelling, as
+        // both publish doors judge a stored flow draft (#29557): a history
+        // body is a row at rest. Restored as stored; the credential read below
+        // reads the stored version.
+        body: storedFlowVerdictBody(type, body),
         source,
         packageId: binding,
         ...(channel
@@ -530,7 +549,9 @@ export async function draftPublishVerdict(
         type: singular,
         name: draft.name,
         state: 'active',
-        body: draft.body,
+        // [#29557] The body the promotion judges: a flow draft in its
+        // D2-converted spelling, every other draft as stored.
+        body: storedFlowVerdictBody(singular, draft.body),
         packageId: draft.packageId,
         ...(pending !== undefined ? { pending } : {}),
         ...(channel

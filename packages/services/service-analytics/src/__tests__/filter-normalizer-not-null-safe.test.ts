@@ -721,7 +721,9 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
     });
 
     it('an unknown operator inside a `$not` still THROWS rather than being guarded', async () => {
-      await expect(ids({ $not: { stage: { $regex: '.*' } } })).rejects.toThrowError(/Unsupported filter operator/);
+      await expect(ids({ $not: { stage: { $sounds_like: '.*' } } })).rejects.toThrowError(/Unsupported filter operator/);
+      // [#28945] A RETIRED operator throws too, with the retirement's prescription.
+      await expect(ids({ $not: { stage: { $regex: '.*' } } })).rejects.toThrowError(/"\$regex" on field "stage" is RETIRED/);
       await expect(ids({ $not: { $nor: [{ stage: 'won' }] } })).rejects.toThrowError(/Unsupported top-level filter operator/);
     });
 

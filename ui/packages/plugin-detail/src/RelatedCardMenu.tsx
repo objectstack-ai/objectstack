@@ -40,7 +40,7 @@ export const RelatedCardMenu: React.FC<{
         <Button
           variant="ghost"
           size="sm"
-          className="h-6 w-6 shrink-0 p-0 text-muted-foreground"
+          className="h-11 w-11 shrink-0 p-0 sm:h-6 sm:w-6 text-muted-foreground"
           aria-label={t('detail.relatedCardMenu', { title, defaultValue: 'More for {{title}}' })}
           data-related-card-menu=""
           onClick={(event) => event.stopPropagation()}
@@ -91,7 +91,7 @@ export const RelatedPanelHandle: React.FC<{
           <button
             type="button"
             className={cn(
-              'inline-flex h-6 w-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              'inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-sm sm:h-6 sm:w-5 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
               chrome.dragHandleProps?.draggable && 'cursor-grab active:cursor-grabbing',
             )}
             aria-label={t('detail.relatedPanelReorder', { title, defaultValue: 'Reorder {{title}}' })}

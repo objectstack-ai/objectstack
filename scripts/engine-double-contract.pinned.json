@@ -52,6 +52,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/mcp/src/mcp-create-record-stale-summary.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/mcp-create-record-stale-summary.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/mcp-create-record-stale-summary.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/mcp/src/mcp-stdio-tools.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -63,6 +78,21 @@
     },
     {
       "file": "packages/mcp/src/mcp-stdio-tools.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/mcp-update-delete-record-stale-summary.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/mcp-update-delete-record-stale-summary.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/mcp-update-delete-record-stale-summary.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -283,6 +313,16 @@
     },
     {
       "file": "packages/metadata-protocol/src/protocol.active-save-namespace-prefix.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.adopt-orphans-owner-judges.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.adopt-orphans-owner-judges.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -597,7 +637,22 @@
       "pinned": 1
     },
     {
-      "file": "packages/metadata-protocol/src/protocol.data-door-internal-field-positions.test.ts",
+      "file": "packages/metadata-protocol/src/protocol.dashboard-duplicate-global-filter-name-refusal.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.dashboard-duplicate-global-filter-name-refusal.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.dashboard-duplicate-global-filter-name-refusal.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.data-door-internal-field-delegation.test.ts",
       "verb": "findOne",
       "pinned": 1
     },
@@ -837,6 +892,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.extension-field-suffix.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.extension-field-suffix.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.extension-field-suffix.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.external-binding-named-datasource-refusal.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -888,6 +958,21 @@
     },
     {
       "file": "packages/metadata-protocol/src/protocol.flow-org-override-closed.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.form-layout-diagnostics.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.form-layout-diagnostics.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.form-layout-diagnostics.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -1222,6 +1307,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.named-base-overlay-write.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.named-base-overlay-write.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.named-base-overlay-write.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.named-base-stored-binding.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1353,6 +1453,36 @@
     },
     {
       "file": "packages/metadata-protocol/src/protocol.package-publish-audit-rows.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.packaged-base-refusal.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.packaged-base-refusal.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.packaged-base-refusal.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.packageless-layered-read-refusal.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.packageless-layered-read-refusal.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.packageless-layered-read-refusal.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -1667,6 +1797,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.row-binding-column.test.ts",
+      "verb": "findOne",
+      "pinned": 2
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.runtime-authoring-gate.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1802,6 +1937,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.seed-external-id-refusal.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.seed-external-id-refusal.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.seed-external-id-refusal.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.select-shorthand-refusal.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1892,6 +2042,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.summary-rollup-publish-gate.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.summary-rollup-publish-gate.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.summary-rollup-publish-gate.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.unknown-datasource-refusal.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1903,6 +2068,21 @@
     },
     {
       "file": "packages/metadata-protocol/src/protocol.unknown-datasource-refusal.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.unknown-grant-object-refusal.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.unknown-grant-object-refusal.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.unknown-grant-object-refusal.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -2065,6 +2245,21 @@
       "file": "packages/metadata-protocol/src/seed-loader-driver-text.test.ts",
       "verb": "update",
       "pinned": 2
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-empty-key-warn.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-empty-key-warn.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-empty-key-warn.test.ts",
+      "verb": "update",
+      "pinned": 1
     },
     {
       "file": "packages/metadata-protocol/src/seed-loader-engine-schema-fallback.test.ts",
@@ -2639,6 +2834,11 @@
     {
       "file": "packages/objectql/src/protocol-commit-history.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-data-door-internal-field-positions.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {
@@ -4137,6 +4337,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-sharing/src/share-link-redact-fields.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/share-link-redact-fields.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-sharing/src/sharing-rule-provenance.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -4297,6 +4507,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/rest/src/meta-layers-ambiguous-package.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/meta-layers-ambiguous-package.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/meta-layers-ambiguous-package.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/rest/src/meta-object-extension-agreement.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -4429,6 +4654,21 @@
     {
       "file": "packages/rest/src/rest-server-meta-references-refusal-envelope.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/action-body-write-stale-summary.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/action-body-write-stale-summary.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/action-declarative-update-stale-summary.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {
@@ -4692,6 +4932,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/runtime/src/sandbox/body-write-stale-summary.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/sandbox/body-write-stale-summary.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/security/resolve-execution-context.forward-credential.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/runtime/src/security/resolve-execution-context.oauth-organization.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -4762,7 +5017,27 @@
       "pinned": 1
     },
     {
+      "file": "packages/services/service-automation/src/builtin/crud-stale-summary.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/builtin/crud-stale-summary.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/builtin/crud-stale-summary.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/services/service-automation/src/builtin/notify-both-channels-unheld-address.integration.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/builtin/notify-email-field-cache.integration.test.ts",
       "verb": "findOne",
       "pinned": 1
     },
@@ -5028,6 +5303,21 @@
     },
     {
       "file": "packages/services/service-messaging/src/system-context.pin.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/template-declared-fallback.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/template-declared-fallback.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/template-declared-fallback.test.ts",
       "verb": "update",
       "pinned": 1
     },

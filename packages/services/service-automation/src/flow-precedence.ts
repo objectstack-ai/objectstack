@@ -57,6 +57,26 @@
 // reader ask one source); with none, NO contender is packaged, which is the
 // engine's fail-closed answer too. The body's stamps stay on the contender
 // for display only.
+//
+// [#28412, ADR-0146 D9 item 1] THE DECLARED OVERRIDE IS THE PACKAGED FLOW.
+//
+// ADR-0146 D2 gives a base package's customer one place to change a base
+// item: an item of the base's paired `<base>.custom` package that bears the
+// base item's name and declares `overrides: { package: <base>, basedOn }`
+// (ruling A on #28390: only the pair declares). D9 item 1 applies that to a
+// flow: the declared override is armed OVER the loader's body for the name,
+// so a customer's change to HotCRM's flow is HotCRM's flow — one body runs
+// per record change, the same ledger switch, and deleting it restores the
+// original. So the rank gains one case above `package`, and only one row can
+// hold it: a contender is `override` exactly when the loader's set holds its
+// name and the one served-override predicate (`isServedOverrideRowOf`,
+// `@objectstack/metadata-protocol`) admits it for the set's owner, judged on
+// the row's STORED binding — the `package_id` column the protocol read,
+// carried on the body by the protocol's hydration (`storedRowBindingOf`) —
+// ⛔ never on the body's `_packageId`. A dependent package's declaration, a
+// package-less row whose body names the pair, and an undeclared pair row are
+// `runtime` as before: shadowed and warned, with a remedy that names the
+// declaration or a new name.
 
 // [commit fa5d137ab] From `@objectstack/metadata-core`, which this package DECLARES —
 // not from `@objectstack/objectql`, which it does not. The predicate is the
@@ -66,6 +86,12 @@
 // answered it by inlining objectql's implementation into this package's dist.
 // `pnpm check:undeclared-dep-imports` is the gate over that class.
 import { isCodeArtifactBody } from '@objectstack/metadata-core';
+// [#28412, ADR-0146 D9 item 1] The one served-override predicate (N-10) and
+// the stored row's own binding the protocol's hydration records — never a
+// second spelling of "is this the declared override", and never the body's
+// `_packageId`.
+import { isServedOverrideRowOf, storedRowBindingOf } from '@objectstack/metadata-protocol';
+import { customizationPackageId } from '@objectstack/spec/kernel';
 import type { FlowContender, FlowShadowingRecord, PackagedFlowSource } from './engine.js';
 
 /** One flow name's resolved winner, plus the receipt when it displaced others. */
@@ -117,6 +143,14 @@ function loaderSetOwner(packagedFlowOwner: PackagedFlowSource | undefined, name:
  */
 function classifyContender(item: unknown, owner: string | undefined): FlowContender {
     const packageId = (item as { _packageId?: unknown } | null | undefined)?._packageId;
+    // [#28412, ADR-0146 D9 item 1] Asked FIRST, and only inside a held name:
+    // the owner's declared override, by its stored binding (see the header).
+    if (owner !== undefined) {
+        const binding = storedRowBindingOf(item);
+        if (isServedOverrideRowOf({ type: 'flow', package_id: binding, metadata: item }, owner)) {
+            return { source: 'override', packageId: binding as string };
+        }
+    }
     if (owner !== undefined && isCodeArtifactBody(item)) {
         return { source: 'package', packageId: String(packageId) };
     }
@@ -184,6 +218,11 @@ export function describeFlowContender(item: unknown, packagedFlowOwner?: Package
  * only because of who happens to call it stops being safe at the next caller.
  */
 export function renderFlowContender(contender: FlowContender): string {
+    // [#28412] The declared override is a stored row too, and the phrase says
+    // which: the pair it is bound to (its stored binding, always present).
+    if (contender.source === 'override') {
+        return `the declared override in '${contender.packageId}' (sys_metadata)`;
+    }
     if (contender.source !== 'package') return 'a runtime-authored row (sys_metadata)';
     return contender.packageId
         ? `package '${contender.packageId}'`
@@ -193,13 +232,35 @@ export function renderFlowContender(contender: FlowContender): string {
 /**
  * Rank one contender for a bare name. LOWER wins.
  *
- * [#20913] `package` (0) beats `runtime` (1) — ADR-0126 §2's sealed base,
- * quoted at the top of this file. A `package` contender exists only inside a
- * name the loader's set holds, so this rank decides exactly one thing: a
- * stored row of a shipped name is shadowed, never armed.
+ * [#28412, ADR-0146 D9 item 1] `override` (0) beats `package` (1): the
+ * shipping package's declared override is the packaged flow, armed over the
+ * loader's body. [#20913] `package` (1) beats `runtime` (2) — ADR-0126 §2's
+ * sealed base, quoted at the top of this file. An `override` or a `package`
+ * contender exists only inside a name the loader's set holds, so this rank
+ * decides exactly two things there: the declared override is armed, and every
+ * other stored row of a shipped name is shadowed, never armed.
  */
 function precedenceRank(contender: FlowContender): number {
-    return contender.source === 'package' ? 0 : 1;
+    switch (contender.source) {
+        case 'override': return 0;
+        case 'package': return 1;
+        default: return 2;
+    }
+}
+
+/**
+ * [#28412, ADR-0146 D9 item 1] The remedy for a stored row of a shipped name
+ * that is not the declared override: declare it from the shipping package's
+ * paired `.custom` (the one row the rank arms), or save it under a new name.
+ * ⛔ No longer "clone": the clone is a second flow beside the base, and both
+ * run.
+ */
+function undeclaredRemedy(owner: string | undefined): string {
+    const pair = owner === undefined ? undefined : customizationPackageId(owner);
+    const where = pair?.ok
+        ? `declare it as an override in '${pair.value}' (overrides: { package: '${owner}', basedOn })`
+        : 'declare it as an override in the shipping package\'s paired .custom package';
+    return `To change what runs, ${where}, or save it under a new name.`;
 }
 
 /**
@@ -210,8 +271,10 @@ function precedenceRank(contender: FlowContender): number {
  * more than one contender are reordered — and those by a TOTAL order that does
  * not read registry iteration order at all:
  *
- *   1. `package` before `runtime` (ADR-0126 §2: a managed package's flow is
- *      sealed, so a stored row of a name it ships is shadowed);
+ *   1. `override` before `package` before `runtime` ([#28412] ADR-0146 D9
+ *      item 1: the shipping package's declared override is the packaged flow;
+ *      ADR-0126 §2: a managed package's flow is sealed, so any other stored
+ *      row of a name it ships is shadowed);
  *   2. within `package`, lexicographic `packageId`.
  *
  * Rule 2 covers the ADR-0048 §3.4 case of two packages legitimately shipping one
@@ -293,17 +356,32 @@ export function resolveFlowPrecedence(
 
         const armed = ranked[0];
         const shadowed = ranked.slice(1).map((entry) => entry.contender);
-        // [#20913] Say WHY this one is armed, per case — the three cases are
-        // three different rules, and the remedy differs with them.
+        // [#28412, ADR-0146 D9 item 1] The declared override over its own
+        // base's body, and nothing else: the customized state, not a
+        // collision. Nothing is warned and no receipt is written — the name
+        // has one packaged flow, the override — exactly as for a name with one
+        // contender. Any other contender beside them (a second package
+        // shipping the name, an undeclared stored row) keeps the warning.
+        const overrideOverOwnBase = armed.contender.source === 'override'
+            && shadowed.every((contender) => contender.source === 'package' && contender.packageId === owner);
+        if (overrideOverOwnBase) {
+            winners.push({ name, definition: armed.definition });
+            continue;
+        }
+        // [#20913] Say WHY this one is armed, per case — the cases are
+        // different rules, and the remedy differs with them.
         const sealedOverStored =
-            armed.contender.source === 'package' && shadowed.some((contender) => contender.source === 'runtime');
-        const why = sealedOverStored
-            ? ` because a managed package's flow is sealed (ADR-0126 §2)`
-            : armed.contender.source === 'package'
-                ? ' by package id'
-                : ' by arrival order';
+            (armed.contender.source === 'package' || armed.contender.source === 'override')
+            && shadowed.some((contender) => contender.source === 'runtime');
+        const why = armed.contender.source === 'override'
+            ? ` because it is the declared override of '${owner}' (ADR-0146 D9)`
+            : sealedOverStored
+                ? ` because a managed package's flow is sealed (ADR-0126 §2)`
+                : armed.contender.source === 'package'
+                    ? ' by package id'
+                    : ' by arrival order';
         const remedy = sealedOverStored
-            ? 'To change what runs, clone the flow under a new name, or switch the packaged flow off.'
+            ? undeclaredRemedy(owner)
             : 'Rename one of them.';
         logger?.warn(
             `[Automation] Flow name collision: '${name}' is claimed by ${group.length} definitions ` +

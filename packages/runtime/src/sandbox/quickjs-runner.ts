@@ -40,6 +40,7 @@ import {
 } from 'quickjs-emscripten';
 import { resolveSandboxTimeoutMs, sandboxBusinessMessage, isEngineDuplicateRecordEnvelope, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import type { HookBody, ScriptBody, ExpressionBody, HookBodyCapability } from '@objectstack/spec/data';
+import { isUnlandedWriteRefusal } from '@objectstack/objectql';
 import type {
   ScriptContext,
   ScriptOrigin,
@@ -47,6 +48,7 @@ import type {
   ScriptRunOptions,
   ScriptRunner,
 } from './script-runner.js';
+import { installSandboxIntl } from './sandbox-intl.js';
 
 const DEFAULT_HOOK_TIMEOUT_MS = 250;
 const DEFAULT_ACTION_TIMEOUT_MS = 5000;
@@ -272,6 +274,10 @@ export class QuickJSScriptRunner implements ScriptRunner {
 
     try {
       this.installCtx(vm, args.ctx, new Set(args.capabilities), args.origin, txState, deferreds);
+      // [#28898] `Intl.DateTimeFormat`, host-backed through plain values only.
+      // Every body kind runs through here, so hooks, actions and jobs share one
+      // global set (see `sandbox-intl.ts`).
+      installSandboxIntl(vm);
 
       // L1 expressions are pure-sync: evaluate and read __result.
       if (args.isExpression) {
@@ -942,6 +948,30 @@ export class QuickJSScriptRunner implements ScriptRunner {
       titleFn.dispose();
     }
 
+    // ── [#28251] `ctx.notice(message)` — tell the saver what the save did ───
+    //
+    // Installed only when the host handed the engine's member over (the hook
+    // face, on an insert / update dispatch). Synchronous: the listener only
+    // records the message, so there is nothing to await and no deferred to
+    // pump. `vm.dump`, like every other host bridge here, so the member sees
+    // what the body passed — and refuses anything but a non-empty string
+    // itself, with a `TypeError` relayed into the VM by `hostErrorToVm`. No
+    // capability gate: the call reads nothing and writes nothing but the
+    // requester's own answer.
+    if (typeof ctx.notice === 'function') {
+      const noticeFn = vm.newFunction('notice', (messageH) => {
+        const message = messageH === undefined ? undefined : vm.dump(messageH);
+        try {
+          ctx.notice!(message as string);
+        } catch (err) {
+          throw hostErrorToVm(vm, err);
+        }
+        return vm.undefined;
+      });
+      vm.setProp(ctxObj, 'notice', noticeFn);
+      noticeFn.dispose();
+    }
+
     vm.setProp(vm.global, '__ctx', ctxObj);
     ctxObj.dispose();
 
@@ -1576,6 +1606,16 @@ function hostErrorToVm(vm: QuickJSContext, err: unknown): QuickJSHandle {
  * shared predicate on the HOST-side error, so the runner and the doors cannot
  * disagree about which errors are the engine's. Every other host error crosses
  * exactly as it did.
+ *
+ * [#29527] …and for objectql's converted stale-roll-up refusal, a write that
+ * did not land because a nested write's roll-up could not be recomputed
+ * (`isUnlandedWriteRefusal`, objectql's own predicate). Its reader is not a
+ * door but the hook-dispatch seam a sandboxed hook body returns to: that seam
+ * converts again and re-leads an earlier conversion, so the outer write's
+ * caller reads the outer write and `cause` keeps the original refusal. Crossing
+ * as a `SandboxError` it was neither recognised nor carried its `cause`. Its
+ * status and code are the ones the `SandboxError` lifted, `500
+ * INTERNAL_ERROR`, so no door's answer moves.
  */
 interface HeldEngineRefusal {
   /** A dup of the VM error {@link hostErrorToVm} built; released before `vm.dispose()`. */
@@ -1591,10 +1631,11 @@ const HELD_ENGINE_REFUSALS = new WeakMap<QuickJSContext, HeldEngineRefusal[]>();
 
 /**
  * [#23702] Remember `errH` when `err` is the engine's unique-constraint
- * envelope. Best-effort: a failure leaves the error crossing as it always did.
+ * envelope, or [#29527] objectql's converted stale-roll-up refusal.
+ * Best-effort: a failure leaves the error crossing as it always did.
  */
 function holdEngineRefusal(vm: QuickJSContext, errH: QuickJSHandle, err: unknown): void {
-  if (!isEngineDuplicateRecordEnvelope(err)) return;
+  if (!isEngineDuplicateRecordEnvelope(err) && !isUnlandedWriteRefusal(err)) return;
   try {
     const snapshot = crossingSnapshot(vm, errH);
     if (snapshot === undefined) return;

@@ -7,7 +7,7 @@
  */
 
 import { createContext } from 'react';
-import type { AuthUser, AuthClientSession, PreviewModeOptions, AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthInvitationPreview, AuthPublicConfig, SignInWithProviderOptions, DelegableScope } from './types.js';
+import type { AuthUser, AuthClientSession, PreviewModeOptions, AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthInvitationPreview, AuthPublicConfig, SignInWithProviderOptions, DelegableScope, TwoFactorChallenge, SignInTwoFactorCodeKind } from './types.js';
 
 export interface AuthContextValue {
   /** Current authenticated user */
@@ -31,8 +31,30 @@ export interface AuthContextValue {
   isPreviewMode: boolean;
   /** Preview mode configuration (only set when isPreviewMode is true) */
   previewMode: PreviewModeOptions | null;
-  /** Sign in with email and password */
-  signIn: (email: string, password: string) => Promise<void>;
+  /**
+   * Sign in with email and password. `twoFactorRequired` is true when the
+   * server accepted the password but the account has two-factor sign-in on
+   * (objectstack#29105): no user is signed in yet, `twoFactorChallenge` is
+   * set, and `verifySignInTwoFactor` finishes the sign-in.
+   */
+  signIn: (email: string, password: string) => Promise<{ twoFactorRequired: boolean }>;
+  /**
+   * objectstack#29105 — the pending two-factor sign-in, or `null`. Set by a
+   * `signIn` whose password the server accepted for an account with
+   * two-factor sign-in on; cleared when the code is verified, when
+   * `cancelTwoFactorChallenge` runs, and when the server reports the pending
+   * sign-in spent or expired.
+   */
+  twoFactorChallenge: TwoFactorChallenge | null;
+  /**
+   * Finish the pending two-factor sign-in with an authenticator code or a
+   * backup code. Rejects with the server's `code` on a wrong code and keeps
+   * the challenge; on a spent or expired challenge it also clears it, so the
+   * user signs in with their password again.
+   */
+  verifySignInTwoFactor: (code: string, kind: SignInTwoFactorCodeKind) => Promise<void>;
+  /** Abandon the pending two-factor sign-in and go back to the password step. */
+  cancelTwoFactorChallenge: () => void;
   /** Sign up with name, email, and password.
    *  Returns `{ requiresVerification: true }` when the server accepted the
    *  account but is gating sign-in on email verification; callers should

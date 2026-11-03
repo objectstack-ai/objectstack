@@ -138,6 +138,7 @@ export {
   validateFlowTriggerReadiness,
   validateFlowApiTriggerSecret,
   FLOW_TRIGGER_UNKNOWN_OBJECT,
+  FLOW_INPUT_UNKNOWN_OBJECT,
   FLOW_DRAFT_STATUS_AMBIGUOUS,
   FLOW_TRIGGER_UNKNOWN_EVENT,
   FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
@@ -235,6 +236,7 @@ export type { SourceStyleFinding, SourceStyleSeverity } from './validate-page-so
 
 export {
   validateRecordTitle,
+  validateTitleFormatRetired,
   TITLE_FORMAT_RETIRED,
   TITLE_UNRESOLVABLE,
 } from './validate-record-title.js';
@@ -279,6 +281,7 @@ export {
   VISIBILITY_PREDICATE_OVER_BUDGET,
   VISIBILITY_PREDICATE_UNKNOWN_FUNCTION,
   VISIBILITY_PREDICATE_HAS_ARGUMENT,
+  VISIBILITY_PAGE_VARIABLE_UNDECLARED,
 } from './validate-visibility-predicates.js';
 export type {
   VisibilityFinding,
@@ -358,6 +361,8 @@ export {
   SECURITY_CBP_NO_RELATION,
   SECURITY_CBP_AMBIGUOUS_RELATION,
   SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
+  SECURITY_SUPERUSER_FIELD_MASK_INERT,
+  holdsSuperuserBypass,
 } from './validate-security-posture.js';
 export type { SecurityFinding, SecuritySeverity } from './validate-security-posture.js';
 
@@ -674,6 +679,18 @@ export {
 } from './validate-print-page-blocks.js';
 export type { PrintPageBlockFinding } from './validate-print-page-blocks.js';
 
+// #28663 — a page's `variables` declarations: unique, named, and seeded with
+// a `defaultValue` of the declared `type`; #28725 — a `source` naming a
+// component the page holds.
+export {
+  validatePageVariables,
+  PAGE_VARIABLE_NAME_DUPLICATE,
+  PAGE_VARIABLE_NAME_EMPTY,
+  PAGE_VARIABLE_DEFAULT_TYPE,
+  PAGE_VARIABLE_SOURCE_UNKNOWN,
+} from './validate-page-variables.js';
+export type { PageVariableFinding } from './validate-page-variables.js';
+
 // #24953 — a CEL slot inside a page component's `properties` (a `page:tabs`
 // item `visibleWhen`, an `object-form` section predicate, an `action:*`
 // `visible`, …) over the platform's parse bounds. A warning in 18.x.
@@ -703,6 +720,22 @@ export {
   REPORT_DATE_RANGE_DIMENSION_NONE,
 } from './validate-report-date-range.js';
 export type { ReportDateRangeFinding } from './validate-report-date-range.js';
+
+// [#28473] ADR-0146 D3: a package namespace too long to have a paired
+// customization namespace, judged with `customizationNamespace` itself.
+export {
+  validateCustomizationNamespace,
+  NAMESPACE_NO_CUSTOMIZATION_PAIR,
+} from './validate-customization-namespace.js';
+export type { CustomizationNamespaceFinding } from './validate-customization-namespace.js';
+
+// [#29049] ADR-0031 region shape: a flow the automation engine refuses to
+// register, judged with the spec's `validateControlFlow` itself.
+export {
+  validateFlowRegionShape,
+  FLOW_REGION_SHAPE_INVALID,
+} from './validate-flow-region-shape.js';
+export type { FlowRegionShapeFinding } from './validate-flow-region-shape.js';
 
 // [#14105] The layer BELOW the chart/widget binding rules above: a dataset's
 // own `include[]`, `dimensions[].field`, `measures[].field` and filter KEYS,
@@ -990,6 +1023,9 @@ export {
 export { lintFlowCredentialLiterals, FLOW_CREDENTIAL_LITERAL } from './lint-flow-credential-literals.js';
 export type { FlowCredentialLiteralFinding } from './lint-flow-credential-literals.js';
 export { isCredentialShapedLiteral } from './credential-literal.js';
+// The same predicate over a declarative connector's four header/env maps.
+export { lintConnectorCredentialLiterals, CONNECTOR_CREDENTIAL_LITERAL } from './lint-connector-credential-literals.js';
+export type { ConnectorCredentialLiteralFinding } from './lint-connector-credential-literals.js';
 
 export { lintLivenessProperties } from './lint-liveness-properties.js';
 // #11624 — the ledger's warn set, as a decision procedure. `os lint` runs the
@@ -1071,6 +1107,7 @@ export {
   lintUniqueDeclarations,
   lintUnscopedDeclaredIndexes,
   lintLegacyOrganizationComposites,
+  lintSummaryRollups,
   lintDataModel,
   UNIQUE_DOUBLE_DECLARATION,
   UNIQUE_UNSCOPED_DECLARED_INDEX,

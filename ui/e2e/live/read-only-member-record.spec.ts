@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { signInMember } from './member';
+import { writesRecordsOf } from './data-writes';
 
 /**
  * objectstack#27552 — a member who may READ a record but not WRITE it is
@@ -32,6 +33,9 @@ const API = process.env.LIVE_API_URL || 'http://localhost:3000';
 const OBJECT = 'showcase_inquiry';
 const recordPath = (id: string) => `/apps/showcase_app/${OBJECT}/record/${id}`;
 const formPath = (id: string) => `${recordPath(id)}?form=${encodeURIComponent(id)}`;
+// Named write routes, not "any non-GET": the record page itself loads through
+// the read `POST /api/v1/data/:object/:id/page` (see `./data-writes`).
+const writesInquiry = writesRecordsOf(OBJECT);
 
 // The record header's Edit CTA and the record body's inline-edit pencils carry
 // no test id; their accessible names are the `detail.edit` and
@@ -84,7 +88,7 @@ test('a member who may read but not write an inquiry gets a read-only form and n
       const memberPage = await context.newPage();
       const writes: string[] = [];
       memberPage.on('request', (r) => {
-        if (r.method() !== 'GET' && r.url().includes(`/api/v1/data/${OBJECT}`)) writes.push(`${r.method()} ${r.url()}`);
+        if (writesInquiry(r)) writes.push(`${r.method()} ${r.url()}`);
       });
 
       await memberPage.goto(formPath(id));
@@ -124,9 +128,7 @@ test('a member who may read but not write an inquiry gets a read-only form and n
 
     const value = `Admin edit ${Date.now()}`;
     await company.fill(value);
-    const saved = page.waitForResponse(
-      (r) => r.request().method() !== 'GET' && r.url().includes(`/api/v1/data/${OBJECT}/${id}`),
-    );
+    const saved = page.waitForResponse((r) => writesInquiry(r.request()));
     await dialog.getByTestId('modal-form-footer').locator('button[type="submit"]').click();
     expect((await saved).ok(), 'the admin save answered 2xx').toBe(true);
 

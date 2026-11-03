@@ -10,6 +10,15 @@ import type {
 import { connectorFetchOptions, readConnectorResponse } from '@objectstack/spec/integration';
 import { resilientFetch } from '@objectstack/spec/shared';
 import { callWithBorrowedCredential, withoutBorrowedCredential } from '@objectstack/types';
+import {
+    defaultParameterEncoding,
+    resolveParameterEncoding,
+    serializeHeaderParameter,
+    serializePathParameter,
+    serializeQueryParameter,
+    type ParameterEncoding,
+    type SentParameterLocation,
+} from './parameter-serialization.js';
 
 /**
  * OpenAPI connector generator — turns a declarative OpenAPI 3.x document into a
@@ -55,6 +64,13 @@ import { callWithBorrowedCredential, withoutBorrowedCredential } from '@objectst
  *     parameter, WeCom's `access_token`) is the platform's to fill, so it is
  *     left out of the action's input schema, as `Authorization` is for an
  *     `oauth2`, `openIdConnect` or `http` scheme.
+ *
+ * **How a parameter value is sent** — by the `style` / `explode` its
+ * Parameter Object declares, or the OpenAPI 3.x default for its location
+ * (`./parameter-serialization.ts`): an object or array value is never passed
+ * through `String()`. A parameter whose `style` OpenAPI 3.x does not define for
+ * its location refuses the operation at materialization; a value the declared
+ * style cannot carry fails the dispatch before anything is sent.
  */
 
 /** Static auth understood by the generated connector (the open-source subset). */
@@ -117,6 +133,12 @@ export interface OpenApiParameter {
     required?: boolean;
     description?: string;
     schema?: JsonSchema;
+    /** How the value is serialized; absent ⇒ the location's default (`form` for query, `simple` for path and header). */
+    style?: string;
+    /** Whether an array or object value is exploded; absent ⇒ true for `form`, false for every other style. */
+    explode?: boolean;
+    /** A media-type representation instead of `schema`; such a parameter carries no style. */
+    content?: Record<string, { schema?: JsonSchema }>;
 }
 
 export interface OpenApiRequestBody {
@@ -216,7 +238,8 @@ interface RequestInput {
     method: string;
     path: string;
     headers?: Record<string, string>;
-    query?: Record<string, string>;
+    /** Serialized query pairs, in order (a `deepObject` or exploded parameter contributes several). */
+    query?: [string, string][];
     body?: unknown;
 }
 
@@ -265,10 +288,10 @@ export function createOpenApiConnector(config: OpenApiConnectorConfig): OpenApiC
         /** One attempt, with the static auth or the credential the handle answered. */
         const send = (credential?: BorrowedConnectorAuth): Promise<Response> => {
             const headers: Record<string, string> = { ...config.defaultHeaders, ...input.headers };
-            const query: Record<string, string> = { ...input.query };
-            applyAuth(credential ?? auth, headers, query);
+            const authQuery: Record<string, string> = {};
+            applyAuth(credential ?? auth, headers, authQuery);
 
-            const url = buildUrl(baseUrl as string, input.path, query);
+            const url = buildUrl(baseUrl as string, input.path, withAuthQuery(input.query ?? [], authQuery));
             const hasBody = input.body !== undefined && method !== 'GET' && method !== 'HEAD';
             if (hasBody && headers['Content-Type'] === undefined && headers['content-type'] === undefined) {
                 headers['Content-Type'] = 'application/json';
@@ -307,6 +330,9 @@ export function createOpenApiConnector(config: OpenApiConnectorConfig): OpenApiC
     for (const op of collectOperations(document)) {
         if (include && !include(toInfo(op))) continue;
         const key = uniqueKey(operationActionKey(op), seenKeys);
+        // Read before the action exists: a parameter whose style cannot be
+        // honoured refuses the operation here, at materialization.
+        const encodings = parameterEncodings(op, key);
         const security = effectiveSecurity(op, document);
         const anonymous = security !== undefined && security.length === 0;
 
@@ -322,9 +348,9 @@ export function createOpenApiConnector(config: OpenApiConnectorConfig): OpenApiC
             const req = input as { path?: unknown; query?: unknown; header?: unknown; body?: unknown };
             return request({
                 method: op.method,
-                path: interpolatePath(op.path, asRecord(req.path)),
-                query: stringifyValues(asRecord(req.query)),
-                headers: stringifyValues(asRecord(req.header)),
+                path: interpolatePath(op.path, asRecord(req.path), encodings.path),
+                query: serializeQuery(asRecord(req.query), encodings.query),
+                headers: serializeHeaders(asRecord(req.header), encodings.header),
                 body: req.body,
             }, ctx, anonymous);
         };
@@ -554,14 +580,83 @@ function pickJsonSchema(content: Record<string, { schema?: JsonSchema }> | undef
     return chosen?.schema;
 }
 
-/** Build the request URL from base + path + query, encoding query params. */
-function buildUrl(baseUrl: string, path: string, query: Record<string, string>): string {
+/** Each sent parameter's encoding, by location and name (a header name also lower-cased). */
+type EncodingTable = Record<SentParameterLocation, Map<string, ParameterEncoding>>;
+
+/**
+ * Resolve the encoding of every path / query / header parameter the
+ * operation declares, refusing at materialization one whose `style` /
+ * `explode` cannot be honoured (see `./parameter-serialization.ts`).
+ */
+function parameterEncodings(op: Op, key: string): EncodingTable {
+    const table: EncodingTable = { path: new Map(), query: new Map(), header: new Map() };
+    const label = `${op.method.toUpperCase()} ${op.path} (${key})`;
+    for (const p of op.parameters ?? []) {
+        if (!p || typeof p !== 'object' || '$ref' in p) continue;
+        if (p.in !== 'path' && p.in !== 'query' && p.in !== 'header') continue;
+        if (typeof p.name !== 'string') continue;
+        const encoding = resolveParameterEncoding(p, label);
+        table[p.in].set(p.in === 'header' ? p.name.toLowerCase() : p.name, encoding);
+    }
+    return table;
+}
+
+function encodingFor(table: Map<string, ParameterEncoding>, name: string, where: SentParameterLocation): ParameterEncoding {
+    return table.get(where === 'header' ? name.toLowerCase() : name) ?? defaultParameterEncoding(name, where);
+}
+
+/** The query pairs of an action's `query` input, each parameter by its encoding. */
+function serializeQuery(input: Record<string, unknown>, table: Map<string, ParameterEncoding>): [string, string][] {
+    const pairs: [string, string][] = [];
+    for (const [name, value] of Object.entries(input)) {
+        pairs.push(...serializeQueryParameter(encodingFor(table, name, 'query'), value));
+    }
+    return pairs;
+}
+
+/** The header values of an action's `header` input, each parameter by its encoding. */
+function serializeHeaders(input: Record<string, unknown>, table: Map<string, ParameterEncoding>): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const [name, value] of Object.entries(input)) {
+        const sent = serializeHeaderParameter(encodingFor(table, name, 'header'), value);
+        if (sent !== undefined) out[name] = sent;
+    }
+    return out;
+}
+
+/**
+ * Merge the auth's query parameters into the input's pairs: an auth parameter
+ * replaces a pair of the same name where it stands, and is appended when no
+ * pair carries it — the static credential always wins.
+ */
+function withAuthQuery(pairs: readonly [string, string][], authQuery: Record<string, string>): [string, string][] {
+    const placed = new Set<string>();
+    const out: [string, string][] = [];
+    for (const [name, value] of pairs) {
+        if (!Object.prototype.hasOwnProperty.call(authQuery, name)) {
+            out.push([name, value]);
+        } else if (!placed.has(name)) {
+            out.push([name, authQuery[name]]);
+            placed.add(name);
+        }
+    }
+    for (const [name, value] of Object.entries(authQuery)) {
+        if (!placed.has(name)) out.push([name, value]);
+    }
+    return out;
+}
+
+/**
+ * Build the request URL from base + path + query. Each pair is appended
+ * through `URLSearchParams` (form-urlencoded); a name the base URL's own query
+ * already carries is replaced, not repeated.
+ */
+function buildUrl(baseUrl: string, path: string, query: readonly [string, string][]): string {
     const base = baseUrl.replace(/\/+$/, '');
     const suffix = path ? (path.startsWith('/') ? path : `/${path}`) : '';
     const url = new URL(base + suffix);
-    for (const [key, value] of Object.entries(query)) {
-        if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
-    }
+    for (const name of new Set(query.map(([n]) => n))) url.searchParams.delete(name);
+    for (const [name, value] of query) url.searchParams.append(name, value);
     return url.toString();
 }
 
@@ -585,22 +680,13 @@ function applyAuth(auth: RestAuth | BorrowedConnectorAuth, headers: Record<strin
     }
 }
 
-/** Interpolate {name} path templates with encoded values from the input. */
-function interpolatePath(template: string, pathParams: Record<string, unknown>): string {
+/** Interpolate {name} path templates with values from the input, each by its parameter's encoding. */
+function interpolatePath(template: string, pathParams: Record<string, unknown>, table: Map<string, ParameterEncoding>): string {
     return template.replace(/\{([^}]+)\}/g, (_match, key: string) => {
-        const value = pathParams[key];
-        return value === undefined || value === null ? `{${key}}` : encodeURIComponent(String(value));
+        const value = Object.prototype.hasOwnProperty.call(pathParams, key) ? pathParams[key] : undefined;
+        const sent = serializePathParameter(encodingFor(table, key, 'path'), value);
+        return sent === undefined ? `{${key}}` : sent;
     });
-}
-
-/** Coerce a record of mixed values into string values, dropping null/undefined. */
-function stringifyValues(rec: Record<string, unknown>): Record<string, string> {
-    const out: Record<string, string> = {};
-    for (const [k, v] of Object.entries(rec)) {
-        if (v === undefined || v === null) continue;
-        out[k] = String(v);
-    }
-    return out;
 }
 
 /** Return v if it is a plain object, else an empty record. */

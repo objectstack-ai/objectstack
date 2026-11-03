@@ -244,6 +244,7 @@ come at two severities: **errors** fail the build; **warnings** are advisory
 | **Unknown function** — a misspelled or nonexistent stdlib call. | `isBlnk(record.x)` | error |
 | **Type soundness** — a text or boolean field used with an arithmetic (`+ - * / %`) or ordering (`< > <= >=`) operator against a number faults at runtime and evaluates to `null`. Store it as a number field, or drop the arithmetic. | `record.title * 2` | warning |
 | **Date arithmetic** — a `date` / `datetime` field used with `+` / `-` against a number (a `YYYY-MM-DD` value is a string at runtime, so this always faulted to `null`). Use the date helpers instead. | `record.end_date - record.start_date + 1` → `daysBetween(record.start_date, record.end_date) + 1`; `today() + 30` → `daysFromNow(30)`; `record.date + n` → `addDays(record.date, n)` | error (#3306) |
+| **Date subtraction** — the runtime holds a `date` / `datetime` field as its text (`YYYY-MM-DD`, or an ISO-8601 instant), so subtracting two of them faults and the formula reads `null`; a timestamp minus one computes a duration, which a field reads as `{}`. Use `daysBetween`. A condition may still compare a duration (`today() - record.start_date > duration("72h")`). | `record.end_date - record.start_date` → `daysBetween(record.start_date, record.end_date)`; `today() - record.start_date` → `daysBetween(record.start_date, today())` | error |
 
 > **Integer literals in arithmetic are fine.** `record.amount / 100`,
 > `record.price * 2`, `record.total - fee` all work — the engine handles mixed
@@ -298,7 +299,10 @@ then a shared picklist's `picklists.<picklist>.options.<value>`), exactly as
 `Accept-Language`, so the write response the save toast reads, the record
 page title, related lists and lookups all follow it.
 
-- `label()` takes exactly `record.<field>`, a field that declares `options`.
+- `label()` takes exactly `record.<field>`, a field that declares `options`
+  or names a `picklist`. Any other field is refused when the object is saved
+  (`os validate`, `os build`, the object save door), with the field named,
+  because it has no label to read and the formula would read null on every row.
   An empty value reads `''`; a stored value no option declares reads as itself.
   A multi-value select is refused.
 - A read with no locale (a script, a scheduled job) reads the declared labels.

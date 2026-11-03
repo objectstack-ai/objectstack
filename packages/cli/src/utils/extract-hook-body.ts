@@ -118,7 +118,7 @@
  * handler with a pattern parameter. See {@link peelToBlockBody}. Both faces.
  */
 
-import { ts } from 'ts-morph';
+import ts from 'typescript';
 import { detectFreeIdentifiers, parseFunction } from './detect-free-identifiers.js';
 
 /**
@@ -711,11 +711,16 @@ function freeIdentifierRefusal(
         `inline them into the handler or move the logic behind \`ctx\` (e.g. \`ctx.api\`).`
       : '';
   const hint = nodeOnly.map((n) => SANDBOX_REPLACEMENTS[n]).filter(Boolean).join(' ');
+  // [#28898] The sandbox's `Intl` is partial, so a refused `Intl` name says
+  // which part exists: "does not provide Intl" alone is false of the namespace.
+  const intlNote = nodeOnly.some((n) => n === 'Intl' || n.startsWith('Intl.'))
+    ? ' (of `Intl` it provides `Intl.DateTimeFormat` only)'
+    : '';
 
   return (
     head +
     `${names} ${isAre} not available in the hook sandbox — the QuickJS build the runtime evaluates a ` +
-    `lowered body in does not provide ${itThem}, so the body would throw ReferenceError in production ` +
+    `lowered body in does not provide ${itThem}${intlNote}, so the body would throw in production ` +
     `while validate, typecheck, test and build all stay green (they run the raw function in Node, ` +
     `where ${itThem} exist${nodeOnly.length === 1 ? 's' : ''}). This handler will be BUNDLED instead ` +
     `(no behavior change). To keep it as metadata, keep the check in a string handler ref — put the ` +

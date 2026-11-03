@@ -35,10 +35,18 @@ export default defineConfig({
         find: /^@objectstack\/plugin-hono-server$/,
         replacement: path.resolve(__dirname, '../../plugins/plugin-hono-server/src/index.ts'),
       },
+      // @objectstack/runtime's one published subpath, listed BEFORE the bare
+      // entry below so that entry's prefix match cannot swallow it into
+      // `src/__mocks__/runtime.ts/compiled-plugin-manifest-file` (ENOTDIR). It
+      // is an import-free constant module, so it points at the real source,
+      // not the mock (#28080).
+      {
+        find: /^@objectstack\/runtime\/compiled-plugin-manifest-file$/,
+        replacement: path.resolve(__dirname, '../../runtime/src/compiled-plugin-manifest-file.ts'),
+      },
       // Unchanged in reach from the object entry this array replaced: a bare
       // string `find` still matches by prefix, so the kernel mock keeps exactly
-      // the surface it had. @objectstack/runtime publishes only `.`, so there
-      // is no subpath here for the prefix to swallow.
+      // the surface it had for the root entry.
       {
         find: '@objectstack/runtime',
         replacement: path.resolve(__dirname, 'src/__mocks__/runtime.ts'),

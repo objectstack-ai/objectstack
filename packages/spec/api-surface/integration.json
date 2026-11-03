@@ -5,6 +5,7 @@
     "BorrowedConnectorAuth (type)",
     "BorrowedConnectorCredential (interface)",
     "CONNECTOR_CREDENTIAL_REJECTED (const)",
+    "CONNECTOR_UPSTREAM_CHANGED (const)",
     "CONNECTOR_UPSTREAM_UNAVAILABLE (const)",
     "Connector (type)",
     "ConnectorAction (type)",
@@ -66,6 +67,7 @@
     "ConnectorState (type)",
     "ConnectorType (type)",
     "ConnectorTypeSchema (const)",
+    "ConnectorUpstreamChangedError (class)",
     "ConnectorUpstreamUnavailableError (class)",
     "DeclarativeConnectorEntry (type)",
     "DeclarativeConnectorEntryParsed (type)",
@@ -78,6 +80,7 @@
     "connectorFetchOptions (function)",
     "defineConnector (function)",
     "isConnectorCredentialRejected (function)",
+    "isConnectorUpstreamChanged (function)",
     "isConnectorUpstreamUnavailable (function)",
     "readConnectorResponse (function)"
   ]

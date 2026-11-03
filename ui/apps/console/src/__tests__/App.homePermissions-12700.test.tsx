@@ -34,8 +34,9 @@ import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } fr
 import { render, screen, cleanup, waitFor, act } from '@testing-library/react';
 import { useContext, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MetadataCtx, type MetadataContextValue, __resetVisibilityPredicateWarnings } from '@object-ui/react';
-import { usePermissions, type MePermissionsResponse } from '@object-ui/permissions';
+import { MetadataCtx, type MetadataContextValue } from '@object-ui/react';
+import { __resetVisibilityPredicateWarnings } from '../../../../packages/react/src/utils/visibilityDiagnostic';
+import { usePermissions, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 // Not on the package's entry: the context object itself, read by its module id
 // (`@object-ui/permissions` resolves to `packages/permissions/src`, so this is
 // the same module instance the provider writes).
@@ -79,12 +80,13 @@ const METADATA: MetadataContextValue = {
   getTypeStatus: () => 'ready',
 } as unknown as MetadataContextValue;
 
-function permissionsAnswer(): MePermissionsResponse {
+function permissionsAnswer(): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u_agent',
     tenantId: null,
-    roles: [],
+    positions: [],
+    hasAnyQueue: false,
     permissionSets: ['service_agent'],
     systemPermissions: ['studio.access'],
     objects: {
@@ -93,7 +95,7 @@ function permissionsAnswer(): MePermissionsResponse {
       crm_opportunity: { allowRead: net.opportunityRead },
     },
     fields: {},
-  } as MePermissionsResponse;
+  } as MePermissionsAuthenticatedResponse;
 }
 
 function respond(input: unknown): Promise<Response> {

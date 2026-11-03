@@ -31,6 +31,7 @@ import {
   PublishPackageDraftsResponse,
   LoginRequest,
   SessionResponse,
+  MePermissionsResponse,
   GetPresignedUrlRequest,
   PresignedUrlResponse,
   CompleteUploadRequest,
@@ -45,6 +46,9 @@ import {
   ListNotificationsResponse,
   MarkNotificationsReadResponse,
   MarkAllNotificationsReadResponse,
+  RegisterDeviceRequest,
+  RegisterDeviceResponse,
+  UnregisterDeviceResponse,
   // The AI wire types (#3718). `Ai{Nlq,Suggest,Insights}{Request,Response}`
   // used to be here; they typed three endpoints nothing has ever mounted and
   // went with the methods that called them. These type the routes that exist.
@@ -123,11 +127,15 @@ import {
   PackagePublishResult,
   DiscardPackageDraftsResponse,
   ListPackageCommitsResponse,
+  GetPackageCustomizationsResponse,
   RevertPackageCommitResponse,
   RollbackToPackageCommitResponse,
   PackageExportManifest,
   ReassignOrphanedMetadataResponse,
   DuplicatePackageResponse,
+  EnsureCustomizationPackageResponse,
+  CloneFlowRequest,
+  CloneFlowResponse,
   ValidateDataIssue,
 } from '@objectstack/spec/api';
 // [#17536] The element the two `/packages` READ doors are declared to serve.
@@ -538,8 +546,8 @@ export interface CloneDataResult<T = any> {
    * a non-system clone cannot seed a static `readonly` column, whether the value
    * was COPIED from the source row or supplied through `overrides`, so those
    * keys are dropped and the field re-derives its default. Present only when
-   * ≥1 field was dropped; the clone still succeeded. Body only: unlike `create`,
-   * the clone route sets no `X-ObjectStack-Dropped-Fields` header.
+   * ≥1 field was dropped; the clone still succeeded. REST also mirrors this in
+   * the `X-ObjectStack-Dropped-Fields` response header, as it does for `create`.
    */
   droppedFields?: DroppedFieldsEvent[];
   /**
@@ -3045,7 +3053,7 @@ export class ObjectStackClient {
     },
 
     /** ADR-0033: drop every pending draft bound to the package. */
-    discardDrafts: async (id: string, opts?: { actor?: string }): Promise<DiscardPackageDraftsResponse> => {
+    discardDrafts: async (id: string, opts?: { /** @deprecated Ignored: the server records the signed-in caller, never a name the request supplies. */ actor?: string }): Promise<DiscardPackageDraftsResponse> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/discard-drafts`, {
             method: 'POST',
@@ -3066,7 +3074,7 @@ export class ObjectStackClient {
     },
 
     /** ADR-0067: revert ONE commit (the revert is itself a commit). */
-    revertCommit: async (id: string, commitId: string, opts?: { actor?: string }): Promise<RevertPackageCommitResponse> => {
+    revertCommit: async (id: string, commitId: string, opts?: { /** @deprecated Ignored: the server records the signed-in caller, never a name the request supplies. */ actor?: string }): Promise<RevertPackageCommitResponse> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(
             `${this.baseUrl}${route}/${encodeURIComponent(id)}/commits/${encodeURIComponent(commitId)}/revert`,
@@ -3076,7 +3084,7 @@ export class ObjectStackClient {
     },
 
     /** ADR-0067: roll back through all commits newer than `commitId`. */
-    rollback: async (id: string, commitId: string, opts?: { actor?: string }): Promise<RollbackToPackageCommitResponse> => {
+    rollback: async (id: string, commitId: string, opts?: { /** @deprecated Ignored: the server records the signed-in caller, never a name the request supplies. */ actor?: string }): Promise<RollbackToPackageCommitResponse> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/rollback`, {
             method: 'POST',
@@ -3108,8 +3116,21 @@ export class ObjectStackClient {
         return this.unwrapResponse<PackageExportManifest>(res);
     },
 
+    /**
+     * [#28411, ADR-0146 D8 item 4] What this deployment changed on an installed
+     * base: its `.custom` pair's served overrides, the members the pair adds to
+     * the base's objects, and the base's switched-off items, with counts.
+     * A `.custom` id is refused naming its base; a base with no pair answers
+     * empty lists.
+     */
+    customizations: async (id: string): Promise<GetPackageCustomizationsResponse> => {
+        const route = this.getRoute('packages');
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/customizations`);
+        return this.unwrapResponse<GetPackageCustomizationsResponse>(res);
+    },
+
     /** ADR-0070 D5: bulk-rebind package-less (orphaned) metadata into this base. */
-    adoptOrphans: async (id: string, opts?: { actor?: string }): Promise<ReassignOrphanedMetadataResponse> => {
+    adoptOrphans: async (id: string, opts?: { /** @deprecated Ignored: the server records the signed-in caller, never a name the request supplies. */ actor?: string }): Promise<ReassignOrphanedMetadataResponse> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/adopt-orphans`, {
             method: 'POST',
@@ -3126,7 +3147,12 @@ export class ObjectStackClient {
     duplicate: async (
         id: string,
         targetPackageId: string,
-        opts?: { targetName?: string; targetNamespace?: string; actor?: string },
+        opts?: {
+            targetName?: string;
+            targetNamespace?: string;
+            /** @deprecated Ignored: the server records the signed-in caller, never a name the request supplies. */
+            actor?: string;
+        },
     ): Promise<DuplicatePackageResponse> => {
         // ⚠ `success` on the returned payload is the OPERATION's verdict
         // (false for a partial or empty duplicate) — the envelope-level
@@ -3138,6 +3164,30 @@ export class ObjectStackClient {
             body: JSON.stringify({ targetPackageId, ...(opts ?? {}) }),
         });
         return this.unwrapResponse<DuplicatePackageResponse>(res);
+    },
+
+    /**
+     * ADR-0146 D3: ensure the paired customization package `<id>.custom` of
+     * the installed, read-only base `id` — the one creation path of the pair.
+     * The server answers the pair, creating it when absent (`created: true`,
+     * HTTP 201) or returning it unchanged (`created: false`, HTTP 200); its
+     * namespace (`<base namespace>_custom`) and its dependency range on the
+     * base are derived by the server, never sent. Customer changes to the base
+     * are then authored into `packageId`.
+     *
+     * Refused, with nothing written: a base that is not installed (404), a
+     * writable base — customize it directly — or one with no pair namespace,
+     * and an installed `<id>.custom` that lacks the namespace or the
+     * dependency (409); another package owning the namespace (422
+     * `NAMESPACE_CONFLICT`). Under a walled tenancy posture only the platform
+     * operator may call it.
+     */
+    ensureCustomization: async (id: string): Promise<EnsureCustomizationPackageResponse> => {
+        const route = this.getRoute('packages');
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/ensure-customization`, {
+            method: 'POST',
+        });
+        return this.unwrapResponse<EnsureCustomizationPackageResponse>(res);
     },
   };
 
@@ -4946,6 +4996,26 @@ export class ObjectStackClient {
     },
 
     /**
+     * [#28709] The caller's effective permissions: `GET /auth/me/permissions`,
+     * the body the console reads once per session for its whole permission
+     * layer, declared strictly by `MePermissionsResponseSchema`
+     * (`@objectstack/spec/api`). Served by plugin-hono-server, not better-auth.
+     *
+     * Discriminate on `authenticated`: an anonymous caller RESOLVES
+     * `{ authenticated: false }` (the route answers it at 200, so a client can
+     * tell "signed out" from a fault), unlike {@link me}, which rejects. The
+     * authenticated answer carries `hasAnyQueue` among the rest;
+     * `systemPermissions` / `tabPermissions` are absent only on a server
+     * without SecurityPlugin, where absent means unknown and an empty array
+     * means none.
+     */
+    mePermissions: async (): Promise<MePermissionsResponse> => {
+        const route = this.getRoute('auth');
+        const res = await this.fetch(`${this.baseUrl}${route}/me/permissions`);
+        return (await res.json()) as MePermissionsResponse;
+    },
+
+    /**
      * Register a new user account
      * Uses better-auth endpoint: POST /sign-up/email
      *
@@ -5846,6 +5916,40 @@ export class ObjectStackClient {
       },
 
       /**
+       * [#28149, ADR-0146 D4] "New similar": copy the flow `name` under a NEW
+       * machine name, into a package, switched off.
+       *
+       * `POST /automation/:name/clone` copies the whole definition, renames
+       * and relabels it, and writes it with `status: 'obsolete'`, so the copy
+       * never runs beside its original; switch it on by saving its
+       * definition with `status: 'active'` into its package and publishing.
+       * Its references are not re-pointed, and nothing records what it was
+       * copied from (ADR-0126 §9).
+       *
+       * `body.package` names the package the copy lands in: an installed,
+       * writable package whose dependency closure holds the source's
+       * package. Omitted, the copy lands in the source's paired
+       * customization package `<base>.custom`, created on first use through
+       * the ensure door (`packages.ensureCustomization`). The answer names the
+       * package in `packageId`.
+       *
+       * Refused, with nothing written: an unknown source (404); a taken name
+       * (409 `RESOURCE_CONFLICT`); a source holding a credential (409); an
+       * unknown or read-only `package` (422 `WRITABLE_PACKAGE_REQUIRED`), or
+       * one whose closure lacks the source's package (409
+       * `RESOURCE_CONFLICT`); `package` omitted for a source no package ships,
+       * which has no pair (400). Requires `manage_metadata`.
+       */
+      clone: async (name: string, body: CloneFlowRequest): Promise<CloneFlowResponse['data']> => {
+          const route = this.getRoute('automation');
+          const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(name)}/clone`, {
+              method: 'POST',
+              body: JSON.stringify(body),
+          });
+          return this.unwrapResponse<CloneFlowResponse['data']>(res);
+      },
+
+      /**
        * Execution run history
        */
       runs: {
@@ -6705,10 +6809,11 @@ export class ObjectStackClient {
   /**
    * Notification Services
    *
-   * Device registration and preference methods were removed in #3612 — the
-   * /notifications/devices and /notifications/preferences server routes that
-   * ADR-0012 describes were never built. They return together with the server
-   * (and a route-ledger row keeps them honest).
+   * The device methods (`registerDevice` / `unregisterDevice`) returned with
+   * the server's device registry (ADR-0012 §6), and their route-ledger rows
+   * (`runtime/src/route-ledger.ts`) keep them honest. The preference methods
+   * removed in #3612 stay gone: no server route serves
+   * `/notifications/preferences`.
    */
   notifications = {
     /**
@@ -6753,6 +6858,37 @@ export class ObjectStackClient {
         method: 'POST'
       });
       return this.unwrapResponse<MarkAllNotificationsReadResponse>(res);
+    },
+
+    /**
+     * Register or refresh this user's push device (`POST /notifications/devices`).
+     *
+     * Send the `deviceId` the server answered on every later registration:
+     * re-registering it refreshes that device (token, vendor, app, locale)
+     * instead of adding another. Without one the server mints an id and
+     * answers it. `vendor` may be omitted for `ios` (apns) and `android`
+     * (fcm); a `web` registration names it.
+     */
+    registerDevice: async (request: RegisterDeviceRequest): Promise<RegisterDeviceResponse> => {
+      const route = this.getRoute('notifications');
+      const res = await this.fetch(`${this.baseUrl}${route}/devices`, {
+        method: 'POST',
+        body: JSON.stringify(request)
+      });
+      return this.unwrapResponse<RegisterDeviceResponse>(res);
+    },
+
+    /**
+     * Unregister one of this user's push devices
+     * (`DELETE /notifications/devices/:deviceId`), on sign-out or account
+     * switch. A device id this user does not hold answers 404 `NOT_FOUND`.
+     */
+    unregisterDevice: async (deviceId: string): Promise<UnregisterDeviceResponse> => {
+      const route = this.getRoute('notifications');
+      const res = await this.fetch(`${this.baseUrl}${route}/devices/${encodeURIComponent(deviceId)}`, {
+        method: 'DELETE'
+      });
+      return this.unwrapResponse<UnregisterDeviceResponse>(res);
     }
   };
 

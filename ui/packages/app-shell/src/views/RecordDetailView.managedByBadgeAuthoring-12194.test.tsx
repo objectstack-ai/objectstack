@@ -45,7 +45,7 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vite
 import { render, waitFor, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { MetadataCtx } from '@object-ui/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -88,12 +88,13 @@ const FIELDS = {
 const RECORD = { id: REC, name: 'Acme Workspace', city: 'London' };
 
 /** A `/me/permissions` answer; `systemPermissions` omitted when `held` is `undefined`. */
-function answer(held: string[] | undefined): MePermissionsResponse {
+function answer(held: string[] | undefined): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u1',
     tenantId: null,
-    roles: [],
+    positions: [],
+    hasAnyQueue: false,
     permissionSets: [],
     ...(held === undefined ? {} : { systemPermissions: held }),
     objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },

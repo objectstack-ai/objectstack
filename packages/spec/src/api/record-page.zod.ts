@@ -4,15 +4,18 @@ import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { ExplainDecisionSchema } from '../security/explain.zod';
 import { GetRecordFieldAccessResponseSchema } from './protocol.zod';
+import type { SysActivityBuiltinType } from '../data/feed.zod';
 
 /**
  * Record page payload — `POST /api/v1/data/{object}/{id}/page`.
  *
  * One request that answers everything a record page asks of the server when it
  * opens: the record (with the lookups it names resolved), the count and first
- * rows of every related list the page draws, the caller's field projection of
- * the record, the approval state that locks it, and the record-grained access
- * verdicts its header actions are gated on.
+ * rows of every related list the page draws (with the lookups of those rows it
+ * names resolved), the caller's field projection of the record, the approval
+ * state that locks it, the record-grained access verdicts its header actions
+ * are gated on, and the record's own streams the page draws — its discussion,
+ * its activity feed and its attachments.
  *
  * The request NAMES the parts. Which related lists a page draws (their order,
  * their declared scope, which of them the reader may see) is the page's own
@@ -24,15 +27,32 @@ import { GetRecordFieldAccessResponseSchema } from './protocol.zod';
  *
  * Every part is the answer of the read it replaces, asked as the same caller:
  * the record is `GET /data/{object}/{id}`, a related list is
- * `GET /data/{child}` with that filter and `$count`, `fieldAccess` is
- * `GET /data/{object}/{id}/field-access`, `explain` is
- * `POST /security/explain` with the record id, and `approvals` is
+ * `GET /data/{child}` with that filter, `$count` and the `$expand` it names,
+ * `fieldAccess` is `GET /data/{object}/{id}/field-access`, `explain` is
+ * `POST /security/explain` with the record id, `approvals` is
  * `GET /approvals/requests` for the record plus
- * `GET /approvals/records/{object}/{id}/lock`. Object permissions, row-level
- * security, sharing and field-level security therefore apply exactly as they
- * apply to those reads. A part whose read refuses carries that refusal in place
- * of an answer — a related list the caller may not read carries neither a
- * count nor rows — and the other parts are answered. A record the caller
+ * `GET /approvals/records/{object}/{id}/lock`, `discussion` is
+ * `GET /data/sys_comment` for the record's thread plus
+ * `GET /data/sys_comment_reaction` for those comments, `activity` is
+ * `GET /data/sys_activity` for the record with its actor expanded, and
+ * `attachments` is `GET /data/sys_attachment` for the record with `$count`.
+ * The three stream parts are each that read exactly as the table on
+ * `RecordPageActivityRequestSchema` spells it: the route composes the record's
+ * scope and the order, and the request names only whether a stream is wanted
+ * and how many rows. Paging further, posting, reacting and uploading keep
+ * their own routes. [#28737] The `timeline` part is the size of the record's
+ * 动态 stream — the comments, the activity and the field changes it merges —
+ * counted by those reads as the caller (`RecordPageTimelineRequestSchema`), so
+ * a page draws the stream's count without holding every row of it. The total
+ * counts the sources' rows as that schema's table defines them, so it is an
+ * upper bound of the entries the 动态 panel draws, not their number. The panel
+ * draws fewer where its `showCompleted` / `types` configuration filters entries
+ * out, and where a ledger row has no displayable diff and so draws no entry.
+ * Object permissions, row-level security, sharing and
+ * field-level security therefore apply exactly as they apply to those reads.
+ * A part whose read refuses carries that refusal in place of an answer — a
+ * related list the caller may not read carries neither a count nor rows — and
+ * the other parts are answered. A record the caller
  * cannot read refuses the whole request with the record read's own answer, so
  * no part discloses a record the caller could not open.
  */
@@ -43,6 +63,38 @@ export const RECORD_PAGE_MAX_RELATED = 50;
 export const RECORD_PAGE_MAX_RELATED_ROWS = 50;
 /** The most sort keys one related list may order its rows by. */
 export const RECORD_PAGE_MAX_RELATED_SORT = 8;
+/**
+ * The most activity rows the `activity` part may ask for: the window the
+ * console's record feed reads (`$top: 200`), which its 动态 tab draws in full.
+ * The stream's count is the `timeline` part's, never these rows' (#28737).
+ */
+export const RECORD_PAGE_MAX_ACTIVITY_ROWS = 200;
+/** The most attachment rows the `attachments` part may ask for: the Attachments panel's window. */
+export const RECORD_PAGE_MAX_ATTACHMENT_ROWS = 100;
+
+/**
+ * [#28737] The `sys_activity.type` values the record page's 动态 stream draws
+ * no entry for: a comment and a mention are the discussion's own rows
+ * (`sys_comment`), and a sign-in and a sign-out are account events, not the
+ * record's. The one definition: the `timeline` part's count leaves these out,
+ * and the console's activity reading (`ACTIVITY_TYPE_TO_FEED_TYPE`) maps
+ * exactly these to no entry. Every other value, an author-extended one
+ * included, is an entry.
+ */
+export const RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES = [
+  'commented',
+  'mentioned',
+  'login',
+  'logout',
+] as const satisfies readonly SysActivityBuiltinType[];
+
+/**
+ * [#28737] The `sys_activity.type` of an update, which steps aside in the
+ * 动态 stream once the stream merges the record's field changes: the audit
+ * entry says the same update with its before and after values, so an update
+ * is one entry.
+ */
+export const RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE = 'updated' satisfies SysActivityBuiltinType;
 
 /** The record-grained operations a record page's header asks about. */
 export const RecordPageExplainOperationSchema = z.enum(['update', 'delete', 'transfer']);
@@ -70,9 +122,87 @@ export const RecordPageRelatedRequestSchema = lazySchema(() => z.object({
   }).strict()).max(RECORD_PAGE_MAX_RELATED_SORT).optional().describe(
     'The order of the list\'s first rows, as `GET /data/{object}` orders them by `$orderby`. Absent for the default order.',
   ),
+  expand: z.array(z.string().min(1)).optional().describe(
+    'Lookup fields of the child object to resolve on the list\'s rows, as `GET /data/{object}?$expand=` resolves '
+    + 'them: each named reference is answered with the referenced record the caller may read in place of its id, so '
+    + 'the rows carry the display names the list draws. Absent: the rows carry the bare ids.',
+  ),
 }).strict());
 export type RecordPageRelatedRequest = z.input<typeof RecordPageRelatedRequestSchema>;
 export type RecordPageRelatedRequestParsed = z.infer<typeof RecordPageRelatedRequestSchema>;
+
+/**
+ * The record's own streams, each the read it replaces (the record is
+ * `{object}` / `{id}` of the route):
+ *
+ * | part          | the read                                                                                       |
+ * | ------------- | ---------------------------------------------------------------------------------------------- |
+ * | `discussion`  | `sys_comment` where `thread_id` = `{object}:{id}` (the id the comment writer stores), by       |
+ * |               | `created_at` asc, no page size (the whole thread, as the record feed reads it); then           |
+ * |               | `sys_comment_reaction` where `comment_id` is among those comments, by `created_at` asc         |
+ * | `activity`    | `sys_activity` where `object_name` = `{object}` and `record_id` = `{id}`, by `timestamp` desc, |
+ * |               | `top` rows with `$count`, `actor_id` expanded                                                  |
+ * | `attachments` | `sys_attachment` where `parent_object` = `{object}` and `parent_id` = `{id}`, by `created_at`  |
+ * |               | desc, `top` rows with `$count`                                                                 |
+ *
+ * Each is asked of the data door as the caller, behind that object's own API
+ * exposure gate, so a stream the caller may not read is that read's refusal.
+ *
+ * This schema is the `activity` part of a request: how many of the newest rows.
+ */
+export const RecordPageActivityRequestSchema = lazySchema(() => z.object({
+  top: z.number().int().min(1).max(RECORD_PAGE_MAX_ACTIVITY_ROWS).describe(
+    'How many of the record\'s newest activity rows to return with their count.',
+  ),
+}).strict());
+export type RecordPageActivityRequest = z.input<typeof RecordPageActivityRequestSchema>;
+export type RecordPageActivityRequestParsed = z.infer<typeof RecordPageActivityRequestSchema>;
+
+/**
+ * [#28737] The `timeline` part of a request: which of the record's sources its
+ * 动态 stream merges, each counted by its read as the caller, behind that
+ * object's own API exposure gate (the record is `{object}` / `{id}`):
+ *
+ * | source         | the count                                                                                   |
+ * | -------------- | ------------------------------------------------------------------------------------------- |
+ * | `discussion`   | `sys_comment` where `thread_id` = `{object}:{id}`: every comment and reply of the thread    |
+ * | `activity`     | `sys_activity` where `object_name` = `{object}`, `record_id` = `{id}` and `type` is not one |
+ * |                | of `RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES`; with any field change counted, not             |
+ * |                | `RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE` either                                               |
+ * | `fieldChanges` | `sys_audit_log` where `object_name` = `{object}`, `record_id` = `{id}` and `action` is a    |
+ * |                | write (`create`, `update`, `delete`)                                                         |
+ *
+ * The total is their sum: it counts the sources' rows as this table defines
+ * them, so it is an upper bound of the entries the 动态 panel draws, not their
+ * number. The panel draws fewer where its `showCompleted` / `types`
+ * configuration filters entries out, and where a ledger row has no
+ * displayable diff and so draws no entry. A source this deployment does not serve (its read
+ * answers `OBJECT_NOT_FOUND`) holds no entry, as the page reads such a stream
+ * as an empty one. The field changes are the history the stream merges only
+ * where the caller may read it: a refused `sys_audit_log` read counts none, as
+ * the stream then draws none. A refused comment or activity read refuses the
+ * part, so a refused stream is never counted as an empty one.
+ */
+export const RecordPageTimelineRequestSchema = lazySchema(() => z.object({
+  discussion: z.boolean().describe('Count the record\'s comment thread: every comment and reply.'),
+  activity: z.boolean().describe(
+    'Count the record\'s activity rows the stream draws an entry for (not `RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES`).',
+  ),
+  fieldChanges: z.boolean().describe(
+    'Count the record\'s field changes (its `sys_audit_log` writes); with any, its `updated` activity rows step aside.',
+  ),
+}).strict());
+export type RecordPageTimelineRequest = z.input<typeof RecordPageTimelineRequestSchema>;
+export type RecordPageTimelineRequestParsed = z.infer<typeof RecordPageTimelineRequestSchema>;
+
+/** The `attachments` part of a request: how many of the newest attachments. */
+export const RecordPageAttachmentsRequestSchema = lazySchema(() => z.object({
+  top: z.number().int().min(0).max(RECORD_PAGE_MAX_ATTACHMENT_ROWS).describe(
+    'How many of the record\'s newest attachments to return with their count; 0 returns the count alone.',
+  ),
+}).strict());
+export type RecordPageAttachmentsRequest = z.input<typeof RecordPageAttachmentsRequestSchema>;
+export type RecordPageAttachmentsRequestParsed = z.infer<typeof RecordPageAttachmentsRequestSchema>;
 
 /** The request body of `POST /data/{object}/{id}/page`. */
 export const RecordPageRequestSchema = lazySchema(() => z.object({
@@ -91,6 +221,18 @@ export const RecordPageRequestSchema = lazySchema(() => z.object({
   ),
   approvals: z.boolean().optional().describe(
     'Return the record\'s approval requests and its approval lock.',
+  ),
+  discussion: z.boolean().optional().describe(
+    'Return the record\'s discussion: its comment thread and those comments\' reactions (`RecordPageDiscussionSchema`).',
+  ),
+  activity: RecordPageActivityRequestSchema.optional().describe(
+    'Return the record\'s newest activity rows and their count (`RecordPageStreamRowsSchema`).',
+  ),
+  attachments: RecordPageAttachmentsRequestSchema.optional().describe(
+    'Return the record\'s newest attachments and their count (`RecordPageStreamRowsSchema`).',
+  ),
+  timeline: RecordPageTimelineRequestSchema.optional().describe(
+    'Return the size of the record\'s timeline stream over the sources named (`RecordPageTimelineCountSchema`).',
   ),
 }).strict());
 export type RecordPageRequest = z.input<typeof RecordPageRequestSchema>;
@@ -153,6 +295,65 @@ export const RecordPageApprovalsSchema = lazySchema(() => z.object({
 export type RecordPageApprovals = z.input<typeof RecordPageApprovalsSchema>;
 export type RecordPageApprovalsParsed = z.infer<typeof RecordPageApprovalsSchema>;
 
+/**
+ * A stream part whose read refused: the refusal alone, so a refused stream
+ * cannot be read as an empty one and an answered one carries no refusal.
+ */
+export const RecordPageStreamRefusalSchema = lazySchema(() => z.object({
+  error: RecordPagePartRefusalSchema.describe('The refusal the replaced read answers, in place of this part\'s answer.'),
+}).strict());
+export type RecordPageStreamRefusal = z.input<typeof RecordPageStreamRefusalSchema>;
+export type RecordPageStreamRefusalParsed = z.infer<typeof RecordPageStreamRefusalSchema>;
+
+/** A stream's newest rows and how many it holds: the `activity` and `attachments` parts. */
+export const RecordPageStreamRowsSchema = lazySchema(() => z.object({
+  total: z.number().int().describe('How many rows the stream holds for this caller.'),
+  records: z.array(z.record(z.string(), z.unknown())).describe('The stream\'s newest rows, as the caller may read them.'),
+}).strict());
+export type RecordPageStreamRows = z.input<typeof RecordPageStreamRowsSchema>;
+export type RecordPageStreamRowsParsed = z.infer<typeof RecordPageStreamRowsSchema>;
+
+/**
+ * [#28737] The `timeline` part: the size of the record's 动态 stream, counted
+ * by the reads `RecordPageTimelineRequestSchema` names, as the caller. The
+ * total counts the sources' rows as that schema's table defines them, so it is
+ * an upper bound of the entries the 动态 panel draws, not their number. The
+ * panel draws fewer where its `showCompleted` / `types` configuration filters
+ * entries out, and where a ledger row has no displayable diff and so draws no
+ * entry.
+ */
+export const RecordPageTimelineCountSchema = lazySchema(() => z.object({
+  total: z.number().int().min(0).describe(
+    'The rows of the sources the request named, counted as this caller may read them: an upper bound of the entries the timeline panel draws, not their number. The panel draws fewer where its `showCompleted` / `types` configuration filters entries out, and where a ledger row has no displayable diff.',
+  ),
+}).strict());
+export type RecordPageTimelineCount = z.input<typeof RecordPageTimelineCountSchema>;
+export type RecordPageTimelineCountParsed = z.infer<typeof RecordPageTimelineCountSchema>;
+
+/** The reactions of the discussion's comments: their rows, or the refusal of their read. */
+export const RecordPageDiscussionReactionsSchema = lazySchema(() => z.union([
+  z.object({
+    records: z.array(z.record(z.string(), z.unknown())).describe(
+      'The `sys_comment_reaction` rows of the thread\'s comments, oldest first; empty for a thread with no comment.',
+    ),
+  }).strict(),
+  RecordPageStreamRefusalSchema,
+]));
+export type RecordPageDiscussionReactions = z.input<typeof RecordPageDiscussionReactionsSchema>;
+export type RecordPageDiscussionReactionsParsed = z.infer<typeof RecordPageDiscussionReactionsSchema>;
+
+/**
+ * The discussion part: the record's comment thread and its reactions. The
+ * reactions are a part of their own: their refusal (a deployment without
+ * `sys_comment_reaction` answers its 404) leaves the comments answered.
+ */
+export const RecordPageDiscussionSchema = lazySchema(() => z.object({
+  comments: z.array(z.record(z.string(), z.unknown())).describe('The thread\'s comments, oldest first, as the caller may read them.'),
+  reactions: RecordPageDiscussionReactionsSchema.describe('The reactions of those comments, or the refusal of their read.'),
+}).strict());
+export type RecordPageDiscussion = z.input<typeof RecordPageDiscussionSchema>;
+export type RecordPageDiscussionParsed = z.infer<typeof RecordPageDiscussionSchema>;
+
 /** One requested operation's access decision, or the refusal of the explain read. */
 export const RecordPageExplainAnswerSchema = lazySchema(() => z.union([ExplainDecisionSchema, RecordPagePartErrorSchema]));
 export type RecordPageExplainAnswer = z.input<typeof RecordPageExplainAnswerSchema>;
@@ -178,6 +379,18 @@ export const RecordPageResponseSchema = lazySchema(() => z.object({
   explain: z.object(explainAnswerShape()).optional().describe('One access decision per requested operation, keyed by operation, when the request asked for any.'),
   approvals: z.union([RecordPageApprovalsSchema, RecordPagePartErrorSchema]).optional().describe(
     'The approval part, when the request asked for it.',
+  ),
+  discussion: z.union([RecordPageDiscussionSchema, RecordPageStreamRefusalSchema]).optional().describe(
+    'The discussion part, when the request asked for it: the thread and its reactions, or the refusal of the comment read.',
+  ),
+  activity: z.union([RecordPageStreamRowsSchema, RecordPageStreamRefusalSchema]).optional().describe(
+    'The activity part, when the request asked for it: the newest rows and their count, or the refusal of their read.',
+  ),
+  attachments: z.union([RecordPageStreamRowsSchema, RecordPageStreamRefusalSchema]).optional().describe(
+    'The attachments part, when the request asked for it: the newest rows and their count, or the refusal of their read.',
+  ),
+  timeline: z.union([RecordPageTimelineCountSchema, RecordPageStreamRefusalSchema]).optional().describe(
+    'The timeline part, when the request asked for it: the stream\'s size, or the refusal of a comment or activity read.',
   ),
 }));
 export type RecordPageResponse = z.input<typeof RecordPageResponseSchema>;

@@ -206,6 +206,11 @@ interface CensusEntry {
  * [#27627] 5, unchanged: the app metadata bundle (`meta-app-bundle-routes.ts`)
  * reads metadata only and builds no `query:` slot, so the new module's floor
  * is 0.
+ *
+ * [#28470] 6 = 0 + 3 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 1 + 0 + 0 + 0 + 0 + 0 + 2 + 0:
+ * the record page's stream reads (the discussion, its reactions, the activity
+ * and the attachments) go through one server-built slot (`readStream`), so the
+ * module's floor is 2.
  */
 const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, number>> = {
     'rest-server.ts': 0,
@@ -226,7 +231,7 @@ const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, numb
     'meta-item-write-routes.ts': 0,
     'meta-item-history-routes.ts': 0,
     'meta-object-state-routes.ts': 0,
-    'record-page-routes.ts': 1,
+    'record-page-routes.ts': 2,
     'meta-app-bundle-routes.ts': 0,
 };
 
@@ -438,10 +443,11 @@ describe('[#16638] §1 CONTROLS on the census instrument itself', () => {
         // [#26433] The list's length is no longer pinned: the list is the authority.
         // [#27627] The sum 4 → 5: the record page's related list read.
         // [#27627] The sum unchanged by the app metadata bundle (no slot).
+        // [#28470] The sum 5 → 6: the record page's stream reads (`readStream`).
         expect(Object.keys(REGISTRAR_QUERY_SLOT_FLOORS).sort()).toEqual([...REST_SERVER_REGISTRAR_FILES].sort());
         expect(CENSUS.filter(({ file }) => REGISTRAR_SOURCES.has(file)).map(({ file }) => file))
             .toEqual([...REST_SERVER_REGISTRAR_FILES]);
-        expect([...REGISTRAR_SOURCES.values()].reduce((n, source) => n + querySlots(source).length, 0)).toBe(5);
+        expect([...REGISTRAR_SOURCES.values()].reduce((n, source) => n + querySlots(source).length, 0)).toBe(6);
     });
 
     it('dropping comment lines leaves the code that is being censused', () => {

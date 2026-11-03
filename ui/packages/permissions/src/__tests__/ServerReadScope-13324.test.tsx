@@ -23,7 +23,7 @@
 import { describe, it, expect } from 'vitest';
 import { render } from '@testing-library/react';
 import React from 'react';
-import { MePermissionsProvider, type MePermissionsResponse } from '../MePermissionsProvider';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '../MePermissionsProvider';
 import { ServerReadScope } from '../ServerReadScope';
 import { usePermissions } from '../usePermissions';
 
@@ -34,11 +34,12 @@ function Probe({ seen }: { seen: Perms[] }) {
   return null;
 }
 
-const ANSWER: MePermissionsResponse = {
+const ANSWER: MePermissionsAuthenticatedResponse = {
   authenticated: true,
   userId: 'u1',
   tenantId: 'org_1',
-  roles: ['member'],
+  hasAnyQueue: false,
+  positions: ['member'],
   permissionSets: ['member_default'],
   objects: { invoice: { allowRead: true, allowEdit: true } },
   fields: { 'invoice.internal_score': { readable: false, editable: false } },

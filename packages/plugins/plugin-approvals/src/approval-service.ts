@@ -21,7 +21,7 @@ import { ExpressionEngine, collectCelRootIdentifiers } from '@objectstack/formul
 // writer-local re-derivation here was rejected by name (Option B): it would be
 // a third answer to a question the codebase already answered two ways.
 import { createRecordOrganizationResolver, type RecordOrganizationResolver } from '@objectstack/metadata-core';
-import { keysetWalk, strandedDecisionFailure } from '@objectstack/types';
+import { isObjectAbsentError, keysetWalk, strandedDecisionFailure } from '@objectstack/types';
 // [#15981 / #16166] Every built-in identity NAME is deliberately absent here:
 // both arms of `isOverrideActor` read an ADR-0095 capability rung, never a name.
 // `BUILTIN_IDENTITY_PLATFORM_ADMIN` went with the platform arm's name read and
@@ -1119,6 +1119,34 @@ const OOO_MAX_CHAIN = 8;
 const MEMBER_SCREEN_READ_LIMIT = 50000;
 
 /**
+ * [#29362, #29503] Rows per page of the directory holder reads
+ * ({@link ApprovalService.readHoldersToCompletion}: the membership tier, the
+ * position assignments, the team members, the business-unit members) — the bound each read always
+ * carried, so a group held by fewer people issues the one read it always did,
+ * and one held by more is read in further pages rather than cut.
+ */
+const HOLDER_PAGE_ROWS = 10000;
+
+/**
+ * [#29655] Rows per page of the business-unit descent's child-unit read — the
+ * bound that read always carried, so a parent with fewer children issues the
+ * one read it always did, and one with more is read in further pages.
+ */
+const CHILD_UNIT_PAGE_ROWS = 1000;
+
+/**
+ * [#29362, #29655] Why a directory read refused: what could not be read, the
+ * driver's reason, and why the answer is a refusal rather than nobody. The
+ * driver's error rides along as `cause`.
+ */
+function holderReadRefusal(scope: string, err: unknown): Error {
+  return Object.assign(new Error(
+    `[approvals] ${scope} could not be read: ${err instanceof Error ? err.message : String(err)}. `
+    + 'Routing to a shortened slate would leave holders unasked, so the expansion refuses instead.',
+  ), { cause: err });
+}
+
+/**
  * Approver types resolved by QUERYING a graph rather than by taking `value`
  * literally (#3807). Each can legitimately come back empty — an unstaffed
  * position, an emptied team, a mis-pointed unit — and the caller then falls
@@ -1317,6 +1345,24 @@ function isBlankDecisionOutput(value: unknown): boolean {
   if (Array.isArray(value)) return value.filter(v => v !== null && v !== undefined && String(v).trim() !== '').length === 0;
   return false;
 }
+
+/** The organization a `sys_team` row names, or `''` when it carries none (or there is no row). */
+function teamOrganizationOf(row: any): string {
+  return row?.organization_id ? String(row.organization_id) : '';
+}
+
+/**
+ * What one value of each picker kind of decision output is (#28658): the
+ * thing the picker commits, and the thing an `expression` approver with the
+ * matching `resolveAs` reads downstream. `text` is absent: free text has no
+ * resolver, so only its shape (`multiple`) is judged.
+ */
+const DECISION_OUTPUT_VALUE_NOUN: Readonly<Record<string, string>> = {
+  user: 'user id',
+  department: 'department id',
+  team: 'team id',
+  position: 'position machine name',
+};
 
 function rowFromRequest(row: any): ApprovalRequestRow {
   // Display labels by the ONE chain (`display-labels.ts`, #23889) the open
@@ -2008,14 +2054,19 @@ export class ApprovalService implements IApprovalService {
     return notified;
   }
 
-  /** Load a request row and assert it is still pending. */
-  private async loadPendingRow(requestId: string): Promise<any> {
+  /**
+   * Load a request row for a door acting on it as `context` and assert it is
+   * still pending. A request that caller may not read answers as an id that
+   * names no request ({@link refuseUnreadableRequest}).
+   */
+  private async loadPendingRow(requestId: string, context: ExecutionContext): Promise<any> {
     if (!requestId) throw new Error('VALIDATION_FAILED: requestId is required');
     const rows = await this.engine.find('sys_approval_request', {
       where: { id: requestId }, limit: 1, context: SYSTEM_CTX,
     });
     const raw: any = Array.isArray(rows) ? rows[0] : null;
     if (!raw) throw new Error(`REQUEST_NOT_FOUND: ${requestId}`);
+    await this.refuseUnreadableRequest(raw, requestId, context);
     if (raw.status !== 'pending') throw new Error(`INVALID_STATE: request is ${raw.status}`);
     return raw;
   }
@@ -2369,10 +2420,27 @@ export class ApprovalService implements IApprovalService {
     if (!step || !Array.isArray(step.approvers)) return [];
     const now = opts?.now ?? this.clock.now().getTime();
     const out: string[] = [];
+    // A person is a member of a per_group group once (#28684): the tally sizes
+    // each group and counts each approval by these tags, so a repeated tag let
+    // one signature count twice toward `minApprovals`.
+    const tag = (id: string, group: string): void => {
+      if (!opts?.groups) return;
+      const tags = (opts.groups[id] ??= []);
+      if (!tags.includes(group)) tags.push(group);
+    };
     const specs: any[] = step.approvers;
     for (let idx = 0; idx < specs.length; idx++) {
       const a = specs[idx];
       if (!a) continue;
+      // #28684: the slate ONE spec builds names each resolved person once, in
+      // first-appearance order, and only AFTER resolution, so out-of-office
+      // delegation is included: an expression yielding `['u2', 'u2']`, a field
+      // holding `'u2,u2'`, two ids delegated to the same delegate, or one
+      // member of two departments a `resolveAs` expression returned, each
+      // opens one slot. Every group the person resolved into is still tagged.
+      // Across specs the slate is unchanged: a person two specs name stands
+      // once per spec, as `pending_approvers` always recorded.
+      const named = new Set<string>();
       // Approvers without an explicit `group` each form their own group keyed
       // by position (#3266), so a plain per-approver list behaves predictably.
       const groupKey = a.group != null && String(a.group) !== '' ? String(a.group) : `#${idx}`;
@@ -2388,10 +2456,10 @@ export class ApprovalService implements IApprovalService {
         if (opts?.resolvedFrom) opts.resolvedFrom[`expression#${idx}`] = resolved.raw;
         for (const entry of resolved.slots) {
           if (!entry.id) continue;
+          tag(entry.id, entry.subGroup ? `${groupKey}:${entry.subGroup}` : groupKey);
+          if (named.has(entry.id)) continue;
+          named.add(entry.id);
           out.push(entry.id);
-          if (opts?.groups) {
-            (opts.groups[entry.id] ??= []).push(entry.subGroup ? `${groupKey}:${entry.subGroup}` : groupKey);
-          }
         }
         continue;
       }
@@ -2403,8 +2471,10 @@ export class ApprovalService implements IApprovalService {
       // per_group (#3266): tag each resolved id with this spec's group.
       for (const u of ids) {
         if (!u) continue;
+        tag(u, groupKey);
+        if (named.has(u)) continue;
+        named.add(u);
         out.push(u);
-        if (opts?.groups) (opts.groups[u] ??= []).push(groupKey);
       }
     }
     return out.filter(Boolean);
@@ -2527,6 +2597,9 @@ export class ApprovalService implements IApprovalService {
     // The user a `manager` approver resolved FROM, kept for the warning below
     // when no manager comes back.
     let managerSubject: unknown;
+    // [#29362] The directory failure the catch below took, kept so the warning
+    // can say the read FAILED rather than that the slot expanded to nobody.
+    let directoryFailure: string | undefined;
     try {
       if (type === 'team') {
         // #10230: the request's OWN organization, not `directoryOrg`. They are
@@ -2565,7 +2638,11 @@ export class ApprovalService implements IApprovalService {
           if (mgr) return this.applyOooDelegation(mgr, now, organizationId, substitutions);
         }
       }
-    } catch { /* a directory lookup failed → handled below as resolving to nobody */ }
+    } catch (err) {
+      // A directory lookup failed → handled below as resolving to nobody, and
+      // the graph-type warning names the failure (#29362).
+      directoryFailure = err instanceof Error ? err.message : String(err);
+    }
     // #22558: a PERSON type that resolved to nobody contributes NO slot — see
     // PERSON_APPROVER_TYPES for why its `type:value` literal could never be
     // taken. With nothing else on the slate, the request reaches the node's
@@ -2632,18 +2709,52 @@ export class ApprovalService implements IApprovalService {
       // follows. The old ending ("the request cannot advance until someone is
       // added") restated a fate this resolver cannot know, and was false on
       // the default path.
-      this.logger?.warn?.(
-        `[approvals] approver '${type}:${a.value}' expanded to nobody — the slot names no one, so no one is `
-        + `asked through it. Staff it or re-point the approver; a slate left naming no one is decided by the `
-        + `node's onEmptyApprovers.`,
-        { type, value: a.value, organizationId: organizationId ?? null },
-      );
+      if (directoryFailure !== undefined) {
+        // [#29362] A failed read is not an unstaffed approver: say which one
+        // this is, and carry the error, so an operator does not go staffing a
+        // position whose holders simply could not be read. The try above also
+        // wraps the cross-org read filter (`bounded`), so the line names both.
+        this.warnExpansionFailed(type, a.value, organizationId, directoryFailure);
+      } else {
+        this.logger?.warn?.(
+          `[approvals] approver '${type}:${a.value}' expanded to nobody — the slot names no one, so no one is `
+          + `asked through it. Staff it or re-point the approver; a slate left naming no one is decided by the `
+          + `node's onEmptyApprovers.`,
+          { type, value: a.value, organizationId: organizationId ?? null },
+        );
+      }
     }
     // #27397: a `user` that resolved to no one adds no slot — `user:<value>`
     // is no acting address (`approver-address.ts`), and the bare value is the
     // phantom slot the existence check above exists to keep off the slate.
     if (type === 'user') return [];
     return [`${type}:${a.value}`];
+  }
+
+  /**
+   * [#29362, #29606] The one warning an approver slot logs when its expansion
+   * FAILED — a directory or read-filter lookup threw — rather than came back
+   * empty: the slot falls back to its literal, and the line carries the error.
+   * Shared by the static graph types ({@link resolveApproverSpec}) and an
+   * `expression` approver's `resolveAs` values ({@link resolveExpressionApprovers},
+   * which passes its source as `expression`), so the two cannot drift.
+   */
+  private warnExpansionFailed(
+    type: string,
+    value: unknown,
+    organizationId: string | null | undefined,
+    error: string,
+    expression?: string,
+  ): void {
+    this.logger?.warn?.(
+      `[approvals] approver '${type}:${value}' could not be expanded — a directory or read-filter lookup failed, so the `
+      + `slot falls back to its literal rather than route to part of its people. Fix the read (see error); `
+      + `a slate left naming no one is decided by the node's onEmptyApprovers.`,
+      {
+        type, value, organizationId: organizationId ?? null, error,
+        ...(expression === undefined ? {} : { expression }),
+      },
+    );
   }
 
   /**
@@ -2788,6 +2899,11 @@ export class ApprovalService implements IApprovalService {
         }
       } catch (err: any) {
         if (String(err?.message ?? '').startsWith('VALIDATION_FAILED')) throw err;
+        // [#29606] The literal slot below is the same fallback the static graph
+        // types take, and it says why exactly as they do: a failed read is not
+        // an unstaffed value, so an operator is pointed at the read rather than
+        // at staffing it.
+        this.warnExpansionFailed(resolveAs, key, organizationId, err instanceof Error ? err.message : String(err), source);
         users = [];
       }
       if (crossOrg && users.length) {
@@ -2848,16 +2964,12 @@ export class ApprovalService implements IApprovalService {
   private async expandTeamUsers(teamId: string, organizationId?: string | null): Promise<string[]> {
     if (!teamId) return [];
     if (await this.teamIsProvablyOutsideOrg(teamId, organizationId)) return [];
-    let rows: any[] = [];
-    try {
-      rows = await this.engine.find('sys_team_member', {
-        where: { team_id: teamId },
-        fields: ['user_id'],
-        limit: 10000,
-        context: SYSTEM_CTX,
-      } as any);
-    } catch { rows = []; }
-    const users = Array.from(new Set((rows ?? []).map((r: any) => String(r.user_id ?? '')).filter(Boolean)));
+    // [#29503] Every member, read to completion — or a refusal that
+    // {@link resolveApproverSpec}'s directory catch reports as a failed read,
+    // never "expanded to nobody". A stack with no `sys_team_member` has none.
+    const users = await this.readHoldersToCompletion(
+      'sys_team_member', { team_id: teamId }, `the members of team '${teamId}'`,
+    );
     // #10547: the TEAM proved its tenancy above; its members have not proved
     // theirs, and `sys_team_member` holds no fact that could. One read.
     return await this.dropMembersProvablyOutsideOrg(teamId, users, organizationId);
@@ -2896,20 +3008,11 @@ export class ApprovalService implements IApprovalService {
     // No organization on the request ⇒ nothing to screen against, and no read.
     // The ordinary single-organization / embedded stack costs nothing here.
     if (!requestOrg) return false;
-    let rows: any[] = [];
+    let row: any;
     try {
-      // No `as any` on this options bag — #4918's ratchet grandfathers this
-      // file for its EXISTING erasures only, and a NEW one must carry the
-      // declared type. `ApprovalEngine.find` already accepts it as written.
-      rows = await this.engine.find('sys_team', {
-        where: { id: teamId },
-        fields: ['id', 'organization_id'],
-        limit: 1,
-        context: SYSTEM_CTX,
-      });
+      row = await this.readTeamRow(teamId);
     } catch { return false; } // team unreadable — see the fail-open note above
-    const row: any = Array.isArray(rows) ? rows[0] : null;
-    const teamOrg = row?.organization_id ? String(row.organization_id) : '';
+    const teamOrg = teamOrganizationOf(row);
     if (!teamOrg) return false;                  // no tenancy fact on this team
     if (teamOrg === requestOrg) return false;    // it is this org's team — route as before
     this.logger?.warn?.(
@@ -2921,6 +3024,25 @@ export class ApprovalService implements IApprovalService {
       { teamId, teamOrganizationId: teamOrg, requestOrganizationId: requestOrg },
     );
     return true;
+  }
+
+  /**
+   * The `sys_team` row `teamId` names, or `null` when none does. The one read
+   * behind {@link teamIsProvablyOutsideOrg} and the check a `team` decision
+   * output's value passes (#28658). A failed read throws: each caller decides
+   * what an unreadable directory means.
+   */
+  private async readTeamRow(teamId: string): Promise<any | null> {
+    // No `as any` on this options bag — #4918's ratchet grandfathers this
+    // file for its EXISTING erasures only, and a NEW one must carry the
+    // declared type. `ApprovalEngine.find` already accepts it as written.
+    const rows = await this.engine.find('sys_team', {
+      where: { id: teamId },
+      fields: ['id', 'organization_id'],
+      limit: 1,
+      context: SYSTEM_CTX,
+    });
+    return Array.isArray(rows) && rows[0] ? rows[0] : null;
   }
 
   /**
@@ -3111,49 +3233,72 @@ export class ApprovalService implements IApprovalService {
    */
   private async expandBusinessUnitUsers(businessUnitId: string, organizationId?: string | null): Promise<string[]> {
     if (!businessUnitId) return [];
+    const inOrg = organizationId ? ` in organization '${organizationId}'` : '';
     // Seed sanity check: skip if dept doesn't exist or is inactive within tenant.
+    // [#29655] A failed seed read refuses — the slot then says the read failed
+    // rather than "expanded to nobody". A stack with no `sys_business_unit`
+    // has no departments.
+    let live: boolean;
     try {
-      const seed = await this.engine.find('sys_business_unit', {
-        where: this.businessUnitOrgScope({ id: businessUnitId }, organizationId),
-        fields: ['id', 'active'],
-        limit: 1,
-        context: SYSTEM_CTX,
-      } as any);
-      const seedRow: any = Array.isArray(seed) ? seed[0] : null;
-      if (!seedRow || seedRow.active === false) return [];
-    } catch { return []; }
+      live = await this.businessUnitIsLive(businessUnitId, organizationId);
+    } catch (err) {
+      if (isObjectAbsentError(err, 'sys_business_unit')) return [];
+      throw holderReadRefusal(`business unit '${businessUnitId}'${inOrg}`, err);
+    }
+    if (!live) return [];
 
     const seen = new Set<string>([businessUnitId]);
     const queue: string[] = [businessUnitId];
     while (queue.length) {
       const parent = queue.shift()!;
-      let kids: any[] = [];
-      try {
-        const filter = this.businessUnitOrgScope(
-          { parent_business_unit_id: parent, active: { $ne: false } },
-          organizationId,
-        );
-        kids = await this.engine.find('sys_business_unit', { filter, fields: ['id'], limit: 1000, context: SYSTEM_CTX } as any);
-      } catch { kids = []; }
+      // [#29655] Every active child unit, read to completion — or a refusal.
+      // It read once at a 1,000-row bound and answered `[]` on any failure:
+      // a child past the bound, or every child of a parent whose read failed,
+      // left the slate with its members and no signal.
+      const kids = await this.readRowsToCompletion(
+        'sys_business_unit',
+        this.businessUnitOrgScope({ parent_business_unit_id: parent, active: { $ne: false } }, organizationId),
+        [],
+        `the child units of business unit '${parent}'${inOrg}`,
+        CHILD_UNIT_PAGE_ROWS,
+      );
       for (const k of kids ?? []) {
-        const kid = String((k as any).id ?? '');
+        const kid = String(k?.id ?? '');
         if (kid && !seen.has(kid)) { seen.add(kid); queue.push(kid); }
       }
     }
-    let rows: any[] = [];
-    try {
-      rows = await this.engine.find('sys_business_unit_member', {
-        // #14946: tenant-screened — {@link businessUnitMemberScope} is STRICT
-        // on purpose and is not {@link businessUnitOrgScope}. The units above
-        // proved their tenancy; these rows have not, and the
-        // shared seeded unit id is exactly where other tenants' rows sit.
-        where: this.businessUnitMemberScope({ business_unit_id: { $in: Array.from(seen) } }, organizationId),
-        fields: ['user_id'],
-        limit: 10000,
-        context: SYSTEM_CTX,
-      } as any);
-    } catch { rows = []; }
-    return Array.from(new Set((rows ?? []).map((r: any) => String(r.user_id ?? '')).filter(Boolean)));
+    // [#29606] Every member of the subtree, read to completion — or a refusal
+    // that {@link resolveApproverSpec}'s directory catch reports as a failed
+    // read, never "expanded to nobody". It read once at a 10,000-row bound and
+    // answered `[]` on any failure: past the bound the slate silently lost the
+    // rest, and a failed read logged as an unstaffed unit. A stack with no
+    // `sys_business_unit_member` has no members.
+    return this.readHoldersToCompletion(
+      'sys_business_unit_member',
+      // #14946: tenant-screened — {@link businessUnitMemberScope} is STRICT
+      // on purpose and is not {@link businessUnitOrgScope}. The units above
+      // proved their tenancy; these rows have not, and the
+      // shared seeded unit id is exactly where other tenants' rows sit.
+      this.businessUnitMemberScope({ business_unit_id: { $in: Array.from(seen) } }, organizationId),
+      `the members of business unit '${businessUnitId}' and its descendant units${inOrg}`,
+    );
+  }
+
+  /**
+   * Does `businessUnitId` name an active department of `organizationId`'s
+   * directory? The seed check of {@link expandBusinessUnitUsers}, and the
+   * check a `department` decision output's value passes (#28658). A failed
+   * read throws: each caller decides what an unreadable directory means.
+   */
+  private async businessUnitIsLive(businessUnitId: string, organizationId?: string | null): Promise<boolean> {
+    const seed = await this.engine.find('sys_business_unit', {
+      where: this.businessUnitOrgScope({ id: businessUnitId }, organizationId),
+      fields: ['id', 'active'],
+      limit: 1,
+      context: SYSTEM_CTX,
+    });
+    const seedRow: any = Array.isArray(seed) ? seed[0] : null;
+    return !!seedRow && seedRow.active !== false;
   }
 
   /**
@@ -3234,18 +3379,16 @@ export class ApprovalService implements IApprovalService {
    */
   private async expandPositionUsers(positionName: string, organizationId?: string | null): Promise<string[]> {
     if (!positionName) return [];
-    const users = new Set<string>();
-    const filter: any = { position: positionName };
+    const filter: Record<string, unknown> = { position: positionName };
     if (organizationId) filter.organization_id = organizationId;
-    try {
-      const rows = await this.engine.find('sys_user_position', {
-        filter, fields: ['user_id'], limit: 10000, context: SYSTEM_CTX,
-      } as any);
-      for (const r of (rows ?? []) as any[]) {
-        const uid = String(r.user_id ?? '');
-        if (uid) users.add(uid);
-      }
-    } catch { /* table may not exist on minimal stacks — union source below still applies */ }
+    // [#29503] Every assignment, read to completion — or a refusal, never the
+    // tier limb below alone (a shrunk slate that looks complete). A stack with
+    // no `sys_user_position` has no assignment holders; the union source below
+    // still applies.
+    const users = new Set<string>(await this.readHoldersToCompletion(
+      'sys_user_position', filter,
+      `the assignments of position '${positionName}'${organizationId ? ` in organization '${organizationId}'` : ''}`,
+    ));
     // ADR-0057 D4 transition source: pre-migration stacks still carry the
     // position name in better-auth's `sys_member.role` column, so the same
     // lookup serves a position name here and a membership tier for
@@ -3331,16 +3474,93 @@ export class ApprovalService implements IApprovalService {
    * {@link expandPositionUsers} carries the ruling both reads inherit
    * (#8613 / commit 04d03c3a0) — this method is also the second limb of that union, so a
    * change here changes position routing too.
+   *
+   * [#29362] Read to COMPLETION, or refused — never a shortened or an invented
+   * empty slate. Pages of {@link HOLDER_PAGE_ROWS} through the platform's
+   * one keyset walk (`keysetWalk`, `@objectstack/types`), ordered by `id`, so a
+   * tier held past the bound routes to every holder rather than the first
+   * 10,000 rows. A read that fails, or a walk that cannot vouch for completion
+   * (a row without an `id`, a page that did not honour the cursor), THROWS:
+   * {@link resolveApproverSpec}'s directory catch then lets the slot fall back
+   * to its literal and says the read failed. Answering `[]` instead routed a
+   * `position` approver to its assignment holders alone — a shrunk slate that
+   * looks complete — and logged an `org_membership_level` one as "expanded to
+   * nobody", indistinguishable from a tier no one holds. A membership object
+   * that does not exist is the one failure that IS an answer (a stack that never
+   * materialises `sys_member` has no tier holders) and keeps answering `[]`;
+   * see {@link readHoldersToCompletion}.
    */
   private async expandMembershipTierUsers(tier: string, organizationId?: string | null): Promise<string[]> {
     if (!tier) return [];
-    const filter: any = { role: tier };
+    const filter: Record<string, unknown> = { role: tier };
     if (organizationId) filter.organization_id = organizationId;
-    let rows: any[] = [];
+    return this.readHoldersToCompletion(
+      'sys_member', filter,
+      `the holders of membership tier '${tier}'${organizationId ? ` in organization '${organizationId}'` : ''}`,
+    );
+  }
+
+  /**
+   * [#29362, #29503] The `user_id`s of every `object` row matching `where`,
+   * read to COMPLETION — or a refusal, never a shortened or an invented empty
+   * slate. The one read behind the membership tier, the position assignments,
+   * the team members and the business-unit members (#29606).
+   *
+   * Pages of {@link HOLDER_PAGE_ROWS} through the platform's one keyset walk
+   * (`keysetWalk`, `@objectstack/types`), ordered by `id`, so a group held past
+   * the bound routes to every holder rather than the first 10,000 rows. A read
+   * that fails, or a walk that cannot vouch for completion (a row without an
+   * `id`, a page that did not honour the cursor), THROWS:
+   * {@link resolveApproverSpec}'s directory catch then lets the slot fall back
+   * to its literal and says the read failed. An object that does not exist on
+   * this stack is the one failure that IS an answer (no holders through it) and
+   * answers `[]` — `isObjectAbsentError` (`@objectstack/types`) decides that,
+   * attributed to `object`, so an absence of another object is still loud.
+   */
+  private async readHoldersToCompletion(object: string, where: Record<string, unknown>, scope: string): Promise<string[]> {
+    const rows = await this.readRowsToCompletion(object, where, ['user_id'], scope, HOLDER_PAGE_ROWS);
+    const users = new Set<string>();
+    for (const row of rows ?? []) {
+      const uid = String(row?.user_id ?? '');
+      if (uid) users.add(uid);
+    }
+    return Array.from(users);
+  }
+
+  /**
+   * [#29362, #29503, #29655] Every `object` row matching `where` (its `id`
+   * plus `fields`), read to COMPLETION through the platform's one keyset walk
+   * — or a refusal; `null` when `object` does not exist on this stack, so each
+   * caller says what absence means for it. The one walk behind
+   * {@link readHoldersToCompletion} and the business-unit descent of
+   * {@link expandBusinessUnitUsers}.
+   */
+  private async readRowsToCompletion(
+    object: string,
+    where: Record<string, unknown>,
+    fields: readonly string[],
+    scope: string,
+    pageSize: number,
+  ): Promise<Record<string, unknown>[] | null> {
+    const rows: Record<string, unknown>[] = [];
+    const walk = keysetWalk<Record<string, unknown>>(
+      (page) => this.engine.find(object, { ...page, fields: ['id', ...fields], context: SYSTEM_CTX }),
+      { where, pageSize },
+    );
     try {
-      rows = await this.engine.find('sys_member', { filter, fields: ['user_id'], limit: 10000, context: SYSTEM_CTX } as any);
-    } catch { rows = []; }
-    return Array.from(new Set((rows ?? []).map((r: any) => String(r.user_id ?? '')).filter(Boolean)));
+      for await (const page of walk.pages()) rows.push(...page);
+    } catch (err) {
+      if (isObjectAbsentError(err, object)) return null;
+      throw holderReadRefusal(scope, err);
+    }
+    if (walk.truncated) {
+      throw new Error(
+        `[approvals] ${scope} could not be read to completion: the read by id could not continue past a page `
+        + '(a row without an id, or a page that repeated the cursor). Routing to a shortened slate would leave '
+        + 'holders unasked, so the expansion refuses instead.',
+      );
+    }
+    return rows;
   }
 
   /**
@@ -4424,6 +4644,131 @@ export class ApprovalService implements IApprovalService {
   }
 
   /**
+   * [#28658, ruling 6566731522 letter A] Judge each admitted decision output
+   * against its declaration, and throw ONE `VALIDATION_FAILED` naming every
+   * `outputs.KEY` that does not match. Called before any write.
+   *
+   *  - A blank value is `required`'s question, not this one's: an omitted
+   *    optional output stays omitted.
+   *  - `multiple: true` takes a list and only a list, with no entry twice;
+   *    `multiple` absent or false takes one value. This holds for every
+   *    declaration, `text` (the default, and every bare-key declaration)
+   *    included: the ruling's sentence on `multiple` names no kind.
+   *  - `text` is judged on that shape only; its values are free.
+   *  - A picker's values must resolve, through the lookup the matching `expression`
+   *    approver's `resolveAs` expands it with
+   *    ({@link decisionOutputValueRefusal}).
+   */
+  private async assertDecisionOutputsMatchDeclarations(
+    outputs: Record<string, unknown>,
+    defs: ReturnType<typeof normalizeDecisionOutputs>,
+    organizationId: string | null,
+  ): Promise<void> {
+    const problems: string[] = [];
+    for (const def of defs) {
+      const kind = def.type ?? 'text';
+      // `undefined` for `text`: its shape is judged, its values are not.
+      const noun: string | undefined = DECISION_OUTPUT_VALUE_NOUN[kind];
+      if (!Object.prototype.hasOwnProperty.call(outputs, def.key)) continue;
+      const value = outputs[def.key];
+      if (isBlankDecisionOutput(value)) continue;
+      const path = `\`outputs.${def.key}\``;
+      const what = noun ?? 'value';
+      if (def.multiple === true && !Array.isArray(value)) {
+        problems.push(`${path} takes a list of ${what}s (it is declared \`multiple: true\`), not a single value`);
+        continue;
+      }
+      if (def.multiple !== true && Array.isArray(value)) {
+        problems.push(`${path} takes one ${what} (it is not declared \`multiple: true\`), not a list`);
+        continue;
+      }
+      const values: unknown[] = Array.isArray(value) ? value : [value];
+      if (!noun) {
+        // Free text: one entry twice is the same answer given twice.
+        const seenText = new Set<string>();
+        const repeatedText = new Set<string>();
+        for (const v of values) {
+          const spelled = typeof v === 'string' ? `'${v}'` : JSON.stringify(v);
+          (seenText.has(spelled) ? repeatedText : seenText).add(spelled);
+        }
+        if (repeatedText.size) problems.push(`${path} lists ${[...repeatedText].join(', ')} more than once`);
+        continue;
+      }
+      if (values.some(v => typeof v !== 'string' || v.trim() === '')) {
+        problems.push(`${path} must hold ${def.multiple === true ? `${noun}s` : `a ${noun}`} as text`);
+        continue;
+      }
+      const seen = new Set<string>();
+      const repeated = new Set<string>();
+      for (const v of values as string[]) (seen.has(v) ? repeated : seen).add(v);
+      if (repeated.size) {
+        problems.push(`${path} lists ${[...repeated].map(v => `'${v}'`).join(', ')} more than once`);
+        continue;
+      }
+      for (const v of seen) {
+        const why = await this.decisionOutputValueRefusal(kind, v, organizationId);
+        if (why) problems.push(`${path}: '${v}' ${why}`);
+      }
+    }
+    if (!problems.length) return;
+    throw new Error(
+      `VALIDATION_FAILED: ${problems.join('; ')}. Nothing was recorded and the request is still pending — `
+      + `decide again with values the step declares.`,
+    );
+  }
+
+  /**
+   * Why one value of a picker decision output resolves to nothing — the clause
+   * a refusal carries — or `undefined` when it resolves. Each kind asks the
+   * lookup an `expression` approver with the same `resolveAs` asks, in the
+   * request's organization:
+   *
+   *  - `user`: a record id an account carries — {@link reassignTargetRefusal}
+   *    asked with no organization, as a `user` approver asks it. A slot
+   *    address (`kind:value`) or an email is not a record id.
+   *  - `department`: an active department of the organization —
+   *    {@link businessUnitIsLive}, the seed check of the department expansion.
+   *  - `team`: a `sys_team` row ({@link readTeamRow}) not owned by another
+   *    organization.
+   *  - `position`: a machine name someone in the organization holds —
+   *    {@link expandPositionUsers}, which matches `sys_user_position.position`
+   *    by name. A `sys_position` id names no holder there, so it is refused.
+   *
+   * A failed read proves nothing, so it answers `undefined`, as every
+   * resolution in this file reads one.
+   */
+  private async decisionOutputValueRefusal(
+    kind: string,
+    value: string,
+    organizationId: string | null,
+  ): Promise<string | undefined> {
+    try {
+      if (kind === 'user') {
+        if (value.includes(':') || value.includes('@')) return 'is not a user id';
+        return (await this.reassignTargetRefusal(value, null)) === undefined ? undefined : 'names no user';
+      }
+      if (kind === 'department') {
+        return (await this.businessUnitIsLive(value, organizationId))
+          ? undefined : 'names no active department in this request\'s organization';
+      }
+      if (kind === 'team') {
+        const row = await this.readTeamRow(value);
+        if (!row) return 'names no team';
+        const teamOrg = teamOrganizationOf(row);
+        return organizationId && teamOrg && teamOrg !== String(organizationId)
+          ? 'is a team of another organization' : undefined;
+      }
+      if (kind === 'position') {
+        return (await this.expandPositionUsers(value, organizationId)).length
+          ? undefined : 'is not a position anyone holds in this request\'s organization (a position is named by its machine name)';
+      }
+    } catch {
+      return undefined;
+    }
+    return undefined;
+  }
+
+  /**
    * Record a decision on a node-driven request. Honours the node's `behavior`
    * (#3266): `first_response` finalizes on the first approval; `unanimous`,
    * `quorum`, and `per_group` hold the request open until their tally is met
@@ -4449,6 +4794,7 @@ export class ApprovalService implements IApprovalService {
     });
     const raw: any = Array.isArray(rawRows) ? rawRows[0] : null;
     if (!raw) throw new Error(`REQUEST_NOT_FOUND: ${requestId}`);
+    await this.refuseUnreadableRequest(raw, requestId, context);
     if (raw.status !== 'pending') throw new Error(`INVALID_STATE: request is ${raw.status}`);
 
     const pendingApprovers = csvSplit(raw.pending_approvers);
@@ -4528,8 +4874,8 @@ export class ApprovalService implements IApprovalService {
       acceptedOutputs = { ...input.outputs };
     }
 
-    // objectui#2955: `required` outputs. Unlike `type`/`multiple` — which only
-    // shape the input widget — this one is a runtime contract: the flow must
+    // objectui#2955: `required` outputs. A runtime contract, like `type` and
+    // `multiple` below: the flow must
     // never resume past this node with a required key missing, because that is
     // precisely what a downstream `expression` approver reads. Before this,
     // an author's only backstop was `onEmptyApprovers` (the next node opens,
@@ -4555,6 +4901,15 @@ export class ApprovalService implements IApprovalService {
           + `request — open the approval and fill them in before approving.`,
         );
       }
+    }
+
+    // [#28658, ruling 6566731522 letter A] Each admitted output is judged
+    // against its declaration's `type` and `multiple`, before any write, so a
+    // value the next step cannot use is refused here and not at the step that
+    // reads it. On a reject too: the outputs ride the reject's resume and the
+    // `__decisionOutputs` snapshot just as they ride an approve's.
+    if (acceptedOutputs) {
+      await this.assertDecisionOutputsMatchDeclarations(acceptedOutputs, declaredDefs, org);
     }
 
     // The run behind this request must still be resumable before ANY of it is
@@ -5215,6 +5570,7 @@ export class ApprovalService implements IApprovalService {
     });
     const raw: any = Array.isArray(rawRows) ? rawRows[0] : null;
     if (!raw) throw new Error(`REQUEST_NOT_FOUND: ${requestId}`);
+    await this.refuseUnreadableRequest(raw, requestId, context);
     const inReviseWindow = raw.status === 'returned';
     if (raw.status !== 'pending' && !inReviseWindow) {
       throw new Error(`INVALID_STATE: request is ${raw.status}`);
@@ -5658,7 +6014,7 @@ export class ApprovalService implements IApprovalService {
     context: ExecutionContext,
   ): Promise<ApprovalSendBackResult> {
     const actorId = await this.resolveActor(input?.actorId, context);
-    const raw = await this.loadPendingRow(requestId);
+    const raw = await this.loadPendingRow(requestId, context);
     const pending = csvSplit(raw.pending_approvers);
     const slot = await this.takenSlot(pending, actorId, context);
     if (!context.isSystem && slot === undefined) {
@@ -5817,6 +6173,7 @@ export class ApprovalService implements IApprovalService {
     });
     const raw: any = Array.isArray(rawRows) ? rawRows[0] : null;
     if (!raw) throw new Error(`REQUEST_NOT_FOUND: ${requestId}`);
+    await this.refuseUnreadableRequest(raw, requestId, context);
     if (raw.status !== 'returned') {
       throw new Error(`INVALID_STATE: request is ${raw.status} (resubmit applies to returned requests)`);
     }
@@ -5971,7 +6328,7 @@ export class ApprovalService implements IApprovalService {
     const actorId = await this.resolveActor(input?.actorId, context);
     const to = String(input?.to ?? '').trim();
     if (!to) throw new Error('VALIDATION_FAILED: `to` (new approver) is required');
-    const raw = await this.loadPendingRow(requestId);
+    const raw = await this.loadPendingRow(requestId, context);
 
     const pending = csvSplit(raw.pending_approvers);
     if (pending.includes(to)) {
@@ -6174,7 +6531,7 @@ export class ApprovalService implements IApprovalService {
     context: ExecutionContext,
   ): Promise<{ request: ApprovalRequestRow; notified: number }> {
     const actorId = await this.resolveActor(input?.actorId, context);
-    const raw = await this.loadPendingRow(requestId);
+    const raw = await this.loadPendingRow(requestId, context);
     if (!context.isSystem && raw.submitter_id && String(raw.submitter_id) !== String(actorId)) {
       throw new Error('FORBIDDEN: only the submitter may send reminders');
     }
@@ -6281,7 +6638,9 @@ export class ApprovalService implements IApprovalService {
     opts?: { ttlMs?: number },
   ): Promise<{ approve: string; reject: string }> {
     if (!approverId?.trim()) throw new Error('VALIDATION_FAILED: approverId is required');
-    const raw = await this.loadPendingRow(requestId);
+    // Minted by the server for a slot it names, on behalf of no reader — read
+    // as the system, as before.
+    const raw = await this.loadPendingRow(requestId, SYSTEM_CTX);
     const pending = csvSplit(raw.pending_approvers);
     if (!pending.includes(approverId)) {
       throw new Error(`FORBIDDEN: '${approverId}' is not a pending approver on this request`);
@@ -6477,7 +6836,7 @@ export class ApprovalService implements IApprovalService {
   ): Promise<{ request: ApprovalRequestRow }> {
     const actorId = await this.resolveActor(input?.actorId, context);
     if (!input?.comment?.trim()) throw new Error('VALIDATION_FAILED: comment is required');
-    const raw = await this.loadPendingRow(requestId);
+    const raw = await this.loadPendingRow(requestId, context);
     const pending = csvSplit(raw.pending_approvers);
     const slot = await this.takenSlot(pending, actorId, context);
     if (!context.isSystem && slot === undefined) {
@@ -6517,7 +6876,7 @@ export class ApprovalService implements IApprovalService {
   ): Promise<{ request: ApprovalRequestRow }> {
     const actorId = await this.resolveActor(input?.actorId, context);
     if (!input?.comment?.trim()) throw new Error('VALIDATION_FAILED: comment is required');
-    const raw = await this.loadPendingRow(requestId);
+    const raw = await this.loadPendingRow(requestId, context);
     const pending = csvSplit(raw.pending_approvers);
     const isSubmitter = raw.submitter_id && String(raw.submitter_id) === String(actorId);
     // The submitter speaks as themselves; anyone else speaks from the slot
@@ -9123,6 +9482,80 @@ export class ApprovalService implements IApprovalService {
   }
 
   /**
+   * The stored row request `requestId` names, as the READ door finds it for
+   * this caller — the one rule {@link getRequest} serves by and every door
+   * that acts on a request asks ({@link refuseUnreadableRequest}), so the two
+   * cannot disagree about who may see a request.
+   *
+   * The row is read inside the caller's organization (`findRequestRow` — the
+   * tenancy wall), and with `enforceVisibility` it is kept only when it is
+   * among the requests this caller may see ({@link visibleRequestIds}). `null`
+   * alike for an id this store does not hold and for a request the caller may
+   * not read — ⛔ no path tells the two apart. `caller` comes back because the
+   * read path also attaches the viewer block with it.
+   *
+   * Without `enforceVisibility` only the tenancy wall applies: the echo a write
+   * path builds ({@link readBackRequest}) has already been authorized by the
+   * operation's own rule.
+   */
+  private async requestRowForCaller(
+    requestId: string,
+    context: ExecutionContext,
+    enforceVisibility: boolean,
+  ): Promise<{ raw: any; caller: ActingCaller | null } | null> {
+    // `organizationId` is not on the envelope — see isOverrideActor().
+    const tenantOrg = (context as any)?.organizationId ?? context?.tenantId;
+    const raw = await findRequestRow(this.engine, requestId, tenantOrg ?? null);
+    if (!raw) return null;
+    const caller = await this.actingCaller(context);
+    // #3590: tenant scoping alone let any authenticated user read any request
+    // — and, once decision attachments derived their access from the request
+    // (#3580), its files too. Participation is the rest of the rule.
+    if (enforceVisibility) {
+      // [#8652] The row itself names the target record, so a request loaded by
+      // id carries its own anchor — which is what makes `listActions` and the
+      // decision-attachment gate follow this rule without a second copy of it.
+      const visible = await this.visibleRequestIds(context, tenantOrg ?? null, {
+        object: raw.object_name, recordId: raw.record_id,
+      }, caller);
+      if (visible && !visible.has(String(raw.id))) return null;
+    }
+    return { raw, caller };
+  }
+
+  /**
+   * Every door that ACTS on a request — decide (approve / reject), recall,
+   * send back, resubmit, reassign, remind, request info, comment — answers a
+   * caller who may not READ the request exactly what it answers an id that
+   * names no request: `REQUEST_NOT_FOUND`. Asked right after the row is found
+   * and before any refusal that depends on it (its status, its slate, its
+   * submitter), so no answer a door gives tells that caller the request
+   * exists or what state it is in. A caller who can read the request is
+   * judged by the door's own rule, as before: `FORBIDDEN`, `INVALID_STATE`, or
+   * the action.
+   *
+   * The test is the read door's own ({@link requestRowForCaller}) — ⛔ never a
+   * second copy of it. `requestId` is the id the caller sent, so the refusal
+   * is byte for byte the one a missing id gets.
+   *
+   * The override actor ({@link isOverrideActor}, judged against the REQUEST's
+   * organization, exactly as each door judges it) is not asked: a platform
+   * admin's override crosses the tenancy wall the read door keeps, and a system
+   * context (the SLA sweep, the action link) acts on behalf of no reader. Both
+   * act exactly as before. Everyone else a door admits — a pending approver,
+   * the submitter — is a participant of the request, and so can read it.
+   */
+  private async refuseUnreadableRequest(
+    raw: any,
+    requestId: string,
+    context: ExecutionContext,
+  ): Promise<void> {
+    if (this.isOverrideActor(context, raw?.organization_id ?? null)) return;
+    if (await this.requestRowForCaller(requestId, context, true)) return;
+    throw new Error(`REQUEST_NOT_FOUND: ${requestId}`);
+  }
+
+  /**
    * [#26314] `IApprovalService.getRecordLock` — is this record held by a
    * locking approval, for EVERY caller who can read the record (#25934 ruling
    * A). A non-participant is told the record is locked before they edit it,
@@ -9168,23 +9601,9 @@ export class ApprovalService implements IApprovalService {
     enforceVisibility: boolean,
   ): Promise<ApprovalRequestRow | null> {
     if (!requestId) return null;
-    // `organizationId` is not on the envelope — see isOverrideActor().
-    const tenantOrg = (context as any)?.organizationId ?? context?.tenantId;
-    const raw = await findRequestRow(this.engine, requestId, tenantOrg ?? null);
-    if (!raw) return null;
-    const caller = await this.actingCaller(context);
-    // #3590: tenant scoping alone let any authenticated user read any request
-    // — and, once decision attachments derived their access from the request
-    // (#3580), its files too. Participation is the rest of the rule.
-    if (enforceVisibility) {
-      // [#8652] The row itself names the target record, so a request loaded by
-      // id carries its own anchor — which is what makes `listActions` and the
-      // decision-attachment gate follow this rule without a second copy of it.
-      const visible = await this.visibleRequestIds(context, tenantOrg ?? null, {
-        object: raw.object_name, recordId: raw.record_id,
-      }, caller);
-      if (visible && !visible.has(String(raw.id))) return null;
-    }
+    const read = await this.requestRowForCaller(requestId, context, enforceVisibility);
+    if (!read) return null;
+    const { raw, caller } = read;
     const row = rowFromRequest(raw);
     // [#10749] Redact before enrichment — see `redactPayloads`. [#23594] The
     // snapshot and the subject title are narrowed by ONE answer for the reader;

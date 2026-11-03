@@ -58,6 +58,8 @@ vi.mock('@object-ui/permissions', async (importOriginal) => {
 });
 
 import { ObjectGrid } from '../ObjectGrid';
+import { BULK_SELECT_ALL_MATCHING_CAP } from '../bulkSelectAllMatchingCap';
+import { en } from '@object-ui/i18n/locales';
 import { registerAllFields } from '@object-ui/fields';
 import { ActionProvider, I18nProvider } from '@object-ui/react';
 
@@ -367,6 +369,13 @@ describe('#4501 must-not-change — the internal-loader path', () => {
 
     await selectWholePage();
     fireEvent.click(await screen.findByTestId('bulk-select-all-matching'));
+    // objectstack#28552 — the banner names the number the fan-out delivers,
+    // read from the one constant both sides read.
+    expect(screen.getByTestId('bulk-cross-page-banner')).toHaveTextContent(
+      en.grid.bulkAllMatchingSelectedCapped
+        .replace('{{cap}}', String(BULK_SELECT_ALL_MATCHING_CAP))
+        .replace('{{total}}', String(BIG)),
+    );
     const calls = await fanOutParams(ds, onBulkDelete);
 
     // 5000 / 500 = 10 pages, then the cap stops it — the 6000th record is never
@@ -374,5 +383,6 @@ describe('#4501 must-not-change — the internal-loader path', () => {
     expect(calls).toHaveLength(10);
     expect(calls.map((p: any) => p.$skip)).toEqual([0, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500]);
     expect(onBulkDelete.mock.calls[0][0]).toHaveLength(5000);
+    expect(onBulkDelete.mock.calls[0][0]).toHaveLength(BULK_SELECT_ALL_MATCHING_CAP);
   });
 });

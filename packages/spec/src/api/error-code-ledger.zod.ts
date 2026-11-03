@@ -1208,6 +1208,13 @@ export const ERROR_CODE_LEDGER = {
     // operation, try when it settles"; that one says "never, fix the
     // configuration instead".
     'DELIVERY_NOT_ELIGIBLE',
+    // [#29068] `unregisterDevice`'s refusal for a device id the caller does
+    // not hold, unknown or another user's alike (`deviceNotFoundError` in
+    // `device-registry.ts`), so the answer never says the id exists for
+    // somebody else. Wire path: `DELETE /api/v1/notifications/devices/:deviceId`
+    // throws it out of the `/notifications` domain and the dispatcher answers
+    // `404 NOT_FOUND` through `resolveThrownHttpError`.
+    'NOT_FOUND',
   ],
   '@objectstack/trigger-api': [
     'ENQUEUE_FAILED',                // queue accepted the call but publish threw
@@ -1232,6 +1239,13 @@ export const ERROR_CODE_LEDGER = {
     // the code `@objectstack/cloud-connection` already registers — one
     // condition, one vocabulary; provenance, not identity (see above).
     'ENVIRONMENT_NOT_FOUND',
+    // [#28410, ADR-0146 D2] `os validate` refuses an item the override write
+    // gate refuses (`utils/override-declarations.ts`, step 3a-iii): each row on
+    // `errors` (`--json`, exit 1) carries this code, the one the publish doors
+    // answer the same item with. `door: 'none'`: a CLI exit, no HTTP boundary.
+    // Registered under `@objectstack/metadata-protocol`, so this row is
+    // provenance, not identity.
+    'NOT_OVERRIDABLE',
     // [#20367 ruling B] `os validate` / `os build` refuse a config whose default
     // export no stack producer built (`hasStackProvenance`, `@objectstack/spec`)
     // — right after load, before any other judgement, through each command's
@@ -1280,6 +1294,12 @@ export const ERROR_CODE_LEDGER = {
     'MARKETPLACE_STORAGE_FAILED',    // install-record read/write failed
     'MARKETPLACE_UNAVAILABLE',
     'NOTHING_TO_PURGE',              // package declares no seed datasets
+    // [#28410, ADR-0146 D2] install-local refused a managed install whose items
+    // the override write gate refuses (step 2d, `marketplace-install-local-plugin.ts`),
+    // 403, by the plugin's OWN Hono route, before any write; `details.refusals`
+    // names each item. The code the publish doors answer the same item with,
+    // registered under `@objectstack/metadata-protocol`: provenance, not identity.
+    'NOT_OVERRIDABLE',
     'PLUGIN_INSTALL_FAILED',
     'PLUGIN_MANIFEST_INVALID',
     'PLUGIN_REGISTER_FAILED',
@@ -1633,6 +1653,14 @@ export const ERROR_CODE_LEDGER = {
     // degrades the instance; no HTTP door on this tree answers with it, the
     // thrown value is the boundary.
     'CONNECTOR_CREDENTIAL_REJECTED',
+    // [#27401] `door: 'none'` — `ConnectorUpstreamChangedError`
+    // (`integration/connector-provider-errors.ts`), thrown by a connector
+    // provider factory whose upstream serves a definition that differs from a
+    // pin the instance declares (the mcp provider's
+    // `providerConfig.toolsSnapshot`). The automation materializer catches it
+    // and degrades the instance, re-checking with backoff; no HTTP door on this
+    // tree answers with it, the thrown value is the boundary.
+    'CONNECTOR_UPSTREAM_CHANGED',
     'CONNECTOR_UPSTREAM_UNAVAILABLE',
     'EXTERNAL_SCHEMA_MISMATCH',
     'EXTERNAL_SCHEMA_MODE_VIOLATION',

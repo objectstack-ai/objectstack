@@ -43,9 +43,13 @@ const TOP_BAR_DEFAULT_TRANSLATIONS: Record<string, string> = {
 
 const useTopBarTranslation = createSafeTranslation(TOP_BAR_DEFAULT_TRANSLATIONS, 'common.close');
 
-/** The bar's icon-button face, shared by every control on it. */
+/**
+ * The bar's icon-button face, shared by every control on it. Below `sm` a
+ * control is a 44 px touch target, and the bar grows to hold it
+ * (objectstack#29071).
+ */
 const RECORD_TOP_BAR_BUTTON_CLASS =
-  'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40';
+  'inline-flex h-11 w-11 sm:h-7 sm:w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40';
 
 /** The list context the bar steps through: the counter and ↓ ↑. */
 export interface RecordTopBarStepper {
@@ -178,7 +182,7 @@ export function RecordTopBar({ leading, leadingTestId, stepper, toggles, frame, 
   return (
     <div
       className={cn(
-        'flex h-10 min-w-0 shrink-0 items-center justify-between gap-2 border-b px-2 text-xs text-muted-foreground',
+        'flex min-h-11 sm:h-10 sm:min-h-0 min-w-0 shrink-0 items-center justify-between gap-2 border-b px-2 text-xs text-muted-foreground',
         className,
       )}
       data-record-top-bar=""

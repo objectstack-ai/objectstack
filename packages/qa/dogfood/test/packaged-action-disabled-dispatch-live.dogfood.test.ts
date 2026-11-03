@@ -67,7 +67,7 @@ const activation = (object: string, action: string) => `/actions/_activation/${o
  */
 function expectDisabledSentence(message: unknown, _action: string) {
   expect(String(message)).toMatch(/^This action is turned off for this deployment\. /);
-  expect(String(message)).toContain('An administrator can turn it on again under Setup › Packaged automation');
+  expect(String(message)).toContain('An administrator can turn it on again under Setup › Packaged Actions');
   expect(String(message)).not.toContain(LEDGER);
   expect(String(message)).not.toMatch(/ADR-\d+/);
 }

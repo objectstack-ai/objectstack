@@ -70,9 +70,10 @@ export function PreviewModeProvider({ force, children }: { force?: boolean; chil
   // Sticky state: stays true across the flag-less navigation window so the
   // CONTEXT VALUE never flickers false mid-session. A flicker is not benign —
   // it swaps the whole metadata source to published for one render, which
-  // (a) wastes a full refetch and (b) feeds cross-world diffs to effects
-  // like NavigationSyncEffect that must never see the two worlds as one
-  // timeline (that misread once WROTE nav changes from inside a preview).
+  // (a) wastes a full refetch and (b) feeds cross-world snapshots to any
+  // consumer that compares renders over time, which must never see the two
+  // worlds as one timeline (a navigation diff that misread it once WROTE nav
+  // changes from inside a preview).
   const [sticky, setSticky] = useState(fromUrl);
   useEffect(() => {
     if (fromUrl) {

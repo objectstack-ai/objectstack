@@ -97,6 +97,7 @@ export interface RegistryDoubleInstance {
   registerItem: any;
   registerApp: any;
   installPackage: any;
+  getPackage: any;
   reset: any;
   metadata: any;
   [member: string]: any;
@@ -173,6 +174,15 @@ export function createRegistryModuleMock(
     registerItem: vi.fn(),
     registerApp: vi.fn(),
     installPackage: vi.fn(),
+    // [#28697] A package's installed record, read by the plugin's install
+    // paths. The same lesson as `getAllObjects` above: empty is the truthful
+    // body for a suite that installs nothing for real, and an omitted member
+    // is a hard `TypeError` at its first read.
+    getPackage: vi.fn(() => undefined),
+    // [#28697] …and every `registerApp` runs its body through this member, so
+    // a refused registration is put back. The double runs the body as given:
+    // it records nothing, so it has nothing to put back.
+    restoringOnRefusal: vi.fn((register: () => unknown) => register()),
     reset: vi.fn(),
     metadata: { get: vi.fn(() => new Map()) },
     ...instanceOverrides,

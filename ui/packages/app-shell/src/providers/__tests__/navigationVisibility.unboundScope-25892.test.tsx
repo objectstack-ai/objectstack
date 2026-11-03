@@ -24,7 +24,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import React from 'react';
 import { renderHook } from '@testing-library/react';
-import { __resetVisibilityPredicateWarnings } from '@object-ui/react';
+import { __resetVisibilityPredicateWarnings } from '../../../../react/src/utils/visibilityDiagnostic';
 import {
   ExpressionProvider,
   createExpressionEvaluator,

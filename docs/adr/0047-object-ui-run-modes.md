@@ -1,6 +1,6 @@
 # ADR-0047: Two run modes for object UI — data views vs interface pages, user filters, and runtime visualization choice
 
-**Status**: Accepted (2026-06-12; revised 2026-06-19) — framework scope implemented (`UserFiltersSchema`/`InterfacePageConfigSchema` + the 2026-07-07 object-list narrowing, reference-integrity diagnostics); the PageView render + Studio panel phases live in objectui.
+**Status**: Accepted (2026-06-12; revised 2026-06-19; amended 2026-11-02, interface-page toolbar toggles) — framework scope implemented (`UserFiltersSchema`/`InterfacePageConfigSchema` + the 2026-07-07 object-list narrowing, reference-integrity diagnostics); the PageView render + Studio panel phases live in objectui.
 
 > **Revision (2026-06-19) — the "iron rule" is superseded.** Validating the
 > Studio config panel against Airtable showed Airtable has no "inherit from a
@@ -10,6 +10,22 @@
 > and the page editor edits them in place. `sourceView` is deprecated and kept
 > only as a runtime back-compat fallback. TL;DR #2 below no longer holds; the
 > rest of the ADR (two run modes, userFilters, visualization whitelist) stands.
+
+> **Amendment (2026-11-02) — an interface page's toolbar toggles take the shared
+> `userActions` defaults.** Maintainer ruling of 2026-11-02, objectstack#29144
+> comment 6574404727 (batch #455, letter A).
+> A page's `interfaceConfig.userActions` is the same `UserActionsConfigSchema` a
+> list view uses, and the page reads it with that schema's published defaults:
+> `search`, `sort`, `filter`, `rowHeight`, `group` and `hideFields` are on unless
+> the page writes `false`, and `rowColor` is off unless it writes `true`. One
+> schema, one set of defaults: a page that omits a key, a page with no block and
+> a stored page that was never parsed draw the same toolbar. So TL;DR #1's
+> "selected user actions" and TL;DR #5's "closed until the author opens it" no
+> longer cover these toggles: they are withheld per key, by writing `false`.
+> Everything else interface mode keeps closed stands, as §3.4 lays out: no quick
+> filters until the author configures `userFilters`, the visualization locked to
+> the authored one unless whitelisted, no user-created views, session-scoped
+> filter state; and export stays off on the page.
 >
 > **Amendment (2026-07-07) — `dropdown` user filters are allowed on object list
 > views again (framework #2679 / objectui #2338).** The phase-4 rollout had

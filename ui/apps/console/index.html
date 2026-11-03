@@ -123,6 +123,66 @@
         } catch (_) { /* non-blocking */ }
       })();
     </script>
+    <!--
+      The page's ONE `GET /api/v1/auth/get-session`, started during parse
+      beside `runtime/config` above (objectstack#29118).
+
+      `preflightAuth()` in `src/lib/auth-preflight.ts` validates the stored
+      Bearer before React renders, and it is the boot's only session read
+      (`AuthProvider` takes its answer, objectui#12808). Asked from the bundle,
+      it waited for the main chunk to download and evaluate: a whole round
+      trip at the head of the startup chain that needs nothing from the bundle.
+      This script asks the SAME question at parse time and hands the answer to
+      the preflight, the way the script above hands `runtime/config` to
+      `initRuntimeConfig()`.
+
+      Same question means same answer, so the request is the preflight's
+      byte for byte: the same URL, the same `Authorization: Bearer` read from
+      the same `localStorage` key, `credentials: 'include'` (the cookie rides
+      along so a renewed session cookie is stored, objectui#12892) and the
+      same `Accept`. The auth URL is spelled as `src/main.tsx`'s `AUTH_URL`,
+      through the same Vite HTML env substitution, and the slot carries that
+      URL and the token it sent; the preflight takes it once, and only when
+      both match what it would send itself.
+
+      Every safety of the preflight is kept. No token, or blocked storage,
+      sends nothing, exactly as the preflight returns early. A request that
+      fails or answers non-OK hands over a rejection, so the preflight fetches
+      as it always did and the stale-token purge reads its own answer.
+
+      `src/__tests__/sessionCheckBootDedup.test.tsx` executes THIS script's
+      text against the real `preflightAuth()`, so a drift between the two
+      spellings of the slot fails a test rather than silently restoring the
+      second request.
+    -->
+    <script>
+      (function startEarlySessionCheck() {
+        let token;
+        try {
+          token = localStorage.getItem('auth-session-token');
+        } catch (_) {
+          return; // storage blocked: the preflight has nothing to validate either
+        }
+        if (!token) return;
+
+        // `src/main.tsx`: AUTH_URL = (VITE_SERVER_URL or '') + '/api/v1/auth'.
+        // An unsubstituted token reads as same-origin '', as in the script above.
+        const injected = '%VITE_SERVER_URL%';
+        const authUrl = (injected.charAt(0) === '%' ? '' : injected) + '/api/v1/auth';
+
+        const body = fetch(authUrl + '/get-session', {
+          method: 'GET',
+          credentials: 'include',
+          headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' },
+        }).then(function (res) {
+          if (!res.ok) throw new Error('get-session ' + res.status);
+          return res.json().catch(function () { return null; });
+        });
+        // The preflight reads a failure as "ask again"; it is never unhandled.
+        body.catch(function () {});
+        globalThis[Symbol.for('objectui.earlySessionCheck')] = { authUrl: authUrl, token: token, body: body };
+      })();
+    </script>
     <script>
       window.process = window.process || { env: { NODE_ENV: 'development' }, version: '', platform: 'browser' };
     </script>

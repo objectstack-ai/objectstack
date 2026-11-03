@@ -586,6 +586,18 @@ const FAILURE_PROPAGATION_SITES = new Map([
         },
     ],
     [
+        'packages/metadata-protocol/src/protocol-packageless-overlay-migration.ts::migratePackagelessOverlays',
+        {
+            callees: [['fail', 'effect']],
+            why:
+                "`fail()` is this function's per-row outcome recorder: it increments the base's `failed` count "
+                + "and appends `{ id, outcome: 'failed', error }` to the RETURNED report, which "
+                + '`os migrate packageless-overlays` prints row by row and turns into exit 1 under `--apply`. '
+                + 'The unbound row is kept on every failed path (its delete follows the read-back), so the '
+                + "report names the row whose move did not land and why — the operation's contract (#28413).",
+        },
+    ],
+    [
         'packages/cli/src/utils/schema-migration-plugins.ts::measureComposedCoverage',
         {
             callees: [['failures.set', 'effect']],
@@ -3064,6 +3076,30 @@ function unwrapExpression(expr) {
  *   costs no depth — counting it would make every move push its callers one
  *   hop closer to the bound.
  *
+ * [#25467 E1] Ruling E (6537939895) moves whole sections through ONE host
+ * instead of a `this` literal per stub: a moved body reads `host.x` where it
+ * read `this.x`, and the stub hands it `protocolHost(this)` (`protocol-host.ts`).
+ * Both shapes above follow it, by the same rule and nothing wider:
+ *
+ *   HOST CALL — `host.x(…)` where `host` is the FIRST parameter of the function
+ *   the call sits in (arrows inherit it), typed by a host interface (bare, or
+ *   through `Pick<Host, 'x' | …>` naming `x`) that the module declares or
+ *   imports by name from another `./protocol-*.js` module of this package that
+ *   declares it, whose member `x` is typed `ObjectStackProtocolImplementation['x']`
+ *   (an instance method) or `(typeof ObjectStackProtocolImplementation)['x']`
+ *   (a static method — the host carries the class's private statics too).
+ *
+ *   STUB — a method whose LAST statement returns `fn(protocolHost(this), …)`
+ *   (awaited or not), `fn` as above.
+ *
+ * Measured when E1 landed: `main` @ 838a802bf3 reads 98, the E1 tree 100 —
+ * the two new lines are `protocol-packageless-overlay-migration.ts`'s
+ * `migratePackagelessOverlays()` guarding `storedPairRow()`, whose
+ * `host.findEnvironmentRows()` the HOST CALL rule now follows (that helper
+ * already took its module's own host interface as a first parameter named
+ * `host`, the shape ruling E makes general). Both read "no invented answer",
+ * so no verdict and no ledger row moved; the pilot's moved body loses none.
+ *
  * Measured when this landed, with the resolver: `main` @ bc496bf7 reads
  * 95, not 93 — the two new lines are `protocol-batch-data.ts`'s
  * `runBatchDataLoop()` and `runUpdateManyLoop()` guarding
@@ -3088,6 +3124,10 @@ const HOST_SPLIT = Object.freeze({
     hostClass: 'ObjectStackProtocolImplementation',
     module: /^protocol-[a-z0-9-]+\.ts$/,
     specifier: /^\.\/(protocol-[a-z0-9-]+)\.js$/,
+    // [#25467 E1] Ruling E's host split: the parameter a moved body reads the
+    // class through, and the function a stub builds it with.
+    hostParam: 'host',
+    hostOf: 'protocolHost',
 });
 
 /**
@@ -3127,22 +3167,26 @@ function createHostSplit(load) {
         return made;
     };
 
-    /** The host class's own methods, by name — `undefined` for a name declared twice. */
-    const hostMethods = () => {
+    /**
+     * The host class's own methods, by name — `undefined` for a name declared
+     * twice. `static: true` answers its static methods instead (#25467 E1).
+     */
+    const hostMethods = ({ static: wantStatic = false } = {}) => {
         const e = entry(hostRel);
         if (!e) return undefined;
-        if (e.methods) return e.methods;
-        e.methods = new Map();
+        const key = wantStatic ? 'statics' : 'methods';
+        if (e[key]) return e[key];
+        e[key] = new Map();
         for (const stmt of e.sf.statements) {
             if (!ts.isClassDeclaration(stmt) || stmt.name?.text !== HOST_SPLIT.hostClass) continue;
             for (const m of stmt.members) {
                 if (!ts.isMethodDeclaration(m) || !m.body || !ts.isIdentifier(m.name)) continue;
-                const static_ = m.modifiers?.some((x) => x.kind === ts.SyntaxKind.StaticKeyword);
-                if (static_) continue;
-                e.methods.set(m.name.text, e.methods.has(m.name.text) ? undefined : m.body);
+                const static_ = !!m.modifiers?.some((x) => x.kind === ts.SyntaxKind.StaticKeyword);
+                if (static_ !== wantStatic) continue;
+                e[key].set(m.name.text, e[key].has(m.name.text) ? undefined : m.body);
             }
         }
-        return e.methods;
+        return e[key];
     };
 
     /** The `./protocol-*.js` named imports of the host file: local name → module path. */
@@ -3178,6 +3222,42 @@ function createHostSplit(load) {
         ts.isStringLiteral(type.indexType.literal) &&
         type.indexType.literal.text === name;
 
+    /** #25467 E1: is `type` the class's STATIC member `name`, spelled `(typeof ObjectStackProtocolImplementation)['name']`? */
+    const typedAsHostStatic = (type, name) => {
+        if (!type || !ts.isIndexedAccessTypeNode(type)) return false;
+        let obj = type.objectType;
+        while (obj && ts.isParenthesizedTypeNode(obj)) obj = obj.type;
+        return !!obj && ts.isTypeQueryNode(obj) && ts.isIdentifier(obj.exprName) &&
+            obj.exprName.text === HOST_SPLIT.hostClass &&
+            ts.isLiteralTypeNode(type.indexType) &&
+            ts.isStringLiteral(type.indexType.literal) &&
+            type.indexType.literal.text === name;
+    };
+
+    /**
+     * #25467 E1: the interface `hostType` names in module `rel` — declared there,
+     * or imported by name from another `./protocol-*.js` module of the split that
+     * declares it. `undefined` otherwise.
+     */
+    const hostInterface = (rel, hostType) => {
+        const e = entry(rel);
+        if (!e) return undefined;
+        const own = e.sf.statements.find((s) => ts.isInterfaceDeclaration(s) && s.name.text === hostType);
+        if (own) return own;
+        for (const stmt of e.sf.statements) {
+            if (!ts.isImportDeclaration(stmt) || !ts.isStringLiteral(stmt.moduleSpecifier)) continue;
+            const m = HOST_SPLIT.specifier.exec(stmt.moduleSpecifier.text);
+            const named = stmt.importClause?.namedBindings;
+            if (!m || !named || !ts.isNamedImports(named)) continue;
+            const el = named.elements.find((x) => x.name.text === hostType);
+            if (!el) continue;
+            const from = entry(`${HOST_SPLIT.dir}/${m[1]}.ts`);
+            const exported = (el.propertyName ?? el.name).text;
+            return from?.sf.statements.find((s) => ts.isInterfaceDeclaration(s) && s.name.text === exported);
+        }
+        return undefined;
+    };
+
     /**
      * HOST CALL: resolve `this.name(…)` in a module to the host class's method
      * body, through the module's own host interface — or `undefined`.
@@ -3185,14 +3265,17 @@ function createHostSplit(load) {
     const hostCall = (node, bodies) => {
         if (!isModule(bodies.relPath)) return undefined;
         const expr = node.expression;
-        if (!ts.isPropertyAccessExpression(expr) || expr.expression.kind !== ts.SyntaxKind.ThisKeyword) return undefined;
-        if (!ts.isIdentifier(expr.name)) return undefined;
+        if (!ts.isPropertyAccessExpression(expr) || !ts.isIdentifier(expr.name)) return undefined;
+        // `this.x(…)` (the per-member series) or, #25467 E1, `host.x(…)` (ruling E's host split).
+        const viaHostParam = ts.isIdentifier(expr.expression) && expr.expression.text === HOST_SPLIT.hostParam;
+        if (expr.expression.kind !== ts.SyntaxKind.ThisKeyword && !viaHostParam) return undefined;
         const name = expr.name.text;
-        // The function whose `this` the call reads: arrows inherit it.
+        // The function whose `this` (or first parameter) the call reads: arrows inherit it.
         let fn = node.parent;
         while (fn && (ts.isArrowFunction(fn) || !ts.isFunctionLike(fn))) fn = fn.parent;
         const thisParam = fn?.parameters?.[0];
-        if (!thisParam || !ts.isIdentifier(thisParam.name) || thisParam.name.text !== 'this') return undefined;
+        const paramName = viaHostParam ? HOST_SPLIT.hostParam : 'this';
+        if (!thisParam || !ts.isIdentifier(thisParam.name) || thisParam.name.text !== paramName) return undefined;
         let type = thisParam.type;
         if (!type || !ts.isTypeReferenceNode(type) || !ts.isIdentifier(type.typeName)) return undefined;
         if (type.typeName.text === 'Pick') {
@@ -3203,14 +3286,18 @@ function createHostSplit(load) {
             type = target;
         }
         const hostType = type.typeName.text;
-        const iface = bodies.sourceFile?.statements.find(
-            (s) => ts.isInterfaceDeclaration(s) && s.name.text === hostType,
-        );
+        // The per-member series' host interface is the module's own; ruling E's
+        // may be imported from the module that declares it (`protocol-host.ts`).
+        const iface = viaHostParam
+            ? hostInterface(bodies.relPath, hostType)
+            : bodies.sourceFile?.statements.find((s) => ts.isInterfaceDeclaration(s) && s.name.text === hostType);
         const member = iface?.members.find(
             (m) => ts.isPropertySignature(m) && m.name && ts.isIdentifier(m.name) && m.name.text === name,
         );
-        if (!member || !typedAsHostMember(member.type, name)) return undefined;
-        const body = hostMethods()?.get(name);
+        if (!member) return undefined;
+        const body = typedAsHostMember(member.type, name) ? hostMethods()?.get(name)
+            : viaHostParam && typedAsHostStatic(member.type, name) ? hostMethods({ static: true })?.get(name)
+            : undefined;
         return body ? { body, bodies: entry(hostRel).bodies } : undefined;
     };
 
@@ -3227,11 +3314,23 @@ function createHostSplit(load) {
         if (!last || !ts.isReturnStatement(last) || !last.expression) return undefined;
         let call = last.expression;
         if (ts.isAwaitExpression(call)) call = call.expression;
-        if (!ts.isCallExpression(call) || !ts.isPropertyAccessExpression(call.expression)) return undefined;
+        if (!ts.isCallExpression(call)) return undefined;
+        let fnName;
         const callee = call.expression;
-        if (!ts.isIdentifier(callee.name) || callee.name.text !== 'call' || !ts.isIdentifier(callee.expression)) return undefined;
-        if (!call.arguments[0] || !ts.isIdentifier(call.arguments[0])) return undefined;
-        const imported = hostImports()?.get(callee.expression.text);
+        const first = call.arguments[0];
+        if (ts.isPropertyAccessExpression(callee)) {
+            // `fn.call(host, …)` — the per-member series.
+            if (!ts.isIdentifier(callee.name) || callee.name.text !== 'call' || !ts.isIdentifier(callee.expression)) return undefined;
+            if (!first || !ts.isIdentifier(first)) return undefined;
+            fnName = callee.expression.text;
+        } else if (ts.isIdentifier(callee)) {
+            // #25467 E1: `fn(protocolHost(this), …)` — ruling E's host split.
+            if (!first || !ts.isCallExpression(first) || !ts.isIdentifier(first.expression) ||
+                first.expression.text !== HOST_SPLIT.hostOf || first.arguments.length !== 1 ||
+                first.arguments[0].kind !== ts.SyntaxKind.ThisKeyword) return undefined;
+            fnName = callee.text;
+        } else return undefined;
+        const imported = hostImports()?.get(fnName);
         if (!imported || !isModule(imported.rel)) return undefined;
         const mod = entry(imported.rel);
         if (!mod) return undefined;
@@ -4916,6 +5015,16 @@ const SELF_TEST_BATTERIES = Object.freeze({
         'flags: #25467 — a protocol.ts try around a stub follows the moved body, and the stub costs no hop': 1,
         'BOUND (#25467): the host hop IS a hop — a third hop through the host is still refused': 1,
         'BOUND (#25467): the same host ladder IS a seam one hop deeper — the pin above is not vacuous': 1,
+        'flags: #25467 E1 — a moved body\'s `host.x()` into a protocol.ts storage wrapper, through the imported host interface, is still that read seam': 1,
+        'passes: #25467 E1 — negative control: a moved body whose `host.x()` reaches no storage wrapper is no seam': 1,
+        'passes: #25467 E1 — a `host` that is not the function\'s first parameter resolves nowhere': 1,
+        'passes: #25467 E1 — a host interface imported from outside the split\'s modules resolves nowhere': 1,
+        'passes: #25467 E1 — a host member typed any way but AS the class member resolves nowhere': 1,
+        'flags: #25467 E1 — a private static reached as `host.x()`, typed AS the class\'s static, is still that read seam': 1,
+        'flags: #25467 E1 — a protocol.ts try around a `fn(protocolHost(this), …)` stub follows the moved body, and the stub costs no hop': 1,
+        'passes: #25467 E1 — a stub that hands its body anything but `protocolHost(this)` is not followed': 1,
+        'BOUND (#25467 E1): the `host.x()` hop IS a hop — a third hop through the host is still refused': 1,
+        'BOUND (#25467 E1): the same host ladder IS a seam one hop deeper — the pin above is not vacuous': 1,
         'ledger (read seams): a stale entry PASSES and is reported; an unledgered seam still FAILS (#26444)': 1,
         'ledger (read seams): a ledgered file on disk the scan never READ is refused; a deleted one passes (#26444)': 1,
     }),
@@ -6231,6 +6340,37 @@ function selfTestReadSeams() {
             }
             /*ROLLBACK*/
         }`;
+    // #25467 E1: ruling E's host split — ONE host interface, declared in
+    // `protocol-host.ts` and imported by name; a moved body's first parameter
+    // is \`host\`; a stub hands it \`protocolHost(this)\`. \`readStatic\` is a
+    // private static the host carries; \`untyped\` is a member typed some other way.
+    const E1_HOST = `
+        import { listRowsMoved } from './protocol-uninstall.js';
+        export class ObjectStackProtocolImplementation {
+            async findRows(t: string) { return await this.engine.find(t, {}); }
+            async tidy(t: string) { this.memo.delete(t); }
+            private async lookup(t: string) { return await this.driver.find(t, {}); }
+            private async findOverlay(t: string) { return await this.lookup(t); }
+            async getItem(t: string) { return await this.findOverlay(t); }
+            private static async readStatic(engine: any, t: string) { return await engine.find(t, {}); }
+            async listRowsMoved(id: string) {
+                return listRowsMoved(protocolHost(this), id);
+            }
+            /*ROLLBACK*/
+        }`;
+    const E1_HOST_MODULE = `
+        export interface ProtocolHost {
+            readonly findRows: ObjectStackProtocolImplementation['findRows'];
+            readonly tidy: ObjectStackProtocolImplementation['tidy'];
+            readonly getItem: ObjectStackProtocolImplementation['getItem'];
+            readonly readStatic: (typeof ObjectStackProtocolImplementation)['readStatic'];
+            readonly untyped: (t: string) => Promise<unknown[]>;
+        }`;
+    const E1_MODULE_HEAD = `
+        import type { ProtocolHost } from './protocol-host.js';
+        export async function listRowsMoved(host: Pick<ProtocolHost, 'findRows'>, id: string) {
+            return await host.findRows(id);
+        }`;
     const SPLIT_MODULE_HEAD = `
         export interface UninstallHost {
             findRows: ObjectStackProtocolImplementation['findRows'];
@@ -7448,6 +7588,155 @@ function selfTestReadSeams() {
                 [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: SPLIT_MODULE_HEAD + `
                     export async function listDeep(this: Pick<UninstallHost, 'getItem'>, id: string) {
                         try { return await this.getItem(id); }
+                        catch { return []; }
+                    }`,
+            },
+            maxReadWrapperDepth: MAX_READ_WRAPPER_DEPTH + 1,
+            expectViolation: true,
+            expectSeams: 1,
+        },
+
+        // ── #25467 E1: the same two hops through ruling E's host ─────────────
+        {
+            name: 'flags: #25467 E1 — a moved body\'s `host.x()` into a protocol.ts storage wrapper, through the imported host interface, is still that read seam',
+            files: {
+                [`${HOST_SPLIT.dir}/protocol.ts`]: E1_HOST,
+                [`${HOST_SPLIT.dir}/protocol-host.ts`]: E1_HOST_MODULE,
+                [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: E1_MODULE_HEAD + `
+                    export async function listRows(host: Pick<ProtocolHost, 'findRows'>, id: string) {
+                        try { return await host.findRows(id); }
+                        catch { return []; }
+                    }`,
+            },
+            expectViolation: true,
+            expectSeams: 1,
+        },
+        {
+            name: 'passes: #25467 E1 — negative control: a moved body whose `host.x()` reaches no storage wrapper is no seam',
+            files: {
+                [`${HOST_SPLIT.dir}/protocol.ts`]: E1_HOST,
+                [`${HOST_SPLIT.dir}/protocol-host.ts`]: E1_HOST_MODULE,
+                [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: E1_MODULE_HEAD + `
+                    export async function tidyRows(host: Pick<ProtocolHost, 'tidy'>, id: string) {
+                        try { return await host.tidy(id); }
+                        catch { return []; }
+                    }`,
+            },
+            expectViolation: false,
+            expectSeams: 0,
+        },
+        {
+            name: 'passes: #25467 E1 — a `host` that is not the function\'s first parameter resolves nowhere',
+            files: {
+                [`${HOST_SPLIT.dir}/protocol.ts`]: E1_HOST,
+                [`${HOST_SPLIT.dir}/protocol-host.ts`]: E1_HOST_MODULE,
+                [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: E1_MODULE_HEAD + `
+                    export async function listRows(id: string, host: Pick<ProtocolHost, 'findRows'>) {
+                        try { return await host.findRows(id); }
+                        catch { return []; }
+                    }`,
+            },
+            expectViolation: false,
+            expectSeams: 0,
+        },
+        {
+            name: 'passes: #25467 E1 — a host interface imported from outside the split\'s modules resolves nowhere',
+            files: {
+                [`${HOST_SPLIT.dir}/protocol.ts`]: E1_HOST,
+                [`${HOST_SPLIT.dir}/host-types.ts`]: E1_HOST_MODULE,
+                [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: `
+                    import type { ProtocolHost } from './host-types.js';
+                    export async function listRows(host: Pick<ProtocolHost, 'findRows'>, id: string) {
+                        try { return await host.findRows(id); }
+                        catch { return []; }
+                    }`,
+            },
+            expectViolation: false,
+            expectSeams: 0,
+        },
+        {
+            name: 'passes: #25467 E1 — a host member typed any way but AS the class member resolves nowhere',
+            files: {
+                [`${HOST_SPLIT.dir}/protocol.ts`]: E1_HOST,
+                [`${HOST_SPLIT.dir}/protocol-host.ts`]: E1_HOST_MODULE,
+                [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: E1_MODULE_HEAD + `
+                    export async function listRows(host: Pick<ProtocolHost, 'untyped'>, id: string) {
+                        try { return await host.untyped(id); }
+                        catch { return []; }
+                    }`,
+            },
+            expectViolation: false,
+            expectSeams: 0,
+        },
+        {
+            name: 'flags: #25467 E1 — a private static reached as `host.x()`, typed AS the class\'s static, is still that read seam',
+            files: {
+                [`${HOST_SPLIT.dir}/protocol.ts`]: E1_HOST,
+                [`${HOST_SPLIT.dir}/protocol-host.ts`]: E1_HOST_MODULE,
+                [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: E1_MODULE_HEAD + `
+                    export async function listStatic(host: Pick<ProtocolHost, 'readStatic'>, engine: any, id: string) {
+                        try { return await host.readStatic(engine, id); }
+                        catch { return []; }
+                    }`,
+            },
+            expectViolation: true,
+            expectSeams: 1,
+        },
+        {
+            // \`rollBack\` -> \`listRowsMoved\` (a stub, read as its moved body) ->
+            // \`host.findRows\` -> \`engine.find\`: the chain the method had before
+            // its body moved, at the same depth.
+            name: 'flags: #25467 E1 — a protocol.ts try around a `fn(protocolHost(this), …)` stub follows the moved body, and the stub costs no hop',
+            files: {
+                [`${HOST_SPLIT.dir}/protocol.ts`]: E1_HOST.replace('/*ROLLBACK*/', `
+                    async rollBack(id: string) {
+                        try { return await this.listRowsMoved(id); }
+                        catch { return []; }
+                    }`),
+                [`${HOST_SPLIT.dir}/protocol-host.ts`]: E1_HOST_MODULE,
+                [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: E1_MODULE_HEAD,
+            },
+            expectViolation: true,
+            expectSeams: 1,
+        },
+        {
+            name: 'passes: #25467 E1 — a stub that hands its body anything but `protocolHost(this)` is not followed',
+            files: {
+                [`${HOST_SPLIT.dir}/protocol.ts`]: E1_HOST
+                    .replace('return listRowsMoved(protocolHost(this), id);', 'return listRowsMoved(this.someHost, id);')
+                    .replace('/*ROLLBACK*/', `
+                    async rollBack(id: string) {
+                        try { return await this.listRowsMoved(id); }
+                        catch { return []; }
+                    }`),
+                [`${HOST_SPLIT.dir}/protocol-host.ts`]: E1_HOST_MODULE,
+                [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: E1_MODULE_HEAD,
+            },
+            expectViolation: false,
+            expectSeams: 0,
+        },
+        {
+            name: 'BOUND (#25467 E1): the `host.x()` hop IS a hop — a third hop through the host is still refused',
+            files: {
+                [`${HOST_SPLIT.dir}/protocol.ts`]: E1_HOST,
+                [`${HOST_SPLIT.dir}/protocol-host.ts`]: E1_HOST_MODULE,
+                [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: E1_MODULE_HEAD + `
+                    export async function listDeep(host: Pick<ProtocolHost, 'getItem'>, id: string) {
+                        try { return await host.getItem(id); }
+                        catch { return []; }
+                    }`,
+            },
+            expectViolation: false,
+            expectSeams: 0,
+        },
+        {
+            name: 'BOUND (#25467 E1): the same host ladder IS a seam one hop deeper — the pin above is not vacuous',
+            files: {
+                [`${HOST_SPLIT.dir}/protocol.ts`]: E1_HOST,
+                [`${HOST_SPLIT.dir}/protocol-host.ts`]: E1_HOST_MODULE,
+                [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: E1_MODULE_HEAD + `
+                    export async function listDeep(host: Pick<ProtocolHost, 'getItem'>, id: string) {
+                        try { return await host.getItem(id); }
                         catch { return []; }
                     }`,
             },

@@ -18,8 +18,9 @@
  */
 
 import {
-  celEngine,
+  compileCel,
   firstUndeclaredReference,
+  firstDateTextVerdict,
   firstTypeMismatch,
   inferCelType,
   parseCelToAst,
@@ -42,6 +43,7 @@ import {
   receiverCallNameFromNoOverload,
 } from './unknown-function';
 import { DEFAULT_TRAVERSAL_ROOT, type TraversalConflictKind } from './relationship-traversal';
+import { optionLabelFieldOf, optionlessLabelSentence } from './stdlib';
 import type {
   CelFieldRole,
   ExprValidationCode,
@@ -200,6 +202,26 @@ export interface ExprSchemaHint {
    * not run, which is every caller's behaviour until it opts in.
    */
   traversalHydration?: boolean;
+  /**
+   * [#28659] The fields of {@link fields} that declare options once served —
+   * the fields `label(record.<field>)` can answer on: inline `options`, or a
+   * `picklist` the registry resolves onto the served field. Read an authored
+   * field through `declaresOptionsOnceServed` (`stdlib.ts`), whose served-form
+   * half is `declaresOptions`, the predicate the engine builds its label map
+   * with, so this list and the evaluator agree.
+   *
+   * When supplied, every `label(record.<field>)` call naming a field that IS
+   * declared ({@link fields}) but is not in this list is refused under
+   * `label-field-no-options`: the evaluator faults on that call on every row,
+   * so the formula reads null forever. A field {@link fields} does not declare
+   * keeps its `unknown-field` refusal and gets no second one.
+   *
+   * Opt-in, like {@link traversalHydration}: absent ⇒ the check does not run,
+   * because a caller that does not have the object's options in hand cannot
+   * tell an optionless field from one it was not told about. Needs
+   * {@link fields}; without it nothing is judged.
+   */
+  optionFields?: readonly string[];
 }
 
 /**
@@ -287,15 +309,20 @@ function toCelFieldTypes(fieldTypes: Readonly<Record<string, string>>): Record<s
  *  - `type-mismatch` (**warning**): a text/boolean field used with an
  *    arithmetic/ordering operator against a number — nulls unless the text value
  *    happens to be numeric, so it stays advisory.
+ *  - `date-text-arithmetic` / `date-duration-value` (**error**, #28944): what
+ *    the Timestamp typing passes, re-checked with a date field declared as the
+ *    text the runtime holds — see {@link dateTextIssue}.
  * `scope` selects `record.<field>` vs bare field binding, shaping the message.
  */
 function typeSoundnessIssue(
   source: string,
   fieldTypes: Readonly<Record<string, string>>,
   scope: 'record' | 'flattened',
+  role: 'predicate' | 'value',
 ): { issue: ExprValidationError; severity: 'error' | 'warning' } | null {
-  const mismatch = firstTypeMismatch(source, toCelFieldTypes(fieldTypes), scope);
-  if (!mismatch) return null;
+  const celFieldTypes = toCelFieldTypes(fieldTypes);
+  const mismatch = firstTypeMismatch(source, celFieldTypes, scope);
+  if (!mismatch) return dateTextIssue(source, celFieldTypes, scope, role);
   const reference = mismatch.field
     ? (scope === 'record' ? `record.${mismatch.field}` : mismatch.field)
     : undefined;
@@ -332,6 +359,63 @@ function typeSoundnessIssue(
       `type mismatch \`${mismatch.operands}\` — ${subject} but is used with \`${mismatch.operator}\` ` +
         `against a number. This faults at runtime, so the expression silently evaluates to null ` +
         `(unless the value happens to be numeric). Use a number field, or drop the arithmetic/comparison.`,
+    ),
+  };
+}
+
+/**
+ * #28944 — the date shapes the Timestamp typing of {@link firstTypeMismatch}
+ * passes and the runtime cannot answer, judged by {@link firstDateTextVerdict}
+ * with every `date`/`datetime` field declared as the text the runtime holds:
+ *  - `date-text-arithmetic`: arithmetic on that text the evaluator faults on —
+ *    `record.end_date - record.start_date` (either field kind), `record.d -
+ *    duration('24h')` — so the expression reads null. Any role.
+ *  - `date-duration-value`: a formula (`value` role) that computes a
+ *    `google.protobuf.Duration` — `today() - record.start_date` — which a field
+ *    serialises as `{}`. A predicate that COMPARES a duration
+ *    (`today() - record.d > duration('72h')`) evaluates, and is not touched.
+ * Runs only when there is something to find: a date field to retype, or a
+ * `value` whose computed type is the question.
+ */
+function dateTextIssue(
+  source: string,
+  celFieldTypes: Readonly<Record<string, FieldCelType>>,
+  scope: 'record' | 'flattened',
+  role: 'predicate' | 'value',
+): { issue: ExprValidationError; severity: 'error' | 'warning' } | null {
+  if (role !== 'value' && !Object.values(celFieldTypes).includes('timestamp')) return null;
+  const verdict = firstDateTextVerdict(source, celFieldTypes, scope);
+  if (!verdict) return null;
+  const reference = verdict.field
+    ? (scope === 'record' ? `record.${verdict.field}` : verdict.field)
+    : undefined;
+  const ref = reference !== undefined ? `\`${reference}\`` : null;
+  const shift = `\`daysFromNow(n)\` / \`addDays(d, n)\` / \`addMonths(d, n)\` to shift a date.`;
+  if (verdict.kind === 'fault') {
+    const subject = ref ? `${ref} is a date field` : 'a date field is an operand';
+    return {
+      severity: 'error',
+      issue: refusal(
+        'date-text-arithmetic',
+        { operands: verdict.operands, ...(reference !== undefined ? { reference } : {}) },
+        source,
+        `date arithmetic \`${verdict.operands}\` — ${subject}, and the runtime holds a date field as ` +
+          `its text (\`YYYY-MM-DD\`, or an ISO-8601 instant for a date-time), which CEL can't do ` +
+          `arithmetic on: this faults at runtime, so the field silently evaluates to null. Use ` +
+          `\`daysBetween(a, b)\` for the span in whole days, and ${shift}`,
+      ),
+    };
+  }
+  if (role !== 'value' || verdict.type !== 'google.protobuf.Duration') return null;
+  return {
+    severity: 'error',
+    issue: refusal(
+      'date-duration-value',
+      reference !== undefined ? { reference } : {},
+      source,
+      `date arithmetic — this computes a \`google.protobuf.Duration\`${ref ? ` from ${ref}` : ''}, and a ` +
+        `field can't hold a duration: it reads \`{}\` at runtime. Use \`daysBetween(a, b)\` for the ` +
+        `span in whole days, and ${shift}`,
     ),
   };
 }
@@ -650,6 +734,56 @@ function receiverCallHint(celMessage: string, source: string): { text: string; n
       `argument; only cel-js's own receiver methods (\`record.name.split(',')\`) are written ` +
       `after a dot.`,
   };
+}
+
+/**
+ * [#28659] Every `label(record.<field>)` call in `source` whose field is
+ * declared but declares no options — one `label-field-no-options` refusal per
+ * such field, worded as the evaluator's fault on the same call
+ * (`optionlessLabelSentence`), so the door says at author time what the log
+ * line would say on every row.
+ *
+ * The field a call names is read through `optionLabelFieldOf`, the reader the
+ * `label` macro itself uses, so a call shape the macro refuses at the type
+ * check (a computed argument, `record.?kind`) names no field here and is left
+ * to that refusal. Runs only when the caller supplied
+ * {@link ExprSchemaHint.optionFields} and {@link ExprSchemaHint.fields}; a
+ * field outside `fields` is `checkFieldExistence`'s to refuse.
+ */
+function checkOptionLabelTargets(
+  ast: () => CelAstNode | null,
+  source: string,
+  schema: ExprSchemaHint | undefined,
+  errors: ExprValidationError[],
+): void {
+  if (!schema?.optionFields || !schema.fields || schema.fields.length === 0) return;
+  // A source that never spells the call cannot hold one (CEL has no comments),
+  // so the common formula pays one scan and no tree walk.
+  if (!/\blabel\s*\(/.test(source)) return;
+  const tree = ast();
+  if (tree == null) return;
+  const declared = new Set(schema.fields);
+  const withOptions = new Set(schema.optionFields);
+  const seen = new Set<string>();
+  const visited = new Set<object>();
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== 'object' || visited.has(node)) return;
+    visited.add(node);
+    if (Array.isArray(node)) {
+      for (const child of node) walk(child);
+      return;
+    }
+    const { op, args } = node as { op?: unknown; args?: unknown };
+    if (op === 'call' && Array.isArray(args) && args[0] === 'label' && Array.isArray(args[1]) && args[1].length === 1) {
+      const field = optionLabelFieldOf(args[1][0] as { op: string; args: unknown } | undefined);
+      if (field !== undefined && declared.has(field) && !withOptions.has(field) && !seen.has(field)) {
+        seen.add(field);
+        errors.push(refusal('label-field-no-options', { field }, source, optionlessLabelSentence(field)));
+      }
+    }
+    for (const value of Object.values(node as Record<string, unknown>)) walk(value);
+  };
+  walk(tree);
 }
 
 /**
@@ -985,7 +1119,9 @@ export function validateExpression(
     ));
     return { ok: false, errors, warnings };
   }
-  const compiled = celEngine.compile(source);
+  // `compileCel` is `celEngine.compile` with the fault's cel-js code kept
+  // beside the verdict (#27904), for the `invalid-cel` params below.
+  const { result: compiled, celCode } = compileCel(source);
   // One parse through the canonical front end, shared by the two passes that
   // read members — field existence and the relationship-traversal arm — and
   // taken only when one of them runs.
@@ -1031,15 +1167,20 @@ export function validateExpression(
     } else if (braces) {
       errors.push(refusal('cel-template-brace', { role: celRole, detail, ref: braces.ref }, source, `${lead} — ${braces.text}`));
     } else {
+      // #27904 — the engine's own fault code and the range it points at, when
+      // it reported them, beside the unchanged sentence: an editor keys its own
+      // words to `celCode` and puts its caret at `pos`. Absent when unknown.
+      const { pos } = compiled.error;
       errors.push(refusal(
         'invalid-cel',
-        { role: celRole, detail },
+        { role: celRole, detail, ...(celCode ? { celCode } : {}), ...(pos ? { pos } : {}) },
         source,
         `${lead} — ${role}s are bare CEL (e.g. \`record.rating >= 4\`).`,
       ));
     }
   } else {
     checkFieldExistence(ast, source, schema, errors);
+    checkOptionLabelTargets(ast, source, schema, errors);
     checkRoleCatalog(source, schema, errors);
     if (schema?.scope === 'record') {
       // In a `record`-scoped site a bare top-level identifier is a silent bug —
@@ -1070,7 +1211,7 @@ export function validateExpression(
         // numeric text value can succeed), or date-field arithmetic (hard error —
         // always nulls). Only runs when there is no bare-ref error (the typed
         // check needs the canonical `record.<field>` form).
-        const r = typeSoundnessIssue(source, schema.fieldTypes, 'record');
+        const r = typeSoundnessIssue(source, schema.fieldTypes, 'record', role);
         if (r) (r.severity === 'error' ? errors : warnings).push(r.issue);
       }
     } else if (schema?.fields && schema.fields.length > 0) {
@@ -1105,7 +1246,7 @@ export function validateExpression(
       // date-field arithmetic (error). Flow variables stay `dyn` (never flagged);
       // equality/ordering of a date is runtime-safe (never flagged).
       if (schema.fieldTypes) {
-        const r = typeSoundnessIssue(source, schema.fieldTypes, 'flattened');
+        const r = typeSoundnessIssue(source, schema.fieldTypes, 'flattened', role);
         if (r) (r.severity === 'error' ? errors : warnings).push(r.issue);
       }
     }

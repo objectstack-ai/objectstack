@@ -1,0 +1,7 @@
+{
+  "file": "packages/plugins/plugin-auth/src/agent-forward-identity-view.ts",
+  "adrs": [
+    "ADR-0090"
+  ],
+  "invariant": "ADR-0090 D10 rule 5 (amended 2026-10-31, #28367) — at the identity mount a redeemed forward credential is shown to better-auth as a request-scoped, in-memory view of the delegating user: answered only inside that request's own async chain, never written as a `sys_session` row, never a token or cookie valid anywhere else, and none for a banned or missing user. better-auth's own authorization of that user still decides (rule 1's intersection across the two doors), identity writes carry the agent's client as `performedBy` beside the user, and no credential-rotation header leaves the mount for an agent caller. Minting a real session for the agent is option C of #28178, which stays refused."
+}

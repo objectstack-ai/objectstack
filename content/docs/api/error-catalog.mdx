@@ -158,7 +158,10 @@ when a read names it in a position that would evaluate its stored value: a filte
 aggregation's own `filter`), a sort, a `groupBy`, an `aggregations[].field`, a
 `searchFields` entry, or an `expand` entry's own filter or sort at any depth. Such a
 field is never returned on a generic read, so it cannot be queried by either — the
-refusal names the object that declares it. Query by another field.
+refusal names the object that declares it. Query by another field. The engine
+itself gives the same refusal on its own reads for every caller but a system
+context; server code that matches on such a field runs its lookup as a system
+context.
 A non-blank `search` is refused (`param: 'search'`), not answered with every row,
 when the object's resolved search set is empty: no `searchableFields` entry names a
 stored field, and the default search scans none (`internal: true` fields never
@@ -313,12 +316,15 @@ object is rejected with `400 VALIDATION_FAILED`, and the specifics ride in
 }
 ```
 
-The check covers create, update and bulk update. Three cases are deliberately
+The check covers create, update and bulk update. Four cases are deliberately
 *not* rejections: an empty value (`null` / `""` / `[]`) means "no link", a
 `isSystem` write is exempt (seed replay and package install legitimately write
-in an order that only resolves once the batch completes), and a target that
+in an order that only resolves once the batch completes), a target that
 cannot be checked at all — an unregistered object, an unreachable datasource —
-fails **open** rather than inventing a rejection.
+fails **open** rather than inventing a rejection, and an update that carries back
+a value (or a member of a multi-valued field) the row already stores is not
+judged again, because the update does not add it; on a bulk update that holds
+only when every matched row already stores it.
 </Callout>
 
 ### `DUPLICATE_VALUE`

@@ -25,6 +25,10 @@
  *    dereferences to), which is why `updateDatasource` treats "a secret was
  *    supplied" as a connectivity change alongside this function's verdict.
  *  - `pool` — read by the pool-support gate and `toSpec`.
+ *  - `ssl` — read by `toSpec` (`ssl: record.ssl`) and turned into the SQL
+ *    client's TLS option by the driver factory. Joined the set with #28633,
+ *    when the admin doors started storing it: before that no write path here
+ *    could change it.
  *  - `schemaMode` — read by the connect policy gate (`canConnect`), by
  *    `toSpec` (so it reaches `factory.create` and the driver it builds), and
  *    by `registerDatasourceDef` (the write gate's def). It is patchable on
@@ -59,7 +63,7 @@ import type { StoredDatasource } from './datasource-admin-service.js';
 /** The slice of a stored record this comparison consults. */
 export type ConnectivityBearingFields = Pick<
   StoredDatasource,
-  'driver' | 'config' | 'external' | 'pool' | 'schemaMode' | 'active'
+  'driver' | 'config' | 'external' | 'pool' | 'schemaMode' | 'active' | 'ssl'
 >;
 
 /**
@@ -85,6 +89,7 @@ export function datasourceConnectivityChanged(
   if (!deepEqual(before.config ?? {}, after.config ?? {})) return true;
   if (!deepEqual(before.external, after.external)) return true;
   if (!deepEqual(before.pool, after.pool)) return true;
+  if (!deepEqual(before.ssl, after.ssl)) return true;
   if (before.schemaMode !== after.schemaMode) return true;
   if ((before.active ?? true) !== (after.active ?? true)) return true;
   return false;

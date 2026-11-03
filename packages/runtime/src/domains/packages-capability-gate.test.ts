@@ -87,6 +87,7 @@ function fullProtocol() {
         rollbackToPackageCommit: vi.fn().mockResolvedValue({ success: true }),
         reassignOrphanedMetadata: vi.fn().mockResolvedValue({ reassigned: 0 }),
         duplicatePackage: vi.fn().mockResolvedValue({ package: { id: 'pkg-b' } }),
+        ensureCustomizationPackage: vi.fn().mockResolvedValue({ basePackageId: 'pkg-a', packageId: 'pkg-a.custom', namespace: 'pkg_custom', dependencyRange: '^1', created: true, writable: true }),
         updatePackage: vi.fn().mockResolvedValue({ package: { manifest: { id: 'com.example.pkg-a' } } }),
         deletePackage: vi.fn().mockResolvedValue({ deletedCount: 1 }),
         getMetaItems: vi.fn().mockResolvedValue({ items: [] }),
@@ -169,6 +170,7 @@ const WRITE_ROUTES: WriteCase[] = [
     { name: 'POST /:id/rollback', path: '/pkg-a/rollback', method: 'POST', body: { commitId: 'c1' }, target: (p) => p.rollbackToPackageCommit },
     { name: 'POST /:id/adopt-orphans', path: '/pkg-a/adopt-orphans', method: 'POST', target: (p) => p.reassignOrphanedMetadata },
     { name: 'POST /:id/duplicate', path: '/pkg-a/duplicate', method: 'POST', body: { targetPackageId: 'pkg-b' }, target: (p) => p.duplicatePackage },
+    { name: 'POST /:id/ensure-customization', path: '/pkg-a/ensure-customization', method: 'POST', target: (p) => p.ensureCustomizationPackage },
     { name: 'PATCH /:id (manifest)', path: '/pkg-a', method: 'PATCH', body: { name: 'renamed' }, target: (p) => p.updatePackage },
     // [#20492] The uninstall's allow-path acts in an organization: the door
     // refuses one that names none before anything else runs, as the persisted

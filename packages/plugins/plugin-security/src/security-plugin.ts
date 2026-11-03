@@ -2,7 +2,7 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { declaredHttpStatus } from '@objectstack/types';
-import { Plugin, PluginContext, POSTURE_LADDER, buildEffectiveObjectPermissions } from '@objectstack/core';
+import { Plugin, PluginContext, POSTURE_LADDER, buildEffectiveObjectPermissions, registryObjectPackageDisabled } from '@objectstack/core';
 import type { EffectiveObjectPermission, PermissionSet, RowLevelSecurityPolicy, TenantLayer0Verdict } from '@objectstack/spec/security';
 import { describeHighPrivilegeBits } from '@objectstack/spec/security';
 import type { AnchorBindingContext } from '@objectstack/spec/security';
@@ -287,6 +287,7 @@ import {
   type ControlledByParentWriteDenialLeg,
   type ControlledByParentWriteOutcome,
   type PositionGrantSummary,
+  type ExplainAccessRequest,
 } from '@objectstack/spec/contracts';
 import {
   type MatchesFilterOptions,
@@ -1629,32 +1630,21 @@ export class SecurityPlugin implements Plugin {
       // can resolve them by name when SecurityPlugin middleware queries
       // `metadata.list('permissions')`.
       permissions: this.bootstrapPermissionSets,
-      // ADR-0029 D7 — contribute the RBAC entries into the Setup app's
-      // `group_access_control` slot. This plugin owns the security catalog, so
-      // it ships its menu too; when the plugin is absent the entries don't
-      // appear. [ADR-0131 D3/D7] Each entry opens Setup's list of the registry
-      // type in its environment scope — the catalog has no object behind it.
+      // [ADR-0146 D1] No catalog entries: Setup carries no metadata catalog.
+      // Positions, capabilities and permission sets are listed in Studio's
+      // "All metadata" area (`/studio/~all/metadata`), where a position or a
+      // permission set is switched on and off on its own page (a capability
+      // has no switch), and an old Setup link to them redirects there. Setup
+      // keeps the people pages below (D7).
       navigationContributions: [
-        {
-          app: 'setup',
-          group: 'group_access_control',
-          priority: 100,
-          items: [
-            { id: 'nav_positions', type: 'url', label: 'Positions', url: '/apps/setup/metadata/position?scope=environment', icon: 'shield-check' },
-            { id: 'nav_capabilities', type: 'url', label: 'Capabilities', url: '/apps/setup/metadata/capability?scope=environment', icon: 'badge-check' },
-            { id: 'nav_permission_sets', type: 'url', label: 'Permission Sets', url: '/apps/setup/metadata/permission?scope=environment', icon: 'lock' },
-          ],
-        },
         {
           // [ADR-0146 D7] The two ASSIGNMENT pages — who holds a position, and
           // which users carry a permission set. They sit with the people they
-          // assign (People & Organization), not with the catalog above. The
-          // console binds each `componentRef` to its page (app-shell
-          // `builtinComponents`), and the pages read and write this plugin's
-          // assignment rows, so the entries live and die with this plugin like
-          // the catalog entries. Gate: none of their own, exactly like
-          // Positions / Permission Sets — the Setup app's `setup.access` and the
-          // ungated group anchor decide who sees them (ADR-0146 D7: the scope of
+          // assign (People & Organization). The console binds each
+          // `componentRef` to its page (app-shell `builtinComponents`), and the
+          // pages read and write this plugin's assignment rows, so the entries
+          // live and die with this plugin. Gate: none of their own — the Setup
+          // app's `setup.access` and the ungated group anchor decide who sees them (ADR-0146 D7: the scope of
           // `setup.access` and the delegated-administrator gate), and the writes
           // the pages make keep their own server-side gates (the ADR-0090 D12
           // delegated-admin gate among them). Priority 200 keeps them after
@@ -2383,9 +2373,13 @@ export class SecurityPlugin implements Plugin {
    * explaining ANOTHER user whose read of the record is refused (a declared
    * 4xx) is answered so too; a caller explaining itself keeps the write path's
    * notion (no row), so its explanation shows what its own doors do.
+   *
+   * The request is the contract's `ExplainAccessRequest` itself, so the
+   * method's declared type carries every member the body honours, the batch
+   * form `recordIds` included, and cannot drift from the published selector.
    */
   explainAccessForCaller(
-    request: { object: string; operation: string; userId?: string; recordId?: string },
+    request: ExplainAccessRequest,
     callerContext?: any,
   ): Promise<ExplainDecision> {
     // [#25223 cut 10] The body moved to `security-plugin-explain-access.ts` (see `ExplainAccessHost`).
@@ -3617,6 +3611,9 @@ export class SecurityPlugin implements Plugin {
       // seed reads only `name` / `enable` off each entry.
       allSchemas: () => ql?.registry?.getAllObjects?.(),
       schemaOf: (name: string) => ql?.getSchema?.(name),
+      // [#28877] The data plane's own predicate, as `/auth/me/permissions` hands
+      // it: a disabled package's objects leave the map `can()` reads.
+      isObjectPackageDisabled: registryObjectPackageDisabled(ql?.registry),
       logger: this.logger,
     }));
   }

@@ -22,7 +22,7 @@ import { templateSlotSource } from '@objectstack/spec/automation';
 import { EngineQueryOptionsSchema, DATA_ACTION_TO_API_OPERATION } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
-import type { IHttpServer, IObjectQLEngine, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
+import type { IHttpServer, IObjectQLEngine, InternalFieldEvaluationQuery, QueryEvaluationGate, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
 import { standardErrorCodeForHttpStatus, type MetadataProtocol } from '@objectstack/spec/api';
 // [#15942 / #16293] The confirmation member's SPELLING is the contract, so it
 // is imported, never hand-spelled: the door that refuses and the client that
@@ -39,6 +39,11 @@ import { checkApiExposure, type ApiExposureDecision, type ObjectApiDef } from '.
 // door's and the MCP stdio bridge's, imported rather than re-walked so this door
 // cannot disagree with them about which conditions a filter holds.
 import { relationConditionSites } from '@objectstack/core';
+// [ADR-0090 D10 rule 5] The agent forward credential: minted here, redeemed by
+// the doors that serve forward targets (the dispatcher, the REST face, the
+// identity mount). One module in `@objectstack/rest`, which all three reach.
+import { FORWARD_CREDENTIAL_HEADER, withForwardCredential, type ForwardAgentProvenance } from '@objectstack/rest';
+import { MCP_OAUTH_SCOPE_ACTIONS, MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_DATA_WRITE, MCP_OAUTH_SCOPE_METADATA_WRITE } from '@objectstack/spec/ai';
 // [#25653] The app-automation elevation mark an action body's context carries
 // — see `buildActionExecutionContext`.
 import { markAppAutomationElevation } from '@objectstack/core';
@@ -60,7 +65,8 @@ import {
 // Who may START a flow by name — the one rule the trigger door, this door and
 // the declared endpoint share (the maintainer's rulings, letters B and A, and
 // the flow's own `requiredPermissions`).
-import { flowStartRefusal } from './flow-start-admission.js';
+import { flowDeclaredRecordReads, flowRunsElevated, flowStartRefusal } from './flow-start-admission.js';
+import { validationFailure } from './validation-failure.js';
 // [ADR-0066 D4] The capability arithmetic the action gate and the flow start
 // gate share.
 import { missingCapabilities } from './required-capabilities.js';
@@ -83,7 +89,11 @@ import {
     reconcileActionRegistrations as reconcileActionRegistrationsPure,
     resolveActionHandlerKeys,
     standaloneActionOwnerKey,
+    SummaryRecomputeError,
 } from '@objectstack/objectql';
+import { earnedAnswerOf, staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
+// [#28861] A landed write answers its success to the action handler's code.
+import { answerLandedWritesDespiteStaleSummary, landedWriteAnswer } from './landed-write-answer.js';
 
 // [ADR-0110] The addressing vocabulary and the D5 reconciliation moved to
 // @objectstack/objectql (the engine owns the map they describe, and its
@@ -552,6 +562,19 @@ export async function refuseUnexposedDataAction(deps: ActionExecutionDeps,
     if (credentialRefusal) throw credentialRefusal;
 }
 
+/**
+ * Ask `engine` the `internal: true` evaluate refusal (`QueryEvaluationGate`
+ * on the `objectql` slot contract, `IObjectQLEngine`) for `object` and
+ * `query`, for every caller — or nothing, when the value handed in is not an
+ * engine that carries it (a test double, a foreign engine, the raw driver the
+ * MCP multi-env path threads through), which then answers for itself.
+ */
+function assertNoInternalFieldEvaluatedBy(engine: unknown, object: string, query: InternalFieldEvaluationQuery): void {
+    const gate = (engine as Partial<QueryEvaluationGate> | null | undefined)?.assertNoInternalFieldEvaluated;
+    if (typeof gate !== 'function') return;
+    gate.call(engine, object, query);
+}
+
 export async function callData(deps: ActionExecutionDeps,
     requestContext: HttpProtocolContext,
     action: string,
@@ -591,7 +614,15 @@ export async function callData(deps: ActionExecutionDeps,
             return await protocol.createData({ object: params.object, data: params.data, ...(scopeId ? { environmentId: scopeId } : {}), context: executionContext });
         }
         if (ql && typeof ql.insert === 'function') {
-            const res = await ql.insert(params.object, params.data, qlOpts);
+            // [#28782] A row stored under a parent roll-up the engine could
+            // not recompute (`ERR_SUMMARY_RECOMPUTE`, "the triggering records
+            // WERE written") builds this arm's answer from the refusal's
+            // `written` and carries it on the refusal, as the protocol's
+            // `createData` does since #28781 (`withEarnedAnswer`), so a door
+            // reading `earnedAnswerOf` answers the write's success here too.
+            let stale: SummaryRecomputeRefusal | undefined;
+            const res = await ql.insert(params.object, params.data, qlOpts)
+                .catch((e: unknown) => (stale = staleSummaryRefusalOrThrow(e)).written as any);
             const record = { ...params.data, ...res };
             // The engine's write result keeps the stored row whole, so this
             // fallback mouth owes the same write-response rules the protocol
@@ -599,9 +630,15 @@ export async function callData(deps: ActionExecutionDeps,
             // Fail closed: with no schema to judge the fields by, no record
             // is echoed at all — only the receipt.
             const schema = await writeResponseSchema();
-            if (!schema) return { object: params.object, id: record.id };
+            if (!schema) {
+                const receipt = { object: params.object, id: record.id };
+                if (stale) throw withEarnedAnswer(stale, receipt);
+                return receipt;
+            }
             omitInternalFieldsFromWriteResponse(schema, record);
-            return { object: params.object, id: record.id, record };
+            const answer = { object: params.object, id: record.id, record };
+            if (stale) throw withEarnedAnswer(stale, answer);
+            return answer;
         }
         throw { statusCode: 503, message: 'Data service not available' };
     }
@@ -671,15 +708,24 @@ export async function callData(deps: ActionExecutionDeps,
             // reported as an internal fault and taken to the error reporter
             // with it.
             if (!existing) throw recordNotFoundError(params.object, params.id);
-            await ql.update(params.object, params.data, findOpts({ where: { id: params.id } }));
+            // [#28782] The create arm's carrier, for an update that landed.
+            let stale: SummaryRecomputeRefusal | undefined;
+            await ql.update(params.object, params.data, findOpts({ where: { id: params.id } }))
+                .catch((e: unknown) => { stale = staleSummaryRefusalOrThrow(e); });
             const record = { ...existing, ...params.data };
             // The echo carries the caller's own patch: a credential-class value
             // in it is masked like a read of the stored row would be. Fail
             // closed, as on create: no schema ⇒ the receipt only.
             const schema = await writeResponseSchema();
-            if (!schema) return { object: params.object, id: params.id };
+            if (!schema) {
+                const receipt = { object: params.object, id: params.id };
+                if (stale) throw withEarnedAnswer(stale, receipt);
+                return receipt;
+            }
             omitInternalFieldsFromWriteResponse(schema, record);
-            return { object: params.object, id: params.id, record };
+            const answer = { object: params.object, id: params.id, record };
+            if (stale) throw withEarnedAnswer(stale, answer);
+            return answer;
         }
         throw { statusCode: 503, message: 'Data service not available' };
     }
@@ -738,7 +784,10 @@ export async function callData(deps: ActionExecutionDeps,
             if (!all) all = [];
             const existing = (all as any[]).find((i: any) => i.id === params.id);
             if (!existing) throw recordNotFoundError(params.object, params.id);
-            await ql.delete(params.object, findOpts({ where: { id: params.id } }));
+            // [#28782] The create arm's carrier, for a delete that landed.
+            let stale: SummaryRecomputeRefusal | undefined;
+            await ql.delete(params.object, findOpts({ where: { id: params.id } }))
+                .catch((e: unknown) => { stale = staleSummaryRefusalOrThrow(e); });
             // [#5581] `success`, not `deleted`. The success body was the other
             // half of the same "one `callData`, two answers" defect #5138 fixed
             // on the not-found side: the protocol path returns the SPEC's shape
@@ -757,7 +806,9 @@ export async function callData(deps: ActionExecutionDeps,
             // Teaching consumers to read `success ?? deleted` would have been
             // the contract-first-forbidden shape — two spellings of one fact,
             // kept alive by every reader.
-            return { object: params.object, id: params.id, success: true };
+            const answer = { object: params.object, id: params.id, success: true };
+            if (stale) throw withEarnedAnswer(stale, answer);
+            return answer;
         }
         throw { statusCode: 503, message: 'Data service not available' };
     }
@@ -812,6 +863,11 @@ export async function callData(deps: ActionExecutionDeps,
             if (exposureGated) {
                 await refuseUnservedRelationTargets(deps, requestContext, ql, params.object, bag.where, scopeId);
             }
+            // …and the `internal: true` evaluate refusal for every caller, as
+            // the protocol path asks it inside `findData` — the engine's one
+            // definition (see the `aggregate` arm). A raw driver on the MCP
+            // multi-env path carries no such member and is not an engine.
+            assertNoInternalFieldEvaluatedBy(ql, params.object, bag);
             let all = await ql.find(params.object, findOpts(bag));
             if (!Array.isArray(all) && all && (all as any).value) all = (all as any).value;
             if (!all) all = [];
@@ -838,7 +894,7 @@ export async function callData(deps: ActionExecutionDeps,
         const engine = (await deps.getObjectQL(requestContext, scopeId))
             ?? await deps.resolveService(requestContext, 'objectql', scopeId).catch(() => null);
         if (engine && typeof engine.aggregate === 'function') {
-            // [#22823] This arm takes no protocol, so it is the engine's door on
+            // [#22823] This arm runs on no protocol data method, so it is the engine's door on
             // every assembly: each nested-relation condition's TARGET in `where`
             // is asked before the engine aggregates, as the query fallback asks
             // it (the engine lowers relation conditions in `where` only, never
@@ -846,6 +902,23 @@ export async function callData(deps: ActionExecutionDeps,
             if (exposureGated) {
                 await refuseUnservedRelationTargets(deps, requestContext, engine, params.object, params.where, scopeId);
             }
+            // The `internal: true` evaluate refusal — a filter (`where`, an
+            // aggregation's own `filter`), a group key or an aggregation operand
+            // on such a field — asked of the ENGINE's one definition
+            // (`QueryEvaluationGate` on the `objectql` slot contract), the one
+            // the data door asks too, so the refusal is the door's word for
+            // word whether or not this host registers a `protocol` service.
+            // `engine.aggregate` applies it itself to every non-system caller;
+            // it is asked here as well so a system context this arm admits is
+            // refused like every caller at the door. ⛔ Never a copy of the
+            // walk here (route-ownership rule 1). The probe tolerates a test
+            // double or foreign engine without the member, which then answers
+            // for itself.
+            assertNoInternalFieldEvaluatedBy(engine, params.object, {
+                where: params.where,
+                groupBy: params.groupBy,
+                aggregations: params.aggregations,
+            });
             const rows = await engine.aggregate(
                 params.object,
                 {
@@ -1182,6 +1255,16 @@ const API_FORWARD_HEADER_ALLOWLIST: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * [ADR-0090 D10 rule 5] The caller's identity headers, of
+ * {@link API_FORWARD_HEADER_ALLOWLIST}: dropped from a forward that carries an
+ * agent forward credential, so the agent's token never reaches the target and
+ * the target reads exactly one credential, the one the server minted.
+ */
+const API_FORWARD_IDENTITY_HEADERS: ReadonlySet<string> = new Set([
+    'authorization', 'cookie', 'x-admin-session-token', 'x-api-key',
+]);
+
+/**
  * Marks a forwarded request so a `target` that is itself an action door
  * cannot loop: the door refuses a request already carrying it.
  */
@@ -1272,6 +1355,31 @@ export function foldsApiDecisionOutputs(action: any): boolean {
 }
 
 /**
+ * Which record input does this partly built forward `path` still lack, by its
+ * `{field}` tokens? `recordId` when the caller named no record, otherwise the
+ * field the record has no value for; `undefined` when every token resolved.
+ * Read after `${…}` and `{{…}}` are refused, so a brace pair left here is a
+ * `{field}` token.
+ */
+function unresolvedApiTargetRecordInput(path: string, routedRecordId: unknown): string | undefined {
+    const match = /\{([a-z_][a-z0-9_]*)\}/i.exec(path);
+    if (!match) return undefined;
+    return routedRecordId === undefined ? 'recordId' : match[1];
+}
+
+/** The refusal for a `target` record token the dispatch inputs left unresolved: nothing is forwarded. */
+function unresolvedApiTargetRecordRefusal(name: string, target: string, missing: string): ApiActionRequestRefusal {
+    return {
+        status: 400,
+        message: missing === 'recordId'
+            ? `Action '${name}' has a \`target\` ('${target}') that names its record, and no \`recordId\` was given. ` +
+                `Pass the id of the record to run it on as \`recordId\`. The request was not sent.`
+            : `Action '${name}' has a \`target\` ('${target}') that reads \`${missing}\` from its record, and this ` +
+                `record has no value for it. The request was not sent.`,
+    };
+}
+
+/**
  * Assemble the request a same-origin `type: 'api'` action makes — method,
  * path and JSON body — from its DECLARATION and the dispatch inputs, by the
  * same rules the console's api handler applies at a click
@@ -1281,6 +1389,10 @@ export function foldsApiDecisionOutputs(action: any): boolean {
  *     the caller (`ctx.recordId`, `ctx.user.id`, `ctx.org.id`; `ctx.origin` /
  *     `ctx.apiBase` are `''` on the server, as they are for a same-origin
  *     console), values percent-encoded; then `{field}` from the subject row.
+ *     A record token neither can fill — no `recordId` given (an empty one is
+ *     none), or a row with no value for the field — is REFUSED naming the
+ *     missing input, never blanked or forwarded as written: that path reaches
+ *     no route, and its 404 would say the endpoint does not exist.
  *  2. The body: the params bag, flat or under `bodyShape.wrap`; the `outputs.*`
  *     fold (#3447); `recordIdParam` seeded from the subject row's
  *     `recordIdField` (default `id`) — or REFUSED when the row cannot supply it
@@ -1313,23 +1425,37 @@ export function buildApiActionRequest(
         : undefined;
 
     // ── 1. the path ──
+    // An empty id is no id: `${ctx.recordId}` and `{id}` stay unresolved, and
+    // are refused below by name, rather than blanked into a path naming no record.
+    const routedRecordId: unknown = input.recordId || (input.record as any)?.id || undefined;
     let path = substituteApiTargetTokens(target, {
         param: input.params,
         ctx: {
             origin: '',
             apiBase: '',
-            recordId: input.recordId ?? (input.record as any)?.id,
+            recordId: routedRecordId,
             user: { id: ec.userId, email: ec.email },
             org: { id: organizationId },
         },
     });
-    if (input.record && /\{[a-z_][a-z0-9_]*\}/i.test(path)) {
-        const row = input.record;
-        path = path.replace(/\{([a-z_][a-z0-9_]*)\}/gi, (_m, k: string) => {
-            const v = row[k];
-            return v == null ? '' : encodeURIComponent(String(v));
+    if (/\{[a-z_][a-z0-9_]*\}/i.test(path)) {
+        // Without a row only `{id}` has a source: the routed `recordId`, as
+        // for `recordIdParam` below. A field with no value is LEFT IN PLACE,
+        // never blanked: the refusal below names it, and nothing is forwarded.
+        const row: Record<string, unknown> = input.record && typeof input.record === 'object' ? input.record : {};
+        path = path.replace(/\{([a-z_][a-z0-9_]*)\}/gi, (m, k: string) => {
+            const v = row[k] ?? (k === 'id' ? routedRecordId : undefined);
+            return v == null || v === '' ? m : encodeURIComponent(String(v));
         });
     }
+    // A record token left unresolved — the caller named no record, or the
+    // record has no value for the field the path reads — is refused BEFORE the
+    // forward, naming the missing input: a forward with a hole in its path
+    // reaches no route, and its 404 would tell the caller the endpoint does
+    // not exist instead of what they did not send. `${ctx.recordId}` is read
+    // here, ahead of the browser-only refusal below, which would otherwise
+    // claim it; a `{field}` token after it, so a `{{page.x}}` keeps that one.
+    if (path.includes('${ctx.recordId}')) return unresolvedApiTargetRecordRefusal(name, target, 'recordId');
     if (/\$\{[\w.]+\}|\{\{/.test(path)) {
         return {
             status: 400,
@@ -1340,6 +1466,8 @@ export function buildApiActionRequest(
                 `exists only in the browser). Pass the value as a param, or call the target from the console.`,
         };
     }
+    const missingRecordInput = unresolvedApiTargetRecordInput(path, routedRecordId);
+    if (missingRecordInput) return unresolvedApiTargetRecordRefusal(name, target, missingRecordInput);
     if (!isSameOriginApiTarget(path)) {
         return { status: 400, message: `Action '${name}' interpolated its \`target\` to '${path}', which is not a same-origin path.` };
     }
@@ -1369,8 +1497,16 @@ export function buildApiActionRequest(
     // left out. Without a row (a record-less dispatch) only `id` can be seeded,
     // from the routed `recordId`; anything else has no source and the request
     // goes without it, exactly as a console click from a record-less location.
+    //
+    // [#29173] "Record-less" has ONE meaning here, the one the path half above
+    // uses: the dispatch names no record (`routedRecordId` is empty). The
+    // subject load hands a record-less dispatch an EMPTY object as its
+    // `ctx.record`, and that `{}` is not a row: read as one, every
+    // `execution: 'aggregate'` api action declaring `recordIdParam` was refused
+    // for lacking `id`, and its target never ran. A dispatch that names a record
+    // keeps both #8018 refusals for a row that lacks the field or holds null.
     const recordIdParam: string | undefined = typeof action?.recordIdParam === 'string' && action.recordIdParam ? action.recordIdParam : undefined;
-    if (recordIdParam) {
+    if (recordIdParam && routedRecordId) {
         const field: string = typeof action?.recordIdField === 'string' && action.recordIdField ? action.recordIdField : 'id';
         const row: Record<string, unknown> | undefined =
             input.record && typeof input.record === 'object' ? input.record
@@ -1450,16 +1586,32 @@ export type ApiForwardTargetDoor = 'identity' | 'mcp' | 'platform';
  * Read by `run_action` and the REST action door (the refusal, before any
  * forward) and by `list_actions` (the same refusal, carried on the listing as
  * the action's `unavailable` mark), so the listing and the run door cannot
- * disagree. ⛔ This table states what each door accepts today; it changes no
- * door. Letting an OAuth-connected agent reach a door that does not accept its
- * token is a separate decision (a server-built forward credential), never a
- * new cell here.
+ * disagree. ⛔ This table states what each door accepts of the CALLER'S OWN
+ * credential; it changes no door. Where an agent reaches a door that does not
+ * accept its token, the forward carries a credential the server mints instead,
+ * and only at the cells {@link API_FORWARD_AGENT_CREDENTIAL_DOORS} names.
  */
 const API_FORWARD_DOOR_ACCEPTS: Readonly<Record<ApiForwardTargetDoor, ReadonlySet<ApiForwardCredentialKind>>> = {
     identity: new Set<ApiForwardCredentialKind>(['session']),
     mcp: new Set<ApiForwardCredentialKind>(['session', 'api_key', 'oauth']),
     platform: new Set<ApiForwardCredentialKind>(['session', 'api_key']),
 };
+
+/**
+ * [ADR-0090 D10 rule 5] The cells of {@link API_FORWARD_DOOR_ACCEPTS} that flip
+ * from "refuse by name" to "accept with a forward credential": an OAuth-connected
+ * agent at an identity route and at a platform route. The forward then carries
+ * a credential the server mints for that one forward
+ * (`@objectstack/rest` `withForwardCredential`), never the agent's token, and
+ * the target resolves it to the same agent principal. The platform cell is
+ * bounded by the scope-family rule ({@link apiForwardScopeFamilyRefusal}).
+ *
+ * ⛔ Exactly these two. `api_key` × `identity` keeps refusing by name: an API
+ * key is its owner's credential, not an agent principal (ADR-0090 D10, the
+ * 2026-09-16 note), so there is no agent for a forward credential to carry.
+ * `oauth` × `mcp` needs none: that door honours the caller's own token.
+ */
+const API_FORWARD_AGENT_CREDENTIAL_DOORS: ReadonlySet<ApiForwardTargetDoor> = new Set<ApiForwardTargetDoor>(['identity', 'platform']);
 
 /** The door a forward `path` (or an action's declared `target`) is served by. */
 function apiForwardTargetDoor(path: string): ApiForwardTargetDoor {
@@ -1470,19 +1622,60 @@ function apiForwardTargetDoor(path: string): ApiForwardTargetDoor {
     return 'platform';
 }
 
+/**
+ * The metadata door (`/api/v1/meta/…`, plain or environment-scoped). A
+ * state-changing forward to it stays outside the forward credential (ADR-0090
+ * D10 rule 5, the scope-family rule's third clause): an agent authors metadata
+ * through the MCP authoring tools under `metadata:write`, which save drafts a
+ * person publishes, never through an action forward.
+ */
+function isMetadataDoorTarget(path: string): boolean {
+    return /^\/api\/v1(?:\/environments\/[^/]+)?\/meta(?:[/?]|$)/.test(path);
+}
+
+/**
+ * The agent a forward credential would carry for this request: the agent
+ * principal the MCP door resolved from a verified OAuth access token. `undefined`
+ * for every other caller, and for an OAuth caller the door did not resolve to an
+ * agent (a token naming no client), whom the forward has no agent to carry for.
+ */
+export function apiForwardAgentOf(requestContext: HttpProtocolContext | undefined): ForwardAgentProvenance | undefined {
+    const ec: any = requestContext?.executionContext;
+    if (!ec || ec.principalKind !== 'agent' || !Array.isArray(ec.oauthScopes)) return undefined;
+    const userId = typeof ec.onBehalfOf?.userId === 'string' ? ec.onBehalfOf.userId : ec.userId;
+    const clientId = ec.performedBy?.clientId;
+    if (typeof userId !== 'string' || !userId || typeof clientId !== 'string' || !clientId) return undefined;
+    return {
+        userId,
+        clientId,
+        scopes: (ec.oauthScopes as unknown[]).filter((s): s is string => typeof s === 'string'),
+        ...(typeof ec.tenantId === 'string' && ec.tenantId ? { organizationId: ec.tenantId } : {}),
+    };
+}
+
 /** The kind of credential that admitted this request's caller (see {@link ApiForwardCredentialKind}). */
 export function apiForwardCredentialKind(requestContext: HttpProtocolContext | undefined): ApiForwardCredentialKind | undefined {
     if (Array.isArray(requestContext?.executionContext?.oauthScopes)) return 'oauth';
     return requestContext?.admission?.credential;
 }
 
-/** A forward refusal: the status and standard code the target would have answered, and the sentence that says why. */
-export type ApiForwardCredentialRefusal = { status: 401; code: string; message: string };
+/**
+ * A forward refusal: the status and standard code, and the sentence that says
+ * why. `401` when the target's door cannot read the caller's credential (the
+ * status the target would have answered); `403` when the scope-family rule
+ * refuses an agent the consent did not grant the forward's family, or when the
+ * target's door accepts the credential and its per-object gate refuses the
+ * request for it ({@link apiForwardDataDoorGuardRefusal}, that gate's own code
+ * and sentence).
+ */
+export type ApiForwardCredentialRefusal = { status: 401 | 403; code: string; message: string };
 
 /**
  * The refusal for running `action` by forward with this caller's credential —
- * `null` when the target's door accepts it ({@link API_FORWARD_DOOR_ACCEPTS}),
- * or when the action is not a same-origin `type: 'api'` action at all.
+ * `null` when the target's door accepts it ({@link API_FORWARD_DOOR_ACCEPTS})
+ * and the target's per-object gate would not refuse the request for it
+ * ({@link apiForwardDataDoorGuardRefusal}), or when the action is not a
+ * same-origin `type: 'api'` action at all.
  *
  * `target` is the forward's path, which decides the door; the listing passes
  * the declared `target`, whose door prefix is the same before its tokens are
@@ -1502,12 +1695,131 @@ export function apiForwardCredentialRefusal(
     const kind = apiForwardCredentialKind(requestContext);
     if (!kind) return null;
     const door = apiForwardTargetDoor(target);
-    if (API_FORWARD_DOOR_ACCEPTS[door].has(kind)) return null;
+    if (API_FORWARD_DOOR_ACCEPTS[door].has(kind)) return apiForwardDataDoorGuardRefusal(kind, action, target);
     const path = (typeof action?.target === 'string' ? action.target : target).split('?')[0]!;
+    // [ADR-0090 D10 rule 5] The two flipped cells: an agent principal is carried
+    // by a forward credential, bounded by the scope-family rule.
+    if (kind === 'oauth' && API_FORWARD_AGENT_CREDENTIAL_DOORS.has(door)) {
+        const agent = apiForwardAgentOf(requestContext);
+        if (agent) return apiForwardScopeFamilyRefusal(agent.scopes, action, target, path);
+    }
     const message = kind === 'api_key'
         ? apiActionIdentityRouteKeyRefusal(action, path)
         : apiActionOAuthForwardRefusal(action, path, door);
     return { status: 401, code: standardErrorCodeForHttpStatus(401), message };
+}
+
+/**
+ * [#28943] The data-door operation a forward to `/api/v1/data/<object>[/…]`
+ * asks, by the door's own operation names — `undefined` for a path the data
+ * door does not serve. A safe method (`GET`, `HEAD`) and the door's two reads
+ * by `POST` (`/:object/query`, `/:object/:id/page`) are reads; `PATCH` and
+ * `PUT` are `update`, `DELETE` is `delete`, `POST` to the collection is
+ * `create`, and every other `POST` (`batch`, `createMany`, `import`, `clone`,
+ * …) is a write the door names on its own route. Only the read-or-write
+ * reading is load-bearing: the per-object rule this feeds refuses every
+ * operation it does not list as a read.
+ */
+function apiForwardDataDoorOperation(method: string, path: string): { object: string; operation: string } | undefined {
+    const m = /^\/api\/v1(?:\/environments\/[^/]+)?\/data\/([^/?#]+)(?:\/([^?#]*))?/.exec(path);
+    if (!m) return undefined;
+    const object = m[1]!;
+    const rest = (m[2] ?? '').replace(/\/+$/, '').split('/').filter(Boolean);
+    const verb = method.toUpperCase();
+    if (verb === 'GET' || verb === 'HEAD') return { object, operation: rest.length ? 'get' : 'list' };
+    if (verb === 'PATCH' || verb === 'PUT') return { object, operation: 'update' };
+    if (verb === 'DELETE') return { object, operation: 'delete' };
+    if (rest.length === 0) return { object, operation: 'create' };
+    if (rest.length === 1 && rest[0] === 'query') return { object, operation: 'list' };
+    if (rest.length === 2 && rest[1] === 'page') return { object, operation: 'get' };
+    return { object, operation: rest[rest.length - 1]! };
+}
+
+/**
+ * [#28943] A forward the target's door ACCEPTS the caller's credential for,
+ * which the target's per-object gate then refuses for that credential: today
+ * one rule, a write to `sys_api_key` from a principal an API key admitted
+ * (`@objectstack/core` `apiKeyManagementCredentialRefusal`, the predicate
+ * every data door's gate asks, read here and never restated). The refusal is
+ * the rule's own: its `403`, its `PERMISSION_DENIED`, its sentence. So
+ * `list_actions` marks `revoke_api_key` unavailable to an `osk_` caller with
+ * the answer the target gives, and the run doors answer that same refusal
+ * before forwarding instead of after. A session caller, and a caller whose
+ * door recorded no credential, are never refused here (the rule is positive
+ * on `api_key`).
+ *
+ * `method` is the forward's (`action.method`, default `POST`, as
+ * {@link buildApiActionRequest} reads it), so the listing (the declared
+ * `target`, tokens unfilled) and the run door (the filled path) judge the same
+ * request: the object segment is never a token.
+ */
+function apiForwardDataDoorGuardRefusal(
+    kind: ApiForwardCredentialKind,
+    action: any,
+    target: string,
+): ApiForwardCredentialRefusal | null {
+    if (kind !== 'api_key') return null;
+    const request = apiForwardDataDoorOperation(String(action?.method || 'POST'), target);
+    if (!request) return null;
+    const refusal = apiKeyManagementCredentialRefusal({ ...request, credential: kind });
+    return refusal ? { status: refusal.status, code: refusal.code, message: refusal.message } : null;
+}
+
+/**
+ * [ADR-0090 D10 rule 5, the scope-family rule] Whether an agent's consented
+ * scopes cover a forward outside MCP — `null` when they do, else the refusal,
+ * given by name before anything is minted or sent.
+ *
+ * Outside MCP there are no tool families, and a target that gates on system
+ * permissions only would see the agent's `systemPermissions`, which under
+ * `actions:execute` are the delegating user's whole list. So the forward's
+ * method names a data family the agent must ALSO hold:
+ *
+ *  1. every forward credential needs `actions:execute` (the action doors serve
+ *     an agent only under it, so this is the floor, restated where it is read);
+ *  2. a safe method (`GET`, `HEAD`) needs `data:read` or `data:write`, any
+ *     other method `data:write` — a read-consented agent can read through an
+ *     action and can never change state through one, at any target;
+ *  3. a state-changing method on the metadata door is outside the flip and
+ *     keeps refusing by name ({@link isMetadataDoorTarget}).
+ *
+ * `method` is the forward's (`action.method`, default `POST`, as
+ * {@link buildApiActionRequest} reads it), so the listing and the run door
+ * judge the same request.
+ */
+function apiForwardScopeFamilyRefusal(
+    scopes: readonly string[],
+    action: any,
+    target: string,
+    path: string,
+): ApiForwardCredentialRefusal | null {
+    const method = String(action?.method || 'POST').toUpperCase();
+    const safe = method === 'GET' || method === 'HEAD';
+    const name = action?.name ?? 'unknown';
+    if (!safe && isMetadataDoorTarget(target)) {
+        return {
+            status: 403,
+            code: standardErrorCodeForHttpStatus(403),
+            message:
+                `Action '${name}' sends a ${method} request to the metadata endpoint ('${path}'), and an AI agent ` +
+                `does not change metadata through an action. The action was not run. An agent connected with the '` +
+                `${MCP_OAUTH_SCOPE_METADATA_WRITE}' scope builds metadata as drafts through its authoring tools, and a person publishes them.`,
+        };
+    }
+    const needs = !scopes.includes(MCP_OAUTH_SCOPE_ACTIONS)
+        ? [MCP_OAUTH_SCOPE_ACTIONS]
+        : safe
+            ? (scopes.includes(MCP_OAUTH_SCOPE_DATA_READ) || scopes.includes(MCP_OAUTH_SCOPE_DATA_WRITE) ? [] : [MCP_OAUTH_SCOPE_DATA_READ])
+            : (scopes.includes(MCP_OAUTH_SCOPE_DATA_WRITE) ? [] : [MCP_OAUTH_SCOPE_DATA_WRITE]);
+    if (needs.length === 0) return null;
+    return {
+        status: 403,
+        code: standardErrorCodeForHttpStatus(403),
+        message:
+            `Action '${name}' sends a ${method} request to '${path}', which an AI agent may run only with the ` +
+            `'${needs[0]}' scope, and this connection was not granted it. The action was not run. Reconnect the ` +
+            `agent and grant '${needs[0]}', or ask a person signed in to the app to run it.`,
+    };
 }
 
 /**
@@ -1658,6 +1970,16 @@ export function apiActionForwardLoopError(action: any, mark: string): string {
  * A caller whose credential the target's door cannot read is never
  * forwarded ({@link apiForwardCredentialRefusal}).
  *
+ * [ADR-0090 D10 rule 5] An AI agent principal is the one caller whose own
+ * credential is never carried. At the two cells the table flips
+ * ({@link API_FORWARD_AGENT_CREDENTIAL_DOORS}) the forward drops every caller
+ * identity header and carries a forward credential instead: minted here, after
+ * every gate of the action door has passed, bound to this one method, path and
+ * action run, spent by its first presentation and revoked when the target
+ * answers (`@objectstack/rest` `withForwardCredential`). The target resolves it
+ * to the same agent principal. And no credential-rotation header comes back to
+ * an agent: whatever the target mints stays with the target.
+ *
  * Relayed back: the status, the JSON body, and the credential-rotation
  * headers a target like `/admin/impersonate-user` emits — `set-auth-token` /
  * `set-admin-session-token` (the bearer lane) and `Set-Cookie` (the cookie
@@ -1671,14 +1993,14 @@ export async function forwardApiAction(
     inject: (url: string, init: RequestInit) => Promise<Response>,
     requestContext: HttpProtocolContext,
     req: ApiActionRequest,
-    mark: { objectName: string; actionName: string; target?: string },
+    mark: { objectName: string; actionName: string; target?: string; recordId?: string },
 ): Promise<ApiActionForwardAnswer> {
     // A caller whose credential the target's door cannot read (the table,
     // {@link API_FORWARD_DOOR_ACCEPTS}) is refused here, before the target is
     // called, with the status the target would have answered and the sentence
     // that says why. Both doors relay it as they relay a target's refusal.
     const refusal = apiForwardCredentialRefusal(
-        requestContext, { type: 'api', name: mark.actionName, target: mark.target }, req.path,
+        requestContext, { type: 'api', name: mark.actionName, target: mark.target, method: req.method }, req.path,
     );
     if (refusal) {
         return {
@@ -1691,10 +2013,18 @@ export async function forwardApiAction(
         requestContext?.request?.headers && typeof requestContext.request.headers === 'object'
             ? requestContext.request.headers
             : {};
+    // [ADR-0090 D10 rule 5] The agent this forward carries, when the caller is
+    // one and the target's door is a flipped cell; the refusal above has
+    // already answered every other agent forward.
+    const agent = apiForwardCredentialKind(requestContext) === 'oauth'
+        && API_FORWARD_AGENT_CREDENTIAL_DOORS.has(apiForwardTargetDoor(req.path))
+        ? apiForwardAgentOf(requestContext)
+        : undefined;
     const headers: Record<string, string> = {};
     for (const [k, v] of Object.entries(incoming)) {
         const key = k.toLowerCase();
         if (!API_FORWARD_HEADER_ALLOWLIST.has(key) || v == null) continue;
+        if (agent && API_FORWARD_IDENTITY_HEADERS.has(key)) continue;
         headers[key] = Array.isArray(v) ? v.join(', ') : String(v);
     }
     headers.accept = 'application/json';
@@ -1705,7 +2035,21 @@ export async function forwardApiAction(
         init.body = JSON.stringify(req.body);
     }
     const host = typeof incoming.host === 'string' && incoming.host ? incoming.host : 'localhost';
-    const res = await inject(`http://${host}${req.path}`, init);
+    const url = `http://${host}${req.path}`;
+    const res = agent
+        ? await withForwardCredential(
+            {
+                method: req.method,
+                path: req.path,
+                run: { objectName: mark.objectName, actionName: mark.actionName, ...(mark.recordId ? { recordId: mark.recordId } : {}) },
+                agent,
+            },
+            (handle) => {
+                headers[FORWARD_CREDENTIAL_HEADER] = handle;
+                return inject(url, init);
+            },
+        )
+        : await inject(url, init);
 
     const text = await res.text();
     let body: any;
@@ -1734,6 +2078,8 @@ export async function forwardApiAction(
         };
     }
     const relayed: Record<string, string | string[]> = {};
+    // [ADR-0090 D10 rule 5] Nothing a target mints reaches an agent caller.
+    if (agent) return { status: res.status, body, headers: relayed };
     for (const name of API_FORWARD_RELAYED_RESPONSE_HEADERS) {
         const value = res.headers.get(name);
         if (value) relayed[name] = value;
@@ -1816,8 +2162,15 @@ export function apiActionRefusalMembers(answer: ApiActionForwardAnswer): Record<
  */
 export function apiActionForwardRefusal(action: any, answer: ApiActionForwardAnswer): Error {
     const body = answer.body;
+    // [#28657] Three places a target writes its sentence: the ADR-0112
+    // envelope's `error.message`, a bare `message` (better-auth), and a bare
+    // STRING `error` beside a top-level `code` — the approvals decision routes'
+    // `{ code, error }`, whose prescription (which decision outputs are
+    // required to approve, why this actor may not decide) was replaced by the
+    // fallback below before this read it.
     const message: string =
         (body && typeof body === 'object' && typeof body.error?.message === 'string' && body.error.message) ||
+        (body && typeof body === 'object' && typeof body.error === 'string' && body.error) ||
         (body && typeof body === 'object' && typeof body.message === 'string' && body.message) ||
         `Action '${action?.name ?? 'unknown'}' — its target answered HTTP ${answer.status}`;
     const code: string =
@@ -1996,6 +2349,68 @@ function flowActionRowIdKeys(action: any, objectName: string): Set<string> {
 function flowActionCallerParamKeys(action: any, objectName: string, params: Record<string, unknown>): string[] {
     const rowIdKeys = flowActionRowIdKeys(action, objectName);
     return Object.keys(params).filter((key) => !rowIdKeys.has(key));
+}
+
+/**
+ * The row slots the CALLER's own `params` fill at this door, as flow start
+ * admission's third question reads them ({@link refuseUnreadableFlowStartRecords}):
+ * each row-id key ({@link flowActionRowIdKeys}) the caller's bag names, whose
+ * value reaches the run over the seeded id because the caller's params win
+ * ({@link seedFlowActionParams}). Two cases name none:
+ *
+ *  - an action whose `recordIdField` names a field other than `id`: the door
+ *    seeds every row slot with that field's VALUE, never an id of this
+ *    object, so there is no row of this object to load a slot's value as;
+ *  - a value equal to the routed `recordId` this door's subject load already
+ *    delivered (an object-bound action): that row was judged by that load.
+ */
+function flowActionCallerRecordKeys(
+    action: any,
+    objectName: string,
+    params: Record<string, unknown>,
+    recordId: string | undefined,
+    subject: ActionSubjectRecordLoad,
+): Array<readonly [string, unknown]> {
+    const idField: string = typeof action?.recordIdField === 'string' && action.recordIdField ? action.recordIdField : 'id';
+    if (idField !== 'id') return [];
+    const judged = recordId !== undefined && recordId !== '' && !isObjectLessActionKey(objectName) && !subject.recordLoadDenied
+        ? recordId
+        : undefined;
+    const keys: Array<readonly [string, unknown]> = [];
+    for (const key of flowActionRowIdKeys(action, objectName)) {
+        if (!Object.prototype.hasOwnProperty.call(params, key)) continue;
+        const value = params[key];
+        if (judged !== undefined && (typeof value === 'string' || typeof value === 'number') && String(value) === judged) continue;
+        keys.push([key, value]);
+    }
+    return keys;
+}
+
+/**
+ * The inputs this door hands a run from the REQUEST, each with the value the
+ * run receives under it ({@link seedFlowActionParams}'s bag), as flow start
+ * admission's third question judges them against the object the flow's own
+ * definition reads them from ({@link refuseUnreadableFlowStartRecords}): every
+ * key of the caller's own `params`, and each row slot carrying the routed
+ * record id. Two kinds of key are left out, because their values come from a
+ * row the caller has already shown it can read, not from the request:
+ *
+ *  - the subject row's own fields, which the bag carries under their names;
+ *  - the row slots of an action whose `recordIdField` names a field other than
+ *    `id`, which carry that field's value.
+ */
+function flowActionStartInputs(
+    action: any,
+    objectName: string,
+    params: Record<string, unknown>,
+    runParams: Record<string, unknown>,
+): Array<readonly [string, unknown]> {
+    const keys = new Set<string>(Object.keys(params));
+    const idField: string = typeof action?.recordIdField === 'string' && action.recordIdField ? action.recordIdField : 'id';
+    if (idField === 'id') {
+        for (const key of flowActionRowIdKeys(action, objectName)) keys.add(key);
+    }
+    return [...keys].map((key) => [key, runParams[key]] as const);
 }
 
 /**
@@ -2214,6 +2629,32 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
             code: startRefusal.code,
         });
     }
+    // Flow start admission's third question, the row the start addresses
+    // (`flow-start-admission.ts`): the routed row was judged by this door's
+    // subject load upstream, so what is asked here is every row slot the
+    // CALLER's own params fill, whose value reaches the run over that row's id.
+    // Each is loaded in the caller's scope by the read the subject load makes
+    // (the request's own driver, environment and identity, as both entrances
+    // load the routed row), and refused with that load's 404 before the run
+    // exists. Thrown with `code` + `status`, like the refusals above.
+    //
+    // The same question then follows every value this door hands the run's
+    // inputs that came from the request (the caller's params, and the routed
+    // id under the row slots) to the object the flow's own definition reads it
+    // from, where it declares one: the routed row was judged against the
+    // action's object, which is not always the object the flow reads.
+    const runParams = seedFlowActionParams(deps, action, { objectName, record, params, recordId });
+    await refuseUnreadableFlowStartRecords(
+        automation,
+        action.target,
+        {
+            objectName,
+            recordKeys: flowActionCallerRecordKeys(action, objectName, params, recordId, subject),
+            inputs: flowActionStartInputs(action, objectName, params, runParams),
+        },
+        ec,
+        (object, id) => callData(deps, requestContext, 'get', { object, id }, requestContext?.dataDriver, envId, ec),
+    );
     // Pass a proper AutomationContext (the engine never read the former
     // `triggerData` envelope).
     const result: any = await automation.execute(action.target, {
@@ -2240,7 +2681,7 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
         // twin (`buildAutomationContext`): a refused run's message renders in
         // it. See `AutomationContext.locale`.
         ...(typeof ec?.locale === 'string' && ec.locale.length > 0 ? { locale: ec.locale } : {}),
-        params: seedFlowActionParams(deps, action, { objectName, record, params, recordId }),
+        params: runParams,
         // [#19846] Which of those keys the CALLER supplied, stated here where it
         // is known rather than inferred downstream from the merged bag.
         callerParamKeys: flowActionCallerParamKeys(action, objectName, params),
@@ -2850,22 +3291,34 @@ export function buildActionExecutionContext(ec: any): Record<string, unknown> {
  * hash keyed) and never the stored row. [#21594] An action BODY's API is built
  * over this one by the sandbox (`buildSandboxApi`), whose body layers refuse a
  * family read or write before it reaches this seam.
+ *
+ * [#28861] A write through it that the engine stored, whose parent roll-up
+ * could not be recomputed after it, answers the write's success to the
+ * handler (`landed-write-answer.ts`), on this context and every one it
+ * derives. That layer sits beneath the reader seam, so the answer is served
+ * like any write's return.
  */
 export function buildActionApi(_deps: ActionExecutionDeps, ql: any, ec: any): any | undefined {
     if (!ql || typeof ql.createContext !== 'function') return undefined;
+    const served = (scoped: unknown) =>
+        serveStoredMetadataReadsThrough(answerLandedWritesDespiteStaleSummary(scoped, ACTION_API_SURFACE), ql);
     try {
-        return serveStoredMetadataReadsThrough(ql.createContext(buildActionExecutionContext(ec)), ql);
+        return served(ql.createContext(buildActionExecutionContext(ec)));
     } catch {
         // A malformed caller envelope must not sink the action — fall back to
         // the bare elevated context (the same shape hooks default to), marked
         // as the body's elevation like every other (#25653).
         try {
-            return serveStoredMetadataReadsThrough(ql.createContext(buildActionExecutionContext(undefined)), ql);
+            return served(ql.createContext(buildActionExecutionContext(undefined)));
         } catch {
             return undefined;
         }
     }
 }
+
+/** [#28861] The surfaces the stale-column line names, for an action handler's two data handles. */
+const ACTION_API_SURFACE = 'action ctx.api';
+const ACTION_ENGINE_SURFACE = 'action ctx.engine';
 
 /**
  * The sentence a caller still on the WITHDRAWN bare-filter shape must read
@@ -2954,17 +3407,31 @@ function assertActionEngineFindEnvelope(object: string, query: Record<string, un
  * use. Every call carries {@link buildActionExecutionContext} so `ctx.engine`
  * and `ctx.api` write under the SAME identity (#3914); passing `ec` is what
  * separates a trusted write from a context-less one.
+ *
+ * [#28861] A write the engine stored, whose parent roll-up could not be
+ * recomputed after it, answers the write's success here, as on `ctx.api`
+ * ({@link landedWriteAnswer}): the handler's next line runs. Every other
+ * throw, a refusal before the write among them, reaches the handler as is.
  */
 export function buildActionEngineFacade(_deps: ActionExecutionDeps, ql: any, ec?: any): any {
     const context = buildActionExecutionContext(ec);
     return {
         async insert(object: string, data: Record<string, unknown>): Promise<{ id: string }> {
-            const res = await ql.insert(object, data, { context });
+            let res: unknown;
+            try {
+                res = await ql.insert(object, data, { context });
+            } catch (e) {
+                res = landedWriteAnswer(e, object, ACTION_ENGINE_SURFACE);
+            }
             const id = (res && (res as any).id) ?? (data as any).id;
             return { id };
         },
         async update(object: string, id: string, data: Record<string, unknown>): Promise<void> {
-            await ql.update(object, data, { where: { id }, context });
+            try {
+                await ql.update(object, data, { where: { id }, context });
+            } catch (e) {
+                landedWriteAnswer(e, object, ACTION_ENGINE_SURFACE);
+            }
         },
         // Both spellings are DECLARED contract (#15117), not a tolerance: the
         // spec's `ActionEngineFacade.delete` takes `string | string[]`.
@@ -2983,10 +3450,17 @@ export function buildActionEngineFacade(_deps: ActionExecutionDeps, ql: any, ec?
         // it pulls the runtime back onto the contract that is already on the
         // record, here, in the spec member doc, and in the `never a null id`
         // pin at `packages/spec/src/ui/action-params.test.ts`.
+        //
+        // [#28861] Each id's landed delete is answered on its own, so a stale
+        // roll-up after one id's delete does not leave the later ids undeleted.
         async delete(object: string, idOrIds: string | string[]): Promise<void> {
             const ids = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
             for (const id of ids) {
-                await ql.delete(object, { where: { id }, context });
+                try {
+                    await ql.delete(object, { where: { id }, context });
+                } catch (e) {
+                    landedWriteAnswer(e, object, ACTION_ENGINE_SURFACE);
+                }
             }
         },
         // [#15124] The ENVELOPE goes through — this arm no longer builds one.
@@ -3190,6 +3664,240 @@ export function refuseDeniedSubjectLoad(
     // ⛔ NOT a second condition — a guard whose extra clause can switch it off is
     // the inert-guard shape this whole seam exists to remove.
     throw recordNotFoundError(objectName, recordId ?? '');
+}
+
+/**
+ * Contract point 3 as the two action doors' dispatch reads it, for every
+ * branch: {@link refuseDeniedSubjectLoad}, except for a same-origin
+ * `type: 'api'` forward that needs nothing from the row.
+ *
+ * ## Why the api forward is different
+ *
+ * The 404 exists so that nothing TRUSTED is built for a caller who has not
+ * shown read access to the subject row: the RLS/FLS-bypassing `ctx.engine` /
+ * `ctx.api` of a script body, a persisted flow run, a declarative write. An
+ * api forward builds none of those. It hands its declared `target` the
+ * caller's OWN credentials, and the target authorizes the caller itself
+ * (ADR-0066 D4) — a request the caller could send to that target directly.
+ * Refusing it here put the generic data door's verdict in front of a door
+ * that answers the question itself, and wrongly: approval decisions are
+ * authorized by the approvals routes (a pending approver may decide), while a
+ * member has no data-door read on `sys_approval_request` by design. So a
+ * denied load no longer answers its own 404 ahead of the forward; the door
+ * forwards and relays what the target answers. A load that names nothing and
+ * a load that was filtered are the same answer to the target too, so this
+ * opens no existence oracle the target does not already answer.
+ *
+ * ## ⛔ No row data the caller could not read reaches the request
+ *
+ * On a denied load the request is built from the `recordId`, the params and
+ * the caller only ({@link apiForwardSubjectRecord}). A declaration whose
+ * request needs a field OF the row ({@link apiActionRequestReadsSubjectRow})
+ * cannot be built from those, so it keeps today's 404 `RECORD_NOT_FOUND`.
+ *
+ * Every other branch — the declarative update, the flow dispatch, the
+ * script/body dispatch — keeps the refusal unchanged. Both doors call this
+ * ONE function at the same point (the REST `/actions` door and the MCP
+ * `run_action` bridge), so the rule cannot hold at one and not the other.
+ */
+export function refuseDeniedSubjectLoadBeforeDispatch(
+    action: any,
+    objectName: string,
+    recordId: string | undefined,
+    subject: ActionSubjectRecordLoad,
+): void {
+    if (subject.recordLoadDenied && forwardsOnDeniedSubjectLoad(action)) return;
+    refuseDeniedSubjectLoad(objectName, recordId, subject);
+}
+
+/**
+ * Does a denied subject load still forward this action? Exactly a same-origin
+ * `type: 'api'` action (the doors refuse an off-origin one earlier) whose
+ * request can be built without the row. A declarative update is never one,
+ * whatever its `type` says: `operation` before `type`.
+ */
+export function forwardsOnDeniedSubjectLoad(action: any): boolean {
+    return !isDeclarativeUpdateAction(action)
+        && action?.type === 'api'
+        && isSameOriginApiTarget(action?.target)
+        && !apiActionRequestReadsSubjectRow(action);
+}
+
+/**
+ * Does this api action's request need a field OF the subject row — beyond the
+ * `id` the caller already named? Two places in the declaration read the row
+ * ({@link buildApiActionRequest}): a `{field}` path token in `target`, and a
+ * `recordIdParam` seeded from a `recordIdField`. `{id}` and a `recordIdField`
+ * of `id` (the default) are the routed `recordId` itself, so they do not.
+ *
+ * Read off the declaration, before any substitution: a token that only looks
+ * like a field (a `${name}` with no scope the substitution leaves in place)
+ * counts as one, which errs toward the 404, never toward a forward.
+ */
+export function apiActionRequestReadsSubjectRow(action: any): boolean {
+    const target: string = typeof action?.target === 'string' ? action.target : '';
+    for (const match of target.matchAll(/\{([a-z_][a-z0-9_]*)\}/gi)) {
+        if (match[1] !== 'id') return true;
+    }
+    const recordIdParam = typeof action?.recordIdParam === 'string' && action.recordIdParam ? action.recordIdParam : undefined;
+    if (recordIdParam) {
+        const field: string = typeof action?.recordIdField === 'string' && action.recordIdField ? action.recordIdField : 'id';
+        if (field !== 'id') return true;
+    }
+    return false;
+}
+
+/**
+ * The subject row an api forward's request is built from. A row the caller's
+ * own scope delivered, as it was; on a denied load, `{ id: recordId }` and
+ * nothing else — built from the id the caller named, ⛔ never from whatever
+ * the load left behind, so no field of a row the caller could not read can
+ * reach the request.
+ */
+export function apiForwardSubjectRecord(
+    recordId: string | undefined,
+    subject: ActionSubjectRecordLoad,
+): Record<string, unknown> {
+    if (!subject.recordLoadDenied) return subject.record;
+    return recordId ? { id: recordId } : {};
+}
+
+/**
+ * The row-slot keys a start hands a run, each with the value the run will
+ * receive under it — what {@link refuseUnreadableFlowStartRecords} loads.
+ */
+export type FlowStartRecordKeys = ReadonlyArray<readonly [key: string, value: unknown]>;
+
+/**
+ * Flow start admission's THIRD question, the row a start addresses
+ * (`flow-start-admission.ts`), as the ONE function every door that starts a
+ * flow by name calls after `flowStartRefusal` and before `execute()`.
+ *
+ * ## The rule
+ *
+ * Every record key a door hands the run in a row slot the door defines
+ * (`recordId`, the `<object>Id` alias, an action's declared `recordIdParam`)
+ * is loaded first, in the CALLER's own scope, through
+ * {@link loadActionSubjectRecord}, and a key that scope does not deliver is
+ * refused by {@link refuseDeniedSubjectLoad}: the action door's own
+ * `404 RECORD_NOT_FOUND`, one envelope for a row the caller cannot read and an
+ * id that names nothing, so no door is an existence oracle the action door
+ * declines to be. Before `execute()`, so a refused start persists no run.
+ *
+ * It holds for every run, as the action door's load does: a persisted run is
+ * built only on a row the caller has shown it can read. A `runAs: 'system'`
+ * run is where the rule bites, because its nodes read and write past the
+ * caller's own access.
+ *
+ * ## The object a key is loaded from
+ *
+ * `objectName` is the object the start names: the action's own object at the
+ * action door, the request's `objectName` (or `object`) at the trigger routes
+ * and a declared endpoint, the object the door hands the run as `object` and
+ * derives the `<object>Id` alias from. A start whose keys come with no object
+ * to load them from (none named, or an object-less action key) cannot be
+ * judged:
+ *
+ *  - an ELEVATED run ({@link flowRunsElevated}) is refused
+ *    `400 VALIDATION_FAILED` naming `objectName`, the one thing the caller
+ *    adds to be judged;
+ *  - a user run starts as before: it reads in the caller's own scope.
+ *
+ * A key whose value is not one record id (a string or a number) is never
+ * loaded and is refused `400 VALIDATION_FAILED` naming the key: only an id
+ * names one row.
+ *
+ * ## The object the flow reads a start input from
+ *
+ * The object the start names is not always the object the run reads. A flow's
+ * own definition can state that it reads a start input as the id of a row of
+ * a fixed object ({@link flowDeclaredRecordReads}: a CRUD node's `filter.id`,
+ * a screen edit form's `recordId`, handed on through `subflow` and `map`
+ * inputs). Every such input the start hands the run (`start.inputs`, the
+ * `params` the run's input variables are bound from, row slots included) is
+ * judged against THAT object too, by the same load and the same refusals: the
+ * value must be one record id (a list of ids where the flow reads a list), or
+ * the start is refused `400 VALIDATION_FAILED` naming the input, and each id
+ * is loaded in the caller's own scope from the object the flow reads it from,
+ * or the start is refused `404 RECORD_NOT_FOUND` for that object. This holds
+ * whether or not the start names an object, and whatever object it names.
+ *
+ * ## What stays as it was
+ *
+ *  - **The system principal** (`isSystem`, never set on inbound HTTP) starts
+ *    every flow on every row, as the two admission rules let it.
+ *  - **A start that names no record key**, to a flow that declares no record
+ *    read of what it was handed, loads nothing.
+ *  - **A key the door already loaded** is not passed in `recordKeys`: the
+ *    action door's subject load judged the routed id against the action's
+ *    object, and its tests stay as they are.
+ *
+ * `readRecord` is the door's own caller-scope read, the `callData('get', …)`
+ * its subject load uses, so there is no second loader.
+ */
+export async function refuseUnreadableFlowStartRecords(
+    automation: unknown,
+    flowName: string,
+    start: { objectName: unknown; recordKeys: FlowStartRecordKeys; inputs?: FlowStartRecordKeys },
+    executionContext: { isSystem?: boolean } | null | undefined,
+    readRecord: (objectName: string, recordId: string) => Promise<unknown>,
+): Promise<void> {
+    if (executionContext?.isSystem === true) return;
+    const loaded = new Set<string>();
+    const loadOrRefuse = async (objectName: string, recordId: string): Promise<void> => {
+        const once = `${objectName}\u0000${recordId}`;
+        if (loaded.has(once)) return;
+        const subject = await loadActionSubjectRecord(objectName, recordId, () => readRecord(objectName, recordId));
+        refuseDeniedSubjectLoad(objectName, recordId, subject);
+        loaded.add(once);
+    };
+    const named = start.recordKeys.filter(([, value]) => isNamedStartValue(value));
+    if (named.length > 0) {
+        const objectName = typeof start.objectName === 'string' && start.objectName !== '' && !isObjectLessActionKey(start.objectName)
+            ? start.objectName
+            : undefined;
+        if (objectName === undefined) {
+            if (await flowRunsElevated(automation, flowName)) {
+                const message = 'A start that names a record must also name the record\'s object (`objectName`), '
+                    + 'so the caller\'s access to that record can be checked before the flow starts.';
+                throw validationFailure(message, [{ field: 'objectName', code: 'required', message }]);
+            }
+        } else {
+            for (const [key, value] of named) {
+                await loadOrRefuse(objectName, oneRecordIdOrRefuse(key, value));
+            }
+        }
+    }
+    const inputs = (start.inputs ?? []).filter(([, value]) => isNamedStartValue(value));
+    if (inputs.length === 0) return;
+    const reads = await flowDeclaredRecordReads(automation, flowName);
+    for (const [key, value] of inputs) {
+        for (const read of reads.get(key) ?? []) {
+            const ids = read.many ? recordIdListOrRefuse(key, value) : [oneRecordIdOrRefuse(key, value)];
+            for (const recordId of ids) await loadOrRefuse(read.object, recordId);
+        }
+    }
+}
+
+/** Whether a start names something under a key: absent, `null` and `''` name nothing. */
+function isNamedStartValue(value: unknown): boolean {
+    return value !== undefined && value !== null && value !== '';
+}
+
+/** One record id (a string or a number), or the `400` naming the key: only an id names one row. */
+function oneRecordIdOrRefuse(key: string, value: unknown): string {
+    if (typeof value === 'string' || typeof value === 'number') return String(value);
+    const message = `The record key \`${key}\` must name one record by its id.`;
+    throw validationFailure(message, [{ field: key, code: 'invalid_type', message }]);
+}
+
+/** A list of record ids, or the `400` naming the key: a flow that reads a list of ids reads nothing else. */
+function recordIdListOrRefuse(key: string, value: unknown): string[] {
+    if (Array.isArray(value) && value.every((id) => typeof id === 'string' || typeof id === 'number')) {
+        return value.map(String);
+    }
+    const message = `The record key \`${key}\` must name a list of records by their ids.`;
+    throw validationFailure(message, [{ field: key, code: 'invalid_type', message }]);
 }
 
 /**
@@ -3412,7 +4120,20 @@ export async function executeDeclarativeUpdateAction(
     // ⛔ `ec`, never `buildActionExecutionContext(ec)`. See the docblock — this
     // single argument is the difference between a user edit and a privilege
     // escalation.
-    const written = await callData('update', { object: objectName, id: recordId, data }, driver, envId, ec);
+    // [#28856] An update the engine stored but whose parent roll-up it could
+    // not recompute (`ERR_SUMMARY_RECOMPUTE`) is still this action's write:
+    // the result below is composed from the answer `callData`'s producer
+    // attached to the refusal, exactly as from a normal answer, and attached
+    // in turn so each action door answers the action's success. Every other
+    // throw, a refusal before the write among them, propagates as is.
+    let stale: SummaryRecomputeRefusal | undefined;
+    let written: unknown;
+    try {
+        written = await callData('update', { object: objectName, id: recordId, data }, driver, envId, ec);
+    } catch (e) {
+        stale = staleSummaryRefusalOrThrow(e);
+        written = earnedAnswerOf(stale);
+    }
 
     const prior: Record<string, unknown> = subject.record ?? {};
     // The result carries the caller's merged patch (`record`'s fallback,
@@ -3456,13 +4177,15 @@ export async function executeDeclarativeUpdateAction(
         };
     }
 
-    return {
+    const result: DeclarativeUpdateResult = {
         operation: DECLARATIVE_UPDATE_OPERATION,
         object: objectName,
         id: recordId,
         record,
         ...(undo ? { undo } : {}),
     };
+    if (stale) throw withEarnedAnswer(stale, { ...result });
+    return result;
 }
 
 /**
@@ -3644,13 +4367,39 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
             action, objectName, recordId, params, subject, ec, driver, envId, callData,
         });
     } catch (err) {
-        await recordActionInvocation(deps, requestContext, envId, {
-            ...invocation, outcome: 'failed', ...actionInvocationFailure(err),
-        });
-        throw err;
+        // [#28856] A refusal carrying the action's answer is answered as the
+        // success it is by the `run_action` tool, so the row records that.
+        //
+        // [#28861] Read on the declarative-update arm only: that arm composes
+        // the ACTION's answer and attaches it (`dispatchAdmittedBusinessAction`).
+        // Any other arm's refusal can carry only a WRITE's data answer — a
+        // handler that let out a refusal a data door attached its answer to —
+        // and the action that threw has no result. It is answered as the
+        // failure it is, and leaves this door with nothing attached, so the
+        // `run_action` tool, which reads every throw, cannot relay it either.
+        const declarative = isDeclarativeUpdateAction(action);
+        await recordActionInvocation(deps, requestContext, envId, declarative && earnedAnswerOf(err)
+            ? { ...invocation, outcome: 'succeeded' }
+            : { ...invocation, outcome: 'failed', ...actionInvocationFailure(err) });
+        throw declarative ? err : withoutWriteAnswer(err);
     }
     await recordActionInvocation(deps, requestContext, envId, { ...invocation, outcome: 'succeeded' });
     return answer;
+}
+
+/**
+ * [#28861] `err` with no write answer attached: a stale-roll-up refusal a data
+ * door attached its answer to comes back as the same refusal — objectql's
+ * class, `failures`, `written`, message and stack — with nothing attached;
+ * every other value is returned as is. For a non-declarative arm's throw,
+ * whose attached answer is a write's, never the action's.
+ */
+function withoutWriteAnswer(err: unknown): unknown {
+    if (earnedAnswerOf(err) === undefined) return err;
+    const stale = err as SummaryRecomputeRefusal;
+    const bare = new SummaryRecomputeError([...(stale.failures ?? [])] as SummaryRecomputeError['failures'], stale.written);
+    if (typeof stale.stack === 'string') bare.stack = stale.stack;
+    return bare;
 }
 
 /**
@@ -3685,10 +4434,20 @@ async function dispatchAdmittedBusinessAction(deps: ActionExecutionDeps,
     // cannot disagree about the identity the write carries — the failure class
     // commit f19475c0a and #15168 each paid for once, on this exact seam.
     if (isDeclarativeUpdateAction(action)) {
-        const result = await executeDeclarativeUpdateAction(deps, action, {
-            objectName, actionName: name, subject, recordId, params, ec, driver, envId, callData, requestContext,
-        });
-        return { ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}), result };
+        const answered = (result: unknown) => ({ ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}), result });
+        let result: DeclarativeUpdateResult;
+        try {
+            result = await executeDeclarativeUpdateAction(deps, action, {
+                objectName, actionName: name, subject, recordId, params, ec, driver, envId, callData, requestContext,
+            });
+        } catch (e) {
+            // [#28856] The write landed under a failing roll-up: the action's
+            // own answer rides the refusal for the `run_action` tool to relay.
+            const earned = earnedAnswerOf(e);
+            if (!earned) throw e;
+            throw withEarnedAnswer(e as SummaryRecomputeRefusal, answered(earned));
+        }
+        return answered(result);
     }
 
     // ── contract point 3: the caller-scope load's VERDICT, consumed ──────────
@@ -3703,7 +4462,11 @@ async function dispatchAdmittedBusinessAction(deps: ActionExecutionDeps,
     //    persisted automation run exists and no trusted body has been entered
     //    when the refusal lands. `ok: true` on a row the caller cannot read is
     //    the defect; refusing after the run was created would only describe it.
-    refuseDeniedSubjectLoad(objectName, recordId, subject);
+    //
+    // [#28657] Except ahead of an api forward that needs nothing from the row
+    // (`refuseDeniedSubjectLoadBeforeDispatch`): the target authorizes the
+    // caller itself. The REST `/actions` door calls the same function.
+    refuseDeniedSubjectLoadBeforeDispatch(action, objectName, recordId, subject);
 
     // ── api forward (#27506) ── a same-origin `type: 'api'` action is
     // forwarded in-process to its declared `target` with the caller's own
@@ -3725,11 +4488,11 @@ async function dispatchAdmittedBusinessAction(deps: ActionExecutionDeps,
                 code: standardErrorCodeForHttpStatus(503), status: 503,
             });
         }
-        const built = buildApiActionRequest(action, { recordId, record, params, ec });
+        const built = buildApiActionRequest(action, { recordId, record: apiForwardSubjectRecord(recordId, subject), params, ec });
         if ('message' in built) {
             throw Object.assign(new Error(built.message), { code: standardErrorCodeForHttpStatus(built.status), status: built.status });
         }
-        const answer = await forwardApiAction(inject, requestContext, built, { objectName, actionName: action.name, target: action.target });
+        const answer = await forwardApiAction(inject, requestContext, built, { objectName, actionName: action.name, target: action.target, ...(recordId ? { recordId: String(recordId) } : {}) });
         if (answer.status < 200 || answer.status >= 300) throw apiActionForwardRefusal(action, answer);
         return {
             ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}),

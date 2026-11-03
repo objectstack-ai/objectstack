@@ -148,9 +148,9 @@ tests: every entry resolves at runtime, and this table documents them all.
 | `date(s)` / `datetime(s)` | timestamp | Parse an ISO date / date-time string to a timestamp |
 | `isoDate(t)` / `isoDatetime(t)` | string | Timestamp to UTC ISO text, `2026-10-08` / `2026-10-08T17:55:06.123Z`. Text in? `isoDate(date(s))` |
 
-> **No date arithmetic.** A date mixed with a number faults and the build
-> rejects it; `end - start` does not fault — it yields a `duration` stored as
-> `{}`.
+> **No date arithmetic.** The build refuses `date + n` and `end - start`: a
+> date or date-time mixed with a number, or minus another, reads `null`, and
+> `today()` / `now()` minus a date field reads `{}`. Use `daysBetween(a, b)`.
 
 | Want | Write — never `end - start`, `date + n`, `today() + 30` |
 |:---|:---|

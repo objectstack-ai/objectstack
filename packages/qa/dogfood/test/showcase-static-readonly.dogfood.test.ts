@@ -117,3 +117,76 @@ describe('showcase: static readonly write enforcement (#2948 / #3003 / #3043)', 
     expect(after.lead_score ?? null, 'readonly value unchanged by an all-forged payload').toBeNull();
   });
 });
+
+// The same strip on the two other single-object create doors. `POST
+// /data/:object` and `PATCH /data/:object/:id` advertise it in the body and the
+// `X-ObjectStack-Dropped-Fields` header (#3431); clone and createMany used to
+// put it in the body only, so a caller reading the header missed it. Every 2xx
+// write answer whose body carries `droppedFields` now sends the header too, in
+// the single create's format; createMany's names the union of its rows'
+// strips, each field once, and the body keeps its own report.
+describe('showcase: clone and createMany advertise the readonly strip in the header too', () => {
+  let stack: VerifyStack;
+  let admin: string;
+  let sourceId: string;
+
+  beforeAll(async () => {
+    stack = await getSharedShowcase();
+    admin = await stack.signIn();
+    const created = await stack.apiAs(admin, 'POST', OBJ, { name: 'Header Probe Source', email: 'hdr-src@verify.test' });
+    expect(created.status).toBe(201);
+    sourceId = idOf(await created.json());
+    expect(sourceId).toBeTruthy();
+  }, 60_000);
+
+  const namesReadonlyLeadScore = (body: any) =>
+    ((body?.droppedFields ?? []) as Array<{ fields: string[]; reason: string }>)
+      .some((d) => d.reason === 'readonly' && d.fields.includes('lead_score'));
+
+  it('clone with overrides.lead_score: body and header name lead_score', async () => {
+    const res = await stack.apiAs(admin, 'POST', `${OBJ}/${sourceId}/clone`, { overrides: { lead_score: 42 } });
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(namesReadonlyLeadScore(body), JSON.stringify(body?.droppedFields)).toBe(true);
+    // The source's readonly columns are all empty, so the clone carries none of
+    // them into the insert (#29200): the header names lead_score and nothing else.
+    expect(res.headers.get('X-ObjectStack-Dropped-Fields')).toBe('lead_score;reason=readonly');
+  });
+
+  // #29200: the source's lead_score is empty and the caller sent none, so a
+  // plain clone strips nothing and must not announce a dropped field.
+  it('a plain clone of a source whose lead_score is empty: no droppedFields, no header', async () => {
+    const res = await stack.apiAs(admin, 'POST', `${OBJ}/${sourceId}/clone`, {});
+    const body = await res.json();
+    expect(res.status, JSON.stringify(body)).toBe(201);
+    expect(body?.droppedFields, JSON.stringify(body?.droppedFields)).toBeUndefined();
+    expect(res.headers.get('X-ObjectStack-Dropped-Fields')).toBeNull();
+  });
+
+  it('a two-row createMany carrying lead_score: body and header name lead_score once', async () => {
+    const res = await stack.apiAs(admin, 'POST', `${OBJ}/createMany`, [
+      { name: 'Header Probe A', email: 'hdr-a@verify.test', lead_score: 10 },
+      { name: 'Header Probe B', email: 'hdr-b@verify.test', lead_score: 11 },
+    ]);
+    const body = await res.json();
+    expect(res.status, JSON.stringify(body)).toBe(201);
+    expect(namesReadonlyLeadScore(body), JSON.stringify(body?.droppedFields)).toBe(true);
+    expect(res.headers.get('X-ObjectStack-Dropped-Fields')).toBe('lead_score;reason=readonly');
+  });
+
+  it('a createMany where only one row strips still names the field once', async () => {
+    const res = await stack.apiAs(admin, 'POST', `${OBJ}/createMany`, [
+      { name: 'Header Probe C', email: 'hdr-c@verify.test', lead_score: 12 },
+      { name: 'Header Probe D', email: 'hdr-d@verify.test' },
+    ]);
+    expect(res.status).toBe(201);
+    expect(res.headers.get('X-ObjectStack-Dropped-Fields')).toBe('lead_score;reason=readonly');
+  });
+
+  it('a createMany that strips nothing sends no header', async () => {
+    const many = await stack.apiAs(admin, 'POST', `${OBJ}/createMany`, [{ name: 'Header Probe E', email: 'hdr-e@verify.test' }]);
+    expect(many.status).toBe(201);
+    expect((await many.json())?.droppedFields).toBeUndefined();
+    expect(many.headers.get('X-ObjectStack-Dropped-Fields')).toBeNull();
+  });
+});

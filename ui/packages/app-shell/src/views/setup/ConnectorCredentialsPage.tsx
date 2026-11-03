@@ -24,6 +24,7 @@
 
 import { useEffect, useState, type ReactNode } from 'react';
 import { AlertCircle, Info, KeyRound } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import {
   Badge,
   Button,
@@ -53,6 +54,7 @@ import {
   fetchCredentialListing,
   type CredentialListing,
 } from './connectorCredentials.js';
+import { connectorConnectionsPagePath } from './connectorConnections.js';
 
 /** The status badge's look per status — green, amber, red. */
 const STATUS_CLASS: Record<ConnectorCredentialRef['status'], string> = {
@@ -347,6 +349,14 @@ export function ConnectorCredentialsPage() {
           </div>
         ) : null}
         {body}
+        <p className="text-xs text-muted-foreground" data-testid="connector-credentials-connections-link">
+          {t('connectorCredentials.connectionsHint', {
+            defaultValue: 'A connector that signs in to its vendor with OAuth is connected in',
+          })}{' '}
+          <Link to={connectorConnectionsPagePath()} className="font-medium underline underline-offset-2">
+            {t('connectorCredentials.connectionsLink', { defaultValue: 'Connector connections' })}
+          </Link>
+        </p>
       </div>
 
       <Dialog open={clearDraft !== null} onOpenChange={(open) => { if (!open && !clearDraft?.busy) setClearDraft(null); }}>

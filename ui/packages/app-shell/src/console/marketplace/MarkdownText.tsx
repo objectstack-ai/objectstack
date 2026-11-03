@@ -8,6 +8,12 @@
  *   • `1. ` numbered lists (single level)
  *   • `**bold**`, `*italic*`, `` `code` ``, `[text](url)` inline
  *   • Triple-backtick fenced code blocks
+ *   • `>` blockquotes: consecutive `>` lines, their content parsed as blocks
+ *     (so a quote nests lists, code and further quotes). A GitHub alert —
+ *     `> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]` on the
+ *     quote's first line — renders as the same plain quote with the marker
+ *     dropped. CommonMark's lazy continuation (an unprefixed line continuing a
+ *     quoted paragraph) is not read: an unprefixed line ends the quote.
  *
  * Deliberately NOT a full Markdown engine — we want zero new deps and
  * predictable output. If a README really needs tables or images, the
@@ -29,11 +35,25 @@
 import { RAW_HTML_CLOSING_TAG, RAW_HTML_OPEN_TAG, renderInlineMarkdown } from '@object-ui/components';
 
 interface Block {
-  type: 'h1' | 'h2' | 'h3' | 'p' | 'ul' | 'ol' | 'code' | 'html';
+  type: 'h1' | 'h2' | 'h3' | 'p' | 'ul' | 'ol' | 'code' | 'html' | 'quote';
   text?: string;
   items?: string[];
   lang?: string;
+  /** A blockquote's content, parsed as blocks. */
+  children?: Block[];
 }
+
+// ── Blockquotes ─────────────────────────────────────────────────────────────
+
+/** A blockquote line: up to three spaces of indent, then `>`. */
+const QUOTE_LINE = /^ {0,3}>/;
+/** The quote marker and the one optional space after it. */
+const QUOTE_MARKER = /^ {0,3}> ?/;
+/**
+ * GitHub's alert marker, alone on a quote's first line. GitHub matches the
+ * five types case-insensitively; anything else in brackets stays text.
+ */
+const ALERT_MARKER = /^\[!(?:NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*$/i;
 
 // ── CommonMark raw-HTML grammar ─────────────────────────────────────────────
 // The open and closing tag come from `@object-ui/components`, where the inline
@@ -115,6 +135,19 @@ function parseBlocks(src: string): Block[] {
       continue;
     }
 
+    // Blockquote: the run of `>` lines, unprefixed, parsed as its own blocks.
+    // A GitHub alert's marker line is dropped, leaving a plain quote.
+    if (QUOTE_LINE.test(line)) {
+      const inner: string[] = [];
+      while (i < lines.length && QUOTE_LINE.test(lines[i])) {
+        inner.push(lines[i].replace(QUOTE_MARKER, ''));
+        i++;
+      }
+      if (ALERT_MARKER.test(inner[0])) inner.shift();
+      blocks.push({ type: 'quote', children: parseBlocks(inner.join('\n')) });
+      continue;
+    }
+
     // Headings
     const h = /^(#{1,3})\s+(.*)$/.exec(line);
     if (h) {
@@ -161,6 +194,7 @@ function parseBlocks(src: string): Block[] {
       !/^[-*]\s+/.test(lines[i]) &&
       !/^\d+\.\s+/.test(lines[i]) &&
       !lines[i].startsWith('```') &&
+      !QUOTE_LINE.test(lines[i]) &&
       !htmlBlockRule(lines[i])?.interruptsParagraph
     ) {
       buf.push(lines[i]);
@@ -188,51 +222,87 @@ function renderInline(input: string): React.ReactNode {
   return renderInlineMarkdown(input, README_INLINE);
 }
 
-export function MarkdownText({ source, className }: { source: string; className?: string }) {
-  const blocks = parseBlocks(source);
-  return (
-    <div className={`flex flex-col gap-4 text-sm leading-relaxed text-foreground/90 ${className ?? ''}`}>
-      {blocks.map((b, i) => {
-        switch (b.type) {
-          case 'h1':
-            return <h2 key={i} className="mt-2 text-xl font-bold tracking-tight">{renderInline(b.text ?? '')}</h2>;
-          case 'h2':
-            return <h3 key={i} className="mt-3 text-base font-semibold tracking-tight">{renderInline(b.text ?? '')}</h3>;
-          case 'h3':
-            return <h4 key={i} className="mt-2 text-sm font-semibold tracking-tight text-foreground/80">{renderInline(b.text ?? '')}</h4>;
-          case 'p':
-            return <p key={i}>{renderInline(b.text ?? '')}</p>;
-          case 'ul':
-            return (
-              <ul key={i} className="ml-1 flex list-none flex-col gap-1.5">
-                {(b.items ?? []).map((it, j) => (
-                  <li key={j} className="flex gap-2">
-                    <span aria-hidden="true" className="mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-violet-500/70" />
-                    <span>{renderInline(it)}</span>
-                  </li>
-                ))}
-              </ul>
-            );
-          case 'ol':
-            return (
-              <ol key={i} className="ml-5 flex list-decimal flex-col gap-1.5 marker:text-muted-foreground">
-                {(b.items ?? []).map((it, j) => (
-                  <li key={j} className="pl-1">{renderInline(it)}</li>
-                ))}
-              </ol>
-            );
-          case 'code':
-            return (
-              <pre key={i} className="overflow-x-auto rounded-lg border bg-muted/40 p-3 text-xs leading-relaxed">
-                <code className="font-mono">{b.text}</code>
-              </pre>
-            );
-          case 'html':
-            // Skipped: neither rendered nor printed (objectui#12146).
-            return null;
-        }
+/**
+ * The two places a package's Markdown is read: `base` is the About card's
+ * README, `compact` the Versions panel's release notes — a narrow side column
+ * in muted small print, where README-sized headings would outweigh the
+ * version they annotate.
+ */
+type MarkdownSize = 'base' | 'compact';
+
+const SIZE_CLASSES: Record<MarkdownSize, { root: string; stack: string; h1: string; h2: string; h3: string }> = {
+  base: {
+    root: 'text-sm leading-relaxed text-foreground/90',
+    stack: 'gap-4',
+    h1: 'mt-2 text-xl font-bold tracking-tight',
+    h2: 'mt-3 text-base font-semibold tracking-tight',
+    h3: 'mt-2 text-sm font-semibold tracking-tight text-foreground/80',
+  },
+  compact: {
+    root: 'text-xs leading-relaxed text-muted-foreground',
+    stack: 'gap-2',
+    h1: 'text-sm font-semibold tracking-tight text-foreground',
+    h2: 'text-xs font-semibold tracking-tight text-foreground',
+    h3: 'text-xs font-medium tracking-tight text-foreground/80',
+  },
+};
+
+function renderBlocks(blocks: Block[], size: MarkdownSize): React.ReactNode[] {
+  const cls = SIZE_CLASSES[size];
+  return blocks.map((b, i) => {
+    switch (b.type) {
+      case 'h1':
+        return <h2 key={i} className={cls.h1}>{renderInline(b.text ?? '')}</h2>;
+      case 'h2':
+        return <h3 key={i} className={cls.h2}>{renderInline(b.text ?? '')}</h3>;
+      case 'h3':
+        return <h4 key={i} className={cls.h3}>{renderInline(b.text ?? '')}</h4>;
+      case 'p':
+        return <p key={i}>{renderInline(b.text ?? '')}</p>;
+      case 'ul':
+        return (
+          <ul key={i} className="ml-1 flex list-none flex-col gap-1.5">
+            {(b.items ?? []).map((it, j) => (
+              <li key={j} className="flex gap-2">
+                <span aria-hidden="true" className="mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-violet-500/70" />
+                <span>{renderInline(it)}</span>
+              </li>
+            ))}
+          </ul>
+        );
+      case 'ol':
+        return (
+          <ol key={i} className="ml-5 flex list-decimal flex-col gap-1.5 marker:text-muted-foreground">
+            {(b.items ?? []).map((it, j) => (
+              <li key={j} className="pl-1">{renderInline(it)}</li>
+            ))}
+          </ol>
+        );
+      case 'code':
+        return (
+          <pre key={i} className="overflow-x-auto rounded-lg border bg-muted/40 p-3 text-xs leading-relaxed">
+            <code className="font-mono">{b.text}</code>
+          </pre>
+        );
+      case 'quote':
+        return (
+          <blockquote key={i} className={`flex flex-col ${cls.stack} border-l-2 border-violet-500/40 pl-4 text-muted-foreground`}>
+            {renderBlocks(b.children ?? [], size)}
+          </blockquote>
+        );
+      case 'html':
+        // Skipped: neither rendered nor printed (objectui#12146).
         return null;
-      })}
+    }
+    return null;
+  });
+}
+
+export function MarkdownText({ source, className, size = 'base' }: { source: string; className?: string; size?: MarkdownSize }) {
+  const cls = SIZE_CLASSES[size];
+  return (
+    <div className={`flex flex-col ${cls.stack} ${cls.root} ${className ?? ''}`}>
+      {renderBlocks(parseBlocks(source), size)}
     </div>
   );
 }

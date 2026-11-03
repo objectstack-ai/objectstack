@@ -19,9 +19,10 @@ import { registerHttpNodes } from './http-nodes.js';
  * wire, on EVERY arm the node can take.
  *
  * The key is declared without qualification — `HttpConfigSchema.signingSecret`
- * and the descriptor's `configSchema` both read "HMAC-SHA256 secret →
- * X-Objectstack-Signature" — yet only the durable arm used to hand it to
- * anything that signs (the messaging outbox). The inline arm, and the durable
+ * reads "HMAC-SHA256 secret → X-Objectstack-Signature", and the descriptor's
+ * `configSchema` says it signs each request — yet only the durable arm used
+ * to hand it to anything that signs (the messaging outbox). The inline arm,
+ * and the durable
  * arm's no-outbox fallback that degrades to it, built their `fetch` from
  * `headers` alone: the request went out unsigned and the run said
  * `success: true`.

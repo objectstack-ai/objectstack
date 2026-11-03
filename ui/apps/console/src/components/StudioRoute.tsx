@@ -44,8 +44,11 @@ import {
   CommandPaletteProvider,
   LoadingFallback,
   LoadingScreen,
+  STUDIO_ALL_PACKAGES_SEGMENT,
+  STUDIO_METADATA_AREA,
   STUDIO_ORG_SCOPE_PILLAR,
   STUDIO_ORG_SCOPE_SEGMENT,
+  studioMetadataAreaPath,
   useHomePath,
   useRecentItems,
 } from '@object-ui/app-shell';
@@ -74,6 +77,9 @@ const StudioDesignSurface = lazy(() =>
 const BuilderLanding = lazy(() =>
   import('./studioBuilder').then((m) => ({ default: m.BuilderLanding })),
 );
+const StudioMetadataArea = lazy(() =>
+  import('./studioBuilder').then((m) => ({ default: m.StudioMetadataArea })),
+);
 
 /**
  * What a principal without `studio.access` sees, at the Studio URL they opened
@@ -98,7 +104,7 @@ function StudioAccessRequired({ home }: { home: string }) {
         </div>
         <EmptyTitle>
           {t('console.studio.accessRequired', {
-            defaultValue: 'You need Studio access to open Studio. An administrator can grant it with a permission set in Setup → Permission Sets.',
+            defaultValue: 'You need Studio access to open Studio. An administrator can grant it with a permission set in Setup → Permission Set Assignment.',
           })}
         </EmptyTitle>
         <div className="mt-4">
@@ -206,6 +212,19 @@ export function StudioBuilderLoading() {
  */
 function StudioLanding() {
   return (
+    <StudioConsoleFrame>
+      <BuilderLanding />
+    </StudioConsoleFrame>
+  );
+}
+
+/**
+ * The console frame `/studio` screens without a package draw (objectui#11863):
+ * the console's own top bar in its `studio` variant and the command palette in
+ * its `studio` scope, around a body that loads with its route.
+ */
+function StudioConsoleFrame({ children }: { children: ReactNode }) {
+  return (
     <CommandPaletteProvider>
       <div className="flex min-h-screen flex-col bg-background text-foreground">
         {/* The console top bar, 48 px like every console frame's
@@ -217,13 +236,26 @@ function StudioLanding() {
         </header>
         <CommandPalette scope="studio" />
         <div className="min-h-0 flex-1 overflow-auto">
-          {/* The frame above stays painted while the landing's chunk loads. */}
-          <Suspense fallback={<StudioBuilderLoading />}>
-            <BuilderLanding />
-          </Suspense>
+          {/* The frame above stays painted while the body's chunk loads. */}
+          <Suspense fallback={<StudioBuilderLoading />}>{children}</Suspense>
         </div>
       </div>
     </CommandPaletteProvider>
+  );
+}
+
+/**
+ * objectstack#28561 — the "All metadata" area's cross-package leg
+ * (`/studio/~all/metadata/*`, ADR-0146 D1): the environment catalog, served
+ * with no package. No package means no pillars, no package switcher and no
+ * package publish, so it is not the pillar builder: it is the area alone, in
+ * the frame the landing draws, which it is entered from.
+ */
+function StudioAllPackagesMetadata() {
+  return (
+    <StudioConsoleFrame>
+      <StudioMetadataArea packageId={null} />
+    </StudioConsoleFrame>
   );
 }
 
@@ -241,7 +273,7 @@ function StudioLanding() {
  * and the provider writes nothing. The package-less scope (`~org`) is not a
  * package and records nothing.
  */
-function StudioPackageBuilder() {
+function StudioPackageBuilder({ area }: { area?: typeof STUDIO_METADATA_AREA }) {
   const { packageId } = useParams();
   const { addRecentItem } = useRecentItems();
   useEffect(() => {
@@ -259,7 +291,7 @@ function StudioPackageBuilder() {
   }, [packageId]);
   return (
     <Suspense fallback={<LoadingFallback />}>
-      <StudioDesignSurface />
+      <StudioDesignSurface area={area} />
     </Suspense>
   );
 }
@@ -273,10 +305,13 @@ function StudioPackageBuilder() {
  * REAL tree instead of a transcription of it — a transcription would be free to
  * agree with itself while `App.tsx` quietly mounted the builder ungated.
  *
- *   `/studio`                    front door (pick / create a writable package)
- *   `/studio/~org`               the package-less scope lands on its one pillar
- *   `/studio/:packageId`         a package lands on its Data pillar
- *   `/studio/:packageId/:tab`    the pillar builder (a recent-package visit)
+ *   `/studio`                         front door (pick / create a writable package)
+ *   `/studio/~org`                    the package-less scope lands on its one pillar
+ *   `/studio/~all/metadata/*`         the "All metadata" area across packages
+ *   `/studio/~all/*`                  lands on that area
+ *   `/studio/:packageId`              a package lands on its Data pillar
+ *   `/studio/:packageId/metadata/*`   a package's "All metadata" area, in the builder
+ *   `/studio/:packageId/:tab`         the pillar builder (a recent-package visit)
  *
  * `~org` is the reserved segment for the organization's own, package-less
  * flows (objectui#11553; `studioScope.ts` in app-shell says why `~` can never
@@ -285,6 +320,15 @@ function StudioPackageBuilder() {
  * package" — so only its bare leg needs a route of its own: a static segment
  * outranks `:packageId`, and the generic leg would send it to a Data pillar the
  * scope does not have.
+ *
+ * objectstack#28561 — the "All metadata" area (ADR-0146 D1) has routes of its
+ * own because its pages nest below it (`StudioMetadataArea` declares them), and
+ * `:packageId/:tab` matches one segment: an area URL such as
+ * `/studio/crm/metadata/flow` would match no route at all. The static
+ * `metadata` segment outranks `:tab`. `~all` is the area's reserved
+ * cross-package segment (`metadataArea.ts` in app-shell says why it is not
+ * `~org`); every `~all` URL outside the area lands on it, so none reaches the
+ * pillar builder as a package id.
  */
 export const studioRoutes = (
   <Route path="/studio" element={<StudioRoute />}>
@@ -293,7 +337,19 @@ export const studioRoutes = (
       path={STUDIO_ORG_SCOPE_SEGMENT}
       element={<Navigate to={STUDIO_ORG_SCOPE_PILLAR} replace />}
     />
+    <Route
+      path={`${STUDIO_ALL_PACKAGES_SEGMENT}/${STUDIO_METADATA_AREA}/*`}
+      element={<StudioAllPackagesMetadata />}
+    />
+    <Route
+      path={`${STUDIO_ALL_PACKAGES_SEGMENT}/*`}
+      element={<Navigate to={studioMetadataAreaPath(STUDIO_ALL_PACKAGES_SEGMENT)} replace />}
+    />
     <Route path=":packageId" element={<Navigate to="data" replace />} />
+    <Route
+      path={`:packageId/${STUDIO_METADATA_AREA}/*`}
+      element={<StudioPackageBuilder area={STUDIO_METADATA_AREA} />}
+    />
     <Route path=":packageId/:tab" element={<StudioPackageBuilder />} />
   </Route>
 );

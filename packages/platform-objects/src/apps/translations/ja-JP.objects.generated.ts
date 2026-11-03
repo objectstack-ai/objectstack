@@ -108,7 +108,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "この ID の作成方法 — idp_provisioned（フェデレーション SSO の JIT）または env_native（ローカルサインアップ／アプリのエンドユーザー）。システム管理のため編集しないでください。",
         options: {
           idp_provisioned: "IdP プロビジョニング",
-          env_native: "環境ネイティブ"
+          env_native: "ローカルアカウント"
         }
       },
       id: {
@@ -241,6 +241,17 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           managerId: {
             label: "マネージャー",
             helpText: "このユーザーの直属の上長。組織が異なるマネージャー、自分自身の指定、レポートラインが循環する、または深さの上限を超える指定はサーバー側で拒否されます。"
+          }
+        }
+      },
+      list_platform_admins: {
+        label: "プラットフォーム管理者",
+        resultDialog: {
+          title: "プラットフォーム管理者",
+          description: "現在プラットフォーム管理者の資格を持つ全員：既定の組織が所有する有効期間内の admin_full_access 付与を持つ人、またはデプロイの所有者リストに確認済みのアドレスが載っている人。",
+          acknowledge: "閉じる",
+          fields: {
+            entries: "プラットフォーム管理者"
           }
         }
       },
@@ -844,11 +855,12 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       cancel_invitation: {
         label: "招待をキャンセル",
         confirmText: "この招待をキャンセルしますか？受信者は承認できなくなります。",
-        successMessage: "招待をキャンセルしました"
+        successMessage: "招待をキャンセルしました",
+        cancelText: "招待を保持"
       },
       resend_invitation: {
         label: "招待を再送",
-        description: "{{ record.email }} に招待を再送しますか？有効期限は改めて始まります。",
+        description: "{{ record.email }} に招待を再送しますか？有効期限は改めて始まります。すでに期限切れの招待は新しい招待に置き換えられます。",
         successMessage: "招待を再送しました",
         outcomeMessages: {
           sent: "{{ result.email }} に招待を再送しました",
@@ -1399,6 +1411,38 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       by_user: {
         label: "ユーザー別"
+      }
+    }
+  },
+  sys_personal_view: {
+    label: "個人ビュー",
+    pluralLabel: "個人ビュー",
+    description: "閲覧者自身が名前を付けたリストビュー（マイビュー）。所有者だけに表示されます。",
+    fields: {
+      id: {
+        label: "個人ビュー ID"
+      },
+      created_at: {
+        label: "作成日時"
+      },
+      updated_at: {
+        label: "更新日時"
+      },
+      user_id: {
+        label: "所有者",
+        help: "このビューが属するユーザー。このユーザーだけが参照・変更できます。"
+      },
+      object_name: {
+        label: "オブジェクト",
+        help: "このビューが一覧表示するオブジェクト（マシン名）。"
+      },
+      label: {
+        label: "名前",
+        help: "所有者がこのビューに付けた名前。"
+      },
+      config: {
+        label: "ビュー設定",
+        help: "spec の ListView 形式のリスト設定。保存のたびに検証されます。"
       }
     }
   },
@@ -3061,7 +3105,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "履歴データとして扱う"
       },
       error: {
-        label: "致命的なエラー"
+        label: "失敗理由"
       },
       results: {
         label: "行ごとの結果（サンプル）",

@@ -21,7 +21,7 @@
  * This file pins the door: the header's number, and the `--json` list, on the
  * real command.
  *
- * The CLI runs through `bin/run-dev.js` (source, via tsx). Its dependencies
+ * The CLI runs through `bin/run-dev.js` (source, under `node`). Its dependencies
  * resolve through `exports` to `dist/`.
  */
 
@@ -36,8 +36,7 @@ import { defineStackSourceFromLiteral, linkSpec } from './helpers/define-stack-f
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
-/** A cold `tsx` spawn of the CLI source entry runs well past vitest's 5 s default. */
+/** A cold spawn of the CLI source entry runs well past vitest's 5 s default. */
 const SPAWN_TIMEOUT_MS = 120_000;
 
 interface Run {
@@ -49,7 +48,7 @@ interface Run {
 function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...args],
       { cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {

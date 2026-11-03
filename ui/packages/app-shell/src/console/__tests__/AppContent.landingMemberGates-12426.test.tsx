@@ -34,7 +34,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 // AGENTS.md §测试纪律 — the lazy page modules are stubbed so no unbounded
 // `import()` races a bounded `findBy` window.
@@ -131,19 +131,20 @@ function LocationProbe() {
 }
 
 /** The member's `/me/permissions` answer: every object readable unless denied. */
-function permissionsDenying(...unreadable: string[]): MePermissionsResponse {
+function permissionsDenying(...unreadable: string[]): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u_1',
     tenantId: null,
-    roles: [],
+    positions: [],
+    hasAnyQueue: false,
     permissionSets: [],
     objects: {
       '*': { allowRead: true },
       ...Object.fromEntries(unreadable.map((name) => [name, { allowRead: false }])),
     },
     fields: {},
-  } as MePermissionsResponse;
+  } as MePermissionsAuthenticatedResponse;
 }
 
 function renderConsoleAt(initialUrl: string, permissions: Partial<React.ComponentProps<typeof MePermissionsProvider>>) {

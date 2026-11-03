@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: three spawns of the source CLI (os lint, os validate, os build) over one planted-defect stack, every one a distinct triple whose exit code is the contract; the ten rule cases run in process; slowest CI reading 12.5 s (run 41271604267) of the five scheduled CI runs 41199450735, 41217827347, 41237094739, 41255489006, 41271604267, x 1.25, rounded up
 
 /**
  * The BEHAVIOURAL half of #4409, next to the structural ratchet in
@@ -137,6 +138,42 @@ const CASES: ReadonlyArray<{ rule: string; blindTo: readonly AuthoringCommand[];
     stack: withBaseline({
       views: [{ name: 'parity_task', list: listView('parity_task'), formViews: { default: formView('parity_task') } }],
       actions: [{ name: 'log_time', type: 'form', target: 'parity_task.default' }],
+    }),
+  },
+  // [#29049] Was the one row of an `OUTSIDE_THE_TABLE` table: `os validate`
+  // and `os build` refused it through a CLI-only walk (#28893) and `os lint`,
+  // which runs only this registry, passed it. The planted defect is a
+  // `try_catch` catch region that is not single-exit, which the automation
+  // engine refuses to register; the rule is that same call.
+  {
+    rule: 'flow-region-shape-invalid',
+    blindTo: ['lint'],
+    stack: withBaseline({
+      objects: [{ name: 'parity_task', label: 'Task', sharingModel: 'private', fields: { name: { type: 'text', label: 'Name' } } }],
+      flows: [{
+        name: 'parity_region', label: 'Region', type: 'record_change', runAs: 'system', status: 'active',
+        nodes: [
+          { id: 'start', type: 'start', label: 'Start', config: { objectName: 'parity_task', triggerType: 'record-after-create' } },
+          {
+            id: 'guard', type: 'try_catch', label: 'Guard',
+            config: {
+              try: { nodes: [{ id: 'work', type: 'assignment', label: 'Work' }], edges: [] },
+              catch: {
+                nodes: ['d', 'x', 'y'].map((id) => ({ id, type: 'assignment', label: id })),
+                edges: [
+                  { id: 'dx', source: 'd', target: 'x', type: 'default' },
+                  { id: 'dy', source: 'd', target: 'y', type: 'default' },
+                ],
+              },
+            },
+          },
+          { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [
+          { id: 'e1', source: 'start', target: 'guard', type: 'default' },
+          { id: 'e2', source: 'guard', target: 'end', type: 'default' },
+        ],
+      }],
     }),
   },
 ];

@@ -322,12 +322,17 @@ describe('Studio right slot: properties OR the copilot (objectui#12725)', () => 
   it('the pillar names are visible from 1024 px (lg), icons below', async () => {
     await openDashboard();
     const links = within(screen.getByTestId('studio-pillar-nav')).getAllByRole('link');
-    expect(links).toHaveLength(4);
-    for (const link of links) {
+    // The four pillars, then (objectstack#28561) the "All metadata" area.
+    expect(links).toHaveLength(5);
+    for (const link of links.slice(0, 4)) {
       const name = link.querySelector('span') as HTMLElement;
       expect(name).toHaveClass('sr-only', 'lg:not-sr-only');
       expect(name).not.toHaveClass('xl:not-sr-only');
     }
+    // The area is named from 1280 px: the 1024 px row holds the four names.
+    const area = links[4].querySelector('span') as HTMLElement;
+    expect(area).toHaveClass('sr-only', 'xl:not-sr-only');
+    expect(area).not.toHaveClass('lg:not-sr-only');
   });
 });
 

@@ -10,7 +10,7 @@
 import { useNavigate } from 'react-router-dom';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { Card, CardContent } from '@object-ui/components';
-import { Settings, Database, ArrowUpRight } from 'lucide-react';
+import { Settings, ArrowUpRight } from 'lucide-react';
 import { cn } from '@object-ui/components';
 
 interface QuickAction {
@@ -29,25 +29,10 @@ export function QuickActions() {
   const { t } = useObjectTranslation();
 
   // Manual "Create App" deprecated — the AI-first builder (Build with AI on
-  // /home) is the path to a new application.
+  // /home) is the path to a new application. No "Manage Objects" card either
+  // (objectstack ADR-0146 D1): objects are designed in Studio, which Home
+  // opens from its own cover.
   const actions: QuickAction[] = [
-    {
-      id: 'manage-objects',
-      label: t('home.quickActions.manageObjects', { defaultValue: 'Manage Objects' }),
-      description: t('home.quickActions.manageObjectsDesc', { defaultValue: 'Configure data models' }),
-      icon: Database,
-      // #3739 — the metadata-admin engine's CANONICAL route, not the legacy
-      // `…/system/metadata/object` alias this card used to carry. That alias is
-      // not a page: `apps/console`'s host fragment serves it with
-      // `MetadataRedirect`, a bare `<Navigate>` onto the URL below, so every
-      // click paid a redundant hop plus a re-render. Same defect and same
-      // remedy as #3660's `sys-datasources` entry in both sidebars. The alias
-      // routes stay for bookmarks and external links.
-      href: '/apps/setup/metadata/object',
-      iconBg: 'bg-gradient-to-br from-violet-500/15 to-purple-500/10 ring-violet-500/20',
-      iconText: 'text-violet-600 dark:text-violet-400',
-      hoverBorder: 'hover:border-violet-500/40',
-    },
     {
       id: 'system-settings',
       label: t('home.quickActions.systemSettings', { defaultValue: 'System Settings' }),

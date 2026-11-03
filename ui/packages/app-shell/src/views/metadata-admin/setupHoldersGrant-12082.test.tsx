@@ -27,7 +27,7 @@ import * as React from 'react';
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 vi.mock('@object-ui/react', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -99,16 +99,17 @@ const SHAPE = {
   full: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
 } as const;
 
-function answer(objects: MePermissionsResponse['objects']): MePermissionsResponse {
+function answer(objects: MePermissionsAuthenticatedResponse['objects']): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u-admin',
     tenantId: null,
-    roles: ['member'],
+    positions: ['member'],
+    hasAnyQueue: false,
     permissionSets: ['member'],
     objects,
     fields: {},
-  } as MePermissionsResponse;
+  } as MePermissionsAuthenticatedResponse;
 }
 
 /** A super-user wildcard, as the organization administrator set carries one. */
@@ -136,7 +137,7 @@ const ORG_ADMIN = answer({
   '*': WILDCARD,
   [GRANT_OBJECT]: SHAPE.createAndDelete,
   [HOLDING_OBJECT]: SHAPE.createAndDelete,
-} as MePermissionsResponse['objects']);
+} as MePermissionsAuthenticatedResponse['objects']);
 
 /**
  * CONTROL: the same wildcard beside explicit entries with neither create nor
@@ -146,7 +147,7 @@ const WILDCARD_BESIDE_READ_ONLY = answer({
   '*': WILDCARD,
   [GRANT_OBJECT]: SHAPE.readOnly,
   [HOLDING_OBJECT]: SHAPE.readOnly,
-} as MePermissionsResponse['objects']);
+} as MePermissionsAuthenticatedResponse['objects']);
 
 const SECTIONS = [
   {

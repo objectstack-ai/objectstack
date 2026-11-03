@@ -44,6 +44,19 @@ import { SysApprovalApprover } from './sys-approval-approver.object.js';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
+/**
+ * The `titleFormat` template each object declared before the ruling of record
+ * on #29007 (6574393684, letter B) retired it: an object definition that
+ * declares one is refused at the metadata save gate and by `os validate`, so
+ * the object no longer carries it. Kept here as the reference text the title
+ * has to reproduce — the text the template drew — not as a title resolver.
+ */
+const RETIRED_TITLE_TEMPLATES: Readonly<Record<string, string>> = {
+  sys_approval_request: '{process_name}',
+  sys_approval_action: '{action} · {step_name}',
+  sys_approval_approver: '{approver} · {request_id}',
+};
+
 const SYS = { context: { isSystem: true } } as any;
 
 /**
@@ -129,7 +142,7 @@ describe('[#20015] approval objects resolve a real record title under ADR-0079 o
     expect(resolveRecordTitle(SysApprovalRequest, storedOnly(row!))).toBe('Discount Sign-off');
     // The pairing, restated: `titleFormat` keeps the machine source, and a
     // renderer reaches it only where the pointer's value is empty — not here.
-    expect(renderTitleFormat(SysApprovalRequest.titleFormat, row!)).toBe('flow:deal_desk');
+    expect(renderTitleFormat(RETIRED_TITLE_TEMPLATES[SysApprovalRequest.name], row!)).toBe('flow:deal_desk');
   });
 
   it('sys_approval_request: with no flow label stored, the H1 is the template\'s "{process_name}", which display_title matches, never "null" and never the record id', async () => {
@@ -143,10 +156,11 @@ describe('[#20015] approval objects resolve a real record title under ADR-0079 o
     expect(row).not.toBeNull();
     expect(row!.process_label ?? null).toBeNull();
 
-    // The pointer's value is empty, so ADR-0079's order falls through to the
-    // deprecated template: the machine source, the same text the formula draws.
+    // The pointer's value is empty, so ADR-0079's order falls through: to the
+    // retired template once, to the derived `display_title` now — the machine
+    // source either way, the same text the formula draws.
     expect(h1Of(SysApprovalRequest, row!) ?? null).toBeNull();
-    const fallback = renderTitleFormat(SysApprovalRequest.titleFormat, row!);
+    const fallback = renderTitleFormat(RETIRED_TITLE_TEMPLATES[SysApprovalRequest.name], row!);
     expect(fallback).toBe('flow:deal_desk');
     expect(fallback).not.toContain('opp_42');
     expect(fallback).not.toContain('null');
@@ -168,7 +182,7 @@ describe('[#20015] approval objects resolve a real record title under ADR-0079 o
     const row = await engine.findOne('sys_approval_action', { where: { id: stepped.id } }, SYS);
     expect(h1Of(SysApprovalAction, row!)).toBe('approve · manager_review');
     expect(h1Of(SysApprovalAction, row!)).not.toBe(row!.id);
-    expect(h1Of(SysApprovalAction, row!)).toBe(renderTitleFormat(SysApprovalAction.titleFormat, row!));
+    expect(h1Of(SysApprovalAction, row!)).toBe(renderTitleFormat(RETIRED_TITLE_TEMPLATES[SysApprovalAction.name], row!));
     expect(resolveRecordTitle(SysApprovalAction, storedOnly(row!))).toBe('approve · manager_review');
 
     const stepless = await engine.insert('sys_approval_action', {
@@ -192,7 +206,7 @@ describe('[#20015] approval objects resolve a real record title under ADR-0079 o
 
     expect(h1Of(SysApprovalApprover, row!)).toBe(`role:finance · ${request.id}`);
     expect(h1Of(SysApprovalApprover, row!)).not.toBe(row!.id);
-    expect(h1Of(SysApprovalApprover, row!)).toBe(renderTitleFormat(SysApprovalApprover.titleFormat, row!));
+    expect(h1Of(SysApprovalApprover, row!)).toBe(renderTitleFormat(RETIRED_TITLE_TEMPLATES[SysApprovalApprover.name], row!));
     expect(resolveRecordTitle(SysApprovalApprover, storedOnly(row!))).toBe(`role:finance · ${request.id}`);
   });
 

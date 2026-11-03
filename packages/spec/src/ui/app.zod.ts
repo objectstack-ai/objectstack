@@ -1594,8 +1594,8 @@ export type AppContextSelectorParsed = z.infer<typeof AppContextSelectorSchema>;
  * `item` is an id into the same tree, and the difference is the refusal:
  * {@link checkAppLandingItems} runs on every app parse, so an `item` that
  * names no entry of this app's own `navigation` or `areas[].navigation`, or
- * names an entry that opens nothing (a `group`, a `separator`, an `action`),
- * is refused at its own path before the app is stored. The landing is a
+ * names an entry that opens nothing inside the app (a `group`, a `separator`,
+ * an `action`, a `url`), is refused at its own path before the app is stored. The landing is a
  * sidebar entry, so the sidebar highlights what the reader landed on; carrying
  * the target inline instead would have made a second copy of a navigation
  * target that the sidebar knows nothing about.
@@ -1635,7 +1635,7 @@ export const AppLandingEntrySchema = lazySchema(() => strictObject(
    * and cannot be named here.
    */
   item: SnakeCaseIdentifierSchema
-    .describe("Id of the app's own navigation entry this audience lands on (any depth of `navigation` or `areas[].navigation`). Refused at parse when no such entry exists, or when it is a `group`, `separator` or `action` entry, which open nothing.")
+    .describe("Id of the app's own navigation entry this audience lands on (any depth of `navigation` or `areas[].navigation`). Refused at parse when no such entry exists, or when it is a `group`, `separator`, `action` or `url` entry, which open nothing inside the app.")
     .meta({ title: 'Navigation item' }),
 
   /**
@@ -1652,8 +1652,12 @@ export type AppLandingEntry = z.input<typeof AppLandingEntrySchema>;
 /** Post-parse shape of {@link AppLandingEntry} — defaults applied, transforms run (ADR-0122). */
 export type AppLandingEntryParsed = z.infer<typeof AppLandingEntrySchema>;
 
-/** Navigation entry types a landing may not name: none of them opens a page. */
-const LANDING_TARGET_REFUSED_TYPES: ReadonlySet<string> = new Set(['group', 'separator', 'action']);
+/**
+ * Navigation entry types a landing may not name: none of them opens a page
+ * inside the app. A `url` entry opens an external address, and the app-root
+ * landing is an in-app redirect, so a `url` landing would land nobody (#28450).
+ */
+const LANDING_TARGET_REFUSED_TYPES: ReadonlySet<string> = new Set(['group', 'separator', 'action', 'url']);
 
 /** Every navigation entry of one tree, at any depth, by `id`, first declaration wins. */
 function collectNavEntriesById(items: unknown, into: Map<string, string>): void {
@@ -1722,8 +1726,8 @@ export function checkAppLandingItems(app: unknown, ctx: z.RefinementCtx): void {
           path: ['landing', index, 'item'],
           message:
             `\`landing[${index}].item\` names \`${entry.item}\`, a \`${type}\` navigation entry, which opens no page, `
-            + 'so a reader could not land on it. Name an entry that opens something (an object, page, dashboard, report, '
-            + 'component, doc or url entry), e.g. one of the entries inside that group.',
+            + 'so a reader could not land on it. Name an entry that opens something inside the app (an object, page, dashboard, '
+            + 'report, component or doc entry), e.g. one of the entries inside that group.',
         });
       }
     }
@@ -1817,8 +1821,8 @@ export function checkAppLandingItems(app: unknown, ctx: z.RefinementCtx): void {
  * than trusted. And it is not a second "where everyone lands": every entry
  * carries a required audience predicate, so "everyone" is still the first
  * navigation item. The maintainer ruled it spec-first rather than
- * enforce-first, so it lands `planned` in the liveness ledger, which warns an
- * author that no console reads it until the landing redirect ships.
+ * enforce-first; the console's landing redirect followed (#28450), and the
+ * liveness ledger carries it `live`.
  */
 const HOME_PAGE_ID_RETIRED =
   '`app.homePageId` was removed in @objectstack/spec 17.0.0 (ADR-0049). '
@@ -2037,9 +2041,13 @@ export const AppSchema = lazySchema(() => strictObject(
    * navigation item by `order`. Every `item` must name an entry of this app,
    * refused at parse otherwise ({@link checkAppLandingItems}).
    *
-   * PLANNED: declared spec-first; the console's landing redirect that reads it
-   * is its own card. Until it lands, an app opens on its first navigation item
-   * whatever this list says, and the liveness ledger tells the author so.
+   * The console's app-root landing reads it (#28450): each `visible` is asked
+   * with the evaluator a navigation entry's `visible` is asked with, over the
+   * same reader roots (`current_user` and `features`; no `data`). A predicate
+   * that faults, a root outside those included, passes its entry over, and the
+   * next entry is asked. A `doc` entry is a landing like any other: it opens
+   * the in-app docs portal, and which docs a reader may open is the server's
+   * audience gate on the doc (objectstack#19790), not the landing's.
    *
    * @example Sales staff open on Leads, service staff on the service console
    * ```ts
@@ -2050,7 +2058,7 @@ export const AppSchema = lazySchema(() => strictObject(
    * ```
    */
   landing: z.array(AppLandingEntrySchema).min(1).optional()
-    .describe('[PLANNED — not yet rendered] Per-audience landing: the first entry whose `visible` (CEL) holds for the reader names the navigation entry (`item`, an `id` of this app\'s own `navigation` or `areas[].navigation`) the app opens on. An `item` that names no entry of this app, or a `group` / `separator` / `action` entry, is refused at parse. No match, or no key: the app opens on its first navigation item by `order`, as before. No console reads this list yet, so until the landing redirect ships every reader still opens on the first navigation item.'),
+    .describe('Per-audience landing: the first entry whose `visible` (CEL) holds for the reader names the navigation entry (`item`, an `id` of this app\'s own `navigation` or `areas[].navigation`) the app opens on; an entry whose `item` the reader\'s own navigation gates hide, or whose `visible` faults, is passed over. An `item` that names no entry of this app, or a `group` / `separator` / `action` / `url` entry, is refused at parse. No match, or no key: the app opens on its first navigation item by `order`, as before.'),
 
   /** 
    * Access Control

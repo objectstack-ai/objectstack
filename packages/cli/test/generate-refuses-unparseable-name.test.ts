@@ -16,7 +16,7 @@
  * assertions here are on a real child process and on stdout, for the same two
  * reasons `invocation-loudness.e2e.test.ts` documents at length — these
  * commands print through `utils/format.ts`, whose `printError` writes to
- * stdout. Spawned through `bin/run-dev.js` + tsx so the suite does not depend
+ * stdout. Spawned through `bin/run-dev.js` + `node` so the suite does not depend
  * on `packages/cli/dist` having been built.
  *
  * ## ⛔ Why this file is NOT named `.e2e`
@@ -85,9 +85,8 @@ import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
-/** oclif + tsx cold start, with every command module loaded; ~2-10 s when healthy. */
+/** oclif cold start, with every command module loaded; ~2-10 s when healthy. */
 const RUN_TIMEOUT_MS = 240_000;
 
 interface Run {
@@ -96,10 +95,10 @@ interface Run {
   stderr: string;
 }
 
-function runTsx(args: string[], cwd: string): Promise<Run> {
+function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       args,
       { cwd, maxBuffer: 8 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {
@@ -155,16 +154,16 @@ beforeAll(async () => {
   dryRunDir = mkdtempSync(join(tmpdir(), 'os-g-dryrun-'));
   unparseableDir = mkdtempSync(join(tmpdir(), 'os-g-unparseable-'));
 
-  // Sequential on purpose: cold tsx starts, each loading every command module,
+  // Sequential on purpose: cold CLI starts, each loading every command module,
   // in a container several agents share.
-  refused = await runTsx([CLI, 'generate', 'object', 'foo.bar'], refusedDir);
+  refused = await runCli([CLI, 'generate', 'object', 'foo.bar'], refusedDir);
   // A second generator, to show the refusal is not one patched call site.
-  refusedAgain = await runTsx([CLI, 'generate', 'flow', 'foo.bar'], refusedDir);
-  dryRun = await runTsx([CLI, 'generate', 'object', 'foo.bar', '--dry-run'], dryRunDir);
+  refusedAgain = await runCli([CLI, 'generate', 'flow', 'foo.bar'], refusedDir);
+  dryRun = await runCli([CLI, 'generate', 'object', 'foo.bar', '--dry-run'], dryRunDir);
   // Inside the charset, outside the grammar — the name that reaches THIS
   // check now that a charset gate stands in front of it (#16726).
-  unparseable = await runTsx([CLI, 'generate', 'object', 'class'], unparseableDir);
-  control = await runTsx([CLI, 'generate', 'object', 'order_line'], controlDir);
+  unparseable = await runCli([CLI, 'generate', 'object', 'class'], unparseableDir);
+  control = await runCli([CLI, 'generate', 'object', 'order_line'], controlDir);
 }, RUN_TIMEOUT_MS);
 
 afterAll(() => {

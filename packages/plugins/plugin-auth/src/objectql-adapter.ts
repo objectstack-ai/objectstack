@@ -5,6 +5,7 @@ import { createAdapterFactory } from 'better-auth/adapters';
 import type { CleanedWhere, WhereOperator } from 'better-auth/adapters';
 import { SystemObjectName } from '@objectstack/spec/system';
 import { resolveAttributedUserId } from './auth-actor-attribution.js';
+import { agentForwardPerformedBy } from './agent-forward-identity-view.js';
 import { inScimRequestScope } from './scim-connection-service.js';
 import { adoptExistingMembership } from './adopt-membership.js';
 import { refuseIssuerRepointWithLiveBindings } from './account-identity-preflight.js';
@@ -752,8 +753,19 @@ export function withSystemContext(engine: IDataEngine): IDataEngine {
   // still wins on every key — the same precedence `isSystem` already had.
   const asAttributedSystem = async (q: any) => {
     const attributedUserId = await resolveAttributedUserId();
-    if (!attributedUserId) return asSystem(q);
-    return { ...(q ?? {}), context: { attributedUserId, isSystem: true, ...(q?.context ?? {}) } };
+    // [ADR-0090 D10 rule 5, #28367] A forwarded AI agent's write also names the
+    // agent's client (`performedBy`), so the audit row records both sides.
+    const performedBy = agentForwardPerformedBy();
+    if (!attributedUserId && !performedBy) return asSystem(q);
+    return {
+      ...(q ?? {}),
+      context: {
+        ...(attributedUserId ? { attributedUserId } : {}),
+        ...(performedBy ? { performedBy } : {}),
+        isSystem: true,
+        ...(q?.context ?? {}),
+      },
+    };
   };
   return {
     insert: async (m: string, d: any, o?: any) => e.insert(m, d, await asAttributedSystem(o)),

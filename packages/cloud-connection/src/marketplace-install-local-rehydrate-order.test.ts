@@ -94,4 +94,16 @@ describe('kernel:ready rehydrate — ADR-0141 D5 dependency order', () => {
         expect(cycle).toContain('com.acme.a');
         expect(cycle).toContain('com.acme.b');
     });
+
+    it('[#28604] orders an entry ledgered in the CLI\'s lifted shape by the dependencies its nested manifest declares', async () => {
+        // What an install before #28535 ledgered for `os package install <file>`:
+        // the manifest nested, `id` and `version` lifted beside it.
+        const lifted: InstalledManifestEntry = {
+            ...REVENUE,
+            manifest: { id: REVENUE.manifestId, version: '1.0.0', manifest: { ...REVENUE.manifest } },
+        };
+        const { order, errors } = await rehydrate(dir, [lifted, HOTCRM]);
+        expect(order).toEqual(['app.objectstack.hotcrm', 'app.objectstack.hotcrm.revenue']);
+        expect(errors.filter((e) => e.includes('cycle'))).toEqual([]);
+    });
 });

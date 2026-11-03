@@ -23,6 +23,16 @@
  *    same request without a token answers (the control): `404
  *    RECORD_NOT_FOUND`, the same status and the same body, with no
  *    `currentVersion` and no `currentRecord`. The row is untouched.
+ *  - **The same, on an object the caller reads but may not write:** the write
+ *    door answers first, so the control is its `403` — and a stale token, on
+ *    the hidden row and on an id naming no row, gets that same `403` body. The
+ *    comparison gives no answer of its own for a row absent from the
+ *    caller's read. A row the caller reads there still conflicts `409`.
+ *  - **An object the caller may write but not read, with no row filter on
+ *    the write:** the caller's re-read is REFUSED, not empty, and a refusal is
+ *    never handed to the write door: a stale token answers the read door's
+ *    `403` and the row is unchanged, on update and on delete. The control
+ *    without a token lands, so the pin is not vacuous.
  *  - **A field the caller's FLS hides:** the `409`'s `currentRecord` does not
  *    carry it, as the caller's own read of the row does not.
  *  - **A row the caller may read whole (the positive control):** a stale token
@@ -60,15 +70,26 @@ const DATA = `${PREFIX}/data`;
 const SCOPED = 'occ_vis_ledger';
 /** An object no row or field rule names: the positive control. */
 const PLAIN = 'occ_vis_plain';
+/** An object the member reads but may not write, under the same row scope as {@link SCOPED}. */
+const READONLY = 'occ_vis_readonly';
+/** An object the member may update and delete but not read, with no row rule at all. */
+const WRITEONLY = 'occ_vis_writeonly';
 
 const SYS_CTX = { isSystem: true, userId: 'usr_system' };
 
 const MEMBER_SET = PermissionSetSchema.parse({
     name: 'member_default',
     label: 'Member',
-    objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+    objects: {
+        '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
+        [READONLY]: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+        [WRITEONLY]: { allowRead: false, allowCreate: false, allowEdit: true, allowDelete: true },
+    },
     fields: { [`${SCOPED}.secret`]: { readable: false, editable: false } },
-    rowLevelSecurity: [{ name: 'region_scope', object: SCOPED, operation: 'all', using: "record.region != 'HIDDEN'" }],
+    rowLevelSecurity: [
+        { name: 'region_scope', object: SCOPED, operation: 'all', using: "record.region != 'HIDDEN'" },
+        { name: 'region_scope_readonly', object: READONLY, operation: 'all', using: "record.region != 'HIDDEN'" },
+    ],
 });
 
 const MEMBER_CTX = { userId: 'usr_member', positions: [] as string[], permissions: [MEMBER_SET.name], posture: 'MEMBER' as const };
@@ -82,6 +103,12 @@ const HIDDEN_ID = 'h1';
 const MASKED_ID = 'v1';
 /** The positive control's row. */
 const PLAIN_ID = 'p1';
+/** The row the member reads on {@link READONLY}. */
+const READABLE_ID = 'r1';
+/** An id that names no row anywhere. */
+const MISSING_ID = 'occ_vis_missing';
+/** The row on {@link WRITEONLY}. */
+const WRITEONLY_ID = 'w1';
 
 /** A by-id read's options, typed to the engine's contract. */
 const byId = (id: string, context: EngineQueryOptions['context']): EngineQueryOptions => ({ where: { id }, context });
@@ -218,6 +245,23 @@ describe('[#23586] a 409 CONCURRENT_UPDATE reports only what the caller may read
                     },
                 },
                 {
+                    name: READONLY,
+                    label: 'Read-only ledger',
+                    sharingModel: 'public_read_write',
+                    fields: {
+                        title: { name: 'title', type: 'text' },
+                        region: { name: 'region', type: 'text' },
+                    },
+                },
+                {
+                    name: WRITEONLY,
+                    label: 'Write-only ledger',
+                    sharingModel: 'public_read_write',
+                    fields: {
+                        title: { name: 'title', type: 'text' },
+                    },
+                },
+                {
                     name: PLAIN,
                     label: 'Plain',
                     sharingModel: 'public_read_write',
@@ -264,7 +308,7 @@ describe('[#23586] a 409 CONCURRENT_UPDATE reports only what the caller may read
 
     /** A fresh copy of the three rows, so each case starts from a known store. */
     async function seed(): Promise<void> {
-        for (const [object, id] of [[SCOPED, HIDDEN_ID], [SCOPED, MASKED_ID], [PLAIN, PLAIN_ID]] as const) {
+        for (const [object, id] of [[SCOPED, HIDDEN_ID], [SCOPED, MASKED_ID], [PLAIN, PLAIN_ID], [READONLY, HIDDEN_ID], [READONLY, READABLE_ID], [WRITEONLY, WRITEONLY_ID]] as const) {
             if (await systemRow(object, id)) await engine.delete(object, { where: { id }, context: SYS_CTX } as any);
         }
         await engine.insert(SCOPED, [
@@ -272,7 +316,15 @@ describe('[#23586] a 409 CONCURRENT_UPDATE reports only what the caller may read
             { id: MASKED_ID, title: 'visible', region: 'NA', secret: 'masked-secret' },
         ], { context: SYS_CTX } as never);
         await engine.insert(PLAIN, [{ id: PLAIN_ID, title: 'plain', note: 'readable' }], { context: SYS_CTX } as never);
+        await engine.insert(READONLY, [
+            { id: HIDDEN_ID, title: 'hidden', region: 'HIDDEN' },
+            { id: READABLE_ID, title: 'readable', region: 'NA' },
+        ], { context: SYS_CTX } as never);
+        await engine.insert(WRITEONLY, [{ id: WRITEONLY_ID, title: 'write-only' }], { context: SYS_CTX } as never);
     }
+
+    /** The body with the id it names written out, so the answers for two ids compare. */
+    const withoutId = (body: unknown, id: string) => JSON.parse(JSON.stringify(body ?? null).split(id).join('ID'));
 
     const codeOf = (body: any): string | undefined =>
         body?.error && typeof body.error === 'object' ? body.error.code : body?.code;
@@ -308,6 +360,47 @@ describe('[#23586] a 409 CONCURRENT_UPDATE reports only what the caller may read
                     }
                     // Nothing was written.
                     expect(await systemRow(SCOPED, HIDDEN_ID)).toMatchObject({ title: 'hidden', secret: 'hidden-secret' });
+                }, 60_000);
+
+                it('a row RLS hides on an object the caller reads but may not write: a stale token answers the write door\'s 403, as the control does, and so does an id naming no row', async () => {
+                    await seed();
+                    const control = await door().send(verb, READONLY, HIDDEN_ID);
+                    expect({ status: control.status, code: codeOf(control.body) }, JSON.stringify(control.body))
+                        .toEqual({ status: 403, code: 'PERMISSION_DENIED' });
+
+                    const stale = await door().send(verb, READONLY, HIDDEN_ID, ifMatch(STALE));
+                    expect(stale.status, JSON.stringify(stale.body)).toBe(control.status);
+                    expect(stale.body).toEqual(control.body);
+                    const missing = await door().send(verb, READONLY, MISSING_ID, ifMatch(STALE));
+                    expect(missing.status, JSON.stringify(missing.body)).toBe(control.status);
+                    expect(withoutId(missing.body, MISSING_ID)).toEqual(withoutId(control.body, HIDDEN_ID));
+                    expect(await systemRow(READONLY, HIDDEN_ID)).toMatchObject({ title: 'hidden' });
+
+                    // A row the caller reads on the same object still conflicts: the record it is
+                    // shown is one it can GET anyway.
+                    const readable = await door().send(verb, READONLY, READABLE_ID, ifMatch(STALE));
+                    expect({ status: readable.status, code: codeOf(readable.body) }, JSON.stringify(readable.body))
+                        .toEqual({ status: 409, code: 'CONCURRENT_UPDATE' });
+                    expect(await systemRow(READONLY, READABLE_ID)).toMatchObject({ title: 'readable' });
+                }, 60_000);
+
+                it('an object the caller may write but not read: a stale token answers the read refusal and the row is unchanged; without a token the write lands', async () => {
+                    await seed();
+                    const before = await systemRow(WRITEONLY, WRITEONLY_ID);
+                    expect(before).toMatchObject({ title: 'write-only' });
+
+                    const stale = await door().send(verb, WRITEONLY, WRITEONLY_ID, ifMatch(STALE));
+                    expect({ status: stale.status, code: codeOf(stale.body) }, JSON.stringify(stale.body))
+                        .toEqual({ status: 403, code: 'PERMISSION_DENIED' });
+                    expect(JSON.stringify(stale.body)).not.toContain('currentRecord');
+                    expect(await systemRow(WRITEONLY, WRITEONLY_ID), 'the stale token wrote nothing').toEqual(before);
+
+                    // Control: the same request without a token is admitted and lands —
+                    // the caller really holds the write grant.
+                    const plain = await door().send(verb, WRITEONLY, WRITEONLY_ID);
+                    expect(plain.status, JSON.stringify(plain.body)).toBe(200);
+                    if (verb === 'PATCH') expect(await systemRow(WRITEONLY, WRITEONLY_ID)).toMatchObject({ title: 'written' });
+                    else expect(await systemRow(WRITEONLY, WRITEONLY_ID)).toBeFalsy();
                 }, 60_000);
 
                 it('a field FLS hides: the 409 carries the row the caller reads, without that field', async () => {
@@ -359,9 +452,10 @@ describe('[#23586] a 409 CONCURRENT_UPDATE reports only what the caller may read
                         findOne.mockClear();
                         const matched = await door().send(verb, PLAIN, PLAIN_ID, ifMatch(version));
                         expect(matched.status, JSON.stringify(matched.body)).toBe(200);
-                        // DELETE probes once more when a token is present (it skips the probe without one);
-                        // PATCH probes in both. Nothing else is read on the match path.
-                        expect(findOne.mock.calls.length).toBe(withoutToken + (verb === 'DELETE' ? 1 : 0));
+                        // Both verbs probe once more when a token is present and skip the probe without
+                        // one: neither looks the record up ahead of the engine, which judges the write
+                        // first. Nothing else is read on the match path.
+                        expect(findOne.mock.calls.length).toBe(withoutToken + 1);
                     } finally {
                         findOne.mockRestore();
                     }

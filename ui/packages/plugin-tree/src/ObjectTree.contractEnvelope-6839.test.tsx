@@ -35,7 +35,7 @@
  * on PRs that cannot reach `plugin-tree` at all — `expected 1 to be 2`.
  *
  * That wait was `container.querySelector('[data-testid="object-tree"]') ??
- * queryByText('No records')`, and the row count was read the instant it passed.
+ * queryByText('No data')`, and the row count was read the instant it passed.
  * The testid is on the TABLE WRAPPER, so it is a MOUNT signal, not a rows
  * signal — and the rows this file counts arrive at a LATER commit than the
  * table does.
@@ -73,7 +73,7 @@
  *     count alone is also satisfied by a tree that flattens everything.
  *   - the REFUSAL arm cannot wait for an absence, so it takes a SETTLED read
  *     anchored on something that DOES appear in that scenario: the tree's own
- *     "No records" panel, which `ObjectTree` renders only once `loading` has
+ *     "No data" panel, which `ObjectTree` renders only once `loading` has
  *     flipped false. Probed on the `records` fixture the sequence is
  *     `loading → empty-state` with no table at any point, and the panel is
  *     absent while loading — so this arm cannot pass by timing out on an
@@ -173,14 +173,14 @@ function drawnRows(container: HTMLElement): DrawnRow[] {
 }
 
 /**
- * Has the tree drawn its own "No records" panel?
+ * Has the tree drawn its own "No data" panel?
  *
  * ⚠️ `queryAllByText`, not `queryByText`: the singular form THROWS on multiple
  * matches as well as answering `null` on none, so it cannot express "how many"
  * without the throw becoming the result.
  */
 function emptyPanelDrawn(container: HTMLElement): boolean {
-  return within(container).queryAllByText('No records').length > 0;
+  return within(container).queryAllByText('No data').length > 0;
 }
 
 function readSettled(container: HTMLElement): Settled {
@@ -246,14 +246,14 @@ async function settledOn(envelope: Envelope, outcome: Outcome): Promise<Settled>
   if ('refuses' in outcome) {
     // A refusal has no arrival to wait for, so this is a SETTLED read built
     // from the two things that CAN be observed: `find` has answered (above),
-    // and the tree has drawn the "No records" panel — a node it renders only
+    // and the tree has drawn the "No data" panel — a node it renders only
     // after `loading` flips false, so it is a COMPLETION ANCHOR and not the
     // mere passage of time. `act` then flushes what React still had queued; it
     // is the opposite of widening a timeout.
     await waitFor(() =>
       expect(
         emptyPanelDrawn(container),
-        'the tree must have drawn its own "No records" panel before it is read — without that anchor an absence assertion passes by timing out',
+        'the tree must have drawn its own "No data" panel before it is read — without that anchor an absence assertion passes by timing out',
       ).toBe(true),
     );
     await act(async () => {});
@@ -304,12 +304,12 @@ describe('ObjectTree — the find() envelope it reads (objectui#6839)', () => {
   it('does NOT read `records` — not a QueryResult member', async () => {
     // Before the fix these two nodes drew off a key `QueryResult` does not
     // declare, and did so AHEAD of `data`. The tree now settles on its own
-    // "No records" panel — a DIFFERENT node from the table, which is what makes
+    // "No data" panel — a DIFFERENT node from the table, which is what makes
     // this a reading of the refusal rather than of a mount that never happened.
     const settled = await settledOn(asRecords, REFUSES);
     expect(
       settled.emptyPanelDrawn,
-      'the refusal must be OBSERVED: the tree drew its "No records" panel',
+      'the refusal must be OBSERVED: the tree drew its "No data" panel',
     ).toBe(true);
     expect(
       settled.rows,

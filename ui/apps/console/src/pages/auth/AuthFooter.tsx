@@ -44,14 +44,16 @@ export function readLegalLinks(cfg: AuthPublicConfig | null): { privacyUrl?: str
 
 export function AuthFooter({ privacyUrl, termsUrl }: { privacyUrl?: string; termsUrl?: string }) {
   const { t } = useObjectTranslation();
+  // On a phone (below `sm`) each control here is a 44 px touch target.
   const linkClass =
-    'underline-offset-4 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:underline';
+    'inline-flex min-h-[44px] min-w-[44px] items-center justify-center underline-offset-4 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:underline sm:min-h-0 sm:min-w-0';
   return (
     <div
       data-testid="auth-footer"
       className="flex min-h-8 items-center justify-between gap-3 px-1 text-xs text-muted-foreground"
     >
-      <div className="flex items-center">
+      {/* LocaleSwitcher draws a 32 px icon button; grow it to 44 px on a phone. */}
+      <div className="flex items-center max-sm:[&_button]:size-11">
         <LocaleSwitcher />
       </div>
       {privacyUrl || termsUrl ? (

@@ -27,7 +27,7 @@
  * worker is not one — only a process that has actually exited has a status for
  * a shell, a `set -e` script or a container entrypoint to read. That audience
  * is the entire point of the ruling, and it is the one an in-process assertion
- * cannot stand in for. Spawned through `bin/run-dev.js` + tsx, the pattern
+ * cannot stand in for. Spawned through `bin/run-dev.js` + `node`, the pattern
  * `migrate-exit-code.e2e.test.ts` and `migrate-plan-exits.e2e.test.ts` already
  * use, so the suite does not depend on `packages/cli/dist` having been built.
  *
@@ -47,7 +47,7 @@ import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CLI, TSX, childEnv } from './helpers/serve-process.js';
+import { CLI, childEnv } from './helpers/serve-process.js';
 
 /**
  * The environment variable the unloadable fixture demands.
@@ -58,7 +58,7 @@ import { CLI, TSX, childEnv } from './helpers/serve-process.js';
  */
 const REQUIRED_VAR = 'OS_E2E_12953_SECRET';
 
-/** Generous: a cold tsx compile of the command tree dominates a ~1 s plan. */
+/** Generous: a cold load of the command tree dominates a ~1 s plan. */
 const RUN_BUDGET_MS = 120_000;
 
 interface Run {
@@ -70,7 +70,7 @@ interface Run {
 function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...args],
       {
         cwd,

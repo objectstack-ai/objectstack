@@ -24,6 +24,7 @@ import {
   type RowActionMenuProps,
 } from './RowActionMenu';
 import { isDestructiveBulkDef, useBulkActionItems } from './BulkActionBar';
+import { BULK_SELECT_ALL_MATCHING_CAP, exceedsBulkSelectAllMatchingCap } from '../bulkSelectAllMatchingCap';
 
 /**
  * The items of a list row's context menu (objectstack#28434) — the second way
@@ -40,7 +41,7 @@ const CONTEXT_MENU_FALLBACKS: Record<string, string> = {
 
 function useContextMenuTranslation() {
   const { t } = useObjectTranslation();
-  return (key: string, options?: { count?: number; defaultValue?: string }): string => {
+  return (key: string, options?: { count?: number; cap?: number; total?: number; defaultValue?: string }): string => {
     const v = String(options ? t(key, options) : t(key));
     return v === key ? (CONTEXT_MENU_FALLBACKS[key] ?? key) : v;
   };
@@ -120,7 +121,13 @@ export const SelectionContextMenuItems: React.FC<{
     <>
       <DropdownMenuLabel className="text-xs font-medium tabular-nums text-muted-foreground" data-testid="row-context-selection-count">
         {allMatchingSelected
-          ? t('grid.bulkSelectedAllMatches', { count: totalMatching, defaultValue: '{{count}} selected (all matches)' })
+          ? exceedsBulkSelectAllMatchingCap(totalMatching)
+            ? t('grid.bulkSelectedAllMatchesCapped', {
+                cap: BULK_SELECT_ALL_MATCHING_CAP,
+                total: totalMatching,
+                defaultValue: '{{cap}} selected (of {{total}} matches)',
+              })
+            : t('grid.bulkSelectedAllMatches', { count: totalMatching, defaultValue: '{{count}} selected (all matches)' })
           : t('grid.bulkSelected', { count: selectedRows.length, defaultValue: '{{count}} selected' })}
       </DropdownMenuLabel>
       {hasActions && <DropdownMenuSeparator />}
@@ -143,7 +150,7 @@ export const SelectionContextMenuItems: React.FC<{
           </DropdownMenuItem>
         );
       })}
-      {items.legacy.map(({ name, destructive }) => (
+      {items.legacy.map(({ name, label, destructive }) => (
         <DropdownMenuItem
           key={name}
           onClick={() => onAction?.(name, selectedRows)}
@@ -151,7 +158,7 @@ export const SelectionContextMenuItems: React.FC<{
           className={destructive ? 'text-destructive focus:text-destructive' : undefined}
         >
           {destructive && <Trash2 className="mr-2 h-4 w-4" />}
-          {formatActionLabel(name)}
+          {label}
         </DropdownMenuItem>
       ))}
       <DropdownMenuSeparator />

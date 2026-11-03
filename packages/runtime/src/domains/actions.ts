@@ -65,7 +65,7 @@ import {
 // generic replacement text — the same two `@objectstack/rest` composes into
 // `isScriptFaultMessage` / `UNCLASSIFIED_FAULT`, so this door's crash reading
 // cannot drift from the `/data` door's. ⛔ Never re-inline either.
-import { isNativeErrorName, INTERNAL_ERROR_MESSAGE, sandboxBusinessMessage, driverNotNullRefusalAnswer } from '@objectstack/types';
+import { isNativeErrorName, INTERNAL_ERROR_MESSAGE, sandboxBusinessMessage, driverNotNullRefusalAnswer, earnedAnswerOf, staleSummaryAnswerLines, type SummaryRecomputeRefusal } from '@objectstack/types';
 // [ADR-0029 D9.6] The ONE "does a code package ship this?" reading, which the
 // activation write below asks to name the ledger row's package.
 import { isCodeArtifactBody, isTenantAuthored } from '@objectstack/metadata-core';
@@ -730,6 +730,18 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
     const paramsFailure = objectValueFailure('params', reqBody.params);
     if (paramsFailure) return invalidBody(`Invalid action body — \`params\` ${paramsFailure.message}`, paramsFailure);
     const recordId = recordIdFromPath ?? reqBody.recordId;
+    // The routed record is named by ONE id, a string or a number: the subject
+    // load below reads the row whose `id` equals it, and every branch hands it
+    // on as the row's id. Any other value names no one row, so it is refused
+    // here, before the param contract, the load and dispatch, with the `400`
+    // flow start admission answers for a record key that is not one id at the
+    // other doors (`refuseUnreadableFlowStartRecords`). A path segment is
+    // always a string; absent, `null` and `''` stay the record-less call.
+    if (recordId !== undefined && recordId !== null && recordId !== ''
+        && typeof recordId !== 'string' && typeof recordId !== 'number') {
+        const message = 'The record key `recordId` must name one record by its id.';
+        return invalidBody(`Invalid action body — ${message}`, { field: 'recordId', code: 'invalid_type', message });
+    }
     const reqParams: Record<string, unknown> = reqBody.params ?? {};
 
     // [ADR-0104 D2] Enforce the declared param contract before the handler
@@ -879,7 +891,13 @@ async function dispatchAdmittedRestAction(
         // audit line and the RLS/FLS-bypassing `ctx.engine` / `ctx.api` are
         // built below, and none of them may exist for a caller who has not
         // demonstrated read access to the subject row.
-        actionExec.refuseDeniedSubjectLoad(objectName, recordId, subject);
+        //
+        // [#28657] Except ahead of an api forward that needs nothing from the
+        // row: it builds none of that, and its target authorizes the caller
+        // itself (ADR-0066 D4), so a denied load forwards and the target's
+        // answer is this door's — see `refuseDeniedSubjectLoadBeforeDispatch`.
+        // The MCP `run_action` bridge calls the same function at the same point.
+        actionExec.refuseDeniedSubjectLoadBeforeDispatch(actionDef, objectName, recordId, subject);
 
         // ── api forward (#27506, ruling 6499781492) ── a same-origin
         // `type: 'api'` action is forwarded IN-PROCESS to its declared
@@ -903,11 +921,15 @@ async function dispatchAdmittedRestAction(
             if (!inject) {
                 return { handled: true, response: deps.error(actionExec.apiActionForwardUnavailableError(actionDef), 503) };
             }
-            const built = actionExec.buildApiActionRequest(actionDef, { recordId, record, params: reqParams, ec });
+            // [#28657] On a denied load the request is built from the
+            // `recordId` alone — ⛔ never from a row the caller could not read.
+            const built = actionExec.buildApiActionRequest(actionDef, {
+                recordId, record: actionExec.apiForwardSubjectRecord(recordId, subject), params: reqParams, ec,
+            });
             if ('message' in built) {
                 return { handled: true, response: deps.error(built.message, built.status) };
             }
-            const answer = await actionExec.forwardApiAction(inject, _context, built, { objectName, actionName, target: actionDef?.target });
+            const answer = await actionExec.forwardApiAction(inject, _context, built, { objectName, actionName, target: actionDef?.target, ...(recordId ? { recordId: String(recordId) } : {}) });
             const relayed = Object.keys(answer.headers).length > 0 ? { headers: answer.headers } : {};
             if (answer.status >= 200 && answer.status < 300) {
                 return { handled: true, response: { ...deps.success(actionExec.apiActionResultOf(answer)), ...relayed } };
@@ -1058,6 +1080,24 @@ async function dispatchAdmittedRestAction(
         // carry a status now, so the extra layer lost its job.
         return { handled: true, response: deps.success(result) };
     } catch (err: any) {
+        // [#28856] An action whose write landed under a failing roll-up answers
+        // the result the runtime composed and attached (`executeDeclarativeUpdateAction`),
+        // as when the recompute succeeds; the stale column is logged once.
+        //
+        // [#28861] Read on the declarative-update arm only: that arm's refusal
+        // carries the ACTION's result. Any other arm's can carry only a WRITE's
+        // data answer — a handler that let out a refusal a data door attached
+        // its answer to — and the action that threw has no result, so it is
+        // answered below as the failure it is. (A handler's own `ctx.engine` /
+        // `ctx.api` writes answer a landed write's success and never throw it.)
+        const earned = actionExec.isDeclarativeUpdateAction(actionDef) ? earnedAnswerOf(err) : undefined;
+        if (earned) {
+            const log = deps.logger && typeof deps.logger.error === 'function'
+                ? (line: string) => deps.logger.error(`[HttpDispatcher] ${line}`)
+                : (line: string) => console.error(`[HttpDispatcher] ${line}`);
+            for (const line of staleSummaryAnswerLines(err as SummaryRecomputeRefusal, objectName)) log(line);
+            return { handled: true, response: deps.success(earned) };
+        }
         const full = err?.message ?? String(err);
         // The sandbox wraps a user throw as `<kind> '<name>' threw: <msg>` for
         // server logs; surface only the business `<msg>` to the client so an

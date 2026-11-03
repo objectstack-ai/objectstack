@@ -65,6 +65,7 @@ import {
   type FormulaServingChannel,
 } from '@objectstack/objectql';
 import { refuseStoredMetadataBodyReads, refuseStoredMetadataBodyWrites } from '../stored-metadata-reader-seam.js';
+import { answerLandedWritesDespiteStaleSummary } from '../landed-write-answer.js';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import {
   isWildcardHookTarget,
@@ -1153,10 +1154,19 @@ function buildEngineRepoFacade(ql: any, objectName: string, context?: any) {
  * body's, and is served by the reader-context seam
  * (`serveStoredMetadataReadsThrough`) with its writes kept (deployer code,
  * outside the boundary).
+ *
+ * [#28861] Beneath both refusals, every body face's write that the engine
+ * stored, whose parent roll-up could not be recomputed after it, answers the
+ * write's success in the VM (`landed-write-answer.ts`), whatever source below
+ * the API is built from: the body runs on to its own result. An action's
+ * host-built `api` already answers so (`buildActionApi`); the layer is
+ * idempotent.
  */
 function buildSandboxApi(engineCtx: any, ql: any, errLabel: string) {
   return refuseStoredMetadataBodyWrites(
-    refuseStoredMetadataBodyReads(buildSandboxApiSource(engineCtx, ql, errLabel)),
+    refuseStoredMetadataBodyReads(
+      answerLandedWritesDespiteStaleSummary(buildSandboxApiSource(engineCtx, ql, errLabel), errLabel),
+    ),
   );
 }
 
@@ -1299,6 +1309,11 @@ function buildSandboxContext(
     // dispatches for one write, and its params bag has no caller options.
     dispatch,
     inputOptions,
+    // [#28251] Hook face only: the engine's `ctx.notice`, bound from the
+    // write's own `onNotice` listener on insert / update dispatches. Handed
+    // over as the engine's function, so the body reaches the one listener and
+    // the member's own refusal of a non-string message — never a copy here.
+    ...(typeof engineCtx?.notice === 'function' ? { notice: engineCtx.notice as (message: string) => void } : {}),
     // [commit 34ce8e7db] The declared referential-cleanup marker, carried across the
     // sandbox boundary BY CONTRACT — copied only in its declared shape
     // (`true`), the same unrecognised-shape rule as `dispatch` above: anything

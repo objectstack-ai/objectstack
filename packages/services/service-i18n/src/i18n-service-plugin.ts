@@ -89,6 +89,8 @@ export class I18nServicePlugin implements Plugin {
       defaultLocale: this.options.defaultLocale,
       localesDir: this.options.localesDir,
       fallbackLocale: this.options.fallbackLocale,
+      // [#28109] A translation `t()` could not serve as asked is said once here.
+      logger: ctx.logger,
     };
 
     const i18n = new FileI18nAdapter(adapterOptions);

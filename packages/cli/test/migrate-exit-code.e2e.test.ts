@@ -25,7 +25,7 @@
  * It has to be a real child process. `process.exitCode` set inside a vitest
  * worker is not an exit status — the number the defect produced only exists
  * once Node has exited and the kernel has masked it to `& 0xFF`. Spawned
- * through `bin/run-dev.js` + tsx (the pattern `migrate-meta.e2e.test.ts` and
+ * through `bin/run-dev.js` + `node` (the pattern `migrate-meta.e2e.test.ts` and
  * `emit-json-pipe.test.ts` already use) so the suite does not depend on
  * `packages/cli/dist` having been built.
  */
@@ -40,7 +40,6 @@ import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 /** Minimal project: the command boots a stack, it does not need much of one. */
 const CONFIG = `
@@ -79,7 +78,7 @@ function runCli(args: string[], cwd: string, env: Record<string, string> = {}): 
   const started = Date.now();
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...args],
       { cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1', ...env }) },
       (err, stdout, stderr) => {
@@ -189,7 +188,7 @@ describe('os migrate recorded-by --json — a successful run exits 0 (#4873)', (
   });
 
   it('still exits promptly — #4813 stays fixed', () => {
-    // Wall time of the whole child, tsx compile included.
+    // Wall time of the whole child, command-tree load included.
     for (const run of runs) expect(run.wallMs).toBeLessThan(SLOW_RUN_MS);
   });
 });

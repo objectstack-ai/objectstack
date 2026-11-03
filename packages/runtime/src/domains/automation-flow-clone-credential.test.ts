@@ -56,7 +56,18 @@ function makeDispatcher(
         }),
     };
     if (holdings) spies.flowCredentialHoldings = vi.fn(holdings);
-    const services: Record<string, unknown> = { automation: spies };
+    // [#28149] The door writes every copy into a package (ADR-0146 D4): the
+    // loader's set names a base, the ensure door answers its pair, and the
+    // registry holds both, so the one case that clones reaches its save.
+    const protocol = {
+        packagedArtifactOwner: () => 'base',
+        ensureCustomizationPackage: async () => ({ packageId: 'base.custom' }),
+        saveMetaItem: vi.fn(async () => ({ success: true })),
+        tenantAuthoredWriteRefusal: async () => undefined,
+    };
+    const packages: Record<string, unknown> = { base: { id: 'base' }, 'base.custom': { id: 'base.custom', dependencies: { base: '^1' } } };
+    const objectql = { registry: { getPackage: (id: string) => (packages[id] ? { manifest: packages[id] } : undefined) } };
+    const services: Record<string, unknown> = { automation: spies, protocol, objectql };
     const resolve = (name: string) => services[name];
     const kernel: any = { getService: resolve, getServiceAsync: async (name: string) => resolve(name), context: { getService: resolve } };
     return { dispatcher: new HttpDispatcher(kernel), spies };

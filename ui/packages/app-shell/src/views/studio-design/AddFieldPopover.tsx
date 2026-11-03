@@ -13,8 +13,9 @@
  * creates nothing.
  *
  * The api name is derived from the label, as the field inspector derives it,
- * and shown under the Label before Create. When the label yields none (a
- * label with no Latin letters, a Chinese one say) or yields one another field
+ * and shown under the Label before Create; a Chinese label derives through its
+ * pinyin (`romanizeHan`: `客户等级` → `kehu_dengji`). When the label yields
+ * none (a Japanese one, say) or yields one another field
  * already holds, the popover asks for the api name instead of letting the
  * host fall back to a positional `field_<N>` the author never saw, which is
  * permanent once published (objectui#13389).
@@ -25,6 +26,11 @@
  *   its authoring context with no element to hand over): the host passes
  *   `open` / `onOpenChange`, `children` is the element it is placed against,
  *   and `returnFocusTo` names where focus goes back when it closes.
+ *
+ * objectstack#28575 (ADR-0146 D10) — on a read-only base's object the field
+ * is the customer's extension field (`extensionField`): its api name takes
+ * the spec's suffix (`region` → `region__c`), shown before Create, a typed
+ * name the same, and Create always hands the suffixed name.
  */
 
 import * as React from 'react';
@@ -40,6 +46,8 @@ import type { FieldTypeId } from '../metadata-admin/previews/field-types.js';
 import { FieldTypePicker } from '../metadata-admin/inspectors/FieldTypePicker.js';
 import { t, tFormat, useMetadataLocale, type SupportedLocale } from '../metadata-admin/i18n.js';
 import { toFieldNameLoose } from '../metadata-admin/previews/object-fields-io.js';
+import { romanizeHan, romanizerPending, useHanRomanizer } from '../metadata-admin/romanizeHan.js';
+import { extensionFieldName } from './StudioCustomizeControls.js';
 
 /**
  * The refusal for an api name another field of the object already holds, or
@@ -76,6 +84,11 @@ export interface AddFieldPopoverProps {
   returnFocusTo?: () => HTMLElement | null;
   /** Which edge of `children` the popover lines up with. */
   align?: 'start' | 'end';
+  /**
+   * objectstack#28575 — the field is a customer extension field of a base
+   * object: its api name is suffixed (`__c`), and Create hands that name.
+   */
+  extensionField?: boolean;
 }
 
 export function AddFieldPopover({
@@ -86,6 +99,7 @@ export function AddFieldPopover({
   onOpenChange,
   returnFocusTo,
   align = 'end',
+  extensionField = false,
 }: AddFieldPopoverProps): React.ReactElement {
   const locale = useMetadataLocale();
   const [openState, setOpenState] = React.useState(false);
@@ -111,18 +125,23 @@ export function AddFieldPopover({
   };
 
   const trimmed = label.trim();
-  const derived = toFieldNameLoose(trimmed).replace(/_+$/, '');
+  useHanRomanizer(trimmed);
+  // The pinyin dictionary is still on its way: the name is about to derive, so
+  // neither ask for one nor allow Create yet.
+  const pending = romanizerPending(trimmed);
+  const suffixed = (name: string) => (extensionField ? extensionFieldName(name) : name);
+  const derived = suffixed(toFieldNameLoose(romanizeHan(trimmed)).replace(/_+$/, ''));
   const derivedTaken = !!derived && takenNames.includes(derived);
   // The label alone cannot name the field: the author types the api name.
-  const asksName = !!trimmed && (!derived || derivedTaken);
-  const typed = apiName.replace(/_+$/, '');
+  const asksName = !!trimmed && !pending && (!derived || derivedTaken);
+  const typed = suffixed(apiName.replace(/_+$/, ''));
   const typedRefusal = fieldNameTakenRefusal(typed, takenNames, locale);
   const typedTaken = !!typedRefusal;
-  const canCreate = !!trimmed && (!asksName || (!!typed && !typedTaken));
+  const canCreate = !!trimmed && !pending && (!asksName || (!!typed && !typedTaken));
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!canCreate) return;
-    onCreate(trimmed, type, asksName ? typed : undefined);
+    onCreate(trimmed, type, asksName ? typed : extensionField ? derived : undefined);
     setOpen(false);
   };
   const nameHint = !asksName
@@ -175,7 +194,7 @@ export function AddFieldPopover({
               data-testid="add-field-label-input"
               className="h-8 text-sm"
             />
-            {trimmed && !asksName && (
+            {trimmed && !asksName && !pending && (
               <p className="text-xs text-muted-foreground" data-testid="add-field-api-name-preview">
                 {t('designer.field.apiName', locale)}: <span className="font-mono text-foreground">{derived}</span>
               </p>
@@ -201,6 +220,11 @@ export function AddFieldPopover({
               {nameHint && (
                 <p id={apiNameHintId} className="text-xs text-destructive" data-testid="add-field-api-name-hint">
                   {nameHint}
+                </p>
+              )}
+              {!nameHint && extensionField && typed && (
+                <p className="text-xs text-muted-foreground" data-testid="add-field-api-name-preview">
+                  {t('designer.field.apiName', locale)}: <span className="font-mono text-foreground">{typed}</span>
                 </p>
               )}
             </div>

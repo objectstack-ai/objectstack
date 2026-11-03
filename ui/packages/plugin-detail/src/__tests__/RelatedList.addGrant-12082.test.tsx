@@ -26,7 +26,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import * as React from 'react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { RelatedList } from '../RelatedList';
 
 const JUNCTION = 'sys_user_permission_set';
@@ -41,16 +41,17 @@ const SHAPE = {
   full: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
 } as const;
 
-function answer(objects: Record<string, Record<string, unknown>>): MePermissionsResponse {
+function answer(objects: Record<string, Record<string, unknown>>): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u-pin',
     tenantId: null,
-    roles: ['member'],
+    positions: ['member'],
+    hasAnyQueue: false,
     permissionSets: ['member'],
     objects,
     fields: {},
-  } as MePermissionsResponse;
+  } as MePermissionsAuthenticatedResponse;
 }
 
 /**

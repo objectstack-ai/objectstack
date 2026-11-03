@@ -7,7 +7,11 @@ import type {
   ConnectorProviderFactory,
   ResolvedConnectorAuth,
 } from '@objectstack/spec/integration';
-import { ConnectorCredentialRejectedError, ConnectorUpstreamUnavailableError } from '@objectstack/spec/integration';
+import {
+  ConnectorCredentialRejectedError,
+  ConnectorUpstreamChangedError,
+  ConnectorUpstreamUnavailableError,
+} from '@objectstack/spec/integration';
 import { callWithBorrowedCredential } from '@objectstack/types';
 import {
   createMcpConnector,
@@ -15,8 +19,10 @@ import {
   DEFAULT_MCP_CLIENT_INFO,
   type McpClientLike,
   type McpConnectorOptions,
+  type McpToolDescriptor,
   type McpTransport,
 } from './mcp-connector.js';
+import { compareToolsSnapshot, parseToolsSnapshot, type ToolsSnapshotDrift } from './tool-snapshot.js';
 
 /**
  * The provider key this package contributes (ADR-0097). A declarative
@@ -60,6 +66,8 @@ interface McpProviderConfig {
   transport?: unknown;
   /** Optional tool-name allowlist — only these tools become actions. */
   include?: unknown;
+  /** Optional per-tool pin: tool name → sha256 of its definition (see ./tool-snapshot.ts). */
+  toolsSnapshot?: unknown;
 }
 
 function isStringRecord(v: unknown): v is Record<string, string> {
@@ -71,8 +79,9 @@ function isStringRecord(v: unknown): v is Record<string, string> {
  * Fold the resolved instance `auth` into an MCP **http** transport's headers
  * (ADR-0024 keeps MCP credentials with the transport). `credentialRef` has
  * already been resolved upstream, so this only maps the static credential to the
- * right header. Not applied to stdio transports — a stdio server receives its
- * credentials through `transport.env`.
+ * right header. Not applied to stdio transports — a stdio server receives the
+ * instance's credential in its environment, under the variable
+ * `transport.credentialEnv` names (see {@link credentialEnvOf}).
  */
 function applyAuthToHeaders(
   auth: ResolvedConnectorAuth | undefined,
@@ -93,11 +102,85 @@ function applyAuthToHeaders(
   }
 }
 
-/** Validate + normalize `providerConfig.transport`, injecting resolved auth for http. */
+/** An environment variable name as POSIX shells spell one. */
+const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * The secret of a resolved static credential — what a stdio server is handed
+ * in its environment: a `bearer` token, an `api-key` key, a `basic` password.
+ * An `api-key`'s `headerName` / `paramName` place the key on an http request
+ * and are not read here; a `basic` username is not a secret, and a server that
+ * needs it takes it from `transport.env`.
+ */
+function secretOf(auth: Exclude<ResolvedConnectorAuth, { type: 'none' }>): string {
+  switch (auth.type) {
+    case 'bearer':
+      return auth.token;
+    case 'api-key':
+      return auth.key;
+    case 'basic':
+      return auth.password;
+  }
+}
+
+/**
+ * `transport.credentialEnv` of a stdio transport, judged — the route a stdio
+ * server's credential takes out of metadata (ADR-0097 §3 at ADR-0024 §3's
+ * process boundary). The instance's `auth.credentialRef` is resolved by the
+ * host like any other instance's (the environment, the stored credential, the
+ * host's resolver; a reference nothing answers degrades the instance naming it
+ * before this factory runs), and the resolved secret is put into the child's
+ * environment under the variable `credentialEnv` names. The value is never
+ * stored, logged, put on the connector `def` or carried in a message: it
+ * exists only in the environment handed to the spawn.
+ *
+ * Refused plain (configuration faults), each naming the key and never a value:
+ * a `credentialEnv` that is not a variable name; one with no static `auth` to
+ * place (a grant-bearing kind is refused by the credential-handle check, with
+ * this route named); one naming a variable `transport.env` also sets, which
+ * would give that variable two values. `undefined` when the transport names
+ * none: then `auth` is not applied to the stdio server at all, as before.
+ */
+function credentialEnvOf(
+  t: Record<string, unknown>,
+  env: Record<string, string> | undefined,
+  connectorName: string,
+  auth: ResolvedConnectorAuth | undefined,
+  borrowsCredential: boolean,
+): { name: string; value: string } | undefined {
+  const name = t.credentialEnv;
+  if (name === undefined) return undefined;
+  if (typeof name !== 'string' || !ENV_NAME_RE.test(name)) {
+    throw new Error(
+      `connector-mcp provider: connector '${connectorName}' providerConfig.transport.credentialEnv must be the name of ` +
+        `an environment variable (letters, digits and '_', not starting with a digit): the variable the stdio server ` +
+        `reads the instance's credential from.`,
+    );
+  }
+  if (borrowsCredential) return undefined;
+  if (!auth || auth.type === 'none') {
+    throw new Error(
+      `connector-mcp provider: connector '${connectorName}' names providerConfig.transport.credentialEnv '${name}' but ` +
+        `declares no credential to place there. Give the entry auth: { type: 'bearer', credentialRef } (or 'api-key' / ` +
+        `'basic'): the provider passes the resolved credential to the server in '${name}'.`,
+    );
+  }
+  if (env && Object.prototype.hasOwnProperty.call(env, name)) {
+    throw new Error(
+      `connector-mcp provider: connector '${connectorName}' sets environment variable '${name}' twice: in ` +
+        `providerConfig.transport.env and as providerConfig.transport.credentialEnv. Drop the env entry: the provider ` +
+        `passes the resolved credential to the server in '${name}' itself.`,
+    );
+  }
+  return { name, value: secretOf(auth) };
+}
+
+/** Validate + normalize `providerConfig.transport`, injecting resolved auth (http headers, stdio `credentialEnv`). */
 function normalizeTransport(
   raw: unknown,
   connectorName: string,
   auth: ResolvedConnectorAuth | undefined,
+  borrowsCredential: boolean,
 ): McpTransport {
   if (!raw || typeof raw !== 'object') {
     throw new Error(
@@ -112,14 +195,23 @@ function normalizeTransport(
         `connector-mcp provider: connector '${connectorName}' stdio transport requires a 'command' string.`,
       );
     }
+    const env = isStringRecord(t.env) ? t.env : undefined;
+    const credential = credentialEnvOf(t, env, connectorName, auth, borrowsCredential);
     return {
       kind: 'stdio',
       command: t.command,
       args: Array.isArray(t.args) ? t.args.map((a) => String(a)) : undefined,
-      env: isStringRecord(t.env) ? t.env : undefined,
+      env: credential ? { ...env, [credential.name]: credential.value } : env,
     };
   }
   if (t.kind === 'http') {
+    if (t.credentialEnv !== undefined) {
+      throw new Error(
+        `connector-mcp provider: connector '${connectorName}' names providerConfig.transport.credentialEnv on an http ` +
+          `transport. credentialEnv places the instance's credential in a stdio server's environment; over http the ` +
+          `provider sends the resolved auth as a request header itself. Delete the key.`,
+      );
+    }
     if (typeof t.url !== 'string' || t.url.length === 0) {
       throw new Error(
         `connector-mcp provider: connector '${connectorName}' http transport requires a 'url' string.`,
@@ -273,6 +365,13 @@ async function credentialRejectionStatus(err: unknown): Promise<number | undefin
  * directory. The policy check runs first and is unchanged: it judges the
  * `command` string exactly as written.
  *
+ * A declarative stdio server's credential stays out of metadata the way an
+ * http one's does: the entry declares `auth: { type, credentialRef }`, the host
+ * resolves the reference, and `providerConfig.transport.credentialEnv` names
+ * the environment variable the provider hands the resolved secret to the child
+ * in (see {@link credentialEnvOf}). A stdio transport naming no
+ * `credentialEnv` does not apply `auth` at all.
+ *
  * The connection is opened at materialization. Faults are classified (#3017):
  * an invalid transport shape is a *configuration* fault and throws plain —
  * fatal at boot per the ADR-0097 fail-loud contract — while a connect /
@@ -301,13 +400,40 @@ async function credentialRejectionStatus(err: unknown): Promise<number | undefin
  * tool names, with the `openapi` provider's meaning. An `include` that is not
  * an array of non-empty strings is refused before connecting, and an entry
  * naming a tool the server's `tools/list` does not carry is refused after
- * listing (the connection is closed first); both are configuration faults,
- * thrown plain. The instance never falls back to exposing every tool.
+ * listing (the connection is closed first); both are configuration faults.
+ * The instance never falls back to exposing every tool. The second refusal is
+ * thrown plain when the handshake carried no instance credential, and as
+ * {@link ConnectorCredentialRejectedError} when it did: a server may list only
+ * the tools a credential is allowed to use (GitHub's hides a tool a classic
+ * token's scopes do not cover), and nothing in a `tools/list` answer tells a
+ * tool hidden from this credential apart from one the server never had, so the
+ * refusal names both and takes the credential's path — the instance degraded,
+ * a stored credential marked `rejected`, the boot not failed.
+ *
+ * `providerConfig.toolsSnapshot` (optional) pins tools by name: each value is
+ * the sha256 of that tool's definition (`mcpToolDigest` in
+ * ./tool-snapshot.ts — ruling 6506797088, letter B). A record that is not tool
+ * name → sha256 hex is refused before connecting, and so is a pinned name an
+ * `include` leaves out (the instance would never expose it, so the pin could
+ * never be checked); both are configuration faults, thrown plain. After
+ * listing, every pinned tool is hashed and compared on its own: a pinned tool
+ * the server serves with a different description or input schema, or no
+ * longer serves, closes the connection and degrades the instance with a
+ * message naming each such tool — thrown as {@link ConnectorUpstreamChangedError}
+ * (ruling 6545635244), which the materializer re-checks on its backoff (see
+ * {@link toolsSnapshotDriftError}). A
+ * pinned name's absence is the pin's to report even when `include` lists it
+ * too: the pin says the tool existed with that definition, so its absence is
+ * the server's change rather than a typo — unless the instance's credential
+ * reached the server, which may hide a tool from that credential: then a
+ * missing pinned tool takes the credential path ({@link ConnectorCredentialRejectedError},
+ * both causes named), and only a served tool that hashes differently is
+ * {@link ConnectorUpstreamChangedError}.
  */
 export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorProviderFactory {
   return async (ctx) => {
     const cfg = (ctx.providerConfig ?? {}) as McpProviderConfig;
-    let transport = normalizeTransport(cfg.transport, ctx.name, ctx.auth);
+    let transport = normalizeTransport(cfg.transport, ctx.name, ctx.auth, ctx.credentialHandle !== undefined);
     if (transport.kind === 'stdio') {
       assertDeclarativeStdioAllowed(deps.declarativeStdio, transport.command, ctx.name);
       // One anchor for the app's relative paths (#22423). A resolver that
@@ -335,15 +461,17 @@ export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorP
     }
     // ADR-0143 D4 — a grant-bearing instance (`oauth2`, `app-credential`)
     // borrows its credential per request. Only an http transport carries one
-    // (a stdio server takes its credentials in `transport.env`), and a
-    // request is authenticated one way.
+    // (a stdio server is handed a static credential once, at spawn, in the
+    // variable `transport.credentialEnv` names), and a request is
+    // authenticated one way.
     const handle = ctx.credentialHandle;
     if (handle) {
       if (transport.kind !== 'http') {
         throw new Error(
           `connector-mcp provider: connector '${ctx.name}' borrows its credential per request (a grant-bearing auth kind), ` +
-            `which only an http transport can carry: a stdio server takes its credentials in transport.env. Declare an ` +
-            `http transport, or a static credential for the stdio one.`,
+            `which only an http transport can carry: a stdio server is handed its credential once, at spawn. Declare an ` +
+            `http transport, or a static credential for the stdio one (auth: { type: 'bearer', credentialRef }) with ` +
+            `providerConfig.transport.credentialEnv naming the variable the server reads it from.`,
         );
       }
       const ways = [
@@ -391,14 +519,34 @@ export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorP
     };
 
     const includeList = cfg.include as readonly string[] | undefined;
+    // The pin is read before connecting too, and a pinned name `include`
+    // leaves out is refused here: the instance never exposes that tool, so its
+    // pin could never be compared — a pin that reads as protection and checks
+    // nothing.
+    const snapshot = parseToolsSnapshot(cfg.toolsSnapshot, ctx.name);
+    if (snapshot && includeList) {
+      const unexposed = Object.keys(snapshot).filter((name) => !includeList.includes(name));
+      if (unexposed.length > 0) {
+        throw new Error(
+          `connector-mcp provider: connector '${ctx.name}' providerConfig.toolsSnapshot pins ` +
+            `${unexposed.map((name) => `'${name}'`).join(', ')}, which providerConfig.include leaves out: ` +
+            `the instance never exposes ${unexposed.length === 1 ? 'that tool' : 'those tools'}, so the pin is ` +
+            `never checked. Pin only tools include lists, or add ${unexposed.length === 1 ? 'it' : 'them'} to include.`,
+        );
+      }
+    }
     // The allowlist rides the connector's own `include` predicate; every tool
     // name the server lists is recorded on the way, so an entry nothing
-    // matched can be named in the refusal below.
+    // matched can be named in the refusal below, and every selected tool's
+    // `tools/list` entry is kept for the pin to hash.
     const listedTools: string[] = [];
-    const include = includeList
-      ? (toolName: string) => {
+    const selectedTools = new Map<string, McpToolDescriptor>();
+    const include = includeList || snapshot
+      ? (toolName: string, tool: McpToolDescriptor) => {
           listedTools.push(toolName);
-          return includeList.includes(toolName);
+          const selected = includeList ? includeList.includes(toolName) : true;
+          if (selected) selectedTools.set(toolName, tool);
+          return selected;
         }
       : undefined;
 
@@ -447,33 +595,107 @@ export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorP
         { cause: err },
       );
     }
+    // [#27237] The handshake carried the instance's credential only over
+    // http, and only as a header (an api-key `paramName` is not sent): then
+    // the server's answer was given to that credential. A stdio server handed
+    // the credential in `credentialEnv` is not counted: nothing in a stdio
+    // handshake says the server used, let alone accepted, its environment.
+    //
+    // A grant-bearing instance's borrowed token (`ctx.credentialHandle`)
+    // reaches the server too, and is deliberately not counted here. A 403 the
+    // server answers that token with at discovery (thrown above as
+    // `ConnectorCredentialRejectedError`; a 401 is refreshed once, then a 503)
+    // is routed by the materializer to the
+    // connection the token was borrowed from: for an `authorization_code`
+    // instance, the discovery organization's connection is marked
+    // `reconnect_required` and a reconnect there lists again, while the
+    // instance's `credentialRef` (its client secret) is left alone (#26702).
+    // The `include` / `toolsSnapshot` refusals below are not routed that way:
+    // with the borrowed token not counted here, such an instance keeps the
+    // plain fault for them (the accepted deviation of #28357).
+    const credentialSent = transport.kind === 'http' && sendsInstanceAuth(ctx.auth);
     if (includeList) {
-      // An entry naming a tool the server does not list is a configuration
-      // fault, thrown plain — fatal at boot, a skipped entry on reload — after
-      // the connection is released. Ignoring it would bring the instance up
-      // without the tool the author listed (a typo, or a tool the server
-      // renamed or dropped), and the first sign would be a flow failing at
-      // run time.
+      // An entry naming a tool the server does not list is refused after the
+      // connection is released. Ignoring it would bring the instance up
+      // without the tool the author listed (a typo, a tool the server renamed
+      // or dropped, or one hidden from this credential), and the first sign
+      // would be a flow failing at run time.
+      // A pinned entry is left to the pin below — its absence is the server's
+      // change, reported with the pin's other findings, not a typo — but only
+      // when no instance credential reached the server. When one did, a
+      // missing pinned entry may be a tool hidden from that credential, which
+      // the answer cannot tell apart from a dropped one, so it takes the
+      // credential's path below like any other entry (#27401 contract review).
       const offered = new Set(listedTools);
-      const unknown = [...new Set(includeList)].filter((entry) => !offered.has(entry));
+      const pinned = new Set(snapshot && !credentialSent ? Object.keys(snapshot) : []);
+      const unknown = [...new Set(includeList)].filter((entry) => !offered.has(entry) && !pinned.has(entry));
       if (unknown.length > 0) {
         await bundle.close().catch(() => {});
+        const named = unknown.map((entry) => `'${entry}'`).join(', ');
         // At most 20 of the server's tool names, as the openapi refusal lists.
         const sample = [...offered].slice(0, 20);
         const more = offered.size > sample.length ? `, … ${offered.size - sample.length} more` : '';
+        const listed =
+          `the server lists ${offered.size} tool(s): ` + `${sample.map((name) => `'${name}'`).join(', ')}${more}.`;
+        if (credentialSent) {
+          // A server may list only the tools the credential it was sent is
+          // allowed to use: GitHub's hides each tool a classic token's scopes
+          // do not cover, and its answer carries nothing about what it hid —
+          // no field in the tools/list result, no response header. So a
+          // missing tool is the credential's fault or the declaration's, and
+          // which one cannot be read off the answer. It takes the credential's
+          // path, like a 401 / 403 above: the instance degraded naming both
+          // causes, a stored credential marked `rejected` (cleared by setting
+          // it again, or by a handshake that lists every entry), and never a
+          // failed boot for a value the administrator supplies and can fix.
+          // Status 403: the server answered 200 and refused nothing in so many
+          // words, and 403 is the status a credential short of the scopes a
+          // resource needs is answered with (RFC 6750 §3.1, insufficient_scope;
+          // GitHub's server answers a tools/call outside its token's scopes
+          // that way). The message quotes no HTTP status for that reason.
+          throw new ConnectorCredentialRejectedError(
+            `connector-mcp provider: connector '${ctx.name}' providerConfig.include names ${named}, which the MCP ` +
+              `server does not list for the credential this instance sent. A server may list only the tools a ` +
+              `credential is allowed to use, and its tools/list answer cannot tell the two causes apart: either the ` +
+              `credential lacks the scopes or permissions these tools need — fix the credential, then set it ` +
+              `again — or the declaration names a tool this server does not have — fix providerConfig.include. ` +
+              `For this credential, ${listed}`,
+            403,
+          );
+        }
+        // The instance's `auth` did not reach the server, so its list was not
+        // filtered for a credential the administrator supplies; one written
+        // into `providerConfig.transport.headers` is part of the declaration,
+        // fixed by editing it. A configuration fault, thrown plain — fatal at
+        // boot, a skipped entry on reload.
         throw new Error(
           `connector-mcp provider: connector '${ctx.name}' providerConfig.include names ` +
-            `${unknown.map((entry) => `'${entry}'`).join(', ')}, which the MCP server does not list. ` +
-            `Each entry must be the name of a tool from the server's tools/list; ` +
-            `the server lists ${offered.size} tool(s): ` +
-            `${sample.map((name) => `'${name}'`).join(', ')}${more}.`,
+            `${named}, which the MCP server does not list. ` +
+            `Each entry must be the name of a tool from the server's tools/list; ${listed}`,
         );
       }
     }
-    // [#27237] The handshake carried the instance's credential only over
-    // http, and only as a header (an api-key `paramName` is not sent): then
-    // the server's answer proved it.
-    const credentialVerified = transport.kind === 'http' && sendsInstanceAuth(ctx.auth);
+    if (snapshot) {
+      // Every pinned tool is compared on its own (ruling 6506797088): one
+      // aggregate digest could only say "something changed".
+      const drift = compareToolsSnapshot(snapshot, selectedTools);
+      if (drift) {
+        await bundle.close().catch(() => {});
+        // A pinned tool the server does not list, on an instance whose
+        // credential reached it (a pin with no `include`; an included one was
+        // refused above), is the credential's or the server's change, and the
+        // answer cannot say which — so it takes the credential's path, as an
+        // `include` entry does: degraded naming both causes, a stored
+        // credential marked `rejected`, no retry against the same value. A
+        // served tool that hashes differently is the server's change alone.
+        if (credentialSent && drift.missing.length > 0) {
+          throw pinnedToolsHiddenError(ctx.name, drift.missing, listedTools);
+        }
+        throw toolsSnapshotDriftError(ctx.name, drift);
+      }
+    }
+    // [#27237] Then the server's answer proved the credential.
+    const credentialVerified = credentialSent;
     return {
       def: bundle.def,
       handlers: bundle.handlers,
@@ -484,6 +706,66 @@ export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorP
       ...(credentialVerified ? { credentialVerified } : {}),
     };
   };
+}
+
+/** At most this many tools are named in a drift message; the rest are counted. */
+const DRIFT_NAMED_MAX = 20;
+
+/**
+ * The fault a `toolsSnapshot` mismatch is thrown as: one line naming each
+ * pinned tool the server changed (with the digest it now serves, which is what
+ * a reviewed re-pin writes) and each pinned tool it no longer serves.
+ *
+ * Thrown as {@link ConnectorUpstreamChangedError} (ruling 6545635244): the
+ * ADR-0097 materializer degrades the instance without failing boot, the husk's
+ * reason (`GET /connectors`, a `connector_action` refusal) is this message, and
+ * its log records say the pin did not match rather than that the upstream is
+ * unavailable. The instance is re-checked on the #3017 backoff — so a server
+ * that serves the pinned definitions again recovers it, as an edited pin does
+ * at once.
+ */
+function toolsSnapshotDriftError(connectorName: string, drift: ToolsSnapshotDrift): ConnectorUpstreamChangedError {
+  const findings = [
+    ...drift.changed.map(({ name, served }) => `tool '${name}' changed (it now hashes to ${served})`),
+    ...drift.missing.map((name) => `pinned tool '${name}' is no longer served`),
+  ];
+  const named = findings.slice(0, DRIFT_NAMED_MAX);
+  const more = findings.length > named.length ? `; … ${findings.length - named.length} more` : '';
+  return new ConnectorUpstreamChangedError(
+    `connector-mcp provider: connector '${connectorName}' providerConfig.toolsSnapshot does not match the tools ` +
+      `its MCP server serves: ${named.join('; ')}${more}. This materialization exposes none of the server's ` +
+      `tools. If the change is expected, review it and set each pin to the digest the server now serves; ` +
+      `otherwise the instance comes back once the server serves the pinned definitions again.`,
+  );
+}
+
+/**
+ * The fault for pinned tools the server does not list when the instance's
+ * credential reached it: {@link ConnectorCredentialRejectedError} (403), the
+ * same path and reasoning as an `include` entry the server does not list for
+ * that credential — a server may list only the tools a credential may use, so
+ * the message names both causes.
+ */
+function pinnedToolsHiddenError(
+  connectorName: string,
+  missing: readonly string[],
+  listedTools: readonly string[],
+): ConnectorCredentialRejectedError {
+  const named = missing.slice(0, DRIFT_NAMED_MAX).map((name) => `'${name}'`).join(', ');
+  const moreMissing = missing.length > DRIFT_NAMED_MAX ? `, … ${missing.length - DRIFT_NAMED_MAX} more` : '';
+  const offered = [...new Set(listedTools)];
+  const sample = offered.slice(0, 20);
+  const more = offered.length > sample.length ? `, … ${offered.length - sample.length} more` : '';
+  return new ConnectorCredentialRejectedError(
+    `connector-mcp provider: connector '${connectorName}' providerConfig.toolsSnapshot pins ${named}${moreMissing}, ` +
+      `which the MCP server does not list for the credential this instance sent. A server may list only the tools ` +
+      `a credential is allowed to use, and its tools/list answer cannot tell the two causes apart: either the ` +
+      `credential lacks the scopes or permissions these tools need — fix the credential, then set it again — or ` +
+      `the server no longer serves these tools — review the change and update providerConfig.toolsSnapshot. ` +
+      `For this credential, the server lists ${offered.length} tool(s): ` +
+      `${sample.map((name) => `'${name}'`).join(', ')}${more}.`,
+    403,
+  );
 }
 
 /** Whether {@link applyAuthToHeaders} puts the instance's credential on the http transport. */

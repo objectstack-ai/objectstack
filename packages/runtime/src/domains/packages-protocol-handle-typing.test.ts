@@ -188,4 +188,12 @@ describe('#13598 · 2 · a PARTIAL protocol host is still answered, never crashe
             expect(JSON.stringify(result.response?.body)).toContain(message);
         });
     }
+
+    // The ensure door reads no body (a body with keys is its 400), so it is
+    // driven without the shared one above.
+    it('ensure-customization answers 501 from the capability probe', async () => {
+        const result = await partialProtocolDoor().handlePackages('/crm/ensure-customization', 'POST', undefined, {}, PKG_ADMIN());
+        expect(result.response?.status).toBe(501);
+        expect(JSON.stringify(result.response?.body)).toContain('Customization package ensure not supported');
+    });
 });

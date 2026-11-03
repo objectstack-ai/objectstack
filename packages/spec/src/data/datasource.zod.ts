@@ -590,6 +590,52 @@ function reportDriverConfigIssues(
 }
 
 /**
+ * Datasource names the datasource admin API can never serve by name.
+ *
+ * The admin route family mounts its by-name doors at `/api/v1/datasources/:name`
+ * and, beside them, literal single-segment routes under the same root. Where a
+ * literal shares a method with a by-name route, it is mounted first and captures
+ * the path: `GET /api/v1/datasources/drivers` answers the driver catalog, so a
+ * datasource named `drivers` would be stored and listed while its detail read
+ * (the load of its edit form) was never reached.
+ *
+ * ONE list for every half. `DatasourceSchema.name` refuses each entry, so
+ * `defineDatasource`, `defineStack`, `os validate`, `os build` and the metadata
+ * save door (`PUT /api/v1/meta/datasource/NAME`) all refuse it; the admin
+ * registrar in `@objectstack/service-datasource` mounts each shadowing literal
+ * from this list, and its create door refuses each name too. A drift pin there
+ * holds the list equal to the literals the registrar actually mounts beside a
+ * same-method by-name route, in both directions.
+ *
+ * Not here: `default`, the host's primary datasource. A stack may not declare
+ * it (`defineStack` refuses it), but the host's own `default` row is a valid
+ * `DatasourceSchema` record, so it is not a refused name.
+ */
+export const ROUTE_SHADOWED_DATASOURCE_NAMES = Object.freeze(['drivers'] as const);
+
+const quotedRouteShadowedNames = ROUTE_SHADOWED_DATASOURCE_NAMES.map((name) => `'${name}'`).join(', ');
+
+/**
+ * The refusal `DatasourceSchema.name` answers for a route-shadowed name: built
+ * from the offending input, so it names that one name and its route (never the
+ * whole list), in the admin create door's sentence family.
+ */
+function routeShadowedNameRefusal(issue: { input?: unknown }): string {
+  const name = String(issue.input);
+  return `Datasource name '${name}' is reserved: the datasource admin API serves its own route at `
+    + `/api/v1/datasources/${name}, ahead of the by-name read /api/v1/datasources/:name, so a datasource `
+    + 'of that name could never be read by name. Pick another name.';
+}
+
+/**
+ * A second pattern on `name`, not a refinement: zod emits both patterns into
+ * the published JSON Schema (`allOf`), so editors and other JSON-Schema
+ * consumers refuse the name too. The entries are snake_case identifiers (the
+ * `name` pattern itself, pinned), so none needs escaping.
+ */
+const NOT_ROUTE_SHADOWED_NAME = new RegExp(`^(?!(?:${ROUTE_SHADOWED_DATASOURCE_NAMES.join('|')})$)`);
+
+/**
  * Datasource Schema
  * Represents a connection to an external data store.
  */
@@ -648,8 +694,18 @@ export const DatasourceSchema = lazySchema(() => strictObject(
       + 'left the datasource connecting on driver defaults rather than failing.',
   },
   {
-  /** Machine Name */
-  name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Unique datasource identifier'),
+  /**
+   * Machine Name. Refuses the route-shadowed names
+   * ({@link ROUTE_SHADOWED_DATASOURCE_NAMES}): the admin API could never read
+   * a datasource of that name by name.
+   */
+  name: z.string()
+    .regex(/^[a-z_][a-z0-9_]*$/)
+    .regex(NOT_ROUTE_SHADOWED_NAME, { error: routeShadowedNameRefusal })
+    .describe(
+      `Unique datasource identifier (snake_case). Reserved: ${quotedRouteShadowedNames}, a path the `
+      + 'datasource admin API serves itself, so a datasource of that name could never be read by name.',
+    ),
   
   /** Human Label */
   label: z.string().optional().describe('Display label'),
@@ -733,7 +789,13 @@ export const DatasourceSchema = lazySchema(() => strictObject(
     rejectUnauthorized: z.boolean().default(true).describe('Reject connections with invalid/self-signed certificates'),
     ca: z.string().optional().describe('CA certificate (PEM format or path to file)'),
     cert: z.string().optional().describe('Client certificate (PEM format or path to file)'),
-    key: z.string().optional().describe('Client private key (PEM format or path to file)'),
+    /**
+     * The client PRIVATE key: a credential VALUE (`.meta({ credential: 'value' })`),
+     * so every metadata read exit withholds it and names `ssl.key` in
+     * `redactedKeys` (`kernel/metadata-type-redaction.ts`). `ca` and `cert`
+     * are public material and stay served.
+     */
+    key: z.string().optional().describe('Client private key (PEM format or path to file)').meta({ credential: 'value' }),
   }).optional().describe('SSL/TLS configuration for secure database connections'),
 
   /** Description */

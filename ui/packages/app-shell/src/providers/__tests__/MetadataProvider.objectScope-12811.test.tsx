@@ -116,7 +116,7 @@ afterEach(() => cleanup());
 describe('MetadataProvider.readObjectScope (objectui#12811)', () => {
   it("asks for the package's objects with `?package=`, never the whole list", async () => {
     const m = mount();
-    await waitFor(() => expect(m.server.calls).toContain('view'));
+    await waitFor(() => expect(m.server.calls).toContain('app'));
     act(() => {
       m.ctx().readObjectScope!({ packageId: CRM });
     });
@@ -133,7 +133,7 @@ describe('MetadataProvider.readObjectScope (objectui#12811)', () => {
 
   it('asks an object outside the package by name, and is not settled until it answers', async () => {
     const m = mount();
-    await waitFor(() => expect(m.server.calls).toContain('view'));
+    await waitFor(() => expect(m.server.calls).toContain('app'));
     m.server.holdByName = true;
     act(() => {
       m.ctx().readObjectScope!({ packageId: CRM, names: ['crm_account', 'crm_case'] });
@@ -159,7 +159,7 @@ describe('MetadataProvider.readObjectScope (objectui#12811)', () => {
 
   it('shapes a scoped definition exactly like the same object in the whole list', async () => {
     const m = mount();
-    await waitFor(() => expect(m.server.calls).toContain('view'));
+    await waitFor(() => expect(m.server.calls).toContain('app'));
     act(() => {
       m.ctx().readObjectScope!({ packageId: CRM, names: ['crm_case'] });
     });
@@ -181,7 +181,7 @@ describe('MetadataProvider.readObjectScope (objectui#12811)', () => {
 
   it('lists a name the server does not answer as missing, and settles', async () => {
     const m = mount();
-    await waitFor(() => expect(m.server.calls).toContain('view'));
+    await waitFor(() => expect(m.server.calls).toContain('app'));
     act(() => {
       m.ctx().readObjectScope!({ packageId: CRM, names: ['cloud_only'] });
     });
@@ -191,7 +191,7 @@ describe('MetadataProvider.readObjectScope (objectui#12811)', () => {
 
   it('CONTROL: `objects` is still the whole registry, and so is a scope with no package id', async () => {
     const m = mount();
-    await waitFor(() => expect(m.server.calls).toContain('view'));
+    await waitFor(() => expect(m.server.calls).toContain('app'));
     act(() => {
       void m.ctx().objects;
     });
@@ -206,7 +206,7 @@ describe('MetadataProvider.readObjectScope (objectui#12811)', () => {
 
   it('with the whole registry loaded, a scope is cut from it and asks for nothing', async () => {
     const m = mount();
-    await waitFor(() => expect(m.server.calls).toContain('view'));
+    await waitFor(() => expect(m.server.calls).toContain('app'));
     act(() => {
       void m.ctx().objects;
     });
@@ -220,7 +220,7 @@ describe('MetadataProvider.readObjectScope (objectui#12811)', () => {
 
   it('is dropped and refetched with the `object` type, never on a clock', async () => {
     const m = mount();
-    await waitFor(() => expect(m.server.calls).toContain('view'));
+    await waitFor(() => expect(m.server.calls).toContain('app'));
     const read = () => m.ctx().readObjectScope!({ packageId: CRM, names: ['crm_case'] });
     act(() => {
       read();

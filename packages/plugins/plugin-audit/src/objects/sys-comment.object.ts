@@ -122,6 +122,23 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *   gate answers them with the bounded thread probe (fail closed), never a
  *   leaf.
  *
+ * ## Platform-written: the author's display identity `author_name` / `author_avatar_url`
+ *
+ * The name and avatar a reader is shown beside a comment are the server's,
+ * the same as `author_id`: the create hook in `comment-access-hooks.ts` stamps
+ * both from the session user's own `sys_user` profile (its display name and
+ * `image`), the one resolution the record history's actor columns use, over
+ * any value the client sent and when it sent none. A user whose profile cannot
+ * be read is stored with neither (`null`), never with the client's value.
+ *
+ * - **Read-only on update.** Both declare `readonly: true`, so the engine's
+ *   update-side strip drops a non-system caller's value and reports it
+ *   (`droppedFields`): an edit never changes whose name a comment shows. ⛔
+ *   Not a refusal: the console released before this change sends both on
+ *   every new comment, and the create hook simply assigns over them.
+ * - **System writes** (seeds, imports, migrations) keep the values they
+ *   supply, as they do for `author_id`.
+ *
  * @namespace sys
  */
 export const SysComment = ObjectSchema.create({
@@ -134,7 +151,6 @@ export const SysComment = ObjectSchema.create({
   description: 'Threaded comments attached to records via thread_id',
   displayNameField: 'body',
   nameField: 'body', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{author_name}: {body}',
   highlightFields: ['created_at', 'author_name', 'body'],
 
   fields: {
@@ -195,15 +211,20 @@ export const SysComment = ObjectSchema.create({
       group: 'Author',
     }),
 
+    // Platform-written, like `author_id` (see "Platform-written: the
+    // author's display identity" above): stamped on create from the session
+    // user's profile, read-only on update.
     author_name: Field.text({
       label: 'Author Name',
       required: false,
+      readonly: true,
       group: 'Author',
     }),
 
     author_avatar_url: Field.url({
       label: 'Author Avatar',
       required: false,
+      readonly: true,
       group: 'Author',
     }),
 

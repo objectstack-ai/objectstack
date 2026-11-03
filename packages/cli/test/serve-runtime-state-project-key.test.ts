@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 30 — spawns the real producer once per single-cause fixture: three sequential child processes (project A, project B, a second boot of A), each loading the real `os serve` state writer from `src/commands/serve.ts` through tsx, about 4 s of module load apiece; distinct pids and a clean exit per child are the subject; slowest CI reading 19.7 s of the five scheduled runs 41199450735…41271604267, x 1.25, rounded up
 
 /**
  * #15733 — the runtime state file is keyed by the PROJECT, not by the

@@ -244,7 +244,7 @@ describe('a hatch-elevated type: its PACKAGED item is read-only on every gate (o
     expect(screen.queryByRole('button', { name: /^Save$/ })).toBeNull();
     for (const box of screen.getAllByRole('checkbox')) expect(box).toBeDisabled();
     expect(screen.getByText(ARTIFACT_CAPTION)).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: /Clone to customize/ }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: /New similar/ }).length).toBeGreaterThan(0);
   });
 
   it('the badge claims no more: its tooltip says the hatch never opens an item a package ships', async () => {

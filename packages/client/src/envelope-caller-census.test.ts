@@ -525,6 +525,18 @@ const LEDGER: readonly LedgerRow[] = [
         method: 'analytics.query', receiver: 'service', count: 2, verdict: 'NOT_SDK',
         why: 'the real AnalyticsService that AnalyticsServicePlugin registers over an ObjectQL engine with the driver\'s data doors spied, called directly (no HTTP, no dispatcher envelope) to read whether the ObjectQL face\'s answer carries an echoed `sql`, and its rows',
     },
+    // ── [#28841] the /analytics/sql dry run vs the query for one column asked twice: producer reads only ──
+    {
+        file: 'packages/services/service-analytics/src/__tests__/objectql-echo-column-twice.test.ts',
+        method: 'analytics.query', receiver: 'service', count: 4, verdict: 'NOT_SDK',
+        why: 'the real AnalyticsService that AnalyticsServicePlugin registers over a live engine, called directly (no HTTP, no dispatcher envelope) to compare the query\'s refusal with the dry run\'s (one column asked twice, and a bad dateRange beside it, #28852), and to read the `sql` and rows the query serves',
+    },
+    // ── [#28977] the /analytics/sql dry run vs the query for a date bucket over a column that is not a date: producer reads only ──
+    {
+        file: 'packages/services/service-analytics/src/__tests__/objectql-echo-non-date-bucket.test.ts',
+        method: 'analytics.query', receiver: 'service', count: 2, verdict: 'NOT_SDK',
+        why: 'the real AnalyticsService that AnalyticsServicePlugin registers over a live engine, called directly (no HTTP, no dispatcher envelope) to compare the query\'s refusal with the dry run\'s (a date bucket over a text, select, number, boolean or time column), and to read the `sql` the query serves for a date and a datetime bucket',
+    },
     {
         file: 'packages/client/src/analytics-automation-json-erasure.test.ts',
         method: 'analytics.meta', receiver: 'sdk', count: 2, verdict: 'PAYLOAD_DEPENDENT',
@@ -761,13 +773,23 @@ describe('#13079 §2 — positive controls on the matcher itself', () => {
         // [#21647] A fifth, two sites: the bucket echo's enumeration pin calls
         // the same plugin-registered AnalyticsService, over an engine with the
         // driver's data doors spied, to read whether the answer carries `sql`.
-        expect(service.length, literalNote()).toBe(11);
+        // [#28841] A sixth, three sites: the dry-run parity pin calls the same
+        // plugin-registered AnalyticsService to compare the query's refusal
+        // and served `sql` with `generateSql`'s. [#28852] A fourth site there:
+        // the refusal precedence beside an unrecognised `dateRange`.
+        // [#28977] A seventh, two sites: the dry-run parity pin for a date
+        // bucket over a column that is not a date calls the same
+        // plugin-registered AnalyticsService to compare the query's refusal
+        // and served `sql` with `generateSql`'s.
+        expect(service.length, literalNote()).toBe(17);
         expect([...new Set(service.map((s) => s.file))].sort()).toEqual([
             'packages/client/src/analytics-automation-json-erasure.test.ts',
             'packages/drivers/driver-memory/src/memory-exists-non-boolean-refusal.test.ts',
             'packages/rest/src/analytics-nested-relation-filter.test.ts',
             'packages/services/service-analytics/src/__tests__/objectql-echo-bucket-enumeration.test.ts',
+            'packages/services/service-analytics/src/__tests__/objectql-echo-column-twice.test.ts',
             'packages/services/service-analytics/src/__tests__/objectql-echo-date-bucket.test.ts',
+            'packages/services/service-analytics/src/__tests__/objectql-echo-non-date-bucket.test.ts',
         ]);
         expect(service.every((s) => s.method === 'analytics.query')).toBe(true);
     });
@@ -814,12 +836,15 @@ describe('#13079 §3 — every call site is classified', () => {
         expect(production, literalNote()).toEqual([]);
     });
 
-    it('records the split: 18 payload pins, 10 result-insensitive, 11 not-SDK', () => {
+    it('records the split: 18 payload pins, 10 result-insensitive, 17 not-SDK', () => {
         expect(verdictTotal('PAYLOAD_DEPENDENT')).toBe(18);
         expect(verdictTotal('RESULT_INSENSITIVE')).toBe(10);
         // [#21441] 8 -> 9: the date-bucket echo pin's producer call (§2).
         // [#21647] 9 -> 11: the bucket echo enumeration's two producer calls (§2).
-        expect(verdictTotal('NOT_SDK')).toBe(11);
+        // [#28841] 11 -> 14: the dry-run parity pin's three producer calls (§2).
+        // [#28852] 14 -> 15: its dateRange-precedence call.
+        // [#28977] 15 -> 17: the non-date bucket dry-run parity pin's two producer calls (§2).
+        expect(verdictTotal('NOT_SDK')).toBe(17);
         // The three above are LEDGER sums and cannot move on a census reading;
         // this one is census-derived, so it carries the note. [#13874]
         expect(sdkSites.length, literalNote()).toBe(28);

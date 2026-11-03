@@ -24,6 +24,11 @@ export default defineConfig({
     // own entry, not folded into the one above, which promises the derivation
     // and nothing else.
     'src/view-container-name.ts',
+    // `@objectstack/metadata/picklist-references` — which picklists a
+    // manifest's fields name, and the residual-picklist refusal the engine and
+    // `os validate` / `os build` share. Its own entry because objectql's
+    // registry (in the ADR-0076 lean entry) reads the walk.
+    'src/picklist-references.ts',
   ],
   splitting: false,
   sourcemap: true,

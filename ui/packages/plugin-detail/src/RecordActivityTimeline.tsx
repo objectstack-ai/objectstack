@@ -26,6 +26,8 @@ import {
   Share2,
   BadgeCheck,
   Lock,
+  AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 import type { FeedItem, FeedItemType, RecordActivityComponentProps, RecordSubscription } from '@object-ui/types';
 import type { FeedFilterMode } from '@objectstack/spec/data';
@@ -111,6 +113,8 @@ export interface RecordActivityTimelineProps {
   collapseWhenEmpty?: boolean;
   /** Optional list of mention suggestions for the rich comment input. */
   mentionSuggestions?: Array<{ id: string; label: string; avatarUrl?: string }>;
+  /** Called on the comment input's focus, for the host to read {@link mentionSuggestions} (objectstack#28470). */
+  onMentionSuggestionsWanted?: () => void;
   /** Optional uploader for comment attachments. When provided, the composer
    *  exposes a drag-and-drop file panel. */
   onUploadAttachments?: (files: FileList) => Promise<Attachment[]>;
@@ -129,6 +133,17 @@ export interface RecordActivityTimelineProps {
   activityDenied?: boolean;
   /** The same, for the feed's comment read. */
   commentsDenied?: boolean;
+  /**
+   * The feed's activity read FAILED: a 5xx or a network failure, not a
+   * refusal (objectstack#29188). The timeline then says the activity could
+   * not be loaded, with a Retry, instead of claiming there is none. The host
+   * that owns the read decides this.
+   */
+  activityFailed?: boolean;
+  /** The same, for the feed's comment read. */
+  commentsFailed?: boolean;
+  /** Read the failed feed reads again; the load-failure notice's Retry calls it. */
+  onRetryFeed?: () => void;
   /**
    * objectstack#27055, Target 3 — `stream` is the record page's 动态 stream
    * in full (the 动态 tab): the filter chips 全部 / 活动 / 讨论 / 变更 on the
@@ -313,11 +328,15 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
   onToggleSubscription,
   collapseWhenEmpty = false,
   mentionSuggestions,
+  onMentionSuggestionsWanted,
   onUploadAttachments,
   titleLabel,
   emptyLabel,
   activityDenied = false,
   commentsDenied = false,
+  activityFailed = false,
+  commentsFailed = false,
+  onRetryFeed,
   variant = 'panel',
   streamFilter = 'all',
   onStreamFilterChange,
@@ -368,6 +387,48 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
         )}
       </div>
     ) : null;
+
+  // objectstack#29188: which of the feed's reads FAILED (a 5xx or a network
+  // failure), one line per failed source, and a Retry when the host offers
+  // one. Placed where the refusal notice is: in place of the empty state with
+  // no rows, above the rows with some. A failed read is not "nothing here",
+  // and only the i18n sentence is rendered: no status code, no server text.
+  const failedNotice =
+    activityFailed || commentsFailed ? (
+      <div
+        role="alert"
+        data-testid="activity-load-failed"
+        className="flex flex-col items-start gap-2 py-4 text-sm text-muted-foreground"
+      >
+        {activityFailed && (
+          <p data-failed-source="activity" className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>{t('detail.activityLoadFailed')}</span>
+          </p>
+        )}
+        {commentsFailed && (
+          <p data-failed-source="comments" className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>{t('detail.commentsLoadFailed')}</span>
+          </p>
+        )}
+        {onRetryFeed && (
+          <Button type="button" variant="outline" size="sm" onClick={onRetryFeed} disabled={loading} data-feed-retry="">
+            <RefreshCw className="mr-1 h-4 w-4" aria-hidden="true" />
+            {t('detail.retryLoadFeed')}
+          </Button>
+        )}
+      </div>
+    ) : null;
+  // A read that did not answer, refused or failed: the rows on screen (if
+  // any) are not the whole story, and the count is unknown.
+  const readUnanswered = activityDenied || commentsDenied || activityFailed || commentsFailed;
+  const readNotice = readUnanswered ? (
+    <>
+      {deniedNotice}
+      {failedNotice}
+    </>
+  ) : null;
 
   const activeFilter = controlledFilter ?? internalFilter;
   const showFilter = config?.showFilterToggle !== false;
@@ -765,6 +826,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
       onChange={setCommentText}
       onSubmit={handleAddComment}
       mentionSuggestions={mentionSuggestions}
+      onMentionSuggestionsWanted={onMentionSuggestionsWanted}
       placeholder={t('detail.leaveCommentPlaceholder')}
       disabled={isSubmitting}
       canSubmitEmpty={pendingAttachments.length > 0}
@@ -822,7 +884,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
             ) : (
               <button
                 type="button"
-                className="flex h-8 w-full items-center rounded-md border border-input bg-background px-2.5 text-left text-[12.5px] text-muted-foreground transition-colors hover:border-ring/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="flex h-11 sm:h-8 w-full items-center rounded-md border border-input bg-background px-2.5 text-left text-[12.5px] text-muted-foreground transition-colors hover:border-ring/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 onClick={() => setComposerOpen(true)}
                 data-record-timeline-composer=""
               >
@@ -831,7 +893,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
             )}
           </div>
         )}
-        {filtered.length > 0 && deniedNotice && <div className="border-t border-border px-3">{deniedNotice}</div>}
+        {filtered.length > 0 && readNotice && <div className="border-t border-border px-3">{readNotice}</div>}
         {loading && filtered.length === 0 ? (
           <div
             role="status"
@@ -842,8 +904,8 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
             <span>{t('detail.loading')}</span>
           </div>
-        ) : (activityDenied || commentsDenied) && filtered.length === 0 ? (
-          <div className="border-t border-border px-3">{deniedNotice}</div>
+        ) : readUnanswered && filtered.length === 0 ? (
+          <div className="border-t border-border px-3">{readNotice}</div>
         ) : filtered.length === 0 ? (
           <div className="border-t border-border px-3 py-2 text-xs text-muted-foreground">
             {emptyLabel ?? t('detail.noActivity')}
@@ -903,7 +965,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
             {/* A refused read leaves the count unknown, not zero: the rows
                 the reader may not see are not in `filtered`, so a number here
                 would state what the server withheld. */}
-            {!activityDenied && !commentsDenied && (
+            {!readUnanswered && (
               <span className="text-sm font-normal text-muted-foreground" data-testid="activity-count">
                 ({filtered.length})
               </span>
@@ -925,7 +987,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
                     onClick={() => onStreamFilterChange?.(chip)}
                     data-stream-filter={chip}
                     className={cn(
-                      'h-6 rounded-md px-2 text-xs font-normal transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      'h-11 min-w-11 sm:h-6 sm:min-w-0 rounded-md px-2 text-xs font-normal transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                       streamFilter === chip ? 'bg-primary/10 text-primary' : 'bg-muted text-foreground hover:bg-muted/70',
                     )}
                   >
@@ -953,7 +1015,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
             >
               <SelectTrigger
                 aria-label={t('detail.filterActivity')}
-                className="h-8 w-auto min-w-[140px] py-1 text-sm"
+                className="h-11 sm:h-8 w-auto min-w-[140px] py-1 text-sm"
               >
                 <SelectValue />
               </SelectTrigger>
@@ -976,7 +1038,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
             The rows stay, and the notice above them says which half the
             reader may not see. Without it the rows would read as the whole
             story. With no rows, the notice is the branch below instead. */}
-        {filtered.length > 0 && deniedNotice}
+        {filtered.length > 0 && readNotice}
 
         {/* Timeline.
             The loading branch comes FIRST because "still fetching" and "no
@@ -1001,15 +1063,17 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
             <Loader2 className="h-4 w-4 animate-spin" />
             <span>{t('detail.loading')}</span>
           </div>
-        ) : (activityDenied || commentsDenied) && filtered.length === 0 ? (
+        ) : readUnanswered && filtered.length === 0 ? (
           // objectui#11195: a REFUSED read is not an empty one. This branch
           // comes before the empty state because "you may not see this" and
           // "there is nothing here" are different answers, and only the first
           // is true when the server refused the read. The empty state's copy
           // is a claim about the record, and a refusal gives no evidence for
           // it. Only the i18n sentence is rendered: no status code, no server
-          // message, no object name.
-          deniedNotice
+          // message, no object name. objectstack#29188: a FAILED read (5xx,
+          // network) is not an empty one either, for the same reason; it
+          // says the read failed and offers a Retry.
+          readNotice
         ) : filtered.length === 0 ? (
           collapseWhenEmpty ? null : (
             <DataEmptyState

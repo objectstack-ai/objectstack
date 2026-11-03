@@ -163,6 +163,12 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // reference tells. Not a registry rule: it reads the filesystem. `os build`
   // then writes the bytes it read into the artifact (`placeSeedFiles`, below).
   'collectSeedFiles',
+  // The OpenAPI document a `provider: 'openapi'` connector names by
+  // package-relative file must name a JSON object under the config's
+  // directory. Not a registry rule: it reads the filesystem. `os build` then
+  // writes the document it read into the entry's `providerConfig.spec`
+  // (`placeConnectorSpecFiles`, below).
+  'collectConnectorSpecFiles',
   // ADR-0141 D2, author side: every `manifest.dependencies` range of the
   // packages one install act delivers, judged by the install's own predicate
   // (`checkDeclaredDependencies`). Not a registry rule: an in-artifact range is
@@ -177,6 +183,44 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // and the walk reads every dataset where it sits, the package bodies
   // included, across the whole artifact.
   'judgeSeedRecordValues',
+  // [ADR-0146 D2, #28410, #28643] The override write gate: an item bearing a
+  // name a package in its dependency closure ships, or an `overrides`
+  // declaration the gate does not admit, judged by the publish door's own
+  // `judgeOverrideWrite`. Not a registry rule: the WALK decides which packages
+  // of the artifact are in each package's closure and which of them ship the
+  // same name, so it is cross-package by construction.
+  //
+  // ⭐ This row is the #28410 VALIDATE_ONLY_GATES entry CLOSED. That entry read
+  // "os build is a fourth point it did not name", and it was right: the build
+  // emitted an artifact the managed install and the publish doors refused
+  // later. `compile.ts` now makes the same call (#28643), so the row moved
+  // here — deleted there rather than reworded, for the reason the
+  // `runPerPackageAuthoringRules` row above gives.
+  'findOverrideDeclarationRefusals',
+  // [ADR-0146 D10, #28564, #28727] The `__c` extension-field reservation: a
+  // field spelled `__c` only in a base's paired `.custom` package, and every
+  // `objectExtensions[].fields` key of a `.custom` pair suffixed, judged by
+  // the save and install doors' own `judgeExtensionFieldSuffix`. Not a
+  // registry rule: the WALK decides which package each field is declared in —
+  // each `packages[]` entry under its own id, or the stack under
+  // `manifest.id` — and the verdict turns on that package's id, which the
+  // union stack a registry rule is handed does not carry.
+  //
+  // ⭐ This row is the #28564 VALIDATE_ONLY_GATES entry CLOSED. That entry read
+  // "os build is a further point it did not name", and it was right: the
+  // build emitted an artifact the marketplace install and the save and
+  // publish doors refused later. `compile.ts` now makes the same call
+  // (#28727), so the row moved here — deleted there rather than reworded, for
+  // the reason the `runPerPackageAuthoringRules` row above gives.
+  'findExtensionFieldSuffixRefusals',
+  // [#29051] An undeclared cycle in a flow's top-level graph (ADR-0044),
+  // judged by the automation engine's own registration judge
+  // (`findUndeclaredFlowCycle`, `@objectstack/metadata-core`), which the
+  // publish doors run too. Not a registry rule: `@objectstack/lint` does not
+  // depend on metadata-core, so the rule table cannot reach the judge without
+  // a new package edge, and a copy of the walk is what the ruling forbids. So
+  // `os lint` does not give this verdict; validate and build do.
+  'findFlowCycleRefusals',
 ];
 
 /**
@@ -215,12 +259,19 @@ const BUILD_ONLY_GATES: Readonly<Record<string, string>> = {
  * SHARED_NON_REGISTRY_GATES instead.
  *
  * EMPTY is this ledger's steady state: every row is a gap the build carries.
- * Its one row, `findViewContainerNameRefusals` (#20331), moved to
- * SHARED_NON_REGISTRY_GATES when `compile.ts` gained the call (#20393). The
- * ledger stays, empty, because it is the only honest place the closed roster
- * has for the next validate-only gate.
+ * Three rows it has held moved to SHARED_NON_REGISTRY_GATES when `compile.ts`
+ * gained the call: `findViewContainerNameRefusals` (#20331 → #20393),
+ * `findOverrideDeclarationRefusals` (#28410 → #28643) and
+ * `findExtensionFieldSuffixRefusals` (#28564 → #28727). It holds one today,
+ * `findFieldPatchTargetRefusals` (#28565), whose card did not name the build.
  */
-const VALIDATE_ONLY_GATES: Readonly<Record<string, string>> = {};
+const VALIDATE_ONLY_GATES: Readonly<Record<string, string>> = {
+  findFieldPatchTargetRefusals:
+    '[ADR-0146 D10, second rule] An object extension\'s `fieldPatches` naming a field or option value its ' +
+    'in-stack target lacks, judged by the marketplace install door\'s own `fieldPatchTargetRefusals`. Wired ' +
+    'where the rollout card asked for it (`os validate` and the install door); `os build` still emits such an ' +
+    'artifact, which the install door then refuses — the build-side gap, reported rather than closed here.',
+};
 
 /**
  * Everything else the two commands call, and the reason each one is NOT an
@@ -307,8 +358,12 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
   // a gate in SHARED_NON_REGISTRY_GATES above — already read and judged into
   // their datasets' `files` maps. It refuses nothing and reports nothing; with
   // no artifact, `os validate` has nowhere to put them.
+  // `placeConnectorSpecFiles` writes the OpenAPI documents
+  // `collectConnectorSpecFiles` — a gate in SHARED_NON_REGISTRY_GATES above —
+  // already read and judged into their entries' `providerConfig.spec`. Same
+  // classification, for the same reasons.
   'Artifact assembly — puts already-collected, already-linted content into the bundle `os build` writes; judges nothing':
-    ['placeCollectedDocs', 'placeSeedFiles'],
+    ['placeCollectedDocs', 'placeSeedFiles', 'placeConnectorSpecFiles'],
   'Presentation — renders, formats or serialises a verdict something else reached; judges nothing':
     [
       'printHeader',

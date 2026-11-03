@@ -46,9 +46,9 @@ export const MUST_SURVIVE = [
   'divide-border/50',
   'focus:ring-destructive/30',
   'text-muted-foreground/80',
-  'border-l-[3px]',
+  'min-w-[140px]',
   'bg-emerald-500/5',
-  'dark:bg-slate-950/40',
+  'dark:bg-emerald-950/20',
 ];
 
 /**

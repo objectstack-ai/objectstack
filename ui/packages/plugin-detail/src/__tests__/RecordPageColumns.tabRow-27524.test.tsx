@@ -121,7 +121,9 @@ describe('the record page tab row (objectstack#27524, Target 8)', () => {
       </RecordContextProvider>,
     );
     await waitFor(() => expect(tabCount('task.lead_id')).toBe('2'));
-    expect(tabCount('note.parent_id')).toBe('0');
+    // The empty list's tab waits in the dropdown (objectstack#28469), beside the hidden one.
+    expect(tabIds()).not.toContain('note.parent_id');
+    expect(document.querySelector('[data-record-tab-more]')?.textContent).toBe('+2');
     expect(tabCount(RECORD_PAGE_TIMELINE_PANEL)).toBe('7');
     // The hidden panel was asked as well: its tab sits in the dropdown with its count.
     expect(find.mock.calls.map((call) => call[0]).sort()).toEqual(['call', 'note', 'task']);

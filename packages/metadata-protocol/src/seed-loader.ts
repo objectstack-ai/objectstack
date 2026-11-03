@@ -33,6 +33,7 @@ import { resolveSeedRecord } from '@objectstack/formula';
 import {
   bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult, runWithAdvisoryAggregation, type AdvisoryGroup,
   temporalComparandKind, temporalStorageForm, type TemporalComparandKind, isMissing,
+  blankAsNullColumns, blankStorageForm, type BlankAsNullReach,
 } from '@objectstack/core';
 // [#8442] The repo's ONE recogniser for "this throw is a record-validation
 // failure" — duck-typed on `code`/`name`, the same predicate `mapDataError` and
@@ -556,6 +557,12 @@ interface ReplayComparands {
   readonly temporal: ReadonlyMap<string, TemporalComparandKind>;
   /** [#24624] Fields the read path masks: a set value is never compared. */
   readonly masked: ReadonlySet<string>;
+  /**
+   * [#29277] Fields whose blank the write door stores as `null`, with which
+   * blanks (`blankAsNullColumns`, `@objectstack/core` — the rule the door
+   * itself applies): a seed value is compared in that stored form.
+   */
+  readonly blankAsNull: ReadonlyMap<string, BlankAsNullReach>;
 }
 
 /**
@@ -1241,8 +1248,26 @@ export class SeedLoaderService implements ISeedLoaderService {
     // own copy (otherwise upsert would clobber other tenants' rows
     // that share the same natural key — e.g. `name: 'Acme Corp'`).
     let existingRecords: Map<string, any> | undefined;
-    if ((mode === 'upsert' || mode === 'update' || mode === 'ignore') && !config.dryRun) {
+    const keyedMode = mode === 'upsert' || mode === 'update' || mode === 'ignore';
+    if (keyedMode && !config.dryRun) {
       existingRecords = await this.loadExistingRecords(objectName, externalId, config.organizationId);
+    }
+    // [#28952] A keyed dataset whose every record keys EMPTY — its
+    // `externalId` names a field no record carries, most often a field the
+    // object does not have — can never match a row: each record is written as
+    // new (`upsert`, `ignore`) or skipped (`update`) on every load. The save
+    // door and the publish promotion refuse such a seed; this load never
+    // refuses (a boot must not fail on a stored seed), so it says so once per
+    // dataset, at `warn`, and loads exactly as before.
+    if (keyedMode && dataset.records.length > 0
+      && dataset.records.every((record) => this.externalIdKey(record as Record<string, unknown>, externalId) === '')) {
+      this.logger.warn(
+        `[SeedLoader] Seed dataset for '${objectName}' keys every record on externalId ` +
+          `'${this.externalIdLabel(externalId)}', and no record carries a value for it, so this ${mode} load can ` +
+          `match no existing row: ${mode === 'update' ? 'every record is skipped' : 'every record is written as a new row, on every load'}. ` +
+          `Set externalId to a field the object declares and each record carries, or use mode 'insert'.`,
+        { object: objectName, externalId: this.externalIdLabel(externalId), mode, records: dataset.records.length },
+      );
     }
 
     // [#21665] Per-organization row identity. On a per-organization replay,
@@ -1449,10 +1474,12 @@ export class SeedLoaderService implements ISeedLoaderService {
     this.warnOnUndeclaredSeedColumns(dataset, objectDefinition);
     // How a replay compares each field (`isNoOpReplay`): [#24562] a temporal
     // field in its stored form, [#24624] a field the read path masks never by
-    // its set value.
+    // its set value, [#29277] a seed blank the write door stores as `null` as
+    // that `null`.
     const comparands: ReplayComparands = {
       temporal: temporalFieldKinds(objectDefinition),
       masked: maskedOnReadFields(objectDefinition),
+      blankAsNull: blankAsNullColumns(objectDefinition),
     };
     // [#25779] The dataset's file fields: seed files stored and kept, and an
     // id-shaped file value that names no file refused (`seed-files.ts`).
@@ -3096,6 +3123,15 @@ export class SeedLoaderService implements ISeedLoaderService {
    * change. No unmasked read is taken for this; the loader never sees a
    * stored credential.
    *
+   * [#29277] A seed BLANK is compared in the form the write door stores it
+   * (`comparands.blankAsNull`, from `blankAsNullColumns` in `@objectstack/core`
+   * — the rule the door itself applies, never a second spelling of it): a
+   * seed `''` on an optional `select` / `lookup`, on an optional unique text
+   * column, or any blank on a number / boolean / date column lands as `null`,
+   * so against a stored `null` it is no change. Only the SEED side is put in
+   * stored form, and only on those columns: elsewhere `''` against `null` is
+   * still a change, because there the door keeps `''`.
+   *
    * Pure: {@link decideWriteAction} asks it up to three times per record.
    */
   private isNoOpReplay(
@@ -3106,7 +3142,8 @@ export class SeedLoaderService implements ISeedLoaderService {
     for (const [key, value] of Object.entries(record)) {
       if (key === 'id') continue;
       if (SeedLoaderService.isUncomparableCredential(key, value, existing[key], comparands)) continue;
-      if (!this.seedValueEquals(value, existing[key], comparands.temporal.get(key))) return false;
+      const seedStored = blankStorageForm(value, comparands.blankAsNull.get(key));
+      if (!this.seedValueEquals(seedStored, existing[key], comparands.temporal.get(key))) return false;
     }
     return true;
   }

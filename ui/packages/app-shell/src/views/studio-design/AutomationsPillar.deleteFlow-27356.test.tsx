@@ -5,7 +5,7 @@
  * pillar's ⋯ menu, on a writable package's open flow: an in-app confirm
  * naming the flow (objectui#13333), the draft's discard and the flow's delete
  * at the package (`client.reset`), then the empty state over a re-read rail.
- * A refusal keeps the flow open; a read-only package draws no menu. The
+ * A refusal keeps the flow open; a read-only package's menu has no Delete. The
  * harness is `AutomationsPillar.showMeFocus-26730`'s, the server doubled at
  * the metadata client.
  */
@@ -145,9 +145,13 @@ describe('Automations — Delete flow (#27356 row 19)', () => {
     expect(toast.success).not.toHaveBeenCalled();
   });
 
-  it('a read-only package draws no ⋯ menu', async () => {
+  // objectstack#28567 — a read-only package's flow has a ⋯ menu now, for
+  // New similar; it offers no Delete.
+  it('a read-only package\'s menu offers no Delete', async () => {
     mount(true);
     expect(await screen.findByTestId('auto-canvas-caption', undefined, { timeout: 8000 })).toHaveTextContent('Approval');
-    expect(screen.queryByTestId('auto-item-more')).toBeNull();
+    fireEvent.pointerDown(await screen.findByTestId('auto-item-more'), { button: 0, ctrlKey: false });
+    expect(await screen.findByTestId('auto-item-new-similar')).toBeInTheDocument();
+    expect(screen.queryByTestId('auto-item-delete')).toBeNull();
   });
 });

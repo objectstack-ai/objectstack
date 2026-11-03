@@ -10,7 +10,7 @@ import {
   UNMANAGED_INSTALL_REFUSING_DISPOSITIONS,
   unmanagedInstallValueCarries,
 } from './kernel/unmanaged-install';
-import { PLURAL_TO_SINGULAR } from './meta-spelling/manifest-collection-spelling';
+import { PLURAL_TO_SINGULAR, pluralToSingular } from './meta-spelling/manifest-collection-spelling';
 import { validateObjectNamespacePrefix } from './kernel/namespace-prefix';
 import { PLATFORM_CAPABILITY_TOKENS, RETIRED_PLATFORM_CAPABILITY_GUIDANCE } from './kernel/platform-capabilities';
 import { DatasourceSchema } from './data/datasource.zod';
@@ -47,7 +47,7 @@ import { SeedSchema } from './data/seed.zod';
 
 // UI Protocol
 import { AppSchema } from './ui/app.zod';
-import { ViewSchema, isAggregatedViewContainer } from './ui/view.zod';
+import { ViewSchema, isAggregatedViewContainer, expandViewContainer } from './ui/view.zod';
 import { deriveViewContainerObject } from './ui/view-container-object';
 import { defaultRecordPageObject } from './ui/default-record-page';
 import { PageSchema } from './ui/page.zod';
@@ -66,6 +66,7 @@ import { JobSchema } from './system/job.zod';
 import { PositionSchema } from './identity/position.zod';
 import { PermissionSetSchema, findHierarchyScopeGrants } from './security/permission.zod';
 import { judgePermissionSetOwnerBinding } from './security/permission-set-owner-binding';
+import { judgeCollectionItemOwnerStamp, OWNER_STAMP_JUDGED_COLLECTIONS } from './kernel/collection-item-owner-stamp';
 import { CapabilityDeclarationSchema } from './security/capabilities';
 import { SharingRuleSchema } from './security/sharing.zod';
 import { QueueSchema } from './security/queue.zod';
@@ -275,6 +276,153 @@ function applyPermissionSetOwnerBindingGate(
     if (typeof name === 'string' && claimed.has(name)) return;
     judge(set, config.manifest?.id, ['permissions', i]);
   });
+}
+
+/**
+ * [ADR-0010] Raise every collection item whose body carries a `_packageId`
+ * other than the package that ships it as a Zod issue at that key: the BUILD
+ * door of the owner-stamp judge ({@link judgeCollectionItemOwnerStamp},
+ * `kernel/collection-item-owner-stamp.ts`, whose header holds the rule, the
+ * collections and the other door). The registration door refuses the same
+ * stamp at boot or install; judged here too, an author hears it where they
+ * wrote it.
+ *
+ * On the SCHEMA rather than inside `defineStack`, for the reason
+ * {@link applyApiEndpointGates} gives: `defineStack`, `os validate`, `os build`,
+ * the lint scorer and the metadata plugin's artifact ingestion all run this one
+ * parse. It reads the PARSED stack, and every item schema of a judged
+ * collection declares `_packageId` (`MetadataProtectionFields`), so the parse
+ * keeps the key for the judge. The owner is the id each item is registered
+ * under, read the way {@link applyPermissionSetOwnerBindingGate} reads a
+ * permission set's:
+ *
+ * - **no `packages[]`**: every top-level item ships from `manifest.id`, and
+ *   from no package when there is no `manifest`;
+ * - **`packages[]`** (ADR-0130 D4): a body's items ship from that body's own
+ *   `id`. The top level is judged as the boot's residual rule reads it
+ *   (`unclaimedTopLevel`, `@objectstack/metadata`), mirrored by
+ *   {@link isResidualTopLevelItem} because this package cannot import that one:
+ *   a top-level item is the stack's residual, registered under `manifest.id`
+ *   and judged against it, only when it occupies a registry slot no body
+ *   occupies. A top-level item a body declares is a copy of that body's item,
+ *   never registered from the top level, so the top level does not judge it.
+ *
+ * A stack's `plugins` are runtime plugin instances (`z.unknown()`), not bodies
+ * this parse can read; the registration door judges a nested plugin's items
+ * when it registers them.
+ */
+function applyCollectionItemOwnerStampGate(
+  config: Record<string, unknown> & { manifest?: { id?: unknown } | undefined; packages?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  const nameOf = (key: string, item: unknown): string => {
+    const it = (item ?? {}) as { name?: unknown; id?: unknown; object?: unknown };
+    const name = key === 'data' ? it.object : (it.name ?? it.id ?? (key === 'views' ? it.object : undefined));
+    return typeof name === 'string' && name !== '' ? name : '(unnamed)';
+  };
+  const judgeBody = (
+    body: Record<string, unknown>,
+    owner: unknown,
+    path: (string | number)[],
+    judged?: (key: string, item: unknown) => boolean,
+  ): void => {
+    for (const key of OWNER_STAMP_JUDGED_COLLECTIONS) {
+      const items = body[key];
+      if (!Array.isArray(items)) continue;
+      items.forEach((item: unknown, i: number) => {
+        if (judged && !judged(key, item)) return;
+        const name = nameOf(key, item);
+        const refusal = judgeCollectionItemOwnerStamp(
+          item,
+          pluralToSingular(key),
+          name,
+          typeof owner === 'string' ? owner : undefined,
+          'build',
+        );
+        if (refusal) ctx.addIssue({ code: 'custom', path: [...path, key, i, '_packageId'], message: refusal.message });
+      });
+    }
+  };
+  if (!Array.isArray(config.packages)) {
+    judgeBody(config, config.manifest?.id, []);
+    return;
+  }
+  const bodies: Record<string, unknown>[] = [];
+  config.packages.forEach((entry: unknown, j: number) => {
+    const body = (entry as { manifest?: Record<string, unknown> } | null | undefined)?.manifest;
+    if (!body || typeof body !== 'object') return;
+    bodies.push(body);
+    judgeBody(body, body.id, ['packages', j, 'manifest']);
+  });
+  judgeBody(config, config.manifest?.id, [], isResidualTopLevelItem(bodies));
+}
+
+/**
+ * The judged collections a `packages[]` stack's TOP LEVEL never files as
+ * residual items: the boot's residual rule (`unclaimedTopLevel`,
+ * `@objectstack/metadata`) walks the collections the metadata door registers
+ * as items (its `ARTIFACT_FIELD_TO_TYPE`), and these two are not among them,
+ * so the boot judges no stamp on a top-level item of either. Both are read off
+ * the stack whole, the top level merged with every body
+ * (`resolveArtifactCollections`, `@objectstack/runtime`): `AppPlugin` hands the
+ * seed `data` to the seed loader and schedules the `jobs`.
+ * `datasets` is not here: the residual rule walks it, so a top-level dataset
+ * that no body declares is registered under `manifest.id` and its stamp is
+ * judged at both doors, like every other residual item.
+ * A package BODY's items of these collections are still judged, at both doors.
+ *
+ * Mirrored, because `@objectstack/spec` cannot import the rule it mirrors; a
+ * `@objectstack/metadata` test holds the two equal, collection by collection.
+ */
+const TOP_LEVEL_COLLECTIONS_NEVER_RESIDUAL: ReadonlySet<string> = new Set(['data', 'jobs']);
+
+/**
+ * The registry slot one item occupies, the way the boot's residual rule
+ * derives it (`artifactItemSlot`, `@objectstack/metadata`): an aggregated view
+ * container is filed under the object it binds to
+ * ({@link deriveViewContainerObject}), however that binding is spelled; any
+ * other item under its `name`, a `views` entry without one falling back to the
+ * same derivation. `undefined`: no slot, so no door registers the item.
+ */
+function residualSlotOf(key: string, item: unknown): string | undefined {
+  if (key === 'views' && isAggregatedViewContainer(item)) return deriveViewContainerObject(item) || undefined;
+  const name = (item as { name?: unknown } | null | undefined)?.name;
+  if (name) return String(name);
+  return key === 'views' ? deriveViewContainerObject(item) || undefined : undefined;
+}
+
+/**
+ * Whether a top-level item of a `packages[]` stack is its RESIDUAL: the
+ * mirror of `unclaimedTopLevel`'s judgement (`@objectstack/metadata`). True
+ * when the item's collection is one the rule walks
+ * ({@link TOP_LEVEL_COLLECTIONS_NEVER_RESIDUAL}), the item occupies a slot
+ * ({@link residualSlotOf}), and no body occupies that slot in the same
+ * collection: a body's container claims its object's slot and the slot of
+ * every view it expands into ({@link expandViewContainer}), any other body
+ * item its name's.
+ */
+function isResidualTopLevelItem(bodies: readonly Record<string, unknown>[]): (key: string, item: unknown) => boolean {
+  // `<collection>:<slot>`: no collection key carries a `:`, so the pair is unambiguous.
+  const claimed = new Set<string>();
+  for (const body of bodies) {
+    for (const key of OWNER_STAMP_JUDGED_COLLECTIONS) {
+      const items = body[key];
+      if (!Array.isArray(items)) continue;
+      for (const item of items) {
+        const slot = residualSlotOf(key, item);
+        if (slot === undefined) continue;
+        claimed.add(`${key}:${slot}`);
+        if (key === 'views' && isAggregatedViewContainer(item)) {
+          for (const view of expandViewContainer(slot, item)) claimed.add(`views:${view.name}`);
+        }
+      }
+    }
+  }
+  return (key, item) => {
+    if (TOP_LEVEL_COLLECTIONS_NEVER_RESIDUAL.has(key)) return false;
+    const slot = residualSlotOf(key, item);
+    return slot !== undefined && !claimed.has(`${key}:${slot}`);
+  };
 }
 
 /** One `objectExtensions` entry as the registry registers it, with where it sits in the stack. */
@@ -2183,6 +2331,7 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
   ...STACK_DEFINITION_COLLECTIONS_SHAPE,
 }).superRefine(applyApiEndpointGates)
   .superRefine(applyPermissionSetOwnerBindingGate)
+  .superRefine(applyCollectionItemOwnerStampGate)
   .superRefine(applyControlledByParentExtensionGate));
 
 export type ObjectStackDefinition = z.input<typeof ObjectStackDefinitionSchema>;
@@ -3097,36 +3246,63 @@ function collectDuplicateEntryErrors(config: ObjectStackDefinition): string[] {
  * `origins` labels each page's position for the finding (`stack.pages[3]`);
  * {@link collectComposedDefaultRecordPageErrors} reuses the reading over the
  * pages a composition brings together, with its own labels.
+ *
+ * The same rule holds one level down, per app (ruling A on #28979): two record
+ * pages for one object that both name the same app in `apps` are two pages for
+ * that app's record view, refused here with the same counting and naming. The
+ * default and an app's page are different slots and never meet.
  */
 function duplicateDefaultRecordPageFindings(
   entries: Iterable<{ readonly page: unknown; readonly origin: string; readonly holder?: string }>,
   scope: string,
 ): string[] {
-  // object → page identity → { name, origins }. The identity is the page name,
-  // or `holder|name` where the caller says which package an entry lands in.
-  const byObject = new Map<string, Map<string, { name: string; origins: string[] }>>();
+  // slot → page identity → { name, origins }. A slot is an object's default
+  // (no app), or an object's record page inside one app (ruling A on #28979:
+  // `apps`, one page per object per app — the default's rule one level down,
+  // read by the same `defaultRecordPageObject` with the app passed). The
+  // identity is the page name, or `holder|name` where the caller says which
+  // package an entry lands in.
+  type Slot = { object: string; app?: string };
+  const slots = new Map<string, { slot: Slot; pages: Map<string, { name: string; origins: string[] }> }>();
   for (const { page, origin, holder } of entries) {
-    const object = defaultRecordPageObject(page);
-    if (object === undefined) continue;
     const name = readEntryName(page);
     if (name === undefined) continue;
-    const pages = byObject.get(object) ?? new Map<string, { name: string; origins: string[] }>();
-    const key = holder === undefined ? name : `${holder}|${name}`;
-    const found = pages.get(key) ?? { name, origins: [] };
-    found.origins.push(origin);
-    pages.set(key, found);
-    byObject.set(object, pages);
+    const held: Slot[] = [];
+    const object = defaultRecordPageObject(page);
+    if (object !== undefined) held.push({ object });
+    const apps: unknown = (page as { apps?: unknown } | null | undefined)?.apps;
+    if (Array.isArray(apps)) {
+      for (const app of new Set(apps.filter((a): a is string => typeof a === 'string'))) {
+        const scoped = defaultRecordPageObject(page, app);
+        if (scoped !== undefined) held.push({ object: scoped, app });
+      }
+    }
+    for (const slot of held) {
+      const slotKey = JSON.stringify([slot.object, slot.app ?? null]);
+      const entry = slots.get(slotKey) ?? { slot, pages: new Map<string, { name: string; origins: string[] }>() };
+      const key = holder === undefined ? name : `${holder}|${name}`;
+      const found = entry.pages.get(key) ?? { name, origins: [] };
+      found.origins.push(origin);
+      entry.pages.set(key, found);
+      slots.set(slotKey, entry);
+    }
   }
 
   const errors: string[] = [];
-  for (const [object, pages] of byObject) {
+  for (const { slot: { object, app }, pages } of slots.values()) {
     if (pages.size < 2) continue;
     const named = [...pages.values()].map(({ name, origins }) => `'${name}' (${joinDeclarationOrigins(origins)})`);
+    const count = pages.size === 2 ? 'two' : String(pages.size);
     errors.push(
-      `Object '${object}' has ${pages.size === 2 ? 'two' : pages.size} default record pages in ${scope}: ` +
-        `${joinDeclarationOrigins(named)}. Set \`isDefault: false\` on all but one of them. At most one ` +
-        `record page may be \`isDefault: true\` for an object in a deployment: the record view opens that ` +
-        `page with no tie-break, so with two the choice would fall to registration order.`,
+      app === undefined
+        ? `Object '${object}' has ${count} default record pages in ${scope}: ` +
+            `${joinDeclarationOrigins(named)}. Set \`isDefault: false\` on all but one of them. At most one ` +
+            `record page may be \`isDefault: true\` for an object in a deployment: the record view opens that ` +
+            `page with no tie-break, so with two the choice would fall to registration order.`
+        : `Object '${object}' has ${count} record pages for app '${app}' in ${scope}: ` +
+            `${joinDeclarationOrigins(named)}. Remove '${app}' from \`apps\` on all but one of them. At most one ` +
+            `record page may name an app in \`apps\` for an object: the app's record view opens that page with ` +
+            `no tie-break, so with two the choice would fall to registration order.`,
     );
   }
   return errors;
@@ -5847,12 +6023,18 @@ const warnedEmailTemplateFloors = new Set<string>();
  *
  * ## What goes wrong without this
  *
- * `IEmailService.sendTemplate` matches `(name, locale)` EXACTLY and, for a call
- * that NAMES a locale, retries exactly one rung — the literal `en-US` — and
- * stops. There is no language-subtag folding, so a bundle whose English row is
- * tagged `en` is unreachable from `en-US` and from every other tag it does not
- * itself carry: each such delivery raises `TEMPLATE_NOT_FOUND`, which
- * classifies **permanent**, so it dead-letters with no retry. `sys_user.locale`
+ * `IEmailService.sendTemplate` reads one row at one tag exactly. For a call
+ * that NAMES a locale, over the built-in registry template loader, it folds
+ * that locale against the bundle's tags (`resolveBundleLocale`: exact,
+ * case-insensitive, base language, variant expansion), then the stack's
+ * declared fallback locale (`i18n.fallbackLocale`, else `defaultLocale`) the
+ * same way, then the literal `en-US` (#28880); a replacement `TemplateLoader`
+ * matches the named tag exactly and retries only `en-US`. So a bundle with no
+ * `en-US` row is reachable from a recipient tag only when that tag or the
+ * declared fallback folds to one of its rows, and behind a replacement loader
+ * only from the tags it carries exactly. Every other delivery raises
+ * `TEMPLATE_NOT_FOUND`, which classifies **permanent**, so it dead-letters
+ * with no retry. `sys_user.locale`
  * is user-editable free-text BCP-47 and is NOT constrained to
  * `supportedLocales`, so the locales that can reach the lookup are not the ones
  * the author enumerated — a recipient can break their own mail by setting a
@@ -5862,15 +6044,17 @@ const warnedEmailTemplateFloors = new Set<string>();
  * starts at `en-US` by name and, when the bundle carries no `en-US` row, drops
  * to that bundle's lowest locale tag and renders it silently. So one floorless
  * bundle dead-letters the recipients whose locale was named and quietly fills
- * for the ones whose was not. The full three-rung ladder is on
+ * for the ones whose was not. The full ladders are on
  * `SendTemplateInput.locale` in `packages/spec/src/contracts/email-service.ts`
- * and is not restated here.
+ * and are not restated here.
  *
- * ⭐ The trap is that the author does the CONSISTENT thing: a stack declaring
- * `defaultLocale: 'en'` whose English row says `locale: 'en'` agrees with
- * itself everywhere, validates, builds and installs clean, and still ships a
- * bundle with no floor. The stack's own declared default locale is the wrong
- * answer whenever it is not spelled `en-US`.
+ * ⭐ The CONSISTENT thing an author writes, a stack declaring
+ * `defaultLocale: 'en'` whose English row says `locale: 'en'`, validates,
+ * builds and installs clean. Over the built-in loader, on a host whose i18n
+ * service answers that declared fallback, it reaches every recipient; behind
+ * a replacement loader, or on a host that declares no fallback, it still has
+ * no floor. This report reads the bundle alone, so it fires for that shape
+ * whichever host serves it: `en-US` is the one rung every loader retries.
  *
  * ## Posture — advisory, and deliberately so
  *
@@ -5948,15 +6132,17 @@ function warnEmailTemplateLocaleFloor(data: ObjectStackDefinition): void {
     warnedEmailTemplateFloors.add(key);
     console.warn(
       `defineStack: emailTemplates '${name}' carries rows for ${declared.map((t) => `'${t}'`).join(', ')} ` +
-      `but none tagged '${EMAIL_TEMPLATE_FLOOR_LOCALE}', so this bundle has no fallback floor for a ` +
-      `send that names a locale. sendTemplate matches (name, locale) exactly and retries only the ` +
-      `literal '${EMAIL_TEMPLATE_FLOOR_LOCALE}' — there is no language-subtag folding, so every ` +
-      `recipient locale this bundle does not carry a row for raises TEMPLATE_NOT_FOUND, which is ` +
-      `permanent (dead-letter, no retry). A send naming NO locale does not fail: it drops to this ` +
-      `bundle's lowest tag and renders that silently, so one gap is loud for some recipients and ` +
-      `invisible for others. Your stack's own i18n.defaultLocale is the wrong tag here unless ` +
-      `it is spelled '${EMAIL_TEMPLATE_FLOOR_LOCALE}': tag the English row '${EMAIL_TEMPLATE_FLOOR_LOCALE}' ` +
-      `and keep the other tags beside it.`,
+      `but none tagged '${EMAIL_TEMPLATE_FLOOR_LOCALE}', so this bundle has no fallback floor that ` +
+      `holds for every send naming a locale. With the built-in template loader such a send folds its ` +
+      `locale against these rows (exact, case-insensitive, base language, variant expansion), then ` +
+      `tries the stack's declared fallback locale (i18n.fallbackLocale, else defaultLocale) folded ` +
+      `the same way; a replacement TemplateLoader matches exactly and retries only ` +
+      `'${EMAIL_TEMPLATE_FLOOR_LOCALE}'. When no rung lands on a row the send raises ` +
+      `TEMPLATE_NOT_FOUND, which is permanent (dead-letter, no retry). A send naming NO locale does ` +
+      `not fail: it drops to this bundle's lowest tag and renders that silently, so one gap is loud ` +
+      `for some recipients and invisible for others. '${EMAIL_TEMPLATE_FLOOR_LOCALE}' is the one rung ` +
+      `every loader retries: tag the English row '${EMAIL_TEMPLATE_FLOOR_LOCALE}' and keep the other ` +
+      `tags beside it.`,
     );
   }
 }

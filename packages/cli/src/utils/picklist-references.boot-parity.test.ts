@@ -5,15 +5,18 @@
  * stack's top-level picklist that no package body declares and no object field
  * the engine registers names is refused by the boot (the engine's `manifest`
  * service, `INVALID_METADATA`), and `judgePicklistReferences` refuses the same
- * stacks as `picklist-residual-unreferenced`, in the same words.
+ * stack as `picklist-residual-unreferenced`, in the same words.
  *
- * The engine does not export its judgement, so the author-time door restates
- * it. This file is what keeps the two from drifting. Each stack is judged by
- * the door and booted on a real kernel with the real `ObjectQLPlugin`, the way
- * `AppPlugin` hands a config boot's stack to the `manifest` service
- * (`{ ...manifest, ...stack }`). Where the door refuses one list, the boot
- * throws `${message} ${hint}` byte for byte; where the door raises no such
- * refusal, the boot does not throw this one.
+ * Both read ONE judgement, `unreferencedResidualPicklists`
+ * (`@objectstack/metadata/picklist-references`, re-exported by
+ * `@objectstack/objectql`), so this file is a smoke check of the wiring, not
+ * the guard against drift: one refused stack and one control, booted on a real
+ * kernel with the real `ObjectQLPlugin`, the way `AppPlugin` hands a config
+ * boot's stack to the `manifest` service (`{ ...manifest, ...stack }`). Which
+ * lists are refused, judged off which fields, is pinned on the judgement and
+ * at each door: `picklist-references.test.ts` here, and objectql's
+ * `manifest-service-residual-objects.test.ts` and
+ * `registration-refusal-one-spelling.test.ts`.
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -31,8 +34,6 @@ const unused = { name: 'parity_unused', label: 'Unused', options: [{ label: 'A',
 const statusField = { status: { type: 'select', label: 'Status', picklist: 'parity_status' } };
 const caseObj = (fields: AnyRec = { subject: { type: 'text', label: 'Subject' } }) =>
   ({ name: 'parity_case', label: 'Case', sharingModel: 'private', fields });
-const noteObj = (fields: AnyRec = { title: { type: 'text', label: 'Title' } }) =>
-  ({ name: 'parity_note', label: 'Note', sharingModel: 'private', fields });
 
 /** Two bodies, a manifest naming neither, and `top` on the top level. */
 const composed = (top: AnyRec, coreExtra: AnyRec = {}): AnyRec => ({
@@ -44,27 +45,10 @@ const composed = (top: AnyRec, coreExtra: AnyRec = {}): AnyRec => ({
   ],
 });
 
-/** Every stack the door's pins name, the refused and the controls alike. */
+/** One refused stack and one control. */
 const STACKS: Record<string, AnyRec> = {
   'a list nothing names': composed({ picklists: [unused] }),
-  'a list only a top-level `objectExtensions` entry names': composed({
-    picklists: [unused], objectExtensions: [{ extend: 'parity_case', fields: { u: { type: 'select', label: 'U', picklist: 'parity_unused' } } }],
-  }),
-  'a list only a diverging top-level copy of a body object names': composed({
-    picklists: [unused], objects: [caseObj({ u: { type: 'select', label: 'U', picklist: 'parity_unused' } })],
-  }),
-  'a list only a body `picklistExtensions` entry extends': composed({ picklists: [unused] }, {
-    picklistExtensions: [{ extend: 'parity_unused', options: [{ label: 'Closed', value: 'closed' }] }],
-  }),
-  'a list only a top-level `plugins[]` entry\'s object names': composed({
-    picklists: [unused], plugins: [{ name: 'parity_plugin', objects: [noteObj({ u: { type: 'select', label: 'U', picklist: 'parity_unused' } })] }],
-  }),
-  'CONTROL: a list a residual object\'s field names': composed({
-    picklists: [unused], objects: [noteObj({ u: { type: 'select', label: 'U', picklist: 'parity_unused' } })],
-  }),
-  'CONTROL: a body-declared list repeated on the top level': composed({ picklists: [status] }),
   'CONTROL: a body-declared list a body field names': composed({}, { objects: [caseObj(statusField)] }),
-  'CONTROL: a stack without `packages[]`': { manifest: manifest(STACK_ID), picklists: [unused], objects: [noteObj()] },
 };
 
 const kernels: ObjectKernel[] = [];

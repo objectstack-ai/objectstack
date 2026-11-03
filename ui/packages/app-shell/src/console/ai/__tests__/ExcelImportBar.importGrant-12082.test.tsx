@@ -21,7 +21,7 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, cleanup, fireEvent, waitFor, screen, within, act } from '@testing-library/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 const h = vi.hoisted(() => ({
   /** The objects the bar lists as import targets. */
@@ -64,11 +64,12 @@ const SHAPES: Array<{ shape: string; bits: Record<string, boolean>; create: bool
 ];
 const FULL = SHAPES[3].bits;
 
-const envelope = (objects: Record<string, Record<string, unknown>>): MePermissionsResponse => ({
+const envelope = (objects: Record<string, Record<string, unknown>>): MePermissionsAuthenticatedResponse => ({
   authenticated: true,
   userId: 'u-pin',
   tenantId: null,
-  roles: ['member'],
+  positions: ['member'],
+  hasAnyQueue: false,
   permissionSets: ['member'],
   objects: objects as never,
   fields: {},

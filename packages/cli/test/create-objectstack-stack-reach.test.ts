@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: one on-ramp scaffold child and three spawns of the source CLI (os g object, os g flow, os validate), chained over the one scaffolded project, every one a distinct triple; slowest CI reading 12.4 s (run 41255489006), taken through the tsx launcher this file no longer uses, of the five scheduled CI runs 41199450735, 41217827347, 41237094739, 41255489006, 41271604267, x 1.25, rounded up
 
 /**
  * PIN (#20333) — `npm create objectstack` → `os g flow` → `os validate`
@@ -63,14 +64,19 @@ import { GENERATOR_SCAFFOLD_TARGETS } from '../src/commands/generate.js';
 import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
+/**
+ * Spawned by this process's own `node`, not through the `tsx` binary: the entry, its
+ * `src/` and its pinned `NODE_ENV=development` are the same either way, and the
+ * `.bin/tsx` launcher only adds a second node process in front of the CLI, about half
+ * of every spawn's wall (#23181).
+ */
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 // One `resolve(HERE, …)` call per line: `check:cross-package-test-inputs`
 // reconstructs this read by SOURCE SCAN.
 const ON_RAMP_BIN = resolve(HERE, '../../..', 'packages/create-objectstack/bin/create-objectstack.js');
 
-/** One plain-node scaffold, then three oclif + tsx cold starts, sequential. */
+/** One plain-node scaffold, then three oclif cold starts of the source CLI, sequential. */
 const RUN_TIMEOUT_MS = 240_000;
 
 const PROJECT = 'my-app';
@@ -106,7 +112,7 @@ function run(file: string, args: string[], cwd: string): Promise<Run> {
   });
 }
 
-const os = (args: string[], cwd: string) => run(TSX, [CLI, ...args], cwd);
+const os = (args: string[], cwd: string) => run(process.execPath, [CLI, ...args], cwd);
 const out = (r: Run) => r.stdout + r.stderr;
 
 const target = (type: string) => {

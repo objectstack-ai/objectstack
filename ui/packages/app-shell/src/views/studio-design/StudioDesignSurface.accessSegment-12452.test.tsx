@@ -218,9 +218,10 @@ describe('Studio pillar nav: Access is the fourth segment, and More is gone (obj
     await screen.findByTestId('studio-shell-header');
 
     const links = within(pillarNav()).getAllByRole('link');
-    expect(links.map((a) => a.textContent)).toEqual([DATA, AUTOMATIONS, INTERFACES, ACCESS]);
+    // objectstack#28561 — the "All metadata" area follows the four pillars.
+    expect(links.map((a) => a.textContent)).toEqual([DATA, AUTOMATIONS, INTERFACES, ACCESS, t('engine.studio.pillar.metadata', 'en')]);
     expect(links.map((a) => a.getAttribute('href'))).toEqual(
-      ['data', 'automations', 'interfaces', 'access'].map((p) => `/studio/${PKG}/${p}`),
+      ['data', 'automations', 'interfaces', 'access', 'metadata'].map((p) => `/studio/${PKG}/${p}`),
     );
     // No More trigger, under its old test id or any other name.
     expect(within(pillarNav()).queryAllByRole('button')).toEqual([]);

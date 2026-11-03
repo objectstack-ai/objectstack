@@ -1,6 +1,6 @@
 /**
- * The Audit Log's `sys_audit_log.action` helpers (the Action filter's choices
- * and the action badge's tone), split into their own module — rather than
+ * The Audit Log's `sys_audit_log.action` helpers (the Action filter's choices,
+ * the action badge's label and its tone), split into their own module — rather than
  * living inline in AuditLogPage.tsx — so they can be imported by tests
  * without pulling a component export into a non-component file (React Fast
  * Refresh wants component files to only export components).
@@ -49,6 +49,22 @@ export function actionFilterOptionsOf(objectDef: unknown): ActionFilterOption[] 
     options.push({ value: option.value, label });
   }
   return options;
+}
+
+/**
+ * The label a row's action shows in the Action column and the detail drawer:
+ * the declared label of its option among `options` (the filter's choices from
+ * `actionFilterOptionsOf`, so the badge and the filter name an action alike),
+ * else the stored value itself, so an action the server writes without
+ * declaring it still reads as what was stored. A missing or empty action
+ * answers `undefined` and the page shows its dash.
+ */
+export function actionLabelOf(
+  options: readonly ActionFilterOption[],
+  action: string | null | undefined,
+): string | undefined {
+  if (!action) return undefined;
+  return options.find((o) => o.value === action)?.label ?? action;
 }
 
 export type ActionBadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline';

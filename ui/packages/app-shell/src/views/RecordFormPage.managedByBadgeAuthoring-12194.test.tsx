@@ -33,7 +33,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { RecordFormPage } from './RecordFormPage';
 
 vi.mock('sonner', () => ({
@@ -75,12 +75,13 @@ vi.mock('../providers/AdapterProvider', () => ({
 }));
 
 /** A `/me/permissions` answer holding exactly `held`. */
-function answer(held: string[]): MePermissionsResponse {
+function answer(held: string[]): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u1',
     tenantId: null,
-    roles: [],
+    positions: [],
+    hasAnyQueue: false,
     permissionSets: [],
     systemPermissions: held,
     objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },

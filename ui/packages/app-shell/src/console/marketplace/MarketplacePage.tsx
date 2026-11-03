@@ -358,6 +358,9 @@ export function MarketplacePage() {
   } | null>(null);
   const [orgDeploy, setOrgDeploy] = useState<OrgDeployState | null>(null);
   const [installedIds, setInstalledIds] = useState<Set<string>>(new Set());
+  // Packages the control plane lists as uninstalled (a soft disable that keeps
+  // the row): not installed, and the org card offers Reinstall for them.
+  const [disabledIds, setDisabledIds] = useState<Set<string>>(new Set());
 
   const installedByManifestId = useMemo(() => {
     const m = new Map<string, LocalInstallEntry>();
@@ -394,9 +397,11 @@ export function MarketplacePage() {
       setInstalled(installs);
       setOrgItems(org.items ?? []);
       const ids = new Set<string>();
+      const disabled = new Set<string>();
       for (const e of installs) ids.add(e.manifestId);
-      for (const e of cloudInstalled.items) ids.add(e.manifestId);
+      for (const e of cloudInstalled.items) (e.disabled ? disabled : ids).add(e.manifestId);
       setInstalledIds(ids);
+      setDisabledIds(disabled);
       if (catalog.failure !== null) {
         setError(catalog.failure);
         setItems([]);
@@ -744,6 +749,9 @@ export function MarketplacePage() {
           <div className={CARD_GRID}>
             {orgItems.map((pkg) => {
               const isInstalled = installedIds.has(pkg.manifest_id);
+              // Uninstalled on the control plane, which keeps the row: the
+              // install door re-enables that row, so the action reads Reinstall.
+              const isDisabled = !isInstalled && disabledIds.has(pkg.manifest_id);
               // objectui#11760 — the same page's other "Installed": an org
               // package installed into this runtime that it refused to load at
               // startup reads "Not loaded", from the local listing's marker.
@@ -783,7 +791,9 @@ export function MarketplacePage() {
                           <Button size="sm" onClick={() => void doOrgInstall(pkg)} disabled={orgInstalling === pkg.id}>
                             {orgInstalling === pkg.id
                               ? t('marketplace.org.installing', { defaultValue: 'Installing…' })
-                              : t('marketplace.org.install', { defaultValue: 'Install' })}
+                              : isDisabled
+                                ? t('marketplace.action.reinstall')
+                                : t('marketplace.org.install', { defaultValue: 'Install' })}
                           </Button>
                         )}
                       </div>

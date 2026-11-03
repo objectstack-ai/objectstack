@@ -60,8 +60,10 @@
  * Assertions run against a REAL CHILD PROCESS and read stdout, for the two
  * reasons `generate-agent-retired.e2e.test.ts` documents: `process.exitCode`
  * inside a vitest worker is not an exit status, and these commands print
- * through `utils/format.ts`, which writes to stdout. Spawned through
- * `bin/run-dev.js` + tsx, so the suite does not depend on `packages/cli/dist`.
+ * through `utils/format.ts`, which writes to stdout. The CLI is spawned as
+ * `bin/run-dev.js` under this process's own `node`, so the suite does not
+ * depend on `packages/cli/dist`; only the parse probe, a bare `.ts` file, runs
+ * through the tsx binary.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -86,6 +88,7 @@ import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
+/** Runs the parse probe only: a bare `.ts` module, which plain `node` cannot import. */
 const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 /**
@@ -96,7 +99,7 @@ const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
  */
 const SPEC_PACKAGE_ROOT = dirname(createRequire(import.meta.url).resolve('@objectstack/spec/package.json'));
 
-/** oclif + tsx cold start, with every command module loaded; ~2-10 s when healthy. */
+/** oclif cold start, with every command module loaded; ~2-10 s when healthy. */
 const RUN_TIMEOUT_MS = 180_000;
 
 /** The contract under test, read from the registry — never restated. */
@@ -111,10 +114,10 @@ interface Run {
   stderr: string;
 }
 
-function runTsx(args: string[], cwd: string): Promise<Run> {
+function runChild(bin: string, args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      bin,
       args,
       { cwd, maxBuffer: 8 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {
@@ -161,13 +164,13 @@ beforeAll(async () => {
   specLink = join(dir, 'node_modules', '@objectstack', 'spec');
   symlinkSync(SPEC_PACKAGE_ROOT, specLink, 'dir');
 
-  // Sequential on purpose: cold tsx starts, each loading every command module,
+  // Sequential on purpose: cold CLI starts, each loading every command module,
   // in a container several agents share.
   // `lead_qualification`, not `lead-qualification`: the #16726 charset gate
   // refuses kebab-case at the door. Both spellings derive the same written
   // file and the same barrel alias, so what this file measures is unchanged.
-  generated = await runTsx([CLI, 'g', 'skill', 'lead_qualification'], dir);
-  control = await runTsx([CLI, 'g', 'object', 'customer'], dir);
+  generated = await runChild(process.execPath, [CLI, 'g', 'skill', 'lead_qualification'], dir);
+  control = await runChild(process.execPath, [CLI, 'g', 'object', 'customer'], dir);
 
   const skillDir = join(dir, 'src', 'skills');
   const produced = existsSync(skillDir)
@@ -188,7 +191,7 @@ beforeAll(async () => {
       `import skill from './src/skills/${writtenName}';\n`
       + 'process.stdout.write(JSON.stringify(skill));\n',
     );
-    parseProbe = await runTsx([probe], dir);
+    parseProbe = await runChild(TSX, [probe], dir);
   }
 }, RUN_TIMEOUT_MS);
 

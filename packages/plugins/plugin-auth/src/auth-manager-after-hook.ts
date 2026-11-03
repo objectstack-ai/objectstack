@@ -40,11 +40,13 @@
  * Nothing re-exports this module, so the published surface does not move.
  */
 
+import { codeSelfServiceRefusal } from './account-self-service-refusal-code.js';
 import type { AuthManager } from './auth-manager.js';
 import { SIGN_IN_EMAIL_PATH } from './auth-session-audit.js';
 import { narrowDirectoryForExternalCaller } from './external-directory-door.js';
 import { rotateCallerBearerOnImpersonation } from './impersonation-bearer-rotation.js';
 import { stampInvitationDeliveryOutcome } from './invitation-delivery-outcome.js';
+import { retireExpiredInvitationsOnReissue } from './invitation-expired-supersede.js';
 import { codeInviteRoleNotFound } from './invite-role-not-found-code.js';
 import { readRequestClientAddress } from './request-client-address.js';
 import { stampRoleChangeGrantedSet } from './role-change-granted-set.js';
@@ -218,6 +220,10 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
       // caller here, so the request rung applies.
       await this.sendChangeEmailNotice(from, newEmail, ctx);
     }
+    // #29163 — the vendor's uncoded refusals here carry a ledgered code
+    // (see `account-self-service-refusal-code.ts`). It throws on a match,
+    // so it stays last in this section.
+    await codeSelfServiceRefusal(ctx);
     return;
   }
 
@@ -234,6 +240,13 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // `invitation-delivery-outcome.ts`). A refusal passes untouched.
   await stampInvitationDeliveryOutcome(ctx, () => this.isEmailDeliveryLive());
 
+  // ── #28540: a new invitation retires the person's expired pending one ──
+  // The vendor skips an expired row when it looks for one to renew, so a
+  // resend (or an invite) on it issues a new invitation; the expired row is
+  // moved to `expired` here, so the Pending list holds one row per person
+  // (see `invitation-expired-supersede.ts`). A refusal retires nothing.
+  await retireExpiredInvitationsOnReissue(ctx);
+
   // ── #27862: a role change names the permission set it granted ──
   // The before hook read the member's org-admin grants; a success that
   // left a new one held answers `outcome: 'permission_set_granted'` and
@@ -247,6 +260,10 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // `ROLE_NOT_FOUND` (see `invite-role-not-found-code.ts`). It throws
   // on a match, so it stays after every section above.
   await codeInviteRoleNotFound(ctx);
+
+  // ── #29163: update-user's uncoded refusal carries its code ──
+  // Same seam as the change-email section above; throws on a match.
+  await codeSelfServiceRefusal(ctx);
 
   if (ctx?.path !== '/sign-up/email') return;
   // ADR-0069 D1 — stamp password_changed_at for a newly-created local

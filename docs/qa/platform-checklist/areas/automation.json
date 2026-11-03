@@ -579,7 +579,7 @@
       "title": "Every demonstrable flow node type authors in the designer, executes in a run, and surfaces its step in run logs",
       "since": "v15",
       "status": "active",
-      "revision": 11,
+      "revision": 13,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -588,12 +588,12 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the showcase flow-per-node-type map (examples/app-showcase/src/automation/flows/): create_record=showcase_inbound_task_webhook · update_record+screen=showcase_reassign_wizard · get_record+decision+delete_record=showcase_inquiry_purge · script+notify=showcase_task_completed · wait=showcase_task_follow_up · subflow=showcase_task_done_notify_owner→showcase_notify_owner · map=showcase_release_signoff · connector_action=showcase_task_completed_rest_ping · loop=showcase_batch_reminders · parallel+http=showcase_fan_out_notify · try_catch=showcase_resilient_sync · assignment=showcase_closure_signoff and showcase_one_task_signoff (the map child: its mark_ok / mark_no nodes run inside every showcase_release_signoff item once that item's approval is decided) · approval=showcase_expense_signoff · approval_revise=showcase_budget_approval (wait_revision)"
+          "the showcase flow-per-node-type map (examples/app-showcase/src/automation/flows/): create_record=showcase_inbound_task_webhook · update_record+screen=showcase_reassign_wizard · get_record+decision+delete_record=showcase_inquiry_purge · script+save_notice+notify=showcase_task_completed · wait=showcase_task_follow_up · subflow=showcase_task_done_notify_owner→showcase_notify_owner · map=showcase_release_signoff · connector_action=showcase_task_completed_rest_ping · loop=showcase_batch_reminders · parallel+http=showcase_fan_out_notify · try_catch=showcase_resilient_sync · assignment=showcase_closure_signoff and showcase_one_task_signoff (the map child: its mark_ok / mark_no nodes run inside every showcase_release_signoff item once that item's approval is decided) · approval=showcase_expense_signoff · approval_revise=showcase_budget_approval (wait_revision)"
         ],
         "knownGaps": [
           "parallel_gateway / join_gateway / boundary_event are deliberately NOT in the matrix: BPMN-interop lowering targets whose author-facing forms are the ADR-0031 structured containers — waived with reasons in examples/app-showcase/src/coverage.ts FLOW_NODE_WAIVERS, and the coverage test enforces every OTHER enum member is authored",
           "showcase_fan_out_notify (the parallel + http owner in the map above) posts to Slack and needs outbound egress. On an egress-denied runner, prove parallel on another run that carries it (showcase_nested_fan_out_reminders — a loop-body parallel), and record http as blocked(environment) rather than FAIL when its only located steps failed for want of egress (#21784 FE13). http itself is provable without egress on a SELF-PINGING scratch flow: register (POST /api/v1/automation) start → http {method: 'GET', url: 'http://127.0.0.1:<OS_PORT>/api/v1/health'} → end, trigger it (POST /api/v1/automation/<name>/trigger), read the run (http step success), then DELETE /api/v1/automation/<name> — measured on main c91af8ed6: 200, run completed, http success",
-          "no pin scores a full clause of this item (RUNNER rule 6, a pin scores only the layer it drives; the theme-B rule), so the item carries no automated ref. packages/qa/dogfood/test/flow-node.dogfood.test.ts runs ONE update_record node over the HTTP trigger, with its input variable wired into the filter (the target stamped, the bystander untouched). That is one variant of acceptance[1]'s twenty, and no clause scores a single variant. automated may return when a pin drives the whole matrix, the palette feed or the unknown-type contract"
+          "no pin scores a full clause of this item (RUNNER rule 6, a pin scores only the layer it drives; the theme-B rule), so the item carries no automated ref. packages/qa/dogfood/test/flow-node.dogfood.test.ts runs ONE update_record node over the HTTP trigger, with its input variable wired into the filter (the target stamped, the bystander untouched). That is one variant of acceptance[1]'s twenty-one, and no clause scores a single variant. automated may return when a pin drives the whole matrix, the palette feed or the unknown-type contract"
         ]
       },
       "variants": [
@@ -608,6 +608,7 @@
         "get_record",
         "http",
         "notify",
+        "save_notice",
         "script",
         "screen",
         "wait",
@@ -621,8 +622,8 @@
       ],
       "steps": [
         "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin",
-        "GET /api/v1/automation/actions (the designer palette feed) and record the descriptor list; open the Studio flow-designer palette on a WRITABLE scope and screenshot it — the stock showcase package is read-only, so its canvas offers no Add node: clone a flow first (POST /api/v1/automation/NAME/clone with both `name` and `label` in the body — a missing label is refused, field label required — or Setup › Packaged Automation, as QA run #24545 did) and open the clone under Studio's ~org scope",
-        "record_change chain: POST a showcase_task WITH `assignee` set to a real user's email, under a project that has an `owner` (the project lookup is required), with status 'in_review' — task_status_flow allows done only from in_review and does not check a create — then PATCH status→done — fires showcase_task_completed (script+notify), showcase_fan_out_notify (parallel+http), showcase_resilient_sync (try_catch), showcase_task_done_notify_owner (subflow); the create also fires showcase_task_follow_up (wait) and showcase_declarative_connector_ping / showcase_mcp_connector_echo (connector_action). ⚠ The notify steps address the task's assignee and its project's owner: a task created without an assignee, or under a project without an owner, makes them fail LOUDLY for want of a recipient — a correct refusal, not a notify FAIL (QA run #23166)",
+        "GET /api/v1/automation/actions (the designer palette feed) and record the descriptor list; open the Studio flow-designer palette on a WRITABLE package and screenshot it — the stock showcase package is read-only, so its canvas offers no Add node: make a copy into its writable customization pair first, from Studio (/_console/studio/com.example.showcase/automations, open a flow, ⋯ → New similar, a new machine name and label) or over the API (POST /api/v1/automation/NAME/clone with both `name` and `label` and no `package` — a missing label is refused, field label required). The copy lands in com.example.showcase.custom switched off (ADR-0146 D4) and opens there; it is also listed on the base's rail marked 'In com.example.showcase.custom'. Delete it at teardown",
+        "record_change chain: POST a showcase_task WITH `assignee` set to a real user's email, under a project that has an `owner` (the project lookup is required), with status 'in_review' — task_status_flow allows done only from in_review and does not check a create — then PATCH status→done — fires showcase_task_completed (script+save_notice+notify; the PATCH answer carries its `notice`), showcase_fan_out_notify (parallel+http), showcase_resilient_sync (try_catch), showcase_task_done_notify_owner (subflow); the create also fires showcase_task_follow_up (wait) and showcase_declarative_connector_ping / showcase_mcp_connector_echo (connector_action). ⚠ The notify steps address the task's assignee and its project's owner: a task created without an assignee, or under a project without an owner, makes them fail LOUDLY for want of a recipient — a correct refusal, not a notify FAIL (QA run #23166)",
         "on-demand chain: POST /api/v1/automation/<name>/trigger for showcase_batch_reminders {params:{tasks:[…]}} (loop), showcase_inquiry_purge (get_record+decision+delete_record — seed at least one closed showcase_inquiry first), showcase_release_signoff {params:{items:[…]}} (map — its itemObject is showcase_task, so each item is record-shaped, {id, title})",
         "browser chain: run the Tasks row action showcase_bulk_reassign → showcase_reassign_wizard (screen + update_record)",
         "approval chain: the boot already leaves a PAUSED showcase_expense_signoff run at its approval node — the showcase's approval-demo seed launches it on EXP-2001 (examples/app-showcase/src/security/seed-approval-demo.ts) — so locate the approval variant on that run; a NEW one needs a report ENTERING submitted from another status (the start condition requires previous.status != 'submitted'), e.g. PATCH EXP-2003 (draft) to submitted; PATCH a showcase_project budget above 100000 to open showcase_budget_approval, then POST /api/v1/approvals/requests/:id/revise so the run parks at the approval_revise node",
@@ -633,7 +634,7 @@
       ],
       "acceptance": [
         {
-          "clause": "the designer palette (fed by GET /api/v1/automation/actions) offers every NON-structural variant (19 of 21; start/end are structural per FLOW_STRUCTURAL_NODE_TYPES — no executor, no descriptor)",
+          "clause": "the designer palette (fed by GET /api/v1/automation/actions) offers every NON-structural variant (20 of 22; start/end are structural per FLOW_STRUCTURAL_NODE_TYPES — no executor, no descriptor)",
           "oracle": "api",
           "verify": "the actions descriptor list contains every variant id except start and end; the palette screenshot (taken after render) shows them offered. start/end absent from the feed is by design, not a gap",
           "evidence": "actions API read + palette screenshot"
@@ -641,7 +642,7 @@
         {
           "clause": "each non-structural variant plus `start` appears as an executed step; `end` is proven by the run reaching status completed — a TAKEN end logs no step, while an end on an UNTAKEN branch is logged as a `skipped` step (that row proves the closed gate, not the end).",
           "oracle": "api",
-          "verify": "for each of the 20 step-logging variants cite the run id + step whose nodeType matches (status success, or the documented pause for suspending types), and for end cite a completed run — executeNode returns on a taken end before any step is pushed, while start logs a success step; a skipped end row (skippedBy naming the gate, the #4354 trace — e.g. showcase_inquiry_purge) is no evidence for end. A variant with no located evidence is UNPROVEN for that variant, not a partial pass of the matrix",
+          "verify": "for each of the 21 step-logging variants cite the run id + step whose nodeType matches (status success, or the documented pause for suspending types), and for end cite a completed run — executeNode returns on a taken end before any step is pushed, while start logs a success step; a skipped end row (skippedBy naming the gate, the #4354 trace — e.g. showcase_inquiry_purge) is no evidence for end. A variant with no located evidence is UNPROVEN for that variant, not a partial pass of the matrix",
           "evidence": "per-variant table of run id / step / status"
         },
         {
@@ -750,12 +751,19 @@
           "change": "steps[1], steps[3] and steps[6] name the request shapes the run needed. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26456, release-18.2.0-w2-manual-browser, at 756220c4; wave anchor #25807, slice A): the clone door needs a label as well as a name, release_signoff's items are record-shaped, and the inbound hook accepts only the timestamped signature. Re-read at base e4ba846f (api-trigger.ts; examples/app-showcase/src/automation/flows/index.ts showcase_release_signoff's map node; packages/runtime/src/domains/automation-flow-clone.test.ts, the label-required case). No clause changed",
           "ref": "#25807"
         },
-        { "revision": 11, "date": "2026-10-31", "change": "fixtures.requires[0] names the second assignment carrier and steps[5] the seeded approval run. Fixture findings of QA run #27441 (18.3.0 sweep, wave 3, manual set, at c4c515ad; sweep anchor #27377): assignment is also exercised by showcase_one_task_signoff, and the boot already leaves a paused showcase_expense_signoff run, while PATCHing an already-submitted report starts nothing. Re-read at base 488b3ed0: examples/app-showcase/src/automation/flows/index.ts (showcase_one_task_signoff mark_ok / mark_no; showcase_expense_signoff's record-after-update start condition), examples/app-showcase/src/security/seed-approval-demo.ts (launches showcase_expense_signoff on EXP-2001). No clause changed", "ref": "#27441" }
+        { "revision": 11, "date": "2026-10-31", "change": "fixtures.requires[0] names the second assignment carrier and steps[5] the seeded approval run. Fixture findings of QA run #27441 (18.3.0 sweep, wave 3, manual set, at c4c515ad; sweep anchor #27377): assignment is also exercised by showcase_one_task_signoff, and the boot already leaves a paused showcase_expense_signoff run, while PATCHing an already-submitted report starts nothing. Re-read at base 488b3ed0: examples/app-showcase/src/automation/flows/index.ts (showcase_one_task_signoff mark_ok / mark_no; showcase_expense_signoff's record-after-update start condition), examples/app-showcase/src/security/seed-approval-demo.ts (launches showcase_expense_signoff on EXP-2001). No clause changed", "ref": "#27441" },
+        { "revision": 12, "date": "2026-11-01", "change": "variants gain save_notice, the FlowNodeAction member #28251 added: a record-triggered flow tells the person who made the write what the save set in motion, and the create/update answer carries it as `notice`. The showcase demonstrates it on showcase_task_completed (node tell_saver, between summarize and notify), so fixtures.requires[0] and steps[2] name it; acceptance[0] counts 20 of 22 offered variants and acceptance[1] 21 step-logging variants; enumSource.expect is 21", "ref": "#28251" },
+        {
+          "revision": 13,
+          "date": "2026-11-02",
+          "change": "steps[1] re-pointed to the Studio door (ADR-0146 D4/D11): the copy that gives the palette a writable canvas is made with Studio's New similar (or the clone door with no `package`) and lands in com.example.showcase.custom, not under Studio's ~org scope, which no longer receives a package-less clone (#28149), and Setup › Packaged Automation, the old route to it, is retired (#28785). Read at base dfbe34d887 (FlowItemMoreMenu.tsx New similar; domains/automation.ts resolveCloneTarget), with QA run #29002's measurement of where a copy lands (card note 6570476620). No clause changed",
+          "ref": "#28579"
+        }
       ],
       "enumSource": {
         "file": "packages/spec/src/automation/flow.zod.ts",
         "export": "FlowNodeAction",
-        "expect": 20
+        "expect": 21
       }
     },
     {
@@ -1869,7 +1877,7 @@
       "title": "Disabling a packaged flow writes a durable sys_metadata_activation row that survives a cold restart with the trigger left unbound; re-enable UPDATES the row and restores firing",
       "since": "v17",
       "status": "active",
-      "revision": 8,
+      "revision": 10,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -1903,9 +1911,9 @@
           "evidence": "the row read (the four ledger columns, and the key set showing no tenant column) + the toggle response"
         },
         {
-          "clause": "the FLOW_DISABLED refusal message says the flow was switched off by the deployment's packaged-automation switch, in plain words: triggering the disabled flow answers 409 FLOW_DISABLED whose message is the switched-off packaged flow sentence — the flow is turned off for this deployment, an administrator can turn it on again under Setup › Packaged automation, or copy it there under a new name — and names no system table and no ADR (the engine's info log line carries those)",
+          "clause": "the FLOW_DISABLED refusal message says the flow was switched off by the deployment's packaged-automation switch, in plain words: triggering the disabled flow answers 409 FLOW_DISABLED whose message is the switched-off packaged flow sentence — the flow is turned off for this deployment, an administrator can turn it on again in its package's Automations in Studio, or copy it there under a new name — and names no system table and no ADR (the engine's info log line carries those)",
           "oracle": "api",
-          "verify": "the step-5 error message is exactly \"This flow is turned off for this deployment. An administrator can turn it on again under Setup › Packaged automation, or copy it there under a new name.\" (engine.ts describeDisabledFlow, built by describeTurnedOffPackagedItem in @objectstack/types — the one sentence the switched-off action refusal also reads as) and contains neither 'sys_metadata_activation' nor an ADR number. ⛔ The CODE alone is NOT the oracle: ADR-0126 §7.2 deliberately REUSES FLOW_DISABLED for the ledger dimension (no new ADR-0112 entry), and a status-disabled flow answers the same 409 FLOW_DISABLED with the old bare \"Flow '<name>' is disabled\" — the ledger-vs-status distinction rides the MESSAGE, so a verdict keyed on code alone cannot tell this item's dimension from the authoring one",
+          "verify": "the step-5 error message is exactly \"This flow is turned off for this deployment. An administrator can turn it on again in its package's Automations in Studio, or copy it there under a new name.\" (engine.ts describeDisabledFlow, built by describeTurnedOffPackagedItem in @objectstack/types — the one sentence the switched-off action refusal also reads as) and contains neither 'sys_metadata_activation' nor an ADR number. ⛔ The CODE alone is NOT the oracle: ADR-0126 §7.2 deliberately REUSES FLOW_DISABLED for the ledger dimension (no new ADR-0112 entry), and a status-disabled flow answers the same 409 FLOW_DISABLED with the old bare \"Flow '<name>' is disabled\" — the ledger-vs-status distinction rides the MESSAGE, so a verdict keyed on code alone cannot tell this item's dimension from the authoring one",
           "evidence": "the full 409 body with the message quoted"
         },
         {
@@ -1931,7 +1939,7 @@
         "a toggle answering 2xx with NO sys_metadata_activation row written is a FAIL on this boot — the engine has a legitimate ledger-less degraded mode, but it WARNS 'IN PROCESS ONLY … will NOT survive a restart' (engine.ts) and the showcase composition attaches the ledger, so silence plus no row means the durable write was skipped where it was promised",
         "a restart that re-arms the flow (enabled or bound true, or a run row from the post-restart create) is a FAIL against the whole point of ADR-0126 §7.2 — it is the retired flowEnabled map's behaviour reappearing",
         "a re-enable that DELETES the row is a FAIL of the row contract even though firing resumes — absence-means-active makes deletion look equivalent right up until something needs the recorded choice",
-        "a ledger-disabled flow's trigger answered 409 FLOW_DISABLED with the status dimension's bare sentence (\"Flow 'showcase_urgent_task_alert' is disabled\", with no 'turned off for this deployment' sentence and no Setup › Packaged automation remedy is a FAIL: the refusal then reports the administrator's ledger choice as an authoring status, and the code alone cannot tell the two apart, because ADR-0126 §7.2 shares it between them by design"
+        "a ledger-disabled flow's trigger answered 409 FLOW_DISABLED with the status dimension's bare sentence (\"Flow 'showcase_urgent_task_alert' is disabled\", with no 'turned off for this deployment' sentence and no Studio Automations remedy is a FAIL: the refusal then reports the administrator's ledger choice as an authoring status, and the code alone cannot tell the two apart, because ADR-0126 §7.2 shares it between them by design"
       ],
       "traps": [
         "first-boot-cold-start",
@@ -1998,6 +2006,18 @@
           "date": "2026-10-30",
           "change": "acceptance[1] and negative[3] respelled for #27966: the ledger-disabled FLOW_DISABLED message is now written for the caller (the flow is turned off for this deployment, an administrator can turn it on again under Setup › Packaged automation, or copy it there under a new name) and names no system table and no ADR; the engine writes the code, the flow, sys_metadata_activation and ADR-0126 §7.2 to an info log line. It is the same builder the switched-off action sentence reads from (#27842). The verdict is unchanged: the message still distinguishes the ledger dimension from the status one, and the code is still FLOW_DISABLED.",
           "ref": "#27966"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-02",
+          "change": "Re-measured against main after N-28/N-30 (#28818, #29264), at base dfbe34d887: the item drives the API doors only (POST /automation/:name/toggle, /trigger, _status, the data API), none of which moved, so steps and clauses stand. fixtures.knownGaps[0] (new) marks acceptance[1]'s and negative[3]'s remedy phrase TRANSITIONAL: the served FLOW_DISABLED sentence (describeTurnedOffPackagedItem('flow'), @objectstack/types) still names 'Setup › Packaged automation' and a copy made 'there', a page ADR-0146 D4/D11 retired into Studio's Automations pillar. The clause keeps the sentence exactly as served, so no clause is weakened; the remedy's wrong place is reported as a product defect for its own card, not fixed here",
+          "ref": "#28579"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-02",
+          "change": "The producer now names the live door: describeTurnedOffPackagedItem('flow') (@objectstack/types) tells the reader an administrator can turn the flow on again in its package's Automations in Studio, or copy it there under a new name (New similar), not the retired Setup › Packaged automation page. acceptance[1] (clause and the verbatim sentence in its verify) and negative[3]'s remedy phrase are re-pointed to it, as fixtures.knownGaps[0] said they would be, and that TRANSITIONAL entry, the item's only known gap, is retired. The item still drives the API doors only; the code FLOW_DISABLED and the ledger-vs-status distinction by message are unchanged",
+          "ref": "#29374"
         }
       ]
     },
@@ -2006,7 +2026,7 @@
       "title": "Disabling a packaged flow that packaged callers invoke as a subflow is refused 409 DELETE_RESTRICTED naming every caller; the refused attempt writes no ledger row; enabling the subflow itself is never guarded",
       "since": "v17",
       "status": "active",
-      "revision": 11,
+      "revision": 12,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2035,7 +2055,7 @@
         "remedy sequence (the refusal's own instruction): POST /api/v1/automation/showcase_task_done_notify_owner/toggle {\"enabled\": false} (the CALLER — it has no packaged callers of its own, so this lands), then RETRY POST /api/v1/automation/showcase_notify_owner/toggle {\"enabled\": false} and record what it answers",
         "enable arm, child FIRST: POST /api/v1/automation/showcase_notify_owner/toggle {\"enabled\": true} while its caller is still off (confirm it is never refused), then toggle showcase_task_done_notify_owner back ON, then repeat the child's enable with the caller armed (a no-op enable). ⚠️ Enabling the CALLER while its packaged subflow is still disabled is refused by design since 679f95e (#20711) — 409 RESOURCE_CONFLICT 'cannot be enabled while 1 packaged subflow it calls is disabled … Enable it first' — so the caller-first order is not a fail of this item",
         "teardown: re-enable anything left disabled (or discard the run's own DB)",
-        "scope, not a probe: the UI half (the caller names rendered verbatim in a role=alert on the Setup packaged-automation page) is deliberately NOT scored here; it is automation.setup-packaged-automation-board's refusal clause",
+        "scope, not a probe: the UI half (the caller names rendered verbatim in Studio's refusal strip, whose sentence (data-testid studio-refusal-message) carries role=alert, when the flow's ledger switch is turned off — the retired Setup packaged-automation page's bookmark now opens Studio (#28785, #28818)) is deliberately NOT scored here; it is automation.setup-packaged-automation-board's refusal clause",
         "several-callers leg (negative[1]): run the qa-second-packaged-caller recipe, then POST /api/v1/automation/showcase_notify_owner/toggle {\"enabled\": false} and record the answer — 409 DELETE_RESTRICTED whose message counts 2 packaged callers and names both showcase_task_done_notify_owner and qasub_second_notify_caller, and NO active=false sys_metadata_activation row for showcase_notify_owner: its row is UNCHANGED. Run in this item's order, steps[5]'s enables already wrote that row (active true), so 'no row at all' holds only on a boot where nothing has toggled the child yet; then the recipe's teardown, after which the same disable names the stock caller alone"
       ],
       "acceptance": [
@@ -2114,15 +2134,21 @@
           "change": "fixtures.provisioning opts into the new area recipe qa-second-packaged-caller, negative[1] says how its door leg is staged, steps[8] drives it, fixtures.knownGaps gains its CLOSED-by-recipe line and source cites the install-local door and packagedArtifactOwner. Card #26622 (maintainer-directed in the 18.2.0 wave-2 session: 「补测试数据配方。立卡」): negative[1] scored blocked(fixture) in both 18.2.0 waves because only a package-loader-installed package can add a second PACKAGED caller. Re-driven once on the recipe, on a fresh showcase boot at d31329f1: with the package installed, POST /api/v1/automation/showcase_notify_owner/toggle {\"enabled\": false} answered 409 DELETE_RESTRICTED, 'cannot be disabled while 2 packaged flows still call it as a subflow: 'showcase_task_done_notify_owner', 'qasub_second_notify_caller'', with both callers in the remedy sentence; sys_metadata_activation held no row; after the teardown the same disable named showcase_task_done_notify_owner alone. Verdict for negative[1]: pass (no FAIL observed). No clause changed",
           "ref": "#26622"
         },
-        { "revision": 11, "date": "2026-10-31", "change": "steps[8] reads the ledger row as unchanged, not absent. Checklist-accuracy finding of QA run #27392 (18.3.0 sweep, wave 3, at c4c515ad; sweep anchor #27377): run in the item's own order, steps[5]'s enable arm had already written an active row for showcase_notify_owner, so 'NO sys_metadata_activation row' could not hold when steps[8] runs. What the refusal must not do is write an active=false row. Re-read at base 488b3ed0: packages/services/service-automation/src/engine.ts toggleFlow (the durable row is written FIRST on every toggle that lands, enables included). acceptance[2] is unchanged: at steps[3] no toggle has landed yet", "ref": "#27392" }
+        { "revision": 11, "date": "2026-10-31", "change": "steps[8] reads the ledger row as unchanged, not absent. Checklist-accuracy finding of QA run #27392 (18.3.0 sweep, wave 3, at c4c515ad; sweep anchor #27377): run in the item's own order, steps[5]'s enable arm had already written an active row for showcase_notify_owner, so 'NO sys_metadata_activation row' could not hold when steps[8] runs. What the refusal must not do is write an active=false row. Re-read at base 488b3ed0: packages/services/service-automation/src/engine.ts toggleFlow (the durable row is written FIRST on every toggle that lands, enables included). acceptance[2] is unchanged: at steps[3] no toggle has landed yet", "ref": "#27392" },
+        {
+          "revision": 12,
+          "date": "2026-11-02",
+          "change": "steps[7]'s scope note re-pointed (#28579 slice 2, FOLLOW-UPS §13c): the UI half it defers is rendered in Studio's refusal strip from the ledger switch, as automation.setup-packaged-automation-board's acceptance[5] scores it since slice 1, not on the retired Setup page. No clause changed. Read at base eb123b7ccc",
+          "ref": "#28579"
+        }
       ]
     },
     {
       "id": "automation.packaged-flow-clone-contract",
-      "title": "POST /automation/:name/clone: whole-definition copy mutating exactly name/label/status, protection envelope dropped, no ancestry, draft-but-armed (double-fire notice verbatim), 409/404/400 refusal arms — and the honest clause: the clone must survive a restart and reach Studio",
+      "title": "POST /automation/:name/clone (Studio's New similar): whole-definition copy mutating exactly name/label/status, written switched off (status obsolete) into a package — the base's .custom pair when `package` is omitted —, protection envelope dropped, no ancestry, notice verbatim, 400/404/409/422 refusal arms — and the honest clause: the copy survives a restart and reaches Studio",
       "since": "v17",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2132,19 +2158,21 @@
         "app": "showcase",
         "requires": [
           "a FILE-backed database (the restart clause is unreachable without one — same discipline as automation.durable-suspend-restart)",
-          "showcase_urgent_task_alert (packaged record_change flow — the double-fire specimen: its trigger is an urgent showcase_task create, cheap to fire twice) and showcase_task_done_notify_owner (packaged flow carrying a subflow node → showcase_notify_owner — the references-not-re-pointed specimen)"
+          "showcase_urgent_task_alert (packaged record_change flow — the no-double-fire specimen: its trigger is an urgent showcase_task create, cheap to fire) and showcase_task_done_notify_owner (packaged flow carrying a subflow node → showcase_notify_owner — the references-not-re-pointed specimen)",
+          "the read-only base com.example.showcase and its pair com.example.showcase.custom: with `package` omitted the door ensures the pair (ADR-0146 D3) and lands the copy there (resolveCloneTarget, domains/automation.ts)",
+          "for acceptance[7]'s outside-closure arm, a writable package whose manifest declares no dependency on com.example.showcase (e.g. a scratch package made from the Studio landing); delete it at teardown"
         ]
       },
       "steps": [
         "boot the showcase on its own port against its own file DB (dogfood §0, OS_PORT exported); sign in as the dev admin",
-        "refusal arms first (no state left behind): POST /api/v1/automation/showcase_urgent_task_alert/clone with {} · with {\"name\":\"x\"} (label missing) · with {\"label\":\"x\"} (name missing) · with {\"name\":\"\",\"label\":\"Empty\"} (empty name, code invalid_type) · with {\"name\":\"showcase_urgent_task_alert\",\"label\":\"Same\"} (same-name) · with {\"name\":\"Bad-Name!\",\"label\":\"Illegal\"} (violates ^[a-z_][a-z0-9_]*$) · and POST /api/v1/automation/does_not_exist/clone {\"name\":\"qa_x\",\"label\":\"X\"} (unknown source) — record every status + code + message",
-        "the copy: POST /api/v1/automation/showcase_urgent_task_alert/clone {\"name\":\"qa_urgent_alert_clone\",\"label\":\"QA urgent alert clone\"} — record the FULL response body (flow + notice)",
+        "refusal arms first (no state left behind): POST /api/v1/automation/showcase_urgent_task_alert/clone with {} · with {\"name\":\"x\"} (label missing) · with {\"label\":\"x\"} (name missing) · with {\"name\":\"\",\"label\":\"Empty\"} (empty name, code invalid_type) · with {\"name\":\"showcase_urgent_task_alert\",\"label\":\"Same\"} (same-name) · with {\"name\":\"Bad-Name!\",\"label\":\"Illegal\"} (violates ^[a-z_][a-z0-9_]*$) · and POST /api/v1/automation/does_not_exist/clone {\"name\":\"qa_x\",\"label\":\"X\"} (unknown source) — record every status + code + message. Then the `package` arms, each on POST /api/v1/automation/showcase_urgent_task_alert/clone {\"name\":\"qa_x\",\"label\":\"X\",\"package\":…}: \"package\": \"\" (blank) · \"package\": \"qa_no_such_pkg\" (not installed) · \"package\": \"com.example.showcase\" (read-only) · \"package\": the scratch package with no dependency on the base (outside the closure); after each, confirm GET /api/v1/automation/qa_x answers 404",
+        "the copy: POST /api/v1/automation/showcase_urgent_task_alert/clone {\"name\":\"qa_urgent_alert_clone\",\"label\":\"QA urgent alert clone\"} (no `package`) — record the FULL response body (flow + packageId + notice)",
         "read both definitions back (GET /api/v1/automation/qa_urgent_alert_clone and …/showcase_urgent_task_alert) and diff them key by key",
-        "double-fire: POST /api/v1/data/showcase_task with priority='urgent'; GET both flows' runs lists",
+        "no double-fire: POST /api/v1/data/showcase_task with priority='urgent' (with its required project), three times; GET both flows' runs lists",
         "references: POST /api/v1/automation/showcase_task_done_notify_owner/clone {\"name\":\"qa_task_done_clone\",\"label\":\"QA task-done clone\"}; read the clone's subflow node config",
-        "ordinariness: PUT /api/v1/automation/qa_urgent_alert_clone with the clone's own definition (label tweaked) — it is a tenant flow, the edit lands",
-        "restart probe: stop the server; cold-boot over the SAME database file; GET /api/v1/automation/qa_urgent_alert_clone and GET /api/v1/meta/flow (does any package/tenant metadata hold the clone?); then, in the browser as the admin (this leg needs a served console: on a tree built with `pnpm build` alone /_console/ answers 503 until `pnpm console:build` has run), open /_console/studio/~org/automations (the 'Organization flows' scope) and confirm the clone is listed on the Automations rail and opens in the designer; create one more urgent task (with its required project) and confirm the clone's runs list grows on the new process",
-        "teardown: DELETE /api/v1/automation/qa_urgent_alert_clone and …/qa_task_done_clone (or discard the run's own DB)"
+        "ordinariness: PUT /api/v1/automation/qa_urgent_alert_clone with the clone's own definition (label tweaked) — it is the pair's own flow, the edit lands",
+        "restart probe: stop the server; cold-boot over the SAME database file; GET /api/v1/automation/qa_urgent_alert_clone and GET /api/v1/meta/flow (which package holds the copy?); create one more urgent task and read both runs lists; then, in the browser as the admin (this leg needs a served console: on a tree built with `pnpm build` alone /_console/ answers 503 until `pnpm console:build` has run), open /_console/studio/com.example.showcase/automations and confirm the copy is listed on the rail marked 'In com.example.showcase.custom' and opens in the designer; open /_console/studio/~org/automations and record what it lists",
+        "teardown: DELETE /api/v1/automation/qa_urgent_alert_clone and …/qa_task_done_clone (or discard the run's own DB), and the scratch package"
       ],
       "acceptance": [
         {
@@ -2154,16 +2182,16 @@
           "evidence": "the four 400 bodies with their details arrays"
         },
         {
-          "clause": "the copy is whole-definition with exactly name/label/status mutated, the protection envelope and read decorations dropped, and NO ancestry: every other key of the clone deep-equals the source; none of the 10 FLOW_CLONE_DROPPED_KEYS (_diagnostics, _draft, _lock, _lockReason, _lockSource, _provenance, _packageId, _packageVersion, _lockDocsUrl, protection) is present on the clone; no clonedFrom-shaped key exists in the response or the stored definition",
+          "clause": "the copy is whole-definition with exactly name/label/status mutated, the protection envelope and read decorations dropped, and NO ancestry: every other key of the copy deep-equals the source; none of the 10 FLOW_CLONE_DROPPED_KEYS (_diagnostics, _draft, _lock, _lockReason, _lockSource, _provenance, _packageId, _packageVersion, _lockDocsUrl, protection) is present on the copy; no clonedFrom-shaped key exists in the response or the stored definition. The response names where the copy LIVES (packageId com.example.showcase.custom when `package` was omitted), which is not ancestry",
           "oracle": "api",
-          "verify": "the step-4 diff: differences are exactly {name, label, status:'draft'} (FLOW_CLONE_MUTATED_FIELDS, flow-clone.ts) plus the ABSENCE of the dropped keys (flow-clone.ts — METADATA_READ_DECORATIONS + MetadataProtectionFields, derived, plus the package author's `protection` block, named (#23120): 2+7+1=10 at base 9a7838edf5; count them from the source at run time rather than trusting this line). A missing facet (nodes, edges, variables, runAs, retry…) is the #11703 param-list failure shape; a surviving _packageId or _lock defeats the feature (the clone would be package-owned or locked); any ancestry key violates amendment ruling 2 / §9",
-          "evidence": "the key-by-key diff + the dropped-keys absence check"
+          "verify": "the step-4 diff: differences are exactly {name, label, status:'obsolete'} (FLOW_CLONE_MUTATED_FIELDS and FLOW_CLONE_STATUS, flow-clone.ts — 'obsolete' since #28149, ADR-0146 D4) plus the ABSENCE of the dropped keys (flow-clone.ts — METADATA_READ_DECORATIONS + MetadataProtectionFields, derived, plus the package author's `protection` block, named (#23120): 2+7+1=10 at base 9a7838edf5; count them from the source at run time rather than trusting this line). The step-3 response carries data.packageId 'com.example.showcase.custom' (domains/automation.ts, the clone arm's deps.success). A missing facet (nodes, edges, variables, runAs, retry…) is the #11703 param-list failure shape; a surviving _packageId or _lock defeats the feature (the copy would claim the base's package or be locked); any ancestry key violates amendment ruling 2 / §9",
+          "evidence": "the key-by-key diff + the dropped-keys absence check + the response's packageId"
         },
         {
-          "clause": "status 'draft' is NOT an off-switch and the response says so verbatim: one urgent create fires BOTH base and clone (double-fire), and the clone response's notice equals FLOW_CLONE_NOTICE",
+          "clause": "the copy is written switched OFF and never double-runs beside its original, and the response says so verbatim: over the step-5 urgent creates the base runs each time and the copy never runs, and the response's notice equals FLOW_CLONE_NOTICE",
           "oracle": "api",
-          "verify": "step 5: one new run in EACH flow's runs list for the same create — the engine disables on status obsolete/invalid only, draft binds its trigger (flow-clone.ts). The response notice matches flow-clone.ts verbatim, including the toggle instruction — the sentence is the only thing standing between the admin and the two-flows-one-trigger surprise, so a paraphrase is a FAIL",
-          "evidence": "both runs lists bracketing the create + the notice text from the clone response"
+          "verify": "step 5: one new run per create in the base's runs list, none in the copy's — the copy carries status 'obsolete', one of the two values the engine disables a flow on (FLOW_CLONE_STATUS, flow-clone.ts; registerFlow, service-automation engine.ts). The notice matches flow-clone.ts FLOW_CLONE_NOTICE verbatim ('The copy is switched off and does not run until you switch it on, and it still uses the same subflows, actions and objects as the original.'), so a paraphrase is a FAIL. A copy run on a base trigger is the double-fire ADR-0146 D4 ruled out — FAIL. QA run #29002 measured 3 creates: the base ran each time, the copy never",
+          "evidence": "both runs lists bracketing the creates + the notice text from the clone response"
         },
         {
           "clause": "the refusal arms answer their own status+code: same/taken name → 409 RESOURCE_CONFLICT with the shadow-rationale message suggesting a free name; unknown source → 404 RESOURCE_NOT_FOUND; an illegal machine name → 400 (the definition goes through registerFlow's own validation, one policy not two)",
@@ -2178,38 +2206,45 @@
           "evidence": "the clone's subflow node config read"
         },
         {
-          "clause": "the clone is an ordinary tenant flow at the engine: PUT /api/v1/automation/qa_urgent_alert_clone lands (2xx, edit visible on re-read)",
+          "clause": "the copy is an ordinary flow of the pair at the engine: PUT /api/v1/automation/qa_urgent_alert_clone lands (2xx, edit visible on re-read)",
           "oracle": "api",
-          "verify": "step 7. ⚠️ Scope note: this proves the clone is editable, NOT that the packaged base is protected at this door — PUT /automation/:name currently performs no lock/provenance check on ANY flow (domains/automation.ts), and that door-parity question is access-security.packaged-flow-write-door-parity's expected-fail probe, not this clause",
+          "verify": "step 7. ⚠️ Scope note: this proves the copy is editable, NOT that the packaged base is protected at this door — that door-parity question is access-security.packaged-flow-write-door-parity's item, not this clause",
           "evidence": "the PUT response + the re-read"
         },
         {
-          "clause": "the honest clause — the clone OUTLIVES the process and REACHES Studio: after a cold restart over the same database file the clone still exists and dispatches, and it is listed on a Studio Automations rail (it is 'an ordinary org/install-owned flow', ADR-0126 §7.1, under the shipped 'customize in Studio' promise §1.3 — the Setup page's own copy says 'Editing happens in Studio')",
+          "clause": "the honest clause — the copy OUTLIVES the process and REACHES Studio: after a cold restart over the same database file the copy still exists in com.example.showcase.custom, still switched off (it does not run on a new urgent create), and it is listed on the base's Studio Automations rail marked 'In com.example.showcase.custom' and opens in the designer (ADR-0146 D4: 'new similar' lands in the pair; ADR-0126 §1.3's 'customize in Studio' promise)",
           "oracle": "api",
-          "verify": "step 8: GET /api/v1/automation/qa_urgent_alert_clone on the new process, and the flow present in metadata a Studio rail can list. DURABILITY holds since cb4c31d (#20907, with the clone save path #20761): the clone survives a cold restart and still dispatches. REACHABILITY holds since objectui#11553 (the vendored console at f8267df93aba carries it; #21332 closed as a duplicate on 2026-10-03): Studio's org scope, /_console/studio/~org/automations ('Organization flows'), lists package-less flows on its Automations rail, so the clone stored with package_id null (_packageId deliberately stripped, flow-clone.ts) is listed there and opens in the designer. A clone absent from that rail, or a rail that opens another flow for the clone's deep link, fails the clause. Record which half failed (durability, reachability, or both) — do NOT soften the clause to a same-process read",
-          "evidence": "the post-restart GET (present or 404) + the meta/flow listing showing where, if anywhere, the clone is held"
+          "verify": "step 8: GET /api/v1/automation/qa_urgent_alert_clone on the new process answers the copy; GET /api/v1/meta/flow shows it held by com.example.showcase.custom; the post-restart urgent create adds a run to the base only. Reachability: /_console/studio/com.example.showcase/automations lists the copy with the pair's mark (engine.studio.customize.addedIn 'In {pair}'; a read-only base's rail lists the flows its pair adds, StudioDesignSurface.tsx railPairId) and its deep link opens it. The package-less scope /_console/studio/~org/automations no longer holds the copy: QA run #29002 read 'No flows outside a package…' there, which is correct now that no clone is written without a package (ADR-0070 D5/D6). A copy absent from the base's rail, or a rail that opens another flow for the copy's deep link, fails the clause. Record which half failed (durability, reachability, or both) — do NOT soften the clause to a same-process read",
+          "evidence": "the post-restart GET (present or 404) + the meta/flow listing showing which package holds the copy + the rail screenshot"
+        },
+        {
+          "clause": "the `package` target arms answer their own status + code and write nothing: a blank `package` → 400 on the field (code invalid_type); a package not installed → 422 WRITABLE_PACKAGE_REQUIRED; a read-only package → 422 WRITABLE_PACKAGE_REQUIRED; a writable package whose closure does not hold the source's package → 409 RESOURCE_CONFLICT",
+          "oracle": "api",
+          "verify": "step 2's package arms: each message carries its bracketed reason (new_similar_target_not_installed, new_similar_target_read_only, new_similar_target_outside_closure — newSimilarTargetRefusal, domains/new-similar-target.ts) and ends 'Nothing was written.', and the follow-up GET answers 404 each time. The blank arm is the clone arm's own 400 (domains/automation.ts: 'must be a non-empty package id when sent'), never read as omitted. Pinned at the route layer by packages/runtime/src/domains/automation-flow-clone-custom-package.test.ts ('an explicit target: `package`'), a mocked-service pin that does not drive the live dispatcher",
+          "evidence": "the four refusal bodies + the four 404 re-reads"
         }
       ],
       "negative": [
-        "a clone missing any source facet the diff can name (a node, an edge, a variable, the retry block) is the #11703 enumerated-param-list regression — fail the copy clause even if the clone runs",
+        "a copy missing any source facet the diff can name (a node, an edge, a variable, the retry block) is the #11703 enumerated-param-list regression — fail the copy clause even if the copy runs",
         "a clonedFrom / ancestry field appearing ANYWHERE — response, stored definition, or a later listing — is a FAIL of amendment ruling 2: a response field is the cheapest place for lineage to reappear and a UI that reads one starts displaying what the platform ruled it does not track",
         "a same-name clone answering 2xx is the silent order-dependent shadow #11665 §2.2 measured — the worst outcome this door has, because storage legitimately holds both rows and only the engine's bare-name map breaks",
-        "an anonymous or non-manage_metadata caller reaching the clone door (anything but 401/403 PERMISSION_DENIED) is a FAIL — the door is in the #10145 authoring write set precisely because a clone REGISTERS flow metadata at environment scope"
+        "an anonymous or non-manage_metadata caller reaching the clone door (anything but 401/403 PERMISSION_DENIED) is a FAIL — the door is in the #10145 authoring write set precisely because a clone REGISTERS flow metadata at environment scope",
+        "a copy written without a package (package_id null, listed under /_console/studio/~org/automations) is the package-less clone ADR-0146 D4 retired — FAIL"
       ],
       "traps": [
         "dispatcher-vs-hono-route",
         "destructive-in-place"
       ],
       "source": [
-        "docs/adr/0126-packaged-metadata-customization-model.md §7.1 (mandatory new name, whole-definition copy, no linkage), §9 (no re-pointing, no ancestry), §1.3 (the shipped 'customize in Studio' promise the honest clause holds the clone to)",
+        "docs/adr/0126-packaged-metadata-customization-model.md §7.1 (mandatory new name, whole-definition copy, no linkage), §9 (no re-pointing, no ancestry), §1.3 (the shipped 'customize in Studio' promise the honest clause holds the copy to), as amended by docs/adr/0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md D4 (clone kept only as 'new similar': a target package, the pair by default, the copy written inactive)",
         "packages/runtime/src/flow-clone.ts#FLOW_CLONE_STATUS (FLOW_CLONE_STATUS draft — and why it is deliberately not an off-switch), (FLOW_CLONE_MUTATED_FIELDS), (FLOW_CLONE_DROPPED_KEYS derived from spec), (FLOW_CLONE_NOTICE), (409 + name-taken message), (deep copy via structuredClone; _packageId et al. stripped)",
-        "packages/runtime/src/domains/automation.ts#clone (the clone arm: body-first validation, mandatory name+label, 404/409 probes, registerFlow-only registration, no ancestry on the response), (clone in the manage_metadata write set)",
-        "packages/runtime/src/domains/automation-flow-clone.test.ts#dispatcher (route-level pins for the validation and refusal arms — a mocked-service pin; it cannot see the live dispatcher, the double-fire, or the restart — which is exactly the remainder this item drives)",
+        "packages/runtime/src/domains/automation.ts#clone (the clone arm: body-first validation, mandatory name+label, optional `package`, 404/409 probes, registerAndSaveFlow, packageId + notice on the response, no ancestry), (clone in the manage_metadata write set) + resolveCloneTarget (the pair by default, ensured through the protocol's ensureCustomizationPackage) + packages/runtime/src/domains/new-similar-target.ts#newSimilarTargetRefusal (the 422/409 target arms)",
+        "packages/runtime/src/domains/automation-flow-clone.test.ts#dispatcher (route-level pins for the validation and refusal arms) + automation-flow-clone-custom-package.test.ts (the pair by default, switched off; the `package` arms) — mocked-service pins; they cannot see the live dispatcher, the runs, or the restart — which is exactly the remainder this item drives",
         "packages/spec/src/automation/flow.zod.ts (machine-name regex)",
-        "objectui packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx + studioScope.ts (the org scope ~org that lists package-less flows; objectui#11553, pinned by StudioDesignSurface.packageLessFlows-11553.test.tsx) — the reachability half of the honest clause",
+        "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (a read-only base's Automations rail lists the flows its pair adds, marked 'In PAIR' — engine.studio.customize.addedIn) + FlowItemMoreMenu.tsx (New similar, the Studio door onto this endpoint) — the reachability half of the honest clause",
         "examples/app-showcase/src/automation/flows/index.ts#UrgentTaskAlertFlow (UrgentTaskAlertFlow; TaskDoneNotifyOwnerFlow → showcase_notify_owner)",
         "#12438 (sweep) · Epic #12150",
-        "cross-ref: access-security.packaged-flow-write-door-parity (owns the packaged-base write-door question this item's ordinariness clause must not be read as answering); automation.setup-packaged-automation-board (the clone dialog UI half)"
+        "cross-ref: access-security.packaged-flow-write-door-parity (owns the packaged-base write-door question this item's ordinariness clause must not be read as answering); automation.setup-packaged-automation-board (the New similar dialog UI half)"
       ],
       "history": [
         {
@@ -2236,15 +2271,21 @@
           "change": "surface api → mixed, and steps[7] says its browser leg needs a built console. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26476, release-18.2.0-w2-manual-api, at 756220c4; wave anchor #25807, slice A): acceptance[6] and steps[7] open Studio in a browser, so the item is not api-only, and on a `pnpm build` tree the run met /_console/ answering 503 until `pnpm console:build`. Every other step stays an api step. No clause changed",
           "ref": "#25807"
         },
-        { "revision": 10, "date": "2026-10-31", "change": "acceptance[0] and steps[1] separate an absent key from an empty one. Checklist-accuracy finding of QA run #27441 (18.3.0 sweep, wave 3, manual set, at c4c515ad; sweep anchor #27377): an empty-string name or label answers 400 with code invalid_type, and 'required' is only for an absent key; the clause now says both and adds the empty-string arm. Re-read at base 488b3ed0: packages/runtime/src/domains/automation.ts (the clone door's name and label details: absent ⇒ 'required', otherwise 'invalid_type'). The three absent-key arms are unchanged", "ref": "#27441" }
+        { "revision": 10, "date": "2026-10-31", "change": "acceptance[0] and steps[1] separate an absent key from an empty one. Checklist-accuracy finding of QA run #27441 (18.3.0 sweep, wave 3, manual set, at c4c515ad; sweep anchor #27377): an empty-string name or label answers 400 with code invalid_type, and 'required' is only for an absent key; the clause now says both and adds the empty-string arm. Re-read at base 488b3ed0: packages/runtime/src/domains/automation.ts (the clone door's name and label details: absent ⇒ 'required', otherwise 'invalid_type'). The three absent-key arms are unchanged", "ref": "#27441" },
+        {
+          "revision": 11,
+          "date": "2026-11-02",
+          "change": "Re-pointed to ADR-0146 D4's 'new similar' (#28149: the copy lands in a package, the base's .custom pair when `package` is omitted, written status 'obsolete'). Measured input: QA run #29002 (W4-C3b1, 7fa9873f; card note 6570476620), which failed acceptance[1], [2] and [6] as stale spec. Re-read at base dfbe34d887 (flow-clone.ts FLOW_CLONE_STATUS 'obsolete' and FLOW_CLONE_NOTICE; domains/automation.ts resolveCloneTarget; new-similar-target.ts): acceptance[1]'s mutated status is 'obsolete' and the response's packageId is named as where the copy lives; acceptance[2] is inverted from 'double-fire, draft is not an off-switch' to 'switched off, never double-runs' — the property the run measured over 3 creates; acceptance[6] reads the copy on the base's Studio rail marked 'In com.example.showcase.custom', and ~org's empty list as correct; acceptance[5]'s 'tenant flow' becomes the pair's flow. New acceptance[7] asks the `package` arms the note named as unasked (blank 400, not installed 422, read-only 422, outside the closure 409). steps, fixtures, negative and source follow; no clause weakened",
+          "ref": "#28579"
+        }
       ]
     },
     {
       "id": "automation.setup-packaged-automation-board",
-      "title": "The Setup packaged-automation page: reachable from Setup nav, lists packaged flows + packaged actions, toggle persists, clone on flow rows only, no lineage surface, server refusals verbatim in role=alert",
+      "title": "The packaged-automation doors after ADR-0146 D4/D11: Setup nav serves Packaged actions (the retired flows page's bookmark lands in Studio), Studio's Automations pillar lists the packaged flows, its ledger switch persists, New similar is offered on flows only, no lineage surface, server refusals verbatim in role=alert",
       "since": "v17",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2254,81 +2295,84 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a console bundle built from this checkout's ui/ tree with `pnpm console:build` (the page is ui/ code — a packages/console/dist older than the tree tests last week's page: RUNNER.md's stale-console-bundle trap)",
-          "the packaged showcase flows (com.example.showcase) and at least one packaged action for the actions section",
-          "the stock subflow pair showcase_task_done_notify_owner → showcase_notify_owner (drives the 409 refusal-rendering clause)"
+          "a console bundle built from this checkout's ui/ tree with `pnpm console:build` (both doors are ui/ code — a packages/console/dist older than the tree tests last week's pages: RUNNER.md's stale-console-bundle trap)",
+          "the packaged showcase flows (com.example.showcase, read-only in Studio) and at least one packaged action for the Packaged actions page",
+          "the stock subflow pair showcase_task_done_notify_owner → showcase_notify_owner (drives the 409 refusal-rendering clause)",
+          "the read-only base's customization pair com.example.showcase.custom, which New similar targets when no package is sent: the clone door ensures it through ADR-0146 D3's door (D4)"
         ],
         "knownGaps": [
-          "REPO OWNERSHIP (ADR-0054): the PAGE — markup, testids, dialogs, refusal rendering — is objectui's (packages/app-shell/src/views/setup/PackagedAutomationPage.tsx + PackagedActionsSection.tsx, registered as ref 'automation:packaged' in services/builtinComponents.tsx); the Setup NAV METADATA that reaches it is objectstack's (packages/platform-objects/src/apps/setup-nav.contributions.ts — nav_packaged_automation, landed by #12457). A locator or copy fix goes to objectui; a nav-entry regression goes HERE. Conflating the two repos is how the original nav gap survived both repos' tests — each side now pins its own half (framework: setup-packaged-automation-nav.test.ts; objectui: PackagedAutomationPage.navContribution.test.tsx), and only the live sidebar click observes the seam between them",
-          "THE PINS ARE COMPONENT TESTS UNDER ui/ — `automated.ref` names ui/packages/app-shell component tests, runnable from this checkout with that package's vitest; and those tests are the MOCKED half only (stubbed fetch): they prove the page against faked responses and structurally cannot see the missing framework nav entry, a live server's refusal bodies, or persistence",
-          "MEMBER POSTURE MEASURED, NOT ADJUDICATED (QA run #23163, objectstack 36b2889c, objectui 1fb1ced36243): a plain member could NOT open the Setup app — so neither the page nor its switches — and its read of sys_metadata_activation answered 403. That is the opposite of the posture acceptance[7] was authored against (the member reaches the page; the ledger and meta reads are open), and of the 'Reads stay open' note in packages/platform-objects/src/system/sys-metadata-activation.object.ts. The maintainer question the clause flags is still open; this note only records what the run met. QA run #26468 met the same posture at 756220c4 (member 403 at the Setup app's open, and 403 on the activation read): the second run to see it. While the member cannot reach the page, acceptance[5]'s member-toggle cell cannot be driven through it either: score that cell on the reachability a run actually meets, and say which"
+          "TRANSITION (ADR-0146 D4/D11, #28785 then #28818): the Setup page this item was authored against (PackagedAutomationPage.tsx, ref 'automation:packaged', nav_packaged_automation) is retired. Its flows half is Studio's Automations pillar on the read-only package (the FlowLedgerSwitch header switch and FlowItemMoreMenu's New similar); its actions half is Setup › Packaged actions (PackagedActionsPage.tsx, ref 'automation:packaged-actions', nav_packaged_actions). The retired page's bookmark /apps/APP/component/automation/packaged is a static route (PackagedAutomationRedirect, AppContent.tsx) that opens /studio/PKG/automations when ?package= names one and /studio/~all/metadata/flow otherwise (packagedAutomationStudioPath, setupMetadataRedirect.ts). Re-pointed from QA run #29124 (W4-L1, 7fa9873f), which drove every clause on these replacements",
+          "REPO OWNERSHIP (ADR-0054) still splits the nav clause: the PAGES — markup, testids, dialogs, refusal rendering — are the ui/ tree's (Studio: ui/packages/app-shell/src/views/studio-design/; Setup › Packaged actions: views/setup/PackagedActionsPage.tsx + PackagedActionsSection.tsx); the Setup NAV METADATA that reaches the actions page is packages/platform-objects/src/apps/setup-nav.contributions.ts (nav_packaged_actions). Each side pins its own half (setup-packaged-actions-nav.test.ts; PackagedActionsPage.navContribution.test.tsx), and only the live sidebar click observes the seam between them",
+          "MEMBER POSTURE MEASURED, NOT ADJUDICATED (QA runs #23163 at 36b2889c, #26468 at 756220c4, #29124 at 7fa9873f): a plain member cannot open the Setup app, and #29124 measured that Studio refuses the member too; the member's read of sys_metadata_activation answers 403 while GET /api/v1/automation/_status and GET /api/v1/meta/action stay open. That is the opposite of the 'Reads stay open' note in packages/platform-objects/src/system/sys-metadata-activation.object.ts. The maintainer question acceptance[7] flags is still open. While the member reaches neither door, acceptance[5]'s member cell is scored over the API (the toggle door's 403 body): record that it was"
         ]
       },
       "steps": [
         "boot the showcase on its own port and DB (dogfood §0, OS_PORT exported); build/serve the pinned console; sign in as the dev admin",
-        "nav probe: GET /api/v1/meta/app?id=setup and search the served navigation for a type:'component' item with componentRef 'automation:packaged'; then look for the entry in the rendered Setup sidebar and click it",
-        "regardless of the nav verdict, reach the page and screenshot it settled (only if the sidebar entry is MISSING — a regression of #12457 — fall back to the typed URL /_console/apps/com.objectstack.setup/component/automation/packaged — where the sidebar entry lands, the app segment being the package id (QA run #24545) — recording that the typed URL was needed, so the rest of the item is still scored)",
-        "inventory: compare the flows table rows against GET /api/v1/meta/flow (which items carry a real _packageId and _provenance != 'org') and GET /api/v1/automation/_status (the runtime list the page joins as its spine), and the actions section against its own packaged-actions read. Read each row's Activation cell as two facts: the switch shows the activation flag, and the badge beside it (data-testid packaged-flow-activation, its data-reading attribute) says whether the flow RUNS (objectui packagedFlows.ts activationReading). The badge reads 'On' for an enabled flow whose _status row carries no unboundCause (bound, or with no trigger to bind); 'Not running here', with the switch still checked, for an enabled flow whose row carries one; and 'Off', switch unchecked, for a disabled flow — showcase_approver_bindings, authored status: 'obsolete' (examples/app-showcase/src/automation/flows/approver-bindings.flow.ts). On a default boot (OS_AUTOMATION_SCHEDULED_WORK_ENABLED unset) the two type: 'schedule' flows, showcase_scheduled_digest (interval) and showcase_task_due_reminder (time_relative), carry unboundCause 'deployment_policy' (RUNNER.md, the scheduled-work entry), so they read 'Not running here', each with a Details chip holding the platform's reason. Derived from the 32 flows allFlows declares at 93e6c1a5f8 (examples/app-showcase/src/automation/flows/index.ts): 1 obsolete → Off; those 2 → Not running here; 29 → On (18 record-triggered flows and 1 api-triggered flow, which bind, and 10 with no trigger); a boot that exports the switch reads 31 On / 1 Off. Reconcile the rows against _status, not against these digits: a row whose unboundCause is anything but deployment_policy (disabled_subflow, missing_trigger, binding_failure) is a finding to read, not a count to match",
-        "toggle: flip showcase_urgent_task_alert OFF; reload the page fully; record the switch state and the sys_metadata_activation row; flip it back ON",
-        "clone dialog: open Clone on a flow row — it opens PREFILLED with SOURCE_copy and 'LABEL (copy)', both editable and submit enabled (objectui#13344, ui/packages/app-shell/src/views/setup/PackagedAutomationPage.tsx), so clear each field first — then try submitting with name empty, label empty, then name 'Bad-Name!' + a label; record what renders; then a legal clone and the post-clone notice; DELETE the clone via the API afterwards",
-        "refusal rendering (admin): flip showcase_notify_owner OFF — screenshot the row after the 409 lands",
-        "refusal rendering + posture (plain member): sign in as the member IN A FRESH BROWSER CONTEXT (own session — both localStorage token and cookie, or the cell is still the admin's), open the page, record what renders BEFORE any click, then flip any switch and screenshot the row",
-        "lineage sweep: with the clone from step 6 present, search the whole page (both sections) for any diff/badge/'customized'/lineage affordance"
+        "nav probe: GET /api/v1/meta/app?id=setup and search the served navigation for the type:'component' item with componentRef 'automation:packaged-actions' (and confirm no item names 'automation:packaged'); then click the entry in the rendered Setup sidebar. Then type the retired page's bookmark /_console/apps/com.objectstack.setup/component/automation/packaged and record where it lands (no ?package= → /_console/studio/~all/metadata/flow), and once more with ?package=com.example.showcase (→ /_console/studio/com.example.showcase/automations, the query kept)",
+        "open Studio on the read-only package: /_console/studio/com.example.showcase/automations; screenshot the rail settled",
+        "inventory: compare the rail's flows against GET /api/v1/automation/_status (the runtime list whose rows carry the ledger flag) and GET /api/v1/meta/flow (the items whose _packageId is com.example.showcase). Open a flow (the URL gains ?surface=flow:NAME, studioPillarItemPath in metadataArea.ts) and read the header switch data-testid auto-ledger-switch as two facts: aria-checked is the ledger flag of that flow's _status row, and data-reading says whether the flow RUNS ('on' — 'On for this deployment'; 'not-running' — 'On for this deployment, not running here', with the platform's reason in auto-ledger-not-running-reason; 'off' — 'Off for this deployment'). The readings come from objectui packagedFlows.ts activationReading, the same rule the retired page used. Expect showcase_approver_bindings (authored status: 'obsolete') off, and on a default boot (OS_AUTOMATION_SCHEDULED_WORK_ENABLED unset) showcase_scheduled_digest and showcase_task_due_reminder not-running with unboundCause 'deployment_policy'. Reconcile against _status, not against counts: QA run #29124 read 32 flows on both the rail and _status",
+        "toggle: on showcase_urgent_task_alert flip auto-ledger-switch OFF (POST /api/v1/automation/showcase_urgent_task_alert/toggle); reload the page fully and re-open the flow; record the switch state and the sys_metadata_activation row (metadata_type 'flow', name showcase_urgent_task_alert, active false); flip it back ON",
+        "New similar: on an open packaged flow open the ⋯ menu (auto-item-more) → New similar (auto-item-new-similar). The dialog (auto-new-similar-dialog) opens PREFILLED with NAME_copy and 'LABEL (copy)', both editable and submit enabled (FlowItemMoreMenu.tsx openNewSimilar), so clear each field first — then try submitting with name empty, label empty, then name 'Bad-Name!' + a label; record what renders; then make a legal copy and record the landing strip (auto-new-similar-strip, with the door's notice in auto-new-similar-notice) and where the copy opened; DELETE the copy via the API afterwards",
+        "Packaged actions: open Setup › Packaged actions (the sidebar entry of steps[1]) and screenshot the section (data-testid packaged-actions-section) and its rows",
+        "refusal rendering (admin): open showcase_notify_owner in Studio and flip its auto-ledger-switch OFF — screenshot the studio-refusal strip after the 409 lands and read the role of studio-refusal-message",
+        "refusal rendering + posture (plain member): sign in as the member IN A FRESH BROWSER CONTEXT (own session — both localStorage token and cookie, or the cell is still the admin's); open Setup and Studio and record what renders BEFORE any click; then flip a switch where a door is reachable, or else POST /api/v1/automation/showcase_urgent_task_alert/toggle {\"enabled\": false} as the member and capture the 403 body",
+        "lineage sweep: with the copy from step 6 present, search the Studio flow page, the rail and the Packaged actions page for any diff/'customized'/clonedFrom/lineage affordance"
       ],
       "acceptance": [
         {
-          "clause": "the page is REACHABLE FROM SETUP NAVIGATION: the served setup app metadata contains a type:'component' nav item with componentRef 'automation:packaged', and clicking the sidebar entry lands on the page",
+          "clause": "the Setup navigation serves the Packaged actions entry and no longer the retired flows page: the served setup app carries the type:'component' item componentRef 'automation:packaged-actions' and none naming 'automation:packaged', clicking the sidebar entry lands on Setup › Packaged actions, and the retired page's bookmark lands in Studio (the cross-package flow list, or the named package's Automations pillar), never on a dead Setup page",
           "oracle": "network",
-          "verify": "the GET /api/v1/meta/app?id=setup body carries the item — id 'nav_packaged_automation', type 'component', componentRef 'automation:packaged', label 'Packaged Automation', in group_apps beside Packages — AND the sidebar click navigates to the page. The entry is contributed at packages/platform-objects/src/apps/setup-nav.contributions.ts (#12457, fixing the gap the #12438 sweep found: the page had merged in objectui with no framework nav entry naming its ref, reachable only by typed URL). Two deliberate ABSENCES on the entry are part of the contract — no requiresService ('automation') and no requiredPermissions (the sys_metadata_activation ledger works without the automation service, #12419; the write doors gate server-side) — do not 'fix' either. ⛔ A typed-URL landing must still NOT tick this clause: each repo pins only its own half (framework nav metadata: setup-packaged-automation-nav.test.ts; objectui ref→URL resolution: PackagedAutomationPage.navContribution.test.tsx), and the live served-app body + real sidebar click is the only observation that crosses the seam the original defect lived in",
-          "evidence": "the meta/app body (item present or absent) + sidebar screenshot"
+          "verify": "the GET /api/v1/meta/app?id=setup body carries id 'nav_packaged_actions', type 'component', componentRef 'automation:packaged-actions', label 'Packaged Actions' (setup-nav.contributions.ts), and nav_packaged_automation occurs 0 times (tombstoned in setup-nav-dead-key-tombstone.test.ts) — AND the sidebar click navigates to the page. The entry carries no requiresService and no requiredPermissions, as its predecessor did (the write doors gate server-side) — do not 'fix' either. The bookmark legs are the navigation trace of steps[1]: /component/automation/packaged → /studio/~all/metadata/flow with no ?package=, → /studio/com.example.showcase/automations with one (packagedAutomationStudioPath; pinned by AppContent.setupMetadataStudio-28578.test.tsx). ⛔ A typed-URL landing does not tick the sidebar half: each repo half pins only itself (setup-packaged-actions-nav.test.ts; PackagedActionsPage.navContribution.test.tsx), and the live served body + real sidebar click is the only observation that crosses the seam",
+          "evidence": "the meta/app body + sidebar screenshot + the two bookmark navigation traces"
         },
         {
-          "clause": "inventory: the flows table lists exactly the packaged flows (each row's switch, the activation flag, is checked by default, an obsolete-status flow excepted: the engine holds it disabled, so its switch is unchecked) and the packaged-actions section renders beside it; tenant/org-authored flows are ABSENT. This clause judges the switch, not the badge beside it: on a default boot the two policy-unbound schedule flows keep a checked switch while their badge reads 'Not running here' (steps[3]), and that reading does not fail this clause",
+          "clause": "inventory: Studio's Automations rail on the read-only showcase package lists exactly that package's packaged flows, each with a row in GET /api/v1/automation/_status, and an open flow's ledger switch is checked by default (an obsolete-status flow excepted: the engine holds it disabled). A flow the customization pair adds appears only marked 'In com.example.showcase.custom' (engine.studio.customize.addedIn), never as one of the base's flows. This clause judges the flag, not the reading: on a default boot the two policy-unbound schedule flows keep a checked switch whose data-reading is 'not-running' (steps[3]), and that does not fail this clause",
           "oracle": "dom",
-          "verify": "rows (data-testid packaged-flow-<name>) match the isPackagedFlowItem filter — a real _packageId, not 'sys_metadata', and _provenance != 'org', joined against the engine runtime list as spine (objectui packagedFlows.ts). The clone created later must NOT appear (it is a tenant artifact). Erring either way is a real defect: a tenant flow shown gets an install-wide switch Studio owns; a packaged flow filtered out leaves no off-switch at all. Score each row's switch against the enabled field of its row in the same GET /api/v1/automation/_status read steps[3] takes: the page checks the switch exactly where that field is not false (joinPackagedFlows in packagedFlows.ts; the Switch's checked prop in PackagedAutomationPage.tsx), and the engine sets it false only for an obsolete or invalid status or a ledger toggle (isFlowEnabled, service-automation engine.ts). OS_AUTOMATION_SCHEDULED_WORK_ENABLED moves the badge, never the flag: on a fresh boot the only unchecked switch is the obsolete-status flow's (showcase_approver_bindings), whether that variable is exported or not. The badge (data-testid packaged-flow-activation) is steps[3]'s reading, reconciled there against the row's unboundCause: ⛔ do not score a 'Not running here' badge as a switch reading Off, nor read a checked switch as a flow that runs",
-          "evidence": "row list vs the two API reads, side by side"
+          "verify": "rail rows vs the _status rows filtered to the package: same names, none missing, none extra (a copy from steps[5] shows only with its 'In PAIR' mark). For each opened flow, auto-ledger-switch aria-checked equals the enabled field of its _status row (StudioDesignSurface.tsx: ledgerRow from flowStatus, FlowLedgerSwitch checked), which the engine sets false only for an obsolete or invalid status or a ledger toggle (isFlowEnabled, service-automation engine.ts). OS_AUTOMATION_SCHEDULED_WORK_ENABLED moves the reading, never the flag. ⛔ Do not score a 'not-running' reading as a switch reading Off, nor read a checked switch as a flow that runs. QA run #29124 read 32 flows on the rail and in _status",
+          "evidence": "rail list vs the two API reads, side by side, plus the switch's aria-checked and data-reading per flow opened"
         },
         {
-          "clause": "the toggle flips state AND persists: after flipping OFF and a full reload the switch still reads Off and the sys_metadata_activation row reads active=false",
+          "clause": "the toggle flips state AND persists: after flipping OFF in Studio and a full reload the switch still reads Off and the sys_metadata_activation row reads active=false",
           "oracle": "api",
-          "verify": "the reload re-derives the switch from the server (runtime states), not from component state; corroborate with the data-API row read — the DOM alone cannot distinguish a durable flip from an optimistic one",
+          "verify": "the reload re-derives the switch from the server's _status row, not from component state (the switch binds the ledger, never the definition's status: AutomationsPillar.ledgerSwitch-28148.test.tsx 'binds the switch to the ledger, not the definition, and a flip posts the toggle and saves no draft'); corroborate with the data-API row read — the DOM alone cannot distinguish a durable flip from an optimistic one. QA run #29124 measured the state across a reload and in the activation row",
           "evidence": "post-reload screenshot + the row read"
         },
         {
-          "clause": "clone is offered on FLOW rows ONLY — no clone affordance anywhere in the packaged-actions section",
+          "clause": "copying is offered on FLOWS only: an open packaged flow's ⋯ menu offers New similar, and Setup › Packaged actions offers no clone or copy affordance anywhere",
           "oracle": "dom",
-          "verify": "every flow row carries a Clone button; the actions section has none (its own header states why — ADR-0126 §8 keeps the action clone pre-chartered; PackagedActionsSection.tsx header ⛔ 'No clone'). A clone control appearing on actions is a FAIL against the charter, not a bonus",
-          "evidence": "screenshots of both sections"
+          "verify": "auto-item-new-similar is present in the flow's menu; packaged-actions-section carries no clone/copy control (PackagedActionsSection.tsx header ⛔ 'No clone' — ADR-0126 §8 item 2 keeps the action clone pre-chartered). A clone control appearing on actions is a FAIL against the charter, not a bonus",
+          "evidence": "screenshots of the flow menu and the actions section"
         },
         {
-          "clause": "NO lineage surface: no diff-vs-base, no 'customized' badge, no clonedFrom link, no drift indicator anywhere on the page — including after a clone exists",
+          "clause": "NO lineage surface: no diff-vs-base, no clonedFrom link, no drift indicator on the Studio flow page, its rail or the Packaged actions page — including after a copy exists. The pair's 'In com.example.showcase.custom' mark and a customization's own controls (ADR-0146 D2) say where an item is saved, not what it was copied from, and do not fail this clause",
           "oracle": "dom",
-          "verify": "the step-9 sweep finds nothing lineage-shaped (ADR-0126 §9 / the ⛔ no-drift-surface rule quoted in the page header). Displayed ancestry would mean a data source the platform ruled it does not track — its appearance is a FAIL even if it looks helpful",
-          "evidence": "full-page screenshot with the clone present"
+          "verify": "the step-10 sweep finds nothing that names the copy's source (ADR-0126 §9; FlowItemMoreMenu.tsx: 'No lineage is drawn … nothing here says what the copy was made from'; PackagedActionsSection.tsx ⛔ 'No drift or ancestry surface'). Displayed ancestry would mean a data source the platform ruled it does not track — its appearance is a FAIL even if it looks helpful",
+          "evidence": "full-page screenshots with the copy present"
         },
         {
-          "clause": "server refusals render VERBATIM in a role=alert beside the control that caused them: the plain member's toggle shows the exact manage_metadata sentence; the admin's subflow toggle shows the 409 naming showcase_task_done_notify_owner; the local fallback strings appear nowhere",
+          "clause": "server refusals render VERBATIM and are announced: the admin's subflow toggle shows the 409 naming showcase_task_done_notify_owner in Studio's refusal strip, whose sentence element carries role=alert; the plain member's toggle answers the exact manage_metadata sentence; the local fallback strings appear nowhere",
           "oracle": "dom",
-          "verify": "the member's alert text equals 'Enabling or disabling an automation flow requires the `manage_metadata` capability.' (domains/automation.ts) and the admin's names the caller — actionErrorDetail reads error → error.message → message and falls back only when the body is unreadable (objectui core/src/actions/actionErrorDetail.ts; the alert at PackagedAutomationPage.tsx). The i18n fallbacks (packagedAutomation.toggleFailed / toggleFailedHttp) rendering instead of the server sentence means the body was dropped — the server's remedy ('disable the callers first' / the capability name) is the actionable half",
-          "evidence": "both alert screenshots with the text transcribed"
+          "verify": "the admin cell: [data-testid=studio-refusal-message] has role=\"alert\" (ui/packages/app-shell/src/views/studio-design/StudioRefusalStrip.tsx#StudioRefusalStrip — #29139 closed by #29224, which put the role on the sentence alone, so 'Show me' and Details stay outside the alert) and its text is the server's 409 sentence naming the caller; toggleLedger hands it over verbatim (requestFlowToggle, packagedFlowLedger.ts, reads it with actionErrorDetail). The member cell: the 403 text equals 'Enabling or disabling an automation flow requires the `manage_metadata` capability.' (FLOW_ENABLEMENT_DENY_MESSAGE, domains/automation.ts) — read from the strip if the member reaches a switch, otherwise from the toggle door's body (fixtures.knownGaps[2]; QA run #29124 scored it over the API), and the record says which. The i18n fallbacks (engine.studio.auto.ledger.toggleFailed / toggleFailedHttp) rendering instead of the server sentence means the body was dropped",
+          "evidence": "the admin strip screenshot with its role attribute and text transcribed + the member's 403 body (or strip screenshot)"
         },
         {
-          "clause": "the clone dialog requires BOTH machine name and label before submit is possible, and a server-refused name surfaces legibly: the illegal-name 400 renders in the dialog's alert — record exactly what text arrives, because the per-field details[] are dropped client-side",
+          "clause": "the New similar dialog requires BOTH a new machine name and a new label before submit is possible, a server-refused name surfaces verbatim in role=alert inside the dialog, and a legal copy lands switched off in the pair with the door's notice shown as sent",
           "oracle": "dom",
-          "verify": "the submit control is disabled until both fields are non-empty (cloneNameValid, which disables the clone dialog's submit button in objectui PackagedAutomationPage.tsx — so the 'required' 400s of the API item are unreachable from this dialog); submitting 'Bad-Name!' round-trips the server 400 and the dialog alert (role=alert) shows the message actionErrorDetail extracted — details[] never reach the DOM, so if the rendered sentence does not state the ^[a-z_][a-z0-9_]*$ constraint legibly, record what DID render as the finding rather than inventing a pass. A legal clone then shows the server's post-clone notice verbatim",
-          "evidence": "dialog screenshots: disabled submit, the 400 alert text, the post-clone notice"
+          "verify": "auto-new-similar-submit is disabled while either field is blank (copyValid, FlowItemMoreMenu.tsx — so the API's 'required' 400s are unreachable from this dialog); submitting 'Bad-Name!' round-trips the clone door's 400 and auto-new-similar-refusal (role=alert) shows the sentence actionErrorDetail extracted, with the dialog still open on the names typed — details[] never reach the DOM, so if the sentence does not state the ^[a-z_][a-z0-9_]*$ constraint legibly, record what DID render as the finding rather than inventing a pass. A legal copy on the read-only base sends no package (the door picks the pair), opens in com.example.showcase.custom, and auto-new-similar-strip reads 'Saved the copy NAME in package com.example.showcase.custom.' with the door's notice verbatim in auto-new-similar-notice. QA run #29124 measured the validation and the 400 in role=alert",
+          "evidence": "dialog screenshots: disabled submit, the 400 alert text, the landing strip with its notice"
         },
         {
-          "clause": "posture record (not a pass/fail gate): record whether a plain member REACHES the page and sees the switches, which lists load, what the activation read answers, and where the first refusal arrives. Authored (#12438) against a posture where the member reached the page with open reads and met the refusal only after a click; at 36b2889c the member could not open Setup and the activation read answered 403 (knownGaps[2]). Record the posture as observed",
+          "clause": "posture record (not a pass/fail gate): record whether a plain member REACHES Setup › Packaged actions or Studio's Automations pillar, which lists load, what the activation read answers, and where the first refusal arrives. Authored (#12438) against a posture where the member reached the page with open reads and met the refusal only after a click; QA run #29124 met a member refused at both Setup and Studio, with the activation read 403 and _status and /meta/action open (knownGaps[2]). Record the posture as observed",
           "oracle": "dom",
-          "verify": "ComponentNavView resolves the ref with no authz check (objectui ComponentNavView.tsx) and sys_metadata_activation declares its reads open (apiMethods ['get', 'list'], 'Reads stay open so operability surfaces can answer \"what is disabled here?\"', sys-metadata-activation.object.ts) — but a member's read of it answered 403 in QA runs #23163 and #26468, so the declaration opens the verbs and the member's permission set grants no read. Record which the run meets: open reads (the member sees real install-wide state with dead controls) or the 403 (knownGaps[2]). Whether that read-exposure is intended is a maintainer question tracked in the #12438 sweep's follow-ups — this clause RECORDS what a member sees (which lists load, what the first refusal moment is); it does not adjudicate",
-          "evidence": "the member's pre-click page screenshot + the list of requests the page made and their statuses"
+          "verify": "sys_metadata_activation declares its reads open (apiMethods ['get', 'list'], 'Reads stay open so operability surfaces can answer \"what is disabled here?\"', sys-metadata-activation.object.ts) — but a member's read of it answered 403 in QA runs #23163, #26468 and #29124, so the declaration opens the verbs and the member's permission set grants no read. Record which the run meets. Whether that read-exposure is intended is a maintainer question tracked in the #12438 sweep's follow-ups — this clause RECORDS what a member sees; it does not adjudicate",
+          "evidence": "the member's pre-click screenshots of both doors + the list of requests and their statuses"
         }
       ],
       "negative": [
-        "ticking the nav clause off a typed-URL landing (or off either repo's unit pin alone) is the exact false positive this item exists to block — the page working and the page being findable are different facts, and the second was red for a full epic before #12457 precisely because each repo's tests proved only its own half",
-        "scoring the member's refusal cell while the admin's token is still live in the browser context is an auth-state-leak — the alert would show a 409 (subflow) instead of the 403 (capability), silently proving the wrong clause",
-        "a toggle whose switch flips back On after reload while the API row says active=false (or vice versa) is a FAIL wherever the mismatch lies — the page must derive from the server, and the server must have written the row"
+        "ticking the nav clause off a typed-URL landing (or off either repo's unit pin alone) is the exact false positive this item exists to block — the page working and the page being findable are different facts",
+        "scoring the member's refusal cell while the admin's token is still live in the browser context is an auth-state-leak — the strip would show a 409 (subflow) instead of the 403 (capability), silently proving the wrong clause",
+        "a toggle whose switch flips back On after reload while the API row says active=false (or vice versa) is a FAIL wherever the mismatch lies — the switch must derive from the server, and the server must have written the row",
+        "a Setup page still listing packaged FLOWS, or a sidebar item naming 'automation:packaged', is a FAIL: two switches for one ledger row is the split ADR-0146 D11 retired"
       ],
       "traps": [
         "wrong-persona",
@@ -2338,14 +2382,14 @@
       ],
       "automated": {
         "kind": "test",
-        "ref": "ui/packages/app-shell/src/views/setup/PackagedAutomationPage.test.tsx + PackagedActionsSection.test.tsx + PackagedAutomationPage.navContribution.test.tsx — the MOCKED component half only (stubbed fetch): rendering, filter, dialog validation, alert wiring; they cannot evidence live refusal bodies or persistence. PackagedAutomationPage.navContribution.test.tsx is acceptance[0]'s ui half (the ref→URL resolution its verify names), component-layer like the others: it scores no clause on its own. The nav clause's framework half is pinned HERE by packages/platform-objects/src/apps/setup-packaged-automation-nav.test.ts (#12457: entry present, ref/label/group, the two deliberate absences, parses as a NavigationContribution) — runnable from this checkout, but it proves the contribution only; the served body + sidebar click still need the live run"
+        "ref": "ui/packages/app-shell/src/views/studio-design/AutomationsPillar.ledgerSwitch-28148.test.tsx (the ledger switch on a read-only package: binds the ledger flag, the off and not-running readings, the walled switch, the refusal verbatim, and 'announces the subflow guard's 409: one alert, the sentence verbatim, and again on a second refusal') + AutomationsPillar.newSimilar-28567.test.tsx (New similar: no target on a read-only base, the copy opened where the answer named, a 409 verbatim with the dialog kept open, no menu in the package-less scope) + StudioDesignSurface.refusalAnnounced-29139.test.tsx (the strip's sentence is the role=alert, 'Show me' and Details outside it) + ui/packages/app-shell/src/views/setup/PackagedActionsSection.test.tsx + PackagedActionsPage.navContribution.test.tsx + ui/packages/app-shell/src/console/__tests__/AppContent.setupMetadataStudio-28578.test.tsx (the retired page's bookmark → Studio) — all the MOCKED component half (stubbed fetch): they cannot evidence live refusal bodies or persistence, and score no clause on their own. The nav clause's framework half is pinned by packages/platform-objects/src/apps/setup-packaged-actions-nav.test.ts (entry present, ref/label/group, the deliberate absences); the served body + sidebar click still need the live run"
       },
       "source": [
-        "docs/adr/0126-packaged-metadata-customization-model.md §7.4 (the Setup surface: on/off + clone, authoring stays in Studio; ⛔ no drift/ancestry surface)",
-        "objectui packages/app-shell/src/views/setup/PackagedAutomationPage.tsx (the clone dialog's validation — cloneNameValid, which disables its submit button — and its role=alert rendering of clone.refusal) + PackagedActionsSection.tsx (header: ⛔ no clone on actions) + packagedFlows.ts (isPackagedFlowItem + runtime-spine join)",
-        "objectui packages/app-shell/src/services/builtinComponents.tsx (registerAppComponent ref 'automation:packaged') + views/ComponentNavView.tsx (ref resolution, no gate) + views/setup/PackagedAutomationPage.navContribution.test.tsx (ref→URL resolution — the mocked half of the nav clause)",
+        "docs/adr/0126-packaged-metadata-customization-model.md §7.4 (on/off + clone; ⛔ no drift/ancestry surface) as amended by docs/adr/0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md D4 (the packaged flow's switch and New similar move to the item in Studio; Setup › Packaged automation retires) and D11 (the retire list, N-28)",
+        "ui/packages/app-shell/src/views/studio-design/FlowLedgerSwitch.tsx (auto-ledger-switch: aria-checked = the ledger flag, data-reading = activationReading) + FlowItemMoreMenu.tsx (New similar: copyValid disables submit; auto-new-similar-refusal role=alert) + StudioDesignSurface.tsx (toggleLedger, auto-new-similar-strip) + StudioRefusalStrip.tsx (studio-refusal-message role=alert, the one strip every pillar draws) + ui/packages/app-shell/src/views/setup/packagedFlows.ts (activationReading) + packagedFlowLedger.ts (requestFlowToggle)",
+        "ui/packages/app-shell/src/views/setup/PackagedActionsPage.tsx + PackagedActionsSection.tsx (header: ⛔ no clone, ⛔ no drift surface) + ui/packages/app-shell/src/services/builtinComponents.tsx (registerAppComponent ref 'automation:packaged-actions') + ui/packages/app-shell/src/views/studio-design/setupMetadataRedirect.ts#packagedAutomationStudioPath (the retired page's bookmark)",
         "objectui packages/core/src/actions/actionErrorDetail.ts (error → error.message → message; details[] dropped)",
-        "packages/platform-objects/src/apps/setup-nav.contributions.ts#nav_packaged_automation (nav_packaged_automation → componentRef 'automation:packaged', landed by #12457; the entry's comment records why it lives in platform-objects, not service-automation) + setup-packaged-automation-nav.test.ts (the framework-half pin)",
+        "packages/platform-objects/src/apps/setup-nav.contributions.ts#nav_packaged_actions (nav_packaged_actions → componentRef 'automation:packaged-actions', pinned by setup-packaged-actions-nav.test.ts). It replaced nav_packaged_automation → 'automation:packaged' (#12457): the page's flows half retired into Studio's Automations pillar (ADR-0146 D11, #28578), and its actions half is this entry; nav_packaged_automation is tombstoned in setup-nav-dead-key-tombstone.test.ts",
         "packages/runtime/src/domains/automation.ts (the exact enablement 403 sentence)",
         "packages/platform-objects/src/system/sys-metadata-activation.object.ts (reads open)",
         "docs/adr/0054 (locator stability / UI-testability contract — the repo-ownership split recorded in fixtures)",
@@ -2412,6 +2456,12 @@
           "date": "2026-10-27",
           "change": "personas[1], steps[5], fixtures.knownGaps[2] and acceptance[7].verify follow the wave-2 head. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26468, release-18.2.0-w2-tier1-a, at 756220c4; wave anchor #25807, slice A): a fresh sign-up is refused on stock, so the member is minted invite-first; the clone dialog opens prefilled (objectui#13344), so 'submit with name empty' needs the fields cleared; and acceptance[7].verify asserted reads 'open by ruling' while two runs measured the member's read 403. Re-read at base e4ba846f (PackagedAutomationPage.tsx: SOURCE_copy and the (copy) label default; sys-metadata-activation.object.ts enable.apiMethods). The posture question is still not adjudicated here; no clause's assertion changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 11,
+          "date": "2026-11-02",
+          "change": "Re-pointed to the doors that replaced the retired Setup › Packaged automation page (ADR-0146 D4/D11; #28785 retired its flows half, #28818 sent its bookmark to Studio). Measured inputs: QA run #29124 (W4-L1, 7fa9873f; card note 6572222369), which failed A0, A1, A2, A3, A5 and A6 as stale spec and passed A4 and A7. Clause by clause, re-read at base dfbe34d887: acceptance[0] asserts nav_packaged_actions ('automation:packaged-actions'), the absence of 'automation:packaged', and the retired bookmark's landing in Studio (packagedAutomationStudioPath); acceptance[1] reads Studio's Automations rail against _status (32 flows in the run) and the header auto-ledger-switch's aria-checked/data-reading; acceptance[2] the same flip persisted across a reload; acceptance[3] New similar on flows, no clone on Setup › Packaged actions; acceptance[4] no lineage, now naming that the pair's 'In PAIR' mark and ADR-0146 D2's customization controls are not lineage; acceptance[5] re-points to Studio's refusal strip and, per the seat's ruling, to #29139's outcome instead of marking it transitional: #29224 put role=alert on studio-refusal-message, so the clause keeps 'announced' — the member's 403 cell is scored over the API while the member reaches neither door (#29124 measured exactly that); acceptance[6] the New similar dialog (copyValid, auto-new-similar-refusal role=alert, the landing strip in the pair); acceptance[7] records the posture #29124 met. steps, fixtures, negative, automated.ref and source[0]–[2] follow. No clause dropped; acceptance[4] no longer forbids a 'customized' badge, because ADR-0146 D2 charters that mark on served facts. After merging main at a20dcae3f9 the strip lives in its own StudioRefusalStrip.tsx (#29380) and the switch stays focused while a toggle is in flight (#29375, aria-disabled while busy); the citations follow, and no clause moves",
+          "ref": "#28579"
         }
       ]
     },
@@ -2800,6 +2850,131 @@
           "date": "2026-10-26",
           "change": "acceptance[1].verify and acceptance[2].verify say they are scored on a served boot, not from the pins. Checklist-accuracy finding of the 18.2.0 sweep (QA run #25815, release-18.2.0-tier1, at 6679644a: a1/a2; wave anchor #25807, card #25840): both pins assert that flows are armed (or not) and the refusal sentence on a LiteKernel; neither observes a served boot log line or run rows after intervals. Re-read at base 9753d1637f (both per-kernel-scheduled-work-policy.test.ts files assert getTriggerBindingAudit and the triggers' refusal text). No clause changed",
           "ref": "#25840"
+        }
+      ]
+    },
+    {
+      "id": "automation.package-flow-override",
+      "title": "Customize a read-only base's flow in Studio: the pair's item under the base's name, declaring the override, is armed in place of the base in one reload, keeps the base's ledger switch, lets a waiting run finish on the base, and Restore re-arms the base — New similar stays a separate copy under a new name",
+      "since": "v18",
+      "status": "active",
+      "revision": 3,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "admin (holds manage_metadata; single posture)",
+        "dev admin as the approver (holds the manager position, so showcase_budget_approval's manager_review routes to them)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase on its own port and DB (dogfood §0) with OS_PORT exported, signed in as the seeded admin (admin@objectos.ai / admin123), and a console built from this tree with `pnpm console:build`",
+          "the stock read-only base com.example.showcase (examples/app-showcase/objectstack.config.ts: id com.example.showcase, namespace showcase, version 0.1.0 — a booted code package, so read-only to isWritablePackage) and its customization pair com.example.showcase.custom (namespace showcase_custom, dependency ^0 on the base), created by the ensure door on the first customization",
+          "the packaged flow showcase_budget_approval (record-after-update on showcase_project, condition budget != null && budget > 100000 && budget != previous.budget; an approval node manager_review), whose run waits on an approval — the specimen for both the override and the waiting run",
+          "a showcase_project record whose budget the run can PATCH above 100000 (approvals.json's stock recipe for raising showcase_budget_approval requests)"
+        ],
+        "knownGaps": [
+          "AUTOMATION LIVES UNDER ui/ — `cd ui && pnpm exec vitest run --maxWorkers=1 packages/app-shell/src/views/studio-design/FILE`; the jsdom pins mock the server",
+          "the engine's arming and the waiting run are pinned at the engine layer only (packages/services/service-automation/src/flow-sync-one-precedence.test.ts drives the boot pull, the kernel:ready sync and the metadata:reloaded re-sync against a fake store); no pin drives the HTTP doors this item reads"
+        ]
+      },
+      "steps": [
+        "start a run on the BASE first: PATCH a showcase_project budget above 100000; GET /api/v1/automation/showcase_budget_approval/runs and record the paused run's id",
+        "open /_console/studio/com.example.showcase/automations and select showcase_budget_approval: the canvas is read-only and Customize (studio-customize) is offered; press it — nothing is sent",
+        "edit the flow (e.g. a node's label) and let the autosave run: capture POST /api/v1/packages/com.example.showcase/ensure-customization and PUT /api/v1/meta/flow/showcase_budget_approval?mode=draft&package=com.example.showcase.custom; confirm no POST /api/v1/automation/showcase_budget_approval/toggle and no sys_metadata_activation write",
+        "publish the pair; then GET /api/v1/automation/_status (one row for the name) and GET /api/v1/meta/flow/showcase_budget_approval (no package); read the header: the override badge (studio-override-chip) and the ledger switch (auto-ledger-switch) — no definition switch",
+        "as the approver, approve the step-1 run's pending request; GET /api/v1/automation/showcase_budget_approval/runs/RUN_ID",
+        "PATCH the project budget again (a new value above 100000): the new run's step log",
+        "ledger: switch the flow off with auto-ledger-switch, PATCH the budget again (no run starts), switch it back on",
+        "Restore package original (studio-restore-original), read the confirmation and confirm: capture the two DELETEs at the pair; PATCH the budget once more and read the new run",
+        "New similar on the same flow (auto-new-similar-*): give a new name and label; read where the copy opens and its status",
+        "Customize and publish the flow again (as steps 2–4), and while that override is live press New similar on it with another new name and label; read the answer, the copy's draft in the pair, and GET /api/v1/meta/flow/showcase_budget_approval; then Restore package original as in step 8"
+      ],
+      "acceptance": [
+        {
+          "clause": "Customize writes the flow's draft into the pair under the base's own name, declaring overrides: { package: 'com.example.showcase', basedOn: '0.1.0' }, and writes no ledger row",
+          "oracle": "network",
+          "verify": "step 3: one ensure POST, then the flow draft PUT naming package=com.example.showcase.custom with the overrides block and name showcase_budget_approval; no toggle POST and no activation write",
+          "evidence": "the network trace of steps 2–3 + GET /api/v1/meta/flow/showcase_budget_approval?state=draft&package=com.example.showcase.custom"
+        },
+        {
+          "clause": "once published, the override is the packaged flow: armed in place of the base with no restart, one body per name, and it is what new runs execute",
+          "oracle": "api",
+          "verify": "step 4: _status lists showcase_budget_approval once; the package-less meta read serves the override's body with its overrides block; step 6's new run's step log follows the override's edited definition (resolveFlowPrecedence's declared rank — the override wins inside the base's held name, by declaration, never by arrival order)",
+          "evidence": "_status + the meta read + the new run's step log"
+        },
+        {
+          "clause": "a run suspended on the base finishes on the base; only runs started after the publish run the override",
+          "oracle": "api",
+          "verify": "step 5: the step-1 run completes, and its run record and step log are the base's definition, not the override's (real version pinning, #28405 / N-12)",
+          "evidence": "the step-1 run's record before and after the approval"
+        },
+        {
+          "clause": "the override inherits the base's ledger identity: one switch, the ledger switch — off silences the override, on re-arms it — and no definition switch is drawn",
+          "oracle": "api",
+          "verify": "step 7: the toggle POSTs answer 200 and write the base's sys_metadata_activation row; with it off the budget change starts no run, with it on the next change runs the override; the header draws auto-ledger-switch and no second switch",
+          "evidence": "the toggle answers + the runs list across the three changes + the header screenshot"
+        },
+        {
+          "clause": "'Restore package original' deletes the pair's draft and row and the base's flow is re-armed in place",
+          "oracle": "api",
+          "verify": "step 8: both DELETEs name package=com.example.showcase.custom and answer 200; the next run follows the base's definition; GET /meta/flow/showcase_budget_approval serves the base with no overrides key",
+          "evidence": "the DELETE trace + the post-restore run's step log + the meta read"
+        },
+        {
+          "clause": "New similar is a different door: a whole copy under a NEW name, written switched off (status obsolete) into the pair and opened there — it overrides nothing",
+          "oracle": "network",
+          "verify": "step 9 sends POST /api/v1/automation/showcase_budget_approval/clone with the new name and label and no package; the answer names com.example.showcase.custom and the copy opens there, listed 'In com.example.showcase.custom'; the base stays armed. The clone door's own contract is automation.packaged-flow-clone-contract; the dialog's validation is automation.setup-packaged-automation-board — cite them",
+          "evidence": "the clone request and answer + the rail screenshot"
+        },
+        {
+          "clause": "New similar on a flow whose override is live copies what the name serves, the override's definition, and the copy declares no override: it is the pair's own item under its new name, never a 403 NOT_OVERRIDABLE",
+          "oracle": "api",
+          "verify": "step 10: POST /api/v1/automation/showcase_budget_approval/clone answers 200 naming com.example.showcase.custom, the dialog closes and the copy opens in the pair; the answer's flow and GET /api/v1/meta/flow/NEW_NAME?package=com.example.showcase.custom carry the override's edited node label, status obsolete, and no overrides key; GET /api/v1/meta/flow/showcase_budget_approval still serves the override with its overrides block",
+          "evidence": "the clone request and answer + the copy's meta read + the source's meta read"
+        }
+      ],
+      "negative": [
+        "both the base and the override firing on one record change (two runs) is the FAIL — the double-fire ADR-0146 D9 replaced clone-and-switch to remove",
+        "an override that needs a server restart to arm, or a restore that leaves the override armed, is the FAIL D9's 'rebound in one reload' rules out"
+      ],
+      "traps": [
+        "stale-console-bundle",
+        "automation-input",
+        "eventual-consistency",
+        "wrong-persona"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "ui/packages/app-shell/src/views/studio-design/AutomationsPillar.customizeFlow-28570.test.tsx + AutomationsPillar.newSimilar-28567.test.tsx (jsdom: acceptance[0], [4] and [5]'s console calls against a mocked server) + packages/services/service-automation/src/flow-sync-one-precedence.test.ts (engine layer: the override is armed by every step and its removal re-arms the base; the ledger is the base's; 'with N-12: a run suspended on the base finishes on the base' — corroborates acceptance[1]–[4], drives no HTTP door) + packages/runtime/src/domains/automation-flow-clone-custom-package.test.ts ('New similar while the source's override is live': acceptance[6]'s clone door over the real metadata protocol and store, with the override stored in the pair and armed in the engine's map). the live spec of #28579 slice 3 (ui/e2e/live/studio-customize-journey.spec.ts) customizes a view and an object, not a flow, so every browser and api clause is the run's live leg"
+      },
+      "source": [
+        "packages/services/service-automation/src/flow-precedence.ts#resolveFlowPrecedence (the declared .custom rank, #28412)",
+        "packages/metadata-protocol/src/protocol-packaged-base-refusal.ts#refusePackagedBaseOverride (a declared override from the base's pair is admitted; every other write onto the sealed flow is refused)",
+        "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (the Automations pillar's Customize, the pair's save, and Restore) + ui/packages/app-shell/src/views/studio-design/FlowItemMoreMenu.tsx#FlowItemMoreMenu (Restore package original and New similar on a flow)",
+        "examples/app-showcase/src/automation/flows/index.ts#BudgetApprovalFlow (the specimen: an approval step that waits)",
+        "docs/adr/0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md D4 (New similar) and D9 (a flow override is served over the base's name, rebound in one reload, inherits the ledger identity, waits for real version pinning)",
+        "#28412 (N-11) landed by PRs #28693 and #28770; #28570 (N-18) by PR #28824; #28567 (N-22) by PR #28668; version pinning #28405 (N-12)",
+        "cross-ref: automation.packaged-flow-clone-contract (the clone door), automation.setup-packaged-automation-board (the ledger switch and the New similar dialog), studio-authoring.packaged-automation-studio-lock (the lock that holds until Customize)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-02",
+          "change": "new item (ADR-0146 N-11 #28412 / PRs #28693 and #28770, N-18 #28570 / PR #28824, N-22 #28567 / PR #28668): a flow customized in Studio is the pair's item under the base's name declaring the override, armed in place of the base, keeping the base's ledger switch, with a waiting run finishing on the base and Restore re-arming it; New similar is the separate copy under a new name. Specimen showcase_budget_approval. Read from source at base eb123b7ccc",
+          "ref": "#28579"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-02",
+          "change": "automated no longer says the e2e is owed by #28579 slice 3: the slice 3 live spec (ui/e2e/live/studio-customize-journey.spec.ts) does not drive a flow, so the live leg stays the run's. No clause, step or fixture changed",
+          "ref": "#28579"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-03",
+          "change": "added step 10 and acceptance[6]: New similar while the override is live. The steps cloned only after the restore, so they could not see the copy keeping the override's overrides block under its new name, which the save gate refused 403 NOT_OVERRIDABLE (#29650, QA-source #29648). automated names the clone-door pin",
+          "ref": "#29650"
         }
       ]
     }

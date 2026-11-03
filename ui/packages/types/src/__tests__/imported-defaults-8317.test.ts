@@ -144,11 +144,13 @@ import {
   checkDashboardWidgetStageOrder,
   checkDashboardWidgetMetricMeasureArity,
   checkDashboardWidgetChartMeasureArity,
+  checkDashboardReservedDateRangeGlobalFilters,
   checkPageRequiresKind,
   checkPageRegionPlacement,
   checkPageDefaultPlacement,
   checkPageMainRegionWidth,
   checkPageRecordBindingPlacement,
+  checkAppLandingItems,
   VIEW_METADATA_MEMBERS as SpecViewMetadataMembers,
   // objectui#12736 — the form option's spec shape: the form-view option.
   FormSelectOptionSchema as SpecFormSelectOptionSchema,
@@ -727,6 +729,9 @@ describe('the import boundary strips every imported default (objectui#8317)', ()
       // `PageNodeSchema` and `PageKindNodeSchema`.
       ['checkDashboardWidgetChartMeasureArity', checkDashboardWidgetChartMeasureArity],
       ['checkPageRequiresKind', checkPageRequiresKind],
+      // objectstack#29213: the spec's reserved-`dateRange` dashboard check, re-attached on
+      // `DashboardComponentSchema` under the same ruling.
+      ['checkDashboardReservedDateRangeGlobalFilters', checkDashboardReservedDateRangeGlobalFilters],
       // objectui#12030's page slot-pair check left this list with the `tabs`
       // slot (objectstack#27053): the spec no longer carries it.
       // objectui#12370's page view-data check left this list with objectui#12666: objectstack#23784
@@ -745,6 +750,9 @@ describe('the import boundary strips every imported default (objectui#8317)', ()
       // `ListViewSchema`, attached on the authored page `list-view` node's bag
       // (`ListViewPropsBag`), whose `type` is the spec's view kind.
       ['checkListViewChartBinding', checkListViewChartBinding],
+      // objectstack#28450: the spec's `AppSchema.landing` check, re-attached on
+      // `AppComponentSchema` under the objectui#7715 ruling.
+      ['checkAppLandingItems', checkAppLandingItems],
     ]);
 
     /**

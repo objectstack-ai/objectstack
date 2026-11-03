@@ -31,7 +31,9 @@ import type { z } from 'zod';
  *   `visible` CEL predicate using {@link featureGatePredicate}.
  * - plugin-auth drift guard (key-set equivalence with `getPublicConfig()`).
  * - platform-objects completeness guard (`feature-gate-guard.test.ts`) —
- *   every path in `gatedInputs` must carry the matching predicate, and every
+ *   every path in `gatedInputs` must resolve to an input whose `visible`
+ *   carries the matching predicate as one of its `&&` conjuncts (a param path
+ *   resolves to the FIRST param on that name or field), and every
  *   `features.*` reference in a `visible` predicate must be booked here.
  *
  * This module is deliberately **import-free** (type-only zod import aside) so
@@ -70,7 +72,10 @@ export type PublicAuthFeatureEntry = {
    * Spec inputs gated on this flag. Path grammar:
    * `<object>.actions.<action>` or `<object>.actions.<action>.params.<name|field>`.
    * The platform-objects completeness guard resolves each path and asserts the
-   * target's `visible` predicate matches {@link featureGatePredicate}.
+   * target's `visible` predicate carries {@link featureGatePredicate} as a
+   * conjunct. A param path resolves to the FIRST param on that name or field;
+   * further params on the same field that reference the flag are booked by the
+   * same path, whatever their gate (see `phoneNumber`).
    * Mutually exclusive with `exempt`.
    */
   gatedInputs?: readonly string[];
@@ -230,12 +235,16 @@ export const PUBLIC_AUTH_FEATURES = {
   phoneNumber: {
     surface: 'crud',
     semantics: 'opt-in',
-    gatedInputs: ['sys_user.actions.create_user.params.phoneNumber'],
+    gatedInputs: ['sys_user.actions.create_user.params.phoneNumber', 'sys_user.actions.create_user.params.email'],
     notes:
       'The fix this registry generalizes: create-user\'s phone field ' +
       'follows the opt-in phoneNumber plugin instead of offering a field ' +
       'the backend refuses. Also read by objectui LoginForm for the ' +
-      'phone+password sign-in mode.',
+      'phone+password sign-in mode. The create_user email path stands for ' +
+      'TWO params on the email field: the first, optional one carries this ' +
+      'gate; the second, required one is NEGATIVELY gated ' +
+      '(has(features.phoneNumber) && features.phoneNumber != true), because ' +
+      'the endpoint requires an email only while phone sign-in is off.',
   },
   // The managed (cloud-hosted, SSO-only) mode — ruling 6341690661 on #25083,
   // Q2 D (one accessor) and Q3 A (this flag, camelCase, hide-when-on).

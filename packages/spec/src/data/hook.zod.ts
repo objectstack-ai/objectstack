@@ -1401,11 +1401,12 @@ export const HookContextSchema = lazySchema(() => z.object({
   /**
    * Referential-Cleanup Marker
    * `true` exactly when THIS write is the engine's own reference cleanup — the
-   * UPDATE `cascadeDeleteRelations` issues against a row that HOLDS a lookup
-   * whose `deleteBehavior` resolves to `set_null`, while the record it
-   * references is being deleted (clearing the slot, or on a `multiple: true`
-   * lookup removing the deleted member). Absent on every other dispatch; read
-   * it as `ctx.referentialFieldClear === true`.
+   * UPDATE `cascadeDeleteRelations` issues against a row that HOLDS a
+   * reference field whose `deleteBehavior` resolves to `set_null` (a `lookup`
+   * or `tree` by default, or a `user` field that declares it, #29253), while
+   * the record it references is being deleted (clearing the slot, or on a
+   * `multiple: true` field removing the deleted member). Absent on every other
+   * dispatch; read it as `ctx.referentialFieldClear === true`.
    *
    * ## Why a declared key (commit 34ce8e7db)
    *
@@ -1458,8 +1459,9 @@ export const HookContextSchema = lazySchema(() => z.object({
   referentialFieldClear: z.boolean().optional().describe(
     "Engine-produced marker: true exactly when this write is the engine's own referential cleanup "
     + "(the set_null cascade UPDATE clearing — or, for multiple: true, removing the deleted member "
-    + 'from — a lookup that references a record being deleted). Absent on every other write, '
-    + 'including a user hand-clearing the same lookup; read as `ctx.referentialFieldClear === true`. '
+    + 'from — a lookup, tree or user field that references a record being deleted, where a user field '
+    + 'takes part only when it declares its deleteBehavior). Absent on every other write, including a '
+    + 'user hand-clearing the same field; read as `ctx.referentialFieldClear === true`. '
     + 'The declared projection of the operation-private `__referentialFieldClear`, carried across '
     + 'the sandbox boundary by contract; server-derived and never client-supplied.',
   ),
@@ -1470,10 +1472,11 @@ export const HookContextSchema = lazySchema(() => z.object({
    * child DELETE `cascadeDeleteRelations` performs for each row that
    * references a record being deleted through a relation whose
    * `deleteBehavior` resolves to `cascade` (a `master_detail` unless it
-   * declares `restrict`; a `lookup` or `tree` that declares `cascade`), at any
-   * depth: a grandchild the child's own cascade removes is marked too. Present
-   * in both phases of that delete (`beforeDelete`, `afterDelete`). Absent on
-   * every other dispatch; read it as `ctx.referentialCascadeDelete === true`.
+   * declares `restrict`; a `lookup`, `tree` or `user` field that declares
+   * `cascade`, the `user` one since #29253), at any depth: a grandchild the
+   * child's own cascade removes is marked too. Present in both phases of that
+   * delete (`beforeDelete`, `afterDelete`). Absent on every other dispatch;
+   * read it as `ctx.referentialCascadeDelete === true`.
    *
    * The delete twin of {@link referentialFieldClear}. That key marks the
    * `set_null` cleanup UPDATE; this one marks the `cascade` child DELETE. A
@@ -1599,6 +1602,46 @@ export const HookContextSchema = lazySchema(() => z.object({
     .describe('Cross-object data access (IScopedContext — `object(name)` + `transaction(cb)`)'),
 
   /**
+   * Save Notice (#28251)
+   *
+   * `ctx.notice('Sent to your manager for approval')` tells the person who
+   * made THIS write what the save set in motion. It is the hook face of the
+   * write's own `onNotice` listener (`WriteObservabilityOptions`), never a
+   * second channel: the engine binds it from the write's options at every
+   * `insert` / `update` dispatch (`before*` and `after*`, one record or each
+   * row of a batch), and a call hands the message to that listener, which
+   * `metadata-protocol`'s `createData` / `updateData` answer as `notice`.
+   *
+   * It is the one spelling every hook face can reach. An in-process handler
+   * calls it like the cast `ctx.input.options` listener; a sandboxed `body`
+   * (and a `handler` the build lowers into one), whose `ctx.input.options`
+   * is the frozen `{ multi, where }` projection, calls it too: the body
+   * runner marshals it as a host function. No capability token: it reads
+   * nothing and writes nothing but the requester's own answer.
+   *
+   * - The message is one non-empty string; anything else is REFUSED with a
+   *   `TypeError` naming the call, so a mistaken call is never a silent no-op.
+   * - One message per write, the listener's rule: a later call replaces an
+   *   earlier one, so the last call before the write answers wins.
+   * - Present on every `insert` / `update` dispatch, whether or not anyone
+   *   listens: a write no person is waiting on (a batch, a seed, an import, a
+   *   flow node's write) passes no listener, and then the call sets nothing.
+   *   Absent on `find` and `delete` dispatches, whose answers carry no notice.
+   * - A refused write answers its error, never a notice, even if a `before*`
+   *   hook set one first. A nested write a hook or a flow makes inside this one
+   *   carries its own options, so its notice never reaches this answer.
+   *
+   * Runtime-only, like {@link api}: a live function, so the RUNTIME schema is
+   * `z.unknown()` (JSON Schema `{}`) and the type is a static cast.
+   */
+  notice: (z.unknown().optional() as unknown as z.ZodOptional<z.ZodType<HookNoticeSetter, HookNoticeSetter>>)
+    .describe(
+      'Tell the person who made THIS insert/update what the save set in motion: `ctx.notice(message)` hands one '
+      + 'non-empty string to the write\'s own `onNotice` listener, answered as the create/update `notice`. Bound '
+      + 'by the engine on every insert/update dispatch (a no-op when nothing listens); absent on find/delete',
+    ),
+
+  /**
    * Current User Info
    * Convenience shortcut for session.userId + additional user metadata.
    * Populated by the engine when available.
@@ -1628,6 +1671,12 @@ export type ResolvedHook = z.output<typeof HookSchema>;
  * the enclosing transaction commits (#7477).
  */
 export type HookEventType = z.input<typeof HookEvent>;
+/**
+ * The function a hook calls as `ctx.notice(message)` (#28251) — see
+ * `HookContext.notice`. Refuses (throws a `TypeError`) a message that is not
+ * a non-empty string.
+ */
+export type HookNoticeSetter = (message: string) => void;
 export type HookContext = z.input<typeof HookContextSchema>;
 /**
  * The engine's dispatch marker (#6966) — see `HookContext.dispatch`. Named so

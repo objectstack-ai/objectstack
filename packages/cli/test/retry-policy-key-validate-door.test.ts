@@ -21,7 +21,7 @@
  * Integration tier: it spawns the source CLI (`packages/cli/vitest-tiers.ts`).
  * Not named `.e2e`, so it runs on every PR and in the merge queue rather than
  * nightly; two spawns, one per fixture, keep that cost to the floor. The CLI
- * runs through `bin/run-dev.js` (source, via tsx), and `@objectstack/spec`
+ * runs through `bin/run-dev.js` (source, under `node`), and `@objectstack/spec`
  * resolves through `exports` to `dist/`.
  */
 
@@ -36,7 +36,6 @@ import { writeDefineStackConfig } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 type Retry = Record<string, unknown>;
 
@@ -109,7 +108,7 @@ interface Run {
 function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...args],
       { cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {

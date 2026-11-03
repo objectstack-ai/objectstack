@@ -20,6 +20,9 @@ import { actionInvocationFailure, recordActionInvocation, withActionSurface } fr
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 import { readDispatchedBody } from '../deferred-request-body.js';
+// [#28715] The engine's own reading of "this field declares options" (its
+// `label()` map is built from it), never a second spelling here.
+import { declaresOptions } from '@objectstack/formula';
 // [#15705] The resume door's one refusal table, shared with
 // `POST /automation/:name/runs/:runId/resume` so the two doors answer one
 // engine result identically.
@@ -601,6 +604,18 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
         (await readMergedItems(await getProtocol(), 'object')) as any[] | undefined;
 
     /**
+     * The one object `describe_object` describes and `validate_expression`
+     * judges against: from the listing {@link readMergedObjects} reads, or the
+     * metadata service's by-name read on a host with none.
+     */
+    const readServedObject = async (name: string): Promise<any> => {
+        const merged = await readMergedObjects();
+        return merged !== undefined
+            ? merged.find((o: any) => o?.name === name)
+            : await ((await getMeta()) as any)?.getObject?.(name);
+    };
+
+    /**
      * [#25139] The object definitions `list_objects` lists: the merged listing,
      * or the metadata service's on a host with none. `list_actions`,
      * `run_action` and `resume_run` collect object-embedded actions from the
@@ -683,10 +698,7 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
         // can describe, and a name the listing omits (a disabled package's
         // object among them) is "not found" here too.
         describeObject: async (name: string) => {
-            const merged = await readMergedObjects();
-            const def: any = merged !== undefined
-                ? merged.find((o: any) => o?.name === name)
-                : await ((await getMeta()) as any)?.getObject?.(name);
+            const def: any = await readServedObject(name);
             if (!def) return null;
             const fields = def.fields ?? {};
             return {
@@ -700,6 +712,17 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
                 })),
                 enableFeatures: def.enable ?? {},
             };
+        },
+        // [#28715] The fields `validate_expression` judges a `label()` call
+        // against, from the object `describeObject` reads: the served object,
+        // where a picklist-bound field carries its list's resolved `options`,
+        // so the served-form predicate is the one that matches.
+        optionFieldsOf: async (name: string): Promise<readonly string[] | null> => {
+            const def: any = await readServedObject(name);
+            if (!def) return null;
+            return Object.entries(def.fields ?? {})
+                .filter(([, f]) => declaresOptions(f))
+                .map(([k]) => k);
         },
         query: async (object: string, o: any) => {
             const query: any = {};
@@ -865,6 +888,9 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
                 // an API key) is LISTED, marked with the refusal `run_action`
                 // would answer — the same table, the same sentence — so an
                 // agent can explain the gap instead of discovering it.
+                // [#28943] …and one the target's per-object gate refuses for
+                // that credential (a `sys_api_key` write under an API key),
+                // marked with that gate's own code and sentence.
                 const refusal = actionExec.apiForwardCredentialRefusal(context, action);
                 out.push({
                     ...actionExec.summarizeAction(deps, action, obj, objectName, flow ?? undefined),
@@ -897,11 +923,39 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
         // The `external-datasource` service Studio's datasource page reaches
         // through `…/external/tables` and `…/tables/:remote/import`, refused
         // on the same two capabilities those routes gate on.
-        listRemoteTables: async (datasource: string, opts: { schema?: string }) =>
-            (await federationService(deps, context, ec, 'read')).listRemoteTables(datasource, opts),
-        importObject: async (datasource: string, remoteName: string, opts: { name?: string; writable?: boolean }) =>
-            (await federationService(deps, context, ec, 'write')).importObject(datasource, remoteName, opts),
+        //
+        // [#28938] Carried only for an envelope holding one of those two
+        // capabilities. `wireBridgeTools` (`@objectstack/mcp`) registers the
+        // pair only on a bridge carrying both members, so without them
+        // `tools/list` omits the pair —
+        // the shape `list_actions` already has, which hides an action its
+        // caller may not run. The case that made this matter: the `/mcp` door
+        // hands an OAuth agent the user's system capabilities only under
+        // `actions:execute`, so a `metadata:write`-only grant holds none and
+        // was listed two tools whose every call answered 403, for an
+        // administrator too. Read off the SAME envelope the per-call gate
+        // reads ({@link heldFederationCapabilities}), so listing and calling
+        // cannot disagree; nothing a grant can do changes.
+        ...(heldFederationCapabilities(ec).length > 0
+            ? {
+                listRemoteTables: async (datasource: string, opts: { schema?: string }) =>
+                    (await federationService(deps, context, ec, 'read')).listRemoteTables(datasource, opts),
+                importObject: async (datasource: string, remoteName: string, opts: { name?: string; writable?: boolean }) =>
+                    (await federationService(deps, context, ec, 'write')).importObject(datasource, remoteName, opts),
+            }
+            : {}),
     };
+}
+
+/**
+ * [#28938] The federation capabilities this request's envelope holds — the
+ * one read both the bridge's listing decision and {@link federationService}'s
+ * per-call gate make, so a tool is listed exactly where some call of the pair
+ * can pass.
+ */
+function heldFederationCapabilities(ec: any): string[] {
+    const held: unknown[] = Array.isArray(ec?.systemPermissions) ? ec.systemPermissions : [];
+    return [FEDERATION_READ_CAPABILITY, FEDERATION_WRITE_CAPABILITY].filter((cap) => held.includes(cap));
 }
 
 /**
@@ -918,8 +972,7 @@ async function federationService(
     kind: 'read' | 'write',
 ): Promise<IExternalDatasourceService> {
     const required = kind === 'write' ? FEDERATION_WRITE_CAPABILITY : FEDERATION_READ_CAPABILITY;
-    const held: unknown[] = Array.isArray(ec?.systemPermissions) ? ec.systemPermissions : [];
-    if (!held.includes(required)) {
+    if (!heldFederationCapabilities(ec).includes(required)) {
         throw Object.assign(
             new Error(
                 kind === 'write'

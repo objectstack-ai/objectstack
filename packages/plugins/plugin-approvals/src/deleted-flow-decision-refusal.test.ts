@@ -194,7 +194,12 @@ describe('a decision on a run whose flow is gone is refused before it is recorde
     expect(await automation.hasSuspendedRun(runId), 'the run row is untouched by the refusal').toBe(true);
   });
 
-  it('parked node edited away: the same refusal, nothing recorded', async () => {
+  it('parked node gone and the body the run started on unrecoverable: the same refusal, nothing recorded', async () => {
+    // [#28405] A plain republish no longer reaches this refusal: the run
+    // resumes on the flow body it started on. The parked node is lost only
+    // when that body is gone too: withdrawn from the engine (which forgets the
+    // bodies it held) and never stored in a metadata history.
+    automation.withdrawFlow('scratch_approval');
     automation.registerFlow('scratch_approval', scratchFlow({ withApprovalNode: false }) as never);
 
     const err = await approve();

@@ -31,7 +31,7 @@ import type { Dashboard } from '@objectstack/spec/ui';
 export const PipelineDashboard: Dashboard = {
   name: 'pipeline_dashboard',
   label: 'Pipeline Dashboard',
-  description: 'Aggregate view of the sales pipeline with period-over-period comparisons.',
+  description: 'The sales pipeline at a glance, compared with earlier periods.',
   columns: 12,
   widgets: [
     // --- Row 1: KPI tiles -------------------------------------------------
@@ -45,7 +45,7 @@ export const PipelineDashboard: Dashboard = {
       id: 'total_pipeline',
       type: 'metric',
       title: 'Total Pipeline',
-      description: 'Sum of opportunity amounts across open stages.',
+      description: 'Total value of all open opportunities.',
       filter: { stage: { $nin: ['closed_won', 'closed_lost'] } },
       dataset: 'opportunity_metrics',
       values: ['total_amount'],
@@ -55,7 +55,7 @@ export const PipelineDashboard: Dashboard = {
       id: 'won_this_quarter',
       type: 'metric',
       title: 'Won This Quarter',
-      description: 'Revenue closed-won in the current quarter, compared to the previous quarter.',
+      description: 'Value of deals won this quarter, compared with last quarter.',
       filter: {
         stage: 'closed_won',
         close_date: {
@@ -72,7 +72,7 @@ export const PipelineDashboard: Dashboard = {
       id: 'avg_deal_size_yoy',
       type: 'metric',
       title: 'Avg Deal Size (YoY)',
-      description: 'Average won-deal value this year vs the same window last year.',
+      description: 'Average value of deals won this year, compared with the same period last year.',
       filter: {
         stage: 'closed_won',
         close_date: {
@@ -91,7 +91,7 @@ export const PipelineDashboard: Dashboard = {
       id: 'pipeline_trend_90d',
       type: 'line',
       title: 'Pipeline Trend (12 months)',
-      description: 'Opportunity count bucketed by close-month for the last year, with a sliding overlay of the prior year for compareTo.',
+      description: 'Opportunities by expected close month over the last 12 months, compared with the year before.',
       filter: {
         close_date: { $gte: '{1_years_ago}', $lte: '{today}' },
       },
@@ -107,7 +107,7 @@ export const PipelineDashboard: Dashboard = {
       id: 'opportunities_by_stage',
       type: 'bar',
       title: 'Opportunities by Stage',
-      description: 'Count grouped by stage with previous-quarter overlay (compareTo).',
+      description: 'Opportunities expected to close this quarter, by stage, compared with last quarter.',
       filter: {
         close_date: {
           $gte: '{current_quarter_start}',
@@ -126,7 +126,7 @@ export const PipelineDashboard: Dashboard = {
       id: 'pipeline_by_industry',
       type: 'pie',
       title: 'Open Pipeline by Stage',
-      description: 'Open-pipeline revenue split by pipeline stage. Pie/donut/funnel ignore `compareTo`.',
+      description: 'Value of open opportunities, split by stage.',
       filter: { stage: { $nin: ['closed_won', 'closed_lost'] } },
       dataset: 'opportunity_metrics',
       dimensions: ['stage'],

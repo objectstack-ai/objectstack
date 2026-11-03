@@ -842,11 +842,15 @@ const DataTableRowActionsMenu: React.FC<{
         <Button
           variant="ghost"
           size="icon"
-          // objectui#12423 — shown on row hover, on focus-within, on a selected
-          // row, while its menu is open and on a coarse pointer; hidden by
-          // OPACITY only, so it keeps its Tab stop and its accessible name.
-          // `RowActionMenu` (`@object-ui/plugin-grid`) carries the same set.
-          className="h-8 w-8 opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-within/row:opacity-100 group-data-[state=selected]/row:opacity-100 data-[state=open]:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100"
+          // Drawn on every row at rest, on every pointer type, in the muted
+          // tone (objectstack#28923): an `Actions` header over a column of cells
+          // that look empty until the pointer reaches a row reads as "no
+          // actions". Full strength on row hover, on focus-within, on a
+          // selected row, on its own keyboard focus, while its menu is open and
+          // on a coarse pointer, where no hover will ever lift it. The tone is a
+          // text colour, never an opacity. `RowActionMenu`
+          // (`@object-ui/plugin-grid`, objectstack#28871) carries the same set.
+          className="h-8 w-8 text-muted-foreground transition-colors group-hover/row:text-foreground group-focus-within/row:text-foreground group-data-[state=selected]/row:text-foreground data-[state=open]:text-foreground focus-visible:text-foreground pointer-coarse:text-foreground"
           onClick={(e) => e.stopPropagation()}
           aria-label={t('table.rowActions')}
           data-testid="data-table-row-actions"

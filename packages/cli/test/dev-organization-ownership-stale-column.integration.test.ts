@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 40 — spawns the real producer once per single-cause fixture: two sequential boots of the built `os dev` on one database file (a fresh boot that creates the tables the stale shape is staged on, then the refused boot that runs the upgrade ceremony and starts), each stopped by SIGTERM; slowest CI reading 29.0 s of the five scheduled runs 41199450735…41271604267, x 1.25, rounded up
 
 /**
  * #26615 — the card's third target, run against the BUILT CLI: a development

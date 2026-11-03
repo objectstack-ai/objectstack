@@ -134,9 +134,15 @@ const OBJECTS = [
 let rootWidth = 0;
 let dataSource: { find: ReturnType<typeof vi.fn> } & Record<string, unknown>;
 
+/**
+ * The related lists' totals: both have records, so their tabs sit on the tab
+ * row, which keeps empty lists' tabs in its dropdown (objectstack#28469).
+ */
+const RELATED_TOTALS: Record<string, number> = { showcase_task: 2, showcase_note: 1 };
+
 function makeDataSource() {
   return {
-    find: vi.fn(async () => ({ data: [], total: 0 })),
+    find: vi.fn(async (objectName: string) => ({ data: [], total: RELATED_TOTALS[objectName] ?? 0 })),
     create: vi.fn(async (_o: string, row: unknown) => row),
     findOne: vi.fn(async (_o: string, recordId: string) => ({
       id: recordId,
@@ -228,7 +234,9 @@ const rightPanels = (container: HTMLElement) =>
  * The page's only tablist is its tab row (objectstack#27524, Target 8): the
  * same tabs on every tier, the active one as `active`.
  */
-const expectTabRowOnly = (active = 'overview') => {
+const expectTabRowOnly = async (active = 'overview') => {
+  // The panels' tabs join the row once their counts land (objectstack#28469).
+  await waitFor(() => expect(document.querySelector('[role="tab"][data-record-tab="showcase_note.project"]')).not.toBeNull());
   const lists = screen.getAllByRole('tablist');
   expect(lists).toHaveLength(1);
   expect(lists[0].closest('[data-record-tab-row]')).not.toBeNull();
@@ -250,7 +258,7 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     expect(shown(container)).toBe('details right');
     expect(columnsGrid(container)).toContain('23.75rem');
     expect(detailsGrid(container)).toContain('@lg:grid-cols-3');
-    expectTabRowOnly();
+    await expectTabRowOnly();
     expect(rightPanels(container)).toEqual(['timeline', 'showcase_task.project', 'showcase_note.project']);
     // No resident timeline column and no rail: the two columns are all.
     expect(column(container, 'timeline')).toBeNull();
@@ -277,7 +285,7 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     // The same panels as the wide tier — no rail to open first.
     expect(rightPanels(container)).toEqual(['timeline', 'showcase_task.project', 'showcase_note.project']);
     expect(screen.queryByTestId('record-related-rail-toggle')).toBeNull();
-    expectTabRowOnly();
+    await expectTabRowOnly();
   });
 
   it.each([
@@ -289,7 +297,7 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     expect(tierOf(container)).toBe('stack');
     expect(shown(container)).toBe('details');
     expect(columnsGrid(container)).toContain('grid-cols-1');
-    expectTabRowOnly();
+    await expectTabRowOnly();
     // The panels follow the details, in the right column's order.
     const details = column(container, 'details')!;
     const right = column(container, 'right')!;
@@ -321,14 +329,14 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     const { container } = renderPage({ width: 720, embedded: true });
     await screen.findAllByText('Tasks', undefined, { timeout: 5000 });
     expect(tierOf(container)).toBe('stack');
-    expectTabRowOnly();
+    await expectTabRowOnly();
   });
 
   it('`?tab=` addresses no strip on a laid-out page; `?related=timeline` is the 动态 tab: the full stream with its chips', async () => {
     const tabbed = renderPage({ width: 720, search: '?tab=related' });
     await screen.findAllByText('Tasks', undefined, { timeout: 5000 });
     expect(tierOf(tabbed.container)).toBe('stack');
-    expectTabRowOnly();
+    await expectTabRowOnly();
     expect(column(tabbed.container, 'details')).not.toBeNull();
     tabbed.unmount();
 
@@ -344,7 +352,7 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     expect(face.getAttribute('aria-label')).toBe('Activity');
     expect(face.querySelector('[data-stream-filters]')).not.toBeNull();
     expect(face.querySelector('[data-record-timeline-peek]')).toBeNull();
-    expectTabRowOnly('timeline');
+    await expectTabRowOnly('timeline');
     // The face takes the page: no columns under it.
     expect(container.querySelector('[data-record-columns]')).toBeNull();
     await waitFor(() => expect(auditReads()).toBeGreaterThan(0));

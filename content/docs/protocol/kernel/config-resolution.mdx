@@ -75,8 +75,14 @@ Two rules follow from the walk, and both are enforced in `SettingsService`:
   array concatenation. A row at a higher scope replaces the layer below it
   wholesale.
 - **A lock anywhere up the chain locks the effective value.** An `OS_*`
-  override always locks; a row may additionally carry `locked=true`, and then a
-  write against any *lower* scope is rejected with `SETTINGS_LOCKED`.
+  override always locks; a global or tenant row may additionally carry
+  `locked=true`. A locked row is platform-locked: a write against any *lower*
+  scope is rejected with `SETTINGS_LOCKED`, and so is a write at the row's own
+  scope from anyone but the platform — an organization's administrator cannot
+  save over its own organization's locked tenant row. Only a platform
+  administrator (`manage_platform_settings`) or a trusted in-process caller
+  writes through a lock at its own scope, and the row stays locked. A user row
+  carries no lock.
 
 How far down the cascade a key is even eligible to travel is **declared, not
 chosen by the caller** — see [Scope is declared](#scope-is-declared).
@@ -213,7 +219,7 @@ Writes fail loudly rather than silently degrading:
 | Condition | Thrown | Code |
 | :--- | :--- | :--- |
 | An `OS_*` override is in force for the key | `SettingsLockedError` | `SETTINGS_LOCKED` |
-| A row at an upper scope has `locked=true` | `SettingsLockedError` | `SETTINGS_LOCKED` (`locked-by-<scope>`) |
+| A row at an upper scope has `locked=true`, or a row at the write's own scope has it and the caller is not the platform | `SettingsLockedError` | `SETTINGS_LOCKED` (`locked-by-<scope>`) |
 | Key not declared by the manifest | `UnknownKeyError` | `SETTINGS_UNKNOWN_KEY` |
 | Namespace has no manifest | `UnknownNamespaceError` | `SETTINGS_UNKNOWN_NAMESPACE` |
 | Patch would leave a visible required field empty, or violates a declared constraint | `SettingsValidationError` | per-key `FieldError` list (ADR-0114) |

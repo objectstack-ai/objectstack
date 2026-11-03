@@ -35,7 +35,6 @@ export const SysActivity = ObjectSchema.create({
   description: 'Recent activity stream entries (lightweight, denormalized)',
   displayNameField: 'summary',
   nameField: 'summary', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{type} · {summary}',
   highlightFields: ['timestamp', 'type', 'actor_name', 'summary'],
 
   fields: {
@@ -196,7 +195,7 @@ export const SysActivity = ObjectSchema.create({
     // registered-but-broken with the ActivityPointer lookup the read path
     // assumes (ADR-0052 §5) silently absent.
     record_id: Field.text({
-      label: 'Record ID',
+      label: 'Record',
       required: false,
       readonly: true,
       searchable: true,

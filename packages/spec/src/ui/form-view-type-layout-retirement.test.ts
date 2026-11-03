@@ -16,8 +16,10 @@
  *   2. The split-only keys `sections[].pane` (and the legacy `groups[].pane`),
  *      `splitSize`, `splitResizable` and — since the renderer half, #27159 —
  *      `splitDirection` are `retiredKey()` tombstones, refused on every
- *      layout. `drawerSide`, `drawerWidth` and `modalSize` stay declared — a
- *      stated boundary, pinned as one.
+ *      layout. `modalSize` stays declared — a stated boundary, pinned as one.
+ *      ([#29012] `drawerSide` / `drawerWidth` stayed here and were retired
+ *      later in the same release: `form-view-drawer-keys-removed`, pinned in
+ *      `form-view-drawer-keys-retirement.test.ts`.)
  *   3. The `object-form` page block (#27159): `formType` drops `split` and
  *      keeps `drawer` / `modal` (the block renderer is the caller that opens
  *      those containers); its `splitDirection`, `splitSize`, `splitResizable`
@@ -226,16 +228,13 @@ describe('the split-only keys — `pane`, `splitSize`, `splitResizable`, `splitD
     ]));
   });
 
-  it('STATED BOUNDARY: `drawerSide`, `drawerWidth` and `modalSize` stay declared', () => {
-    // `modalSize` is read by the console's record dialog on every layout; the
-    // other two feed the React `ObjectForm` block contract (`react-blocks.ts`),
-    // whose `formType='drawer'` container still reads them (#27153 keeps their
-    // enforce-or-remove question for form views).
+  it('STATED BOUNDARY: `modalSize` stays declared', () => {
+    // `modalSize` is read by the console's record dialog on every layout.
+    // [#29012] `drawerSide` / `drawerWidth` left this boundary: they are
+    // tombstones now (`form-view-drawer-keys-retirement.test.ts`).
     const r = FormViewSchema.safeParse({
       type: 'simple',
       sections: SECTIONS,
-      drawerSide: 'left',
-      drawerWidth: '480px',
       modalSize: 'lg',
     });
     expect(r.success).toBe(true);
@@ -415,7 +414,8 @@ describe(`the D2 conversion ${CONVERSION_ID}`, () => {
           splitDirection: 'vertical',
           sections: [{ label: 'A', pane: 'primary', fields: ['name'] }, { label: 'B', pane: 'secondary', fields: ['email'] }],
         },
-        quick: { type: 'drawer', drawerSide: 'left', sections: [{ label: 'Q', fields: ['status'] }] },
+        // [#29012] The bystander is `modalSize`: `drawerSide` is stripped by its own conversion now.
+        quick: { type: 'drawer', modalSize: 'lg', sections: [{ label: 'Q', fields: ['status'] }] },
       },
     };
     const notices: ConversionNotice[] = [];
@@ -432,7 +432,7 @@ describe(`the D2 conversion ${CONVERSION_ID}`, () => {
     expect(parsed.formViews?.beside?.type).toBe('simple');
     expect(parsed.formViews?.beside).not.toHaveProperty('splitDirection');
     expect(parsed.formViews?.quick?.type).toBe('simple');
-    expect(parsed.formViews?.quick?.drawerSide).toBe('left');
+    expect(parsed.formViews?.quick?.modalSize).toBe('lg');
     // A live layout is the author's and is never touched.
     expect(out.form).toBe(row.form);
     // Copy-on-write: the stored row is not mutated.

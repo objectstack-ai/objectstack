@@ -31,7 +31,11 @@
  *    as before. Redaction is a read-path SERVING act.
  *
  * The write-path carry-forward (a redacted-body PUT must not persist credential
- * deletion) is also #8154's, deliberately not represented here.
+ * deletion) is also #8154's, and lives with the consumer. The one fact about
+ * it a redactor states is which withheld positions it must NOT carry forward
+ * (`MetadataRedactionResult.notCarriedForwardKeys`, #28640 ②B): the redactor is
+ * the only party that knows a position is dead, and the carry-forward reads it
+ * off the same result it already re-grafts from.
  *
  * ## Why `datasource` is a BUILT-IN, not a plugin registration
  *
@@ -60,11 +64,13 @@
  * and the derivation is present from module load on every composition.
  *
  * Precedence: an explicit registration wins, then a built-in, then the
- * derivation. `datasource` (schema-reading plus URL scrubbing) and `flow`
- * (nested regions, write-path strip) keep their explicit redactors.
+ * derivation. `datasource` (schema-reading plus URL scrubbing), `connector`
+ * (positions inside a union and a provider-owned record) and `flow` (nested
+ * regions, write-path strip) keep their explicit redactors.
  */
 
 import { redactDatasourceConfig } from '../data/datasource-credential-redaction';
+import { redactConnectorItem } from '../integration/connector-credential-redaction';
 import { derivedCredentialRedactorFor } from './metadata-credential-fields';
 import {
   getMetadataTypeSchema,
@@ -80,7 +86,24 @@ import {
   isStoredMetadataBodyObject,
 } from './stored-metadata-body-objects';
 
-/** What a {@link MetadataTypeRedactor} returns: the servable item, and what was withheld. */
+/**
+ * What a {@link MetadataTypeRedactor} returns: the servable item, what was
+ * withheld, and which of the withheld positions a save drops instead of
+ * keeping.
+ *
+ * ## What a caller does with each list
+ *
+ *  - A READ exit serves `item` and treats `redactedKeys` as the whole answer
+ *    to "was anything withheld?" — every withheld position is in it, whichever
+ *    class it belongs to, so a reader that knows only `redactedKeys` withholds
+ *    and reports exactly what it did before `notCarriedForwardKeys` existed.
+ *  - A SAVE's carry-forward (the write-path inverse in
+ *    `@objectstack/metadata-protocol`) re-grafts the stored value at each
+ *    `redactedKeys` position the incoming body sends back as served — EXCEPT
+ *    the positions `notCarriedForwardKeys` names. Those it never re-grafts, so
+ *    a save of the served form drops them from the stored row, and the save
+ *    names each one it dropped on its answer, so a drop at rest is loud.
+ */
 export interface MetadataRedactionResult {
   /** The item with credential material removed. A NEW object — never the input mutated. */
   item: Record<string, unknown>;
@@ -91,8 +114,27 @@ export interface MetadataRedactionResult {
    * {@link getMetadataTypeRedactor} answering `undefined`. Serving this beside
    * the item is the difference between a caller that knows a credential is
    * being withheld and one that infers it from an absence.
+   *
+   * Names EVERY withheld position, the {@link notCarriedForwardKeys} ones
+   * included: an empty list still means "nothing withheld".
    */
   redactedKeys: string[];
+  /**
+   * [#28640 ②B, ruling 6566912252] The positions among {@link redactedKeys}
+   * that are withheld AND NOT CARRIED FORWARD — the same dotted spelling,
+   * sorted, each one also in `redactedKeys`. A save of the served form drops
+   * the stored value at each of them instead of re-grafting it: the class is
+   * for a position nothing reads and no door accepts any more, where keeping
+   * the stored value only keeps cleartext at rest (a connector's undeclared
+   * `auth` keys, refused at the save door since the instance-auth shapes went
+   * strict).
+   *
+   * Optional, and absent means `[]`: every withheld position is carried
+   * forward, which is what every redactor that does not set it — the
+   * derivation, the `datasource` built-in, any registered one — has always
+   * meant. A redactor sets it only when it names at least one position.
+   */
+  notCarriedForwardKeys?: string[];
 }
 
 /**
@@ -103,27 +145,42 @@ export interface MetadataRedactionResult {
 export type MetadataTypeRedactor = (item: Record<string, unknown>) => MetadataRedactionResult;
 
 /**
- * The built-in `datasource` redactor: redacts the driver `config` through the
- * one credential-key definition in `data/datasource-credential-redaction.ts`
- * (derived from each driver's `z.never()` contract + the pre-#8078 alias list
- * + turso's retired `encryptionKey`, which a legacy stored row may still
- * carry), and leaves every other key of the item —
- * `_diagnostics` included — byte-for-byte.
+ * The built-in `datasource` redactor, in two halves:
+ *
+ *  - the driver `config`, through the one credential-key definition in
+ *    `data/datasource-credential-redaction.ts` (derived from each driver's
+ *    `z.never()` contract + the pre-#8078 alias list + turso's retired
+ *    `encryptionKey`, which a legacy stored row may still carry);
+ *  - every OTHER position the datasource schema marks as a credential
+ *    (`.meta({ credential: … })`, today `ssl.key`), through the same
+ *    derivation the third resolution uses. The built-in wins the lookup, so
+ *    without this half a marker on `DatasourceSchema` would never be read.
+ *
+ * Every other key of the item — `_diagnostics` included — is left
+ * byte-for-byte, and an item with nothing to withhold is returned by
+ * reference.
  */
 function redactDatasourceItem(item: Record<string, unknown>): MetadataRedactionResult {
+  let served = item;
+  const redactedKeys: string[] = [];
+
   const config = item.config;
-  if (!config || typeof config !== 'object' || Array.isArray(config)) {
-    return { item, redactedKeys: [] };
+  if (config && typeof config === 'object' && !Array.isArray(config)) {
+    const redacted = redactDatasourceConfig(item.driver, config as Record<string, unknown>);
+    if (redacted.redactedKeys.length > 0) {
+      served = { ...served, config: redacted.config };
+      redactedKeys.push(...redacted.redactedKeys.map((key) => `config.${key}`));
+    }
   }
-  const { config: redacted, redactedKeys } = redactDatasourceConfig(
-    item.driver,
-    config as Record<string, unknown>,
-  );
+
+  const marked = derivedCredentialRedactorFor(getMetadataTypeSchema('datasource'))?.(served);
+  if (marked && marked.redactedKeys.length > 0) {
+    served = marked.item;
+    redactedKeys.push(...marked.redactedKeys);
+  }
+
   if (redactedKeys.length === 0) return { item, redactedKeys: [] };
-  return {
-    item: { ...item, config: redacted },
-    redactedKeys: redactedKeys.map((key) => `config.${key}`),
-  };
+  return { item: served, redactedKeys: redactedKeys.sort() };
 }
 
 /**
@@ -131,9 +188,16 @@ function redactDatasourceItem(item: Record<string, unknown>): MetadataRedactionR
  * A type omitted here serves its stored body unredacted (most types hold no
  * secret). See the module note for why `datasource` is wired here rather than
  * registered from the opt-in admin plugin.
+ *
+ * `connector` is a built-in for the same reason: its rows reach the metadata
+ * save door with or without any connector plugin mounted. Its credential
+ * positions sit inside a union (`auth`) and a provider-owned record
+ * (`providerConfig`), which the schema derivation does not reach, so the
+ * redactor names them (`integration/connector-credential-redaction.ts`).
  */
 const BUILTIN_METADATA_TYPE_REDACTORS: Record<string, MetadataTypeRedactor> = {
   datasource: redactDatasourceItem,
+  connector: redactConnectorItem,
 };
 
 /** Runtime-extensible overlay populated via `registerMetadataTypeRedactor`. */

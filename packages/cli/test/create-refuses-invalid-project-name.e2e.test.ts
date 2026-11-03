@@ -44,7 +44,7 @@
  * length rule into the shared validator would break `init` for a name npm
  * accepts; this test is what says so.
  *
- * Spawned through `bin/run-dev.js` + tsx, so the suite does not depend on
+ * Spawned through `bin/run-dev.js` + `node`, so the suite does not depend on
  * `packages/cli/dist` having been built — `@objectstack/cli#test` depends on
  * `^build` only (the reason `invocation-loudness.e2e.test.ts` spawns that way).
  */
@@ -67,9 +67,8 @@ import { NPM_PACKAGE_NAME_MAX_LENGTH, validateProjectName } from '../src/command
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
-/** oclif + tsx cold start with every command module loaded; ~2-10 s when healthy. */
+/** oclif cold start with every command module loaded; ~2-10 s when healthy. */
 const RUN_TIMEOUT_MS = 180_000;
 
 /** The card's input: a capital and a space, both npm-invalid. */
@@ -93,7 +92,7 @@ interface Run {
 function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...args],
       { cwd, maxBuffer: 8 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {

@@ -159,6 +159,149 @@ describe('FAIL-CLOSED: the datasource redactor is a BUILT-IN, not a plugin regis
   });
 });
 
+describe('the datasource built-in also withholds the credential members its schema marks (the declared ssl block)', () => {
+  const redact = (item: Record<string, unknown>) => getMetadataTypeRedactor('datasource')!(item);
+
+  it('ssl.key is dropped and named; the public ssl members stay', () => {
+    const stored = {
+      name: 'tls_pg',
+      driver: 'postgres',
+      config: { host: 'db.internal', database: 'app' },
+      ssl: { enabled: true, rejectUnauthorized: true, ca: 'CA_PEM', cert: 'CERT_PEM', key: 'TEST_PLACEHOLDER_KEY' },
+    };
+    const result = redact(stored);
+    expect(result.item.ssl).toEqual({ enabled: true, rejectUnauthorized: true, ca: 'CA_PEM', cert: 'CERT_PEM' });
+    expect(JSON.stringify(result.item)).not.toContain('TEST_PLACEHOLDER_KEY');
+    expect(result.redactedKeys).toEqual(['ssl.key']);
+    // Pure: the stored body keeps its key for the connect path.
+    expect(stored.ssl.key).toBe('TEST_PLACEHOLDER_KEY');
+  });
+
+  it('with no config object at all, ssl.key is still withheld', () => {
+    const result = redact({ name: 'x', driver: 'postgres', ssl: { enabled: true, key: 'TEST_PLACEHOLDER_KEY', cert: 'CERT_PEM' } });
+    expect(result.item.ssl).toEqual({ enabled: true, cert: 'CERT_PEM' });
+    expect(result.redactedKeys).toEqual(['ssl.key']);
+  });
+
+  it('config and ssl credentials together are both withheld, in one sorted list', () => {
+    const result = redact({
+      name: 'x',
+      driver: 'postgres',
+      config: { host: 'h', password: 'TEST_SECRET' },
+      ssl: { enabled: true, key: 'TEST_PLACEHOLDER_KEY' },
+    });
+    expect(result.item).toEqual({ name: 'x', driver: 'postgres', config: { host: 'h' }, ssl: { enabled: true } });
+    expect(result.redactedKeys).toEqual(['config.password', 'ssl.key']);
+  });
+
+  it('controls: no ssl block, and an ssl block with no secret member, are served unchanged by reference', () => {
+    const noSsl = { name: 'x', driver: 'postgres', config: { host: 'h' } };
+    expect(redact(noSsl)).toEqual({ item: noSsl, redactedKeys: [] });
+    expect(redact(noSsl).item).toBe(noSsl);
+    const publicSsl = { name: 'x', driver: 'postgres', config: { host: 'h' }, ssl: { enabled: true, ca: 'CA_PEM', cert: 'CERT_PEM' } };
+    expect(redact(publicSsl).item).toBe(publicSsl);
+    expect(redact(publicSsl).redactedKeys).toEqual([]);
+  });
+
+  it('the cleared form (an empty key) holds nothing, so it is served as written and not reported', () => {
+    const cleared = { name: 'x', driver: 'postgres', ssl: { enabled: true, key: '' } };
+    expect(redact(cleared)).toEqual({ item: cleared, redactedKeys: [] });
+  });
+
+  it('the stored-row seam withholds ssl.key from a serialized datasource body', () => {
+    const row = {
+      type: 'datasource',
+      name: 'tls_pg',
+      metadata: JSON.stringify({ name: 'tls_pg', driver: 'postgres', ssl: { enabled: true, key: 'TEST_PLACEHOLDER_KEY' } }),
+    };
+    const served = redactStoredMetadataRow('sys_metadata', row) as Record<string, unknown>;
+    expect(String(served.metadata)).not.toContain('TEST_PLACEHOLDER_KEY');
+    expect(JSON.parse(String(served.metadata)).ssl).toEqual({ enabled: true });
+  });
+});
+
+describe('FAIL-CLOSED: the connector redactor is a BUILT-IN as well', () => {
+  // A connector row reaches the metadata save door with or without any
+  // connector plugin mounted — the same fail-open shape as `datasource` — and
+  // its credential positions sit where the schema derivation does not reach
+  // (a union and a provider-owned record). Every value is a placeholder.
+  const stored = {
+    name: 'vendor',
+    label: 'Vendor',
+    type: 'api',
+    provider: 'rest',
+    providerConfig: { baseUrl: 'https://vendor.example.com', defaultHeaders: { Authorization: 'TEST_PLACEHOLDER_A' } },
+    auth: { type: 'bearer', credentialRef: 'VENDOR_TOKEN', token: 'TEST_PLACEHOLDER_B' },
+  };
+
+  it('is resolvable with zero registration calls, and the snapshot lists it', () => {
+    expect(getMetadataTypeRedactor('connector')).toBeDefined();
+    expect(listMetadataTypeRedactorTypes()).toContain('connector');
+  });
+
+  it('withholds the inline secret and the header map, and names both', () => {
+    const { item, redactedKeys } = getMetadataTypeRedactor('connector')!(stored);
+    expect(redactedKeys).toEqual(['auth.token', 'providerConfig.defaultHeaders']);
+    expect(JSON.stringify(item)).not.toMatch(/TEST_PLACEHOLDER/);
+    expect(item.auth).toEqual({ type: 'bearer', credentialRef: 'VENDOR_TOKEN' });
+  });
+
+  it('the stored-row seam withholds both on a serialized body, under either type spelling', () => {
+    for (const type of ['connector', 'connectors']) {
+      const row = { id: 'r1', type, name: 'vendor', metadata: JSON.stringify(stored) };
+      const served = redactStoredMetadataRow('sys_metadata', row);
+      expect(served.metadata, type).not.toMatch(/TEST_PLACEHOLDER/);
+      expect(JSON.parse(served.metadata as string).providerConfig.baseUrl, type).toBe('https://vendor.example.com');
+    }
+  });
+});
+
+// [#28640 ②B, ruling 6566912252] `notCarriedForwardKeys` is a SUBSET of
+// `redactedKeys`: a reader that knows only `redactedKeys` still withholds a
+// not-carried-forward position, and every redactor that does not set it means
+// "carry every withheld position forward".
+describe('notCarriedForwardKeys — the withheld positions a save drops', () => {
+  const onlyUndeclaredAuth = {
+    name: 'vendor',
+    label: 'Vendor',
+    type: 'api',
+    provider: 'rest',
+    providerConfig: { baseUrl: 'https://vendor.example.com' },
+    auth: { type: 'bearer', credentialRef: 'VENDOR_TOKEN', token: 'TEST_PLACEHOLDER_ONLY_AUTH' },
+  };
+
+  it('the connector names its undeclared `auth` key in both lists', () => {
+    const result = getMetadataTypeRedactor('connector')!(onlyUndeclaredAuth);
+    expect(result.redactedKeys).toEqual(['auth.token']);
+    expect(result.notCarriedForwardKeys).toEqual(['auth.token']);
+  });
+
+  it('a row whose ONLY withheld position is not carried forward is still redacted by the stored-row seam (subset, never disjoint)', () => {
+    const row = { id: 'r1', type: 'connector', name: 'vendor', metadata: JSON.stringify(onlyUndeclaredAuth) };
+    const served = redactStoredMetadataRow('sys_metadata', row);
+    expect(served.metadata).not.toMatch(/TEST_PLACEHOLDER_ONLY_AUTH/);
+    expect(JSON.parse(served.metadata as string).auth).toEqual({ type: 'bearer', credentialRef: 'VENDOR_TOKEN' });
+  });
+
+  it('CONTROL: the datasource built-in and a derived redactor never set it — every withheld position is carried forward', () => {
+    const datasource = getMetadataTypeRedactor('datasource')!({
+      name: 'warehouse', driver: 'postgres', config: { host: 'db', password: 'TEST_PLACEHOLDER_PW' }, ssl: { key: 'TEST_PLACEHOLDER_KEY' },
+    });
+    expect(datasource.redactedKeys.length).toBeGreaterThan(0);
+    expect(datasource).not.toHaveProperty('notCarriedForwardKeys');
+    const webhook = getMetadataTypeRedactor('webhook')!({
+      name: 'w', object: 'o', triggers: ['create'], url: 'https://hooks.example', secret: 'TEST_PLACEHOLDER_S',
+    });
+    expect(webhook.redactedKeys).toEqual(['secret']);
+    expect(webhook).not.toHaveProperty('notCarriedForwardKeys');
+  });
+
+  it('a registered redactor that does not set it type-checks unchanged (the member is optional)', () => {
+    const legacyShape: MetadataTypeRedactor = (item): MetadataRedactionResult => ({ item, redactedKeys: [] });
+    expect(legacyShape({ a: 1 })).toEqual({ item: { a: 1 }, redactedKeys: [] });
+  });
+});
+
 describe('absence is distinguishable from "nothing to redact" (the consumer contract of the per-type redaction hook)', () => {
   it('a type with no redactor answers undefined — a fact, not a failure', () => {
     expect(getMetadataTypeRedactor('object')).toBeUndefined();

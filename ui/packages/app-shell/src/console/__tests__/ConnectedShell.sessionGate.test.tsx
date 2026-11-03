@@ -14,10 +14,13 @@
  *   - auth pending  → zero metadata requests;
  *   - auth resolved → the eager requests, once each.
  *
- * objectui#12811: the eager requests are `app` and `view`. The third,
+ * objectui#12811: the eager requests were `app` and `view`. The third,
  * `object`, was the whole object registry, which the root's action runtime
  * (`useActionModal`) loaded on every open by reading `objects`; it now loads
  * only where a route or an action reads it, and this shell renders neither.
+ * objectstack#28645: `view` is no longer eager either — it is read beside the
+ * whole registry, or for objects outside the app bundle — so the one eager
+ * request is `app`.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -110,7 +113,7 @@ describe('ConnectedShell session gate (objectui#4042)', () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(metaCalls.filter((c) => c === 'object')).toHaveLength(0);
-    expect(metaCalls.filter((c) => c === 'view')).toHaveLength(1);
+    expect(metaCalls.filter((c) => c === 'view')).toHaveLength(0);
     expect(metaCalls.filter((c) => c === 'app')).toHaveLength(1);
     expect(getByTestId('route-content')).toBeTruthy();
   });

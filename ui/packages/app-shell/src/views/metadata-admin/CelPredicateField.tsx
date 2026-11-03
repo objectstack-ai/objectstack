@@ -142,8 +142,10 @@ export interface CelPredicateFieldProps {
    * references at the node, which name an out-of-scope root (objectui#11789).
    * The host renders that verdict; this editor then withholds its "Valid CEL"
    * affordance, so one expression reads one verdict. The lint itself, its
-   * findings and `onLintChange` are unaffected. Omitted on every surface that
-   * has no such second verdict (the permission matrix included).
+   * findings and `onLintChange` are unaffected. The permission matrix sets it
+   * for the spec's own cross-field verdict on an RLS policy's USING / CHECK pair
+   * (objectstack#28664), which it renders under the field. Omitted on every
+   * surface that has no such second verdict.
    */
   scopeIssue?: boolean;
   /**

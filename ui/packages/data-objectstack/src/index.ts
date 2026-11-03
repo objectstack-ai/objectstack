@@ -91,7 +91,7 @@ import {
   type DatasetDrillRange,
 } from '@object-ui/core';
 import { MetadataCache } from './cache/MetadataCache';
-import { AppBundleStore, indexAppBundle, type AppBundleAnswer } from './app-bundle';
+import { AppBundleStore, indexAppBundle, type AppBundleAnswer, type AppBundlePeek } from './app-bundle';
 import { MetadataClient } from './metadata-client';
 import { formatMetadataError } from './metadata-error';
 import {
@@ -950,17 +950,18 @@ export function serializeOrderBy(orderby: QueryParams['$orderby']): string | und
  * The one {@link MetadataCache} key for the published view list,
  * `GET /api/v1/meta/view` (objectui#13044).
  *
- * Three readers ask that one URL on a single list-page open: the app-shell
- * `MetadataProvider`'s eager `view` read (through {@link ObjectStackAdapter.getClient}),
- * {@link ObjectStackAdapter.listViews} and
- * {@link ObjectStackAdapter.listViewOverrides}. They share the request IN
- * FLIGHT under this key: whoever asks while one is on the wire joins it.
+ * The client's list read (`client.meta.getItems('view')`, which the app-shell
+ * `MetadataProvider` asks through {@link ObjectStackAdapter.getClient}) shares
+ * its request IN FLIGHT under this key: whoever asks while one is on the wire
+ * joins it.
  *
  * The answer is also stored under it (objectui#13057, completing objectui#13044
- * ruling 6268839381 (a)-(c)). The client read still always asks the server; the
- * adapter's own two readers are answered from what it stored, so the console's
- * order (the eager read lands, then the object page reads the list and the
- * overrides) costs one request. The settled entry is dropped by every path that
+ * ruling 6268839381 (a)-(c)). The client read still always asks the server.
+ * The adapter's own two view readers, {@link ObjectStackAdapter.listViews} and
+ * {@link ObjectStackAdapter.listViewOverrides}, are answered from what it
+ * stored, narrowed to their object; with nothing stored they ask for their one
+ * object's views instead of this list (objectstack#29550, see the adapter's
+ * `readObjectViewRows`). The settled entry is dropped by every path that
  * should see a fresh list:
  *
  * - every view write: {@link ObjectStackAdapter.invalidateViewKeys}, the client
@@ -3400,6 +3401,10 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
   // (`loadAppBundle`); a by-name metadata read of an item the active one holds
   // is answered from it (`fetchObjectSchemaFresh`, `installBundledItemReads`).
   private appBundles: AppBundleStore;
+  // objectstack#29550 — the metadata-cache key each object's one-object view
+  // read was last stored under (`readObjectViewRows`), so a key a later
+  // invalidation retired is dropped rather than left to the LRU.
+  private readonly objectViewKeys = new Map<string, string>();
   private connectionState: ConnectionState = 'disconnected';
   private connectionStateListeners: ConnectionStateListener[] = [];
   private batchProgressListeners: BatchProgressListener[] = [];
@@ -4487,16 +4492,17 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    *
    * The app-shell `MetadataProvider` reads `client.meta.getItems('view')`
    * through {@link getClient}; {@link listViews} and {@link listViewOverrides}
-   * read the same `GET /api/v1/meta/view`. Each used to put its own request on
+   * used to read the same `GET /api/v1/meta/view`. Each put its own request on
    * the wire, so one list-page open asked the server three times for one URL.
    *
    * A caller of the client keeps its contract, "ask the server": it is never
    * answered from a settled entry. It joins a request already in flight for
    * the same URL instead of sending a second one, and its answer is stored
    * under {@link VIEW_LIST_KEY} (see {@link MetadataCache.share}), which is
-   * what {@link readViewList} answers this adapter's own readers from
-   * (objectui#13057). Only the bare call is routed: any argument after the
-   * type changes the URL, so such a call goes straight to the SDK.
+   * what {@link readObjectViewRows} answers this adapter's own readers from
+   * (objectui#13057, objectstack#29550). Only the bare call is routed: any
+   * argument after the type changes the URL, so such a call goes straight to
+   * the SDK.
    *
    * Every caller gets its own copy of the answer. Before this, every reader
    * got its own parsed response, so a reader that changed what it was handed
@@ -4584,6 +4590,19 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     return this.appBundles.enter(appId);
   }
 
+  /**
+   * The active app bundle as it stands, without waiting for it
+   * (objectstack#28645): `none` before any app is entered, `pending` while its
+   * first answer is on the wire, else `ready` with the items it holds (empty
+   * for an app with no bundle). A stale bundle is asked again, and answers
+   * from what it holds until that lands. A metadata reader that must answer
+   * in render (a list a route looks a name up in) reads the bundle here, and
+   * reads its own route for anything the bundle does not hold.
+   */
+  peekAppBundle(): AppBundlePeek {
+    return this.appBundles.peek();
+  }
+
   /** The one round trip behind {@link loadAppBundle}. */
   private async requestAppBundle(appId: string, etag: string | undefined): Promise<AppBundleAnswer> {
     await this.connect();
@@ -4598,21 +4617,6 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     if (!answer.etag) return { status: 'fresh', items, noStore: true };
     // The validator goes back as the server spelled it, a weak `W/` included.
     return { status: 'fresh', etag: `${answer.etag.weak ? 'W/' : ''}"${answer.etag.value}"`, items };
-  }
-
-  /**
-   * The published view list for this adapter's own readers
-   * ({@link listViews}, {@link listViewOverrides}): the answer stored under
-   * {@link VIEW_LIST_KEY} while it holds one (objectui#13057), else the
-   * client's read, which joins the request in flight for that key or starts
-   * one, and stores its answer (objectui#13044). Always a copy the caller may
-   * keep. Every path that should see a fresh list drops the key first; the
-   * list is in {@link VIEW_LIST_KEY}'s doc.
-   */
-  private readViewList(): Promise<any> {
-    const settled = this.metadataCache.getCachedSync(VIEW_LIST_KEY);
-    if (settled !== undefined) return Promise.resolve(structuredClone(settled));
-    return this.client.meta.getItems('view');
   }
 
   /**
@@ -5946,10 +5950,10 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    * {@link updateView}; the toolbar's `updateViewConfig` wrote overlays there
    * until objectui#12504 retired it). Loading them per-view fires N HTTP GETs
    * that 404 for every view the user never customized — console noise on
-   * every page load. This batch method performs a single
-   * `GET /api/v1/meta/view` (returns `{type, items}`) and narrows the
-   * result to `objectName` client-side, exactly as {@link listViews}
-   * does over the same rows (shared accessor: {@link viewItemObjectName}).
+   * every page load. This batch method reads the object's rows once,
+   * `GET /api/v1/meta/view?object=OBJECT` or the stored list narrowed the same
+   * way ({@link readObjectViewRows}, objectstack#29550), exactly as
+   * {@link listViews} does (shared accessor: {@link viewItemObjectName}).
    *
    * objectui#3774 — this used to enumerate `GET /api/v1/meta/<objectName>`,
    * putting the OBJECT name in the metadata TYPE slot. That key space is
@@ -5987,10 +5991,9 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
 
     const cacheKey = `view-overrides:${objectName}`;
     return await this.metadataCache.get(cacheKey, async () => {
-      const result: any = await this.readViewList();
-      const items: any[] = Array.isArray(result?.items)
-        ? result.items
-        : Array.isArray(result) ? result : [];
+      // objectstack#29550: this object's rows, not every object's
+      // ({@link readObjectViewRows}).
+      const items: any[] = await this.readObjectViewRows(objectName);
       const out: Record<string, any> = {};
       for (const it of items) {
         if (!it || typeof it !== 'object') continue;
@@ -6044,9 +6047,12 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    * match the view spec shape.
    *
    * Returns view spec objects with their canonical `name` as identifier.
-   * Narrows to one object client-side via {@link viewItemObjectName} —
-   * the metadata index is name-only, not field-typed, so the route has no
-   * `?object=` to push the filter down into. {@link listViewOverrides}
+   * Reads only this object's rows, in the contract's order
+   * ({@link readObjectViewRows}: `GET /api/v1/meta/view?object=OBJECT`, or
+   * the stored list narrowed the same way; objectstack#29550). The
+   * draft-overlaid list is narrowed by the same rule
+   * ({@link ObjectStackAdapter.objectBoundViewRows}). Each row is still
+   * matched through {@link viewItemObjectName}. {@link listViewOverrides}
    * reads the same rows through the same accessor.
    *
    * ## Every failure still degrades to an empty list — and now says which kind
@@ -6103,12 +6109,14 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
         const draftItems = await this.metadataClient()
           .withPreviewDrafts(true)
           .list<any>('view');
-        items = Array.isArray(draftItems) ? draftItems : [];
+        // objectstack#29550: one rule on both reads. The overlaid list is
+        // narrowed and ordered by the contract's one-object rule too, so a row
+        // the published read does not serve is not a tab in the preview either.
+        items = ObjectStackAdapter.objectBoundViewRows(draftItems, objectName);
       } else {
-        const result: any = await this.readViewList();
-        items = Array.isArray(result?.items)
-          ? result.items
-          : Array.isArray(result) ? result : [];
+        // objectstack#29550: this object's rows, not every object's
+        // ({@link readObjectViewRows}).
+        items = await this.readObjectViewRows(objectName);
       }
       // This feeds the list-view switcher (ViewTabBar), so it must return
       // LIST-family views only. The backend now exposes each view as an
@@ -6199,6 +6207,126 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       }
       return [];
     }
+  }
+
+  /**
+   * The published `view` rows bound to `objectName`, in the order the
+   * contract serves them (objectstack#29550): what {@link listViews} and
+   * {@link listViewOverrides} read.
+   *
+   * ADR-0017 §3.5 declares the read that answers one object's views,
+   * `GET /api/v1/meta/view?object=OBJECT`, "the aggregation query that powers
+   * the switcher". The server serves the rows whose `viewKind` is set and whose
+   * `object` names the object, sorted by `order` and then `name`
+   * (`createMetaListAnswer` step 4 in `@objectstack/rest`). Both readers used
+   * to download every view of every object (`GET /api/v1/meta/view`) to keep
+   * one object's, on every object route.
+   *
+   * - When the list is stored under {@link VIEW_LIST_KEY} (something on this
+   *   page read the whole list), it answers and nothing is asked. It is
+   *   narrowed and ordered by the same rule
+   *   ({@link ObjectStackAdapter.objectBoundViewRows}), so the tabs do not
+   *   reorder with what else has loaded.
+   * - When the whole list is on the wire under that key, the reader joins it,
+   *   narrowed by the same rule, and nothing more is asked. On a packaged
+   *   app's object route the app object scope reads the whole list while a
+   *   route object's lookup target lies outside the app bundle
+   *   (objectstack#29551); a one-object read beside it would be one request
+   *   more, not one fewer.
+   * - Otherwise the one-object read, which both readers share while it is on
+   *   the wire, and whose answer is stored as the whole list's is. Its answer
+   *   goes through the same rule too: a server that does not read `?object=`
+   *   answers its whole list, and the rule keeps one object's rows of it.
+   *
+   * Neither client spells `?object=` (`client.meta.getItems` takes a package,
+   * `MetadataClient`'s list a package and an include), so the request is built
+   * here, the way {@link downloadImportTemplate}'s is: this adapter's origin
+   * and auth, and the client's locale, because the server translates the list
+   * it serves. Its key names the last invalidation of {@link VIEW_LIST_KEY}
+   * ({@link MetadataCache.droppedAt}), so every path that drops the stored
+   * list (listed in {@link VIEW_LIST_KEY}'s doc) drops the stored one-object
+   * answers and detaches the one-object request in flight too: a reader asking
+   * after a view write or a switch asks again. A failure
+   * rejects, as the client's read does, carrying the server's `status` and
+   * ADR-0112 `code`, so each reader keeps its own failure contract.
+   *
+   * Always a copy the caller may keep.
+   */
+  private readObjectViewRows(objectName: string): Promise<any[]> {
+    const settled = this.metadataCache.getCachedSync(VIEW_LIST_KEY);
+    if (settled !== undefined) {
+      return Promise.resolve(ObjectStackAdapter.objectBoundViewRows(structuredClone(settled), objectName));
+    }
+    // The whole list on the wire (on a packaged app's object route the app
+    // object scope reads it, objectstack#29551): join it rather than put a
+    // second, narrower request beside it.
+    const listing = this.metadataCache.peekInflight<any>(VIEW_LIST_KEY);
+    if (listing) {
+      return listing.then((answer) => ObjectStackAdapter.objectBoundViewRows(structuredClone(answer), objectName));
+    }
+    // The one-object answer is stored, and shared while on the wire, under a
+    // key that names the last invalidation of the view list: every path that
+    // drops the stored list (a view write, an organization, session or locale
+    // switch) moves the key, so neither the stored answer nor a request sent
+    // before it answers a reader asking after it.
+    const key = `${VIEW_LIST_KEY}@${this.metadataCache.droppedAt(VIEW_LIST_KEY)}?object=${objectName}`;
+    const previous = this.objectViewKeys.get(objectName);
+    if (previous !== undefined && previous !== key) this.metadataCache.invalidate(previous);
+    this.objectViewKeys.set(objectName, key);
+    return this.metadataCache
+      .get(key, () => this.requestObjectViewRows(objectName))
+      .then((rows) => structuredClone(rows));
+  }
+
+  /** The one round trip behind {@link readObjectViewRows}. */
+  private async requestObjectViewRows(objectName: string): Promise<any[]> {
+    const url = `${this.baseUrl}/api/v1/meta/view?object=${encodeURIComponent(objectName)}`;
+    const locale = this.client.getLocale();
+    const headers: Record<string, string> = {
+      ...this.getAuthHeaders(),
+      ...(locale ? { 'Accept-Language': locale } : {}),
+    };
+    const res = await this.fetchImpl(url, { method: 'GET', headers, credentials: 'include' });
+    if (!res.ok) {
+      const errorBody = await res.json().catch(() => ({ message: res.statusText }));
+      const envelope = readErrorEnvelope(errorBody);
+      const err = new Error(envelope.message ?? res.statusText) as Error & {
+        status?: number;
+        httpStatus?: number;
+        code?: string;
+      };
+      err.status = res.status;
+      err.httpStatus = res.status;
+      err.code = envelope.code;
+      throw err;
+    }
+    const body = await res.json();
+    const answer =
+      body && typeof body === 'object' && typeof body.success === 'boolean' && 'data' in body
+        ? body.data
+        : body;
+    return ObjectStackAdapter.objectBoundViewRows(answer, objectName);
+  }
+
+  /**
+   * The rows of a published view list (the `{ type, items }` envelope or a
+   * bare array) that the contract binds to `objectName`, in its order: set
+   * `viewKind`, `object` naming the object, sorted by `order` and then `name`.
+   * The same rule as `GET /meta/view?object=` (see
+   * {@link readObjectViewRows}), so the stored list, the one-object read and
+   * {@link listViews}' draft-overlaid list answer by one rule: a row without
+   * `viewKind` or `object` (stored before the write door refused such rows,
+   * #7741) is a tab on none of them.
+   */
+  private static objectBoundViewRows(answer: any, objectName: string): any[] {
+    const items: any[] = Array.isArray(answer?.items)
+      ? answer.items
+      : Array.isArray(answer) ? answer : [];
+    return items
+      .filter((v: any) => v && typeof v === 'object' && v.viewKind && v.object === objectName)
+      .sort((a: any, b: any) =>
+        ((a.order ?? 0) as number) - ((b.order ?? 0) as number)
+        || String(a.name).localeCompare(String(b.name)));
   }
 
   /**
@@ -7752,6 +7880,8 @@ export {
 
 // Export cache types
 export type { MetadataCacheStats } from './cache/MetadataCache';
+// objectstack#28645 — what `ObjectStackAdapter.peekAppBundle` answers.
+export type { AppBundlePeek, AppBundleItems, AppBundleEntry } from './app-bundle';
 
 // User-scoped persistence adapter (favorites / recent items / …)
 export {

@@ -6,13 +6,13 @@ import { createRecordWallOrganizationResolver, type RecordOrganizationResolver }
 import {
     createLazyCounterStore,
     incrementFixedWindow,
-    type CounterStore,
 } from '@objectstack/plugin-auth/rate-limit-storage';
 import { defineActionDescriptor, isExpressionEnvelopeShaped, NotifyConfigSchema } from '@objectstack/spec/automation';
 import type { NotifyConfigParsed, NotifyEmailFieldRecipientParsed } from '@objectstack/spec/automation';
 import type { AutomationEngine } from '../engine.js';
 import { renderTextSlot, type VariableMap } from './template.js';
 import { parseNodeConfig } from './parse-config.js';
+import { resolveKernelCache } from './kernel-cache.js';
 import { resolveValueSlot, resolveValueSlotMap } from './value-slot-map.js';
 
 /**
@@ -719,15 +719,10 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
     // async, possibly after this plugin), else a per-process fallback that
     // announces itself — the one resolution every fleet-wide counter shares.
     const resolveCounterStore = createLazyCounterStore({
-        resolveCache: async (): Promise<CounterStore | undefined> => {
-            let cache: any;
-            try {
-                cache = await (ctx as { getServiceAsync?: (name: string) => Promise<unknown> }).getServiceAsync?.('cache');
-            } catch {
-                return undefined;
-            }
-            return cache && typeof cache.get === 'function' && typeof cache.set === 'function' ? cache : undefined;
-        },
+        // ADR-0069 D2: a `cache` registered as a value or as a factory, never
+        // the kernel's own `degraded` stand-in — the resolution every budget
+        // counter shares (`resolveKernelCache`).
+        resolveCache: () => resolveKernelCache(ctx),
         logger: ctx.logger,
         logPrefix: '[notify]',
         subject: 'per-address email-field send limit',

@@ -5,6 +5,8 @@ import {
   rel,
   repoFilesOnDisk,
   liveTurboConfig,
+  packageOwnRootAnchoredInputs,
+  packageRootAnchoredInputs,
   rootAnchoredInputs,
 } from './helpers/turbo-inputs';
 import { outOfPackageFiles } from './helpers/tsc-program';
@@ -131,7 +133,14 @@ const INPUTS_NOT_DERIVABLE: ReadonlyMap<string, string> = new Map([
 // ── The derivation, computed once ────────────────────────────────────────────
 
 const PACKAGES = packagesWithScript(TASK);
-const DERIVED = PACKAGES.map((pkg) => ({ ...pkg, outside: outOfPackageFiles(pkg.dir, pkg.script) }));
+const DERIVED = PACKAGES.map((pkg) => ({
+  ...pkg,
+  outside: outOfPackageFiles(pkg.dir, pkg.script),
+  // What turbo hashes THIS package's task from: the root task's list, resolved
+  // through the package's own turbo.json when it has one (objectstack#29361).
+  inputs: packageRootAnchoredInputs(TASK, pkg.dir),
+  ownInputs: packageOwnRootAnchoredInputs(TASK, pkg.dir),
+}));
 const ROOT_INPUTS = rootAnchoredInputs(TASK, liveTurboConfig());
 const MATCHERS = ROOT_INPUTS.map((glob) => ({ glob, re: globToRegExp(glob) }));
 
@@ -155,14 +164,16 @@ describe('turbo `type-check` inputs cover every out-of-package file (objectui#35
   it.each(DERIVED.filter((pkg) => pkg.outside.length > 0).map((pkg) => [pkg.name, pkg] as const))(
     '%s',
     (_name, pkg) => {
-      const uncovered = pkg.outside.filter((file) => !MATCHERS.some(({ re }) => re.test(file)));
+      const matchers = pkg.inputs.map((glob) => globToRegExp(glob));
+      const uncovered = pkg.outside.filter((file) => !matchers.some((re) => re.test(file)));
       expect(
         uncovered,
         `${pkg.name}'s type-check program reads ${uncovered.join(', ')} from outside ` +
-          `${rel(pkg.dir)}, and turbo hashes ${TASK} from ${JSON.stringify(ROOT_INPUTS)} plus the ` +
+          `${rel(pkg.dir)}, and turbo hashes its ${TASK} from ${JSON.stringify(pkg.inputs)} plus the ` +
           `package directory. Turbo will replay a stale verdict when ${uncovered.length === 1 ? 'that file changes' : 'those files change'}. ` +
           `Add ${uncovered.map((file) => `"$TURBO_ROOT$/${file}"`).join(', ')} to turbo.json's ` +
-          `\`${TASK}\` inputs.`,
+          `\`${TASK}\` inputs, or to the package's own turbo.json \`${TASK}\` inputs beside ` +
+          `"$TURBO_EXTENDS$" when only this package reads it.`,
       ).toEqual([]);
     },
   );
@@ -182,6 +193,16 @@ describe('turbo `type-check` inputs cover every out-of-package file (objectui#35
           `hashing nothing while reading as coverage — fix the glob or delete the entry.`,
       ).toBe(true);
     }
+    for (const pkg of DERIVED) {
+      for (const glob of pkg.ownInputs) {
+        const re = globToRegExp(glob);
+        expect(
+          [...onDisk].some((file) => re.test(file)),
+          `${rel(pkg.dir)}/turbo.json \`${TASK}\` input "$TURBO_ROOT$/${glob}" matches no file in ` +
+            `the repo. It is hashing nothing while reading as coverage — fix the glob or delete the entry.`,
+        ).toBe(true);
+      }
+    }
   });
 
   /**
@@ -199,6 +220,18 @@ describe('turbo `type-check` inputs cover every out-of-package file (objectui#35
           `type-check program any more. Delete it, or record why it cannot be derived in ` +
           `INPUTS_NOT_DERIVABLE.`,
       ).not.toHaveLength(0);
+    }
+    // A package's own entry is earned by THAT package's program: it hashes
+    // into no other package's task, so no other program can earn it.
+    for (const pkg of DERIVED) {
+      for (const glob of pkg.ownInputs) {
+        const re = globToRegExp(glob);
+        expect(
+          pkg.outside.filter((file) => re.test(file)),
+          `${rel(pkg.dir)}/turbo.json \`${TASK}\` input "$TURBO_ROOT$/${glob}" is not required by ` +
+            `${pkg.name}'s type-check program any more. Delete it.`,
+        ).not.toHaveLength(0);
+      }
     }
   });
 });

@@ -34,7 +34,7 @@ export function usePullToRefresh<T extends HTMLElement = HTMLElement>(
     (e: TouchEvent) => {
       if (!enabled || isRefreshing) return;
       const el = ref.current;
-      if (el && el.scrollTop === 0) {
+      if (el && el.scrollTop === 0 && !scrolledBetween(e.target, el)) {
         startYRef.current = e.touches[0].clientY;
       }
     },
@@ -158,6 +158,23 @@ interface PullBinding {
  * check reads the DOM and not the React tree.
  */
 const PULL_HOST_ATTRIBUTE = 'data-pull-to-refresh-host';
+
+/**
+ * Whether a scroll box between the touched node and the bound element is
+ * scrolled away from its top. The bound element need not be the box that
+ * scrolls: a list host that clips its body and lets an inner box scroll never
+ * moves its own `scrollTop`. A pull starts only when every box the finger is
+ * in sits at its top; otherwise a downward drag is the reader scrolling back
+ * up, not a pull.
+ */
+function scrolledBetween(target: EventTarget | null, el: HTMLElement): boolean {
+  let node = target instanceof Element ? target : null;
+  while (node && node !== el) {
+    if (node.scrollTop > 0) return true;
+    node = node.parentElement;
+  }
+  return false;
+}
 
 function armedPullHostAbove(el: HTMLElement): boolean {
   const parent = el.parentElement;

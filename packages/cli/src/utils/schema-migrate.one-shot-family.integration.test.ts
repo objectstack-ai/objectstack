@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 30 — spawns the real producer once per single-cause fixture: one served boot writes the template database, then its 129 cases boot in process, each over its own copy (every bootSchemaStack caller's modes on a present file, on an absent file and in a development key home, plus the lifecycle and key-home controls), each a distinct (command, mode, state); slowest CI reading 17.7 s (run 41255489006) of the five scheduled CI runs 41199450735, 41217827347, 41237094739, 41255489006, 41271604267, x 1.25, rounded up
 
 /**
  * [#21391] Every command that boots through `bootSchemaStack` keeps the two
@@ -64,12 +65,15 @@ import MigrateApply from '../commands/migrate/apply.js';
 import MigrateAuditKeyMaterial from '../commands/migrate/audit-key-material.js';
 import MigrateAuditMailBodies from '../commands/migrate/audit-mail-bodies.js';
 import MigrateAuditMetadataBodies from '../commands/migrate/audit-metadata-bodies.js';
+import MigrateBlankSingleValues from '../commands/migrate/blank-single-values.js';
+import MigrateOptionCodes from '../commands/migrate/option-codes.js';
 import MigrateCommentReactions from '../commands/migrate/comment-reactions.js';
 import MigrateDuplicates from '../commands/migrate/duplicates.js';
 import MigrateFilesToReferences from '../commands/migrate/files-to-references.js';
 import MigrateMeta from '../commands/migrate/meta.js';
 import MigrateMultiValueColumns from '../commands/migrate/multi-value-columns.js';
 import MigrateOrganizationOwnership from '../commands/migrate/organization-ownership.js';
+import MigratePackagelessOverlays from '../commands/migrate/packageless-overlays.js';
 import MigratePlan from '../commands/migrate/plan.js';
 import MigrateRecordCurrencyCodes from '../commands/migrate/record-currency-codes.js';
 import MigrateRecordedBy from '../commands/migrate/recorded-by.js';
@@ -187,6 +191,16 @@ const CALLERS: Record<string, Caller> = {
     noWrite: [{ label: 'migrate activity-changed-fields', argv: ['--database-url', '@DB@', '--json'] }],
     write: [{ label: 'migrate activity-changed-fields --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
   },
+  'commands/migrate/blank-single-values.ts': {
+    run: invoke(MigrateBlankSingleValues),
+    noWrite: [{ label: 'migrate blank-single-values', argv: ['--database-url', '@DB@', '--json'] }],
+    write: [{ label: 'migrate blank-single-values --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
+  },
+  'commands/migrate/option-codes.ts': {
+    run: invoke(MigrateOptionCodes),
+    noWrite: [{ label: 'migrate option-codes', argv: ['--database-url', '@DB@', '--json'] }],
+    write: [{ label: 'migrate option-codes --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
+  },
   'commands/migrate/comment-parent-pair.ts': {
     run: invoke(MigrateCommentParentPair),
     noWrite: [{ label: 'migrate comment-parent-pair', argv: ['--database-url', '@DB@', '--json'] }],
@@ -258,6 +272,16 @@ const CALLERS: Record<string, Caller> = {
         '--apply', '--backup-taken', '--plan-file', '@DIR@/organization-ownership-reviewed-plan.json',
         '--out', '@DIR@/organization-ownership-apply.json', '--database-url', '@DB@', '--json',
       ],
+    }],
+  },
+  'commands/migrate/packageless-overlays.ts': {
+    run: invoke(MigratePackagelessOverlays),
+    // The fixture stores no package-less overlay row, so the run lists
+    // nothing and `--apply` moves nothing — the boot is what these cases are about.
+    noWrite: [{ label: 'migrate packageless-overlays', argv: ['--database-url', '@DB@', '--json'] }],
+    write: [{
+      label: 'migrate packageless-overlays --apply',
+      argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'],
     }],
   },
   'commands/migrate/plan.ts': {

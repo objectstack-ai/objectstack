@@ -16,10 +16,11 @@
 // These pins hold the key open to the input shapes `label` takes (a string or
 // an inline locale map; since #27948 a string is the `template` slot's
 // shorthand and parses to its envelope), and hold the
-// three things this change must NOT do: relax the strict shape, widen the
-// INLINE action surface ahead of its renderer, or re-point the action PARAM's
-// `description` → `helpText` alias, which is a different surface and still
-// correct.
+// two things this change must NOT do: relax the strict shape, or re-point the
+// action PARAM's `description` → `helpText` alias, which is a different surface
+// and still correct. The INLINE action surface took the key later, once
+// `element:button`'s renderer forwarded it (cloud#3281, ruling A); its pins
+// live in `inline-action.test.ts`.
 
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
@@ -147,23 +148,25 @@ describe('the surfaces the action `description` key deliberately does NOT widen'
     expect(issue?.code).toBe('unrecognized_keys');
     expect(issue?.message).toContain('helpText');
   });
+});
 
-  it('an INLINE action still refuses it — the pick widens when a renderer widens, not before', () => {
+describe('the INLINE action surface took the key once its renderer forwarded it', () => {
+  it('an INLINE action takes it too — the pick widened once element:button forwarded it', () => {
     // `InlineActionSchema` forwards exactly what `element:button`'s renderer
-    // honours. That renderer has no description slot, so picking the key here
-    // would declare a field no renderer reads — the failure that schema exists
-    // to stop (`bodyExtra` is the one knowing exception, ruled in #5777).
+    // honours, and that renderer now hands `description` to the runner, whose
+    // param dialog draws it (cloud#3281, ruling A). Same field, same parse.
     const result = InlineActionSchema.safeParse({
       type: 'url',
       target: '/docs',
       label: 'Docs',
-      description: 'Not honoured by element:button',
+      description: 'Opens the product documentation.',
     });
 
-    expect(result.success).toBe(false);
-    const issue = result.success ? undefined : result.error.issues[0];
-    expect(issue?.code).toBe('unrecognized_keys');
-    expect(issue?.message).toContain('description');
+    expect(result.success).toBe(true);
+    expect(result.success && result.data.description).toEqual({
+      dialect: 'template',
+      source: 'Opens the product documentation.',
+    });
   });
 });
 

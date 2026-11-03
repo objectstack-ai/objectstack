@@ -38,6 +38,7 @@ import { zodIssuesToMetadataIssues } from './protocol.js';
 // landed by #8300). Composed into `decorateMetadataItem` below — see the
 // ordering note there for why it is not applied per read exit.
 import { redactMetadataItem } from './metadata-redaction.js';
+import { storedFlowVerdictBody } from './protocol-flow-save-replay.js';
 // [#26707] The snapshot key a write type's findings are spelled under — the
 // runtime gate's own answer, so the publish verdict below is re-spelled
 // against the same prefix the gate wrote it with.
@@ -276,7 +277,18 @@ export function computeMetadataDiagnostics(
     // [#26886] …and judge each picklist-bound field as its author wrote it:
     // the `options` the runtime resolved onto it are not part of that shape
     // ({@link withoutResolvedPicklistOptions}).
-    const candidate = withoutResolvedPicklistOptions(stripReadDecorations(item));
+    //
+    // [#29696] …and judge a FLOW in the spelling every door judges it in: its
+    // ADR-0087 D2-converted body ({@link storedFlowVerdictBody}, the seam the
+    // save door's fallback verdict, both publish doors and the restore doors
+    // judge through). A served flow is a row at rest that no read converts
+    // (`convertStoredItem` skips `flow`; the engine converts it when it
+    // registers it), so judged as stored a legacy D2 spelling (`get_record`
+    // `config.filters`) read `valid: false` while every door and the engine
+    // accepted it. For the VERDICT only: the read serves the body it was
+    // handed. Not a redaction, so the #8154 order below is untouched: the
+    // body judged is still the unredacted one.
+    const candidate = withoutResolvedPicklistOptions(storedFlowVerdictBody(singular, stripReadDecorations(item)));
 
     // [#25783] A document parsed before against this same schema is answered
     // from the memo — see "The verdict memo" above.
@@ -429,6 +441,124 @@ export function withPublishVerdict(
         valid: false,
         errors: [...(diagnostics?.errors ?? []), ...refusals],
     };
+}
+
+// ---------------------------------------------------------------------------
+// [#29196] The lint's `form-field-unknown` on a served view's `_diagnostics`
+// [#29309] …and its sibling `form-section-group-unknown`
+// ---------------------------------------------------------------------------
+//
+// A form section naming a field its object does not have is Zod-valid, so the
+// schema verdict above reads `valid: true`, and the renderer skips the field.
+// `validateFormLayout` (`@objectstack/lint`) is the rule that says so, and it
+// ran only in the CLI. The view read now runs that rule on the body it serves
+// and puts each `form-field-unknown` finding in `_diagnostics.warnings`, with
+// the rule's own message: one spelling, no second rule. [#29309] The rule's
+// other finding, `form-section-group-unknown` (a section's `group` names a
+// field group the object does not declare, so the whole section renders
+// nothing), is the same silent skip and travels the same way. The objects the
+// lookup answers carry their `fieldGroups`, which is all that finding reads.
+//
+// Save and publish answer both findings as `advisories` on their own: the
+// rule is crossed to the runtime gate (`runtimeTypes: ['view']` in
+// `@objectstack/lint`'s `AUTHORING_RULES`). That is not a second report on
+// this read: the read carries no runtime advisory, only the publish verdict's
+// refusals (`withPublishVerdict`), and these findings are never refusals.
+//
+// A WARNING, never an error: the spec's `MetadataValidationResult` calls
+// warnings non-blocking, `valid` stays the schema's answer, and neither a save
+// nor a publish reads it. The entry is the spec's `{ path, message }`, the
+// shape the read's other derived warnings already take (the admin read's
+// anonymous-intake reasons, a view container's rename note).
+//
+// The field set is the one the door already resolves for the view: the
+// caller's object lookup (`registry.getObject` at the read, the served object
+// with its extensions folded on), asked for the object names the body itself
+// spells. A name it cannot resolve is left out of the universe, and the rule
+// then judges nothing for that form: no false warning.
+//
+// Loaded lazily from the package root, as `build-probes.ts` loads its lint
+// rule: the kernel boot path reaches `@objectstack/lint` only through its
+// `/runtime` entry, and a view read is where this one is first needed.
+
+/** The names this pass reads from `@objectstack/lint`. */
+interface FormLayoutLint {
+    validateFormLayout: (stack: Record<string, unknown>) => ReadonlyArray<{ rule: string; path: string; message: string }>;
+    /** The rule ids served on the read: `form-field-unknown`, `form-section-group-unknown`. */
+    servedRules: ReadonlySet<string>;
+}
+
+let formLayoutLint: Promise<FormLayoutLint | undefined> | undefined;
+
+function loadFormLayoutLint(): Promise<FormLayoutLint | undefined> {
+    formLayoutLint ??= import('@objectstack/lint').then(
+        (lint) => ({
+            validateFormLayout: lint.validateFormLayout,
+            servedRules: new Set([lint.FORM_FIELD_UNKNOWN, lint.FORM_SECTION_GROUP_UNKNOWN]),
+        }),
+        () => undefined,
+    );
+    return formLayoutLint;
+}
+
+type Rec = Record<string, unknown>;
+
+function isRec(value: unknown): value is Rec {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** Every object name the body spells (`object` / `objectName`), at any depth. */
+function spelledObjectNames(value: unknown, into: Set<string>, depth = 0): Set<string> {
+    if (depth > 16) return into;
+    if (Array.isArray(value)) {
+        for (const entry of value) spelledObjectNames(entry, into, depth + 1);
+    } else if (isRec(value)) {
+        for (const [key, inner] of Object.entries(value)) {
+            if ((key === 'object' || key === 'objectName') && typeof inner === 'string' && inner) into.add(inner);
+            else spelledObjectNames(inner, into, depth + 1);
+        }
+    }
+    return into;
+}
+
+/**
+ * Add the lint's `form-field-unknown` and `form-section-group-unknown`
+ * warnings to a served view's `_diagnostics`. Returns `served` itself when there is nothing to add.
+ *
+ * `getObject` is the door's own object lookup; an object it does not answer
+ * is not judged.
+ */
+export async function withFormLayoutWarnings<T>(
+    type: string,
+    served: T,
+    getObject: ((name: string) => unknown) | undefined,
+): Promise<T> {
+    if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'view' || !isRec(served) || !getObject) return served;
+    const lint = await loadFormLayoutLint();
+    if (!lint) return served;
+    // [#29309] The served body is the rule's input as it is: the rule reads a
+    // form `ViewItem`'s `config` rung itself, the same walk the save and
+    // publish gate runs, so the read needs no adapter of its own.
+    const objects: Rec[] = [];
+    for (const name of spelledObjectNames(served, new Set())) {
+        const object = getObject(name);
+        if (isRec(object)) objects.push({ ...object, name });
+    }
+    if (objects.length === 0) return served;
+    const name = typeof served.name === 'string' ? served.name : '';
+    const warnings = lint.validateFormLayout({ objects, views: [served] })
+        .filter((finding) => lint.servedRules.has(finding.rule))
+        .map((finding) => ({
+            path: itemRelativeIssuePath('view', name, finding.path),
+            message: finding.message,
+        }));
+    if (warnings.length === 0) return served;
+    const prior = served._diagnostics as MetadataDiagnostics | undefined;
+    const diagnostics: MetadataDiagnostics = {
+        ...(prior ?? { valid: true }),
+        warnings: [...(prior?.warnings ?? []), ...warnings],
+    };
+    return { ...served, _diagnostics: diagnostics } as T;
 }
 
 // ---------------------------------------------------------------------------

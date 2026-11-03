@@ -37,6 +37,24 @@ describe('importTargetFields', () => {
     expect(byName.code.required).toBe(false);
   });
 
+  it('passes a declared defaultValue through as declared, and none when absent or null', () => {
+    const expression = { dialect: 'cel', source: "record.source == 'self' ? 'to_review' : 'to_confirm'" };
+    const out = importTargetFields('duty', {
+      review_status: { type: 'select', label: 'Review status', required: true, defaultValue: expression },
+      priority: { type: 'select', label: 'Priority', required: true, defaultValue: 'normal' },
+      owner_name: { type: 'text', label: 'Owner', required: true, defaultValue: null },
+      title: { type: 'text', label: 'Title', required: true },
+    });
+    const byName = Object.fromEntries(out.map((f) => [f.name, f]));
+    // The expression envelope is carried as is, never evaluated or flattened.
+    expect(byName.review_status.defaultValue).toBe(expression);
+    expect(byName.priority.defaultValue).toBe('normal');
+    expect('defaultValue' in byName.owner_name).toBe(false);
+    expect('defaultValue' in byName.title).toBe(false);
+    // `required` still states the schema; the wizard decides what a default spares.
+    expect(byName.review_status.required).toBe(true);
+  });
+
   it('still drops computed fields — no storage column to match or write', () => {
     const out = importTargetFields('device', fields);
     const names = out.map((f) => f.name);

@@ -19,7 +19,7 @@ import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor, within, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 const POSITION = { name: 'env_position', label: 'Environment Position' };
 
@@ -57,12 +57,13 @@ vi.mock('./useMetadata', async (importOriginal) => ({
 
 import { MetadataResourceEditPage } from './ResourceEditPage';
 
-function mePermissions(systemPermissions: string[]): MePermissionsResponse {
+function mePermissions(systemPermissions: string[]): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u1',
     tenantId: 'org_1',
-    roles: [],
+    positions: [],
+    hasAnyQueue: false,
     permissionSets: [],
     systemPermissions,
     objects: {},

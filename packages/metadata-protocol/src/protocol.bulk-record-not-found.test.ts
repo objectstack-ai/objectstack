@@ -22,17 +22,25 @@
  *     of them deleted. Verbatim the defect #4435's own body describes, still
  *     live ten lines from the `deleteMany` loop that fixed it.
  *
- * The pins that matter most here are the ones about what the engine was ASKED
- * to do: a 404 in the response body is cheap to produce, but "the write
- * pipeline never ran for that row" is the actual guarantee — it is what keeps
- * hooks, automation and audit rows from firing for a record that does not
- * exist. So the fake engine below reproduces the #4775 abort verbatim on any
- * write it receives for an unknown id, and each test asserts both the row's
- * code and that the write was never attempted.
+ * A 404 in the response body is cheap to produce; "the write pipeline never ran
+ * for that row" is the actual guarantee — it is what keeps hooks, automation
+ * and audit rows from firing for a record that does not exist. ObjectQL now
+ * holds it itself: its by-id update refuses an id that names no row with
+ * `recordNotFoundError`, AFTER the write has been judged and BEFORE any
+ * `before*` hook (`engine-write-not-found-gate.test.ts` pins that order at the
+ * engine). So these faces no longer probe ahead of the engine — an update by id
+ * answers the same refusal whether or not the id exists, as delete does — and
+ * the fake engine below answers the way ObjectQL does, in ObjectQL's order:
+ *
+ *   1. the write is judged (a caller it refuses is refused, whatever the id);
+ *   2. an id that names no row is `recordNotFoundError`;
+ *   3. only then does the pipeline run — recorded on `pipeline`, so each test
+ *      asserts both the row's answer and that the pipeline never saw that row.
  */
 
 import { describe, it, expect, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import { recordNotFoundError } from '@objectstack/core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const SCHEMA = {
@@ -43,17 +51,16 @@ const SCHEMA = {
     },
 };
 
-/**
- * What the real pipeline answers today when a write reaches it for an id with
- * no stored row — quoted from the issue's repro. Unclassified (no `code`, no
- * `status`), so `toRowApiError` renders it `INTERNAL_ERROR`: exactly the
- * misdirection the probe exists to prevent.
- */
-const HOOK_ABORT =
-    "Hook 'showcase_audit_task_completion' could not evaluate its condition " +
-    '(runtime: No such key: done) — operation aborted. The condition reads ' +
-    "'done', which this object does not declare — fix the hook's condition, or " +
-    'declare the field.';
+/** A caller the engine's write judgement refuses — an object-level grant it lacks. */
+const REFUSED = { userId: 'u_refused' };
+
+/** The refusal the engine's middleware answers that caller with, before the row is looked up. */
+function writeRefusal(): Error {
+    return Object.assign(new Error('You do not have permission to perform this action.'), {
+        code: 'PERMISSION_DENIED',
+        status: 403,
+    });
+}
 
 /**
  * In-memory store with real snapshot/rollback transaction semantics — the
@@ -67,13 +74,18 @@ function makeStoreEngine() {
         ['t3', { id: 't3', progress: 0, done: false }],
     ]);
     const handle = { id: 'trx-1' };
+    /** What a hook, automation or audit row would observe: the rows the write pipeline ran for. */
+    const pipeline = vi.fn((_id: string) => {});
 
-    const update = vi.fn(async (_object: string, data: any, options?: any) => {
+    const update = vi.fn(async (object: string, data: any, options?: any) => {
         assertEngineUpdateDispatch(data, options);
         const id = options?.where?.id;
-        // The write pipeline, reached for an id that names no row: the hook
-        // condition evaluates against a payload-only record and #4775 aborts.
-        if (!rows.has(id)) throw new Error(HOOK_ABORT);
+        // ObjectQL's order: the write is judged first (the middleware chain)…
+        if (options?.context?.userId === REFUSED.userId) throw writeRefusal();
+        // …then its by-id not-found gate, ahead of every `before*` hook…
+        if (!rows.has(id)) throw recordNotFoundError(object, id);
+        // …and only then the pipeline.
+        pipeline(id);
         const next = { ...rows.get(id), ...data };
         rows.set(id, next);
         return next;
@@ -81,6 +93,7 @@ function makeStoreEngine() {
     // Contract per #4435: `false` is the positive not-found value.
     const del = vi.fn(async (_object: string, options?: any) => {
         assertEngineDeleteDispatch(options);
+        if (options?.context?.userId === REFUSED.userId) throw writeRefusal();
         const id = options?.where?.id;
         if (!rows.has(id)) return false;
         rows.delete(id);
@@ -111,7 +124,7 @@ function makeStoreEngine() {
             }
         }),
     };
-    return { engine, rows, update, del, findOne };
+    return { engine, rows, update, del, findOne, pipeline };
 }
 
 /**
@@ -143,8 +156,11 @@ describe('[#5088] updateManyData — a row naming no record is RECORD_NOT_FOUND'
         expect(res.succeeded).toBe(0);
         expect(res.failed).toBe(1);
         // THE CRUX. A refused row must not fire hooks, automation or an audit
-        // row for a record that does not exist — so the engine is never asked.
-        expect(t.update).not.toHaveBeenCalled();
+        // row for a record that does not exist — so the pipeline never ran for
+        // it: the engine judged the write and refused the row before it.
+        expect(t.pipeline).not.toHaveBeenCalled();
+        // …and nothing was asked ahead of the engine.
+        expect(t.findOne).not.toHaveBeenCalled();
     });
 
     it('non-atomic: a stale id fails alone — the real rows in the same batch still land', async () => {
@@ -168,7 +184,7 @@ describe('[#5088] updateManyData — a row naming no record is RECORD_NOT_FOUND'
         expect(res.results[2]).toMatchObject({ id: 't3', success: true });
         expect(t.rows.get('t1')).toMatchObject({ progress: 1 });
         expect(t.rows.get('t3')).toMatchObject({ progress: 3 });
-        expect(t.update).toHaveBeenCalledTimes(2);
+        expect(t.pipeline.mock.calls.map((c) => c[0])).toEqual(['t1', 't3']);
     });
 
     it('atomic: the stale row is the CAUSAL row — later rows NOT_ATTEMPTED, nothing written', async () => {
@@ -193,7 +209,7 @@ describe('[#5088] updateManyData — a row naming no record is RECORD_NOT_FOUND'
         ]);
         expectRecordNotFoundRow(res.results[0], 'definitely_missing');
         expect(t.rows.get('t2')).toMatchObject({ progress: 0 });
-        expect(t.update).not.toHaveBeenCalled();
+        expect(t.pipeline).not.toHaveBeenCalled();
     });
 
     it('atomic: a stale row AFTER a real one still rolls the real one back', async () => {
@@ -236,9 +252,9 @@ describe('[#5088] updateManyData — a row naming no record is RECORD_NOT_FOUND'
         expect(res.results[0].data).toMatchObject({ id: 't1', progress: 1 });
         // Context is still threaded to every write (#3455).
         expect(t.update.mock.calls.every((c: any[]) => c[2]?.context?.userId === 'u1')).toBe(true);
-        // …and the probe asks EXISTENCE, not visibility (#4435): system context,
-        // so a row the caller cannot READ is still the by-id write policy's call.
-        expect(t.findOne.mock.calls.every((c: any[]) => c[1]?.context?.isSystem === true)).toBe(true);
+        // …and nothing is read ahead of the engine: a row the caller cannot
+        // READ is still the by-id write policy's call, made inside the engine.
+        expect(t.findOne).not.toHaveBeenCalled();
     });
 });
 
@@ -262,8 +278,8 @@ describe('[#5088] batchData update — the same gate as updateMany', () => {
         expect(res.succeeded).toBe(1);
         expect(res.failed).toBe(1);
         expectRecordNotFoundRow(res.results[1], 'definitely_missing');
-        expect(t.update).toHaveBeenCalledTimes(1);
-        expect(t.update.mock.calls[0][2].where.id).toBe('t1');
+        expect(t.pipeline.mock.calls.map((c) => c[0])).toEqual(['t1']);
+        expect(t.findOne).not.toHaveBeenCalled();
     });
 
     it('atomic: the stale row is causal, the earlier write is rolled back', async () => {
@@ -661,5 +677,65 @@ describe('[#5088] the three by-id write faces answer the SAME thing', () => {
         expect(batch.results[0].errors[0].message).toBe(expected);
         expect(many.results[0].errors[0].code).toBe(single.code);
         expect(batch.results[0].errors[0].code).toBe(single.code);
+    });
+});
+
+describe('an update by id answers the same refusal whether or not the id exists, as delete does', () => {
+    /** The refusal as the caller sees it: code, status and sentence. */
+    const refusalOf = async (run: () => Promise<unknown>) => {
+        try {
+            await run();
+        } catch (err: any) {
+            return { code: err?.code, status: err?.status, message: err?.message };
+        }
+        throw new Error('expected a refusal, but the call resolved');
+    };
+    const rowRefusal = (res: any) => {
+        const { code, httpStatus, message } = res.results[0].errors[0];
+        return { success: res.results[0].success, code, httpStatus, message };
+    };
+
+    it('the single-record faces: PATCH and DELETE refuse a real and a missing id alike', async () => {
+        const t = makeStoreEngine();
+        const p = new ObjectStackProtocolImplementation(t.engine);
+        const patch = (id: string) => () => p.updateData({ object: 'showcase_task', id, data: { progress: 1 }, context: REFUSED } as any);
+        const remove = (id: string) => () => p.deleteData({ object: 'showcase_task', id, context: REFUSED } as any);
+
+        const patchReal = await refusalOf(patch('t1'));
+        expect(patchReal).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+        expect(await refusalOf(patch('definitely_missing'))).toEqual(patchReal);
+        const deleteReal = await refusalOf(remove('t1'));
+        expect(await refusalOf(remove('definitely_missing'))).toEqual(deleteReal);
+        // Existence was never asked: the engine refused the write first.
+        expect(t.findOne).not.toHaveBeenCalled();
+        expect(t.pipeline).not.toHaveBeenCalled();
+        expect(t.rows.get('t1')).toMatchObject({ progress: 0 });
+    });
+
+    it('the bulk faces: updateMany and batchData give one per-row refusal for a real and a missing id', async () => {
+        const t = makeStoreEngine();
+        const p = new ObjectStackProtocolImplementation(t.engine);
+        const many = (id: string) => p.updateManyData({
+            object: 'showcase_task', records: [{ id, data: { progress: 1 } }], context: REFUSED,
+        } as any);
+        const batch = (id: string) => p.batchData({
+            object: 'showcase_task', request: { operation: 'update', records: [{ id, data: { progress: 1 } }] }, context: REFUSED,
+        } as any);
+
+        const manyReal = rowRefusal(await many('t1'));
+        expect(manyReal).toMatchObject({ success: false, code: 'PERMISSION_DENIED', httpStatus: 403 });
+        expect(rowRefusal(await many('definitely_missing'))).toEqual(manyReal);
+        expect(rowRefusal(await batch('definitely_missing'))).toEqual(rowRefusal(await batch('t1')));
+        expect(t.findOne).not.toHaveBeenCalled();
+        expect(t.pipeline).not.toHaveBeenCalled();
+    });
+
+    it('CONTROL: a caller the write is open to still gets 404 for the missing id on every face', async () => {
+        const t = makeStoreEngine();
+        const p = new ObjectStackProtocolImplementation(t.engine);
+        const single = await refusalOf(() => p.updateData({ object: 'showcase_task', id: 'definitely_missing', data: { progress: 1 }, context: { userId: 'u1' } } as any));
+        expect(single).toMatchObject({ code: 'RECORD_NOT_FOUND', status: 404 });
+        const many: any = await p.updateManyData({ object: 'showcase_task', records: [{ id: 'definitely_missing', data: { progress: 1 } }], context: { userId: 'u1' } } as any);
+        expectRecordNotFoundRow(many.results[0], 'definitely_missing');
     });
 });

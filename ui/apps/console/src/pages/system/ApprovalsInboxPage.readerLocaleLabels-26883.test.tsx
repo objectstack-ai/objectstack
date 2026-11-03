@@ -31,7 +31,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { I18nProvider } from '@object-ui/i18n';
 
 const { ADAPTER, AUTH } = vi.hoisted(() => ({
@@ -123,12 +123,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function permissions(): MePermissionsResponse {
+function permissions(): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u_1',
     tenantId: 't_1',
-    roles: [],
+    positions: [],
+    hasAnyQueue: false,
     permissionSets: [],
     objects: {},
     fields: {},

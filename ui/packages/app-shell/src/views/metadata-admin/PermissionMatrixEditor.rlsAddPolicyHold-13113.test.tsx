@@ -12,7 +12,8 @@
  *   needs, and nothing is sent or refused;
  * - naming it lets the save go;
  * - a refusal naming a policy name reads in the author's words, mapped from the
- *   refusal's own issue paths; any other refusal keeps the transport's text.
+ *   refusal's own issue paths; any other refusal keeps the transport's text,
+ *   followed by each issue's own message (objectstack#28664).
  *
  * Every absence is read against a presence from the same harness: the named
  * row that saves is the control for the unnamed row that does not, and a CEL
@@ -201,7 +202,7 @@ describe('controls: what held, saved and read before still does (objectui#13113)
     await waitFor(() => expect(server.sent).toHaveLength(1), AUTOSAVE);
   });
 
-  it('(d) a refusal naming no policy name keeps the transport’s text', async () => {
+  it('(d) a refusal naming no policy keeps the door’s headline, then each issue’s own message (objectstack#28664)', async () => {
     const raw = 'permission/sales_perms failed spec validation: 1 issue — objects.a_account [custom]';
     const server: Server = {
       sent: [],
@@ -212,7 +213,68 @@ describe('controls: what held, saved and read before still does (objectui#13113)
     typeUsing('owner_id == current_user.id');
 
     await waitFor(() => expect(server.sent).toHaveLength(1), AUTOSAVE);
-    expect(await screen.findByText(raw)).toBeInTheDocument();
+    const strip = await screen.findByText(/objects\.a_account: nope/);
+    expect(strip.textContent).toBe(`${raw}\nobjects.a_account: nope`);
     expect(screen.queryByText(/Policy name, on row/)).toBeNull();
+  });
+});
+
+/**
+ * objectstack#28664 — the door's 422 message is a headline of paths and zod
+ * codes; the explanation rides `issues[].message`. A refusal at a policy's
+ * CHECK, or at the policy itself, reads in that message, on the policy's row.
+ */
+const CHECK_ON_SELECT =
+  '`check` is never evaluated on a `select` policy: it validates the new row an insert or an update writes, '
+  + 'and a read writes none. Remove `check` from this policy.';
+
+describe('a refused save shows the server’s issue messages, not only the path (objectstack#28664)', () => {
+  it('(e) a refusal at a policy’s CHECK reads the server’s message on the policy’s row', async () => {
+    const raw = 'permission/sales_perms failed spec validation: 1 issue — rowLevelSecurity.0.check [custom]';
+    const server: Server = {
+      sent: [],
+      judge: () => refusal(raw, [{ path: 'rowLevelSecurity.0.check', code: 'custom', message: CHECK_ON_SELECT }]),
+    };
+    await openPackageDoor(server);
+    typeName('tenant_rows');
+    typeUsing('owner_id == current_user.id');
+
+    await waitFor(() => expect(server.sent).toHaveLength(1), AUTOSAVE);
+    const strip = await screen.findByText(/Policy on row 1/);
+    expect(strip.textContent).toBe(`Not saved. Policy on row 1: ${CHECK_ON_SELECT}`);
+    expect(screen.queryByText(/\[custom\]/)).toBeNull();
+  });
+
+  it('(e) CONTROL — a refusal with no issues keeps the transport’s text', async () => {
+    const raw = 'permission/sales_perms failed spec validation: 1 issue — rowLevelSecurity.0.check [custom]';
+    const server: Server = { sent: [], judge: () => refusal(raw, []) };
+    await openPackageDoor(server);
+    typeName('tenant_rows');
+    typeUsing('owner_id == current_user.id');
+
+    await waitFor(() => expect(server.sent).toHaveLength(1), AUTOSAVE);
+    expect(await screen.findByText(raw)).toBeInTheDocument();
+  });
+});
+
+describe('what the spec refuses in a policy’s clauses holds the save (objectstack#28664)', () => {
+  it('(f) a named row with no predicate is held, says why, and sends nothing; a USING lets it go', async () => {
+    const server: Server = { sent: [], judge: doorJudge };
+    await openPackageDoor(server);
+    typeName('tenant_rows');
+
+    // The spec's own refusal, under USING; the status line says the save is held.
+    expect(await screen.findByTestId('rls-using-finding-0')).toHaveTextContent(/^At least one of "using" or "check"/);
+    await waitFor(() =>
+      expect(screen.getByTestId('perm-autosave-held')).toHaveTextContent(
+        'Not saved: fix the policy finding shown under USING or CHECK.',
+      ),
+    );
+    await pause(PAST_THE_PAUSE);
+    expect(server.sent).toHaveLength(0);
+
+    typeUsing('owner_id == current_user.id');
+    expect(screen.queryByTestId('rls-using-finding-0')).toBeNull();
+    await waitFor(() => expect(server.sent).toHaveLength(1), AUTOSAVE);
   });
 });

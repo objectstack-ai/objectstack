@@ -54,6 +54,7 @@
     "integration/ConnectorInstanceNoAuth:type",
     "integration/ConnectorInstanceOAuth2AuthorizationCodeAuth:authorizationUrl",
     "integration/ConnectorInstanceOAuth2AuthorizationCodeAuth:clientId",
+    "integration/ConnectorInstanceOAuth2AuthorizationCodeAuth:clientSource",
     "integration/ConnectorInstanceOAuth2AuthorizationCodeAuth:credentialRef",
     "integration/ConnectorInstanceOAuth2AuthorizationCodeAuth:grant",
     "integration/ConnectorInstanceOAuth2AuthorizationCodeAuth:resource",

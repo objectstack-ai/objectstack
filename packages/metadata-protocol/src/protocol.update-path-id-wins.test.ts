@@ -25,8 +25,13 @@
  * asserted below is deliberately not "the fix line is present" but the
  * ingress-level fact a future fork would break:
  *
- *   **the probed row, the OCC-checked row, the written row and the receipt's
- *   `id`/`record` are the SAME row — the PATH row.**
+ *   **the OCC-checked row, the written row (and the row a not-found answer
+ *   names) and the receipt's `id`/`record` are the SAME row — the PATH row.**
+ *
+ * There is no existence probe AHEAD of the write any more: an update by id is
+ * judged first and its row's existence asked after, as a delete's is, so the
+ * "probed row" of the history above is now the row the post-write existence
+ * check reads — the same PATH row.
  *
  * ## What is deliberately NOT re-litigated here
  *
@@ -147,7 +152,8 @@ describe('[#6479] the PATH row is the row — probe, OCC, write and receipt agre
         const { p, findOne, update, store } = makeProtocol(TWO_ROWS);
         const res = await p.updateData({ object: 'task', id: 'rec_1', data: { id: 'rec_1', title: 'x' } });
 
-        expect(findOne.mock.calls[0][1]).toMatchObject({ where: { id: 'rec_1' } });
+        // No token and a row that is there: nothing is read beside the write.
+        expect(findOne).not.toHaveBeenCalled();
         expect(boundRowOfCall(update)).toBe('rec_1');
         expect(res).toMatchObject({ object: 'task', id: 'rec_1', record: { id: 'rec_1', title: 'x' } });
         expect(store.get('rec_1')).toMatchObject({ id: 'rec_1', title: 'x' });
@@ -158,8 +164,8 @@ describe('[#6479] the PATH row is the row — probe, OCC, write and receipt agre
         const { p, findOne, update, store } = makeProtocol(TWO_ROWS);
         const res = await p.updateData({ object: 'task', id: 'rec_1', data: { id: 'rec_2', title: 'x' } });
 
-        // The four gates, one row.
-        expect(findOne.mock.calls[0][1]).toMatchObject({ where: { id: 'rec_1' } });
+        // The gates, one row.
+        expect(findOne).not.toHaveBeenCalled();
         expect(boundRowOfCall(update)).toBe('rec_1');
         expect(res.id).toBe('rec_1');
         expect(res.record).toMatchObject({ id: 'rec_1', title: 'x' });
@@ -189,10 +195,12 @@ describe('[#6479] the PATH row is the row — probe, OCC, write and receipt agre
     });
 
     it('(d1) a path id that names no row is still 404, and the body id cannot rescue it', async () => {
-        // Unchanged by this fix and pinned as such: the probe has always asked the
-        // PATH id (#4435). What it adds here is that an existing row named by the
-        // BODY does not make the call succeed — and is not written.
-        const { p, update, store } = makeProtocol(TWO_ROWS);
+        // Unchanged by this fix and pinned as such: existence is asked of the
+        // PATH id (#4435) — now after the engine has judged the write, which
+        // this double resolves with a `null` readback for the PATH row it
+        // bound. What it adds here is that an existing row named by the BODY
+        // does not make the call succeed — and is not written.
+        const { p, findOne, update, store } = makeProtocol(TWO_ROWS);
         let caught: any;
         try {
             await p.updateData({ object: 'task', id: 'ghost', data: { id: 'rec_2', title: 'x' } });
@@ -203,7 +211,8 @@ describe('[#6479] the PATH row is the row — probe, OCC, write and receipt agre
         expect(caught.code).toBe('RECORD_NOT_FOUND');
         expect(caught.status).toBe(404);
         expect(caught.message).toContain('ghost');
-        expect(update).not.toHaveBeenCalled();
+        expect(boundRowOfCall(update)).toBe('ghost');
+        expect(findOne.mock.calls[0][1]).toMatchObject({ where: { id: 'ghost' } });
         expect(store.get('rec_2')).toEqual(TWO_ROWS[1]);
     });
 });

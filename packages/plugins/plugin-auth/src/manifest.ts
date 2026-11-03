@@ -38,6 +38,7 @@ import {
   SysTwoFactor,
   SysUser,
   SysUserPreference,
+  SysPersonalView,
   SysVerification,
 } from '@objectstack/platform-objects/identity';
 import { Field } from '@objectstack/spec/data';
@@ -59,6 +60,10 @@ export const authIdentityObjects: any[] = [
   SysApiKey,
   SysTwoFactor,
   SysUserPreference,
+  // A reader's own named list views: user data on the preference template
+  // (ruling 6570568131 on #28971). Its save validation and default flag live
+  // in `personal-view-hooks.ts`.
+  SysPersonalView,
   SysOauthApplication,
   SysOauthAccessToken,
   SysOauthRefreshToken,

@@ -2777,29 +2777,15 @@ describe('groupByField — a padded field name is refused', () => {
 });
 
 describe('ViewSharingSchema', () => {
-  it('should default to collaborative', () => {
-    const sharing = {};
-
-    const result = ViewSharingSchema.parse(sharing);
-    expect(result.type).toBe('collaborative');
+  // [#29037] `type` is retired (ADR-0049): the block carries `lockedBy` only,
+  // and parsing an empty block no longer writes an ownership type.
+  it('emits no ownership type for an empty block', () => {
+    const result = ViewSharingSchema.parse({});
+    expect(result).toEqual({});
   });
 
-  it('should accept personal view', () => {
-    const sharing = {
-      type: 'personal' as const,
-      lockedBy: 'user_123',
-    };
-
-    expect(() => ViewSharingSchema.parse(sharing)).not.toThrow();
-  });
-
-  it('should accept collaborative view with lock', () => {
-    const sharing = {
-      type: 'collaborative' as const,
-      lockedBy: 'admin_user',
-    };
-
-    expect(() => ViewSharingSchema.parse(sharing)).not.toThrow();
+  it('should accept a lock', () => {
+    expect(ViewSharingSchema.parse({ lockedBy: 'admin_user' })).toEqual({ lockedBy: 'admin_user' });
   });
 });
 
@@ -3032,9 +3018,9 @@ describe('Airtable-style ListView enhancements', () => {
       name: 'my_pipeline',
       label: 'My Pipeline',
       columns: ['name', 'stage'],
-      description: 'Personal view for tracking deals',
+      description: 'Pipeline view for tracking deals',
       sharing: {
-        type: 'personal',
+        lockedBy: 'admin',
       },
     };
 
@@ -3108,7 +3094,6 @@ describe('Airtable-style ListView enhancements', () => {
       hiddenFields: ['internal_id', 'sys_updated_at'],
       fieldOrder: ['project_name', 'status', 'priority', 'budget', 'completion', 'department'],
       sharing: {
-        type: 'collaborative',
         lockedBy: 'admin',
       },
       resizable: true,
@@ -3144,7 +3129,7 @@ describe('Airtable-style ListView enhancements', () => {
             summarizeField: 'amount',
             columns: ['name', 'owner', 'close_date'],
           },
-          sharing: { type: 'collaborative' },
+          sharing: { lockedBy: 'admin' },
         },
         gallery: {
           type: 'gallery',
@@ -3435,7 +3420,7 @@ describe('UserActionsConfigSchema', () => {
     expect(config.group).toBe(true);
     expect(config.addRecordForm).toBe(false);
     expect(config.editInline).toBe(true);
-    expect(config.hideFields).toBe(false);
+    expect(config.hideFields).toBe(true);
     expect(config.rowColor).toBe(false);
     expect(config.buttons).toBeUndefined();
   });
@@ -3495,16 +3480,51 @@ describe('UserActionsConfigSchema', () => {
     });
   });
 
-  // The split is copied from the renderer's reads, not chosen by the spec
-  // (ruled A on objectui#5435): ListView.tsx computes `showGroup` as
-  // `ua?.group !== false` (absent ⇒ shown) but `showHideFields` / `showColor`
-  // as `ua?.hideFields === true` / `ua?.rowColor === true` (absent ⇒ hidden).
-  // Normalising the three to one default would silently flip a toolbar
-  // affordance on every view that never wrote the key.
-  it('pins the group-ON / hideFields-OFF / rowColor-OFF defaults asymmetry, copied from what the renderer reads', () => {
+  // Maintainer ruling on #28912: 「Fable 评估（核对后） 同意立卡」, confirmed on
+  // the card 「#28911 和 #28912 都保留，按卡上写的做。」 A reader can hide and
+  // show the view's columns by default; `hideFields: false` is the opt-out.
+  // The old OFF default was copied from the renderer's legacy `=== true` read;
+  // the renderer now reads `ua?.hideFields !== false`, so the two agree again.
+  describe('hideFields defaults ON (maintainer ruling)', () => {
+    it('an absent key parses to true', () => {
+      expect(UserActionsConfigSchema.parse({}).hideFields).toBe(true);
+      const view = ListViewSchema.parse({
+        name: 'accounts',
+        label: 'Accounts',
+        columns: [{ field: 'name' }],
+        userActions: {},
+      });
+      expect(view.userActions?.hideFields).toBe(true);
+    });
+
+    it('an explicit false stays false — the opt-out', () => {
+      expect(UserActionsConfigSchema.parse({ hideFields: false }).hideFields).toBe(false);
+      const view = ListViewSchema.parse({
+        name: 'accounts',
+        label: 'Accounts',
+        columns: [{ field: 'name' }],
+        userActions: { hideFields: false },
+      });
+      expect(view.userActions?.hideFields).toBe(false);
+    });
+
+    it('a view with no `userActions` block still materialises none', () => {
+      const view = ListViewSchema.parse({
+        name: 'accounts',
+        label: 'Accounts',
+        columns: [{ field: 'name' }],
+      });
+      expect(view.userActions).toBeUndefined();
+    });
+  });
+
+  // `group` is ON unless turned off (`ua?.group !== false`), `rowColor` is OFF
+  // unless turned on (`ua?.rowColor === true`) — the renderer's reads, ruled A
+  // on objectui#5435. `hideFields` left this pair by the ruling above.
+  it('pins the group-ON / hideFields-ON / rowColor-OFF defaults, matching what the renderer reads', () => {
     const config = UserActionsConfigSchema.parse({});
     expect(config.group).toBe(true);
-    expect(config.hideFields).toBe(false);
+    expect(config.hideFields).toBe(true);
     expect(config.rowColor).toBe(false);
   });
 

@@ -85,7 +85,6 @@ import {
   KERNEL_ASSIGNED_PORT,
   probeThroughChild,
   readKernelAssignedPort,
-  TSX,
 } from './helpers/serve-process.js';
 import { defineStackSourceFromLiteral, linkSpec, writeDefineStackConfig } from './helpers/define-stack-fixture.js';
 
@@ -127,7 +126,7 @@ interface Live {
 
 function boot(argv: string[], cwd: string, env: Record<string, string | undefined>): Promise<Live> {
   return new Promise((resolveBoot, rejectBoot) => {
-    const child = spawn(TSX, [CLI, ...argv], {
+    const child = spawn(process.execPath, [CLI, ...argv], {
       cwd,
       // `childEnv`, never a bare `...process.env` — see its header. Neither
       // artifact variable leaks in from the runner: each case states its own.

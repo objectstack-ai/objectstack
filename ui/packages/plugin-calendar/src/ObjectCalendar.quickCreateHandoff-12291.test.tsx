@@ -35,7 +35,7 @@
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { SchemaRenderer, SchemaRendererProvider } from '@object-ui/react';
 
 const probe = vi.hoisted(() => ({
@@ -227,11 +227,12 @@ describe('objectui#12291 — an object quick-create cannot satisfy hands the day
 
   it('a closed `calendarQuickCreate` row withholds the hand-off exactly as it withholds the dialog', async () => {
     const onEdit = vi.fn();
-    const readOnly: MePermissionsResponse = {
+    const readOnly: MePermissionsAuthenticatedResponse = {
       authenticated: true,
       userId: 'u-pin',
       tenantId: null,
-      roles: ['member'],
+      hasAnyQueue: false,
+      positions: ['member'],
       permissionSets: ['member'],
       objects: { showcase_task: { allowCreate: false, allowRead: true, allowEdit: false, allowDelete: false } as never },
       fields: {},

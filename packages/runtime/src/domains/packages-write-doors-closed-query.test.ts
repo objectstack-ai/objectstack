@@ -58,6 +58,7 @@ function boot(caller: Record<string, unknown> = AUTHOR) {
         revertCommit: vi.fn(async () => ({ success: true })),
         reassignOrphanedMetadata: vi.fn(async () => ({ success: true, adoptedCount: 0 })),
         duplicatePackage: vi.fn(async (r: any) => ({ success: true, copiedCount: 0, failedCount: 0, targetPackageId: r.targetPackageId, copied: [], failed: [] })),
+        ensureCustomizationPackage: vi.fn(async (r: any) => ({ basePackageId: r.basePackageId, packageId: `${r.basePackageId}.custom`, namespace: 'app_custom', dependencyRange: '^1', created: true, writable: true })),
     };
     const protocol = {
         installPackage: acts.installPackage,
@@ -68,6 +69,7 @@ function boot(caller: Record<string, unknown> = AUTHOR) {
         revertCommit: acts.revertCommit,
         reassignOrphanedMetadata: acts.reassignOrphanedMetadata,
         duplicatePackage: acts.duplicatePackage,
+        ensureCustomizationPackage: acts.ensureCustomizationPackage,
     };
     const metadata = { publishPackage: acts.publishPackage };
     const services: Record<string, unknown> = { objectql: { registry }, protocol, metadata };
@@ -121,6 +123,7 @@ const DOORS: Door[] = [
     { door: 'POST /packages/:id/commits/:c/revert', method: 'POST', path: `/packages/${PKG}/commits/c_1/revert`, body: {}, declared: [], act: 'revertCommit', okStatus: 200 },
     { door: 'POST /packages/:id/adopt-orphans', method: 'POST', path: `/packages/${PKG}/adopt-orphans`, body: {}, declared: [], act: 'reassignOrphanedMetadata', okStatus: 200 },
     { door: 'POST /packages/:id/duplicate', method: 'POST', path: `/packages/${PKG}/duplicate`, body: { targetPackageId: 'com.acme.copy' }, declared: [], act: 'duplicatePackage', okStatus: 200 },
+    { door: 'POST /packages/:id/ensure-customization', method: 'POST', path: `/packages/${PKG}/ensure-customization`, body: {}, declared: [], act: 'ensureCustomizationPackage', okStatus: 201 },
 ];
 
 // `setPackageDisabled` writes a real JSON file under OS_HOME on the enable /

@@ -49,7 +49,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { FlowSchema, FlowNodeSchema } from '../automation/flow.zod';
-import { EndConfigSchema, ScreenConfigSchema } from '../automation/builtin-node-config.zod';
+import { EndConfigSchema, SaveNoticeConfigSchema, ScreenConfigSchema } from '../automation/builtin-node-config.zod';
 import { NotifyConfigSchema } from '../automation/io-node-config.zod';
 import { ApprovalNodeConfigSchema, APPROVAL_NODE_TYPE } from '../automation/approval.zod';
 import { getBuiltinNodeConfigContracts } from '../automation/flow-node-config-refusals';
@@ -106,6 +106,9 @@ const RUNNER_SLOTS: Readonly<Record<string, Disposition>> = {
   'flow.variables[].name': noReader('a variable name — the binding a screen field or node writes to'),
   'flow.variables[].type': noReader('a data-type token'),
   'flow.variables[].defaultValue': noReader('a value the run binds, not text it shows'),
+  // [#29442] Read by the start doors, which load the input from that object; the
+  // object's own labels are translated under `objects.<object>`.
+  'flow.variables[].objectName': noReader('an object name — the object a start input declared a record id is loaded from'),
   'flow.edges[].id': noReader('an edge id'),
   'flow.edges[].source': noReader('a node id the edge leaves'),
   'flow.edges[].target': noReader('a node id the edge enters'),
@@ -164,6 +167,13 @@ const RUNNER_SLOTS: Readonly<Record<string, Disposition>> = {
 
   // EndConfigSchema (an `end` node's config)
   'end.message': keyed('refusals.NODE.message', "a refused run's notice, picked by the engine in the run's locale"),
+
+  // SaveNoticeConfigSchema (a `save_notice` node's config, #28251) — rendered by
+  // the engine like the refusal, so it is a tier-1 slot, not a tier-2 one.
+  'save_notice.message': keyed(
+    'notices.NODE.message',
+    "the sentence the writer reads with the save, picked by the engine in the writer's locale",
+  ),
 };
 
 /**
@@ -269,6 +279,7 @@ function runnerLeaves(): string[] {
     ...prefixed('node', textLeaves(FlowNodeSchema, (p) => p === 'config')),
     ...prefixed('screen', textLeaves(ScreenConfigSchema)),
     ...prefixed('end', textLeaves(EndConfigSchema)),
+    ...prefixed('save_notice', textLeaves(SaveNoticeConfigSchema)),
   ];
 }
 
@@ -284,7 +295,7 @@ function otherNodeLeaves(): string[] {
   contracts.set(APPROVAL_NODE_TYPE, ApprovalNodeConfigSchema);
   const out: string[] = [];
   for (const [type, schema] of contracts) {
-    if (type === 'screen') continue; // tier 1
+    if (type === 'screen' || type === 'save_notice') continue; // tier 1
     const regions = new Set((FLOW_REGION_SLOTS_BY_TYPE.get(type) ?? []).map((slot) => slot.key));
     for (const leaf of textLeaves(schema, (p) => regions.has(p.split(/[.[]/)[0]!))) {
       if (COPY_WORD.test(leaf.replace(/\[\]/g, '').replace(/\.\*/g, ''))) out.push(`${type}.${leaf}`);

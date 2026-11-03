@@ -33,14 +33,16 @@ import {
   FlaskConical,
   Check,
   Circle,
+  AlertCircle,
 } from 'lucide-react';
 import { CelPredicateField } from './CelPredicateField.js';
 import { CelTestRunDialog } from './CelTestRunDialog.js';
 import type { CelLintIssue } from './celAuthoring.js';
 import { objectRuleCell, objectRuleSeed, type ObjectAccessDefault, type ObjectPerm } from './permission-slice.js';
-import type {
-  AdminScope as SpecAdminScope,
-  RowLevelSecurityPolicy as SpecRlsPolicy,
+import {
+  RowLevelSecurityPolicySchema,
+  type AdminScope as SpecAdminScope,
+  type RowLevelSecurityPolicy as SpecRlsPolicy,
 } from '@objectstack/spec/security';
 
 /**
@@ -205,6 +207,67 @@ function asArray<T = unknown>(v: unknown): T[] {
  */
 function policyNamed(policy: RlsPolicy | null | undefined): boolean {
   return typeof policy?.name === 'string' && policy.name.trim() !== '';
+}
+
+/**
+ * What the spec's own policy schema says about a policy's USING / CHECK pair,
+ * shown on the field it concerns.
+ *
+ * Judged by `RowLevelSecurityPolicySchema` itself, ⛔ never by a rule restated
+ * here: which operations admit a `check`, and when a policy carries no
+ * predicate at all, are the spec's cross-field rules, and the text shown is
+ * the spec's message. The probe carries only the members those rules read
+ * (`operation`, `using`, `check`) beside a placeholder name and object, so a
+ * name still being typed cannot keep the rules from running, and nothing else
+ * the row carries is judged here.
+ *
+ * - `using`: the issues at `using` and at the policy itself (no predicate at
+ *   all), shown under USING.
+ * - `check`: the issues at `check`, shown under CHECK.
+ * - `checkApplies`: whether the operation admits a `check` at all, read by
+ *   probing a non-blank one. A blank CHECK on an operation that admits none is
+ *   not offered.
+ */
+export interface RlsClauseFindings {
+  using: string[];
+  check: string[];
+  checkApplies: boolean;
+}
+
+function rlsClauseProbe(operation: unknown, using: unknown, check: unknown): Record<string, unknown> {
+  const body: Record<string, unknown> = { name: 'clause_probe', object: '*', operation };
+  if (using !== undefined) body.using = using;
+  if (check !== undefined) body.check = check;
+  return body;
+}
+
+export function rlsClauseFindings(policy: RlsPolicy | null | undefined): RlsClauseFindings {
+  const p = policy && typeof policy === 'object' ? policy : {};
+  const using: string[] = [];
+  const check: string[] = [];
+  const judged = RowLevelSecurityPolicySchema.safeParse(rlsClauseProbe(p.operation, p.using, p.check));
+  if (!judged.success) {
+    for (const issue of judged.error.issues) {
+      if (issue.path[0] === 'check') check.push(issue.message);
+      else if (issue.path.length === 0 || issue.path[0] === 'using') using.push(issue.message);
+    }
+  }
+  const admits = RowLevelSecurityPolicySchema.safeParse(rlsClauseProbe(p.operation, 'true', 'true'));
+  const checkApplies = admits.success || !admits.error.issues.some((issue) => issue.path[0] === 'check');
+  return { using, check, checkApplies };
+}
+
+/**
+ * How many such findings the draft's policies carry: the host holds its save
+ * while any remain, since the door refuses exactly these (`rlsClauseFindings`).
+ * Read from the draft itself, so the hold does not wait for the RLS tab to
+ * mount.
+ */
+export function rlsClauseFindingCount(rowLevelSecurity: unknown): number {
+  return asArray<RlsPolicy>(rowLevelSecurity).reduce((n, pol) => {
+    const f = rlsClauseFindings(pol);
+    return n + f.using.length + f.check.length;
+  }, 0);
 }
 
 /** Tolerantly coerce a facet value (parsed value or JSON string) to an object. */
@@ -397,6 +460,24 @@ interface FacetSectionProps {
   flat?: { shown: boolean; testId: string };
 }
 
+/**
+ * objectstack#28664 — the spec's findings on one clause ({@link rlsClauseFindings}),
+ * in the spec's words, under the field they concern.
+ */
+function ClauseFindings({ messages, testId }: { messages: string[]; testId: string }) {
+  if (messages.length === 0) return null;
+  return (
+    <ul className="mt-1 space-y-1" aria-live="polite" data-testid={testId}>
+      {messages.map((message, i) => (
+        <li key={i} className="flex items-start gap-1.5 text-[11px] text-destructive">
+          <AlertCircle className="mt-[1px] h-3 w-3 shrink-0" />
+          <span>{message}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** A collapsible facet section so the three editors don't crowd the matrix. */
 function FacetSection({ title, icon, count, children, defaultOpen, flat }: FacetSectionProps) {
   const [open, setOpen] = React.useState(!!defaultOpen);
@@ -566,6 +647,9 @@ export function PermissionAdvancedFacets({
   }, [totalCelErrors]);
 
   const testPolicy = testIndex != null ? policies[testIndex] : undefined;
+
+  // objectstack#28664 — the spec's own verdict on each row's USING / CHECK pair.
+  const clauseFindings = React.useMemo(() => policies.map(rlsClauseFindings), [policies]);
 
   const setPolicies = (next: RlsPolicy[]) =>
     setDraft((p) => ({ ...p, rowLevelSecurity: next }));
@@ -737,40 +821,58 @@ export function PermissionAdvancedFacets({
                 </p>
               )}
               <div className="grid gap-2 sm:grid-cols-2">
-                <CelPredicateField
-                  label={t('perm.rls.using')}
-                  value={pol.using ?? ''}
-                  disabled={!writable}
-                  placeholder="organization_id == current_user.organization_id"
-                  objectName={pol.object}
-                  fieldNames={fieldsFor(pol.object)}
-                  clause="using"
-                  verdictPath={`rowLevelSecurity.${i}.using`}
-                  onLintChange={(issues) => reportClause(`${i}:using`, issues)}
-                  onChange={(v) => {
-                    const next = [...policies];
-                    next[i] = { ...pol, using: v };
-                    setPolicies(next);
-                  }}
-                  t={t}
-                />
-                <CelPredicateField
-                  label={t('perm.rls.check')}
-                  value={pol.check ?? ''}
-                  disabled={!writable}
-                  placeholder={t('perm.rls.checkPlaceholder')}
-                  objectName={pol.object}
-                  fieldNames={fieldsFor(pol.object)}
-                  clause="check"
-                  verdictPath={`rowLevelSecurity.${i}.check`}
-                  onLintChange={(issues) => reportClause(`${i}:check`, issues)}
-                  onChange={(v) => {
-                    const next = [...policies];
-                    next[i] = { ...pol, check: v };
-                    setPolicies(next);
-                  }}
-                  t={t}
-                />
+                <div>
+                  <CelPredicateField
+                    label={t('perm.rls.using')}
+                    value={pol.using ?? ''}
+                    disabled={!writable}
+                    placeholder="organization_id == current_user.organization_id"
+                    objectName={pol.object}
+                    fieldNames={fieldsFor(pol.object)}
+                    clause="using"
+                    verdictPath={`rowLevelSecurity.${i}.using`}
+                    scopeIssue={clauseFindings[i].using.length > 0}
+                    onLintChange={(issues) => reportClause(`${i}:using`, issues)}
+                    onChange={(v) => {
+                      const next = [...policies];
+                      next[i] = { ...pol, using: v };
+                      setPolicies(next);
+                    }}
+                    t={t}
+                  />
+                  <ClauseFindings messages={clauseFindings[i].using} testId={`rls-using-finding-${i}`} />
+                </div>
+                {/* objectstack#28664 — a blank CHECK is not offered on an
+                    operation the spec admits none on; a non-blank one stays,
+                    with the spec's refusal under it, so nothing is pruned. */}
+                {clauseFindings[i].checkApplies || (pol.check ?? '').trim() !== '' ? (
+                  <div>
+                    <CelPredicateField
+                      label={t('perm.rls.check')}
+                      value={pol.check ?? ''}
+                      disabled={!writable}
+                      placeholder={t('perm.rls.checkPlaceholder')}
+                      objectName={pol.object}
+                      fieldNames={fieldsFor(pol.object)}
+                      clause="check"
+                      verdictPath={`rowLevelSecurity.${i}.check`}
+                      scopeIssue={clauseFindings[i].check.length > 0}
+                      onLintChange={(issues) => reportClause(`${i}:check`, issues)}
+                      onChange={(v) => {
+                        const next = [...policies];
+                        next[i] = { ...pol, check: v };
+                        setPolicies(next);
+                      }}
+                      t={t}
+                    />
+                    <ClauseFindings messages={clauseFindings[i].check} testId={`rls-check-finding-${i}`} />
+                  </div>
+                ) : (
+                  <div data-testid={`rls-check-not-applicable-${i}`}>
+                    <Label className="text-[10px] uppercase text-muted-foreground">{t('perm.rls.check')}</Label>
+                    <p className="mt-1 text-xs text-muted-foreground">{t('perm.rls.checkNotApplicable')}</p>
+                  </div>
+                )}
               </div>
             </div>
           ))}

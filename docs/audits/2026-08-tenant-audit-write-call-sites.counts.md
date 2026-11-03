@@ -33,19 +33,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 255 |
-| Object name statically decidable | 177 |
-| Object name chosen at run time | 78 |
+| Write call sites | 261 |
+| Object name statically decidable | 182 |
+| Object name chosen at run time | 79 |
 | Against a tenancy-enabled object | 176 |
-| Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 196 |
+| Against an object declaring tenancy off | 6 |
+| Threading a tenant context | 198 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
-| Options argument unreadable | 51 |
+| Options argument unreadable | 55 |
 | …and decidably tenancy-enabled | 29 |
-| Threading a decidably elevated context | 145 |
+| Threading a decidably elevated context | 146 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 102 |
+| Threading a context of undecidable elevation | 107 |
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-31 at `d06a02507`.
+Measured on 2026-11-02 at `187d77e7f`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 830 |
-| engine-shaped types recognised | 96 |
-| declared objects in the registry | 124 |
-| same-named calls subtracted as non-engine | 214 |
+| tracked non-test sources scanned | 854 |
+| engine-shaped types recognised | 101 |
+| declared objects in the registry | 126 |
+| same-named calls subtracted as non-engine | 228 |
 
 ## Every site
 
@@ -166,6 +166,7 @@ Measured on 2026-10-31 at `d06a02507`.
 | `packages/plugins/plugin-auth/src/organization-delete.ts` | `delete` | `sys_team` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/organization-delete.ts` | `delete` | `sys_team_member` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/organization-delete.ts` | `delete` | `sys_user_permission_set` | enabled | elevated | 1 |
+| `packages/plugins/plugin-auth/src/personal-view-routes.ts` | `delete` | `PERSONAL_VIEW_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/reconcile-membership.ts` | `insert` | `sys_member` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-auth/src/scim-connection-service.ts` | `insert` | `sys_scim_connection_credential` | enabled | PROVABLY NONE | 1 |
 | `packages/plugins/plugin-auth/src/session-tombstone.ts` | `update` | `objectName` | undecidable | options unreadable | 1 |
@@ -232,6 +233,9 @@ Measured on 2026-10-31 at `d06a02507`.
 | `packages/services/service-mailbox/src/ingest/mail-ingest-service.ts` | `insert` | `MAIL_MESSAGE_OBJECT` | undecidable | elevated | 1 |
 | `packages/services/service-mailbox/src/ingest/mail-ingest-service.ts` | `update` | `MAIL_MESSAGE_OBJECT` | undecidable | elevated | 1 |
 | `packages/services/service-mailbox/src/sync/mailbox-sync-service.ts` | `update` | `MAILBOX_OBJECT` | undecidable | elevated | 1 |
+| `packages/services/service-messaging/src/device-registry.ts` | `delete` | `sys_user_device` | disabled | options unreadable | 2 |
+| `packages/services/service-messaging/src/device-registry.ts` | `insert` | `sys_user_device` | disabled | context, elevation undecidable | 1 |
+| `packages/services/service-messaging/src/device-registry.ts` | `update` | `sys_user_device` | disabled | options unreadable | 2 |
 | `packages/services/service-messaging/src/inbox-channel.ts` | `insert` | `objectName` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-messaging/src/inbox-channel.ts` | `insert` | `receiptObject` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-messaging/src/messaging-service.ts` | `insert` | `RECEIPT_OBJECT` | undecidable | context, elevation undecidable | 1 |

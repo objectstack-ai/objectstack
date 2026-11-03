@@ -9,6 +9,10 @@ view / page / dashboard / report metadata.
   dashboard/report widgets: when a data need fits a `defineDataset`, when it
   must escalate to a stored field or app code, and when an ad-hoc
   in-page `<ObjectChart>` needs no dataset at all.
+- `record-page.json` — the record page as the object declares it: a child
+  table placed first by `relatedList: 'primary'` (no page file), and
+  `navigation: { mode: 'page' }` on the list view with the reader's own
+  open choice left out of metadata.
 - `report-period-export.json` — a non-`joined` report's `dateRange` (one
   `type: 'date'` dataset dimension) and `exportOptions` (csv / xlsx under the
   base object's `allowExport` permission).

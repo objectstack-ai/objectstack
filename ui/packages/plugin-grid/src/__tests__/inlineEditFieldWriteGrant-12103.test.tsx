@@ -27,7 +27,7 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vite
 import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { SystemFieldName } from '@objectstack/spec/system';
 import { ObjectGrid } from '../ObjectGrid';
 import { __clearRecordCrudVerdictCache } from '../hooks/useRecordCrudVerdicts';
@@ -56,12 +56,13 @@ afterEach(() => {
 });
 
 /** The measured envelope: may edit the object, may not edit annual revenue, may not transfer. */
-function envelope(objectBits: Record<string, boolean> = {}): MePermissionsResponse {
+function envelope(objectBits: Record<string, boolean> = {}): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u-rep',
     tenantId: null,
-    roles: [],
+    hasAnyQueue: false,
+    positions: [],
     permissionSets: ['rep'],
     objects: {
       [OBJECT]: {

@@ -3523,6 +3523,165 @@ describe('runtime authoring gate on PAGE writes — the component visibleWhen ve
     });
 });
 
+// #28663 — an app navigation entry's `visible` that does not parse, and a
+// page's `variables` declarations that are duplicated, unnamed or seeded with a
+// value of the wrong type, at the ACTIVE save door (the draft read and the
+// publish are `protocol.draft-publish-verdict.test.ts`). Before: each saved
+// 200; the nav entry then vanished for every viewer. The lint-level pins are
+// `@objectstack/lint`'s `runtime-gate.app-nav-visible-predicate-writes.test.ts`
+// and `runtime-gate.page-variable-writes.test.ts`.
+//
+// ⚠️ This package reaches `@objectstack/lint` through its built `dist/`.
+describe('runtime authoring gate on APP and PAGE writes — nav `visible` syntax and page variables (#28663)', () => {
+    const app = (visible: unknown) => ({
+        name: 'qa_app',
+        label: 'QA App',
+        navigation: [{ id: 'nav_admin_only', type: 'object', label: 'Admin Only', objectName: 'qa_note', visible }],
+    });
+    const page = (variables: unknown[]) => ({
+        name: 'vars_page',
+        label: 'Vars',
+        type: 'app',
+        variables,
+        regions: [{ name: 'main', components: [{ type: 'page:header', properties: { title: 'Vars' } }] }],
+    });
+    const activeRows = (rows: Map<string, Row>, type: string) =>
+        Array.from(rows.values()).filter((r) => r.type === type && r.state === 'active');
+    const buildErrors = (stack: Record<string, unknown>) =>
+        runAuthoringRules('build', { normalized: stack, parsed: stack }).filter((f) => f.severity === 'error');
+
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+
+    it('REFUSES an active app save whose nav `visible` does not parse, with the build\'s finding; nothing stored', async () => {
+        const { protocol, rows } = makeProtocol();
+        const item = app("'org_owner' in");
+
+        const err = await protocol.saveMetaItem({ type: 'app', name: 'qa_app', item }).catch((e: any) => e);
+
+        expect(err, 'the save resolved — the door still accepts the nav predicate').toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issues = err.issues.filter((i: any) => i.rule === 'visibility-predicate-syntax');
+        expect(issues, JSON.stringify(err.issues)).toHaveLength(1);
+        expect(issues[0]).toMatchObject({ path: 'apps[0].navigation[0].visible', where: 'app "qa_app" · nav "nav_admin_only"' });
+        const atBuild = buildErrors({ apps: [item] }).filter((f) => f.rule === 'visibility-predicate-syntax');
+        for (const k of ['rule', 'where', 'path', 'message', 'hint'] as const) {
+            expect(issues[0][k], `door and build disagree on '${k}'`).toBe(atBuild[0]![k]);
+        }
+        expect(activeRows(rows, 'app')).toEqual([]);
+    });
+
+    it('[#28726] REFUSES an active app save whose nav `visible` overruns the CEL parse budget, with the build\'s finding; nothing stored', async () => {
+        const { protocol, rows } = makeProtocol();
+        const item = app(Array.from({ length: 90 }, () => 'features.cloudManaged != true').join(' || '));
+
+        const err = await protocol.saveMetaItem({ type: 'app', name: 'qa_app', item }).catch((e: any) => e);
+
+        expect(err, 'the save resolved — the door still accepts the over-budget nav predicate').toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issues = err.issues.filter((i: any) => i.rule === 'visibility-predicate-over-budget');
+        expect(issues, JSON.stringify(err.issues)).toHaveLength(1);
+        expect(issues[0]).toMatchObject({ path: 'apps[0].navigation[0].visible', where: 'app "qa_app" · nav "nav_admin_only"' });
+        const atBuild = buildErrors({ apps: [item] }).filter((f) => f.rule === 'visibility-predicate-over-budget');
+        for (const k of ['rule', 'where', 'path', 'message', 'hint'] as const) {
+            expect(issues[0][k], `door and build disagree on '${k}'`).toBe(atBuild[0]![k]);
+        }
+        expect(activeRows(rows, 'app')).toEqual([]);
+    });
+
+    it('[#28726] an app whose nav `visible` is a chain inside the budget saves, and the row lands', async () => {
+        const { protocol, rows } = makeProtocol();
+        const item = app(Array.from({ length: 51 }, () => 'features.cloudManaged != true').join(' || '));
+
+        await expect(protocol.saveMetaItem({ type: 'app', name: 'qa_app', item })).resolves.toMatchObject({ success: true });
+
+        expect(activeRows(rows, 'app')).toHaveLength(1);
+    });
+
+    it('an app whose nav `visible` parses saves, and the row lands', async () => {
+        const { protocol, rows } = makeProtocol();
+
+        await expect(
+            protocol.saveMetaItem({ type: 'app', name: 'qa_app', item: app("'org_owner' in current_user.positions") }),
+        ).resolves.toMatchObject({ success: true });
+
+        expect(activeRows(rows, 'app')).toHaveLength(1);
+    });
+
+    for (const [rule, variables, path] of [
+        ['page-variable-name-duplicate', [{ name: 'count', type: 'number' }, { name: 'count', type: 'string' }], 'pages[0].variables[1].name'],
+        ['page-variable-name-empty', [{ name: '', type: 'string' }], 'pages[0].variables[0].name'],
+        ['page-variable-default-type', [{ name: 'count', type: 'number', defaultValue: 'abc' }], 'pages[0].variables[0].defaultValue'],
+    ] as const) {
+        it(`REFUSES an active page save carrying [${rule}], located at the entry; nothing stored`, async () => {
+            const { protocol, rows } = makeProtocol();
+
+            const err = await protocol
+                .saveMetaItem({ type: 'page', name: 'vars_page', item: page([...variables]) })
+                .catch((e: any) => e);
+
+            expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+            expect(err.issues.filter((i: any) => i.rule === rule).map((i: any) => i.path)).toEqual([path]);
+            expect(activeRows(rows, 'page')).toEqual([]);
+        });
+    }
+
+    it('a page with clean variables saves, and the row lands', async () => {
+        const { protocol, rows } = makeProtocol();
+
+        await expect(protocol.saveMetaItem({
+            type: 'page',
+            name: 'vars_page',
+            item: page([{ name: 'count', type: 'number', defaultValue: 0 }, { name: 'picked', type: 'record_id' }]),
+        })).resolves.toMatchObject({ success: true });
+
+        expect(activeRows(rows, 'page')).toHaveLength(1);
+    });
+
+    // #28725 — references INTO the variables list: a `source` naming no
+    // component on the page, and a `page.NAME` read the page does not declare.
+    const referencing = (source: string, visibleWhen: string) => ({
+        ...page([{ name: 'picked', type: 'record_id', source }]),
+        regions: [{ name: 'main', components: [
+            { id: 'project_picker', type: 'element:record_picker', dataSource: { object: 'qa_note' }, properties: { label: 'Note', labelField: 'name' } },
+            { type: 'page:header', properties: { title: 'Vars' }, visibleWhen },
+        ] }],
+    });
+    for (const [rule, item, path] of [
+        ['page-variable-source-unknown', referencing('no_such_component', "page.picked != ''"), 'pages[0].variables[0].source'],
+        ['visibility-page-variable-undeclared', referencing('project_picker', "page.nosuch == 'x'"), 'pages[0].regions[0].components[1]'],
+    ] as const) {
+        it(`[#28725] REFUSES an active page save carrying [${rule}], located at the reference; nothing stored`, async () => {
+            const { protocol, rows } = makeProtocol();
+
+            const err = await protocol.saveMetaItem({ type: 'page', name: 'vars_page', item }).catch((e: any) => e);
+
+            expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+            expect(err.issues.filter((i: any) => i.rule === rule).map((i: any) => i.path)).toEqual([path]);
+            const atBuild = buildErrors({ pages: [item] }).filter((f) => f.rule === rule);
+            expect(err.issues.filter((i: any) => i.rule === rule).map((i: any) => i.message)).toEqual(atBuild.map((f) => f.message));
+            expect(activeRows(rows, 'page')).toEqual([]);
+        });
+    }
+
+    it('[#28725] a page whose `source` names its picker and whose predicate reads a declared variable saves', async () => {
+        const { protocol, rows } = makeProtocol();
+
+        await expect(protocol.saveMetaItem({
+            type: 'page', name: 'vars_page', item: referencing('project_picker', "page.picked != ''"),
+        })).resolves.toMatchObject({ success: true });
+
+        expect(activeRows(rows, 'page')).toHaveLength(1);
+    });
+});
+
 // #25002 — a CEL slot INSIDE a page component's `properties` bag that overruns
 // the platform's parse bounds (`page-predicate-over-budget`,
 // `validatePagePredicateBounds`) is refused at the runtime save door, as
@@ -5054,5 +5213,91 @@ describe('the object save door judges related-list names against the live regist
         expect(issue.path).toBe('objects.rl_quote.fieldGroups[0].relatedList');
         expect(issue.message).toContain("'rl_quote_line.quote' is a side card");
         expect(quoteRows(rows)).toEqual([]);
+    });
+});
+
+// ── #29341: the connector save door carries `connector-credential-literal` ──
+//
+// `@objectstack/lint`'s own tests prove the rule is registered for `connector`
+// writes. This block asks the door's question, through the real
+// `saveMetaItem`: does a `PUT /meta/connector/:name` publish carry the
+// advisory back on the 2xx, with the row STORED (nothing refused), and stay
+// silent on an `auth.credentialRef`-routed entry? Every value is a probe
+// sentinel, not a credential.
+describe('the connector save door carries connector-credential-literal as an advisory (#29341)', () => {
+    const CONNECTOR_RULE = 'connector-credential-literal';
+    const SENTINELS = ['door-headers-sentinel', 'door-default-headers-sentinel', 'door-transport-sentinel', 'door-env-sentinel'];
+
+    const restConnector = (literal: boolean) => ({
+        name: 'vendor_api',
+        label: 'Vendor API',
+        type: 'api',
+        provider: 'rest',
+        providerConfig: {
+            baseUrl: 'https://api.vendor.invalid/v1',
+            headers: literal
+                ? { Authorization: `Bearer ${SENTINELS[0]}`, Accept: 'application/json' }
+                : { Accept: 'application/json' },
+            defaultHeaders: literal
+                ? { 'X-Vendor-Trace': `Bearer ${SENTINELS[1]}` }
+                : { 'User-Agent': 'objectstack' },
+        },
+        ...(literal ? {} : { auth: { type: 'bearer', credentialRef: 'VENDOR_API_TOKEN' } }),
+    });
+
+    const mcpConnector = (kind: 'http' | 'stdio') => ({
+        name: `tools_${kind}`,
+        label: 'Tools',
+        type: 'api',
+        provider: 'mcp',
+        providerConfig: {
+            transport: kind === 'http'
+                ? { kind, url: 'https://mcp.vendor.invalid/mcp', headers: { Authorization: `Bearer ${SENTINELS[2]}` } }
+                : { kind, command: 'local-mcp-server', env: { MCP_UPSTREAM: `Bearer ${SENTINELS[3]}` } },
+        },
+    });
+
+    const saveConnector = (protocol: any, item: { name: string }, extra: Record<string, unknown> = {}) =>
+        protocol.saveMetaItem({ type: 'connector', name: item.name, item, ...extra });
+
+    const connectorRows = (rows: Map<string, Row>) =>
+        Array.from(rows.values()).filter((r) => r.type === 'connector');
+
+    const ofRule = (result: any) => (result.advisories ?? []).filter((a: any) => a.rule === CONNECTOR_RULE);
+
+    it('⭐ LIT — each map\'s literal rides the 2xx as a warning, and the row is stored', async () => {
+        const { protocol, rows } = makeProtocol();
+        const results = [
+            await saveConnector(protocol, restConnector(true)),
+            await saveConnector(protocol, mcpConnector('http')),
+            await saveConnector(protocol, mcpConnector('stdio')),
+        ];
+
+        expect(results.flatMap((r) => ofRule(r).map((a: any) => a.path))).toEqual([
+            'connectors[0].providerConfig.headers.Authorization',
+            'connectors[0].providerConfig.defaultHeaders["X-Vendor-Trace"]',
+            'connectors[0].providerConfig.transport.headers.Authorization',
+            'connectors[0].providerConfig.transport.env.MCP_UPSTREAM',
+        ]);
+        for (const advisory of results.flatMap(ofRule)) {
+            expect(advisory.severity).toBe('warning');
+            expect(advisory.message).toContain('auth.credentialRef');
+        }
+
+        // Nothing refused: every save landed, as written.
+        expect(connectorRows(rows).map((r) => r.name).sort()).toEqual(['tools_http', 'tools_stdio', 'vendor_api']);
+        const stored = JSON.parse(connectorRows(rows).find((r) => r.name === 'vendor_api')!.metadata);
+        expect(stored.providerConfig.headers.Authorization).toBe(`Bearer ${SENTINELS[0]}`);
+
+        // The advisory rides the save response: it must not copy the credential it asks the author to move.
+        const wire = JSON.stringify(results.map((r) => r.advisories ?? []));
+        for (const sentinel of SENTINELS) expect(wire.includes(sentinel), sentinel).toBe(false);
+    });
+
+    it('DARK — an `auth.credentialRef`-routed connector with only ordinary headers draws none', async () => {
+        const { protocol, rows } = makeProtocol();
+        const result = await saveConnector(protocol, restConnector(false));
+        expect(ofRule(result)).toEqual([]);
+        expect(connectorRows(rows).map((r) => r.name)).toEqual(['vendor_api']);
     });
 });

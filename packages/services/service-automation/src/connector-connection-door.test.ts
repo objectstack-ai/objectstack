@@ -62,6 +62,8 @@ const idp = {
     requests: [] as TokenRequest[],
     /** Answer to a refresh_token grant; default rotate. */
     refresh: 'rotate' as 'rotate' | 'invalid_grant' | 'down' | 'no_rotate',
+    /** Whether the code exchange issues a refresh token; default yes. */
+    exchangeIssuesRefreshToken: true,
     issued: 0,
 };
 
@@ -86,7 +88,11 @@ beforeAll(async () => {
         if (form.grant_type === 'authorization_code') {
             if (form.code !== GOOD_CODE) return answer(400, { error: 'invalid_grant' });
             return answer(200, {
-                access_token: `dummy-at-exchange-${n}`, token_type: 'Bearer', expires_in: 3600, refresh_token: `dummy-rt-${n}`, scope: 'crm.read',
+                access_token: `dummy-at-exchange-${n}`,
+                token_type: 'Bearer',
+                expires_in: 3600,
+                ...(idp.exchangeIssuesRefreshToken ? { refresh_token: `dummy-rt-${n}` } : {}),
+                scope: 'crm.read',
             });
         }
         if (form.grant_type === 'refresh_token') {
@@ -200,6 +206,7 @@ afterEach(async () => {
     }
     idp.requests.length = 0;
     idp.refresh = 'rotate';
+    idp.exchangeIssuesRefreshToken = true;
     idp.issued = 0;
     vi.restoreAllMocks();
 });
@@ -281,7 +288,7 @@ describe('ADR-0143 D4/D5 — connect an instance nobody authorized yet', () => {
         expect(provider.state.materialized).toHaveLength(0);
         expect(engine.getConnectorDegradedReason('crm')).toContain("connector instance 'crm' is not connected");
         expect(await engine.getConnectorConnection({ connector: 'crm', context: ADMIN_A as never }))
-            .toEqual({ connector: 'crm', organizationId: 'org_a', status: 'not_connected' });
+            .toEqual({ connector: 'crm', organizationId: 'org_a', status: 'not_connected', redirectUri: REDIRECT_URI });
 
         const { begun, done } = await connect();
         const url = new URL(begun.authorizationUrl);
@@ -433,6 +440,54 @@ describe('ADR-0143 D4/D5 — connect an instance nobody authorized yet', () => {
             if (saved.b === undefined) delete process.env.OS_BASE_URL; else process.env.OS_BASE_URL = saved.b;
         }
     });
+    it('the read answers the redirect URI to register with the vendor: the option, else OS_AUTH_URL, else OS_BASE_URL; with no base it is absent, never a refusal', async () => {
+        const CALLBACK = '/api/v1/automation/connectors/oauth/callback';
+        const saved = { a: process.env.OS_AUTH_URL, b: process.env.OS_BASE_URL };
+        delete process.env.OS_AUTH_URL;
+        delete process.env.OS_BASE_URL;
+        try {
+            const { engine, connect } = await boot([crm()], { redirectUri: null });
+            const read = () => engine.getConnectorConnection({ connector: 'crm', context: ADMIN_A as never });
+
+            // No base: the status still answers, the key is absent (not a
+            // guess, not a 503) — and a begin is still the 503 it was.
+            const bare = await read();
+            expect(bare).toEqual({ connector: 'crm', organizationId: 'org_a', status: 'not_connected' });
+            expect('redirectUri' in bare).toBe(false);
+            await expect(engine.beginConnectorConnection({ connector: 'crm', context: ADMIN_A as never }))
+                .rejects.toMatchObject({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+            // A base that is no absolute http(s) URL derives nothing either.
+            process.env.OS_BASE_URL = 'os.example.com';
+            expect('redirectUri' in (await read())).toBe(false);
+
+            process.env.OS_BASE_URL = 'https://base.example.com/';
+            expect((await read()).redirectUri).toBe(`https://base.example.com${CALLBACK}`);
+            process.env.OS_AUTH_URL = 'https://auth.example.com';
+            expect((await read()).redirectUri).toBe(`https://auth.example.com${CALLBACK}`);
+
+            // The URI the read shows is the one a connect names, and a
+            // connected read still answers it.
+            const { begun, done } = await connect();
+            expect(new URL(begun.authorizationUrl).searchParams.get('redirect_uri')).toBe(`https://auth.example.com${CALLBACK}`);
+            await done();
+            expect(await read()).toMatchObject({ status: 'connected', redirectUri: `https://auth.example.com${CALLBACK}` });
+
+            // The plugin option outranks both variables.
+            const { engine: optioned } = await boot([crm()]);
+            expect((await optioned.getConnectorConnection({ connector: 'crm', context: ADMIN_A as never })).redirectUri).toBe(REDIRECT_URI);
+        } finally {
+            if (saved.a === undefined) delete process.env.OS_AUTH_URL; else process.env.OS_AUTH_URL = saved.a;
+            if (saved.b === undefined) delete process.env.OS_BASE_URL; else process.env.OS_BASE_URL = saved.b;
+        }
+    });
+
+    it('⛔ a client_credentials instance has no connection, so its read is refused 400 and answers no redirect URI', async () => {
+        const clientCredentials = crm({ name: 'svc', auth: { ...crm().auth, grant: 'client_credentials', authorizationUrl: undefined } });
+        const { engine } = await boot([crm(), clientCredentials]);
+        const err = (await engine.getConnectorConnection({ connector: 'svc', context: ADMIN_A as never }).catch((e: unknown) => e)) as Record<string, unknown>;
+        expect(err).toMatchObject({ status: 400, code: 'VALIDATION_ERROR', message: expect.stringContaining('does not use the oauth2 authorization_code grant') });
+        expect(String(err.message)).not.toContain('oauth/callback');
+    });
 });
 
 // ─── D4 dispatch ─────────────────────────────────────────────────────
@@ -488,6 +543,25 @@ describe('ADR-0143 D4 — dispatch with the connection', () => {
         expect(engine.getConnectorDegradedReason('crm')).toBeUndefined();
         expect(await call('org_a')).toMatchObject({ status: 200 });
         expect((await rowsOf(ql))[0]).toMatchObject({ status: 'connected', revision: 2 });
+    });
+
+    it('[#28963] a connection marked because no refresh token was issued: the log and the hold name that cause, not a refusal', async () => {
+        const out = captureOutput();
+        const { call, connect, provider, engine, ql } = await boot();
+        idp.exchangeIssuesRefreshToken = false;
+        await (await connect()).done();
+        provider.state.accepted = new Set();
+        const refused = await call('org_a').catch((e) => e);
+        expect(refused).toMatchObject({ status: 503, message: expect.stringContaining('issued no refresh token') });
+        const [row] = await rowsOf(ql);
+        expect(row).toMatchObject({ status: 'reconnect_required', status_reason: refused.message });
+        // The log line is the stored reason, whose cause is the one that happened.
+        await vi.waitFor(() => expect(out.text()).toContain(`[Automation] ${refused.message}.`));
+        expect(out.text()).not.toContain('refused the grant');
+        // The instance is held with the cause the row stores.
+        await vi.waitFor(() => expect(engine.getConnectorDegradedReason('crm')).toContain('issued no refresh token'));
+        expect(engine.getConnectorDegradedReason('crm')).not.toContain('refused the grant');
+        expect(idp.requests.filter((r) => r.form.grant_type === 'refresh_token')).toHaveLength(0);
     });
 
     it("the run's organization selects the connection; a run with none is refused when several exist", async () => {
@@ -573,7 +647,9 @@ describe('ADR-0143 D3/D6 — what a grant leaves behind', () => {
         }
         // The logs did record the connect — the pin is not passing on silence.
         expect(out.text()).toContain("connector instance 'crm' connected for organization 'org_a' by user 'usr_admin'");
-        expect(out.text()).toContain("refused the grant of organization 'org_a'");
+        expect(out.text()).toContain(
+            "[Automation] connector instance 'crm' needs to be reconnected for organization 'org_a': its authorization server refused the grant",
+        );
     });
 
     it('⛔ writes only its own record — never sys_metadata, never a sign-in account (D6) — and reads no account either', async () => {
@@ -608,5 +684,238 @@ describe('ADR-0143 D3/D6 — what a grant leaves behind', () => {
         expect(collectMaskedReadFields(SysConnectorConnection as never)).toEqual(['refresh_token', 'registered_client']);
         expect(SysConnectorConnection.enable).toMatchObject({ apiEnabled: false, apiMethods: [] });
         expect(Object.keys(SysConnectorConnection.fields)).not.toContain('access_token');
+    });
+});
+
+// ─── ADR-0143 D2.1 (2026-11-02 amendment): the installer's client ────
+
+/**
+ * An instance declaring `clientSource: 'installer'`: the definition names no
+ * client and no secret, and the administrator of each deployment enters the
+ * client they registered with the vendor on the connection.
+ */
+function installerCrm(over: Record<string, unknown> = {}) {
+    const { clientId: _id, credentialRef: _ref, ...auth } = crm().auth;
+    return crm({ auth: { ...auth, clientSource: 'installer' }, ...over });
+}
+const INSTALLER_ID = 'installer-client-28866';
+const INSTALLER_SECRET = 'dummy-installer-secret-28866';
+const INSTALLER_CLIENT = { clientId: INSTALLER_ID, clientSecret: INSTALLER_SECRET };
+const basicOf = (id: string, secret: string) => `Basic ${Buffer.from(`${id}:${secret}`).toString('base64')}`;
+
+describe("ADR-0143 D2.1 — an instance that takes the installer's OAuth client", () => {
+    /** Begin with `client`, complete as the same caller. */
+    const connectWith = async (engine: AutomationEngine, client: unknown, context = ADMIN_A) => {
+        const begun = await engine.beginConnectorConnection({ connector: 'crm', context: context as never, client: client as never });
+        const state = new URL(begun.authorizationUrl).searchParams.get('state')!;
+        return { begun, done: () => engine.completeConnectorConnection({ query: { state, code: GOOD_CODE }, context: context as never }) };
+    };
+
+    it("connects with the administrator's client, refreshes as it, and revokes; each call carries that client", async () => {
+        const { engine, provider, call, ql } = await boot([installerCrm()]);
+        // Served: held "not connected", never "without `clientId`".
+        expect(engine.getConnectorDegradedReason('crm')).toContain("connector instance 'crm' is not connected");
+        expect(engine.getConnectorDegradedReason('crm')).not.toContain('clientId');
+
+        const { begun, done } = await connectWith(engine, INSTALLER_CLIENT);
+        expect(new URL(begun.authorizationUrl).searchParams.get('client_id')).toBe(INSTALLER_ID);
+        const state = await done();
+        expect(state).toMatchObject({
+            connector: 'crm', organizationId: 'org_a', status: 'connected',
+            client: { source: 'installer', clientId: INSTALLER_ID, hasSecret: true },
+        });
+        // The code exchange authenticated as the installer's client.
+        expect(idp.requests).toHaveLength(1);
+        expect(idp.requests[0].authorization).toBe(basicOf(INSTALLER_ID, INSTALLER_SECRET));
+        expect(idp.requests[0].form).toMatchObject({ grant_type: 'authorization_code', code: GOOD_CODE, redirect_uri: REDIRECT_URI });
+
+        // Dispatch with the exchanged token, then a 401 refreshes as the installer's client.
+        expect(await call('org_a')).toMatchObject({ status: 200 });
+        provider.state.accepted = new Set(['dummy-at-refresh-2']);
+        expect(await call('org_a')).toMatchObject({ status: 200 });
+        expect(idp.requests).toHaveLength(2);
+        expect(idp.requests[1].form).toMatchObject({ grant_type: 'refresh_token', refresh_token: 'dummy-rt-1' });
+        expect(idp.requests[1].authorization).toBe(basicOf(INSTALLER_ID, INSTALLER_SECRET));
+
+        // The row: the id in plain text, the client (with its secret) only behind the encrypted column.
+        const [row] = await rowsOf(ql);
+        expect(row).toMatchObject({ client_id: INSTALLER_ID });
+        expect(Boolean(row.client_has_secret)).toBe(true);
+        expect(JSON.stringify(row)).not.toContain(INSTALLER_SECRET);
+        const kept = JSON.parse(await (ql as any).resolveSecretField(CONNECTOR_CONNECTION_OBJECT, row.id, 'registered_client'));
+        expect(kept).toEqual({ source: 'installer', clientId: INSTALLER_ID, clientSecret: INSTALLER_SECRET });
+
+        // The read leg shows that a client is set and its id, never the secret.
+        const read = await engine.getConnectorConnection({ connector: 'crm', context: ADMIN_A as never });
+        expect(read.client).toEqual({ source: 'installer', clientId: INSTALLER_ID, hasSecret: true });
+        expect(JSON.stringify(read)).not.toContain(INSTALLER_SECRET);
+
+        // Revoke takes the client with the row.
+        expect(await engine.revokeConnectorConnection({ connector: 'crm', context: ADMIN_A as never }))
+            .toEqual({ connector: 'crm', organizationId: 'org_a', status: 'not_connected' });
+        expect(await rowsOf(ql)).toHaveLength(0);
+        await vi.waitFor(() => expect(engine.getConnectorDegradedReason('crm')).toContain('is not connected'));
+    });
+
+    it('a public client (no secret) exchanges and refreshes with its id in the form; the read says no secret is kept', async () => {
+        const { engine, provider, call } = await boot([installerCrm()]);
+        const state = await (await connectWith(engine, { clientId: INSTALLER_ID })).done();
+        expect(state.client).toEqual({ source: 'installer', clientId: INSTALLER_ID, hasSecret: false });
+        expect(idp.requests[0].authorization).toBeUndefined();
+        expect(idp.requests[0].form.client_id).toBe(INSTALLER_ID);
+        provider.state.accepted = new Set(['dummy-at-refresh-2']);
+        await call('org_a');
+        expect(idp.requests[1].form).toMatchObject({ grant_type: 'refresh_token', client_id: INSTALLER_ID });
+    });
+
+    it('each organization connects with its own client, and a reconnect replaces it', async () => {
+        const { engine, ql } = await boot([installerCrm()]);
+        await (await connectWith(engine, INSTALLER_CLIENT, ADMIN_A)).done();
+        await (await connectWith(engine, { clientId: 'installer-client-b', clientSecret: 'dummy-secret-b' }, ADMIN_B)).done();
+        expect(idp.requests[1].authorization).toBe(basicOf('installer-client-b', 'dummy-secret-b'));
+        await (await connectWith(engine, { clientId: 'installer-client-a2' }, ADMIN_A)).done();
+        const byOrg = Object.fromEntries((await rowsOf(ql)).map((r) => [r.organization_id, r.client_id]));
+        expect(byOrg).toEqual({ org_a: 'installer-client-a2', org_b: 'installer-client-b' });
+        expect((await engine.getConnectorConnection({ connector: 'crm', context: ADMIN_A as never })).client)
+            .toEqual({ source: 'installer', clientId: 'installer-client-a2', hasSecret: false });
+    });
+
+    it("a reconnect without a client reuses the one the organization's connection keeps; another organization's, or a revoked one, is never reused", async () => {
+        const { engine, ql } = await boot([installerCrm()]);
+        await (await connectWith(engine, INSTALLER_CLIENT)).done();
+
+        // Reconnect naming no client: no 400 — the authorization request, the
+        // code exchange and the stored row all use the kept client.
+        const { begun, done } = await connectWith(engine, undefined);
+        expect(new URL(begun.authorizationUrl).searchParams.get('client_id')).toBe(INSTALLER_ID);
+        expect(JSON.stringify(begun)).not.toContain(INSTALLER_SECRET);
+        expect(await done()).toMatchObject({ status: 'connected', client: { source: 'installer', clientId: INSTALLER_ID, hasSecret: true } });
+        expect(idp.requests).toHaveLength(2);
+        expect(idp.requests[1].authorization).toBe(basicOf(INSTALLER_ID, INSTALLER_SECRET));
+        const [row] = await rowsOf(ql);
+        expect(row).toMatchObject({ organization_id: 'org_a', client_id: INSTALLER_ID, revision: 2 });
+        expect(JSON.parse(await (ql as any).resolveSecretField(CONNECTOR_CONNECTION_OBJECT, row.id, 'registered_client')))
+            .toEqual({ source: 'installer', clientId: INSTALLER_ID, clientSecret: INSTALLER_SECRET });
+
+        // The client belongs to org_a's connection: org_b, connecting first, is refused as before.
+        await expect(engine.beginConnectorConnection({ connector: 'crm', context: ADMIN_B as never }))
+            .rejects.toMatchObject({ status: 400, code: 'VALIDATION_ERROR', message: expect.stringContaining('Register an OAuth client') });
+        // Revoked, nothing is kept to reuse.
+        await engine.revokeConnectorConnection({ connector: 'crm', context: ADMIN_A as never });
+        await expect(engine.beginConnectorConnection({ connector: 'crm', context: ADMIN_A as never }))
+            .rejects.toMatchObject({ status: 400, code: 'VALIDATION_ERROR', message: expect.stringContaining('Register an OAuth client') });
+        expect(idp.requests).toHaveLength(2);
+    });
+
+    it('a reconnect without a client reuses a kept public client as it is: its id in the form, no secret', async () => {
+        const { engine } = await boot([installerCrm()]);
+        await (await connectWith(engine, { clientId: INSTALLER_ID })).done();
+        const state = await (await connectWith(engine, undefined)).done();
+        expect(state.client).toEqual({ source: 'installer', clientId: INSTALLER_ID, hasSecret: false });
+        expect(idp.requests[1].authorization).toBeUndefined();
+        expect(idp.requests[1].form.client_id).toBe(INSTALLER_ID);
+    });
+
+    it('⛔ a connect without a client is refused 400, naming the instance and the vendor registration step; nothing is kept', async () => {
+        const { engine, ql } = await boot([installerCrm()]);
+        const err = (await engine.beginConnectorConnection({ connector: 'crm', context: ADMIN_A as never }).catch((e: Error) => e)) as Error & { status?: number; code?: string };
+        expect(err).toMatchObject({ status: 400, code: 'VALIDATION_ERROR' });
+        expect(err.message).toContain("Connector instance 'crm' takes its OAuth client from the installer");
+        expect(err.message).toContain('Register an OAuth client for this deployment with the vendor');
+        expect(err.message).toContain(REDIRECT_URI);
+        expect(idp.requests).toHaveLength(0);
+        expect(await rowsOf(ql)).toHaveLength(0);
+    });
+
+    it('⛔ a malformed client is refused 400 naming the key, never repeating a value', async () => {
+        const { engine } = await boot([installerCrm()]);
+        for (const [client, named] of [
+            [{ clientId: '' }, '`clientId`'],
+            [{ clientId: 42, clientSecret: INSTALLER_SECRET }, '`clientId`'],
+            [{ clientId: 'x'.repeat(513), clientSecret: INSTALLER_SECRET }, '`clientId`'],
+            [{ clientId: INSTALLER_ID, clientSecret: '' }, '`clientSecret`'],
+            [{ clientId: INSTALLER_ID, clientSecret: INSTALLER_SECRET, redirect_uri: 'https://evil.example.com' }, '`redirect_uri`'],
+            [INSTALLER_SECRET, 'an object naming `clientId`'],
+        ] as Array<[unknown, string]>) {
+            const err = (await engine.beginConnectorConnection({ connector: 'crm', context: ADMIN_A as never, client: client as never })
+                .catch((e: Error) => e)) as Error & { status?: number };
+            expect(err.status).toBe(400);
+            expect(err.message).toContain(named);
+            expect(err.message).not.toContain(INSTALLER_SECRET);
+            expect(err.message).not.toContain('evil.example.com');
+        }
+        expect(idp.requests).toHaveLength(0);
+    });
+
+    it('⛔ CONTROL: a client offered to an instance that declares its own is refused 400, not ignored; without one it connects as before', async () => {
+        const { engine } = await boot([crm()]);
+        const err = (await engine.beginConnectorConnection({ connector: 'crm', context: ADMIN_A as never, client: INSTALLER_CLIENT })
+            .catch((e: Error) => e)) as Error & { status?: number; code?: string };
+        expect(err).toMatchObject({ status: 400, code: 'VALIDATION_ERROR' });
+        expect(err.message).toContain("Connector instance 'crm' does not take its OAuth client from the installer");
+        expect(err.message).not.toContain(INSTALLER_SECRET);
+        const state = await (await connectWith(engine, undefined)).done();
+        expect(state.client).toBeUndefined();
+        expect(idp.requests[0].authorization).toBe(basicOf('client-26702', CLIENT_SECRET));
+    });
+
+    it('⛔ the read and revoke legs refuse a client: one is entered only when a connect is begun', async () => {
+        const { engine } = await boot([installerCrm()]);
+        for (const leg of [
+            () => engine.getConnectorConnection({ connector: 'crm', context: ADMIN_A as never, client: INSTALLER_CLIENT }),
+            () => engine.revokeConnectorConnection({ connector: 'crm', context: ADMIN_A as never, client: INSTALLER_CLIENT }),
+        ]) {
+            const err = (await leg().catch((e: Error) => e)) as Error & { status?: number };
+            expect(err.status).toBe(400);
+            expect(err.message).toContain('takes no OAuth client');
+            expect(err.message).not.toContain(INSTALLER_SECRET);
+        }
+    });
+
+    it('⛔ a declaration that changed where its client comes from while the browser was away uses no code', async () => {
+        const declared: unknown[] = [installerCrm()];
+        const { engine, ql } = await boot(declared);
+        const { done } = await connectWith(engine, INSTALLER_CLIENT);
+        declared[0] = crm();
+        await expect(done()).rejects.toMatchObject({ status: 400, message: expect.stringContaining('changed where its OAuth client comes from') });
+        expect(idp.requests).toHaveLength(0);
+        expect(await rowsOf(ql)).toHaveLength(0);
+    });
+
+    it("⛔ the installer's secret is in no log line, descriptor, reason, door answer or engine read", async () => {
+        const out = captureOutput();
+        const { engine, call, provider, ql } = await boot([installerCrm()]);
+        const answers: string[] = [];
+        await engine.beginConnectorConnection({ connector: 'crm', context: ADMIN_A as never }).catch((e: Error) => answers.push(e.message));
+        await engine.beginConnectorConnection({ connector: 'crm', context: ADMIN_A as never, client: { ...INSTALLER_CLIENT, x: 1 } as never })
+            .catch((e: Error) => answers.push(e.message));
+        const { begun, done } = await connectWith(engine, INSTALLER_CLIENT);
+        answers.push(JSON.stringify(begun), JSON.stringify(await done()));
+        provider.state.accepted = new Set(['dummy-at-refresh-2']);
+        await call('org_a');
+        idp.refresh = 'invalid_grant';
+        provider.state.accepted = new Set();
+        await call('org_a').catch((e) => answers.push(String(e.message)));
+        await vi.waitFor(() => expect(engine.getConnectorDegradedReason('crm')).toBeDefined());
+        answers.push(JSON.stringify(await engine.getConnectorConnection({ connector: 'crm', context: ADMIN_A as never })));
+        const surfaces = {
+            logs: out.text(),
+            descriptors: JSON.stringify(engine.getConnectorDescriptors()),
+            reason: String(engine.getConnectorDegradedReason('crm')),
+            answers: answers.join('\n'),
+            'engine read': JSON.stringify(await rowsOf(ql)),
+        };
+        for (const [where, text] of Object.entries(surfaces)) {
+            expect(text.includes(INSTALLER_SECRET), `${where} carries the installer's secret`).toBe(false);
+        }
+        // Not passing on silence: the connect was logged and the read named the client.
+        expect(out.text()).toContain("connector instance 'crm' connected for organization 'org_a' by user 'usr_admin'");
+        expect(surfaces.answers).toContain(INSTALLER_ID);
+    });
+
+    it('the installer client columns: the id and the secret flag are plain, the client itself stays the masked field', () => {
+        expect(collectMaskedReadFields(SysConnectorConnection as never)).toEqual(['refresh_token', 'registered_client']);
+        expect(SysConnectorConnection.fields.client_id.type).toBe('text');
+        expect(SysConnectorConnection.fields.client_has_secret.type).toBe('boolean');
     });
 });

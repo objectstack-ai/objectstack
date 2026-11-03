@@ -1,4 +1,5 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: 63 cases on real QuickJS sandboxes, the slowest being real waits that are their subject (600 ms and 500 ms host awaits, 250 ms CPU budgets spent by busy loops, wall-ceiling rollbacks); 4.8 s in a local run; slowest CI reading 10.1 s (scheduled full-battery run 41237094739, Test Core shard log) x 1.25, rounded up
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { QuickJSScriptRunner, SandboxError } from './quickjs-runner.js';

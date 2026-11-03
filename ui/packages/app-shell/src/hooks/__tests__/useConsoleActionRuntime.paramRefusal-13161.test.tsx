@@ -39,6 +39,7 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
     actionParamOptionLabel: (_o: any, _a: any, _p: any, _v: any, fallback: any) => fallback,
     actionDescription: (_o: any, _a: any, fallback: any) => fallback,
     actionSubmitText: (_o: any, _a: any, fallback: any) => fallback,
+    actionCancelText: (_o: any, _a: any, fallback: any) => fallback,
   }),
   useObjectTranslation: () => ({
     t: (key: string, options?: any) => String(options?.defaultValue ?? key),

@@ -23,7 +23,6 @@ import { useCanvasPanZoom } from './hooks/useCanvasPanZoom';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { PropertyEditor, type PropertyField } from './components/PropertyEditor';
 import { Minimap } from './components/Minimap';
-import { useCollaboration } from './CollaborationProvider';
 import { CANVAS_BACKGROUND_CLASS, canvasBackgroundStyle } from './canvasBackground';
 
 function cn(...inputs: (string | undefined | false)[]) {
@@ -216,7 +215,7 @@ function autoLayoutNodes(nodes: BPMNNode[], edges: BPMNEdge[]): BPMNNode[] {
  *
  * Phase 2-4 features: undo/redo, confirm dialogs, multi-select,
  * copy/paste, pan/zoom, minimap, edge creation UI, auto-layout,
- * property editor, drag-and-drop, collaboration, keyboard shortcuts,
+ * property editor, drag-and-drop, keyboard shortcuts,
  * and collapsible panels.
  */
 export function ProcessDesigner({
@@ -262,9 +261,6 @@ export function ProcessDesigner({
   // ---- Pan / Zoom ----
   const panZoom = useCanvasPanZoom({ initialZoom: 1 });
 
-  // ---- Collaboration (optional context) ----
-  const collaboration = useCollaboration();
-
   // ---- Local UI state ----
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [connectMode, setConnectMode] = useState(false);
@@ -300,9 +296,8 @@ export function ProcessDesigner({
       pushSnapshot(updatedNodes, edges);
       setSelectedNodeId(newNode.id);
       multiSelect.selectOne(newNode.id);
-      collaboration?.sendOperation({ type: 'insert', elementId: newNode.id, data: { label }, userId: collaboration.currentUserId ?? '' });
     },
-    [nodes, edges, readOnly, pushSnapshot, multiSelect, collaboration],
+    [nodes, edges, readOnly, pushSnapshot, multiSelect],
   );
 
   // ---- Delete node (with confirmation) ----
@@ -321,9 +316,8 @@ export function ProcessDesigner({
       pushSnapshot(updatedNodes, updatedEdges);
       if (selectedNodeId === id) setSelectedNodeId(null);
       multiSelect.clearSelection();
-      collaboration?.sendOperation({ type: 'delete', elementId: id, data: {}, userId: collaboration.currentUserId ?? '' });
     },
-    [nodes, edges, selectedNodeId, readOnly, pushSnapshot, confirmDialog, multiSelect, collaboration],
+    [nodes, edges, selectedNodeId, readOnly, pushSnapshot, confirmDialog, multiSelect],
   );
 
   // ---- Delete multiple selected nodes ----
@@ -397,10 +391,9 @@ export function ProcessDesigner({
       pushSnapshot(nodes, updatedEdges);
       setConnectSource(null);
       setConnectMode(false);
-      collaboration?.sendOperation({ type: 'insert', elementId: newEdge.id, data: { source: connectSource, target: nodeId }, userId: collaboration.currentUserId ?? '' });
       return true;
     },
-    [connectMode, connectSource, nodes, edges, pushSnapshot, collaboration],
+    [connectMode, connectSource, nodes, edges, pushSnapshot],
   );
 
   // ---- Auto layout ----
@@ -667,14 +660,6 @@ export function ProcessDesigner({
             >
               {versionLabel(version)}
             </span>
-          )}
-
-          {/* Collaboration indicator */}
-          {collaboration?.isConnected && (
-            <div className="flex items-center gap-1 text-xs text-muted-foreground" role="status" aria-label="Collaboration active">
-              <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
-              {collaboration.users.length} user{collaboration.users.length !== 1 ? 's' : ''}
-            </div>
           )}
 
           <div className="flex-1" />

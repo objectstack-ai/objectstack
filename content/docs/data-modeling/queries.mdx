@@ -538,7 +538,8 @@ Only `query` and `fields` are implemented. The engine expands `search` into a dr
 <Callout type="info">
 `fields` (and its query-parameter spelling, `?searchFields=` / `?$searchFields=`) can only
 **narrow** the scan within the server-resolved searchable set — the object's declared
-`searchableFields`, or a text-like auto-default when none are declared. Over the
+`searchableFields`, or, when none are declared, a text-like auto-default plus every
+field marked `searchable: true` except `secret` / `password` / `vector`. Over the
 REST/protocol ingress a name outside that set is `400 INVALID_FIELD`, with distinct
 messages for a field that does not exist and a real field that is not searchable. An
 override that names no field at all (`?$searchFields=`, `?$searchFields=,`, an empty

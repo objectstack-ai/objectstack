@@ -39,6 +39,8 @@ import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import { readTarGz, type ArchiveFile } from '@objectstack/core';
 import type { ObjectStackManifestParsed } from '@objectstack/spec/kernel';
+// The import-free subpath, not the root entry: see `readOspluginManifest` below.
+import { COMPILED_PLUGIN_MANIFEST_FILE } from '@objectstack/runtime/compiled-plugin-manifest-file';
 
 export { readTar, readTarGz, sha256Hex, MAX_UNPACKED_ARTIFACT_BYTES, type ArchiveFile } from '@objectstack/core';
 
@@ -70,7 +72,13 @@ export function computeIntegrity(files: ArchiveFile[]): Record<string, string> {
   return Object.fromEntries(Object.entries(out).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 }
 
-export const MANIFEST_FILENAME = 'objectstack.plugin.json';
+/**
+ * The compiled manifest's filename: the runtime's own constant, so the entry
+ * `os plugin build` writes is the one the runtime's reader finds, and the
+ * entry publish/install exempt from the integrity map is that same one.
+ * ⛔ Never a second string literal here.
+ */
+export const MANIFEST_FILENAME = COMPILED_PLUGIN_MANIFEST_FILE;
 export const SIGNATURE_FILENAME = 'SIGNATURE';
 export const OSPLUGIN_EXT = '.osplugin';
 

@@ -233,7 +233,7 @@
       "title": "MCP stdio auto-start fails closed without OS_MCP_STDIO_API_KEY; with a member-bound key, reads AND aggregates honor RLS/FLS and revocation bites on the next call",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P0",
       "surface": "cli",
       "personas": ["restricted member API key (for the RLS half — on showcase, a contributor-bound member)", "a second restricted member API key for the FLS half (on showcase, a client_liaison-bound member — see fixtures.requires)", "admin API key (for the full-row comparison)"],
@@ -257,7 +257,7 @@
         "run the same two reads over REST as the same member (Bearer the same key) and as the admin key; compare. On `os start` the stdio transport answers tool calls before the HTTP listener is up, so poll GET /api/v1/health until 200 before the first REST leg; a refused connection there is the boot still coming up, not a result",
         "aggregate parity: over MCP stdio as the member, aggregate_records the OWD-private object with a count grouped by a readable field ({ aggregations: [{ function: 'count', alias: 'n' }], groupBy: ['<readable field>'] }); run the SAME aggregate over REST as the member and as the admin; compare the per-group counts",
         "FLS aggregate fail-closed: over MCP stdio as the member, aggregate_records with an aggregation (or a groupBy) naming the field the member cannot read (the masked field above); capture the refusal and confirm no numeric result is returned",
-        "revoke the member key while the stdio session is up (as the admin, PATCH /api/v1/data/sys_api_key/<key id> {\"revoked\": true}); issue one more read on the SAME session; capture the tool result and parse its error envelope (code and status, not only the prose)",
+        "revoke the member key while the stdio session is up (as the admin from a SIGNED-IN SESSION, PATCH /api/v1/data/sys_api_key/<key id> {\"revoked\": true}, or revoke it on Setup's API Keys page. Never with the admin's API key: a sys_api_key write from a principal an API key admitted is refused 403 PERMISSION_DENIED 'Changing an API key requires a signed-in session…' and nothing is written, packages/core/src/security/api-key-management-credential.ts); issue one more read on the SAME session; capture the tool result and parse its error envelope (code and status, not only the prose)",
         "start once more with stdio enabled and the key revoked in the previous step; capture the refusal to start (the lifecycle arm of the up-front admission)",
         "start once more with stdio NOT enabled and no key set, again with `--log-level info` (the not-auto-started line is logged at INFO, like the principal-bound line of step 2); confirm a clean boot (the key is only demanded when stdio is on)"
       ],
@@ -359,6 +359,12 @@
           "date": "2026-10-28",
           "change": "steps[4] waits for the HTTP listener, and automated.ref names two corroborating files. Checklist-accuracy findings of the 18.2.0 wave 2 (QA runs #26481, priority:P0, and #26468, Tier 1 half A, both at 756220c4; wave anchor #25807, slice B). (1) #26481: on `os start` stdio answered tool calls before the HTTP listener was up, so the REST comparison leg met a refused connection; the step now polls health 200 first. (2) #26468: plugin.test.ts's 'Transport not auto-started' cases and plugin-execution-context.test.ts (generic 'no longer valid' refusal) corroborate without scoring; the ref names both, and its statement that no packages/mcp test asserts API_KEY_REVOKED still holds. Re-read at base fd246c22 (grep API_KEY_REVOKED over packages/mcp/src: no hit; plugin-execution-context.test.ts, its /no longer valid/ case). No clause changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-01",
+          "change": "QA run #28545 (W3-C1R) finding: steps[7]'s revoke 'as the admin' failed when the admin used an API key, which answers 403 PERMISSION_DENIED 'Changing an API key requires a signed-in session' since #27692 (api-key-management-credential.ts: every non-read sys_api_key operation from an API-key credential is refused). The step now says to revoke from the admin's signed-in session, or Setup's API Keys page, and names that refusal. No clause changed. Read from source at base 6b9c1ca991. Wave anchor #27377, wave-3 accuracy slice S9 (#28641); finding parked in anchor comment 6554042054",
+          "ref": "#28545"
         }
       ]
     },

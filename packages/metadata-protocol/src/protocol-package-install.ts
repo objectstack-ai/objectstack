@@ -51,6 +51,8 @@ import { assertDeclaredDependencies, assertProtocolCompat } from '@objectstack/m
 import { PackageInstallManifestSchema } from '@objectstack/spec/api';
 import type { InstallPackageRequest, InstallPackageResponse } from '@objectstack/spec/api';
 import { ManifestSchema, deriveNamespaceFromPackageId, manifestIdRefusal } from '@objectstack/spec/kernel';
+// [ADR-0146 D3] The pair-shaped-id predicate, asked before the namespace default.
+import { customizationPairManifestRefusal } from './protocol-customization-package.js';
 
 /**
  * [#21243] Write `manifest` to `sys_packages`, and say whether it failed.
@@ -144,8 +146,8 @@ export async function installPackage(
     // while `defineStack()`, `os build`, `os validate` and the publish face
     // all refuse the same id. That is «declared ≠ enforced» on a PUBLISHED
     // contract, the shape Prime Directive #10 refuses outright and
-    // 北极星 clause 4 names in as many words:
-    // 「错的必须被**响亮拒绝**并给处方,**永不静默落库**」.
+    // 北极星 clause 4 names in as many words: "what is wrong must be loudly
+    // refused with a prescription, never silently stored".
     //
     // ⭐ THE GATE IS ON THE PRIMITIVE, NOT ON ONE DOOR. #19473 landed the
     // same parse at `POST /packages`
@@ -234,6 +236,19 @@ export async function installPackage(
             new Error(`Invalid package manifest — ${located}`),
             { statusCode: 400 },
         );
+    }
+
+    // [ADR-0146 D3] A paired customization package id (`<base>.custom`) is
+    // installed only with what the pair's ensure door writes: the base's pair
+    // namespace, explicit, and the dependency on the base. Asked BEFORE the
+    // namespace default below, whose id derivation answers `custom` for every
+    // pair — the namespace D3 says is never written. One predicate for every
+    // caller of this primitive (the HTTP install door asks it too, ahead of
+    // both its limbs); an exported pair declaring both installs, and the
+    // ADR-0141 D2 check below judges its range.
+    const pairRefusal = customizationPairManifestRefusal(manifest, (id) => this.engine.registry.getPackage?.(id));
+    if (pairRefusal !== undefined) {
+        throw Object.assign(new Error(pairRefusal), { statusCode: 400 });
     }
 
     // Studio-authored writable packages arrive WITHOUT a namespace. The

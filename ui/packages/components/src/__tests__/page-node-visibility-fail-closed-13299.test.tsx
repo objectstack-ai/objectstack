@@ -26,8 +26,8 @@ import {
   RecordContextProvider,
   SchemaRenderer,
   UNRESOLVABLE_VISIBILITY_PREFIX,
-  __resetVisibilityPredicateWarnings,
 } from '@object-ui/react';
+import { __resetVisibilityPredicateWarnings } from '../../../react/src/utils/visibilityDiagnostic';
 import { RelatedCountStore } from '../hooks/related-count-store';
 // Module-scope import (not `beforeAll`) — objectui#3010/#3021.
 import '../renderers';

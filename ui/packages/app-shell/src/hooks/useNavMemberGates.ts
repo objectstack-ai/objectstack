@@ -98,6 +98,7 @@ import {
 import { withoutUnreadableObjectEntries, type ObjectReadCheck } from '../utils/navObjectReadGate.js';
 import { filterActiveApps } from '../utils/appRoute.js';
 import { navigationNames } from '../console/appObjectScope.js';
+import type { ReadNamesWithoutViews } from './useObjectPresence.js';
 
 const NO_MISSING: readonly string[] = [];
 
@@ -354,9 +355,8 @@ export function useNavMemberGates(forApp?: Record<string, unknown>): NavMemberGa
   // as registered, as every object did while the whole list loaded. The gate
   // asks for nothing itself: `AppContent` names the objects the app's own
   // entries require, so the sidebar's answer is exact, while the bell's
-  // cross-app roster does not ask another app's objects one by one. Outside an
-  // app (the home page's feeds) there is no package, and the gate reads the
-  // whole registry, as it does once anything has loaded it.
+  // cross-app roster does not ask another app's objects one by one. Once
+  // anything has loaded the whole registry, the gate reads it.
   //
   // objectui#12980 — inside an app whose served item names NO package (an app
   // created in the console), on the same condition, the gate reads the
@@ -367,19 +367,33 @@ export function useNavMemberGates(forApp?: Record<string, unknown>): NavMemberGa
   // it. A name not answered yet, or whose read failed (objectui#13009: left
   // unanswered), shows, as every entry does while the whole list loads or
   // after it fails.
+  //
+  // objectstack#29121 — outside an app (the home page's feeds, whose roster
+  // gates every app's navigation) the gate reads the same names-only scope over
+  // the app list's `requiresObject` union, with `views: false`: it reads which
+  // objects there are, never their views. It read the whole registry there,
+  // which the home page then loaded on every visit for these few names. The
+  // package leg asks without views too: inside an app the bundle answers them
+  // anyway, and on Home (the palette's gates for its host app) nothing does,
+  // so composing them read the whole `/meta/view` list.
+  //
+  // objectstack#29416 — inside an app with no package the union is asked
+  // without views as well: the gate reads only which objects there are, and
+  // the union names other apps' objects, which the app's bundle does not
+  // hold, so composing them read the whole `/meta/view` list on every route
+  // of such an app. The route's own objects are composed with their views by
+  // the route's reader (`AppContent`), not here.
   const metadata = useMetadata();
   const packageId = typeof app?._packageId === 'string' && app._packageId ? app._packageId : undefined;
-  const packageless = !packageId && typeof app?.name === 'string' && app.name !== '';
-  const readObjectScope =
-    (packageId || packageless) && metadata.getTypeStatus?.('object') === 'idle' ? metadata.readObjectScope : undefined;
+  const readObjectScope = metadata.getTypeStatus?.('object') === 'idle' ? metadata.readObjectScope : undefined;
   const unionNames = readObjectScope && !packageId ? requiredObjectUnion(metadata.apps, app) : NO_MISSING;
   const scope: { objects: readonly unknown[]; missing: readonly string[] } | null = !readObjectScope
     ? null
     : packageId
-      ? readObjectScope({ packageId })
-      : unionNames.length > 0
-        ? readObjectScope({ names: unionNames })
-        : NO_REQUIRED_OBJECTS;
+      ? (readObjectScope as ReadNamesWithoutViews)({ packageId, views: false })
+      : unionNames.length === 0
+        ? NO_REQUIRED_OBJECTS
+        : (readObjectScope as ReadNamesWithoutViews)({ names: unionNames, views: false });
   const metadataObjects = scope ? scope.objects : metadata.objects;
   const missingObjects = scope ? scope.missing : NO_MISSING;
   const registeredObjectNames = useMemo(
@@ -412,7 +426,10 @@ export function useNavMemberGates(forApp?: Record<string, unknown>): NavMemberGa
  * console's sidebar always wires an action dispatcher, so it draws one. A `doc`
  * entry is kept as served: the sidebar's doc-readability answer is defence in
  * depth behind the server, which already drops an unreadable one
- * (objectstack#19790), and no consumer of this function lands on a `doc`.
+ * (objectstack#19790). The console's app-root landing reads these trees and
+ * does land on a `doc` entry an app's `landing` names (objectstack#28450): it
+ * opens the in-app docs portal, under the server's audience gate on the doc,
+ * without the sidebar's doc-readability answer.
  */
 export function navEntriesShownToMember(items: NavigationItem[], gates: NavMemberGates): NavigationItem[] {
   const guards: NavigationVisibilityOptions = {

@@ -52,7 +52,7 @@ import { EnvironmentEntitlementDialog, type EntitlementDialogState } from '../en
 import { entitlementDialogFromError, type EntitlementDialogSpec } from '../environment/entitlements.js';
 import { resolvePageVarTokens } from '../utils/resolvePageVarTokens.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
-import { apiActionFailureMessage } from '../utils/flowResponse.js';
+import { apiActionRefusalResult } from '../utils/flowResponse.js';
 import {
   findDeclaredApiAction,
   isSameOriginApiTarget,
@@ -170,13 +170,12 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
   // `requiredPermissions` action closed on exactly the deployments this
   // doctrine exists to protect (objectui#4656).
   const { systemPermissions } = usePermissions();
-  const { fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel, actionDescription, actionSubmitText, actionResultDialog } = useObjectLabel();
+  const { fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel, actionDescription, actionSubmitText, actionCancelText, actionResultDialog } = useObjectLabel();
   // Entitlement 403s render as a dialog, not a toast — its copy is localized
   // here rather than taken from the server (objectui#2458 / cloud#959).
   // `language` also resolves inline per-locale action-param labels below, and
-  // with `i18n` it is what a flow launch translates the flow's own toasts in
-  // (objectui#12075).
-  const { t, language, i18n } = useObjectTranslation();
+  // is the language a flow launch reads a refused write's permission line in.
+  const { t, language } = useObjectTranslation();
 
   /**
    * The console's own metadata store.
@@ -347,6 +346,9 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
       // object-less action) first, then the authored `I18nLabel` collapsed to
       // the active language. Absent, the dialog keeps its default "Confirm".
       const submitText = actionSubmitText(objForI18n, action?.name, pickLocalized(action?.submitText, language) || undefined);
+      // The dismiss button's label (`cancelText`), resolved the same way.
+      // Absent, the dialog keeps its default "Cancel".
+      const cancelText = actionCancelText(objForI18n, action?.name, pickLocalized(action?.cancelText, language) || undefined);
       setParamState({
         open: true,
         params: localized,
@@ -362,6 +364,7 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
           ? [overrideNotice, declaredDescription].filter(Boolean).join('\n\n')
           : declaredDescription,
         submitText,
+        cancelText,
         interpolate,
         resolve,
         // The runner's `run`, so Confirm runs the action from inside the
@@ -369,7 +372,7 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
         run,
       });
     })(); });
-  }, [objectName, objectDef, objects, metadata, fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel, actionSubmitText, language]);
+  }, [objectName, objectDef, objects, metadata, fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel, actionSubmitText, actionCancelText, language]);
 
   const currentUser = user
     ? { id: user.id, name: user.name, avatar: user.image, isPlatformAdmin: (user as any)?.isPlatformAdmin ?? false, systemPermissions }
@@ -463,8 +466,9 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
             return { success: false };
           }
           // A flow-backed endpoint's refused run reads its inner refusal, not
-          // the node chain (objectstack#27487).
-          return { success: false, error: apiActionFailureMessage(res, body, `HTTP ${res.status}`, language) };
+          // the node chain (objectstack#27487); a refusal naming fields carries
+          // them for the param dialog to mark (objectstack#28289).
+          return apiActionRefusalResult(res, body, `HTTP ${res.status}`, language);
         };
 
         // The action door (objectstack#27611). The server assembles the
@@ -768,7 +772,7 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
         recordId,
         triggerParams: params,
         objects: withKnownObjects(objects, metadata.objects),
-        translation: { i18n, language },
+        language,
       });
       const judged = launch.judged;
       // Paused at a `screen` node: FlowRunner renders the form + resumes, and
@@ -794,7 +798,7 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
     } catch (error) {
       return { success: false, error: (error as Error).message };
     }
-  }, [authFetch, objApiName, objects, metadata, refresh, i18n, language, t]);
+  }, [authFetch, objApiName, objects, metadata, refresh, language, t]);
 
   // Server-side action handler — POST /api/v1/actions/{object}/{action}, built
   // from @object-ui/core's `createServerActionHandler` via the shared console

@@ -1099,6 +1099,45 @@ describe('createHonoApp', () => {
       expect(exposed).toContain('x-objectstack-dropped-fields');
     });
 
+    // [#28970] The metadata reads answer an `ETag` that `@objectstack/client`'s
+    // cached reads send back; cross-origin JS reads it as `null` unless exposed.
+    it('always exposes ETag by default', async () => {
+      const app = createHonoApp({ kernel: mockKernel, prefix: '/api/v1' });
+
+      const res = await app.request('/api/v1/meta', {
+        method: 'GET',
+        headers: { Origin: 'https://app.example.com' },
+      });
+      const exposed = (res.headers.get('access-control-expose-headers') || '')
+        .split(',').map(s => s.trim().toLowerCase());
+      expect(exposed).toContain('etag');
+    });
+
+    // [#28970] The `/meta` first-draft save sends `If-None-Match: *`; a preflight
+    // that does not allow it fails the save in the browser before it is sent.
+    it('allows If-None-Match on a preflight by default, beside If-Match', async () => {
+      const app = createHonoApp({
+        kernel: mockKernel,
+        prefix: '/api/v1',
+        cors: { origin: 'https://app.example.com' },
+      });
+
+      const res = await app.request('/api/v1/meta/page/x?mode=draft', {
+        method: 'OPTIONS',
+        headers: {
+          Origin: 'https://app.example.com',
+          'Access-Control-Request-Method': 'PUT',
+          'Access-Control-Request-Headers': 'content-type,if-match,if-none-match',
+        },
+      });
+      expect(res.status).toBe(204);
+      expect(res.headers.get('access-control-allow-origin')).toBe('https://app.example.com');
+      const allowed = (res.headers.get('access-control-allow-headers') || '')
+        .split(',').map(s => s.trim().toLowerCase());
+      expect(allowed).toContain('if-none-match');
+      expect(allowed).toContain('if-match');
+    });
+
     it('merges user-supplied exposeHeaders with set-auth-token (does not replace)', async () => {
       const app = createHonoApp({
         kernel: mockKernel,

@@ -114,21 +114,22 @@ describe('SecurityPlugin — Setup People & Organization assignment entries (ADR
     }
   });
 
-  it('carries the same gate as the Positions / Permission Sets entries: none of its own', async () => {
+  it('carries no gate of its own, and the catalog entries are gone (ADR-0146 D1)', async () => {
     const manifest = await registeredManifest();
-    const items = (manifest.navigationContributions as Contribution[]).flatMap((c) => c.items);
+    const contributions = manifest.navigationContributions as Contribution[];
+    const items = contributions.flatMap((c) => c.items);
     const byId = new Map(items.map((i) => [i.id, i]));
-    const positions = byId.get('nav_positions');
-    const permissionSets = byId.get('nav_permission_sets');
-    // Control: the catalog entries really are in this manifest, so the
-    // comparison below is against a real gate, not two undefined lookups.
-    expect(positions).toBeDefined();
-    expect(permissionSets).toBeDefined();
+    // Setup carries no metadata catalog: positions, capabilities and permission
+    // sets are Studio's "All metadata" area's, so this plugin contributes no
+    // entry into Access Control.
+    for (const id of ['nav_positions', 'nav_capabilities', 'nav_permission_sets']) {
+      expect(byId.has(id), id).toBe(false);
+    }
+    expect(contributions.filter((c) => c.group === 'group_access_control')).toEqual([]);
     for (const id of [POSITION_HOLDERS.id, PERMISSION_SET_ASSIGNMENT.id]) {
       const entry = byId.get(id);
       expect(entry, id).toBeDefined();
-      expect(gateOf(entry!), id).toEqual(gateOf(positions!));
-      expect(gateOf(entry!), id).toEqual(gateOf(permissionSets!));
+      expect(Object.values(gateOf(entry!)).filter((v) => v !== undefined), id).toEqual([]);
     }
   });
 
@@ -149,13 +150,11 @@ describe('SecurityPlugin — Setup People & Organization assignment entries (ADR
     expect(all.filter((i) => i.componentRef === PERMISSION_SET_ASSIGNMENT.componentRef)).toHaveLength(1);
   });
 
-  it('without this plugin, neither entry appears — hidden exactly where the catalog entries are', async () => {
+  it('without this plugin, neither entry appears', async () => {
     const nav = await renderedSetup(false);
     const ids = nav.flatMap((n) => n.children ?? []).map((i) => i.id);
     // Control: the fold still serves platform-objects' entries.
     expect(ids).toContain('nav_users');
-    expect(ids).not.toContain('nav_positions');
-    expect(ids).not.toContain('nav_permission_sets');
     expect(ids).not.toContain(POSITION_HOLDERS.id);
     expect(ids).not.toContain(PERMISSION_SET_ASSIGNMENT.id);
   });

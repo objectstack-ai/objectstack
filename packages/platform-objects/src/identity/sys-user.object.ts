@@ -86,7 +86,6 @@ export const SysUser = ObjectSchema.create({
   description: 'User accounts for authentication',
   displayNameField: 'name',
   nameField: 'name', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{name}',
   highlightFields: ['name', 'email', 'email_verified'],
 
   // Custom actions — generic CRUD is suppressed because user accounts are
@@ -314,8 +313,22 @@ export const SysUser = ObjectSchema.create({
       bodyExtra: { generatePassword: true },
       params: [
         // The endpoint requires email OR phone (phone-only users get a
-        // placeholder address; requires auth.plugins.phoneNumber).
-        { field: 'email', required: false },
+        // placeholder address; requires auth.plugins.phoneNumber). With phone
+        // sign-in off (the default) it requires the email. A param's
+        // `required` is a static boolean, so the one Email field is declared
+        // twice, and the console collects and submits only the param whose
+        // gate says yes (#28280):
+        // - FIRST, optional, shown when phone sign-in is on. It must stay
+        //   first: the feature-gate guard resolves the booked path
+        //   `sys_user.actions.create_user.params.email` to the first param on
+        //   the field and wants the canonical opt-in gate on it.
+        // - SECOND, required, shown when the served config says phone sign-in
+        //   is off. `has()` keeps it hidden while the console holds no flag
+        //   (config not fetched, or the fetch failed): a bare
+        //   `features.phoneNumber != true` faults on the absent key, and a
+        //   faulting gate shows its param, so both inputs would render.
+        { field: 'email', required: false, requiresFeature: 'phoneNumber' },
+        { field: 'email', required: true, visible: 'has(features.phoneNumber) && features.phoneNumber != true' },
         {
           name: 'phoneNumber',
           label: 'Phone Number',
@@ -563,6 +576,40 @@ export const SysUser = ObjectSchema.create({
         requiresConfirmation: true,
       },
     },
+    {
+      // ADR-0095 D3 — who holds platform-admin standing. Standing is derived
+      // per user, never stored on this object, so the Users list carries no
+      // column for it: a list column would have to evaluate the predicate for
+      // every row of every page. This one entry asks the population question
+      // instead. The plugin-auth route enumerates the candidates with the
+      // last-admin guard's own enumerator and confirms each through
+      // `hasPlatformAdminStanding`, and it answers only a caller who holds
+      // that standing (an organization owner or admin is refused 403), so the
+      // `visible` term below, the same as every action in the platform-admin
+      // block above, is display only.
+      // No `ai` block: this action postdates the ADR-0011 identity-actions
+      // assessment, and an unassessed action stays human-only.
+      name: 'list_platform_admins',
+      label: 'Platform Administrators',
+      icon: 'shield-check',
+      variant: 'secondary',
+      locations: ['list_toolbar'],
+      type: 'api',
+      target: '/api/v1/auth/admin/list-platform-admins',
+      visible: 'current_user.isPlatformAdmin == true',
+      // A read: the Users list behind the dialog is not reloaded.
+      refreshAfter: false,
+      resultDialog: {
+        title: 'Platform Administrators',
+        description:
+          'Everyone who holds platform-admin standing now: an in-window admin_full_access grant owned by the '
+          + 'Default Organization, or a verified address on the deployment\'s owner list.',
+        acknowledge: 'Close',
+        fields: [
+          { path: 'entries', label: 'Platform administrators', format: 'code-list' },
+        ],
+      },
+    },
 
     // ── Self-service actions (the row owner only) ─────────────────────
     //
@@ -802,9 +849,13 @@ export const SysUser = ObjectSchema.create({
       // has no feature gate, and on a deployment with 2FA off (the default)
       // it read a dead "No" on every row. The state is shown on the user's
       // own record page, in the Security tab, behind the `twoFactor` gate.
-      // `banned` and `role` sit beside the email so a banned user or an
-      // admin is spotted from the list, without opening each record.
-      columns: ['name', 'email', 'phone_number', 'email_verified', 'banned', 'role', 'source', 'created_at'],
+      // `banned` sits beside the email so a banned user is spotted from the
+      // list, without opening each record (#27863). No `role` column
+      // (#28105): better-auth's legacy scalar is not the platform role.
+      // ObjectStack never writes it, and with the admin plugin on it reads
+      // `user` for every user, a platform admin included. Platform-admin
+      // standing is ADR-0068 D2's (owner e-mail or `admin_full_access`).
+      columns: ['name', 'email', 'phone_number', 'email_verified', 'banned', 'source', 'created_at'],
       sort: [{ field: 'name', order: 'asc' }],
       pagination: { pageSize: 50 },
     },
@@ -1174,6 +1225,9 @@ export const SysUser = ObjectSchema.create({
     // identity-edit actions hide for managed users, who hold no local
     // credential) and is the marker SCIM lifecycle keys off. Owned by objectql
     // (better-auth is oblivious to this column — like `ai_access`).
+    // The option labels are the administrator's words (#27855): `env_native`
+    // reads "Local Account", an identity held by this environment's own
+    // sign-in, beside the federated "IdP-Provisioned". The stored values stay.
     source: Field.select({
       label: 'Identity Source',
       required: false,
@@ -1182,7 +1236,7 @@ export const SysUser = ObjectSchema.create({
       defaultValue: 'env_native',
       options: [
         { label: 'IdP-Provisioned', value: 'idp_provisioned' },
-        { label: 'Env-Native', value: 'env_native' },
+        { label: 'Local Account', value: 'env_native' },
       ],
       description: 'How this identity was created — idp_provisioned (federated SSO JIT) or env_native (local signup / app end-user). System-managed; do not edit.',
     }),

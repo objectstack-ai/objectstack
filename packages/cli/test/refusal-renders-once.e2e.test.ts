@@ -21,7 +21,7 @@
  *
  * ## What each case asserts
  *
- * The CLI is SPAWNED — `bin/run-dev.js` through tsx, the source entry that
+ * The CLI is SPAWNED — `bin/run-dev.js` under `node`, the source entry that
  * shares the published entry's `handle()` and `flush()` — because the second
  * rendering is made by the entry point AFTER `run()` has thrown, so no
  * in-process run can see it (`exit-signal.pin.test.ts` says as much). For each
@@ -61,7 +61,7 @@
  * ## Tier
  *
  * Nightly by name, `integration` by behaviour (`vitest-tiers.ts`): each case is
- * a spawn. Every spawn is paid in `beforeAll`, sequentially — ten tsx starts at
+ * a spawn. Every spawn is paid in `beforeAll`, sequentially — ten CLI starts at
  * once is the load that turns a shared box's verdicts into timeouts — and no
  * case is clocked.
  */
@@ -77,7 +77,6 @@ import { linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 interface Run {
   code: number;
@@ -88,7 +87,7 @@ interface Run {
 function runCli(argv: string[], cwd: string, env: Record<string, string> = {}): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...argv],
       { cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1', ...env }) },
       (err, stdout, stderr) => {

@@ -7,9 +7,15 @@ import {
   AuthEndpointSchema,
   AuthEndpointAliases,
   AuthFeaturesConfigSchema,
+  GetAuthConfigResponseSchema,
   EndpointMapping,
   getAuthEndpointUrl,
 } from './auth-endpoints.zod';
+import {
+  PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS,
+  PUBLIC_AUTH_FEATURE_NAMES,
+  PUBLIC_AUTH_FEATURES_NOT_ADVERTISED,
+} from '../kernel/public-auth-features';
 
 describe('AuthEndpointPaths', () => {
   it('should define email/password authentication endpoints', () => {
@@ -129,6 +135,143 @@ describe('AuthFeaturesConfig retired flags (ruled: stop advertising them)', () =
     const parsed = AuthFeaturesConfigSchema.parse(valid);
     expect(parsed).not.toHaveProperty('passkeys');
     expect(parsed).not.toHaveProperty('magicLink');
+  });
+});
+
+// `features.sso` is served (plugin-auth's `/config` route and the hono
+// adapter's, both refined to "usable") and read (the console LoginForm), so
+// the contract declares it: a parse keeps it instead of stripping it.
+describe('AuthFeaturesConfig.sso (served, now declared)', () => {
+  const valid = { twoFactor: false, organization: true };
+
+  it.each([true, false])('keeps a served `sso: %s` through a parse', (sso) => {
+    const parsed = AuthFeaturesConfigSchema.parse({ ...valid, sso });
+    expect(parsed.sso).toBe(sso);
+  });
+
+  it('keeps it through the whole GET /auth/config response parse', () => {
+    const parsed = GetAuthConfigResponseSchema.parse({
+      emailPassword: { enabled: true },
+      socialProviders: [],
+      features: { ...valid, sso: true, ssoEnforced: false },
+    });
+    expect(parsed.features.sso).toBe(true);
+    expect(parsed.features.ssoEnforced).toBe(false);
+  });
+
+  it('CONTROL: an absent `sso` stays absent (no default is invented)', () => {
+    const parsed = AuthFeaturesConfigSchema.parse(valid);
+    expect(parsed).not.toHaveProperty('sso');
+  });
+
+  it.each([['yes'], [1], [null]])('refuses a non-boolean `sso` (%j)', (sso) => {
+    const result = AuthFeaturesConfigSchema.safeParse({ ...valid, sso });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues).toEqual([
+      expect.objectContaining({ code: 'invalid_type', expected: 'boolean', path: ['sso'] }),
+    ]);
+  });
+
+  it('says it is the usable answer and how it differs from ssoEnforced', () => {
+    const description = AuthFeaturesConfigSchema.shape.sso.description ?? '';
+    expect(description).toMatch(/isSsoUsable/);
+    expect(description).toMatch(/ssoEnforced/);
+    expect(description).not.toMatch(/#\d{3,}/);
+  });
+});
+
+// The registry-to-schema pin. plugin-auth's drift guard holds the served
+// `features` keys equal to PUBLIC_AUTH_FEATURES plus the non-flag list; this
+// holds those same keys equal to what the contract declares, so a key can no
+// longer be served and classified while a contract parse strips it.
+describe('AuthFeaturesConfig declares every classified served key', () => {
+  const shape = AuthFeaturesConfigSchema.shape;
+  const declared = Object.keys(shape);
+  const retired: readonly string[] = PUBLIC_AUTH_FEATURES_NOT_ADVERTISED;
+  const classified = [...PUBLIC_AUTH_FEATURE_NAMES, ...PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS];
+
+  it('declared keys, retired tombstones excepted, equal the flag registry plus the non-flag list', () => {
+    expect(declared.filter((key) => !retired.includes(key)).sort()).toEqual([...classified].sort());
+  });
+
+  it('keeps a tombstone for every reserved-but-unadvertised key', () => {
+    for (const key of retired) expect(declared).toContain(key);
+  });
+
+  it.each([...PUBLIC_AUTH_FEATURE_NAMES])('declares the flag `%s` as an optional boolean', (name) => {
+    expect(AuthFeaturesConfigSchema.parse({ [name]: true })[name]).toBe(true);
+    expect(AuthFeaturesConfigSchema.parse({ [name]: false })[name]).toBe(false);
+    const refused = AuthFeaturesConfigSchema.safeParse({ [name]: 'yes' });
+    expect(refused.success).toBe(false);
+    if (refused.success) return;
+    expect(refused.error.issues).toEqual([
+      expect.objectContaining({ code: 'invalid_type', expected: 'boolean', path: [name] }),
+    ]);
+  });
+
+  it.each(declared.filter((key) => !retired.includes(key)))('`%s` carries a describe with no tracker id', (key) => {
+    const description = shape[key as keyof typeof shape].description ?? '';
+    expect(description.length).toBeGreaterThan(0);
+    expect(description).not.toMatch(/#\d{3,}/);
+  });
+
+  // The served shape, every key `getPublicConfig()` can put in `features`.
+  const served = {
+    twoFactor: false,
+    organization: true,
+    multiOrgEnabled: true,
+    tenancyPosture: 'group',
+    audiencePosture: 'invite_only',
+    degradedTenancy: false,
+    oidcProvider: true,
+    sso: false,
+    ssoEnforced: false,
+    deviceAuthorization: true,
+    admin: true,
+    phoneNumber: false,
+    phoneNumberOtp: false,
+    cloudManaged: false,
+    termsUrl: 'https://objectstack.ai/terms',
+    privacyUrl: 'https://objectstack.ai/privacy',
+    turnstileSiteKey: '0x4AAAAAAA',
+  } as const;
+
+  it('the served fixture names every classified key, so the parse below covers them all', () => {
+    expect(Object.keys(served).sort()).toEqual([...classified].sort());
+  });
+
+  it('a whole GET /auth/config response keeps every served features key through a parse', () => {
+    const parsed = GetAuthConfigResponseSchema.parse({
+      emailPassword: { enabled: true },
+      socialProviders: [],
+      features: served,
+    });
+    expect(parsed.features).toEqual(served);
+  });
+
+  it('CONTROL: absent new keys stay absent (no default is invented)', () => {
+    const parsed = AuthFeaturesConfigSchema.parse({ twoFactor: false, organization: true });
+    expect(Object.keys(parsed).sort()).toEqual(['organization', 'twoFactor']);
+  });
+
+  it.each([
+    ['tenancyPosture', 'multi'],
+    ['audiencePosture', 'public'],
+  ])('refuses an off-vocabulary `%s` (%j)', (key, value) => {
+    const result = AuthFeaturesConfigSchema.safeParse({ [key]: value });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues).toEqual([expect.objectContaining({ code: 'invalid_value', path: [key] })]);
+  });
+
+  it.each(['termsUrl', 'privacyUrl'])('refuses a non-string `%s`', (key) => {
+    const result = AuthFeaturesConfigSchema.safeParse({ [key]: true });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues).toEqual([
+      expect.objectContaining({ code: 'invalid_type', expected: 'string', path: [key] }),
+    ]);
   });
 });
 

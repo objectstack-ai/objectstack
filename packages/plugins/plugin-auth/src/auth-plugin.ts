@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 // [#25083] `isCloudManaged`: the ONE accessor the cloud-managed doors below ask.
+import { serveAgentForwardAtIdentityMount } from './agent-forward-identity-view.js';
 import { Plugin, PluginContext, IHttpServer, isCloudManaged, resolveRequestExecutionContext, type RequestAuthService } from '@objectstack/core';
 import type { BetterAuthOptions } from 'better-auth';
 import {
@@ -67,6 +68,9 @@ import {
 } from './identity-write-guard.js';
 import { registerLastAdminGuard } from './last-admin-guard.js';
 import { registerApiKeyRestoreGuard } from './api-key-restore-guard.js';
+import { registerPersonalViewHooks } from './personal-view-hooks.js';
+import { registerUserPreferenceHooks } from './user-preference-hooks.js';
+import { personalViewCallerResolver, registerPersonalViewRoutes, PERSONAL_VIEW_REMOVE_ROUTE, type PersonalViewEngine } from './personal-view-routes.js';
 import { registerMembershipEndedSessionTrigger } from './membership-ended-session.js';
 import { registerMemberRoleCanonicalization } from './member-role-canonical.js';
 import { registerSessionFirstActivity } from './session-first-activity.js';
@@ -85,6 +89,7 @@ import {
   type CurrencySettingsDoor,
 } from './organization-default-currency.js';
 import type { CounterStore } from './rate-limit-storage.js';
+import { resolveKernelCache } from './kernel-cache.js';
 import { authIdentityManifest } from './manifest.js';
 import { scheduleLegacySsoSecretMigration } from './sso-client-secret.js';
 import {
@@ -669,20 +674,12 @@ export class AuthPlugin implements Plugin {
     // The currency there is paid SMS, so an N-node deployment was billed for up
     // to N× the declared budget.
     //
-    // The `cache` service is registered ASYNC — `getService` throws for it, so
-    // resolve via `getServiceAsync` and treat any failure (not registered, or
-    // not yet ready) as "no shared cache, ask again later".
-    const resolveCache = async (): Promise<CounterStore | undefined> => {
-      let cache: any;
-      try {
-        cache = await (ctx as { getServiceAsync?: (n: string) => Promise<unknown> })
-          .getServiceAsync?.('cache');
-      } catch {
-        return undefined;
-      }
-      if (cache && typeof cache.get === 'function' && typeof cache.set === 'function') return cache;
-      return undefined;
-    };
+    // The `cache` service may be registered as a value or as a factory, and
+    // the plugin context carries no `getServiceAsync` of its own: resolve it
+    // through the kernel the context hands out (`resolveKernelCache`), and
+    // treat any failure (not registered, or not yet ready) as "no shared cache,
+    // ask again later".
+    const resolveCache = (): Promise<CounterStore | undefined> => resolveKernelCache(ctx);
 
     {
       const { createLazyCacheRateLimitStorage, createLazyCounterStore } = await import(
@@ -1389,6 +1386,11 @@ export class AuthPlugin implements Plugin {
           // Route registration errors should propagate (server misconfiguration)
           this.registerAuthRoutes(httpServer, ctx);
           ctx.logger.info(`Auth routes registered at ${this.options.basePath}`);
+          // The owner's delete door for a personal view: a member removes their
+          // own `sys_personal_view` row, and only theirs, with no object-level
+          // `delete` grant (seat ruling 6583289013 on #29443; the #26161 shape).
+          // See personal-view-routes.ts.
+          this.mountPersonalViewDoor(httpServer, ctx);
         } else {
           ctx.logger.warn(
             'No HTTP server available — auth routes not registered. ' +
@@ -1863,6 +1865,18 @@ export class AuthPlugin implements Plugin {
         // api-key-restore-guard.ts.
         registerApiKeyRestoreGuard(engine, {
           packageId: 'com.objectstack.plugin-auth.api-key-restore-guard',
+          logger: ctx.logger,
+        });
+        // A reader's own named list views: the body is judged on every save as
+        // a ListView for the row's own object. See personal-view-hooks.ts.
+        registerPersonalViewHooks(engine, {
+          packageId: 'com.objectstack.plugin-auth.personal-view',
+          logger: ctx.logger,
+        });
+        // A user's own preferences: the owner (user_id) is fixed when the row
+        // is saved, for every caller but the system. See user-preference-hooks.ts.
+        registerUserPreferenceHooks(engine, {
+          packageId: 'com.objectstack.plugin-auth.user-preference',
           logger: ctx.logger,
         });
         // [cloud ADR-0024 D5.2] Break-glass — the same identity write
@@ -3028,6 +3042,33 @@ export class AuthPlugin implements Plugin {
    * - Email verification
    * - 2FA, passkeys, magic links (if enabled)
    */
+  /**
+   * Mount the owner's delete door for a personal view
+   * (`personal-view-routes.ts`). The engine, the auth service and the tenancy
+   * posture are read per request, so a provider that settles after this hook
+   * is still seen.
+   */
+  private mountPersonalViewDoor(httpServer: IHttpServer, ctx: PluginContext): void {
+    // A server that serves the raw-app auth routes but registers no DELETE
+    // verb (a partial embedding) mounts nothing here, and says so by name.
+    if (typeof (httpServer as Partial<IHttpServer>).delete !== 'function') {
+      ctx.logger.warn(
+        `The HTTP server registers no DELETE routes, so the personal view delete door (DELETE ${PERSONAL_VIEW_REMOVE_ROUTE}) `
+          + 'is not mounted, and a member cannot remove their own personal view.',
+      );
+      return;
+    }
+    registerPersonalViewRoutes(httpServer, {
+      getEngine: () => this.authManager?.getDataEngine() as unknown as PersonalViewEngine | undefined,
+      resolveCaller: personalViewCallerResolver({
+        getEngine: () => this.authManager?.getDataEngine(),
+        getAuth: () => (this.authManager ?? undefined) as unknown as RequestAuthService | undefined,
+        tenancy: () => this.tenancy ?? undefined,
+      }),
+    });
+    ctx.logger.info(`Personal view delete door mounted at DELETE ${PERSONAL_VIEW_REMOVE_ROUTE}`);
+  }
+
   private registerAuthRoutes(httpServer: IHttpServer, ctx: PluginContext): void {
     if (!this.authManager) return;
 
@@ -3082,6 +3123,24 @@ export class AuthPlugin implements Plugin {
       }
       return next();
     });
+
+    // ── ADR-0090 D10 rule 5 (#28367) — the agent forward credential ───────
+    // An AI agent's `api` action forwarded to an identity route reaches this
+    // mount carrying a credential the action door minted for that one forward,
+    // never the agent's token. Resolved HERE, before any route below runs —
+    // the vendor catch-all (`handleRequest`) and the platform's raw mounts
+    // (`/admin/ban-user`, …) alike, which is why the seam is this middleware
+    // and not `handleRequest` alone — into a request-scoped view of the
+    // delegating user: no session of record, nothing that outlives the
+    // request, no credential header back to the agent. Registered after the
+    // D5 allow-list, so a forward is judged by the same network gate. A
+    // credential that does not redeem resolves as nobody. See
+    // `agent-forward-identity-view.ts`.
+    // Inlined so the wildcard fall-through guard (#4116) can read that it
+    // yields: every branch of the seam hands the request on to `next`.
+    if (typeof rawApp.use === 'function') {
+      rawApp.use(`${basePath}/*`, (c: any, next: () => Promise<void>) => serveAgentForwardAtIdentityMount(c, next));
+    }
 
     // Register /config before the wildcard so it takes precedence.
     // better-auth has no /config endpoint, so without this explicit route
@@ -3431,6 +3490,31 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] set-user-manager failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
+    // ADR-0095 D3 — admin: who holds platform-admin standing (the sys_user
+    // `list_platform_admins` action). A read with no stored column behind it:
+    // the last-admin guard's own enumerator names the candidates and
+    // `hasPlatformAdminStanding` confirms each one, so the Users list itself
+    // stays one read per page. Same family as `set-user-manager` above: the
+    // shared gate first, then the handler, which confirms the caller's own
+    // standing before it names any platform operator. No body is read.
+    rawApp.post(`${basePath}/admin/list-platform-admins`, async (c: any) => {
+      try {
+        const actor = await gateAdmin(c);
+        if (actor instanceof Response) return actor;
+        const { runPlatformAdminRoster } = await import('./platform-admin-roster.js');
+        const { status, body } = await runPlatformAdminRoster(
+          { getDataEngine: () => this.authManager!.getDataEngine() as any },
+          actor,
+        );
+        return c.json(body, status as any);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] list-platform-admins failed', err);
         return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
       }
     });

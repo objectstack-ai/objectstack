@@ -201,6 +201,11 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // a provider-less host would render the raw key where the refusal belongs.
   'detail.activityAccessDenied': "You don't have permission to view activity on this record.",
   'detail.commentsAccessDenied': "You don't have permission to view comments on this record.",
+  // objectstack#29188 — the timeline's load-failure state for a feed read that
+  // FAILED (5xx, network), read bare as the refusal rows above are.
+  'detail.activityLoadFailed': "We couldn't load the activity for this record.",
+  'detail.commentsLoadFailed': "We couldn't load the comments for this record.",
+  'detail.retryLoadFeed': 'Retry',
   // objectui#7149 — the rest of `ActivityTimeline`'s copy. Byte-identical to
   // the `en` pack rows (this map mirrors it; `defaults-maps-mirror-en-pack`
   // enforces that), so a provider-less host reads the same English the console

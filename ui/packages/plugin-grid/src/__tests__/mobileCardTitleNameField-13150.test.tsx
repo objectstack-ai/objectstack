@@ -142,10 +142,11 @@ describe('mobile card is titled by the declared nameField, not the first column 
     const cards = await readCards(2);
     expect(cards.map((c) => c.title)).toEqual(['Plant A check', 'Plant B check']);
     expect(find.mock.calls.at(-1)?.[1]?.$select).toContain('name');
-    for (const card of cards) {
-      expect(card.body).toContain('Dev Admin');
-      expect(card.body).toContain('Notes');
-    }
+    // objectstack#28484 — both shown columns read on the subtitle line, as
+    // values with no label lines.
+    cards.forEach((card, i) => {
+      expect(card.body).toBe(`Dev Admin · ${ROWS[i].notes}`);
+    });
   });
 
   it('a declared name value the row lacks draws the empty title, never the first column', async () => {

@@ -225,7 +225,7 @@ describe('Interfaces pillar — a `?sel=nav:ID` link on a read-only package (obj
 
     await treeLoaded();
     // Let the apply run against the loaded tree before reading its outcome.
-    await waitFor(() => expect(mockClient.layered).toHaveBeenCalledWith('app', APP.name));
+    await waitFor(() => expect(mockClient.layered).toHaveBeenCalledWith('app', APP.name, { packageId: PKG }));
     await new Promise((r) => setTimeout(r, 50));
 
     expect(navEditingOpen()).toBe(false);

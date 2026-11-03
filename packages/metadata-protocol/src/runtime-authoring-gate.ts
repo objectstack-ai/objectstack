@@ -89,6 +89,9 @@ import {
     anonymousFormIntakeUnavailableRemedy,
     anonymousFormObjectName,
     anonymousFormSharingPath,
+    // [#29025] The one judge of an undeclared flow cycle (ADR-0044), the
+    // function the engine's registration calls.
+    findUndeclaredFlowCycle,
 } from '@objectstack/metadata-core';
 
 /**
@@ -528,6 +531,75 @@ export function findPackagedRuleCopyGaps(args: {
         path: changedKeys.length > 0 && index >= 0 ? `${rulePath}.${changedKeys[0]}` : rulePath,
         message,
         hint: VALIDATION_RULE_COPY_PRESCRIPTION,
+    }];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #29025 — a flow whose top-level graph has a cycle not declared `back`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The rule id of the finding below: the automation engine refuses to register
+ * a flow whose graph, minus its `type: 'back'` edges, has a cycle (ADR-0044).
+ *
+ * ## The defect this closes
+ *
+ * The engine's refusal ran at registration only. A loop flow whose closing
+ * edge was not typed `back` read `valid: true` as a draft, published through
+ * the per-item and the package doors, and was then refused registration, so
+ * the flow never ran and only the boot log said why.
+ *
+ * ## Why it is gate-local
+ *
+ * Unlike its neighbours, its input is not a deployment fact. The judge is
+ * shared rather than restated: {@link findUndeclaredFlowCycle}
+ * (`@objectstack/metadata-core`), the function the engine's registration
+ * calls, so the gate refuses exactly the graphs the engine refuses, in the
+ * engine's words. `AUTHORING_RULES` (`@objectstack/lint`) cannot reach that
+ * judge without a new package edge, so the rule joins the gate's own set; the
+ * build verbs' copy of the question is a separate seam.
+ */
+export const FLOW_UNDECLARED_CYCLE = 'flow-undeclared-cycle';
+
+/**
+ * Judge one about-to-be-published `flow` body for an undeclared cycle in its
+ * top-level graph: one `error` finding, located on the cycle-closing edge.
+ *
+ * PURE. Reads the body's own `nodes` and `edges`, member by member: a member
+ * the schema would refuse is the schema's to report, so it takes no part here.
+ */
+export function findFlowCycleGaps(args: { type: string; name: string; body: unknown }): RuntimeAuthoringIssue[] {
+    if (args.type !== 'flow' || !isRec(args.body)) return [];
+    const flow = args.body;
+    const nodes = (Array.isArray(flow.nodes) ? flow.nodes : [])
+        .filter((n): n is AnyRec & { id: string } => isRec(n) && typeof n.id === 'string');
+    const rawEdges: unknown[] = Array.isArray(flow.edges) ? flow.edges : [];
+    // One entry per body edge, so the closing edge's index is the body's own;
+    // a member with no string endpoints is set aside as the judge sets aside a
+    // `back` edge (the schema refuses it, and says where).
+    const edges = rawEdges.map((e) =>
+        isRec(e) && typeof e.source === 'string' && typeof e.target === 'string'
+            ? { source: e.source, target: e.target, ...(typeof e.type === 'string' ? { type: e.type } : {}) }
+            : { source: '', target: '', type: 'back' });
+    const cycle = findUndeclaredFlowCycle({ nodes, edges });
+    if (!cycle) return [];
+    const flowName = typeof flow.name === 'string' && flow.name ? flow.name : args.name;
+    const closing = rawEdges[cycle.closingEdgeIndex];
+    const edgeName = isRec(closing) && typeof closing.id === 'string' && closing.id
+        ? closing.id
+        : `#${cycle.closingEdgeIndex}`;
+    const from = cycle.path[cycle.path.length - 2];
+    const to = cycle.path[cycle.path.length - 1];
+    return [{
+        severity: 'error',
+        rule: FLOW_UNDECLARED_CYCLE,
+        where: `flow "${flowName}" · edge "${edgeName}"`,
+        path: `flows[0].edges[${cycle.closingEdgeIndex}]`,
+        message: cycle.message,
+        hint:
+            `If the loop is intended, set type: 'back' on the edge ${from} → ${to}; otherwise remove or `
+            + `redirect it. The automation engine registers a flow only when its graph minus the back edges `
+            + `has no cycle, so this flow would publish and never run.`,
     }];
 }
 
@@ -1301,7 +1373,11 @@ export function evaluateRuntimeAuthoringGate(args: {
             ? { packagedRuleCopyRefusal: args.packagedRuleCopyRefusal }
             : {}),
     });
+    // [#29025] The engine's registration refusal of an undeclared cycle, asked
+    // of the same judge so the publish and the registration cannot disagree.
+    const flowCycleGaps = findFlowCycleGaps({ type: args.type, name: args.name, body: args.body });
     const localIssues = [
+        ...flowCycleGaps,
         ...scheduleOrgGaps,
         ...packagedRuleCopyGaps,
         ...hierarchyScopeGaps,
@@ -1364,7 +1440,7 @@ export function evaluateRuntimeAuthoringGate(args: {
     // here would reintroduce exactly the ambiguity it was added to remove.
     const rulesRun = [
         ...result.rulesRun,
-        ...(args.type === 'flow' ? [PLATFORM_SCHEDULE_CREATE_RECORD_ORG_MISSING] : []),
+        ...(args.type === 'flow' ? [FLOW_UNDECLARED_CYCLE, PLATFORM_SCHEDULE_CREATE_RECORD_ORG_MISSING] : []),
         ...(args.type === 'view' ? [PUBLIC_FORM_INTAKE_UNAVAILABLE] : []),
         ...(args.type === 'permission' && args.hierarchyResolverMounted !== undefined
             ? [HIERARCHY_SCOPE_CAPABILITY_REQUIRED]

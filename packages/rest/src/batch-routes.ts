@@ -60,13 +60,14 @@ import { apiKeyManagementCredentialRefusal } from '@objectstack/core';
 // The engine's own by-id predicates, which `ObjectQL.update` / `.delete`
 // dispatch on — the cross-object batch's up-front id check asks them.
 import { resolveEngineDeleteDispatch, resolveEngineUpdateDispatch } from '@objectstack/metadata-core';
-import { handleRouteError } from './error-response.js';
+import { applyDroppedFieldsHeader, handleRouteError } from './error-response.js';
 import type { ServerScopedDataRequest } from './data-action-routes.js';
 import {
     apiAccessDenialFromEnable,
     wiredEngineOrLoud,
     type RestServer,
 } from './rest-server.js';
+import { earnedWriteDespiteStaleSummary } from './stale-summary-answer.js';
 
 /**
  * The `RestServer` members {@link registerBatchEndpoints} reads — every one of
@@ -423,7 +424,12 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                     return out;
                 }, context);
 
-                res.json({ results, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
+                const answer = { results, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) };
+                // [#3431] The ops' strips in the header too: one token per
+                // field and reason, the union across ops (the header names no
+                // op or object); the body keeps each op's event with its index.
+                applyDroppedFieldsHeader(res, answer);
+                res.json(answer);
             } catch (error: any) {
                 // Log only genuine server faults; client 4xx (validation,
                 // unresolved ref, atomic rollback of a bad op) are expected.
@@ -485,6 +491,9 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                         ...(context ? { context } : {}),
                     };
                     const result = await p.batchData!(batchRequest);
+                    // [#3431] Each row's strips (`results[i].droppedFields`) in
+                    // the header too, as their union; the body keeps each row's.
+                    applyDroppedFieldsHeader(res, result, (result as { results?: unknown[] } | null)?.results);
                     res.json(result);
                 } catch (error: any) {
                     handleRouteError(res, error, req.params?.object);
@@ -538,8 +547,16 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                         ...(context ? { context } : {}),
                     };
                     const result = await p.createManyData!(createManyRequest);
+                    // [#3431] The strips in the header too. `createManyData`'s
+                    // `droppedFields` is already the rows' union (its response
+                    // has no per-row slot), so the header names each field once.
+                    applyDroppedFieldsHeader(res, result);
                     res.status(201).json(result);
                 } catch (error: any) {
+                    // [#28782] Rows stored under a failing roll-up: the answer they earned, 201,
+                    // with the header the success path sets.
+                    const earned = earnedWriteDespiteStaleSummary(error, res, req.params?.object);
+                    if (earned) { res.status(201).json(earned); return; }
                     handleRouteError(res, error, req.params?.object);
                 }
             },
@@ -594,6 +611,8 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                         ...(context ? { context } : {}),
                     };
                     const result = await p.updateManyData!(updateManyRequest);
+                    // [#3431] Each row's strips in the header too, as their union.
+                    applyDroppedFieldsHeader(res, result, (result as { results?: unknown[] } | null)?.results);
                     res.json(result);
                 } catch (error: any) {
                     handleRouteError(res, error, req.params?.object);

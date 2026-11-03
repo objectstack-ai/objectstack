@@ -7,8 +7,11 @@
  * every field a query names exists, can be sorted, projected, expanded,
  * searched, grouped or aggregated (`assert*FieldsExist` and their siblings),
  * and no internal field is evaluated or served (`assertNoInternalFieldEvaluated`,
- * the `refuseInternal*` walks, `servedExpand`) — moved out of `protocol.ts`
- * whole.
+ * `servedExpand`) — moved out of `protocol.ts` whole. `assertNoInternalFieldEvaluated`
+ * has since become a delegation: the walk it held is the engine's
+ * (`QueryEvaluationGate`, `@objectstack/objectql`'s
+ * `internal-field-evaluation-guard.ts`), and only this door's relation-target
+ * exposure question is still handed in from here.
  *
  * A MOVE, not a redesign. Each function below is the body of the
  * `ObjectStackProtocolImplementation` method of the same name as it stood,
@@ -26,8 +29,8 @@
  * body that reads no member takes no host and is called directly. A method is
  * handed over as a closure that calls it on the protocol at call time, so a
  * test double or spy set on the instance is still the one the body reaches,
- * and the moved bodies that call one another (the `refuseInternal*` walks
- * recurse) do so through the protocol, exactly as before.
+ * and the moved bodies that call one another (`servedExpand` recurses) do so
+ * through the protocol, exactly as before.
  *
  * The one field the bodies read, `engine`, goes as a GETTER, so each read
  * happens when the body makes it: tests replace it on a constructed protocol.
@@ -43,10 +46,10 @@
  */
 
 import type { ObjectStackProtocolImplementation } from './protocol.js';
-import { FILTER_LOGICAL_KEYS, ODATA_SPELLING, QUERY_PARAM_NEAR_MISS, collectFilterReads, invalidSortError, isObjectOfDisabledPackage, isPlainRecord, nearMissKey, objectPackageDisabledError, quotedQueryValue, suggestFieldName } from './protocol.js';
+import { FILTER_LOGICAL_KEYS, ODATA_SPELLING, QUERY_PARAM_NEAR_MISS, invalidSortError, isObjectOfDisabledPackage, isPlainRecord, nearMissKey, objectPackageDisabledError, quotedQueryValue, suggestFieldName } from './protocol.js';
 import { objectNotFoundError, relationConditionSites } from '@objectstack/core';
 import { collectInternalWriteResponseFields } from './write-response-internal-fields.js';
-import { AggregationFunction, DateGranularity, REFERENCE_VALUE_TYPES, SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS, apiExposureDenialReason, canServeApiOperation, classifyDottedFilterHead, effectiveOperationsArray, isCredentialFieldType, isFilterAST, isVirtualSearchField, parseFilterAST, referenceTargetOf, resolveEffectiveApiMethods, resolveSearchFieldResolution } from '@objectstack/spec/data';
+import { AggregationFunction, DateGranularity, REFERENCE_VALUE_TYPES, SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS, SEARCH_FLAG_EXCLUDED_TYPES, apiExposureDenialReason, canServeApiOperation, classifyDottedFilterHead, effectiveOperationsArray, isCredentialFieldType, isFilterAST, isVirtualSearchField, parseFilterAST, referenceTargetOf, resolveEffectiveApiMethods, resolveSearchFieldResolution } from '@objectstack/spec/data';
 
 /**
  * [#20802] The nested-relation spelling of a dotted relation path, as the
@@ -233,10 +236,10 @@ function collectFilterFieldKeys(
 }
 
 /**
- * [#22646] How deep the data door's `internal: true` walk follows nested
- * relation conditions and `expand` levels — a backstop against a
- * self-referential in-process value, well above anything the engine executes
- * (one nested-relation hop; `expand` stops at its own depth cap).
+ * [#22661] How deep {@link servedExpand} follows `expand` levels — a backstop
+ * against a self-referential in-process value, well above anything the engine
+ * executes (`expand` stops at its own depth cap). The same depth the engine's
+ * `internal: true` walk stops at.
  */
 const INTERNAL_FIELD_WALK_DEPTH = 8;
 
@@ -278,11 +281,6 @@ const RELATION_CONDITION_TARGET_OPERATION = 'list';
 export interface QueryValidationHost {
     assertFilterFieldsExist: ObjectStackProtocolImplementation['assertFilterFieldsExist'];
     readonly engine: ObjectStackProtocolImplementation['engine'];
-    groupByFieldNames: ObjectStackProtocolImplementation['groupByFieldNames'];
-    orderByFieldNames: ObjectStackProtocolImplementation['orderByFieldNames'];
-    refuseInternalInExpand: ObjectStackProtocolImplementation['refuseInternalInExpand'];
-    refuseInternalInFilter: ObjectStackProtocolImplementation['refuseInternalInFilter'];
-    refuseInternalNames: ObjectStackProtocolImplementation['refuseInternalNames'];
     refuseUnservedRelationTarget: ObjectStackProtocolImplementation['refuseUnservedRelationTarget'];
     resolveQueryFields: ObjectStackProtocolImplementation['resolveQueryFields'];
     servedExpand: ObjectStackProtocolImplementation['servedExpand'];
@@ -1028,17 +1026,31 @@ export function assertSearchFieldsAreSearchable(
             + "'search' scans — a field outside it cannot be a search target until it is added there.";
     } else {
         const meta = gate.fields[first];
+        // The field's own `searchable: true` admits it whatever its name,
+        // `hidden` or type, except the hard exclusions — the resolution above
+        // asks it before the default's own exclusions (ruling record
+        // 6573569376). So the reason names the opt-in the field lacks, and the
+        // remedy offers it wherever it would work.
+        const hardExcluded = !!meta && typeof meta.type === 'string' && SEARCH_FLAG_EXCLUDED_TYPES.has(meta.type);
         const why = !meta || SEARCH_AUTO_EXCLUDED_FIELDS.has(first)
             ? 'a system/audit column, which the default never includes'
             : meta.hidden
                 ? 'hidden'
-                : `type '${meta.type}'`;
+                : hardExcluded
+                    ? `type '${meta.type}', which 'search' never scans even when marked 'searchable: true'`
+                    : `type '${meta.type}'`;
+        const flaggable = !!meta && typeof meta.type === 'string' && !hardExcluded;
         detail = `Field '${first}' on object '${object}' is not searchable`
             + (offenders.length > 1 ? ` (also: ${offenders.slice(1).join(', ')})` : '')
             + `. With no 'searchableFields' declared, 'search' scans the text-like columns `
-            + `(${[...SEARCHABLE_TEXTUAL_TYPES, ...SEARCHABLE_ENUM_TYPES].join(' / ')}), and '${first}' is `
+            + `(${[...SEARCHABLE_TEXTUAL_TYPES, ...SEARCHABLE_ENUM_TYPES].join(' / ')}) and every field `
+            + `marked 'searchable: true', and '${first}' is `
             + why
-            + ". Declare 'searchableFields' on the object to choose the searchable set explicitly.";
+            + (flaggable ? ", not marked 'searchable: true'" : '')
+            + (flaggable
+                ? ". Mark the field 'searchable: true', or declare 'searchableFields' on the object to "
+                  + 'choose the searchable set explicitly.'
+                : ". Declare 'searchableFields' on the object to choose the searchable set explicitly.");
     }
     const err: any = new Error(detail);
     err.code = 'INVALID_FIELD';
@@ -1256,50 +1268,65 @@ export function assertAggregationFieldsExist(
 
 /** The body of `ObjectStackProtocolImplementation#assertNoInternalFieldEvaluated`; the method's docblock there is its contract. */
 export function assertNoInternalFieldEvaluated(
-    this: Pick<QueryValidationHost, 'groupByFieldNames' | 'orderByFieldNames' | 'refuseInternalInExpand' | 'refuseInternalInFilter' | 'refuseInternalNames' | 'resolveQueryFields'>,
+    this: Pick<QueryValidationHost, 'engine' | 'refuseUnservedRelationTarget' | 'resolveQueryFields'>,
     object: string, options: Record<string, any>): void {
-    const gate = this.resolveQueryFields(object);
-    if (!gate) return;
-    const internal = new Set(collectInternalWriteResponseFields(gate.schema));
-    // where + the `filter` alias a direct bag may still carry, each with its
-    // nested-relation conditions.
-    this.refuseInternalInFilter(object, options.where, 'filter', 0);
-    this.refuseInternalInFilter(object, options.filter, 'filter', 0);
-    this.refuseInternalNames(object, this.orderByFieldNames(options.orderBy), internal, 'sort');
-    this.refuseInternalNames(object, this.groupByFieldNames(options.groupBy), internal, 'groupBy');
-    if (Array.isArray(options.aggregations)) {
-        options.aggregations.forEach((agg: any, i: number) => {
-            const field = agg?.field;
-            if (typeof field === 'string' && field !== '*') {
-                this.refuseInternalNames(object, [field], internal, `aggregations[${i}].field`);
-            }
-            this.refuseInternalInFilter(object, agg?.filter, `aggregations[${i}].filter`, 0);
-        });
+    const engine = this.engine;
+    if (typeof engine?.assertNoInternalFieldEvaluated !== 'function') {
+        // No gate to hand the hop question to: this door's own exposure
+        // question is still asked, at every hop, before the engine reads. The
+        // `internal: true` judgement is the engine's alone and is not copied.
+        refuseUnservedRelationTargetsIn.call(this, object, options);
+        return;
     }
-    // The whole expand tree, every level against its own target.
-    this.refuseInternalInExpand(object, options.expand, 'expand', 0);
+    engine.assertNoInternalFieldEvaluated(object, options, {
+        beforeRelationTarget: (target, param) => this.refuseUnservedRelationTarget(target, param),
+    });
 }
 
-/** The body of `ObjectStackProtocolImplementation#refuseInternalInFilter`; the method's docblock there is its contract. */
-export function refuseInternalInFilter(
-    this: Pick<QueryValidationHost, 'refuseInternalInFilter' | 'refuseInternalNames' | 'refuseUnservedRelationTarget' | 'resolveQueryFields'>,
-    object: string, where: unknown, param: string, depth: number): void {
-    if (where == null || depth > INTERNAL_FIELD_WALK_DEPTH) return;
-    const gate = this.resolveQueryFields(object);
-    if (!gate) return;
-    const condition = isFilterAST(where) ? parseFilterAST(where) : where;
-    const internal = new Set(collectInternalWriteResponseFields(gate.schema));
-    if (internal.size > 0) {
-        const reads = new Set<string>();
-        collectFilterReads(condition, reads);
-        this.refuseInternalNames(object, [...reads], internal, param);
+/**
+ * [#22737] The data door's relation-target exposure question, asked at every
+ * nested-relation condition of a read the door hands an engine that carries no
+ * `QueryEvaluationGate` (a test double, a metadata-only store). With the gate,
+ * the same question rides its `beforeRelationTarget` hook instead, at the same
+ * hops and in the same order. The positions are the ones that hook is asked
+ * at: the filter (`where`, or the `filter` alias), each aggregation's own
+ * `filter`, and each `expand` entry's filter, every level against its own
+ * target. Exposure only — it judges no field.
+ */
+function refuseUnservedRelationTargetsIn(
+    this: Pick<QueryValidationHost, 'refuseUnservedRelationTarget' | 'resolveQueryFields'>,
+    object: string, options: Record<string, any>): void {
+    const inFilter = (source: string, where: unknown, param: string, depth: number): void => {
+        if (where == null || depth > INTERNAL_FIELD_WALK_DEPTH) return;
+        const gate = this.resolveQueryFields(source);
+        if (!gate) return;
+        const condition = isFilterAST(where) ? parseFilterAST(where) : where;
+        for (const site of relationConditionSites(gate.fields, condition)) {
+            const position = `${param}.${site.field}`;
+            this.refuseUnservedRelationTarget(site.target, position);
+            inFilter(site.target, site.condition, position, depth + 1);
+        }
+    };
+    const inExpand = (source: string, expand: unknown, prefix: string, depth: number): void => {
+        if (!isPlainRecord(expand) || depth > INTERNAL_FIELD_WALK_DEPTH) return;
+        const gate = this.resolveQueryFields(source);
+        if (!gate) return;
+        for (const [rel, entry] of Object.entries(expand)) {
+            if (!isPlainRecord(entry)) continue;
+            const def = gate.fields?.[rel];
+            const target = def != null && REFERENCE_VALUE_TYPES.has(def.type) ? referenceTargetOf(def) : undefined;
+            if (!target) continue;
+            const path = `${prefix}['${rel}']`;
+            inFilter(target, entry.where, `${path}.filter`, 0);
+            inExpand(target, entry.expand, `${path}.expand`, depth + 1);
+        }
+    };
+    inFilter(object, options.where, 'filter', 0);
+    inFilter(object, options.filter, 'filter', 0);
+    if (Array.isArray(options.aggregations)) {
+        options.aggregations.forEach((agg: any, i: number) => inFilter(object, agg?.filter, `aggregations[${i}].filter`, 0));
     }
-    for (const site of relationConditionSites(gate.fields, condition)) {
-        const position = `${param}.${site.field}`;
-        // [#22737] The target's exposure before anything of it is judged.
-        this.refuseUnservedRelationTarget(site.target, position);
-        this.refuseInternalInFilter(site.target, site.condition, position, depth + 1);
-    }
+    inExpand(object, options.expand, 'expand', 0);
 }
 
 /** The body of `ObjectStackProtocolImplementation#refuseUnservedRelationTarget`; the method's docblock there is its contract. */
@@ -1325,31 +1352,6 @@ export function refuseUnservedRelationTarget(
     err.object = target;
     err.param = param;
     throw err;
-}
-
-/** The body of `ObjectStackProtocolImplementation#refuseInternalInExpand`; the method's docblock there is its contract. */
-export function refuseInternalInExpand(
-    this: Pick<QueryValidationHost, 'orderByFieldNames' | 'refuseInternalInExpand' | 'refuseInternalInFilter' | 'refuseInternalNames' | 'resolveQueryFields'>,
-    source: string, expand: unknown, prefix: string, depth: number): void {
-    if (!isPlainRecord(expand) || depth > INTERNAL_FIELD_WALK_DEPTH) return;
-    const gate = this.resolveQueryFields(source);
-    if (!gate) return;
-    for (const [rel, entry] of Object.entries(expand)) {
-        if (!isPlainRecord(entry)) continue;
-        const sourceField = gate.fields?.[rel];
-        const target = sourceField != null && REFERENCE_VALUE_TYPES.has(sourceField.type)
-            ? referenceTargetOf(sourceField)
-            : undefined;
-        if (!target) continue;
-        const path = `${prefix}['${rel}']`;
-        this.refuseInternalInFilter(target, entry.where, `${path}.filter`, 0);
-        const targetGate = this.resolveQueryFields(target);
-        if (targetGate) {
-            const targetInternal = new Set(collectInternalWriteResponseFields(targetGate.schema));
-            this.refuseInternalNames(target, this.orderByFieldNames(entry.orderBy), targetInternal, `${path}.sort`);
-        }
-        this.refuseInternalInExpand(target, entry.expand, `${path}.expand`, depth + 1);
-    }
 }
 
 /** The body of `ObjectStackProtocolImplementation#servedExpand`; the method's docblock there is its contract. */
@@ -1387,47 +1389,3 @@ export function servesExpansionTarget(
     return canServeApiOperation(schema?.enable, EXPANSION_TARGET_OPERATION);
 }
 
-/** The body of `ObjectStackProtocolImplementation#orderByFieldNames`; the method's docblock there is its contract. */
-export function orderByFieldNames(orderBy: unknown): string[] {
-    if (!Array.isArray(orderBy)) return [];
-    return orderBy
-        .map((e) => (typeof e === 'string' ? e : (e as { field?: unknown })?.field))
-        .filter((f): f is string => typeof f === 'string' && f.length > 0)
-        .map((f) => f.split('.')[0] as string);
-}
-
-/** The body of `ObjectStackProtocolImplementation#groupByFieldNames`; the method's docblock there is its contract. */
-export function groupByFieldNames(groupBy: unknown): string[] {
-    if (!Array.isArray(groupBy)) return [];
-    return groupBy
-        .map((e) => (typeof e === 'string' ? e : (e as { field?: unknown })?.field))
-        .filter((f): f is string => typeof f === 'string' && f.length > 0)
-        .map((f) => f.split('.')[0] as string);
-}
-
-/** The body of `ObjectStackProtocolImplementation#refuseInternalNames`; the method's docblock there is its contract. */
-export function refuseInternalNames(object: string, names: readonly string[], internal: ReadonlySet<string>, param: string): void {
-    const hit = names.filter((n) => internal.has(n));
-    if (hit.length === 0) return;
-    const first = hit[0] as string;
-    const verb = param.endsWith('sort') ? 'sort' : param === 'groupBy' ? 'group' : param.includes('filter') ? 'filter' : 'query';
-    const err: any = new Error(
-        `Cannot ${verb} '${object}' by '${first}' (${param}): the query was not run. The ${first} field `
-        + 'is declared `internal: true`, so its value is never returned on a generic data exit — the engine '
-        + 'omits it from every row. '
-        + (verb === 'sort'
-            ? 'A sort on it orders by that withheld value'
-            : verb === 'group'
-                ? 'A group key would be the withheld value, served as the key'
-                : 'A filter on it confirms a guessed value by whether the row comes back')
-        + ', so it is refused rather than evaluated. Use another field.',
-    );
-    err.code = 'INVALID_FIELD';
-    err.status = 400;
-    err.httpStatus = 400;
-    err.field = first;
-    err.fields = hit;
-    err.object = object;
-    err.param = param;
-    throw err;
-}

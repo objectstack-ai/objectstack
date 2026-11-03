@@ -87,7 +87,7 @@ import type {
 import { EndpointMatcher } from './endpoint-matcher.js';
 // [#5309] The stored ENVELOPE / authored BODY split — peeled before any spec
 // schema parses a stored row. See `stored-envelope.ts`.
-import { peelStoredEnvelope } from './stored-envelope.js';
+import { peelStoredEnvelope, STORED_ENVELOPE_KEYS } from './stored-envelope.js';
 // [#13913] Registry-free expansion of an aggregated view container reached
 // through THIS manager's own store — see `getViewsByObject`.
 import { expandRuntimeViewContainer } from './view-container-expansion.js';
@@ -331,6 +331,38 @@ export interface MetadataManagerOptions extends MetadataManagerConfig {
   loaders?: MetadataLoader[];
   /** Optional IDataDriver instance. When provided alongside config.datasource, auto-configures DatabaseLoader. */
   driver?: IDataDriver;
+}
+
+/**
+ * {@link MetadataManager.redactServedBody}'s walk, for one document and the
+ * snapshots nested in its bookkeeping. Returns the input by reference when
+ * nothing at any depth is withheld.
+ */
+function redactServedDocument(
+  redactor: NonNullable<ReturnType<typeof getMetadataTypeRedactor>>,
+  record: Record<string, unknown>,
+): Record<string, unknown> {
+  const bookkeeping: Record<string, unknown> = {};
+  const authored: Record<string, unknown> = {};
+  let bookkeepingChanged = false;
+  for (const [key, value] of Object.entries(record)) {
+    if (!(STORED_ENVELOPE_KEYS as readonly string[]).includes(key)) {
+      authored[key] = value;
+    } else if (value === null || typeof value !== 'object') {
+      bookkeeping[key] = value;
+    } else if (key === 'publishedDefinition' && !Array.isArray(value)) {
+      const served = redactServedDocument(redactor, value as Record<string, unknown>);
+      if (served !== value) bookkeepingChanged = true;
+      bookkeeping[key] = served;
+    } else {
+      // A non-scalar bookkeeping value that is not a snapshot: not served.
+      bookkeepingChanged = true;
+    }
+  }
+  const peeled = Object.keys(bookkeeping).length > 0 || bookkeepingChanged;
+  const result = redactor(peeled ? authored : record);
+  if (result.redactedKeys.length === 0 && !bookkeepingChanged) return record;
+  return peeled ? { ...result.item, ...bookkeeping } : result.item;
 }
 
 /**
@@ -2285,14 +2317,30 @@ export class MetadataManager implements IMetadataService {
     return this.redactServedBody(type, body);
   }
 
-  /** [#20552] The per-type read-path redaction, applied to one served body. */
+  /**
+   * [#20552] The per-type read-path redaction, applied to one served body.
+   *
+   * The body can carry this layer's own bookkeeping beside the authored
+   * document (`packageId`, `state`, and the publish keys: the fallback serves
+   * the stored row itself, and a publish snapshot copies it whole). Those keys
+   * are not the type's vocabulary ({@link STORED_ENVELOPE_KEYS}), and a
+   * redactor that withholds every key its type does not declare would withhold
+   * them too. So the redactor is handed the authored document alone, and the
+   * bookkeeping is served beside its answer.
+   *
+   * Only a SCALAR bookkeeping value is served unchanged. A publish snapshot
+   * copies the whole row, so a row published again carries the previous
+   * snapshot under `publishedDefinition`: that value is a document of the same
+   * type, and it is served through this same redaction, at every depth. Any
+   * other bookkeeping value that is not a scalar is not served: no envelope key
+   * but `publishedDefinition` holds a document, and nothing here can judge one.
+   */
   private redactServedBody(type: string, body: unknown): unknown {
     if (!body || typeof body !== 'object' || Array.isArray(body)) return body;
     // Keyed on the singular type name (Prime Directive #3); a plural spelling folds first.
     const redactor = getMetadataTypeRedactor(canonicalMetadataServiceType(type));
     if (!redactor) return body;
-    const result = redactor(body as Record<string, unknown>);
-    return result.redactedKeys.length > 0 ? result.item : body;
+    return redactServedDocument(redactor, body as Record<string, unknown>);
   }
 
   // ==========================================

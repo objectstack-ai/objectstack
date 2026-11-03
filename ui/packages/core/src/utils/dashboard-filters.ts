@@ -22,7 +22,8 @@
 
 import type { DashboardComponentSchema, DashboardWidgetSchema, I18nLabel, PageVariable } from '@object-ui/types';
 import { liftLegacyGlobalFilterDefault } from '@object-ui/types';
-import { DATE_RANGE_PRESETS, DashboardSchema as SpecDashboardSchema, type DateRangePreset } from '@objectstack/spec/ui';
+import { DATE_RANGE_PRESET_MACRO_WINDOWS, isDateRangePresetName } from '@objectstack/spec/data';
+import { DATE_RANGE_PRESETS, DashboardSchema as SpecDashboardSchema } from '@objectstack/spec/ui';
 import { resolveDateMacros } from './date-macros.js';
 
 /** Reserved filter name for the dashboard's built-in date range. */
@@ -146,49 +147,32 @@ export interface DateRangeValue {
 }
 
 /**
- * Date-range presets → date-macro token bounds. Tokens stay symbolic in the
- * generated condition; every widget renderer resolves them at query time via
- * `resolveDateMacros`, exactly like hand-authored widget filters.
+ * Date-range preset NAME → its date-macro token bounds, read from the spec's
+ * own window table, `DATE_RANGE_PRESET_MACRO_WINDOWS`. Tokens stay symbolic in
+ * the generated condition; every widget renderer resolves them at query time
+ * via `resolveDateMacros`, exactly like hand-authored widget filters.
  *
- * `satisfies Record<DateRangePreset, …>` is the load-bearing half of
- * objectui#4167, not decoration. `DATE_RANGE_PRESETS` below is now the spec's
- * list rather than `Object.keys` of this table, so the two could otherwise
- * drift in the one direction the spec's own comment on that const names as the
- * failure mode: a preset the SCHEMA knows and this table has no bounds for
- * "validates clean and then resolves to nothing" — it would reach the filter
- * bar's dropdown, be selected, and produce no range. The `satisfies` makes that
- * a compile error at the moment the spec adds a preset (missing key), and makes
- * a local invention a compile error too (excess key). The annotation form
- * `const PRESET_RANGES: Record<DateRangePreset, …>` would NOT do this: a string
- * index signature satisfies every literal key, so the check passes vacuously.
- */
-const PRESET_RANGES = {
-  today: { from: '{today}', to: '{today}' },
-  yesterday: { from: '{yesterday}', to: '{yesterday}' },
-  this_week: { from: '{current_week_start}', to: '{current_week_end}' },
-  last_week: { from: '{last_week_start}', to: '{last_week_end}' },
-  this_month: { from: '{current_month_start}', to: '{current_month_end}' },
-  last_month: { from: '{last_month_start}', to: '{last_month_end}' },
-  this_quarter: { from: '{current_quarter_start}', to: '{current_quarter_end}' },
-  last_quarter: { from: '{last_quarter_start}', to: '{last_quarter_end}' },
-  this_year: { from: '{current_year_start}', to: '{current_year_end}' },
-  last_year: { from: '{last_year_start}', to: '{last_year_end}' },
-  last_7_days: { from: '{7_days_ago}', to: '{today}' },
-  last_30_days: { from: '{30_days_ago}', to: '{today}' },
-  last_90_days: { from: '{90_days_ago}', to: '{today}' },
-} satisfies Record<DateRangePreset, { from?: string; to?: string }>;
-
-/**
- * Bounds for a preset NAME that may not be one.
+ * There is no local bounds table. This module used to carry one
+ * (`PRESET_RANGES`) holding the same thirteen windows as the spec's, spelled
+ * with the `{current_*}` period tokens where the spec writes the bare aliases
+ * (`{month_start}`); both spellings name the same day through
+ * `DATE_MACRO_ALIAS_TOKENS`, so the copy protected nothing and could only
+ * drift. The guarantees that table's `satisfies Record<DateRangePreset, …>`
+ * pin bought (objectui#4167) now sit on the spec's declaration, which is typed
+ * `Record<DateRangePreset, …>` over a literal union: a preset the spec adds
+ * without a window is a compile error THERE, and no local name can be invented
+ * here because there is no local table to add one to.
  *
- * The runtime receives whatever a stored dashboard carries, so an unrecognised
- * name must warn (see `buildFilterCondition`) rather than fail to compile. That
- * read is confined here so the `satisfies` pin above stays the single place
- * deciding which names exist — an unguarded `PRESET_RANGES[someString]` would
- * have forced the table back to a `Record<string, …>` and taken the pin with it.
+ * The runtime receives whatever a stored dashboard carries, so a name that is
+ * not a preset must miss (and warn, see `buildFilterCondition`) rather than
+ * fail to compile. Membership is the spec's exact predicate,
+ * `isDateRangePresetName` — never `in` or a bare index, which would also find
+ * `Object.prototype` members (`constructor`, `toString`) on a plain object.
  */
-function presetBounds(preset: string): { from?: string; to?: string } | undefined {
-  return (PRESET_RANGES as Record<string, { from?: string; to?: string }>)[preset];
+function presetBounds(preset: string): { from: string; to: string } | undefined {
+  if (!isDateRangePresetName(preset)) return undefined;
+  const [from, to] = DATE_RANGE_PRESET_MACRO_WINDOWS[preset];
+  return { from, to };
 }
 
 /**
@@ -206,10 +190,9 @@ function presetBounds(preset: string): { from?: string; to?: string } | undefine
  * already identical in content AND display order — the copy had nothing to
  * protect.
  *
- * What stays local is the BOUNDS table above, which is the other half of
- * objectstack-ai/objectstack#4614's design ("the two vocabularies live one import apart and neither
- * restates the other's grammar"): the spec owns which presets exist, this
- * module owns what each one resolves to in date-macro tokens.
+ * The BOUNDS each name resolves to are the spec's too (`presetBounds` above
+ * reads `DATE_RANGE_PRESET_MACRO_WINDOWS`), so this module restates neither the
+ * preset list nor its windows.
  */
 export { DATE_RANGE_PRESETS };
 
@@ -228,7 +211,7 @@ const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}(?:[T ][\d:.]+(?:Z|[+-]\d{2}:?\d{2})?)?$/
  *  - a **date-macro token** (`{today}`, `${current_month_start}`,
  *    `{7_days_ago}`) — it stays symbolic in the generated condition and is
  *    resolved at query time by `resolveDateMacros`, exactly like the bounds
- *    `PRESET_RANGES` emits. The check asks that resolver itself instead of
+ *    `presetBounds` emits. The check asks that resolver itself instead of
  *    restating its grammar here: one token vocabulary, no second dialect to
  *    drift — and a token it does not know is precisely the typo this guard
  *    exists to catch;
@@ -396,7 +379,7 @@ function liftLegacyFilterDeclaration<T>(filter: T): T {
 function normalizeDateDefault(type: DashboardFilterDef['type'], defaultValue: unknown): unknown {
   if (type !== 'date' && type !== 'dateRange') return defaultValue;
   if (typeof defaultValue !== 'string') return defaultValue;
-  return defaultValue in PRESET_RANGES ? { preset: defaultValue } : defaultValue;
+  return isDateRangePresetName(defaultValue) ? { preset: defaultValue } : defaultValue;
 }
 
 /**

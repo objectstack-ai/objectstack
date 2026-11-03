@@ -29,11 +29,12 @@
  * an input is focused.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ConsolePageHeader } from '@object-ui/app-shell';
 import {
   Button,
+  buttonVariants,
   Badge,
   Card,
   CardContent,
@@ -71,6 +72,7 @@ import {
   SelectTrigger,
   SelectValue,
   cn,
+  useIsMobile,
   HorizontalOverflowBox,
   PINNED_RIGHT_SEAM_SHADOW_CLASSES,
 } from '@object-ui/components';
@@ -445,6 +447,113 @@ function RejectCommentField({ id, label, value, onChange }: {
       <label htmlFor={id} className="text-sm font-medium">{label}</label>
       <Textarea id={id} rows={3} value={value} onChange={(e) => onChange(e.target.value)} />
     </div>
+  );
+}
+
+/** How the page opens the shared inline confirmations for one row. */
+interface InlineDecisionDialogsHandle {
+  openApprove: (r: ApprovalRequestRow) => void;
+  openReject: (r: ApprovalRequestRow) => void;
+}
+
+/**
+ * The shared inline approve / reject confirmations (#2762 P0-2) — opened from
+ * a row's quick buttons, a phone card, or the a / r keys — and the state they
+ * hold: which row, and the Reject reason.
+ *
+ * objectstack#29070: that state lives HERE, not on the page. On the page,
+ * opening a confirmation or typing one character of the reason re-rendered the
+ * whole inbox — both faces of every row — so on a phone at 4× CPU with 200
+ * pending requests a tap on Approve took about a second to show the dialog and
+ * each keystroke of the reason blocked for about 400 ms. Here only these two
+ * dialogs re-render. The page learns the decision through `onApprove` /
+ * `onReject` once it is confirmed.
+ *
+ * On a phone (`useIsMobile`) the footer buttons take the `lg` size, 44 px.
+ */
+function InlineDecisionDialogs({ ref, tr, isMobile, onApprove, onReject }: {
+  ref: React.Ref<InlineDecisionDialogsHandle>;
+  tr: Translate;
+  isMobile: boolean;
+  onApprove: (r: ApprovalRequestRow) => void;
+  onReject: (r: ApprovalRequestRow, comment: string) => void;
+}) {
+  const [approveTarget, setApproveTarget] = useState<ApprovalRequestRow | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<ApprovalRequestRow | null>(null);
+  // The optional reason a Reject confirmation collects, sent as the reject
+  // call's `comment` (the approvals door records it on the timeline). Each
+  // dialog starts empty: closing one clears what it held.
+  const [rejectComment, setRejectComment] = useState('');
+  useImperativeHandle(ref, () => ({ openApprove: setApproveTarget, openReject: setRejectTarget }), []);
+  // The size alone (`variant: null`): each button keeps its own variant.
+  const footerButton = isMobile ? buttonVariants({ variant: null, size: 'lg' }) : undefined;
+  const titleOf = (r: ApprovalRequestRow | null) => (r ? (r.record_title || formatIdentity(r.record_id)) : '');
+
+  return (
+    <>
+      <AlertDialog open={!!approveTarget} onOpenChange={(open) => !open && setApproveTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {tr('approveOneTitle', 'Approve "{{title}}"?', { title: titleOf(approveTarget) })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {tr('approveOneBody', 'This approves the request with your identity. To add a comment or attachment, open the request instead.')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className={footerButton}>{tr('cancel', 'Cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              className={footerButton}
+              onClick={() => {
+                const r = approveTarget;
+                setApproveTarget(null);
+                if (r) onApprove(r);
+              }}
+            >
+              {tr('approve', 'Approve')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!rejectTarget}
+        onOpenChange={(open) => { if (!open) { setRejectTarget(null); setRejectComment(''); } }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {tr('rejectOneTitle', 'Reject "{{title}}"?', { title: titleOf(rejectTarget) })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {tr('rejectOneBody', 'This rejects the request and notifies the submitter.')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <RejectCommentField
+            id="approvals-reject-comment"
+            label={tr('comment', 'Comment (optional)')}
+            value={rejectComment}
+            onChange={setRejectComment}
+          />
+          <AlertDialogFooter>
+            <AlertDialogCancel className={footerButton}>{tr('cancel', 'Cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const r = rejectTarget;
+                const comment = rejectComment;
+                setRejectTarget(null);
+                setRejectComment('');
+                if (r) onReject(r, comment);
+              }}
+              className={cn(footerButton, 'bg-destructive text-destructive-foreground hover:bg-destructive/90')}
+            >
+              {tr('reject', 'Reject')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
 
@@ -878,17 +987,22 @@ function ApprovalsQueue() {
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
   const [bulkRunning, setBulkRunning] = useState(false);
 
-  // Inline decision confirmation targets (row-level quick action / mobile
-  // card / keyboard). BOTH decisions confirm before executing (#2762 P0-2):
-  // the right-edge icons are small, easy to misclick, and a decision is
-  // irreversible — one stray click must never finalize a request.
-  const [approveTarget, setApproveTarget] = useState<ApprovalRequestRow | null>(null);
-  const [rejectTarget, setRejectTarget] = useState<ApprovalRequestRow | null>(null);
+  // Inline decision confirmations (row-level quick action / mobile card /
+  // keyboard). BOTH decisions confirm before executing (#2762 P0-2): the
+  // right-edge icons are small, easy to misclick, and a decision is
+  // irreversible — one stray click must never finalize a request. Which row a
+  // confirmation is for, and the Reject reason, live in `InlineDecisionDialogs`
+  // (objectstack#29070), so opening one does not re-render the list.
+  const decisionDialogs = useRef<InlineDecisionDialogsHandle>(null);
+  const openApprove = useCallback((r: ApprovalRequestRow) => decisionDialogs.current?.openApprove(r), []);
+  const openReject = useCallback((r: ApprovalRequestRow) => decisionDialogs.current?.openReject(r), []);
   const [inlineActing, setInlineActing] = useState<string | null>(null);
-  // The optional reason a Reject confirmation collects, sent as the reject
-  // call's `comment` (the approvals door records it on the timeline). Each
-  // dialog starts empty: closing one clears what it held.
-  const [rejectComment, setRejectComment] = useState('');
+  // Phone sizing (objectstack#29070): below 768 px the inbox's own controls
+  // take the 44 px touch height — Button's `lg` size, and `h-11` on the
+  // controls that have no size prop.
+  const isMobile = useIsMobile();
+  const controlHeight = isMobile ? 'h-11' : 'h-8';
+  const tabTouch = cn(isMobile && 'min-h-11 min-w-11');
   const [bulkRejectComment, setBulkRejectComment] = useState('');
 
   // Keyboard row focus
@@ -1023,9 +1137,15 @@ function ApprovalsQueue() {
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [rows]);
 
+  // objectstack#29070: the list follows the search box at a deferred
+  // priority, so a keystroke repaints the box first and the rows after,
+  // interruptibly. With the rows memoised below (`rowFaces`), a keystroke on
+  // a phone at 4× CPU no longer blocks for the whole list's render.
+  const deferredQuery = useDeferredValue(query);
+
   /** Client-side filtered + sorted rows shown in table. */
   const filteredRows = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = deferredQuery.trim().toLowerCase();
     const matched = rows.filter(r => {
       if (processFilter !== 'all' && processLabel(r) !== processFilter) return false;
       if (objectFilter !== 'all' && r.object_name !== objectFilter) return false;
@@ -1067,7 +1187,7 @@ function ApprovalsQueue() {
       sorted.sort((a, b) => (submittedAt(a) || '').localeCompare(submittedAt(b) || ''));
     }
     return sorted;
-  }, [rows, query, processFilter, objectFilter, statusFilter, tab, sortKey, hiddenFields, displayLocale]);
+  }, [rows, deferredQuery, processFilter, objectFilter, statusFilter, tab, sortKey, hiddenFields, displayLocale]);
 
   // Reset selection when underlying filtered list changes (avoid acting on hidden rows).
   useEffect(() => {
@@ -1119,7 +1239,7 @@ function ApprovalsQueue() {
     [filteredRows, selectedRowIds, quickDecidable],
   );
 
-  const allFilteredSelectable = filteredRows.filter(r => r.status === 'pending');
+  const allFilteredSelectable = useMemo(() => filteredRows.filter(r => r.status === 'pending'), [filteredRows]);
   const allSelected =
     allFilteredSelectable.length > 0 &&
     allFilteredSelectable.every(r => selectedRowIds.has(r.id));
@@ -1179,13 +1299,10 @@ function ApprovalsQueue() {
   }, [actionableSelectedRows, identities, user?.id, load, refreshBadge, tr]);
 
   /** Confirmed row-level approve (from the shared dialog). */
-  const inlineApprove = useCallback(async () => {
-    const r = approveTarget;
-    if (!r) return;
+  const inlineApprove = useCallback(async (r: ApprovalRequestRow) => {
     const pending = new Set(r.pending_approvers || []);
     const actor = identities.find(i => pending.has(i)) || user?.id || '';
     setInlineActing(r.id);
-    setApproveTarget(null);
     try {
       const res = await approvalsApi.approve(r.id, { actor_id: actor });
       toast.success(res.finalized
@@ -1198,18 +1315,13 @@ function ApprovalsQueue() {
     } finally {
       setInlineActing(null);
     }
-  }, [approveTarget, identities, user?.id, load, refreshBadge, humanizeError, tr]);
+  }, [identities, user?.id, load, refreshBadge, humanizeError, tr]);
 
   /** Confirmed row-level reject (from the shared dialog). */
-  const inlineReject = useCallback(async () => {
-    const r = rejectTarget;
-    if (!r) return;
+  const inlineReject = useCallback(async (r: ApprovalRequestRow, comment: string) => {
     const pending = new Set(r.pending_approvers || []);
     const actor = identities.find(i => pending.has(i)) || user?.id || '';
-    const comment = rejectComment;
     setInlineActing(r.id);
-    setRejectTarget(null);
-    setRejectComment('');
     try {
       await approvalsApi.reject(r.id, { actor_id: actor, ...decisionComment(comment) });
       toast.success(tr('inlineRejected', 'Rejected "{{title}}"', { title: r.record_title || formatIdentity(r.record_id) }));
@@ -1220,7 +1332,7 @@ function ApprovalsQueue() {
     } finally {
       setInlineActing(null);
     }
-  }, [rejectTarget, rejectComment, identities, user?.id, load, refreshBadge, humanizeError, tr]);
+  }, [identities, user?.id, load, refreshBadge, humanizeError, tr]);
 
   // ── Keyboard flow: j/k move · Enter open · x select · a approve · r reject ──
   const filteredRef = useRef(filteredRows);
@@ -1230,11 +1342,10 @@ function ApprovalsQueue() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (approveTarget || rejectTarget) return; // a dialog owns the keyboard
       const el = e.target as HTMLElement | null;
       const tag = el?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return;
-      if (document.querySelector('[role="alertdialog"]')) return;
+      if (document.querySelector('[role="alertdialog"]')) return; // a dialog owns the keyboard
       const list = filteredRef.current;
       if (!list.length) return;
       const idx = focusRef.current;
@@ -1253,15 +1364,269 @@ function ApprovalsQueue() {
         toggleRow(list[idx].id);
       } else if (e.key === 'a' && idx >= 0 && list[idx] && quickDecidable(list[idx])) {
         e.preventDefault();
-        setApproveTarget(list[idx]);
+        openApprove(list[idx]);
       } else if (e.key === 'r' && idx >= 0 && list[idx] && quickDecidable(list[idx])) {
         e.preventDefault();
-        setRejectTarget(list[idx]);
+        openReject(list[idx]);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [approveTarget, rejectTarget, tab, openRequest, toggleRow, quickDecidable]);
+  }, [tab, openRequest, toggleRow, quickDecidable, openApprove, openReject]);
+
+  /**
+   * The rows, both faces: the desktop table and the phone cards.
+   *
+   * objectstack#29070: memoised on what the rows read, so a render the rows
+   * do not depend on — a keystroke in the search box before the deferred
+   * filter catches up, a filter popover opening, a toast — reuses them instead
+   * of re-rendering every row. At 200 rows on a phone at 4× CPU that render
+   * was a 300–500 ms long task per keystroke.
+   */
+  const rowFaces = useMemo(() => (
+    <>
+      {/* Desktop table */}
+      <Card className="hidden md:block">
+        <CardContent className="p-0">
+          {/* objectui#12708 — wider than the panel, the table scrolls
+              in the shared overflow box: a right-edge shadow while
+              columns remain to the right, its scrollbar on hover. */}
+          {/* objectui#12816 — `seam="pinned"`: the shadow moves from
+              the box's edge to the pinned Approve / Reject cells. */}
+          <HorizontalOverflowBox seam="pinned" outerClassName="rounded-lg overflow-hidden" data-testid="approvals-inbox-table-scroller">
+          <Table containerClassName="overflow-visible">
+            <TableHeader>
+              <TableRow>
+                {tab === 'pending' && (
+                  <TableHead className="w-10">
+                    <Checkbox
+                      checked={allSelected}
+                      onCheckedChange={toggleAll}
+                      aria-label={tr('selectAll', 'Select all')}
+                      disabled={allFilteredSelectable.length === 0}
+                    />
+                  </TableHead>
+                )}
+                {/* Column widths rebalanced (#2762 P2): the Record is the
+                    primary content so it gets the widest share, the
+                    Request a moderate one, and Status/Submitted fixed
+                    widths so they never crowd — instead of the browser
+                    spreading five auto columns evenly and leaving 审批事项
+                    over-wide next to a cramped 状态. */}
+                <TableHead className="w-[22%]">{tr('colRequest', 'Request')}</TableHead>
+                {/* objectui#12816 — the Record cells are `max-w-0` (below),
+                    so this floor is the column's only minimum: enough to
+                    tell one record from the next at 1024 px, however long
+                    the titles are. */}
+                <TableHead className="w-[30%] min-w-40">{tr('colRecord', 'Record')}</TableHead>
+                <TableHead className="w-[16%]">{tr('colRequester', 'Requester')}</TableHead>
+                <TableHead className="w-[110px] min-w-[96px] whitespace-nowrap">{tr('colStatus', 'Status')}</TableHead>
+                <TableHead className="w-[132px]">{tr('colWaiting', 'Submitted')}</TableHead>
+                <TableHead className={cn('w-20', PINNED_ACTIONS_CLASSES, 'after:bg-muted/50')} aria-label={tr('colActions', 'Actions')} />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredRows.map((r, i) => (
+                <TableRow
+                  key={r.id}
+                  className={cn(
+                    'group cursor-pointer hover:bg-accent/50',
+                    focusIndex === i && 'ring-2 ring-inset ring-ring bg-accent/30',
+                  )}
+                  onClick={() => { setFocusIndex(i); openRequest(r.id); }}
+                >
+                  {tab === 'pending' && (
+                    <TableCell className="w-10" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={selectedRowIds.has(r.id)}
+                        onCheckedChange={() => toggleRow(r.id)}
+                        disabled={r.status !== 'pending'}
+                        aria-label={tr('selectRow', 'Select request')}
+                      />
+                    </TableCell>
+                  )}
+                  <TableCell><RequestCell r={r} tr={tr} /></TableCell>
+                  {/* objectui#12816 — `max-w-0` takes the record title's
+                      unbreakable width out of the auto-layout table's
+                      column sizing, so a long title truncates (full text
+                      in its `title`) instead of widening the table. */}
+                  <TableCell className="max-w-0">
+                    <RecordCell
+                      r={r}
+                      // A known-dead reference needs no probe: there is
+                      // nothing to link to, and the probe is async and
+                      // fails open, so leaving it to answer would render
+                      // a live-looking link for the first paint.
+                      href={deadLabelFor(r) !== null || readability.isUnreadable(r) ? null : recordHref(r)}
+                      linkState={recordLinkState}
+                      hiddenKeys={hiddenFields.forObject(r.object_name)}
+                      deadLabel={deadLabelFor(r)}
+                      unresolvableLabel={unresolvableLabelFor(r)}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    {isSystemSubmitter(r) ? (
+                      // Flow-/system-initiated: name the origin instead of a
+                      // bare person icon + "—" (#2762 P1-4).
+                      <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                        <Workflow className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate italic">{tr('flowOrigin', 'Flow-initiated')}</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5 text-sm">
+                        <UserIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        <span className="truncate" title={r.submitter_id || ''}>{submitterDisplay(r)}</span>
+                        {tab !== 'submitted' && r.viewer?.is_submitter === true && (
+                          <SelfSubmittedBadge label={tr('submittedByYou', 'You submitted this')} />
+                        )}
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell><StatusBadge status={r.status} label={statusLabel(r.status)} /></TableCell>
+                  <TableCell
+                    className={cn('text-xs whitespace-nowrap', agingClass(r, now))}
+                    title={formatDate(submittedAt(r), displayLocale)}
+                  >
+                    <Clock className="h-3 w-3 inline mr-1" />
+                    {formatRelative(submittedAt(r))}
+                    {r.status === 'pending' && (() => {
+                      const sla = slaState(r.sla_due_at, now);
+                      return sla ? (
+                        <div className={cn(
+                          'mt-0.5 text-[10px] font-medium',
+                          sla.overdue ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground',
+                        )}>
+                          {slaLabel(sla)}
+                        </div>
+                      ) : null;
+                    })()}
+                  </TableCell>
+                  <TableCell
+                    className={cn(
+                      'w-20',
+                      PINNED_ACTIONS_CLASSES,
+                      // The focused row's inset ring is drawn by the row,
+                      // under this opaque cell: the cell redraws the ring's
+                      // top, right and bottom edges itself.
+                      focusIndex === i
+                        ? 'after:bg-accent/30 after:opacity-100 in-[tr:hover]:after:bg-accent/50 shadow-[inset_0_2px_0_var(--color-ring),inset_-2px_0_0_var(--color-ring),inset_0_-2px_0_var(--color-ring)]'
+                        : 'after:bg-accent/50',
+                    )}
+                  >
+                    <InlineActions
+                      r={r}
+                      actionable={isActionable(r)}
+                      busy={inlineActing === r.id}
+                      needsInputs={needsDecisionInputs(r)}
+                      tr={tr}
+                      onApprove={openApprove}
+                      onReject={openReject}
+                    />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          </HorizontalOverflowBox>
+        </CardContent>
+      </Card>
+
+      {/* Mobile cards */}
+      <div className="md:hidden space-y-2">
+        {filteredRows.map((r) => (
+          <Card key={r.id} className="cursor-pointer active:bg-accent/50 [content-visibility:auto] [contain-intrinsic-size:auto_9rem]" onClick={() => openRequest(r.id)}>
+            <CardContent className="p-3 space-y-1.5">
+              <div className="flex items-start justify-between gap-2">
+                <div className="font-medium text-sm truncate">{processLabel(r)}</div>
+                <StatusBadge status={r.status} label={statusLabel(r.status)} />
+              </div>
+              {/* objectui#7108: same tombstone as the desktop row —
+                  the mobile card renders the SAME reference for the
+                  same request, so fixing only the table would leave
+                  the bare id on every phone. */}
+              {/* objectui#8631: and the same cause-free affordance as
+                  the desktop row. This card used to consult NO probe at
+                  all, so a phone kept the opaque id after the table had
+                  stopped showing it — the dead end moved viewport, not
+                  away. */}
+              {(() => {
+                const deadLabel = deadLabelFor(r);
+                const unresolvableLabel = unresolvableLabelFor(r);
+                return (
+                  <div className="text-sm truncate">
+                    {deadLabel !== null ? (
+                      <span className="italic text-muted-foreground">{deadLabel}</span>
+                    ) : unresolvableLabel !== null ? (
+                      <span className="italic text-muted-foreground">{unresolvableLabel}</span>
+                    ) : (
+                      r.record_title || formatIdentity(r.record_id)
+                    )}
+                    <span className="text-muted-foreground text-xs ml-1.5">{objectDisplay(r)}</span>
+                    {deadLabel !== null && r.record_title && (
+                      <span className="text-muted-foreground text-xs ml-1.5">· {r.record_title}</span>
+                    )}
+                    {(() => {
+                      // objectui#6020: this row's OWN object decides.
+                      const amount = decisionAmountEntry(r, hiddenFields.forObject(r.object_name), displayLocale);
+                      return amount ? (
+                        <span className="text-xs ml-1.5 font-medium" title={amount.label}>· {amount.display}</span>
+                      ) : null;
+                    })()}
+                  </div>
+                );
+              })()}
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                {isSystemSubmitter(r) ? (
+                  <span className="inline-flex items-center gap-1 truncate italic">
+                    <Workflow className="h-3 w-3" />{tr('flowOrigin', 'Flow-initiated')}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 truncate">
+                    <UserIcon className="h-3 w-3" />{submitterDisplay(r)}
+                    {tab !== 'submitted' && r.viewer?.is_submitter === true && (
+                      <SelfSubmittedBadge label={tr('submittedByYou', 'You submitted this')} />
+                    )}
+                  </span>
+                )}
+                <span className={cn('inline-flex items-center gap-1 whitespace-nowrap', agingClass(r, now))}>
+                  <Clock className="h-3 w-3" />{formatRelative(submittedAt(r))}
+                </span>
+              </div>
+              {isActionable(r) && (
+                // #2829: outputs-declaring requests decide only via the
+                // request page's dialog — quick buttons disable with the hint.
+                <div
+                  className="flex gap-2 pt-1"
+                  onClick={(e) => e.stopPropagation()}
+                  title={needsDecisionInputs(r)
+                    ? tr('needsDecisionInputs', 'This approval collects decision outputs — open it to decide.')
+                    : undefined}
+                >
+                  {/* objectstack#29070: the phone card's decision
+                      buttons take the 44 px `lg` size (they were
+                      28 px); `px-3` keeps two side by side. */}
+                  <Button size="lg" className="flex-1 px-3" disabled={inlineActing === r.id || needsDecisionInputs(r)} onClick={() => openApprove(r)}>
+                    <CheckCircle2 className="h-3.5 w-3.5 mr-1" />{tr('approve', 'Approve')}
+                  </Button>
+                  <Button
+                    size="lg" variant="outline" className="flex-1 px-3 border-destructive text-destructive"
+                    disabled={inlineActing === r.id || needsDecisionInputs(r)} onClick={() => openReject(r)}
+                  >
+                    <XCircle className="h-3.5 w-3.5 mr-1" />{tr('reject', 'Reject')}
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </>
+  ), [
+    tab, allSelected, toggleAll, allFilteredSelectable, tr, filteredRows, focusIndex, openRequest,
+    selectedRowIds, toggleRow, deadLabelFor, readability, recordHref, recordLinkState, hiddenFields,
+    unresolvableLabelFor, statusLabel, now, displayLocale, formatRelative, isActionable, inlineActing,
+    needsDecisionInputs, openApprove, openReject, slaLabel,
+  ]);
 
   const hasFilters = !!query || processFilter !== 'all' || objectFilter !== 'all' || statusFilter !== 'all';
 
@@ -1300,15 +1665,16 @@ function ApprovalsQueue() {
       )}
 
       <Tabs value={tab} onValueChange={onTabChange}>
-        <TabsList>
-          <TabsTrigger value="pending">
+        {/* Phone (objectstack#29070): 44 px triggers, so the list grows to hold them. */}
+        <TabsList className={cn(isMobile && 'h-auto')}>
+          <TabsTrigger value="pending" className={tabTouch}>
             {tr('tabMyPending', 'My Pending')}
             {myPendingCount > 0 && (
               <Badge variant="secondary" className="ml-2">{myPendingCount}</Badge>
             )}
           </TabsTrigger>
-          <TabsTrigger value="submitted">{tr('tabSubmitted', 'Submitted by me')}</TabsTrigger>
-          <TabsTrigger value="all">{tr('tabAll', 'All')}</TabsTrigger>
+          <TabsTrigger value="submitted" className={tabTouch}>{tr('tabSubmitted', 'Submitted by me')}</TabsTrigger>
+          <TabsTrigger value="all" className={tabTouch}>{tr('tabAll', 'All')}</TabsTrigger>
         </TabsList>
 
         <TabsContent value={tab} className="mt-4 space-y-3">
@@ -1321,13 +1687,18 @@ function ApprovalsQueue() {
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder={tr('searchPlaceholder', 'Search record, process, requester…')}
-                  className="pl-8 h-8 text-sm"
+                  // On a phone: 44 px, and Input's own 16 px text — a smaller
+                  // focused field makes iOS zoom the page (objectstack#29070).
+                  className={cn('pl-8', isMobile ? 'h-11' : 'h-8 text-sm')}
                 />
                 {query && (
                   <button
                     type="button"
                     onClick={() => setQuery('')}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    className={cn(
+                      'absolute top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground',
+                      isMobile ? 'right-0 inline-flex h-11 w-11 items-center justify-center' : 'right-2',
+                    )}
                     aria-label={tr('clearSearch', 'Clear search')}
                   >
                     <X className="h-3.5 w-3.5" />
@@ -1336,7 +1707,7 @@ function ApprovalsQueue() {
               </div>
               {tab !== 'pending' && (
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="h-8 w-auto min-w-[130px] text-sm">
+                  <SelectTrigger className={cn(controlHeight, 'w-auto min-w-[130px] text-sm')}>
                     <SelectValue placeholder={tr('statusFilter', 'Status')} />
                   </SelectTrigger>
                   <SelectContent>
@@ -1351,7 +1722,7 @@ function ApprovalsQueue() {
               )}
               {processOptions.length > 1 && (
                 <Select value={processFilter} onValueChange={setProcessFilter}>
-                  <SelectTrigger className="h-8 w-auto min-w-[140px] text-sm">
+                  <SelectTrigger className={cn(controlHeight, 'w-auto min-w-[140px] text-sm')}>
                     <SelectValue placeholder={tr('processFilter', 'Process')} />
                   </SelectTrigger>
                   <SelectContent>
@@ -1364,7 +1735,7 @@ function ApprovalsQueue() {
               )}
               {objectOptions.length > 1 && (
                 <Select value={objectFilter} onValueChange={setObjectFilter}>
-                  <SelectTrigger className="h-8 w-auto min-w-[140px] text-sm">
+                  <SelectTrigger className={cn(controlHeight, 'w-auto min-w-[140px] text-sm')}>
                     <SelectValue placeholder={tr('objectFilter', 'Object')} />
                   </SelectTrigger>
                   <SelectContent>
@@ -1378,7 +1749,7 @@ function ApprovalsQueue() {
               {/* Triage ordering (#2762 P1-3): newest by default, or by wait
                   time / decision amount. */}
               <Select value={sortKey} onValueChange={(v) => setSortKey(v as typeof sortKey)}>
-                <SelectTrigger className="h-8 w-auto min-w-[120px] text-sm">
+                <SelectTrigger className={cn(controlHeight, 'w-auto min-w-[120px] text-sm')}>
                   <ArrowUpDown className="h-3.5 w-3.5 mr-1 text-muted-foreground" />
                   <SelectValue placeholder={tr('sortBy', 'Sort')} />
                 </SelectTrigger>
@@ -1511,7 +1882,7 @@ function ApprovalsQueue() {
                     </Button>
                   </p>
                 ) : tab === 'pending' && (
-                  <Button variant="link" size="sm" className="mt-1" onClick={() => onTabChange('all')}>
+                  <Button variant="link" size={isMobile ? 'lg' : 'sm'} className="mt-1" onClick={() => onTabChange('all')}>
                     {tr('emptyViewAll', 'Browse all requests')}
                   </Button>
                 )}
@@ -1523,238 +1894,7 @@ function ApprovalsQueue() {
             </div>
           ) : (
             <>
-              {/* Desktop table */}
-              <Card className="hidden md:block">
-                <CardContent className="p-0">
-                  {/* objectui#12708 — wider than the panel, the table scrolls
-                      in the shared overflow box: a right-edge shadow while
-                      columns remain to the right, its scrollbar on hover. */}
-                  {/* objectui#12816 — `seam="pinned"`: the shadow moves from
-                      the box's edge to the pinned Approve / Reject cells. */}
-                  <HorizontalOverflowBox seam="pinned" outerClassName="rounded-lg overflow-hidden" data-testid="approvals-inbox-table-scroller">
-                  <Table containerClassName="overflow-visible">
-                    <TableHeader>
-                      <TableRow>
-                        {tab === 'pending' && (
-                          <TableHead className="w-10">
-                            <Checkbox
-                              checked={allSelected}
-                              onCheckedChange={toggleAll}
-                              aria-label={tr('selectAll', 'Select all')}
-                              disabled={allFilteredSelectable.length === 0}
-                            />
-                          </TableHead>
-                        )}
-                        {/* Column widths rebalanced (#2762 P2): the Record is the
-                            primary content so it gets the widest share, the
-                            Request a moderate one, and Status/Submitted fixed
-                            widths so they never crowd — instead of the browser
-                            spreading five auto columns evenly and leaving 审批事项
-                            over-wide next to a cramped 状态. */}
-                        <TableHead className="w-[22%]">{tr('colRequest', 'Request')}</TableHead>
-                        {/* objectui#12816 — the Record cells are `max-w-0` (below),
-                            so this floor is the column's only minimum: enough to
-                            tell one record from the next at 1024 px, however long
-                            the titles are. */}
-                        <TableHead className="w-[30%] min-w-40">{tr('colRecord', 'Record')}</TableHead>
-                        <TableHead className="w-[16%]">{tr('colRequester', 'Requester')}</TableHead>
-                        <TableHead className="w-[110px] min-w-[96px] whitespace-nowrap">{tr('colStatus', 'Status')}</TableHead>
-                        <TableHead className="w-[132px]">{tr('colWaiting', 'Submitted')}</TableHead>
-                        <TableHead className={cn('w-20', PINNED_ACTIONS_CLASSES, 'after:bg-muted/50')} aria-label={tr('colActions', 'Actions')} />
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredRows.map((r, i) => (
-                        <TableRow
-                          key={r.id}
-                          className={cn(
-                            'group cursor-pointer hover:bg-accent/50',
-                            focusIndex === i && 'ring-2 ring-inset ring-ring bg-accent/30',
-                          )}
-                          onClick={() => { setFocusIndex(i); openRequest(r.id); }}
-                        >
-                          {tab === 'pending' && (
-                            <TableCell className="w-10" onClick={(e) => e.stopPropagation()}>
-                              <Checkbox
-                                checked={selectedRowIds.has(r.id)}
-                                onCheckedChange={() => toggleRow(r.id)}
-                                disabled={r.status !== 'pending'}
-                                aria-label={tr('selectRow', 'Select request')}
-                              />
-                            </TableCell>
-                          )}
-                          <TableCell><RequestCell r={r} tr={tr} /></TableCell>
-                          {/* objectui#12816 — `max-w-0` takes the record title's
-                              unbreakable width out of the auto-layout table's
-                              column sizing, so a long title truncates (full text
-                              in its `title`) instead of widening the table. */}
-                          <TableCell className="max-w-0">
-                            <RecordCell
-                              r={r}
-                              // A known-dead reference needs no probe: there is
-                              // nothing to link to, and the probe is async and
-                              // fails open, so leaving it to answer would render
-                              // a live-looking link for the first paint.
-                              href={deadLabelFor(r) !== null || readability.isUnreadable(r) ? null : recordHref(r)}
-                              linkState={recordLinkState}
-                              hiddenKeys={hiddenFields.forObject(r.object_name)}
-                              deadLabel={deadLabelFor(r)}
-                              unresolvableLabel={unresolvableLabelFor(r)}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            {isSystemSubmitter(r) ? (
-                              // Flow-/system-initiated: name the origin instead of a
-                              // bare person icon + "—" (#2762 P1-4).
-                              <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                                <Workflow className="h-3.5 w-3.5 shrink-0" />
-                                <span className="truncate italic">{tr('flowOrigin', 'Flow-initiated')}</span>
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-1.5 text-sm">
-                                <UserIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                                <span className="truncate" title={r.submitter_id || ''}>{submitterDisplay(r)}</span>
-                                {tab !== 'submitted' && r.viewer?.is_submitter === true && (
-                                  <SelfSubmittedBadge label={tr('submittedByYou', 'You submitted this')} />
-                                )}
-                              </div>
-                            )}
-                          </TableCell>
-                          <TableCell><StatusBadge status={r.status} label={statusLabel(r.status)} /></TableCell>
-                          <TableCell
-                            className={cn('text-xs whitespace-nowrap', agingClass(r, now))}
-                            title={formatDate(submittedAt(r), displayLocale)}
-                          >
-                            <Clock className="h-3 w-3 inline mr-1" />
-                            {formatRelative(submittedAt(r))}
-                            {r.status === 'pending' && (() => {
-                              const sla = slaState(r.sla_due_at, now);
-                              return sla ? (
-                                <div className={cn(
-                                  'mt-0.5 text-[10px] font-medium',
-                                  sla.overdue ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground',
-                                )}>
-                                  {slaLabel(sla)}
-                                </div>
-                              ) : null;
-                            })()}
-                          </TableCell>
-                          <TableCell
-                            className={cn(
-                              'w-20',
-                              PINNED_ACTIONS_CLASSES,
-                              // The focused row's inset ring is drawn by the row,
-                              // under this opaque cell: the cell redraws the ring's
-                              // top, right and bottom edges itself.
-                              focusIndex === i
-                                ? 'after:bg-accent/30 after:opacity-100 in-[tr:hover]:after:bg-accent/50 shadow-[inset_0_2px_0_var(--color-ring),inset_-2px_0_0_var(--color-ring),inset_0_-2px_0_var(--color-ring)]'
-                                : 'after:bg-accent/50',
-                            )}
-                          >
-                            <InlineActions
-                              r={r}
-                              actionable={isActionable(r)}
-                              busy={inlineActing === r.id}
-                              needsInputs={needsDecisionInputs(r)}
-                              tr={tr}
-                              onApprove={setApproveTarget}
-                              onReject={setRejectTarget}
-                            />
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                  </HorizontalOverflowBox>
-                </CardContent>
-              </Card>
-
-              {/* Mobile cards */}
-              <div className="md:hidden space-y-2">
-                {filteredRows.map((r) => (
-                  <Card key={r.id} className="cursor-pointer active:bg-accent/50" onClick={() => openRequest(r.id)}>
-                    <CardContent className="p-3 space-y-1.5">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="font-medium text-sm truncate">{processLabel(r)}</div>
-                        <StatusBadge status={r.status} label={statusLabel(r.status)} />
-                      </div>
-                      {/* objectui#7108: same tombstone as the desktop row —
-                          the mobile card renders the SAME reference for the
-                          same request, so fixing only the table would leave
-                          the bare id on every phone. */}
-                      {/* objectui#8631: and the same cause-free affordance as
-                          the desktop row. This card used to consult NO probe at
-                          all, so a phone kept the opaque id after the table had
-                          stopped showing it — the dead end moved viewport, not
-                          away. */}
-                      {(() => {
-                        const deadLabel = deadLabelFor(r);
-                        const unresolvableLabel = unresolvableLabelFor(r);
-                        return (
-                          <div className="text-sm truncate">
-                            {deadLabel !== null ? (
-                              <span className="italic text-muted-foreground">{deadLabel}</span>
-                            ) : unresolvableLabel !== null ? (
-                              <span className="italic text-muted-foreground">{unresolvableLabel}</span>
-                            ) : (
-                              r.record_title || formatIdentity(r.record_id)
-                            )}
-                            <span className="text-muted-foreground text-xs ml-1.5">{objectDisplay(r)}</span>
-                            {deadLabel !== null && r.record_title && (
-                              <span className="text-muted-foreground text-xs ml-1.5">· {r.record_title}</span>
-                            )}
-                            {(() => {
-                              // objectui#6020: this row's OWN object decides.
-                              const amount = decisionAmountEntry(r, hiddenFields.forObject(r.object_name), displayLocale);
-                              return amount ? (
-                                <span className="text-xs ml-1.5 font-medium" title={amount.label}>· {amount.display}</span>
-                              ) : null;
-                            })()}
-                          </div>
-                        );
-                      })()}
-                      <div className="flex items-center justify-between text-xs text-muted-foreground">
-                        {isSystemSubmitter(r) ? (
-                          <span className="inline-flex items-center gap-1 truncate italic">
-                            <Workflow className="h-3 w-3" />{tr('flowOrigin', 'Flow-initiated')}
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 truncate">
-                            <UserIcon className="h-3 w-3" />{submitterDisplay(r)}
-                            {tab !== 'submitted' && r.viewer?.is_submitter === true && (
-                              <SelfSubmittedBadge label={tr('submittedByYou', 'You submitted this')} />
-                            )}
-                          </span>
-                        )}
-                        <span className={cn('inline-flex items-center gap-1 whitespace-nowrap', agingClass(r, now))}>
-                          <Clock className="h-3 w-3" />{formatRelative(submittedAt(r))}
-                        </span>
-                      </div>
-                      {isActionable(r) && (
-                        // #2829: outputs-declaring requests decide only via the
-                        // request page's dialog — quick buttons disable with the hint.
-                        <div
-                          className="flex gap-2 pt-1"
-                          onClick={(e) => e.stopPropagation()}
-                          title={needsDecisionInputs(r)
-                            ? tr('needsDecisionInputs', 'This approval collects decision outputs — open it to decide.')
-                            : undefined}
-                        >
-                          <Button size="sm" className="h-7 flex-1" disabled={inlineActing === r.id || needsDecisionInputs(r)} onClick={() => setApproveTarget(r)}>
-                            <CheckCircle2 className="h-3.5 w-3.5 mr-1" />{tr('approve', 'Approve')}
-                          </Button>
-                          <Button
-                            size="sm" variant="outline" className="h-7 flex-1 border-destructive text-destructive"
-                            disabled={inlineActing === r.id || needsDecisionInputs(r)} onClick={() => setRejectTarget(r)}
-                          >
-                            <XCircle className="h-3.5 w-3.5 mr-1" />{tr('reject', 'Reject')}
-                          </Button>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
+              {rowFaces}
 
               {tab !== 'pending' && total != null && (
                 <div className="flex items-center justify-center gap-3 py-1">
@@ -1762,7 +1902,7 @@ function ApprovalsQueue() {
                     {tr('loadedOf', 'Loaded {{loaded}} of {{total}}', { loaded: rows.length, total })}
                   </span>
                   {rows.length < total && (
-                    <Button size="sm" variant="outline" disabled={loadingMore} onClick={() => void loadMore()}>
+                    <Button size={isMobile ? 'lg' : 'sm'} variant="outline" disabled={loadingMore} onClick={() => void loadMore()}>
                       {loadingMore ? tr('loadingMore', 'Loading…') : tr('loadMore', 'Load more')}
                     </Button>
                   )}
@@ -1777,61 +1917,14 @@ function ApprovalsQueue() {
         </TabsContent>
       </Tabs>
 
-      {/* Shared inline-approve confirmation (#2762 P0-2) */}
-      <AlertDialog open={!!approveTarget} onOpenChange={(open) => !open && setApproveTarget(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {tr('approveOneTitle', 'Approve "{{title}}"?', {
-                title: approveTarget ? (approveTarget.record_title || formatIdentity(approveTarget.record_id)) : '',
-              })}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {tr('approveOneBody', 'This approves the request with your identity. To add a comment or attachment, open the request instead.')}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{tr('cancel', 'Cancel')}</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void inlineApprove()}>
-              {tr('approve', 'Approve')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Shared inline-reject confirmation */}
-      <AlertDialog
-        open={!!rejectTarget}
-        onOpenChange={(open) => { if (!open) { setRejectTarget(null); setRejectComment(''); } }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {tr('rejectOneTitle', 'Reject "{{title}}"?', {
-                title: rejectTarget ? (rejectTarget.record_title || formatIdentity(rejectTarget.record_id)) : '',
-              })}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {tr('rejectOneBody', 'This rejects the request and notifies the submitter.')}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <RejectCommentField
-            id="approvals-reject-comment"
-            label={tr('comment', 'Comment (optional)')}
-            value={rejectComment}
-            onChange={setRejectComment}
-          />
-          <AlertDialogFooter>
-            <AlertDialogCancel>{tr('cancel', 'Cancel')}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => void inlineReject()}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {tr('reject', 'Reject')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {/* Shared inline approve / reject confirmations (#2762 P0-2) */}
+      <InlineDecisionDialogs
+        ref={decisionDialogs}
+        tr={tr}
+        isMobile={isMobile}
+        onApprove={(r) => void inlineApprove(r)}
+        onReject={(r, comment) => void inlineReject(r, comment)}
+      />
     </div>
     </div>
   );

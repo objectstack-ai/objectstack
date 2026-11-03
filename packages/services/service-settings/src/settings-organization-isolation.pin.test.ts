@@ -24,6 +24,13 @@
  *    D8), under a wall and under `single` alike — and the global rung is read
  *    by every organization;
  *  - the lock pre-flight reads the same row the cascade does;
+ *  - a locked row binds every writer below the platform rung — at an upper
+ *    rung as before, and at the write's own rung too: an organization's
+ *    administrator cannot save over its own organization's locked tenant row,
+ *    nor over a locked global row, while a platform administrator
+ *    (`manage_platform_settings`) and a trusted in-process caller still write
+ *    through, and the row keeps its lock — through the service and through the
+ *    settings route alike;
  *  - the refusal: under a walled posture a tenant-scope write that names no
  *    organization is refused whole, and writes nothing; under `single` it is
  *    not;
@@ -44,7 +51,8 @@
  * query shape it cannot express fails here instead of reading as "no row".
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import type { IHttpServer, IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
 import { ObjectQL } from '@objectstack/objectql';
 import { SysUser } from '@objectstack/platform-objects/identity';
 import { SysPlatformSetting, SysSetting } from '@objectstack/platform-objects/system';
@@ -52,6 +60,8 @@ import type { TenancyPosture } from '@objectstack/spec/security';
 import { SettingsService, type SettingsOrganizationSource } from './settings-service.js';
 import { wrapEngineAsSettingsEngine } from './settings-service-plugin.js';
 import { SettingsLockedError, type SettingsContext } from './settings-service.types.js';
+import { registerSettingsRoutes } from './settings-routes.js';
+import { companySettingsManifest } from './manifests/company.manifest.js';
 
 const SYS = { context: { isSystem: true } } as const;
 const NS = 'org_isolation_fixture';
@@ -291,6 +301,237 @@ describe('a tenant-scope value belongs to the organization that wrote it (walled
 
     await expect(svc.set(NS, 'theme', 'blue', inOrg(ORG_A, { userId }))).rejects.toBeInstanceOf(SettingsLockedError);
     await expect(svc.set(NS, 'theme', 'blue', inOrg(ORG_B, { userId }))).resolves.toBeDefined();
+  });
+});
+
+/**
+ * An organization's administrator: verified, holding the namespace's read and
+ * write capabilities, inside its own organization — and not the platform.
+ */
+const orgAdmin = (organization: string): SettingsContext => ({
+  enforced: true,
+  permissions: ['setup.access', 'setup.write'],
+  userId: `usr_admin_${organization}`,
+  tenantId: organization,
+});
+/** A platform administrator, working inside an organization. */
+const platformAdmin = (organization: string): SettingsContext => ({
+  enforced: true,
+  permissions: ['setup.access', 'setup.write', 'manage_platform_settings'],
+  userId: 'usr_platform_admin',
+  tenantId: organization,
+});
+
+/** A row put straight into the global rung's store, as the platform left it. */
+async function seedGlobal(row: Record<string, unknown>): Promise<void> {
+  await engine.insert('sys_platform_setting', {
+    namespace: NS, value_enc: null, encrypted: false, locked: false, locked_reason: null, ...row,
+  }, SYS);
+}
+
+/** The refusal a write ends in, or `null` when it lands. */
+const refusalOf = (write: Promise<unknown>): Promise<any> => write.then(() => null, (e) => e);
+
+describe('a locked row binds every writer below the platform rung', () => {
+  const LOCK = { key: 'motto', scope: 'tenant', value: 'Platform motto', locked: true, locked_reason: 'Set by the platform.' };
+
+  it('an organization administrator\'s save over its own organization\'s locked tenant row is refused, and the value is unchanged', async () => {
+    await seed({ ...LOCK, organization_id: ORG_A });
+    const svc = settings('isolated');
+
+    const refusal = await refusalOf(svc.setMany(NS, { motto: 'Org A override' }, orgAdmin(ORG_A)));
+    expect(refusal).toBeInstanceOf(SettingsLockedError);
+    expect(refusal.code).toBe('SETTINGS_LOCKED');
+    expect(refusal.reason).toBe('locked-by-tenant');
+    expect(refusal.key).toBe('motto');
+
+    const after = await svc.get(NS, 'motto', inOrg(ORG_A));
+    expect(after.value).toBe('Platform motto');
+    expect(settingRows().map((r) => [r.organization_id, r.value, r.locked])).toEqual([[ORG_A, 'Platform motto', true]]);
+  });
+
+  it('a reset over the locked row is a write too, and is refused the same way', async () => {
+    await seed({ ...LOCK, organization_id: ORG_A });
+    const svc = settings('isolated');
+
+    const refusal = await refusalOf(svc.setMany(NS, { motto: null }, orgAdmin(ORG_A)));
+    expect(refusal?.code).toBe('SETTINGS_LOCKED');
+    expect(refusal?.reason).toBe('locked-by-tenant');
+    const reset = await refusalOf(svc.runAction(NS, 'reset', null, orgAdmin(ORG_A)));
+    expect(reset?.code).toBe('SETTINGS_LOCKED');
+    expect((await svc.get(NS, 'motto', inOrg(ORG_A))).value).toBe('Platform motto');
+  });
+
+  it('what the read reports as locked is what the write refuses: get, getMany and getNamespace all say locked', async () => {
+    await seed({ ...LOCK, organization_id: ORG_A });
+    const svc = settings('isolated');
+    const ctx = orgAdmin(ORG_A);
+
+    const one = await svc.get(NS, 'motto', ctx);
+    expect(one.locked).toBe(true);
+    expect(one.lockedReason).toBe('Set by the platform.');
+    expect((await svc.getMany(NS, ['motto'], ctx)).motto.locked).toBe(true);
+    expect((await svc.getNamespace(NS, ctx)).values.motto.locked).toBe(true);
+    expect((await refusalOf(svc.set(NS, 'motto', 'x', ctx)))?.code).toBe('SETTINGS_LOCKED');
+  });
+
+  it('a platform administrator writes through the lock, and the row keeps its lock', async () => {
+    await seed({ ...LOCK, organization_id: ORG_A });
+    const svc = settings('isolated');
+
+    await svc.setMany(NS, { motto: 'Platform motto, revised' }, platformAdmin(ORG_A));
+    expect((await svc.get(NS, 'motto', inOrg(ORG_A))).value).toBe('Platform motto, revised');
+    expect(settingRows().map((r) => [r.organization_id, r.value, r.locked])).toEqual([
+      [ORG_A, 'Platform motto, revised', true],
+    ]);
+    // The lock still binds the organization's administrator after that write.
+    expect((await refusalOf(svc.set(NS, 'motto', 'Org A override', orgAdmin(ORG_A))))?.code).toBe('SETTINGS_LOCKED');
+  });
+
+  it('a trusted in-process caller writes through the lock', async () => {
+    await seed({ ...LOCK, organization_id: ORG_A });
+    const svc = settings('isolated');
+
+    await svc.set(NS, 'motto', 'Seeded by the platform', inOrg(ORG_A));
+    expect((await svc.get(NS, 'motto', inOrg(ORG_A))).value).toBe('Seeded by the platform');
+  });
+
+  it('another organization\'s administrator is not bound by it', async () => {
+    await seed({ ...LOCK, organization_id: ORG_A });
+    const svc = settings('isolated');
+
+    await svc.setMany(NS, { motto: 'Org B value' }, orgAdmin(ORG_B));
+    expect((await svc.get(NS, 'motto', inOrg(ORG_B))).value).toBe('Org B value');
+    expect((await svc.get(NS, 'motto', inOrg(ORG_A))).value).toBe('Platform motto');
+  });
+
+  it('an unlocked tenant row is saved over as before', async () => {
+    await seed({ ...LOCK, organization_id: ORG_A, locked: false });
+    const svc = settings('isolated');
+
+    await svc.setMany(NS, { motto: 'Org A value' }, orgAdmin(ORG_A));
+    expect((await svc.get(NS, 'motto', inOrg(ORG_A))).value).toBe('Org A value');
+  });
+
+  it('a locked global row refuses a non-platform write of the global key, and the platform administrator writes through it', async () => {
+    await seedGlobal({ key: 'banner', value: 'Platform banner', locked: true, locked_reason: 'Set by the platform.' });
+    const svc = settings('isolated');
+
+    const refusal = await refusalOf(svc.setMany(NS, { banner: 'Org A banner' }, orgAdmin(ORG_A)));
+    expect(refusal?.code).toBe('SETTINGS_LOCKED');
+    expect(refusal?.reason).toBe('locked-by-global');
+    expect((await svc.get(NS, 'banner', inOrg(ORG_A))).value).toBe('Platform banner');
+
+    await svc.setMany(NS, { banner: 'Platform banner, revised' }, platformAdmin(ORG_A));
+    const after = await svc.get(NS, 'banner', inOrg(ORG_B));
+    expect(after.value).toBe('Platform banner, revised');
+    expect(after.locked).toBe(true);
+  });
+
+  it('a locked upper rung still refuses the platform administrator\'s write below it', async () => {
+    await seedGlobal({ key: 'motto', value: 'Platform motto', locked: true, locked_reason: 'Set by the platform.' });
+    const svc = settings('isolated');
+
+    const refusal = await refusalOf(svc.setMany(NS, { motto: 'Org A motto' }, platformAdmin(ORG_A)));
+    expect(refusal?.code).toBe('SETTINGS_LOCKED');
+    expect(refusal?.reason).toBe('locked-by-global');
+  });
+
+  it('the user rung carries no lock: the read reports none and the owner\'s write is not refused', async () => {
+    await seed({ key: 'theme', scope: 'user', user_id: userId, value: 'dark', organization_id: ORG_A, locked: true });
+    const svc = settings('isolated');
+    const ctx: SettingsContext = { ...orgAdmin(ORG_A), userId };
+
+    expect((await svc.get(NS, 'theme', ctx)).locked).toBe(false);
+    await svc.setMany(NS, { theme: 'blue' }, ctx);
+    expect((await svc.get(NS, 'theme', ctx)).value).toBe('blue');
+  });
+
+  it('the in-memory store keeps the lock through the platform\'s write as the engine does', async () => {
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(MANIFEST);
+    await (svc as any).upsertRow({
+      namespace: NS, key: 'motto', scope: 'tenant', user_id: null, organization_id: ORG_A,
+      value: 'Platform motto', value_enc: null, encrypted: false, locked: true, locked_reason: 'Set by the platform.',
+    });
+
+    expect((await refusalOf(svc.set(NS, 'motto', 'Org A override', orgAdmin(ORG_A))))?.reason).toBe('locked-by-tenant');
+    await svc.set(NS, 'motto', 'Platform motto, revised', platformAdmin(ORG_A));
+    const after = await svc.get(NS, 'motto', inOrg(ORG_A));
+    expect(after.value).toBe('Platform motto, revised');
+    expect(after.locked).toBe(true);
+    expect((await refusalOf(svc.set(NS, 'motto', 'Org A override', orgAdmin(ORG_A))))?.reason).toBe('locked-by-tenant');
+  });
+});
+
+/** The settings routes over the same engine, with the caller each request resolves to. */
+class RouteHttp implements IHttpServer {
+  routes = new Map<string, RouteHandler>();
+  private add(method: string, path: string, handler: RouteHandler) { this.routes.set(`${method} ${path}`, handler); }
+  get(path: string, h: RouteHandler) { this.add('GET', path, h); return this as any; }
+  post(path: string, h: RouteHandler) { this.add('POST', path, h); return this as any; }
+  put(path: string, h: RouteHandler) { this.add('PUT', path, h); return this as any; }
+  delete(path: string, h: RouteHandler) { this.add('DELETE', path, h); return this as any; }
+  patch(path: string, h: RouteHandler) { this.add('PATCH', path, h); return this as any; }
+  use() { return this as any; }
+  listen() { return Promise.resolve(); }
+  close() { return Promise.resolve(); }
+  getInstance() { return null; }
+}
+
+describe('the settings route answers a locked row the way the service does', () => {
+  const COMPANY = companySettingsManifest.namespace;
+
+  async function companyRoutes() {
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(companySettingsManifest);
+    svc.bindEngine(wrapEngineAsSettingsEngine(engine as any), undefined, {
+      tenancyPosture: () => 'isolated',
+      organization: NO_ORGANIZATION_OBJECT,
+    });
+    let caller: SettingsContext = {};
+    const http = new RouteHttp();
+    registerSettingsRoutes(http, svc, { contextFromRequest: () => caller });
+    const put = async (ctx: SettingsContext, body: Record<string, unknown>) => {
+      caller = ctx;
+      const state: { status: number; body?: any } = { status: 200 };
+      const req: IHttpRequest = { params: { namespace: COMPANY }, query: {}, body, headers: {}, method: 'PUT', path: '/' };
+      const res: IHttpResponse = {
+        json: vi.fn((data) => { state.body = data; }) as any,
+        send: vi.fn() as any,
+        status: vi.fn((code: number) => { state.status = code; return res; }) as any,
+        header: vi.fn(() => res) as any,
+      };
+      await http.routes.get('PUT /api/settings/:namespace')!(req, res);
+      return state;
+    };
+    return { svc, put };
+  }
+
+  beforeEach(async () => {
+    await engine.insert('sys_setting', {
+      namespace: COMPANY, key: 'legal_name', scope: 'tenant', user_id: null, organization_id: ORG_A,
+      value: 'Platform Legal Name', value_enc: null, encrypted: false, locked: true, locked_reason: 'Set by the platform.',
+    }, SYS);
+  });
+
+  it('an organization administrator\'s PUT over its own locked row is 409 SETTINGS_LOCKED naming the key and the tenant lock', async () => {
+    const { svc, put } = await companyRoutes();
+
+    const r = await put(orgAdmin(ORG_A), { legal_name: 'Org A Override' });
+    expect(r.status).toBe(409);
+    expect(r.body.error.code).toBe('SETTINGS_LOCKED');
+    expect(r.body.error.details).toEqual({ namespace: COMPANY, key: 'legal_name', reason: 'locked-by-tenant' });
+    expect((await svc.get(COMPANY, 'legal_name', inOrg(ORG_A))).value).toBe('Platform Legal Name');
+  });
+
+  it('a platform administrator\'s PUT over it lands, and another organization\'s administrator is not bound by it', async () => {
+    const { svc, put } = await companyRoutes();
+
+    expect((await put(platformAdmin(ORG_A), { legal_name: 'Revised Legal Name' })).status).toBe(200);
+    expect((await svc.get(COMPANY, 'legal_name', inOrg(ORG_A))).value).toBe('Revised Legal Name');
+    expect((await put(orgAdmin(ORG_B), { legal_name: 'Org B Legal Name' })).status).toBe(200);
+    expect((await svc.get(COMPANY, 'legal_name', inOrg(ORG_B))).value).toBe('Org B Legal Name');
   });
 });
 

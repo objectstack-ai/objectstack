@@ -732,3 +732,57 @@ describe('[#22088] a flow edge that names no node, or repeats an earlier edge, i
         expect([...rows.values()].map((r) => [r.type, r.name])).toEqual([['flow', 'repro_edges']]);
     });
 });
+
+describe('[#28806] a save_notice reachable from a suspending node is refused at the metadata door', () => {
+    const NOTICE_FLOW = (order: 'after' | 'before') => ({
+        name: 'deal_submit',
+        label: 'Deal submit',
+        type: 'record_change',
+        nodes: [
+            { id: 'start', type: 'start', label: 'Start', config: { objectName: 'deal', triggerType: 'record-after-create' } },
+            { id: 'ask', type: 'approval', label: 'Manager', config: { approvers: [{ type: 'user', value: 'u_mgr' }] } },
+            { id: 'tell', type: 'save_notice', label: 'Tell the saver', config: { message: 'Sent {{ record.name }} for approval' } },
+            { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: order === 'after'
+            ? [
+                { id: 'e1', source: 'start', target: 'ask' },
+                { id: 'e2', source: 'ask', target: 'tell', label: 'approve' },
+                { id: 'e3', source: 'ask', target: 'end', label: 'reject' },
+                { id: 'e4', source: 'tell', target: 'end' },
+            ]
+            : [
+                { id: 'e1', source: 'start', target: 'tell' },
+                { id: 'e2', source: 'tell', target: 'ask' },
+                { id: 'e3', source: 'ask', target: 'end', label: 'approve' },
+                { id: 'e4', source: 'ask', target: 'end', label: 'reject' },
+            ],
+    });
+
+    it.each([
+        ['publish', undefined],
+        ['draft', 'draft'],
+    ] as const)('%s mode — 422 INVALID_METADATA at the node\'s type, naming the approval, nothing stored', async (_label, mode) => {
+        const { protocol, rows } = makeProtocol();
+        const err = await saveFlowAsAdministrator(protocol, NOTICE_FLOW('after'), mode);
+
+        expect(err).toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issues = err.issues as Array<{ code?: string; path?: string; message: string }>;
+        expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', 'nodes.2.type']]);
+        expect(issues[0]!.message).toContain(
+            "This one is reached after `approval` node 'ask' suspends the run. A suspended run resumes after the write "
+            + 'has already answered, so on that path the node is refused by name at run time, and after an approval the '
+            + "decision cannot finish its run. Move the `save_notice` ahead of 'ask', or tell the person after it with a "
+            + '`notify` node.',
+        );
+        expect(rows.size).toBe(0);
+    });
+
+    it('CONTROL — the same flow with the notice ahead of the approval is stored', async () => {
+        const { protocol, rows } = makeProtocol();
+        const result = await saveFlowAsAdministrator(protocol, NOTICE_FLOW('before'));
+        expect(result instanceof Error ? `${result.message} ${JSON.stringify((result as any).issues ?? [])}` : 'stored').toBe('stored');
+        expect([...rows.values()].map((r) => [r.type, r.name])).toEqual([['flow', 'deal_submit']]);
+    });
+});

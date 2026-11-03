@@ -522,14 +522,29 @@ const PARAM_PROBES: ReadonlyArray<{ label: string; param?: string; query: Record
     { label: '(none)', query: {} },
     { label: '?id=crm', param: 'id', query: { id: 'crm' } },
     { label: '?id=nope', param: 'id', query: { id: 'nope' } },
+    // [#28548] An EMPTY app name is refused (400 VALIDATION_ERROR) on both
+    // transports, never read as absent.
+    { label: '?id= (empty)', param: 'id', query: { id: '' } },
+    // …and so is a BRACKETED `id` key (a qs-style array spelling), never
+    // read as no filter.
+    { label: '?id[]=crm', param: 'id', query: { 'id[]': 'crm' } },
+    { label: '?id[0]=crm', param: 'id', query: { 'id[0]': 'crm' } },
     { label: '?object=lead', param: 'object', query: { object: 'lead' } },
     { label: '?object=nope', param: 'object', query: { object: 'nope' } },
+    // [#28548] …and so is an EMPTY view object.
+    { label: '?object= (empty)', param: 'object', query: { object: '' } },
+    // …and a BRACKETED view `object` key, never read as no filter.
+    { label: '?object[]=lead', param: 'object', query: { 'object[]': 'lead' } },
+    { label: '?object[0]=lead', param: 'object', query: { 'object[0]': 'lead' } },
     { label: '?include=content', param: 'include', query: { include: 'content' } },
     // [#25333] The position list's opt-in description.
     { label: '?include=grants', param: 'include', query: { include: 'grants' } },
     { label: '?locale=zh-CN', param: 'locale', query: { locale: 'zh-CN' } },
     { label: 'Accept-Language: zh-CN', query: {}, headers: { 'accept-language': 'zh-CN' } },
     { label: '?package=crm', param: 'package', query: { package: 'crm' } },
+    // A BRACKETED `package` key is refused at the list's arity step, never
+    // read as every package.
+    { label: '?package[]=crm', param: 'package', query: { 'package[]': 'crm' } },
     { label: '?preview=draft', param: 'preview', query: { preview: 'draft' } },
     // [#20408] The switch's value is compared case-insensitively on `RestServer`.
     { label: '?preview=DRAFT', param: 'preview', query: { preview: 'DRAFT' } },
@@ -680,8 +695,18 @@ describe('[#20320] row A: the reference moves — each probe changes RestServer\
         const { read } = bootRest('holder');
         expect(names((await read('/meta/app', { id: 'crm' })).items)).toEqual(['crm']);
         expect((await read('/meta/app', { id: 'nope' })).items).toEqual([]);
+        const blank = await read('/meta/app', { id: '' });
+        expect({ status: blank.status, code: blank.code, items: blank.items }).toEqual({ status: 400, code: 'VALIDATION_ERROR', items: undefined });
+        const bracketed = await read('/meta/app', { 'id[]': 'crm' });
+        expect({ status: bracketed.status, code: bracketed.code, items: bracketed.items }).toEqual({ status: 400, code: 'VALIDATION_ERROR', items: undefined });
         expect(names((await read('/meta/view', { object: 'lead' })).items)).toEqual(['lead_mine', 'lead_all']);
         expect((await read('/meta/views', { object: 'nope' })).items).toEqual([]);
+        const blankObject = await read('/meta/views', { object: '' });
+        expect({ status: blankObject.status, code: blankObject.code, items: blankObject.items }).toEqual({ status: 400, code: 'VALIDATION_ERROR', items: undefined });
+        const bracketedObject = await read('/meta/view', { 'object[]': 'lead' });
+        expect({ status: bracketedObject.status, code: bracketedObject.code, items: bracketedObject.items }).toEqual({ status: 400, code: 'VALIDATION_ERROR', items: undefined });
+        const bracketedPackage = await read('/meta/view', { 'package[]': 'crm' });
+        expect({ status: bracketedPackage.status, code: bracketedPackage.code, items: bracketedPackage.items }).toEqual({ status: 400, code: 'VALIDATION_ERROR', items: undefined });
         const docs = await read('/meta/docs');
         expect(text(docs)).not.toContain('Welcome aboard.');
         expect(text(await read('/meta/docs', { include: 'content' }))).toContain(DOC_SECRET);
@@ -856,6 +881,8 @@ const ITEM_PROBES: ReadonlyArray<{ label: string; param?: string; query: Record<
     { label: '?preview=draft', param: 'preview', query: { preview: 'draft' } },
     { label: '?preview=DRAFT', param: 'preview', query: { preview: 'DRAFT' } },
     { label: '?package=crm', param: 'package', query: { package: 'crm' } },
+    // A BRACKETED `package` key: an unknown name to the item read's closed set.
+    { label: '?package[]=crm', param: 'package', query: { 'package[]': 'crm' } },
     { label: '?locale=zh-CN', param: 'locale', query: { locale: 'zh-CN' } },
     { label: 'Accept-Language: zh-CN', query: {}, headers: { 'accept-language': 'zh-CN' } },
     // [#20478] The layered view's deprecated spelling — any non-empty value —
@@ -894,6 +921,8 @@ const TREE_CELLS: readonly string[] = ['admin_guide', 'help_center', 'public_gui
 const TREE_PROBES: ReadonlyArray<{ label: string; param?: string; query: Record<string, string>; headers?: Record<string, string> }> = [
     { label: '(none)', query: {} },
     { label: '?package=crm', param: 'package', query: { package: 'crm' } },
+    // A BRACKETED `package` key is refused at the tree's arity step.
+    { label: '?package[]=crm', param: 'package', query: { 'package[]': 'crm' } },
     { label: '?locale=zh-CN', param: 'locale', query: { locale: 'zh-CN' } },
     { label: 'Accept-Language: zh-CN', query: {}, headers: { 'accept-language': 'zh-CN' } },
 ];
@@ -908,6 +937,8 @@ const TREE_CALLERS = ['holder', 'non-holder', 'builder', 'anonymous'] as const s
 const LAYERS_PROBES: ReadonlyArray<{ label: string; param?: string; query: Record<string, string>; headers?: Record<string, string> }> = [
     { label: '(none)', query: {} },
     { label: '?package=crm', param: 'package', query: { package: 'crm' } },
+    // A BRACKETED `package` key: an unknown name to the layered view's closed set.
+    { label: '?package[]=crm', param: 'package', query: { 'package[]': 'crm' } },
     { label: 'Accept-Language: zh-CN', query: {}, headers: { 'accept-language': 'zh-CN' } },
 ];
 const LAYERS_PARAM_AXIS = new Set(LAYERS_PROBES.map((p) => p.param).filter((p): p is string => !!p));

@@ -18,9 +18,10 @@
 
 import { formatZodIssue } from '@objectstack/spec';
 import { ManifestSchema, type ObjectStackManifestParsed } from '@objectstack/spec/kernel';
+import { COMPILED_PLUGIN_MANIFEST_FILE } from './compiled-plugin-manifest-file.js';
 
-/** The manifest at an artifact's root. */
-export const COMPILED_PLUGIN_MANIFEST_FILE = 'objectstack.plugin.json';
+/** The manifest at an artifact's root (its one spelling, shared with the CLI). */
+export { COMPILED_PLUGIN_MANIFEST_FILE };
 
 /** An artifact entry, as `readTarGz` answers it. */
 export interface CompiledManifestEntry {

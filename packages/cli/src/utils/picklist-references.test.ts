@@ -16,6 +16,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { unclaimedTopLevel } from '@objectstack/metadata';
+import { unreferencedResidualPicklists } from '@objectstack/metadata/picklist-references';
 import {
   judgePicklistReferences,
   picklistRefusalHeading,
@@ -336,8 +338,9 @@ describe('judgePicklistReferences — a `picklistExtensions[].extend` in a `pack
  * [ADR-0130 D4] A composed stack's top-level picklist that no package body
  * declares and no object field the boot registers names: the boot refuses the
  * stack (`INVALID_METADATA`), so this door refuses it too, as
- * `picklist-residual-unreferenced`, in the boot's words. The boot's own text is
- * held equal in `picklist-references.boot-parity.test.ts`.
+ * `picklist-residual-unreferenced`, in the boot's words. Both read the one
+ * judgement, `unreferencedResidualPicklists`; the last pin below holds the door
+ * to it, and `picklist-references.boot-parity.test.ts` smoke-checks the boot.
  */
 describe('judgePicklistReferences — a composed stack\'s residual picklist that nothing names', () => {
   const STACK_ID = 'com.example.release';
@@ -421,6 +424,23 @@ describe('judgePicklistReferences — a composed stack\'s residual picklist that
   it('CONTROL: a stack without `packages[]` has no residual — its unnamed picklist is not refused', () => {
     expect(judgePicklistReferences({ manifest: manifest('com.example.pk'), picklists: [industry, unused], objects: [account('industry')] }))
       .toEqual({ refusals: [], notices: [] });
+  });
+
+  it('reports the one judgement the boot throws — its lists, their locations and its words, one finding per list', () => {
+    const stack = composed({ picklists: [industry, unused, { ...unused, name: 'spare_list' }] });
+    const judged = unreferencedResidualPicklists(
+      unclaimedTopLevel(stack),
+      stack.packages.map((entry) => entry.manifest),
+    );
+    expect(judged?.picklists).toHaveLength(2);
+    expect(residualRefusals(stack)).toEqual(judged!.picklists.map((list) => ({
+      severity: 'error',
+      rule: PICKLIST_RESIDUAL_UNREFERENCED,
+      where: `picklist "${list.name}"`,
+      path: `${list.field}[${list.index}]`,
+      message: list.wording.judgement,
+      hint: list.wording.prescription,
+    })));
   });
 });
 

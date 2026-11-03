@@ -19,17 +19,20 @@ import { test, expect, type APIRequestContext, type Page } from '@playwright/tes
  * 5/5 run of the enlarged allowlist); the readings are on that card's PR.
  */
 
-// The object designer is reached through the showcase's own app: a stock
-// showcase boot does not serve the Studio app (`com.objectstack.studio`; the
-// served apps are what `GET /api/v1/meta/app` lists), and the metadata routes
-// resolve under any served app.
+// The object designer is reached through Studio's "All metadata" area, on the
+// package's own leg (`/studio/<package>/metadata/...`): Setup carries no
+// metadata editor (objectstack ADR-0146 D1), and its old URLs redirect here.
+// The area opens a create page on a WRITABLE package only: the showcase is
+// provided by code, so its create URL lands on the type's list, and every
+// test that opens the designer authors a package of its own first.
 const PKG = 'com.example.showcase';
-const NEW_OBJ = `/apps/showcase_app/metadata/object/new?package=${PKG}`;
+const newObjectIn = (pkg: string) => `/studio/${pkg}/metadata/object/new?package=${pkg}`;
 const API = process.env.LIVE_API_URL || 'http://localhost:3000';
 
 /**
- * A package the environment authors, for a test that SAVES: the showcase is
- * provided by code, so a save into it is refused (`WRITABLE_PACKAGE_REQUIRED`).
+ * A package the environment authors, for a test that opens the designer: the
+ * showcase is provided by code, so the area offers no create page on it, and a
+ * save into it is refused (`WRITABLE_PACKAGE_REQUIRED`).
  */
 async function authorWritablePackage(request: APIRequestContext, stamp: number): Promise<string> {
   const id = `com.e2e.designer${stamp}`;
@@ -49,25 +52,35 @@ async function addField(page: Page, typeName: string) {
   await page.getByRole('button', { name: typeName, exact: true }).first().click();
 }
 
-test('F2: object Name accepts a typed underscore (no per-keystroke trim)', async ({ page }) => {
-  await page.goto(NEW_OBJ);
-  const name = page.getByTestId('object-name-input');
-  await expect(name).toBeVisible();
-  await name.click();
-  // MUST type char-by-char: .fill() would set the value in one shot and hide
-  // the per-keystroke bug. Pre-fix this yields "repairticket".
-  await name.pressSequentially('repair_ticket');
-  await expect(name).toHaveValue('repair_ticket');
+test('F2: object Name accepts a typed underscore (no per-keystroke trim)', async ({ page, request }) => {
+  const pkgId = await authorWritablePackage(request, Date.now());
+  try {
+    await page.goto(newObjectIn(pkgId));
+    const name = page.getByTestId('object-name-input');
+    await expect(name).toBeVisible();
+    await name.click();
+    // MUST type char-by-char: .fill() would set the value in one shot and hide
+    // the per-keystroke bug. Pre-fix this yields "repairticket".
+    await name.pressSequentially('repair_ticket');
+    await expect(name).toHaveValue('repair_ticket');
+  } finally {
+    await request.delete(`${API}/api/v1/packages/${pkgId}`);
+  }
 });
 
-test('F3: a field API name derives from its label on blur', async ({ page }) => {
-  await page.goto(NEW_OBJ);
-  await page.getByTestId('object-name-input').fill('asset');
-  await addField(page, 'Text');
-  const label = page.getByTestId('field-label-input');
-  await label.fill('Asset Code');
-  await label.blur();
-  await expect(page.getByTestId('field-apiname-input')).toHaveValue('asset_code');
+test('F3: a field API name derives from its label on blur', async ({ page, request }) => {
+  const pkgId = await authorWritablePackage(request, Date.now());
+  try {
+    await page.goto(newObjectIn(pkgId));
+    await page.getByTestId('object-name-input').fill('asset');
+    await addField(page, 'Text');
+    const label = page.getByTestId('field-label-input');
+    await label.fill('Asset Code');
+    await label.blur();
+    await expect(page.getByTestId('field-apiname-input')).toHaveValue('asset_code');
+  } finally {
+    await request.delete(`${API}/api/v1/packages/${pkgId}`);
+  }
 });
 
 test('F4: adding a picklist + an empty option row does not trip spec validation, and is not stored', async ({ page, request }) => {
@@ -75,7 +88,7 @@ test('F4: adding a picklist + an empty option row does not trip spec validation,
   const pkgId = await authorWritablePackage(request, stamp);
   const objName = `e2e_asset${stamp}`;
   try {
-    await page.goto(`/apps/showcase_app/metadata/object/new?package=${pkgId}`);
+    await page.goto(newObjectIn(pkgId));
     await page.getByTestId('object-name-input').fill(objName);
     await addField(page, 'Picklist');
     // Give the picklist its option source first: a select with no options is a

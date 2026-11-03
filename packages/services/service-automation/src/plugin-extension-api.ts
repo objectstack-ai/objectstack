@@ -31,7 +31,7 @@
 import type { ActionDescriptor, FlowParsed } from '@objectstack/spec/automation';
 import { FLOW_RESERVED_NODE_TYPES, defineActionDescriptor, resolveFlowTriggerKind, resolveScheduleOrganization } from '@objectstack/spec/automation';
 import type { Connector, ConnectorOrigin } from '@objectstack/spec/integration';
-import { ConnectorSchema } from '@objectstack/spec/integration';
+import { ConnectorSchema, isConnectorUpstreamChanged } from '@objectstack/spec/integration';
 import { describeThrownForLog } from './thrown-cause-diagnostics.js';
 import type { AutomationEngine, ConnectorActionHandler, ConnectorHold, FlowTrigger, FlowTriggerBinding, NodeExecutor } from './engine.js';
 
@@ -385,8 +385,13 @@ export function registerDegradedConnector(
             (hold
                 ? `; a connector_action dispatching to it fails with the stored reason, and the materializer ` +
                   `does not retry it until ${describeHold(hold)} (or a restart).`
-                : ` until its upstream is reachable; a connector_action dispatching to it fails with the stored ` +
-                  `reason, and the materializer retries with backoff.`),
+                : isConnectorUpstreamChanged(cause)
+                    // [#27401] Not an outage: the upstream answered with a
+                    // definition its pin does not match.
+                    ? ` until its upstream serves the definitions its pin names again; a connector_action ` +
+                      `dispatching to it fails with the stored reason, and the materializer re-checks with backoff.`
+                    : ` until its upstream is reachable; a connector_action dispatching to it fails with the stored ` +
+                      `reason, and the materializer retries with backoff.`),
         cause === undefined
             ? { degradedReason: reason }
             : { degradedReason: reason, ...describeThrownForLog(cause) },

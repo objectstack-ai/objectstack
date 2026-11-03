@@ -84,13 +84,9 @@ function renderSession(language: string) {
   const schema: any = {
     type: 'object-grid',
     objectName: 'showcase_account',
-    // The card view partitions the columns AFTER the first (the card title)
-    // and routes them by NAME: `classify()` matches `dateKeys` substrings, so
-    // a column must be named like a date to reach the compact `'short'` cells
-    // at all — `closed_on` would be classified 'other' and rendered by the
-    // ordinary DateCellRenderer instead. Two date columns are carried so both
-    // `'short'` sites run: `dateCols[0]` (the unlabelled density row) and
-    // `dateCols.slice(1)` (the labelled rows below it).
+    // objectstack#28484 — the card's subtitle draws the first two shown
+    // columns after the title through their own desktop cells, so both date
+    // columns below are drawn by the date cell, joined on one line.
     columns: [
       { field: 'account_name', label: 'Account Name' },
       { field: 'close_date', label: 'Close Date', type: 'date' },
@@ -119,9 +115,8 @@ describe("ObjectGrid mobile cards — the 'short' date cells follow the display 
     setMobileWidth();
     const { container } = renderSession('zh');
     await waitFor(() => expect(screen.getByText('Northwind')).toBeInTheDocument());
-    // dateCols[0] — the unlabelled density row.
+    // Both subtitle values, each through the date cell.
     expect(container.textContent).toContain('3月');
-    // dateCols.slice(1) — the labelled rows below it.
     expect(container.textContent).toContain('6月');
     expect(container.textContent).not.toContain('Mar');
     expect(container.textContent).not.toContain('Jun');
@@ -132,7 +127,8 @@ describe("ObjectGrid mobile cards — the 'short' date cells follow the display 
     setMobileWidth();
     const { container } = renderSession('en');
     await waitFor(() => expect(screen.getByText('Northwind')).toBeInTheDocument());
-    expect(container.textContent).toContain("Mar 15, '24");
-    expect(container.textContent).toContain("Jun 20, '24");
+    // objectstack#28484 — the date cell's face, the one the desktop row draws.
+    expect(container.textContent).toContain('Mar 15, 2024');
+    expect(container.textContent).toContain('Jun 20, 2024');
   });
 });

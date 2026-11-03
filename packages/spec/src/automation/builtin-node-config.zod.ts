@@ -1425,6 +1425,78 @@ export const EndConfigSchema = lazySchema(() => strictObject({
 export type EndConfig = z.input<typeof EndConfigSchema>;
 export type EndConfigParsed = z.infer<typeof EndConfigSchema>;
 
+// ─── save_notice ─────────────────────────────────────────────────────
+
+/**
+ * `save_notice` node config — tell the person who made the write that fired
+ * this run what the save set in motion (#28251).
+ *
+ * The flow face of the save `notice` (`CreateDataResponseSchema.notice` /
+ * `UpdateDataResponseSchema.notice`): a record-triggered run, which the
+ * record-change trigger dispatches INSIDE the triggering write, renders
+ * `message` and hands it to that write's own `onNotice` listener through the
+ * hook face (`HookContext.notice`) — the one channel, never a second. The
+ * create/update answer carries it, and a client shows it with, or in place
+ * of, its own success message.
+ *
+ * A node rather than a key on an existing node, because the case it exists
+ * for says so: a save that sends a record for approval tells the saver BEFORE
+ * the `approval` node suspends the run, and the run's `end` is reached only
+ * once the decision lands, long after the write answered. So the notice is a
+ * step of its own, placed where the run still holds the write.
+ *
+ * Where it can run is judged at the flow parse (`FlowSchema`): a flow whose
+ * start is not a `record-(before|after)-(create|insert|update|write)` trigger
+ * is refused, because no write is waiting on such a run. At run time a run no
+ * longer holding the write (a leg an approval or a wait resumed) refuses the
+ * node by name, never drops the message silently.
+ *
+ * ## `message` — a `{{ }}` template, translated where it is rendered
+ *
+ * Rendered by the engine's one text renderer, exactly like a refusing `end`
+ * node's `message` (`'Sent {{ record.name }} to your manager for approval'`),
+ * and translated the same way (the #22507 rule: a user-read flow string the
+ * server renders is picked in the reader's locale before its holes are
+ * filled): the engine reads `flows.<flow>.notices.<node_id>.message`
+ * (`flowNoticeMessageKey`) in the triggering writer's locale, and renders the
+ * authored template when none is held. The answer carries the rendered text.
+ */
+export const SaveNoticeConfigSchema = lazySchema(() => strictObject({
+  surface: 'this save_notice node config',
+  history: BUILTIN_NODE_CONFIG_HISTORY,
+  aliases: {
+    // The words a notice arrives spelled in: `notice` from the answer key,
+    // `text` / `body` / `description` from prose and the screen node.
+    notice: 'message',
+    text: 'message',
+    body: 'message',
+    description: 'message',
+  },
+  guidance: {
+    title:
+      'A save notice has no heading — the client shows `message` alone with, or in place of, its success '
+      + 'message. Put the whole sentence in `message`.',
+    severity:
+      'A save notice is always info severity: it reports what the save set in motion, never a problem. A '
+      + 'problem is a refusal (an `end` node with `outcome: \'refused\'`, or a validation rule).',
+  },
+}, {
+  /** The sentence the saver reads. A `{{ }}` template. */
+  message: z.string().min(1).describe(
+    'The sentence the person who made the triggering write reads, answered as the create/update `notice` — a '
+    + 'template rendered at run time like an `end` refusal `message`: `{{ }}` holes over the flow\'s variables '
+    + '(`Sent {{ record.name }} for approval`). Translated through flows.<flow>.notices.<node_id>.message in the '
+    + 'writer\'s locale. One notice per write: a later notice on the same write replaces it.',
+  ),
+}).superRefine((config, ctx) => {
+  // [#22110] A text slot: `{{ }}` holes, never a single-brace token.
+  const refusal = textSlotTemplateRefusal(config.message);
+  if (refusal !== undefined) ctx.addIssue({ code: 'custom', path: ['message'], message: refusal });
+}));
+
+export type SaveNoticeConfig = z.input<typeof SaveNoticeConfigSchema>;
+export type SaveNoticeConfigParsed = z.infer<typeof SaveNoticeConfigSchema>;
+
 // ─── map ─────────────────────────────────────────────────────────────
 
 /**

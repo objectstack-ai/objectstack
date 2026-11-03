@@ -1243,6 +1243,14 @@ export const ShowcaseTranslationBundle = {
       showcase_active_projects: { label: '进行中的项目' },
       // `ui/pages/invoice-document.page.ts` — the invoice print page.
       showcase_invoice_document: { label: '发票' },
+      // `ui/pages/task-detail.page.ts` — the banner a task in review shows.
+      // Only its `title` has a key on this face; its `body` carries its
+      // zh-CN text inline on the page (see the comment on the node there).
+      showcase_task_detail: {
+        components: {
+          review_alert: { title: '待评审' },
+        },
+      },
       showcase_contact_form: {
         components: {
           field_name: { label: '姓名', placeholder: '艾达·洛夫莱斯' },
@@ -1307,6 +1315,10 @@ export const ShowcaseTranslationBundle = {
             fields: { new_assignee: { label: '新负责人' } },
           },
         },
+      },
+      // The save notice the person who marks a task done reads with the save.
+      showcase_task_completed: {
+        notices: { tell_saver: { message: '已将 {{ record.title }} 标记为完成，正在通知负责人' } },
       },
       // The approval flows: the flow's name and each approval step's name, as
       // the approvals inbox, the record's approval panel and the request page

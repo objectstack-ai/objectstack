@@ -4,6 +4,11 @@ import { describe, it, expect } from 'vitest';
 import { provisionPrimary } from '@objectstack/spec/data';
 import { SysAuditLog } from './objects/sys-audit-log.object.js';
 import * as AuditObjects from './objects/index.js';
+import { SysActivity } from './objects/sys-activity.object.js';
+import { enObjects } from './translations/en.objects.generated.js';
+import { zhCNObjects } from './translations/zh-CN.objects.generated.js';
+import { jaJPObjects } from './translations/ja-JP.objects.generated.js';
+import { esESObjects } from './translations/es-ES.objects.generated.js';
 
 /**
  * `sys_audit_log` declares the ActivityPointer pair — #11386 (ADR-0052 §5,
@@ -193,4 +198,36 @@ describe('audit record pages and lists — the type half never draws as text (#2
     expect(view?.columns).toEqual(['created_at', 'action', 'user_id']);
     expect((SysAuditLog.fields as Record<string, Record<string, unknown>>).record_id.referenceVia).toBe('object_name');
   });
+});
+
+/**
+ * #28353 — the id half is headed "Record", because its cell draws the record.
+ *
+ * The console draws a `referenceVia` id half as the target record (its
+ * object's icon and name) in the list views and on the Details tab, so the
+ * header "Record ID" disagreed with the cell. The label reads "Record" in
+ * every pack, the words `sys_approval_action.record_id` and
+ * `sys_approval_request.record_id` already use. Only the label moves: the
+ * field stays the same text id half of the same pair.
+ */
+describe('audit pointer id halves — headed "Record", not "Record ID" (#28353)', () => {
+  const bundles = { en: enObjects, 'zh-CN': zhCNObjects, 'ja-JP': jaJPObjects, 'es-ES': esESObjects };
+  const words = { en: 'Record', 'zh-CN': '记录', 'ja-JP': 'レコード', 'es-ES': 'Registro' };
+
+  for (const object of [SysAuditLog, SysActivity]) {
+    const field = (object.fields as Record<string, Record<string, unknown>>).record_id;
+
+    it(`${object.name}.record_id is labelled "Record" and stays the text id half`, () => {
+      expect(field.label).toBe('Record');
+      expect(field.type).toBe('text');
+      expect(field.referenceVia).toBe('object_name');
+    });
+
+    for (const [locale, bundle] of Object.entries(bundles)) {
+      it(`${object.name}.record_id reads ${words[locale as keyof typeof words]} in ${locale}`, () => {
+        const leaf = (bundle as Record<string, { fields?: Record<string, { label?: string }> }>)[object.name]?.fields?.record_id;
+        expect(leaf?.label).toBe(words[locale as keyof typeof words]);
+      });
+    }
+  }
 });

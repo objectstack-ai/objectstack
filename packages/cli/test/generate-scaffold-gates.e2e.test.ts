@@ -79,7 +79,6 @@ import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 // One `resolve(HERE, …)` call per line: `check:cross-package-test-inputs`
 // reconstructs this read by SOURCE SCAN.
@@ -135,7 +134,7 @@ function run(file: string, args: string[], cwd: string): Promise<Run> {
   });
 }
 
-const os = (args: string[], cwd: string) => run(TSX, [CLI, ...args], cwd);
+const os = (args: string[], cwd: string) => run(process.execPath, [CLI, ...args], cwd);
 const out = (r: Run) => r.stdout + r.stderr;
 
 const target = (type: string) => {

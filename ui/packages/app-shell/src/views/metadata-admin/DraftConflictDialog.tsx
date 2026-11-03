@@ -52,6 +52,12 @@
  *     installed with no draft read behind it (a reset, a discard) holds nothing
  *     either: the caller says so with `forget()`. A read-back of the guard's
  *     OWN save is not an install.
+ *     A draft read REFUSED `403` is not a failure that says nothing: a draft
+ *     row is there that this session may not read (its audience gate,
+ *     `requiredPermissions`, names a capability the author does not hold).
+ *     {@link readDraftForSave} hands that refusal back as `refused`, and a load
+ *     that sees it installs no buffer: one seeded from the published layer
+ *     would be saved over the draft it never read.
  *  4. A `409 METADATA_CONFLICT` opens the conflict dialog: reload the saved
  *     version (the caller's reload runs; the buffer is replaced), overwrite it
  *     after a confirmation (re-sent pinned to the refusal's `currentVersion`,
@@ -151,13 +157,38 @@ function pinOfConflict(err: unknown): DraftPin | null {
 }
 
 /**
+ * Whether a draft read was REFUSED for this session (`403`): the read reached
+ * a draft row and the server withheld it, so the row exists and its body is
+ * not this session's to hold. Told apart by status, never by prose.
+ */
+export function isDraftReadRefused(err: unknown): boolean {
+  return (err as { status?: unknown } | null | undefined)?.status === 403;
+}
+
+/** What {@link readDraftForSave} answers. */
+export interface DraftReadForSave<T> {
+  /** The served draft envelope, or `null`: no pending draft, or a read that failed. */
+  answer: T | null;
+  /** The pin the next draft save at the read's address is sent with. */
+  pin: DraftPin | null;
+  /**
+   * The server's refusal, present only when the read was refused `403`
+   * ({@link isDraftReadRefused}). `answer` is then `null` although a draft is
+   * pending: a load that sees `refused` installs no buffer, because one seeded
+   * from the published layer would be saved over the draft it never read.
+   */
+  refused?: unknown;
+}
+
+/**
  * A load's draft read at `packageId` — the address the buffer's draft saves
  * write — with the pin it serves for that address. Read and pin come from one
  * call so a load cannot pin a save to a read of another address (see the
  * module header). A read that fails resolves `answer: null`, as the loads'
  * `.catch(() => null)` always did, and pins nothing: a failure says nothing
- * about the row. Record the pin with `recordRead` where the buffer is
- * installed, not here: a load that is cancelled installs nothing.
+ * about the row. A read refused `403` says the row is there and withheld, and
+ * carries the refusal as `refused`. Record the pin with `recordRead` where the
+ * buffer is installed, not here: a load that is cancelled installs nothing.
  */
 export async function readDraftForSave<T = unknown>(
   client: Pick<MetadataClient, 'getDraft'>,
@@ -167,15 +198,15 @@ export async function readDraftForSave<T = unknown>(
   // objectstack#26649 — the bundle member whose draft this is; omitted, the
   // canonical member's. The save it pins is addressed by its body's member.
   member?: string,
-): Promise<{ answer: T | null; pin: DraftPin | null }> {
+): Promise<DraftReadForSave<T>> {
   try {
     const answer = await client.getDraft<T>(type, name, {
       ...(packageId ? { packageId } : {}),
       ...(member ? { member } : {}),
     });
     return { answer, pin: draftPinOf(answer) };
-  } catch {
-    return { answer: null, pin: null };
+  } catch (err) {
+    return isDraftReadRefused(err) ? { answer: null, pin: null, refused: err } : { answer: null, pin: null };
   }
 }
 

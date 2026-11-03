@@ -302,10 +302,11 @@ function readerWithout(...denied: string[]): MePermissionsResponse {
     authenticated: true,
     userId: 'u1',
     tenantId: 't1',
-    roles: [],
+    positions: [],
+    hasAnyQueue: false,
     permissionSets: [],
     objects: { '*': all } as never,
-    fields: Object.fromEntries(denied.map((f) => [`invoice.${f}`, { readable: false }])),
+    fields: Object.fromEntries(denied.map((f) => [`invoice.${f}`, { readable: false, editable: false }])),
     systemPermissions: [],
   };
 }

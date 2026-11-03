@@ -400,6 +400,15 @@ The split pane beside an open record keeps the same switcher.
 - **☆ Star** puts a view in the sidebar's **Favorites** section of the app, where the user can
   drag it into place. A view your app's navigation already opens (an `object` entry with that
   `viewName`) is in the menu already, so its star is disabled.
+- **My views** are each user's own. **Save as my view**, at the end of the dropdown, saves the
+  list on screen under a name the user gives it: the open view with the user's filter, sort,
+  grouping, column order, hidden columns and density laid over it. The search term and the
+  filter chips are not saved. The views appear in their own **My views** section, where each
+  row can be renamed or deleted, and **📌 Pin** on one makes it that user's default. Nobody else
+  sees them, and an administrator's **Manage views** does not list them. They are rows of the
+  `sys_personal_view` object, not view metadata, so a package never carries them. A user the
+  server grants that object nothing (an external member, today) is offered neither the section
+  nor the save.
 
 ## Form View
 
@@ -515,19 +524,31 @@ app page or action, where `features.*` stays bound and stays legal. A record *fi
 
 ## How a list opens a record
 
-Clicking a row, card, node, bar or event opens the record in an overlay whose mode is
-the view's `navigation.mode`: `drawer`, `modal`, `split` or `popover`. Every list-type
-view (grid, tree, kanban, calendar, gantt, list, gallery, map and timeline) opens the
-same record panel, so a record reads with its declared labels and typed values, without
-its `hidden` fields, whichever view it came from. In `split` the view moves into the
-left panel; in `popover` the panel is anchored to what was clicked.
+Clicking a row, card, node, bar or event opens the record the one way its object declares:
+in the **drawer**, which expands to the full page, unless the view's `navigation.mode` is
+`page`, declared only for an object whose record should open as a full page (`new_window`
+and `none` are the other two values). Every list-type view (grid, tree, kanban, calendar,
+gantt, list, gallery, map and timeline) opens the same record page, so a record reads with
+its declared labels and typed values, without its `hidden` fields, whichever view it came
+from. `modal`, `split` and `popover` were removed in @objectstack/spec 18.3.0 (ADR-0087 D2):
+a stored value is refused with its fix, and `os migrate meta --from 17` drops it. On a phone
+every record opens as a page, whatever the view declares.
+
+Whether a row opens the drawer or the full page is the reader's choice, not the view's. The
+list's **Display** menu offers **Open records**: **Drawer** (the default) draws the record over
+the list, which keeps its full width, and **Full page** navigates. The choice is kept in the
+browser for every drawer-mode object, and is not offered for an object declared to open as a
+page; a record's **↗** always opens the full page. The reader also drags the drawer's edge,
+**⤢** maximizes it in place, **Open as full page** leaves the drawer, and **Collapse to
+drawer** returns to the stack it left. The `size` bucket on `navigation` sets only the
+drawer's starting width; `width` is deprecated.
 
 The record opened from a list is addressable: `?recordId=` on the list's URL, so a
 reload, a shared link or Back reopens it. A record opened inside the drawer (a related
 row, a lookup value) opens one level down in the same drawer; those levels are
-in-memory, so a reload shows the root record. `⤢` opens a level's full page, and
-**Collapse to drawer** returns to the stack it left. A record page's own layout is
-described in [Pages](/docs/ui/pages).
+in-memory, so a reload shows the root record. A record page's own layout, and the
+reader's right-column and panel choices on it, are described in
+[Pages](/docs/ui/pages#record-pages).
 
 ### A user's list state never writes the view
 
@@ -538,8 +559,17 @@ metadata is read-only. What you author (`sort`, filters, columns, `rowHeight`,
 `hiddenFields`, the views' order) is the default for every user with no state of their own.
 
 - A link carrying list state (`uf_*` parameters) wins over the stored state.
+- When a session ends, the sign-in page's return link keeps the list's path but never its
+  `uf_*` state, so whoever signs in next opens their own stored state or the view's default.
 - A user's hidden fields only subtract from the columns the view shows, never add one.
-- **Reset view** in the page header's ⋯ menu drops the active view's stored state.
+- While a user's list differs from the view, a **Personalized** marker sits beside the list
+  title (an icon alone on a phone). Opening it names what differs: filters, search, sort,
+  grouping, column layout, hidden fields, density, and the Display panel's layout, row
+  color, row numbers and inline editing. Its **Reset to view** is the one way back: it
+  drops the active view's stored state and cached search, and removes the list's `uf_*`
+  parameters from the address bar, so the list is the view's own again after a reload too.
+  Pinned views, favorites, how records open and a "View all" link's `filter[...]` scope are
+  not list state and stay. Nothing about the marker is configurable.
 
 ### A view the user may not open
 

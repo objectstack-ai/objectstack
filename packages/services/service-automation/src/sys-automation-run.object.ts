@@ -73,14 +73,14 @@ export const SysAutomationRun = ObjectSchema.create({
   // refused / missed), aged out by the retention above.
   description: 'Paused automation runs waiting to resume, and the recent history of finished runs.',
   // [ADR-0079] The record title is `display_title`, a text formula over the
-  // same two columns `titleFormat` names. The pointer used to be `id`: once a
+  // same two columns `titleFormat` named. The pointer used to be `id`: once a
   // renderer honours ADR-0079's order (an explicit `nameField` wins over
-  // `titleFormat`), that made the record page's H1 the raw run id.
-  // `titleFormat` stays for renderers that still read it first;
-  // `sys-automation-run-display-title.test.ts` holds the two to the same text.
+  // `titleFormat`), that made the record page's H1 the raw run id. The retired
+  // `titleFormat` template beside it is gone (refused at save and by
+  // `os validate`); `sys-automation-run-display-title.test.ts` holds the
+  // formula to the text that template drew.
   displayNameField: 'display_title',
   nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{flow_name} · {node_id}',
   // The three operands of the broken-sweep first filter —
   // `selected_count > 0 AND acted_count = 0 AND unmeasured_count = 0` — sit in
   // the highlight set on purpose (#4354): "selected 30, acted 0" has to be
@@ -153,13 +153,30 @@ export const SysAutomationRun = ObjectSchema.create({
 
     flow_version: Field.number({ label: 'Flow Version', required: false, group: 'Identity' }),
 
+    // [#28405, ADR-0146 D9 item 4] The content identity of the flow body the
+    // run is executing — `hashSpec(body, 'flow')`, the checksum
+    // `sys_metadata_history` keys a stored flow's versions by. A resume
+    // continues on the body with this identity, not on the definition
+    // registered under `flow_name` now; `flow_version` stays the author's
+    // display number. Nullable: a row written before this column reads as "no
+    // identity" and resumes on the registered definition, as before. On a
+    // terminal row it is written only beside a consumed suspension (the
+    // snapshot columns below), so a restore re-arms the pause pinned to it.
+    flow_checksum: Field.text({
+      label: 'Flow Checksum',
+      required: false,
+      maxLength: 80,
+      group: 'Identity',
+      description: 'Content checksum of the flow definition the run started on; a waiting run resumes on that definition even after the flow is republished. Empty on runs recorded before checksums were kept.',
+    }),
+
     // [#13937] The stranded-class carve-out in this description mirrors
     // `node_type`'s below, for the same reason: the restore verb re-arms the
     // pause from this column (`ObjectStoreSuspendedRunStore` rebuilds the
     // consumed snapshot's node from it — there is no other column), so on that
     // one terminal-row class the writer (`AutomationEngine.recordLog`) puts
     // the PAUSED node here, not the last step. This column is also what the
-    // Runs surface titles and highlights a row with (`titleFormat` /
+    // Runs surface titles and highlights a row with (`display_title` /
     // `highlightFields` above), so the carve-out is visible there too, by
     // design: the row names the pause an operator can re-arm.
     node_id: Field.text({

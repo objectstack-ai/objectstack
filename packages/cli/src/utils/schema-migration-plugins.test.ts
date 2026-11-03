@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — whole-package import: the composition under test imports `@objectstack/runtime` cold for the AppPlugin it composes, as `os serve` does, and that one import is about 9.9 s of the file locally (plugin-auth's src and service-automation follow on their own triggers); every case is in process, no spawn; slowest CI reading 15.9 s (run 41271604267) of the five scheduled ci.yml runs 41199450735 to 41271604267 (slice 23's offender table), x 1.25, rounded up
 
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';

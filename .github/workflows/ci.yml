@@ -173,16 +173,19 @@ jobs:
       #                   the objectui skill bundle; see the filter below);
       #   ui_consumers  — one of the seven packages objectui installs from this
       #                   tree changed, so the Console is compiled (Type Check
-      #                   UI) and built (Build & E2E UI) against the new shape in
-      #                   the PR that moves it;
+      #                   UI), built (Build & E2E UI) and tested (Test UI, since
+      #                   objectstack#28220) against the new shape in the PR
+      #                   that moves it;
       #   ui_tree       — `ui/package.json` exists in this checkout.
       # On merge_group `ui` and `ui_consumers` come from the queue diff
       # (objectstack#25867): an entry whose merged diff against
       # `merge_group.base_sha` touches no ui path and none of the seven
       # packages skips the five ui jobs, exactly as the same diff does on its
-      # PR head; an entry that touches one runs them. If the step fails (the
-      # base cannot be fetched, the diff errors), it is `continue-on-error`
-      # there, its outputs are empty and `|| 'true'` runs every ui job.
+      # PR head; an entry that touches one runs them (Lint UI reads `ui`
+      # alone, so one of the seven by itself does not start it). If the step
+      # fails (the base cannot be fetched, the diff errors), it is
+      # `continue-on-error` there, its outputs are empty and `|| 'true'` runs
+      # every ui job.
       #
       # `ui_tree` is what keeps the ui jobs SKIPPED, not failed, on a tree that
       # does not carry ui/ yet: `ui` and `ui_consumers` fall back to 'true' on
@@ -366,6 +369,10 @@ jobs:
               - 'ui/scripts/check-dist-completeness.mjs'
               - 'ui/scripts/invoked-as.mjs'
               - 'ui/scripts/vitest-invocation-guard.mjs'
+              # The Console's vite config emits its Service Worker from this
+              # generator's source (#29155), so it is a build and test input of
+              # every `@object-ui/*` package in turbo.json.
+              - 'ui/packages/mobile/src/serviceWorkerSource.ts'
               # TEST INPUTS outside every package (#27961): each `$TURBO_ROOT$/…`
               # input of turbo.json's generic `test` task. That task runs for
               # every package Test Core tests, so a diff confined to one moves
@@ -557,9 +564,11 @@ jobs:
               # skipped on the PR and in the queue alike.
               - 'package.json'
             # The seven packages objectui installs from this tree (the set its
-            # `.objectstack-pin` used to pack). A change here compiles and builds
-            # the Console in the same PR — the check the retired Spec Shape Gate
-            # ran hourly against a clone of objectui main.
+            # `.objectstack-pin` used to pack). A change here compiles, builds
+            # and tests the Console in the same PR — the check the retired Spec
+            # Shape Gate ran hourly against a clone of objectui main. Test UI
+            # reads this list since objectstack#28220: its selector already
+            # turns full for any of these packages.
             ui_consumers:
               - 'packages/spec/**'
               - 'packages/client/**'
@@ -3727,10 +3736,25 @@ jobs:
   # non-documentation root file, `patches/`, one of the seven packages the
   # `ui_consumers` filter names). The selector's header states the rules and
   # what it does not see; the full battery on `main` is the backstop.
+  #
+  # ── Test UI: when the shards start (objectstack#28220, ruling A) ─────────
+  # On `ui` OR `ui_consumers`, the shape Build UI Deps, Type Check UI and
+  # Build & E2E UI already read. Until this entry the shards read `ui` alone,
+  # so a diff confined to one of the seven packages compiled and built the
+  # Console against the new shape and never ran a ui test that pins it: the
+  # selector above already answered `mode=full` for such a diff, but the job
+  # it answers in never started. The queue build of objectstack#28192
+  # (packages/lint/** + packages/metadata-protocol/**, run 41091107812)
+  # skipped all sixteen shards; the next queue build that started them
+  # (objectstack#28197) failed a ui test that imports @objectstack/lint, and a
+  # bystander was ejected for it. Which files run stays the selector's answer.
+  # The Test UI aggregate below explains a skip only when both outputs said
+  # false, so an `if:` that drops `ui_consumers` again reds there on the first
+  # such diff. Lint UI keeps `ui` alone: its eslint reads none of the seven.
   test-ui:
     name: Test UI (${{ matrix.shard }}/16)
     needs: [filter, ui-deps]
-    if: ${{ !cancelled() && needs.filter.outputs.ui_tree != 'false' && needs.filter.outputs.ui != 'false' }}
+    if: ${{ !cancelled() && needs.filter.outputs.ui_tree != 'false' && (needs.filter.outputs.ui != 'false' || needs.filter.outputs.ui_consumers != 'false') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -3861,22 +3885,55 @@ jobs:
       # paths relative to ui/, the vitest root, passed as positionals with no
       # `--`, the only spelling ui/scripts/vitest-invocation-guard.mjs admits.
       #
-      # objectui's full-battery runs also pass its per-file timings reporter
-      # and upload the result for the weekly dataset refresh. Both belong to
-      # that refresh workflow, which is in the governance-workflow audit
-      # (sub-issue 4 of the epic); until it is ported the committed dataset
-      # is what the sequencer reads.
+      # THE PER-FILE TIMINGS (objectstack#29517). The whole suite also passes
+      # ui/scripts/test-file-timings.mjs, the per-file timings reporter, beside
+      # the two reporters it would otherwise displace. It writes this shard's
+      # report to $OBJECTUI_TEST_TIMINGS_OUT, and the step after this one
+      # uploads it on the full battery's events as `test-file-timings-N`.
+      # .github/workflows/ui-test-timings-refresh.yml merges those reports
+      # weekly into ui/scripts/test-shard-timings.json, the dataset the shard
+      # sequencer splits on. Report-only, by ruling: the reporter never throws
+      # into vitest (a failure is one stderr line and no report), and nothing
+      # here or there grades a duration. The affected speed passes no reporter:
+      # a slice of the suite is not a measurement of it.
+      # ui/scripts/__tests__/test-file-timings.test.ts holds this step, the
+      # upload and the refresh's `--shards` to the names that script spells.
+      # The reporter is spelled from the workspace root, never `./scripts/…`
+      # relative to ui/: the root's workflow readers (check-self-test-wired)
+      # key a `./scripts/` path to the ROOT `scripts/`, where it is not.
       - name: Run the ui tests (shard ${{ matrix.shard }}/16)
         env:
           MODE: ${{ steps.select.outputs.mode }}
+          OBJECTUI_TEST_TIMINGS_OUT: ${{ runner.temp }}/test-file-timings/shard-${{ matrix.shard }}.json
         run: |
           if [ "$MODE" = 'affected' ]; then
             mapfile -t filters < "$RUNNER_TEMP/affected-tests.txt"
             echo "Affected speed: ${#filters[@]} vitest filter(s), shard ${{ matrix.shard }} of 16."
             pnpm --dir ui exec vitest run --shard=${{ matrix.shard }}/16 --reporter=default --reporter=github-actions "${filters[@]}"
           else
-            pnpm --dir ui run test --shard=${{ matrix.shard }}/16 --reporter=default --reporter=github-actions
+            pnpm --dir ui run test --shard=${{ matrix.shard }}/16 --reporter=default --reporter=github-actions --reporter="${GITHUB_WORKSPACE}/ui/scripts/test-file-timings.mjs"
           fi
+
+      # Diagnostics only, so it can never red a shard: `continue-on-error`, and
+      # a missing report is a warning, not an error (the refresh's selector
+      # then skips this run by name). Uploaded on the full battery's events
+      # only, the deny-list of THE TWO SPEEDS above `jobs:`; a pull request that
+      # failed open to the whole suite writes a report and uploads nothing.
+      # `overwrite: true` so a re-run shard replaces its report, as the
+      # shard-attestation uploads do. The refresh reads only the newest
+      # completed `push` / `schedule` runs of this workflow on `main`, as many
+      # as its selector's own cap examines, so the retention below is
+      # deliberately more than that window needs; it is not a measurement of it.
+      - name: Publish this shard's per-file test timings
+        if: ${{ always() && github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-file-timings-${{ matrix.shard }}
+          path: ${{ runner.temp }}/test-file-timings/
+          if-no-files-found: warn
+          retention-days: ${{ github.event_name == 'schedule' && 7 || 2 }}
+          overwrite: true
 
   test-ui-gate:
     # Stable required-check name for the sharded Test UI matrix (#26460, ruling
@@ -3895,7 +3952,8 @@ jobs:
     #
     # The verdict reads the matrix rollup `needs.test-ui.result`, and only
     # `success` passes, with one exception: `skipped`, when `filter` concluded
-    # `success` AND said the diff reaches no ui path (the shards' own `if:`).
+    # `success` AND said the diff reaches no ui path and none of the seven
+    # packages ui consumes (the shards' own `if:`, objectstack#28220).
     # That is #4928's skipped-only-when-filter-succeeded guard, and it makes a
     # queue build or PR that touches no ui path read green here the way Lint
     # UI and Build & E2E UI read `skipped` there. Everything else is red:
@@ -3926,17 +3984,18 @@ jobs:
           OS_FILTER_RESULT: ${{ needs.filter.result }}
           OS_UI_TREE: ${{ needs.filter.outputs.ui_tree }}
           OS_UI: ${{ needs.filter.outputs.ui }}
+          OS_UI_CONSUMERS: ${{ needs.filter.outputs.ui_consumers }}
         run: |
-          echo "Test UI (k/16) rollup: '$OS_TEST_UI_RESULT'; filter: '$OS_FILTER_RESULT' (ui_tree='$OS_UI_TREE', ui='$OS_UI')."
+          echo "Test UI (k/16) rollup: '$OS_TEST_UI_RESULT'; filter: '$OS_FILTER_RESULT' (ui_tree='$OS_UI_TREE', ui='$OS_UI', ui_consumers='$OS_UI_CONSUMERS')."
           case "$OS_TEST_UI_RESULT" in
             success)
               echo "✓ Test UI: every shard concluded success."
               ;;
             skipped)
-              if [ "$OS_FILTER_RESULT" = 'success' ] && { [ "$OS_UI_TREE" = 'false' ] || [ "$OS_UI" = 'false' ]; }; then
-                echo "✓ Test UI: the shards were skipped because filter found no ui path in this diff."
+              if [ "$OS_FILTER_RESULT" = 'success' ] && { [ "$OS_UI_TREE" = 'false' ] || { [ "$OS_UI" = 'false' ] && [ "$OS_UI_CONSUMERS" = 'false' ]; }; }; then
+                echo "✓ Test UI: the shards were skipped because filter found no ui path and no ui-consumed package in this diff."
               else
-                echo "::error title=Test UI::the Test UI shards were skipped, but filter (result '$OS_FILTER_RESULT', ui_tree='$OS_UI_TREE', ui='$OS_UI') does not explain the skip. A skip passes only when filter succeeded and said the diff reaches no ui path (#4928)."
+                echo "::error title=Test UI::the Test UI shards were skipped, but filter (result '$OS_FILTER_RESULT', ui_tree='$OS_UI_TREE', ui='$OS_UI', ui_consumers='$OS_UI_CONSUMERS') does not explain the skip. A skip passes only when filter succeeded and said the diff reaches no ui path and none of the seven packages ui consumes (#4928)."
                 exit 1
               fi
               ;;

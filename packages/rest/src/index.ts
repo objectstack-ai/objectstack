@@ -230,3 +230,16 @@ export { metaItemPackageBinding } from './rest-server.js';
 // MCP federation tools (`list_remote_tables` / `import_object`) refuse a caller
 // exactly where `GET …/external/tables` and `POST …/tables/:remote/import` do.
 export { FEDERATION_READ_CAPABILITY, FEDERATION_WRITE_CAPABILITY } from './external-datasource-routes.js';
+
+// [ADR-0090 D10 rule 5, #28367] The agent forward credential: the action door
+// mints it for an AI agent's in-process `api` forward, and every door that
+// serves forward targets (the runtime dispatcher, this REST face, the identity
+// mount) redeems it to the same agent principal. Process-local by design.
+export {
+    FORWARD_CREDENTIAL_HEADER,
+    FORWARD_CREDENTIAL_TTL_MS,
+    withForwardCredential,
+    redeemForwardCredential,
+    presentedForwardCredential,
+} from './forward-credential.js';
+export type { ForwardAgentProvenance, ForwardCredentialBinding } from './forward-credential.js';

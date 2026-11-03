@@ -27,7 +27,7 @@ import { promisify } from 'node:util';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { childEnv, runServe, CLI, TSX } from './helpers/serve-process.js';
+import { childEnv, runServe, CLI } from './helpers/serve-process.js';
 import { linkSpec } from './helpers/define-stack-fixture.js';
 
 const execFileP = promisify(execFile);
@@ -82,7 +82,7 @@ beforeAll(async () => {
   // regression is about. Without it serve wraps the config directly (#4085/#4110
   // made that path boot), `onEnable` runs for the trivial reason, and the test
   // would pass while exercising nothing.
-  await execFileP(TSX, [CLI, 'compile'], {
+  await execFileP(process.execPath, [CLI, 'compile'], {
     cwd: dir,
     maxBuffer: 16 * 1024 * 1024,
     env: childEnv({ NO_COLOR: '1' }),

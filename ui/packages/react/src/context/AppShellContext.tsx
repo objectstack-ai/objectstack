@@ -90,8 +90,7 @@ export interface MetadataContextValue extends MetadataCacheState {
   /**
    * Per-type load status. Lazy types ('page', 'dashboard', …) return their
    * items array immediately — empty or stale while a (re)fetch is in flight —
-   * so consumers that DIFF the list over time (e.g. NavigationSyncEffect)
-   * must distinguish "empty because unloaded" from "actually empty" and only
+   * so consumers that DIFF the list over time must distinguish "empty because unloaded" from "actually empty" and only
    * trust snapshots taken while the type is 'ready'. Optional so hand-rolled
    * context values in tests keep working; absent means "always ready".
    */

@@ -22,29 +22,73 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import { recordNotFoundError } from '@objectstack/core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const SCHEMA = { name: 'task', fields: { title: { name: 'title', type: 'text' } } };
+
+/** The refusal a write the engine judges unauthorized answers — before the row is looked up. */
+function writeRefusal(): Error {
+  return Object.assign(new Error('You do not have permission to perform this action.'), {
+    code: 'PERMISSION_DENIED',
+    status: 403,
+  });
+}
 
 /**
  * An engine whose `delete` honours the driver contract
  * (`IDataDriver.delete` — "True if deleted, false if not found") and whose
  * `findOne` answers from the same row set, so existence means one thing here.
+ *
+ * `refuse` names a caller whose writes the engine refuses, in ObjectQL's order:
+ * the write is judged before the row is looked up. `leavesScope` names rows a
+ * landed update moves out of the caller's row scope, so their readback is
+ * `null` while the row is still there.
+ *
+ * `hidden` names rows a CALLER's read does not return (the system's read
+ * still does), and a by-id write of one is answered the way the security
+ * layer answers it: the read question is asked ahead of the write, and a row
+ * the caller cannot read gets what an id naming no row gets. `readRefusal`
+ * makes every caller read throw instead — a refusal, or a fault.
  */
-function makeProtocol(rows: Record<string, any> = {}) {
+function makeProtocol(
+  rows: Record<string, any> = {},
+  opts: {
+    refuse?: string;
+    leavesScope?: ReadonlySet<string>;
+    hidden?: ReadonlySet<string>;
+    readRefusal?: () => Error;
+  } = {},
+) {
   const store = new Map<string, any>(Object.entries(rows));
-  const findOne = vi.fn(async (_object: string, opts: any) => { assertEngineFindOnePredicate(_object, opts); return store.get(String(opts?.where?.id)) ?? null; });
-  const update = vi.fn(async (_object: string, data: any, opts: any) => {
-    assertEngineUpdateDispatch(data, opts);
-    const id = String(opts?.where?.id);
+  const refused = (o: any) => opts.refuse !== undefined && o?.context?.userId === opts.refuse;
+  /** A read or write made as a caller rather than as the system. */
+  const asCaller = (o: any) => o?.context?.isSystem !== true;
+  const findOne = vi.fn(async (_object: string, o: any) => {
+    assertEngineFindOnePredicate(_object, o);
+    const id = String(o?.where?.id);
+    if (asCaller(o)) {
+      if (opts.readRefusal) throw opts.readRefusal();
+      if (opts.hidden?.has(id)) return null;
+    }
+    return store.get(id) ?? null;
+  });
+  const update = vi.fn(async (_object: string, data: any, o: any) => {
+    assertEngineUpdateDispatch(data, o);
+    if (refused(o)) throw writeRefusal();
+    const id = String(o?.where?.id);
+    if (asCaller(o) && opts.hidden?.has(id)) throw recordNotFoundError('task', id);
     if (!store.has(id)) return null;
     const next = { ...store.get(id), ...data };
     store.set(id, next);
-    return next;
+    return opts.leavesScope?.has(id) ? null : next;
   });
-  const del = vi.fn(async (_object: string, opts: any) => {
-    assertEngineDeleteDispatch(opts);
-    return store.delete(String(opts?.where?.id));
+  const del = vi.fn(async (_object: string, o: any) => {
+    assertEngineDeleteDispatch(o);
+    if (refused(o)) throw writeRefusal();
+    const id = String(o?.where?.id);
+    if (asCaller(o) && opts.hidden?.has(id)) throw recordNotFoundError('task', id);
+    return store.delete(id);
   });
   const engine = {
     registry: { getObject: (n: string) => (n === 'task' ? SCHEMA : undefined) },
@@ -71,14 +115,21 @@ async function expectRecordNotFound(run: () => Promise<unknown>, id: string) {
 
 describe('[#4435] updateData refuses an id that names no row', () => {
   it('PATCH of a nonexistent id is 404 RECORD_NOT_FOUND, not 200 { record: null }', async () => {
-    const { p, update } = makeProtocol({ real: { id: 'real', title: 'x' } });
+    // This engine RESOLVES a `null` readback for a row that is not there (the
+    // shape `IDataEngine.update` declares), rather than refusing it the way
+    // ObjectQL's own not-found gate does — so the 404 here is the protocol's.
+    const { p, update, findOne } = makeProtocol({ real: { id: 'real', title: 'x' } });
     await expectRecordNotFound(
       () => p.updateData({ object: 'task', id: 'definitely_not_a_row', data: { title: 'y' } } as any),
       'definitely_not_a_row',
     );
-    // …and the engine was never asked to write. A refused PATCH must not fire
-    // hooks, automation or an audit row for a record that does not exist.
-    expect(update).not.toHaveBeenCalled();
+    // The write is judged FIRST, and existence is asked only after the engine
+    // resolved — the order `deleteData` has. (That no hook, automation or
+    // audit row fires for a row that is not there is the engine's to hold:
+    // its by-id branch refuses it ahead of every `before*` hook.)
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(findOne).toHaveBeenCalledTimes(1);
+    expect(update.mock.invocationCallOrder[0]).toBeLessThan(findOne.mock.invocationCallOrder[0]);
   });
 
   it('the SAME id answers 404 on the read path — the two verbs agree now', async () => {
@@ -89,37 +140,61 @@ describe('[#4435] updateData refuses an id that names no row', () => {
     );
   });
 
-  it('an existing record still updates and returns the row', async () => {
-    const { p, update } = makeProtocol({ real: { id: 'real', title: 'x' } });
+  it('an existing record still updates and returns the row — and nothing is read ahead of the engine', async () => {
+    const { p, update, findOne } = makeProtocol({ real: { id: 'real', title: 'x' } });
     const res: any = await p.updateData({ object: 'task', id: 'real', data: { title: 'y' } } as any);
     expect(update).toHaveBeenCalledTimes(1);
     expect(res).toMatchObject({ object: 'task', id: 'real', record: { title: 'y' } });
+    expect(findOne).not.toHaveBeenCalled();
   });
 
-  it('the existence probe asks EXISTENCE, not the caller\'s visibility', async () => {
-    // Load-bearing, and the first cut of this fix got it backwards. Probing
-    // with the CALLER's context turns the existence gate into an authorization
-    // gate: a row the caller cannot read comes back null and the PATCH 404s.
-    // That would (a) move an RLS decision out of the write policy where #1994
-    // put it, and (b) disarm `@proof: rls-by-id-write` — the dogfood fixture
-    // whose RED half asserts that a member who cannot READ a row but has no
-    // write policy still mutates it by id. A caller-scoped probe makes that
-    // proof go green, so the gate could no longer prove it can go red, and a
-    // future revert of #1994 would be masked by this probe.
+  it('the existence check asks EXISTENCE, not the caller\'s visibility — a write that moved its row out of scope keeps its 200', async () => {
+    // Load-bearing, and the first cut of this fix got it backwards. Asking
+    // with the CALLER's context turns the existence check into an
+    // authorization gate: a row the caller cannot read comes back null and the
+    // PATCH 404s. That would (a) move an RLS decision out of the write policy
+    // where #1994 put it, and (b) disarm `@proof: rls-by-id-write` — the
+    // dogfood fixture whose RED half asserts that a member who cannot READ a
+    // row but has no write policy still mutates it by id.
     //
-    // So the probe runs as system: "does this row exist", nothing more.
-    // Authorization stays inside engine.update, exactly where it was.
-    const { p, findOne } = makeProtocol({ real: { id: 'real' } });
-    await p.updateData({ object: 'task', id: 'real', data: {}, context: { userId: 'u1' } } as any);
+    // So it is asked as the system: "does this row exist", nothing more —
+    // and only after the engine has judged and resolved the write, on its
+    // `null` readback. Here that readback is a write that LANDED and moved
+    // the row out of the caller's row scope, so the row exists and the PATCH
+    // keeps its success.
+    const { p, findOne, store } = makeProtocol({ real: { id: 'real', owner: 'u1' } }, { leavesScope: new Set(['real']) });
+    const res: any = await p.updateData({ object: 'task', id: 'real', data: { owner: 'u2' }, context: { userId: 'u1' } } as any);
+    expect(res).toMatchObject({ object: 'task', id: 'real', record: null });
+    expect(store.get('real')).toMatchObject({ owner: 'u2' });
+    expect(findOne).toHaveBeenCalledTimes(1);
     expect(findOne.mock.calls[0][1]).toMatchObject({
       where: { id: 'real' },
       context: { isSystem: true },
     });
   });
 
-  it('a PATCH the caller may not see is still decided by RLS, not by the probe', async () => {
-    // The row exists, so the probe passes it through to the engine — where the
-    // write policy answers, as it always has. The probe must not pre-empt it.
+  it('a write the engine refuses answers the same refusal whether or not the id exists, as delete does', async () => {
+    // The engine judges the write before it asks whether the row exists, so a
+    // caller it refuses is refused alike for both ids — and this door asks
+    // nothing ahead of it.
+    const { p, findOne, store } = makeProtocol({ real: { id: 'real', title: 'x' } }, { refuse: 'u1' });
+    const answer = (run: () => Promise<unknown>) => run().then(
+      () => { throw new Error('expected a refusal, but the call resolved'); },
+      (e: any) => ({ code: e.code, status: e.status, message: e.message }),
+    );
+    const patchReal = await answer(() => p.updateData({ object: 'task', id: 'real', data: { title: 'y' }, context: { userId: 'u1' } } as any));
+    const patchMissing = await answer(() => p.updateData({ object: 'task', id: 'definitely_not_a_row', data: { title: 'y' }, context: { userId: 'u1' } } as any));
+    const deleteMissing = await answer(() => p.deleteData({ object: 'task', id: 'definitely_not_a_row', context: { userId: 'u1' } } as any));
+    expect(patchReal).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(patchMissing).toEqual(patchReal);
+    expect(deleteMissing).toEqual(patchReal);
+    expect(findOne).not.toHaveBeenCalled();
+    expect(store.get('real')).toEqual({ id: 'real', title: 'x' });
+  });
+
+  it('a PATCH the caller may not see is still decided by RLS, not by an existence read', async () => {
+    // The write goes to the engine — where the write policy answers, as it
+    // always has. Nothing at this door pre-empts it.
     const { p, update } = makeProtocol({ hidden: { id: 'hidden' } });
     await p.updateData({ object: 'task', id: 'hidden', data: { title: 'x' }, context: { userId: 'nobody' } } as any);
     expect(update).toHaveBeenCalledOnce();
@@ -307,4 +382,114 @@ describe('[#4435] deleteManyData reports per id, not per request', () => {
     expect(engine.delete).toHaveBeenCalledTimes(3);
     expect(res.succeeded + res.failed).toBe(res.total);
   });
+});
+
+describe('a stale version token on a row absent from the caller\'s read gets the write door\'s answer, as no token does', () => {
+  // The by-id OCC comparison runs before the write is authorized. When the
+  // tokens disagree it re-reads the row as the caller, and a row that read
+  // RETURNS NO ROW for leaves the answer to the write door: what the same
+  // request without a token gets, status, code and sentence, which is also
+  // what a token on an id naming no row gets (ruling of record 5985885287: a
+  // row the caller cannot read answers what a nonexistent id answers, on
+  // update and delete alike). Only an absent row is handed over: a caller
+  // read that THROWS — a refusal or a fault — propagates as raised.
+  const CURRENT = '2026-10-30T08:00:00.000Z';
+  const STALE = '2001-01-01T00:00:00.000Z';
+  const CALLER = { userId: 'u1' };
+  const MISSING = 'definitely_not_a_row';
+  const row = (id: string) => ({ id, title: 'x', updated_at: CURRENT });
+  /** The read door's refusal of a caller without the object's read grant. */
+  const readRefusalError = () =>
+    Object.assign(new Error('Reading this object is not permitted.'), { code: 'PERMISSION_DENIED', status: 403 });
+
+  /** A refused call as the doors render it: status, code and sentence. */
+  const answerOf = (run: () => Promise<unknown>) => run().then(
+    () => { throw new Error('expected a refusal, but the call resolved'); },
+    (e: any) => ({ code: e.code, status: e.status, message: e.message }),
+  );
+  /** The answer with the id its sentence names written out, so the answers for two ids compare. */
+  const withoutId = (a: { message: unknown }, id: string) => ({ ...a, message: String(a.message).split(id).join('ID') });
+
+  for (const verb of ['updateData', 'deleteData'] as const) {
+    const write = (p: any, id: string, expectedVersion?: string) => verb === 'updateData'
+      ? p.updateData({ object: 'task', id, data: { title: 'y' }, context: CALLER, ...(expectedVersion ? { expectedVersion } : {}) })
+      : p.deleteData({ object: 'task', id, context: CALLER, ...(expectedVersion ? { expectedVersion } : {}) });
+
+    describe(verb, () => {
+      it('a hidden row, the write refused: the write refusal answers, for the row and for no row, token or none', async () => {
+        const { p, store } = makeProtocol({ real: row('real') }, { refuse: 'u1', hidden: new Set(['real']) });
+        const stale = await answerOf(() => write(p, 'real', STALE));
+        const noToken = await answerOf(() => write(p, 'real'));
+        const missing = await answerOf(() => write(p, MISSING, STALE));
+        expect(stale).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+        expect(stale).toEqual(noToken);
+        expect(withoutId(missing, MISSING)).toEqual(withoutId(stale, 'real'));
+        expect(store.get('real')).toEqual(row('real'));
+      });
+
+      it('the caller\'s read REFUSES and the write is refused too: the read refusal propagates, with the write\'s status and code', async () => {
+        // A caller holding neither grant. The refused read is the answer, so its
+        // sentence is the read door's: status and code are compared here, the
+        // sentence deliberately is not.
+        const { p, store } = makeProtocol({ real: row('real') }, { refuse: 'u1', readRefusal: readRefusalError });
+        const stale = await answerOf(() => write(p, 'real', STALE));
+        const noToken = await answerOf(() => write(p, 'real'));
+        const missing = await answerOf(() => write(p, MISSING, STALE));
+        expect(stale).toEqual({ code: 'PERMISSION_DENIED', status: 403, message: readRefusalError().message });
+        expect({ code: noToken.code, status: noToken.status }).toEqual({ code: stale.code, status: stale.status });
+        expect({ code: missing.code, status: missing.status }).toEqual({ code: stale.code, status: stale.status });
+        expect(store.get('real')).toEqual(row('real'));
+      });
+
+      it('the caller\'s read REFUSES and the write door admits the write (a write grant without a read grant): the read refusal propagates and nothing is written', async () => {
+        const { p, store, update, del } = makeProtocol({ real: row('real') }, { readRefusal: readRefusalError });
+        await expect(write(p, 'real', STALE)).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+        expect(update).not.toHaveBeenCalled();
+        expect(del).not.toHaveBeenCalled();
+        expect(store.get('real')).toEqual(row('real'));
+        // Control: without a token the same double admits the same write, so the
+        // pin above is not vacuous.
+        await write(p, 'real');
+        if (verb === 'updateData') expect(store.get('real')).toMatchObject({ title: 'y' });
+        else expect(store.has('real')).toBe(false);
+      });
+
+      it('a hidden row, the write admitted up to its read question: the write door\'s 404, for the row and for no row alike', async () => {
+        const { p, store, update, del } = makeProtocol({ real: row('real') }, { hidden: new Set(['real']) });
+        const stale = await answerOf(() => write(p, 'real', STALE));
+        expect(stale).toMatchObject({ code: 'RECORD_NOT_FOUND', status: 404 });
+        // The write was asked: the 404 is the write door's, not one of the comparison's own.
+        expect((verb === 'updateData' ? update : del)).toHaveBeenCalledTimes(1);
+        expect(await answerOf(() => write(p, 'real'))).toEqual(stale);
+        expect(withoutId(await answerOf(() => write(p, MISSING, STALE)), MISSING)).toEqual(withoutId(stale, 'real'));
+        expect(store.get('real')).toEqual(row('real'));
+      });
+
+      it('a read that FAULTS, or throws any other 4xx, propagates as raised, and the write is never asked', async () => {
+        for (const fault of [
+          new Error('connection reset'),
+          Object.assign(new Error('store unavailable'), { code: 'SERVICE_UNAVAILABLE', status: 503 }),
+          Object.assign(new Error('bad read'), { code: 'VALIDATION_FAILED', statusCode: 400 }),
+        ]) {
+          const { p, update, del } = makeProtocol({ real: row('real') }, { readRefusal: () => fault });
+          await expect(write(p, 'real', STALE)).rejects.toBe(fault);
+          expect(update).not.toHaveBeenCalled();
+          expect(del).not.toHaveBeenCalled();
+        }
+      });
+
+      it('control: a row the caller reads still conflicts — 409 with that row, and the write is never asked', async () => {
+        const { p, store, update, del } = makeProtocol({ real: row('real') });
+        await expect(write(p, 'real', STALE)).rejects.toMatchObject({
+          code: 'CONCURRENT_UPDATE',
+          status: 409,
+          currentVersion: CURRENT,
+          currentRecord: row('real'),
+        });
+        expect(update).not.toHaveBeenCalled();
+        expect(del).not.toHaveBeenCalled();
+        expect(store.get('real')).toEqual(row('real'));
+      });
+    });
+  }
 });

@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 30 — spawns the real producer once per single-cause fixture: eight spawns of the source CLI's `os i18n extract`, the one real extract that writes the in-sync tree each seeded case copies, then seven distinct (flags, `--out` state) runs (`--check` and `--check --json` over an empty `--out`, `--check --json` over a stale bundle, `--check` and `--check --json` over the in-sync tree, `--check --json` with no `--out`, `--json` without `--check`); slowest CI reading 22.2 s (run 41271604267, over the five scheduled ci.yml runs 41199450735 to 41271604267) x 1.25, rounded up
 
 /**
  * `os i18n extract --check --json` COMPARES, and reaches the same verdict as
@@ -103,8 +104,13 @@ import { fileURLToPath } from 'node:url';
 import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
+/**
+ * Spawned by this process's own `node`, not through the `tsx` binary: the entry, its
+ * `src/` and its pinned `NODE_ENV=development` are the same either way, and the
+ * `.bin/tsx` launcher only adds a second node process in front of the CLI, about half
+ * of every spawn's wall (#23181).
+ */
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 const CLI_PACKAGE_ROOT = resolve(HERE, '..');
 
 /** One object, and a `defaultLocale` equal to the only locale asked for. */
@@ -150,7 +156,7 @@ interface Run {
 
 /** The CLI, from source, with `--check`'s non-zero exit treated as data. */
 function runCli(args: readonly string[]): Run {
-  const child = spawnSync(TSX, [CLI, 'i18n', 'extract', ...args], {
+  const child = spawnSync(process.execPath, [CLI, 'i18n', 'extract', ...args], {
     cwd: CLI_PACKAGE_ROOT,
     encoding: 'utf8',
     env: childEnv(),

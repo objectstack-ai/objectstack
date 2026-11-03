@@ -940,6 +940,16 @@ export interface UIActionSchema {
    */
   submitText?: SpecAction['submitText'];
 
+  /**
+   * The label of the dismiss button on the dialog the action opens before it
+   * runs (`ActionSchema.cancelText`) — its confirm dialog or its param dialog —
+   * in place of the dialog's default "Cancel" ("Keep invitation" beside
+   * "Cancel Invitation"). DERIVED from the spec: an `I18nLabel`, a string or an
+   * inline per-locale map, the console collapses to the active language after
+   * the translation bundle's `_actions.ACTION.cancelText` entry.
+   */
+  cancelText?: SpecAction['cancelText'];
+
   /** Permission required to execute */
   permission?: string;
   

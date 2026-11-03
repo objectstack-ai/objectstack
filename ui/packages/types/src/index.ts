@@ -1070,8 +1070,6 @@ export type {
   DetailSectionNodeSchema,
   ViewComponentSchema,
   CommentEntry,
-  MentionNotification,
-  CommentSearchResult,
   ActivityEntry,
   // Feed / Chatter Protocol Types
   FeedItemType,

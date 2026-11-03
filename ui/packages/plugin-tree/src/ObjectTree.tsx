@@ -53,6 +53,7 @@ import {
   usePredicateScope,
 } from '@object-ui/react';
 import {
+  DataErrorState,
   NavigationOverlay,
   RefreshIndicator,
   cn,
@@ -109,6 +110,18 @@ const TREE_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // pack. This control is a tree-GRID — a table of rows re-read in place — so
   // it takes the name `ObjectGrid` gives the very same bar.
   'grid.refreshing': 'Refreshing…',
+  // The loading and empty placeholders read the bundle's `common.*` pair, the
+  // keys the sibling renderers (`element:repeater`, `element:record_picker`)
+  // read for theirs, so a zh-CN page never shows English here. The object-tree
+  // contract declares no empty-text key, so nothing authored overrides them.
+  'common.loading': 'Loading…',
+  'common.noData': 'No data',
+  // The load-failure title, borrowed from the list's own failure panel: a
+  // tree is a list layout (`ListView` mounts it for a `tree` view), and a
+  // failed read here is the same "Couldn't load records" a reader sees on the
+  // grid, so one failure gets one translation. The error's own message is
+  // drawn under it, as `ObjectGrid` draws it under `grid.errorLoading`.
+  'list.loadErrorTitle': 'Couldn\u2019t load records',
 };
 
 const useTreeTranslation = createSafeTranslation(
@@ -1157,15 +1170,22 @@ export const ObjectTree: React.FC<ObjectTreeProps> = ({
     onRowClick,
   });
 
-  // Heading of the record-detail overlay rendered at the bottom of this file.
-  // Must stay above the conditional returns below — rules-of-hooks.
+  // The placeholders below and the record-detail overlay heading rendered at
+  // the bottom of this file. Must stay above the conditional returns below —
+  // rules-of-hooks.
   const { t } = useTreeTranslation();
 
+  // The load-failure panel: a translated title and the error's own message,
+  // drawn by the component named for a failure (`role="alert"`), never an
+  // English literal on a translated page.
   if (error) {
     return (
-      <div className={cn('flex items-center justify-center h-40 text-destructive', className)}>
-        <p>Failed to load tree: {error.message}</p>
-      </div>
+      <DataErrorState
+        data-testid="tree-load-error"
+        className={cn('h-40', className)}
+        title={t('list.loadErrorTitle')}
+        message={error.message}
+      />
     );
   }
 
@@ -1181,7 +1201,7 @@ export const ObjectTree: React.FC<ObjectTreeProps> = ({
   if (records === null || (loading && records.length === 0)) {
     return (
       <div className={cn('flex items-center justify-center h-40 text-muted-foreground', className)}>
-        <p>Loading…</p>
+        <p>{t('common.loading')}</p>
       </div>
     );
   }
@@ -1189,7 +1209,7 @@ export const ObjectTree: React.FC<ObjectTreeProps> = ({
   if (records.length === 0) {
     return (
       <div className={cn('flex items-center justify-center h-40 text-muted-foreground', className)}>
-        <p>No records</p>
+        <p>{t('common.noData')}</p>
       </div>
     );
   }

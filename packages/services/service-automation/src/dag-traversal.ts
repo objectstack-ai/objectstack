@@ -34,6 +34,7 @@ import {
     FlowSuspendSignal,
     isRefusalSignal,
     isSuspendSignal,
+    nestedChildRunId,
     type ExecutionLogEntry,
     type NodeExecutionResult,
     type StepLogEntry,
@@ -139,6 +140,10 @@ export interface DagTraversalHost {
     readonly recordLog: AutomationEngine['recordLog'];
     readonly finishRefusedRun: AutomationEngine['finishRefusedRun'];
     readonly persistSuspendedRun: AutomationEngine['persistSuspendedRun'];
+    readonly flowChecksumOf: AutomationEngine['flowChecksumOf'];
+    readonly renderFlowTerminalMessage: AutomationEngine['renderFlowTerminalMessage'];
+    readonly resolveSuspensionChainForCancel: AutomationEngine['resolveSuspensionChainForCancel'];
+    readonly cancelRun: AutomationEngine['cancelRun'];
 }
 
 /** The body of {@link AutomationEngine.executeNode}, moved unedited; that method's docblock is its contract. */
@@ -744,9 +749,9 @@ export async function traverseNext(
     }
 }
 
-/** The body of {@link AutomationEngine.runRegion}, moved unedited; that method's docblock is its contract. */
+/** The body of {@link AutomationEngine.runRegion}; that method's docblock is its contract. */
 export async function runRegion(
-    this: Pick<DagTraversalHost, 'executeNode'>,
+    this: Pick<DagTraversalHost, 'executeNode' | 'resolveSuspensionChainForCancel' | 'cancelRun' | 'logger'>,
     region: FlowRegionParsed,
     variables: Map<string, unknown>,
     context: AutomationContext,
@@ -833,12 +838,70 @@ export async function runRegion(
         if (isSuspendSignal(err)) {
             const suspended = region.nodes.find(n => n.id === err.nodeId);
             const flowName = (suspended?.config as { flowName?: unknown } | undefined)?.flowName;
-            throw refuseRegionSuspension({
+            const refusal = refuseRegionSuspension({
                 regionNodeId: grouping?.parentNodeId ?? entryId,
                 regionKind: grouping?.regionKind ?? 'region',
                 suspendedNodeId: err.nodeId,
                 ...(typeof flowName === 'string' && flowName ? { subFlowName: flowName } : {}),
             });
+            // [#28897] A `subflow` / `map` node suspends by parking the CHILD
+            // run it started and linking it through its correlation
+            // (`subflow:<childRunId>` / `map:<childRunId>`). This run fails
+            // here, so nothing will ever resume through that link: measured,
+            // the child stayed parked in the durable store, and a later
+            // resume ran the rest of the child for a caller that had already
+            // failed, then failed to resume that caller. So the child run is
+            // cancelled, with every run it is itself parked on, deepest
+            // first, through the engine's own `cancelRun`. ⛔ The refusal is
+            // thrown exactly as before: a failed cancellation is logged, never
+            // put in its place.
+            const childRunId = nestedChildRunId(err.correlation);
+            if (childRunId !== undefined) {
+                try {
+                    // [#29333] The chain is read through the STRICT loader,
+                    // the read `cancelRun` itself takes. The degrading one
+                    // answered an unreadable link as "nothing suspended", so
+                    // the walk stopped there and every run below that link
+                    // stayed parked with only a `warn` said (#29166 covered
+                    // the case where the unreadable link is the child itself).
+                    const { chain, unreadable } = await this.resolveSuspensionChainForCancel(childRunId);
+                    const reason = `the run that started it failed at a region boundary: ${refusal.message}`;
+                    if (unreadable) {
+                        // The deepest link the walk knows of. Its id is known
+                        // (the link above names it, or it is the child), so it
+                        // is cancelled anyway, deepest first: `cancelRun`
+                        // reads it again and owns the `error` record for THAT
+                        // run when the store still cannot be read, and it is a
+                        // no-op when the run is in fact gone.
+                        await this.cancelRun(unreadable.runId, reason);
+                        // What `cancelRun` cannot say: the walk never read
+                        // this link, so a run it is itself parked on was never
+                        // reached and may still be parked. #4632 verdict:
+                        // DURABILITY, `error`.
+                        this.logger.error(
+                            `[automation] node '${err.nodeId}' suspended inside region '${refusal.regionNodeId}', and ` +
+                                `the suspended run '${unreadable.runId}' in the chain of the child run '${childRunId}' could not be ` +
+                                `read while cancelling that chain, so any run '${unreadable.runId}' is itself parked on ` +
+                                `was not reached and may still be parked. Once the suspended-run store answers, cancel ` +
+                                `each with cancelRun(runId). The read failure is in this record's meta.`,
+                            undefined,
+                            describeThrownForLog(unreadable.cause),
+                        );
+                    }
+                    for (const run of [...chain].reverse()) await this.cancelRun(run.runId, reason);
+                } catch (cancelErr) {
+                    // #4632 verdict: DURABILITY, `error`, as `cancelRun`'s own
+                    // store failure: the child may still be parked.
+                    this.logger.error(
+                        `[automation] node '${err.nodeId}' suspended inside region '${refusal.regionNodeId}', and ` +
+                            `cancelling the child run '${childRunId}' it parked failed, so that run may still be ` +
+                            `parked. Cancel it with cancelRun('${childRunId}'). The failure is in this record's meta.`,
+                        undefined,
+                        describeThrownForLog(cancelErr),
+                    );
+                }
+            }
+            throw refusal;
         }
         // [#15788] The refusing `end` node's signal, converted at exactly
         // the same boundary and for the same reason: a control signal must
@@ -1122,9 +1185,10 @@ export function seedRunVariables(
 
 /** The body of {@link AutomationEngine.executeWithoutRetry}, moved unedited; that method's docblock is its contract. */
 export async function executeWithoutRetry(
-    this: Pick<DagTraversalHost, 'flows' | 'isFlowEnabled' | 'describeDisabledFlow' | 'nextRunId' | 'seedRunVariables' | 'resolveRunContext' | 'validateNodeInputSchemas' | 'executeNode' | 'recordLog' | 'logger' | 'finishRefusedRun' | 'persistSuspendedRun'>,
+    this: Pick<DagTraversalHost, 'flows' | 'isFlowEnabled' | 'describeDisabledFlow' | 'nextRunId' | 'seedRunVariables' | 'resolveRunContext' | 'validateNodeInputSchemas' | 'executeNode' | 'recordLog' | 'logger' | 'finishRefusedRun' | 'persistSuspendedRun' | 'flowChecksumOf' | 'renderFlowTerminalMessage'>,
     flowName: string,
     context?: AutomationContext,
+    dispatched?: { errorMessage: string | undefined },
 ): Promise<AutomationResult> {
     const startTime = Date.now();
     const flow = this.flows.get(flowName);
@@ -1282,7 +1346,12 @@ export async function executeWithoutRetry(
         // The author's completion text has to be produced here as well, or
         // `successMessage` would be a function of which attempt happened to
         // work — the same route-dependent shape the fix is removing.
-        return { success: true, output, durationMs, successMessage: flow.successMessage, flowLabel: flow.label, summary };
+        //
+        // [#28054] Rendered over this attempt's variables, in the run's locale.
+        const successMessage = this.renderFlowTerminalMessage(
+            flowName, 'successMessage', flow.successMessage, variables, runContext,
+        );
+        return { success: true, output, durationMs, successMessage, flowLabel: flow.label, summary };
     } catch (err: unknown) {
         // [#15788] The THIRD producer: an attempt that reached a refusing
         // `end`. A flow under `errorHandling.strategy: 'retry'` is handed
@@ -1358,6 +1427,7 @@ export async function executeWithoutRetry(
                 runId,
                 flowName,
                 flowVersion: flow.version,
+                flowChecksum: this.flowChecksumOf(flow),
                 nodeId: err.nodeId,
                 nodeType: err.nodeType,
                 variables: variablesSnapshot,
@@ -1452,12 +1522,18 @@ export async function executeWithoutRetry(
         // argument, and note the two names are NOT the same thing here:
         // the local `errorMessage` is the raw thrown text, `flow.errorMessage`
         // is what the author wrote for a human to read.
+        //
+        // [#28054] Rendered over this attempt's variables at the failure
+        // point. Under `retryExecution` the template is the dispatched
+        // definition's (`dispatched`), as the exhausted exit reports it.
         return {
             success: false,
             error: errorMessage,
             durationMs,
             status: 'failed',
-            errorMessage: flow.errorMessage,
+            errorMessage: this.renderFlowTerminalMessage(
+                flowName, 'errorMessage', dispatched ? dispatched.errorMessage : flow.errorMessage, variables, runContext,
+            ),
             flowLabel: flow.label,
             // [#17562] Recomputed when the guard above had to abandon
             // `recordLog`: the same pure function of the same steps that

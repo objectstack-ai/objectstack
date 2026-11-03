@@ -486,7 +486,11 @@ export const CEILINGS = new Map([
   // three pointer lines' "Moved to", and five clause-level trims. Arithmetic in
   // priced bytes: 25860 -> 25827 (-33 net) -> ceil(25827 / 4) = 6457; re-locked
   // AT the measurement, headroom 0 tokens.
-  ['skills/objectstack-automation/SKILL.md', 6457],
+  // 6457 -> 6450 (card #28299): the loader-gap line no longer names OAuth or
+  // request signing, which the built-in providers serve (recipe 6 and the
+  // `signed` kind in references/integration-recipes.md). Re-locked AT the
+  // measurement, headroom 0 tokens.
+  ['skills/objectstack-automation/SKILL.md', 6449],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:
@@ -577,7 +581,7 @@ export const CEILINGS = new Map([
   // absorbed and the ceiling moves 5997 -> 6014 (+17), the measured
   // remainder only. Pinned AT the measurement.
   //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(24055 / 4)
-  ['skills/objectstack-platform/SKILL.md', 6014],
+  ['skills/objectstack-platform/SKILL.md', 6011],
   // `skills/objectstack-pm-dispatch/SKILL.md` (9708) and its
   // `rules/dev-template.md` (1838) left this table on 2026-09-10 with the files:
   // the maintainer deleted the published PM skill whole (verbatim:
@@ -639,7 +643,13 @@ export const CEILINGS = new Map([
   //   ceil($(wc -c < skills/objectstack-ui/SKILL.md) / 4) == ceil(15424 / 4)
   // 3856 -> 3851: A2′ — the release-stamp line left the count (see
   // STAMP_LINE_REPIN); the file's count fell by the same 5, headroom unchanged.
-  ['skills/objectstack-ui/SKILL.md', 3851],
+  // 3851 -> 3544 (#27059, record-page epic #26676 child 8): LOWERED. The two related-list
+  // paragraphs that taught a Details / Related / Timeline tab strip (false since the
+  // record page's tab row and right column landed) left for a two-line pointer at
+  // `rules/record-page.md`; one Detailed Rules link and the CRM blueprint row reworded.
+  // The file is 14194 bytes less its stamp line -> 3544 tokens; the ceiling follows it
+  // down to the measurement, the ratchet's ordinary direction.
+  ['skills/objectstack-ui/SKILL.md', 3544],
   // 8333 -> 6193: RE-LOCK at the landed count after the #19715 split (decision
   // batch #213 item 1, maintainer 「1 2 4 同意」): the worked R1, the report
   // template and the v17-canonical shapes block moved VERBATIM into
@@ -855,13 +865,36 @@ export const CEILINGS = new Map([
   // prescription that objectstack-data → Search Fields carries whole — so the file nets -4
   // and the ceiling follows it down to the new measurement.
   ['skills/objectstack-ui/rules/list-views.md', 3129],
-  ['skills/objectstack-ui/rules/navigation.md', 2273],
+  // 2273 -> 2196 (#27059): LOWERED. The Surface bullet points at `rules/record-page.md`,
+  // says create / edit is a modal or the `editMode: 'page'` route, and the Overlay-width
+  // bullet moved there whole (the `size` bucket, the deprecated pixel keys); the ceiling
+  // follows the file down to the measurement (8784 bytes).
+  ['skills/objectstack-ui/rules/navigation.md', 2196],
   // 5501 -> 5692 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +191 tokens,
   // zero headroom to absorb any of it, ceiling +191. Maintainer ruling
   // 2026-09-22 on decision batch #213 item 1, verbatim and untranslated:
   // 「1 2 4 同意」.
-  ['skills/objectstack-ui/rules/pages.md', 5692],
+  // 5692 -> 5669 (#27059): LOWERED. The `tabs`-slot sentence is a one-line pointer at
+  // `rules/record-page.md`; the ceiling follows the file down to the measurement (22673 bytes).
+  ['skills/objectstack-ui/rules/pages.md', 5669],
+  // objectstack-ui `rules/record-page.md` — the sixth rules file, ordered by card #27059
+  // (record-page epic #26676 child 8, dispatched by ui seat 1 2026-11-01, with the seat's
+  // ruling that the record page gets its own rules file rather than rows in the files
+  // PR #28488 holds open). INITIAL measurement AT its landed count, on the same terms as
+  // the #14296 rows above: zero headroom, the next token added here is paid for by
+  // deleting one from this file. What it teaches, in order: the object's declarations
+  // produce the page, the relationship flags shape the related column, a slotted page
+  // overrides one of six slots (no `tabs`), `kind: 'full'` is the escape hatch, the
+  // drawer unless the object declares `page`, and the reader's own choices are not
+  // metadata. PAID DOWN FIRST by the 404 tokens the three rows above gave up (the tab
+  // strip the record page no longer has, SKILL.md 307 + navigation.md 77 + pages.md 20, its
+  // ceiling 23);
+  // the card's binding budget is the package's hand-authored LINE count, +40 at most,
+  // landed at +39 (1876 -> 1915), so the package nets +592 tokens, every one of them
+  // teaching the surface `main` ships today and none of it restating a sibling file.
+  //   ceil($(wc -c < skills/objectstack-ui/rules/record-page.md) / 4) == ceil(3981 / 4)
+  ['skills/objectstack-ui/rules/record-page.md', 996],
 
   // ── 2026-09-22 the #19715 split — decision batch #213 item 1 ─────────────
   // The maintainer ruled the four over-500-line published SKILL.md files split
@@ -902,7 +935,29 @@ export const CEILINGS = new Map([
   // and untranslated: 「A:先削重复,余额按实测提高」 — the standing path of
   // ruling record 6513306068 on #27847.
   //   ceil($(wc -c < skills/objectstack-automation/references/integration-recipes.md) / 4) == ceil(8942 / 4)
-  ['skills/objectstack-automation/references/integration-recipes.md', 2236],
+  // 8938 -> 10089 (card #28299; the file had shrunk 4 bytes under the row
+  // since, headroom 1 token): the "Not yet" OAuth bullet becomes recipe 6 —
+  // `oauth2` / `app-credential` are served on `rest`, `openapi` and `mcp` now
+  // that the built-in providers ask the credential handle: the three `auth`
+  // shapes, the per-organization connect (`POST …/connectors/:name/connection`,
+  // the callback, status, revoke) and the kept `bearer`-ref warning. Paid down
+  // first, two restatements each with a surviving home: recipe 3's agent
+  // exposure example (its pointer to objectstack-ai § Actions as AI Tools
+  // stays, and that skill teaches the shape), and recipe 5's "Each
+  // `operationId` is a named action in the flow palette and to agents" (the
+  // Holds bullet says actions come from the upstream's `operationId`s).
+  // Arithmetic after the contract-review patch round (the vendor token
+  // placements, the token lifecycle clause and the status triple restated
+  // the connectors page and are gone; the Holds `auth` bullet points at
+  // recipe 6; the delta round restored the three `vendor` values in the
+  // app-credential comment): 8938 -> 9949 (+1011 net: -308 cut, +1319 added) ->
+  // ceil(9949 / 4) = 2488; the ceiling moves +252, pinned AT the
+  // measurement. Maintainer ruling 2026-10-27 on the seat's decision card
+  // 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」, tap A verbatim
+  // and untranslated: 「A:先削重复,余额按实测提高」 — the standing path of
+  // ruling record 6513306068 on #27847.
+  //   ceil($(wc -c < skills/objectstack-automation/references/integration-recipes.md) / 4) == ceil(9949 / 4)
+  ['skills/objectstack-automation/references/integration-recipes.md', 2488],
   // 5569 -> 5587 (card #26298, audit #26184 row A2): the approval config table
   // gains `excludeSubmitter` (refused beside `onEmptyApprovers: 'auto_approve'`),
   // +105 tokens. Paid down first: Best Practices 1 and 4 restated the Branching
@@ -926,7 +981,7 @@ export const CEILINGS = new Map([
   // stale `{ type: 'lookup', reference: 'user' }` fields (an object that does
   // not exist) became `type: 'user'`; -10 tokens, the row follows the
   // measurement down, zero headroom.
-  ['skills/objectstack-data/references/examples-objects.md', 1769],
+  ['skills/objectstack-data/references/examples-objects.md', 1756],
   ['skills/objectstack-data/references/lint-rules.md', 970],
   // 1299 -> 1566 (#26297): the `columns` dataset key and `applyOn: 'create'`
   // — a column a job or an admin owns after the first load is written on
@@ -938,7 +993,7 @@ export const CEILINGS = new Map([
   // 花板,怎么付?」, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
   ['skills/objectstack-data/references/seeds.md', 1566],
   ['skills/objectstack-platform/references/bootstrap.md', 1351],
-  ['skills/objectstack-platform/references/operations.md', 3125],
+  ['skills/objectstack-platform/references/operations.md', 3119],
   ['skills/objectstack-platform/references/plugin-development.md', 3137],
   ['skills/objectstack-upgrade/references/examples-upgrade.md', 1197],
 

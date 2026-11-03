@@ -526,8 +526,56 @@ export interface EffectiveObjectPermissionsSchemaSource {
   allSchemas?: () => readonly (ApiExposureSchemaLike & ObjectAccessPostureLike)[] | null | undefined;
   /** One object's schema — read by the managed-write clamp and the `apiOperations` annotation. */
   schemaOf?: (objectName: string) => (ManagedSchemaLike & ApiExposureSchemaLike) | null | undefined;
+  /**
+   * [#28877] Whether `objectName` is an object whose OWNING package is
+   * disabled — the engine registry's `isObjectPackageDisabled`, the predicate
+   * the data plane asks before it answers `404 OBJECT_PACKAGE_DISABLED`. Hand
+   * over that predicate itself, never a second reading of the package state:
+   * the map must leave out exactly the objects the data plane refuses.
+   */
+  isObjectPackageDisabled?: (objectName: string) => boolean;
   /** Where a failed seed / annotation pass is reported. */
   logger?: { warn?: (message: string, meta?: Record<string, unknown>) => void };
+}
+
+/**
+ * [#28877] The {@link EffectiveObjectPermissionsSchemaSource.isObjectPackageDisabled}
+ * accessor over an engine registry: its `isObjectPackageDisabled`, the predicate
+ * `SchemaRegistry` answers and the data plane asks before it refuses an object
+ * `404 OBJECT_PACKAGE_DISABLED`. That member is not on the contract's registry
+ * view, so it is asked when present; a registry without it disables nothing.
+ * Both builders of the map (`/auth/me/permissions` and
+ * `ISecurityService.getEffectiveObjectPermissions`) hand over this one reading.
+ */
+export function registryObjectPackageDisabled(registry: unknown): (objectName: string) => boolean {
+  return (objectName) => {
+    const predicate = (registry as { isObjectPackageDisabled?: unknown } | null | undefined)?.isObjectPackageDisabled;
+    return typeof predicate === 'function' && predicate.call(registry, objectName) === true;
+  };
+}
+
+/**
+ * [#28877] Leave out of the map every object whose owning package is disabled
+ * (#28117 ruling A: a disabled package is hidden, and refused on the data
+ * plane). The data plane answers such an object `404 OBJECT_PACKAGE_DISABLED`
+ * for every verb, so an entry granting it would tell the console, and
+ * `current_user.can(object, verb)`, a grant no request can use; an object the
+ * map does not mention answers `can()` false. Re-enabling the package brings
+ * the entries back on the next build: nothing is cached here.
+ *
+ * Runs LAST, over the entries every earlier step placed: an explicit grant, a
+ * super-user seed, a plain wildcard's coverage. The `'*'` entry itself is not
+ * an object and is kept.
+ */
+function omitDisabledPackageObjects(
+  objects: Record<string, any>,
+  isObjectPackageDisabled: ((objectName: string) => boolean) | undefined,
+): void {
+  if (typeof isObjectPackageDisabled !== 'function') return;
+  // Judged in full before anything is removed, so a predicate that throws
+  // midway leaves the map whole rather than half-pruned.
+  const disabled = Object.keys(objects).filter((name) => name !== '*' && isObjectPackageDisabled(name) === true);
+  for (const name of disabled) delete objects[name];
 }
 
 /** One resolved permission set, as far as this merge reads it. */
@@ -556,7 +604,10 @@ export interface EffectiveObjectPermissionsInputSet {
  *     not a step, so an entry a super-user set names itself keeps that set's
  *     explicit answer, and `modifyAllRecords` alone grants no create;
  *  5. {@link clampManagedObjectWrites};
- *  6. {@link annotateEffectiveApiOperations} — guarded like (2).
+ *  6. {@link annotateEffectiveApiOperations} — guarded like (2);
+ *  7. {@link omitDisabledPackageObjects} — [#28877] an object whose owning
+ *     package is disabled is left out, as the data plane refuses it; guarded
+ *     like (2).
  *
  * Every entry is a FRESH object: nothing in the returned map aliases a
  * permission set, so a caller may freeze or serialise it freely.
@@ -624,6 +675,13 @@ export function buildEffectiveObjectPermissions(
   } catch (e: any) {
     source.logger?.warn?.('[effective-permissions] apiOperations annotate failed', { err: e?.message });
   }
+  // [#28877] Last: a disabled package's objects leave the map. Guarded like the
+  // seed: a predicate that throws leaves the map as the earlier steps built it.
+  try {
+    omitDisabledPackageObjects(objects, source.isObjectPackageDisabled);
+  } catch (e: any) {
+    source.logger?.warn?.('[effective-permissions] disabled-package omission failed', { err: e?.message });
+  }
   return objects as Record<string, EffectiveObjectPermission>;
 }
 
@@ -683,9 +741,72 @@ export function fieldPermissionVote(
   return { readable: entry.readable === true, editable: verdict === 'matched' && entry.editable === true };
 }
 
+/**
+ * [ADR-0066 D2 / ①] Does `set` hold the super-user ("View/Modify All Data")
+ * bypass on `objectName`? The ONE reading of that question:
+ * `PermissionEvaluator.superuserBypassSets` (`@objectstack/plugin-security`,
+ * the row-level bypass every RLS, sharing and explain consumer folds through)
+ * asks it per set, and so does the field merge's super-user vote below, so the
+ * two can never disagree about who is a super-user on an object.
+ *
+ * The set's own entry for the object answers when it has one; otherwise its
+ * `'*'` wildcard does (`resolveObjectPermission` in the evaluator: lookup, not
+ * merge). The private posture never changes the answer, because it withholds
+ * only a wildcard that carries NEITHER bit.
+ *
+ *  - `view`   — `viewAllRecords` OR `modifyAllRecords` (Modify All implies View All);
+ *  - `modify` — `modifyAllRecords` only: View All never widens a write.
+ */
+export function holdsSuperuserBypass(
+  set: { objects?: Record<string, unknown> | null } | null | undefined,
+  objectName: string,
+  bit: 'view' | 'modify',
+): boolean {
+  const objects = set?.objects;
+  if (!objects || typeof objects !== 'object') return false;
+  const op = (objects[objectName] || objects['*']) as
+    | { viewAllRecords?: unknown; modifyAllRecords?: unknown }
+    | null
+    | undefined;
+  if (!op || typeof op !== 'object') return false;
+  return bit === 'modify' ? Boolean(op.modifyAllRecords) : Boolean(op.viewAllRecords || op.modifyAllRecords);
+}
+
+/**
+ * [ADR-0066 D2 ⑧ as amended — ruling of record 6573563853, letter A] The
+ * super-user vote in the field merge: when any of `sets` holds the bypass on
+ * `objectName` ({@link holdsSuperuserBypass}), it votes on EVERY field of that
+ * object — `viewAllRecords` votes `readable: true`, `modifyAllRecords` votes
+ * `readable: true` and `editable: true`. `null` when no set holds it.
+ *
+ * A set that grants the object through its super-user bits but names no field
+ * used to cast no vote at all, so another set's `readable: false` hid the
+ * field from a platform admin who also held that set. Union without deny is
+ * otherwise unchanged: a caller who holds no super-user set on the object is
+ * narrowed by a declared mask as before. Applied to the fields the merge
+ * already holds an entry for; an absent field is unrestricted anyway.
+ *
+ * Both merges apply it after their declared-entry votes —
+ * `PermissionEvaluator.getFieldPermissions` per object and
+ * {@link buildEffectiveFieldPermissions} for every object.
+ */
+export function superuserFieldVote(
+  sets: ReadonlyArray<{ objects?: Record<string, unknown> | null } | null | undefined>,
+  objectName: string,
+): { readable: true; editable: boolean } | null {
+  let read = false;
+  for (const ps of sets) {
+    if (holdsSuperuserBypass(ps, objectName, 'modify')) return { readable: true, editable: true };
+    if (!read && holdsSuperuserBypass(ps, objectName, 'view')) read = true;
+  }
+  return read ? { readable: true, editable: false } : null;
+}
+
 /** A resolved permission set, as far as the field merge reads it. */
 export interface EffectiveFieldPermissionsInputSet {
   fields?: Record<string, unknown> | null;
+  /** Read only for the super-user vote ({@link superuserFieldVote}). */
+  objects?: Record<string, unknown> | null;
 }
 
 /**
@@ -697,6 +818,9 @@ export interface EffectiveFieldPermissionsInputSet {
  * no row), so a row-conditioned entry is reported as its lock: a client reading
  * this map never advertises an edit the write gate refuses, and may hide one it
  * admits on the rows the condition does not name.
+ *
+ * A set holding the super-user bypass on an object then votes on every field
+ * of it ({@link superuserFieldVote}, ruling of record 6573563853).
  *
  * Every entry is a FRESH object, as {@link buildEffectiveObjectPermissions}'s are.
  */
@@ -715,6 +839,19 @@ export function buildEffectiveFieldPermissions(
       if (vote.editable) acc.editable = true;
       fields[key] = acc;
     }
+  }
+  // [Ruling of record 6573563853] The super-user vote, per object the map
+  // names — the same function `getFieldPermissions` applies per object.
+  const votes = new Map<string, ReturnType<typeof superuserFieldVote>>();
+  for (const [key, acc] of Object.entries(fields)) {
+    const dot = key.indexOf('.');
+    if (dot <= 0) continue;
+    const objectName = key.slice(0, dot);
+    if (!votes.has(objectName)) votes.set(objectName, superuserFieldVote(sets, objectName));
+    const vote = votes.get(objectName);
+    if (!vote) continue;
+    acc.readable = true;
+    if (vote.editable) acc.editable = true;
   }
   return fields;
 }

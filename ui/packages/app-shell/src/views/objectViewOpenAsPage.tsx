@@ -27,9 +27,14 @@
  * hands the page the way back to this list with the record open, which the
  * page offers as 「Collapse to drawer」 (objectstack#27545).
  *
- * Hidden by OPACITY until the row is hovered or holds focus, as the row's ⋮
- * menu is (`RowActionMenu`), so it keeps its Tab stop and its name; a coarse
- * pointer, which has no hover, always shows it.
+ * Hidden by OPACITY until the row is hovered or holds focus, so it keeps its
+ * Tab stop and its name; a coarse pointer, which has no hover, always shows
+ * it. This is deliberately NOT the row ⋯ menu's treatment: that trigger
+ * (`RowActionMenu`, `data-table`'s row actions) is drawn at rest in a muted
+ * tone because an `Actions` header over empty-looking cells reads as "no
+ * actions" (objectstack#28871, #28923). This ↗ is an extra beside the name,
+ * under no header of its own, and drawn on every row it would crowd the name
+ * column, so it stays hover-revealed.
  */
 
 import { ArrowUpRight } from 'lucide-react';

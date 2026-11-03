@@ -27,6 +27,7 @@ const NAV = [
   },
   { id: 'nav_new_case', type: 'action', label: 'New case', actionDef: { actionName: 'new_case' } },
   { type: 'separator', id: 'sep_one' },
+  { id: 'nav_help_site', type: 'url', label: 'Help site', url: 'https://help.example.com' },
 ];
 
 const app = (extra: Record<string, unknown>) => ({ name: 'crm', label: 'CRM', navigation: NAV, ...extra });
@@ -73,16 +74,20 @@ describe('app.landing — refused at parse, at the entry\'s own path', () => {
     expect(issues).toHaveLength(1);
     expect(issues[0]).toMatchObject({ code: 'custom', path: 'landing.0.item' });
     expect(issues[0].message).toContain('`nav_missing`');
-    // Openable entries are named; the group, the action and the separator are not.
+    // Openable entries are named; the group, the action, the separator and the url entry are not.
     expect(issues[0].message).toContain('`nav_leads`, `nav_service_console`');
     expect(issues[0].message).not.toContain('`grp_service`');
+    expect(issues[0].message).not.toContain('`nav_help_site`');
   });
 
   it.each([
     ['group', 'grp_service'],
     ['action', 'nav_new_case'],
     ['separator', 'sep_one'],
-  ])('refuses an item naming a `%s` entry, which opens no page', (type, item) => {
+    // A `url` entry leaves the app; the app-root landing is an in-app redirect,
+    // so a `url` landing would land nobody (#28450).
+    ['url', 'nav_help_site'],
+  ])('refuses an item naming a `%s` entry, which opens no page inside the app', (type, item) => {
     const issues = issuesOf(AppSchema.safeParse(app({ landing: [{ item, visible: 'true' }] })));
     expect(issues).toHaveLength(1);
     expect(issues[0]).toMatchObject({ code: 'custom', path: 'landing.0.item' });

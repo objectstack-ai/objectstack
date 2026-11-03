@@ -15,6 +15,7 @@ import { isActionSwitchedOff } from '@object-ui/core';
 import type { BulkActionDef } from '@object-ui/types';
 import { partitionBulkRows, hasVisibilityGate } from '../bulkEligibility';
 import { formatActionLabel } from './RowActionMenu';
+import { BULK_SELECT_ALL_MATCHING_CAP, exceedsBulkSelectAllMatchingCap } from '../bulkSelectAllMatchingCap';
 
 /**
  * Is this rich bulk def offered for this selection? `visible` is evaluated
@@ -45,6 +46,11 @@ function isBulkDefOffered(
 /** A legacy string bulk action, with the destructive styling its name implies. */
 export interface LegacyBulkActionItem {
   name: string;
+  /**
+   * What the button and the menu item read: the built-in `delete` reads the
+   * grid's translation key, any other name is formatted from itself.
+   */
+  label: string;
   destructive: boolean;
 }
 
@@ -87,6 +93,9 @@ export function useBulkActionItems(input: {
   const { selectedRows, actions, actionDefs, objectFields } = input;
   const mayInvoke = useCapabilityGate();
   const scope = usePredicateScope();
+  // `language` keys the memo on the active language itself, so the label
+  // follows a switch whatever identity `t` keeps across it.
+  const { t, language } = useObjectTranslation();
   return React.useMemo(() => {
     const defs = (actionDefs ?? []).filter(
       (d) =>
@@ -98,11 +107,12 @@ export function useBulkActionItems(input: {
       const actionStr = String(action).toLowerCase();
       return {
         name: action,
+        label: actionStr === 'delete' ? t('grid.delete', { defaultValue: 'Delete' }) : formatActionLabel(action),
         destructive: actionStr.includes('delete') || actionStr.includes('remove') || actionStr.includes('destroy'),
       };
     });
     return { defs, legacy };
-  }, [actionDefs, actions, selectedRows, scope, objectFields, mayInvoke]);
+  }, [actionDefs, actions, selectedRows, scope, objectFields, mayInvoke, t, language]);
 }
 
 /** A rich def reads as destructive by its variant or by the delete operation it runs. */
@@ -207,6 +217,9 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({
     && pageSize > 0
     && selectedRows.length >= pageSize
     && totalMatching > pageSize;
+  // Over the cap, every string that counts the match set says that only the
+  // first BULK_SELECT_ALL_MATCHING_CAP records are processed.
+  const overCap = exceedsBulkSelectAllMatchingCap(totalMatching);
 
   return (
     <div
@@ -224,10 +237,16 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({
             <>
               <CheckSquare className="h-3 w-3 text-primary shrink-0" />
               <span>
-                {t('grid.bulkAllMatchingSelected', {
-                  count: totalMatching,
-                  defaultValue: 'All {{count}} matching records are selected.',
-                })}
+                {overCap
+                  ? t('grid.bulkAllMatchingSelectedCapped', {
+                      cap: BULK_SELECT_ALL_MATCHING_CAP,
+                      total: totalMatching,
+                      defaultValue: 'Only the first {{cap}} of {{total}} matching records will be processed.',
+                    })
+                  : t('grid.bulkAllMatchingSelected', {
+                      count: totalMatching,
+                      defaultValue: 'All {{count}} matching records are selected.',
+                    })}
               </span>
             </>
           ) : (
@@ -244,10 +263,16 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({
                 onClick={onSelectAllMatching}
                 data-testid="bulk-select-all-matching"
               >
-                {t('grid.bulkSelectAllMatching', {
-                  count: totalMatching,
-                  defaultValue: 'Select all {{count}} matching',
-                })}
+                {overCap
+                  ? t('grid.bulkSelectAllMatchingCapped', {
+                      cap: BULK_SELECT_ALL_MATCHING_CAP,
+                      total: totalMatching,
+                      defaultValue: 'Select the first {{cap}} of {{total}} matching',
+                    })
+                  : t('grid.bulkSelectAllMatching', {
+                      count: totalMatching,
+                      defaultValue: 'Select all {{count}} matching',
+                    })}
               </button>
             </>
           )}
@@ -261,10 +286,16 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({
           className="inline-block motion-safe:animate-in motion-safe:zoom-in-90 motion-safe:duration-150"
         >
           {allMatchingSelected
-            ? t('grid.bulkSelectedAllMatches', {
-                count: totalMatching,
-                defaultValue: '{{count}} selected (all matches)',
-              })
+            ? overCap
+              ? t('grid.bulkSelectedAllMatchesCapped', {
+                  cap: BULK_SELECT_ALL_MATCHING_CAP,
+                  total: totalMatching,
+                  defaultValue: '{{cap}} selected (of {{total}} matches)',
+                })
+              : t('grid.bulkSelectedAllMatches', {
+                  count: totalMatching,
+                  defaultValue: '{{count}} selected (all matches)',
+                })
             : t('grid.bulkSelected', {
                 count: selectedRows.length,
                 defaultValue: '{{count}} selected',
@@ -280,7 +311,7 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({
             onActionDef={onActionDef}
           />
         ))}
-        {items.legacy.map(({ name: action, destructive: isDestructive }) => {
+        {items.legacy.map(({ name: action, label, destructive: isDestructive }) => {
           const Icon = isDestructive ? Trash2 : null;
           return (
             <Button
@@ -292,7 +323,7 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({
               data-testid={`bulk-action-${action}`}
             >
               {Icon && <Icon className="h-3 w-3" />}
-              {formatActionLabel(action)}
+              {label}
             </Button>
           );
         })}

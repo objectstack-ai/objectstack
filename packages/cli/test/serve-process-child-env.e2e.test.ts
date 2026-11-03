@@ -115,7 +115,6 @@ import { join } from 'node:path';
 import type { Readable } from 'node:stream';
 import {
   CLI,
-  TSX,
   E2E_SECRET_KEY,
   boundPortFromBanner,
   childEnv,
@@ -266,7 +265,7 @@ async function probeOrigin(
   env: Record<string, string | undefined>,
   requestedPort: string = KERNEL_ASSIGNED_PORT,
 ): Promise<{ status: number; code: unknown }> {
-  const child = spawn(TSX, [CLI, 'serve', 'objectstack.config.ts', '--port', requestedPort], {
+  const child = spawn(process.execPath, [CLI, 'serve', 'objectstack.config.ts', '--port', requestedPort], {
     cwd: dir,
     stdio: ['ignore', 'pipe', 'pipe'],
     env,

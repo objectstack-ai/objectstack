@@ -52,7 +52,7 @@
  *
  * Same reason as `migrate-unloadable-host-config-exit.e2e.test.ts`: the claim
  * is about a command an operator runs, and `process.exitCode` set inside a
- * vitest worker is not an exit status. Spawned through `bin/run-dev.js` + tsx,
+ * vitest worker is not an exit status. Spawned through `bin/run-dev.js` + `node`,
  * so the suite does not depend on `packages/cli/dist` having been built.
  */
 
@@ -62,7 +62,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { CLI, TSX, childEnv } from './helpers/serve-process.js';
+import { CLI, childEnv } from './helpers/serve-process.js';
 import { NO_DDL_EXECUTED_NOTICE } from '../src/utils/schema-migration-plugins.js';
 
 /**
@@ -75,7 +75,7 @@ import { NO_DDL_EXECUTED_NOTICE } from '../src/utils/schema-migration-plugins.js
  */
 const REQUIRED_VAR = 'OS_E2E_13118_SECRET';
 
-/** Generous: a cold tsx compile of the command tree dominates a ~1 s apply. */
+/** Generous: a cold load of the command tree dominates a ~1 s apply. */
 const RUN_BUDGET_MS = 120_000;
 
 interface Run {
@@ -87,7 +87,7 @@ interface Run {
 function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...args],
       {
         cwd,

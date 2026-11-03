@@ -34,7 +34,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, within, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { MetadataCtx } from '@object-ui/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { DETAIL_DEFAULT_TRANSLATIONS } from '@object-ui/plugin-detail';
 import { effectiveOperationsArray, resolveEffectiveApiMethods } from '@objectstack/spec/data';
 
@@ -121,16 +121,17 @@ const SHAPE = {
 type Bits = Record<string, unknown>;
 
 /** The caller's answer: full on the record's own object, `feed` on the feed's objects (absent keys are absent). */
-function answer(feed: { [COMMENT]?: Bits; [REACTION]?: Bits }): MePermissionsResponse {
+function answer(feed: { [COMMENT]?: Bits; [REACTION]?: Bits }): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u1',
     tenantId: null,
-    roles: ['member'],
+    positions: ['member'],
+    hasAnyQueue: false,
     permissionSets: ['member'],
     objects: { [OBJECT_NAME]: SHAPE.full, ...feed },
     fields: {},
-  } as MePermissionsResponse;
+  } as MePermissionsAuthenticatedResponse;
 }
 
 /**

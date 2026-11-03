@@ -30,7 +30,7 @@
  *
  * The exit status is what a CI step reads, and it only exists once Node has
  * exited — the same reason `src/commands/validate-json-strict-exit.e2e.test.ts`
- * gives. Spawned through `bin/run-dev.js` + tsx, so the suite does not depend on
+ * gives. Spawned through `bin/run-dev.js` + `node`, so the suite does not depend on
  * `packages/cli/dist`; it lands in the INTEGRATION project (`vitest-tiers.ts`).
  * ⛔ Deliberately NOT named `*.e2e.test.ts`: that name selects the NIGHTLY run,
  * and this pin belongs to the queue's.
@@ -47,7 +47,6 @@ import { linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 const objects = (orderFields: string, orderExtra = '') => `
 import { defineStack } from '@objectstack/spec';
@@ -125,7 +124,7 @@ interface Run {
 function runValidate(cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, 'validate', '--json'],
       // `childEnv()`, never a bulk `process.env` copy: the vitest worker's
       // `TEST` / `VITEST*` family must not reach the child (check:cli-test-child-env).

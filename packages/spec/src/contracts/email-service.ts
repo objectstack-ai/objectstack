@@ -171,9 +171,11 @@ export interface SendEmailResult {
 export interface SendTemplateInput {
   /**
    * Template identifier (the `email_template` item's `name`), e.g.
-   * `'auth.password_reset'`. There is no "best match" and no language-subtag
-   * folding: the locale member is resolved by the exact ladder documented on
-   * `locale` below.
+   * `'auth.password_reset'`. The name is matched exactly; only the locale
+   * member is resolved, by the ladder documented on `locale` below. Every
+   * rung of it loads one row at one tag exactly, so `en` and `en-US` stay two
+   * distinct rows of the bundle: folding chooses which row is read, it never
+   * merges two.
    */
   template: string;
   /** Envelope recipients. */
@@ -181,18 +183,38 @@ export interface SendTemplateInput {
   /** Render context — placeholders in subject/body are resolved against this object. */
   data?: Record<string, unknown>;
   /**
-   * Preferred BCP-47 locale (e.g. user's locale). Falls back to `'en-US'`.
+   * Preferred BCP-47 locale (e.g. user's locale).
    *
-   * Resolution is exact, then default, then deterministic — never "whichever
-   * row the store yields first" (#7731):
+   * Resolution is deterministic, never "whichever row the store yields first"
+   * (#7731). A call that NAMES a locale, over the built-in registry template
+   * loader (the one `EmailServicePlugin` wires), walks (#28880):
    *
-   *  1. this locale, matched exactly (no language-only prefix matching: `zh`
-   *     does not resolve `zh-CN`);
-   *  2. `'en-US'` — which is also where a call that omits `locale` STARTS, so
-   *     "no locale" means the default rather than an arbitrary member;
-   *  3. only for a call that named no locale, and only when the bundle has no
-   *     `en-US` member at all: its lowest locale tag, so a single-locale
-   *     bundle keeps rendering and does so identically on every boot.
+   *  1. this locale, folded against the locale tags the template's bundle
+   *     carries by `resolveBundleLocale` (`@objectstack/spec/system`, the
+   *     BCP-47 fold plugin-email imports rather than copying): exact, then
+   *     case-insensitive (`zh-cn` → `zh-CN`), then base language (`en-GB` →
+   *     `en`), then variant expansion (`zh` and `zh-TW` → `zh-CN`), the first
+   *     match in ascending tag order;
+   *  2. the stack's declared fallback locale, as
+   *     `II18nService.getFallbackLocale()` answers it (`i18n.fallbackLocale`,
+   *     else `defaultLocale`), folded the same way. A host whose i18n service
+   *     declares none, or that has no i18n service, skips this rung;
+   *  3. `'en-US'`, exactly;
+   *  4. none of them lands on a row: `TEMPLATE_NOT_FOUND`, which is permanent.
+   *
+   * A rung that resolves to a tag already tried is skipped. A replacement
+   * `TemplateLoader` keeps the exact ladder: this locale matched exactly, then
+   * `'en-US'`, then `TEMPLATE_NOT_FOUND`, with no fold and no declared
+   * fallback.
+   *
+   * A call that omits `locale` keeps its own ladder. The service's part of it
+   * holds over any loader: no fold, no declared fallback, and `'en-US'` first,
+   * exactly, so "no locale" means the default rather than an arbitrary member.
+   * When that misses, the service asks the loader for its own no-locale
+   * answer. The built-in registry loader answers the bundle's `en-US` member,
+   * else its lowest locale tag, so a single-locale bundle keeps rendering and
+   * does so identically on every boot; a replacement `TemplateLoader` gives
+   * its own deterministic best answer for the name.
    */
   locale?: string;
   /**
@@ -279,8 +301,8 @@ export interface RenderTemplateInput {
   currency?: string;
   /**
    * Preferred BCP-47 locale. Resolution is the SAME ladder as
-   * {@link SendTemplateInput.locale} — exact match, then `'en-US'`, then
-   * (no-locale calls only) the bundle's deterministic single-locale answer.
+   * {@link SendTemplateInput.locale}, both the named-locale and the no-locale
+   * one.
    */
   locale?: string;
   /**
@@ -330,8 +352,9 @@ export interface IEmailService {
    * Locale resolution is the ladder on {@link SendTemplateInput.locale}.
    *
    * Errors:
-   * - `TEMPLATE_NOT_FOUND` — no template matches `(name, locale|en-US)`, and
-   *   (for a call that named no locale) the name carries no members at all.
+   * - `TEMPLATE_NOT_FOUND` — no rung of the locale ladder lands on a row of
+   *   the name's bundle; for a call that named no locale, the name carries no
+   *   members at all.
    * - `TEMPLATE_INACTIVE`  — the template exists but `active=false`.
    * - `MISSING_VARIABLES`  — declared `required` variables absent from `data`.
    * - `TEMPLATE_INVALID`   — the stored template has a hole the authoring rules
@@ -361,8 +384,9 @@ export interface IEmailService {
    * Locale resolution is the ladder on {@link SendTemplateInput.locale}.
    *
    * Errors (same vocabulary as `sendTemplate`, since resolution is shared):
-   * - `TEMPLATE_NOT_FOUND` — no template matches `(name, locale|en-US)`, and
-   *   (for a call that named no locale) the name carries no members at all.
+   * - `TEMPLATE_NOT_FOUND` — no rung of the locale ladder lands on a row of
+   *   the name's bundle; for a call that named no locale, the name carries no
+   *   members at all.
    * - `TEMPLATE_INACTIVE`  — the template exists but `active=false`.
    * - `MISSING_VARIABLES`  — declared `required` variables absent from `data`.
    * - `TEMPLATE_INVALID`   — the stored template has a hole the authoring rules

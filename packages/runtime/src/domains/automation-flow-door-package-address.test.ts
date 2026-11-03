@@ -145,6 +145,8 @@ async function boot() {
     const getFlow = vi.fn(async (name: string) => flows.get(name) ?? null);
     const services: Record<string, unknown> = {
         protocol,
+        // [#28149] The registry the clone door's target rule reads.
+        objectql: engine,
         automation: { handlerReady: true, registerFlow, unregisterFlow, getFlow },
     };
     const get = (name: string) => services[name] ?? null;
@@ -305,7 +307,9 @@ for (const order of [[ALPHA, BETA], [BETA, ALPHA]] as const) {
             rig.flows.set('source_flow', flowOf('source_flow', 'Source'));
             const before = await rig.rows(SHARED);
 
-            const answer = await rig.call('POST', '/automation/source_flow/clone', { name: SHARED, label: 'The clone' });
+            // [#28149] A source no package ships names the package its copy
+            // lands in; one of the two packages holding the name.
+            const answer = await rig.call('POST', '/automation/source_flow/clone', { name: SHARED, label: 'The clone', package: ALPHA });
 
             expect(answer).toEqual({ status: 409, code: 'RESOURCE_CONFLICT' });
             expect(await rig.rows(SHARED)).toEqual(before);
@@ -373,7 +377,10 @@ for (const order of [[ALPHA, BETA], [BETA, ALPHA]] as const) {
             rig.flows.set('source_flow', flowOf('source_flow', 'Source'));
             const before = await rig.rows(SHARED);
 
-            const answer = await rig.refusal('POST', '/automation/source_flow/clone', { name: SHARED, label: 'The clone' });
+            // [#28149] Into one of the two packages holding the name: the
+            // clone's first-write pin meets that package's row, and the answer
+            // is the same taken-name refusal.
+            const answer = await rig.refusal('POST', '/automation/source_flow/clone', { name: SHARED, label: 'The clone', package: ALPHA });
 
             expect({ status: answer.status, code: answer.code }).toEqual({ status: 409, code: 'RESOURCE_CONFLICT' });
             // A clone takes a NEW name (ADR-0126 §7.1): no package route is prescribed.
@@ -383,10 +390,10 @@ for (const order of [[ALPHA, BETA], [BETA, ALPHA]] as const) {
                 .filter((candidate) => candidate !== SHARED);
             expect(suggested).toHaveLength(1);
 
-            const followed = await rig.call('POST', '/automation/source_flow/clone', { name: suggested[0], label: 'The clone' });
+            const followed = await rig.call('POST', '/automation/source_flow/clone', { name: suggested[0], label: 'The clone', package: ALPHA });
 
             expect(followed).toEqual({ status: 200, code: undefined });
-            expect(await rig.bindings(suggested[0]!)).toEqual([null]);
+            expect(await rig.bindings(suggested[0]!)).toEqual([ALPHA]);
             expect(await rig.rows(SHARED)).toEqual(before);
         }, 60_000);
 

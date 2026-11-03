@@ -23,9 +23,17 @@
  *   - nothing is withdrawn when the uninstall did not happen: a refused caller,
  *     an id this door never installed (even one the registry holds), a ledger
  *     write that failed;
- *   - a refused withdrawal is reported on the response as a failed outcome,
- *     never swallowed, the cleanups still run, and the cause goes to the
- *     operator log only;
+ *   - [#28511, ADR-0146 D3] an uninstall the registry would refuse is refused
+ *     BEFORE the ledger write, with the registry's own `409
+ *     RESOURCE_CONFLICT` and its sentence: a base whose paired customization
+ *     package (`BASE.custom`) is installed, and an ADR-0029 extended owner.
+ *     Nothing moves — the ledger entry, the registration and the pair stay —
+ *     and no cleanup runs. Asked of a REAL `SchemaRegistry`, the one predicate
+ *     (`assertPackageUninstallable`) its own `uninstallPackage` asks;
+ *   - a withdrawal refused for a cause nothing asked ahead (a registry that
+ *     does not carry the predicate) is still reported on the response as a
+ *     failed outcome, never swallowed, the cleanups still run, and the cause
+ *     goes to the operator log only;
  *   - a registry that does not hold the package has nothing to withdraw;
  *   - [ADR-0090 D5] the permission-set names the package held are captured
  *     just BEFORE the withdrawal releases them, and handed to the cleanups.
@@ -39,6 +47,7 @@ import { tmpdir } from 'node:os';
 // clocked `it` (`scripts/check-test-source-alias.mjs`): the plugin reaches the
 // same module through a dynamic `import()` for its handler binder on rehydrate.
 import '@objectstack/runtime';
+import { SchemaRegistry } from '@objectstack/objectql';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 import { INSTALLER_USER_ID, installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 import { LocalManifestSource } from './local-manifest-source.js';
@@ -106,11 +115,13 @@ async function bootPlugin(opts: {
     refuseWithdrawal?: string;
     auth?: unknown;
     held?: string[];
+    /** A REAL registry to boot over, in place of the recording double. */
+    realRegistry?: SchemaRegistry;
 } = {}) {
     const events: Array<{ step: string; id: string; ledgerOnDisk: boolean }> = [];
     const handed: unknown[] = [];
     const packages = new Map((opts.registered ?? [APP_ID, USER_CODE_ID]).map((id) => [id, { manifest: { id } }]));
-    const registry = {
+    const fake = {
         getAllPackages: () => [...packages.values()],
         getPackage: (id: string) => packages.get(id),
         ...(opts.held ? {
@@ -125,6 +136,14 @@ async function bootPlugin(opts: {
             return packages.delete(id);
         }),
     };
+    const registry: typeof fake = opts.realRegistry
+        ? Object.assign(opts.realRegistry, {
+            uninstallPackage: vi.fn((id: string) => {
+                events.push({ step: 'withdraw', id, ledgerOnDisk: existsSync(ledgerFile()) });
+                return SchemaRegistry.prototype.uninstallPackage.call(opts.realRegistry, id);
+            }),
+        }) as unknown as typeof fake
+        : fake;
     const hooks = new Map<string, any>();
     const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
     const rawApp = makeRawApp();
@@ -245,9 +264,11 @@ describe('#21576: an install-local uninstall withdraws the package from the runn
         expect(packages.has(APP_ID)).toBe(true);
     });
 
-    it('a refused withdrawal is one failed outcome on the response, the cleanups still run, and the cause stays in the log', async () => {
+    it('a withdrawal refused for a cause nothing asked ahead (a registry without the predicate) is one failed outcome on the response, the cleanups still run, and the cause stays in the log', async () => {
         seedLedger();
-        const cause = 'Cannot uninstall package: an object it owns is extended by another package';
+        // The double carries no `assertPackageUninstallable`, so nothing is
+        // asked ahead and its throw is met at the withdrawal itself.
+        const cause = 'registry withdrawal failed: tasks_task is still referenced';
         const { uninstall, events, warnings } = await bootPlugin({ refuseWithdrawal: cause });
 
         const res = await uninstall();
@@ -277,5 +298,101 @@ describe('#21576: an install-local uninstall withdraws the package from the runn
         expect(registry.uninstallPackage).not.toHaveBeenCalled();
         expect(res.payload.data.cleanups).toEqual(CLEANUP_OUTCOMES);
         expect(warnings()).toEqual([]);
+    });
+});
+
+const PAIR_ID = `${APP_ID}.custom`;
+const EXTENDER_ID = 'com.example.tasksaddon';
+
+/**
+ * [#28511, ADR-0146 D3] The REAL registry: a marketplace-installed base
+ * (`com.example.tasksapp`, owning `tasks_task`), and — per case — its paired
+ * customization package installed, or another package extending its object.
+ */
+function realRegistry(opts: { pair?: boolean; extender?: boolean } = {}): SchemaRegistry {
+    const r = new SchemaRegistry({ multiTenant: false });
+    r.logLevel = 'silent';
+    r.installPackage({ id: APP_ID, name: 'Tasks App', version: '0.1.0', type: 'app' } as never, 'marketplace');
+    r.registerObject({ name: 'tasks_task', fields: {} } as never, APP_ID, undefined, 'own');
+    if (opts.pair) {
+        r.installPackage({ id: PAIR_ID, name: 'Tasks App customizations', version: '0.1.0', type: 'app' } as never, 'authored');
+    }
+    if (opts.extender) {
+        r.installPackage({ id: EXTENDER_ID, name: 'Tasks add-on', version: '0.1.0', type: 'app' } as never, 'marketplace');
+        r.registerObject({ name: 'tasks_task', fields: {} } as never, EXTENDER_ID, undefined, 'extend');
+    }
+    return r;
+}
+
+describe('#28511: an install-local uninstall the registry would refuse is refused before the ledger write', () => {
+    async function refused(registry: SchemaRegistry) {
+        seedLedger();
+        const contributorsBefore = registry.getObjectContributors('tasks_task').map((c) => `${c.packageId}:${c.ownership}`);
+        const booted = await bootPlugin({ realRegistry: registry });
+
+        const res = await booted.uninstall();
+
+        // ADR-0112 envelope: the registry's own refusal, code and status.
+        expect(res.status, JSON.stringify(res.payload)).toBe(409);
+        expect(res.payload.success).toBe(false);
+        expect(res.payload.error.code).toBe('RESOURCE_CONFLICT');
+        // Nothing moved: the ledger entry, the registration, the contributions.
+        expect(existsSync(ledgerFile())).toBe(true);
+        expect(registry.getPackage(APP_ID)).toBeDefined();
+        expect(registry.getObjectContributors('tasks_task').map((c) => `${c.packageId}:${c.ownership}`))
+            .toEqual(contributorsBefore);
+        // No withdrawal was attempted and no cleanup ran.
+        expect(booted.events).toEqual([]);
+        expect(booted.warnings()).toEqual([]);
+        return res;
+    }
+
+    it('a base whose paired customization package is installed: 409 naming the pair, and the pair stays', async () => {
+        const registry = realRegistry({ pair: true });
+
+        const res = await refused(registry);
+
+        expect(res.payload.error.message).toContain(`"${PAIR_ID}"`);
+        expect(registry.getPackage(PAIR_ID)).toBeDefined();
+    });
+
+    it('an ADR-0029 extended owner: 409 naming the extender, and the extension stays', async () => {
+        const registry = realRegistry({ extender: true });
+
+        const res = await refused(registry);
+
+        expect(res.payload.error.message).toContain(EXTENDER_ID);
+        expect(registry.getPackage(EXTENDER_ID)).toBeDefined();
+    });
+
+    it('control — a base the registry would let go keeps #21576\'s ledger-first order: ledger removed, then withdrawn, then the cleanups', async () => {
+        seedLedger();
+        const registry = realRegistry();
+        const { uninstall, events, warnings } = await bootPlugin({ realRegistry: registry });
+
+        const res = await uninstall();
+
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(res.payload.success).toBe(true);
+        expect(events).toEqual([
+            { step: 'withdraw', id: APP_ID, ledgerOnDisk: false },
+            { step: 'cleanups', id: APP_ID, ledgerOnDisk: false },
+        ]);
+        expect(registry.getPackage(APP_ID)).toBeUndefined();
+        expect(res.payload.data.cleanups).toEqual(CLEANUP_OUTCOMES);
+        expect(warnings()).toEqual([]);
+    });
+
+    it('control — an id this door never installed answers 404 as before, even with a refusable registry', async () => {
+        seedLedger();
+        const registry = realRegistry({ pair: true });
+        const { uninstall, events } = await bootPlugin({ realRegistry: registry });
+
+        const res = await uninstall(USER_CODE_ID);
+
+        expect(res.status).toBe(404);
+        expect(res.payload.error.code).toBe('RESOURCE_NOT_FOUND');
+        expect(events).toEqual([]);
+        expect(existsSync(ledgerFile())).toBe(true);
     });
 });

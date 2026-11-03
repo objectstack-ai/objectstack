@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveInjectedSystemColumns, resolveInjectedColumnProvenance as injectedColumnProvenance, isInjectedColumnDefinition, isTenancyDisabled, checkManagedApiMethodAffordances, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS, materializeTreeSelfReferences } from '@objectstack/spec/data';
+import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveInjectedSystemColumns, resolveInjectedColumnProvenance as injectedColumnProvenance, isInjectedColumnDefinition, isTenancyDisabled, checkManagedApiMethodAffordances, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS, materializeTreeSelfReferences, BASE_FIELD_DISPLAY_WHITELIST, type ObjectExtensionParsed } from '@objectstack/spec/data';
 // [#4513] The audit-family governance table, and [#6562] the injected-column
 // DEFINITION tables it governs — see the re-exports below for why both live in a
 // package `objectql` and `metadata-protocol` both depend on.
@@ -37,6 +37,11 @@ import {
   OBJECT_FIELD_TYPE_REFUSED_ERROR_NAME,
   type ObjectFieldTypeRefusal,
   type ObjectFieldTypeViolation,
+  // [ADR-0146 D10, second rule] The field-patch target check — the install
+  // door's and `os validate`'s judge, asked here so the fold names a patch it
+  // cannot apply by the same verdict those doors refuse it by.
+  fieldPatchTargetMisses,
+  type FieldPatchTargetMiss,
 } from '@objectstack/metadata-core';
 // [ADR-0029 D9.2a] `scalarOverridesPackagedBase` is the #8284 comparison, imported rather
 // than re-spelled: the object FOLD asks the same question one layer down (has
@@ -46,7 +51,7 @@ import { SystemFieldName, scalarOverridesPackagedBase } from '@objectstack/spec/
 import { resolveTenancyPosture, resolveSearchPinyinEnabled } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { provisionSearchCompanion, SEARCH_COMPANION_FIELD } from './search-companion.js';
-import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema, InstalledPackageSourceSchema, type InstalledPackageSource, checkFieldCompleteness } from '@objectstack/spec/kernel';
+import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema, InstalledPackageSourceSchema, type InstalledPackageSource, checkFieldCompleteness, customizationPackageId } from '@objectstack/spec/kernel';
 import { DEFAULT_FLOW_FUNCTION_EFFECT } from '@objectstack/spec/automation';
 import { AppSchema, ActionSchema } from '@objectstack/spec/ui';
 import { applyProtection } from '@objectstack/spec/shared';
@@ -76,8 +81,12 @@ import {
   defaultRecordPageHolderKey,
   describeDefaultRecordPageHolder,
   type DefaultRecordPageHolder,
+  holdsRecordPageSlot,
+  recordPageSlotKey,
+  recordPageSlotsOf,
+  type RecordPageSlot,
 } from './default-record-page.js';
-import { defaultRecordPageObject, misplacedDefaultPageRefusal } from '@objectstack/spec/ui';
+import { misplacedDefaultPageRefusal } from '@objectstack/spec/ui';
 // [#14553] The ONE resolution of "does this nav group id exist?" and the ONE
 // wording of the diagnostic when it does not. `os build` calls the same two
 // (`checkNavContributionGroups`), so the compile-time door and this read-time
@@ -496,6 +505,215 @@ const OBJECT_FOLD_SCALAR_KEYS = ['label', 'pluralLabel', 'description'] as const
 type ObjectFoldScalarKey = (typeof OBJECT_FOLD_SCALAR_KEYS)[number];
 
 /**
+ * [ADR-0146 D10, second rule] An object extension's per-field display patches:
+ * the slot `ObjectExtensionSchema.fieldPatches` declares, carried onto the
+ * extension def by the manifest loop (`engine.ts`) and applied by
+ * {@link mergeObjectDefinitions}. ⛔ No second shape: the type IS the spec's,
+ * and the keys applied are read from `BASE_FIELD_DISPLAY_WHITELIST`, so a
+ * widened whitelist widens what the merge applies too.
+ */
+type ObjectFieldPatches = NonNullable<ObjectExtensionParsed['fieldPatches']>;
+
+/** An `extend` contributor's body: a partial object that may carry {@link ObjectFieldPatches}. */
+type ObjectExtensionBody = Partial<ServiceObject> & { fieldPatches?: ObjectFieldPatches };
+
+/** [#28835] One extension's `fields` as the fold merged them, with the package that declared them. */
+type FoldedExtensionFields = { packageId: string | undefined; fields: unknown };
+
+const isPlainRecord = (v: unknown): v is Record<string, unknown> =>
+  v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * The address of one patched display key in a fold's D9.2a yield set
+ * ({@link SchemaRegistry.tenantPatchedDisplayKeys}): a field key, or one key of
+ * the option addressed by its stored value.
+ */
+function fieldPatchYieldKey(field: string, key: string, option?: string): string {
+  return option === undefined ? `${field}\u0000${key}` : `${field}\u0000options\u0000${option}\u0000${key}`;
+}
+
+/** A field of an object body's name-keyed `fields`, when it is a record. */
+function recordFieldOf(body: unknown, name: string): Record<string, unknown> | undefined {
+  const fields = isPlainRecord(body) ? body.fields : undefined;
+  if (!isPlainRecord(fields) || !Object.prototype.hasOwnProperty.call(fields, name)) return undefined;
+  const field = fields[name];
+  return isPlainRecord(field) ? field : undefined;
+}
+
+/**
+ * [ADR-0146 D10, second rule] The fields a field patch reaches: the names the
+ * `own` contributor's declaration carries in the name-keyed `fields` the merge
+ * reads — "the target object's own fields", as `ObjectExtensionSchema.fieldPatches`
+ * publishes it. A field an extension adds is never one of them, whatever the
+ * priorities, and neither is an array-spelled entry: the merge, the patch and
+ * the miss report all read the record spelling, so they cannot disagree.
+ * The declaration is the one the registry stores, so the platform columns
+ * {@link applySystemFields} injects at registration (`created_at` and the
+ * rest) are among these names: the fold and the install door
+ * (`getObjectOwner`) admit a patch of one, while `os validate`, which judges
+ * the authored declaration, refuses it.
+ * `undefined` when no owner is registered — no opinion, as
+ * {@link SchemaRegistry.tenantPatchedDisplayKeys} has none there either.
+ */
+function ownFieldNamesOf(owner: unknown): ReadonlySet<string> | undefined {
+  if (owner === undefined) return undefined;
+  const fields = isPlainRecord(owner) ? owner.fields : undefined;
+  return new Set(isPlainRecord(fields) ? Object.keys(fields).filter((name) => isPlainRecord(fields[name])) : []);
+}
+
+/**
+ * [ADR-0146 D10, second rule; #28809] What a field patch is judged against in
+ * the fold: the owner's declaration (`owner`) with only the fields of
+ * `ownFields` the fold carries at that point in the record spelling
+ * (`carried`) — which fields a patch reaches is the owner's own, unchanged —
+ * each field AS THE OWNER DECLARES IT, never as an extension's `fields`
+ * redeclared it. The install door (`getObjectOwner(name).definition`) and
+ * `os validate` (the declared object) cannot see another package's extension,
+ * so the owner's own field and options are the one answer all three readers
+ * share: an option an extension adds by taking the field over through `fields`
+ * is not one a patch can name.
+ */
+function ownFieldsTarget(
+  owner: unknown,
+  ownFields: ReadonlySet<string>,
+  carried: (name: string) => boolean,
+): Record<string, unknown> {
+  const fields: Record<string, unknown> = {};
+  for (const name of ownFields) {
+    const field = recordFieldOf(owner, name);
+    if (field && carried(name)) fields[name] = field;
+  }
+  return { ...(isPlainRecord(owner) ? owner : {}), fields };
+}
+
+/** The option of a field's own `options` whose stored `value` is `value`. */
+function optionByValue(field: Record<string, unknown>, value: string): Record<string, unknown> | undefined {
+  const options = field.options;
+  if (!Array.isArray(options)) return undefined;
+  const found = options.find((o) => isPlainRecord(o) && o.value === value);
+  return isPlainRecord(found) ? found : undefined;
+}
+
+/**
+ * [ADR-0029 D9.2a] The scalar yield's comparison, asked of one display key of a
+ * field or of one of its options. It IS {@link scalarOverridesPackagedBase} —
+ * the one comparison behind every D9.2a yield, keyed by any attribute (its own
+ * docblock: the exported key union names the keys its callers ask about, and
+ * the implementation underneath reads any) — ⛔ never a second copy of it.
+ */
+function displayKeyOverridesPackagedBase(packaged: unknown, key: string, value: unknown): boolean {
+  return scalarOverridesPackagedBase(packaged, key as Parameters<typeof scalarOverridesPackagedBase>[1], value);
+}
+
+/**
+ * [ADR-0146 D10, second rule] One base field with an extension's patch applied:
+ * the whitelisted field keys, then each option the patch addresses by its
+ * stored `value`. A key the tenant authored on the fold's base yields
+ * (`tenantPatched`, ADR-0029 D9.2a). Returns `field` BY REFERENCE when nothing
+ * applies.
+ *
+ * A field bound to a picklist is left alone under `options`: the served options
+ * are the picklist's, written over the field after the fold
+ * ({@link SchemaRegistry.finishServedObject}), so an option label written here
+ * would never be served. The target check names that patch instead.
+ */
+function patchedField(
+  name: string,
+  field: Record<string, unknown>,
+  patch: ObjectFieldPatches[string],
+  tenantPatched: ReadonlySet<string> | undefined,
+): Record<string, unknown> {
+  let next: Record<string, unknown> | undefined;
+  const patchKeys = patch as Record<string, unknown>;
+  for (const key of BASE_FIELD_DISPLAY_WHITELIST.field) {
+    const value = patchKeys[key];
+    if (value === undefined || tenantPatched?.has(fieldPatchYieldKey(name, key))) continue;
+    (next ??= { ...field })[key] = value;
+  }
+  const optionPatches = patch.options;
+  const options = field.options;
+  const picklistBound = typeof field.picklist === 'string' && field.picklist !== '';
+  if (optionPatches && Array.isArray(options) && !picklistBound) {
+    let patchedOptions: unknown[] | undefined;
+    options.forEach((option, index) => {
+      if (!isPlainRecord(option) || typeof option.value !== 'string') return;
+      if (!Object.prototype.hasOwnProperty.call(optionPatches, option.value)) return;
+      const optionPatch = optionPatches[option.value] as Record<string, unknown> | undefined;
+      if (!optionPatch) return;
+      let patchedOption: Record<string, unknown> | undefined;
+      for (const key of BASE_FIELD_DISPLAY_WHITELIST.option) {
+        const value = optionPatch[key];
+        if (value === undefined || tenantPatched?.has(fieldPatchYieldKey(name, key, option.value))) continue;
+        (patchedOption ??= { ...option })[key] = value;
+      }
+      if (patchedOption) (patchedOptions ??= [...options])[index] = patchedOption;
+    });
+    if (patchedOptions) (next ??= { ...field }).options = patchedOptions;
+  }
+  return next ?? field;
+}
+
+/**
+ * [ADR-0146 D10, second rule] `fields` with every patch of `patches` applied
+ * that names one of the owner's own fields (`ownFields`, {@link ownFieldNamesOf})
+ * present in `fields`. A patch naming any other field — one the object lacks,
+ * or one only an extension adds — is skipped here, and named by the fold
+ * ({@link SchemaRegistry.reportFieldPatchMisses}). Nothing applies when no
+ * owner is registered. Returns `fields` BY REFERENCE when nothing applies.
+ *
+ * [#28809] The fold hands this only the patches the judge admitted against the
+ * owner's declaration ({@link admittedFieldPatches}). An admitted option patch
+ * whose option an earlier layer left out (an extension's `fields`
+ * redeclaration, a tenant overlay base) finds no option here, so nothing of it
+ * applies; the fold names it after the merge, by the same judge asked of the
+ * merged fields.
+ */
+function applyFieldPatches(
+  fields: ServiceObject['fields'],
+  patches: ObjectFieldPatches,
+  tenantPatched: ReadonlySet<string> | undefined,
+  ownFields: ReadonlySet<string> | undefined,
+): ServiceObject['fields'] {
+  if (!isPlainRecord(fields) || !ownFields) return fields;
+  let out: Record<string, unknown> | undefined;
+  for (const [name, patch] of Object.entries(patches)) {
+    if (!patch || !ownFields.has(name)) continue;
+    const field = recordFieldOf({ fields: out ?? fields }, name);
+    if (!field) continue;
+    const next = patchedField(name, field, patch, tenantPatched);
+    if (next !== field) (out ??= { ...fields })[name] = next;
+  }
+  return (out ?? fields) as ServiceObject['fields'];
+}
+
+/**
+ * [ADR-0146 D10, second rule; #28809] `patches` without what the judge missed
+ * against the owner's declaration: a missed field's whole patch, a missed
+ * option's entry under `options`. The fold applies exactly what the install
+ * door and `os validate` admit, and names exactly what they refuse. Returns
+ * `patches` BY REFERENCE when nothing was missed.
+ */
+function admittedFieldPatches(
+  patches: ObjectFieldPatches,
+  misses: readonly FieldPatchTargetMiss[],
+): ObjectFieldPatches {
+  if (misses.length === 0) return patches;
+  const out: Record<string, ObjectFieldPatches[string]> = { ...patches };
+  for (const miss of misses) {
+    const patch = out[miss.field];
+    if (!patch) continue;
+    if (miss.option === undefined) {
+      delete out[miss.field];
+      continue;
+    }
+    if (!patch.options) continue;
+    const { [miss.option]: _missed, ...options } = patch.options;
+    out[miss.field] = { ...patch, options };
+  }
+  return out as ObjectFieldPatches;
+}
+
+/**
  * [#28356] Which layer an object fold serves: `'served'`, what every read
  * answers (the bound actions the registry serves, runtime-authored included),
  * or `'code'`, the code-layer resolution {@link SchemaRegistry.getArtifactItem}
@@ -516,6 +734,13 @@ type ServedObjectLayer = 'served' | 'code';
  *   - The three {@link OBJECT_FOLD_SCALAR_KEYS} (`label`, `pluralLabel`,
  *     `description`) are overridden last-writer-wins, subject to the
  *     `tenantAuthored` yield rule below.
+ *   - `fieldPatches` [ADR-0146 D10, second rule] is APPLIED, never carried:
+ *     after the merges above, each patch writes its `BASE_FIELD_DISPLAY_WHITELIST`
+ *     keys onto the named field and its option labels onto the options whose
+ *     stored `value` it names, each key yielding where `tenantPatched` says the
+ *     tenant authored it — the same D9.2a rule as the scalars. A patch reaches
+ *     the owner's own fields only (`ownFields`): one naming any other field,
+ *     a field an extension adds included, is skipped here; the fold names it.
  *
  * **Every other top-level prop on `extension` is silently discarded.**
  * `merged` starts as `{ ...base }` and nothing outside the list above is ever
@@ -527,8 +752,8 @@ type ServedObjectLayer = 'served' | 'code';
  *
  * Declarative authors never reach that silence, though: `ObjectExtensionSchema`
  * (`packages/spec/src/data/object.zod.ts`) is `.strict()` — its shape is
- * exactly `extend` / `fields` / `label` / `pluralLabel` / `description` /
- * `validations` / `indexes` / `priority`, so an `objectExtensions` entry
+ * exactly `extend` / `fields` / `fieldPatches` / `label` / `pluralLabel` /
+ * `description` / `validations` / `indexes` / `priority`, so an `objectExtensions` entry
  * naming `tenancy`, `permissions`, or any other key outside that list fails
  * LOUDLY at authoring time with a prescription (#4001; the same rule is
  * documented at `content/docs/data-modeling/object-extensions.mdx`). This
@@ -558,9 +783,11 @@ type ServedObjectLayer = 'served' | 'code';
  */
 function mergeObjectDefinitions(
   base: ServiceObject,
-  extension: Partial<ServiceObject>,
+  extension: ObjectExtensionBody,
   tenantAuthored?: ReadonlySet<ObjectFoldScalarKey>,
   tenantRules?: ReadonlyMap<string, TenantRuleSettings>,
+  tenantPatched?: ReadonlySet<string>,
+  ownFields?: ReadonlySet<string>,
 ): ServiceObject {
   const merged = { ...base };
 
@@ -592,6 +819,18 @@ function mergeObjectDefinitions(
   }
   if (extension.description !== undefined && !yields('description')) {
     merged.description = extension.description;
+  }
+
+  // [ADR-0146 D10, second rule] The extension's display patches of the
+  // owner's own fields (`ownFields`) — never of a field an extension adds,
+  // whatever the priorities, or the answer would depend on which extender the
+  // fold reached first — applied AFTER the additive merges, with each key
+  // yielding where the tenant authored it (`tenantPatched`, ADR-0029 D9.2a),
+  // as the scalars above yield. Two extenders patching one key resolve as the
+  // scalars do: the fold applies contributors in ascending `priority`, so the
+  // higher one is written last.
+  if (extension.fieldPatches) {
+    merged.fields = applyFieldPatches(merged.fields, extension.fieldPatches, tenantPatched, ownFields);
   }
 
   return merged;
@@ -1837,6 +2076,30 @@ class ExtensionMembershipKeysRefusedError extends Error {
 }
 
 /**
+ * [#28574] The refusals an `extend` contribution meets at registration, before
+ * anything is materialized: `defaultRowScope`
+ * ({@link ExtensionDefaultRowScopeRefusedError}) and `membershipKeys`
+ * ({@link ExtensionMembershipKeysRefusedError}), in that order. `undefined`
+ * when the contribution carries neither.
+ *
+ * The ONE copy of both: {@link SchemaRegistry.registerObject} throws what this
+ * answers, and the metadata save and publish doors ask it of an
+ * `object_extension` item (through
+ * {@link SchemaRegistry.extendContributionRefusal}) so the item is refused at
+ * the door with the same sentence, instead of being stored and then failing
+ * every sync that registers it.
+ */
+export function extendContributionRefusal(
+  schema: { name?: unknown; defaultRowScope?: unknown; membershipKeys?: unknown },
+  packageId: string | undefined,
+): Error | undefined {
+  const name = String(schema.name ?? '');
+  if (schema.defaultRowScope !== undefined) return new ExtensionDefaultRowScopeRefusedError(name, packageId);
+  if (schema.membershipKeys !== undefined) return new ExtensionMembershipKeysRefusedError(name, packageId);
+  return undefined;
+}
+
+/**
  * {@link ValidationRuleCopyRefusedError}'s code — `INVALID_METADATA`, for the
  * reason {@link EXTENSION_DEFAULT_ROW_SCOPE_REFUSED_CODE} gives: a body this
  * registry will not take as written. ⛔ Not a new code. The condition is named
@@ -2388,6 +2651,11 @@ export class SecurityCatalogNameConflictError extends Error {
 export interface DefaultRecordPageConflict {
   /** The object both pages are the default record page of. */
   readonly object: string;
+  /**
+   * The app both pages are the record page of `object` inside (`PageSchema.apps`,
+   * ruling A on objectstack#28979); absent for the deployment's default.
+   */
+  readonly app?: string;
   /** The page whose registration this refusal stopped. */
   readonly incoming: DefaultRecordPageHolder;
   /** The page that already holds the object's default record page. */
@@ -2434,16 +2702,30 @@ export class DefaultRecordPageConflictError extends Error {
     const [first] = conflicts;
     const lines = conflicts.map(
       (c) =>
-        `${describeDefaultRecordPageHolder(c.incoming)} cannot be the default record page of object ` +
-        `"${c.object}": ${describeDefaultRecordPageHolder(c.existing)} already is`,
+        c.app === undefined
+          ? `${describeDefaultRecordPageHolder(c.incoming)} cannot be the default record page of object ` +
+            `"${c.object}": ${describeDefaultRecordPageHolder(c.existing)} already is`
+          : `${describeDefaultRecordPageHolder(c.incoming)} cannot be the record page of object ` +
+            `"${c.object}" in app "${c.app}": ${describeDefaultRecordPageHolder(c.existing)} already is`,
     );
-    super(
-      `Default record page conflict: ${lines.join('; ')}. Keep one default per object: set ` +
-        `\`isDefault: false\` on one of the two pages, or compose the deployment without the other ` +
-        `package's page. At most one \`isDefault: true\` record page may exist for an object in a ` +
-        `deployment: the record view opens that page with no tie-break, so with two the page would be ` +
-        `chosen by registration order.`,
-    );
+    const remedies: string[] = [];
+    if (conflicts.some((c) => c.app === undefined)) {
+      remedies.push(
+        `Keep one default per object: set \`isDefault: false\` on one of the two pages, or compose the ` +
+          `deployment without the other package's page. At most one \`isDefault: true\` record page may ` +
+          `exist for an object in a deployment: the record view opens that page with no tie-break, so with ` +
+          `two the page would be chosen by registration order.`,
+      );
+    }
+    if (conflicts.some((c) => c.app !== undefined)) {
+      remedies.push(
+        `Keep one page per object per app: remove the app from \`apps\` on one of the two pages, or ` +
+          `compose the deployment without the other package's page. At most one record page may name an ` +
+          `app in \`apps\` for an object: that app's record view opens it with no tie-break, so with two ` +
+          `the page would be chosen by registration order.`,
+      );
+    }
+    super(`Default record page conflict: ${lines.join('; ')}. ${remedies.join(' ')}`);
     this.name = 'DefaultRecordPageConflictError';
     this.conflicts = conflicts;
     this.object = first.object;
@@ -2790,6 +3072,19 @@ const EXTENDED_OBJECTS_LISTED = 5;
  * in registration order — and the prescription names every extending package,
  * so one answer is the whole way out rather than the first step of several.
  *
+ * [#28408, ADR-0146 D3] …and the uninstall refusal of a base whose paired
+ * customization package is installed: `<base>.custom`, the id
+ * {@link customizationPackageId} derives, held by this registry. That package
+ * holds every customization of the base, so uninstalling the base under it
+ * would strand them all, with nothing serving them and nothing saying why.
+ * ADR-0146 puts this refusal in this family and this shape, so it is this
+ * class rather than a sibling: one refusal, decided by the same method and
+ * raised at the same doors. When both causes hold, the ONE refusal carries
+ * both, and its prescription is the whole way out — uninstall the extenders
+ * and delete the pair. The pair is named by id, with the way to keep what it
+ * holds before it is deleted: its own export door. The class keeps its name
+ * because ADR-0141 and ADR-0146 cite it as the anchor of this family.
+ *
  * ⛔ Unexported, like its siblings: a consumer compares `code`, never
  * `instanceof` (see the note over the `*_CODE` constants).
  */
@@ -2804,25 +3099,53 @@ class PackageUninstallExtendedError extends Error {
   readonly extendedObjects: readonly ExtendedObjectOfUninstall[];
   /** Every extending package, once each, in the order the objects name them. */
   readonly extenders: readonly string[];
+  /**
+   * [#28408, ADR-0146 D3] The base's paired customization package, when this
+   * registry holds it — `undefined` when that is not a cause of this refusal.
+   */
+  readonly customizationPackageId: string | undefined;
 
-  constructor(packageId: string, extendedObjects: readonly ExtendedObjectOfUninstall[]) {
+  constructor(
+    packageId: string,
+    extendedObjects: readonly ExtendedObjectOfUninstall[],
+    customizationPackage?: string,
+  ) {
     const extenders = [...new Set(extendedObjects.flatMap((o) => o.extenders))];
     const listed = extendedObjects
       .slice(0, EXTENDED_OBJECTS_LISTED)
       .map((o) => `object "${o.objectName}" is extended by ${o.extenders.join(', ')}`);
     const more = extendedObjects.length - listed.length;
+    const extendersStep = extendedObjects.length === 0 ? undefined :
+      `the ${extenders.length === 1 ? 'package that extends' : 'packages that extend'} ` +
+      `${extendedObjects.length === 1 ? 'an object' : 'objects'} of "${packageId}"`;
+    const extendersFact = extendedObjects.length === 0 ? undefined :
+      `${listed.join('; ')}${more > 0 ? `; and ${more} more extended object${more === 1 ? '' : 's'}` : ''}`;
+    // The pair's step names its own export door, so "export it or delete it"
+    // is one instruction: export to keep what it holds, then delete it.
+    const pairStep = customizationPackage === undefined ? undefined :
+      `the customization package "${customizationPackage}" first (to keep its customizations, export it ` +
+      `before that: GET /api/v1/packages/${customizationPackage}/export)`;
+    const extendersReason = 'a package cannot be uninstalled while another package extends an object it owns ' +
+      '(objectExtensions, ADR-0029)';
+    const pairReason = 'while its paired customization package is installed, which would strand every ' +
+      'customization it holds (ADR-0146 D3)';
     super(
-      `Uninstall the ${extenders.length === 1 ? 'package that extends' : 'packages that extend'} ` +
-        `${extendedObjects.length === 1 ? 'an object' : 'objects'} of "${packageId}" first ` +
-        `(${extenders.join(', ')}), then uninstall "${packageId}" again: a package cannot be ` +
-        `uninstalled while another package extends an object it owns (objectExtensions, ADR-0029). ` +
-        `Cannot uninstall package "${packageId}": ${listed.join('; ')}` +
-        `${more > 0 ? `; and ${more} more extended object${more === 1 ? '' : 's'}` : ''}.`,
+      extendersStep !== undefined && pairStep !== undefined
+        ? `Uninstall ${extendersStep} (${extenders.join(', ')}) and delete ${pairStep}, then uninstall ` +
+          `"${packageId}" again: ${extendersReason}, nor ${pairReason}. Cannot uninstall package ` +
+          `"${packageId}": ${extendersFact}; and its customization package "${customizationPackage}" is installed.`
+        : pairStep !== undefined
+          ? `Delete ${pairStep}, then uninstall "${packageId}" again: a package cannot be uninstalled ` +
+            `${pairReason}. Cannot uninstall package "${packageId}": its customization package ` +
+            `"${customizationPackage}" is installed.`
+          : `Uninstall ${extendersStep} first (${extenders.join(', ')}), then uninstall "${packageId}" again: ` +
+            `${extendersReason}. Cannot uninstall package "${packageId}": ${extendersFact}.`,
     );
     this.name = 'PackageUninstallExtendedError';
     this.packageId = packageId;
     this.extendedObjects = extendedObjects;
     this.extenders = extenders;
+    this.customizationPackageId = customizationPackage;
   }
 }
 
@@ -2954,6 +3277,34 @@ function withoutField(schema: ServiceObject, name: string): ServiceObject {
   if (!fields || fields[name] === undefined) return schema;
   const { [name]: _dropped, ...rest } = fields;
   return { ...schema, fields: rest } as ServiceObject;
+}
+
+/**
+ * [#28697] The undo record of one registration run under
+ * {@link SchemaRegistry.restoringOnRefusal}: for each registry entry the run
+ * writes, the way to put back what the entry held just before the run's FIRST
+ * write to it. An entry the run never writes is never recorded, so a restore
+ * puts back exactly the entries the run touched and nothing else — another
+ * package's entries and a tenant's layers are left as they are.
+ */
+class RegistrationRestorePoint {
+  private readonly touched = new Set<string>();
+  private readonly undo: Array<() => void> = [];
+
+  /**
+   * Record `key` before its first write in this run. `capture` reads the
+   * entry as it is now and returns how to put it back.
+   */
+  note(key: string, capture: () => () => void): void {
+    if (this.touched.has(key)) return;
+    this.touched.add(key);
+    this.undo.push(capture());
+  }
+
+  /** Put every recorded entry back, the last one written first. */
+  restore(): void {
+    for (let i = this.undo.length - 1; i >= 0; i--) this.undo[i]();
+  }
 }
 
 export class SchemaRegistry {
@@ -3239,6 +3590,172 @@ export class SchemaRegistry {
   }
 
   // ==========================================
+  // Restore on refusal
+  // ==========================================
+
+  /** The open {@link RegistrationRestorePoint}, while {@link restoringOnRefusal} runs. */
+  private restorePoint: RegistrationRestorePoint | undefined;
+
+  /**
+   * [#28697] Run `register` — one registration made of several registry
+   * writes, such as an upgrade of an installed package — and, when it throws,
+   * put back exactly the entries it wrote, then throw the same error.
+   *
+   * Every refusal a verb below raises keeps its code and words; this decides
+   * only what is left afterwards, wherever in the run the refusal came from:
+   * the entries as they were before the run.
+   *
+   * What is recorded, each entry before the run's first write to it: an
+   * object's contributor list (an `extend` or overlay layer of another package
+   * or a tenant sits in it and is put back unchanged), a namespace's owners,
+   * an item slot (the package record included), this package's picklist
+   * extension of one list, and the security catalog and default record page
+   * claims the package door records. Nothing the run does not write is
+   * recorded or put back. After a restore every merged object is
+   * re-resolved, since a fold computed during the run may have read an entry
+   * the restore put back.
+   *
+   * ⛔ Not a way back from an operator's verb: {@link uninstallPackage},
+   * {@link unregisterObject} and the overlay removals are never journaled.
+   * Synchronous by contract: `register` must not return a promise, so no
+   * other caller's write can land between the run's writes and its restore.
+   * A nested call joins the run that is already open.
+   */
+  restoringOnRefusal<T>(register: () => T): T {
+    if (this.restorePoint) return register();
+    const point = new RegistrationRestorePoint();
+    this.restorePoint = point;
+    try {
+      const result = register();
+      if (result instanceof Promise) {
+        throw new TypeError('[Registry] restoringOnRefusal takes a synchronous registration; it was handed one that returned a promise.');
+      }
+      return result;
+    } catch (err) {
+      point.restore();
+      this.invalidateAll();
+      throw err;
+    } finally {
+      this.restorePoint = undefined;
+    }
+  }
+
+  /** Record an object's contributor list (and each contributor's mutable slots) before its first write. */
+  private noteObjectEntry(fqn: string): void {
+    this.restorePoint?.note(`object\u0000${fqn}`, () => {
+      const list = this.objectContributors.get(fqn);
+      if (!list) return () => this.closeObjectEntry(fqn);
+      // The late-install branch re-classifies a sitting contributor in place,
+      // so its ownership and priority are kept beside the reference.
+      const saved = list.map((c) => ({ c, ownership: c.ownership, priority: c.priority }));
+      return () => {
+        for (const s of saved) {
+          s.c.ownership = s.ownership;
+          s.c.priority = s.priority;
+        }
+        list.splice(0, list.length, ...saved.map((s) => s.c));
+        this.mergedObjectCache.delete(fqn);
+      };
+    });
+  }
+
+  /** Record a namespace's owner set before its first write. */
+  private noteNamespace(namespace: string): void {
+    this.restorePoint?.note(`namespace\u0000${namespace}`, () => {
+      const owners = this.namespaceRegistry.get(namespace);
+      const saved = owners ? new Set(owners) : undefined;
+      return () => {
+        if (saved) this.namespaceRegistry.set(namespace, saved);
+        else this.namespaceRegistry.delete(namespace);
+      };
+    });
+  }
+
+  /** Record whether an item type had a store at all, before the run can create one. */
+  private noteItemType(type: string): void {
+    this.restorePoint?.note(`type\u0000${type}`, () => {
+      const hadType = this.metadata.has(type);
+      return () => {
+        if (!hadType && this.metadata.get(type)?.size === 0) this.metadata.delete(type);
+      };
+    });
+  }
+
+  /** Record one item slot before its first write. */
+  private noteItem(type: string, key: string): void {
+    this.restorePoint?.note(`item\u0000${type}\u0000${key}`, () => {
+      const collection = this.metadata.get(type);
+      const had = collection?.has(key) ?? false;
+      const value = collection?.get(key);
+      return () => {
+        const now = this.metadata.get(type);
+        if (had) now?.set(key, value);
+        else now?.delete(key);
+      };
+    });
+  }
+
+  /** Record this package's extension of one picklist before its first write. */
+  private notePicklistExtension(target: string, packageKey: string): void {
+    this.restorePoint?.note(`picklistExtension\u0000${target}\u0000${packageKey}`, () => {
+      const byPackage = this.picklistExtensionContributions.get(target);
+      const saved = byPackage?.get(packageKey);
+      return () => {
+        let now = this.picklistExtensionContributions.get(target);
+        if (saved) {
+          if (!now) this.picklistExtensionContributions.set(target, now = new Map());
+          now.set(packageKey, saved);
+        } else if (now) {
+          now.delete(packageKey);
+          if (now.size === 0) this.picklistExtensionContributions.delete(target);
+        }
+      };
+    });
+  }
+
+  /** Record who holds one security catalog name before its first write. */
+  private noteSecurityCatalogClaim(type: SecurityCatalogType, name: string): void {
+    this.restorePoint?.note(`catalogClaim\u0000${type}\u0000${name}`, () => {
+      const saved = this.securityCatalogClaims.get(type)?.get(name);
+      return () => {
+        let byName = this.securityCatalogClaims.get(type);
+        if (saved !== undefined) {
+          if (!byName) this.securityCatalogClaims.set(type, byName = new Map());
+          byName.set(name, saved);
+        } else {
+          byName?.delete(name);
+        }
+      };
+    });
+  }
+
+  /**
+   * Record the default record page claims before `packageId`'s first rewrite
+   * of them ({@link recordDefaultRecordPageClaims} drops all of the package's
+   * claims, then adds what the manifest declares). Put back per object, and
+   * only for the objects `packageId` held a claim on before or after, each in
+   * its holders' original order.
+   */
+  private noteDefaultRecordPageClaims(packageId: string): void {
+    // Keyed by slot (`recordPageSlotKey`): an object's default, or one app's
+    // page of it. Every slot is put back the same way.
+    this.restorePoint?.note(`defaultPageClaims\u0000${packageId}`, () => {
+      const saved = new Map<string, Map<string, string>>();
+      for (const [object, byPackage] of this.defaultRecordPageClaims) saved.set(object, new Map(byPackage));
+      return () => {
+        const objects = new Set<string>();
+        for (const [object, byPackage] of saved) if (byPackage.has(packageId)) objects.add(object);
+        for (const [object, byPackage] of this.defaultRecordPageClaims) if (byPackage.has(packageId)) objects.add(object);
+        for (const object of objects) {
+          const before = saved.get(object);
+          if (before) this.defaultRecordPageClaims.set(object, new Map(before));
+          else this.defaultRecordPageClaims.delete(object);
+        }
+      };
+    });
+  }
+
+  // ==========================================
   // Namespace Management
   // ==========================================
 
@@ -3248,6 +3765,7 @@ export class SchemaRegistry {
    */
   registerNamespace(namespace: string, packageId: string): void {
     if (!namespace) return;
+    this.noteNamespace(namespace);
 
     let owners = this.namespaceRegistry.get(namespace);
     if (!owners) {
@@ -3264,6 +3782,7 @@ export class SchemaRegistry {
   unregisterNamespace(namespace: string, packageId: string): void {
     const owners = this.namespaceRegistry.get(namespace);
     if (owners) {
+      this.noteNamespace(namespace);
       owners.delete(packageId);
       if (owners.size === 0) {
         this.namespaceRegistry.delete(namespace);
@@ -3295,8 +3814,10 @@ export class SchemaRegistry {
   // ==========================================
 
   /**
-   * Object → package → the page that package declared as the object's default
-   * record page at install, recorded by {@link installPackage} once its
+   * Slot → package → the page that package declared for the slot at install —
+   * a slot is an object's default record page, keyed by the object alone, or
+   * the record page of an object inside one app (`PageSchema.apps`, ruling A
+   * on objectstack#28979), keyed by `recordPageSlotKey` — recorded by {@link installPackage} once its
    * declarations pass {@link refuseDefaultRecordPageConflicts}, forgotten by
    * {@link uninstallPackage}.
    *
@@ -3326,7 +3847,7 @@ export class SchemaRegistry {
    * onto an overlay of a packaged page), and is named as that package's page.
    * A disabled package is still installed, and its pages still hold.
    */
-  private defaultRecordPageSlots(object: string): Array<{ holder: DefaultRecordPageHolder; bare: boolean }> {
+  private defaultRecordPageSlots(slot: RecordPageSlot): Array<{ holder: DefaultRecordPageHolder; bare: boolean }> {
     const found = new Map<string, { holder: DefaultRecordPageHolder; bare: boolean }>();
     const add = (holder: DefaultRecordPageHolder, bare: boolean) => {
       found.set(defaultRecordPageHolderKey(holder), { holder, bare });
@@ -3338,7 +3859,7 @@ export class SchemaRegistry {
       const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
       if (sep < 0) {
         bareNames.add(key);
-        if (defaultRecordPageObject(item) !== object) continue;
+        if (!holdsRecordPageSlot(item, slot)) continue;
         const packaged =
           typeof stamped === 'string' && stamped !== '' && stamped !== 'sys_metadata' && !isTenantAuthored(item);
         add(packaged ? { kind: 'package', packageId: stamped, page: key } : { kind: 'environment', page: key }, true);
@@ -3351,10 +3872,10 @@ export class SchemaRegistry {
       }
     }
     for (const { packageId, page, item } of composites) {
-      if (bareNames.has(page) || defaultRecordPageObject(item) !== object) continue;
+      if (bareNames.has(page) || !holdsRecordPageSlot(item, slot)) continue;
       add({ kind: 'package', packageId, page }, false);
     }
-    for (const [packageId, page] of this.defaultRecordPageClaims.get(object) ?? []) {
+    for (const [packageId, page] of this.defaultRecordPageClaims.get(recordPageSlotKey(slot)) ?? []) {
       if (bareNames.has(page)) continue;
       add({ kind: 'package', packageId, page }, false);
     }
@@ -3371,9 +3892,13 @@ export class SchemaRegistry {
    * An environment item under a page's name stands in for that page, so a
    * name appears once, as the bare slot's verdict, whatever the slots it
    * shadows say. See {@link defaultRecordPageSlots}.
+   *
+   * With `app` passed, the holders of the record page of `object` inside that
+   * app instead (`PageSchema.apps`, ruling A on objectstack#28979) — the slot
+   * the save door meets an app-scoped page with.
    */
-  defaultRecordPageHoldersOf(object: string): DefaultRecordPageHolder[] {
-    return this.defaultRecordPageSlots(object).map(({ holder }) => holder);
+  defaultRecordPageHoldersOf(object: string, app?: string): DefaultRecordPageHolder[] {
+    return this.defaultRecordPageSlots(app === undefined ? { object } : { object, app }).map(({ holder }) => holder);
   }
 
   /**
@@ -3382,8 +3907,8 @@ export class SchemaRegistry {
    * the package's own pages and the bare-slot item of the same name (the
    * environment's overlay of the very page being registered).
    */
-  private otherDefaultRecordPageHolders(object: string, page: string, packageId: string): DefaultRecordPageHolder[] {
-    return this.defaultRecordPageSlots(object)
+  private otherDefaultRecordPageHolders(slot: RecordPageSlot, page: string, packageId: string): DefaultRecordPageHolder[] {
+    return this.defaultRecordPageSlots(slot)
       .filter(({ holder, bare }) => {
         if (holder.kind === 'package' && holder.packageId === packageId) return false;
         return !(bare && holder.page === page);
@@ -3414,20 +3939,21 @@ export class SchemaRegistry {
     if (misplaced.length > 0) throw new MisplacedDefaultPageError(selfId, misplaced);
     if (selfId === undefined) return;
     const conflicts: DefaultRecordPageConflict[] = [];
-    // object → the first page this manifest declares for it.
+    // slot → the first page this manifest declares for it.
     const firstDeclared = new Map<string, string>();
-    for (const { object, page } of declaredDefaultRecordPages(manifest)) {
+    for (const { page, ...slot } of declaredDefaultRecordPages(manifest)) {
       const incoming: DefaultRecordPageHolder = { kind: 'package', packageId: selfId, page };
-      const first = firstDeclared.get(object);
+      const key = recordPageSlotKey(slot);
+      const first = firstDeclared.get(key);
       if (first === undefined) {
-        firstDeclared.set(object, page);
-        for (const existing of this.otherDefaultRecordPageHolders(object, page, selfId)) {
-          conflicts.push({ object, incoming, existing });
+        firstDeclared.set(key, page);
+        for (const existing of this.otherDefaultRecordPageHolders(slot, page, selfId)) {
+          conflicts.push({ ...slot, incoming, existing });
         }
       } else if (first !== page) {
-        // Two pages of one manifest for one object. One page declared twice
+        // Two pages of one manifest for one slot. One page declared twice
         // under one name is one page (the stack contract refuses the repeat).
-        conflicts.push({ object, incoming, existing: { kind: 'package', packageId: selfId, page: first } });
+        conflicts.push({ ...slot, incoming, existing: { kind: 'package', packageId: selfId, page: first } });
       }
     }
     if (conflicts.length > 0) throw new DefaultRecordPageConflictError(conflicts);
@@ -3438,12 +3964,14 @@ export class SchemaRegistry {
    * {@link defaultRecordPageClaims} for why a re-install replaces).
    */
   private recordDefaultRecordPageClaims(packageId: string, manifest: ObjectStackManifest): void {
+    this.noteDefaultRecordPageClaims(packageId);
     this.forgetDefaultRecordPageClaims(packageId);
-    for (const { object, page } of declaredDefaultRecordPages(manifest)) {
-      let byPackage = this.defaultRecordPageClaims.get(object);
+    for (const { page, ...slot } of declaredDefaultRecordPages(manifest)) {
+      const key = recordPageSlotKey(slot);
+      let byPackage = this.defaultRecordPageClaims.get(key);
       if (!byPackage) {
         byPackage = new Map();
-        this.defaultRecordPageClaims.set(object, byPackage);
+        this.defaultRecordPageClaims.set(key, byPackage);
       }
       if (!byPackage.has(packageId)) byPackage.set(packageId, page);
     }
@@ -3567,6 +4095,7 @@ export class SchemaRegistry {
         byName = new Map();
         this.securityCatalogClaims.set(type, byName);
       }
+      this.noteSecurityCatalogClaim(type, name);
       byName.set(name, packageId);
     }
   }
@@ -3784,14 +4313,20 @@ export class SchemaRegistry {
     // {@link ExtensionDefaultRowScopeRefusedError}. Here, beside the field-`type`
     // door and for the same reason: before any materialization and before the
     // contributor list is opened, so a refused contribution leaves nothing behind.
-    if (ownership === 'extend' && (schema as { defaultRowScope?: unknown }).defaultRowScope !== undefined) {
-      throw new ExtensionDefaultRowScopeRefusedError(schema.name, packageId);
-    }
     // [#25234 ruling A, refusal 10] Nor does it declare a membership key — see
     // {@link ExtensionMembershipKeysRefusedError}. The same door, for the same
-    // reason, so a refused contribution leaves nothing behind.
-    if (ownership === 'extend' && (schema as { membershipKeys?: unknown }).membershipKeys !== undefined) {
-      throw new ExtensionMembershipKeysRefusedError(schema.name, packageId);
+    // reason, so a refused contribution leaves nothing behind. [#28574] Both
+    // are asked through {@link extendContributionRefusal}, the one copy the
+    // metadata save and publish doors also ask of an `object_extension` item.
+    if (ownership === 'extend') {
+      const extendRefusal = extendContributionRefusal(schema, packageId);
+      if (extendRefusal) throw extendRefusal;
+      // [#28858] …filed under the key the object it extends is registered
+      // under — see {@link extensionTargetKey}. Every entry that registers an
+      // extension reaches this line: the manifest `objectExtensions` loop and
+      // a stored `object_extension` row ({@link registerObjectExtension}).
+      const target = this.extensionTargetKey(String(schema.name ?? ''), packageId);
+      if (target !== schema.name) schema = { ...schema, name: target };
     }
     // [ADR-0144 D6] A `summary` roll-up that reads a `record`-mode amount —
     // `sum` / `avg` / `min` / `max` of a child field whose rows each carry
@@ -3916,6 +4451,11 @@ export class SchemaRegistry {
     // record — skip rather than registering `undefined` as an owner (which
     // would also mean widening `registerNamespace`'s own required-string
     // contract, out of scope here).
+    // [#28697] Recorded before the first write below (the namespace claim),
+    // so a refusal raised after it — the ownership conflict — puts this
+    // object's layers back exactly ({@link restoringOnRefusal}).
+    this.noteObjectEntry(fqn);
+
     if (namespace && packageId) {
       this.registerNamespace(namespace, packageId);
     }
@@ -4119,21 +4659,177 @@ export class SchemaRegistry {
     // tenant's `message` and `active`. Computed once, over the base, as the
     // scalars above are.
     const tenantRules = this.tenantRuleSettings(contributors, baseDefinition);
+    // [ADR-0146 D10, second rule; ADR-0029 D9.2a] The display keys the tenant
+    // authored on the fields the extenders patch — computed once, over the
+    // base, for the scalars' reason above.
+    const tenantPatched = this.tenantPatchedDisplayKeys(contributors, baseDefinition);
+    // [ADR-0146 D10, second rule] The fields a patch reaches: the owner's own.
+    const owner = contributors.find((c) => c.ownership === 'own')?.definition;
+    const ownFields = ownFieldNamesOf(owner);
     let merged = tenantRules
       ? this.withPackagedOwnerRules(contributors, baseDefinition, tenantRules)
       : { ...baseDefinition };
+    // [#28835] Each extension's `fields` as the merge took them, in fold order.
+    const folded: FoldedExtensionFields[] = [];
     for (const contrib of contributors) {
       if (contrib.ownership === 'extend') {
         let extension = governAudit ? applyAuditFieldGovernance(contrib.definition) : contrib.definition;
         if (governQueue) extension = this.withoutExtensionQueueField(extension, contrib.packageId);
-        merged = mergeObjectDefinitions(merged, extension, tenantAuthored, tenantRules);
+        // [#28809] The judge, asked of the owner's fields as the OWNER declares
+        // them (what the install door and `os validate` read), never as an
+        // extension's `fields` redeclared them; the merge applies only what it
+        // admits. A field counts as carried as the merge below will carry it:
+        // in the running body's record spelling, or redeclared by this body.
+        const patches = (extension as ObjectExtensionBody).fieldPatches;
+        const running = merged;
+        const misses = patches && owner && ownFields
+          ? fieldPatchTargetMisses(
+            String(baseDefinition.name ?? extension.name ?? ''),
+            patches,
+            ownFieldsTarget(owner, ownFields, (name) => !!(recordFieldOf(running, name) ?? recordFieldOf(extension, name))),
+          )
+          : [];
+        const admitted = misses.length > 0
+          ? { ...extension, fieldPatches: admittedFieldPatches(patches!, misses) } as ObjectExtensionBody
+          : extension;
+        merged = mergeObjectDefinitions(merged, admitted, tenantAuthored, tenantRules, tenantPatched, ownFields);
+        // [#28809] …and the same judge once more, over the admitted patches
+        // against the owner's fields as MERGED, which only names: an admitted
+        // option an earlier layer left out (an extension's `fields`
+        // redeclaration, a tenant overlay base) had nothing to relabel, so the
+        // fold names it as it names any patch it skipped. Never drops, never
+        // refuses; admission above stays the owner's.
+        const admittedPatches = (admitted as ObjectExtensionBody).fieldPatches;
+        const residual = admittedPatches && owner && ownFields
+          ? fieldPatchTargetMisses(
+            String(baseDefinition.name ?? extension.name ?? ''),
+            admittedPatches,
+            ownFieldsTarget(merged, ownFields, (name) => !!recordFieldOf(merged, name)),
+          )
+          : [];
+        this.reportFieldPatchMisses([...misses, ...residual], contrib.packageId);
+        folded.push({ packageId: contrib.packageId, fields: extension.fields });
       }
     }
+    this.reportRedeclaredFields(String(merged.name ?? baseDefinition.name ?? ''), contributors, ownFields, folded);
     if (tenantRules) this.reportChangedRuleCopies(contributors, baseDefinition);
     // A picklist-bound field is served with its list's options resolved onto
     // it — here, in the fold every object read and the write door share, so
     // the set a client is offered and the set a write is judged by are one.
     return this.finishServedObject(merged, layer);
+  }
+
+  /**
+   * [ADR-0146 D10, second rule] Field-patch targets already named, keyed
+   * `object|package|field|option`. Per registry, for the reason
+   * {@link shadowedExtensionQueueWarned} gives.
+   */
+  private fieldPatchMissesWarned = new Set<string>();
+
+  /**
+   * [#28835] Field names already named as declared by more than one
+   * contributor, keyed `object|field|packages` (the packages in fold order).
+   * Per registry, for the reason {@link shadowedExtensionQueueWarned} gives.
+   */
+  private redeclaredFieldsWarned = new Set<string>();
+
+  /**
+   * [#28835] Name, once, each field name of the object that more than one
+   * contributor declares in `fields`: two extensions both adding it, or an
+   * extension redeclaring a field the owner declares (one of `ownFields`). The
+   * merge spreads `fields`, so the definition served is the last one the fold
+   * applied: contributions fold in ascending `priority`, and at equal priority
+   * in the order they registered, so the one registered last. The line names
+   * the object, the field, every declaring package in that order, and the one
+   * whose definition is served.
+   *
+   * Judged from the contributors' own declarations (`folded`, as the merge
+   * took them), never from the running body, so a base that already carries
+   * the extensions' fields (a folded body handed to
+   * {@link foldObjectExtendersOnto}, a stored overlay row) is not read as a
+   * redeclaration. `fieldPatches` is not a declaration and is not counted
+   * ({@link reportFieldPatchMisses} names a patch that misses). A `.custom`
+   * pair's `__c` field and a dependent's plain one never share a name.
+   *
+   * ⛔ Never a refusal, and the served definition is unchanged: the same
+   * reasons as {@link reportFieldPatchMisses} (the fold runs on every read
+   * while a boot is still registering packages). At `warn`: one package's
+   * definition of the field is not served.
+   */
+  private reportRedeclaredFields(
+    object: string,
+    contributors: readonly ObjectContributor[],
+    ownFields: ReadonlySet<string> | undefined,
+    folded: readonly FoldedExtensionFields[],
+  ): void {
+    if (folded.length === 0) return;
+    const owner = contributors.find((c) => c.ownership === 'own');
+    const declarers = new Map<string, Array<{ packageId: string | undefined; owner: boolean }>>();
+    for (const { packageId, fields } of folded) {
+      if (!isPlainRecord(fields)) continue;
+      for (const name of Object.keys(fields)) {
+        let list = declarers.get(name);
+        if (!list) {
+          list = owner && ownFields?.has(name) ? [{ packageId: owner.packageId, owner: true }] : [];
+          declarers.set(name, list);
+        }
+        list.push({ packageId, owner: false });
+      }
+    }
+    const named = (packageId: string | undefined) => (packageId ? `"${packageId}"` : '(no package)');
+    for (const [field, list] of declarers) {
+      if (list.length < 2) continue;
+      const key = `${object}|${field}|${list.map((d) => d.packageId ?? '').join(',')}`;
+      if (this.redeclaredFieldsWarned.has(key)) continue;
+      this.redeclaredFieldsWarned.add(key);
+      const extenders = list.filter((d) => !d.owner).map((d) => named(d.packageId));
+      const declaredBy = list[0]!.owner
+        ? `the owner ${named(list[0]!.packageId)} and by extensions from ${extenders.join(', ')}`
+        : `extensions from ${extenders.join(', ')}`;
+      console.warn(
+        `[Registry] Field "${field}" of object "${object}" is declared in \`fields\` by ${declaredBy}; ` +
+          `the definition served is the one from ${named(list[list.length - 1]!.packageId)}, the last the fold applies ` +
+          '(ascending `priority`; at equal priority, the one registered last). Rename the field in one extension, ' +
+          'or patch an owner field\'s display properties instead of redeclaring it.',
+      );
+    }
+  }
+
+  /**
+   * [ADR-0146 D10, second rule] Name, once, each patch the fold did not apply
+   * because the judge missed it: a field that is not one of the owner's own
+   * (absent, or added only by an extension), an option value the owner's field
+   * does not declare (one an extension adds by redeclaring the field through
+   * `fields` included, #28809), or an option of a picklist-bound field. The
+   * verdict (`misses`) is the install door's and `os validate`'s own judge
+   * (`fieldPatchTargetMisses`), asked by the fold of the owner's declaration
+   * ({@link ownFieldsTarget}) as those doors ask it, so the boot names exactly
+   * what they refuse — plus, asked again of the merged fields, an admitted
+   * option an earlier layer left out, which had nothing to relabel. What the
+   * fold names is what it skipped. With no owner registered there is nothing
+   * to judge against, and nothing is named.
+   *
+   * ⛔ Never a refusal, and worded as the state it observes: the fold runs on
+   * every read while a boot is still registering packages, and an owner that
+   * registers again declaring the field (an upgrade) makes the patch apply on
+   * the next read, with nothing recorded to undo (AGENTS.md *Startup registry
+   * reads*). At `warn`: the object is visibly unpatched, and nothing durable
+   * is lost.
+   */
+  private reportFieldPatchMisses(
+    misses: readonly FieldPatchTargetMiss[],
+    packageId: string | undefined,
+  ): void {
+    for (const miss of misses) {
+      const object = miss.object;
+      const key = `${object}|${packageId ?? ''}|${miss.field}|${miss.option ?? ''}`;
+      if (this.fieldPatchMissesWarned.has(key)) continue;
+      this.fieldPatchMissesWarned.add(key);
+      console.warn(
+        `[Registry] An extension of object "${object}"${packageId ? ` from package "${packageId}"` : ''} ` +
+          `carries a field patch that is not applied while the object has no such target: ${miss.message}`,
+      );
+    }
   }
 
   /**
@@ -4234,21 +4930,29 @@ export class SchemaRegistry {
     if (body === null || typeof body !== 'object') return body;
     const objectName = (body as { name?: unknown }).name;
     if (typeof objectName !== 'string' || objectName === '') return body;
-    const collection = this.metadata.get('action');
-    if (!collection || collection.size === 0) return body;
     const declared = (body as { actions?: unknown }).actions;
     const base: any[] = Array.isArray(declared) ? declared : [];
+    // [#28877] On the SERVED layer the object's own actions that launch into a
+    // disabled package are withheld too ({@link isActionWithheldByDisabledPackage}),
+    // as an attached one is: the same-stack merge puts a bound action here, not
+    // in the collection below. The code layer is the artifact as shipped and
+    // keeps them. A withheld name still blocks an attached twin of that name,
+    // so nothing stands in for it.
+    const kept = layer === 'served' ? base.filter((action) => !this.isActionWithheldByDisabledPackage(action)) : base;
     const present = new Set<unknown>(base.map((action) => action?.name));
     const fresh: any[] = [];
-    for (const action of layer === 'code' ? this.boundCodeActions() : this.boundServedActions()) {
-      if (standaloneActionOwnerKey(action) !== objectName || present.has(action.name)) continue;
-      present.add(action.name);
-      fresh.push(action);
+    const collection = this.metadata.get('action');
+    if (collection && collection.size > 0) {
+      for (const action of layer === 'code' ? this.boundCodeActions() : this.boundServedActions()) {
+        if (standaloneActionOwnerKey(action) !== objectName || present.has(action.name)) continue;
+        present.add(action.name);
+        fresh.push(action);
+      }
     }
-    if (fresh.length === 0) return body;
+    if (fresh.length === 0 && kept.length === base.length) return body;
     // The object's own actions keep their served order, untouched; the
     // attached ones follow, ordered among themselves by `order`.
-    return { ...body, actions: [...base, ...sortActionsByOrder(fresh)] };
+    return { ...body, actions: [...kept, ...sortActionsByOrder(fresh)] };
   }
 
   /**
@@ -4286,7 +4990,8 @@ export class SchemaRegistry {
       const name: string = (action as any).name;
       if (key !== name && collection.has(name)) continue;
       if (isObjectLessActionKey(standaloneActionOwnerKey(action))) continue;
-      if (this.isPackageDisabled((action as any)._packageId)) continue;
+      // [#28877] …and so is an action that launches into a disabled package.
+      if (this.isActionWithheldByDisabledPackage(action)) continue;
       out.push(action);
     }
     return out;
@@ -4437,6 +5142,55 @@ export class SchemaRegistry {
     for (const key of OBJECT_FOLD_SCALAR_KEYS) {
       if (scalarOverridesPackagedBase(owner, key, baseDefinition[key])) {
         (authored ??= new Set()).add(key);
+      }
+    }
+    return authored;
+  }
+
+  /**
+   * [ADR-0146 D10, second rule; ADR-0029 D9.2a] The display keys a fold's base
+   * has authored away from the packaged owner's value, on the fields and
+   * options the `extend` contributors patch — each a {@link fieldPatchYieldKey}.
+   * A patch yields on those keys, as an extender's scalar yields on
+   * {@link tenantAuthoredScalars}, and by the same comparison
+   * ({@link displayKeyOverridesPackagedBase}).
+   *
+   * The same two "no opinion" edges as {@link tenantAuthoredScalars}, for its
+   * reasons: no `own` contributor, or a base that IS the owner's body (by
+   * reference). Idempotent over a folded base for its reason too: a base that
+   * already carries a patch's text reads as authored, so the patch yields and
+   * the value stays what the first fold produced.
+   */
+  private tenantPatchedDisplayKeys(
+    contributors: ObjectContributor[],
+    baseDefinition: ServiceObject,
+  ): ReadonlySet<string> | undefined {
+    const owner = contributors.find((c) => c.ownership === 'own')?.definition;
+    if (!owner || owner === baseDefinition) return undefined;
+    let authored: Set<string> | undefined;
+    for (const contrib of contributors) {
+      if (contrib.ownership !== 'extend') continue;
+      const patches = (contrib.definition as ObjectExtensionBody).fieldPatches;
+      if (!patches) continue;
+      for (const [name, patch] of Object.entries(patches)) {
+        const packagedField = recordFieldOf(owner, name);
+        const baseField = recordFieldOf(baseDefinition, name);
+        if (!patch || !packagedField || !baseField) continue;
+        for (const key of BASE_FIELD_DISPLAY_WHITELIST.field) {
+          if (displayKeyOverridesPackagedBase(packagedField, key, baseField[key])) {
+            (authored ??= new Set()).add(fieldPatchYieldKey(name, key));
+          }
+        }
+        for (const value of Object.keys(patch.options ?? {})) {
+          const packagedOption = optionByValue(packagedField, value);
+          const baseOption = optionByValue(baseField, value);
+          if (!packagedOption || !baseOption) continue;
+          for (const key of BASE_FIELD_DISPLAY_WHITELIST.option) {
+            if (displayKeyOverridesPackagedBase(packagedOption, key, baseOption[key])) {
+              (authored ??= new Set()).add(fieldPatchYieldKey(name, key, value));
+            }
+          }
+        }
       }
     }
     return authored;
@@ -4614,10 +5368,14 @@ export class SchemaRegistry {
    * Why this is public API rather than the protocol reaching for the
    * contributor list: `GET /meta/object/:name` reaches an object body through a
    * source this registry never sees — the copy `MetadataPlugin` registers into
-   * the `metadata` SERVICE when a deployment ingests a compiled artifact, where
-   * `objects` and `objectExtensions` are stored as SEPARATE collections. That
-   * body is ONE LAYER, and serving a layer as the resolved schema is what
-   * dropped every `objectExtensions` field from the by-name read (and from both
+   * the `metadata` SERVICE when a deployment ingests a compiled artifact. That
+   * service holds the owner's declaration only: a code package's
+   * `objectExtensions` are never stored there as items, because the ObjectQL
+   * engine's `registerApp` registers each one as an `'extend'` contributor
+   * here, and `MetadataPlugin` files no item from that collection (an
+   * extension carries `extend` and no `name`). That body is ONE LAYER, and
+   * serving a layer as the resolved schema is what dropped every
+   * `objectExtensions` field from the by-name read (and from both
    * layers of `?layers=true`) while `GET /meta/object` — which reads
    * `resolveObject` — kept them. Two folds would re-open exactly that seam one
    * level down, so there is one.
@@ -5509,6 +6267,115 @@ export class SchemaRegistry {
   }
 
   /**
+   * [#28574] {@link extendContributionRefusal}, asked of the registry by the
+   * metadata doors (which reach this registry through the engine and do not
+   * import this package).
+   */
+  extendContributionRefusal(
+    schema: { name?: unknown; defaultRowScope?: unknown; membershipKeys?: unknown },
+    packageId: string | undefined,
+  ): Error | undefined {
+    return extendContributionRefusal(schema, packageId);
+  }
+
+  /**
+   * [#28574, ADR-0146 D10] Register an `object_extension` item — a stored row
+   * of a writable package — as that package's `'extend'` contributor of the
+   * object it names.
+   *
+   * The WHOLE body is the contribution: every key the extension's schema
+   * declares reaches {@link mergeObjectDefinitions}, never a hand-copied key
+   * list. Only the two addressing keys are taken off it: `extend` becomes the
+   * contribution's `name` (the object it registers under) and `priority` its
+   * merge priority ({@link DEFAULT_EXTENDER_PRIORITY} when absent). The body
+   * is the caller's PARSED body (`ObjectExtensionSchema`), so schema defaults
+   * and the parse's own rewrites are already applied.
+   *
+   * Re-registering replaces the package's previous contribution to the object
+   * (the `extend` arm of {@link registerObject}), so every sync that re-reads
+   * the stored row can call this again. Refusals are {@link registerObject}'s.
+   *
+   * @returns the FQN registered under.
+   */
+  registerObjectExtension(
+    extension: { extend: string; priority?: number } & Record<string, unknown>,
+    packageId: string,
+  ): string {
+    const { extend, priority, ...contribution } = extension;
+    return this.registerObject(
+      { ...contribution, name: extend } as unknown as ServiceObject,
+      packageId,
+      undefined,
+      'extend',
+      typeof priority === 'number' ? priority : DEFAULT_EXTENDER_PRIORITY,
+    );
+  }
+
+  /**
+   * [#28858] Spellings of an `extend` already named, keyed
+   * `spelled|resolved|package`. Per registry, for the reason
+   * {@link shadowedExtensionQueueWarned} gives.
+   */
+  private extensionSpellingWarned = new Set<string>();
+
+  /**
+   * [#28858, ADR-0146 D10] The key an extension of `name` is filed under: the
+   * key {@link getObject} reads `name` as. That is `name` itself whenever an
+   * entry is registered under it, or nothing is registered that `name` folds
+   * to. It differs only for a short name `getObject` folds to a legacy
+   * `<ns>__<name>` key ({@link resolveObjectKey}); filing such an extension
+   * under the short name would open a second, owner-less entry beside the
+   * object it meant, which nothing serves and nothing checks.
+   *
+   * The folded spelling is named once at `warn`, with the key to write. ⛔
+   * Never a refusal: the manifest loop and the boot hydration run while
+   * packages are still registering (AGENTS.md *Startup registry reads*). The
+   * `object_extension` item door refuses the same spelling at save (#28834),
+   * where the author is present to fix it. A legacy owner that registers
+   * AFTER the extension is not yet there to fold to, so that extension is
+   * filed under its own spelling, as before.
+   */
+  private extensionTargetKey(name: string, packageId: string | undefined): string {
+    if (name === '' || this.objectContributors.has(name)) return name;
+    const resolved = this.resolveObjectKey(name);
+    if (resolved === undefined || resolved === name) return name;
+    const key = `${name}|${resolved}|${packageId ?? ''}`;
+    if (!this.extensionSpellingWarned.has(key)) {
+      this.extensionSpellingWarned.add(key);
+      console.warn(
+        `[Registry] An extension${packageId ? ` from package "${packageId}"` : ''} names its object '${name}', ` +
+          `which is registered as '${resolved}': the extension is filed under '${resolved}', the object it ` +
+          `reads as. Write \`extend: '${resolved}'\` to name the object by the key it is registered under.`,
+      );
+    }
+    return resolved;
+  }
+
+  /**
+   * [#28574] Withdraw ONE package's `'extend'` contribution to an object — the
+   * delete of that package's `object_extension` item. The owner, the overlay
+   * layer and every other package's extension stay exactly where they are; a
+   * package's whole set leaves with {@link unregisterObjectsByPackage}.
+   *
+   * @returns whether a contribution was removed (idempotent: `false` when the
+   *   package contributes no extension to the object).
+   */
+  withdrawObjectExtension(name: string, packageId: string): boolean {
+    const fqn = this.resolveObjectKey(name) ?? name;
+    const contributors = this.objectContributors.get(fqn);
+    if (!contributors) return false;
+    const idx = contributors.findIndex(c => c.ownership === 'extend' && c.packageId === packageId);
+    if (idx === -1) return false;
+    contributors.splice(idx, 1);
+    if (contributors.length === 0) this.closeObjectEntry(fqn);
+    // The same two invalidations every other contributor mutation performs.
+    this.mergedObjectCache.delete(fqn);
+    this._objectRevision += 1;
+    this.log(`[Registry] Withdrew extend contribution to ${fqn} from ${packageId}`);
+    return true;
+  }
+
+  /**
    * [ADR-0029 D9.7] Remove the tenant OVERLAY layer of an object, leaving the
    * packaged owner exactly where it is — the layer-addressed sibling of
    * #6818's name-addressed {@link unregisterObject}.
@@ -5631,13 +6498,23 @@ export class SchemaRegistry {
    * its prescription is the whole way out. The decision is unchanged: the
    * package is refused exactly when the first such object exists.
    *
+   * [#28408, ADR-0146 D3] It also refuses while this registry holds the
+   * package's paired customization package — the id
+   * {@link customizationPackageId} derives from `packageId`, so the pair is
+   * found by id alone, whichever door created or installed it. The same
+   * refusal, carrying both causes when both hold. Uninstalling the pair itself
+   * asks nothing of this kind: a `.custom` id derives no pair of its own. An
+   * id that derives no valid pair id (`@acme/crm`) cannot have one installed,
+   * so it is not asked either.
+   *
    * ⛔ ONE predicate: {@link unregisterObjectsByPackage} calls this method
    * rather than keeping its own copy, so the question asked ahead and the
    * refusal raised by the uninstall cannot disagree. `force` is not a
    * parameter here: forcing means not asking, and stays the caller's choice.
    *
    * @throws PackageUninstallExtendedError (`RESOURCE_CONFLICT` / 409) if the
-   *   package owns an object another package extends (ADR-0029)
+   *   package owns an object another package extends (ADR-0029), or its
+   *   paired customization package is installed (ADR-0146 D3)
    */
   assertPackageUninstallable(packageId: string): void {
     const extended: ExtendedObjectOfUninstall[] = [];
@@ -5654,7 +6531,11 @@ export class SchemaRegistry {
         extended.push({ objectName: fqn, extenders: otherExtenders.map(c => String(c.packageId)) });
       }
     }
-    if (extended.length > 0) throw new PackageUninstallExtendedError(packageId, extended);
+    const pair = customizationPackageId(packageId);
+    const installedPair = pair.ok && this.getPackage(pair.value) !== undefined ? pair.value : undefined;
+    if (extended.length > 0 || installedPair !== undefined) {
+      throw new PackageUninstallExtendedError(packageId, extended, installedPair);
+    }
   }
 
   /**
@@ -5668,7 +6549,8 @@ export class SchemaRegistry {
    * its own mutations.
    *
    * @throws PackageUninstallExtendedError (`RESOURCE_CONFLICT` / 409) if trying
-   *   to uninstall an owner that has extenders — {@link assertPackageUninstallable}'s
+   *   to uninstall an owner that has extenders, or a base whose paired
+   *   customization package is installed — {@link assertPackageUninstallable}'s
    */
   unregisterObjectsByPackage(packageId: string, force: boolean = false): void {
     // [#7970] REFUSAL PASS — see {@link assertPackageUninstallable}, which holds
@@ -5829,6 +6711,7 @@ export class SchemaRegistry {
    * Universal Register Method for non-object metadata.
    */
   registerItem<T>(type: string, item: T, keyField: keyof T = 'name' as keyof T, packageId?: string) {
+    this.noteItemType(type);
     if (!this.metadata.has(type)) {
       this.metadata.set(type, new Map());
     }
@@ -5895,14 +6778,16 @@ export class SchemaRegistry {
       // prints at `os validate` and at save.
       const refusal = misplacedDefaultPageRefusal(item);
       if (refusal !== undefined) throw new MisplacedDefaultPageError(packageId, [{ page: baseName, refusal }]);
-      const object = defaultRecordPageObject(item);
-      if (object !== undefined) {
-        const holders = this.otherDefaultRecordPageHolders(object, baseName, packageId);
-        if (holders.length > 0) {
-          const incoming: DefaultRecordPageHolder = { kind: 'package', packageId, page: baseName };
-          throw new DefaultRecordPageConflictError(holders.map((existing) => ({ object, incoming, existing })));
+      // Every slot the page holds: its object's default, and one per app its
+      // `apps` names (ruling A on objectstack#28979).
+      const incoming: DefaultRecordPageHolder = { kind: 'package', packageId, page: baseName };
+      const conflicts: DefaultRecordPageConflict[] = [];
+      for (const slot of recordPageSlotsOf(item)) {
+        for (const existing of this.otherDefaultRecordPageHolders(slot, baseName, packageId)) {
+          conflicts.push({ ...slot, incoming, existing });
         }
       }
+      if (conflicts.length > 0) throw new DefaultRecordPageConflictError(conflicts);
     }
 
     // ADR-0010 §3.7 — translate the author-facing `protection` block
@@ -6107,6 +6992,7 @@ export class SchemaRegistry {
       }
     }
 
+    this.noteItem(type, storageKey);
     collection.set(storageKey, item);
     if (type === 'picklist') this.invalidateAll();
     // [#24400] A bound action is attached to its target on read
@@ -6115,6 +7001,10 @@ export class SchemaRegistry {
       const target = standaloneActionOwnerKey(item);
       if (!isObjectLessActionKey(target)) this.invalidate(target);
     }
+    // [#28877] A flow can change whether an action launching it is withheld
+    // ({@link isActionWithheldByDisabledPackage}), which only a disable makes
+    // possible.
+    if (type === 'flow' && this.hasDisabledPackage()) this.invalidateAll();
     this.log(`[Registry] Registered ${type}: ${storageKey}`);
   }
 
@@ -6144,7 +7034,8 @@ export class SchemaRegistry {
     // Every resolved object may carry this list's options; the removal below
     // is synchronous, so the next fold re-resolves against the store without it.
     // [#24400] …and an object may carry this bound action ({@link attachBoundActions}).
-    if (type === 'picklist' || type === 'action') this.invalidateAll();
+    // [#28877] …or one that launches this flow while a package is disabled.
+    if (type === 'picklist' || type === 'action' || (type === 'flow' && this.hasDisabledPackage())) this.invalidateAll();
     const collection = this.metadata.get(type);
     if (!collection) {
       console.warn(`[Registry] Attempted to unregister non-existent ${type}: ${name}`);
@@ -6306,7 +7197,8 @@ export class SchemaRegistry {
     // object is re-derived without its lists and its added values.
     const droppedExtensions = this.unregisterPicklistExtensionsByPackage(packageId);
     // [#24400] …and so is every object its bound actions were attached to.
-    if (droppedExtensions || removed.some((r) => r.startsWith('picklist/') || r.startsWith('action/'))) this.invalidateAll();
+    // [#28877] …and every object whose actions a flow of this package withheld.
+    if (droppedExtensions || removed.some((r) => r.startsWith('picklist/') || r.startsWith('action/') || r.startsWith('flow/'))) this.invalidateAll();
     return { removed, orphanedOverlays };
   }
 
@@ -6694,6 +7586,74 @@ export class SchemaRegistry {
   }
 
   /**
+   * [#28877] Whether `name` addresses a flow that ONLY disabled packages ship:
+   * at least one registered flow of that name, and every one of them owned by
+   * a disabled package. Those are the flows a disable takes out of the
+   * automation engine's binding (it binds from the list, which omits a
+   * disabled package's items), so a launch of `name` answers "Flow not found".
+   * A flow some enabled package or an overlay row also serves, and a name the
+   * registry holds no flow of (a runtime-authored flow it never hydrated), are
+   * not disabled.
+   */
+  isFlowOfDisabledPackage(name: string): boolean {
+    const collection = this.metadata.get('flow');
+    if (!collection || typeof name !== 'string' || name === '') return false;
+    let found = false;
+    for (const [key, flow] of collection) {
+      if (key !== name && !key.endsWith(`:${name}`)) continue;
+      if (!this.isPackageDisabled((flow as { _packageId?: string } | undefined)?._packageId)) return false;
+      found = true;
+    }
+    return found;
+  }
+
+  /**
+   * [#24400, #28877] Whether a disable withholds `action` from the served
+   * reads: the action's own package is disabled (#24400: a disabled package's
+   * bound actions are withdrawn), or it LAUNCHES into a disabled package, where
+   * the launch could only fail (#28117 ruling A: disabled = hidden, and refused
+   * on the data plane):
+   *
+   *  - an action bound by `objectName` to an object of a disabled package: the
+   *    object's own read is refused, so the action is not listed beside it;
+   *  - a `type: 'flow'` action whose `target` is a flow only disabled packages
+   *    ship ({@link isFlowOfDisabledPackage}): its launch answers "Flow not
+   *    found";
+   *  - an action with a param whose `objectOverride` names an object of a
+   *    disabled package ({@link isObjectPackageDisabled}): its dialog backs the
+   *    param by a field of an object the data plane refuses.
+   *
+   * The ONE predicate for both faces: the registry's served object fold
+   * ({@link attachBoundActions}) and the protocol's `action` list and by-name
+   * read. An action that merely names such an object anywhere else (a URL, a
+   * label) is not withheld.
+   */
+  isActionWithheldByDisabledPackage(action: unknown): boolean {
+    if (!action || typeof action !== 'object') return false;
+    const a = action as { _packageId?: string; objectName?: unknown; type?: unknown; target?: unknown; params?: unknown };
+    if (this.isPackageDisabled(a._packageId)) return true;
+    if (!this.hasDisabledPackage()) return false;
+    if (typeof a.objectName === 'string' && a.objectName !== '' && this.isObjectPackageDisabled(a.objectName)) return true;
+    if (a.type === 'flow' && typeof a.target === 'string' && this.isFlowOfDisabledPackage(a.target)) return true;
+    if (Array.isArray(a.params)) {
+      for (const param of a.params) {
+        const override = (param as { objectOverride?: unknown } | null | undefined)?.objectOverride;
+        if (typeof override === 'string' && override !== '' && this.isObjectPackageDisabled(override)) return true;
+      }
+    }
+    return false;
+  }
+
+  /** [#28877] Whether any installed package is disabled — the cheap gate before the launch walk. */
+  private hasDisabledPackage(): boolean {
+    for (const pkg of this.metadata.get('package')?.values() ?? []) {
+      const p = pkg as { enabled?: boolean; status?: string } | undefined;
+      if (p?.enabled === false || p?.status === 'disabled') return true;
+    }
+    return false;
+  }
+
+  /**
    * Get all registered metadata types (Kinds)
    */
   getRegisteredTypes(): string[] {
@@ -6872,6 +7832,7 @@ export class SchemaRegistry {
       this.registerNamespace(manifest.namespace, manifest.id);
     }
     
+    this.noteItemType('package');
     if (!this.metadata.has('package')) {
       this.metadata.set('package', new Map());
     }
@@ -6881,6 +7842,7 @@ export class SchemaRegistry {
       // a normal path, not an error — keep it at debug (#3420).
       this.debug(`[Registry] Overwriting package: ${manifest.id}`);
     }
+    this.noteItem('package', manifest.id);
     collection.set(manifest.id, pkg);
     // The names this package now holds, recorded whether or not an item store
     // entry will carry them (see `securityCatalogClaims`).
@@ -7005,7 +7967,19 @@ export class SchemaRegistry {
     }
   }
 
-  uninstallPackage(id: string): boolean {
+  /**
+   * Withdraw an installed package: its objects, namespace, items, catalog
+   * claims and record (each step's reason is on it below).
+   *
+   * @param options.keepBootSeed [#28697] Keep `id` in the boot seed of
+   *   disabled packages ({@link setInitialDisabledPackageIds}), for a caller
+   *   taking back a package that never existed for an operator, so the
+   *   persisted disable state its next install must honour is not forgotten
+   *   with the row. An operator's uninstall omits it. (A registration the
+   *   engine refuses part-way is put back by {@link restoringOnRefusal}
+   *   instead, which never touches the boot seed.)
+   */
+  uninstallPackage(id: string, options?: { keepBootSeed?: boolean }): boolean {
     const pkg = this.getPackage(id);
     if (!pkg) {
       console.warn(`[Registry] Package not found for uninstall: ${id}`);
@@ -7051,7 +8025,12 @@ export class SchemaRegistry {
     // record removal below rather than at the top: every mutation here is
     // downstream of `unregisterObjectsByPackage`, the one step that can REFUSE
     // (ADR-0029), so a refused uninstall still removes nothing at all.
-    this.initialDisabledPackageIds.delete(id);
+    if (options?.keepBootSeed !== true) this.initialDisabledPackageIds.delete(id);
+
+    // [#28877] A disabled package's objects and flows withheld other packages'
+    // actions ({@link isActionWithheldByDisabledPackage}); with the record gone
+    // nothing is disabled, so every cached fold is re-derived.
+    if (this.isPackageDisabled(id)) this.invalidateAll();
 
     // Remove package record
     const collection = this.metadata.get('package');
@@ -7395,6 +8374,7 @@ export class SchemaRegistry {
 
     let byPackage = this.picklistExtensionContributions.get(target);
     if (!byPackage) this.picklistExtensionContributions.set(target, byPackage = new Map());
+    this.notePicklistExtension(target, packageKey);
     byPackage.set(packageKey, { packageId, options: merged });
     this.invalidateAll();
     this.log(`[Registry] Registered picklist extension: ${target} (+${extension.options?.length ?? 0}) from ${packageId}`);

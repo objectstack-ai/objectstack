@@ -68,7 +68,6 @@ import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 const COMMANDS_DIR = resolve(HERE, '../src/commands');
 
 /** The refusal and its two hint lines — what must be on stderr, never stdout. */
@@ -84,7 +83,7 @@ interface Run {
 function runCli(argv: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...argv],
       { cwd, maxBuffer: 32 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {
@@ -137,7 +136,7 @@ beforeAll(async () => {
   // assumed, by making sure no stray `objectstack.config.*` is in reach.
   dir = mkdtempSync(join(tmpdir(), 'os-diff-usage-e2e-'));
 
-  // Sequential: concurrent `tsx` starts are the kind of load that makes a
+  // Sequential: concurrent CLI starts are the kind of load that makes a
   // shared box report timeouts instead of verdicts.
   control = await runCli(['diff', '--help'], dir);
   runs = {};
@@ -156,7 +155,7 @@ describe('control — the reading below is worthless without this', () => {
     // negative: empty streams, non-zero exit. Rule it out before reading
     // anything off the runs.
     expect(existsSync(CLI)).toBe(true);
-    expect(existsSync(TSX)).toBe(true);
+    expect(existsSync(process.execPath)).toBe(true);
   });
 
   it('actually reaches `os diff` with this argv', () => {

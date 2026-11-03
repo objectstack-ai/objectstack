@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: a fresh real ObjectQL engine and SecurityPlugin per case across three postures, 60 cases that each write and read back the same holder's assignments, so no boot can be shared; 4.3 s in a local run; slowest CI reading 10.9 s (scheduled full-battery run 41199450735, Test Core shard log) x 1.25, rounded up
 
 /**
  * [ADR-0090 D12, amended 2026-10-17] The organization administrator's

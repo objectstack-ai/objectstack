@@ -55,6 +55,7 @@
  * Nothing re-exports this module, so the published surface does not move.
  */
 
+import { agentForwardIdentityViewPlugin } from './agent-forward-identity-view.js';
 import type { AuthPluginConfig } from '@objectstack/spec/system';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import { resolveUserAuthzGrants } from '@objectstack/core';
@@ -216,6 +217,12 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
   // browser deployments; bearer is additive, not a replacement.
   const { bearer } = await import('better-auth/plugins/bearer');
   plugins.push(bearer());
+
+  // [ADR-0090 D10 rule 5, #28367] ALWAYS enabled, inert outside a forwarded
+  // agent request: answers the identity mount's request-scoped view of the
+  // delegating user from memory, so an agent's identity-route forward is
+  // served with no session of record. See `agent-forward-identity-view.ts`.
+  plugins.push(agentForwardIdentityViewPlugin() as any);
 
   // Opt-in Cloudflare Turnstile on email sign-up: mounted only when BOTH keys
   // are configured, through the same resolver `getPublicConfig()` advertises

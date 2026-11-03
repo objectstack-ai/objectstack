@@ -143,6 +143,8 @@ ruling (`RULED_CEILING_RAISES`); a test file over 10 s of wall, unless the file 
 measured budget with its class (ruling record 6181973363), is its lane's card, fixed and ⛔
 never deleted; a test is deleted only when its PR names a duplicate pinning that assertion at a
 layer at least as close to the code (ruling record 6120820653).
+A new pin for a component that already has a shared harness file goes into that file as a
+top-level `describe`, not a new file (ruling record 6583487846).
 
 ### Running the dev server
 
@@ -203,7 +205,7 @@ See `ui/AGENTS.md` for the app-id / localStorage / auth gotchas.
    `packages/spec/src/{domain}/`. Environment-overlay opt-in lives only in `allowEnvironmentOverlay` on
    `DEFAULT_METADATA_TYPE_REGISTRY` — no parallel whitelists. See ADR-0005, amended by ADR-0131 C5.
 8. **North Star alignment.** Read `docs/NORTH-STAR.md` before structural changes. If a change doesn't advance a row of
-   its 路上的功能点 ladder, graded by its 优先级 — it probably shouldn't ship.
+   its *Features on the road* ladder, graded by its *Priority* — it probably shouldn't ship.
 9. **`OS_` env-var prefix + structure.** All ObjectStack-owned env vars MUST start with `OS_`, then follow
    **`OS_{DOMAIN}_{FEATURE}[_QUALIFIER]`** where `DOMAIN` is the subsystem (`AUTH`, `SEARCH`, `CORS`, `CLOUD`,
    `DATABASE`, `CLUSTER`, `MCP`, `SSO`, …) so related vars group together (cf. `OS_AUTH_*`, `OS_CORS_*`). Pick the
@@ -250,9 +252,9 @@ See `ui/AGENTS.md` for the app-id / localStorage / auth gotchas.
     "be liberal in what you accept" does **not** apply. Change the **spec** only when the spec itself is genuinely
     wrong, and then deliberately (edit the Zod schema + migrate). When an alias must be tolerated at all, declare it
     as an **ADR-0087 conversion-layer entry** (never a bare `??`, no executor shims) so it is declared, loud, tested,
-    and *removable on a schedule*. Stored `sys_metadata` rows are covered from the other side: every rehydration seam
-    replays the **full** conversion chain — retired entries included — via `applyConversionsToStoredItem` (ADR-0087
-    addendum), so a consumer never needs its own accommodation for a legacy stored shape either. Strengthens #5.
+    and *removable on a schedule*. Stored rows: `applyConversionsToStoredItem` replays the chain the installed release
+    carries, retired entries included; kits age out one major after retiring (ADR-0087 as amended, ruling 6434038284),
+    so run `os migrate meta --stored --apply` before leaving a release that still converts the row. Strengthens #5.
 13. **An accepted ADR binds until a superseding ADR says otherwise.** Reversing a recorded decision is itself a
     decision: it needs a **new ADR** (or an amended status line on the old one), not a changeset that quietly does the
     opposite. Before changing behaviour in `docs/adr/`-governed territory, **grep the ADRs for the surface you are
@@ -632,8 +634,6 @@ Root also exports: `defineStack`, `composeStacks`, `defineView`, `defineApp`, `d
 |:---|:---|
 | `ObjectKernel` | Default production runtime. Full DI / EventBus / Plugin lifecycle. |
 | `LiteKernel` | Tests (vitest), serverless, edge (Workers). |
-
-`EnhancedObjectKernel` is deprecated — do not use.
 
 ---
 

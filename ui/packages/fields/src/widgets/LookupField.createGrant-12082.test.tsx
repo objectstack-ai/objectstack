@@ -40,7 +40,7 @@ import { render, screen, fireEvent, waitFor, act, cleanup } from '@testing-libra
 import '@testing-library/jest-dom';
 import React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { LookupField } from './LookupField';
 
 afterEach(cleanup);
@@ -68,11 +68,12 @@ function makeDataSource() {
 type Grant = { allowCreate: boolean; apiOperations?: string[] };
 
 /** `/me/permissions` with `target` and `source` grants on the two objects. */
-const envelope = (target: Grant, source: Grant = { allowCreate: true }): MePermissionsResponse => ({
+const envelope = (target: Grant, source: Grant = { allowCreate: true }): MePermissionsAuthenticatedResponse => ({
   authenticated: true,
   userId: 'u-requester',
   tenantId: null,
-  roles: ['clm_requester'],
+  hasAnyQueue: false,
+  positions: ['clm_requester'],
   permissionSets: ['clm_requester'],
   objects: {
     [TARGET]: { allowRead: true, allowEdit: false, allowDelete: false, ...target },

@@ -377,3 +377,66 @@ describe('ADR-0143 D5 — connector connection door: begin and revoke refuse a d
         expect(h.complete).toHaveBeenCalledTimes(1);
     });
 });
+
+// ADR-0143 D2.1 (2026-11-02 amendment): an instance declaring `clientSource:
+// 'installer'` takes its OAuth client from the administrator, in the begin
+// leg's body. The door closes that body's key set and hands the client to the
+// service, which judges it (and refuses it on an instance that takes none).
+// ⛔ The secret travels in this body: no refusal here repeats a value.
+describe('ADR-0143 D2.1 — connector connection door: the begin leg takes the installer\'s client', () => {
+    const SECRET = 'dummy-installer-secret-28866';
+    const begin = (h: Harness, body: unknown) =>
+        h.dispatcher.handleAutomation('/connectors/crm/connection', 'POST', body, ADMIN(), undefined);
+
+    it('hands `clientId` and `clientSecret` to the service as `client`, and answers what begin answered', async () => {
+        const h = boot();
+        const { response } = await begin(h, { clientId: 'installer-client-28866', clientSecret: SECRET });
+        expect(statusOf(response)).toBe(200);
+        expect(h.begin).toHaveBeenCalledWith({
+            connector: 'crm',
+            context: expect.objectContaining({ userId: 'u_admin', tenantId: 'org_a' }),
+            client: { clientId: 'installer-client-28866', clientSecret: SECRET },
+        });
+        expect(JSON.stringify(response)).not.toContain(SECRET);
+        // A public client: the id alone.
+        await begin(h, { clientId: 'installer-client-28866' });
+        expect(h.begin).toHaveBeenLastCalledWith(expect.objectContaining({ client: { clientId: 'installer-client-28866' } }));
+    });
+
+    it('CONTROL: no body, or an empty object, begins with no client, exactly as before', async () => {
+        for (const body of [undefined, null, {}]) {
+            const h = boot();
+            expect(statusOf((await begin(h, body)).response)).toBe(200);
+            expect(h.begin).toHaveBeenCalledWith({ connector: 'crm', context: expect.objectContaining({ tenantId: 'org_a' }) });
+        }
+    });
+
+    it('refuses an unknown key, a non-object body and a secret without its id, 400 naming keys only, before the service', async () => {
+        const cases: Array<[unknown, string]> = [
+            [{ clientId: 'c', clientSecret: SECRET, client_secret: SECRET }, '`client_secret`'],
+            [{ redirectUri: 'https://evil.example.com' }, '`redirectUri`'],
+            [[SECRET], 'JSON object body'],
+            [SECRET, 'JSON object body'],
+            [{ clientSecret: SECRET }, '`clientId`'],
+        ];
+        for (const [body, named] of cases) {
+            const h = boot();
+            const { response } = await begin(h, body);
+            expect(statusOf(response)).toBe(400);
+            expect(codeOf(response)).toBe('VALIDATION_ERROR');
+            expect(messageOf(response)).toContain(named);
+            expect(JSON.stringify(response)).not.toContain(SECRET);
+            expect(JSON.stringify(response)).not.toContain('evil.example.com');
+            expect(h.begin).not.toHaveBeenCalled();
+        }
+    });
+
+    it('the read and revoke legs read no body, as before', async () => {
+        const h = boot();
+        for (const verb of ['GET', 'DELETE'] as const) {
+            await h.dispatcher.handleAutomation('/connectors/crm/connection', verb, { clientId: 'c', clientSecret: SECRET }, ADMIN(), undefined);
+        }
+        expect(h.get).toHaveBeenCalledWith({ connector: 'crm', context: expect.objectContaining({ tenantId: 'org_a' }) });
+        expect(h.revoke).toHaveBeenCalledWith({ connector: 'crm', context: expect.objectContaining({ tenantId: 'org_a' }) });
+    });
+});

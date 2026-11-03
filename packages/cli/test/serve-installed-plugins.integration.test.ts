@@ -49,7 +49,7 @@ import PluginDisable from '../src/commands/plugin/disable.js';
 import PluginEnable from '../src/commands/plugin/enable.js';
 import PluginUninstall from '../src/commands/plugin/uninstall.js';
 import PluginTrustAdd from '../src/commands/plugin/trust/add.js';
-import { CLI, E2E_SECRET_KEY, KERNEL_ASSIGNED_PORT, TSX, childEnv } from './helpers/serve-process.js';
+import { CLI, E2E_SECRET_KEY, KERNEL_ASSIGNED_PORT, childEnv } from './helpers/serve-process.js';
 
 const CLI_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ENV_KEYS = ['OS_HOME', 'OS_DATABASE_URL', 'DATABASE_URL', 'TURSO_DATABASE_URL', 'OS_DATABASE_DRIVER', 'OS_ARTIFACT_PATH', 'OS_ENVIRONMENT_ID'] as const;
@@ -185,7 +185,7 @@ interface Boot {
 /** `os serve --no-server` with `OS_MIGRATE_AND_EXIT=1` from the app directory; waits for its own exit. */
 function boot(): Promise<Boot> {
   return new Promise((done, fail) => {
-    const child = spawn(TSX, [CLI, 'serve', 'objectstack.config.ts', '--no-server', '--port', KERNEL_ASSIGNED_PORT], {
+    const child = spawn(process.execPath, [CLI, 'serve', 'objectstack.config.ts', '--no-server', '--port', KERNEL_ASSIGNED_PORT], {
       cwd: app,
       env: childEnv({
         NO_COLOR: '1',

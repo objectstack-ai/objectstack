@@ -14,7 +14,7 @@
  * untouched (the `⚠` line itself is unchanged in kind, so
  * `validate-json-warning-parity.e2e.test.ts` still pairs it).
  *
- * Spawns the real CLI from source (`bin/run-dev.js` + tsx, the
+ * Spawns the real CLI from source (`bin/run-dev.js` + `node`, the
  * `validate-json-warning-parity.e2e.test.ts` pattern): what is pinned is the
  * text two real commands print, not a function's return value. The in-process
  * pins for the helper and for `os explain <rule-id>` are in
@@ -33,7 +33,6 @@ import { linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 /** The tutorial shape: a ticket whose long-text `description` nothing displays. */
 const SOURCE = `
@@ -64,7 +63,7 @@ const EXPECTED = [
 function runCli(args: string[], cwd: string): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((done) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...args],
       { cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {

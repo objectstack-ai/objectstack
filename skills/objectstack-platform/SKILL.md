@@ -55,8 +55,7 @@ ownerless row into a queue — parked, `round_robin` or `least_loaded` — or to
 user. Both need the ownership-queue service `@objectstack/plugin-sharing` registers
 (`sharing` in `requires`): a stack declaring either without it is refused at boot.
 
-Undeclared keys are handled per surface, and the two postures are worth
-keeping straight:
+Undeclared keys are handled per surface, in two postures:
 
 - **Refused** — `defineStack()`'s top level, each `objects[]` entry
   (`ObjectSchema`), and each field (`FieldSchema`). The parse throws, naming
@@ -66,9 +65,8 @@ keeping straight:
   been closed yet (`connectors` is one). `defineStack()` prints the warning
   before the parse, and the value does not survive it:
   `defineStack: connectors.stripe.bogusKey: 'bogusKey' is not a declared connector key, so its value is dropped at load.`
-  Treat these as errors-in-waiting — closing the remaining shapes is a
-  scheduled migration, so a key that only warns today is expected to be
-  refused later.
+  Treat these as errors-in-waiting: a key that only warns today is expected
+  to be refused later.
 
 Exact shape: `ObjectStackDefinitionSchema` in
 `node_modules/@objectstack/spec/src/stack.zod.ts`; each collection's item
@@ -84,7 +82,7 @@ schema sits in its domain folder (`data/object.zod.ts`, `ui/view.zod.ts`, …).
 2. **Cross-references** — views/actions/flows reference defined objects
 3. **Seed data** — dataset objects exist in the definition
 
-To disable (advanced — e.g., objects provided by another plugin):
+To disable (e.g., objects provided by another plugin):
 
 ```typescript
 export default defineStack(config, { strict: false });
@@ -104,23 +102,11 @@ objectstack compile
 OS_ARTIFACT_PATH=./dist/objectstack.json objectstack dev
 ```
 
-Runtime rule of thumb:
-
-| Context | Metadata source | Database role |
-|:--------|:----------------|:--------------|
-| Local dev | TS files or `dist/objectstack.json` | Business rows only |
-| Production runtime | Artifact API response | Business rows only |
-| Control plane | Published JSON in metadata storage | Environment revisions, history, overlays |
-
-When generating `objectstack.config.ts`, keep object names short and
-`snake_case`; never set `tableName`, and do not add `sys_metadata` objects to an
-environment runtime manifest.
-
 ---
 
 ## Manifest Reference
 
-Every stack needs a `manifest` to identify itself in the ecosystem:
+Every stack needs a `manifest`:
 
 ```typescript
 manifest: {
@@ -139,16 +125,20 @@ checks it **before it loads anything** and refuses an out-of-range app at the
 boundary with the exact migration command. Change it when you deliberately move
 to a new protocol major — never to silence a mismatch.
 
-**Object naming:** The object `name` is the canonical identifier and equals the physical table name. Embed any domain prefix directly in the name (e.g. `name: 'crm_account'`); the object-level `namespace` *field* is retired (ADR-0129 D3) and refused at load.
+**Object naming:** The object `name` is the canonical identifier and equals the physical table name. Embed any domain prefix directly in the name (e.g. `name: 'crm_account'`); the object-level `namespace` *field* is retired (ADR-0129 D3) and refused at load. Never set `tableName`, and never add a `sys_metadata` object to a runtime manifest.
 
 **`manifest.namespace` (ADR-0048):** Optional, but **enforced once set**. When a package declares `manifest.namespace: 'crm'`, every `object.name` must start with `crm_` or `defineStack` errors (`validateNamespacePrefix` in `@objectstack/spec`); the legacy `<ns>__<short>` double-underscore form is rejected, and `sys_`-prefixed names are platform-reserved and exempt. The namespace is also a package-ownership key — installing two packages that both claim `crm` fails with `NamespaceConflictError` (downgrade to a warning with `OS_METADATA_COLLISION=warn`). `os lint` additionally emits a non-fatal `naming/namespace-prefix` warning for bare-named UI/automation items (app, page, dashboard, flow, action, report, dataset) when a namespace is set.
+
+**Customizing an installed package (ADR-0146):** Customize an installed base `hotcrm` in its paired writable package `hotcrm.custom`, which depends on it: a same-named item there with `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` (its `manifest.id`/`manifest.version`) replaces the base's document whole. The read honours it only from the pair (the row's `package_id`), today only for a view, dashboard, report, email_template, translation or flow, never judges `basedOn` and ignores any other package's declaration. An email template is one item per (name, locale): an override names a locale the base ships; a locale the base does not ship is added without `overrides`. Then no `?package`, `?package=hotcrm`, the layered read and both lists serve it; the env-wide list holds one item per name one code package ships (a dependent's stays under its own `?package=`); a pre-D11 unbound Setup row wins over the base's until `os migrate packageless-overlays` moves it, and its package-less save, reset and rollback are refused once movable (D11). The base's address serves the pair's added locale too (both lists, the layered read with `code` null and `effective` the pair's, the execution list, a send in that locale); a locale a dependent adds under the base's name is served only under its own `?package=`, never by a base-named or package-less read. An undeclared pair row or a dependent's row at a locale the base ships is an orphan in the layered read's `overlay`, `effective` = the base's. An override may narrow a public form's anonymous intake, never re-open one any honoured body withdrew. `GET /packages/hotcrm.custom/export` carries it with `overrides`.
+
+The pair comes from `POST /api/v1/packages/hotcrm/ensure-customization`: `namespace` = the base's + `_custom`, `dependencies: { hotcrm: '^<major>' }`; `GET /packages/hotcrm/customizations` lists its overrides, extensions and switched-off items, and uninstalling the base is refused (`409`) while the pair exists. Only the pair declares: the save, publish and install doors, `os validate` and `os build` refuse `overrides` from any other package, and a dependent's item under a base item's name — its one fix is a new name. A permission set, position or capability is never overridden: copy it under a new name ("new similar", landing in the pair). An object is extended (`__c` fields, **objectstack-data**); a flow is overridden or copied (**objectstack-automation**).
 
 ---
 
 ## The App / Platform Boundary
 
 An ObjectStack app is a **simplified implementation of business features**:
-author metadata under the platform's spec, guided by these skills, and check it
+author metadata under the platform's spec and check it
 with the `os` commands ([Verify your work](./references/operations.md#verify-your-work)). Never rebuild
 what the platform owns.
 
@@ -183,7 +173,6 @@ what the platform owns.
   `exportsOf` — the scaffolded `AGENTS.md` says how to add to them. The
   memory driver and the Hono server are NOT in the file — the CLI
   auto-registers both at boot
-- A clean slate to extend with the metadata this skill describes
 
 The five retired remote templates (`todo`, `compliance`, `content`,
 `contracts`, `procurement`) are refused by name.
@@ -194,35 +183,12 @@ The five retired remote templates (`todo`, `compliance`, `content`,
 
 ## Project Structure Conventions
 
-Every ObjectStack project follows this directory structure:
-
-```
-my-app/
-├── objectstack.config.ts    # ← THE entry point — defineStack()
-├── package.json
-├── tsconfig.json
-└── src/
-    ├── objects/              # Business object definitions
-    │   ├── task.object.ts    # → exports a single object
-    │   └── index.ts          # → barrel: export * from './task.object'
-    ├── views/                # Optional: UI view definitions
-    │   ├── task.view.ts
-    │   └── index.ts
-    ├── apps/                 # Optional: app definitions (nav, pages)
-    │   ├── main.app.ts
-    │   └── index.ts
-    ├── flows/                # Optional: automation flows
-    │   ├── task.flow.ts
-    │   └── index.ts
-    ├── actions/              # Optional: action definitions
-    │   ├── task.action.ts
-    │   └── index.ts
-    ├── dashboards/           # Optional: dashboards
-    ├── reports/              # Optional: reports
-    ├── datasets/             # Optional: analytics datasets
-    ├── i18n/                 # Optional: translation bundles
-    └── handlers/             # Optional: runtime hook handlers
-```
+`objectstack.config.ts` at the root is THE entry point (`defineStack()`), beside
+`package.json` and `tsconfig.json`. Metadata lives under `src/<collection>/` —
+`objects/` (one `task.object.ts` per object), then the optional `views/`, `apps/`,
+`flows/`, `actions/`, `dashboards/`, `reports/`, `datasets/`, `i18n/` and
+`handlers/` (runtime hook handlers) — each with a barrel `index.ts`
+(`export * from './task.object'`) handed to the stack key of its name.
 
 ### Naming Conventions
 
@@ -237,7 +203,7 @@ my-app/
 
 ## Driver Selection Guide
 
-Drivers are the storage layer. Pick based on your environment:
+Drivers are the storage layer:
 
 | Driver | Package | Best For | Notes |
 |:-------|:--------|:---------|:------|
@@ -253,7 +219,7 @@ Under `os dev` / `os serve` / `os start` the CLI **resolves the driver itself**
 from the database URL and registers `DriverPlugin` for you. Do **not** put a
 driver in your config's `plugins:` array: no example app does, and the
 `plugins:` key is for plugins the CLI cannot infer (connector executors, your
-own plugins). Pick a driver by setting the DB URL, not by writing code.
+own plugins).
 
 Construct `DriverPlugin` yourself only when **you** own the runtime — embedding
 via `Runtime` / `ObjectKernel`, or a test that boots a kernel directly:
@@ -272,8 +238,7 @@ Two packages exist:
 | `@objectstack/hono` | `createHonoApp({ kernel, prefix })` | You own the server: embed ObjectStack routes in your own Hono app / deploy target. |
 | `@objectstack/plugin-hono-server` | `HonoServerPlugin` | ObjectStack owns the server: a kernel plugin that hosts the Hono app and opens the listening socket (this is what `os dev` / `os serve` register). |
 
-There are **no** `@objectstack/adapter-*` packages (no adapter-express /
--fastify / -nextjs / -nuxt / -nestjs / -sveltekit). To integrate another
+There are **no** `@objectstack/adapter-*` packages. To integrate another
 framework, mount the Hono app (a web-standard `fetch` handler) or call the
 dispatcher yourself.
 
@@ -300,8 +265,6 @@ routes added to HttpDispatcher work automatically**.
 ---
 
 ## Runtime Boot Sequence
-
-Understanding how ObjectStack starts helps debug and customize:
 
 ```
 objectstack.config.ts
@@ -411,9 +374,7 @@ export const onEnable = async (ctx: { ql: { registerAction: (...a: unknown[]) =>
 
 The stack's `data:` collection is authored with `defineSeed()`, which
 **objectstack-data** owns — go there for `externalId` matching, `env:` scoping,
-and which keys are derived. In particular `object` is derived from the object
-definition: never write it by hand, and never hand-write a raw
-`data: [{ object: … }]` literal.
+and which keys are derived.
 
 `mode` (`upsert` default · `insert` · `update` · `ignore` · `replace` ⚠️ **data
 loss**) decides what a replay does to rows that already exist —
@@ -450,29 +411,15 @@ needs an account to exist.
 ## CLI Commands
 
 Daily commands are in [Part 3 — Operations](./references/operations.md#part-3--operations-cli-testing-deployment).
-Cheat sheet for the bootstrap loop:
-
-```bash
-npx create-objectstack my-app
-cd my-app && npm install
-os dev --ui          # dev server + Console at /_console/
-os validate          # metadata cross-reference checks
-os compile           # produce dist/ artifact
-os migrate plan      # preview metadata↔DB schema drift (additive sync never alters existing columns)
-os migrate apply     # reconcile DB to metadata (loosening only; --allow-destructive for drops/tightenings)
-PORT=8080 os start   # production — pin the port explicitly
-```
 
 ---
 
 → Moved verbatim to [references/bootstrap.md](./references/bootstrap.md) § Complete Working Example.
 
 ---
----
 
 → Part 2 — Plugin Development & Kernel Extension moved verbatim to [references/plugin-development.md](./references/plugin-development.md) (Quick Reference — Detailed Rules · ObjectKernel vs LiteKernel · Plugin Interface — Quick Overview · PluginContext API · Complete Plugin Example · Using Plugins · Testing Plugins · Well-Known Plugin Names & Services · MetadataPlugin Runtime Boundary · Health Monitoring · Feature Flags); its detailed rules stay at [rules/plugin-lifecycle.md](./rules/plugin-lifecycle.md) · [rules/service-registry.md](./rules/service-registry.md) · [references/plugin-hooks.md](./references/plugin-hooks.md).
 
----
 ---
 
 → Part 3 — Operations: CLI, Testing, Deployment moved verbatim to [references/operations.md](./references/operations.md) (Daily-loop commands · Build & runtime · Verify your work · Ports & networking · Data & migrations · Environments & deploy · Shipping a plugin · Testing pattern · Deployment targets · Health & observability · Common ops pitfalls).

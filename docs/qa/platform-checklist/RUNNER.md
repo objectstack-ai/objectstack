@@ -254,7 +254,7 @@ contradicts it, and correct it here when it does.
   out of this section is the `absence-inference` trap one level up.
   **The discriminator is uniformity:** a launch/environment failure
   takes down the whole run at once (`showcase-smoke.spec.ts` generates one test per
-  `SURFACES` entry — 49 today, so "49 failed" means all of them), while a product defect
+  `SURFACES` entry — 50 today, so "50 failed" means all of them), while a product defect
   fails selectively. ⛔ Do not file a whole-run red as a product defect before checking
   the browser resolved.
 
@@ -579,10 +579,11 @@ contradicts it, and correct it here when it does.
 
 - **An `automated.ref` that names an `objectui` path resolves under `ui/` in this
   checkout.** objectui was imported into this repository: its specs and unit suites live at
-  `ui/<path>` (`ui/e2e/live/*.spec.ts`, `ui/e2e/import-console/*`, `ui/e2e/import-harness/*`,
+  `ui/<path>` (`ui/e2e/live/*.spec.ts`, `ui/e2e/import-console/*`,
   and unit suites under `ui/packages/plugin-grid`, `plugin-gantt`, `plugin-calendar`,
-  `plugin-form`, `fields`, `core`, `app-shell`), and the console builds from this tree with
-  `pnpm console:build`. There is no pinned objectui revision any more. Some refs and
+  `plugin-form`, `fields`, `core`, `app-shell`; the import harness twin was retired on
+  #25921), and the console builds from this tree with `pnpm console:build`.
+  There is no pinned objectui revision any more. Some refs and
   `fixtures.knownGaps` written before the import still spell the path without `ui/`, or
   still say such a pin is not runnable from this checkout; read the first as `ui/<path>`
   and the second as stale. A jsdom unit suite runs from `ui/`, the objectui root, with

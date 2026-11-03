@@ -57,7 +57,10 @@ export const APP_ROUTE_METADATA_READS: ReadonlyArray<{ path: string; reads: read
   { path: ':objectName/record/:recordId', reads: ['object', 'page'] },
   { path: ':objectName/record/:recordId/page/:pageName', reads: ['object', 'page'] },
   // DashboardView, ReportView, PageView: their own bucket and the objects
-  // their widgets, columns and record actions resolve against.
+  // their widgets, columns and record actions resolve against. A dashboard
+  // reads its dashboard bundle-first and the objects its widgets require by
+  // name (`appObjectScope.ts`, objectstack#28784); both buckets stay for an
+  // adapter without the bundle or the scope.
   { path: 'dashboard/:dashboardName', reads: ['dashboard', 'object'] },
   { path: 'report/:reportName', reads: ['report', 'object'] },
   // AppReportIndexView (objectui#13020): the report list, and the dataset
@@ -69,6 +72,8 @@ export const APP_ROUTE_METADATA_READS: ReadonlyArray<{ path: string; reads: read
   { path: 'page/:pageName', reads: ['page', 'object'] },
   // ComponentNavView renders whatever component the registry holds.
   { path: 'component/:ns/:name/*', reads: ALL_LAZY_METADATA_TYPES },
+  // A redirect into Studio (objectstack#28578): the retired Packaged automation page.
+  { path: 'component/automation/packaged', reads: NONE },
   { path: 'component/metadata/directory', reads: NONE },
   { path: 'component/metadata/resource/*', reads: NONE },
   { path: 'design/dashboard/:dashboardName', reads: ['dashboard'] },

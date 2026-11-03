@@ -218,13 +218,13 @@ describe('AuditLogPage — the action filter offers the declared actions (object
     await chooseAction('Sign-in refused');
 
     await waitFor(() => expect(lastFilter()).toEqual({ action: 'login_failed' }));
-    await waitFor(() => expect(actionBadges().map((b) => b.text)).toEqual(['login_failed', 'login_failed']));
+    await waitFor(() => expect(actionBadges().map((b) => b.text)).toEqual(['Sign-in refused', 'Sign-in refused']));
     expect(actionTrigger()).toHaveTextContent('Sign-in refused');
     expect(screen.getByRole('button', { name: /Clear filters \(1\)/ })).toBeInTheDocument();
 
     await chooseAction('Nightly purge');
     await waitFor(() => expect(lastFilter()).toEqual({ action: 'nightly_purge' }));
-    await waitFor(() => expect(actionBadges().map((b) => b.text)).toEqual(['nightly_purge']));
+    await waitFor(() => expect(actionBadges().map((b) => b.text)).toEqual(['Nightly purge']));
 
     await chooseAction('All actions');
     await waitFor(() => expect(lastFilter()).toBeNull());
@@ -241,7 +241,7 @@ describe('AuditLogPage — the action filter offers the declared actions (object
         expect(badge.classes).toContain('bg-primary');
         continue;
       }
-      // login_failed, account_locked, nightly_purge: no local tone.
+      // Sign-in refused, Account locked, Nightly purge: no local tone.
       expect(badge.classes, badge.text).toContain('text-foreground');
       for (const tone of toned) expect(badge.classes, badge.text).not.toContain(tone);
     }

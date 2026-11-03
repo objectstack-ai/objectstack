@@ -44,7 +44,7 @@
 // ⛔ Additive change passes: a row HEAD's boot ADDS (an activity shard, a
 // seeder's row) is not a failure, so counts are compared as "at least", and
 // every fixture row is looked up by id.
-import { copyFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -52,15 +52,18 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { isOrganizationOwnershipBootRefusal } from '@objectstack/runtime';
 import { ORGANIZATION_OWNERSHIP_SHAPE_GENERATION } from '@objectstack/spec/system';
 import type { VerifyStack } from '@objectstack/verify';
-import { columnsOf, type FixtureManifest } from './upgrade-harness/fixture-manifest.js';
+import { readFixtureAsOf } from './upgrade-harness/fixture-as-of.js';
+import { columnsOf } from './upgrade-harness/fixture-manifest.js';
 import { FIXTURE_NAMES, FIXTURE_PEOPLE, bootFixture } from './upgrade-harness/populate-fixture.js';
 import { loadSqlIntoSqlite } from './upgrade-harness/sqlite-text-dump.js';
 import { OWNERSHIP_MARKER, SERVED_ENV, runOwnershipCeremony, runSchemaPlan } from './upgrade-harness/ceremony.js';
 
 const FIXTURE = new URL('./upgrade-harness/fixture-18.0/', import.meta.url);
 const MARKER = OWNERSHIP_MARKER;
-const manifest = JSON.parse(readFileSync(new URL('manifest.json', FIXTURE), 'utf8')) as FixtureManifest;
-const fixtureSql = readFileSync(new URL('database.sql', FIXTURE), 'utf8');
+// Its rotation shards re-dated to the day before this run (`fixture-as-of.ts`),
+// the manifest's physical names with them: a boot drops a shard older than the
+// retention window, and the fixture's date must not decide what this measures.
+const { sql: fixtureSql, manifest } = readFixtureAsOf(FIXTURE);
 
 /** The guard's refusal down a failed boot's `cause` chain (the kernel wraps a failed `start()`). */
 function refusalIn(error: unknown): unknown {
@@ -333,8 +336,7 @@ const NOT_A_TENANT_COLUMN = [
 ];
 
 const isShard = (table: string): boolean => /__r\d{6,8}$/.test(table);
-const gaManifest = JSON.parse(readFileSync(new URL('manifest.json', GA_FIXTURE), 'utf8')) as FixtureManifest;
-const gaFixtureSql = readFileSync(new URL('database.sql', GA_FIXTURE), 'utf8');
+const { sql: gaFixtureSql, manifest: gaManifest } = readFixtureAsOf(GA_FIXTURE);
 
 describe(`[#24884] an 18.0.0 database (fixture from ${gaManifest.ref} @ ${gaManifest.sha.slice(0, 12)}) boots HEAD with no refusal and no destructive drift`, () => {
   const dir = mkdtempSync(join(tmpdir(), 'dogfood-upgrade-18-0-0-'));

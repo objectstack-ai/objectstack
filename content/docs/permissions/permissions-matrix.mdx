@@ -139,9 +139,11 @@ Field-level security controls visibility and editability of individual fields pe
 | `account.name` | Visible, Editable | Visible, Editable | Visible, Editable | Visible | Visible |
 | `account.revenue` | Visible, Editable | Visible, Editable | Visible | Hidden | Hidden |
 | `contact.email` | Visible, Editable | Visible, Editable | Visible, Editable | Visible | Visible |
-| `contact.ssn` | Visible, Editable | Hidden | Hidden | Hidden | Hidden |
+| `contact.ssn` | Visible, Editable | Visible | Hidden | Hidden | Hidden |
 | `opportunity.amount` | Visible, Editable | Visible, Editable | Visible, Editable | Visible | Visible |
-| `opportunity.margin` | Visible, Editable | Visible | Hidden | Hidden | Hidden |
+| `opportunity.margin` | Visible, Editable | Visible, Editable | Hidden | Hidden | Hidden |
+
+**View All / Modify All reach every field.** The Sales Manager column follows from section 2: `sales_manager_access` holds `viewAllRecords` on `contact` and `modifyAllRecords` on `opportunity`, and a set holding View All on an object reads every field of it, while Modify All also edits every field (ADR-0066 D2 ⑧ as amended). Field rules in other sets cannot hide `contact.ssn` from that manager. To keep a field from someone, grant them the object without View All / Modify All and withhold the field there.
 
 ### FLS States
 

@@ -39,13 +39,18 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { EngineAggregateOptions } from '@objectstack/spec/data';
+// [#28550, #28609] The engine's aggregation entry. Each `aggregate_records`
+// entry IS this node, so this door and the REST query door (which parses
+// `FindDataRequestSchema`, whose `aggregations` are this node) judge one shape
+// with one refusal.
+import { AggregationNodeSchema } from '@objectstack/spec/data';
 // [#23529] The catalogue's spelling of `PERMISSION_DENIED`, the code whose
 // `details` `errorResultFromThrown` withholds. Imported, never hand-spelled.
 import { StandardErrorCode } from '@objectstack/spec/api';
 // [#23701] The one key every door that translates the engine's unique-violation
 // envelope asks (the registered code AND the class name, never message text),
 // and the one classification whose arm states the wire code for it.
-import { isEngineDuplicateRecordEnvelope, structuredCodeAnswer } from '@objectstack/types';
+import { earnedAnswerOf, isEngineDuplicateRecordEnvelope, staleSummaryAnswerLines, structuredCodeAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 import {
   MCP_OAUTH_SCOPE_DATA_READ,
   MCP_OAUTH_SCOPE_DATA_WRITE,
@@ -118,6 +123,25 @@ export interface McpDataBridge {
    */
   listObjectsDiagnosed?(): Promise<DiagnosedObjectListing<McpObjectSummary>>;
   describeObject(name: string): Promise<unknown | null>;
+  /**
+   * [#28715] The fields of `name` that declare options — the fields a
+   * formula's `label(record.<field>)` can answer on — or `null` when no such
+   * object is served. Read from the same object {@link describeObject} reads,
+   * through `@objectstack/formula`'s `declaresOptions`, the predicate the
+   * engine builds `label()`'s map with: both bridges read the protocol's
+   * served object, where a field bound to a shared `picklist` already carries
+   * the list's resolved `options`.
+   *
+   * `validate_expression` hands it to the shared validator as
+   * `ExprSchemaHint.optionFields`, so the tool refuses the `label()` call the
+   * object save door refuses, in the same words. It is a member of its own,
+   * not a key on {@link describeObject}'s answer, so `describe_object` serves
+   * what it served before.
+   *
+   * OPTIONAL, like {@link listObjectsDiagnosed}: a bridge that omits it gets
+   * no `label()` target check, exactly as before (the validator's opt-in).
+   */
+  optionFieldsOf?(name: string): Promise<readonly string[] | null>;
   query(
     object: string,
     opts: {
@@ -457,6 +481,28 @@ function errorResultWithCode(err: unknown) {
   return envelope ? codedErrorResult({ ...envelope }) : errorResult(messageOf(err));
 }
 
+/**
+ * [#28782, #28844, #28856] A write tool's answer to a throw: a write the engine
+ * stored but whose parent roll-up it could not recompute (`ERR_SUMMARY_RECOMPUTE`,
+ * "the triggering records WERE written") answers the write it is, read off
+ * #28781's carrier the bridge attached, with the stale column logged once at
+ * `error`. An agent that read an error would apply the write again. Any other
+ * throw, including every refusal raised before the write, renders through
+ * `otherwise` exactly as before: {@link errorResultWithCode} for the data tools,
+ * {@link errorResultFromThrown} for `run_action`, whose answer the runtime
+ * composed and attached.
+ */
+function landedWriteResultOrError(
+  err: unknown,
+  objectName: string | undefined,
+  otherwise: (err: unknown) => ReturnType<typeof errorResultWithCode> = errorResultWithCode,
+) {
+  const earned = earnedAnswerOf(err);
+  if (earned === undefined) return otherwise(err);
+  for (const line of staleSummaryAnswerLines(err as SummaryRecomputeRefusal, objectName)) console.error(`[MCP] ${line}`);
+  return textResult(earned);
+}
+
 function codedErrorResult(error: ThrownRefusalEnvelope & { details?: unknown }) {
   return {
     content: [{ type: 'text' as const, text: jsonText({ error }) }],
@@ -575,12 +621,18 @@ function jsonText(value: unknown): string {
  * (`TemplateExpressionInputSchema`). The tool parses with it first, so whatever
  * the gate refuses at the envelope level — today a source that is blank after
  * trimming — the tool refuses too, with the gate's own issue.
+ *
+ * [#28715] `optionLabels`: the site where the gate judges what a `label()`
+ * call names (`ExprSchemaHint.optionFields`). `@objectstack/lint`'s formula
+ * pass hands the validator the object's option-bearing fields on a formula
+ * field's `expression` and nowhere else, so the tool asks the bridge for them
+ * on the `formula` site only and answers every other site as the gate does.
  */
 const VALIDATE_SITE_MAP: Record<
   string,
-  { role: FieldRole; scope: 'record' | 'flattened'; slot: z.ZodType }
+  { role: FieldRole; scope: 'record' | 'flattened'; slot: z.ZodType; optionLabels?: true }
 > = {
-  formula: { role: 'value', scope: 'record', slot: EvaluatedExpressionInputSchema },
+  formula: { role: 'value', scope: 'record', slot: EvaluatedExpressionInputSchema, optionLabels: true },
   validation: { role: 'predicate', scope: 'record', slot: EvaluatedExpressionInputSchema },
   flow_condition: { role: 'predicate', scope: 'flattened', slot: EvaluatedExpressionInputSchema },
   template: { role: 'template', scope: 'record', slot: TemplateExpressionInputSchema },
@@ -1031,8 +1083,14 @@ export function registerObjectTools(
             fields.push(f.name);
             if (typeof f?.type === 'string') fieldTypes[f.name] = f.type;
           }
-          const { role, scope, slot } = VALIDATE_SITE_MAP[site ?? 'formula'];
-          const hint = { objectName, fields, fieldTypes, scope } as const;
+          const { role, scope, slot, optionLabels } = VALIDATE_SITE_MAP[site ?? 'formula'];
+          // [#28715] The object's option-bearing fields, where the gate reads
+          // them: `label(record.<field>)` on a declared field outside this list
+          // is refused as `label-field-no-options` by the one validator.
+          const optionFields = optionLabels && bridge.optionFieldsOf
+            ? await bridge.optionFieldsOf(objectName)
+            : null;
+          const hint = { objectName, fields, fieldTypes, scope, ...(optionFields ? { optionFields } : {}) } as const;
           // The gate's envelope verdict first: `validateExpression` treats a
           // blank source as "not authored" and answers ok, while the save gate
           // refuses it. Each issue is the spec schema's own (code and message),
@@ -1179,17 +1237,20 @@ export function registerObjectTools(
             {
             objectName: z.string().describe('The object/table name'),
             aggregations: z
-              .array(
-                z.object({
-                  function: z
-                    .enum(['count', 'sum', 'avg', 'min', 'max', 'count_distinct'])
-                    .describe('Aggregation function'),
-                  field: z.string().optional().describe('Field to aggregate (omit for count(*))'),
-                  alias: z.string().describe('Result column name'),
-                }),
-              )
+              // [#28550 → #28609] One entry is the engine's own node, taken whole:
+              // `AggregationNodeSchema` is closed at the producer, so an
+              // undeclared entry key is refused here in the words the REST
+              // query door prints for the same body (`aliases` and the retired
+              // `distinct`'s tombstone included), and `filter` reaches the
+              // bridge unchanged for `engine.aggregate` to apply. ⛔ No local
+              // copy of the entry: the copy this tool closed by itself (#28550)
+              // was a second key list, which this node now is.
+              .array(AggregationNodeSchema)
               .min(1)
-              .describe('Metrics to compute, e.g. [{"function":"sum","field":"amount","alias":"total"}]'),
+              .describe(
+                'Metrics to compute, e.g. [{"function":"sum","field":"amount","alias":"total"},'
+                  + '{"function":"count","alias":"open_count","filter":{"status":"open"}}]',
+              ),
             groupBy: z
               .array(
                 z.union([
@@ -1293,7 +1354,7 @@ export function registerObjectTools(
         try {
           return textResult(await bridge.create(objectName, data));
         } catch (err) {
-          return errorResultWithCode(err);
+          return landedWriteResultOrError(err, objectName);
         }
       },
     );
@@ -1327,7 +1388,7 @@ export function registerObjectTools(
         try {
           return textResult(await bridge.update(objectName, recordId, data));
         } catch (err) {
-          return errorResultWithCode(err);
+          return landedWriteResultOrError(err, objectName);
         }
       },
     );
@@ -1351,7 +1412,7 @@ export function registerObjectTools(
         try {
           return textResult(await bridge.remove(objectName, recordId));
         } catch (err) {
-          return errorResultWithCode(err);
+          return landedWriteResultOrError(err, objectName);
         }
       },
     );
@@ -1535,7 +1596,7 @@ export function registerActionTools(
         });
         return textResult(result);
       } catch (err) {
-        return errorResultFromThrown(err);
+        return landedWriteResultOrError(err, objectName, errorResultFromThrown);
       }
     },
   );

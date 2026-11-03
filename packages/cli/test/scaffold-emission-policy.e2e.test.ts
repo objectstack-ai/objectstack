@@ -62,7 +62,7 @@
  * and would stay green through a build that stopped copying templates at all.
  * Its `dist/` is present because `@objectstack/cli#test` depends on `^build`.
  *
- * Spawned through `bin/run-dev.js` + tsx, so this suite does not depend on
+ * Spawned through `bin/run-dev.js` + `node`, so this suite does not depend on
  * `packages/cli/dist` having been built (`@objectstack/cli#test` depends on
  * `^build` only) — the same reason `create-refuses-invalid-project-name.e2e.test.ts`
  * spawns that way.
@@ -91,7 +91,6 @@ import { DEFAULT_PLACEMENT, templates } from '../src/commands/create.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 /**
  * The on-ramp's real entry point and the template it ships, both declared as
@@ -111,7 +110,7 @@ const ON_RAMP_TEMPLATE_PKG = resolve(HERE, '../../..', 'packages/create-objectst
 const GETTING_STARTED = resolve(HERE, '../../..', 'content/docs/getting-started/index.mdx');
 const TROUBLESHOOTING = resolve(HERE, '../../..', 'content/docs/deployment/troubleshooting.mdx');
 
-/** oclif + tsx cold start with every command module loaded; ~2-10 s when healthy. */
+/** oclif cold start with every command module loaded; ~2-10 s when healthy. */
 const RUN_TIMEOUT_MS = 180_000;
 
 const PROBE_NAME = 'emission-policy-probe';
@@ -257,7 +256,7 @@ describe('the emitted tsconfig.json comes from the shared renderer', () => {
   function runCli(args: string[], cwd: string): Promise<{ code: number; stderr: string }> {
     return new Promise((done) => {
       execFile(
-        TSX,
+        process.execPath,
         [CLI, ...args],
         { cwd, maxBuffer: 8 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
         (err, _stdout, stderr) => {

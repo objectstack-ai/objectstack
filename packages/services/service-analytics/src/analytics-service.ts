@@ -85,7 +85,7 @@ import { assertCubeMeasureFieldTypesAccepted, type MeasureColumn } from './cube-
 import { AMOUNT_AGGREGATES, assertRecordCurrencyAggregatesGrouped } from './cube-record-currency-door.js';
 import type { AnalyticsStrategy, AnalyticsDriverCapabilities, StrategyContext, DatasetScopedStrategyContext, DatasetScope, DurationMeasureSpec, ReadScopeFilterJudge } from './strategies/types.js';
 import { NativeSQLStrategy } from './strategies/native-sql-strategy.js';
-import { ObjectQLStrategy } from './strategies/objectql-strategy.js';
+import { ObjectQLStrategy, aggregateGroupKeys, aggregateObjectOf, resolveCubeFieldName } from './strategies/objectql-strategy.js';
 // [#5669] The `where` source-field gate reads the filter tree through the SAME
 // pair the strategies compile it with, so "the field the gate saw" and "the
 // column that reached SQL" cannot be two different things.
@@ -98,7 +98,7 @@ import {
   NO_DATETIME_COLUMNS,
 } from './strategies/filter-normalizer.js';
 import { findCrossFieldComparand } from './comparand-shape.js';
-import { compileDataset, type CompiledDataset, type RelationshipResolver } from './dataset-compiler.js';
+import { compileDataset, unbackedRelationshipPath, type CompiledDataset, type RelationshipResolver } from './dataset-compiler.js';
 import { measureCurrencyResolver, type DeclaredCurrency } from './measure-currency-coherence.js';
 import { bindDatasetFiltersToObjectFields } from './dataset-filter-field-binding.js';
 import { drillWindowBounds } from './drill-window.js';
@@ -115,7 +115,9 @@ import {
   withServedLabelTargets,
   type DimensionLabelDeps,
 } from './dimension-labels.js';
-import { evaluateAnalyticsQueryOverRows } from './preview-evaluator.js';
+import { evaluateAnalyticsQueryOverRows, lowerPreviewRowFilters } from './preview-evaluator.js';
+import { assertDatasetGroupColumnsDistinct } from './dataset-group-column-door.js';
+import { assertDatasetDateBucketsTemporal } from './dataset-date-bucket-door.js';
 // [#25778] The one lookup of a dataset duration measure by name.
 import { durationMeasureIn } from './duration-measure-sql.js';
 import { scopedMeasureFilter } from './scoped-measure-key.js';
@@ -433,6 +435,79 @@ function resolveMemberSource(
 /** [#20917] A dotted identifier path: relationship hops, then one column — `NativeSQLStrategy`'s own test. */
 const IDENTIFIER_PATH = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$/;
 
+/** One request entry that reads a column through a relationship path. */
+interface RelationshipMember {
+  /** The entry as the request spelled it. */
+  readonly member: string;
+  readonly param: 'dimensions' | 'timeDimensions' | 'measures' | 'where';
+  /** Whether it resolved to a member the cube declares (the dataset compile judged that member's path). */
+  readonly declared: boolean;
+  /** The dotted column path it reads: `account.name`, `account.owner.name`. */
+  readonly column: string;
+}
+
+/** How a refusal names each request key's entry. */
+const RELATIONSHIP_MEMBER_NOUN: Readonly<Record<RelationshipMember['param'], string>> = {
+  dimensions: 'Dimension',
+  timeDimensions: 'Time dimension',
+  measures: 'Measure',
+  where: 'Filter member',
+};
+
+/**
+ * The member each leaf of a `where` tree binds against, in tree order, read
+ * through the lowering both strategies compile with
+ * (`normalizeAnalyticsFilterTree` + `collectFilterLeaves`), structure
+ * discarded. A `where` that is not an object, or that the lowering refuses,
+ * names nothing here: it is refused where it already is. One reader for
+ * {@link namedQueryFields}, {@link relationshipMembers} and
+ * {@link previewWhereColumns}, so what each of them judges is the same leaf
+ * list.
+ */
+function whereLeafMembers(where: unknown): string[] {
+  if (!where || typeof where !== 'object') return [];
+  try {
+    return collectFilterLeaves(normalizeAnalyticsFilterTree({ where }, NO_DATETIME_COLUMNS)).map((leaf) => leaf.member);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * [#28555] Every entry of `query` that reads a column through a relationship
+ * path, in request order: `dimensions`, `timeDimensions`, then (with
+ * `withMeasures`) `measures`, then the `where` leaves. Each is resolved the
+ * way the strategies resolve it ({@link declaredMemberEntry}: a dimension in
+ * `cube.dimensions`, a time dimension and a filter member in either bag, a
+ * measure in `cube.measures` only, with no undeclared fallback), and kept
+ * only when the column it resolves to is a dotted identifier path. So
+ * `<cube>.region` and `<object>.region`, which resolve to the declared
+ * `region`, are not here, and neither is an expression.
+ *
+ * The `where` leaves are read through the lowering both strategies compile
+ * with (`normalizeAnalyticsFilterTree` + `collectFilterLeaves`, as
+ * {@link namedQueryFields} reads them), so they include the dataset's own
+ * `filter` and a requested measure's `filter`, which `DatasetExecutor` folds
+ * into the `where` it hands the service. A `where` that lowering refuses
+ * names nothing here; it is refused where it already is.
+ */
+function relationshipMembers(query: AnalyticsQuery, cube: Cube, withMeasures: boolean): RelationshipMember[] {
+  const out: RelationshipMember[] = [];
+  const read = (member: unknown, param: RelationshipMember['param'], kind: 'dimension' | 'measure' | 'any') => {
+    if (typeof member !== 'string' || member === '') return;
+    const entry = declaredMemberEntry(cube, member, kind);
+    if (!entry && kind === 'measure') return;
+    const sql = entry ? entry.sql : member;
+    if (typeof sql !== 'string' || !IDENTIFIER_PATH.test(sql.trim())) return;
+    out.push({ member, param, declared: !!entry, column: sql.trim() });
+  };
+  for (const member of query.dimensions ?? []) read(member, 'dimensions', 'dimension');
+  for (const td of query.timeDimensions ?? []) read(td?.dimension, 'timeDimensions', 'any');
+  if (withMeasures) for (const member of query.measures ?? []) read(member, 'measures', 'measure');
+  for (const member of whereLeafMembers((query as { where?: unknown }).where)) read(member, 'where', 'any');
+  return out;
+}
+
 /**
  * [#21177] Whether `sql` is a plain COLUMN REFERENCE the admission can attribute
  * to a field — a bare identifier (`amount`), a relationship path ending in one
@@ -567,23 +642,14 @@ function namedQueryFields(
     }
     return true;
   };
-  const filterMembers = (where: unknown): string[] => {
-    if (!where || typeof where !== 'object') return [];
-    try {
-      return collectFilterLeaves(normalizeAnalyticsFilterTree({ where }, NO_DATETIME_COLUMNS)).map((leaf) => leaf.member);
-    } catch {
-      return [];
-    }
-  };
-
   for (const member of query.dimensions ?? []) name(member, 'dimension', 'aggregate');
   for (const td of query.timeDimensions ?? []) name(td.dimension, 'any', td.granularity ? 'aggregate' : 'predicate');
   for (const member of query.measures ?? []) if (!durationColumns(member, 'aggregate')) name(member, 'measure', 'aggregate');
-  for (const member of filterMembers((query as { where?: unknown }).where)) name(member, 'any', 'predicate');
+  for (const member of whereLeafMembers((query as { where?: unknown }).where)) name(member, 'any', 'predicate');
   for (const measure of query.measures ?? []) {
-    for (const member of filterMembers(scopedMeasureFilter(datasetScope, measure, cube.name))) name(member, 'any', 'predicate');
+    for (const member of whereLeafMembers(scopedMeasureFilter(datasetScope, measure, cube.name))) name(member, 'any', 'predicate');
   }
-  for (const member of filterMembers(datasetScope?.filter)) name(member, 'any', 'predicate');
+  for (const member of whereLeafMembers(datasetScope?.filter)) name(member, 'any', 'predicate');
   const order = (query as { order?: unknown }).order;
   if (order && typeof order === 'object' && !Array.isArray(order)) {
     // An order key naming both a duration measure and a declared member is
@@ -1838,6 +1904,17 @@ export class AnalyticsService implements IAnalyticsService {
       query.cube ? reads.getDatasetScope(query.cube) : undefined,
       context,
     );
+    // [#28258] …and a dotted dimension through a relationship path the
+    // compiled dataset does not declare: `INVALID_FIELD` / 400, on every
+    // strategy and the SQL echo. After the admission verdicts, so a path
+    // naming an object the caller may not read keeps that object's 403
+    // (#20933); before any strategy, so the native allowlist's
+    // `DATASET_INVALID` no longer answers it.
+    const allowedRelationships = query.cube ? scope.getCompiledDataset(query.cube)?.allowedRelationships : undefined;
+    this.assertDimensionJoinsBacked(query, query.cube ? scope.getCube(query.cube) : undefined, allowedRelationships);
+    // [#28558] …and a declared path to a column the related object does not
+    // have, which reached SQL as a 500 on the native strategy.
+    this.assertRelationshipColumnsExist(query, query.cube ? scope.getCube(query.cube) : undefined, allowedRelationships);
     // [#21267] …and the order-key door: an `order` key must name a member this
     // query selects, or the query is refused `INVALID_FIELD` / 400
     // (`order-key-door.ts`). On this seam because it is the one `query()` and
@@ -2800,12 +2877,58 @@ export class AnalyticsService implements IAnalyticsService {
             // carries the same `internal` fields the published ones do.
             this.assertNoInternalFieldsQueried(q, cube, previewScope);
             await this.assertFieldsReadable(q, cube, previewScope, context);
+            // [#28258] …and, after the admission verdicts as `callCtx` asks it,
+            // a dotted dimension through a relationship path the dataset does
+            // not declare is refused with the live faces' one answer, where the
+            // evaluator, which joins nothing, grouped every row under one
+            // `null` key.
+            this.assertDimensionJoinsBacked(q, cube, compiled.allowedRelationships);
+            // [#28558] …then a declared path to a column the related object
+            // does not have, with the live faces' one answer.
+            this.assertRelationshipColumnsExist(q, cube, compiled.allowedRelationships);
+            // [#28555] …and last, any member read through a relationship path
+            // at all: the evaluator reads the base object's drafted seed rows
+            // and joins nothing, so a BACKED `account.name` grouped every row
+            // under one `null` key (and a filter on one matched no row) where
+            // the live strategies join it. See {@link assertPreviewJoinsNothing}.
+            this.assertPreviewJoinsNothing(q, cube);
+            // [#28977] …then the row filters (the `where`, then the
+            // time-dimension windows), lowered once here and handed to the
+            // evaluator: the ObjectQL strategy lowers both before the two doors
+            // below, so an unrecognised `dateRange` beside a column asked twice
+            // or a bucket over a text column is refused about the `dateRange`
+            // on every face. The evaluator lowered them after both doors, and
+            // answered the door's refusal.
+            const previewCube = previewEvaluationCube(q, cube);
+            const declaredType = (field: string) => this.sourceFieldMeta?.(dataset.object, field)?.type;
+            const whereColumns = previewWhereColumns(q, cube);
+            const rowFilters = lowerPreviewRowFilters(q, previewCube, declaredType, whereColumns);
+            // [#28765, #28798] …and a selection asking one column for two
+            // values under one name (raw beside its own bucket, or two buckets
+            // of it), with the refusal the ObjectQL strategy gives both live
+            // faces for the keys its direct path builds, where the evaluator
+            // served both columns.
+            assertDatasetGroupColumnsDistinct(
+              aggregateObjectOf(cube),
+              aggregateGroupKeys(q, cube),
+              q,
+              (member) => resolveCubeFieldName(cube, member, 'dimension'),
+            );
+            // [#28852] …and a date bucket over a field declared neither a date
+            // nor a datetime, with the refusal the engine gives both live faces
+            // for the same keys (after the column refusal above, as there),
+            // where the evaluator served one `null` (or `1970`) group.
+            assertDatasetDateBucketsTemporal(aggregateObjectOf(cube), aggregateGroupKeys(q, cube), declaredType);
             return evaluateAnalyticsQueryOverRows(
               q,
-              cube,
+              previewCube,
               seedRows!,
-              (field) => this.sourceFieldMeta?.(dataset.object, field)?.type,
+              declaredType,
               compiled.durations,
+              // [#28691] …and each `where` member the live faces read from a
+              // column spelled otherwise is read from that column.
+              whereColumns,
+              rowFilters,
             );
           },
         } as IAnalyticsService;
@@ -4037,6 +4160,163 @@ export class AnalyticsService implements IAnalyticsService {
   }
 
   /**
+   * [#28258] Refuse a selected member spelled through a relationship path the
+   * compiled dataset does not declare in its `include` — `INVALID_FIELD` / 400,
+   * naming the member as the request spelled it and the first unbacked path —
+   * before either strategy compiles it, and on the draft preview.
+   *
+   * A dotted member no dimension declares is the strategies' synthetic relation
+   * traversal ({@link declaredMemberEntry}'s last case), which
+   * {@link assertDimensionFields} deliberately leaves alone. Measured on
+   * `origin/main` `eeec88d14` (real SQLite), `os28258_deal.bogus` and
+   * `account.name` over a dataset with no `include` got three answers: the
+   * native strategy's join allowlist refused `DATASET_INVALID`, the ObjectQL
+   * strategy refused the first from the driver and SERVED the second by joining
+   * a relationship the dataset never declared, and the draft preview grouped
+   * every row under one `null` key. The verdict is about one request entry,
+   * so it is the member-level envelope ({@link invalidMemberError}), the shape
+   * the other dimension and measure gates answer.
+   *
+   * - [#28556, #28557] Every position a request member reaches a join from
+   *   ({@link relationshipMembers}): `dimensions`, then `timeDimensions`, then
+   *   the `where` leaves. Measured on `0b6a52e8`, an unbacked dotted
+   *   `timeDimensions` entry answered the ObjectQL strategy's cross-object
+   *   bucket refusal when bucketed and the native allowlist's
+   *   `DATASET_INVALID` when only windowed, and the preview dropped the axis;
+   *   an unbacked dotted `runtimeFilter` member answered `DATASET_INVALID`
+   *   (native), the cross-object filter refusal (ObjectQL) and `[]` or, under
+   *   an `$or`, the other arm's rows (preview).
+   * - Only on a compiled dataset (`allowed` defined): a hand-authored cube's
+   *   configured hook stays the strategy's to enforce, as it was.
+   * - Only a member that resolves to no declared member: `<cube>.region` and
+   *   `<object>.region` resolve to the declared `region`, a declared member's
+   *   own path was judged when the dataset compiled, and an expression
+   *   registers no join.
+   * - The native strategy's own allowlist stays, unchanged, behind this gate
+   *   (a hand-authored cube still reaches it).
+   *
+   * Asked in {@link callCtx} after the object, body, internal-field and
+   * field-level verdicts, and at the same point on the draft preview: a path
+   * through an object the caller may not read keeps that object's 403
+   * (#20933, which a gate in `ensureCube` would have pre-empted).
+   */
+  private assertDimensionJoinsBacked(
+    query: AnalyticsQuery,
+    cube: Cube | undefined,
+    allowed: ReadonlySet<string> | undefined,
+  ): void {
+    if (!cube || !allowed) return;
+    for (const { member, param, declared, column } of relationshipMembers(query, cube, false)) {
+      if (declared) continue;
+      const path = unbackedRelationshipPath(column, allowed);
+      if (path === null) continue;
+      const declaredPaths = [...allowed].map((alias) => alias.replace(/__/g, '.')).sort();
+      throw invalidMemberError(
+        `${RELATIONSHIP_MEMBER_NOUN[param]} '${member}' on cube '${cube.name}' traverses relationship path '${path}', which the ` +
+          `dataset does not declare in its \`include\`. Only fields along a declared relationship path are ` +
+          `joinable — declared paths: ${declaredPaths.join(', ') || '(none)'}. ` +
+          `Valid dimensions: ${Object.keys(cube.dimensions).join(', ') || '(none)'}.`,
+        { member, param, cube: cube.name },
+      );
+    }
+  }
+
+  /**
+   * [#28558] Refuse a member spelled through a DECLARED relationship path to a
+   * column the related object does not have — `INVALID_FIELD` / 400, naming the
+   * member, the column and the object — before either strategy compiles it,
+   * and on the draft preview.
+   *
+   * {@link assertDimensionFields} and {@link assertWhereFields} judge the base
+   * object's columns and stand down on a dotted path ("it belongs to the join
+   * allowlist"), and the allowlist judges only the path. So, measured on
+   * `0b6a52e8` (real SQLite), `account.bogus` over a dataset that includes
+   * `account` reached SQL on the native strategy and answered
+   * `DATABASE_ERROR` / 500, as a dimension, as a `runtimeFilter` member and
+   * as a dataset measure's `field` (`max` of `account.bogus`: the measure
+   * gate and the dataset compile both stand down on a dotted source),
+   * while the ObjectQL strategy refused it 400 (the engine's groupBy guard, or
+   * its cross-object filter refusal) and the preview served one `null` group.
+   *
+   * The object is the one the hop resolver names for the path's last hop
+   * ({@link resolvePathHops}, the resolver the admission and the strategies
+   * read), and its columns are {@link AnalyticsServiceConfig.getObjectFieldNames}'
+   * answer, with the same three stand-downs as the base-object gates: no probe,
+   * no answer for that object, or a path this gate does not resolve. `id`,
+   * `created_at` and `updated_at` are admitted as they are there. Asked right
+   * after {@link assertDimensionJoinsBacked}, so an unbacked path keeps that
+   * refusal.
+   */
+  private assertRelationshipColumnsExist(
+    query: AnalyticsQuery,
+    cube: Cube | undefined,
+    allowed: ReadonlySet<string> | undefined,
+  ): void {
+    const probe = this.getObjectFieldNames;
+    if (!probe || !cube || !allowed) return;
+    const baseObject = typeof cube.sql === 'string' ? cube.sql.trim() : '';
+    if (!baseObject || !BARE_IDENTIFIER.test(baseObject)) return;
+    for (const { member, param, column } of relationshipMembers(query, cube, true)) {
+      if (unbackedRelationshipPath(column, allowed) !== null) continue;
+      const segments = column.split('.');
+      const field = segments[segments.length - 1];
+      const hops = resolvePathHops(cube, baseObject, segments.slice(0, -1), this.hopReference);
+      const object = hops[hops.length - 1].object;
+      const fieldNames = probe(object);
+      if (!fieldNames || fieldNames.length === 0) continue;
+      if (new Set<string>([...fieldNames, 'id', 'created_at', 'updated_at']).has(field)) continue;
+      const err = invalidMemberError(
+        `${RELATIONSHIP_MEMBER_NOUN[param]} '${member}' on cube '${cube.name}' reads field '${field}' through ` +
+          `relationship path '${segments.slice(0, -1).join('.')}', which object '${object}' does not have. ` +
+          `Check the spelling of '${field}' — known fields of '${object}': ${[...fieldNames].sort().join(', ')}.`,
+        { member, param, cube: cube.name },
+      ) as Error & { field?: string; object?: string };
+      err.field = field;
+      err.object = object;
+      throw err;
+    }
+  }
+
+  /**
+   * [#28555] The draft preview's refusal of any member it would read through a
+   * relationship path — `INVALID_FIELD` / 400, naming the member — asked after
+   * {@link assertDimensionJoinsBacked} and {@link assertRelationshipColumnsExist},
+   * so an unbacked path and a missing related column keep the live faces' one
+   * answer and only a path the live strategies serve reaches it.
+   *
+   * The preview evaluates the base object's PENDING seed rows in memory
+   * (`evaluateAnalyticsQueryOverRows`) and has no join. Measured on `0b6a52e8`
+   * (real SQLite): a backed `account.name` (dataset `include: ['account']`),
+   * a declared `account_name` over `account.name`, and a backed `account.id`
+   * each served one `null` group holding the whole total, where both live
+   * strategies served the real groups; a backed `runtimeFilter` member served
+   * `[]`; a windowed backed time dimension served a total of `0`. A
+   * dataset measure, dataset `filter` or measure `filter` over a related
+   * field is read the same way, so each is refused here too.
+   *
+   * Refused rather than joined: a join here would read the RELATED object's
+   * rows, which may live in its own pending seed, in the published table, or
+   * both, and are keyed differently in each (a seed row references a lookup by
+   * its external id, a stored row by `id`); and it would read an object this
+   * branch neither admits nor scopes today ({@link cubeObjects}). That is a
+   * second query engine with its own admission, not a gate. A refusal names
+   * the member and says what to do, where the `null` group looked like an
+   * answer.
+   */
+  private assertPreviewJoinsNothing(query: AnalyticsQuery, cube: Cube): void {
+    const baseObject = typeof cube.sql === 'string' ? cube.sql.trim() : cube.name;
+    for (const { member, param, column } of relationshipMembers(query, cube, true)) {
+      throw invalidMemberError(
+        `${RELATIONSHIP_MEMBER_NOUN[param]} '${member}' on cube '${cube.name}' reads '${column}' through relationship ` +
+          `path '${column.split('.').slice(0, -1).join('.')}'. The draft preview evaluates the drafted seed rows of ` +
+          `'${baseObject}' alone and joins no related object, so it cannot answer this member: publish the draft to ` +
+          `query it through the live strategies, or preview without it.`,
+        { member, param, cube: cube.name },
+      );
+    }
+  }
+
+  /**
    * [#5669] Reject a `where` member whose source field the backing object does
    * not have, BEFORE the strategy compiles it into `WHERE`.
    *
@@ -4508,6 +4788,59 @@ function mintableMeasureKey(member: string, cubeName: string): string {
 }
 
 /**
+ * [#28555] The cube the draft-preview evaluator reads for `query`: `cube`, plus
+ * an entry under each requested dimension or time-dimension SPELLING that
+ * resolves to a differently-keyed declared dimension ({@link declaredMemberEntry},
+ * the strategies' resolution), carrying that dimension.
+ *
+ * The evaluator reads a dimension's column as `cube.dimensions[name]?.sql ??
+ * name`, by the name as requested, so `<object>.region` and `<cube>.region`,
+ * which both live strategies resolve to the declared `region`, read the row
+ * key `'<object>.region'`, found nothing and grouped every row under one
+ * `null` (measured on `0b6a52e8`). Only the evaluator reads this cube; every
+ * gate keeps reading `cube`.
+ */
+function previewEvaluationCube(query: AnalyticsQuery, cube: Cube): Cube {
+  const aliases: Record<string, Cube['dimensions'][string]> = {};
+  const spellings = [...(query.dimensions ?? []), ...(query.timeDimensions ?? []).map((td) => td?.dimension)];
+  for (const member of spellings) {
+    if (typeof member !== 'string' || cube.dimensions[member]) continue;
+    const entry = declaredMemberEntry(cube, member, 'dimension');
+    if (entry && entry.key !== member) aliases[member] = cube.dimensions[entry.key];
+  }
+  return Object.keys(aliases).length > 0 ? { ...cube, dimensions: { ...cube.dimensions, ...aliases } } : cube;
+}
+
+/**
+ * [#28691] The column each `where` member resolves to, for every member
+ * spelled other than its column, which the draft-preview evaluator matches
+ * against the drafted rows (they carry columns). `OBJECT.region`,
+ * `CUBE.region` and a dataset dimension `zone` over `region` all read
+ * `region`, as both live strategies read them. Measured before: each matched
+ * no drafted row (`[]`, or under an `$or` only the other arm's rows) where
+ * both live faces served the rows.
+ *
+ * The leaves are read with the reader the strategies compile with
+ * (`normalizeAnalyticsFilterTree` + `collectFilterLeaves`, as
+ * {@link relationshipMembers} reads them), and each is resolved by
+ * {@link declaredMemberEntry}'s `'any'` arm, the strategies' filter-member
+ * lookup. A member that resolves to no declared entry, or to an expression or
+ * a relationship path, is not listed: it is read as written, or was refused
+ * before the evaluator runs.
+ */
+function previewWhereColumns(query: AnalyticsQuery, cube: Cube): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const member of whereLeafMembers((query as { where?: unknown }).where)) {
+    if (out[member] !== undefined) continue;
+    const entry = declaredMemberEntry(cube, member, 'any');
+    if (!entry) continue;
+    const column = typeof entry.sql === 'string' ? entry.sql.trim() : entry.key;
+    if (column !== member && BARE_IDENTIFIER.test(column)) out[member] = column;
+  }
+  return out;
+}
+
+/**
  * [#28172] The measures `measures` names that `cube` (registered as
  * `cubeName`) does not declare, minted
  * the way {@link AnalyticsService.ensureCube} mints them for the strategies:
@@ -4677,6 +5010,36 @@ export function inferredCallerMeasureSql(measure: string, cubeName: string): str
 }
 
 /**
+ * [#29364] The service's date-bucket door (`dataset-date-bucket-door.ts`) in
+ * front of the delegated service, on both the query and the dry run.
+ *
+ * The delegate (`MemoryAnalyticsService` is the in-repo one) folds a bucketed
+ * time dimension itself and reads no field type, so on `origin/main` `aca58cdb`
+ * a month bucket over a `formula` answered 200 with one `null` group holding
+ * every row, and over a `text` column one `null` group beside whatever text
+ * happened to parse as a date — while the engine face refused both. It is
+ * judged here with the keys the ObjectQL strategy's direct path would build
+ * and the context's `declaredFieldType` (the host's `sourceFieldMeta`), so this
+ * face answers the engine's refusal field for field. A host that wired no
+ * field types is not judged, as on the preview and the dry run.
+ *
+ * Reached by no shipped composition (the auto-mounted plugin always bridges
+ * `executeAggregate`, so every bucketed query goes to the engine); reached by
+ * a host composing `new AnalyticsService({ fallbackService })`, or a
+ * `queryCapabilities` override with `objectqlAggregate: false`.
+ */
+function assertDelegatedDateBucketsTemporal(query: AnalyticsQuery, ctx: StrategyContext): void {
+  const cube = ctx.getCube(query.cube!);
+  if (!cube) return;
+  const object = aggregateObjectOf(cube);
+  assertDatasetDateBucketsTemporal(
+    object,
+    aggregateGroupKeys(query, cube),
+    (field) => (ctx as DatasetScopedStrategyContext).declaredFieldType?.(object, field),
+  );
+}
+
+/**
  * FallbackDelegateStrategy — Internal strategy for fallback service delegation.
  *
  * Automatically added to the strategy chain when `fallbackService` is configured.
@@ -4693,10 +5056,12 @@ class FallbackDelegateStrategy implements AnalyticsStrategy {
   }
 
   async execute(query: AnalyticsQuery, ctx: StrategyContext): Promise<AnalyticsResult> {
+    assertDelegatedDateBucketsTemporal(query, ctx);
     return ctx.fallbackService!.query(query);
   }
 
   async generateSql(query: AnalyticsQuery, ctx: StrategyContext): Promise<{ sql: string; params: unknown[] }> {
+    assertDelegatedDateBucketsTemporal(query, ctx);
     if (ctx.fallbackService?.generateSql) {
       return ctx.fallbackService.generateSql(query);
     }

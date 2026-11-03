@@ -16,7 +16,7 @@
  * `--strict` at all** (B subsumes Shape A's warning-accounting change). The
  * exit status is the whole point of the card — it is the only thing a CI
  * pipeline reads — so this test spawns the real CLI (the
- * `migrate-exit-code.e2e.test.ts` pattern: `bin/run-dev.js` + tsx, no
+ * `migrate-exit-code.e2e.test.ts` pattern: `bin/run-dev.js` + `node`, no
  * dependency on `packages/cli/dist`) and asserts what the SHELL sees.
  *
  * Schema-layer pins (issue code/path, near-miss guidance, curated
@@ -35,7 +35,6 @@ import { linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 /** The card's failure shape: a valid stack plus ONE stray top-level key. */
 const CONFIG_WITH_STRAY_KEY = `
@@ -78,7 +77,7 @@ interface Run {
 function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...args],
       { cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {

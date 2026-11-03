@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 40 — spawns the real producer once per single-cause fixture: six spawns of the source CLI, one per distinct (command, shape) pair (doctor, diff --json, migrate meta --json, each over the two-package config and its one-package control), two alive at once; slowest CI reading 31.3 s of the five scheduled runs 41199450735…41271604267 (spawned through the tsx binary then), x 1.25, rounded up
 
 /**
  * #22288 — `os doctor`, `os diff` and `os migrate meta` judged a multi-package
@@ -35,7 +36,7 @@ import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { FILE_REFERENCES_MIGRATION_ID } from '@objectstack/spec/system';
 
-import { CLI, TSX, childEnv } from './helpers/serve-process.js';
+import { CLI, childEnv } from './helpers/serve-process.js';
 import { linkSpec } from './helpers/define-stack-fixture.js';
 
 interface Run { code: number; stdout: string; stderr: string }
@@ -76,8 +77,10 @@ let stubBinDir = '';
 
 function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
+    // `process.execPath`, not the tsx binary: the same `bin/run-dev.js` entry and
+    // the same `src/`, without the second node process tsx's launcher starts.
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...args],
       // Artifact-less on purpose: the config is the only input these commands read.
       // The stub `pnpm` leads `PATH` for every child; only `doctor` calls it.

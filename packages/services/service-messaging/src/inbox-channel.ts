@@ -19,6 +19,9 @@ export const INBOX_OBJECT = 'sys_inbox_message';
 /** The receipt object the inbox channel writes a `delivered` row to (ADR-0030). */
 export const RECEIPT_OBJECT = 'sys_notification_receipt';
 
+/** The input `EmailSenderSurface.renderTemplate` declares — the inbox channel builds it by name. */
+type TemplateRenderInput = Parameters<NonNullable<EmailSenderSurface['renderTemplate']>>[0];
+
 export interface InboxChannelOptions {
     /**
      * Resolve the runtime data engine. Returns `undefined` when no data layer
@@ -206,13 +209,17 @@ export function createInboxChannel(opts: InboxChannelOptions): MessagingChannel 
                     // currency, and grade a refusal below (#27257).
                     currencyReadFault = (err as Error)?.message ?? String(err);
                 }
+                const renderInput: TemplateRenderInput = {
+                    template: templateName,
+                    ...(templateData !== undefined ? { data: templateData } : {}),
+                    ...(templateLocale ? { locale: templateLocale } : {}),
+                };
+                // A plain assignment, not a spread: TypeScript checks the key
+                // against the declared input, so a rename on either side fails
+                // to compile. No default currency sends no key (#27754).
+                if (currency) renderInput.currency = currency;
                 try {
-                    const rendered = await email.renderTemplate({
-                        template: templateName,
-                        ...(templateData !== undefined ? { data: templateData } : {}),
-                        ...(templateLocale ? { locale: templateLocale } : {}),
-                        ...(currency ? { currency } : {}),
-                    });
+                    const rendered = await email.renderTemplate(renderInput);
                     title = rendered.subject;
                     bodyMd = rendered.text;
                 } catch (err) {
@@ -230,7 +237,7 @@ export function createInboxChannel(opts: InboxChannelOptions): MessagingChannel 
                                 template: templateName,
                                 ...(templateData !== undefined ? { data: templateData } : {}),
                                 ...(templateLocale ? { locale: templateLocale } : {}),
-                                ...{ currency: probe },
+                                currency: probe,
                             }),
                         ),
                     };

@@ -153,8 +153,6 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 /** `bin/run-dev.js` — this package's own entrypoint, run from TS source. */
 const CLI = resolve(HERE, '../bin/run-dev.js');
-/** The workspace `tsx` binary (an installed dependency, not a repo source input). */
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 const CONFIG = `
 export default {
@@ -370,7 +368,7 @@ function runServeFrom(
   return new Promise((resolveRun, rejectRun) => {
     // A kernel-assigned port (#24342): no number is drawn here, so none can be
     // taken between a pick and the child's bind.
-    const child = spawn(TSX, [CLI, 'serve', configArg, '--port', KERNEL_ASSIGNED_PORT], {
+    const child = spawn(process.execPath, [CLI, 'serve', configArg, '--port', KERNEL_ASSIGNED_PORT], {
       cwd,
       env: childEnv({
         NO_COLOR: '1',

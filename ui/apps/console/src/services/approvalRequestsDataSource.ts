@@ -111,7 +111,20 @@
  * and the timeline's label read of its `request_id` column, which asks for
  * `{ id: { $in: [...] } }`) stays on the data API, which serves each caller
  * the requests the approvals door would (objectstack's request read gate,
- * objectstack-ai/objectstack#22559). Every other member is the host's.
+ * objectstack-ai/objectstack#22559). Every other member is the host's, but one.
+ *
+ * ## A request's record page payload is refused (objectstack#28546)
+ *
+ * The host's record page payload (`getRecordPage`, objectstack#27627) is the
+ * data API's one read of a record page, `POST /data/:object/:id/page`. For a
+ * request it would read the data API's row: no `viewer` block, so the decision
+ * actions fail closed, and `pending_approvers` as the stored comma-joined
+ * string; and an ordinary approver is refused the object there outright. So
+ * `RecordDetailView` asks no payload for a request, and both sources here
+ * refuse one if asked: `getRecordPage` of `sys_approval_request` rejects with
+ * the `UNSUPPORTED_QUERY_PARAM` refusal before any request goes out, and
+ * `prefetchRecordPage` of one sends nothing. ⛔ It is never forwarded: a page
+ * drawn from the data API's row of a request is the defect this guards.
  */
 import { ApiDataSource } from '@object-ui/core';
 import { createAuthenticatedFetch } from '@object-ui/auth';
@@ -157,6 +170,9 @@ const DROPPED = new Set(['$select']);
 /** Host methods that read rows of a resource; refused for approval requests. */
 const REFUSED_HOST_READS = new Set(['aggregate', 'queryGroupHeaders', 'exportDownload']);
 
+/** The host's record page reads, never forwarded for a request (objectstack#28546). */
+const RECORD_PAGE_READS = new Set(['getRecordPage', 'prefetchRecordPage']);
+
 /** The refusal `ListView` classifies as a rejected query (its error panel). */
 function refusal(what: string): Error & { code: string } {
   const err = new Error(
@@ -165,6 +181,32 @@ function refusal(what: string): Error & { code: string } {
   ) as Error & { code: string };
   err.code = 'UNSUPPORTED_QUERY_PARAM';
   return err;
+}
+
+/** The refusal a request's record page payload rejects with: the same code, its own reason. */
+function recordPageRefusal(): Error & { code: string } {
+  const err = new Error(
+    `${APPROVAL_REQUEST_OBJECT}: a request's record page is not read through the data API's page payload. ` +
+      'Read the request with findOne, which the approvals service answers with its viewer.',
+  ) as Error & { code: string };
+  err.code = 'UNSUPPORTED_QUERY_PARAM';
+  return err;
+}
+
+/**
+ * A host record page read, wrapped so a request's payload is refused
+ * (`getRecordPage`) and a request's prefetch sends nothing
+ * (`prefetchRecordPage`); `undefined` for every other member.
+ */
+function guardRecordPageRead(
+  prop: string,
+  method: (...args: unknown[]) => unknown,
+): ((...args: unknown[]) => unknown) | undefined {
+  if (!RECORD_PAGE_READS.has(prop)) return undefined;
+  return (resource: unknown, ...rest: unknown[]) => {
+    if (resource !== APPROVAL_REQUEST_OBJECT) return method(resource, ...rest);
+    return prop === 'getRecordPage' ? Promise.reject(recordPageRefusal()) : undefined;
+  };
 }
 
 /** An absent value, as the door's own query flattening reads one. */
@@ -386,7 +428,7 @@ export function createApprovalRequestsDataSource(
     REFUSED_HOST_READS.has(prop)
       ? (resource: unknown, ...rest: unknown[]) =>
           resource === APPROVAL_REQUEST_OBJECT ? Promise.reject(refusal(prop)) : method(resource, ...rest)
-      : undefined,
+      : guardRecordPageRead(prop, method),
   );
 }
 
@@ -395,7 +437,8 @@ export function createApprovalRequestsDataSource(
  * to the approvals routes on every surface (objectui#12045): a `findOne` of
  * `sys_approval_request` and one request's `sys_approval_action` timeline.
  * Every other read, a `find` of `sys_approval_request` included, and every
- * other member are the host's. See the module doc for why lists stay on the
+ * other member are the host's, except a request's record page payload, which
+ * is refused (objectstack#28546). See the module doc for why lists stay on the
  * data API.
  *
  * Returns the host's own type: the result IS the host, with two reads
@@ -415,5 +458,5 @@ export function routeApprovalRecordReads<T extends DataSource>(
   const findOne = async (resource: string, id: string, params?: QueryParams): Promise<unknown> =>
     resource === APPROVAL_REQUEST_OBJECT ? doors.findRequest(id) : host.findOne(resource, id, params);
 
-  return forwardToHost(host, { find, findOne });
+  return forwardToHost(host, { find, findOne }, guardRecordPageRead);
 }

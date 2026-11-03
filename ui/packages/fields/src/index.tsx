@@ -8,17 +8,18 @@
 
 import React from 'react';
 import type { DateFieldMetadata, DateTimeFieldMetadata, FieldMetadata, SelectOptionMetadata } from '@object-ui/types';
-import { ComponentRegistry, percentDisplayValue, type PercentScale, getRecordDisplayName, humanizeLabel, isEmptyValue, isMissingForRequired, formatDate, formatDateTime, formatDateTimeCompactParts, formatRelativeDate, toDisplayDate, extractRecords, withoutDeniedFields, type RegistryComponentMeta, type DateDisplayOptions } from '@object-ui/core';
+import { ComponentRegistry, percentDisplayValue, type PercentScale, getRecordDisplayName, humanizeLabel, isEmptyValue, optionDisplayLabel, isMissingForRequired, formatDate, formatDateTime, formatDateTimeCompactParts, formatRelativeDate, toDisplayDate, extractRecords, withoutDeniedFields, type RegistryComponentMeta, type DateDisplayOptions } from '@object-ui/core';
 // The platform's own value-shape contract, asked rather than restated
 // (objectui#6744). See `locationStoredValueSchemaFor` below for why this is a
 // runtime import in the barrel and not a hand-written coordinate range.
 // `resolveFieldScale` is the same kind of ask: the width an ABSENT `scale`
 // means is the protocol's answer, not this package's (objectui#9843).
 import { valueSchemaFor, resolveFieldScale } from '@objectstack/spec/data';
+import type { ReferenceNameOnlyValue } from '@objectstack/spec/data';
 import { useLocalization, useDisplayLocale, formatDisplayNumber } from '@object-ui/i18n';
 import { Badge, Avatar, AvatarImage, AvatarFallback, Button, Checkbox, EmptyValue, cn, setFieldReadFaceResolver } from '@object-ui/components';
 import { Check, Copy, Phone as PhoneIcon, MapPin, CircleQuestionMark, Lock, Star } from 'lucide-react';
-import { useObjectTranslation } from '@object-ui/react';
+import { useObjectTranslation, classifyLoadError } from '@object-ui/react';
 import { SchemaRendererContext as _SchemaRendererContext } from '@object-ui/react';
 import { useRelatedRecordActions } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
@@ -43,6 +44,8 @@ import { RecordHoverCard, type RecordHoverCardObjectDef } from './RecordHoverCar
 type LookupCacheEntry =
   | { state: 'pending'; promise: Promise<void> }
   | { state: 'ok'; record: Record<string, unknown> | null | undefined; schema: unknown }
+  // The reader's own read was REFUSED (objectstack#29641): settled, not failed.
+  | { state: 'refused' }
   | { state: 'err' };
 const lookupNameCache: Map<string, LookupCacheEntry> = new Map();
 
@@ -244,8 +247,15 @@ export function isLikelyOpaqueId(v: unknown): boolean {
  *   answers a record hidden from this reader and a record that does not exist
  *   identically on purpose (existence non-disclosure, objectui#8631), so this
  *   state is that fused answer and nothing finer.
- * - `undefined` — anything else: not asked, still in flight, the read threw,
- *   or a record came back that no display field could name.
+ *   It is also the answer to a read the reader is REFUSED (objectstack#29641):
+ *   the target object's read gate answers the record GET with `403
+ *   PERMISSION_DENIED` (for an id that exists and for one that does not), which
+ *   the adapter throws rather than mapping to `null`. Read through the shared
+ *   `classifyLoadError` (`forbidden`), never from the message.
+ * - `undefined` — anything else: not asked, still in flight, the read failed
+ *   for any other reason (network, 5xx, 401: it may pass on a retry, so it
+ *   says nothing about the record), or a record came back that no display
+ *   field could name.
  */
 type LookupNameAnswer = { state: 'named'; name: string } | { state: 'absent' } | undefined;
 
@@ -324,8 +334,13 @@ function useLookupName(
         // heuristic alone can surface an autonumber over the real name.
         const schema = await fetchRefObjectSchema(dataSource, referenceTo!);
         lookupNameCache.set(cacheKey, { state: 'ok', record, schema });
-      } catch {
-        lookupNameCache.set(cacheKey, { state: 'err' });
+      } catch (err) {
+        // A refusal is the reader's settled answer, like a not-found; any
+        // other failure stays a failure (objectstack#29641).
+        lookupNameCache.set(
+          cacheKey,
+          classifyLoadError(err) === 'forbidden' ? { state: 'refused' } : { state: 'err' },
+        );
       }
       force((n) => n + 1);
     })();
@@ -335,6 +350,7 @@ function useLookupName(
 
   if (!isResolvable) return undefined;
   const entry = lookupNameCache.get(cacheKey);
+  if (entry?.state === 'refused') return { state: 'absent' };
   if (entry?.state !== 'ok') return undefined;
   if (entry.record == null) return { state: 'absent' };
   const name = resolveLookupRecordName(entry.record, entry.schema, displayField, policy, referenceTo);
@@ -749,16 +765,61 @@ function TruncatedText({
 }
 
 /**
- * Text field cell renderer
+ * The declared option a stored value names, or `undefined`: an exact match
+ * first, then a case-insensitive one, so seed data with mixed case
+ * (`"Referral"` stored, `"referral"` declared) still resolves to the option.
+ *
+ * The one matcher of this package's cells for a field's `options` list —
+ * `SelectCellRenderer` and `TextCellRenderer` both call it, so a stored value
+ * names the same option whichever of the two draws the field.
  */
-export function TextCellRenderer({ value }: CellRendererProps): React.ReactElement {
+function findDeclaredOption(
+  options: readonly SelectOptionMetadata[],
+  val: unknown,
+): SelectOptionMetadata | undefined {
+  const exact = options.find(opt => opt.value === val);
+  if (exact) return exact;
+  const norm = String(val).toLowerCase();
+  return options.find(opt => String(opt.value).toLowerCase() === norm);
+}
+
+/**
+ * Text field cell renderer.
+ *
+ * A field that declares a non-empty `options` list reads the matching
+ * option's label (objectstack#28792). The spec allows `options` on every
+ * field type, and the other faces of the same declaration already honour it
+ * on any type: an analytics dimension (`service-analytics`'s
+ * `dimension-labels.ts`: "the condition is the declared list itself, never the
+ * field's type") and a grid group header (`plugin-grid`'s
+ * `objectGridGrouping.ts`). The test here is that same test,
+ * `Array.isArray(options) && options.length > 0`, so a text field with a list
+ * no longer reads `backlog` in its cell and `Backlog` in a chart.
+ *
+ * Display only: the stored value is untouched, a value that names no option
+ * reads as itself, and a field with no list is drawn exactly as before. The
+ * labels arrive already translated: every host that hands this cell a field
+ * (`generateColumns`, `DetailSection`) runs `translateOptions` over a
+ * non-empty list whatever the field's type, the channel `SelectCellRenderer`
+ * reads too. Only a scalar stored value is matched; an array or an expanded
+ * record keeps the coerced text, since neither is one option's code.
+ */
+export function TextCellRenderer({ value, field }: CellRendererProps): React.ReactElement {
   const safe = coerceToSafeValue(value);
   // THE FLOOR by name and nothing more (objectui#8496), on the coerced text.
   // ⛔ Deliberately NOT `isBlankCellText`: a stored `'   '` is a value of a text
   // cell and keeps its spaces — the trim belongs to the renderers that go on to
   // coerce the text into a number, a date or an `href`.
   if (isEmptyValue(safe)) return <EmptyValue />;
-  return <TruncatedText text={String(safe)} />;
+  // `options` is a spec key on every field (`FieldSchema.options`), but the
+  // per-type metadata of the types this cell draws does not name it, so it is
+  // read structurally, as `LookupCellRenderer` reads its static options.
+  const options = (field as { options?: unknown } | undefined)?.options;
+  const option =
+    Array.isArray(options) && options.length > 0 && (typeof value === 'string' || typeof value === 'number')
+      ? findDeclaredOption(options as SelectOptionMetadata[], value)
+      : undefined;
+  return <TruncatedText text={option ? optionDisplayLabel(option) : String(safe)} />;
 }
 
 /**
@@ -1980,16 +2041,9 @@ export function SelectCellRenderer({ value, field }: CellRendererProps): React.R
   // `UserCellRenderer` (an overlapping avatar stack) ask the floor too.
   if (isEmptyValue(value)) return <EmptyValue />;
 
-  // Match a stored value to a configured option, falling back to a
-  // case-insensitive comparison so seed data with mixed case
-  // (e.g. "Referral" stored, "referral" defined) still resolves to the
-  // localized option label.
-  const findOption = (val: any): SelectOptionMetadata | undefined => {
-    const exact = options.find(opt => opt.value === val);
-    if (exact) return exact;
-    const norm = String(val).toLowerCase();
-    return options.find(opt => String(opt.value).toLowerCase() === norm);
-  };
+  // Match a stored value to a configured option (`findDeclaredOption`: exact,
+  // then case-insensitive), resolving to the localized option label.
+  const findOption = (val: any): SelectOptionMetadata | undefined => findDeclaredOption(options, val);
 
   const renderOne = (val: any, key?: number): React.ReactElement => {
     const option = findOption(val);
@@ -2648,9 +2702,16 @@ export function LookupCellRenderer({ value, field }: CellRendererProps): React.R
     (field as { reference_field?: string }).reference_field ||
     undefined;
 
+  // A value made only of served names (`referenceNameVisible`, a target the
+  // reader is refused) resolves nothing: each name is drawn as served. So it
+  // asks nothing of the referenced object either, not even its definition.
+  const nameOnlyValue = Array.isArray(value)
+    ? value.length > 0 && value.every(isReferenceNameOnly)
+    : isReferenceNameOnly(value);
+
   // Referenced object's schema (nameField / titleFormat) so expanded records
   // resolve through the same unified resolver as the picker (issue #2357).
-  const refSchema = useRefObjectSchema(referenceTo);
+  const refSchema = useRefObjectSchema(nameOnlyValue ? undefined : referenceTo);
 
   // The permission policy the referenced record is named under: every name
   // below is resolved from the row with the fields it denies on
@@ -2682,7 +2743,7 @@ export function LookupCellRenderer({ value, field }: CellRendererProps): React.R
   const lookupAnswer = useLookupName(referenceTo, primaryPrimitiveId, displayField, perms);
   const resolvedName = lookupAnswer?.state === 'named' ? lookupAnswer.name : undefined;
   // The reader's own read of the first primitive answered "no record"
-  // (objectui#13335). Only that id gets the restricted face: in flight, a
+  // (objectui#13335) or was refused (objectstack#29641). Only that id gets the restricted face: in flight, a
   // failed read, an unnamed record and the entries never asked keep the
   // unresolved one below.
   const restrictedId = lookupAnswer?.state === 'absent' ? primaryPrimitiveId : undefined;
@@ -2722,6 +2783,11 @@ export function LookupCellRenderer({ value, field }: CellRendererProps): React.R
       }
     }
   }
+
+  // A `referenceNameVisible` field's target the reader is refused: the served
+  // name, as text — no link and no hover card, both of which lead to or read
+  // the refused record (director ruling 6574398310, letter B).
+  if (isReferenceNameOnly(value)) return <ReferenceNameOnly name={value.name} />;
 
   // Server-side $expand returns the related record as a nested object
   // (e.g. { id, name }). Render its display name directly — no fetch needed.
@@ -2783,7 +2849,14 @@ export function LookupCellRenderer({ value, field }: CellRendererProps): React.R
   };
 
   if (Array.isArray(value)) {
-    const itemDisplay = (item: unknown): { label: string; unresolved: boolean; restricted: boolean } => {
+    const itemDisplay = (
+      item: unknown,
+    ): { label: string; unresolved: boolean; restricted: boolean; nameOnly: boolean } => {
+      // The served name of an element whose target the reader is refused,
+      // as served — per element, as the server serves it.
+      if (isReferenceNameOnly(item)) {
+        return { label: item.name, unresolved: false, restricted: false, nameOnly: true };
+      }
       if (item != null && typeof item === 'object') {
         return {
           label:
@@ -2791,12 +2864,18 @@ export function LookupCellRenderer({ value, field }: CellRendererProps): React.R
             String((item as any).id || (item as any)._id || '[Object]'),
           unresolved: false,
           restricted: false,
+          nameOnly: false,
         };
       }
       const r = resolveLabel(item);
       // A restricted entry's label is the restricted sentence, never its id —
       // the overflow chip's `title` lists labels too.
-      return { label: r.restricted ? restrictedLabel : r.text, unresolved: r.unresolved, restricted: r.restricted };
+      return {
+        label: r.restricted ? restrictedLabel : r.text,
+        unresolved: r.unresolved,
+        restricted: r.restricted,
+        nameOnly: false,
+      };
     };
 
     // Cap the chips the same way UserCellRenderer caps its avatars: a
@@ -2810,7 +2889,18 @@ export function LookupCellRenderer({ value, field }: CellRendererProps): React.R
     return (
       <div className="flex flex-wrap gap-1">
         {visible.map((item, idx) => {
-          const { label, unresolved, restricted } = itemDisplay(item);
+          const { label, unresolved, restricted, nameOnly } = itemDisplay(item);
+          if (nameOnly) {
+            // One text chip per refused element: its served name, no link.
+            return (
+              <span
+                key={idx}
+                className="inline-flex min-w-0 items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-50 text-gray-700 dark:bg-gray-800/50 dark:text-gray-200"
+              >
+                <ReferenceNameOnly name={label} />
+              </span>
+            );
+          }
           if (restricted) {
             // No link: the reader's read of this record answered "not found".
             return (
@@ -3166,6 +3256,56 @@ function RestrictedLookupReference({ label }: { label: string }): React.ReactEle
 }
 
 /**
+ * `ReferenceNameOnlyValue` (imported from `@objectstack/spec/data`, where
+ * `ReferenceNameOnlyValueSchema` owns the shape and the engine imports the same
+ * type) is the value a `lookup` / `user` field declaring
+ * `referenceNameVisible: true` is served on `$expand` when the reader may read
+ * the record carrying it but is refused the record it points at (director
+ * ruling 6574398310, letter B): the id the row holds, the target's display
+ * name, and the refusal said in the value, once per element on a
+ * `multiple: true` field. `name` is the target's ADR-0079 display name, or the
+ * floor `Record #<id>` when a field-level rule on the name column holds it
+ * back, and is drawn exactly as served.
+ *
+ * Is this one reference value the served name-only form? Judged on the
+ * in-band `readRefused: true` the server writes, never on the shape of the
+ * rest: an expanded record the reader may read can also carry just an id and
+ * a name (a narrow projection), and that one stays a link.
+ */
+function isReferenceNameOnly(value: unknown): value is ReferenceNameOnlyValue {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as { readRefused?: unknown; name?: unknown };
+  return candidate.readRefused === true && typeof candidate.name === 'string';
+}
+
+/**
+ * The name of a referenced record the reader is refused, as plain text.
+ *
+ * ⛔ No link and no hover card: both lead to, or read, a record this reader's
+ * own read is refused, so the link would open a page that answers 404 and the
+ * card would make the read the server just refused. ⛔ No second read to name
+ * it either: the server served the name, under its own field-level rules, and
+ * this draws that text and nothing else. The viewer's policy on the target
+ * object is not applied to it, because that policy is what refused the record
+ * and the server already decided which name the reader may see.
+ *
+ * Distinct from {@link RestrictedLookupReference}: that face is a field
+ * WITHOUT the key, whose reader's own read answered "not found", so there is
+ * no name to show. This one is a field whose author declared the name visible.
+ */
+function ReferenceNameOnly({ name, className }: { name: string; className?: string }): React.ReactElement {
+  return (
+    <span
+      data-slot="reference-name-only"
+      className={cn('inline-flex min-w-0 max-w-full items-center', className)}
+      title={name}
+    >
+      <span className="truncate">{name}</span>
+    </span>
+  );
+}
+
+/**
  * The shipped PRESENTATION of an unresolved reference, shared by the two
  * renderers that state one (objectui#8434 for `user`, objectui#8695 for
  * `lookup` / `master_detail` / `tree`), and published for the host faces of the
@@ -3262,6 +3402,18 @@ export function UserCellRenderer({ value }: CellRendererProps): React.ReactEleme
           if (typeof entry !== 'object' || entry === null) {
             return <UnresolvedUserReference key={idx} value={entry} className="text-sm" />;
           }
+          // A person the reader is refused, named because the field declares
+          // `referenceNameVisible`: one text chip, the name as served.
+          if (isReferenceNameOnly(entry)) {
+            return (
+              <span
+                key={idx}
+                className="inline-flex min-w-0 items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-50 text-gray-700 dark:bg-gray-800/50 dark:text-gray-200"
+              >
+                <ReferenceNameOnly name={entry.name} />
+              </span>
+            );
+          }
           // Each person as the viewer may read it (objectui#10535).
           const user = withoutDeniedFields(entry, perms, personObject);
           // An entry carrying nothing names no person (objectui#8596) — the
@@ -3312,6 +3464,12 @@ export function UserCellRenderer({ value }: CellRendererProps): React.ReactEleme
   //
   // Judged on the person as the viewer may read it (objectui#10535), as is
   // everything below.
+  //
+  // ...except a person the reader is refused, served by name because the field
+  // declares `referenceNameVisible`: the name as served, as text, with no
+  // avatar. The viewer's `sys_user` policy is what refused the record, so it is
+  // not applied to the one name the server chose to serve.
+  if (isReferenceNameOnly(value)) return <ReferenceNameOnly name={value.name} />;
   const user = withoutDeniedFields(value, perms, personObject);
   if (Object.keys(user).length === 0) {
     return <TruncatedText text={String(coerceToSafeValue(user))} />;

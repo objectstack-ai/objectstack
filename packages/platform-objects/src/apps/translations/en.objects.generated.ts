@@ -108,7 +108,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         help: "How this identity was created — idp_provisioned (federated SSO JIT) or env_native (local signup / app end-user). System-managed; do not edit.",
         options: {
           idp_provisioned: "IdP-Provisioned",
-          env_native: "Env-Native"
+          env_native: "Local Account"
         }
       },
       id: {
@@ -241,6 +241,17 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           managerId: {
             label: "Manager",
             helpText: "The user this person reports to. The server refuses a manager outside their organization, a self-assignment, and a link that would close or over-deepen the reporting chain."
+          }
+        }
+      },
+      list_platform_admins: {
+        label: "Platform Administrators",
+        resultDialog: {
+          title: "Platform Administrators",
+          description: "Everyone who holds platform-admin standing now: an in-window admin_full_access grant owned by the Default Organization, or a verified address on the deployment's owner list.",
+          acknowledge: "Close",
+          fields: {
+            entries: "Platform administrators"
           }
         }
       },
@@ -844,11 +855,12 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       cancel_invitation: {
         label: "Cancel Invitation",
         confirmText: "Cancel this invitation? The recipient will no longer be able to accept it.",
-        successMessage: "Invitation canceled"
+        successMessage: "Invitation canceled",
+        cancelText: "Keep invitation"
       },
       resend_invitation: {
         label: "Resend Invitation",
-        description: "Resend the invitation to {{ record.email }}? Its expiry date starts over.",
+        description: "Resend the invitation to {{ record.email }}? The expiry date starts over, and an invitation that has already expired is replaced by a new one.",
         successMessage: "Invitation resent",
         outcomeMessages: {
           sent: "Invitation resent to {{ result.email }}",
@@ -1399,6 +1411,38 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       by_user: {
         label: "By User"
+      }
+    }
+  },
+  sys_personal_view: {
+    label: "Personal View",
+    pluralLabel: "Personal Views",
+    description: "A reader's own named list views (My Views). Visible only to the owner.",
+    fields: {
+      id: {
+        label: "Personal View ID"
+      },
+      created_at: {
+        label: "Created At"
+      },
+      updated_at: {
+        label: "Updated At"
+      },
+      user_id: {
+        label: "Owner",
+        help: "The user this view belongs to. Only this user reads or changes it."
+      },
+      object_name: {
+        label: "Object",
+        help: "The object this view lists (its machine name)."
+      },
+      label: {
+        label: "Name",
+        help: "The name the owner gave this view."
+      },
+      config: {
+        label: "View Configuration",
+        help: "The list configuration, in spec's ListView shape. Validated on every save."
       }
     }
   },
@@ -3061,7 +3105,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Treat As Historical"
       },
       error: {
-        label: "Fatal Error"
+        label: "Failure Reason"
       },
       results: {
         label: "Row Results (sample)",

@@ -15,6 +15,17 @@
  *    booked in that flag's `gatedInputs`. Adding a gate without registry
  *    bookkeeping turns this red.
  *
+ * One booked path can stand for two params (#28280):
+ * `sys_user.actions.create_user.params.email` in `phoneNumber.gatedInputs`
+ * books BOTH Email params of Create User, because a param's `required` is
+ * static and the field is required only while phone sign-in is off. The first,
+ * optional param carries the canonical opt-in gate, and the forward guard
+ * resolves the path to that first param. The second, required param is
+ * NEGATIVELY gated (`has(features.phoneNumber) && features.phoneNumber !=
+ * true`); the registry does not model a negated gate, so the reverse guard
+ * only checks it is booked, and its verdicts are pinned in
+ * `identity/sys-user-create-user-email-required.test.ts`.
+ *
  * Scope notes: objects that moved to capability plugins per ADR-0029 K2
  * (plugin-security / plugin-sharing / plugin-audit / service-realtime /
  * plugin-webhooks) are outside this package and this guard; none of them

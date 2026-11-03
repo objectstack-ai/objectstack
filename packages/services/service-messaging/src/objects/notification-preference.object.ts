@@ -43,15 +43,16 @@ export const NotificationPreference = ObjectSchema.create({
     // the docblock above (ADR-0030 Layer 3).
     description: 'Which topics and channels each user receives; admins set the defaults.',
     // [ADR-0079] The record title is `display_title`, a text formula over the
-    // same three columns `titleFormat` names. With no pointer declared, the
+    // same three columns `titleFormat` named. With no pointer declared, the
     // registry's designate-only pass stamped `nameField: 'id'` (the first
     // title-eligible field), so a renderer honouring ADR-0079's order (an
     // explicit `nameField` wins over `titleFormat`) drew the raw id as the
-    // record page's H1. `titleFormat` stays for renderers that still read it
-    // first; `notification-display-title.test.ts` holds the two to the same text.
+    // record page's H1. The retired `titleFormat` template beside it is gone
+    // (refused at save and by `os validate`);
+    // `notification-display-title.test.ts` holds the formula to the text that
+    // template drew.
     displayNameField: 'display_title',
     nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-    titleFormat: '{user_id} · {topic} · {channel}',
     highlightFields: ['user_id', 'topic', 'channel', 'enabled', 'digest'],
 
     // The one list view this object ships, declared for its `emptyState`: with

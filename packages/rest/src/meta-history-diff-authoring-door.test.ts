@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: one real-stack boot (better-sqlite3 :memory:, the real sys_metadata objects, protocol and routes) seeded with six saves and shared by the 20 cases, which only read, each case's door reads its subject; slowest CI reading 12.2 s (scheduled full-battery run 41255489006, Test Core shard log) x 1.25, rounded up; read before the 20 identical boots became one
 
 /**
  * [#20378] `GET /meta/:type/:name/diff` and `GET /meta/:type/:name/history` are
@@ -62,7 +63,7 @@
  * booted stack is `packages/qa/dogfood/test/wall-authoring-trail-doors.dogfood.test.ts`.
  */
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterAll, beforeAll, beforeEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
@@ -138,7 +139,7 @@ type SubjectType = keyof typeof SUBJECTS;
 const DRAFT_ONLY_TEXT = ['Atlas (draft)', 'nav_atlas_launch_plan', 'Beacon', 'nav_beacon_home', 'Pipeline (draft)', 'Forecast'];
 
 const liveEngines: ObjectQL[] = [];
-afterEach(async () => {
+afterAll(async () => {
     while (liveEngines.length) {
         try { await liveEngines.pop()?.destroy(); } catch { /* noop */ }
     }
@@ -244,6 +245,20 @@ async function boot() {
     return { door, drafts, spies, resetSpies, draftVersion };
 }
 
+/**
+ * One boot, seeded once, for every case: after the seeding every case only
+ * reads (`GET` on the doors, `draftVersion`'s system read), so no case writes
+ * what another reads. The spies are cleared before each case, as a boot of its
+ * own left them (armed after the seeding, with no call recorded).
+ */
+let shared: Awaited<ReturnType<typeof boot>>;
+beforeAll(async () => {
+    shared = await boot();
+});
+beforeEach(() => {
+    shared?.resetSpies();
+});
+
 const envelope = (res: any) => ({ status: res.statusCode, code: res.body?.error?.code ?? res.body?.code });
 const text = (res: any): string => JSON.stringify(res.body ?? null);
 const navIds = (doc: any): string[] => (doc?.navigation ?? []).map((e: any) => e.id);
@@ -260,7 +275,7 @@ describe('[#20378 · #20441] a member without an authoring capability is refused
     for (const suffix of AUTHORING_DOORS) {
         for (const type of Object.keys(SUBJECTS) as SubjectType[]) {
             it(`${suffix} ${type}: 403 FORBIDDEN in the /meta/_drafts envelope — one answer for a published item, a draft-only one and a missing name, and nothing read`, async () => {
-                const { door, drafts, spies, resetSpies } = await boot();
+                const { door, drafts, spies, resetSpies } = shared;
                 const listing = await drafts('member');
                 expect(envelope(listing)).toEqual({ status: 403, code: 'FORBIDDEN' });
 
@@ -298,7 +313,7 @@ describe('[#20378 · #20441] a member without an authoring capability is refused
     }
 
     it('/diff: a range naming the draft save, the default range and an unparseable bound all answer the member the same refusal', async () => {
-        const { door, draftVersion } = await boot();
+        const { door, draftVersion } = shared;
         const v = await draftVersion('app', 'atlas');
         const plain = await door('member', '/diff', 'app', 'atlas');
         const ranges: Record<string, string>[] = [{ from: '0', to: String(v) }, { from: String(v - 1), to: String(v) }, { from: 'abc' }];
@@ -315,7 +330,7 @@ describe('[#20378 · #20441] a member without an authoring capability is refused
 
     for (const suffix of ['/history', '/audit'] as const) {
         it(`${suffix}: an unparseable \`limit\` answers the member the same refusal — decided before the query parse`, async () => {
-            const { door } = await boot();
+            const { door } = shared;
             const plain = await door('member', suffix, 'app', 'atlas');
             const res = await door('member', suffix, 'app', 'atlas', { limit: 'abc' });
             expect(envelope(res)).toEqual({ status: 403, code: 'FORBIDDEN' });
@@ -328,7 +343,7 @@ describe('[#20378 · #20441] a member without an authoring capability is refused
 
 describe('[#20378 · #20441] builders read /diff, /history and /audit as before — the control', () => {
     it('/diff app: every builder reads the draft version; the author reads it whole, every other builder pruned as the plain read prunes', async () => {
-        const { door, draftVersion } = await boot();
+        const { door, draftVersion } = shared;
         const v = await draftVersion('app', 'atlas');
         for (const who of BUILDERS) {
             // [#26462] From the published version, not `from=0`: a version
@@ -348,7 +363,7 @@ describe('[#20378 · #20441] builders read /diff, /history and /audit as before 
     }, 60_000);
 
     it('/diff view: every builder reads the draft version of a type no per-caller gate judges, and a draft-only view', async () => {
-        const { door, draftVersion } = await boot();
+        const { door, draftVersion } = shared;
         const v = await draftVersion('view', 'opportunity.pipeline');
         for (const who of BUILDERS) {
             const res = await door(who, '/diff', 'view', 'opportunity.pipeline', { from: String(v - 1), to: String(v) });
@@ -363,7 +378,7 @@ describe('[#20378 · #20441] builders read /diff, /history and /audit as before 
     }, 60_000);
 
     it('/history: every builder reads the change log of an app and a view, draft saves included', async () => {
-        const { door } = await boot();
+        const { door } = shared;
         for (const who of BUILDERS) {
             for (const [type, name] of [['app', 'atlas'], ['view', 'opportunity.pipeline']] as const) {
                 const res = await door(who, '/history', type, name);
@@ -375,7 +390,7 @@ describe('[#20378 · #20441] builders read /diff, /history and /audit as before 
     }, 60_000);
 
     it('/audit: every builder reads the audit trail of an app and a view, the author\'s draft save included, and of a draft-only item', async () => {
-        const { door } = await boot();
+        const { door } = shared;
         for (const who of BUILDERS) {
             for (const [type, name] of [['app', 'atlas'], ['view', 'opportunity.pipeline']] as const) {
                 const res = await door(who, '/audit', type, name);
@@ -397,7 +412,7 @@ describe('[#20378 · #20441] builders read /diff, /history and /audit as before 
 
 describe('[#20378] /layers and ?layers=true are unchanged for the member — the lit control', () => {
     it('the member reads both layered doors of a published app: 200, the active row pruned as the plain read prunes it, no draft', async () => {
-        const { door } = await boot();
+        const { door } = shared;
         const plain = await door('member', '', 'app', 'atlas');
         expect(plain.statusCode).toBe(200);
         const expected = navIds(plain.body?.item);
@@ -412,7 +427,7 @@ describe('[#20378] /layers and ?layers=true are unchanged for the member — the
     }, 60_000);
 
     it('the member reads both layered doors of a published view: 200, the active row', async () => {
-        const { door } = await boot();
+        const { door } = shared;
         for (const [label, suffix, query] of [['/layers', '/layers', {}], ['?layers=true', '', { layers: 'true' }]] as const) {
             const res = await door('member', suffix, 'view', 'opportunity.pipeline', query);
             expect(res.statusCode, label).toBe(200);
@@ -425,7 +440,7 @@ describe('[#20378] /layers and ?layers=true are unchanged for the member — the
 describe('[#23546] a setup.access-only caller is refused /diff, /history and /audit, and still lists /meta/_drafts', () => {
     for (const suffix of AUTHORING_DOORS) {
         it(`${suffix}: 403 FORBIDDEN in the /meta/_drafts envelope, before any read; /meta/_drafts still answers 200`, async () => {
-            const { door, drafts, spies, resetSpies } = await boot();
+            const { door, drafts, spies, resetSpies } = shared;
             const listing = await drafts('setupAdmin');
             expect(listing.statusCode).toBe(200);
             const refusal = await drafts('member');
@@ -458,7 +473,7 @@ describe('[#23546] a setup.access-only caller is refused /diff, /history and /au
 
 describe('[#23546] the trail admits a strict subset of the callers /meta/_drafts admits', () => {
     it('every caller the trail admits lists drafts; setup.access alone lists drafts and is refused the trail', async () => {
-        const { door, drafts } = await boot();
+        const { door, drafts } = shared;
         const admitted: Record<string, boolean> = {};
         for (const who of Object.keys(CALLERS) as CallerName[]) {
             const lists = (await drafts(who)).statusCode === 200;
@@ -481,7 +496,7 @@ describe('[#23546] the trail admits a strict subset of the callers /meta/_drafts
 
 describe('[#26462] /diff refuses a named version with no history row, as /rollback does', () => {
     it('steps 4–6: both versions missing, one missing, and an item that never existed answer 404 VERSION_NOT_FOUND; the step 3 control answers its change', async () => {
-        const { door, draftVersion } = await boot();
+        const { door, draftVersion } = shared;
         const v = await draftVersion('view', 'opportunity.pipeline');
         const control = await door('studioBuilder', '/diff', 'view', 'opportunity.pipeline', { from: String(v - 1), to: String(v) });
         expect(control.statusCode).toBe(200);

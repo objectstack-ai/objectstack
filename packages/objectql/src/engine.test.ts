@@ -1723,8 +1723,10 @@ describe('ObjectQL Engine', () => {
             const result = await engine.find('task', { expand: { assignee: { object: 'assignee' } } });
 
             expect(result).toHaveLength(2);
-            expect(result[0].assignee).toEqual({ id: 'u1', name: 'Alice' });
-            expect(result[1].assignee).toEqual({ id: 'u2', name: 'Bob' });
+            // [#29408] The related record is answered on every declared column the
+            // read selected; the double's rows carry no timestamps, so they read null.
+            expect(result[0].assignee).toEqual({ id: 'u1', name: 'Alice', created_at: null, updated_at: null });
+            expect(result[1].assignee).toEqual({ id: 'u2', name: 'Bob', created_at: null, updated_at: null });
 
             // Verify the expand query used $in. The expand sub-read now routes
             // through the secured `find` path ([#2850]), so the referenced
@@ -1768,7 +1770,8 @@ describe('ObjectQL Engine', () => {
 
             const result = await engine.find('ticket', { expand: { owner: { object: 'owner' } } });
 
-            expect(result[0].owner).toEqual({ id: 'u1', name: 'Alice' });
+            // [#29408] Unwritten declared columns of the related record read null.
+            expect(result[0].owner).toEqual({ id: 'u1', name: 'Alice', created_at: null, updated_at: null });
             expect(mockDriver.find).toHaveBeenLastCalledWith(
                 'sys_user',
                 expect.objectContaining({ where: { id: { $in: ['u1'] } } }),
@@ -1825,7 +1828,8 @@ describe('ObjectQL Engine', () => {
             );
 
             // Records the driver filtered out keep their raw FK id (unresolved).
-            expect(result[0].assignee).toEqual({ id: 'u1', name: 'Alice', active: true });
+            // [#29408] Unwritten declared columns of the related record read null.
+            expect(result[0].assignee).toEqual({ id: 'u1', name: 'Alice', active: true, created_at: null, updated_at: null });
             expect(result[1].assignee).toBe('u2');
         });
 
@@ -2071,7 +2075,8 @@ describe('ObjectQL Engine', () => {
                 ]);
 
             const result = await engine.find('order_item', { expand: { order: { object: 'order' } } });
-            expect(result[0].order).toEqual({ id: 'o1', total: 100 });
+            // [#29408] Unwritten declared columns of the related record read null.
+            expect(result[0].order).toEqual({ id: 'o1', total: 100, created_at: null, updated_at: null });
         });
 
         it('should skip expand for fields without reference definition', async () => {
@@ -2558,7 +2563,8 @@ describe('ObjectQL Engine', () => {
             const result = await engine.find('task', { expand: { project: { object: 'project' } } });
 
             // Project expanded, but org inside project remains as raw ID
-            expect(result[0].project).toEqual({ id: 'p1', org: 'o1' });
+            // [#29408] Unwritten declared columns of the related record read null.
+            expect(result[0].project).toEqual({ id: 'p1', org: 'o1', created_at: null, updated_at: null });
             expect(mockDriver.find).toHaveBeenCalledTimes(2); // Only primary + 1 expand query
         });
 

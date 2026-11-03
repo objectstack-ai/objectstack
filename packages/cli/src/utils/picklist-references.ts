@@ -47,9 +47,9 @@
  * The boot keeps a composed stack's residual picklist (a top-level one no
  * body declares) as metadata only, and refuses the stack when no object field
  * the engine registers names it (ADR-0130 D4). This door gives the same
- * refusal, in the boot's words, as {@link PICKLIST_RESIDUAL_UNREFERENCED}, so
- * `os validate` and `os build` foretell it. See
- * `findUnreferencedResidualPicklists`.
+ * refusal as {@link PICKLIST_RESIDUAL_UNREFERENCED}, read from the boot's own
+ * judgement (`unreferencedResidualPicklists`), so `os validate` and `os build`
+ * foretell it in the boot's words. See `findUnreferencedResidualPicklists`.
  *
  * ## Declared dependencies outside the stack: reported, never refused
  *
@@ -93,6 +93,7 @@
 import chalk from 'chalk';
 import type { AuthoringFinding } from '@objectstack/lint';
 import { unclaimedTopLevel } from '@objectstack/metadata';
+import { unreferencedResidualPicklists } from '@objectstack/objectql';
 
 import { artifactPackages } from './artifact-packages.js';
 import { printInfo } from './format.js';
@@ -336,60 +337,6 @@ export function judgePicklistReferences(parsed: AnyRec): PicklistReferenceJudgem
 }
 
 /**
- * The picklist names a manifest-shaped source's fields carry: its `objects`
- * and `objectExtensions`, in either field spelling (a name-keyed record or an
- * array), and the same of each nested `plugins[]` entry that is a plain
- * object. That is the reading the boot's `collectManifestPicklistReferences`
- * (`@objectstack/objectql`) makes of a source it registers. The stack parse
- * refuses a `plugins` key inside a `packages[]` body today; it is walked anyway
- * so this set stays the engine's.
- */
-function fieldPicklistNamesOf(source: unknown): string[] {
-  const names: string[] = [];
-  const rec = asRec(source);
-  if (!rec) return names;
-  const nested = Array.isArray(rec.plugins) ? rec.plugins.map(asRec).filter((p): p is AnyRec => p !== undefined) : [];
-  for (const s of [rec, ...nested]) {
-    for (const collection of ['objects', 'objectExtensions'] as const) {
-      const raw = s[collection];
-      const entries = Array.isArray(raw) ? raw : (asRec(raw) ? Object.values(raw as AnyRec) : []);
-      for (const entry of entries) {
-        const fields = asRec(entry)?.fields;
-        const defs = Array.isArray(fields) ? fields : (asRec(fields) ? Object.values(fields as AnyRec) : []);
-        for (const def of defs) {
-          const picklist = asRec(def)?.picklist;
-          if (typeof picklist === 'string' && picklist !== '') names.push(picklist);
-        }
-      }
-    }
-  }
-  return names;
-}
-
-/**
- * The boot's judgement of an unreferenced residual picklist, for one list, in
- * the boot's words: what `ObjectQLPlugin`'s `manifest` service throws
- * (`unreferencedResidualPicklistRefusal`, `INVALID_METADATA`) is
- * `${judgement} ${prescription}`. Restated here because the engine does not
- * export it; `picklist-references.boot-parity.test.ts` boots the engine on the
- * same stacks and holds the two equal.
- */
-function residualPicklistWording(name: string, owner: string): { judgement: string; prescription: string } {
-  return {
-    judgement:
-      `Picklist '${name}' is declared on the top level of stack '${owner}', and no package body declares it and no `
-      + 'object field the engine registers names it (in a composed stack, a top-level `objectExtensions` entry, a '
-      + 'top-level copy of an object a package body declares and a top-level `plugins[]` entry are not registered). '
-      + 'The engine registers a top-level picklist only through a package body, so this list would be missing from '
-      + 'the engine with nothing said.',
-    prescription:
-      'Declare it inside the `packages[]` entry of the package whose objects use it; or name it from a field of '
-      + 'the object meant to use it (a top-level object that does is then listed and not served until both move '
-      + 'into a package body); or remove it from the top level.',
-  };
-}
-
-/**
  * [ADR-0130 D4] Every top-level picklist of a composed stack (one that carries
  * `packages[]`) that no package body declares and no object field the boot
  * registers names — each one the boot refuses (`INVALID_METADATA`) before
@@ -397,11 +344,11 @@ function residualPicklistWording(name: string, owner: string): { judgement: stri
  * whose top level IS its one package.
  *
  * Which items are residual is the residual rule's answer (`unclaimedTopLevel`,
- * `@objectstack/metadata`), never re-derived here. "Named" is the boot's set:
- * a field of a body's `objects` / `objectExtensions` / nested `plugins[]`, or
- * of a residual object. A top-level `objectExtensions` entry, a top-level copy
- * of an object a body declares and a top-level `plugins[]` entry name nothing,
- * because no door registers them in a composed stack.
+ * `@objectstack/metadata`); which of its lists nothing names, and the words,
+ * are the boot's own judgement, `unreferencedResidualPicklists` (re-exported by
+ * `@objectstack/objectql`), which the `manifest` service throws as one
+ * sentence. This door only reports it, one finding per list, located at the
+ * list's top-level index. ⛔ Never re-derived or re-worded here.
  *
  * A residual picklist that a field DOES name is not this judge's: a residual
  * object's field makes that object listed and not served at boot, and a
@@ -409,28 +356,18 @@ function residualPicklistWording(name: string, owner: string): { judgement: stri
  */
 function findUnreferencedResidualPicklists(parsed: AnyRec): AuthoringFinding[] {
   if (parsed.packages === undefined) return [];
-  const residual = unclaimedTopLevel(parsed);
-  const lists = residual?.items.filter((entry) => entry.type === 'picklist') ?? [];
-  if (!residual || lists.length === 0) return [];
-  const named = new Set<string>();
-  for (const pkg of artifactPackages(parsed)) for (const name of fieldPicklistNamesOf(pkg.body)) named.add(name);
-  const residualObjects = residual.items.filter((entry) => entry.type === 'object').map((entry) => entry.item);
-  for (const name of fieldPicklistNamesOf({ objects: residualObjects })) named.add(name);
-  const owner = residual.ownerId ?? '<none>';
-  return lists
-    .map((entry) => ({ entry, name: String(asRec(entry.item)?.name) }))
-    .filter(({ name }) => !named.has(name))
-    .map(({ entry, name }) => {
-      const wording = residualPicklistWording(name, owner);
-      return {
-        severity: 'error' as const,
-        rule: PICKLIST_RESIDUAL_UNREFERENCED,
-        where: `picklist "${name}"`,
-        path: `${entry.field}[${entry.index}]`,
-        message: wording.judgement,
-        hint: wording.prescription,
-      };
-    });
+  const unreferenced = unreferencedResidualPicklists(
+    unclaimedTopLevel(parsed),
+    artifactPackages(parsed).map((pkg) => pkg.body),
+  );
+  return (unreferenced?.picklists ?? []).map((list) => ({
+    severity: 'error' as const,
+    rule: PICKLIST_RESIDUAL_UNREFERENCED,
+    where: `picklist "${list.name}"`,
+    path: `${list.field}[${list.index}]`,
+    message: list.wording.judgement,
+    hint: list.wording.prescription,
+  }));
 }
 
 /**

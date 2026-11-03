@@ -52,7 +52,8 @@ import { useNavActionDispatch } from '../hooks/useNavActionDispatch.js';
 import { useNavTargetLabel } from '../hooks/useNavTargetLabel.js';
 import { useNavDocTargetCheck } from '../hooks/useNavDocTargetCheck.js';
 import { useNavMemberGates } from '../hooks/useNavMemberGates.js';
-import { matchAppBySegment, appRouteSegment, resolveKeyedI18nLabel } from '../utils/index.js';
+import { matchAppBySegment, resolveKeyedI18nLabel } from '../utils/index.js';
+import { appAddressSegment } from '../utils/appRoute.js';
 import { withoutUnreadableObjectEntries } from '../utils/navObjectReadGate.js';
 import { useHomePath } from '../hooks/useHomePath.js';
 // Aliased for symmetry with objectui's own `resolveKeyedI18nLabel` above (the
@@ -76,6 +77,7 @@ import { useConsoleSidebarRail, useConsoleSidebarRailPanel } from './consoleSide
 import { SidebarItemMenu, sidebarItemDesignPath, favoriteDesignPath } from './SidebarItemMenu.js';
 import { SortableFavoriteRows, type FavoriteRowDragProps } from './SortableFavoriteRows.js';
 import { favoriteAppSegment } from './listViewFavorites.js';
+import { electSidebarArea, type SidebarAreaRoute } from './sidebarAreaElection.js';
 import type { FavoriteItem } from '../hooks/useFavorites.js';
 
 /**
@@ -183,7 +185,7 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
   // An entry with no `label` shows its target's CURRENT label, read from the
   // metadata cache at render time (objectui#9868). `nav:menu` wires the same
   // hook, so the two surfaces cannot name one entry two ways.
-  const resolveNavTargetLabel = useNavTargetLabel();
+  const resolveNavTargetLabel = useNavTargetLabel({ byName: true });
   // Below the fold width the sidebar is the icon rail and expands over the
   // content (objectstack#27593); `useResponsiveSidebar` folds and unfolds it.
   const rail = useConsoleSidebarRail({ enabled: railOverlay });
@@ -212,6 +214,18 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
       document.removeEventListener('touchend', handleTouchEnd);
     };
   }, [isMobile, setOpenMobile]);
+
+  // On a phone the sidebar is a drawer over the page, so a route change closes
+  // it: an entry tapped in the drawer opens its page uncovered, whichever row
+  // (navigation, favorite, recent) it was (objectstack#29075). Keyed on the
+  // route, not on any one row's handler, so a row added later closes it too.
+  const routeKey = `${location.pathname}${location.search}`;
+  const lastRouteKey = React.useRef(routeKey);
+  React.useEffect(() => {
+    if (lastRouteKey.current === routeKey) return;
+    lastRouteKey.current = routeKey;
+    if (isMobile) setOpenMobile(false);
+  }, [routeKey, isMobile, setOpenMobile]);
 
   const { recentItems: allRecentItems } = useRecentItems();
   // A Studio package entry is labelled from the package list (objectui#11863),
@@ -255,6 +269,24 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
     checkCapability: checkCap,
     can,
   } = useNavMemberGates();
+
+  // App-level context selectors (e.g. Studio's package scope). Their
+  // values are injected into nav items as `{<id>}` template vars so a
+  // single dropdown transparently scopes every secondary menu.
+  const { contextValues, element: contextSelectorsUI } = useAppContextSelectors(
+    activeApp?.name || 'home',
+    activeApp?.contextSelectors,
+    t,
+  );
+
+  // The template context every navigation href here resolves with; the area
+  // election below matches routes with it too, so it agrees with the drawn
+  // highlight.
+  const navTemplateContext = {
+    currentUserId: user?.id ?? null,
+    currentOrgId: activeOrganization?.id ?? null,
+    contextValues,
+  };
 
   // Area management.
   //
@@ -303,37 +335,36 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
       hasActionHandler: !!dispatchNavAction,
     }),
   );
+  // The route the area election reads: in an app, the area whose navigation
+  // holds the entry the current page addresses is shown (`electSidebarArea`).
+  const areaRoute: SidebarAreaRoute | null =
+    context === 'app' && activeApp
+      ? {
+          pathname: location.pathname,
+          search: location.search,
+          basePath: `/apps/${appAddressSegment(apps, activeApp)}`,
+          templateContext: navTemplateContext,
+        }
+      : null;
   const [activeAreaId, setActiveAreaId] = React.useState<string | null>(
-    () => visibleAreas.length > 0 ? visibleAreas[0].id : null,
+    () => electSidebarArea(visibleAreas, null, areaRoute),
   );
 
   const visibleAreaIds = visibleAreas.map((a) => a.id).join(',');
 
-  // Re-elect when the app changes or the visible-area set changes. Keeping
-  // `prev` whenever it is still visible means merely REVEALING a new area
-  // never steals the user's current selection.
+  // Re-elect when the app, the visible-area set or the route changes. The
+  // current area stays while it is still visible and the page is one of its
+  // entries' (or no area's), so merely REVEALING a new area never steals the
+  // user's selection, and a user's own pick holds on a page it addresses.
   React.useEffect(() => {
-    if (visibleAreas.length > 0) {
-      setActiveAreaId(prev => visibleAreas.some((a) => a.id === prev) ? prev : visibleAreas[0].id);
-    } else {
-      setActiveAreaId(null);
-    }
-  }, [activeApp?.name, visibleAreaIds]);
+    setActiveAreaId((prev) => electSidebarArea(visibleAreas, prev, areaRoute));
+  }, [activeApp?.name, visibleAreaIds, location.pathname, location.search, context]);
 
   // Resolve navigation items. The render-time `?? visibleAreas[0]` fallback
   // covers the frame between a gating change hiding the active area and the
   // effect above re-electing.
   const activeArea = visibleAreas.find((a) => a.id === activeAreaId) ?? visibleAreas[0];
   const appNavigation: NavigationItem[] = activeArea?.navigation || readableAppNavigation || [];
-
-  // App-level context selectors (e.g. Studio's package scope). Their
-  // values are injected into nav items as `{<id>}` template vars so a
-  // single dropdown transparently scopes every secondary menu.
-  const { contextValues, element: contextSelectorsUI } = useAppContextSelectors(
-    activeApp?.name || 'home',
-    activeApp?.contextSelectors,
-    t,
-  );
 
   // Home navigation items. For workspace admins we surface the full system
   // ("Administration") nav right here on /home — previously the home context
@@ -359,20 +390,15 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
       // active app, `extraRoutes` once one exists), so an app-bearing deployment
       // now reaches the hub here instead of whatever app `/apps/setup` fell back
       // to. Every sibling below already spelled `/apps/setup/system/...` — the
-      // two metadata-admin entries excepted, and only since: they name the
-      // engine's canonical `/apps/setup/metadata/:type` routes (#3660, #3739),
-      // because for THOSE two the `system/...` spelling is a redirect rather
-      // than a page.
+      // datasource entry excepted: it names the engine's canonical
+      // `/apps/setup/metadata/datasource` route (#3660), because for it the
+      // `system/...` spelling is a redirect rather than a page. There is no
+      // Object Manager entry: objects are Studio's (objectstack ADR-0146 D1),
+      // and Setup keeps the datasource alone of the metadata types.
       const adminItems: NavigationItem[] = [
         { id: 'sys-settings', label: t('layout.systemNav.systemSettings', { defaultValue: 'System Settings' }), type: 'url' as const, url: '/apps/setup/system', icon: 'settings' },
         { id: 'sys-apps', label: t('layout.systemNav.applications', { defaultValue: 'Applications' }), type: 'url' as const, url: '/apps/setup/system/apps', icon: 'layout-grid' },
         { id: 'sys-marketplace', label: t('layout.systemNav.appMarketplace', { defaultValue: 'App Marketplace' }), type: 'url' as const, url: '/apps/setup/system/marketplace', icon: 'store' },
-        // #3739 — canonical `…/metadata/object`, not the legacy
-        // `…/system/metadata/object` alias. The alias is served by
-        // `apps/console`'s `MetadataRedirect`, a bare `<Navigate>` onto this
-        // very URL, so pointing here removes a hop without moving the landing
-        // page. The alias routes themselves are untouched.
-        { id: 'sys-objects', label: t('layout.systemNav.objectManager', { defaultValue: 'Object Manager' }), type: 'url' as const, url: '/apps/setup/metadata/object', icon: 'database' },
         // #3660 — canonical `…/metadata/datasource`, not the legacy
         // `…/component/metadata/resource?type=datasource` alias. The alias
         // renders `LegacyMetadataRedirect`, a bare `<Navigate>` onto this very
@@ -405,7 +431,10 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
 
   // Determine which navigation to show based on context
   const navigationItems = context === 'home' ? homeNavigation : appNavigation;
-  const basePath = context === 'app' && activeApp ? `/apps/${appRouteSegment(activeApp)}` : '';
+  // ADR-0048 (A) — the app's one address among the full metadata list, the
+  // list `/apps/SEGMENT` resolves on: its package id when that reaches this
+  // app, else its name (a package's second app shares the first app's id).
+  const basePath = context === 'app' && activeApp ? `/apps/${appAddressSegment(apps, activeApp)}` : '';
   const isStudioApp = context === 'app' && activeApp?.name === 'studio';
   // Studio's package-management link carries the active package scope. Read
   // (and re-emit) it through the SAME per-selector key derivation the selector
@@ -637,7 +666,7 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
              locale={language}
              onAction={dispatchNavAction}
              t={t}
-             templateContext={{ currentUserId: user?.id ?? null, currentOrgId: activeOrganization?.id ?? null, contextValues }}
+             templateContext={navTemplateContext}
            />
 
            {/* The app's report index is an entry its navigation declares,
@@ -731,7 +760,7 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
              locale={language}
              onAction={dispatchNavAction}
              t={t}
-             templateContext={{ currentUserId: user?.id ?? null, currentOrgId: activeOrganization?.id ?? null, contextValues }}
+             templateContext={navTemplateContext}
            />
 
            {/* Starred Apps */}

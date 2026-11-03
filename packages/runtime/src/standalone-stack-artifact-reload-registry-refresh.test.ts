@@ -49,7 +49,8 @@ const PACKAGE_ID = 'com.test.artifact-reload';
 
 /** One artifact, every display string carrying `v`. */
 const artifact = (v: string) => ({
-  manifest: { id: PACKAGE_ID, name: 'artifact_reload', type: 'app', version: '1.0.0' },
+  // [#28576] `namespace`: the base's `.custom` pair is formed from it (ADR-0146 D3).
+  manifest: { id: PACKAGE_ID, name: 'artifact_reload', type: 'app', version: '1.0.0', namespace: 'arl' },
   objects: [{
     name: 'arl_note',
     label: `Note ${v}`,
@@ -208,7 +209,10 @@ describe('an artifact hot reload refreshes every read of every item the boot reg
     expect(await read()).toEqual(boot);
   }, BOOT_TIMEOUT);
 
-  it('an environment save of the template still wins on every read after a reload re-registers the package', async () => {
+  // [#28576, ADR-0146 D11] The environment's customization of a packaged
+  // template is written into the base's pair, declaring what it overrides: the
+  // package-less save onto it is closed.
+  it('a customization of the template saved into its pair still wins on every read after a reload re-registers the package', async () => {
     const { protocol, reload } = await bootOverArtifact();
     const subjects = async () => {
       const pick = (res: any) => (res?.items ?? []).filter((i: any) => i?.name === 'arl_mail').map((i: any) => i.subject);
@@ -218,10 +222,15 @@ describe('an artifact hot reload refreshes every read of every item the boot reg
         byName: (await protocol.getMetaItem({ type: 'email_template', name: 'arl_mail' }))?.item?.subject,
       };
     };
+    await protocol.ensureCustomizationPackage({ basePackageId: PACKAGE_ID });
     await protocol.saveMetaItem({
       type: 'email_template',
       name: 'arl_mail',
-      item: { name: 'arl_mail', label: 'Mail', locale: 'en-US', subject: 'Saved subject', bodyHtml: '<p>saved</p>' },
+      packageId: `${PACKAGE_ID}.custom`,
+      item: {
+        name: 'arl_mail', label: 'Mail', locale: 'en-US', subject: 'Saved subject', bodyHtml: '<p>saved</p>',
+        overrides: { package: PACKAGE_ID, basedOn: '1.0.0' },
+      },
     });
     const saved = { list: ['Saved subject'], execution: ['Saved subject'], byName: 'Saved subject' };
     // Positive control: the save is live before any reload.

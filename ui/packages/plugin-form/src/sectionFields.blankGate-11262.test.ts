@@ -76,7 +76,7 @@ const CHAINS: Array<readonly [string, (pred: unknown, name: string) => ReturnTyp
 describe.each(CHAINS)('attachVisibility via %s (objectui#11262, ADR-0137 D4)', (_chain, build) => {
   it.each(BLANKS)('%s: no gate on the runtime field, as before — and a [blank] report naming the field', (_label, pred) => {
     const name = fresh('blank');
-    const f = build(pred, name);
+    const f = build(pred, name)!;
     expect(f.name).toBe(name);
     expect((f as { visibleOn?: unknown }).visibleOn).toBeUndefined();
     const lines = blankLines();
@@ -139,7 +139,7 @@ describe.each([
     ...BLANKS,
   ] as const)('%s: no view-level gate on the runtime field, and silent', (_label, pred) => {
     const name = fresh('retired');
-    const f = normalizeSectionField(name, ctxWith(name, { [key]: pred }));
+    const f = normalizeSectionField(name, ctxWith(name, { [key]: pred }))!;
     expect(f.name).toBe(name);
     expect((f as { visibleOn?: unknown }).visibleOn).toBeUndefined();
     expect(warn).not.toHaveBeenCalled();

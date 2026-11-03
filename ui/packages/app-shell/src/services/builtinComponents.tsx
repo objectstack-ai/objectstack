@@ -21,9 +21,11 @@ import { registerMetadataResource } from '../views/metadata-admin/registry.js';
 import { PermissionMatrixEditPage } from '../views/metadata-admin/PermissionMatrixEditor.js';
 import { PackagesPage } from '../views/metadata-admin/PackagesPage.js';
 import { PositionGrantedSetsCell, PositionHolderCountCell } from '../views/metadata-admin/PositionGrantCells.js';
-import { PackagedAutomationPage } from '../views/setup/PackagedAutomationPage.js';
+import { PackagedActionsPage } from '../views/setup/PackagedActionsPage.js';
 import { ConnectorCredentialsPage } from '../views/setup/ConnectorCredentialsPage.js';
 import { CONNECTOR_CREDENTIALS_REF } from '../views/setup/connectorCredentials.js';
+import { ConnectorConnectionsPage } from '../views/setup/ConnectorConnectionsPage.js';
+import { CONNECTOR_CONNECTIONS_REF } from '../views/setup/connectorConnections.js';
 import { PositionHoldersPage } from '../views/setup/PositionHoldersPage.js';
 import { PermissionSetAssignmentPage } from '../views/setup/PermissionSetAssignmentPage.js';
 import { PERMISSION_SET_ASSIGNMENT_REF, POSITION_HOLDERS_REF } from '../views/setup/peopleAssignments.js';
@@ -140,17 +142,19 @@ registerAppComponent({
 });
 
 /**
- * ADR-0126 §7.4 — the Setup page for the flows installed packages ship:
- * on/off for this scope, and clone. Contributed the way every other
- * framework-owned Setup surface is, by ref rather than by route, so the Setup
- * app's navigation names `automation:packaged` and `ComponentNavView` resolves
- * it. Automation AUTHORING stays in Studio; this page is operational state.
+ * ADR-0126 §7.4 — the Setup page for the actions installed packages ship:
+ * on/off for this deployment. Contributed the way every other framework-owned
+ * Setup surface is, by ref rather than by route, so the Setup app's navigation
+ * names `automation:packaged-actions` and `ComponentNavView` resolves it.
+ * objectstack ADR-0146 D4 keeps the action switch in Setup; the packaged
+ * FLOWS' page (`automation:packaged`) retired with D11, its switch and its
+ * clone being Studio's.
  */
 registerAppComponent({
-  ref: 'automation:packaged',
-  label: 'Packaged Automation',
+  ref: 'automation:packaged-actions',
+  label: 'Packaged Actions',
   source: '@object-ui/app-shell',
-  component: PackagedAutomationPage,
+  component: PackagedActionsPage,
 });
 
 /**
@@ -165,6 +169,20 @@ registerAppComponent({
   label: 'Connector Credentials',
   source: '@object-ui/app-shell',
   component: ConnectorCredentialsPage,
+});
+
+/**
+ * Setup → Integrations → Connector Connections (ADR-0143 D5): an organization
+ * administrator connects, reconnects or disconnects each `oauth2`
+ * `authorization_code` connector instance for their organization. The entry
+ * naming this ref is the automation service's to contribute, gated on
+ * `manage_connector_connections`; the shell declares no entry for it.
+ */
+registerAppComponent({
+  ref: CONNECTOR_CONNECTIONS_REF,
+  label: 'Connector Connections',
+  source: '@object-ui/app-shell',
+  component: ConnectorConnectionsPage,
 });
 
 /**

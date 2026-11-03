@@ -33,19 +33,17 @@
 //     authorization server the way an MCP client connects: dynamic client
 //     registration, authorize with the MCP resource and PKCE, consent, token.
 //
-// ## ⚠️ The E run does not succeed for the OAuth agent today — and says so
+// ## The agent's runs are served as the agent (ADR-0090 D10 rule 5, #28367)
 //
 // Every one of these actions is `type: 'api'`: the door forwards the call to
-// its identity route as the caller, and an identity route accepts a signed-in
-// session only. So the agent's forward is answered 401 at the target and
-// nothing changes, while the administrator's session making the same call is
-// served (pinned beside it as the contrast — it is not the ruled case, and it
-// does not stand in for it). The run case pins TODAY's answer; the ruled
-// outcome (the agent's E call served) waits on
-// the open decision on #28178, which governs which credentials a forward
-// target accepts. ⛔ Do not make it pass by switching the caller to a session
-// bearer, by minting a session for the agent, or by widening what an identity
-// route or the REST face accepts — when #28178 lands, flip the expectation.
+// its identity route. An identity route accepts a signed-in session only, so
+// until #28367 the agent's forward was refused by name (#28178). Now the
+// forward carries a credential the server mints for that one forward, and the
+// identity mount shows better-auth a request-scoped view of the delegating
+// user: the agent's E call and its confirmed C call are SERVED, and a plain
+// member's agent is refused by the identity route itself (the intersection at
+// the target). ⛔ No session is minted for the agent, and its token never
+// reaches the target.
 //
 // `OS_SCIM_ENABLED=true` precedes the boot because `/admin/*` 501s without
 // better-auth's admin plugin (see `api-action-door-forward.dogfood.test.ts`),
@@ -82,6 +80,7 @@ describe('[#27681, #27900] sys_user identity actions over MCP: what each bucket\
   let admin: string;
   let member: string;
   let agent: string;
+  let memberAgent: string;
   let adminUserId: string;
   let targetUserId: string;
   let agentTargetUserId: string;
@@ -129,7 +128,7 @@ describe('[#27681, #27900] sys_user identity actions over MCP: what each bucket\
    * server for the administrator, the way an MCP client connects (a public
    * client, PKCE S256, `resource` = the MCP URL).
    */
-  const mintAgentToken = async (): Promise<string> => {
+  const mintAgentToken = async (email = ADMIN_EMAIL, password = ADMIN_PASSWORD): Promise<string> => {
     const authSvc: any = await stack.kernel.getServiceAsync('auth');
     const resource = authSvc.getMcpResourceUrl();
     const reg = await stack.api('/auth/oauth2/register', {
@@ -150,7 +149,7 @@ describe('[#27681, #27900] sys_user identity actions over MCP: what each bucket\
     const signIn = await stack.api('/auth/sign-in/email', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD }),
+      body: JSON.stringify({ email, password }),
     });
     const cookie = ((signIn.headers as any).getSetCookie() as string[]).map((c) => c.split(';')[0]).join('; ');
     const verifier = randomBytes(32).toString('base64url');
@@ -218,6 +217,7 @@ describe('[#27681, #27900] sys_user identity actions over MCP: what each bucket\
     targetUserId = await idOf(TARGET_EMAIL);
     agentTargetUserId = await idOf(AGENT_TARGET_EMAIL);
     agent = await mintAgentToken();
+    memberAgent = await mintAgentToken(MEMBER_EMAIL, 'Member-Pass-123');
   }, 300_000);
 
   afterAll(async () => {
@@ -297,17 +297,16 @@ describe('[#27681, #27900] sys_user identity actions over MCP: what each bucket\
     });
   }, 120_000);
 
-  it('E, today (waits on #28178): the agent\'s update_my_profile run is answered 401 at its identity route, and the name is unchanged', async () => {
-    const before = (await userRow(adminUserId))?.name;
+  it('E, served as the agent (#28367): the agent\'s update_my_profile run renames its delegating user through the identity route', async () => {
     const ran = await tool(agent, 'run_action', {
       actionName: 'update_my_profile', objectName: 'sys_user', recordId: adminUserId, params: { name: 'Renamed By Agent' },
     });
-    expect(ran.isError, ran.text).toBe(true);
-    expect(ran.payload?.error).toMatchObject({ status: 401 });
-    expect((await userRow(adminUserId))?.name).toBe(before);
+    expect(ran.isError, ran.text).toBe(false);
+    expect(ran.payload).toMatchObject({ ok: true, action: 'update_my_profile', objectName: 'sys_user', recordId: adminUserId });
+    expect((await userRow(adminUserId))?.name).toBe('Renamed By Agent');
   }, 120_000);
 
-  it('E, the contrast: the same update_my_profile run from the administrator\'s session is served — the declaration is live, and the agent\'s 401 is the identity route\'s credential rule', async () => {
+  it('E, the session lane unchanged: the same update_my_profile run from the administrator\'s session is served', async () => {
     const ran = await tool(admin, 'run_action', {
       actionName: 'update_my_profile', objectName: 'sys_user', recordId: adminUserId, params: { name: 'Renamed By Session' },
     });
@@ -316,7 +315,17 @@ describe('[#27681, #27900] sys_user identity actions over MCP: what each bucket\
     expect((await userRow(adminUserId))?.name).toBe('Renamed By Session');
   }, 120_000);
 
-  it('C: the agent\'s unconfirmed ban_user is refused 428 before any forward; confirmed, today it is answered 401 at its identity route (waits on #28178); nobody is banned', async () => {
+  it('the intersection at the target: a plain member\'s agent, confirmed, passes the action door and is refused by the identity route itself; nobody is banned', async () => {
+    const refused = await tool(memberAgent, 'run_action', {
+      actionName: 'ban_user', objectName: 'sys_user', recordId: agentTargetUserId, params: { banReason: 'member agent' }, confirm: true,
+    });
+    expect(refused.isError, refused.text).toBe(true);
+    expect(refused.payload?.error?.status, refused.text).toBe(403);
+    expect(messageOf(refused)).not.toMatch(/OAuth access token|scope/);
+    expect(await isBanned(agentTargetUserId)).toBe(false);
+  }, 120_000);
+
+  it('C: the agent\'s unconfirmed ban_user is refused 428 before any forward; confirmed, it is served as the agent (#28367) and bans the user', async () => {
     const unconfirmed = await tool(agent, 'run_action', {
       actionName: 'ban_user', objectName: 'sys_user', recordId: agentTargetUserId, params: { banReason: 'agent' },
     });
@@ -327,9 +336,9 @@ describe('[#27681, #27900] sys_user identity actions over MCP: what each bucket\
     const confirmed = await tool(agent, 'run_action', {
       actionName: 'ban_user', objectName: 'sys_user', recordId: agentTargetUserId, params: { banReason: 'agent' }, confirm: true,
     });
-    expect(confirmed.isError, confirmed.text).toBe(true);
-    expect(confirmed.payload?.error).toMatchObject({ status: 401 });
-    expect(await isBanned(agentTargetUserId)).toBe(false);
+    expect(confirmed.isError, confirmed.text).toBe(false);
+    expect(confirmed.payload).toMatchObject({ ok: true, action: 'ban_user', objectName: 'sys_user', recordId: agentTargetUserId });
+    expect(await isBanned(agentTargetUserId)).toBe(true);
   }, 120_000);
 
   it('H: impersonate_user is absent from the agent\'s listing and refused by name', async () => {

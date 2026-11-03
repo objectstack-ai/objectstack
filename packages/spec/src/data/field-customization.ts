@@ -17,9 +17,10 @@
  *    {@link BASE_FIELD_DISPLAY_WHITELIST} is that whitelist: the closed constant
  *    the write gate reads, never a judgement it makes.
  *
- * Constants and one pure predicate, imports nothing: the shape that carries a
- * per-field patch on an object extension, and the merge that applies it, are
- * not declared here.
+ * Constants and one pure predicate, imports nothing. The shape that carries a
+ * per-field patch is `ObjectExtensionSchema.fieldPatches`
+ * (`data/object.zod.ts`), its keys derived from the whitelist below; the merge
+ * that applies it is not declared in `packages/spec`.
  */
 
 /**

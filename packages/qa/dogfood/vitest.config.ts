@@ -63,6 +63,7 @@ import {
 
 // Files proven eligible for the worker-shared plain showcase stack.
 const SHARED_SHOWCASE = [
+  'test/create-caller-id-collision.dogfood.test.ts',
   'test/form-self-auth.dogfood.test.ts',
   'test/showcase-agent-intersection.dogfood.test.ts',
   'test/showcase-agent-scope-ceiling.dogfood.test.ts',

@@ -58,7 +58,6 @@ import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 const PACKAGE_ROOT = resolve(HERE, '..');
 
@@ -108,7 +107,7 @@ function derivePackageManagerPin(): string {
   return `pnpm@${answer}`;
 }
 
-/** oclif + tsx cold start, with every command module loaded; ~2-10 s when healthy. */
+/** oclif cold start, with every command module loaded; ~2-10 s when healthy. */
 const RUN_TIMEOUT_MS = 180_000;
 
 /** What the fixture workspace's own `dev` script prints — proof it ran. */
@@ -134,7 +133,7 @@ interface Run {
 function runDev(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, 'dev', ...args],
       { cwd, maxBuffer: 8 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {
@@ -236,7 +235,7 @@ beforeAll(async () => {
     })}\n`,
   );
 
-  // Sequential on purpose: three cold tsx starts, each loading every command
+  // Sequential on purpose: three cold CLI starts, each loading every command
   // module, in a container several agents share.
   watchEqualsFalse = await runDev(['--watch=false'], projectDir);
   noWatchAtWorkspace = await runDev(['--no-watch'], workspaceDir);

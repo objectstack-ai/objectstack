@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: a fresh real ObjectQL engine on its own better-sqlite3 :memory: database per fixture, most seeded row by row through a natural-order facade (populations of up to 201 users) before the real promotion pass, each population and order its case's subject; slowest CI reading 13.5 s (scheduled full-battery run 41255489006, Test Core shard log) x 1.25, rounded up; read before the card-shape passes were shared by the per-order and same-answer cases
 
 /**
  * Commit 9b9581b11 — WHICH user the `single`-posture bootstrap promotes, and why.
@@ -59,7 +60,7 @@
  * back to being a function of the driver.
  */
 
-import { describe, it, expect, afterEach, beforeEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeAll, beforeEach } from 'vitest';
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
@@ -318,33 +319,44 @@ describe('#16682 — the promotion target is chosen, not sampled', () => {
   // ─────────────────────────────────────────────────────────────────────────
 
   describe('the card\'s shape: >50 users, owner last by id and first by created_at', () => {
-    for (const order of NATURAL_ORDERS) {
-      it(`promotes the oldest authenticable human under natural order ${order}`, async () => {
+    // [#23181] One pass per natural order — a fresh engine, the card's
+    // population seeded through that order's facade, then the promotion — is
+    // the setup of both the per-order cases and the same-answer case, so it
+    // runs once per order, here, and the cases read what each pass produced.
+    const passes = new Map<
+      NaturalOrder,
+      { report: Awaited<ReturnType<typeof bootstrapPlatformAdmin>>; info: string[]; grants: string[] }
+    >();
+
+    beforeAll(async () => {
+      delete process.env[OWNER_ENV];
+      resetPlatformAdminEmailMemo();
+      for (const order of NATURAL_ORDERS) {
         const engine = await boot();
         const ql = withNaturalOrder(engine, order);
         await seedCardPopulation(ql);
 
         const { info, logger } = collectingLogger();
         const report = await bootstrapPlatformAdmin(ql, defaultPermissionSets, { logger });
+        passes.set(order, { report, info, grants: await adminGrantEmails(engine) });
+      }
+    }, 30_000);
+
+    for (const order of NATURAL_ORDERS) {
+      it(`promotes the oldest authenticable human under natural order ${order}`, () => {
+        const { report, info, grants } = passes.get(order)!;
 
         expect(report.adminPromoted).toBe(true);
         expect(report.basis).toBe('oldest-authenticable');
-        expect(await adminGrantEmails(engine)).toEqual(['admin@objectos.ai']);
+        expect(grants).toEqual(['admin@objectos.ai']);
         expect(info.join('\n')).toContain(
           'first user promoted to platform admin: admin@objectos.ai',
         );
       });
     }
 
-    it('gives the SAME answer under all three orders (the driver may not decide this)', async () => {
-      const answers: string[] = [];
-      for (const order of NATURAL_ORDERS) {
-        const engine = await boot();
-        const ql = withNaturalOrder(engine, order);
-        await seedCardPopulation(ql);
-        await bootstrapPlatformAdmin(ql, defaultPermissionSets, {});
-        answers.push((await adminGrantEmails(engine)).join(','));
-      }
+    it('gives the SAME answer under all three orders (the driver may not decide this)', () => {
+      const answers = NATURAL_ORDERS.map((order) => passes.get(order)!.grants.join(','));
       expect(answers).toEqual(['admin@objectos.ai', 'admin@objectos.ai', 'admin@objectos.ai']);
     });
 

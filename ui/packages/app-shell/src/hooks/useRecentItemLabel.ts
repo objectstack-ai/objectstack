@@ -61,7 +61,11 @@ import { useMemo } from 'react';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import type { RecentItem } from '../context/RecentItemsProvider.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
-import { findByName, metadataText, useNavTargetLabel, type LabelledRecord } from './useNavTargetLabel.js';
+import { bundledFirst, useBundledReads } from '../providers/bundledReads.js';
+import { findByName, metadataText, useNavTargetLabel, type LabelledRecord, type NavTargetLabelOptions } from './useNavTargetLabel.js';
+import { readObjectsByName, useReadItemsByName } from './useObjectPresence.js';
+
+const BY_NAME: NavTargetLabelOptions = { byName: true };
 
 /** Answers the display text of a recent entry, in the current language. */
 export type RecentItemLabelResolver = (item: RecentItem) => string;
@@ -78,8 +82,14 @@ export function useRecentItemLabel(
   } = {},
 ): RecentItemLabelResolver {
   const { packages } = sources;
-  const targetLabel = useNavTargetLabel();
+  // objectstack#29121 — a row names its object by name, never by loading the
+  // whole registry: a few recent entries, on Home before anything else asks it.
+  const targetLabel = useNavTargetLabel(BY_NAME);
   const metadata = useMetadata();
+  // objectstack#29235 — a page or report row reads its item by name, never its
+  // type's whole list (a dashboard row does too, through `targetLabel`).
+  const readItemsByName = useReadItemsByName(metadata);
+  const bundledReads = useBundledReads();
   const { objectPluralLabel, pageLabel, reportLabel } = useObjectLabel();
   const { language } = useObjectTranslation();
 
@@ -87,7 +97,7 @@ export function useRecentItemLabel(
     () => (item: RecentItem) => {
       /** What an object's list is titled — an `object` entry's label, and a view's fallback. */
       const listTitle = (objectName: string): string => {
-        const def = findByName(metadata.objects, objectName) as (LabelledRecord & { pluralLabel?: unknown }) | undefined;
+        const def = findByName(readObjectsByName(metadata, [objectName]), objectName) as (LabelledRecord & { pluralLabel?: unknown }) | undefined;
         // The singular half is read exactly as `useNavTargetLabel` reads it;
         // `pluralLabel` is a plain string in the spec, so only a string is one.
         const text = metadataText(def?.label, language);
@@ -102,11 +112,13 @@ export function useRecentItemLabel(
         case 'dashboard':
           return targetLabel({ kind: 'dashboard', dashboardName: item.name }) ?? item.name;
         case 'page': {
-          const text = metadataText(findByName(metadata.pages, item.name)?.label, language);
+          const pages = () => readItemsByName('page', [item.name], () => metadata.pages);
+          const text = metadataText(bundledFirst(bundledReads, 'page', item.name, pages)?.label, language);
           return nonEmpty(pageLabel({ name: item.name, label: text ?? '' })) ?? item.name;
         }
         case 'report': {
-          const text = metadataText(findByName(metadata.reports, item.name)?.label, language);
+          const reports = readItemsByName('report', [item.name], () => metadata.reports);
+          const text = metadataText(findByName(reports, item.name)?.label, language);
           return nonEmpty(reportLabel({ name: item.name, label: text ?? '' })) ?? item.name;
         }
         case 'package':
@@ -115,6 +127,6 @@ export function useRecentItemLabel(
           return item.label;
       }
     },
-    [targetLabel, metadata, objectPluralLabel, pageLabel, reportLabel, language, packages],
+    [targetLabel, metadata, readItemsByName, bundledReads, objectPluralLabel, pageLabel, reportLabel, language, packages],
   );
 }

@@ -714,17 +714,55 @@ describe('AutomationEngine', () => {
             expect(resumed.error).toContain("Flow 'vanishing_flow' not found for run");
         });
 
-        it('should report a resume whose suspended node was edited away as RUN_NOT_FOUND', async () => {
+        // [#28405] Re-judged: a run resumes on the body it started on, so a
+        // republish that drops its parked node no longer ends it. The
+        // RUN_NOT_FOUND answer stays for a body that is truly gone: here the
+        // flow is withdrawn (which forgets every body this process held) and
+        // a different body registered, with no metadata history attached.
+        it('should finish a run whose parked node a republish dropped on the body it started on', async () => {
             const captured: { runId?: unknown } = {};
             registerPausingNode(captured);
-            const nodes = [
-                { id: 'start', type: 'start', label: 'Start' },
-                { id: 'pause', type: 'pause_node', label: 'Pause' },
-                { id: 'end', type: 'end', label: 'End' },
+            const edges = [
+                { id: 'e1', source: 'start', target: 'pause' },
+                { id: 'e2', source: 'pause', target: 'end' },
             ];
             engine.registerFlow('edited_flow', {
                 name: 'edited_flow', label: 'Edited Flow', type: 'autolaunched',
-                nodes,
+                nodes: [
+                    { id: 'start', type: 'start', label: 'Start' },
+                    { id: 'pause', type: 'pause_node', label: 'Pause' },
+                    { id: 'end', type: 'end', label: 'End' },
+                ],
+                edges,
+            });
+
+            const paused = await engine.execute('edited_flow');
+            expect(paused.status).toBe('paused');
+            // The author republishes the flow without the node the run is
+            // parked on.
+            engine.registerFlow('edited_flow', {
+                name: 'edited_flow', label: 'Edited Flow', type: 'autolaunched',
+                nodes: [
+                    { id: 'start', type: 'start', label: 'Start' },
+                    { id: 'end', type: 'end', label: 'End' },
+                ],
+                edges: [{ id: 'e1', source: 'start', target: 'end' }],
+            });
+
+            const resumed = await engine.resume(paused.runId!);
+            expect(resumed.success, JSON.stringify(resumed)).toBe(true);
+        });
+
+        it('should report a resume whose parked node is gone and whose pinned body is unrecoverable as RUN_NOT_FOUND', async () => {
+            const captured: { runId?: unknown } = {};
+            registerPausingNode(captured);
+            engine.registerFlow('edited_flow', {
+                name: 'edited_flow', label: 'Edited Flow', type: 'autolaunched',
+                nodes: [
+                    { id: 'start', type: 'start', label: 'Start' },
+                    { id: 'pause', type: 'pause_node', label: 'Pause' },
+                    { id: 'end', type: 'end', label: 'End' },
+                ],
                 edges: [
                     { id: 'e1', source: 'start', target: 'pause' },
                     { id: 'e2', source: 'pause', target: 'end' },
@@ -733,8 +771,10 @@ describe('AutomationEngine', () => {
 
             const paused = await engine.execute('edited_flow');
             expect(paused.status).toBe('paused');
-            // The author republishes the flow without the node the run is
-            // parked on — the pause can never continue.
+            // The body the run started on is gone from this process (no
+            // metadata history is attached), and the one registered now has
+            // no node the pause can continue from.
+            engine.withdrawFlow('edited_flow');
             engine.registerFlow('edited_flow', {
                 name: 'edited_flow', label: 'Edited Flow', type: 'autolaunched',
                 nodes: [

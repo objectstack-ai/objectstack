@@ -108,7 +108,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Cómo se creó esta identidad: idp_provisioned (JIT de SSO federado) o env_native (registro local / usuario final de la aplicación). Gestionado por el sistema; no editar.",
         options: {
           idp_provisioned: "Aprovisionada por IdP",
-          env_native: "Nativa del entorno"
+          env_native: "Cuenta local"
         }
       },
       id: {
@@ -241,6 +241,17 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           managerId: {
             label: "Gerente",
             helpText: "La persona a la que reporta este usuario. El servidor rechaza un gerente de otra organización, la autoasignación y un vínculo que cerraría un ciclo o superaría la profundidad máxima de la cadena de reporte."
+          }
+        }
+      },
+      list_platform_admins: {
+        label: "Administradores de la plataforma",
+        resultDialog: {
+          title: "Administradores de la plataforma",
+          description: "Todas las personas que tienen ahora la condición de administrador de la plataforma: una concesión admin_full_access vigente propiedad de la Organización predeterminada, o una dirección verificada en la lista de propietarios de la implementación.",
+          acknowledge: "Cerrar",
+          fields: {
+            entries: "Administradores de la plataforma"
           }
         }
       },
@@ -844,11 +855,12 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       cancel_invitation: {
         label: "Cancelar invitación",
         confirmText: "¿Cancelar esta invitación? El destinatario ya no podrá aceptarla.",
-        successMessage: "Invitación cancelada"
+        successMessage: "Invitación cancelada",
+        cancelText: "Conservar invitación"
       },
       resend_invitation: {
         label: "Reenviar invitación",
-        description: "¿Reenviar la invitación a {{ record.email }}? Su plazo de vencimiento vuelve a empezar.",
+        description: "¿Reenviar la invitación a {{ record.email }}? El plazo de vencimiento vuelve a empezar, y una invitación que ya ha vencido se sustituye por una nueva.",
         successMessage: "Invitación reenviada",
         outcomeMessages: {
           sent: "Invitación reenviada a {{ result.email }}",
@@ -1399,6 +1411,38 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       by_user: {
         label: "Por usuario"
+      }
+    }
+  },
+  sys_personal_view: {
+    label: "Vista personal",
+    pluralLabel: "Vistas personales",
+    description: "Las vistas de lista con nombre propio de un lector (Mis vistas). Solo las ve su propietario.",
+    fields: {
+      id: {
+        label: "ID de vista personal"
+      },
+      created_at: {
+        label: "Fecha de creación"
+      },
+      updated_at: {
+        label: "Fecha de actualización"
+      },
+      user_id: {
+        label: "Propietario",
+        help: "El usuario al que pertenece esta vista. Solo este usuario puede leerla o cambiarla."
+      },
+      object_name: {
+        label: "Objeto",
+        help: "El objeto que lista esta vista (su nombre técnico)."
+      },
+      label: {
+        label: "Nombre",
+        help: "El nombre que el propietario dio a esta vista."
+      },
+      config: {
+        label: "Configuración de la vista",
+        help: "La configuración de la lista, en la forma ListView de spec. Se valida en cada guardado."
       }
     }
   },
@@ -3061,7 +3105,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Tratar como histórico"
       },
       error: {
-        label: "Error fatal"
+        label: "Motivo del fallo"
       },
       results: {
         label: "Resultados por fila (muestra)",

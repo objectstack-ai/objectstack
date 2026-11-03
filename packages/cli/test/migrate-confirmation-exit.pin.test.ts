@@ -244,6 +244,8 @@ const ROSTER: Record<string, Member> = {
   'audit-key-material': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'audit-mail-bodies': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'audit-metadata-bodies': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
+  'blank-single-values': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
+  'option-codes': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'comment-parent-pair': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'comment-reactions': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'files-to-references': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
@@ -251,6 +253,7 @@ const ROSTER: Record<string, Member> = {
   meta: { argv: ['--stored', '--apply'], confirm: '--yes', writes: BOOT },
   'multi-value-columns': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'organization-ownership': { argv: ['--apply', '--plan-file', PLAN_FILE], confirm: '--backup-taken', writes: BOOT },
+  'packageless-overlays': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'recorded-by': {
     argv: ['--apply'],
     confirm: '--yes',

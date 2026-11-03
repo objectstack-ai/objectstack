@@ -27,7 +27,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import React from 'react';
 
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { registerAllFields } from '@object-ui/fields';
 import { SchemaRendererProvider } from '@object-ui/react';
 import { LineItemsPanel } from './LineItemsPanel';
@@ -60,11 +60,12 @@ const SHAPES: Array<{ shape: string; bits: Record<string, boolean>; add: boolean
   { shape: 'full', bits: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: true }, add: true, remove: true },
 ];
 
-const envelope = (bits: Record<string, unknown>): MePermissionsResponse => ({
+const envelope = (bits: Record<string, unknown>): MePermissionsAuthenticatedResponse => ({
   authenticated: true,
   userId: 'u-pin',
   tenantId: null,
-  roles: ['member'],
+  hasAnyQueue: false,
+  positions: ['member'],
   permissionSets: ['member'],
   // The parent is fully granted: only the CHILD's grant may decide.
   objects: {

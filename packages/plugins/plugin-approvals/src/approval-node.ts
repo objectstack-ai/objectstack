@@ -135,8 +135,11 @@ export function registerApprovalNode(
       type: APPROVAL_NODE_TYPE,
       version: '1.0.0',
       name: 'Approval',
-      description: 'Route a record for human approval; suspends the flow until a decision, '
-        + 'then continues down the approve / reject branch.',
+      // Palette and node-card text an admin reads, in business words. The run
+      // suspends here until a decision, then resumes down the `approve` /
+      // `reject` edge (see `resumeAuthority` below).
+      description: 'Ask people to approve or reject a record. The flow waits for their decision, '
+        + 'then continues down the approve or reject path.',
       icon: 'check-circle',
       category: 'human',
       paradigms: ['flow'],

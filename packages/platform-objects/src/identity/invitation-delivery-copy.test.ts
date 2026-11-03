@@ -12,6 +12,9 @@
 //    `target`, its answer shown in a copyable text result dialog, offered on a
 //    pending row to the grades that reach invite-member and hidden while the
 //    environment is cloud-managed;
+//  - #28384: it is not offered on a row that still reads `pending` after its
+//    `expires_at` has passed (the handler refuses it too, plugin-auth
+//    `invitation-delivery-outcome.test.ts`), while Resend stays offered there;
 //  - the translated bundles carry a translation of every new leaf, never the
 //    English source `--fill=default` seeds a new key with.
 //
@@ -134,8 +137,13 @@ const DELEGATE = user(['delegated_admin']);
 const MEMBER = user(['org_member']);
 const ON = { organization: true, cloudManaged: false };
 
-function offered(record: Record<string, unknown>, current: unknown, features: Record<string, unknown>): boolean | string {
-  const raw = action(SysInvitation, 'copy_invitation_link').visible;
+function offered(
+  record: Record<string, unknown>,
+  current: unknown,
+  features: Record<string, unknown>,
+  name = 'copy_invitation_link',
+): boolean | string {
+  const raw = action(SysInvitation, name).visible;
   const source = typeof raw === 'string' ? raw : raw?.source;
   const r = celEngine.evaluate(
     { dialect: 'cel', source },
@@ -145,8 +153,13 @@ function offered(record: Record<string, unknown>, current: unknown, features: Re
   return typeof r.value === 'boolean' ? r.value : `NON-BOOLEAN ${JSON.stringify(r.value)}`;
 }
 
+/** ISO text a day from now, or a day ago: what a list row carries for a datetime. */
+const DAY_MS = 24 * 60 * 60 * 1000;
+const inADay = () => new Date(Date.now() + DAY_MS).toISOString();
+const aDayAgo = () => new Date(Date.now() - DAY_MS).toISOString();
+
 describe('sys_invitation.copy_invitation_link — who is offered it', () => {
-  const pending = { id: 'inv_1', status: 'pending' };
+  const pending = { id: 'inv_1', status: 'pending', expires_at: inADay() };
 
   it.each([
     ['owner', OWNER],
@@ -166,6 +179,20 @@ describe('sys_invitation.copy_invitation_link — who is offered it', () => {
 
   it('is not offered on a row projected without its status (sparse list face)', () => {
     expect(offered({ id: 'inv_1' }, OWNER, ON)).toBe(false);
+  });
+
+  it('#28384 — is not offered on a row still pending after its expires_at', () => {
+    expect(offered({ id: 'inv_1', status: 'pending', expires_at: aDayAgo() }, OWNER, ON)).toBe(false);
+  });
+
+  it('#28384 — is not offered on a pending row projected without, or holding no, expires_at', () => {
+    expect(offered({ id: 'inv_1', status: 'pending' }, OWNER, ON)).toBe(false);
+    expect(offered({ id: 'inv_1', status: 'pending', expires_at: null }, OWNER, ON)).toBe(false);
+  });
+
+  it('#28384 — Resend stays offered on a pending row past its expires_at: it is the remedy', () => {
+    const expired = { id: 'inv_1', status: 'pending', expires_at: aDayAgo(), email: 'b@example.com', role: 'member' };
+    expect(offered(expired, OWNER, ON, 'resend_invitation')).toBe(true);
   });
 
   it('is hidden while the environment is cloud-managed', () => {

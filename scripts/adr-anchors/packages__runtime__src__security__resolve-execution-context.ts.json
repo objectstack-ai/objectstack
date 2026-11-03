@@ -1,0 +1,7 @@
+{
+  "file": "packages/runtime/src/security/resolve-execution-context.ts",
+  "adrs": [
+    "ADR-0090"
+  ],
+  "invariant": "ADR-0090 D10 rule 5 (amended 2026-10-31, #28367) — besides a verified OAuth token on `/mcp`, this door resolves an agent principal from exactly one other input: a forward credential redeemed in the forward's own in-process call, whose provenance becomes the same `oauth` input of the shared assembler (scope-derived ceiling, onBehalfOf, performedBy, the consent's organization, vetted again). Such a request reports no admission, so nothing downstream (the `/keys` mint door, the ADR-0069 key gate) can read it as a signed-in session. An OAuth token presented off `/mcp` is still never accepted here."
+}

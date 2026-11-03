@@ -41,6 +41,7 @@
 import {
     buildEffectiveFieldPermissions,
     buildEffectiveObjectPermissions,
+    registryObjectPackageDisabled,
     IDataEngine,
     resolveLocalizationContext,
     resolveRequestExecutionContext,
@@ -50,12 +51,15 @@ import {
     type RequestAuthService,
 } from '@objectstack/core';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import type { MePermissionsAuthenticatedResponse } from '@objectstack/spec/api';
 import { preferredLocaleFromHeader } from '@objectstack/spec/system';
-import type {
-    IMetadataService,
-    IObjectQLEngine,
-    ISecurityService,
-    Logger,
+import {
+    OWNERSHIP_QUEUE_SERVICE,
+    type IMetadataService,
+    type IObjectQLEngine,
+    type IOwnershipQueueService,
+    type ISecurityService,
+    type Logger,
 } from '@objectstack/spec/contracts';
 import { allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
 import { ifNoneMatchHits, representationEtag, REVALIDATE_PRIVATE_CACHE_CONTROL } from '@objectstack/types';
@@ -275,7 +279,7 @@ type MePermissionsTabVisibility = 'visible' | 'hidden' | 'default_on' | 'default
 
 /**
  * The grant half of the `/auth/me/permissions` body on a security-wired stack —
- * every key besides the caller's identity. All six are REQUIRED, so a caller of
+ * every key besides the caller's identity. All seven are REQUIRED, so a caller of
  * {@link mePermissionsBody} cannot drop one without tsc refusing it.
  */
 interface MePermissionsGrants {
@@ -285,6 +289,8 @@ interface MePermissionsGrants {
     fields: Record<string, { readable: boolean; editable: boolean }>;
     systemPermissions: string[];
     tabPermissions: Record<string, MePermissionsTabVisibility>;
+    /** [#28508] See {@link organizationHasAnyQueue}. */
+    hasAnyQueue: boolean;
 }
 
 /**
@@ -298,7 +304,87 @@ interface MePermissionsGrants {
  * Fresh values per call, so no response aliases another.
  */
 function closedMePermissionsGrants(): MePermissionsGrants {
-    return { positions: [], permissionSets: [], objects: {}, fields: {}, systemPermissions: [], tabPermissions: {} };
+    return {
+        positions: [], permissionSets: [], objects: {}, fields: {}, systemPermissions: [], tabPermissions: {},
+        hasAnyQueue: false,
+    };
+}
+
+/**
+ * [#28508] The slice of the ownership-queue contract this handler reads: its
+ * one "any queue at all?" answer.
+ */
+type AnyQueueReader = Pick<IOwnershipQueueService, 'hasAnyQueue'>;
+
+/**
+ * [#28508] Does the caller's organization have at least one ownership queue,
+ * declared (and not switched off in the activation ledger) or a `sys_queue`
+ * row? The console's list toolbar reads this once per session to decide
+ * whether its "in a queue" toggle can ever return a row. A member may not read
+ * `sys_queue` (the #5491 baseline stays), so the server answers for them, and
+ * the boolean is all it discloses: no names, no counts.
+ *
+ * The answer is the ownership-queue service's, which resolves under system
+ * context with the registry-first rule and the ledger in one place. This
+ * function only reaches it:
+ *
+ * - no service registered (no plugin-sharing) ⇒ `false`: with no service, no
+ *   record can sit in a queue, so the toggle has nothing to find;
+ * - a service without the method ⇒ `false`, for the same reason;
+ * - the service throws ⇒ `false`, logged. A queue fault hides one toolbar
+ *   toggle; it must not cost the caller the whole permissions body.
+ *
+ * It never throws.
+ */
+/** The one protocol member `/me/apps` reads: its served list (`ObjectStackProtocolImplementation.getMetaItems`). */
+interface ServedAppLister {
+    getMetaItems(request: { type: string }): Promise<{ items?: unknown } | undefined>;
+}
+
+/**
+ * [#29613, ADR-0146 D8 item 2] The apps the protocol SERVES — the list
+ * `GET /meta/app` answers, a `.custom` pair's published override over the
+ * base's app — or `undefined` when no protocol service is registered (or it
+ * has no list read), and `/me/apps` reads the registry as it always has.
+ *
+ * A protocol list read that fails is warned once per request and answered
+ * from the registry, the degraded source this endpoint already falls back on;
+ * the caller still gets the apps it may enter.
+ */
+async function servedAppsOf(ctx: CurrentUserEndpointsContext): Promise<unknown[] | undefined> {
+    let protocol: ServedAppLister | undefined;
+    try { protocol = ctx.getService<ServedAppLister>('protocol'); } catch { return undefined; }
+    if (typeof protocol?.getMetaItems !== 'function') return undefined;
+    try {
+        const answer = await protocol.getMetaItems({ type: 'app' });
+        return Array.isArray(answer?.items) ? answer.items : undefined;
+    } catch (err: any) {
+        ctx.logger?.warn?.('[hono] /me/apps: the protocol app list failed; answering from the registry', { err: err?.message });
+        return undefined;
+    }
+}
+
+async function organizationHasAnyQueue(
+    ctx: CurrentUserEndpointsContext,
+    organizationId: string | null,
+): Promise<boolean> {
+    try {
+        const service = (() => {
+            try { return ctx.getService<Partial<AnyQueueReader>>(OWNERSHIP_QUEUE_SERVICE) ?? null; }
+            catch { return null; }
+        })();
+        // The contract requires the method, but the locator hands back
+        // whatever a host registered under the name, which may be an
+        // implementation older than the contract: that one answers `false`.
+        const hasAnyQueue = service?.hasAnyQueue;
+        if (typeof hasAnyQueue !== 'function') return false;
+        return (await hasAnyQueue.call(service, organizationId)) === true;
+    } catch (err: any) {
+        ctx.logger?.warn?.('[hono] /auth/me/permissions: hasAnyQueue could not be resolved — answering false', {
+            err: err?.message,
+        });
+        return false;
+    }
 }
 
 /**
@@ -316,7 +402,7 @@ function closedMePermissionsGrants(): MePermissionsGrants {
 function mePermissionsBody(
     identity: { userId: string; tenantId: string | null },
     grants: MePermissionsGrants,
-) {
+): MePermissionsAuthenticatedResponse {
     return {
         authenticated: true as const,
         userId: identity.userId,
@@ -327,6 +413,7 @@ function mePermissionsBody(
         fields: grants.fields,
         systemPermissions: grants.systemPermissions,
         tabPermissions: grants.tabPermissions,
+        hasAnyQueue: grants.hasAnyQueue,
     };
 }
 
@@ -871,6 +958,10 @@ export function registerCurrentUserEndpoints(
             // own), but a stack with no metadata service degraded here before
             // and must keep degrading here, or this becomes a second behaviour
             // change riding on the delegation.
+            // [#28508] Asked on every authenticated branch, the degraded one
+            // included: whether the organization has a queue does not depend on
+            // SecurityPlugin. Never throws (see {@link organizationHasAnyQueue}).
+            const hasAnyQueue = await organizationHasAnyQueue(ctx, identity.tenantId);
             if (!resolvePermissionSets || !metadata) {
                 // Auth resolved but security plugin isn't wired — emit
                 // an empty-but-authenticated body so the frontend can
@@ -884,6 +975,7 @@ export function registerCurrentUserEndpoints(
                     permissionSets: execCtx.permissions ?? [],
                     objects: {},
                     fields: {},
+                    hasAnyQueue,
                 });
             }
             // [#7616] The caller's sets, resolved ONCE by the owner of the
@@ -942,6 +1034,9 @@ export function registerCurrentUserEndpoints(
                 allSchemas: () => ql?.registry?.getAllObjects?.() as ApiExposureSchemaLike[] | undefined,
                 schemaOf: (name) =>
                     ql?.getSchema?.(name) as (ManagedSchemaLike & ApiExposureSchemaLike) | undefined,
+                // [#28877] The data plane's own predicate: a disabled package's
+                // objects leave the map, as the data plane refuses them.
+                isObjectPackageDisabled: registryObjectPackageDisabled(ql?.registry),
                 logger: ctx.logger,
             });
             // Spread into a literal ON PURPOSE, here and in the `catch`: the
@@ -956,6 +1051,7 @@ export function registerCurrentUserEndpoints(
                 fields,
                 systemPermissions: Array.from(systemPermissions),
                 tabPermissions,
+                hasAnyQueue,
             }) });
         } catch (err: any) {
             ctx.logger?.warn?.('[hono] /auth/me/permissions failed', { err: err?.message });
@@ -1033,7 +1129,9 @@ export function registerCurrentUserEndpoints(
     // AppSchema.requiredPermissions with no enforced consumer. Source
     // from `registry.getAllApps()` (the same authority the meta routes
     // use, nav contributions merged), with the metadata service kept as
-    // an additive fallback for runtime-draft-published apps. Filters:
+    // an additive fallback for runtime-draft-published apps. [#29613] With
+    // the protocol service present, its served list stands in for the
+    // registry's ({@link servedAppsOf}). Filters:
     //   1. AppSchema.requiredPermissions ⊆ ctx.systemPermissions
     //   2. ctx.tabPermissions[app.name] !== 'hidden'
     // Anonymous users get an empty array. When SecurityPlugin is absent
@@ -1043,7 +1141,18 @@ export function registerCurrentUserEndpoints(
         if (!execCtx?.userId) return c.json({ apps: [] });
         try {
             const byName = new Map<string, any>();
-            try {
+            // [#29613, ADR-0146 D8 item 2] With the protocol service present,
+            // the apps are the protocol's SERVED list (`getMetaItems`, what
+            // `GET /meta/app` serves, nav contributions merged), so a `.custom`
+            // pair's published override of a base's app is listed over the
+            // base's app. The registry's list holds the base's app alone under
+            // the name since the override no longer takes its bare slot.
+            const served = await servedAppsOf(ctx);
+            if (served !== undefined) {
+                for (const app of served) {
+                    if ((app as { name?: unknown })?.name) byName.set(String((app as { name: unknown }).name), app);
+                }
+            } else try {
                 // The PUBLIC accessor. This read used to reach ObjectQL's
                 // private `_registry` while `/auth/me/permissions` read the
                 // `registry` getter over the same field, on the same object,

@@ -2114,7 +2114,9 @@ describe('HttpDispatcher', () => {
 
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
-            expect(revertCommit).toHaveBeenCalledWith(expect.objectContaining({ commitId: 'cmt_1', actor: 'ai:claude' }));
+            // [#28414] A body `actor` is ignored: the revert commit records the
+            // signed-in caller (`packages-write-actor-session.test.ts` pins every door).
+            expect(revertCommit).toHaveBeenCalledWith(expect.objectContaining({ commitId: 'cmt_1', actor: 'u_pkg_admin' }));
         });
 
         it('POST /packages/:id/rollback routes to protocol.rollbackToPackageCommit', async () => {

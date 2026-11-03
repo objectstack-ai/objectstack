@@ -197,6 +197,20 @@ export interface MetaItemReadGateSources extends MetaReadGateAudienceSources, Me
      * withheld".
      */
     isItemOfDisabledPackage?(item: { type: string; name: string; packageId?: string }): Promise<boolean>;
+    /**
+     * [#28337, ADR-0048] The refusal of a layered read that names NO package,
+     * of a name whose active rows two or more packages hold: the protocol's
+     * `packagelessLayeredReadRefusal`, which answers the refusal the
+     * package-less save and delete answer for the same rows (`409
+     * RESOURCE_CONFLICT`, the holders and the `?package=` prescription), or
+     * `undefined` when one package or none holds the name.
+     *
+     * Read by the layered chain ({@link createMetaLayeredAnswer}) only, and
+     * only for a request with no `?package=`. Absent (a protocol without the
+     * judge) refuses nothing: the answer before #28337. A REJECTION is a fault
+     * and propagates.
+     */
+    packagelessLayeredReadRefusal?(item: { type: string; name: string; member?: string }): Promise<Error | undefined>;
 }
 
 // ── The caller's organization ─────────────────────────────────────────────────
@@ -2402,13 +2416,14 @@ const LAYERED_VIEW_MEMBER_MESSAGE =
  * VALIDATION_ERROR`, the code the recognition and arity rules answer
  * everywhere; `rule` names which of the three refused, because `RestServer`'s
  * item read answers the third at a different point (see
- * {@link metaItemQueryRefusal}).
+ * {@link metaItemQueryRefusal}). The arity doors answer a fourth,
+ * `bracketed-parameter` ({@link metaBracketedFilterRefusal}).
  */
 export interface MetaItemQueryRefusal {
     readonly status: 400;
     readonly code: 'VALIDATION_ERROR';
     readonly message: string;
-    readonly rule: 'unknown-parameter' | 'repeated-parameter' | 'layered-member';
+    readonly rule: 'unknown-parameter' | 'repeated-parameter' | 'layered-member' | 'bracketed-parameter';
 }
 
 /**
@@ -2542,13 +2557,89 @@ export const META_QUERY_ARITY_DOORS: Readonly<Record<MetaQueryArityDoor, readonl
  * each transport writes in its own envelope. It returns the first name of the
  * door's {@link META_QUERY_ARITY_DOORS} entry that was supplied more than once,
  * as `400 VALIDATION_ERROR` with `repeatedQueryParamMessage`'s sentence, which
- * is the answer `RestServer`'s door gives through `refuseRepeatedQueryParams`.
- * It returns `undefined` otherwise, and has then unwrapped a one-element array
- * in place. ⛔ Ask it before any read of the door's query.
+ * is the answer `RestServer`'s door gives through `refuseRepeatedQueryParams`;
+ * then a bracketed narrowing filter ({@link metaBracketedFilterRefusal}), which
+ * `RestServer`'s door asks right after its multiplicity gate. It returns
+ * `undefined` otherwise, and has then unwrapped a one-element array in place.
+ * ⛔ Ask it before any read of the door's query.
  */
 export function metaQueryArityRefusal(door: MetaQueryArityDoor, query: unknown): MetaItemQueryRefusal | undefined {
     if (!query || typeof query !== 'object') return undefined;
-    return repeatedOnceRefusal(query as Record<string, unknown>, META_QUERY_ARITY_DOORS[door]);
+    return repeatedOnceRefusal(query as Record<string, unknown>, META_QUERY_ARITY_DOORS[door])
+        ?? metaBracketedFilterRefusal(door, query);
+}
+
+/**
+ * One filter an arity door judges for a BRACKETED spelling: the name as the
+ * door reads it, what one value of it names, how one value is spelled, what the
+ * door serves, and what leaving the parameter out reads. Every field goes into
+ * {@link listFilterRefusalMessage}'s one sentence frame.
+ */
+interface MetaBracketedFilter {
+    readonly param: string;
+    readonly names: string;
+    readonly takes: string;
+    readonly served: 'list' | 'tree';
+    readonly unscoped: string;
+}
+
+const PACKAGE_ID_TAKES = 'one package id, spelled';
+
+/**
+ * The single-valued filters each arity door judges for a bracketed spelling, in
+ * the order asked: the names these doors read at their entry whose absence
+ * WIDENS the answer (no package is every package, no type is every type). The
+ * list's `id` and `object` are judged a step later, in the list chain
+ * ({@link refuseBracketedListFilter}).
+ */
+const META_BRACKETED_FILTERS: Readonly<Partial<Record<MetaQueryArityDoor, readonly MetaBracketedFilter[]>>> = Object.freeze({
+    list: Object.freeze([
+        { param: 'package', names: 'package', takes: `${PACKAGE_ID_TAKES} ?package=ID`, served: 'list', unscoped: 'list across every package' },
+    ] as const),
+    'book-tree': Object.freeze([
+        { param: 'package', names: 'package', takes: `${PACKAGE_ID_TAKES} ?package=ID`, served: 'tree', unscoped: 'read the tree across every package' },
+    ] as const),
+    drafts: Object.freeze([
+        { param: 'packageId', names: 'package', takes: `${PACKAGE_ID_TAKES} ?packageId=ID`, served: 'list', unscoped: 'list the drafts of every package' },
+        { param: 'type', names: 'metadata type', takes: 'one metadata type, spelled ?type=TYPE', served: 'list', unscoped: 'list the drafts of every type' },
+    ] as const),
+});
+
+/**
+ * The answer of an arity door to a BRACKETED spelling of one of its narrowing
+ * filters ({@link META_BRACKETED_FILTERS}): `?package[]=ID` or `?package[0]=ID`
+ * on the list and the book tree, `?packageId[]=ID` or `?type[]=TYPE` on
+ * `_drafts` — any key that opens `param[`. A client that serialises arrays
+ * qs-style sends it; every adapter hands the key through as spelled
+ * (`readQuery` in `plugin-hono-server`, `readDispatchQuery` in
+ * `@objectstack/hono`), so the door, which reads `query[param]`, read no
+ * filter, and a caller who named ONE package (or one type) was answered across
+ * every package (or type). `400 VALIDATION_ERROR`, rule `bracketed-parameter`,
+ * in the list chain's narrowing-filter frame ({@link listFilterRefusalMessage}),
+ * naming the key as sent; beside a plain spelling too (two spellings of one
+ * filter). Asked at the door's entry, before any read, by both transports:
+ * {@link metaQueryArityRefusal} for the dispatcher, after
+ * `refuseRepeatedQueryParams` for `RestServer`.
+ *
+ * Every by-name `/meta` door (the item read, `/layers`, the save, the reset,
+ * `/publish`) and the diagnostics sweep already refuse such a key: it is not in
+ * their closed set (route rule 5).
+ */
+export function metaBracketedFilterRefusal(door: MetaQueryArityDoor, query: unknown): MetaItemQueryRefusal | undefined {
+    for (const filter of META_BRACKETED_FILTERS[door] ?? []) {
+        const key = bracketedKeyOf(query, filter.param);
+        if (key === undefined) continue;
+        return {
+            status: 400,
+            code: 'VALIDATION_ERROR',
+            message: listFilterRefusalMessage(
+                key, filter.names, `the '${filter.param}' filter takes exactly ${filter.takes}`,
+                `a bracketed '${filter.param}' key`, filter.served, filter.unscoped,
+            ),
+            rule: 'bracketed-parameter',
+        };
+    }
+    return undefined;
 }
 
 /**
@@ -3388,6 +3479,93 @@ export type MetaListAnswer =
     | { ok: true; data: unknown; cacheControl: string; etag?: string }
     | { ok: false; object: string };
 
+/**
+ * [#28548] The list chain's answer to a narrowing filter sent EMPTY — `?id=`
+ * on the app list, `?object=` on the view list. Each was read as absent, so a
+ * caller whose name came out blank — who asked for ONE app, or for the views
+ * of ONE object — was answered every item it may see: the #27484 class (a
+ * blank `$searchFields` read as absent), refused the way that fix refuses it —
+ * `400 VALIDATION_ERROR` naming the parameter, so the caller learns its request
+ * named nothing instead of reading a plausible wrong list.
+ *
+ * Asked by steps 3 and 4 of {@link createMetaListAnswer}, AFTER the per-caller
+ * gate (step 2), which keeps its place. Only the empty string: a value that
+ * names nothing real (`' '`, `nope`) still narrows to the empty list. THROWS,
+ * so each transport's own `catch` shapes it (`RestServer`'s `handleRouteError`,
+ * the dispatcher's `errorFromThrown`), as {@link refuseUnknownMetaListType} does.
+ */
+function refuseEmptyListFilter(param: 'id' | 'object', names: 'app' | 'object', lists: 'app' | 'view'): never {
+    throwListFilterRefusal(param, param, names, lists, 'got ""', `an empty ${names} name`);
+}
+
+/**
+ * The list chain's answer to a BRACKETED spelling of a one-name filter —
+ * `?id[]=NAME` or `?id[0]=NAME` on the app list (step 3), `?object[]=NAME` or
+ * `?object[0]=NAME` on the view list (step 4): any key that opens `param[`. A
+ * client that serialises arrays qs-style sends it; every adapter hands the key
+ * through as spelled (`readQuery` in `plugin-hono-server`, `readDispatchQuery`
+ * in `@objectstack/hono`), so the step, which reads `query[param]`, never saw
+ * it, and the caller who asked for one app, or for one object's views, was
+ * answered every item it may see. Refused with {@link refuseEmptyListFilter}'s
+ * answer — one sentence frame, `400 VALIDATION_ERROR` — naming the key as
+ * sent: the filter takes exactly one name, spelled `?param=NAME`. A bracketed
+ * key beside a plain one is refused too: the request carries two spellings of
+ * one filter.
+ *
+ * Only the type whose step reads `param` judges its bracketed spelling; on
+ * every other type the key is not read, as no other spelling of it is.
+ */
+function refuseBracketedListFilter(
+    query: Readonly<Record<string, unknown>> | undefined,
+    param: 'id' | 'object',
+    names: 'app' | 'object',
+    lists: 'app' | 'view',
+): void {
+    const key = bracketedKeyOf(query, param);
+    if (key === undefined) return;
+    throwListFilterRefusal(
+        param, key, names, lists,
+        `the '${param}' filter takes exactly one ${names} name, spelled ?${param}=NAME`, `a bracketed '${param}' key`,
+    );
+}
+
+/** The first query key that opens `param[` (a qs-style array spelling of `param`), or `undefined`. */
+function bracketedKeyOf(query: unknown, param: string): string | undefined {
+    if (!query || typeof query !== 'object') return undefined;
+    return Object.keys(query).find((k) => k.startsWith(`${param}[`));
+}
+
+/** The one sentence frame of the `/meta` list doors' narrowing-filter refusals. */
+function listFilterRefusalMessage(
+    key: string,
+    names: string,
+    got: string,
+    notAFilter: string,
+    served: 'list' | 'tree',
+    unscoped: string,
+): string {
+    return `Query parameter '${key}' names no ${names}; ${got}. The ${served} was not served: ${notAFilter} `
+        + `is not a filter. Name one ${names}, or leave the parameter out to ${unscoped}.`;
+}
+
+/** {@link listFilterRefusalMessage}, thrown, so each transport's own `catch` shapes it. */
+function throwListFilterRefusal(
+    param: 'id' | 'object',
+    key: string,
+    names: 'app' | 'object',
+    lists: 'app' | 'view',
+    got: string,
+    notAFilter: string,
+): never {
+    const err: any = new Error(
+        listFilterRefusalMessage(key, names, got, notAFilter, 'list', `list every ${lists} you can see`),
+    );
+    err.status = 400;
+    err.code = 'VALIDATION_ERROR';
+    err.param = param;
+    throw err;
+}
+
 /** The items of a list shape this chain serves, or `null` for anything else (left alone, never replaced). */
 function listItemsOf(raw: unknown): any[] | null {
     if (Array.isArray(raw)) return raw;
@@ -3474,11 +3652,15 @@ async function describeMetaPositionList(sources: MetaListAnswerSources, list: an
  *     narrows (permission decides what exists for this caller; the filter
  *     narrows within it, never the reverse, ADR-0045 §3), and on the raw doc
  *     items, before the locale collapse (`_packageId` scopes membership).
- *  3. `app` — `?id=<app>` narrows to the app of that `name` (#7566); empty
- *     and absent spellings mean no filter; no match is an EMPTY list, never a
- *     404.
+ *  3. `app` — `?id=<app>` narrows to the app of that `name` (#7566); absent
+ *     means no filter, and [#28548] an EMPTY value is refused (`400
+ *     VALIDATION_ERROR`), never read as absent, as is a bracketed key
+ *     (`?id[]=`, `?id[0]=`), never read as no filter; no match is an EMPTY
+ *     list, never a 404.
  *  4. `view` — `?object=<object>` keeps the independent views bound to that
- *     object, sorted by `order` then `name` (the switcher).
+ *     object, sorted by `order` then `name` (the switcher); [#28548] an EMPTY
+ *     value is refused (`400 VALIDATION_ERROR`), never read as absent, as is a
+ *     bracketed key (`?object[]=`, `?object[0]=`), never read as no filter.
  *  5. `doc` — the ADR-0046 locale collapse (the request's own preference; the
  *     `translations` map is dropped whatever the locale).
  *  6. `doc` — the ADR-0046 content slim, unless `?include=content`.
@@ -3532,9 +3714,13 @@ export function createMetaListAnswer(
             }
         }
 
-        // 3. [#7566] `?id=<app>`.
+        // 3. [#7566] `?id=<app>`. [#28548] An EMPTY one is refused, never
+        // read as absent (see {@link refuseEmptyListFilter}), and so is a
+        // bracketed spelling of the key (see {@link refuseBracketedListFilter}).
+        if (metaType === 'app') refuseBracketedListFilter(query, 'id', 'app', 'app');
         const appIdFilter = metaType === 'app' ? query?.id : undefined;
-        if (typeof appIdFilter === 'string' && appIdFilter !== '') {
+        if (appIdFilter === '') refuseEmptyListFilter('id', 'app', 'app');
+        if (typeof appIdFilter === 'string') {
             const list = listItemsOf(visible);
             if (list) {
                 visible = withItems(visible, list.filter(
@@ -3543,7 +3729,11 @@ export function createMetaListAnswer(
             }
         }
 
-        // 4. `?object=<object>` — the view switcher.
+        // 4. `?object=<object>` — the view switcher. [#28548] An EMPTY one is
+        // refused, never read as absent (see {@link refuseEmptyListFilter}),
+        // and so is a bracketed spelling of the key, as step 3's is.
+        if (metaType === 'view') refuseBracketedListFilter(query, 'object', 'object', 'view');
+        if (metaType === 'view' && query?.object === '') refuseEmptyListFilter('object', 'object', 'view');
         if (metaType === 'view' && query?.object) {
             const obj = String(query.object);
             const list = listItemsOf(visible);
@@ -3804,6 +3994,12 @@ export interface MetaLayeredRequest {
      */
     readonly packageId?: string;
     /**
+     * [#28337] The bundle member selector the transport read the layers at
+     * (`?member=`, `metaMemberSelector`), absent for the canonical member: the
+     * address step 1c asks about is the member the layers are of.
+     */
+    readonly member?: string;
+    /**
      * [ADR-0106 D2/D3] The caller's field-visibility posture for this item,
      * resolved by the transport BEFORE the read, the not-applicable passthrough
      * for every type but `object`. A tier-3 fault is the transport's to answer
@@ -3883,6 +4079,20 @@ export type MetaLayeredAnswer =
  *     protocol's layered read keeps serving every layer, because
  *     its resolution readers (the security catalog echo, the
  *     packaged-permission-set lock gate) need them: the door answers here.
+ *  1c. [#28337, ADR-0048] A name two or more packages hold, read naming no
+ *     package, is refused with the package-less writes' own refusal — `409
+ *     RESOURCE_CONFLICT`, naming the holders, with the `?package=`
+ *     prescription — asked of
+ *     {@link MetaItemReadGateSources.packagelessLayeredReadRefusal} (the
+ *     protocol's judge over the rows the save and the delete read) and THROWN,
+ *     so each transport answers it through the catch its own save door answers
+ *     that refusal through: one envelope per transport for one ambiguity. The
+ *     protocol's layered read named no package picked one holder's stack
+ *     silently. BEFORE the gate, so the answer never depends on which holder
+ *     that pick met; for the same reason the read refuses, exactly where the
+ *     writes refuse, on every type. Same producer rule as 1b: the protocol's
+ *     layered read keeps serving its resolution readers; the door answers
+ *     here.
  *  2. [#20156] THE per-caller gate on EVERY present layer, `effective` first
  *     (it is what the plain read serves, so its refusal is the plain read's
  *     own), under {@link STORED_VERSION_DOOR_POLICY}: per-caller arms only
@@ -3908,7 +4118,7 @@ export function createMetaLayeredAnswer(
     sources: MetaItemReadGateSources,
     request: MetaLayeredRequest,
 ): (layered: unknown) => Promise<MetaLayeredAnswer> {
-    const { metaType, name, packageId, maskPosture } = request;
+    const { metaType, name, packageId, member, maskPosture } = request;
     return async (raw) => {
         const layered = raw as Record<string, unknown> | null | undefined;
         const present = META_ITEM_LAYERS.filter((layer) => layered?.[layer] != null);
@@ -3922,6 +4132,15 @@ export function createMetaLayeredAnswer(
         if (metaType !== 'object'
             && await sources.isItemOfDisabledPackage?.({ type: metaType, name, ...(packageId ? { packageId } : {}) }) === true) {
             return { kind: 'refuse', refusal: { reason: 'absent' } };
+        }
+
+        // 1c. [#28337] A name several packages hold, naming none: the
+        //     package-less writes' refusal, thrown to the transport's catch.
+        if (!packageId) {
+            const ambiguity = await sources.packagelessLayeredReadRefusal?.({
+                type: metaType, name, ...(member !== undefined ? { member } : {}),
+            });
+            if (ambiguity) throw ambiguity;
         }
 
         // 2. [#20156] THE per-caller gate, on every present layer.

@@ -48,7 +48,8 @@
  *
  * Scope: every form view reachable from a `views[]` entry — the entry itself
  * when it IS a bare form view, plus the container's default `form` and each
- * `formViews.<key>`, through the shared `view-walk.ts` ladder (#6381; see
+ * `formViews.<key>`, plus [#29309] a form ViewItem's `config`, through the
+ * shared `view-walk.ts` ladder (#6381; see
  * {@link formViewSites} for why reading only the first shape left the rules
  * reporting clean on real app metadata, #6251). Forms embedded inside page
  * component trees are a follow-up — the walk deliberately stays shallow so it
@@ -164,7 +165,21 @@ export function validateFormLayout(stack: AnyRec): FormLayoutFinding[] {
     // carries for its own sites.
     const listBinding = isRec(view.list) ? viewObjectName(view.list) ?? containerObject : undefined;
 
-    for (const site of formViewSites(view, viewPath)) {
+    // [#29309] A stored form ViewItem (`{ name, object, viewKind: 'form',
+    // config }`, the shape Studio saves through `PUT /meta/view`) keeps its form
+    // under `config`, a rung the shared container walk does not carry. Read
+    // here, beside the container rungs: the runtime publish gate hands this
+    // rule the written body as authored, so without this rung a Studio form was
+    // judged on no save and no publish. Keyed on `viewKind: 'form'` only — a
+    // list item's `config` is a list view and carries no sections. The rung is
+    // this rule's, not `view-walk.ts`'s: adding it there would change the
+    // verdicts of the other walkers, which a fix here may not do.
+    const sites: Array<{ view: AnyRec; path: string; surface: string }> = formViewSites(view, viewPath);
+    if (view.viewKind === 'form' && isRec(view.config)) {
+      sites.push({ view: view.config, path: `${viewPath}.config`, surface: 'config' });
+    }
+
+    for (const site of sites) {
       // A sub-container declares its own binding (`form.data.object`) and
       // otherwise inherits the container's, then the container's list-bound
       // object as a last resort (#16168) — the resolution order every other

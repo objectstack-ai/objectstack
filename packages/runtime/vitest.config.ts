@@ -148,6 +148,19 @@ export default defineConfig({
         replacement: path.resolve(__dirname, '../platform-objects/src/index.ts'),
       },
       { find: '@objectstack/rest', replacement: path.resolve(__dirname, '../rest/src/index.ts') },
+      // The clone door's target rule (`domains/new-similar-target.ts`) walks the
+      // dependency closure with `resolvePackageClosure`, the one walk the save
+      // door's publish gate uses; its tests judge the source, never `dist/`.
+      { find: /^@objectstack\/lint\/runtime$/, replacement: path.resolve(__dirname, '../lint/src/runtime.ts') },
+      // [#29603] The package root: a served view read imports it lazily for the
+      // form-layout warnings (metadata-protocol's `loadFormLayoutLint`), and
+      // `meta-write-org-scope.test.ts` pays that load at module top. Both
+      // resolve here, so the read judges the lint rule in the checkout, never `dist/`.
+      { find: /^@objectstack\/lint$/, replacement: path.resolve(__dirname, '../lint/src/index.ts') },
+      // The MCP bridge (`domains/mcp.ts`) reads "this field declares options"
+      // through `@objectstack/formula`'s `declaresOptions`; its tests judge the
+      // predicate in the checkout, never `dist/`.
+      { find: /^@objectstack\/formula$/, replacement: path.resolve(__dirname, '../formula/src/index.ts') },
       // #9457: ONE anchored rule for every `@objectstack/spec` namespace, in
       // place of the hand-maintained list of the twelve subpaths tests happened
       // to reach on the day it was written. That list had gone stale in three

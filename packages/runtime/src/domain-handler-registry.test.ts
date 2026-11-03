@@ -794,7 +794,10 @@ describe('HttpDispatcher extracted domains (PR-6: automation)', () => {
         // Direct delegate calls — `dispatch()` would re-resolve identity off
         // the auth-less mock kernel and overwrite the seeded executionContext,
         // the same reason the `/keys` test above bypasses it.
-        const dispatcher = makeDispatcher({ automation });
+        // The caller reads `lead-9`: a door that starts a flow on a record loads
+        // that record in the caller's own scope before the run exists.
+        const protocol = { getData: async ({ object, id }: any) => ({ object, id, record: { id } }) };
+        const dispatcher = makeDispatcher({ automation, protocol });
         await dispatcher.handleAutomation('/trigger/nurture', 'POST', body, ctx);
         await dispatcher.handleAutomation('/nurture/trigger', 'POST', body, ctx);
 

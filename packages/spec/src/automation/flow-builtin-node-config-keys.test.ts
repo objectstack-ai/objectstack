@@ -64,6 +64,7 @@ const VALID: Readonly<Record<string, Config>> = {
   loop: { collection: { dialect: 'cel', source: 'rows' }, body: { nodes: [], edges: [] } },
   parallel: { branches: [{ name: 'a', nodes: [], edges: [] }, { name: 'b', nodes: [], edges: [] }] },
   try_catch: { try: { nodes: [], edges: [] }, retry: { maxRetries: 1, backoffMs: 10 } },
+  save_notice: { message: 'Sent {{ record.name }} for approval' },
 };
 
 /** A `try` region with one node in it — the measured `try_catch`'s protected region. */
@@ -250,8 +251,8 @@ describe('what stays as it was (lit controls)', () => {
     const judged = [...getBuiltinNodeConfigContracts().keys()]
       .filter((type) => flowNodeConfigRefusals(type, { bogusKey: 1 }).some((r) => r.path === 'bogusKey'));
     expect(judged.sort()).toEqual([
-      'create_record', 'delete_record', 'get_record', 'http', 'loop', 'map', 'notify', 'parallel', 'screen',
-      'script', 'subflow', 'try_catch', 'update_record',
+      'create_record', 'delete_record', 'get_record', 'http', 'loop', 'map', 'notify', 'parallel', 'save_notice',
+      'screen', 'script', 'subflow', 'try_catch', 'update_record',
     ]);
     // The predicate the descriptor walk reads names exactly the types the judge judges — one judge per type.
     for (const type of getBuiltinNodeConfigContracts().keys()) {

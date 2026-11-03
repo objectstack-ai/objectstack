@@ -62,7 +62,6 @@ import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 /** oclif + tsx cold starts, five of them, sequential. */
 const RUN_TIMEOUT_MS = 240_000;
@@ -75,10 +74,10 @@ interface Run {
   stderr: string;
 }
 
-function runTsx(args: string[], cwd: string): Promise<Run> {
+function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       args,
       { cwd, maxBuffer: 8 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {
@@ -165,12 +164,12 @@ beforeAll(async () => {
   brokenBarrel = barrelOf(broken);
   brokenFiles = objectFilesIn(broken);
 
-  // Sequential on purpose: cold tsx starts in a container several agents share.
+  // Sequential on purpose: cold CLI starts in a container several agents share.
   // Every refusal runs BEFORE its project's control, so the barrel and file
   // snapshots above are what each refusal was measured against.
-  residual = await runTsx([CLI, 'generate', 'object', 'order__line'], namespaced);
-  residualDryRun = await runTsx([CLI, 'generate', 'view', 'order__line', '--dry-run'], namespaced);
-  loadFailed = await runTsx([CLI, 'generate', 'object', 'customer'], broken);
+  residual = await runCli([CLI, 'generate', 'object', 'order__line'], namespaced);
+  residualDryRun = await runCli([CLI, 'generate', 'view', 'order__line', '--dry-run'], namespaced);
+  loadFailed = await runCli([CLI, 'generate', 'object', 'customer'], broken);
 
   residualAfter = {
     barrel: barrelOf(namespaced),
@@ -179,8 +178,8 @@ beforeAll(async () => {
   };
   loadFailedAfter = { barrel: barrelOf(broken), files: objectFilesIn(broken) };
 
-  namespacedControl = await runTsx([CLI, 'generate', 'object', 'order_line'], namespaced);
-  brokenControl = await runTsx([CLI, 'generate', 'dashboard', 'sales'], broken);
+  namespacedControl = await runCli([CLI, 'generate', 'object', 'order_line'], namespaced);
+  brokenControl = await runCli([CLI, 'generate', 'dashboard', 'sales'], broken);
 }, RUN_TIMEOUT_MS);
 
 afterAll(() => {

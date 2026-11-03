@@ -184,8 +184,10 @@ export function invitationRoleCapFailure(
   issuerRole: unknown,
 ): InvitationRoleCapRefusal | null {
   const requested = parseOrgRoles(requestedRole);
-  // No role at all: better-auth's body schema requires one, so this is not a
-  // reachable invitation shape. Nothing to cap — the route rejects it upstream.
+  // No role at all: nothing to cap. A blank role IS reachable — better-auth's
+  // body schema accepts `""` and its role check drops empty entries — and it is
+  // refused before this cap is asked (`blankInvitationRoleRefusal`,
+  // `invite-role-not-found-code.ts`), so a blank entry never reaches a verdict here.
   if (requested.length === 0) return null;
   if (isPlainMemberInvitation(requestedRole)) return null;
 

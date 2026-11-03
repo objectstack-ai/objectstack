@@ -10,8 +10,8 @@
  * The ⌘K palette names an app navigation entry the way the sidebar does,
  * including an entry with NO `label` (objectui#9868, contract review finding 1).
  *
- * Since objectui#9868 `NavigationSyncEffect` writes every page and dashboard
- * created in the console WITHOUT a `label` — absent means "inherit the target's
+ * Since objectui#9868 the console writes every page and dashboard created in
+ * it into navigation WITHOUT a `label` (`useNavigationWrites`, objectstack#28680) — absent means "inherit the target's
  * current label at render time". The palette read `resolveKeyedI18nLabel(
  * item.label, t)`, which answers `undefined` for an absent label, so such an
  * entry drew a BLANK row whose cmdk filter value read `page undefined my_page`.
@@ -53,7 +53,7 @@ const APP = {
   name: 'crm',
   label: 'CRM',
   navigation: [
-    // What NavigationSyncEffect writes for a page / dashboard since objectui#9868.
+    // What the console's create sites write for a page / dashboard since objectui#9868.
     { id: 'nav_page', type: 'page', pageName: 'my_page' },
     { id: 'nav_dash', type: 'dashboard', dashboardName: 'sales_overview' },
     { id: 'nav_board', type: 'object', objectName: 'customer', viewName: 'board' },

@@ -280,7 +280,7 @@ const EmptyPanelsLine: React.FC<{ entries: FoldStackEntry[]; standalone: boolean
       <span aria-hidden>·</span>
       <button
         type="button"
-        className="rounded-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0 sm:min-w-0"
         onClick={onExpand}
         data-related-empty-fold-expand=""
       >
@@ -313,7 +313,7 @@ const EmptyFoldLine: React.FC<{ entries: FoldStackEntry[]; standalone: boolean }
               disabled={entry.newDisabled}
               data-testid="related-list-empty-fold-new"
               onClick={() => entry.onNew.current?.()}
-              className="gap-1 h-9 sm:h-7 px-2 text-xs shadow-none"
+              className="gap-1 h-11 sm:h-7 px-2 text-xs shadow-none"
             >
               <Plus className="h-3.5 w-3.5" aria-hidden />
               {t('detail.new')}

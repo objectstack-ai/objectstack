@@ -3,7 +3,8 @@
  * title (the object's plural ahead of the view switcher, or the plural alone),
  * managed-by badge, description and icon, with the
  * header's actions (the create button, Import, the schema-driven toolbar and
- * the overflow menu with favorites and "Reset view") and their folded face,
+ * the overflow menu with favorites) and their folded face, the 「Personalized」
+ * marker beside the title (objectstack#28950),
  * moved out of `ObjectViewInner`'s JSX verbatim (objectstack#25992, slice 10).
  * Every value is passed in as a prop.
  */
@@ -15,10 +16,9 @@ import {
   Button,
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@object-ui/components';
-import { Upload, MoreHorizontal, RotateCcw } from 'lucide-react';
+import { Upload, MoreHorizontal } from 'lucide-react';
 import type { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { FavoriteMenuItem } from '../layout/SidebarItemMenu.js';
 import type { useObjectListFavorite } from '../layout/SidebarItemMenu.js';
@@ -29,7 +29,6 @@ import { EnvironmentListToolbar } from '../environment/EnvironmentListToolbar.js
 import { ListHeaderActionBar } from './objectViewHeaderLaunchGate.js';
 import type { useObjectViewToolbarAffordances } from './objectViewToolbarAffordances.js';
 import type { useObjectViewHeaderToolbar } from './objectViewHeaderToolbar.js';
-import type { useObjectViewListUrlState } from './objectViewListUrlState.js';
 import type { useObjectViewHeaderChrome } from './objectViewHeaderChrome.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
 
@@ -88,8 +87,7 @@ export function ObjectViewPageHeader({
     environmentEntitlements,
     toolbarBar,
     listFavorite,
-    activeViewHasPreference,
-    handleResetView,
+    personalizedMarker,
     foldedHeaderActions,
 }: {
     objectDef: ConsoleObjectViewProps['objects'][number];
@@ -112,8 +110,12 @@ export function ObjectViewPageHeader({
     environmentEntitlements: ReturnType<typeof useObjectViewToolbarAffordances>['environmentEntitlements'];
     toolbarBar: ReturnType<typeof useObjectViewHeaderToolbar>['toolbarBar'];
     listFavorite: ReturnType<typeof useObjectListFavorite>;
-    activeViewHasPreference: ReturnType<typeof useObjectViewListUrlState>['activeViewHasPreference'];
-    handleResetView: ReturnType<typeof useObjectViewListUrlState>['handleResetView'];
+    /**
+     * objectstack#28950 — the 「Personalized」 marker (`./ListPersonalizedMarker.tsx`),
+     * or `null` while the reader's list is the view's own. Drawn in the
+     * header's badge slot, beside the title, in both of the header's faces.
+     */
+    personalizedMarker: ReactNode;
     foldedHeaderActions: ReturnType<typeof useObjectViewHeaderChrome>['foldedHeaderActions'];
 }) {
     const pluralLabel = objectPluralLabel(objectDef);
@@ -137,7 +139,9 @@ export function ObjectViewPageHeader({
                  title={title}
                  // The kind chip, in the header's own slot after the title
                  // (objectui#12606).
-                 badge={<ManagedByBadge managedBy={(objectDef as any)?.managedBy} />}
+                 // objectstack#28950 — and, before it, the 「Personalized」
+                 // marker while the reader's list differs from the view.
+                 badge={<>{personalizedMarker}<ManagedByBadge managedBy={(objectDef as any)?.managedBy} /></>}
                  subtitle={objectDef.description ? objectDesc(objectDef) : undefined}
                  // `createElement`, not a JSX tag: the looked-up icon is a value,
                  // which react-hooks/static-components refuses in tag position
@@ -191,10 +195,10 @@ export function ObjectViewPageHeader({
                         row: the favorites entry that replaced the header star.
                         Favorites is a once-and-forget act, so it lives behind
                         the ⋯ rather than in the header's most prominent slot.
-                        "Reset view" (objectui#12418) is the same kind of act and
-                        lives beside it, so the one-row header keeps its shape
-                        as the user sorts. The ⋯ is drawn when either applies. */}
-                    {(listFavorite || activeViewHasPreference) && (
+                        The list's way back to its view is the 「Personalized」
+                        marker beside the title (objectstack#28950), not an
+                        entry here. */}
+                    {listFavorite && (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button
@@ -208,26 +212,11 @@ export function ObjectViewPageHeader({
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          {listFavorite && (
-                            <FavoriteMenuItem
-                              isFavorite={listFavorite.isFavorite}
-                              onToggle={listFavorite.toggle}
-                              testId="object-view-favorite"
-                            />
-                          )}
-                          {/* objectui#12418 — the user's own list state for
-                              this view (sort, filters, column layout) back to
-                              the view's. Only while they have stored some. */}
-                          {activeViewHasPreference && (
-                            <DropdownMenuItem
-                              onSelect={handleResetView}
-                              title={t('console.objectView.resetViewTitle')}
-                              data-testid="object-view-reset-view-button"
-                            >
-                              <RotateCcw className="h-4 w-4" />
-                              <span>{t('console.objectView.resetView')}</span>
-                            </DropdownMenuItem>
-                          )}
+                          <FavoriteMenuItem
+                            isFavorite={listFavorite.isFavorite}
+                            onToggle={listFavorite.toggle}
+                            testId="object-view-favorite"
+                          />
                         </DropdownMenuContent>
                       </DropdownMenu>
                     )}

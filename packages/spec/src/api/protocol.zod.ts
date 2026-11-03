@@ -28,7 +28,9 @@ import {
 import { RealtimePresenceSchema, TransportProtocol } from './realtime.zod';
 import { ObjectPermissionSchema, EffectiveObjectPermissionSchema, FieldPermissionSchema } from '../security/permission.zod';
 import { ActionDescriptorSchema } from '../automation/node-executor.zod';
-import { ServedTranslationDataSchema } from '../system/translation.zod';
+import { ServedTranslationDataSchema, LocaleSchema } from '../system/translation.zod';
+import { PushVendorSchema } from '../system/push-config.zod';
+import { PUSH_DEVICE_PLATFORMS } from '../system/push-device-platform';
 // #5950 / #5882 — the ADR-0010 read-side protection envelope both metadata-item
 // responses publish. Same three vocabularies the resolver filters against, so a
 // value this spec cannot name is a value the resolver would have dropped.
@@ -236,10 +238,45 @@ export const GetMetaTypesResponseSchema = lazySchema(() => z.object({
  * must carry it alongside a request do so in a typed transport envelope at
  * their own layer (see `TransportScopedMetaRequest` in `@objectstack/rest`),
  * never by widening these shapes.
+ *
+ * **`names` is the batch by-names read of one type** (ruling A on #29236,
+ * record 6580261740): a caller that wants a handful of items asks the list
+ * once instead of reading the whole type, or reading each item by name. This
+ * member is the protocol's post-parse shape — a LIST of item names; the wire
+ * spelling `?names=a,b,c` (one comma-separated value, the data routes'
+ * convention for `fields` and `searchFields`, which fits the list door's arity
+ * rule that refuses a repeated key) is split by the REST door, not here. The
+ * protocol pushes it down to the store read, so it filters before decorating
+ * and masking and translation run on the named items only.
+ *
+ * The list arm refuses only the EMPTY list, as `searchFieldsArray` does
+ * (`../data/search-fields-names-a-field.ts`): absent means "every item", so an
+ * empty filter read as absent is a widening — the class the list door's `?id=`
+ * / `?object=` refusal closes (`refuseEmptyListFilter` in `@objectstack/rest`).
+ * The schema judges no member: a name that matches no item is not refused,
+ * it is simply absent from the answer, as an unknown `?id=` narrows to the
+ * empty list. A minimum, not a refinement, so the published JSON Schema
+ * states it.
+ *
+ * **Declared ahead of its producer.** No list door reads `names` yet, so its
+ * describe opens `[PLANNED — not yet served]`; the server PR on #29236 drops
+ * the marker in the change that serves the member (the pin is in
+ * `protocol.test.ts`).
  */
 export const GetMetaItemsRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name (e.g., "object", "plugin")'),
   packageId: z.string().optional().describe('Optional package ID to filter items by'),
+  names: z.array(z.string())
+    .min(1, 'Name at least one item, or leave `names` out to list every item')
+    .optional()
+    .describe(
+      '[PLANNED — not yet served] Item names to narrow the list to: only the named items of the type '
+      + 'are answered, among those the list would answer without it. Sent over HTTP as one '
+      + 'comma-separated value (`?names=a,b,c`). A name that matches no item is simply absent from the '
+      + 'answer (no 404). An empty value is refused with 400 rather than read as every item; leave the '
+      + 'key out to list every item. No list door reads it yet: until one does, a request carrying it '
+      + 'is answered as if it were absent.',
+    ),
   previewDrafts: z.boolean().optional().describe(
     'Draft-visibility switch (ADR-0033 draft-overlay preview): when true, '
     + 'pending `state=\'draft\'` rows are overlaid on the active list — draft '
@@ -752,7 +789,7 @@ export const GetMetaItemResponseSchema = lazySchema(() => z.object({
   ),
   disabledActions: z.array(z.string()).optional().describe(
     'The names in `item.actions` that this deployment\'s activation ledger switches off (an administrator '
-    + 'turned them off under Setup › Packaged automation): a call to any of them is refused 409 '
+    + 'turned them off under Setup › Packaged Actions): a call to any of them is refused 409 '
     + '`ACTION_DISABLED`. Present only on an `object` read answered by a process whose data engine has an '
     + 'activation ledger attached, and then `[]` when none of this object\'s actions is switched off. '
     + 'Absent otherwise, and absence means no ledger answered, never that nothing is switched off. Unlike '
@@ -764,8 +801,8 @@ export const GetMetaItemResponseSchema = lazySchema(() => z.object({
   ),
   cascadeDeleteObjects: z.array(z.string()).optional().describe(
     'The objects, by name, that deleting a record of this object can also delete: every object whose '
-    + 'relation into it cascades (a `master_detail` by default, a `lookup` or `tree` that declares '
-    + '`deleteBehavior: \'cascade\'`), and the objects that cascade into those in turn, each once, in the '
+    + 'relation into it cascades (a `master_detail` by default, a `lookup`, `tree` or `user` field that '
+    + 'declares `deleteBehavior: \'cascade\'`), and the objects that cascade into those in turn, each once, in the '
     + 'order the delete reaches them. This object itself is named only when a cascading relation leads back '
     + 'to it. A `restrict` or `set_null` relation removes nothing and is not named. Read from the rule the '
     + 'delete runs, and object-level: it never says which records or how many. Present only on an `object` '
@@ -1227,7 +1264,14 @@ export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
     + 'CLI at all, which is the gap this key exists to close. The gate runs on '
     + 'both write doors (D1), and both report: '
     + '`POST /meta/:type/:name/publish` carries the same key on '
-    + '`PublishMetaItemResponseSchema`.',
+    + '`PublishMetaItemResponseSchema`. '
+    + 'The save also reports here what it did to the row at rest that the '
+    + 'author did not write, on a draft save too: one `warning` with rule '
+    + '`withheld-key-dropped` for each stored position it dropped because the '
+    + 'type\'s read redactor withholds it and marks it not carried forward '
+    + '(a connector\'s undeclared `auth` keys, which no door accepts and nothing '
+    + 'reads). Its `path` names where the value sat at rest, in the same '
+    + 'spelling (`connectors[0].auth.token`).',
   ),
   message: z.string().optional(),
 }));
@@ -1497,7 +1541,9 @@ export const PublishMetaItemResponseSchema = lazySchema(() => z.object({
  * is the `:id` path segment, never a body member. The door reads exactly two
  * body members and hands them to `publishPackageDrafts`:
  *
- * - `message` — forwarded only when it is a string;
+ * - `message` — parsed with this declaration's member; a note it refuses (a
+ *   number, an object, an array, `null`) is refused `400 VALIDATION_ERROR`
+ *   naming `message` before anything is published;
  * - `backfill` — forwarded as sent whenever the key is present; the protocol
  *   judges its shape before anything is published and refuses the whole
  *   request `400 VALIDATION_ERROR` with every bad entry in `issues[]`.
@@ -2753,7 +2799,8 @@ const WRITE_ANSWER_WITHHELD_MENTIONS_DESCRIPTION =
 const WRITE_ANSWER_NOTICE_DESCRIPTION =
   'One author-written message telling the person who made THIS write what the save set in motion (for example ' +
   '"Sent to your manager for approval"), set by a hook running on the write through the write\'s own `onNotice` ' +
-  'listener (`WriteObservabilityOptions`). Info severity: it reports an outcome, never a problem, so it is distinct ' +
+  'listener (`WriteObservabilityOptions`; a hook body calls it as `ctx.notice(message)`), or by a `save_notice` ' +
+  'node of a flow the write triggered. Info severity: it reports an outcome, never a problem, so it is distinct ' +
   'from `warnings` (the advisory validation-rule hits) and a client shows it with, or in place of, its own ' +
   'success message. One message: when more than one call sets it, the LAST one wins. Present ONLY when a hook set ' +
   'a non-empty message on a write that succeeded; otherwise the key is omitted. A nested write a hook or a flow ' +
@@ -2851,8 +2898,8 @@ export const CloneDataResponseSchema = lazySchema(() => z.object({
     + '`engine.insert`, after the `beforeInsert` hooks, `isSystem`-gated, exactly as on '
     + '`createData`), so those keys are dropped and the field re-derives its default. '
     + 'Present ONLY when ≥1 field was dropped; the clone still succeeded without them '
-    + '(status/success semantics unchanged). Carried in the 201 body only — this route '
-    + 'relays the producer verbatim and sets no `X-ObjectStack-Dropped-Fields` header. '
+    + '(status/success semantics unchanged). REST additionally surfaces this as the '
+    + '`X-ObjectStack-Dropped-Fields` response header. '
     + 'Optional — omit-when-empty keeps the shape backward-compatible for existing clients.'
   ),
   warnings: z.array(ValidateDataIssueSchema).optional().describe(WRITE_ANSWER_WARNINGS_DESCRIPTION),
@@ -3225,8 +3272,9 @@ export const CreateManyDataResponseSchema = lazySchema(() => z.object({
     '`engine.insert` after the `beforeInsert` hooks and exempts keys a hook itself wrote, ' +
     'tracked per row: rows where a hook stamped a protected key drop a different set from ' +
     'rows where it did not. Present ONLY when ≥1 field was dropped; the creates still succeeded ' +
-    'without them (count/success unchanged). Optional — omit-when-empty keeps the shape ' +
-    'backward-compatible. (The same reading applies to the partial-success bulk create, whose ' +
+    'without them (count/success unchanged). REST additionally surfaces this union as the ' +
+    '`X-ObjectStack-Dropped-Fields` response header, each field and reason once. Optional — ' +
+    'omit-when-empty keeps the shape backward-compatible. (The same reading applies to the partial-success bulk create, whose ' +
     'batch-level `droppedFields` names no row for the same reason. The paths that DO carry ' +
     'per-row `droppedFields` on each result are the bulk UPDATE and the mixed batch, where each ' +
     'row is its own engine call — see BatchOperationResultSchema.)'
@@ -3503,25 +3551,53 @@ export const GetPresenceResponseSchema = lazySchema(() => z.object({
 // Notification Operations
 // ==========================================
 
+/**
+ * Register or refresh a push device for the signed-in user (ADR-0012 §6).
+ *
+ * Served by `POST /api/v1/notifications/devices` (its row in
+ * `DEFAULT_NOTIFICATION_ROUTES`); unregister is
+ * `DELETE /api/v1/notifications/devices/:deviceId`.
+ *
+ * One request does both: registering a `deviceId` the user already has
+ * refreshes that device (its token, vendor, app and locale) instead of adding
+ * a second one. A request without `deviceId` gets one minted by the server
+ * and answered in {@link RegisterDeviceResponseSchema}; the client keeps it
+ * and sends it on every later registration and on unregister.
+ *
+ * The members after `name` (`vendor`, `appId`, `locale`) were added for the
+ * push channel, all optional, so the body a client sent before still parses
+ * unchanged. The device's owner is the session's user, never a body member.
+ * The stored device a registration produces is `UserDeviceSchema`
+ * (`system/push-device.zod.ts`).
+ */
 export const RegisterDeviceRequestSchema = lazySchema(() => z.object({
   token: z.string().describe('Device push notification token'),
-  platform: z.enum(['ios', 'android', 'web']).describe('Device platform'),
-  deviceId: z.string().optional().describe('Unique device identifier'),
+  platform: z.enum(PUSH_DEVICE_PLATFORMS).describe('Device platform'),
+  deviceId: z.string().optional().describe(
+    'Client-held device id, stable per app install. Re-registering the same deviceId refreshes that device; '
+    + 'absent, the server mints one and answers it, and the client keeps it for later registrations and unregister',
+  ),
   name: z.string().optional().describe('Device friendly name'),
-}));
+  vendor: PushVendorSchema.optional().describe(
+    'Push vendor the token belongs to: apns or fcm. Absent, the server derives it from platform: ios means apns, '
+    + 'android means fcm. web has no default vendor: a web registration names apns or fcm, and one without vendor is refused',
+  ),
+  appId: z.string().optional().describe('App the token was issued to: the iOS bundle ID or the Android application ID'),
+  locale: LocaleSchema.optional().describe('Device locale (BCP 47, for example zh-CN) that pushes to this device are rendered in'),
+}).describe('Register or refresh a push device for the signed-in user'));
 
 export const RegisterDeviceResponseSchema = lazySchema(() => z.object({
   deviceId: z.string().describe('Registered device ID'),
   success: z.boolean().describe('Whether registration succeeded'),
-}));
+}).describe('Answer to a device registration: the device id the client keeps'));
 
 export const UnregisterDeviceRequestSchema = lazySchema(() => z.object({
   deviceId: z.string().describe('Device ID to unregister'),
-}));
+}).describe('Unregister one of the signed-in user\'s push devices'));
 
 export const UnregisterDeviceResponseSchema = lazySchema(() => z.object({
   success: z.boolean().describe('Whether unregistration succeeded'),
-}));
+}).describe('Answer to a device unregistration'));
 
 export const NotificationPreferencesSchema = lazySchema(() => z.object({
   email: z.boolean().default(true).describe('Receive email notifications'),

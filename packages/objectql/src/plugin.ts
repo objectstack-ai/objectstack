@@ -1,6 +1,13 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ObjectQL, SECURITY_SERVICE_SOURCE_SLOT, type UnservableControlledByParentMaster } from './engine.js';
+import {
+  ObjectQL,
+  SECURITY_SERVICE_SOURCE_SLOT,
+  collectionItemOwnerStampRefusal,
+  permissionSetOwnerRegistrationRefusal,
+  viewsEntryNotContainerRefusal,
+  type UnservableControlledByParentMaster,
+} from './engine.js';
 import { OWNERSHIP_QUEUE_SOURCE_SLOT, describeMissingOwnershipQueueService } from './assignment-rules.js';
 import { OWNERSHIP_QUEUE_SERVICE } from '@objectstack/spec/contracts';
 import { assembleMetadataProtocol } from '@objectstack/metadata-protocol';
@@ -12,8 +19,10 @@ import { resolveArtifactPackageEntries, artifactPackageId, readDeploymentOrgScop
 // multi-package stack no body declares, and the id they take. See
 // `unclaimedTopLevelObjects` below.
 import { unclaimedTopLevel, type UnclaimedTopLevel } from '@objectstack/metadata';
-import { ASSEMBLED_VIEW_ITEMS_KEY, applyConversionsToStoredItem, expandViewContainer, isAggregatedViewContainer, isViewContainerShaped } from '@objectstack/spec';
-import { judgePermissionSetOwnerBinding } from '@objectstack/spec/security';
+// [ADR-0130 D4] The residual-picklist refusal: which lists, and the words —
+// one judgement with `os validate` / `os build`. See `unreferencedResidualPicklistRefusal`.
+import { unreferencedResidualPicklists } from '@objectstack/metadata/picklist-references';
+import { applyConversionsToStoredItem, expandViewContainer, isAggregatedViewContainer, isViewContainerShaped } from '@objectstack/spec';
 // [ADR-0017] The one object derivation of a view container and the one
 // divergent-`name` judge, called by the residual's view registration as by a
 // body's (see `registerUnclaimedTopLevelItems`).
@@ -220,50 +229,23 @@ function unclaimedTopLevelItems(
  * {@link RESIDUAL_TYPES_WITH_OWN_PATH}), so the engine never registers it.
  * One that a field names is loud already: a residual object's field makes
  * that object listed and not served, and a body's field fails the boot's
- * picklist audit. One that no field names was neither registered nor
- * refused, so it went missing from the engine with nothing said. It is
- * refused here, before anything of the artifact registers, naming each list
- * and the stack.
+ * picklist audit. One that no field names would go missing from the engine
+ * with nothing said, so it is refused here, before anything of the artifact
+ * registers, naming each list and the stack.
  *
- * "Names" is judged off the fields the engine registers from this artifact:
- * every package body's (its objects, its `objectExtensions` and its nested
- * `plugins[]`) and the residual's own objects, the set
- * {@link ObjectQLPlugin.registerUnclaimedTopLevelObjects} judges. ⛔ Never off
- * the whole top level: in a composed stack a top-level `objectExtensions`
- * entry, a top-level copy of an object a body declares and a top-level
- * `plugins[]` entry are registered by no door, so a list only they name is
- * dropped all the same. And never off the registry, which is still filling
- * while a boot registers.
+ * Which lists, judged off which fields, and the words are ONE judgement,
+ * `unreferencedResidualPicklists` (`@objectstack/metadata/picklist-references`,
+ * whose header says which fields count): `os validate` and `os build` refuse
+ * the same lists from it as `picklist-residual-unreferenced`, one finding per
+ * list. This seam only throws its one sentence in the picklist envelope.
+ * ⛔ Never compose the text here.
  */
 function unreferencedResidualPicklistRefusal(
   residual: UnclaimedTopLevel | undefined,
   bodies: readonly unknown[],
 ): PicklistMetadataError | undefined {
-  if (!residual) return undefined;
-  const picklists = residual.items
-    .filter((entry) => entry.type === 'picklist')
-    .map((entry) => String((entry.item as { name?: unknown }).name));
-  if (picklists.length === 0) return undefined;
-  const named = new Set<string>();
-  const residualObjects = residual.items.filter((entry) => entry.type === 'object').map((entry) => entry.item);
-  for (const source of [...bodies, { objects: residualObjects }]) {
-    for (const ref of collectManifestPicklistReferences(source, undefined)) named.add(ref.picklist);
-  }
-  const unreferenced = picklists.filter((name) => !named.has(name));
-  if (unreferenced.length === 0) return undefined;
-  const owner = residual.ownerId ?? '<none>';
-  const listed = unreferenced.map((name) => `'${name}'`).join(', ');
-  return picklistMetadataError(
-    `${unreferenced.length === 1 ? 'Picklist' : 'Picklists'} ${listed} ${unreferenced.length === 1 ? 'is' : 'are'} `
-    + `declared on the top level of stack '${owner}', and no package body declares `
-    + `${unreferenced.length === 1 ? 'it' : 'them'} and no object field the engine registers names `
-    + `${unreferenced.length === 1 ? 'it' : 'them'} (in a composed stack, a top-level \`objectExtensions\` entry, a `
-    + 'top-level copy of an object a package body declares and a top-level `plugins[]` entry are not '
-    + 'registered). The engine registers a top-level picklist only through a package body, so this list would be missing from the engine with nothing said. Declare it inside the '
-    + '`packages[]` entry of the package whose objects use it; or name it from a field of the object meant to '
-    + 'use it (a top-level object that does is then listed and not served until both move into a package '
-    + 'body); or remove it from the top level.',
-  );
+  const unreferenced = unreferencedResidualPicklists(residual, bodies);
+  return unreferenced ? picklistMetadataError(unreferenced.wording.text) : undefined;
 }
 
 /**
@@ -972,6 +954,14 @@ export class ObjectQLPlugin implements Plugin {
         // the residual is not a package, and when the id names one of the
         // bodies (a composed stack keeps one member's manifest) that body's
         // record must not be replaced.
+        // [#28534] …and the door's statement of where that owner came from,
+        // recorded before anything of it registers: no package row answers the
+        // id, and a reader of an item's origin must tell the host's own
+        // residual from an installed bundle's (`ObjectQL.recordResidualOwner`).
+        // The residual is not an artifact entry, so it states no source of its
+        // own; the door's word, `code` when it states none, is its origin.
+        const residualOwnerId = residual?.ownerId ?? residualItems?.ownerId;
+        if (residualOwnerId !== undefined) ql.recordResidualOwner(residualOwnerId, options?.source ?? 'code');
         if (residual) this.registerUnclaimedTopLevelObjects(ctx, residual, ordered);
         // [ADR-0015 D7, ADR-0130 D4] Every other residual item, the same way
         // and in the same place: after every body, under the residual rule's
@@ -3096,6 +3086,16 @@ export class ObjectQLPlugin implements Plugin {
   ): void {
     const ql = this.ql;
     if (!ql) return;
+    // [#28697] The body seam's owner-stamp refusal for objects, in its
+    // envelope, asked of every residual object before any of them registers:
+    // a residual object wearing a `_packageId` other than the residual's id
+    // kept it through `applyProtection` and `registerObject` alike, which
+    // stamp only an unset key ({@link collectionItemOwnerStampRefusal}, `engine.ts`).
+    for (const object of residual.objects) {
+      const name = (object as { name?: unknown }).name;
+      const refusal = collectionItemOwnerStampRefusal(object, 'object', typeof name === 'string' && name !== '' ? name : '(unnamed)', residual.ownerId);
+      if (refusal) throw refusal;
+    }
     const bodyPicklists = new Set<string>();
     for (const body of bodies) for (const name of collectManifestPicklistNames(body)) bodyPicklists.add(name);
     const unserved: string[] = [];
@@ -3148,12 +3148,12 @@ export class ObjectQLPlugin implements Plugin {
    *    the copies the body seam and the metadata door call.
    *  - A permission set whose body `packageId` disagrees with the residual's id
    *    is refused by the one owner-binding judge (ADR-0086 D3,
-   *    `judgePermissionSetOwnerBinding`), in the envelope the body seam's
-   *    refusal of the same set carries.
+   *    `judgePermissionSetOwnerBinding`), in the body seam's own envelope
+   *    (`permissionSetOwnerRegistrationRefusal`, `engine.ts`).
    *  - Any other `view` entry takes the body seam's two lines: one with no
    *    `name` is filed under its slot, and one that is not container-shaped
-   *    (`isViewContainerShaped`) is refused 422 `INVALID_METADATA` in the seam's
-   *    words, which this copies (the seam lives in `engine.ts`).
+   *    (`isViewContainerShaped`) is refused 422 `INVALID_METADATA` by the
+   *    seam's own refusal (`viewsEntryNotContainerRefusal`, `engine.ts`).
    *  - Every other item is one `registerItem` under its name.
    *
    * No body declares one of these names — that is what makes it residual — so
@@ -3172,12 +3172,22 @@ export class ObjectQLPlugin implements Plugin {
     const stamp = (item: Record<string, unknown>): Record<string, unknown> => ownerVersion === undefined
       ? { ...item }
       : applyProtection({ ...item } as any, { packageId: ownerId, packageVersion: ownerVersion });
+    // [#28534] The body seam's owner-stamp refusal, in its envelope and at its
+    // place in the order (after the name and permission-set judges): a residual
+    // item wearing a `_packageId` other than the residual's id kept it through
+    // `stamp` and `registerItem` alike, which stamp only an unset key
+    // ({@link collectionItemOwnerStampRefusal}, `engine.ts`).
+    const refuseOwnerStamp = (item: Record<string, unknown>, type: string, name: string | undefined): void => {
+      const refusal = collectionItemOwnerStampRefusal(item, type, name ?? '(unnamed)', ownerId);
+      if (refusal) throw refusal;
+    };
     for (const { type, item } of residual.items) {
       if (type === 'view' && isAggregatedViewContainer(item)) {
         const nameRefusal = viewContainerNameRefusal(item, 'manifest', ownerId);
         if (nameRefusal) throw nameRefusal;
         const object = deriveViewContainerObject(item);
         if (!object) continue;
+        refuseOwnerStamp(item, type, object);
         const container = stamp({ ...item, name: object });
         ql.registry.registerItem('view', container, 'name' as any, ownerId);
         for (const view of expandViewContainer(object, container)) {
@@ -3189,33 +3199,18 @@ export class ObjectQLPlugin implements Plugin {
         continue;
       }
       if (type === 'permission') {
-        const refusal = judgePermissionSetOwnerBinding(item, String(item.name), ownerId, 'register');
-        if (refusal) {
-          throw Object.assign(new Error(refusal.message), {
-            code: 'VALIDATION_ERROR',
-            status: 400,
-            httpStatus: 400,
-            issues: [{ path: 'packageId', message: refusal.issueMessage, code: 'custom' }],
-          });
-        }
+        const refusal = permissionSetOwnerRegistrationRefusal(item, String(item.name), ownerId);
+        if (refusal) throw refusal;
       }
       // The body seam's two `views:` lines, in its words: a non-container entry
       // with no `name` is filed under the slot the residual rule gave it, and an
       // entry that is not container-shaped (`viewKind`/`config`/flattened
       // overlay keys) is refused — `views:` carries containers only (#5320).
       const name = (item.name as string | undefined) || (type === 'view' ? deriveViewContainerObject(item) : undefined);
+      refuseOwnerStamp(item, type, name);
       const toRegister = item.name === name ? item : { ...item, name };
       if (type === 'view' && !isViewContainerShaped(toRegister)) {
-        throw Object.assign(new Error(
-          `Invalid \`views:\` entry '${name}' from manifest '${ownerId}': the stack `
-          + '`views:` collection carries view CONTAINERS only. `viewKind`/`config`/inline view '
-          + 'config belong to a single VIEW, not to the container — wrap it: '
-          + '`defineView({ list: { type, data, columns, … } })`, or name it — '
-          + '`defineView({ listViews: { my_view: { … } } })`. A machine-assembled manifest '
-          + `(package export, environment artifact) carries non-container view artifacts under `
-          + `\`${ASSEMBLED_VIEW_ITEMS_KEY}:\` instead — re-export the package with a runtime that `
-          + 'writes that channel.',
-        ), { code: 'INVALID_METADATA', status: 422, httpStatus: 422 });
+        throw viewsEntryNotContainerRefusal(name, 'manifest', ownerId);
       }
       ql.registry.registerItem(type, stamp(toRegister), 'name' as any, ownerId);
     }
@@ -4204,6 +4199,17 @@ export class ObjectQLPlugin implements Plugin {
                         // unstamped — a synthetic id like 'metadata-service'
                         // would flip isArtifactBacked() and the two-tier write
                         // authorization for genuinely runtime-authored items.
+                        //
+                        // [#28697] The stamp read here is the one the metadata
+                        // plugin's body registration wrote, and that door judges
+                        // a body's own `_packageId` against the body it found the
+                        // item in before it stamps (`artifactItemOwnerStampRefusal`,
+                        // `@objectstack/metadata`), the build door having judged
+                        // every parsed stack first. This seam holds no body to
+                        // judge against: it reads items, not the package that
+                        // registered them, so the judgement lives at the door
+                        // that writes the stamp, and a body stamp naming another
+                        // package never reaches this line.
                         if (this.ql?.registry?.registerItem) {
                             this.ql.registry.registerItem(type, item, keyField, item._packageId);
                         }

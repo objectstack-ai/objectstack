@@ -21,7 +21,7 @@
  * hidden from the report.
  *
  * A real child process, because `process.exit(1)` inside a vitest worker is
- * not an exit status. Spawned through `bin/run-dev.js` + tsx so the suite does
+ * not an exit status. Spawned through `bin/run-dev.js` + `node` so the suite does
  * not depend on `packages/cli/dist`. The target is a stub `node:http` server
  * in this process that answers discovery the way both real producers do; no
  * ObjectStack server is booted.
@@ -34,9 +34,9 @@ import type { AddressInfo } from 'node:net';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CLI, TSX, childEnv } from './helpers/serve-process.js';
+import { CLI, childEnv } from './helpers/serve-process.js';
 
-/** oclif + tsx cold start; a healthy run here is a few seconds. */
+/** oclif cold start; a healthy run here is a few seconds. */
 const RUN_TIMEOUT_MS = 120_000;
 
 /** The variable the `params`-gated scenario needs — test-only, so `OS_TEST_*`. */
@@ -51,7 +51,7 @@ interface Run {
 function runCli(args: string[], cwd: string, env: Record<string, string | undefined> = {}): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...args],
       // The variable is REMOVED unless the run sets it, so an operator's shell
       // cannot decide what the unset-variable run measures.

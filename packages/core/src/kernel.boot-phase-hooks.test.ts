@@ -118,6 +118,23 @@ describe('ObjectKernel bootPhaseHooks', () => {
     });
 
     describe('bootPhaseHooks: false', () => {
+        it('dispatchesBootPhaseHooks() answers false, read by a plugin during its own start()', async () => {
+            const { plugins } = composition();
+            const read: unknown[] = [];
+            const reader: Plugin = {
+                name: 'test.reader',
+                version: '1.0.0',
+                init: async () => {},
+                start: async (ctx) => { read.push(ctx.getKernel().dispatchesBootPhaseHooks()); },
+            };
+            const kernel = track(newKernel({ bootPhaseHooks: false }));
+
+            await boot(kernel, [...plugins, reader]);
+
+            expect(read).toEqual([false]);
+            expect(kernel.dispatchesBootPhaseHooks()).toBe(false);
+        });
+
         it('keeps every definition registered in init() and start(), and the kernel runs', async () => {
             const { plugins } = composition();
             const kernel = track(newKernel({ bootPhaseHooks: false }));
@@ -221,6 +238,22 @@ describe('ObjectKernel bootPhaseHooks', () => {
         ['true', { bootPhaseHooks: true }],
         ['undefined', { bootPhaseHooks: undefined }],
     ] as Array<[string, ObjectKernelConfig]>)('bootPhaseHooks %s (control)', (_label, extra) => {
+        it('dispatchesBootPhaseHooks() answers true, read by a plugin during its own start()', async () => {
+            const { plugins } = composition();
+            const read: unknown[] = [];
+            const reader: Plugin = {
+                name: 'test.reader',
+                version: '1.0.0',
+                init: async () => {},
+                start: async (ctx) => { read.push(ctx.getKernel().dispatchesBootPhaseHooks()); },
+            };
+            const kernel = track(newKernel(extra));
+
+            await boot(kernel, [...plugins, reader]);
+
+            expect(read).toEqual([true]);
+        });
+
         it('fires all three hooks in order and keeps every definition, the kernel:ready one included', async () => {
             const { plugins, spies, order } = composition();
             const kernel = track(newKernel(extra));

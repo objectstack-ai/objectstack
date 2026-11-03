@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: three source-CLI spawns, one per distinct (command, fixture) pair (`os validate --json` and `os lint --json` on the card stack, `os lint --json` on the control stack); slowest CI reading 15.7 s (run 41217827347) of the five scheduled ci.yml runs 41199450735 to 41271604267 (slice 23's offender table), x 1.25, rounded up
 
 /**
  * [#21127] `os validate` and `os lint` judge a stack whose mapping authors
@@ -22,7 +23,9 @@
  * is advisory. (The control was `object.externalSharingModel`, `planned` +
  * `authorWarn`, until #23268 retired that key; the parse now refuses it.)
  *
- * The CLI runs through `bin/run-dev.js` (source, via tsx); `@objectstack/lint`
+ * The CLI runs through `bin/run-dev.js` (the source entry, spawned with this
+ * node binary rather than through the `tsx` wrapper, as
+ * `metadata-type-schema-gate.test.ts` does); `@objectstack/lint`
  * resolves through `exports` to `dist/`, and both read the ledger JSON the spec
  * package ships under `liveness/`.
  */
@@ -38,8 +41,7 @@ import { defineStackSource, linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
-/** A cold `tsx` spawn of the CLI source entry runs well past vitest's 5 s default. */
+/** A cold spawn of the CLI source entry runs well past vitest's 5 s default. */
 const SPAWN_TIMEOUT_MS = 120_000;
 
 /** The lint's ledger-integrity error — the whole answer both doors gave before the fix. */
@@ -54,7 +56,7 @@ interface Run {
 function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...args],
       { cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {

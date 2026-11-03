@@ -5,9 +5,8 @@ import path from 'path';
 import fs from 'fs';
 import net from 'net';
 import chalk, { chalkStderr } from 'chalk';
-import { bundleRequire } from 'bundle-require';
 import { stampDatasourceEnvCredentialsDefault } from '../utils/datasource-env-credentials-default.js';
-import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
+import { loadConfig, bundleConfigModule } from '../utils/config.js';
 import { mergeBootConfig } from '../utils/merge-boot-config.js';
 import { provisionTelemetryDatasource, standaloneTelemetryPrimary } from '../utils/telemetry-datasource.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
@@ -2762,7 +2761,7 @@ export default class Serve extends Command {
         ? { mod: { default: {} as any } }
         : flags.prebuilt
           ? { mod: await import(absolutePath.startsWith('/') ? `file://${absolutePath}` : absolutePath) }
-          : await bundleRequire({ filepath: absolutePath, external: BUNDLE_REQUIRE_EXTERNALS });
+          : await bundleConfigModule(absolutePath);
 
       let config = mod.default || mod;
 
@@ -5705,9 +5704,13 @@ export default class Serve extends Command {
       // [#22288] Counted by `resolveStackCollection`'s rule, so a flow a
       // package declares is counted: the "declared but the automation engine is
       // not enabled" line used to stay silent for every multi-package app.
+      const declaredFlows = resolveStackCollection(config, 'flows');
       const automationSummary = collectAutomationSummary(
         kernel,
-        resolveStackCollection(config, 'flows').length,
+        declaredFlows.length,
+        declaredFlows
+          .map((f) => (f as { name?: unknown } | null)?.name)
+          .filter((name): name is string => typeof name === 'string' && name !== ''),
       );
 
       // ── Seed outcome summary (#3415/#3430) ─────────────────────────
@@ -7241,6 +7244,11 @@ export function resolveBannerConfigRow(opts: {
 export function collectAutomationSummary(
   kernel: any,
   declaredFlowCount: number,
+  /**
+   * [#29059] The declared flows' names, for the refused-at-registration count.
+   * Optional so a caller with only a count keeps its summary; its count is 0.
+   */
+  declaredFlowNames: readonly string[] = [],
 ): AutomationReadySummary | undefined {
   let automation: any;
   try { automation = kernel?.getService?.('automation'); } catch { /* not registered */ }
@@ -7250,6 +7258,7 @@ export function collectAutomationSummary(
       ? {
           enabled: false,
           declaredFlowCount,
+          refusedCount: 0,
           flowCount: 0,
           boundCount: 0,
           triggerTypes: [],
@@ -7292,6 +7301,21 @@ export function collectAutomationSummary(
   try { states = automation.getFlowRuntimeStates?.() ?? []; } catch { /* older engine */ }
   if (states.length === 0 && declaredFlowCount === 0) return undefined;
 
+  // [#29059] Declared flows the engine refused at registration, read off the
+  // engine's OWN record through the read it already serves the metadata door
+  // (`IAutomationService.getFlowRegistration`), one declared name at a time.
+  // No new engine surface: the probe is optional and feature-detected like the
+  // ones beside it. The record is written by the `kernel:ready` bind, which
+  // has settled by the time the banner prints.
+  let refusedCount = 0;
+  if (typeof automation.getFlowRegistration === 'function') {
+    for (const name of new Set(declaredFlowNames)) {
+      try {
+        if (automation.getFlowRegistration(name)?.state === 'refused') refusedCount++;
+      } catch { /* older engine */ }
+    }
+  }
+
   let triggerTypes: string[] = [];
   try { triggerTypes = automation.getRegisteredTriggerTypes?.() ?? []; } catch { /* older engine */ }
 
@@ -7328,6 +7352,7 @@ export function collectAutomationSummary(
   return {
     enabled: true,
     declaredFlowCount,
+    refusedCount,
     flowCount: states.length,
     boundCount: states.filter((s) => s.bound).length,
     triggerTypes,

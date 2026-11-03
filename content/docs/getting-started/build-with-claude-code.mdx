@@ -72,18 +72,23 @@ The scaffolder does more than copy files. It:
 ◆ New Environment
 ────────────────────────────────────────
   Environment: support-desk
-  Namespace:   support_desk
-  Template:    blank — Minimal starter — one object, REST API, ready to extend
+  Namespace: support_desk
+  Template: blank — Minimal starter — one object, REST API, ready to extend
   …
-  → Installing AI skills for your coding agent...
+  → Installing AI skills for your coding agent from @objectstack/skills@<version>...
+  …
   ✓ Environment created!
 
   Next steps:
     cd support-desk
-    npm install
-    npm run dev           # Start development server
-    npm run validate      # Verify metadata: schema + predicates + bindings
+    npm run dev        # Start development server
+    npm run validate   # Verify metadata: schema + predicates + bindings
+                       # (run after every metadata edit — see AGENTS.md)
 ```
+
+`npm install` appears under *Next steps* only when the dependency install was
+skipped (`--skip-install`) or failed. Where `pnpm --version` answers, the
+scaffolder installs with pnpm and its *Next steps* name `pnpm` instead of `npm`.
 
 This is why AI authoring is reliable rather than a guessing game: **the agent
 starts with the protocol's schemas and rules already loaded**, not with generic
@@ -305,7 +310,7 @@ visible: 'status != "resolved"'
 ◆ Validate
 ────────────────────────────────────────
   → Validating against ObjectStack Protocol...
-  → Running author-time rules (57)...
+  → Running author-time rules (63)...
 
   ✗ Author-time rules failed (1 issue)
   • stack · action 'resolve_ticket' visible: bare reference `status` — a
@@ -394,7 +399,10 @@ roll-ups, name fields). Ask the agent to keep the project lint-clean — "run
 ## Beyond the first app — one skill per metadata domain
 
 The loop above never changes; what changes is **which skill the agent loads**.
-The bundle ships nine, one per metadata domain, and the agent picks by task
+The bundle ships one skill per metadata domain (the table below names them),
+plus `objectstack-platform` (runtime setup, plugins, the `os` CLI),
+`objectstack-upgrade` (moving a project across a protocol major) and `objectui`
+(the `@object-ui/*` renderer), and the agent picks by task
 context (the trigger table lives in your project's `AGENTS.md`). To grow the
 support desk into a full application, keep describing — each row is a real
 prompt you can give verbatim:

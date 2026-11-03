@@ -14,12 +14,13 @@ import type {
     ConnectorCredentialHandle,
     ConnectorCredentialRequest,
 } from '@objectstack/spec/integration';
-import { isConnectorCredentialRejected, isConnectorUpstreamUnavailable, RetryConfigSchema } from '@objectstack/spec/integration';
+import { isConnectorCredentialRejected, isConnectorUpstreamChanged, isConnectorUpstreamUnavailable, RetryConfigSchema } from '@objectstack/spec/integration';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
-import type { MetadataMutationEvent } from '@objectstack/metadata-protocol';
+import type { MetadataMutationEvent, SysMetadataEngine } from '@objectstack/metadata-protocol';
+import { SysMetadataRepository, shadowedStoredRowsOf } from '@objectstack/metadata-protocol';
 import { AutomationEngine } from './engine.js';
-import type { AutomationEngineOptions, RefusalI18nService, RunSummaryLogLevel } from './engine.js';
+import type { AutomationEngineOptions, FlowHistorySource, RefusalI18nService, RunSummaryLogLevel } from './engine.js';
 import { describeThrownForLog, thrownMessageText } from './thrown-cause-diagnostics.js';
 import { defaultEnvCredentialResolver, type CredentialResolver } from './credential-resolver.js';
 import { registerFlowCredentialRedactor } from './flow-credential-projection.js';
@@ -87,6 +88,11 @@ import {
     reconnectRequiredReason,
     requestOAuth2Token,
     retryOnVendorTokenRefusal,
+    INSTALLER_CLIENT_ID_MAX_LENGTH,
+    parseKeptConnectionClient,
+    serializeInstallerClient,
+    takesInstallerClient,
+    type InstallerClient,
     type McpAuthorizationClient,
     type OAuth2GrantHandle,
     type PendingAuthorizationStore,
@@ -363,6 +369,239 @@ export function createPackagePathResolver(packageRoot?: string): (relativePath: 
     return (relativePath: string) => resolveInsidePackageRoot(packageRoot, relativePath, 'paths');
 }
 
+/**
+ * [#28534] The package-anchored members a connector entry is handed when it is
+ * not the host's own ({@link nonHostDeclaringPackageOf}) — the package that
+ * declared it was INSTALLED into this runtime, its stamp names a package no
+ * registration records as the host's, or [#28594] it is a definition STORED in
+ * this environment (a metadata-door row, environment-wide or in an `authored`
+ * package) rather than one the host's stack declares: both
+ * {@link ConnectorProviderContext.loadPackageFile} and
+ * {@link ConnectorProviderContext.resolvePackagePath} refuse every ref.
+ *
+ * The contract resolves a relative ref against the root of the package that
+ * declared the entry. An installed package has no root on this runtime's disk
+ * — the install keeps its artifact JSON and nothing else — and the only root
+ * the host holds is its own, so answering would read, or point a launched
+ * process at, ANOTHER package's files: an install-local app naming
+ * `./src/system/connectors/status-openapi.json` materialized against the host
+ * showcase's own document. So the ref is refused, naming the entry, the
+ * package, the ref and the remedy.
+ *
+ * Members, not `undefined`: a factory handed `undefined` takes the
+ * no-filesystem path, which for `resolvePackagePath` means "keep the
+ * behaviour without it" (a stdio child inherits the host's working
+ * directory), the same cross-package reach by another road. A refusal thrown
+ * from the member is the factory's own failure, handled by the materializer
+ * like every other configuration fault (fatal at boot, a skipped entry on
+ * reload), except a STORED entry's (#28594): that one is logged and skipped
+ * at boot too, so a row at rest never stops the platform starting. A factory
+ * that never dereferences a ref (an inline document, an http(s) URL) never
+ * meets it.
+ */
+export function createInstalledPackageRefRefusal(
+    connectorName: string,
+    declaring: NonHostDeclaringPackage,
+    member: 'reads' | 'paths',
+): (relativePath: string) => Promise<never> {
+    return async (relativePath: string) => {
+        const whose = declaring.why === 'installed'
+            ? `is declared by package '${declaring.packageId}', which was installed into this runtime and has no ` +
+                'package root on its disk'
+            : declaring.why === 'unrecorded'
+                ? `names package '${declaring.packageId}' as its owner, which no package registration in this runtime ` +
+                    'records as the host\'s'
+                // [#28594] A definition stored in this environment, not one the
+                // host's stack declares: it has no package root on disk at all.
+                : `is stored in this environment${declaring.packageId === undefined ? '' : ` (package '${declaring.packageId}')`}` +
+                    ', not declared by the host\'s own stack, and a stored definition has no package root on disk';
+        const head =
+            `connector instance '${connectorName}' ${whose}, so its package ${member === 'reads' ? 'file' : 'path'} ref ` +
+            `'${String(relativePath)}' is refused: a relative ref resolves only against the root of the package that ` +
+            `declared it, never against the host's.`;
+        const remedy = member === 'reads'
+            ? declaring.why === 'stored'
+                ? ' Carry the document inline in the definition, or name it by an http(s) URL.'
+                : ' Rebuild the package with a current `os build`, which carries an `openapi` spec file into the artifact, ' +
+                    'or inline the document in the package.'
+            : ' A provider that needs a location inside the package (a stdio MCP server\'s working directory) cannot ' +
+                `serve ${declaring.why === 'stored' ? 'a stored' : 'an installed package\'s'} entry; declare a transport ` +
+                'that needs none, such as an http MCP server.';
+        throw new Error(head + remedy);
+    };
+}
+
+/**
+ * [#28534] What {@link nonHostDeclaringPackageOf} reads: the objectql engine's
+ * package registry rows, and its record of each artifact residual's origin.
+ * [#28594] …and the declaration a registering door FILED under a package, and
+ * which entries the host's own artifact carried.
+ */
+export interface DeclaringPackageReaders {
+    /** `SchemaRegistry.getPackage` — the row the registering door wrote, with its `source`. */
+    getPackage?: (id: string) => { source?: unknown } | undefined;
+    /** `ObjectQL.residualOwnerSource` — the registering door's statement for a residual owner id, which has no row. */
+    residualOwnerSource?: (id: string) => 'code' | 'marketplace' | undefined;
+    /**
+     * [#28594] `SchemaRegistry.getArtifactItem('connector', name, packageId)` —
+     * the connector a package REGISTRATION filed under that package (its
+     * composite slot, the ADR-0010 §3.3 artifact lookup), never a stored row
+     * hydrated into the bare slot. Absent on a registry double that keeps no
+     * such layer: the stored-or-declared judgment then keeps today's reading.
+     */
+    registeredDeclaration?: (name: string, packageId: string) => unknown;
+    /**
+     * [#28594] Whether this exact entry object came from the host's own
+     * artifact — the dev reload's payload (`metadata:reloaded` carrying
+     * `metadata.connectors`, `MetadataPlugin`), the one source of an edited
+     * definition the registry was never re-told.
+     */
+    isHostArtifactEntry?: (entry: unknown) => boolean;
+}
+
+/**
+ * [#28534] A declaring package whose entries are NOT the host's own: one the
+ * runtime installed (`installed`), or a stamp no registration records as the
+ * host's (`unrecorded`). [#28594] Or a definition stored in this environment,
+ * not one the host's stack declares (`stored`): `packageId` is the package
+ * it is stored in, absent for an environment-wide row.
+ */
+export interface NonHostDeclaringPackage {
+    packageId?: string;
+    why: 'installed' | 'unrecorded' | 'stored';
+}
+
+/**
+ * [#28594] Whether `declaration` — what a registering door filed for this name
+ * under `packageId` — states the same provider binding as `entry`: the same
+ * `provider` and the same `providerConfig`, which is everything a factory
+ * dereferences a ref out of. An entry agreeing with it names only refs the
+ * host's stack itself declared; one that differs (a stored row served over the
+ * name, an edit nobody registered) or has no declaration is not the host's.
+ */
+function declaresSameProviderBinding(entry: unknown, declaration: unknown, packageId: string): boolean {
+    if (!declaration || typeof declaration !== 'object') return false;
+    const filed = declaration as { _packageId?: unknown; provider?: unknown; providerConfig?: unknown };
+    if (filed._packageId !== packageId) return false;
+    const own = entry as { provider?: unknown; providerConfig?: unknown };
+    return stableStringify({ provider: own.provider ?? null, providerConfig: own.providerConfig ?? null })
+        === stableStringify({ provider: filed.provider ?? null, providerConfig: filed.providerConfig ?? null });
+}
+
+/**
+ * [#28534] Whether a connector entry is the host's own, whose package-relative
+ * refs resolve against the host's root, or not — then the answer names the
+ * package and why, and its refs are refused
+ * ({@link createInstalledPackageRefRefusal}).
+ *
+ * ## What it trusts
+ *
+ * Only what a REGISTERING DOOR wrote: the package registry's row for the
+ * entry's `_packageId` and that row's `source` (`InstalledPackageSchema.source`,
+ * #23972), and, for an artifact residual's owner, which has no row, the
+ * door's statement the `manifest` service recorded (`ObjectQL.residualOwnerSource`).
+ * The install-local door registers `'marketplace'` at install and at every
+ * restart's rehydrate, for every member of a `packages[]` bundle whatever its
+ * entry states (`asMarketplaceRegistration`, `@objectstack/cloud-connection`);
+ * the host's boot, its multi-package artifact's members and every plugin
+ * package register `'code'`.
+ *
+ * ## What it does not trust
+ *
+ * The item's own stamp, as a statement of ownership: it is used only as the
+ * key the door's record is looked up under, and the registration refuses a
+ * body whose `_packageId` differs from the package registering it
+ * (`collectionItemOwnerStampRefusal`, `@objectstack/objectql`), so a stamp on
+ * a registered item is the registering door's. Nor an artifact entry's stated
+ * `source` — it reaches here only as the row the door wrote.
+ *
+ * [#28594] Nor the entry's PRESENCE in the declared list: the post-boot read
+ * is the protocol's execution view, which serves the environment's stored rows
+ * (`sys_metadata`, written through the metadata door) over and beside the
+ * registry's items, and stamps a stored row's `_packageId` from its column. A
+ * stored row is no package's declaration and has no root on disk; so only an
+ * entry that a registering door filed, or that the host's own artifact
+ * carried, is read as declared at all.
+ *
+ * ## The answers
+ *
+ *  - no registry at all: the host's (no door could have registered a package);
+ *  - no stamp: the host's only when the host's own artifact carried the entry
+ *    (or the registry keeps no registered layer to ask); otherwise `stored`,
+ *    a row bound to no package;
+ *  - a row: `'marketplace'` is `installed`; `'code'` is the host's package;
+ *    any other source (`'authored'`, a package created in this environment,
+ *    whose items are stored rows) is `stored`;
+ *  - no row, but the stamp is a residual owner a `'code'` door recorded: the
+ *    host's package; one an install recorded: `installed`;
+ *  - any other stamp — no row and no residual record, or not a non-empty
+ *    string: `unrecorded`, refused. Fail closed: a stamp nobody's registration
+ *    answers for is never read as the host's;
+ *  - the host's package: the host's only when the entry is what a registering
+ *    door filed under that package with the same provider binding
+ *    ({@link declaresSameProviderBinding}), or the host's own artifact carried
+ *    it; otherwise `stored` (a stored row served under the host's name or
+ *    claiming the host's package).
+ */
+export function nonHostDeclaringPackageOf(
+    entry: unknown,
+    readers: DeclaringPackageReaders | undefined,
+): NonHostDeclaringPackage | undefined {
+    if (readers === undefined) return undefined;
+    const stamp = (entry as { _packageId?: unknown } | null | undefined)?._packageId;
+    const carried = readers.isHostArtifactEntry?.(entry) === true;
+    const judgesStored = readers.registeredDeclaration !== undefined;
+    if (stamp === undefined) return carried || !judgesStored ? undefined : { why: 'stored' };
+    if (typeof stamp !== 'string' || stamp.length === 0) return { packageId: String(stamp), why: 'unrecorded' };
+    const row = readers.getPackage?.(stamp);
+    if (row !== undefined) {
+        if (row.source === 'marketplace') return { packageId: stamp, why: 'installed' };
+        if (row.source !== 'code') return judgesStored ? { packageId: stamp, why: 'stored' } : undefined;
+    } else {
+        const residual = readers.residualOwnerSource?.(stamp);
+        if (residual === 'marketplace') return { packageId: stamp, why: 'installed' };
+        if (residual !== 'code') {
+            // [#28594] No row and no residual record, and no registration filed
+            // this entry under the package it names: a stored row. An `authored`
+            // package's rows reach the boot reconcile before its package row
+            // does, so this is where they meet it (measured on a restart).
+            const name = (entry as { name?: unknown }).name;
+            const filed = judgesStored && !carried && typeof name === 'string'
+                ? readers.registeredDeclaration!(name, stamp) !== undefined
+                : true;
+            return { packageId: stamp, why: filed ? 'unrecorded' : 'stored' };
+        }
+    }
+    // The host's package: only what a registration filed (or the host's own
+    // artifact carried) reads its root.
+    if (carried || !judgesStored) return undefined;
+    const name = (entry as { name?: unknown }).name;
+    const declaration = typeof name === 'string' ? readers.registeredDeclaration!(name, stamp) : undefined;
+    return declaresSameProviderBinding(entry, declaration, stamp) ? undefined : { packageId: stamp, why: 'stored' };
+}
+
+/**
+ * [#28713] Whether the kernel this plugin runs on dispatches its boot-phase
+ * hooks (`kernel:bootstrapped` among them) once every plugin has started —
+ * the kernel's own `dispatchesBootPhaseHooks()`. Only then may the `start()`
+ * reconcile leave stored entries to the `kernel:bootstrapped` pass.
+ *
+ * A host that does not say (no `getKernel`, or a kernel without the reader)
+ * answers `false`, as does a kernel that withholds the hooks: there the
+ * `start()` reconcile keeps every stored entry, so none waits for a pass that
+ * never comes.
+ */
+function kernelDispatchesBootPhaseHooks(ctx: PluginContext): boolean {
+    let kernel: unknown;
+    try {
+        kernel = typeof ctx.getKernel === 'function' ? ctx.getKernel() : undefined;
+    } catch {
+        return false;
+    }
+    const reader = (kernel as { dispatchesBootPhaseHooks?: unknown } | undefined)?.dispatchesBootPhaseHooks;
+    return typeof reader === 'function' && (reader as () => unknown).call(kernel) === true;
+}
+
 // The credential resolver lives in ./credential-resolver.ts so the engine reads
 // the same one for an `api` flow's `config.secretRef`; re-exported unchanged.
 export { defaultEnvCredentialResolver, type CredentialResolver };
@@ -479,12 +718,16 @@ function credentialHandleNotAppliedReason(name: string, provider: string, kind: 
  * ADR-0143 D2.1 — the MCP server URL of an `oauth2` instance whose endpoints or
  * client the MCP authorization flow discovers: `provider: 'mcp'` over an http
  * transport, the `authorization_code` grant, and at least one of
- * `authorizationUrl`, `tokenUrl` and `clientId` left undeclared. `undefined`
+ * `authorizationUrl`, `tokenUrl` and the client left undeclared. The client is
+ * not left to the flow when the instance declares `clientId`, or takes the
+ * installer's (`clientSource: 'installer'`, the 2026-11-02 amendment): the
+ * flow then only discovers the endpoints, and registers nothing. `undefined`
  * for every other instance, which declares what its handle needs.
  */
 function mcpDiscoveryServerUrl(entry: { provider?: unknown; providerConfig?: Record<string, unknown> }, auth: OAuth2InstanceAuth): string | undefined {
     if (entry.provider !== 'mcp' || auth.grant !== 'authorization_code') return undefined;
-    if (auth.authorizationUrl !== undefined && auth.tokenUrl !== undefined && auth.clientId !== undefined) return undefined;
+    const clientSupplied = auth.clientId !== undefined || takesInstallerClient(auth);
+    if (auth.authorizationUrl !== undefined && auth.tokenUrl !== undefined && clientSupplied) return undefined;
     const transport = entry.providerConfig?.transport as { kind?: unknown; url?: unknown } | undefined;
     if (transport?.kind !== 'http' || typeof transport.url !== 'string' || transport.url.length === 0) return undefined;
     return transport.url;
@@ -499,7 +742,9 @@ function mcpDiscoveryServerUrl(entry: { provider?: unknown; providerConfig?: Rec
  * `provider: 'mcp'` over http with the `authorization_code` grant they may be
  * omitted: each connect runs the MCP authorization flow
  * (`./oauth2-grant/mcp-authorization.ts`), and the connection keeps the client
- * it found. An endpoint over plain `http:` off loopback, or any other scheme,
+ * it found. The client alone may be omitted by an `authorization_code` instance
+ * declaring `clientSource: 'installer'`: the administrator enters it on each
+ * connection (ADR-0143 D2.1, 2026-11-02 amendment). An endpoint over plain `http:` off loopback, or any other scheme,
  * is refused by field (`./oauth2-grant/endpoint-transport.ts`): the client
  * secret and the refresh token would cross the network in the clear — and so
  * is such an MCP server's own URL, which the access token travels to.
@@ -520,7 +765,7 @@ function oauth2NotServableReason(
     }
     const missing = discoveredAt !== undefined ? [] : [
         auth.tokenUrl === undefined ? 'tokenUrl' : undefined,
-        auth.clientId === undefined ? 'clientId' : undefined,
+        auth.clientId === undefined && !takesInstallerClient(auth) ? 'clientId' : undefined,
         auth.grant === 'authorization_code' && auth.authorizationUrl === undefined ? 'authorizationUrl' : undefined,
     ].filter((k): k is string => k !== undefined);
     if (missing.length > 0) {
@@ -549,6 +794,10 @@ type ConnectionStateOfInstance =
         readonly reconnectRequired: readonly string[];
         /** The organization whose connection is the oldest standing one: see {@link discoveryOrganizationOf}. */
         readonly discovery?: string;
+        /** When that connection was made: a refusal of its token marks it only while it is still that connect. */
+        readonly discoveryConnectedAt?: string;
+        /** The reason the first `reconnect_required` connection records, the platform's sentence. */
+        readonly reconnectRequiredReason?: string;
     }
     | { readonly kind: 'unreadable' };
 
@@ -573,6 +822,21 @@ function discoveryOrganizationOf(rows: readonly ConnectorConnectionRecord[]): st
         if (a < b || (a === b && row.organizationId < pick.organizationId)) pick = row;
     }
     return pick?.organizationId;
+}
+
+/**
+ * ADR-0143 D4 — why the discovery organization's connection needs
+ * reconnecting: the upstream refused the token borrowed from it while the
+ * instance listed its tools (ruled B on #26702). The refusal is the
+ * connection's grant, not the instance's client secret, so it is recorded on
+ * the connection, and a reconnect there lists again. The platform's sentence,
+ * never the upstream's text.
+ */
+function discoveryTokenRefusedReason(connector: string, organizationId: string, status: number): string {
+    return `connector instance '${connector}' needs to be reconnected for organization '${organizationId}': its MCP server `
+        + `refused the token of this connection while it listed its tools (HTTP ${status}), so the grant does not reach what `
+        + 'the server serves. Reconnect required: an administrator connects it again, granting what the server asks for, and '
+        + 'the instance lists its tools with the new connection (ADR-0143 D4)';
 }
 
 /**
@@ -685,6 +949,26 @@ function connectorInstanceSignature(entry: {
         // the inputs that actually change the transport.
         requestTimeoutMs: entry.requestTimeoutMs ?? null,
     });
+}
+
+/**
+ * [#28591] The provider-bound instances a declaration asks the reconcile for,
+ * as one comparable string: the name and {@link connectorInstanceSignature} of
+ * every named, provider-bound entry not `enabled: false`, sorted. Two reads
+ * with the same fingerprint ask for the same set of instances with the same
+ * inputs. Credential and connection state are not in it: they are read by the
+ * reconcile itself, not declared.
+ */
+function declaredInstanceFingerprint(declared: readonly unknown[]): string {
+    const parts: string[] = [];
+    for (const raw of declared) {
+        const entry = raw as DeclaredConnectorItem | undefined;
+        if (typeof entry?.name !== 'string' || entry.name.length === 0) continue;
+        if (typeof entry.provider !== 'string' || entry.provider.length === 0) continue;
+        if (entry.enabled === false) continue;
+        parts.push(`${entry.name}=${connectorInstanceSignature(entry)}`);
+    }
+    return stableStringify(parts.sort());
 }
 
 /**
@@ -837,6 +1121,47 @@ export function packagedFlowReader(ctx: Pick<PluginContext, 'getService'>): (nam
         }
         if (typeof protocol?.packagedArtifactOwner !== 'function') return undefined;
         return protocol.packagedArtifactOwner({ type: 'flow', name });
+    };
+}
+
+/**
+ * [#28405, ADR-0009 §2.1] The engine's reader of a flow's stored versions by
+ * content identity: the metadata repository's `getByHash` over
+ * `sys_metadata_history`, which history GC never prunes for an
+ * `executionPinned` type. A resume reads the body a waiting run started on
+ * through it once the flow was republished (`resolveResumeTarget`).
+ *
+ * The repository is built here over the data engine rather than asked of the
+ * protocol: the protocol keeps its repository private and offers no read by
+ * checksum, and `getByHash` is a single system read of the history table that
+ * needs nothing else of it. Resolved at QUESTION time, never at boot, for
+ * {@link packagedFlowReader}'s reason. A composition with no data engine, or
+ * one that registers no `sys_metadata_history` (no metadata protocol), stores
+ * no flow version, so the answer is `null`: the run's body is then recovered
+ * only from what this process registered, or the resume says it could not be.
+ * A history that IS registered and fails to answer rejects — see
+ * `FlowHistorySource`.
+ */
+export function flowHistoryReader(ctx: Pick<PluginContext, 'getService'>): FlowHistorySource {
+    let built: { engine: unknown; repository: SysMetadataRepository } | undefined;
+    return async (name, checksum) => {
+        let engine: (SysMetadataEngine & { getSchema?(object: string): unknown }) | undefined;
+        try {
+            engine = ctx.getService('objectql');
+        } catch {
+            try {
+                engine = ctx.getService('data');
+            } catch {
+                return null;
+            }
+        }
+        if (!engine || typeof engine.findOne !== 'function') return null;
+        if (typeof engine.getSchema === 'function' && !engine.getSchema('sys_metadata_history')) return null;
+        if (built?.engine !== engine) {
+            built = { engine, repository: new SysMetadataRepository({ engine, orgLabel: 'env' }) };
+        }
+        const item = await built.repository.getByHash({ org: 'env', type: 'flow', name }, checksum);
+        return item?.body ?? null;
     };
 }
 
@@ -1006,6 +1331,31 @@ export class AutomationServicePlugin implements Plugin {
      * pre-edit one.
      */
     private reloadedConnectors?: { items: unknown[]; owners: ReadonlySet<string> };
+    /**
+     * [#28591] The {@link declaredInstanceFingerprint} of the declaration the
+     * most recent reconcile read. The `kernel:bootstrapped` check compares the
+     * registry against it, so a boot whose registry did not change after
+     * `start()` runs no second reconcile.
+     */
+    private reconciledDeclaration?: string;
+    /**
+     * [#28713] Whether a reconcile leaves STORED entries (rows of the
+     * environment, {@link nonHostDeclaringPackageOf}) for later. True from
+     * `start()` until the `kernel:bootstrapped` pass, on a kernel that
+     * dispatches that pass ({@link kernelDispatchesBootPhaseHooks}).
+     *
+     * A connector plugin registers its connector in its own `start()`, after
+     * this plugin's. A stored entry the `start()` reconcile materialized
+     * would take the name before the plugin's registration arrives, and the
+     * plugin's registration is then refused (ADR-0097 §4, no silent
+     * precedence) — a refusal inside that plugin's `start()`, which fails the
+     * boot. Held until every plugin has started, the stored entry meets the
+     * plugin's connector instead, as on a running platform: the §4 conflict
+     * is logged and the stored entry skipped, the plugin's connector served.
+     */
+    private holdStoredEntries = false;
+    /** [#28713] A reconcile held at least one stored entry, so the `kernel:bootstrapped` pass must run. */
+    private storedEntriesHeld = false;
     /** Serializes reconcile runs — see {@link materializeDeclaredConnectors}. */
     private reconcileQueue: Promise<void> = Promise.resolve();
     private destroyed = false;
@@ -1392,6 +1742,11 @@ export class AutomationServicePlugin implements Plugin {
         // its locked-base verdict reads — never the stamps on a definition.
         // See `packagedFlowReader`.
         this.engine.setPackagedFlowSource(packagedFlowReader(ctx));
+
+        // [#28405] A waiting run resumes on the flow body it started on, read
+        // back from the metadata history once the flow was republished. See
+        // `flowHistoryReader`.
+        this.engine.setFlowHistorySource(flowHistoryReader(ctx));
 
         // [#20552] Every metadata read exit withholds the inbound hook's secret
         // from a served flow from here on — the `flow` entry of the per-type
@@ -1804,7 +2159,13 @@ export class AutomationServicePlugin implements Plugin {
             } else if (typeof ql.registry.listItems !== 'function') {
                 ctx.logger.debug('[Automation] objectql.registry.listItems is not a function');
             }
-            const flows = ql?.registry?.listItems?.('flow') ?? [];
+            // [#28717] …plus the stored rows a declared override holds the
+            // bare slot over: the hydration keeps the override in the slot
+            // and carries each displaced row on its body
+            // (`shadowedStoredRowsOf`), so the precedence below shadows it
+            // and the warning names it beside the override that wins.
+            const flows = (ql?.registry?.listItems?.('flow') ?? [])
+                .flatMap((item) => [item, ...shadowedStoredRowsOf(item)]);
             ctx.logger.debug(`[Automation] flow pull: registry returned ${flows.length} flow(s)`);
             // [#11997] Collapse same-named contenders BEFORE anything is armed.
             // `listItems` returns a packaged flow and a same-named stored row
@@ -1907,7 +2268,27 @@ export class AutomationServicePlugin implements Plugin {
         // #27237, a `credentialRef` no source answers for (it materializes once the
         // credential is set) or one its upstream refuses (CONNECTOR_CREDENTIAL_REJECTED).
         // An operational blip in one integration must not take the whole app down.
+        // [#28713] Stored entries (rows of the environment) wait for the
+        // `kernel:bootstrapped` pass below, when the kernel dispatches it: a
+        // connector plugin that starts after this one registers its connector
+        // first, so a stored entry under its name is skipped, not served in
+        // its place. See {@link holdStoredEntries}.
+        this.holdStoredEntries = kernelDispatchesBootPhaseHooks(ctx);
         await this.materializeDeclaredConnectors(ctx, { fatal: true });
+
+        // ── [#28591] Connectors registered after start(), during the boot ─────
+        // The reconcile above reads the registry as `start()` leaves it. A
+        // package a plugin registers in its own `kernel:ready` handler arrives
+        // after it — the install-local rehydrate re-registers every installed
+        // package there — and announces no reload, so its connectors were never
+        // materialized until some unrelated reload. Its flows already bind: the
+        // `kernel:ready` flow sync below reads the protocol's view after the
+        // rehydrate. Connectors are read again at `kernel:bootstrapped`, which
+        // fires once every `kernel:ready` handler has settled, whatever the
+        // plugin order. See {@link reconcileConnectorsRegisteredDuringBoot}.
+        ctx.hook('kernel:bootstrapped', async () => {
+            await this.reconcileConnectorsRegisteredDuringBoot(ctx);
+        });
 
         // ── Runtime re-bind: re-sync flow triggers on 'metadata:reloaded' ──────
         // Fires on two RUNTIME events (never on a cold boot — the kernel:ready
@@ -2188,6 +2569,44 @@ export class AutomationServicePlugin implements Plugin {
     }
 
     /**
+     * [#28534] The readers {@link nonHostDeclaringPackageOf} judges a
+     * connector entry's origin with, off the `objectql` engine the declared
+     * items are listed out of ({@link readDeclaredConnectorItems}): its package
+     * registry's rows and its residual-owner record. `undefined` when no
+     * `objectql` service is registered: then no door has registered a package
+     * in this kernel either.
+     */
+    private declaringPackageReadersOrNone(ctx: PluginContext): DeclaringPackageReaders | undefined {
+        let ql: {
+            registry?: {
+                getPackage?: (id: string) => { source?: unknown } | undefined;
+                getArtifactItem?: (type: string, name: string, packageId?: string) => unknown;
+            };
+            residualOwnerSource?: (id: string) => 'code' | 'marketplace' | undefined;
+        } | undefined;
+        try {
+            ql = ctx.getService('objectql');
+        } catch {
+            return undefined; // no registry service
+        }
+        if (!ql) return undefined;
+        const registry = ql.registry;
+        // [#28594] The entries the host's own artifact carried (the dev
+        // reload's payload), by identity: the merge hands them on as they are.
+        const carried = new WeakSet<object>(
+            (this.reloadedConnectors?.items ?? []).filter((item): item is object => !!item && typeof item === 'object'),
+        );
+        return {
+            getPackage: registry && typeof registry.getPackage === 'function' ? (id) => registry.getPackage!(id) : undefined,
+            residualOwnerSource: typeof ql.residualOwnerSource === 'function' ? (id) => ql!.residualOwnerSource!(id) : undefined,
+            registeredDeclaration: registry && typeof registry.getArtifactItem === 'function'
+                ? (name, packageId) => registry.getArtifactItem!('connector', name, packageId)
+                : undefined,
+            isHostArtifactEntry: (entry) => !!entry && typeof entry === 'object' && carried.has(entry),
+        };
+    }
+
+    /**
      * The declarative `connectors:` entries this plugin should treat as the
      * current declaration — the input to both the descriptor audit and the
      * ADR-0097 reconcile.
@@ -2219,6 +2638,7 @@ export class AutomationServicePlugin implements Plugin {
      * down every live connector on a reload. Same rule as the flow re-sync's
      * `null` read: never tear down on an absent answer.
      */
+
     private async readDeclaredConnectorItems(
         ctx: PluginContext,
         opts: { post: boolean },
@@ -2299,7 +2719,9 @@ export class AutomationServicePlugin implements Plugin {
      *    provider, invalid `providerConfig`, a host credential resolver that
      *    throws, name conflict, duplicate — **throws**, which is fatal to
      *    bootstrap under both LiteKernel and ObjectKernel (the ADR's "fail
-     *    loudly" contract).
+     *    loudly" contract). [#28698] Except a STORED entry's (a row of the
+     *    environment, not the host's declaration): that one is logged and
+     *    skipped exactly as on a reload, so a row at rest never stops a boot.
      *  - **Reload** (`fatal: false`, called from `metadata:reloaded`): the same
      *    problems are **logged and the offending entry is skipped**, so a bad
      *    Studio publish / dev reload never crashes a live server. A changed
@@ -2331,6 +2753,44 @@ export class AutomationServicePlugin implements Plugin {
      * re-materialize. Degraded instances are retried with exponential backoff
      * ({@link DECLARATIVE_RETRY_BASE_MS}) and on every reconcile.
      */
+    /**
+     * [#28591] Reconcile once more at `kernel:bootstrapped`, only when the
+     * registry's connector declaration differs from the one the last reconcile
+     * read — i.e. a plugin registered (or changed) a provider-bound entry after
+     * the boot reconcile in `start()`, or [#28713] that reconcile held stored
+     * entries ({@link holdStoredEntries}), which are reconciled here, once
+     * every plugin's connectors are registered. A boot that registered
+     * nothing more and held nothing runs no second reconcile.
+     *
+     * Reload semantics (`fatal: false`): an entry registered here arrives the
+     * way a hot install's does, so a configuration fault in it is logged and
+     * the entry skipped, as on install — it never fails the boot. A run that
+     * throws anyway is reported at `warn`: a connector that is not live is a
+     * functional degradation, visible on `GET /automation/connectors`.
+     */
+    private reconcileConnectorsRegisteredDuringBoot(ctx: PluginContext): Promise<void> {
+        return this.onReconcileQueue(async () => {
+            // [#28713] Every plugin has started: stored entries are reconciled
+            // from here on, and this pass reconciles the ones held so far.
+            this.holdStoredEntries = false;
+            const held = this.storedEntriesHeld;
+            this.storedEntriesHeld = false;
+            if (!this.engine || this.destroyed) return;
+            const declared = await this.readDeclaredConnectorItems(ctx, { post: false });
+            if (!declared) return;
+            if (!held && declaredInstanceFingerprint(declared) === this.reconciledDeclaration) return;
+            try {
+                await this.reconcileDeclaredConnectors(ctx, { fatal: false });
+            } catch (err) {
+                ctx.logger.warn(
+                    '[Automation] the connector reconcile for packages registered during the boot failed — their '
+                        + 'connector instances are not live until the next metadata reload or restart.',
+                    describeThrownForLog(err),
+                );
+            }
+        });
+    }
+
     private materializeDeclaredConnectors(ctx: PluginContext, opts: { fatal: boolean }): Promise<void> {
         // Serialize runs: boot, `metadata:reloaded`, and the degraded-retry
         // timer can all request a reconcile; concurrent runs would race the
@@ -2366,6 +2826,13 @@ export class AutomationServicePlugin implements Plugin {
         // wrote after boot.
         const declared = await this.readDeclaredConnectorItems(ctx, { post: !opts.fatal });
         if (!declared) return; // no registry, no reloaded artifact — nothing declared
+        this.reconciledDeclaration = declaredInstanceFingerprint(declared);
+
+        // [#28534] The engine's package rows and residual-owner record, read
+        // once per run (each lookup is live), answer which declaring packages
+        // are not the host's own ({@link nonHostDeclaringPackageOf}).
+        const declaringReaders = this.declaringPackageReadersOrNone(ctx);
+        const storedEntry = (entry: unknown): boolean => nonHostDeclaringPackageOf(entry, declaringReaders)?.why === 'stored';
 
         // Report a reconcile problem: fatal (boot) throws; soft (reload) logs.
         //
@@ -2387,8 +2854,19 @@ export class AutomationServicePlugin implements Plugin {
         // A `fail(msg)` with no cause logs exactly what it always did: `cause`
         // is only described when it is present, so the causeless reports (dup
         // name, §4 conflict, unknown provider) gain no `"error":"undefined"`.
-        const fail = (msg: string, cause?: unknown): void => {
-            if (opts.fatal) {
+        //
+        // [#28594, #28698] `stored`: the fault is a STORED entry's (a row of
+        // the environment, {@link nonHostDeclaringPackageOf}), not one the
+        // host's stack declares. A row at rest is hydrated into the registry
+        // before this boot reconcile reads it, so failing the boot on it would
+        // let one stored definition (accepted when it was saved, and since
+        // made invalid: its provider no longer offered, a policy a newer
+        // runtime refuses) stop the platform starting, with no door left to
+        // fix it through. So a stored entry's fault takes the soft path in
+        // BOTH modes: the same record, the entry skipped, the boot carrying
+        // on. A host-declared entry's keeps the fail-loud contract at boot.
+        const fail = (msg: string, cause?: unknown, stored = false): void => {
+            if (opts.fatal && !stored) {
                 throw new Error(cause === undefined ? msg : `${msg} cause: ${thrownMessageText(cause)}`);
             }
             // Third argument, per the `Logger` contract's `error(message, error?,
@@ -2407,8 +2885,17 @@ export class AutomationServicePlugin implements Plugin {
             if (typeof entry.provider !== 'string' || entry.provider.length === 0) continue;
             const bound = entry as DeclaredConnectorItem & { name: string; provider: string };
             if (bound.enabled === false) continue;
+            // [#28713] Held until every plugin has started ({@link holdStoredEntries}).
+            if (this.holdStoredEntries && storedEntry(bound)) {
+                this.storedEntriesHeld = true;
+                continue;
+            }
             if (desired.has(bound.name)) {
-                fail(`[Automation] duplicate declarative connector instance name '${bound.name}' — connector names must be unique (ADR-0097).`);
+                fail(
+                    `[Automation] duplicate declarative connector instance name '${bound.name}' — connector names must be unique (ADR-0097).`,
+                    undefined,
+                    storedEntry(bound),
+                );
                 continue;
             }
             desired.set(bound.name, { entry: bound, signature: connectorInstanceSignature(bound) });
@@ -2459,11 +2946,17 @@ export class AutomationServicePlugin implements Plugin {
             let state: ConnectionStateOfInstance;
             try {
                 const rows = await this.connectorConnectionStoreOrNone().listFor(name);
+                const reconnectRequired = rows.filter((r) => r.status === 'reconnect_required').map((r) => r.organizationId).sort();
+                const discovery = discoveryOrganizationOf(rows);
+                const discoveryConnectedAt = rows.find((r) => r.organizationId === discovery)?.connectedAt;
+                const reconnectRequiredReason = rows.find((r) => r.organizationId === reconnectRequired[0])?.statusReason;
                 state = {
                     kind: 'read',
                     connected: rows.filter((r) => r.status === 'connected').map((r) => r.organizationId).sort(),
-                    reconnectRequired: rows.filter((r) => r.status === 'reconnect_required').map((r) => r.organizationId).sort(),
-                    discovery: discoveryOrganizationOf(rows),
+                    reconnectRequired,
+                    ...(discovery === undefined ? {} : { discovery }),
+                    ...(discoveryConnectedAt === undefined ? {} : { discoveryConnectedAt }),
+                    ...(reconnectRequiredReason === undefined ? {} : { reconnectRequiredReason }),
                 };
             } catch (err) {
                 state = { kind: 'unreadable' };
@@ -2534,6 +3027,8 @@ export class AutomationServicePlugin implements Plugin {
             if (held?.held && held.signature === signature) continue;
 
             const provider = entry.provider;
+            const notHost = nonHostDeclaringPackageOf(entry, declaringReaders);
+            const stored = notHost?.why === 'stored';
 
             // §4 conflict: the name is held by a plugin-registered connector (not
             // one of ours). Never silently replace across origins.
@@ -2541,6 +3036,8 @@ export class AutomationServicePlugin implements Plugin {
                 fail(
                     `[Automation] connector name conflict: declarative provider-bound instance '${name}' collides with a ` +
                         `plugin-registered connector of the same name — there is no silent precedence (ADR-0097 §4). Rename one.`,
+                    undefined,
+                    stored,
                 );
                 continue;
             }
@@ -2553,6 +3050,8 @@ export class AutomationServicePlugin implements Plugin {
                         `Install the connector plugin that supplies it (openapi → @objectstack/connector-openapi, mcp → @objectstack/connector-mcp, ` +
                         `rest → @objectstack/connector-rest) in the stack's plugins: array. Installed providers: ` +
                         `[${installed.join(', ') || 'none'}] (ADR-0097).`,
+                    undefined,
+                    stored,
                 );
                 continue;
             }
@@ -2600,11 +3099,12 @@ export class AutomationServicePlugin implements Plugin {
                     // (`AutomationServicePluginOptions.credentialResolver` — a
                     // secrets service, or anything that validates with Zod), so
                     // what lands here is not ours to assume anything about, and its
-                    // contract is unchanged: fatal at boot, logged and skipped on
-                    // a reload.
+                    // contract is unchanged: fatal at boot for the host's own
+                    // entry, logged and skipped on a reload or for a stored one.
                     fail(
                         `[Automation] connector instance '${name}' (provider '${provider}'): auth resolution failed (ADR-0097 §3).`,
                         err,
+                        stored,
                     );
                     continue;
                 }
@@ -2630,6 +3130,7 @@ export class AutomationServicePlugin implements Plugin {
                     fail(
                         `[Automation] connector instance '${name}' (provider '${provider}'): auth resolution failed (ADR-0097 §3).`,
                         err,
+                        stored,
                     );
                     continue;
                 }
@@ -2652,6 +3153,8 @@ export class AutomationServicePlugin implements Plugin {
             // The handle the provider is given while it materializes an `mcp`
             // `authorization_code` instance: see `askingDuringMaterializationAs`.
             let materializingHandle: ReturnType<typeof askingDuringMaterializationAs> | undefined;
+            // Its connection, when the provider lists in its name: a refusal of that token is the connection's.
+            let discoveryConnection: { organizationId: string; connectedAt?: string } | undefined;
             if (entry.auth?.type === 'signed') {
                 try {
                     requestSigner = createConnectorRequestSigner(name, entry.auth, {
@@ -2663,6 +3166,7 @@ export class AutomationServicePlugin implements Plugin {
                         `[Automation] connector instance '${name}' (provider '${provider}'): a key it names cannot sign or ` +
                             `verify (ADR-0143 D2.3).`,
                         err,
+                        stored,
                     );
                     continue;
                 }
@@ -2693,17 +3197,21 @@ export class AutomationServicePlugin implements Plugin {
                             signature,
                             existing,
                             reason: state && state.reconnectRequired.length > 0
-                                ? reconnectRequiredReason(name, state.reconnectRequired[0])
+                                ? state.reconnectRequiredReason ?? reconnectRequiredReason(name, state.reconnectRequired[0])
                                 : notConnectedReason(name),
                         });
                         continue;
                     }
                 }
                 credentialHandle = this.createGrantHandle(ctx, name, entry, entry.auth, credential?.value);
-                const discovery = entry.auth.grant === 'authorization_code' && provider === 'mcp'
-                    ? (() => { const state = connectionStates.get(name); return state?.kind === 'read' ? state.discovery : undefined; })()
-                    : undefined;
-                if (discovery !== undefined) materializingHandle = askingDuringMaterializationAs(credentialHandle, discovery);
+                const state = entry.auth.grant === 'authorization_code' && provider === 'mcp' ? connectionStates.get(name) : undefined;
+                if (state?.kind === 'read' && state.discovery !== undefined) {
+                    materializingHandle = askingDuringMaterializationAs(credentialHandle, state.discovery);
+                    discoveryConnection = {
+                        organizationId: state.discovery,
+                        ...(state.discoveryConnectedAt === undefined ? {} : { connectedAt: state.discoveryConnectedAt }),
+                    };
+                }
             } else if (entry.auth?.type === 'app-credential') {
                 // ADR-0143 D2.2 — the vendor exchange the closed `vendor` names,
                 // run from the app secret its `credentialRef` resolved to; the
@@ -2735,6 +3243,7 @@ export class AutomationServicePlugin implements Plugin {
                         `[Automation] connector instance '${name}' (provider '${provider}'): retryConfig is not a valid ` +
                             `connector retry policy (integration/connector.zod.ts RetryConfigSchema).`,
                         parsed.error,
+                        stored,
                     );
                     continue;
                 }
@@ -2761,11 +3270,19 @@ export class AutomationServicePlugin implements Plugin {
                 requestTimeoutMs: entry.requestTimeoutMs,
                 // #3016 — lets a factory dereference relative file refs (e.g.
                 // openapi's `providerConfig.spec: './billing-openapi.json'`),
-                // confined to the stack/package root.
-                loadPackageFile: createPackageFileLoader(this.options.packageRoot),
+                // confined to the stack/package root. [#28534] An entry that is
+                // not the host's own (an INSTALLED package's, or one whose stamp
+                // no registration answers for) is handed refusals instead: such
+                // a package has no root here, and the host's is not its own.
+                // [#28594] So is a definition stored in this environment.
+                loadPackageFile: notHost === undefined
+                    ? createPackageFileLoader(this.options.packageRoot)
+                    : createInstalledPackageRefRefusal(name, notHost, 'reads'),
                 // #22434 — the same root as a location (e.g. a launched
                 // process's working directory), under the same confinement.
-                resolvePackagePath: createPackagePathResolver(this.options.packageRoot),
+                resolvePackagePath: notHost === undefined
+                    ? createPackagePathResolver(this.options.packageRoot)
+                    : createInstalledPackageRefRefusal(name, notHost, 'paths'),
             };
 
             let materialization;
@@ -2792,6 +3309,24 @@ export class AutomationServicePlugin implements Plugin {
                 // echoes the credential back must not carry it into the husk's
                 // reason, a log record or the thrown boot error.
                 const thrown = withoutCredentialThrown(err, credentialForms(credential?.value, basicUsernameOf(entry.auth)));
+                // ADR-0143 D4 — the upstream refused the token borrowed from the
+                // discovery organization's connection while the instance listed
+                // its tools: that connection's grant, not the client secret the
+                // instance's `credentialRef` names, so the connection is marked
+                // and the secret left alone (#26702).
+                if (isConnectorCredentialRejected(thrown) && discoveryConnection !== undefined) {
+                    await this.holdConnectorForRefusedConnection(engine, ctx, {
+                        name,
+                        entry,
+                        provider,
+                        signature,
+                        hasLive: existing !== undefined,
+                        connection: discoveryConnection,
+                        status: typeof (thrown as { status?: unknown }).status === 'number' ? (thrown as { status: number }).status : 403,
+                        cause: thrown,
+                    });
+                    continue;
+                }
                 // [#27237] The upstream refused the credential (ruling on
                 // #27237, comment 6470087293): degrade the instance and mark a
                 // stored credential `rejected` — never a failed boot, never a
@@ -2808,6 +3343,25 @@ export class AutomationServicePlugin implements Plugin {
                         credential,
                         reason: (thrown as Error).message,
                         cause: thrown,
+                    });
+                    continue;
+                }
+                // [#27401] The upstream serves a definition that differs from
+                // the instance's pin (ruling on #27401, comment 6545635244):
+                // degraded with a wording of its own, on the same backoff as an
+                // outage — the server can restore the pinned definition where
+                // this process cannot see it, and an edited pin re-materializes
+                // the instance at once.
+                if (isConnectorUpstreamChanged(thrown)) {
+                    this.degradeConnectorInstance(engine, ctx, {
+                        name,
+                        entry,
+                        provider,
+                        signature,
+                        hasLive: existing !== undefined,
+                        reason: (thrown as Error).message,
+                        cause: thrown,
+                        fault: 'changed',
                     });
                     continue;
                 }
@@ -2852,10 +3406,12 @@ export class AutomationServicePlugin implements Plugin {
                 // people to write, and the first one that validates its
                 // `providerConfig` with Zod throws a message whose first line is
                 // `[`. The cause goes to `meta` on the soft path, and is appended
-                // to the thrown message on the fatal one.
+                // to the thrown message on the fatal one. [#28594] A stored
+                // entry's (its refused package ref among them) is soft at boot.
                 fail(
                     `[Automation] failed to materialize connector instance '${name}' via provider '${provider}' (ADR-0097).`,
                     thrown,
+                    stored,
                 );
                 continue;
             }
@@ -2972,6 +3528,14 @@ export class AutomationServicePlugin implements Plugin {
              * registration `warn` (#5660), which this hands it to.
              */
             cause: unknown;
+            /**
+             * [#27401] Which backoff-retried fault degraded the instance, for
+             * the wording of the record below: `unavailable` (the default,
+             * #3017) or `changed` — the upstream serves a definition that
+             * differs from the instance's pin (`CONNECTOR_UPSTREAM_CHANGED`).
+             * The retry is the same for both.
+             */
+            fault?: 'unavailable' | 'changed';
         },
     ): void {
         const prior = this.degradedInstances.get(info.name);
@@ -3010,14 +3574,20 @@ export class AutomationServicePlugin implements Plugin {
         }
         // Third argument, per `error(message, error?, meta?)` — NOT the second,
         // which would ship the thrown value's stack on every retry (#5575).
+        const changed = info.fault === 'changed';
         ctx.logger.error(
-            `[Automation] connector instance '${info.name}' (provider '${info.provider}') upstream unavailable — ` +
+            `[Automation] connector instance '${info.name}' (provider '${info.provider}') ` +
+                (changed
+                    ? 'serves a tool definition that differs from its toolsSnapshot — '
+                    : 'upstream unavailable — ') +
                 (info.hasLive
                     ? 'the previously-materialized connector keeps serving'
                     : 'instance registered degraded (no actions)') +
-                `; retrying with backoff, attempt ${attempts}.`,
+                `; ${changed ? 're-checking' : 'retrying'} with backoff, attempt ${attempts}.`,
             undefined,
-            describeThrownForLog(info.cause),
+            // No thrown value (the connection store could not be read): the
+            // reason rides `meta`, never `describeThrownForLog(undefined)`.
+            info.cause === undefined ? { reason: info.reason } : describeThrownForLog(info.cause),
         );
     }
 
@@ -3063,14 +3633,17 @@ export class AutomationServicePlugin implements Plugin {
                 );
             }
         }
-        // #5575 — the provider's message rides `meta`, never the message.
+        // #5575 — the provider's message rides `meta`, never the message. A
+        // platform refusal (an `oauth2` instance this server cannot serve) has
+        // no thrown value: its reason rides `meta` instead, so the record never
+        // renders `describeThrownForLog(undefined)`, the string "undefined".
         ctx.logger.error(
             `[Automation] failed to materialize connector instance '${info.name}' via provider '${info.provider}' (ADR-0097): ` +
                 'a configuration fault, so the instance is no longer retried. ' +
                 (info.hasLive ? 'The previously-materialized connector keeps serving. ' : '') +
                 'Fix its declaration; an edit or a restart re-attempts it.',
             undefined,
-            describeThrownForLog(info.cause),
+            info.cause === undefined ? { reason: info.reason } : describeThrownForLog(info.cause),
         );
     }
 
@@ -3122,11 +3695,13 @@ export class AutomationServicePlugin implements Plugin {
         clientSecret: string | undefined,
     ): OAuth2GrantHandle {
         // `oauth2NotServableReason` passed: both are declared, or each
-        // connection keeps the client the MCP authorization flow found.
+        // connection keeps the client the MCP authorization flow found, or
+        // the client its administrator entered (`clientSource: 'installer'`).
         return createOAuth2GrantHandle({
             connector: name,
             config: {
                 grant: auth.grant,
+                ...(takesInstallerClient(auth) ? { clientSource: 'installer' as const } : {}),
                 ...(auth.tokenUrl === undefined ? {} : { tokenUrl: auth.tokenUrl }),
                 ...(auth.clientId === undefined ? {} : { clientId: auth.clientId }),
                 ...(clientSecret === undefined ? {} : { clientSecret }),
@@ -3135,15 +3710,96 @@ export class AutomationServicePlugin implements Plugin {
             },
             connections: this.connectorConnectionStoreOrNone(),
             lock: () => this.clusterService(ctx)?.lock,
-            onGrantRefused: (organizationId) => {
-                ctx.logger.warn(
-                    `[Automation] connector instance '${name}': the authorization server refused the grant of organization `
-                        + `'${organizationId}'; it needs to be reconnected there (ADR-0143 D4).`,
-                );
+            onGrantRefused: (_organizationId, reason) => {
+                // The reason the connection stored: it names the instance, the
+                // organization and the cause that happened on that refresh path.
+                ctx.logger.warn(`[Automation] ${reason}.`);
                 void this.materializeDeclaredConnectors(ctx, { fatal: false }).catch(() => { /* logged by the reconcile */ });
             },
             ...(typeof entry.requestTimeoutMs === 'number' ? { timeoutMs: entry.requestTimeoutMs } : {}),
         });
+    }
+
+    /**
+     * ADR-0143 D4 — the upstream refused the token an `mcp` instance borrowed
+     * from its discovery organization's connection (ruled B on #26702) while
+     * it listed its tools. That organization's connection is marked
+     * `reconnect_required`, with the platform's sentence, and the client
+     * secret the instance's `credentialRef` names is left as it is: it is not
+     * what the upstream refused. The connection's change moves the
+     * instance's signature, so the reconcile queued here lists as the next
+     * connected organization, or holds the instance "reconnect required"
+     * until a reconnect, which lists again.
+     *
+     * The connection is marked only while it is still the connect whose token
+     * was sent (same `connected_at`); a reconnect that landed since keeps its
+     * fresh grant. When the connection could not be marked, the instance is
+     * degraded on the #3017 backoff instead, so the refusal is retried rather
+     * than held on a key that nothing moves. A live connector keeps serving,
+     * as on every failed re-materialization.
+     */
+    private async holdConnectorForRefusedConnection(
+        engine: AutomationEngine,
+        ctx: PluginContext,
+        info: {
+            name: string;
+            entry: DeclaredConnectorItem;
+            provider: string;
+            signature: string;
+            hasLive: boolean;
+            connection: { organizationId: string; connectedAt?: string };
+            status: number;
+            cause: unknown;
+        },
+    ): Promise<void> {
+        const { name, connection } = info;
+        const reason = discoveryTokenRefusedReason(name, connection.organizationId, info.status);
+        let marked = false;
+        try {
+            const store = this.connectorConnectionStoreOrNone();
+            const record = await store.read(connection.organizationId, name);
+            if (record && record.status === 'connected' && record.connectedAt === connection.connectedAt) {
+                await store.markReconnectRequired(record, reason);
+                marked = true;
+            }
+        } catch (err) {
+            ctx.logger.warn(
+                `[Automation] connector instance '${name}': the connection of organization '${connection.organizationId}' `
+                    + 'could not be marked to be reconnected; the instance retries.',
+                describeThrownForLog(err),
+            );
+        }
+        if (!marked) {
+            this.degradeConnectorInstance(engine, ctx, {
+                name,
+                entry: info.entry,
+                provider: info.provider,
+                signature: info.signature,
+                hasLive: info.hasLive,
+                reason: `connector instance '${name}': its MCP server refused the token of organization `
+                    + `'${connection.organizationId}' while it listed its tools (HTTP ${info.status}); it retries`,
+                cause: info.cause,
+            });
+            return;
+        }
+        this.degradedInstances.set(name, { attempts: 1, signature: info.signature, reason, held: true });
+        if (!info.hasLive) {
+            try {
+                engine.registerDegradedConnector(this.buildDegradedHuskDef(name, info.entry), reason, 'declarative', info.cause, { kind: 'connection' });
+            } catch (err) {
+                ctx.logger.warn(
+                    `[Automation] could not register degraded husk for '${name}' — the instance stays absent from the `
+                        + 'connector registry until it is reconnected.',
+                    describeThrownForLog(err),
+                );
+            }
+        }
+        ctx.logger.warn(
+            `[Automation] connector instance '${name}' (provider '${info.provider}'): its MCP server refused the token of `
+                + `organization '${connection.organizationId}' while it listed its tools (HTTP ${info.status}); that connection `
+                + 'needs to be reconnected (ADR-0143 D4).',
+        );
+        void this.materializeDeclaredConnectors(ctx, { fatal: false }).catch(() => { /* logged by the reconcile */ });
     }
 
     /**
@@ -3194,12 +3850,25 @@ export class AutomationServicePlugin implements Plugin {
         return this.memoryPendingAuthorizations;
     }
 
-    /** ADR-0143 D5 — the deployment's fixed redirect URI, or the `503` naming how to configure one. */
-    private connectorOAuthRedirectUri(): string {
+    /**
+     * ADR-0143 D5 — the deployment's fixed redirect URI: the
+     * `connectorOAuthRedirectUri` option, else the callback path under
+     * `OS_AUTH_URL`, else under `OS_BASE_URL`; `undefined` when there is no
+     * base to derive it from. ⛔ Never taken from a request. The one
+     * derivation both the connection read (which then leaves `redirectUri`
+     * out) and a begun connect (which then refuses `503`) answer from.
+     */
+    private derivedConnectorOAuthRedirectUri(): string | undefined {
         if (this.options.connectorOAuthRedirectUri) return this.options.connectorOAuthRedirectUri;
         const env = typeof process !== 'undefined' ? process.env : undefined;
         const origin = (env?.OS_AUTH_URL || env?.OS_BASE_URL || '').trim().replace(/\/+$/, '');
-        if (/^https?:\/\//i.test(origin)) return `${origin}/api/v1/automation/connectors/oauth/callback`;
+        return /^https?:\/\//i.test(origin) ? `${origin}/api/v1/automation/connectors/oauth/callback` : undefined;
+    }
+
+    /** ADR-0143 D5 — the deployment's fixed redirect URI, or the `503` naming how to configure one. */
+    private connectorOAuthRedirectUri(): string {
+        const redirectUri = this.derivedConnectorOAuthRedirectUri();
+        if (redirectUri !== undefined) return redirectUri;
         throw credentialDoorRefusal(
             'This deployment has no fixed public origin for the OAuth redirect, so a connector instance cannot be connected: '
                 + 'set OS_BASE_URL (or OS_AUTH_URL) to the URL it is served at, or pass connectorOAuthRedirectUri to the '
@@ -3215,9 +3884,12 @@ export class AutomationServicePlugin implements Plugin {
      * The organization's connection keeps the client it was connected with,
      * reused on a reconnect while the declaration still leaves the same fields
      * to discovery; otherwise the MCP authorization flow runs, registering a
-     * client when none is declared. Its refusals answer the door: `400` for a
-     * server that does not say what the flow needs, `503` for one that did not
-     * answer.
+     * client when none is declared. An instance taking the installer's client
+     * (`installerClient`, ADR-0143 D2.1's 2026-11-02 amendment) always runs
+     * the flow with that client in place of a declared one — a reconnect may
+     * bring a new client — and so never registers one. Its refusals answer the
+     * door: `400` for a server that does not say what the flow needs, `503`
+     * for one that did not answer.
      */
     private async mcpAuthorizationClient(
         ctx: PluginContext,
@@ -3226,11 +3898,12 @@ export class AutomationServicePlugin implements Plugin {
         auth: Extract<OAuth2InstanceAuth, { grant: 'authorization_code' }>,
         organizationId: string,
         redirectUri: string,
+        installerClient?: InstallerClient,
     ): Promise<McpAuthorizationClient | undefined> {
         const serverUrl = mcpDiscoveryServerUrl(entry, auth);
         if (serverUrl === undefined) return undefined;
         const store = this.connectorConnectionStoreOrNone();
-        const existing = await store.readOrRefuse(organizationId, name);
+        const existing = installerClient ? undefined : await store.readOrRefuse(organizationId, name);
         if (existing?.hasRegisteredClient) {
             let kept: McpAuthorizationClient | undefined;
             try {
@@ -3250,6 +3923,8 @@ export class AutomationServicePlugin implements Plugin {
                     ...(auth.authorizationUrl === undefined ? {} : { authorizationUrl: auth.authorizationUrl }),
                     ...(auth.tokenUrl === undefined ? {} : { tokenUrl: auth.tokenUrl }),
                     ...(auth.clientId === undefined ? {} : { clientId: auth.clientId }),
+                    ...(installerClient ? { clientId: installerClient.clientId } : {}),
+                    ...(installerClient?.clientSecret === undefined ? {} : { clientSecret: installerClient.clientSecret }),
                     ...(auth.resource === undefined ? {} : { resource: auth.resource }),
                 },
                 redirectUri,
@@ -3310,7 +3985,8 @@ export class AutomationServicePlugin implements Plugin {
             );
         }
         const notServable = oauth2NotServableReason(name, { ...entry, provider: entry.provider as string }, auth, true);
-        if (notServable !== undefined) throw credentialDoorRefusal(`${notServable}.`, 'VALIDATION_ERROR', 400);
+        // The reason ends its own sentence: the door answers it as it is.
+        if (notServable !== undefined) throw credentialDoorRefusal(notServable, 'VALIDATION_ERROR', 400);
         const organizationId = request?.context?.tenantId;
         if (typeof organizationId !== 'string' || organizationId.length === 0) {
             throw credentialDoorRefusal(
@@ -3336,13 +4012,125 @@ export class AutomationServicePlugin implements Plugin {
             ...(record.expiresAt ? { expiresAt: record.expiresAt } : {}),
             ...(record.connectedAt ? { connectedAt: record.connectedAt } : {}),
             ...(record.connectedBy ? { connectedBy: record.connectedBy } : {}),
+            // ADR-0143 D2.1 (2026-11-02 amendment): which client the
+            // administrator entered, from the plain columns — never the secret,
+            // which only the encrypted client column holds.
+            ...(record.installerClientId
+                ? { client: { source: 'installer' as const, clientId: record.installerClientId, hasSecret: record.installerClientHasSecret } }
+                : {}),
         };
     }
 
-    /** ADR-0143 D3 — `IAutomationService.getConnectorConnection`. */
+    /**
+     * ADR-0143 D2.1 (2026-11-02 amendment) — the read and revoke legs take no
+     * client: one is entered only when a connect is begun.
+     */
+    private refuseClientOffLeg(name: string, request: ConnectorConnectionRequest | undefined, leg: 'read' | 'revoke'): void {
+        if (request?.client === undefined) return;
+        throw credentialDoorRefusal(
+            `Connector instance '${name}': ${leg === 'read' ? 'reading a connection' : 'revoking a connection'} takes no OAuth `
+                + 'client. A client is entered only when a connect is begun (POST /api/v1/automation/connectors/'
+                + `${name}/connection). Nothing was ${leg === 'read' ? 'read' : 'revoked'}.`,
+            'VALIDATION_ERROR',
+            400,
+        );
+    }
+
+    /**
+     * ADR-0143 D2.1 (2026-11-02 amendment) — the client a begun connect
+     * authorizes with when the instance declares `clientSource: 'installer'`,
+     * or `undefined` for any other instance. A begin of such an instance
+     * that names a client replaces the kept one; one that names none reuses
+     * the client the organization's connection keeps (a reconnect: the
+     * Console can never resend a secret it never reads back), and with none
+     * kept is refused naming the vendor's registration step. A client offered
+     * to an instance that declares its client, or leaves it to MCP dynamic
+     * registration, is refused rather than ignored: no published form lets a
+     * connect replace a declared client. ⛔ No refusal carries a value the
+     * caller sent — only key names.
+     */
+    private async installerClientOfBegin(
+        name: string,
+        auth: Extract<OAuth2InstanceAuth, { grant: 'authorization_code' }>,
+        request: ConnectorConnectionRequest,
+        organizationId: string,
+        redirectUri: string,
+    ): Promise<InstallerClient | undefined> {
+        const offered = request.client as unknown;
+        const refuse = (message: string): Error => credentialDoorRefusal(`${message} Nothing was connected.`, 'VALIDATION_ERROR', 400);
+        if (!takesInstallerClient(auth)) {
+            if (offered === undefined) return undefined;
+            throw refuse(
+                `Connector instance '${name}' does not take its OAuth client from the installer: its definition names the client, `
+                    + 'or leaves it to the MCP server\'s dynamic registration, so a connect cannot supply one. Begin the connect '
+                    + 'without `clientId` and `clientSecret`.',
+            );
+        }
+        if (offered === undefined) {
+            const kept = await this.keptInstallerClient(name, organizationId);
+            if (kept) return kept;
+            throw refuse(
+                `Connector instance '${name}' takes its OAuth client from the installer (\`clientSource: 'installer'\`), and this `
+                    + 'connect names none. Register an OAuth client for this deployment with the vendor, giving it the redirect '
+                    + `URI ${redirectUri}, then begin the connect again with its \`clientId\`, and its \`clientSecret\` when the `
+                    + 'vendor issued one.',
+            );
+        }
+        if (typeof offered !== 'object' || offered === null || Array.isArray(offered)) {
+            throw refuse(`Connector instance '${name}': the OAuth client of a connect is an object naming \`clientId\`.`);
+        }
+        const fields = offered as Record<string, unknown>;
+        const unknownKeys = Object.keys(fields).filter((k) => k !== 'clientId' && k !== 'clientSecret').sort();
+        if (unknownKeys.length > 0) {
+            throw refuse(
+                `Connector instance '${name}': the OAuth client of a connect takes only \`clientId\` and \`clientSecret\`; `
+                    + `unrecognised: ${unknownKeys.map((k) => `\`${k}\``).join(', ')}.`,
+            );
+        }
+        const { clientId, clientSecret } = fields;
+        if (typeof clientId !== 'string' || clientId.trim().length === 0 || clientId.length > INSTALLER_CLIENT_ID_MAX_LENGTH) {
+            throw refuse(
+                `Connector instance '${name}': \`clientId\` must be the client id the vendor issued, a non-empty text of at most `
+                    + `${INSTALLER_CLIENT_ID_MAX_LENGTH} characters.`,
+            );
+        }
+        if (clientSecret !== undefined && (typeof clientSecret !== 'string' || clientSecret.length === 0)) {
+            throw refuse(
+                `Connector instance '${name}': \`clientSecret\`, when given, must be the client secret the vendor issued, a `
+                    + 'non-empty text. Omit it for a public client.',
+            );
+        }
+        return { clientId, ...(clientSecret === undefined ? {} : { clientSecret: clientSecret as string }) };
+    }
+
+    /**
+     * ADR-0143 D2.1 (2026-11-02 amendment) — the installer's client the
+     * organization's connection of `name` keeps, read back whole from the
+     * encrypted client column, or `undefined` when it keeps none. A store
+     * that cannot read or decrypt it refuses (`503`), never "keeps none".
+     */
+    private async keptInstallerClient(name: string, organizationId: string): Promise<InstallerClient | undefined> {
+        const store = this.connectorConnectionStoreOrNone();
+        const record = await store.readOrRefuse(organizationId, name);
+        if (record?.installerClientId === undefined) return undefined;
+        const kept = parseKeptConnectionClient(await store.resolveRegisteredClient(record));
+        if (!kept?.installer) return undefined;
+        return { clientId: kept.clientId, ...(kept.clientSecret === undefined ? {} : { clientSecret: kept.clientSecret }) };
+    }
+
+    /**
+     * ADR-0143 D3 — `IAutomationService.getConnectorConnection`. The answer
+     * carries the deployment's `redirectUri` whatever the status, so the
+     * Connect step can show it before an administrator registers a client
+     * with the vendor (ADR-0143 D2.1); with no base to derive it from the key
+     * is absent, never a refusal: the read still answers the status.
+     */
     private async getConnectorConnection(ctx: PluginContext, request: ConnectorConnectionRequest): Promise<ConnectorConnectionState> {
         const { name, organizationId } = await this.connectionDoorSubject(ctx, request);
-        return this.describeConnection(name, organizationId, await this.connectorConnectionStoreOrNone().readOrRefuse(organizationId, name));
+        this.refuseClientOffLeg(name, request, 'read');
+        const state = this.describeConnection(name, organizationId, await this.connectorConnectionStoreOrNone().readOrRefuse(organizationId, name));
+        const redirectUri = this.derivedConnectorOAuthRedirectUri();
+        return redirectUri === undefined ? state : { ...state, redirectUri };
     }
 
     /**
@@ -3361,12 +4149,15 @@ export class AutomationServicePlugin implements Plugin {
             );
         }
         const redirectUri = this.connectorOAuthRedirectUri();
-        const client = await this.mcpAuthorizationClient(ctx, name, entry, auth, organizationId, redirectUri);
+        const installerClient = await this.installerClientOfBegin(name, auth, request, organizationId, redirectUri);
+        const client = await this.mcpAuthorizationClient(ctx, name, entry, auth, organizationId, redirectUri, installerClient);
         const state = createAuthorizationState();
         const { verifier, challenge } = createPkcePair();
         const expiresAt = Date.now() + PENDING_AUTHORIZATION_TTL_SECONDS * 1000;
         await this.pendingAuthorizations(ctx).put(state, {
-            connector: name, organizationId, userId, verifier, redirectUri, expiresAt, ...(client ? { client } : {}),
+            connector: name, organizationId, userId, verifier, redirectUri, expiresAt,
+            ...(client ? { client } : {}),
+            ...(installerClient ? { installerClient } : {}),
         });
         ctx.logger.info(`[Automation] connect of connector instance '${name}' begun for organization '${organizationId}' by user '${userId}'.`);
         const resource = auth.resource ?? client?.resource;
@@ -3375,7 +4166,7 @@ export class AutomationServicePlugin implements Plugin {
             organizationId,
             authorizationUrl: buildAuthorizationUrl({
                 authorizationUrl: client?.authorizationUrl ?? (auth.authorizationUrl as string),
-                clientId: client?.clientId ?? (auth.clientId as string),
+                clientId: client?.clientId ?? installerClient?.clientId ?? (auth.clientId as string),
                 redirectUri,
                 state,
                 challenge,
@@ -3444,8 +4235,19 @@ export class AutomationServicePlugin implements Plugin {
             context: request.context,
         });
         const client = pending.client;
-        let clientSecret: string | undefined = client?.registered ? client.clientSecret : undefined;
-        if (!client?.registered && auth.credentialRef !== undefined) {
+        // ADR-0143 D2.1 (2026-11-02 amendment): an instance that takes the
+        // installer's client exchanges as the client its connect was begun
+        // with. A declaration that changed which kind of client it takes while
+        // the browser was away answers no connect this server began.
+        const installerClient = pending.installerClient;
+        if (takesInstallerClient(auth) !== (installerClient !== undefined)) {
+            throw refuse(
+                `Connector instance '${name}' changed where its OAuth client comes from while this connect was waiting for its `
+                    + 'callback, so the code was not used. Nothing was connected; begin the connect again.',
+            );
+        }
+        let clientSecret: string | undefined = client?.registered ? client.clientSecret : installerClient?.clientSecret;
+        if (!client?.registered && installerClient === undefined && auth.credentialRef !== undefined) {
             const chain = await this.connectorCredentialChain(ctx);
             const rows = chain.store ? await chain.store.list() : new Map();
             const resolution = await resolveConnectorCredential(chain, auth.credentialRef, rows);
@@ -3472,7 +4274,10 @@ export class AutomationServicePlugin implements Plugin {
             token = await requestOAuth2Token({
                 connector: name,
                 tokenUrl: client?.tokenUrl ?? (auth.tokenUrl as string),
-                client: { clientId: client?.clientId ?? (auth.clientId as string), ...(clientSecret === undefined ? {} : { clientSecret }) },
+                client: {
+                    clientId: client?.clientId ?? installerClient?.clientId ?? (auth.clientId as string),
+                    ...(clientSecret === undefined ? {} : { clientSecret }),
+                },
                 params,
             });
         } catch (err) {
@@ -3493,8 +4298,15 @@ export class AutomationServicePlugin implements Plugin {
                 ...(token.refreshToken === undefined ? {} : { refreshToken: token.refreshToken }),
                 ...(token.scope === undefined ? {} : { scopes: token.scope }),
                 ...(token.expiresAt === undefined ? {} : { expiresAt: new Date(token.expiresAt) }),
+                // The installer's client is kept whole, encrypted (ADR-0143 D2.1,
+                // 2026-11-02 amendment), and its id alone in plain text for reads.
                 // A declared client's secret stays behind its credentialRef; only a registered one is kept.
-                ...(client
+                ...(installerClient
+                    ? {
+                        registeredClient: serializeInstallerClient(installerClient, client),
+                        installerClient: { clientId: installerClient.clientId, hasSecret: installerClient.clientSecret !== undefined },
+                    }
+                    : client
                     ? {
                         registeredClient: JSON.stringify(client.registered
                             ? client
@@ -3518,6 +4330,7 @@ export class AutomationServicePlugin implements Plugin {
     /** ADR-0143 D5 — `IAutomationService.revokeConnectorConnection`. */
     private async revokeConnectorConnection(ctx: PluginContext, request: ConnectorConnectionRequest): Promise<ConnectorConnectionState> {
         const { name, organizationId, userId } = await this.connectionDoorSubject(ctx, request);
+        this.refuseClientOffLeg(name, request, 'revoke');
         const removed = await this.onReconcileQueue(async () => {
             const gone = await this.connectorConnectionStoreOrNone().revoke(organizationId, name, userId);
             if (!gone) return false;
@@ -4396,6 +5209,14 @@ export class AutomationServicePlugin implements Plugin {
      * the same winners by this same decision, so its receipt describes what is
      * armed after them too. The collision warning is logged by every step that
      * meets a contested name.
+     *
+     * [#28412, ADR-0146 D9 item 1] One stored row of a shipped name IS armed:
+     * the shipping package's declared `.custom` override. The protocol's view
+     * serves it in the package's slot (once, in place of the loader's body),
+     * and the boot pull ranks it above the loader's body by its stored
+     * binding (`flow-precedence.ts`), so every step arms it, with no receipt.
+     * Its removal puts the loader's body back in the view, and each step
+     * re-arms that body by one `registerFlow` — never a withdraw first.
      */
     private resolveFlowContenders(ctx: PluginContext, items: readonly unknown[]) {
         const engine = this.engine;

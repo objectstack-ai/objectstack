@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { normalizeSupportedLocales } from '@objectstack/spec/system';
-import type { II18nService } from '@objectstack/spec/contracts';
+import type { II18nService, Logger } from '@objectstack/spec/contracts';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -15,6 +15,13 @@ export interface FileI18nAdapterOptions {
   localesDir?: string;
   /** Fallback locale when a key is not found in the requested locale */
   fallbackLocale?: string;
+  /**
+   * Where `t()` reports a translation it could not serve as asked (#28109).
+   * Each report is said ONCE (see {@link FileI18nAdapter.MISSING_TRANSLATION_REPORT_LIMIT}).
+   * Omitted, the adapter stays silent, as it always was; `I18nServicePlugin`
+   * passes the plugin logger. What `t()` returns never depends on it.
+   */
+  logger?: Pick<Logger, 'warn' | 'debug'>;
 }
 
 /**
@@ -133,10 +140,24 @@ export class FileI18nAdapter implements II18nService {
    * this can only work as a read-time filter in `getLocales()`.
    */
   private supportedLocales: string[] | undefined;
+  private readonly logger: Pick<Logger, 'warn' | 'debug'> | undefined;
+  /** What `t()` has already reported (#28109): `locale` alone, or `locale|key`. */
+  private readonly reportedMisses = new Set<string>();
+
+  /**
+   * [#28109] How many distinct misses `t()` reports before it goes quiet and
+   * says so once. `t()` sits on every translated string the server renders,
+   * and its locale often comes straight from `Accept-Language`, so an
+   * unbounded set would grow (and log) once per header value a client sends.
+   * 1000 is above every per-locale gap the shipped bundles leave today
+   * (measured in the PR) and costs at most some tens of KB of short strings.
+   */
+  static readonly MISSING_TRANSLATION_REPORT_LIMIT = 1000;
 
   constructor(options: FileI18nAdapterOptions = {}) {
     this.defaultLocale = options.defaultLocale ?? 'en';
     this.fallbackLocale = options.fallbackLocale;
+    this.logger = options.logger;
 
     if (options.localesDir) {
       this.loadFromDirectory(options.localesDir);
@@ -147,9 +168,11 @@ export class FileI18nAdapter implements II18nService {
     // Try requested locale
     let value = this.resolveFromLocale(key, locale);
 
-    // Try fallback locale
-    if (value === undefined && this.fallbackLocale && this.fallbackLocale !== locale) {
-      value = this.resolveFromLocale(key, this.fallbackLocale);
+    if (value === undefined) {
+      // Try fallback locale
+      const fallback = this.fallbackLocale && this.fallbackLocale !== locale ? this.fallbackLocale : undefined;
+      if (fallback) value = this.resolveFromLocale(key, fallback);
+      if (this.logger) this.reportMiss(key, locale, fallback, value !== undefined);
     }
 
     // Return key if not found
@@ -275,6 +298,69 @@ export class FileI18nAdapter implements II18nService {
       } catch {
         // Skip files that can't be parsed
       }
+    }
+  }
+
+  /**
+   * Say, once, that `t()` could not answer `key` in `locale` (#28109). Only a
+   * log line: the caller still gets the fallback text or the key.
+   *
+   * - The locale has no bundle at all (static or authored): ONE line per
+   *   locale, not one per key. A locale nobody ships (a `fr` reader on the
+   *   platform bundles) would otherwise report every key it renders.
+   * - The fallback locale served the key: one line per key and locale. The
+   *   key exists, so a translation for this locale is what is missing.
+   * - No bundle holds the key: `debug`, always. Most `t()` callers probe on
+   *   purpose (a deployment override address, a field label with a
+   *   declared-label fallback) and read the echoed key as "not overridden",
+   *   so a `warn` here would mostly report misses nobody has to fix.
+   *
+   * The first two are a `warn` only for a locale this stack OFFERS
+   * (`getLocales()`: the declared `i18n.supportedLocales`, else every loaded
+   * locale). For any other locale the client asked for something the app
+   * never offered, often straight from `Accept-Language`; the fallback is the
+   * designed answer there, so it is `debug`, and a client cannot drive the
+   * warn volume by sending locales.
+   */
+  private reportMiss(key: string, locale: string, fallback: string | undefined, servedByFallback: boolean): void {
+    const logger = this.logger;
+    if (!logger) return;
+    const hasBundle = this.translations.has(locale) || this.authoredTranslations.has(locale);
+    const said = hasBundle ? `${locale}|${key}` : locale;
+    if (this.reportedMisses.has(said)) return;
+    const limit = FileI18nAdapter.MISSING_TRANSLATION_REPORT_LIMIT;
+    if (this.reportedMisses.size >= limit) return;
+    this.reportedMisses.add(said);
+
+    const fallsBackTo = fallback ? `'${fallback}' (fallback locale) or to the key` : 'the key';
+    const offered = this.getLocales().includes(locale);
+    if (!hasBundle && offered) {
+      logger.warn(
+        `[i18n] locale '${locale}' is offered (i18n.supportedLocales) but has no translation bundle; ` +
+        `strings requested in it fall back to ${fallsBackTo}. ` +
+        `Load a '${locale}' bundle, or drop it from i18n.supportedLocales. Said once for this locale.`,
+      );
+    } else if (!hasBundle) {
+      logger.debug(
+        `[i18n] locale '${locale}' has no translation bundle and is not offered; ` +
+        `strings requested in it fall back to ${fallsBackTo}. Said once for this locale.`,
+      );
+    } else if (servedByFallback) {
+      const message =
+        `[i18n] translation key '${key}' is missing in '${locale}'; served the '${fallback}' (fallback locale) text. ` +
+        `Add it to the '${locale}' bundle. Said once for this key and locale.`;
+      if (offered) logger.warn(message);
+      else logger.debug(`${message} '${locale}' is not offered by this stack.`);
+    } else {
+      logger.debug(
+        `[i18n] translation key '${key}' has no entry in '${locale}'${fallback ? ` or '${fallback}' (fallback locale)` : ''}; ` +
+        'the key itself was returned. Said once for this key and locale.',
+      );
+    }
+    if (this.reportedMisses.size >= limit) {
+      logger.warn(
+        `[i18n] ${limit} missing translations reported; further misses are not logged until the process restarts.`,
+      );
     }
   }
 

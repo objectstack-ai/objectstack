@@ -33,6 +33,9 @@
     "@objectstack/types": "workspace:*"
   },
   "devDependencies": {
+    "@objectstack/driver-sql": "workspace:*",
+    "@objectstack/objectql": "workspace:*",
+    "@objectstack/platform-objects": "workspace:*",
     "@objectstack/service-automation": "workspace:*",
     "@types/node": "^26.6.5",
     "typescript": "^6.0.3",

@@ -24,20 +24,17 @@ export const SysBusinessUnitMember = ObjectSchema.create({
   managedBy: 'platform',
   description: 'User assignment to a business unit (matrix-org friendly, effective-dated).',
   // [ADR-0079] The record title is `display_title`, a text formula over the
-  // columns `titleFormat` names. With no pointer declared, the registry's
+  // columns `titleFormat` named. With no pointer declared, the registry's
   // designate-only pass stamped `nameField: 'id'` (the first title-eligible
   // field), so a renderer honouring ADR-0079's order (an explicit `nameField`
-  // wins over `titleFormat`) drew the raw id as the record page's H1.
-  // `titleFormat` stays for renderers that still read it first, and is the
-  // rung below the pointer where the title has no value: the console draws a
-  // lookup placeholder by the related record's name (else its email), so over
-  // an expanded row it renders the same text the formula does.
-  // `identity-display-title.test.ts` holds the two to the same text;
-  // `plugin-security/src/business-unit-member-title.test.ts` pins the title a
-  // read serves.
+  // wins over `titleFormat`) drew the raw id as the record page's H1. The
+  // retired `titleFormat` template beside it, the rung below the pointer where
+  // the title had no value, is gone (refused at save and by `os validate`).
+  // `identity-display-title.test.ts` holds the formula to the text that
+  // template drew; `plugin-security/src/business-unit-member-title.test.ts`
+  // pins the title a read serves.
   displayNameField: 'display_title',
   nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{user_id} in {business_unit_id}',
   highlightFields: ['user_id', 'business_unit_id', 'function_in_business_unit', 'is_primary'],
 
   fields: {

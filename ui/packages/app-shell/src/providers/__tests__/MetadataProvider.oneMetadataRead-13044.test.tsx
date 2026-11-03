@@ -39,6 +39,7 @@ import { readObjectSortability } from '@object-ui/core';
 import { useMetadata } from '@object-ui/react';
 import { MetadataProvider } from '../MetadataProvider';
 import { PreviewModeProvider } from '../../preview/PreviewModeContext';
+import { serveObjectViews } from '../../views/__tests__/objectViewRoute';
 
 type Ctx = ReturnType<typeof useMetadata>;
 
@@ -86,6 +87,12 @@ function makeServer(): { server: Server; adapter: ObjectStackAdapter } {
     if (path.endsWith('/api/v1/discovery')) return json(200, { success: true, data: {} });
     if (path === '/api/v1/meta/view') return json(200, { success: true, data: { type: 'view', items: structuredClone(VIEWS) } });
     if (path === '/api/v1/meta/view?preview=draft') return json(200, { success: true, data: { type: 'view', items: [] } });
+    // objectstack#29550: one object's views, by the server's rule.
+    const oneObject = /^\/api\/v1\/meta\/view\?object=([^&]+)$/.exec(path);
+    if (oneObject) {
+      const items = serveObjectViews(structuredClone(VIEWS), decodeURIComponent(oneObject[1]));
+      return json(200, { success: true, data: { type: 'view', items } });
+    }
     if (path.startsWith('/api/v1/meta/view/')) return json(200, { success: true });
     const byName = /^\/api\/v1\/meta\/object\/([^/?]+)$/.exec(path);
     if (byName) {
@@ -145,11 +152,20 @@ function mount(adapter: ObjectStackAdapter, opts: { preview?: boolean } = {}) {
 const count = (calls: string[], path: string) => calls.filter((c) => c === path).length;
 const OBJECT_URL = '/api/v1/meta/object/sys_member';
 const VIEW_URL = '/api/v1/meta/view';
+/** objectstack#29550: one object's views, the read `listViews` asks while no whole list is held. */
+const ACCOUNT_VIEWS_URL = '/api/v1/meta/view?object=account';
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
+
+/** Starts the provider's own `/meta/view` read, as a reader of the whole registry does. */
+function readViewList(ctx: () => ReturnType<typeof useMetadata>) {
+  act(() => {
+    void ctx().ensureType!('view');
+  });
+}
 
 describe('one request per object document across both caches (objectui#13044)', () => {
   it('provider first: getObjectSchema reads what the provider asked for', async () => {
@@ -205,9 +221,12 @@ describe('one request per object document across both caches (objectui#13044)', 
 });
 
 describe('the published view list: one request per open (objectui#13044, objectui#13057)', () => {
-  it('console order: the eager read lands, then the object page reads the list and the overrides together', async () => {
+  it('console order: the provider view read lands, then the object page reads the list and the overrides together', async () => {
     const { server, adapter } = makeServer();
     const ctx = mount(adapter);
+    // objectstack#28645 — the provider reads the view list on demand (the
+    // whole registry, or a scope outside the app bundle), no longer at mount.
+    readViewList(ctx);
     await waitFor(() => expect(ctx().getTypeStatus!('view')).toBe('ready'));
     expect(count(server.calls, VIEW_URL)).toBe(1);
     // ObjectView starts both reads in one commit (`listViews` and
@@ -222,10 +241,13 @@ describe('the published view list: one request per open (objectui#13044, objectu
     expect(count(server.calls, VIEW_URL)).toBe(1);
   });
 
-  it('a reader that asks while the eager read is on the wire joins it', async () => {
+  it('a reader that asks while the provider view read is on the wire joins it', async () => {
     const { server, adapter } = makeServer();
     server.hold.add(VIEW_URL);
     const ctx = mount(adapter);
+    // objectstack#28645 — the provider reads the view list on demand (the
+    // whole registry, or a scope outside the app bundle), no longer at mount.
+    readViewList(ctx);
     await waitFor(() => expect(count(server.calls, VIEW_URL)).toBe(1));
     const views = adapter.listViews('account');
     const overrides = adapter.listViewOverrides('account');
@@ -269,6 +291,9 @@ describe('controls (objectui#13044)', () => {
   it('the list is settled within an open, and a provider re-read asks again and is what the next list read sees (objectui#13057)', async () => {
     const { server, adapter } = makeServer();
     const ctx = mount(adapter);
+    // objectstack#28645 — the provider reads the view list on demand (the
+    // whole registry, or a scope outside the app bundle), no longer at mount.
+    readViewList(ctx);
     await waitFor(() => expect(ctx().getTypeStatus!('view')).toBe('ready'));
     await adapter.listViews('account');
     await adapter.listViews('account');
@@ -306,15 +331,22 @@ describe('controls (objectui#13044)', () => {
     ]) {
       const { server, adapter } = makeServer();
       const ctx = mount(adapter);
+      // objectstack#28645 — the provider reads the view list on demand (the
+      // whole registry, or a scope outside the app bundle), no longer at mount.
+      readViewList(ctx);
       await waitFor(() => expect(ctx().getTypeStatus!('view')).toBe('ready'));
       await adapter.listViews('account');
       expect(count(server.calls, VIEW_URL)).toBe(1);
       await write(adapter);
       await adapter.listViews('account');
-      // An object whose override map was never read: derived from the stored list.
-      await adapter.listViewOverrides('contact');
-      // The read after the write asked; the one after it reads what it stored.
-      expect(count(server.calls, VIEW_URL)).toBe(2);
+      // An override map never read: derived from what the read after the
+      // write stored.
+      await adapter.listViewOverrides('account');
+      // The read after the write asked (objectstack#29550: one object's
+      // views, as no whole list is held); the one after it reads what it
+      // stored.
+      expect(count(server.calls, ACCOUNT_VIEWS_URL)).toBe(1);
+      expect(count(server.calls, VIEW_URL)).toBe(1);
       cleanup();
     }
   });
@@ -323,13 +355,20 @@ describe('controls (objectui#13044)', () => {
     const { server, adapter } = makeServer();
     server.hold.add(VIEW_URL);
     const ctx = mount(adapter);
+    // objectstack#28645 — the provider reads the view list on demand (the
+    // whole registry, or a scope outside the app bundle), no longer at mount.
+    readViewList(ctx);
     await waitFor(() => expect(count(server.calls, VIEW_URL)).toBe(1));
     // Joins the eager read on the wire (after its own discovery read).
     const before = adapter.listViews('account');
     await new Promise((resolve) => setTimeout(resolve, 0));
     adapter.invalidateViewKeys('account', 'account.mine');
     const after = adapter.listViews('account');
-    await waitFor(() => expect(count(server.calls, VIEW_URL)).toBe(2));
+    // objectstack#29550: the read after the write asks again, for one
+    // object's views; it joins neither the whole-list request on the wire nor
+    // anything stored before the write.
+    await waitFor(() => expect(count(server.calls, ACCOUNT_VIEWS_URL)).toBe(1));
+    expect(count(server.calls, VIEW_URL)).toBe(1);
     server.release();
     await Promise.all([before, after]);
     await waitFor(() => expect(ctx().getTypeStatus!('view')).toBe('ready'));
@@ -339,13 +378,20 @@ describe('controls (objectui#13044)', () => {
     const { server, adapter } = makeServer();
     server.hold.add(VIEW_URL);
     const ctx = mount(adapter);
+    // objectstack#28645 — the provider reads the view list on demand (the
+    // whole registry, or a scope outside the app bundle), no longer at mount.
+    readViewList(ctx);
     await waitFor(() => expect(count(server.calls, VIEW_URL)).toBe(1));
     const before = adapter.listViews('account');
     await new Promise((resolve) => setTimeout(resolve, 0));
     // The shape a page uses when it writes a view without the adapter's seam.
     await adapter.getClient().meta.saveItem('view', 'account.mine', { name: 'account.mine', object: 'account' });
     const after = adapter.listViews('account');
-    await waitFor(() => expect(count(server.calls, VIEW_URL)).toBe(2));
+    // objectstack#29550: the read after the write asks again, for one
+    // object's views; it joins neither the whole-list request on the wire nor
+    // anything stored before the write.
+    await waitFor(() => expect(count(server.calls, ACCOUNT_VIEWS_URL)).toBe(1));
+    expect(count(server.calls, VIEW_URL)).toBe(1);
     server.release();
     await Promise.all([before, after]);
     await waitFor(() => expect(ctx().getTypeStatus!('view')).toBe('ready'));
@@ -361,7 +407,11 @@ describe('controls (objectui#13044)', () => {
     expect(adapter.getCached('list:view')).toBeUndefined();
     const published = await adapter.listViews('account');
     expect(published.map((v: any) => v.name).sort()).toEqual(['account.all', 'account.mine']);
-    expect(count(server.calls, VIEW_URL)).toBe(1);
+    // objectstack#29550: the published read asks the server (one object's
+    // views), and still stores no whole list.
+    expect(count(server.calls, ACCOUNT_VIEWS_URL)).toBe(1);
+    expect(count(server.calls, VIEW_URL)).toBe(0);
+    expect(adapter.getCached('list:view')).toBeUndefined();
   });
 
   it('the preview path still reads through the preview client, never the adapter', async () => {

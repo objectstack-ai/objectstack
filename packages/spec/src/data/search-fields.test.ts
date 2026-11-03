@@ -7,6 +7,7 @@ import {
   resolveSearchFields,
   SEARCH_AUTO_EXCLUDED_FIELDS,
   SEARCH_AUTO_EXCLUDED_TYPES,
+  SEARCH_FLAG_EXCLUDED_TYPES,
   SEARCH_VIRTUAL_TYPES,
   SEARCHABLE_ENUM_TYPES,
   SEARCHABLE_TEXTUAL_TYPES,
@@ -168,6 +169,7 @@ describe('search type vocabularies ⊆ FieldType', () => {
     ['SEARCHABLE_ENUM_TYPES', SEARCHABLE_ENUM_TYPES],
     ['SEARCH_AUTO_EXCLUDED_TYPES', SEARCH_AUTO_EXCLUDED_TYPES],
     ['SEARCH_VIRTUAL_TYPES', SEARCH_VIRTUAL_TYPES],
+    ['SEARCH_FLAG_EXCLUDED_TYPES', SEARCH_FLAG_EXCLUDED_TYPES],
   ];
 
   it.each(vocabularies)('%s has no ghost members', (name, set) => {
@@ -307,13 +309,18 @@ describe('a virtual field declared in searchableFields — not admitted, since n
 
   it('CONTROL — the declared branch still bypasses the auto-default exclusions', () => {
     // The dividing line is STORAGE, not search quality. `lookup` and `json` are
-    // auto-EXCLUDED types, and declaring them is still the author's choice: the
-    // engine runs a `$contains` over the stored foreign key / the stored JSON
-    // text. Narrow and rarely useful, but a scan that CAN match — so it must not
-    // be swept up by the virtual filter. This control is what keeps #6674 from
-    // silently becoming "the declared branch is type-filtered after all", which
-    // would reject metadata the runtime accepts (ADR-0072 D1, and the #4830
-    // changeset's explicit carve-out).
+    // auto-EXCLUDED types, and declaring them is still the author's choice, so
+    // both are ADMITTED here. What each then contributes is the expansion's call
+    // (`expandSearchToFilter`, `@objectstack/objectql`): a single-valued
+    // `lookup` becomes an `$icontains` over the stored foreign key, a narrow scan
+    // that can match;
+    // [#29394] `json` can never hold a string (the text-operator door's
+    // `door-refusal` verdict), so it contributes NO clause, and a set made only
+    // of such columns answers no rows. Neither is swept up by the virtual
+    // filter, which drops only an entry with no column at all. This control is
+    // what keeps #6674 from silently becoming "the declared branch is
+    // type-filtered after all", which would reject metadata the runtime accepts
+    // (ADR-0072 D1, and the #4830 changeset's explicit carve-out).
     expect(
       resolveSearchFieldResolution({
         fields,
@@ -395,5 +402,140 @@ describe('SEARCH_VIRTUAL_TYPES is a storage fact', () => {
         searchableFields: ['name', 'created_at'],
       }),
     ).toEqual({ allowed: ['name', 'created_at'], source: 'declared' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#29008] A field's own `searchable: true` is honoured (ruling record
+// 6573569376, letter A).
+//
+// The key was declared and defaulted on FieldSchema, stored and served — and
+// read by nothing: `$search` skipped a `code` / `html` field marked searchable,
+// and `$searchFields` naming it answered 400 "is not searchable" while the
+// served schema said `searchable: true`. Ruled: with no `searchableFields`
+// declared, the set is the type-based auto-default PLUS every flagged field of
+// any type except `secret` / `password` / `vector`; a declared
+// `searchableFields` stays the whole set. The ingress allow-list is this same
+// resolution, so admitting a name here is what makes `$searchFields` accept it.
+// ---------------------------------------------------------------------------
+describe('field.searchable: true joins the auto-default set — never a declared one', () => {
+  // The card's reproduction: two non-default types marked searchable, and no
+  // `searchableFields` on the object.
+  const repro = {
+    name: { type: 'text' },
+    snippet: { type: 'code', searchable: true },
+    body: { type: 'html', searchable: true },
+  };
+
+  it('the reproduction: `code` and `html` fields marked searchable resolve into the set', () => {
+    expect(resolveSearchFieldResolution({ fields: repro })).toEqual({
+      allowed: ['name', 'snippet', 'body'],
+      source: 'auto',
+    });
+    expect(resolveSearchFields({ fields: repro })).toEqual(['name', 'snippet', 'body']);
+  });
+
+  it('a `$searchFields` override naming a flagged field narrows to it instead of falling back', () => {
+    expect(resolveSearchFields({ fields: repro, requestedFields: 'snippet' })).toEqual(['snippet']);
+    expect(resolveSearchFields({ fields: repro, requestedFields: ['body', 'name'] })).toEqual(['body', 'name']);
+  });
+
+  it('CONTROL — the same fields NOT flagged stay out, exactly as before', () => {
+    const unflagged = { name: { type: 'text' }, snippet: { type: 'code' }, body: { type: 'html' } };
+    expect(resolveSearchFieldResolution({ fields: unflagged })).toEqual({ allowed: ['name'], source: 'auto' });
+    // …and an override naming one is intersected away (the ingress refuses it
+    // before this runs).
+    expect(resolveSearchFields({ fields: unflagged, requestedFields: 'snippet' })).toEqual(['name']);
+  });
+
+  it.each([...SEARCH_FLAG_EXCLUDED_TYPES])('CONTROL — a flagged `%s` field stays excluded (hard exclusion)', (t) => {
+    expect(
+      resolveSearchFieldResolution({ fields: { name: { type: 'text' }, probe: { type: t, searchable: true } } }),
+      `'${t}' is a hard exclusion but searchable: true admitted it`,
+    ).toEqual({ allowed: ['name'], source: 'auto' });
+  });
+
+  it('CONTROL — a flagged virtual (`formula`) field stays out: no stored column to scan', () => {
+    expect(
+      resolveSearchFieldResolution({ fields: { name: { type: 'text' }, total: { type: 'formula', searchable: true } } }),
+    ).toEqual({ allowed: ['name'], source: 'auto' });
+  });
+
+  it('CONTROL — a declared `searchableFields` is the whole set and ignores the flag on other fields', () => {
+    expect(
+      resolveSearchFieldResolution({ fields: repro, searchableFields: ['name'] }),
+    ).toEqual({ allowed: ['name'], source: 'declared' });
+    // …and the override cannot reach a flagged field outside the declaration.
+    expect(resolveSearchFields({ fields: repro, searchableFields: ['name'], requestedFields: 'snippet' }))
+      .toEqual(['name']);
+  });
+
+  it('CONTROL — a text field with `searchable` absent behaves exactly as today, and `false` is the same answer', () => {
+    // The key defaults to `false`, so after a parse every field carries it:
+    // `false` cannot mean "opt out", or every text field would leave the set.
+    for (const meta of [{ type: 'text' }, { type: 'text', searchable: false }, { type: 'text', searchable: true }]) {
+      expect(resolveSearchFieldResolution({ fields: { title: meta } }), JSON.stringify(meta))
+        .toEqual({ allowed: ['title'], source: 'auto' });
+    }
+    expect(resolveSearchFieldResolution({ fields: { amount: { type: 'number', searchable: false } } }))
+      .toEqual({ allowed: [], source: 'auto' });
+  });
+
+  it('admits every other FieldType, the auto-excluded ones included, when flagged', () => {
+    const admissible = FieldType.options.filter(
+      (t) => !SEARCH_FLAG_EXCLUDED_TYPES.has(t) && !SEARCH_VIRTUAL_TYPES.has(t),
+    );
+    // Not vacuous: types the default never guesses are in the domain.
+    expect(admissible).toEqual(expect.arrayContaining(['code', 'html', 'json', 'lookup', 'number', 'boolean']));
+    for (const t of admissible) {
+      expect(
+        resolveSearchFieldResolution({ fields: { probe: { type: t, searchable: true } } }),
+        `searchable: true did not admit a '${t}' field`,
+      ).toEqual({ allowed: ['probe'], source: 'auto' });
+    }
+  });
+
+  it('the flag is asked before the default\'s exclusions: a flagged hidden field and a flagged system name join', () => {
+    expect(resolveSearchFieldResolution({
+      fields: {
+        name: { type: 'text' },
+        internal_code: { type: 'text', hidden: true, searchable: true },
+        owner_id: { type: 'lookup', searchable: true },
+        // CONTROLS — the same exclusions without the flag still hold.
+        notes: { type: 'text', hidden: true },
+        created_by: { type: 'lookup' },
+      },
+    })).toEqual({ allowed: ['name', 'internal_code', 'owner_id'], source: 'auto' });
+  });
+
+  it('an unreadable type is not admitted even when flagged — the hard exclusion cannot be judged (fail closed)', () => {
+    expect(resolveSearchFieldResolution({ fields: { probe: { searchable: true } } }))
+      .toEqual({ allowed: [], source: 'auto' });
+  });
+
+  it('the display field still only ORDERS: a flagged display field leads, field-map order otherwise', () => {
+    expect(resolveSearchFieldResolution({
+      fields: { body: { type: 'html', searchable: true }, name: { type: 'text' }, snippet: { type: 'code', searchable: true } },
+      displayField: 'snippet',
+    })).toEqual({ allowed: ['snippet', 'body', 'name'], source: 'auto' });
+  });
+});
+
+describe('SEARCH_FLAG_EXCLUDED_TYPES — the opt-in\'s hard exclusions', () => {
+  it('is exactly the three ruled types', () => {
+    expect([...SEARCH_FLAG_EXCLUDED_TYPES].sort()).toEqual(['password', 'secret', 'vector']);
+  });
+
+  // The #27822 reasoning one axis over: the REST ingress resolves this set over
+  // the UNFILTERED field map, while the engine withholds every credential
+  // column before it resolves. A credential type a flag could admit would pass
+  // the door and be withheld by the engine — a narrowing answered wider.
+  it.each(Object.keys(MASKED_ON_READ_FIELD_TYPES))('covers credential type %s', (type) => {
+    expect(SEARCH_FLAG_EXCLUDED_TYPES.has(type), `'${type}' is masked on read but searchable: true admits it`)
+      .toBe(true);
+  });
+
+  it('is inside SEARCH_AUTO_EXCLUDED_TYPES — the default never guessed these either', () => {
+    expect([...SEARCH_FLAG_EXCLUDED_TYPES].filter((t) => !SEARCH_AUTO_EXCLUDED_TYPES.has(t))).toEqual([]);
   });
 });

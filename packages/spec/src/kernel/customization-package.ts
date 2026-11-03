@@ -339,6 +339,10 @@ export const OVERRIDE_TYPE_CLASSIFICATION = {
   },
   // ── D10: extended, never replaced ──────────────────────────────────
   object: { disposition: 'extend_only', basis: 'adr_0146_d10_extended' },
+  // An extension is the D10 mechanism itself — its own item of the writing
+  // package, stored under its target's name — so no declared override
+  // replaces one; a `.custom` pair writes its own (#28574).
+  object_extension: { disposition: 'excluded', basis: 'adr_0146_d10_extended' },
   // ── D6: the security catalog's one-name-per-deployment types ──────
   permission: securityCatalog,
   position: securityCatalog,

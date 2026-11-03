@@ -89,6 +89,81 @@ describe('createRestConnector — request action', () => {
     });
 });
 
+// ─── request URL: a base URL that carries its own query ──────────────
+
+describe('createRestConnector — base URL with a query string', () => {
+    /** The URL one `request` dispatch sent, for a base URL and an action input. */
+    async function sentUrl(baseUrl: string, input: Record<string, unknown>, auth?: Parameters<typeof createRestConnector>[0]['auth']) {
+        const { impl, calls } = stubFetch();
+        const { handlers } = createRestConnector({ baseUrl, auth, fetchImpl: impl });
+        await handlers.request(input, {});
+        expect(calls).toHaveLength(1);
+        return calls[0].url;
+    }
+
+    it.each([
+        ['a path', 'https://api.example.com/v1?region=eu', '/items', 'https://api.example.com/v1/items?region=eu'],
+        ['a path without its leading slash', 'https://api.example.com/v1?region=eu', 'items', 'https://api.example.com/v1/items?region=eu'],
+        ['a base with a trailing slash', 'https://api.example.com/v1/?region=eu', '/items', 'https://api.example.com/v1/items?region=eu'],
+        ['a base with no path', 'https://api.example.com?api-version=2024-01', '/items', 'https://api.example.com/items?api-version=2024-01'],
+        ['several base parameters', 'https://api.example.com/v1?region=eu&api-version=2024-01', '/items/7', 'https://api.example.com/v1/items/7?region=eu&api-version=2024-01'],
+        ['an empty path', 'https://api.example.com/v1?region=eu', '', 'https://api.example.com/v1?region=eu'],
+    ])('%s: the path joins the base path and the base query stays the query', async (_label, baseUrl, path, expected) => {
+        expect(await sentUrl(baseUrl, { path })).toBe(expected);
+    });
+
+    it('merges the action query after the base query', async () => {
+        expect(await sentUrl('https://api.example.com/v1?region=eu', { path: '/items', query: { page: 2 } }))
+            .toBe('https://api.example.com/v1/items?region=eu&page=2');
+    });
+
+    it('a clash with the base parameter: the action query wins', async () => {
+        // `query` replaces the value where the parameter already stands.
+        expect(await sentUrl('https://api.example.com/v1?region=eu&api-version=1', { path: '/items', query: { region: 'us' } }))
+            .toBe('https://api.example.com/v1/items?region=us&api-version=1');
+    });
+
+    it('a clash with the base parameter: a query written inline in the path wins too', async () => {
+        expect(await sentUrl('https://api.example.com/v1?region=eu&api-version=1', { path: '/items?region=us&page=2' }))
+            .toBe('https://api.example.com/v1/items?api-version=1&region=us&page=2');
+    });
+
+    it('an api-key query parameter rides beside the base query', async () => {
+        expect(await sentUrl('https://api.example.com/v1?region=eu', { path: '/me' }, { type: 'api-key', key: 'k-1', paramName: 'api_key' }))
+            .toBe('https://api.example.com/v1/me?region=eu&api_key=k-1');
+    });
+
+    it('a base fragment keeps the place the text join gave it', async () => {
+        expect(await sentUrl('https://api.example.com/v1?region=eu#frag', { path: '/items' }))
+            .toBe('https://api.example.com/v1?region=eu#frag/items');
+        expect(await sentUrl('https://api.example.com/v1#frag', { path: '/items' }))
+            .toBe('https://api.example.com/v1#frag/items');
+    });
+
+    it.each([
+        ['no query', 'https://api.example.com/v1'],
+        ['a query', 'https://api.example.com/v1?region=eu'],
+    ])('a path never leaves the base origin (base with %s)', async (_label, baseUrl) => {
+        for (const path of ['//evil.example/x', 'https://evil.example/x', '\\\\evil.example/x', '/@evil.example/x', '/../../x']) {
+            const sent = new URL(await sentUrl(baseUrl, { path }));
+            expect(sent.origin, path).toBe('https://api.example.com');
+            expect(sent.username, path).toBe('');
+            expect(sent.search, path).toBe(new URL(baseUrl).search);
+        }
+    });
+
+    it('a base without a query sends the URL the text join sent', async () => {
+        const cases: Array<[string, string, string]> = [
+            ['https://api.example.com/v1', '/items?page=2', 'https://api.example.com/v1/items?page=2'],
+            ['https://api.example.com/v1/', 'items', 'https://api.example.com/v1/items'],
+            ['https://api.example.com/v1', '//evil.example/x', 'https://api.example.com/v1//evil.example/x'],
+            ['https://api.example.com/v1', 'https://evil.example/x', 'https://api.example.com/v1/https://evil.example/x'],
+            ['https://api.example.com', '', 'https://api.example.com/'],
+        ];
+        for (const [baseUrl, path, expected] of cases) expect(await sentUrl(baseUrl, { path }), `${baseUrl} + ${path}`).toBe(expected);
+    });
+});
+
 // ─── auth injection ──────────────────────────────────────────────────
 
 describe('createRestConnector — static auth', () => {

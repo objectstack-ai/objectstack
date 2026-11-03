@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: one in-process bootStack boot in beforeAll shared by all eight cases, plus real better-auth sign-ins, a session per case, since revocation and holds on that session are the subject; 6.2 s in a local run, the boot about 4.3 s of it; slowest CI reading 10.4 s (scheduled full-battery run 41255489006, Test Core shard log) x 1.25, rounded up
 
 /**
  * ADR-0069 on an IMPERSONATION session, on a real boot: which of the TARGET's

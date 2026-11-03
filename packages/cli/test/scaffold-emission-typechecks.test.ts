@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 50 — compiles the package type graph once: the lib and @objectstack/spec declaration files are parsed and bound once in this worker and shared by one TypeScript Program per emitted scaffold (each `os init` template, each `os g` generator, and the canary), each with its own tsconfig and diagnostics, instead of one `tsc` child per case; the file also imports the init and generate command modules to derive both rosters; slowest CI reading 33.0 s (run 41199450735, over the five scheduled ci.yml runs 41199450735 to 41271604267, one tsc child per case) x 1.25, rounded up
 
 /**
  * PIN (#15976) — every scaffold this package emits must survive the
@@ -54,9 +55,23 @@
  * scaffolds genuinely did parse, validate and load — they simply did not
  * COMPILE, and nothing here had ever asked a compiler.
  *
- * That is the gap this file fills, and it is why it spawns `tsc` over a
- * materialized project instead of importing the module. The type layer is a
- * separate axis from the schema layer, and it needs its own instrument.
+ * That is the gap this file fills, and it is why it runs the TypeScript
+ * compiler over a materialized project instead of importing the module. The
+ * type layer is a separate axis from the schema layer, and it needs its own
+ * instrument.
+ *
+ * ## One compiler, one Program per sandbox
+ *
+ * Each sandbox is compiled as its OWN Program, from its own `tsconfig.json`,
+ * with the diagnostics `tsc --noEmit -p <root>` reports — so a case still asks
+ * exactly "does this emitted project pass its own `typecheck` script", and no
+ * scaffold can lean on another's declarations. What the sandboxes share is the
+ * read-only part every one of them used to redo in its own `tsc` child: the
+ * parsed and bound `lib.*.d.ts` and `@objectstack/spec` declaration files,
+ * held in one source-file cache (the compiler's own reuse model: the language
+ * service shares source files across programs the same way). The compiler is
+ * the `typescript` package `typescript/bin/tsc` resolves to, loaded once in
+ * this worker instead of once per case.
  *
  * ## The rosters are derived, both of them
  *
@@ -100,9 +115,8 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 import {
   TEMPLATES,
   sanitizeNamespace,
@@ -113,7 +127,6 @@ import {
 } from '../src/commands/init.js';
 import { GENERATOR_SCAFFOLD_TARGETS } from '../src/commands/generate.js';
 import { probeBindings } from './helpers/scaffold-bindings.js';
-import { childEnv } from './helpers/serve-process.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -131,23 +144,79 @@ const PROJECT_NAME = 'my-app';
 const STEM = 'probe_thing';
 
 /**
- * Run the emitted project's own `typecheck` script: `tsc --noEmit`.
+ * Declaration files every sandbox reads (`lib.*.d.ts`, `@objectstack/spec`'s
+ * `dist/`), parsed and bound once and handed to each sandbox's Program.
  *
- * The child's environment is DECLARED (`check:cli-test-child-env`, #11595):
- * every spawn under `packages/cli/test/**` owes one, so that what a child
- * inherits is legible at the call site rather than being the vitest worker's
- * environment by default. `childEnv()` is this directory's choke point — the
- * environment minus the `VITEST_*` family — and `NO_COLOR` pairs with
- * `--pretty false` to keep tsc's diagnostics greppable in the failure message.
+ * Only files OUTSIDE the sandbox are cached: a sandbox's own sources are read
+ * fresh by its own Program. Every sandbox compiles under the same
+ * `SCAFFOLD_TSCONFIG_COMPILER_OPTIONS` (they differ only in `rootDir` and
+ * `include`, which change no parse), and the key carries the parse options
+ * the compiler asks with, so a cached file is the file that sandbox's own
+ * `tsc` would have parsed.
+ */
+const SHARED_DECLARATIONS = new Map<string, ts.SourceFile>();
+
+const FORMAT_HOST: ts.FormatDiagnosticsHost = {
+  getCanonicalFileName: (fileName) => fileName,
+  getCurrentDirectory: () => process.cwd(),
+  getNewLine: () => '\n',
+};
+
+/**
+ * Run the emitted project's own `typecheck` script: `tsc --noEmit -p <root>`.
+ *
+ * In process, one Program per sandbox (see the docblock's "One compiler, one
+ * Program per sandbox"). The verdict is `tsc`'s: exit 0 exactly when the
+ * config, options, global, syntactic, semantic and declaration diagnostics
+ * that `tsc --noEmit` reports hold no error, and the output is those
+ * diagnostics in `--pretty false` form, so a failure message is still
+ * greppable for its `TS####` code.
  */
 function typecheckProject(root: string): { code: number; output: string } {
-  const tscBin = createRequire(import.meta.url).resolve('typescript/bin/tsc');
-  const res = spawnSync(
-    process.execPath,
-    [tscBin, '--pretty', 'false', '--noEmit', '-p', root],
-    { cwd: root, encoding: 'utf-8', env: childEnv({ NO_COLOR: '1' }) },
+  const configErrors: ts.Diagnostic[] = [];
+  const parsed = ts.getParsedCommandLineOfConfigFile(
+    path.join(root, 'tsconfig.json'),
+    { noEmit: true },
+    {
+      ...ts.sys,
+      onUnRecoverableConfigFileDiagnostic: (diagnostic) => configErrors.push(diagnostic),
+    },
   );
-  return { code: res.status ?? 1, output: `${res.stdout ?? ''}${res.stderr ?? ''}` };
+  if (!parsed) {
+    return { code: 1, output: ts.formatDiagnostics(configErrors, FORMAT_HOST) };
+  }
+
+  const host = ts.createCompilerHost(parsed.options);
+  const readSourceFile = host.getSourceFile.bind(host);
+  const inSandbox = (fileName: string) => !path.relative(root, fileName).startsWith('..');
+  host.getSourceFile = (fileName, languageVersionOrOptions, onError, shouldCreateNewSourceFile) => {
+    if (inSandbox(fileName)) {
+      return readSourceFile(fileName, languageVersionOrOptions, onError, shouldCreateNewSourceFile);
+    }
+    const key = `${fileName}\u0000${JSON.stringify(languageVersionOrOptions)}`;
+    let file = SHARED_DECLARATIONS.get(key);
+    if (file === undefined) {
+      file = readSourceFile(fileName, languageVersionOrOptions, onError, shouldCreateNewSourceFile);
+      if (file !== undefined) SHARED_DECLARATIONS.set(key, file);
+    }
+    return file;
+  };
+
+  const program = ts.createProgram({
+    rootNames: parsed.fileNames,
+    options: parsed.options,
+    host,
+    projectReferences: parsed.projectReferences,
+    configFileParsingDiagnostics: ts.getConfigFileParsingDiagnostics(parsed),
+  });
+  const diagnostics = [...ts.getPreEmitDiagnostics(program), ...program.emit().diagnostics];
+  const errors = diagnostics.filter((d) => d.category === ts.DiagnosticCategory.Error);
+  return {
+    // The exit status `tsc --noEmit` answers an error with, measured on the
+    // canary against TypeScript 6.0.3; the cases read only zero vs non-zero.
+    code: errors.length === 0 ? 0 : 2,
+    output: ts.formatDiagnostics(diagnostics, FORMAT_HOST),
+  };
 }
 
 /** A sandbox project carrying the tsconfig `init` really writes. */

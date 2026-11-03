@@ -501,6 +501,11 @@ function overlayDiscriminatorOf(type: string): { field: string; canonical: strin
     return ITEM_KEY_DISCRIMINATORS[PLURAL_TO_SINGULAR[type] ?? type];
 }
 
+/** The body field that names `type`'s bundle member (`email_template`: `locale`), or `undefined` for a type with none. */
+export function overlayMemberField(type: string): string | undefined {
+    return overlayDiscriminatorOf(type)?.field;
+}
+
 /**
  * The value {@link OVERLAY_MEMBER_COLUMN} holds for the member a caller names.
  *

@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 50 — spawns the real producer once per single-cause fixture: four crash children that each boot the data stack and are SIGKILLed inside a distinct chunk plan (default, killed after a committed chunk, chunk size 2, a renamed step), two os serve boots (over the interrupted run, and the fresh control) and seven in-process os migrate resume boots over their own copies, all in one beforeAll; slowest CI reading 34.6 s (run 41217827347) of the five scheduled CI runs 41199450735, 41217827347, 41237094739, 41255489006, 41271604267, x 1.25, rounded up
 
 /**
  * [#21498] An interrupted `os migrate recorded-by` run resumes to completion

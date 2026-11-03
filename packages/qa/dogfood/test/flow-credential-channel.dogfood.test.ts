@@ -300,8 +300,14 @@ describe('[#20790] flow credentials live in the write-only channel, not the stor
             ],
             edges: [{ id: 'e1', source: 'start', target: 'end' }],
         });
-        const plain = await stack.apiAs(token, 'POST', '/automation/zz_channel_plain_src/clone', { name: 'zz_channel_plain_copy', label: 'Copy' });
-        expect(plain.status).toBe(200);
+        // [#28149, ADR-0146 D4] No package ships this source, so it has no paired
+        // customization package: its copy names the writable package it lands in.
+        const pkg = await stack.apiAs(token, 'POST', '/packages', { id: 'com.dogfood.channel-plain', name: 'Channel plain', version: '1.0.0', type: 'app' });
+        expect(pkg.status, await pkg.clone().text()).toBeLessThan(300);
+        const plain = await stack.apiAs(token, 'POST', '/automation/zz_channel_plain_src/clone', {
+            name: 'zz_channel_plain_copy', label: 'Copy', package: 'com.dogfood.channel-plain',
+        });
+        expect(plain.status, await plain.clone().text()).toBe(200);
     });
 
     it('7 — with no crypto provider a save carrying a credential is refused before anything is written', async () => {

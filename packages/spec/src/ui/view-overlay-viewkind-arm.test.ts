@@ -189,7 +189,7 @@ describe('W2 — a list-legal value under a key both arms declare differently is
   it.each([
     ['`aria` (the list view ARIA block; the form arm carries a retirement tombstone)', { aria: { ariaLabel: 'Leads' } }],
     ['an i18n `description` (the form arm takes a plain string only)', { description: { en: 'All leads' } }],
-    ['list-style `sharing` (the form arm\'s is the public-link block)', { sharing: { type: 'personal' } }],
+    ['list-style `sharing` (the form arm\'s is the public-link block)', { sharing: { lockedBy: 'admin' } }],
   ])('%s', (_label, extra) => {
     expect(acceptance({ ...LIST, ...extra }).branch).toBe('listOverlay');
   });

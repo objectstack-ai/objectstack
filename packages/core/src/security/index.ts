@@ -308,6 +308,8 @@ export {
 // plugin-hono-server, which re-exports them under the same names.
 export {
   buildEffectiveObjectPermissions,
+  // [#28877] The map's disabled-package accessor over an engine registry.
+  registryObjectPackageDisabled,
   foldWildcardSuperUser,
   clampManagedObjectWrites,
   seedSuperUserRestrictedObjects,
@@ -318,6 +320,10 @@ export {
   // field-permission entry's vote under its row condition (`when`).
   buildEffectiveFieldPermissions,
   fieldPermissionVote,
+  // [ADR-0066 ⑧, ruling of record 6573563853] The one super-user predicate
+  // (row bypass and field vote alike) and the field merge's super-user vote.
+  holdsSuperuserBypass,
+  superuserFieldVote,
   type FieldConditionVerdict,
   type FieldPermissionEntryLike,
   type EffectiveFieldPermissionsInputSet,
@@ -442,10 +448,12 @@ export {
 export {
   ADMIN_STANDING_SURFACE,
   ADMIN_STANDING_NON_TABLE_INPUTS,
+  ADMIN_STANDING_PLATFORM_ENUMERATION,
   adminStandingTables,
   adminStandingColumns,
   type AdminStandingTable,
   type AdminStandingNonTableInput,
+  type AdminStandingPlatformEnumeration,
 } from './admin-standing-surface.js';
 
 // [#11663 L2] The DEPLOYMENT-CONFIG anchor for PLATFORM_ADMIN — parse,
@@ -499,6 +507,15 @@ export {
   carryAppAutomationElevation,
   type AppAutomationElevation,
 } from './app-automation-elevation.js';
+
+// #28881 — the mark a flow run's system elevation carries so its record writes
+// keep the write-time reference check. Set by service-automation, read by
+// objectql.
+export {
+  FLOW_WRITE_REFERENCE_CHECK,
+  markFlowWriteReferenceCheck,
+  keepsFlowWriteReferenceCheck,
+} from './flow-write-reference-check.js';
 
 // Ruling of record 6355206139 — the EXTERNAL rung's OWD seam: plugin-security
 // stamps whether a held grant's RLS speaks, plugin-sharing floors the OWD.

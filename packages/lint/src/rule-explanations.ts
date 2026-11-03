@@ -405,8 +405,9 @@ const DASHBOARD_FILTER_BINDING_UNKNOWN_EXPLANATION: RuleExplanation = {
       'way the widget counts different rows than the author wrote, with nothing on the page to say so, ' +
       'which is why the rule is an error and is not suppressible.',
     'To fix it, rename the key to a declared filter name (the finding names the nearest one), declare ' +
-      'the filter on the dashboard, or delete the entry. A `dateRange` key on a dashboard that declares ' +
-      'no `dateRange` is reported the same way: there is no date range for it to bind.',
+      'the filter on the dashboard, or delete the entry. A `dateRange` key is reported the same way ' +
+      'only when the dashboard declares neither `dateRange` nor a `globalFilters` entry named `dateRange`: ' +
+      'either one is a declared filter under that name, and with neither there is nothing for it to bind.',
   ],
 };
 
@@ -888,6 +889,30 @@ const SECURITY_MODIFY_ALL_DELETE_WITHHELD_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION: RuleExplanation = {
+  rule: 'security-superuser-field-mask-inert',
+  covers: 'why a field mask beside View All or Modify All hides nothing',
+  paragraphs: [
+    '`viewAllRecords` (View All) and `modifyAllRecords` (Modify All) are the super-user bypass on an object. ' +
+      'A set that holds one votes on every field of that object when the field permissions are merged: View ' +
+      'All votes `readable: true`, Modify All votes `readable: true` and `editable: true` (ADR-0066 D2 as ' +
+      'amended). The merge is a union, so a `readable: false` the same set declares on that object hides the ' +
+      'field from none of the set\'s holders, and under Modify All its edit lock (`editable: false`, or ' +
+      '`editable` omitted, which parses to false) holds none of them back either. The stored set still reads ' +
+      'as masked, which is why an author or a reviewer takes the field to be protected.',
+    'The set\'s bypass is read the way the runtime reads it: its own entry for the object when it has one, ' +
+      'otherwise its `\'*\'` entry, as a lookup and never a merge. View All beside an edit lock is not ' +
+      'reported, because View All never widens a write, so that lock still binds. Only the set that declares ' +
+      'the entry is judged: a holder of two sets is unmasked by the other set\'s bypass too, but no author ' +
+      'wrote an inert entry there.',
+    'This is a warning, not an error: the pair is legal and no door refuses it. To fix it, decide which half ' +
+      'is meant. If the field must stay hidden or read-only, remove the bypass bit from the object entry and ' +
+      'reach every row another way, with `readScope: \'org\'` / `writeScope: \'org\'` on the entry or a ' +
+      '`rowLevelSecurity` policy whose condition every row satisfies; the mask then binds. If the bypass is ' +
+      'meant, delete the field entry, which never took effect.',
+  ],
+};
+
 const SECURITY_OWD_ALIAS_EXPLANATION: RuleExplanation = {
   rule: 'security-owd-alias',
   covers: 'which sharing values are retired or misplaced',
@@ -951,6 +976,12 @@ const VISIBILITY_PREDICATE_OVER_BUDGET_EXPLANATION: RuleExplanation = {
       'does not echo the predicate; its `path` locates it.',
     'Logic genuinely this large is not element visibility: compute it once on the record rather than ' +
       're-deriving it in every predicate that needs it.',
+    'An app navigation entry\'s `visible` is judged the same way, and there the cost is the opposite ' +
+      'one: the console\'s navigation gate falls CLOSED, so an entry whose predicate is over budget is ' +
+      'hidden from every viewer, its author included. A navigation entry binds no `record`, so the ' +
+      'rewrite is a smaller predicate over the viewer: collapse a chain of `\'a\' in current_user.positions` ' +
+      'tests into one `current_user.positions.exists(p, p in [\'a\', \'b\'])`, or gate the entry on one ' +
+      'permission check such as `current_user.can(\'OBJECT\', \'read\')`.',
   ],
 };
 
@@ -962,6 +993,12 @@ const VISIBILITY_PREDICATE_SYNTAX_EXPLANATION: RuleExplanation = {
       'evaluate, and the console falls OPEN: the element renders unconditionally and looks exactly like ' +
       'one with no predicate at all (failing open is the console\'s settled behaviour). Every other ' +
       'predicate surface already gates a syntax fault (ADR-0032), so this one does too.',
+    'An app navigation entry\'s `visible` is judged the same way, and there the cost is the opposite ' +
+      'one: the console\'s navigation gate falls CLOSED, so an entry whose predicate does not parse is ' +
+      'hidden from every viewer, its author included. Only whether it parses is judged on a navigation ' +
+      'entry (a size overrun is `visibility-predicate-over-budget`): it binds `current_user`, `user`, ' +
+      '`features` and the rest of the shell\'s roots rather than `record`, so the reference checks a page ' +
+      'predicate gets do not apply to it.',
     'Spellings from other languages do not parse: write `==` (not `===`), `!=` (not `!==` or `<>`), ' +
       '`&&` (not `and`), `||` (not `or`), `!` (not `not`). A predicate that is flawless CEL but too ' +
       'large is `visibility-predicate-over-budget` instead.',
@@ -999,6 +1036,22 @@ const VISIBILITY_PREDICATE_HAS_ARGUMENT_EXPLANATION: RuleExplanation = {
       '(`data` instead of `record` on a metadata-editing form), and `size(record.items) > 0` to ask whether ' +
       'a list has a first element. `has()` over a selection whose receiver is indexed or called, such as ' +
       '`has(record.items[0].name)`, is accepted.',
+  ],
+};
+
+const VISIBILITY_PAGE_VARIABLE_UNDECLARED_EXPLANATION: RuleExplanation = {
+  rule: 'visibility-page-variable-undeclared',
+  covers: 'which page variables a page predicate can read',
+  paragraphs: [
+    'On a page component `page` holds the page\'s own variables and nothing else: the console seeds it ' +
+      'from the page\'s `variables` declarations, and the only things that write it — an element bound ' +
+      'by a declaration\'s `source`, and a dashboard\'s filter bar — write declared names. So ' +
+      '`page.NAME` for a `NAME` no declaration carries is never there: the predicate cannot evaluate and ' +
+      'the console falls OPEN, rendering the element unconditionally.',
+    'It is an error on every authoring door — `os validate`, `os build`, `os lint` and the page save ' +
+      'door (Studio, REST, MCP), including a draft\'s diagnostics and its publish. Declare the variable ' +
+      'in the page\'s `variables`, or correct the name to one the page declares (names are compared ' +
+      'exactly, case included). A predicate that reads through an index (`page[\'x\']`) is not judged.',
   ],
 };
 
@@ -2043,6 +2096,33 @@ const FLOW_TRIGGER_UNKNOWN_OBJECT_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// `flow-input-unknown-object` (#29442) shares the rule file, the hedge and the
+// closure split with `flow-trigger-unknown-object` above; what differs is the
+// position it reads and what a wrong name costs.
+
+const FLOW_INPUT_UNKNOWN_OBJECT_EXPLANATION: RuleExplanation = {
+  rule: 'flow-input-unknown-object',
+  covers: 'why an unknown start-input object warns, and when it refuses',
+  paragraphs: [
+    'A flow input may declare that its value is the id of a record of a named object, with `objectName` on ' +
+      'the variable. The start doors are to load such an input from exactly that name in the caller\'s own ' +
+      'scope before the run exists, so a name no object answers to would refuse every start that supplies ' +
+      'the input. Names match exactly — `app_candidate`, not `candidate`. The declaration is planned: no ' +
+      'door reads it yet, and the property lint says so separately.',
+    'The rule asks whether this stack defines the object. One it does not define may be declared by ' +
+      'another installed package, which a build of this stack cannot see, so the finding is a warning and ' +
+      'can be ignored when such a package declares the object; a `sys_` name is a platform object and is ' +
+      'not judged. A start that omits the input is not affected, so this is not a verdict that the flow ' +
+      'never runs.',
+    'A write into a package is judged against that package\'s closure instead: its own objects, the objects ' +
+      'of the packages its manifest declares in `dependencies`, and platform objects. An object outside it ' +
+      'is one the package never declared it may reference, so there the finding is an error and the publish ' +
+      'is refused, the verdict `flow-trigger-unknown-object` gives a trigger object. Declare a dependency on ' +
+      'the package that defines the object, or name an object inside the closure. A `sys_` name is not ' +
+      'judged there either.',
+  ],
+};
+
 // ── Validation rules that compile at publish time ───────────────────────────
 // `validate-rule-compilability.ts` and `validate-rule-schema-formats.ts`: the
 // write path's fail-open skip and the runtime's ajv environment are shared,
@@ -2452,14 +2532,18 @@ const SEARCHABLE_FIELD_UNSEARCHABLE_EXPLANATION: RuleExplanation = {
   covers: 'which searchableFields entries the runtime refuses',
   paragraphs: [
     SEARCH_FIELDS_ECHO,
-    // Held equal to `SEARCHABLE_TEXTUAL_TYPES` + `SEARCHABLE_ENUM_TYPES` by the rule's tests.
+    // Held equal to `SEARCHABLE_TEXTUAL_TYPES` + `SEARCHABLE_ENUM_TYPES`, and its flag exclusions to
+    // `SEARCH_FLAG_EXCLUDED_TYPES`, by the rule's tests.
     'The allowed set is computed by the function the ingress and the engine consult ' +
       '(`resolveSearchFieldResolution`): the object\'s declared `searchableFields` when it declares ' +
       'them, otherwise the AUTO-DEFAULT set — its text-like columns (text / email / phone / url / ' +
-      'autonumber / textarea / markdown / select), never a system/audit column or a hidden field. A ' +
-      '`lookup` or `master_detail` column stores only the referenced record\'s id, so it is never a ' +
-      'keyword target: to search by the related record\'s title, mirror it onto a stored text field ' +
-      'and declare that. Declaring `searchableFields` on the object chooses its set explicitly, and a ' +
+      'autonumber / textarea / markdown / select), never a system/audit column or a hidden field, plus ' +
+      'every field the object marks `searchable: true`, of any type but `secret` / `password` / ' +
+      '`vector`. A `lookup` or `master_detail` column stores only the referenced record\'s id, so the ' +
+      'default never picks it and marking it `searchable: true` scans that id, never the title: to ' +
+      'search by the related record\'s title, mirror it onto a stored text field and declare that. ' +
+      'Declaring `searchableFields` on the object chooses its set explicitly (a field\'s own ' +
+      '`searchable` is then not read), and a ' +
       'view then narrows that set, never widens it (ADR-0061). The verdict quotes at most three names ' +
       'of a declared set.',
     VIRTUAL_FIELD_STORAGE,
@@ -2713,6 +2797,69 @@ const PRINT_PAGE_BLOCK_UNPRINTABLE_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// ── Page variables (`validate-page-variables.ts`) ───────────────────────────
+
+const PAGE_VARIABLE_NAME_DUPLICATE_EXPLANATION: RuleExplanation = {
+  rule: 'page-variable-name-duplicate',
+  covers: 'why a page variable name may be declared only once',
+  paragraphs: [
+    'A page variable is page-local state that predicates read as `page.NAME` and an element writes ' +
+      'through its `source` binding. The console seeds the page\'s variable store from the declarations ' +
+      'in order, so a second declaration of the same name silently replaces the first: the first one\'s ' +
+      '`type` and `defaultValue` are gone, and nothing says so.',
+    'It is an error on every authoring door — `os validate`, `os build`, `os lint` and the page save ' +
+      'door (Studio, REST, MCP), including a draft\'s diagnostics and its publish. Rename one of the two ' +
+      'or remove the duplicate. A stored page keeps loading and serving; only its next save is judged.',
+  ],
+};
+
+const PAGE_VARIABLE_NAME_EMPTY_EXPLANATION: RuleExplanation = {
+  rule: 'page-variable-name-empty',
+  covers: 'why a page variable needs a name',
+  paragraphs: [
+    'A page variable is reached only by its name: predicates read it as `page.NAME`, and an element ' +
+      'writes it through its `source` binding. A declaration whose name is empty or blank can be neither ' +
+      'read nor written, so it is a declaration that does nothing while looking like one that works.',
+    'It is an error on every authoring door — `os validate`, `os build`, `os lint` and the page save ' +
+      'door (Studio, REST, MCP), including a draft\'s diagnostics and its publish. Name the variable or ' +
+      'remove the entry.',
+  ],
+};
+
+const PAGE_VARIABLE_DEFAULT_TYPE_EXPLANATION: RuleExplanation = {
+  rule: 'page-variable-default-type',
+  covers: 'which `defaultValue` each page variable type admits',
+  paragraphs: [
+    'A page variable starts with its `defaultValue`, or with its type\'s empty value when the default ' +
+      'is omitted: `\'\'` for `string` and `record_id`, `0` for `number`, `false` for `boolean`, `{}` ' +
+      'for `object`, `[]` for `array`. A default of another kind — `defaultValue: "abc"` on a `number` ' +
+      'variable — is seeded as written, so every predicate that reads it compares the wrong kind of ' +
+      'value while the declaration claims otherwise.',
+    'Admitted: a string for `string` and `record_id`, a finite number for `number`, `true` or `false` ' +
+      'for `boolean`, a plain object for `object`, an array for `array`, and `null` for any type ' +
+      '("no value yet"). A variable with no `type` is a `string` variable, as the schema defaults it.',
+    'It is an error on every authoring door — `os validate`, `os build`, `os lint` and the page save ' +
+      'door (Studio, REST, MCP), including a draft\'s diagnostics and its publish. Fix the default, omit ' +
+      'it, or declare the type the default really has.',
+  ],
+};
+
+const PAGE_VARIABLE_SOURCE_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'page-variable-source-unknown',
+  covers: 'what a page variable `source` must name',
+  paragraphs: [
+    'A page variable\'s `source` is the `id` of the component that writes it — a record picker or a ' +
+      'text input on the same page. The console binds the writer by comparing that `id` exactly, so a ' +
+      '`source` no component on the page carries binds nothing: no element ever writes the variable, ' +
+      'and it keeps its default for as long as the page is open while the author believes it is fed.',
+    'It is an error on every authoring door — `os validate`, `os build`, `os lint` and the page save ' +
+      'door (Studio, REST, MCP), including a draft\'s diagnostics and its publish. Set `source` to the ' +
+      'writer\'s `id` (components nested inside a container count), give the writer that `id`, or drop ' +
+      '`source` when nothing on the page writes the variable. A page authored as `source` code ' +
+      '(`kind: \'react\'` or `\'html\'`) is not judged, because its components live in the code.',
+  ],
+};
+
 // ── Filter comparands (`validate-preset-comparands.ts`) ────────────────────
 
 const FILTER_PRESET_COMPARAND_EXPLANATION: RuleExplanation = {
@@ -2943,8 +3090,12 @@ const TITLE_FORMAT_RETIRED_EXPLANATION: RuleExplanation = {
       'write; point `nameField` at it. A formula with `returnType: \'text\'` is title-eligible too and ' +
       'stays legal for a title shown for display only: its value is computed on read and stored nowhere, ' +
       'so a sort by it is refused, search never reaches it, and an import cannot match a lookup cell ' +
-      'against it. Then drop `titleFormat`, which this warning reports for as long as it is declared.',
-    'A warning, not an error: the schema still parses the key, so existing metadata keeps loading.',
+      'against it. Then drop `titleFormat`: an object definition that declares it is refused at the ' +
+      'metadata save gate (an active save, a draft promotion, a restore) and by `os validate`, ' +
+      '`os build` and `os lint`.',
+    'An error, not a warning, though the schema still parses the key: a stored object that carries it ' +
+      'keeps loading and reading, and is refused only when it is next saved or validated. A draft ' +
+      'save passes; its publish is refused.',
   ],
 };
 
@@ -3081,24 +3232,39 @@ const RELATIONSHIP_MASTER_DETAIL_REQUIRED_EXPLANATION: RuleExplanation = {
   ],
 };
 
+/**
+ * Where R13 runs since it became a gate — `lintSummaryRollups`, on all three
+ * commands and the runtime publish gate's `object` writes.
+ */
+const ROLLUP_GATE_REACH =
+  'Reach: `os validate`, `os build`, `os lint` and the metadata write door\'s publish gate (an ' +
+  'object saved active, or a draft published) all refuse it. A draft save is still stored, and its ' +
+  '`_diagnostics` reads `valid: false` with this finding until it is fixed. A stored object already ' +
+  'in violation keeps loading; it is refused at its next publish.';
+
 const ROLLUP_NON_NUMERIC_AGGREGAND_EXPLANATION: RuleExplanation = {
   rule: 'rollup/non-numeric-aggregand',
-  covers: 'why a min/max roll-up needs a numeric child field',
+  covers: 'which child field a roll-up function can aggregate',
   paragraphs: [
     'A `summary` field persists its roll-up\'s answer, and its value contract is a finite number: ' +
       '`summary` is a member of the spec\'s `NUMERIC_VALUE_TYPES`. `min` and `max` answer with a ' +
       'value of the CHILD field\'s own type, and the engine stores the driver\'s answer verbatim, so ' +
       'an ordinary "latest shipment" roll-up — `max` over a `datetime` child — computes an instant ' +
-      'into a number column.',
-    'Accepted children are the numeric value types and the boolean ones, which aggregate as numbers ' +
-      'on every backend. This is deliberately not the analytics aggregate table, which accepts a ' +
-      'temporal `min` / `max` because a dataset measure RETURNS its answer to the caller instead of ' +
-      'storing it.',
-    'Judged: `min` and `max` only — `count` reads no value off the field, and `sum` / `avg` over a ' +
-      'non-numeric child is a different shape. Silent when the child object or field does not ' +
-      'resolve in this stack (another package, a partial load): a rule that cannot answer does not ' +
-      'block.',
-    DATA_MODEL_SWEEP_REACH,
+      'into a number column. Their accepted children are the numeric value types and the boolean ones, ' +
+      'which aggregate as numbers on every backend. This is deliberately not the analytics aggregate ' +
+      'table, which accepts a temporal `min` / `max` because a dataset measure RETURNS its answer to ' +
+      'the caller instead of storing it.',
+    '`sum` and `avg` always answer a number, but the engine computes every roll-up with an aggregate ' +
+      'query, and its aggregate door refuses each pair the analytics aggregate table refuses — `sum` ' +
+      'or `avg` over a `text`, option, reference, temporal or `formula` child, and `sum` over a ' +
+      '`percent` (a rate does not add). On a roll-up that refusal comes after the child write has ' +
+      'committed, on every create, update and delete of the child, so a client is told a write failed ' +
+      'that succeeded. Their accepted children are exactly that table\'s rows.',
+    'Judged: `min`, `max`, `sum` and `avg` — `count` reads no value off the field. Silent when the ' +
+      'child field does not resolve, or the child object does not resolve in this stack (another ' +
+      'package, a partial load, or an install that writes the parent before its child): a rule that ' +
+      'cannot answer does not block.',
+    ROLLUP_GATE_REACH,
   ],
 };
 
@@ -4710,8 +4876,10 @@ const FLOW_CREDENTIAL_LITERAL_EXPLANATION: RuleExplanation = {
       '`api-key` with `paramName`. The schema\'s other kinds also take their secret only as a ' +
       '`credentialRef`, but none is a home a literal moves into by shape: `oauth2` (grant ' +
       '`authorization_code` or `client_credentials`) and `app-credential` (vendor `feishu`, ' +
-      '`dingtalk` or `wecom`) carry a grant whose token the server obtains per dispatch, and until it ' +
-      'runs that grant such an instance is held degraded and calls no upstream; `signed` signs each ' +
+      '`dingtalk` or `wecom`) carry a grant whose token the server obtains per dispatch through the ' +
+      'built-in `rest`, `openapi` and `mcp` providers (an `authorization_code` instance once an ' +
+      'administrator connects it); on a provider that does not ask the credential handle such an ' +
+      'instance is held degraded and calls no upstream; `signed` signs each ' +
       'request with its key. A credential in `connectorConfig.input` is dropped instead, ' +
       'because the connector authenticates through its own `auth`. No variant carries a secret in a ' +
       'url path, so a url path is not judged and no fix line promises one.',
@@ -4720,6 +4888,50 @@ const FLOW_CREDENTIAL_LITERAL_EXPLANATION: RuleExplanation = {
     'The `connectors:` entry also names a `provider` (\'rest\' for a plain HTTP API). A Basic pair is ' +
       '`auth: { type: \'basic\', username, credentialRef }`, and `username` is no secret. The connector guide ' +
       'is content/docs/automation/connectors.mdx.',
+    'Always a warning, and nothing is refused: the predicate is a heuristic (a value under a name ' +
+      'that reads as a credential, or a value that opens with an auth scheme), so a key named ' +
+      '`token` can hold something that is not a secret, and a false positive costs a line of ' +
+      'reading, never a blocked save. A `{variable}` template is not a literal and draws nothing. ' +
+      'The finding names where the value sits and never the value itself, because it travels into ' +
+      'CI logs, the runtime gate\'s server log line and the save response.',
+  ],
+};
+
+// ── Connector credential literals (`lint-connector-credential-literals.ts`) ──
+
+const CONNECTOR_CREDENTIAL_LITERAL_EXPLANATION: RuleExplanation = {
+  rule: 'connector-credential-literal',
+  covers: 'which connector maps are judged, and where a credential goes',
+  paragraphs: [
+    // The four maps are held to the rule and to the connector redactor by the rule's test.
+    'A declarative connector entry carries four maps a provider sends upstream as written: ' +
+      '`providerConfig.headers`, `providerConfig.defaultHeaders` (the `rest` provider), ' +
+      '`providerConfig.transport.headers` (an `mcp` http transport) and `providerConfig.transport.env` ' +
+      '(an `mcp` stdio transport). The metadata read path withholds each of them whole, because one ' +
+      'entry of a map cannot be told from another, but withholding answers the read only: a literal ' +
+      'credential in one of them is still stored in metadata, carried by every build artifact and ' +
+      'source checkout of the stack, and rotated only by editing metadata.',
+    'The supported home for an outbound credential is the connector\'s own `auth`, whose ' +
+      '`credentialRef` names a secrets-layer reference resolved when the instance materializes (an ' +
+      'environment variable in the open tier) and never stored in metadata (ADR-0097 §3). The `rest` ' +
+      'provider and an `mcp` http transport send the resolved credential themselves, so a header ' +
+      'literal moves by shape: an `Authorization` bearer value to `auth: { type: \'bearer\', credentialRef }`, ' +
+      'a key header to `{ type: \'api-key\', headerName, credentialRef }`, a Basic pair to ' +
+      '`{ type: \'basic\', username, credentialRef }`.',
+    'A stdio MCP server takes the same `auth`, and `providerConfig.transport.credentialEnv` names the ' +
+      'environment variable the `mcp` provider hands the resolved credential to the server in, so an env ' +
+      'literal moves to `auth: { type: \'bearer\', credentialRef }` plus `credentialEnv: \'VARIABLE_NAME\'`, ' +
+      'and the env entry is dropped. Without `credentialEnv` a stdio transport does not apply `auth` at ' +
+      'all, so the env finding names both keys. The connector guide is content/docs/automation/connectors.mdx.',
+    // Both route findings are held to the rule by its test.
+    'Two more findings sit on that route. A stdio `mcp` entry that declares a `bearer`, `api-key` or `basic` ' +
+      '`auth` and no `credentialEnv` is reported at `auth`: the reference is still resolved, and a missing one ' +
+      'still degrades the instance, but the provider hands the credential to a stdio server only in the variable ' +
+      '`credentialEnv` names, so without it the credential reaches nothing and nothing else says so. Add the key, ' +
+      'or drop `auth` when the server takes no credential. And `credentialEnv` holds a variable name that is ' +
+      'served on every metadata read, so a value there that reads as a credential (it opens with an auth scheme, ' +
+      'or carries a run of 16 or more letters and digits that switches between the two at least four times, as a ' +
+      'generated token does) is reported at that key. A conventional name such as `REPO_MCP_TOKEN` never draws.',
     'Always a warning, and nothing is refused: the predicate is a heuristic (a value under a name ' +
       'that reads as a credential, or a value that opens with an auth scheme), so a key named ' +
       '`token` can hold something that is not a secret, and a false positive costs a line of ' +
@@ -5278,6 +5490,65 @@ const REPORT_DATE_RANGE_DIMENSION_NONE_EXPLANATION: RuleExplanation = {
   paragraphs: REPORT_DATE_RANGE_SHARED_PARAGRAPHS,
 };
 
+// The pairing rule lives in `@objectstack/spec/kernel`'s `customization-package.ts`
+// (`customizationNamespace`, `MAX_CUSTOMIZATION_BASE_NAMESPACE_LENGTH`,
+// `CUSTOMIZATION_NAMESPACE_SUFFIX`); `rule-explanations.test.ts` holds the
+// numbers and the suffix written below to those constants.
+const NAMESPACE_NO_CUSTOMIZATION_PAIR_EXPLANATION: RuleExplanation = {
+  rule: 'namespace-no-customization-pair',
+  covers: 'why a long namespace leaves a package uncustomizable',
+  paragraphs: [
+    'A package\'s paired customization package holds its installers\' changes to it (ADR-0146). The ' +
+      'first time an installer customizes an installed package, the platform creates `<id>.custom` ' +
+      'beside it, with the package\'s namespace followed by `_custom` as its namespace. A manifest ' +
+      'namespace is at most 20 characters and `_custom` takes 7, so a namespace of 14 characters or more ' +
+      'has no pair namespace: the door that creates the pair refuses the package, and its installers can ' +
+      'never customize it. (A package an installer authored in Studio is writable and is customized ' +
+      'directly; the pair exists for a package provided by code or installed as an app.)',
+    'The pair namespace is never shortened to fit. Truncating or hashing it would be a second spelling ' +
+      'of the pair\'s namespace that nothing could check the pair\'s declarations against, so the only ' +
+      'remedy is the package\'s own namespace.',
+    'Nothing fails when such a package is built or installed: the refusal arrives on an installer\'s ' +
+      'first customization, long after the namespace has shipped. By then shortening it is no small ' +
+      'edit, because the namespace is the prefix of every object name, so every table name and REST path ' +
+      'of the package carries it. The warning is printed while renaming is still a source edit.',
+    'Judged: the namespace of each package one install delivers, which is each `packages[]` body of a ' +
+      'multi-package artifact, or the top-level `manifest` of a single package (an artifact\'s own ' +
+      'wrapper manifest is not a package). Not judged: a package that is itself a pair (an id ending in ' +
+      '`.custom`), whose namespace is a pair namespace and is never paired again; a package that declares ' +
+      'no namespace; and a namespace the manifest grammar refuses for another reason (an uppercase ' +
+      'letter, a leading digit), which `os validate` refuses with the grammar\'s own sentence.',
+    'It stays a warning: the package builds, installs and runs, and only its customization is refused, ' +
+      'so a package nobody is meant to customize may keep its namespace. To fix it, shorten ' +
+      '`manifest.namespace` to 13 characters or fewer and rename the object names it prefixes to match.',
+  ],
+};
+
+// The verdict is `validateControlFlow` from `@objectstack/spec/automation`, the
+// call the automation engine's `registerFlow` makes; the rule file holds no copy.
+const FLOW_REGION_SHAPE_INVALID_EXPLANATION: RuleExplanation = {
+  rule: 'flow-region-shape-invalid',
+  covers: 'what makes a flow region one the engine registers',
+  paragraphs: [
+    'A `loop` body, each `parallel` branch and a `try_catch` try or catch region is a small graph of its ' +
+      'own (ADR-0031). The automation engine runs it from its one entry node to its one exit node, so when ' +
+      'it registers a flow it refuses a region that has more than one entry or exit, or a cycle, at any ' +
+      'depth, and a `parallel` with fewer than two branches. A refused flow is not registered: the server ' +
+      'logs a warning at boot and runs without it, so its trigger never fires.',
+    'The rule asks the engine\'s own question: each flow is parsed with the flow schema and handed to the ' +
+      'same region check the engine runs when it registers the flow, and the message is the engine\'s ' +
+      'refusal behind the flow\'s name. Like the engine it reports a flow\'s first malformed region, so a ' +
+      'flow with two may need two fixes. A flow the flow schema refuses cannot be judged and is reported ' +
+      'as such, with the schema\'s issues. The server asks it too, when a flow is saved active or a draft ' +
+      'is published, of the flow with its legacy spellings converted to the current ones: the body the ' +
+      'engine registers.',
+    'Not judged: a cycle in the flow\'s top-level graph, outside any region. The engine refuses that too, ' +
+      'with a check this rule cannot reach.',
+    'To fix a multi-exit region, add one node every exit of the region leads to; to fix a cycle, remove ' +
+      'the edge that leads back; give a `parallel` a second branch or replace it with its one branch.',
+  ],
+};
+
 export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Object.freeze({
   [FIELD_NO_CONSUMERS_EXPLANATION.rule]: FIELD_NO_CONSUMERS_EXPLANATION,
   [SECURITY_OWD_UNSET_EXPLANATION.rule]: SECURITY_OWD_UNSET_EXPLANATION,
@@ -5316,6 +5587,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION.rule]: SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION,
   [SECURITY_WILDCARD_VAMA_EXPLANATION.rule]: SECURITY_WILDCARD_VAMA_EXPLANATION,
   [SECURITY_MODIFY_ALL_DELETE_WITHHELD_EXPLANATION.rule]: SECURITY_MODIFY_ALL_DELETE_WITHHELD_EXPLANATION,
+  [SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION.rule]: SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION,
   [SECURITY_OWD_ALIAS_EXPLANATION.rule]: SECURITY_OWD_ALIAS_EXPLANATION,
   [SECURITY_DELEGATION_MISSING_REASON_EXPLANATION.rule]: SECURITY_DELEGATION_MISSING_REASON_EXPLANATION,
   [VISIBILITY_ROOT_MISLAYERED_EXPLANATION.rule]: VISIBILITY_ROOT_MISLAYERED_EXPLANATION,
@@ -5323,6 +5595,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [VISIBILITY_PREDICATE_SYNTAX_EXPLANATION.rule]: VISIBILITY_PREDICATE_SYNTAX_EXPLANATION,
   [VISIBILITY_PREDICATE_UNKNOWN_FUNCTION_EXPLANATION.rule]: VISIBILITY_PREDICATE_UNKNOWN_FUNCTION_EXPLANATION,
   [VISIBILITY_PREDICATE_HAS_ARGUMENT_EXPLANATION.rule]: VISIBILITY_PREDICATE_HAS_ARGUMENT_EXPLANATION,
+  [VISIBILITY_PAGE_VARIABLE_UNDECLARED_EXPLANATION.rule]: VISIBILITY_PAGE_VARIABLE_UNDECLARED_EXPLANATION,
   [VISIBILITY_BARE_IDENTIFIER_EXPLANATION.rule]: VISIBILITY_BARE_IDENTIFIER_EXPLANATION,
   [HOOK_BODY_WRITE_UNKNOWN_FIELD_EXPLANATION.rule]: HOOK_BODY_WRITE_UNKNOWN_FIELD_EXPLANATION,
   [HOOK_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION.rule]: HOOK_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION,
@@ -5358,6 +5631,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [FLOW_TRIGGER_UNKNOWN_EVENT_EXPLANATION.rule]: FLOW_TRIGGER_UNKNOWN_EVENT_EXPLANATION,
   [FLOW_API_TRIGGER_SECRET_MISSING_EXPLANATION.rule]: FLOW_API_TRIGGER_SECRET_MISSING_EXPLANATION,
   [FLOW_TRIGGER_UNKNOWN_OBJECT_EXPLANATION.rule]: FLOW_TRIGGER_UNKNOWN_OBJECT_EXPLANATION,
+  [FLOW_INPUT_UNKNOWN_OBJECT_EXPLANATION.rule]: FLOW_INPUT_UNKNOWN_OBJECT_EXPLANATION,
   [VALIDATION_RULE_REGEX_UNCOMPILABLE_EXPLANATION.rule]: VALIDATION_RULE_REGEX_UNCOMPILABLE_EXPLANATION,
   [VALIDATION_RULE_JSON_SCHEMA_UNCOMPILABLE_EXPLANATION.rule]: VALIDATION_RULE_JSON_SCHEMA_UNCOMPILABLE_EXPLANATION,
   [VALIDATION_RULE_JSON_SCHEMA_UNKNOWN_FORMAT_EXPLANATION.rule]: VALIDATION_RULE_JSON_SCHEMA_UNKNOWN_FORMAT_EXPLANATION,
@@ -5382,6 +5656,10 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [COMPONENT_TYPE_UNKNOWN_EXPLANATION.rule]: COMPONENT_TYPE_UNKNOWN_EXPLANATION,
   [COMPONENT_PROPS_INVALID_EXPLANATION.rule]: COMPONENT_PROPS_INVALID_EXPLANATION,
   [PRINT_PAGE_BLOCK_UNPRINTABLE_EXPLANATION.rule]: PRINT_PAGE_BLOCK_UNPRINTABLE_EXPLANATION,
+  [PAGE_VARIABLE_NAME_DUPLICATE_EXPLANATION.rule]: PAGE_VARIABLE_NAME_DUPLICATE_EXPLANATION,
+  [PAGE_VARIABLE_NAME_EMPTY_EXPLANATION.rule]: PAGE_VARIABLE_NAME_EMPTY_EXPLANATION,
+  [PAGE_VARIABLE_DEFAULT_TYPE_EXPLANATION.rule]: PAGE_VARIABLE_DEFAULT_TYPE_EXPLANATION,
+  [PAGE_VARIABLE_SOURCE_UNKNOWN_EXPLANATION.rule]: PAGE_VARIABLE_SOURCE_UNKNOWN_EXPLANATION,
   [FILTER_PRESET_COMPARAND_EXPLANATION.rule]: FILTER_PRESET_COMPARAND_EXPLANATION,
   [FILTER_TOKEN_UNKNOWN_EXPLANATION.rule]: FILTER_TOKEN_UNKNOWN_EXPLANATION,
   [APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY_EXPLANATION.rule]: APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY_EXPLANATION,
@@ -5457,6 +5735,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [PAGE_SOURCE_CLASSNAME_TAILWIND_EXPLANATION.rule]: PAGE_SOURCE_CLASSNAME_TAILWIND_EXPLANATION,
   [PAGE_VISUALIZATION_WITHOUT_BINDING_EXPLANATION.rule]: PAGE_VISUALIZATION_WITHOUT_BINDING_EXPLANATION,
   [FLOW_CREDENTIAL_LITERAL_EXPLANATION.rule]: FLOW_CREDENTIAL_LITERAL_EXPLANATION,
+  [CONNECTOR_CREDENTIAL_LITERAL_EXPLANATION.rule]: CONNECTOR_CREDENTIAL_LITERAL_EXPLANATION,
   [AI_SKILL_SURFACE_MISMATCH_EXPLANATION.rule]: AI_SKILL_SURFACE_MISMATCH_EXPLANATION,
   [AI_SKILL_TOOL_UNRESOLVED_EXPLANATION.rule]: AI_SKILL_TOOL_UNRESOLVED_EXPLANATION,
   [MANAGED_API_METHOD_UNAFFORDABLE_EXPLANATION.rule]: MANAGED_API_METHOD_UNAFFORDABLE_EXPLANATION,
@@ -5483,6 +5762,8 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [REPORT_DATE_RANGE_DIMENSION_NOT_DATE_EXPLANATION.rule]: REPORT_DATE_RANGE_DIMENSION_NOT_DATE_EXPLANATION,
   [REPORT_DATE_RANGE_DIMENSION_AMBIGUOUS_EXPLANATION.rule]: REPORT_DATE_RANGE_DIMENSION_AMBIGUOUS_EXPLANATION,
   [REPORT_DATE_RANGE_DIMENSION_NONE_EXPLANATION.rule]: REPORT_DATE_RANGE_DIMENSION_NONE_EXPLANATION,
+  [NAMESPACE_NO_CUSTOMIZATION_PAIR_EXPLANATION.rule]: NAMESPACE_NO_CUSTOMIZATION_PAIR_EXPLANATION,
+  [FLOW_REGION_SHAPE_INVALID_EXPLANATION.rule]: FLOW_REGION_SHAPE_INVALID_EXPLANATION,
 });
 
 /** The explanation for `rule`, or `undefined` when the rule has none. Exact id match. */

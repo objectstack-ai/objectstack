@@ -125,6 +125,16 @@ export interface ListEmptyStateProps {
    * emptied, and this is the way out from where they land.
    */
   onClearSearch?: () => void;
+  /**
+   * Draws "Clear filters" as the primary action when supplied
+   * (objectstack#28908): the caller hands it only while a filter the READER
+   * applied (the filter panel's conditions, the user-filter chips, the "In a
+   * queue" toggle) is part of the query that came back empty. It removes the reader's whole query, the
+   * search included, and never the view's declared filter. It is the one clear
+   * action: supplied, it replaces "Clear search", and the add-record action
+   * steps down to the secondary style.
+   */
+  onClearFilters?: () => void;
   /** The caller's `list.*` translation function. */
   t: (key: string) => string;
   /** The locale an authored `I18nLabel` map is resolved against. */
@@ -142,6 +152,7 @@ export function ListEmptyState({
   mayCreate,
   onAddRecord,
   onClearSearch,
+  onClearFilters,
   t,
   displayLocale,
 }: ListEmptyStateProps) {
@@ -195,9 +206,12 @@ export function ListEmptyState({
   const description = resolveInlineI18nLabel(authoredMessage, displayLocale) ?? t(defaultCopy.message);
   // Create is offered only with the create grant (objectstack#25898): a known
   // denial withholds the action whatever the caller handed over.
+  // A filter the reader applied is the likelier cause of the empty list than a
+  // missing record, so clearing it leads and creating steps down
+  // (objectstack#28908).
   const addRecordAction = onAddRecord && mayCreate !== false ? (
     <Button
-      variant="default"
+      variant={onClearFilters ? 'outline' : 'default'}
       size="sm"
       data-testid="empty-state-add-record"
       onClick={() => onAddRecord()}
@@ -206,7 +220,19 @@ export function ListEmptyState({
       {t('list.addRecord')}
     </Button>
   ) : undefined;
-  const clearSearchAction = onClearSearch ? (
+  // One clear action at most: "Clear filters" removes the search too, so it
+  // replaces "Clear search" rather than sitting beside it.
+  const clearAction = onClearFilters ? (
+    <Button
+      variant="default"
+      size="sm"
+      data-testid="empty-state-clear-filters"
+      onClick={() => onClearFilters()}
+    >
+      <X className="h-4 w-4 mr-1.5" />
+      {t('list.clearFilters')}
+    </Button>
+  ) : onClearSearch ? (
     <Button
       variant="outline"
       size="sm"
@@ -219,7 +245,7 @@ export function ListEmptyState({
   ) : undefined;
   // One action draws bare, as before; two or more (or the authored link,
   // which always sat in this row) share one wrapping row.
-  const grouped = !!link || (!!clearSearchAction && !!addRecordAction);
+  const grouped = !!link || (!!clearAction && !!addRecordAction);
   return (
     <DataEmptyState
       data-testid="empty-state"
@@ -230,11 +256,11 @@ export function ListEmptyState({
       description={description}
       action={grouped ? (
         <div className="flex flex-wrap items-center justify-center gap-2">
-          {clearSearchAction}
+          {clearAction}
           {addRecordAction}
           {link && <EmptyStateLink link={link} displayLocale={displayLocale} />}
         </div>
-      ) : (clearSearchAction ?? addRecordAction)}
+      ) : (clearAction ?? addRecordAction)}
     />
   );
 }

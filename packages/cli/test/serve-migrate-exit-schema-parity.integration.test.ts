@@ -50,7 +50,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
-import { CLI, E2E_SECRET_KEY, KERNEL_ASSIGNED_PORT, TSX, childEnv } from './helpers/serve-process.js';
+import { CLI, E2E_SECRET_KEY, KERNEL_ASSIGNED_PORT, childEnv } from './helpers/serve-process.js';
 
 /** The fixture app's own object; its table proves the config was loaded. */
 const FIXTURE_OBJECT = 'parity_task';
@@ -93,7 +93,7 @@ function migrateAndExit(label: string, extraArgs: string[]): Promise<MigrateRun>
 
   return new Promise((resolveRun, rejectRun) => {
     const child = spawn(
-      TSX,
+      process.execPath,
       [CLI, 'serve', 'objectstack.config.ts', '--port', KERNEL_ASSIGNED_PORT, ...extraArgs],
       {
         cwd: fixtureDir,

@@ -2,11 +2,14 @@
  * ObjectUI
  * Copyright (c) 2024-present ObjectStack Inc.
  *
- * A flow LAUNCH answers the flow's own toasts in the host's language
- * (objectui#12075): `launchConsoleFlow` reads the `flows` bundle for the flow
- * the run belongs to out of the host's i18next instance, and hands it to
- * `interpretFlowResponse`. The instance here is a real `createI18n` one, loaded
- * through `transformSpecTranslations` the way the console loads an app bundle.
+ * A flow LAUNCH speaks the flow's own toasts as the engine served them
+ * (objectstack#28054). The engine renders `successMessage` / `errorMessage` as
+ * `{{ }}` templates and picks their `flows.FLOW.*` translations in the run's
+ * locale, so the served strings arrive translated and filled; the launch no
+ * longer overlays the host's bundle (objectui#12075 did), because the bundle's
+ * entry is the TEMPLATE and would put raw holes over the filled sentence. A
+ * launch is handed only the host's language now, for a refused write's
+ * permission line, so no bundle can reach the toast.
  *
  * ⚠️ A `.tsx` on purpose, though it renders nothing: the `.test.ts` suffix
  * puts a file in the `unit` project, which runs with `isolate: false` (one
@@ -20,23 +23,10 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createI18n, transformSpecTranslations } from '@object-ui/i18n';
-import type { TranslationData } from '@objectstack/spec/system';
 import { launchConsoleFlow } from '../flowLaunch';
 
 const toasts = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
 vi.mock('sonner', () => ({ toast: toasts }));
-
-const ZH_CN: TranslationData = {
-    objects: { crm_case: { label: '工单', fields: { name: { label: '名称' } } } },
-    flows: { case_escalate: { successMessage: '工单已升级', errorMessage: '升级失败' } },
-};
-
-function zhInstance() {
-    const instance = createI18n({ defaultLanguage: 'zh-CN', detectBrowserLanguage: false });
-    instance.addResourceBundle('zh-CN', 'translation', transformSpecTranslations(ZH_CN as Record<string, unknown>), true, true);
-    return instance;
-}
 
 function answering(body: unknown) {
     return vi.fn(async () => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } }));
@@ -51,7 +41,7 @@ function launch(fetch: ReturnType<typeof answering>, language = 'zh-CN') {
         recordId: 'c1',
         triggerParams: {},
         objects: [],
-        translation: { i18n: zhInstance(), language },
+        language,
     });
 }
 
@@ -60,24 +50,24 @@ beforeEach(() => {
     toasts.success.mockClear();
 });
 
-describe('launchConsoleFlow — the flow\'s own toasts in the host\'s language (objectui#12075)', () => {
-    it('speaks the translated successMessage of a straight-through run', async () => {
-        const out = await launch(answering({ success: true, data: { success: true, status: 'completed', successMessage: 'Case escalated' } }));
+describe("launchConsoleFlow — the flow's own toasts as served (objectstack#28054)", () => {
+    it('speaks the served successMessage of a straight-through run', async () => {
+        const out = await launch(answering({ success: true, data: { success: true, status: 'completed', successMessage: '已升级 3 张工单' } }));
         expect(out.door).toBe('trigger');
-        expect(out.judged.successToast).toBe('工单已升级');
-        expect(toasts.success).toHaveBeenCalledWith('工单已升级');
+        expect(out.judged.successToast).toBe('已升级 3 张工单');
+        expect(toasts.success).toHaveBeenCalledWith('已升级 3 张工单');
     });
 
-    it('hands the ActionRunner the translated errorMessage of a failed run', async () => {
-        const out = await launch(answering({ success: true, data: { success: false, error: 'boom', errorMessage: 'Escalation failed' } }));
-        expect(out.judged.result).toEqual({ success: false, error: '升级失败' });
+    it('hands the ActionRunner the served errorMessage of a failed run', async () => {
+        const out = await launch(answering({ success: true, data: { success: false, error: 'boom', errorMessage: '3 张工单升级失败' } }));
+        expect(out.judged.result).toEqual({ success: false, error: '3 张工单升级失败' });
     });
 
-    it('keeps the served strings in a language the bundle does not carry', async () => {
+    it('keeps the served strings in every language', async () => {
         const out = await launch(
-            answering({ success: true, data: { success: false, error: 'boom', errorMessage: 'Escalation failed' } }),
+            answering({ success: true, data: { success: false, error: 'boom', errorMessage: 'Escalation failed for 3 cases' } }),
             'en',
         );
-        expect(out.judged.result).toEqual({ success: false, error: 'Escalation failed' });
+        expect(out.judged.result).toEqual({ success: false, error: 'Escalation failed for 3 cases' });
     });
 });

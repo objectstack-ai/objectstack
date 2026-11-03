@@ -515,6 +515,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       }
     }
   },
+  object_extension: {
+    label: "Extensión de Objeto",
+    description: "Campos y reglas que un paquete añade a un objeto que define otro paquete"
+  },
   field: {
     label: "Campo",
     sections: {
@@ -716,6 +720,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       reference: {
         label: "Referencia",
         helpText: "Nombre del objeto referenciado"
+      },
+      referenceNameVisible: {
+        label: "Mostrar nombre si no es legible",
+        helpText: "Permite que quien lee este registro vea el nombre del registro referenciado, como texto sin enlace, aunque no pueda abrir ese registro. No se muestra nada más de él, y una regla de nivel de campo sobre el nombre sigue aplicándose (el nombre se muestra entonces como Record # y el id). Sin definir: esa referencia se muestra como «Registro restringido»."
       },
       deleteBehavior: {
         label: "Comportamiento al eliminar",
@@ -1811,6 +1819,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Etiqueta del botón de envío",
         helpText: "Etiqueta del botón de envío en el diálogo de parámetros de esta acción, el verbo que ejecuta el botón (p. ej., \"Enviar\", \"Registrar llamada\"). Solo para una acción que recoge parámetros. Déjalo vacío para mostrar \"Confirmar\"."
       },
+      cancelText: {
+        label: "Etiqueta del botón de cancelar",
+        helpText: "Etiqueta del botón para descartar el diálogo que abre esta acción antes de ejecutarse, su diálogo de confirmación o su diálogo de parámetros. Cuando el verbo de la propia acción es \"Cancelar …\", indica lo que se conserva al descartar (p. ej., \"Conservar invitación\"). Solo para una acción que pide confirmación o recoge parámetros. Déjalo vacío para mostrar \"Cancelar\"."
+      },
       confirmText: {
         label: "Texto de confirmación",
         helpText: "Mensaje de confirmación (p. ej., \"Are you sure?\")"
@@ -2244,6 +2256,9 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "variables.defaultValue": {
         label: "Valor predeterminado"
+      },
+      "variables.objectName": {
+        label: "Objeto de registro"
       },
       status: {
         label: "Estado",

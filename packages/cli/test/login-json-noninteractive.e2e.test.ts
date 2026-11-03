@@ -61,7 +61,6 @@ import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 const LOGIN_SRC = resolve(HERE, '../src/commands/login.ts');
 const CLI_DOCS = resolve(HERE, '../../..', 'content/docs/deployment/cli.mdx');
 
@@ -99,7 +98,7 @@ function runLogin(args: string[], answer: Array<{ when: RegExp; send: string }> 
   const home = join(dir, 'home');
 
   return new Promise<Run>((done) => {
-    const child = spawn(TSX, [CLI, 'login', ...args], {
+    const child = spawn(process.execPath, [CLI, 'login', ...args], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: childEnv({ HOME: home, NO_COLOR: '1' }),
     });

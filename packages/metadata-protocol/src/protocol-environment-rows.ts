@@ -14,7 +14,10 @@
  * [#28238] Beside them, `packagelessContentPackage`: the package a by-name
  * read that names none takes its stored content from, given that address and
  * the code packages that ship the name. Not a moved body: the rule the two
- * by-name reads share.
+ * by-name reads share. [#28409] …and `shippingPackageIds` /
+ * `soleShippingPackage`, the code packages that ship a name, read one way by
+ * those reads and by the env-wide list. [#28802] …and
+ * `baseAddressServesMember`, the member grain both apply to a bundle.
  *
  * A MOVE, not a redesign. Each function below is the body of the
  * `ObjectStackProtocolImplementation` method of the same name as it stood,
@@ -41,11 +44,13 @@
  * not move.
  */
 
+import { customizationPackageId } from '@objectstack/spec/kernel';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import type { StoredOverlayRow } from './item-lock.js';
 import { overlayMemberWhere } from './migrations/overlay-index.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { rowMatchesOverlayWhere, servedOverlayRowCandidates } from './protocol.js';
+import { isServedOverrideRowOf } from './served-override.js';
 
 /**
  * The `ObjectStackProtocolImplementation` members the functions below read —
@@ -100,9 +105,11 @@ export async function findServedOverlayRow(
     packageId?: string | null;
     /** [#22877] The bundle member a by-name door's selector named; omitted, the canonical one. */
     member?: string;
+    /** [#28409] The package's declared override first — see {@link servedOverlayRowCandidates}. */
+    servedOverride?: boolean;
 },
     activeRows?: readonly StoredOverlayRow[],
-): Promise<{ row: any } | undefined> {
+): Promise<{ row: any; overrideOf?: string } | undefined> {
     // [#21804] The order is {@link servedOverlayRowCandidates}, the one
     // the list's merge takes over the rows it read: the canonical
     // spelling then the other, and within each, the package's
@@ -110,7 +117,7 @@ export async function findServedOverlayRow(
     // collision would serve package B's customization for a package A
     // read); with no package context (legacy/runtime reader), any row.
     const other = PLURAL_TO_SINGULAR[args.type] ?? SINGULAR_TO_PLURAL[args.type];
-    for (const candidate of servedOverlayRowCandidates({ packageId: args.packageId })) {
+    for (const candidate of servedOverlayRowCandidates({ packageId: args.packageId, servedOverride: args.servedOverride })) {
         const type = candidate.spelling === 'canonical' ? args.type : other;
         if (type === undefined) continue;
         const where: Record<string, unknown> = {
@@ -129,7 +136,16 @@ export async function findServedOverlayRow(
         const row = activeRows !== undefined && args.state === 'active'
             ? activeRows.find((stored) => rowMatchesOverlayWhere(stored, where))
             : await this.findEnvironmentRow('sys_metadata', { where, context: { isSystem: true } });
-        if (row) return { row };
+        if (!row) continue;
+        // [#28409, ADR-0146 D8 item 2] The pair's row holds the override
+        // candidate only when it declares the override of the address's
+        // package ({@link isServedOverrideRowOf}, on the row's own binding and
+        // body): an undeclared row of the pair is the pair's own item.
+        if (candidate.overrideOf !== undefined) {
+            if (isServedOverrideRowOf(row, candidate.overrideOf)) return { row, overrideOf: candidate.overrideOf };
+            continue;
+        }
+        return { row };
     }
     return undefined;
 }
@@ -199,14 +215,84 @@ export function packagelessContentPackage(
     address: { readonly packageId: string | null; readonly candidates: readonly string[] },
     shipped: readonly unknown[],
 ): string | null | undefined {
-    const shippers = new Set<string>();
-    for (const artifact of shipped) {
-        const id = (artifact as { _packageId?: unknown } | null | undefined)?._packageId;
-        if (typeof id === 'string' && id !== '' && id !== 'sys_metadata') shippers.add(id);
-    }
+    const shippers = shippingPackageIds(shipped);
     if (shippers.size === 0 || (address.packageId !== null && shippers.has(address.packageId))) {
         return address.packageId ?? undefined;
     }
     if (shippers.size === 1) return [...shippers][0];
     return address.candidates.some((id) => shippers.has(id)) ? undefined : null;
+}
+
+/**
+ * [#28238, #28409] The code packages `shipped` belongs to — every artifact an
+ * installed code package registered under one name
+ * (`ObjectStackProtocolImplementation#shippedArtifactsOf`), by its
+ * `_packageId`, the `'sys_metadata'` sentinel left out. The candidates
+ * {@link packagelessContentPackage} weighs for the by-name reads, and the set
+ * the env-wide list asks for the same name ({@link soleShippingPackage}), so
+ * the two read the code packages that ship a name one way.
+ */
+export function shippingPackageIds(shipped: readonly unknown[]): ReadonlySet<string> {
+    const shippers = new Set<string>();
+    for (const artifact of shipped) {
+        const id = (artifact as { _packageId?: unknown } | null | undefined)?._packageId;
+        if (typeof id === 'string' && id !== '' && id !== 'sys_metadata') shippers.add(id);
+    }
+    return shippers;
+}
+
+/**
+ * [ADR-0146 D11] The READ-ONLY code packages that ship a name, sorted: the
+ * {@link shippingPackageIds} of `shipped` less every package
+ * `isWritablePackage` answers for — a writable package's item is edited in
+ * place (ADR-0070) and has no pair (ADR-0146 D3), and the pair itself is
+ * writable. ONE reading for both halves of D11: the bases
+ * `os migrate packageless-overlays` classifies a package-less row against,
+ * and the bases whose package-less write the doors close
+ * (`packagelessOverlayWriteRefusal`), so the close never reaches a name the
+ * ceremony would call environment metadata, nor misses one it would move.
+ */
+export function readOnlyShippingPackages(
+    shipped: readonly unknown[],
+    isWritablePackage: (packageId: string) => boolean,
+): string[] {
+    return [...shippingPackageIds(shipped)].filter((id) => !isWritablePackage(id)).sort();
+}
+
+/**
+ * [#28409, ADR-0146 D8 items 1–2] The one code package that ships a name, or
+ * `undefined` when none or several do: the case in which
+ * {@link packagelessContentPackage} answers that package for every stored row
+ * the name has. The env-wide list (`readFlattenedMetaItems`, naming no
+ * package) then lists the name once, as that package's item, which is what
+ * the by-name read naming no package serves: a row another package stored
+ * under the name is that package's own item, served under its own address
+ * (the read naming it, the list scoped to it), never a second item of the
+ * name beside the base's. Several packages that ship a name keep one item
+ * each (ADR-0048 §3.3), as the by-name read keeps its best-effort answer.
+ */
+export function soleShippingPackage(shipped: readonly unknown[]): string | undefined {
+    const shippers = shippingPackageIds(shipped);
+    return shippers.size === 1 ? [...shippers][0] : undefined;
+}
+
+/**
+ * [#28802, ADR-0146 D2, #28390 ruling A] Whether the address of `base`, a
+ * code package that ships a bundle's name (a type in
+ * `ITEM_KEY_DISCRIMINATORS`), serves a member of that name bound to `bound`.
+ * Member grain: the base's own members and a member bound to no package, and
+ * the pair's own ADDED members, a member of the name the base does not ship
+ * (`baseShipsMember` false), as the pair is the customer layer the base's
+ * address serves. A member another package binds under the base's name (a
+ * dependent's addition) is that package's own item, served under its own
+ * address only: "a dependent adds items under its own names". So is a pair's
+ * undeclared row at a member the base ships (refused at the write gate since
+ * PR #28777). A declared override is served as the base's item by the
+ * served-row resolution and is never asked about here.
+ */
+export function baseAddressServesMember(base: string, bound: string | undefined, baseShipsMember: boolean): boolean {
+    if (bound === undefined || bound === base) return true;
+    if (baseShipsMember) return false;
+    const pair = customizationPackageId(base);
+    return pair.ok && pair.value === bound;
 }

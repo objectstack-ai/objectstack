@@ -201,6 +201,61 @@ describe('a parent-id resume of a map whose item run was cancelled (#27971)', ()
     expect(mapState(paused.runId!)).toEqual({ started: 1, results: [] });
   });
 
+  // [#28202] Cancelling a run never cascades, so the remedy names every run
+  // the operator must cancel: the map's own, then each run waiting on it, up
+  // to the one they resumed.
+  const callerFlow = (name: string, callee: string, input?: Record<string, unknown>) => engine.registerFlow(name, {
+    name, label: name, type: 'autolaunched',
+    nodes: [
+      { id: 'cs', type: 'start', label: 'Start' },
+      { id: 'call', type: 'subflow', label: `Call ${callee}`, config: { flowName: callee, ...(input ? { input } : {}) } },
+      { id: 'ce', type: 'end', label: 'End' },
+    ],
+    edges: [{ id: 'c1', source: 'cs', target: 'call' }, { id: 'c2', source: 'call', target: 'ce' }],
+  } as never);
+
+  it('names the waiting run in the remedy when the map sits one subflow link below the resumed run', async () => {
+    callerFlow('outer_flow', 'batch_flow', { items: [{ id: 't1' }] });
+    const outer = await engine.execute('outer_flow');
+    const [map] = parked('batch_flow');
+    const [item1] = parked('one_item');
+    (engine as any).suspendedRuns.delete(item1!.runId);
+
+    const refused = await engine.resume(outer.runId!, {});
+
+    expect(refused.success).toBe(false);
+    expect(refused.code).toBe(MAP_ITEM_PENDING_REFUSAL_CODE);
+    expect(refused.error).toContain(
+      `To end the batch, cancel run '${map!.runId}' and run '${outer.runId}', which waits on it; `,
+    );
+    expect(parked('outer_flow').map(r => r.runId)).toEqual([outer.runId]);
+    expect(parked('batch_flow').map(r => r.runId)).toEqual([map!.runId]);
+  });
+
+  it('names every run of a three-level chain in the remedy, from the map up to the resumed run', async () => {
+    callerFlow('mid_flow', 'batch_flow', { items: [{ id: 't1' }] });
+    callerFlow('outer_flow', 'mid_flow');
+    const outer = await engine.execute('outer_flow');
+    const [mid] = parked('mid_flow');
+    const [map] = parked('batch_flow');
+    const [item1] = parked('one_item');
+    (engine as any).suspendedRuns.delete(item1!.runId);
+
+    const refused = await engine.resume(outer.runId!, {});
+
+    expect(refused.success).toBe(false);
+    expect(refused.code).toBe(MAP_ITEM_PENDING_REFUSAL_CODE);
+    expect(refused.error).toContain(
+      `To end the batch, cancel run '${map!.runId}' and runs '${mid!.runId}' and '${outer.runId}', ` +
+        `which wait on it in turn; `,
+    );
+    // Nothing moved at any level.
+    expect(mapState(map!.runId)).toEqual({ started: 1, results: [] });
+    expect(parked('outer_flow').map(r => r.runId)).toEqual([outer.runId]);
+    expect(parked('mid_flow').map(r => r.runId)).toEqual([mid!.runId]);
+    expect(parked('batch_flow').map(r => r.runId)).toEqual([map!.runId]);
+  });
+
   it('still refuses a caller signal that writes the engine namespace, so the marker cannot be forged', async () => {
     const paused = await launch();
     const [item1] = parked('one_item');

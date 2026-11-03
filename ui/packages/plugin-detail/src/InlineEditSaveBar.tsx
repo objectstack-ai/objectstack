@@ -599,7 +599,7 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
           size="sm"
           onClick={inline.cancel}
           disabled={inline.saving}
-          className="gap-2"
+          className="h-11 gap-2 sm:h-9"
         >
           <X className="h-4 w-4" />
           <span>{t('detail.cancel')}</span>
@@ -609,7 +609,7 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
           size="sm"
           onClick={handleSave}
           disabled={inline.saving || locked}
-          className="gap-2"
+          className="h-11 gap-2 sm:h-9"
           title={locked ? lockedHint : undefined}
         >
           {inline.saving ? (

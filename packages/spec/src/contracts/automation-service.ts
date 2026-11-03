@@ -23,6 +23,21 @@ import type { FlowRegistration } from '../api/protocol.zod';
 import type { FlowInnerRefusal } from '../api/automation-api.zod';
 
 /**
+ * The write a record-triggered run was dispatched inside (#28251) — see
+ * {@link AutomationContext.saveNotice}.
+ */
+export interface SaveNoticeChannel {
+    /**
+     * Hand the rendered notice to the triggering write. Refuses (throws a
+     * `TypeError`) a message that is not a non-empty string; a later call
+     * replaces an earlier one.
+     */
+    set(message: string): void;
+    /** The writer's locale (BCP-47), when the write's session carries one. */
+    readonly locale?: string;
+}
+
+/**
  * Context passed to a flow/script execution
  */
 export interface AutomationContext {
@@ -183,6 +198,27 @@ export interface AutomationContext {
      * Presentation, not authorization: no security middleware keys on it.
      */
     locale?: string;
+    /**
+     * The write that fired this run, for its `save_notice` nodes (#28251):
+     * where a `save_notice` node hands its rendered message, so the create /
+     * update answer of that write carries it as `notice`.
+     *
+     * Who sets it: the record-change trigger (`trigger-record-change`), the one
+     * door that runs a flow INSIDE a write — its hook handler awaits the run
+     * before the write answers. It wraps the hook face of the write's own
+     * listener (`HookContext.notice`, bound from `onNotice` on every insert /
+     * update dispatch), so this is that channel, never a second one; `locale`
+     * is the writer's (the hook session's `locale`), the language the
+     * `save_notice` executor picks the translated template in.
+     *
+     * In-process only, and only for the run's first leg: a function does not
+     * survive a suspension, so a leg an approval or a wait resumed carries no
+     * channel and its `save_notice` node refuses by name — the write answered
+     * long before. Never inherited by a `subflow` / `map` child (a child is
+     * not started by the write). Absent on every other door's run, which the
+     * flow parse already refuses a `save_notice` node in.
+     */
+    saveNotice?: SaveNoticeChannel;
     /**
      * The tenant default currency of the run's organization (ISO 4217, e.g.
      * `CNY`): the `localization.currency` setting, read the way a currency
@@ -674,10 +710,12 @@ export interface AutomationResult {
      */
     screen?: ScreenSpec;
     /**
-     * Friendly terminal messages copied from the flow definition
+     * Friendly terminal messages rendered from the flow definition
      * (`flow.successMessage` / `flow.errorMessage`) so a screen-flow runner can
      * show a meaningful toast instead of a generic "Done" / the raw error.
      * `successMessage` is set on terminal success, `errorMessage` on failure.
+     * Each is the flow's `{{ }}` template already rendered over the run's
+     * variables, in the run's locale (#28054), so a runner draws it as served.
      */
     successMessage?: string;
     errorMessage?: string;
@@ -905,6 +943,19 @@ export interface FlowRuntimeState {
  * - `disabled_subflow` — the arming gate declined the flow because a packaged
  *   subflow it calls is disabled (ADR-0126 §7.3). Admin remedy: enable the
  *   subflow, and the caller arms.
+ * - `notice_after_suspending_subflow` — the arming gate declined the flow
+ *   because a `save_notice` of it runs after a `subflow` / `map` node whose
+ *   child flow can suspend (#28840): resumed after the write answered, the
+ *   notice would be refused by name and strand the run. Author remedy: move the
+ *   `save_notice` ahead of that node or use a `notify` node, or republish the
+ *   child without a node that suspends, and the flow arms.
+ * - `suspending_subflow_in_region` — the arming gate declined the flow because
+ *   a `subflow` / `map` node inside one of its region bodies (a `loop` body, a
+ *   `parallel` branch, a `try_catch` slot) calls a child flow that can suspend
+ *   (#28897): a region body cannot carry a durable pause, so the run would fail
+ *   at the region boundary the first time that child suspends. Author remedy:
+ *   move the call onto the top-level graph, or republish the child without a
+ *   node that suspends, and the flow arms.
  * - `missing_trigger` — no trigger of the declared type is registered on this
  *   kernel. Author remedy: depend on the trigger package
  *   (`requires: ['triggers']`).
@@ -914,6 +965,8 @@ export interface FlowRuntimeState {
 export const FLOW_UNBOUND_CAUSES = [
     'deployment_policy',
     'disabled_subflow',
+    'notice_after_suspending_subflow',
+    'suspending_subflow_in_region',
     'missing_trigger',
     'binding_failure',
 ] as const;
@@ -1096,7 +1149,11 @@ export interface ConnectorConnectionState {
     /**
      * `not_connected` — no administrator connected it here yet (the instance
      * dispatches nothing for this organization); `connected`; or
-     * `reconnect_required` — the authorization server refused the grant.
+     * `reconnect_required` — the grant stopped working: the authorization
+     * server refused it on refresh, the connection keeps nothing to renew an
+     * access token it has to renew with (no refresh token was issued, or no
+     * client to refresh with), or the upstream refused the connection's token
+     * while an `mcp` instance discovered its tools. `statusReason` says which.
      */
     status: 'not_connected' | 'connected' | 'reconnect_required';
     /** Why the grant stopped working, when `status` is `reconnect_required`. */
@@ -1108,6 +1165,39 @@ export interface ConnectorConnectionState {
     /** When it was last connected, and by whom. */
     connectedAt?: string;
     connectedBy?: string;
+    /**
+     * ADR-0143 D2.1 (2026-11-02 amendment) — the OAuth client the
+     * administrator entered on this connection, for an instance that declares
+     * `clientSource: 'installer'`: its id, and whether a client secret is kept
+     * with it. ⛔ Never the secret itself, which stays encrypted in the
+     * connection record. Absent for an instance whose client is declared or
+     * registered dynamically.
+     */
+    client?: {
+        source: 'installer';
+        clientId: string;
+        hasSecret: boolean;
+    };
+    /**
+     * ADR-0143 D5 — the redirect URI this deployment's connect names: the
+     * absolute URL of `GET /api/v1/automation/connectors/oauth/callback` that
+     * the administrator registers with the vendor's OAuth client, answered so
+     * the Connect step can show it before any client is entered (ADR-0143 D2.1,
+     * `clientSource: 'installer'`). Derived by the server and fixed per
+     * deployment, never taken from a request: the automation plugin's
+     * `connectorOAuthRedirectUri` option, else that path under `OS_AUTH_URL`,
+     * else under `OS_BASE_URL`.
+     *
+     * Present on {@link IAutomationService.getConnectorConnection}'s answer
+     * whenever the server can derive it, whatever `status` says. Absent when
+     * the deployment has no base to derive it from — a connect is then refused
+     * `503` — and ⛔ never guessed from the request's origin. Only an
+     * `authorization_code` instance has a connection, so no other grant ever
+     * carries it. Read-only: no connection request takes it. Declared ahead of
+     * the service that answers it: until the automation service sets it, no
+     * answer carries it.
+     */
+    redirectUri?: string;
 }
 
 /** What {@link IAutomationService.getConnectorConnection} and its revoke / begin siblings are asked about. */
@@ -1116,6 +1206,20 @@ export interface ConnectorConnectionRequest {
     connector: string;
     /** The caller — its organization selects the connection, its user stamps the row. */
     context?: ExecutionContext;
+    /**
+     * ADR-0143 D2.1 (2026-11-02 amendment) — the OAuth client the
+     * administrator registered with the vendor against this deployment's
+     * redirect URI, for an instance that declares `clientSource: 'installer'`.
+     * Read by {@link IAutomationService.beginConnectorConnection} only, which
+     * requires it for such an instance and refuses it for any other (`400
+     * VALIDATION_ERROR`); the read and revoke members refuse it. The secret,
+     * when the vendor issued one, is kept encrypted in the connection record
+     * and never answered back.
+     */
+    client?: {
+        clientId: string;
+        clientSecret?: string;
+    };
 }
 
 /** What {@link IAutomationService.beginConnectorConnection} answers: where to send the administrator's browser. */
@@ -1462,7 +1566,9 @@ export interface IAutomationService {
      * URL to send the browser to. Nothing is stored in the connection record
      * until the callback completes. Rejects as {@link getConnectorConnection}
      * does, plus `503 SERVICE_UNAVAILABLE` when the deployment has no fixed
-     * origin for the redirect URI.
+     * origin for the redirect URI, and `400 VALIDATION_ERROR` for an instance
+     * declaring `clientSource: 'installer'` begun without `client`, or any
+     * other instance begun with one (ADR-0143 D2.1, 2026-11-02 amendment).
      */
     beginConnectorConnection?(request: ConnectorConnectionRequest): Promise<ConnectorConnectionBegin>;
 

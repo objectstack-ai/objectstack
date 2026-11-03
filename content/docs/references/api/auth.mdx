@@ -18,8 +18,8 @@ and Access Control.
 ## TypeScript Usage
 
 ```typescript
-import { AuthProvider, LoginRequestSchema, LoginType, RefreshTokenRequestSchema, RegisterRequestSchema, SessionSchema, SessionResponseSchema, SessionUserSchema, UserProfileResponseSchema } from '@objectstack/spec/api';
-import type { AuthProvider, LoginRequest, LoginType, RefreshTokenRequest, RegisterRequest, Session, SessionResponse, SessionUser, UserProfileResponse } from '@objectstack/spec/api';
+import { AuthProvider, LoginRequestSchema, LoginType, MePermissionsAnonymousResponseSchema, MePermissionsAuthenticatedResponseSchema, MePermissionsResponseSchema, RefreshTokenRequestSchema, RegisterRequestSchema, SessionSchema, SessionResponseSchema, SessionUserSchema, UserProfileResponseSchema } from '@objectstack/spec/api';
+import type { AuthProvider, LoginRequest, LoginType, MePermissionsAnonymousResponse, MePermissionsAuthenticatedResponse, MePermissionsResponse, RefreshTokenRequest, RegisterRequest, Session, SessionResponse, SessionUser, UserProfileResponse } from '@objectstack/spec/api';
 
 // Validate data
 const result = AuthProvider.parse(data);
@@ -66,6 +66,125 @@ const result = AuthProvider.parse(data);
 * `phone`
 * `magic-link`
 * `social`
+
+
+---
+
+## MePermissionsAnonymousResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **authenticated** | `false` | ✅ | No session: the caller is anonymous. |
+
+
+---
+
+## MePermissionsAuthenticatedResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **authenticated** | `true` | ✅ | A session was resolved for the caller. |
+| **userId** | `string` | ✅ | The caller's user id. |
+| **tenantId** | `string \| null` | ✅ | The caller's active organization id, or null when the session has none. |
+| **positions** | `string[]` | ✅ | The security positions the caller holds (ADR-0068 D3): built-in identity names plus assigned positions, scope-resolved. |
+| **permissionSets** | `string[]` | ✅ | The names of the permission sets resolved for the caller. |
+| **objects** | `Record<string, { allowCreate?: boolean; allowRead?: boolean; allowEdit?: boolean; allowDelete?: boolean; … }>` | ✅ | The effective object permissions, keyed by object name — the map `current_user.can()` reads on the server. |
+| **fields** | `Record<string, { readable: boolean; editable: boolean }>` | ✅ | The effective field permissions, keyed `object.field`. |
+| **systemPermissions** | `string[]` | optional | The effective system capabilities (ADR-0066). Absent only on the degraded body, where it means unknown; an empty array means none. |
+| **tabPermissions** | `Record<string, Enum<'visible' \| 'hidden' \| 'default_on' \| 'default_off'>>` | optional | The effective app tab visibilities, keyed by app name. Absent only on the degraded body. |
+| **hasAnyQueue** | `boolean` | ✅ | Whether the caller's organization has at least one ownership queue: a declared queue the activation ledger has not switched off, or a `sys_queue` row of the organization. Resolved server-side through the ownership-queue service, so a member who may not read `sys_queue` still gets the answer; no names and no counts are disclosed. False when no ownership-queue service is registered, and on the closed body. |
+
+### Nested Shape: `MePermissionsAuthenticatedResponse.objects[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **allowCreate** | `boolean` | optional (default: `false`) | Create permission |
+| **allowRead** | `boolean` | optional (default: `false`) | Read permission |
+| **allowEdit** | `boolean` | optional (default: `false`) | Edit permission |
+| **allowDelete** | `boolean` | optional (default: `false`) | Delete permission |
+| **allowExport** | `boolean` | optional | User-level export axis over read (opt-in grant). true = export granted (still bounded by read); unset/false = no export. Merged most-permissively like the CRUD bits; NOT implied by viewAllRecords/modifyAllRecords. |
+| **allowTransfer** | `boolean` | optional (default: `false`) | [RBAC-gated; ENFORCED via the insert/update owner_id guard] Change record ownership (assign/reassign/disown owner_id) |
+| **allowRestore** | `never` | optional | [REMOVED] `objects.<object>.allowRestore` was removed in @objectstack/spec 17 (ADR-0049) — the `restore` ObjectQL operation it claimed to gate has never shipped (roadmap M2), so granting the bit delivered nothing. Delete the key — a dispatched `restore` stays denied fail-closed by the permission evaluator's destructive-operation backstop, and the bit returns with the M2 lifecycle initiative alongside the operation it gates. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **allowPurge** | `never` | optional | [REMOVED] `objects.<object>.allowPurge` was removed in @objectstack/spec 17 (ADR-0049) — the `purge` ObjectQL operation it claimed to gate has never shipped (roadmap M2), so granting the bit delivered nothing (a compliance/GDPR erase the author believed was permission-locked was not — the operation itself does not exist). Delete the key — a dispatched `purge` stays denied fail-closed by the permission evaluator's destructive-operation backstop, and the bit returns with the M2 lifecycle initiative alongside the operation it gates. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **viewAllRecords** | `boolean` | optional (default: `false`) | View All Data (Bypass Sharing) |
+| **modifyAllRecords** | `boolean` | optional (default: `false`) | Modify All Data (Bypass Sharing) — bypasses sharing rules and ownership on the objects record sharing enforces on; on an object with NO owner field sharing abstains, so the platform created_by write floor still applies. Includes delete: an omitted allowDelete parses to true, and an explicit allowDelete: false beside it is refused. |
+| **readScope** | `Enum<'own' \| 'own_and_reports' \| 'unit' \| 'unit_and_below' \| 'org'>` | optional | [ADR-0057 D1] Read depth: own\|unit\|unit_and_below\|org |
+| **writeScope** | `Enum<'own' \| 'own_and_reports' \| 'unit' \| 'unit_and_below' \| 'org'>` | optional | [ADR-0057 D1] Write depth: own\|unit\|unit_and_below\|org |
+| **apiOperations** | `Enum<'get' \| 'list' \| 'create' \| 'update' \| 'delete' \| 'upsert' \| 'bulk' \| …>[]` | optional | Server-resolved effective API operations for this object. Present only when the object tightens exposure via apiMethods; absent = default-allow. The frontend renders this effective set, never the raw whitelist. Vocabulary is the EFFECTIVE ApiOperation set (six primitives + eight derived verbs), not the authored six-value ApiMethod enum. |
+
+### Nested Shape: `MePermissionsAuthenticatedResponse.fields[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **readable** | `boolean` | ✅ | The caller may read the field. |
+| **editable** | `boolean` | ✅ | The caller may edit the field on some row (a row-conditioned entry is reported as its lock). |
+
+
+---
+
+## MePermissionsResponse
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **authenticated** | `false` | ✅ | No session: the caller is anonymous. |
+
+---
+
+#### Option 2
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **authenticated** | `true` | ✅ | A session was resolved for the caller. |
+| **userId** | `string` | ✅ | The caller's user id. |
+| **tenantId** | `string \| null` | ✅ | The caller's active organization id, or null when the session has none. |
+| **positions** | `string[]` | ✅ | The security positions the caller holds (ADR-0068 D3): built-in identity names plus assigned positions, scope-resolved. |
+| **permissionSets** | `string[]` | ✅ | The names of the permission sets resolved for the caller. |
+| **objects** | `Record<string, { allowCreate?: boolean; allowRead?: boolean; allowEdit?: boolean; allowDelete?: boolean; … }>` | ✅ | The effective object permissions, keyed by object name — the map `current_user.can()` reads on the server. |
+| **fields** | `Record<string, { readable: boolean; editable: boolean }>` | ✅ | The effective field permissions, keyed `object.field`. |
+| **systemPermissions** | `string[]` | optional | The effective system capabilities (ADR-0066). Absent only on the degraded body, where it means unknown; an empty array means none. |
+| **tabPermissions** | `Record<string, Enum<'visible' \| 'hidden' \| 'default_on' \| 'default_off'>>` | optional | The effective app tab visibilities, keyed by app name. Absent only on the degraded body. |
+| **hasAnyQueue** | `boolean` | ✅ | Whether the caller's organization has at least one ownership queue: a declared queue the activation ledger has not switched off, or a `sys_queue` row of the organization. Resolved server-side through the ownership-queue service, so a member who may not read `sys_queue` still gets the answer; no names and no counts are disclosed. False when no ownership-queue service is registered, and on the closed body. |
+
+### Nested Shape: `MePermissionsResponse[authenticated=true].objects[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **allowCreate** | `boolean` | optional (default: `false`) | Create permission |
+| **allowRead** | `boolean` | optional (default: `false`) | Read permission |
+| **allowEdit** | `boolean` | optional (default: `false`) | Edit permission |
+| **allowDelete** | `boolean` | optional (default: `false`) | Delete permission |
+| **allowExport** | `boolean` | optional | User-level export axis over read (opt-in grant). true = export granted (still bounded by read); unset/false = no export. Merged most-permissively like the CRUD bits; NOT implied by viewAllRecords/modifyAllRecords. |
+| **allowTransfer** | `boolean` | optional (default: `false`) | [RBAC-gated; ENFORCED via the insert/update owner_id guard] Change record ownership (assign/reassign/disown owner_id) |
+| **allowRestore** | `never` | optional | [REMOVED] `objects.<object>.allowRestore` was removed in @objectstack/spec 17 (ADR-0049) — the `restore` ObjectQL operation it claimed to gate has never shipped (roadmap M2), so granting the bit delivered nothing. Delete the key — a dispatched `restore` stays denied fail-closed by the permission evaluator's destructive-operation backstop, and the bit returns with the M2 lifecycle initiative alongside the operation it gates. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **allowPurge** | `never` | optional | [REMOVED] `objects.<object>.allowPurge` was removed in @objectstack/spec 17 (ADR-0049) — the `purge` ObjectQL operation it claimed to gate has never shipped (roadmap M2), so granting the bit delivered nothing (a compliance/GDPR erase the author believed was permission-locked was not — the operation itself does not exist). Delete the key — a dispatched `purge` stays denied fail-closed by the permission evaluator's destructive-operation backstop, and the bit returns with the M2 lifecycle initiative alongside the operation it gates. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **viewAllRecords** | `boolean` | optional (default: `false`) | View All Data (Bypass Sharing) |
+| **modifyAllRecords** | `boolean` | optional (default: `false`) | Modify All Data (Bypass Sharing) — bypasses sharing rules and ownership on the objects record sharing enforces on; on an object with NO owner field sharing abstains, so the platform created_by write floor still applies. Includes delete: an omitted allowDelete parses to true, and an explicit allowDelete: false beside it is refused. |
+| **readScope** | `Enum<'own' \| 'own_and_reports' \| 'unit' \| 'unit_and_below' \| 'org'>` | optional | [ADR-0057 D1] Read depth: own\|unit\|unit_and_below\|org |
+| **writeScope** | `Enum<'own' \| 'own_and_reports' \| 'unit' \| 'unit_and_below' \| 'org'>` | optional | [ADR-0057 D1] Write depth: own\|unit\|unit_and_below\|org |
+| **apiOperations** | `Enum<'get' \| 'list' \| 'create' \| 'update' \| 'delete' \| 'upsert' \| 'bulk' \| …>[]` | optional | Server-resolved effective API operations for this object. Present only when the object tightens exposure via apiMethods; absent = default-allow. The frontend renders this effective set, never the raw whitelist. Vocabulary is the EFFECTIVE ApiOperation set (six primitives + eight derived verbs), not the authored six-value ApiMethod enum. |
+
+### Nested Shape: `MePermissionsResponse[authenticated=true].fields[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **readable** | `boolean` | ✅ | The caller may read the field. |
+| **editable** | `boolean` | ✅ | The caller may edit the field on some row (a row-conditioned entry is reported as its lock). |
+
+---
 
 
 ---

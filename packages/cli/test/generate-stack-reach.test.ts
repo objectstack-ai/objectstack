@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 40 — spawns the real producer once per single-cause fixture: ten sequential spawns of the source CLI in one beforeAll, each a distinct (`os g` generator, flags, fixture state) triple over five fixtures (the wired app before and after its object and flow exist, a stack with no `requires`, one requiring `triggers` alone, the pre-fix objects-only config, a bare directory), each refusal read against its own byte snapshot; slowest CI reading 31.0 s (run 41217827347, over the five scheduled ci.yml runs 41199450735 to 41271604267) x 1.25, rounded up
 
 /**
  * PIN (#20215) — after writing, `os generate` says whether the scaffold
@@ -64,8 +65,13 @@ import { TEMPLATES, sanitizeNamespace, writeTemplateSrcFiles } from '../src/comm
 import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
+/**
+ * Spawned by this process's own `node`, not through the `tsx` binary: the entry, its
+ * `src/` and its pinned `NODE_ENV=development` are the same either way, and the
+ * `.bin/tsx` launcher only adds a second node process in front of the CLI, about half
+ * of every spawn's wall (#23181).
+ */
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 /** oclif + tsx cold starts, eleven of them, sequential. */
 const RUN_TIMEOUT_MS = 360_000;
@@ -82,7 +88,7 @@ interface Run {
 function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...args],
       { cwd, maxBuffer: 8 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {

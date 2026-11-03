@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import type { IDataEngine } from '@objectstack/spec/contracts';
+import type { IDataEngine, II18nService } from '@objectstack/spec/contracts';
 import type {
   IEmailTransport,
   EmailAddress,
@@ -505,6 +505,16 @@ export class EmailServicePlugin implements Plugin {
       retries: this.options.retries,
       defaultTemplateContext: this.options.defaultTemplateContext,
       logger: ctx.logger,
+    });
+
+    // [#28880] The stack's declared fallback locale joins a named-locale
+    // template ladder (after the recipient's own tag, before en-US). Read
+    // from the i18n service at each send, so one registered after this
+    // plugin is seen; a host with no i18n service declares none.
+    this.service.setTemplateFallbackLocale(() => {
+      let i18n: II18nService | undefined;
+      try { i18n = ctx.getService<II18nService>('i18n'); } catch { return undefined; }
+      return i18n?.getFallbackLocale?.();
     });
 
     // [#23946] Persistence + the template loader are wired HERE, before the

@@ -10,17 +10,24 @@
  * written without (`route-ledger.ts`, the field's JSDoc), and the reason the
  * `POST /packages/:id/publish-drafts` row may carry
  * `requestSchema: 'PublishPackageDraftsRequestSchema'`. The request schema
- * declares the body; it does not claim the door parses the body with it. So
- * each member's behaviour at the door is pinned here as measured:
+ * declares the body, and each member's behaviour at the door is pinned here as
+ * measured:
  *
- * - `message` — a string reaches `publishPackageDrafts` as sent; a non-string
- *   is dropped (the publish goes ahead with no note), not refused;
+ * - `message` — a string reaches `publishPackageDrafts` as sent; a body the
+ *   schema refuses for its note (a number, an object, an array, `null`) is
+ *   refused `400 VALIDATION_ERROR` naming `message` before anything is
+ *   published;
  * - `backfill` — reaches the protocol as sent, and a body the schema refuses
  *   is refused by the protocol's shape judgement `400 VALIDATION_ERROR`
  *   before anything is published (the real protocol, below);
  * - `actor` — never reaches `publishPackageDrafts`: the publisher is the
  *   authenticated caller. That is why the schema strips unknown keys instead
  *   of refusing them: the SDK's deprecated `opts.actor` keeps working.
+ *
+ * The body as a whole: one that is present and is not a JSON object (an
+ * array, a string, a number, a boolean) is refused `400 VALIDATION_ERROR` with
+ * the schema's own whole-body issue before anything is published; an absent
+ * body (`undefined`, `null`) is a publish with no note.
  *
  * The protocol is a double for the forwarding cases (what it receives is the
  * assertion) and the real `ObjectStackProtocolImplementation` for the
@@ -144,29 +151,53 @@ describe('publish-drafts request body conforms to PublishPackageDraftsRequestSch
         expect(bodyMembersSent(sent)).toEqual({});
     });
 
-    it('a note the schema refuses is dropped by the door, not refused: the publish goes ahead with no note', async () => {
-        // Measured divergence: the schema declares `message` a string and the
-        // door forwards only a string, but answers 200 for anything else. A
-        // door that parses the body with the schema flips this pin to a 400.
-        expect(PublishPackageDraftsRequestSchema.safeParse({ message: 42 }).success).toBe(false);
-        const { response, sent } = await publishWith({ message: 42 });
-        expect(response.status).toBe(200);
-        expect(bodyMembersSent(sent)).toEqual({});
+    it('a note the schema refuses is refused 400 VALIDATION_ERROR naming `message`, before anything is published', async () => {
+        // The door parses `message` with the schema's own member, so a body the
+        // schema refuses for its note is refused here, not published with no note.
+        for (const body of [{ message: 42 }, { message: {} }, { message: [] }, { message: null }, { actor: 'x', message: 7 }]) {
+            expect(PublishPackageDraftsRequestSchema.safeParse(body).success, JSON.stringify(body)).toBe(false);
+            const publishPackageDrafts = vi.fn();
+            const door = makeDoor({ publishPackageDrafts });
+            const result = await door.dispatcher.handlePackages(`/${PKG}/publish-drafts`, 'POST', body, {}, PKG_ADMIN());
+            const response = result.response as any;
+            expect(response.status, JSON.stringify(body)).toBe(400);
+            expect(response.body?.error?.code, JSON.stringify(body)).toBe('VALIDATION_ERROR');
+            expect(response.body?.error?.message, JSON.stringify(body)).toMatch(/^Invalid publish-drafts body .*\bmessage: /);
+            expect(publishPackageDrafts, JSON.stringify(body)).not.toHaveBeenCalled();
+            expect(door.saveMetaItem, JSON.stringify(body)).not.toHaveBeenCalled();
+        }
     });
 
-    it('today the ADR-0045 app re-save after the publish still forwards a body `actor` (the one undeclared read left)', async () => {
-        // The publish itself records the caller (above); the visibility flip
-        // that re-saves each unpublished app afterwards still passes a body
-        // `actor` to `saveMetaItem`. Removing that read is the sibling-door
-        // card's (the six package doors' actor fix). When it lands this pin
-        // goes red: flip it to `USER`/absent and drop the sentence about it
-        // from the publish-drafts row note in `route-ledger.ts`.
+    it('a body that is not a JSON object is refused 400 VALIDATION_ERROR with the schema\'s own refusal, before anything is published', async () => {
+        // [#28541] An array, a string, a number or a boolean has no member to
+        // read, so it used to publish with the default note. The schema refuses
+        // it as a whole, and so does the door. An absent body is pinned above.
+        for (const body of [[], ['message'], 'x', '', 42, 0, true, false]) {
+            const schemaVerdict = PublishPackageDraftsRequestSchema.safeParse(body);
+            expect(schemaVerdict.success, JSON.stringify(body)).toBe(false);
+            const publishPackageDrafts = vi.fn();
+            const door = makeDoor({ publishPackageDrafts });
+            const result = await door.dispatcher.handlePackages(`/${PKG}/publish-drafts`, 'POST', body, {}, PKG_ADMIN());
+            const response = result.response as any;
+            expect(response.status, JSON.stringify(body)).toBe(400);
+            expect(response.body?.error?.code, JSON.stringify(body)).toBe('VALIDATION_ERROR');
+            expect(response.body?.error?.message, JSON.stringify(body)).toMatch(/^Invalid publish-drafts body — \(body\): /);
+            expect(publishPackageDrafts, JSON.stringify(body)).not.toHaveBeenCalled();
+            expect(door.saveMetaItem, JSON.stringify(body)).not.toHaveBeenCalled();
+        }
+    });
+
+    it('the ADR-0045 app re-save after the publish records the caller too: a body `actor` reaches no write', async () => {
+        // [#28414] The visibility flip that re-saves each unpublished app
+        // afterwards used to pass a body `actor` to `saveMetaItem`, the one
+        // undeclared read left on this door. It now records the publisher, as
+        // the publish itself does (`resolvePackageWriteActor`).
         const { saveMetaItem } = await publishWith(
             { actor: 'someone_else' },
             [{ name: 'crm', label: 'CRM', _unpublished: true }],
         );
         expect(saveMetaItem).toHaveBeenCalledTimes(1);
-        expect((saveMetaItem.mock.calls[0]![0] as Record<string, unknown>).actor).toBe('someone_else');
+        expect((saveMetaItem.mock.calls[0]![0] as Record<string, unknown>).actor).toBe(USER);
     });
 });
 

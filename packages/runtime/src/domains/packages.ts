@@ -32,7 +32,14 @@ import {
 // (`packages-capability-gate.test.ts`, beside this file), so it names
 // `OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES` — same value it read before,
 // no re-ruling of the package cohort as a side effect of #7020.
-import { OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES } from '@objectstack/metadata-core';
+import { OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES, isCodeArtifactBody } from '@objectstack/metadata-core';
+// [#28411, ADR-0146 D8 item 4] The per-package customization read's three
+// sources, each read from its owner: the pair's id and a pair's base
+// (`@objectstack/spec/kernel`, the one spelling of the suffix), and the
+// activation ledger's one reader (`@objectstack/core`).
+import { customizationBasePackageId, customizationPackageId } from '@objectstack/spec/kernel';
+import { listPackageMetadataActivations, METADATA_ACTIVATION_TABLE } from '@objectstack/core';
+import type { GetPackageCustomizationsResponse } from '@objectstack/spec/api';
 // [ADR-0131 D3 · D12 items 7–8] The walled refusal's one predicate, asked by
 // every package write door below, never restated here.
 import { walledCatalogWriteVerdict } from '@objectstack/metadata-core';
@@ -57,6 +64,9 @@ import {
 // this defect existed precisely because the lifecycle routes had no copy of it,
 // and a second copy would be the next place it drifts.
 import { isWritablePackage, READ_ONLY_PACKAGE_SCOPES } from '@objectstack/metadata-protocol';
+// [ADR-0146 D3] The pair-shaped-id predicate the install primitive asks — asked
+// at `POST /packages` too, ahead of both its install limbs.
+import { customizationPairManifestRefusal } from '@objectstack/metadata-protocol';
 // [#28117] The one reader of a manifest's declared dependency ids (ADR-0141),
 // shared with the registry's co-owner gate.
 import { declaredDependencyIds } from '@objectstack/core';
@@ -150,6 +160,7 @@ import {
     PackageInstallBodySchema,
     PackageInstallManifestSchema,
     PackageInstallRequestSchema,
+    PublishPackageDraftsRequestSchema,
 } from '@objectstack/spec/api';
 
 /**
@@ -217,6 +228,17 @@ export type PackagesDomainProtocol =
          * declare is a compile error.
          */
         revertStoredPackage?: ObjectStackProtocolImplementation['revertStoredPackage'];
+        /**
+         * [ADR-0146 D3] The ensure door of a base's paired `.custom` package,
+         * typed from the producer's method signature — its request and answer
+         * are the published `EnsureCustomizationPackage*Schema` pair.
+         */
+        ensureCustomizationPackage?: ObjectStackProtocolImplementation['ensureCustomizationPackage'];
+        /**
+         * [#28409] The per-package layer the export reads, typed from the
+         * producer's own signature as above.
+         */
+        getMetaItemsPerPackage?: ObjectStackProtocolImplementation['getMetaItemsPerPackage'];
         /** ⚠️ Undeclared request shapes — see "Where the ledger honestly ends". */
         publishPackageDrafts?(request: any): Promise<any>;
         discardPackageDrafts?(request: any): Promise<any>;
@@ -226,6 +248,11 @@ export type PackagesDomainProtocol =
         reassignOrphanedMetadata?(request: any): Promise<any>;
         duplicatePackage?(request: any): Promise<any>;
         updatePackage?(request: any): Promise<any>;
+        /**
+         * [#28411] The served overrides of a base's items, typed from the
+         * producer's own signature.
+         */
+        listServedOverrides?: ObjectStackProtocolImplementation['listServedOverrides'];
     };
 
 /**
@@ -353,9 +380,14 @@ function requireManageMetadata(deps: DomainHandlerDeps, context: HttpProtocolCon
  * Never the request body: a body `actor` let any caller holding
  * `manage_metadata` record any name as the one who changed a package. This is
  * the rule `RestServer.resolveMetaWriteActor` holds for the `/meta` write
- * doors, so attribution cannot drift from authorization. Only
- * `publish-drafts` reads it today; the sibling package doors that still read
- * `body.actor` are carried by their own card.
+ * doors, so attribution cannot drift from authorization. [#28414] Every
+ * package door that stamps history or a commit reads it: `publish-drafts`
+ * (and its app re-save), `discard-drafts`, `commits/:commitId/revert`,
+ * `rollback`, `adopt-orphans` and `duplicate`. A body `actor` is ignored, not
+ * refused, so a client still sending one keeps working and is recorded as
+ * itself. No caller acts on behalf of another identity through these doors
+ * (measured: the console and the SDK send none, the CLI calls none); one that
+ * must is served server-side by calling the protocol with its own `actor`.
  */
 function resolvePackageWriteActor(context: HttpProtocolContext | undefined): string | undefined {
     const userId: unknown = (context?.executionContext as { userId?: unknown } | undefined)?.userId;
@@ -479,9 +511,12 @@ function requireCommitTrailReadCapability(deps: DomainHandlerDeps, context: Http
  * [ADR-0131 D6] For the same reason it no longer names the ADR-0005
  * organization overlay, its remedy after that: the per-organization overlay
  * axis is retired, and a write naming an organization answers `403
- * NOT_OVERRIDABLE`. What a managed package provides is customised BESIDE it,
- * as environment-level state, and the two doors name that remedy in one
- * clause ({@link CUSTOMISE_BESIDE_REMEDY}).
+ * NOT_OVERRIDABLE`. Its remedy after THAT — save an item under its own name,
+ * as environment-level state — is retired too: ADR-0146 D11 closed the
+ * package-less write onto a packaged item (`403 NOT_OVERRIDABLE`, naming the
+ * base's pair). What a read-only package ships is customized in its paired
+ * `<id>.custom` package (ADR-0146 D2/D3), and the two doors name that route
+ * in one clause ({@link customizeInPairRemedy}).
  *
  * ⛔ Deliberately NOT caller-sensitive — there is no `isSystem` bypass, unlike
  * {@link requireManageMetadata}. Read-only is a property of the PACKAGE. Engine
@@ -571,22 +606,54 @@ function packageIsUnknown(registry: unknown, id: string): boolean {
 }
 
 /**
- * [ADR-0131 D6] The customisation remedy both read-only refusals below name
- * ({@link requireWritablePackage}, {@link requireDuplicableSource}), in one
- * spelling. A managed package's items are sealed, and what a customer changes
- * lives beside them as environment-level state: a save under an item's own
- * name is an environment overlay on a type whose registry entry takes one
- * (`allowEnvironmentOverlay`) unless the package's lock refuses it — that save
- * is refused `ITEM_LOCKED`, naming the lock and its reason (ADR-0010 §3.3) —
- * and on every other type the save door's own refusal names the route that
- * type has: a flow's clone and switch, an action's switch, a permission set's
- * clone, else the source. The sentence names that door rather than a list of
- * types, so it cannot drift from the regime table the door reads.
+ * [ADR-0146 D2/D3/D11] The customization remedy both read-only refusals below
+ * name ({@link requireWritablePackage}, {@link requireDuplicableSource}), in
+ * one spelling. A managed package's items are sealed, and what a customer
+ * changes is an item of the package's paired `<id>.custom`: the ensure door
+ * (`POST /api/v1/packages/:id/ensure-customization`, the pair's one creation
+ * path) answers the pair, and a save naming it (`?package=<id>.custom`) lands
+ * there — a new item under its own name, or, declaring `overrides: { package,
+ * basedOn }`, the replacement of an item the package ships, served at that
+ * item's name. The sentence spells the pair, the route and the declaration
+ * exactly as the save door's own close does (`packagelessOverlayWriteRefusal`,
+ * `@objectstack/metadata-protocol`), so a caller sent here reads the fix that
+ * door would name.
+ *
+ * It replaces the ADR-0131 D6 remedy — "save an item under its own name", an
+ * environment-level overlay — which ADR-0146 D11 closed: that package-less
+ * save onto a packaged item answers `403 NOT_OVERRIDABLE`, naming the pair. A
+ * refusal that prescribes a dead end is worse than one that prescribes
+ * nothing (the #14451 lesson above).
+ *
+ * What the route does NOT promise, measured on the real routes before this
+ * sentence was written, and named so the sentence promises no more:
+ *   - a type that takes no declared override (`action` until ADR-0146 D9's
+ *     conditions land, the security catalog's `permission` / `position` /
+ *     `capability`, the code-only types) is refused at the save door naming
+ *     the route that type has ("new similar", the switch), and a locked item
+ *     `ITEM_LOCKED` naming the lock (ADR-0010 §3.3);
+ *   - a package the ensure door cannot pair — no namespace, a pair namespace
+ *     another package owns, a version that is not SemVer — is refused there,
+ *     naming why (ADR-0146 D3).
+ * Both refusals name their own reason, so the sentence names the door rather
+ * than a list of types or package shapes that could drift from them.
+ *
+ * An id the pairing rule derives no pair for (`customizationPackageId`,
+ * `@objectstack/spec/kernel`) gets the sentence without a pair id: the ensure
+ * door answers that id with the reason it has none.
  */
-const CUSTOMISE_BESIDE_REMEDY =
-    'customise what this package provides beside it, as environment-level state (ADR-0131 D6): save an item '
-    + 'under its own name — that overlays it where the item\'s type takes an environment overlay and the package\'s '
-    + 'lock does not refuse it, and is otherwise refused naming the route that type has, or the lock.';
+function customizeInPairRemedy(id: string): string {
+    const ensure = `POST /api/v1/packages/${id}/ensure-customization`;
+    const pair = customizationPackageId(id);
+    if (!pair.ok) {
+        return `customize what it ships in its paired customization package (ADR-0146 D3): ${ensure} answers `
+            + 'that package, or why this one has none.';
+    }
+    return `customize what it ships in its paired package '${pair.value}' (ADR-0146 D3): ensure it with ${ensure}, `
+        + `then save the item there (?package=${pair.value}), declaring overrides: { package: '${id}', basedOn } `
+        + `to replace an item '${id}' ships. A type that takes no override, or a locked item, is refused naming its `
+        + 'route or the lock; a package that cannot have a pair is refused at that door, naming why.';
+}
 
 function requireWritablePackage(
     deps: DomainHandlerDeps,
@@ -602,7 +669,7 @@ function requireWritablePackage(
             `[writable_package_required] Cannot ${action} package '${id}': it is read-only `
             + `(provided by code or an installed app). Packages the deployment ships are managed by `
             + `the deployment, not over this API — ${action} a package you own, or `
-            + CUSTOMISE_BESIDE_REMEDY,
+            + customizeInPairRemedy(id),
             422,
             {
                 code: 'WRITABLE_PACKAGE_REQUIRED',
@@ -733,8 +800,8 @@ function isDisableablePackage(engine: unknown, id: string | undefined): boolean 
  * packages — a NEW decision, and one the ADR itself still lists as open
  * ("should customising a code item also fork it into a writable base?
  * *Leaning: keep overlay for surgical tweaks*"). Two built answers exist
- * instead (ADR-0131 D6): customising BESIDE the package, as environment-level
- * state ({@link CUSTOMISE_BESIDE_REMEDY}), and, for an editable copy of the
+ * instead: customizing in the package's paired `<id>.custom` (ADR-0146 D2/D3,
+ * {@link customizeInPairRemedy}), and, for an editable copy of the
  * whole package, its `unmanaged` install, which the install door judges (the
  * package must permit it, and the copy cannot sit beside a managed install of
  * the same package). So the honest behaviour of an unbuilt gesture is to say
@@ -748,7 +815,7 @@ function isDisableablePackage(engine: unknown, id: string | undefined): boolean 
  * a lie by implicature here: nothing is being written to the source, and its
  * remedy ("use a writable package") reads as *make the source writable*, which
  * is neither possible nor the point. `DUPLICATE_SOURCE_NOT_A_BASE` names the
- * one thing the caller can act on — pick a base, customise beside the package,
+ * one thing the caller can act on — pick a base, customize in its pair,
  * or install it unmanaged where it permits that.
  *
  * ⛔ Deliberately NOT a check on emptiness. A WRITABLE base holding no active
@@ -783,7 +850,7 @@ function requireDuplicableSource(
             + `(provided by code or an installed app), and duplicate clones a writable base's `
             + `stored metadata rows. A code package's metadata is delivered as code, so there are `
             + `no rows to clone and the copy would be empty (ADR-0070 D4 duplicates a BASE). `
-            + `Duplicate a base you own, or ${CUSTOMISE_BESIDE_REMEDY} `
+            + `Duplicate a base you own, or ${customizeInPairRemedy(id)} `
             + `For an editable copy of the whole package, install it unmanaged instead `
             + `(installMode 'unmanaged'), where its manifest's installModes permits that.`,
             422,
@@ -1465,7 +1532,8 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // never be rebuilt or published — «declared ≠ enforced» on a
             // PUBLISHED API contract, the shape Prime Directive #10 refuses
             // outright, and the failure 北极星 clause 4 names in as many words:
-            // 「错的必须被**响亮拒绝**并给处方,**永不静默落库**」.
+            // "what is wrong must be loudly refused with a prescription, never
+            // silently stored".
             //
             // The authorising ruling is 基本裁决原则 —「声明而未兑现是实现缺口,
             // 补实现或退役,⛔ 不在消费端收窄」— and by the mechanical boundary
@@ -1538,7 +1606,8 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // `version` installed and answered `201`. That is «declared ≠
             // enforced» on a PUBLISHED API contract — the shape Prime Directive
             // #10 refuses outright — and it is the failure 北极星 clause 4 names
-            // in as many words: 「错的必须被**响亮拒绝**并给处方,**永不静默落库**」.
+            // in as many words: "what is wrong must be loudly refused with a
+            // prescription, never silently stored".
             // So the refusal is loud and carries the prescription.
             //
             // The ruling that authorises it is 基本裁决原则 —
@@ -1625,6 +1694,18 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // `overwrite` set or not — answers as before.
             const readOnly = requireWritablePackage(deps, qlService, pkgId, overwrite ? 'overwrite' : 'install');
             if (readOnly) return readOnly;
+            // [ADR-0146 D3] A paired customization package id (`<base>.custom`)
+            // installs only with what its ensure door writes — the base's pair
+            // namespace, explicit, and the dependency on the base — or it is
+            // refused `400` naming that door. Asked here, ahead of BOTH limbs,
+            // because the no-protocol fallback never reaches the primitive,
+            // which asks the same predicate; ⛔ never a second copy of the rule.
+            // An exported pair declaring both installs, and ADR-0141 D2 judges
+            // its range below.
+            const pairRefusal = customizationPairManifestRefusal(manifest, (id) => registry.getPackage(id));
+            if (pairRefusal !== undefined) {
+                return { handled: true, response: deps.error(pairRefusal, 400) };
+            }
             // ⚠️ The MANIFEST handed on is the one the caller sent, ⛔ not the
             // parsed copy. `ManifestSchema` applies defaults at parse time
             // (`scope`, `defaultDatasource`), and this door has always stored
@@ -1904,6 +1985,64 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 if (packageIsUnknown(registry, id)) {
                     return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
                 }
+                // [#28452] The note is parsed with the declaration's own
+                // member, `PublishPackageDraftsRequestSchema.shape.message`,
+                // and a note it refuses (a number, an object, an array,
+                // `null`) is refused here `400` (`VALIDATION_ERROR`, derived
+                // from the status as the install door's legs derive it) before
+                // anything is published. It used to be dropped, so the publish
+                // went ahead and every history row recorded the default note,
+                // and the caller never learnt its note was ignored.
+                //
+                // ⛔ Only `message` is judged here. `backfill` keeps its one
+                // refusal, the protocol's shape judgement below (same status,
+                // code and `issues[]` as before); parsing it here too would be a
+                // second judge with a second sentence. Unknown keys are not
+                // read at all, so a body `actor` (the SDK's deprecated
+                // `opts.actor`) still publishes. Placed beside that backfill
+                // judgement, after the 404, so both body-member refusals sit at
+                // one point of the door's order.
+                //
+                // [#28541] A body that is present and is not a JSON object (an
+                // array, a string, a number, a boolean) has no member to read,
+                // so it used to publish with the default note. It is refused
+                // first, with the declaration's own whole-body issue and the
+                // same status as the note refusal. "No body" stays a publish
+                // with no note: the transport hands an absent or empty body as
+                // `{}`, and an in-process caller or a JSON `null` as
+                // `undefined` / `null`, and none of those is refused here.
+                if (body !== undefined && body !== null && (typeof body !== 'object' || Array.isArray(body))) {
+                    const declaredBody = PublishPackageDraftsRequestSchema.safeParse(body);
+                    if (!declaredBody.success) {
+                        const located = declaredBody.error.issues
+                            .map((issue) => `${issue.path.map(String).join('.') || '(body)'}: ${issue.message}`)
+                            .join('; ');
+                        return {
+                            handled: true,
+                            response: deps.error(
+                                `Invalid publish-drafts body — ${located}. Nothing was published: the body is a JSON `
+                                + 'object, { "message"?: string, "backfill"?: [...] }; send one, or send no body to '
+                                + 'publish with the sentence naming the package as the note.',
+                                400,
+                            ),
+                        };
+                    }
+                }
+                const declaredMessage = PublishPackageDraftsRequestSchema.shape.message.safeParse(body?.message);
+                if (!declaredMessage.success) {
+                    const located = declaredMessage.error.issues
+                        .map((issue) => `message: ${issue.message}`)
+                        .join('; ');
+                    return {
+                        handled: true,
+                        response: deps.error(
+                            `Invalid publish-drafts body — ${located}. Nothing was published: \`message\` is the `
+                            + 'change note every history row of this publish records; send it as a string, or leave '
+                            + 'it out to record the sentence naming the package.',
+                            400,
+                        ),
+                    };
+                }
                 try {
                     // [ADR-0146 D1] Who published: the identity this request
                     // was authorized as, never a name the body supplies — see
@@ -1914,9 +2053,8 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                         ...(actor !== undefined ? { actor } : {}),
                         // [ADR-0146 D1] The author's change note: the package
                         // commit and every item history row this publish writes
-                        // carry it. A string, as the single-item publish door
-                        // reads `message`; anything else sends no note.
-                        ...(typeof body?.message === 'string' ? { message: body.message } : {}),
+                        // carry it. The parsed value: a string, or absent.
+                        ...(declaredMessage.data !== undefined ? { message: declaredMessage.data } : {}),
                         // [#24253] Passed through as sent: the protocol judges
                         // its shape and what it names, and refuses the whole
                         // request before anything is published.
@@ -2099,7 +2237,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                                         name: app.name,
                                         item,
                                         packageId: id,
-                                        ...(body?.actor ? { actor: body.actor } : {}),
+                                        ...(actor !== undefined ? { actor } : {}),
                                     });
                                     flipped.push(app.name);
                                 }
@@ -2262,9 +2400,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.discardPackageDrafts === 'function') {
                 try {
+                    const actor = resolvePackageWriteActor(_context);
                     const result = await protocol.discardPackageDrafts({
                         packageId: id,
-                        ...(body?.actor ? { actor: body.actor } : {}),
+                        ...(actor !== undefined ? { actor } : {}),
                     });
                     // The twin of `publish-drafts`' 404: an empty discard is the
                     // answer for a package that exists — see `packageIsUnknown`.
@@ -2314,8 +2453,19 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // POST /packages/:id/commits/:commitId/revert → revert ONE commit
         // (ADR-0067). Created artifacts are soft-removed, edited ones are
         // restored to their pre-commit version; the revert is itself a commit.
+        //
+        // The path's package decides: an unknown `:id` is the sibling doors'
+        // 404, and a commit of another package is the protocol's
+        // `COMMIT_NOT_FOUND` naming `:id` (it is handed `packageId`), so a
+        // commit id copied from the wrong package writes nothing. No
+        // `requireWritablePackage` here: the only commits a read-only package
+        // carries are its environment overlays' publishes (ADR-0131 D6, the
+        // `/publish` door refuses the rest), and undoing one stays open, as
+        // `POST /packages/:id/revert` answers a read-only package's stored
+        // rows before its own guard.
         if (parts.length === 4 && parts[1] === 'commits' && parts[3] === 'revert' && m === 'POST') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
+            const id = decodeURIComponent(parts[0]);
             const commitId = decodeURIComponent(parts[2]);
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Reverting commit "${commitId}"`);
@@ -2323,10 +2473,15 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.revertCommit === 'function') {
+                if (packageIsUnknown(registry, id)) {
+                    return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
+                }
                 try {
+                    const actor = resolvePackageWriteActor(_context);
                     const result = await protocol.revertCommit({
                         commitId,
-                        ...(body?.actor ? { actor: body.actor } : {}),
+                        packageId: id,
+                        ...(actor !== undefined ? { actor } : {}),
                     });
                     return { handled: true, response: deps.success(result) };
                 } catch (e: any) {
@@ -2337,11 +2492,13 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         }
 
         // POST /packages/:id/rollback  body { commitId } → roll the package
-        // back THROUGH every commit newer than `commitId` (ADR-0067).
+        // back THROUGH every commit newer than `commitId` (ADR-0067). The
+        // path's package decides, as for the per-commit revert above.
         if (parts.length === 2 && parts[1] === 'rollback' && m === 'POST') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
+            const id = decodeURIComponent(parts[0]);
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
-            const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Rolling back package "${decodeURIComponent(parts[0])}"`);
+            const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Rolling back package "${id}"`);
             if (walled) return walled;
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             const protocol = await resolveProtocol(deps, _context);
@@ -2349,10 +2506,15 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 if (!body?.commitId) {
                     return { handled: true, response: deps.error('Body { commitId } is required', 400) };
                 }
+                if (packageIsUnknown(registry, id)) {
+                    return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
+                }
                 try {
+                    const actor = resolvePackageWriteActor(_context);
                     const result = await protocol.rollbackToPackageCommit({
                         commitId: String(body.commitId),
-                        ...(body?.actor ? { actor: body.actor } : {}),
+                        packageId: id,
+                        ...(actor !== undefined ? { actor } : {}),
                     });
                     return { handled: true, response: deps.success(result) };
                 } catch (e: any) {
@@ -2420,6 +2582,54 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             return { handled: true, response: deps.success(manifest) };
         }
 
+        // GET /packages/:id/customizations → [#28411, ADR-0146 D8 item 4] what
+        // this deployment changed on an installed base: its `.custom` pair's
+        // served overrides, the members the pair adds to the base's objects,
+        // the base's items switched off in the activation ledger, and the
+        // fields and flows other packages contribute to it (#28722). See
+        // {@link readPackageCustomizations}.
+        if (parts.length === 2 && parts[1] === 'customizations' && m === 'GET') {
+            // The read authority of `GET /packages/:id`, the same gate, asked
+            // first. ⛔ No second authority check.
+            const denied = requireReadCapability(deps, _context); if (denied) return denied;
+            // Closed query set: the door reads none, so a parameter is a
+            // request it would otherwise answer as if it had been honoured.
+            const unknownQuery = unknownQueryParamRefusalMessage(query, []);
+            if (unknownQuery !== undefined) {
+                return { handled: true, response: deps.error(unknownQuery, 400, { code: 'VALIDATION_ERROR' }) };
+            }
+            const id = decodeURIComponent(parts[0]);
+            // A `.custom` id is refused naming its base, whether or not the
+            // pair is installed: the question is about the id's shape, and the
+            // base's read answers it.
+            const baseOfPair = customizationBasePackageId(id);
+            if (baseOfPair !== null) {
+                return {
+                    handled: true,
+                    response: deps.error(
+                        `Package '${id}' is the customization package of '${baseOfPair}'. Customizations are read for the base: `
+                        + `GET /packages/${encodeURIComponent(baseOfPair)}/customizations.`,
+                        400,
+                        { code: 'VALIDATION_ERROR' },
+                    ),
+                };
+            }
+            // The id lookup of `GET /packages/:id`, with its 404 wording.
+            if (!registry.getPackage(id)) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
+            const protocol = await resolveProtocol(deps, _context);
+            if (!protocol || typeof protocol.listServedOverrides !== 'function') {
+                return { handled: true, response: deps.error('Metadata service not available', 503) };
+            }
+            try {
+                return {
+                    handled: true,
+                    response: deps.success(await readPackageCustomizations(id, protocol.listServedOverrides.bind(protocol), qlService)),
+                };
+            } catch (e: any) {
+                return { handled: true, response: deps.errorFromThrown(e, 500) };
+            }
+        }
+
         // POST /packages/:id/adopt-orphans → bulk-rebind package-less (legacy
         // null / 'sys_metadata') metadata INTO this base (ADR-0070 D5 migration;
         // lets the env retire the "Local / Custom" scope once it has no orphans).
@@ -2445,9 +2655,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 return { handled: true, response: deps.error('Orphan adoption not supported', 501) };
             }
             try {
+                const actor = resolvePackageWriteActor(_context);
                 const result = await protocol.reassignOrphanedMetadata({
                     targetPackageId: id,
-                    ...(body?.actor ? { actor: body.actor } : {}),
+                    ...(actor !== undefined ? { actor } : {}),
                 });
                 return { handled: true, response: deps.success(result) };
             } catch (e: any) {
@@ -2487,16 +2698,76 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // loop, so a refusal any later still leaves the empty shell behind.
             const notABase = requireDuplicableSource(deps, qlService, id); if (notABase) return notABase;
             try {
+                const actor = resolvePackageWriteActor(_context);
                 const result = await protocol.duplicatePackage({
                     sourcePackageId: id,
                     targetPackageId,
                     ...(typeof body?.targetName === 'string' ? { targetName: body.targetName } : {}),
                     ...(typeof body?.targetNamespace === 'string' ? { targetNamespace: body.targetNamespace } : {}),
-                    ...(body?.actor ? { actor: body.actor } : {}),
+                    ...(actor !== undefined ? { actor } : {}),
                 });
                 return { handled: true, response: deps.success(result) };
             } catch (e: any) {
                 return { handled: true, response: deps.errorFromThrown(e, 500) };
+            }
+        }
+
+        // POST /packages/:id/ensure-customization → ensure the base's paired
+        // customization package `<id>.custom` (ADR-0146 D3): answer it, creating
+        // it when absent — `201` when this call created it, `200` when it was
+        // already there. The body is the protocol's
+        // (`ensureCustomizationPackage`, `@objectstack/metadata-protocol`),
+        // which judges the packages; this door judges the caller, exactly as
+        // the install door does — `manage_metadata` under `single`, the
+        // platform operator alone under a wall (a tenant administrator is
+        // refused `403`) — and the request shape, all before the protocol runs.
+        if (parts.length === 2 && parts[1] === 'ensure-customization' && m === 'POST') {
+            const denied = requireManageMetadata(deps, _context); if (denied) return denied;
+            const id = decodeURIComponent(parts[0]);
+            // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
+            const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Ensuring the customization package of "${id}"`);
+            if (walled) return walled;
+            // AGENTS.md route rule 5: the measured closed query set is EMPTY —
+            // the door reads the path and the session, no query parameter.
+            const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
+            // The door reads NO body: the base is the path's `:id`, and the
+            // pair's id, namespace and dependency are derived from it, never
+            // requested. A body carrying keys is refused rather than ignored,
+            // so a caller who meant to name a namespace or a range learns that
+            // nothing was read.
+            if (body !== undefined && body !== null
+                && (typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length > 0)) {
+                return {
+                    handled: true,
+                    response: deps.error(
+                        'The ensure-customization door reads no body: the base is the path\'s package id, and the '
+                        + 'pair\'s id, namespace and dependency range are derived from it (ADR-0146 D3). Send no '
+                        + 'body, or an empty object.',
+                        400,
+                    ),
+                };
+            }
+            const protocol = await resolveProtocol(deps, _context);
+            if (!protocol || typeof protocol.ensureCustomizationPackage !== 'function') {
+                return { handled: true, response: deps.error('Customization package ensure not supported', 501) };
+            }
+            try {
+                const result = await protocol.ensureCustomizationPackage({ basePackageId: id });
+                const res = deps.success(result);
+                if (result.created) res.status = 201;
+                return { handled: true, response: res };
+            } catch (err) {
+                // ADR-0141 D2's refusal of the pair's own install (a base at a
+                // prerelease version, which the dependency check does not
+                // admit) keeps its per-entry facts, as at the install door.
+                if (isDependencyMissingError(err)) {
+                    const answer = dependencyMissingAnswer(err);
+                    return {
+                        handled: true,
+                        response: deps.error(answer.message, answer.status, { code: answer.code, ...answer.details }),
+                    };
+                }
+                return { handled: true, response: deps.errorFromThrown(err, 500) };
             }
         }
 
@@ -2879,6 +3150,234 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
  * @returns the manifest object, or `null` if the package id is unknown
  *          AND has no overlay-authored metadata.
  */
+/**
+ * [#28411, ADR-0146 D8 item 4, D3] The answer of `GET /packages/:id/customizations`
+ * for the installed base `baseId`: four lists, each read from the one owner
+ * of its fact, and their lengths. Served rows and ledger rows only; ⛔ no diff
+ * against the base and no `basedOn` verdict (ADR-0146 D2, D6).
+ *
+ *  - **overrides** — the protocol's {@link ObjectStackProtocolImplementation.listServedOverrides}:
+ *    the pair's ACTIVE rows the served-override predicate admits, the one the
+ *    effective read serves by (N-10). ⛔ Never re-derived here.
+ *  - **extensions** — the object registry's `extend` contributors bound to the
+ *    pair, on every object the base OWNS (`getObjectOwner`). Each contributor's
+ *    `definition` is the extension body as declared (`registerObject` stores it
+ *    and folds nothing into an `extend` body), so its `fields`, `validations`
+ *    and `indexes` ARE the members it adds: no diff against the base's
+ *    definition is needed, and none is made.
+ *  - **switchedOff** — the activation ledger's rows recording the base as their
+ *    package with `active: false`, through the ledger's one reader
+ *    ({@link listPackageMetadataActivations}). A composition with no ledger
+ *    object has switched nothing off, which is the ledger's own reading of
+ *    absence (ADR-0126 §4: no row means active).
+ *  - **contributions** — [#28722, ADR-0029 D7 / ADR-0146 D3] what OTHER packages
+ *    bring to the base's surface, each item stamped with its package: see
+ *    {@link readBaseContributions}.
+ *
+ * No per-organization axis (ADR-0131 D6): every source is environment-level,
+ * so every caller the read gate admits gets the same answer. A base with no
+ * pair package answers empty overrides and extensions, and nothing here
+ * creates the pair.
+ */
+async function readPackageCustomizations(
+    baseId: string,
+    listServedOverrides: NonNullable<PackagesDomainProtocol['listServedOverrides']>,
+    ql: any,
+): Promise<GetPackageCustomizationsResponse> {
+    const overrides = await listServedOverrides({ packageId: baseId });
+
+    const pair = customizationPackageId(baseId);
+    const registry = ql?.registry;
+    type Extension = GetPackageCustomizationsResponse['extensions'][number];
+    const extensions: Extension[] = [];
+    if (pair.ok && typeof registry?.getAllObjects === 'function') {
+        for (const object of registry.getAllObjects(pair.value) as Array<{ name?: unknown }>) {
+            const name = object?.name;
+            if (typeof name !== 'string' || registry.getObjectOwner(name)?.packageId !== baseId) continue;
+            for (const contributor of registry.getObjectContributors(name) as Array<{ packageId?: unknown; ownership?: unknown; definition?: any }>) {
+                if (contributor.packageId !== pair.value || contributor.ownership !== 'extend') continue;
+                const body = contributor.definition ?? {};
+                for (const field of Object.keys(body.fields ?? {})) extensions.push({ object: name, kind: 'field', name: field });
+                for (const rule of Array.isArray(body.validations) ? body.validations : []) {
+                    if (typeof rule?.name === 'string') extensions.push({ object: name, kind: 'validation', name: rule.name });
+                }
+                for (const index of Array.isArray(body.indexes) ? body.indexes : []) {
+                    extensions.push({
+                        object: name,
+                        kind: 'index',
+                        ...(typeof index?.name === 'string' && index.name !== '' ? { name: index.name } : {}),
+                        fields: Array.isArray(index?.fields) ? index.fields.filter((f: unknown): f is string => typeof f === 'string') : [],
+                    });
+                }
+            }
+        }
+    }
+    const kindOrder = { field: 0, validation: 1, index: 2 } as const;
+    extensions.sort((a, b) => a.object.localeCompare(b.object)
+        || kindOrder[a.kind] - kindOrder[b.kind]
+        || (a.name ?? '').localeCompare(b.name ?? ''));
+
+    let ledgerRegistered = true;
+    try {
+        ledgerRegistered = typeof registry?.getObject !== 'function' || !!registry.getObject(METADATA_ACTIVATION_TABLE);
+    } catch {
+        // A registry that cannot answer is not an answer: read, and let the read decide.
+    }
+    const switchedOff = (ledgerRegistered && typeof ql?.find === 'function'
+        ? await listPackageMetadataActivations(ql, baseId)
+        : [])
+        .filter((row) => row.active === false)
+        .map((row) => ({ type: row.metadataType, name: row.name }))
+        .sort((a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name));
+
+    const contributions = readBaseContributions(baseId, pair.ok ? pair.value : undefined, registry);
+
+    return {
+        packageId: baseId,
+        overrides,
+        extensions,
+        switchedOff,
+        contributions,
+        counts: {
+            overrides: overrides.length,
+            extensions: extensions.length,
+            switchedOff: switchedOff.length,
+            contributions: contributions.length,
+        },
+    };
+}
+
+/**
+ * [#28722, ADR-0029 D7 as amended by ADR-0146 D3] The `contributions` of
+ * `GET /packages/:id/customizations`: every field and flow a package other than
+ * the base `baseId` and its pair `pairId` contributes to an object the base
+ * OWNS (`getObjectOwner`), each entry naming that package. Read from the two
+ * registries that already record the contributor, never inferred:
+ *
+ *  - **field** — the object registry's `extend` contributors of the object, as
+ *    the customizations' `extensions` reads the pair's: each contributor's
+ *    `definition` is its extension body as declared, so its `fields` keys ARE
+ *    the fields it adds, and its `packageId` is the package that declared it.
+ *    One entry per contributor and field, so two packages adding a field of
+ *    one name are two entries.
+ *  - **flow** — the metadata registry's flows (`listItems('flow')`, which
+ *    already leaves a disabled package's out), whose `start` node's
+ *    `config.objectName` is a base-owned object, attributed to the package
+ *    stamp the registration put on it (its `_packageId`).
+ *
+ * Both kinds ask ONE question of their stamp, {@link codePackageOf}: is it a
+ * code package's ({@link isCodeArtifactBody}: not the package-less
+ * `sys_metadata` sentinel, not a tenant-authored body), and neither the base
+ * nor its pair? Only where the stamp is read differs: the contributor's
+ * `packageId` beside its `definition`, or the flow's own `_packageId`. An item
+ * authored in this environment is the environment's, not a package's, and is
+ * not listed, whichever kind it is.
+ *
+ * Ordered by object, kind, name and package.
+ */
+function readBaseContributions(
+    baseId: string,
+    pairId: string | undefined,
+    registry: any,
+): GetPackageCustomizationsResponse['contributions'] {
+    // The `field` and `flow` entries: the `nav` kind is declared in the spec
+    // ahead of this producer (#27928) and is not listed here yet (#28722).
+    type Contribution = Exclude<GetPackageCustomizationsResponse['contributions'][number], { kind: 'nav' }>;
+    const contributions: Contribution[] = [];
+    if (typeof registry?.getAllObjects !== 'function') return contributions;
+    // The one stamp reading both kinds share: the package `packageId` names
+    // when `body` is a code package's item and the package is neither the base
+    // nor its pair; `undefined` otherwise.
+    const codePackageOf = (packageId: unknown, body: unknown): string | undefined => {
+        if (typeof packageId !== 'string' || packageId === baseId || packageId === pairId) return undefined;
+        const stamped = { _packageId: packageId, _provenance: (body as { _provenance?: unknown } | null | undefined)?._provenance };
+        return isCodeArtifactBody(stamped) ? packageId : undefined;
+    };
+
+    const owned = new Set<string>();
+    for (const object of registry.getAllObjects(baseId) as Array<{ name?: unknown }>) {
+        const name = object?.name;
+        if (typeof name === 'string' && registry.getObjectOwner(name)?.packageId === baseId) owned.add(name);
+    }
+
+    for (const name of owned) {
+        for (const contributor of registry.getObjectContributors(name) as Array<{ packageId?: unknown; ownership?: unknown; definition?: any }>) {
+            if (contributor.ownership !== 'extend') continue;
+            const packageId = codePackageOf(contributor.packageId, contributor.definition);
+            if (packageId === undefined) continue;
+            for (const field of Object.keys(contributor.definition?.fields ?? {})) {
+                contributions.push({ kind: 'field', object: name, name: field, packageId });
+            }
+        }
+    }
+
+    if (owned.size > 0 && typeof registry.listItems === 'function') {
+        for (const flow of registry.listItems('flow') as Array<{ name?: unknown; nodes?: unknown; _packageId?: unknown }>) {
+            const packageId = codePackageOf(flow._packageId, flow);
+            if (packageId === undefined || typeof flow.name !== 'string') continue;
+            const start = Array.isArray(flow.nodes)
+                ? flow.nodes.find((node: any) => node?.type === 'start')
+                : undefined;
+            const object = start?.config?.objectName;
+            if (typeof object !== 'string' || !owned.has(object)) continue;
+            contributions.push({ kind: 'flow', object, name: flow.name, packageId });
+        }
+    }
+
+    const kindOrder = { field: 0, flow: 1 } as const;
+    return contributions.sort((a, b) => a.object.localeCompare(b.object)
+        || kindOrder[a.kind] - kindOrder[b.kind]
+        || a.name.localeCompare(b.name)
+        || a.packageId.localeCompare(b.packageId));
+}
+
+/**
+ * [#29563] Whether an item declares that it overrides `packageId`
+ * (`overrides.package`, ADR-0146 D2). A package's own document never does: the
+ * declaration names the base an item of the base's `.custom` pair replaces.
+ */
+function declaresOverrideOf(item: unknown, packageId: string): boolean {
+    const overrides = (item as { overrides?: unknown } | null | undefined)?.overrides;
+    return typeof overrides === 'object' && overrides !== null
+        && (overrides as { package?: unknown }).package === packageId;
+}
+
+/**
+ * [#29563, #29649, ADR-0146 D8 item 3] A package's own documents of one type,
+ * out of its per-package layer `items`: an item that declares it overrides
+ * `packageId` ({@link declaresOverrideOf}) is the package's `.custom` pair's
+ * override, never one of the package's documents, so it is replaced, in its
+ * place, by the package's own code artifact of the name when the layer lists
+ * none beside it, and dropped otherwise. The artifact is the registry's
+ * prefer-local answer for the package (`getArtifactItem`), kept only when it is
+ * the package's own (`_packageId`) and declares no override itself.
+ */
+function ownDocumentsOf(items: any[], type: string, packageId: string, registry: any): any[] {
+    const own = new Set(items
+        .filter((it) => !declaresOverrideOf(it, packageId))
+        .map((it) => (it as { name?: unknown } | null)?.name));
+    const out: any[] = [];
+    for (const it of items) {
+        if (!declaresOverrideOf(it, packageId)) {
+            out.push(it);
+            continue;
+        }
+        const name = (it as { name?: unknown } | null)?.name;
+        if (typeof name !== 'string' || own.has(name)) continue;
+        let artifact: unknown;
+        try {
+            artifact = registry?.getArtifactItem?.(type, name, packageId);
+        } catch {
+            artifact = undefined;
+        }
+        if ((artifact as { _packageId?: unknown } | null | undefined)?._packageId !== packageId) continue;
+        if (declaresOverrideOf(artifact, packageId)) continue;
+        own.add(name);
+        out.push(artifact);
+    }
+    return out;
+}
+
 async function assemblePackageManifest(
 deps: DomainHandlerDeps,
 packageId: string,
@@ -2913,22 +3412,67 @@ context: HttpProtocolContext,
     const exportPluralKeys = Object.keys(PLURAL_TO_SINGULAR).filter(
         (k) => k !== 'datasources' && k !== 'emailTemplates',
     );
+    // [#28574, ADR-0146 D2 / D10] A package's `object_extension` items travel
+    // as its `objectExtensions`, the collection the install door registers as
+    // `'extend'` contributors (`ObjectQL.registerApp`). `PLURAL_TO_SINGULAR`
+    // carries no such pair — an extension merges into its target rather than
+    // registering under a type of its own — so the pair is stated here, where
+    // the item is read back out as the collection entry it is.
+    const EXTENSIONS_KEY = 'objectExtensions';
+    const singularOf = (plural: string): string =>
+        plural === EXTENSIONS_KEY ? 'object_extension' : PLURAL_TO_SINGULAR[plural];
 
     const manifest: Record<string, any> = {};
     let total = 0;
-    for (const plural of exportPluralKeys) {
-        const singular = PLURAL_TO_SINGULAR[plural];
+    const perPackageLayer = typeof protocol.getMetaItemsPerPackage === 'function';
+    for (const plural of [...exportPluralKeys, EXTENSIONS_KEY]) {
+        const singular = singularOf(plural);
         let items: any[] = [];
         try {
             // getMetaItems applies the packageId filter at the
             // registry/overlay query level, so the returned items are
             // already scoped to this package — no client-side re-filter.
-            const res = await protocol.getMetaItems({ type: singular, packageId });
+            // [#28409, ADR-0146 D8 item 3] A package exports its OWN items:
+            // the per-package layer, where the protocol serves one, never the
+            // effective read that serves a base's name with its pair's
+            // declared override. So the base's export carries the base
+            // unchanged, and its `.custom` pair's export carries the
+            // overriding item with its `overrides` block.
+            const res = typeof protocol.getMetaItemsPerPackage === 'function'
+                ? await protocol.getMetaItemsPerPackage({ type: singular, packageId })
+                : await protocol.getMetaItems({ type: singular, packageId });
             items = Array.isArray(res?.items) ? res.items : [];
         } catch {
             // Unknown/unsupported type for this runtime — skip.
             continue;
         }
+        // [#29563, ADR-0146 D8 item 3] …and, from that layer, never an item
+        // that declares it overrides THIS package: that is the pair's
+        // override, not one of the package's own documents. The layer can list
+        // one under the base: a published `.custom` row is registered in the
+        // registry's bare slot wearing the base's envelope (`_packageId` = the
+        // base's), and for every type but `view` (#22057) that copy is listed
+        // beside the base's own item. Measured for `dashboard` and `report`:
+        // the base's export carried both, the second with the edited label and
+        // the `overrides` block. A protocol with no per-package layer is read
+        // as before.
+        //
+        // [#29649] …and the package's own document is served in its place: the
+        // override copy is not always listed BESIDE the base's item. On a boot
+        // that also holds the base's code documents in the metadata service
+        // (`MetadataPlugin`'s artifact door, as every `defineStack` host does),
+        // the layer merges the registry's items over the service's, one per
+        // `(name, package)` slot, so the copy wearing the base's envelope takes
+        // the base's slot and the base's own item is not listed at all.
+        // Measured on a real showcase boot: a published dashboard or report
+        // override left the base's export without the item, and after #29640
+        // took those two out of the bare slot, a page, app, dataset, doc or
+        // book override still did (#29613 holds them). The package's own
+        // document is its code artifact, read prefer-local from the registry
+        // (`getArtifactItem` with the package's id: the composite slot
+        // `registerApp` filled, which the bare-slot copy never reaches), the
+        // same body the layer serves for the name while no override is live.
+        if (perPackageLayer) items = ownDocumentsOf(items, singular, packageId, registry);
         if (items.length === 0) continue;
         // [#5320] `views` is partitioned rather than dumped: the registry's
         // ADR-0017 dual-read returns the container AND its expanded per-view
@@ -2943,6 +3487,20 @@ context: HttpProtocolContext,
             if (viewItems.length > 0) manifest[ASSEMBLED_VIEW_ITEMS_KEY] = viewItems;
             total += views.length + viewItems.length;
             continue;
+        }
+        // [#28574] A package's `objects` are the objects it OWNS. The registry
+        // lists an object under every package that contributes to it — the
+        // one that extends it too — served as its owner's merged object
+        // (`_packageId` the owner's). Exported, that would re-install as an
+        // `'own'` claim on another package's object, refused at install
+        // (`ObjectOwnershipConflictError`), and the extender's own fields
+        // travel as its `objectExtensions` entry instead.
+        if (plural === 'objects') {
+            items = items.filter((it) => {
+                const owner = (it as { _packageId?: unknown } | null)?._packageId;
+                return owner === undefined || owner === null || owner === packageId;
+            });
+            if (items.length === 0) continue;
         }
         manifest[plural] = items.map(clean);
         total += items.length;
@@ -2960,6 +3518,17 @@ context: HttpProtocolContext,
     if (pkg?.manifest?.label ?? pkg?.label) {
         manifest.label = pkg?.manifest?.label ?? pkg?.label;
     }
+    // [#29617, ADR-0141 D5 / ADR-0146 D2] The two install-manifest keys an
+    // install of this export decides by, read off the registry row's manifest
+    // as it declares them (`PackageExportManifestSchema.namespace` /
+    // `.dependencies`): without `namespace` the install door derives one from
+    // the id (a `.custom` pair lands under `custom`), and without
+    // `dependencies` a pair loses the edge to its base that orders its install
+    // and admits its overrides. Absent on the row ⇒ absent here.
+    const namespace = pkg?.manifest?.namespace;
+    if (namespace !== undefined && namespace !== null) manifest.namespace = namespace;
+    const dependencies = pkg?.manifest?.dependencies;
+    if (dependencies !== undefined && dependencies !== null) manifest.dependencies = { ...dependencies };
     return manifest;
 }
 

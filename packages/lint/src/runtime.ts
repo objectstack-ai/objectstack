@@ -70,6 +70,11 @@ export {
   runtimeGatedTypes,
   stackKeyForType,
 } from './runtime-gate.js';
+// [#28574] The closure prescription the save doors print, for a door outside
+// this package that judges an object name under a package closure (the
+// `object_extension` item gate in `@objectstack/metadata-protocol`), so the
+// sentence is not spelled a second time.
+export { closureDependencyRemedy } from './object-graph.js';
 export type {
   RuntimeGateResult,
   RuntimePackageScope,

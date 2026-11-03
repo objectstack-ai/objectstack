@@ -16,7 +16,7 @@
  * here are on a real child process and on stdout, for the same two reasons
  * `invocation-loudness.e2e.test.ts` documents at length — these commands print
  * through `utils/format.ts`, whose `printError` writes to stdout. Spawned
- * through `bin/run-dev.js` + tsx so the suite does not depend on
+ * through `bin/run-dev.js` + `node` so the suite does not depend on
  * `packages/cli/dist` having been built.
  *
  * ## ⛔ Why this file is NOT named `.e2e`
@@ -66,9 +66,8 @@ import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
-/** oclif + tsx cold start, with every command module loaded; ~2-10 s when healthy. */
+/** oclif cold start, with every command module loaded; ~2-10 s when healthy. */
 const RUN_TIMEOUT_MS = 240_000;
 
 interface Run {
@@ -77,10 +76,10 @@ interface Run {
   stderr: string;
 }
 
-function runTsx(args: string[], cwd: string): Promise<Run> {
+function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       args,
       { cwd, maxBuffer: 8 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {
@@ -125,7 +124,7 @@ beforeAll(async () => {
   controlDir = mkdtempSync(join(tmpdir(), 'os-g-alias-control-'));
   contextualDir = mkdtempSync(join(tmpdir(), 'os-g-contextual-'));
 
-  // Sequential on purpose: cold tsx starts, each loading every command module,
+  // Sequential on purpose: cold CLI starts, each loading every command module,
   // in a container several agents share.
   //
   // The card's measured row was `os g view class`. `view` suffixes its `const`
@@ -134,17 +133,17 @@ beforeAll(async () => {
   // the project's stack must declare, so in these config-less directories it
   // is refused before this layer; `dashboard` suffixes its binding the same
   // way (`classDashboard`) and binds nothing, so it reaches this layer alone.
-  reserved = await runTsx([CLI, 'generate', 'dashboard', 'class'], reservedDir);
+  reserved = await runCli([CLI, 'generate', 'dashboard', 'class'], reservedDir);
   // A second generator, to show the refusal is not one patched call site —
   // and `let`, which is reserved only because a module is in strict mode.
   // (`skill`, not `flow`, for the same #21325 reason as above.)
-  strictReserved = await runTsx([CLI, 'generate', 'skill', 'let'], strictDir);
-  dryRun = await runTsx([CLI, 'generate', 'dashboard', 'class', '--dry-run'], dryRunDir);
+  strictReserved = await runCli([CLI, 'generate', 'skill', 'let'], strictDir);
+  dryRun = await runCli([CLI, 'generate', 'dashboard', 'class', '--dry-run'], dryRunDir);
   // The layer in front, on the name it owns.
-  parseLayer = await runTsx([CLI, 'generate', 'object', 'class'], parseLayerDir);
-  charsetLayer = await runTsx([CLI, 'generate', 'object', 'order-line'], charsetLayerDir);
-  control = await runTsx([CLI, 'generate', 'dashboard', 'order_line'], controlDir);
-  contextual = await runTsx([CLI, 'generate', 'dashboard', 'type'], contextualDir);
+  parseLayer = await runCli([CLI, 'generate', 'object', 'class'], parseLayerDir);
+  charsetLayer = await runCli([CLI, 'generate', 'object', 'order-line'], charsetLayerDir);
+  control = await runCli([CLI, 'generate', 'dashboard', 'order_line'], controlDir);
+  contextual = await runCli([CLI, 'generate', 'dashboard', 'type'], contextualDir);
 }, RUN_TIMEOUT_MS);
 
 afterAll(() => {

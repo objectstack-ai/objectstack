@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: real-kernel boots over a SQLite file holding a 2,500-row history, each remaining full walk its case's subject (the shared first walk, a write raced against a held walk, readiness against a held page, a shutdown mid-walk, the ledger-less boots, the forced rebuild); slowest CI reading 15.2 s (scheduled full-battery run 41271604267, Test Core shard log) x 1.25, rounded up; read before the three cases sharing the first walk took a copy of it
 
 /**
  * #25634 — the boot reconcile reads what changed, not the whole table, and
@@ -17,8 +18,8 @@
  * `find` for the probe object — the cost a boot actually pays.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { copyFileSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ObjectKernel } from '@objectstack/core';
@@ -144,10 +145,12 @@ async function boot(opts: {
   gate?: Promise<void>;
   holdFrom?: number;
   before?: (f: FixturePlugin) => Promise<void>;
+  /** The database file; the case's own `file` unless named. */
+  on?: string;
 } = {}) {
   const kernel = new ObjectKernel({ logger: { level: 'silent' } });
   kernels.push(kernel);
-  const fixture = new FixturePlugin(file, opts);
+  const fixture = new FixturePlugin(opts.on ?? file, opts);
   const plugin = new PinyinSearchPlugin({ enabled: true });
   await kernel.use(new ObjectQLPlugin());
   await kernel.use(fixture);
@@ -180,28 +183,63 @@ function history(): Array<Record<string, unknown>> {
 }
 
 // [#25749] Each case pays for real-kernel boots over a SQLite file (two in
-// most) and at least one full 2,500-row reconcile walk; the forced-rebuild
-// case walks twice. Idle, the slowest case takes about 1 s. On a 4-core box
+// most) and a full 2,500-row walk. Since #23181 the first walk three cases
+// share runs once, in the describe's hook; those cases boot over a copy of
+// what it left, and the forced-rebuild case still walks every row in its
+// explicit rebuild. Idle, the slowest case took about 1 s. On a 4-core box
 // with 20 busy loops the boots and walks alone took 6.8 s and 10.1 s (seed
 // excluded), past vitest's 5 s default, so the suite carries its own budget.
 describe('#25634 the boot reconcile reads what changed since its last completed walk', { timeout: 30_000 }, () => {
+  // [#23181] The first boot over the 2,500-row history, walked to completion
+  // with the ledger on, is the same setup in three cases. It runs ONCE, here,
+  // and its readings are taken while it is up; each of those cases then boots
+  // over its own copy of the database that walk left (`fromWalked`).
+  let walkedDir: string;
+  let walked: string;
+  let firstReads: Reads;
+  let firstCjkSearch: unknown;
+  let firstLatinSearch: unknown;
+  let firstReceipt: any;
+
+  beforeAll(async () => {
+    vi.stubEnv('OS_SEARCH_PINYIN_ENABLED', 'true');
+    walkedDir = mkdtempSync(join(tmpdir(), 'pinyin-reconcile-walked-'));
+    walked = join(walkedDir, 'db.sqlite');
+    const first = await boot({ on: walked, before: (f) => f.directInsert(history()) });
+    try {
+      await first.plugin.whenReconciled();
+      firstReads = { ...first.fixture.reads };
+      firstCjkSearch = (await first.fixture.row('p00010'))?.__search;
+      firstLatinSearch = (await first.fixture.row('p00011'))?.__search ?? null;
+      firstReceipt = await first.fixture.engine.findOne('sys_migration', {
+        where: { id: SEARCH_COMPANION_RECONCILE_MIGRATION_ID }, context: SYSTEM,
+      });
+    } finally {
+      await shutdown(first.kernel);
+      vi.unstubAllEnvs();
+    }
+  }, 30_000);
+
+  afterAll(() => {
+    rmSync(walkedDir, { recursive: true, force: true });
+  });
+
+  /** This case's database becomes a copy of the one the first walk left. */
+  function fromWalked(): void {
+    for (const name of readdirSync(walkedDir)) copyFileSync(join(walkedDir, name), join(dir, name));
+  }
+
   it('a first boot walks every row; an unchanged second boot reads none — and a receipt sits in sys_migration', async () => {
-    const first = await boot({ before: (f) => f.directInsert(history()) });
-    await first.plugin.whenReconciled();
-    const firstReads = { ...first.fixture.reads };
     expect(firstReads.rows).toBe(ROWS);
     expect(firstReads.queries).toBe(Math.ceil(ROWS / PAGE));
     // The walk did its job: a CJK history row now carries its companion.
-    expect((await first.fixture.row('p00010'))?.__search).toBe('zhangwei10 zw10');
-    expect((await first.fixture.row('p00011'))?.__search ?? null).toBeNull();
-    const receipt: any = await first.fixture.engine.findOne('sys_migration', {
-      where: { id: SEARCH_COMPANION_RECONCILE_MIGRATION_ID }, context: SYSTEM,
-    });
-    expect(receipt?.blocking).toBe(0);
-    expect(receipt?.verified_at ?? null).toBeNull();
-    expect(JSON.parse(receipt.details).objects[PROBE].sources).toEqual(['title']);
-    await shutdown(first.kernel);
+    expect(firstCjkSearch).toBe('zhangwei10 zw10');
+    expect(firstLatinSearch).toBeNull();
+    expect(firstReceipt?.blocking).toBe(0);
+    expect(firstReceipt?.verified_at ?? null).toBeNull();
+    expect(JSON.parse(firstReceipt.details).objects[PROBE].sources).toEqual(['title']);
 
+    fromWalked();
     const second = await boot();
     await second.plugin.whenReconciled();
     // THE PIN: the unchanged table is not read again — one filtered query
@@ -212,10 +250,7 @@ describe('#25634 the boot reconcile reads what changed since its last completed 
   });
 
   it('a second boot still fills a row a hook-bypassing writer added since the last walk, reading only that row', async () => {
-    const first = await boot({ before: (f) => f.directInsert(history()) });
-    await first.plugin.whenReconciled();
-    await shutdown(first.kernel);
-
+    fromWalked();
     const second = await boot({
       before: (f) => f.directInsert([{ id: 'p_new', title: '李娜', created_at: new Date().toISOString(), updated_at: new Date().toISOString() }]),
     });
@@ -236,7 +271,10 @@ describe('#25634 the boot reconcile reads what changed since its last completed 
   });
 
   it('control: the explicit rebuild (force) still walks every row, and fills a row the watermark cannot see', async () => {
-    const first = await boot({ before: (f) => f.directInsert(history()) });
+    // Booted over the walked history: the watermark that walk recorded is the
+    // one the back-dated write below hides from.
+    fromWalked();
+    const first = await boot();
     await first.plugin.whenReconciled();
     // A hook- AND stamp-bypassing write that back-dates itself: no watermark
     // can see it. That is what the explicit rebuild is for.

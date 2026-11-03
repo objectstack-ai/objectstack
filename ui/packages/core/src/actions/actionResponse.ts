@@ -139,14 +139,19 @@ export function interpretActionResponse(
 }
 
 /**
- * The `fields` list of a refusal body: `error.details.fields` on the current
- * envelope, `fields` on the legacy inner one. Entries with no string `field`
- * are dropped rather than guessed at; the rest keep the server's own `code`,
- * `message` and `label`.
+ * The `fields` list of a refusal body, as `ActionResult.fieldErrors` carries
+ * it. The ADR-0112 envelope carries the list in one of two members, both on
+ * the spec's `EnhancedApiErrorSchema`: `error.details.fields`, where the data
+ * and action doors put a thrown validation failure, and `error.fields`, where
+ * a door that builds its own refusal names it (plugin-auth's Create User, a
+ * `type: 'api'` target whose envelope the action door relays whole). The
+ * legacy inner envelope carries it as `fields`. Entries with no string
+ * `field` are dropped rather than guessed at; the rest keep the server's own
+ * `code`, `message` and `label`.
  */
-function refusalFieldErrors(body: unknown): ActionFieldError[] | undefined {
-    const b = body as { error?: { details?: { fields?: unknown } }; fields?: unknown } | null | undefined;
-    const raw = b?.error?.details?.fields ?? b?.fields;
+export function refusalFieldErrors(body: unknown): ActionFieldError[] | undefined {
+    const b = body as { error?: { details?: { fields?: unknown }; fields?: unknown }; fields?: unknown } | null | undefined;
+    const raw = b?.error?.details?.fields ?? b?.error?.fields ?? b?.fields;
     if (!Array.isArray(raw)) return undefined;
     const out: ActionFieldError[] = [];
     for (const entry of raw) {

@@ -17,42 +17,58 @@ name: Nightly Tiers
 # RESTORE-ONLY caches (a scheduled run reads main's pnpm store and Build Core's
 # turbo seeds; the per-push workflows own saving them, and a nightly that saved
 # would churn the rationed 10 GB pool the way PR-side saves once did — see
-# ci.yml's "Restore Turbo cache"). The turbo cache restore is what keeps the
+# ci.yml's "Restore Turbo cache"). The turbo cache restore is meant to keep the
 # dependency closure's `build` tasks a replay: `OS_TEST_TIERS` is hashed into
-# the `test` tasks ONLY (turbo.json), so the builds hit main's entries while
-# every test task misses by construction and runs for real.
+# the `test` tasks ONLY (turbo.json), so every test task misses by construction
+# and runs for real. ⚠️ Measured, the builds do not replay either: a CLI leg
+# replayed 0 of its ~62 build tasks on every night from 2026-10-26 to 11-01 and
+# spent 5–6 min building them, and the budget below is sized with that cost in.
 #
-# ## Sharding — TWO shards, derived rather than picked
+# ## Sharding — FOUR shards: the CLI cut three ways, the showcase alone
 #
 # The package set is not the workspace: `scripts/nightly-tiers.mjs --packages`
 # enumerates exactly the packages that own a tier file, in the `turbo ls`
 # document shape, and `scripts/partition-test-shards.mjs` splits THAT with the
-# same measured weights, the same LPT placement and the same
-# `<pkg> k/n` slice grammar Test Core uses. Measured at 6eba38f5a3: one
-# package, `@objectstack/cli`, owning all 60 tier files; its whole suite was
-# 1231s on a hosted runner (run 34009395649) and the e2e tier is ~75% of it
-# (packages/cli/vitest.config.ts, the priced trade), so ≈ 15 min of tests plus
-# ~5 min of restore/install per runner. Under 60 minutes on ONE shard already —
-# but `FILE_SHARDED_PACKAGES` cuts the CLI into two vitest slices, and the
-# partitioner REFUSES to place two slices of one package in one bin
-# (`assertSlicesSpread`), so one shard is not a legal count and two is the
-# smallest one that is. Each shard then carries one slice, ≈ 8 min of tests.
-# Raise the matrix (three places below: `matrix.shard`, the job `name:`, and
-# `--shard k/N`) only when a second tier-owning package arrives heavy enough
-# for the partitioner's own balance line to say so.
+# same LPT placement and the same `<pkg> k/n` slice grammar Test Core uses.
+# Two packages own tier files today. The document reserves a shard of its own
+# for `@objectstack/example-showcase` (`ownShard`) and cuts `@objectstack/cli`
+# across the shards left (`sliceAcrossShards`): CLI 1/3, 2/3 and 3/3 on shards
+# 1-3, the showcase alone on shard 4.
 #
-# The second tier-owning package is `@objectstack/example-showcase`, and it is
-# not that heavy: one `*.live.test.ts` file (#26445), the showcase browser
-# smoke, which used to be its own scheduled workflow (Showcase Smoke) and
-# filed nothing when red. The partitioner keeps it whole ("not the run's
-# floor") and places it on one shard; that shard also builds the Console SPA
-# and installs Chromium for it (≈ 5 min, the "Prepare the showcase browser
-# smoke" step), which no other shard pays.
+# Why that shape, measured on run 41277375892 (2026-11-01, killed at the
+# 45-minute limit with no test red). The CLI's e2e tier is the heavy package:
+# 7981s of per-file test time, 1631s + 1127s of vitest wall as two slices
+# (vitest cuts a package by file COUNT in sha1 order, not by duration, so the
+# slices are unequal and the first is the heavy one). The showcase browser
+# smoke weighs 48s in the dataset, but its shard alone builds the Console SPA
+# and installs Chromium ("Prepare the showcase browser smoke", 9m39s that
+# night) and then builds the example's closure before its two
+# `*.live.test.ts` files run (8m14s with the smoke on run 41009107101). Placed
+# by weight it rode beside the first CLI slice: shard 1 ran 0m52s of setup,
+# 9m39s of preparation and a 33m13s CLI leg, and was killed still building the
+# showcase. That shard needed ≈ 52 min against a budget of 45; the old "≈ 13
+# min a shard" was never measured on this population.
+#
+# Predicted from that night's own per-file durations, with vitest's own file
+# order reproduced (it puts exactly the 42 integration files that night's
+# shard 1 ran into slice 1/2): the CLI shards ≈ 29 / 22 / 18 min (slices of
+# 3671s / 2551s / 1759s of file time, at the 2.86x parallelism measured that
+# night, plus 6 min of closure build and ≈ 1.5 min of setup), the showcase
+# shard ≈ 19 min. Three shards (the CLI cut twice) would leave the CLI 1/2
+# shard at its measured 34.6 min, which rose from 31.0 min over 2026-10-28 to
+# 11-01 with the tier's per-file time; four keep the slowest shard near 29.
+#
+# Raise the matrix (four places below: `matrix.shard`, the job `name:`,
+# `--shard k/N` and the reports artifact's `-of-N`) when the slowest shard's
+# `Run this shard's nightly tiers` step nears 35 minutes; the document
+# re-slices the CLI at the new count with no edit to it. The partitioner's
+# balance line grades the shared shards only — a reserved shard is placed by
+# the document, not by weight — so it cannot say when on its own.
 #
 # ## What lands where — the house idiom of `fleet-patrols.yml`'s `platform-checklist-watchdog` job
 #
 # On green this workflow files nothing, edits nothing and closes nothing. On
-# red the `report` job — ONE writer, after both shards, never the shards
+# red the `report` job — ONE writer, after all shards, never the shards
 # themselves (two matrix legs racing the same lookup would mint two cards) —
 # opens or refreshes ONE card: fixed title `nightly-tiers: red on main`, labels
 # `bug` · `domain:devx` · `priority:p1` on create only (grading is the devx
@@ -148,19 +164,19 @@ env:
 
 jobs:
   tiers:
-    name: Nightly tiers (${{ matrix.shard }}/2)
+    name: Nightly tiers (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
-    # Generous against the ≈ 13 min a shard is expected to take, and still
-    # inside the hour the card set as the whole run's bound. A shard killed here
-    # produces no vitest report; the report job says so rather than reading it
-    # as "no failing files".
+    # ≈ 16 min of headroom over the ≈ 29 min the slowest shard is predicted to
+    # take (see "Sharding" above), and still inside the hour the card set as the
+    # whole run's bound. A shard killed here produces no vitest report; the
+    # report job says so rather than reading it as "no failing files".
     timeout-minutes: 45
     strategy:
-      # Both shards run to completion: the card should carry every failing
+      # All shards run to completion: the card should carry every failing
       # file, not the first shard's.
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3, 4]
 
     steps:
       - name: Checkout repository
@@ -206,7 +222,7 @@ jobs:
           node scripts/nightly-tiers.mjs --check
           node scripts/nightly-tiers.mjs --packages > "$RUNNER_TEMP/tier-packages.json"
           node scripts/partition-test-shards.mjs "$RUNNER_TEMP/tier-packages.json" \
-            --shard ${{ matrix.shard }}/2 \
+            --shard ${{ matrix.shard }}/4 \
             > "$RUNNER_TEMP/shard-packages.txt"
           echo 'Items on this shard (a package name, or a package plus a k/n file-level slice):'
           cat "$RUNNER_TEMP/shard-packages.txt"
@@ -216,16 +232,18 @@ jobs:
       # two things `turbo run test` does not produce: the Console SPA the backend
       # serves at /_console (`packages/console/dist`, built by the `build:dist`
       # task — `pnpm console:build`), and a Chromium this `@playwright/test` can
-      # launch. Only the shard the partitioner gave that package pays for them.
+      # launch. Only the shard the partitioner gave that package pays for them —
+      # a shard of its own, which the document reserves for exactly the packages
+      # this step prepares (`OWN_SHARD_PACKAGES` in scripts/nightly-tiers.mjs;
+      # `partition-test-shards.mjs --self-test` reds when the two disagree).
       # The test's own `^build` closure is the `test` task's, as for every
       # package here.
       #
-      # `continue-on-error`, on purpose: the same shard carries a slice of the
-      # CLI's e2e tier, and a Console build that fails one night must not take
-      # that slice down with it. The night is still red, and still names the
-      # file — the smoke then fails every test at once, and its failure text
-      # says to read a whole-run red as the environment first; this step's red
-      # in the log is the environment.
+      # `continue-on-error`, on purpose: a Console build that fails one night
+      # must not stop the test step from running. The night is still red, and
+      # still names the file — the smoke then fails every test at once, and its
+      # failure text says to read a whole-run red as the environment first;
+      # this step's red in the log is the environment.
       - name: Prepare the showcase browser smoke
         continue-on-error: true
         run: |
@@ -253,11 +271,10 @@ jobs:
       # into a killed job with no report at all.
       #
       # One deliberate difference from ci.yml: the file-level SLICES run first
-      # and the whole-package leg last. The whole packages here are the cheap
-      # ones (the partitioner keeps a package whole when it is not the run's
-      # floor) — today the showcase browser smoke — and a red in one of them
-      # must not stop the shard's slice of the CLI's e2e tier from running.
-      # The other way round, a red slice skips a few minutes of smoke.
+      # and the whole-package leg last, so a red whole package never stops a
+      # slice of the CLI's e2e tier from running. Today no shard carries both —
+      # the showcase browser smoke is alone on its own shard — and the order
+      # holds for the day a whole package shares a shard with a slice again.
       - name: Run this shard's nightly tiers
         env:
           OS_TEST_TIERS: nightly
@@ -332,7 +349,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: nightly-tiers-reports-${{ matrix.shard }}-of-2
+          name: nightly-tiers-reports-${{ matrix.shard }}-of-4
           path: ${{ runner.temp }}/nightly-reports/
           if-no-files-found: ignore
           retention-days: 14

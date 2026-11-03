@@ -515,6 +515,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       }
     }
   },
+  object_extension: {
+    label: "Object Extension",
+    description: "Fields and rules a package adds to an object another package defines"
+  },
   field: {
     label: "Field",
     sections: {
@@ -716,6 +720,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       reference: {
         label: "Reference",
         helpText: "Referenced object name"
+      },
+      referenceNameVisible: {
+        label: "Show Name When Unreadable",
+        helpText: "Lets a reader of this record see the referenced record's name, as plain text with no link, even when they may not open that record. Nothing else of it is shown, and a field-level rule on the name still holds (the name then reads Record # and the id). Unset: such a reference shows as a restricted record."
       },
       deleteBehavior: {
         label: "Delete Behavior",
@@ -1811,6 +1819,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Submit button label",
         helpText: "Label of the submit button in this action's param dialog, the verb the button performs (e.g. \"Send\", \"Log Call\"). Only for an action that collects params. Leave empty to show \"Confirm\"."
       },
+      cancelText: {
+        label: "Cancel button label",
+        helpText: "Label of the dismiss button on the dialog this action opens before it runs, its confirm dialog or its param dialog. Name what dismissing keeps where the action's own verb is \"Cancel …\" (e.g. \"Keep invitation\"). Only for an action that asks for confirmation or collects params. Leave empty to show \"Cancel\"."
+      },
       confirmText: {
         label: "Confirm Text",
         helpText: "Confirmation message (e.g., \"Are you sure?\")"
@@ -2244,6 +2256,9 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "variables.defaultValue": {
         label: "Default Value"
+      },
+      "variables.objectName": {
+        label: "Record Object"
       },
       status: {
         label: "Status",

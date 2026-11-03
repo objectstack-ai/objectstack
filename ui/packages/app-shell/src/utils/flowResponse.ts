@@ -198,62 +198,25 @@
  * whose copy is the flow's own is `silent` as well. So {@link judgeFlowLaunch}
  * marks those two `handedOff`, the member the runner reads to skip the hop.
  *
- * ## The flow's own toasts are translated here, once (objectui#12075)
+ * ## The flow's own toasts are drawn as served (objectstack#28054)
  *
- * The engine serves the flow's `successMessage` and `errorMessage` verbatim,
- * in the author's language, and an app's bundle translates them under
- * `flows.FLOW.successMessage` / `flows.FLOW.errorMessage` (objectstack#22507,
- * `FLOW_TERMINAL_MESSAGE_KEYS`). {@link interpretFlowResponse} is the one
- * place both are lifted off the wire, so it is the one place they are
- * translated: handed a {@link FlowCopyLocale} — the flow the run belongs to,
- * the active `flows` bundle and its locale — it answers the `done` arm's
- * `successMessage` and the `failed` arm's authored `errorMessage` through the
- * spec's `translateFlow`, each falling back to the served string. That reaches
- * `FlowRunner`'s resume and both launch hosts (through `launchConsoleFlow`)
- * alike, so a straight-through run and a paused one close on the same words.
- *
- * Only what the flow AUTHORS is translated: `translateFlow` overlays a toast
- * only where the served result carries one, so a bundle never turns a
- * caller's default sentence into copy the author never wrote, and the engine's
- * own failure prose (`error`) is passed through untouched — it has no key.
+ * The flow's `successMessage` and `errorMessage` are `{{ }}` templates the
+ * engine renders over the run's variables at the run's terminal exit, so the
+ * engine also translates them: it picks `flows.FLOW.successMessage` /
+ * `flows.FLOW.errorMessage` in the run's locale before it fills the holes, and
+ * serves the result already translated and filled. A client overlay never
+ * touches a server-rendered slot (maintainer ruling A on objectstack#22507,
+ * the rule a screen's heading follows), so {@link interpretFlowResponse}
+ * answers both strings exactly as served; an overlay here would replace the
+ * filled sentence with the bundle's template, its holes drawn raw.
  */
 
-import { actionCopySource, actionErrorDetail } from '@object-ui/core';
+import { actionCopySource, actionErrorDetail, refusalFieldErrors } from '@object-ui/core';
 import type { ActionResult } from '@object-ui/core';
 import { getLoadedBuiltInLocales } from '@object-ui/i18n';
 import { declaredUserMessage, delegationScopeMessage, isPermissionError } from '@object-ui/react';
 import { errorCodeIs } from '@object-ui/types';
 import type { AutomationResult } from '@objectstack/spec/contracts';
-import { translateFlow, type TranslationBundle } from '@objectstack/spec/system';
-
-/**
- * What {@link interpretFlowResponse} needs to translate the flow's own toasts
- * (objectui#12075 — see the header): the flow the run belongs to, the active
- * language's `flows` bundle (`activeFlowsBundle` in `utils/flowsBundle`), and
- * that language.
- */
-export interface FlowCopyLocale {
-    flowName: string;
-    bundle: TranslationBundle | undefined;
-    locale: string;
-}
-
-/**
- * One of the flow's terminal toasts as the user should read it: the bundle's
- * `flows.FLOW.KEY` where it carries one, the served string otherwise. Asked
- * of the spec's `translateFlow`, which overlays only a string the flow serves.
- */
-function translatedFlowMessage(
-    key: 'successMessage' | 'errorMessage',
-    served: string,
-    copy: FlowCopyLocale | undefined,
-): string {
-    if (!copy) return served;
-    const answered = translateFlow({ name: copy.flowName, [key]: served }, copy.bundle, { locale: copy.locale })[key];
-    // `translateFlow` answers the served string back when the bundle has no
-    // key; the type says optional only because `FlowLike` declares it so.
-    return typeof answered === 'string' ? answered : served;
-}
 
 /**
  * The `AutomationResult` fields the console reads. Deliberately loose: this is
@@ -366,13 +329,12 @@ function permissionDeniedLine(locale: string | undefined): string {
 
 /**
  * A failed run's message, by the record-save rule (objectstack#24914 ruling
- * B′): the flow's authored `errorMessage` — translated when the bundle carries
- * `flows.FLOW.errorMessage` (objectui#12075) — then the producer-marked
+ * B′): the flow's authored `errorMessage`, as the engine served it (rendered
+ * and translated, objectstack#28054) — then the producer-marked
  * `userMessage`, then the refusal the run's write node met (`innerRefusal`,
  * whose `message` the spec serves without the node and operation prefixes),
- * then the run's own `message`. `locale` is the language the permission line
- * is read in: the flow's own (`copy.locale`) on a launch or resume, the
- * host's active language on the api action door, which knows no flow.
+ * then the run's own `message`. `locale` is the host's active language, the
+ * one the permission line is read in.
  *
  * The inner refusal is rendered exactly as the record form renders the same
  * refusal on a save: a permission denial (`isPermissionError`) becomes the
@@ -385,11 +347,10 @@ function permissionDeniedLine(locale: string | undefined): string {
 function flowFailureMessage(
     failure: FlowFailureCarriers,
     message: string,
-    copy: FlowCopyLocale | undefined,
     locale: string | undefined,
 ): string {
     const friendly = failure.errorMessage;
-    if (typeof friendly === 'string' && friendly.length > 0) return translatedFlowMessage('errorMessage', friendly, copy);
+    if (typeof friendly === 'string' && friendly.length > 0) return friendly;
     if (failure.userMessage) return failure.userMessage;
     const inner = failure.innerRefusal as { code?: unknown; message?: unknown } | null | undefined;
     if (inner && typeof inner === 'object' && typeof inner.code === 'string') {
@@ -434,7 +395,6 @@ function errorEnvelopeDetails(json: unknown): FlowRunResult {
 function flowFailedEnvelopeMessage(
     json: unknown,
     fallback: string,
-    copy: FlowCopyLocale | undefined,
     locale: string | undefined,
 ): string {
     const details = errorEnvelopeDetails(json);
@@ -445,7 +405,6 @@ function flowFailedEnvelopeMessage(
             innerRefusal: details.innerRefusal,
         },
         actionErrorDetail(json, fallback),
-        copy,
         locale,
     );
 }
@@ -454,7 +413,7 @@ function flowFailedEnvelopeMessage(
  * The error a `type: 'api'` action shows for a non-2xx answer (objectstack#27487
  * — see the header). A `400 FLOW_FAILED` is a flow the endpoint ran, and reads
  * the run's refusal by the failed arm's rule; `locale` is the host's active
- * language, since the door knows no flow to translate an `errorMessage` for.
+ * language.
  * Every other answer reads `actionErrorDetail`, as the door always has.
  */
 export function apiActionFailureMessage(
@@ -464,9 +423,32 @@ export function apiActionFailureMessage(
     locale: string | undefined,
 ): string {
     if (res.status === 400 && errorCodeIs((json as { error?: unknown } | null | undefined)?.error, 'FLOW_FAILED')) {
-        return flowFailedEnvelopeMessage(json, fallback, undefined, locale);
+        return flowFailedEnvelopeMessage(json, fallback, locale);
     }
     return actionErrorDetail(json, fallback);
+}
+
+/**
+ * The failed `ActionResult` a `type: 'api'` action answers for a non-2xx: the
+ * text {@link apiActionFailureMessage} reads, and the refusal's per-field
+ * entries as `fieldErrors` when it named any (core's `refusalFieldErrors`, the
+ * reader `/actions` refusals already go through). The parameter dialog marks
+ * a `required` entry on the param it names (objectstack#28289), so Create
+ * User left without an email reads "required" under the Email input, in the
+ * user's language.
+ */
+export function apiActionRefusalResult(
+    res: { status: number },
+    json: unknown,
+    fallback: string,
+    locale: string | undefined,
+): ActionResult {
+    const fieldErrors = refusalFieldErrors(json);
+    return {
+        success: false,
+        error: apiActionFailureMessage(res, json, fallback, locale),
+        ...(fieldErrors ? { fieldErrors } : {}),
+    };
 }
 
 /**
@@ -474,15 +456,16 @@ export function apiActionFailureMessage(
  * `.../runs/{runId}/resume` response.
  *
  * `label` names the flow for fallback messages (e.g. `Flow "convert_lead"`).
- * `json` is the parsed body, or `null` when it could not be parsed. `copy`
- * translates the flow's own `successMessage` / `errorMessage` (objectui#12075
- * — see the header); without it both are answered as served.
+ * `json` is the parsed body, or `null` when it could not be parsed. `locale`
+ * is the host's active language, which a permission refusal's line is read
+ * in. The flow's own `successMessage` / `errorMessage` are answered as served
+ * — the engine renders and translates them (objectstack#28054, see the header).
  */
 export function interpretFlowResponse<S = unknown>(
     res: { ok: boolean; status: number },
     json: any,
     label: string,
-    copy?: FlowCopyLocale,
+    locale?: string,
 ): FlowResponseOutcome<S> {
     if (!res.ok) {
         // The flow RAN and failed — same event as the inner-envelope failure
@@ -492,7 +475,7 @@ export function interpretFlowResponse<S = unknown>(
         if (res.status === 400 && errorCodeIs(json?.error, 'FLOW_FAILED')) {
             return {
                 kind: 'failed',
-                error: flowFailedEnvelopeMessage(json, `${label} failed`, copy, copy?.locale),
+                error: flowFailedEnvelopeMessage(json, `${label} failed`, locale),
                 retryable: false,
             };
         }
@@ -540,8 +523,7 @@ export function interpretFlowResponse<S = unknown>(
                     innerRefusal: data.innerRefusal,
                 },
                 actionErrorDetail(data, `${label} failed`),
-                copy,
-                copy?.locale,
+                locale,
             ),
             retryable: false,
         };
@@ -572,10 +554,7 @@ export function interpretFlowResponse<S = unknown>(
     return {
         kind: 'done',
         data: json?.data as FlowRunResult | undefined,
-        successMessage:
-            typeof data.successMessage === 'string'
-                ? translatedFlowMessage('successMessage', data.successMessage, copy)
-                : undefined,
+        successMessage: typeof data.successMessage === 'string' ? data.successMessage : undefined,
         flowLabel: servedFlowLabel(data),
     };
 }

@@ -20,7 +20,7 @@
 // SSO-only switched on there, so the narrowing is the managed mode's and not
 // SSO-only's.
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { Hono } from 'hono';
 import type { PluginContext } from '@objectstack/core';
 import { resetCloudManagedForTesting } from '@objectstack/core';
@@ -116,10 +116,11 @@ const makeManager = (engine: ReturnType<typeof createMemoryEngine>, extra: Recor
   } as any);
 
 /**
- * One deployment, staged UNMANAGED (so its fixture users can sign up through
- * the invitation lane), then served through the real mount chain. The tests
- * switch the mode on afterwards: every door under test reads the accessor per
- * request.
+ * The staged rows every door case starts from, produced ONCE for the file
+ * (#23181): staging signs three users up, and each sign-up is a fresh-salt
+ * production scrypt derivation, the cost that made fourteen identical
+ * stagings the bulk of this file's wall. Staged UNMANAGED (so the fixture
+ * users can sign up through the invitation lane), with SSO-only off.
  *
  *  - `admin`: a platform admin (the legacy `role` scalar, which
  *    `isPlatformAdminUser` accepts) and the owner of the default organization,
@@ -128,8 +129,11 @@ const makeManager = (engine: ReturnType<typeof createMemoryEngine>, extra: Recor
  *  - `member`: an ordinary `env_native` user holding a local password.
  *  - `idp`: an `idp_provisioned` user with no local credential, the
  *    population the cloud's identity provider owns.
+ *
+ * The bearers are the sessions better-auth minted at staging; they live as
+ * `sys_session` rows, so every copy of the tables carries them.
  */
-async function stage() {
+async function produceStagedRows() {
   const engine = createMemoryEngine();
   engine.tables.set('sys_organization', [{ id: DEFAULT_ORG, name: 'Default', slug: 'default' }]);
   const manager = makeManager(engine);
@@ -186,6 +190,45 @@ async function stage() {
   );
   users().find((r) => String(r.id) === ids.idp)!.source = 'idp_provisioned';
   users().find((r) => String(r.id) === ids.member)!.source = 'env_native';
+
+  return { tables: structuredClone(new Map(engine.tables)), ids, bearers };
+}
+
+let staged: Awaited<ReturnType<typeof produceStagedRows>>;
+
+beforeAll(async () => {
+  const saved = { [MANAGED_ENV]: process.env[MANAGED_ENV], [SSO_ONLY_ENV]: process.env[SSO_ONLY_ENV] };
+  setManaged(false);
+  delete process.env[SSO_ONLY_ENV];
+  const quiet = (['info', 'warn', 'error'] as const).map((level) =>
+    vi.spyOn(console, level).mockImplementation(() => {}),
+  );
+  try {
+    staged = await produceStagedRows();
+  } finally {
+    for (const spy of quiet) spy.mockRestore();
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    resetCloudManagedForTesting();
+  }
+}, 120_000);
+
+/**
+ * One deployment over its OWN copy of the staged rows: a fresh engine, a fresh
+ * `AuthManager` and a fresh mount chain per case, exactly as a per-case
+ * staging gave, so no case sees another's writes. The tests switch the mode
+ * on afterwards: every door under test reads the accessor per request.
+ */
+async function stage() {
+  const engine = createMemoryEngine();
+  for (const [name, rows] of structuredClone(staged.tables)) engine.tables.set(name, rows);
+  const manager = makeManager(engine);
+  const { ids, bearers } = staged;
+
+  const users = () => (engine.tables.get('sys_user') ?? []) as any[];
+  const accounts = () => (engine.tables.get('sys_account') ?? []) as any[];
 
   const app = new Hono();
   const ctx = mockCtx();

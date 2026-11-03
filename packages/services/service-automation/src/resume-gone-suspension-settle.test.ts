@@ -194,11 +194,16 @@ describe('a gone-for-good resume settles the run row (full stack, sqlite file)',
         expect(isTerminalRunStatus(row.status)).toBe(true);
     });
 
-    it('parked node edited away: the refused resume moves the row to failed with the cause', async () => {
+    it('parked node gone with its pinned body unrecoverable: the refused resume moves the row to failed with the cause', async () => {
         const { ql, automation } = await boot(await freshFile());
         const runId = await parkOnScreen(automation, ql, 'edited_probe');
 
-        // The author republishes the flow without the node the run parked on.
+        // The flow is replaced by a body without the node the run parked on,
+        // and the body the run started on is gone: withdrawn from this
+        // process, never stored in the metadata history. [#28405] A plain
+        // republish no longer reaches this exit — the run would resume on the
+        // body it started on (`flow-version-pinning.test.ts`).
+        automation.withdrawFlow('edited_probe');
         automation.registerFlow('edited_probe', screenFlow('edited_probe', false) as never);
         const resumed = await automation.resume(runId, { output: { x: 'v' } });
 

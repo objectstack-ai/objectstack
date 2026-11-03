@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 110 — spawns the real producer once per single-cause fixture: one seed child and ten spawns of the source CLI over one upgraded fixture (unmapped-columns on four objects in its JSON and human faces, the misspelled object, the row cap, the platform object, and os migrate plan --json), every one a distinct triple; slowest CI reading 84.84 s (run 41255489006) of the five scheduled CI runs 41199450735, 41217827347, 41237094739, 41255489006, 41271604267, x 1.25, rounded up
 
 /**
  * `os migrate unmapped-columns` at the public door: the CLI spawned against a
@@ -53,6 +54,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import Database from 'better-sqlite3';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI_ROOT = resolve(HERE, '..', '..', '..');
@@ -149,22 +151,6 @@ process.stderr.write('[fixture] seeded\\n');
 process.exit(0);
 `;
 
-/** The schema and every row, read on a connection of our own. */
-const READ_STATE_CHILD = `
-const { SqlDriver } = await import('@objectstack/driver-sql');
-const raw = new SqlDriver({ client: 'better-sqlite3', connection: { filename: process.env.FIXTURE_DB }, useNullAsDefault: true });
-const k = raw.knex;
-const schema = await k.raw('SELECT type, name, sql FROM sqlite_master ORDER BY type, name');
-const rows = {};
-for (const entry of schema) {
-  if (entry.type !== 'table' || entry.name.startsWith('sqlite_')) continue;
-  rows[entry.name] = await k.raw('SELECT * FROM "' + entry.name + '" ORDER BY rowid');
-}
-await raw.disconnect();
-process.stdout.write(JSON.stringify({ schema, rows }));
-process.exit(0);
-`;
-
 interface Run {
   code: number | null;
   stdout: string;
@@ -184,10 +170,24 @@ function childNode(code: string, env: Record<string, string>): { status: number 
   return { status: out.status, stdout: String(out.stdout), stderr: String(out.stderr) };
 }
 
+/**
+ * The schema and every row, read on a connection of our own, in this process:
+ * a child `node` per read cost a process start and a driver import each time.
+ */
 function readState(): string {
-  const out = childNode(READ_STATE_CHILD, { FIXTURE_DB: db });
-  if (out.status !== 0) throw new Error(`could not read the fixture database (status ${out.status})\n${out.stderr}`);
-  return out.stdout;
+  // Opened as the child it replaces opened it (read-write, knex's default).
+  const conn = new Database(db);
+  try {
+    const schema = conn.prepare('SELECT type, name, sql FROM sqlite_master ORDER BY type, name').all() as Array<{ type: string; name: string }>;
+    const rows: Record<string, unknown> = {};
+    for (const entry of schema) {
+      if (entry.type !== 'table' || entry.name.startsWith('sqlite_')) continue;
+      rows[entry.name] = conn.prepare(`SELECT * FROM "${entry.name}" ORDER BY rowid`).all();
+    }
+    return JSON.stringify({ schema, rows });
+  } finally {
+    conn.close();
+  }
 }
 
 /** One `os <argv…> --database-url file:<db>` run, in the fixture project. */

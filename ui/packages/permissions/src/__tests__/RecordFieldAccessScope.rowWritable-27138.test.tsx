@@ -30,7 +30,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import React from 'react';
-import { MePermissionsProvider, type MePermissionsResponse } from '../MePermissionsProvider';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '../MePermissionsProvider';
 import { RecordFieldAccessScope } from '../RecordFieldAccessScope';
 import { usePermissions } from '../usePermissions';
 
@@ -41,11 +41,12 @@ function Probe({ seen }: { seen: Perms[] }) {
   return null;
 }
 
-const ANSWER: MePermissionsResponse = {
+const ANSWER: MePermissionsAuthenticatedResponse = {
   authenticated: true,
   userId: 'u1',
   tenantId: 'org_1',
-  roles: ['member'],
+  hasAnyQueue: false,
+  positions: ['member'],
   permissionSets: ['rfa_fixture_member'],
   objects: {
     rfa_contract: { allowRead: true, allowCreate: true, allowEdit: true },

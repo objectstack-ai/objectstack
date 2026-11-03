@@ -1023,7 +1023,7 @@ These properties are available on **all** field types:
 | `required` | `boolean` | `false` | Whether the field is required |
 | `unique` | `boolean \| 'global' \| 'organization'` | `false` (`'organization'` on `autonumber`) | Unique constraint **and its scope** (ADR-0120). `'organization'` = one holder per organization; `true` = that same per-organization scope (positional synonym — prefer the explicit spelling in new code); `'global'` = one holder across the whole installation; `false` = no constraint. Omitted ⇒ `false`, except on an `autonumber` field, where omitted ⇒ `'organization'` — an auto-number is a business identifier, so the platform makes it unique per organization by default; write `unique: false` explicitly to opt out. `'tenant'`/`'org'` are rejected — the word is `'organization'`. Full rule in the `unique` doc block in [`FieldSchema`](/docs/references/data/field) |
 | `multiple` | `boolean` | `false` | Allow array of values (multi-record lookup, multi-select, multi-file). An emptied multi-value lookup reads back as `[]`, never `null` — the `multiple` doc block in [`FieldSchema`](/docs/references/data/field) |
-| `searchable` | `boolean` | `false` | Include in search index |
+| `searchable` | `boolean` | `false` | Search this field when the object declares no `searchableFields` — any type but `secret` / `password` / `vector`; a declared `searchableFields` is the whole set |
 | `sortable` | `boolean` | `true` | Allow sorting by this field |
 | `hidden` | `boolean` | `false` | Hide from default views |
 | `readonly` | `boolean` | `false` | Server contract — non-system writes to this field are stripped on **both** INSERT and UPDATE (the value falls back to `defaultValue`), not just hidden in the UI (#2948 / #3043) |

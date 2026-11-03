@@ -83,6 +83,7 @@ import {
   RecordFieldChangesContext,
   RecordTimelineCountContext,
   RecordTimelinePanelContext,
+  RecordTimelineTotalContext,
   filterTimelineStream,
   mergeTimelineStream,
   type TimelineStreamFilter,
@@ -322,6 +323,11 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
   const activityDenied =
     hostItems !== undefined ? false : discussion ? !!discussion.activityDenied : canSelfFetch && selfDenied;
   const commentsDenied = hostItems === undefined && !!discussion?.commentsDenied;
+  // objectstack#29188: which of the host's reads FAILED (5xx, network). Only a
+  // mounted DiscussionContext reports it; host `items` and the self-fetch
+  // carry no failure verdict, as before.
+  const activityFailed = hostItems === undefined && !!discussion?.activityFailed;
+  const commentsFailed = hostItems === undefined && !!discussion?.commentsFailed;
 
   // The timeline takes `filterMode` as a CONTROLLED prop, so the authored
   // `filterMode` becomes the initial state here and the dropdown stays usable —
@@ -338,10 +344,14 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
   // row: the whole stream's size, unknown while the feed loads or a read was
   // refused (a refused read is not "none"). The tab's full face reports it
   // while its 全部 chip is on; another chip's total is not the stream's.
+  // objectstack#28737 — the whole stream's size is the host's count where it
+  // has one (it holds only the newest activity then), else the rows' own.
   const countReporter = React.useContext(RecordTimelineCountContext);
+  const hostTotal = React.useContext(RecordTimelineTotalContext);
+  const wholeTotal = asStream && hostTotal !== null ? hostTotal : applied.total;
   const reportCount = asPeek ? timelinePanel?.onCount : asStream ? (countReporter ?? undefined) : undefined;
   const reportsWhole = asPeek || streamFilter === 'all';
-  const streamCount = !loading && !activityDenied && !commentsDenied ? applied.total : null;
+  const streamCount = !loading && !activityDenied && !commentsDenied && !activityFailed && !commentsFailed ? wholeTotal : null;
   React.useEffect(() => {
     if (reportsWhole) reportCount?.(streamCount);
   }, [reportCount, reportsWhole, streamCount]);
@@ -370,13 +380,17 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
         onEditComment={discussion?.onEditComment}
         onDeleteComment={discussion?.onDeleteComment}
         mentionSuggestions={mentionsEnabled ? (discussion?.mentionSuggestions as any) : undefined}
+        onMentionSuggestionsWanted={mentionsEnabled ? discussion?.onMentionSuggestionsWanted : undefined}
         onUploadAttachments={discussion?.onUploadAttachments as any}
         activityDenied={activityDenied}
         commentsDenied={commentsDenied}
+        activityFailed={activityFailed}
+        commentsFailed={commentsFailed}
+        onRetryFeed={hostItems === undefined ? discussion?.onRetryFeed : undefined}
         {...(asPeek
           ? {
               variant: 'peek' as const,
-              totalCount: applied.total,
+              totalCount: wholeTotal,
               onViewAll: timelinePanel?.onViewAll,
             }
           : asStream
@@ -432,20 +446,26 @@ export function RecordTimelineCountProbe({
   const node = firstActivityNode(nodes);
   const discussion = useDiscussionContext();
   const fieldChanges = React.useContext(RecordFieldChangesContext);
+  const hostTotal = React.useContext(RecordTimelineTotalContext);
   const bag = (node?.properties ?? {}) as Record<string, any>;
   const read = (key: string) => node?.[key] ?? bag[key];
   const hostItems = Array.isArray(read('items')) ? (read('items') as FeedItem[]) : undefined;
   const loading: boolean = read('loading') ?? discussion?.loading ?? false;
-  const denied = hostItems !== undefined ? false : !!discussion?.activityDenied || !!discussion?.commentsDenied;
+  // objectstack#29188: a failed read leaves the count as unknown as a refused one.
+  const denied = hostItems !== undefined
+    ? false
+    : !!discussion?.activityDenied || !!discussion?.commentsDenied || !!discussion?.activityFailed || !!discussion?.commentsFailed;
   const sourceItems = hostItems ?? (discussion?.items as FeedItem[] | undefined);
   const types = read('types');
   const showCompleted = read('showCompleted');
   const unifiedTimeline = read('unifiedTimeline');
   const count = React.useMemo(() => {
     if (!node || !sourceItems || loading || denied) return null;
+    // objectstack#28737 — the host's count of the whole stream, where it has one.
+    if (hostTotal !== null) return hostTotal;
     const stream = mergeTimelineStream(sourceItems, fieldChanges);
     return applyFeedConfig(stream, { types, showCompleted, unifiedTimeline }, Number.MAX_SAFE_INTEGER, BLOCK_NAME).items.length;
-  }, [node, sourceItems, loading, denied, fieldChanges, types, showCompleted, unifiedTimeline]);
+  }, [node, sourceItems, loading, denied, hostTotal, fieldChanges, types, showCompleted, unifiedTimeline]);
   React.useEffect(() => {
     onCount(count);
   }, [onCount, count]);

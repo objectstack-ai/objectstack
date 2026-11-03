@@ -13,7 +13,7 @@ picks one of those.
 |:---|:---|:---|
 | What is installed | the package, registered as code | a copy of every metadata item, written once into the environment |
 | Who is the authority | the package | this environment: the copy is its own metadata |
-| Editing | nothing it ships is edited in place; you customise beside it | every copied item is edited like anything authored in Studio |
+| Editing | nothing it ships is edited in place; a customization is an item of its paired `<package>.custom` package ([how](/docs/concepts/metadata-lifecycle#customizing-an-installed-package-the-paired-custom-override-adr-0146)) | every copied item is edited like anything authored in Studio |
 | Later versions | install the next version | the copy follows no upgrade |
 | The vendor's protection locks | kept and enforced | not copied; the install lists each lock it drops |
 | Tenancy posture | any | refused where the deployment walls organizations (`group`, `isolated`) |
@@ -106,15 +106,29 @@ The package is registered as code and stays the authority. Its install is
 recorded on the runtime host, so it is registered again at every boot, and a
 later version is installed over it.
 
-**Nothing it ships is edited in place.** What a customer changes lives beside
-the package, as environment-level state:
+**Nothing it ships is edited in place.** What a customer changes is an item of
+the package's paired `<package id>.custom` package
+([how](/docs/concepts/metadata-lifecycle#customizing-an-installed-package-the-paired-custom-override-adr-0146)).
+`POST /api/v1/packages/<package id>/ensure-customization` creates the pair, or
+answers it when it already exists, and a save naming it
+(`?package=<package id>.custom`) lands there:
 
-- a `view`, `dashboard`, `report`, `translation` or `email_template` is
-  overlaid by saving one under the same name, and removing the overlay brings
-  the package's own back;
-- a flow is switched off, or cloned under a new name and changed there;
-- a save onto any other item the package ships is refused, and the refusal
-  names the route its type has.
+- an item the package ships, of a type that takes an override (a `view`,
+  `dashboard`, `flow` and the other types ADR-0146 lists), is replaced by
+  saving one of the same name into the pair that declares
+  `overrides: { package: '<package id>', basedOn }`, and removing it from the
+  pair brings the package's own back;
+- a new item is saved into the pair under its own name;
+- a flow can also be switched off;
+- a type that takes no override (an `action` for now, a permission set, a
+  position, a capability, or a code-only type such as a hook) is refused, and
+  the refusal names the route its type has, such as a new item under a new
+  name.
+
+A save naming no package onto an item the package ships is refused with
+`403 NOT_OVERRIDABLE`, naming the pair. A package the ensure door cannot pair,
+for example one whose manifest declares no `namespace`, is refused there with
+the reason.
 
 **The vendor's protection locks hold.** A package locks an item in either
 [ADR-0010](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0010-metadata-protection-model.md)

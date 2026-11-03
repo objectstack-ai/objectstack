@@ -76,9 +76,6 @@ const CALLERS: Record<string, Call[]> = {
   'packages/plugin-gantt/src/ObjectGantt.tsx': [
     { fn: 'formatPercent', storage: 'percentCellScale(def)', source: 'field in hand', why: 'tooltip `percent` row' },
   ],
-  'packages/plugin-grid/src/ObjectGrid.tsx': [
-    { fn: 'formatPercent', storage: 'percentCellScale(percentDef)', source: 'field in hand', why: 'mobile card slot, for a `percent` field only' },
-  ],
   'packages/plugin-grid/src/useColumnSummary.ts': [
     { fn: 'formatPercent', storage: 'percentCellScale(column)', source: 'field in hand', why: 'footer aggregate of a percent column' },
   ],

@@ -39,6 +39,13 @@ import { Switch } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useNotificationPreferences } from '../hooks/notificationPreferences.js';
 
+/**
+ * Each row is the `label` of its switch, so the whole row toggles it: the
+ * switch alone is 44 × 24, under the 44 px tap floor, and below `md` (the
+ * phone app's UI) the row is 44 px tall.
+ */
+const ROW_CLASS = 'flex cursor-pointer items-center justify-between gap-3 px-2 py-1.5 text-sm max-md:min-h-11';
+
 export function NotificationPreferencesMenu() {
   const { t } = useObjectTranslation();
   const {
@@ -65,7 +72,7 @@ export function NotificationPreferencesMenu() {
 
   return (
     <>
-      <div className="flex items-center justify-between gap-3 px-2 py-1.5 text-sm">
+      <label className={ROW_CLASS}>
         <span className="text-foreground/80">
           {t('notifications.toastEnabled', { defaultValue: 'In-app alerts' })}
         </span>
@@ -75,8 +82,8 @@ export function NotificationPreferencesMenu() {
           data-testid="notification-toast-toggle"
           aria-label={t('notifications.toastEnabled', { defaultValue: 'In-app alerts' })}
         />
-      </div>
-      <div className="flex items-center justify-between gap-3 px-2 py-1.5 text-sm">
+      </label>
+      <label className={ROW_CLASS}>
         <span className={desktopDisabled ? 'text-muted-foreground' : 'text-foreground/80'}>
           {t('notifications.desktopEnabled', { defaultValue: 'Desktop notifications' })}
         </span>
@@ -91,7 +98,7 @@ export function NotificationPreferencesMenu() {
           data-testid="notification-desktop-toggle"
           aria-label={t('notifications.desktopEnabled', { defaultValue: 'Desktop notifications' })}
         />
-      </div>
+      </label>
       {hint && (
         <p className="px-2 pb-1.5 text-xs text-muted-foreground" data-testid="notification-desktop-hint">
           {hint}

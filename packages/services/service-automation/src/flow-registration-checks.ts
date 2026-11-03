@@ -24,7 +24,7 @@ import { flowNodeValueTemplateRefusals } from '@objectstack/spec/automation';
 // [#22110] The flow TEXT slots read ADR-0032 §3's `{{ }}` holes — the one judge
 // of the single-brace tokens they may still carry, and the one list of where
 // those slots are, both shared with `objectstack validate`.
-import { flowNodeTextSlotSources, textSlotTemplateRefusal } from '@objectstack/spec/automation';
+import { flowNodeTextSlotSources, flowTextSlotSources, textSlotTemplateRefusal } from '@objectstack/spec/automation';
 // [#21982] Which node types the spec judges an undeclared config key for — the
 // ONE judge of a builtin's undeclared key, met here through `FlowSchema.parse`.
 // `validateNodeConfigKeys` asks it and stands aside for every type it names,
@@ -38,6 +38,11 @@ import { builtinNodeConfigKeysJudged } from '@objectstack/spec/automation';
 // shared refusal to prevent. See `checkStructuralCondition` in `registerFlow`.
 import { EvaluatedExpressionInputSchema, EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec';
 import { validateExpression, nearestName } from '@objectstack/formula';
+// [#29025] The one judge of an undeclared top-level cycle (ADR-0044), shared
+// with the runtime authoring gate (`@objectstack/metadata-protocol`) that the
+// metadata draft verdict and every publish door run, so a flow this engine
+// refuses to register is refused at publish, in the same words.
+import { findUndeclaredFlowCycle } from '@objectstack/metadata-core';
 import type { AutomationEngine } from './engine.js';
 
 /**
@@ -566,6 +571,25 @@ export function validateFlowExpressions(
         check(path, where, raw);
     };
 
+    // [#28054] The flow's OWN text slots — `successMessage` / `errorMessage`,
+    // rendered at the run's terminal exit — judged in the same two steps as a
+    // node's text slots below, with the same judge and the same compile, so a
+    // hole the engine would refuse to render stops the flow here.
+    for (const slot of flowTextSlotSources(flow)) {
+        // The label already names the key (`flow successMessage`), and a flow-level
+        // slot's path IS that key, so no `at …` clause follows it (a node slot's
+        // `at config.…` names a path its label does not).
+        const slotWhere = slot.label;
+        const tokenRefusal = textSlotTemplateRefusal(slot.source);
+        if (tokenRefusal !== undefined) {
+            refuse(slot.path, slotWhere, tokenRefusal, slot.source);
+            continue;
+        }
+        for (const e of validateExpression('template', slot.source).errors) {
+            refuse(slot.path, slotWhere, e.message, slot.source);
+        }
+    }
+
     // #4347 — every graph in the flow, not just the top-level arrays. An
     // ADR-0031 container keeps a whole sub-graph in its `config`, so
     // iterating `flow.nodes`/`flow.edges` checked PART of the flow while
@@ -715,57 +739,13 @@ export function validateFlowExpressions(
     };
 }
 
-/** The body of {@link AutomationEngine.detectCycles}, moved unedited; that method's docblock is its contract. */
+/**
+ * The body of {@link AutomationEngine.detectCycles}; that method's docblock is
+ * its contract. [#29025] The walk itself moved to `findUndeclaredFlowCycle`
+ * (`@objectstack/metadata-core`), the judge the publish gate asks too: this
+ * throws its sentence, unchanged.
+ */
 export function detectCycles(flow: FlowParsed): void {
-    const WHITE = 0, GRAY = 1, BLACK = 2;
-    const color = new Map<string, number>();
-    const parent = new Map<string, string>();
-
-    // Build adjacency list from edges
-    const adj = new Map<string, string[]>();
-    for (const node of flow.nodes) {
-        color.set(node.id, WHITE);
-        adj.set(node.id, []);
-    }
-    for (const edge of flow.edges) {
-        if (edge.type === 'back') continue; // ADR-0044 declared back-edge
-        const targets = adj.get(edge.source);
-        if (targets) targets.push(edge.target);
-    }
-
-    const dfs = (nodeId: string): string[] | null => {
-        color.set(nodeId, GRAY);
-        for (const neighbor of adj.get(nodeId) ?? []) {
-            if (color.get(neighbor) === GRAY) {
-                // Back edge found — reconstruct cycle
-                const cycle = [neighbor, nodeId];
-                let cur = nodeId;
-                while (cur !== neighbor) {
-                    cur = parent.get(cur)!;
-                    if (cur) cycle.push(cur);
-                    else break;
-                }
-                return cycle.reverse();
-            }
-            if (color.get(neighbor) === WHITE) {
-                parent.set(neighbor, nodeId);
-                const result = dfs(neighbor);
-                if (result) return result;
-            }
-        }
-        color.set(nodeId, BLACK);
-        return null;
-    };
-
-    for (const node of flow.nodes) {
-        if (color.get(node.id) === WHITE) {
-            const cycle = dfs(node.id);
-            if (cycle) {
-                throw new Error(
-                    `Flow contains a cycle: ${cycle.join(' → ')}. Only DAG flows are allowed — ` +
-                    `to author an intentional rework loop, mark the cycle-closing edge with type: 'back' (ADR-0044).`,
-                );
-            }
-        }
-    }
+    const cycle = findUndeclaredFlowCycle(flow);
+    if (cycle) throw new Error(cycle.message);
 }

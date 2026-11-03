@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: four vitest list children of this package (--hookTimeout, --teardownTimeout, no override, --testTimeout), every one a distinct config-load question; slowest CI reading 11.3 s (run 41255489006) of the five scheduled CI runs 41199450735, 41217827347, 41237094739, 41255489006, 41271604267, x 1.25, rounded up
 
 /**
  * `--hookTimeout` must never return a GREEN from this package again (#18788).

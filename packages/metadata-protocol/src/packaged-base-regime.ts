@@ -338,6 +338,29 @@ export function packagedBaseRegimeSentence(
     return lock + rowPrescription(row, name);
 }
 
+/**
+ * [#28412, ADR-0146 D2 / D9 item 1] The sealed SAVE sentence of a Regime C
+ * item whose type the declared override opens (`flow`), or `undefined` for a
+ * type with no Regime C row. The lock of {@link packagedBaseRegimeSentence},
+ * then `declare` — the writer's own fix, the declaration from the base's
+ * paired `.custom` or a rename, phrased by the override write gate's module —
+ * in place of the row's clone path, then the row's switch, then the ADR-0126
+ * citation. The clone is not named: a clone is a second flow beside the base,
+ * and both run; the declared override is the one body that replaces it
+ * (ADR-0146 D9 item 1). The removal sentence keeps the row's prescription.
+ *
+ * Kept under the REST door's 500-character bound for an 88-character name
+ * (pinned beside the other rows).
+ */
+export function regimeCDeclaredSaveSentence(type: string, name: string, declare: string): string | undefined {
+    const singular = PLURAL_TO_SINGULAR[type] ?? type;
+    const row = packagedBaseRegimeRow(singular);
+    if (row?.regime !== 'C') return undefined;
+    const switchOff = row.routes.switchOff ? `, or switch it off (${row.routes.switchOff})` : '';
+    return `Metadata item '${singular}/${name}' is provided by a managed package and is sealed against in-place edits. `
+        + `${declare}${switchOff}. See ${REGIME_C_ADR}.`;
+}
+
 /** [ADR-0131 D6] The decision record every sealed-item sentence without a regime row cites. */
 const MANAGED_SEAL_ADR = 'docs/adr/0131-total-organization-ownership-no-null-organization-id.md';
 

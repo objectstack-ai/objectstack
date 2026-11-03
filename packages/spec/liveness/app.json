@@ -315,23 +315,21 @@
       "note": "Drilled because includeAll/placement diverge (dead) from the live core."
     },
     "landing": {
-      "status": "planned",
+      "status": "live",
       "verifiedAt": "2026-10-31",
       "evidenceScope": "in-repo",
-      "authorWarn": true,
-      "authorHint": "Keep it, but nothing reads it yet: no console applies `landing`, so every reader still opens on the app's first navigation item until the landing redirect ships.",
-      "evidence": "packages/spec/src/ui/app.zod.ts#checkAppLandingItems (the parse-time door, mounted on AppSchema: an `item` naming no entry of the app's own `navigation` / `areas[].navigation`, or a `group` / `separator` / `action` entry, is refused at `landing.N.item`, and a `visible` reading `data` at `landing.N.visible`); packages/spec/src/ui/app.zod.ts#AppLandingEntrySchema (strict `{ item, visible }`, `visible` required, the navigation entry's CEL dialect)",
-      "note": "PLANNED RECORD (card 28022, ruling record 6545223246, letter A; spec half by domain:spec seat 2): a per-audience landing list, first entry whose `visible` holds names the navigation entry the app opens on; no match or no key keeps today's rule (first navigation item by `order`). Declared spec-first by the maintainer's ruling, against the `homePageId` tombstone's enforce-first preference, which is why this row warns: measured at origin/main 5da3a8ce, nothing under ui/ reads `app.landing` (the console's landing resolution is ui/packages/app-shell/src/utils/homePath.ts and RootLandingRedirect, neither of which reads the key). The tombstone's other objection, a dangling id resolving silently to the first item, is closed at parse by the door in `evidence`. Flip to `live` when the console landing redirect (the follow-up domain:ui card) reads it, citing the read point, and drop `authorWarn` with the flip.",
+      "evidence": "ui/packages/app-shell/src/console/appDeclaredLanding.ts#resolveDeclaredLandingRoute (the read point: the entries in order, each `visible` asked with the navigation's own evaluator, the first that holds opens the entry its `item` names when the member is shown it; a faulting predicate is passed over); ui/packages/app-shell/src/console/AppContent.tsx#AppRootLanding (the app root's redirect calls it over the trees the member is shown, through `useNavMemberGates`, and keeps the first navigation item by `order` when no entry lands); packages/spec/src/ui/app.zod.ts#checkAppLandingItems (the parse-time door, mounted on AppSchema and on objectui's `AppComponentSchema`: an `item` naming no entry of the app's own `navigation` / `areas[].navigation`, or a `group` / `separator` / `action` / `url` entry, is refused at `landing.N.item`, and a `visible` reading `data` at `landing.N.visible`)",
+      "note": "FLIPPED planned → live 2026-10-31 (card 28450, the domain:ui half of card 28022, ruling record 6545223246, letter A): the console's app-root landing reads the list, and `authorWarn` is dropped with the flip. Scope: the predicate is asked in the scope the app's navigation `visible` is asked in, the roots `buildExpressionScope` binds for the shell (`current_user` with its `user` / `ctx.user` / `os.user` aliases, and `features`); no `data` is bound, and a root outside that scope (`record`, `app`) faults. Fault face: a faulting entry is passed over and reported once by the navigation evaluator (`withholding`), the next entry is asked, and with none left the app opens on its first navigation item. An entry whose item the member's navigation gates hide is passed over too; a `url` item, which opens no in-app route, is refused at parse by `checkAppLandingItems`. Pinned in ui/packages/app-shell/src/console/__tests__/AppContent.declaredLanding-28450.test.tsx.",
       "children": {
         "item": {
-          "status": "planned",
+          "status": "live",
           "verifiedAt": "2026-10-31",
-          "note": "Planned with its container `landing` (see that row): the id of the navigation entry this audience opens on. Its referential refusal is live at parse (pinned in packages/spec/src/ui/app-landing.test.ts); what is planned is the redirect that opens it."
+          "note": "Live with its container `landing` (see that row): the id of the navigation entry this audience opens on, looked up at any depth in the trees the member is shown. Its referential refusal is live at parse (packages/spec/src/ui/app-landing.test.ts)."
         },
         "visible": {
-          "status": "planned",
+          "status": "live",
           "verifiedAt": "2026-10-31",
-          "note": "Planned with its container `landing` (see that row): the audience predicate, the navigation entry `visible` dialect and reader roots, required on every entry. Its shape refusals (blank, ast-only, a `data` read) are live at parse; nothing evaluates it until the console landing redirect ships."
+          "note": "Live with its container `landing` (see that row): the audience predicate, asked with the navigation entry `visible` evaluator and its roots; a faulting predicate passes its entry over. Its shape refusals (blank, ast-only, a `data` read) are live at parse."
         }
       }
     },

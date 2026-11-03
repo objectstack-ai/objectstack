@@ -580,8 +580,15 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     // object, one process, one second — and two surfaces that disagreed
     // (`/actions` → 400, `/data` → 404). Both are asserted here, so they cannot
     // drift apart again without this gate saying so.
+    //
+    // The data surface that answers this the way the action does is the record
+    // READ: the action loads its record through the read door, and the member
+    // reads `showcase_task`. A PATCH is not that surface for this caller: an
+    // update by id is judged before the record is looked up, as a delete is, and
+    // the member holds no edit grant on `showcase_task` — so it is refused the
+    // write whatever the id (`update-by-id-refusal-order.dogfood.test.ts`).
     const ghostId = ACTION.slice(ACTION.lastIndexOf('/') + 1);
-    const rest = await stack.apiAs(memberToken, 'PATCH', `/data/showcase_task/${ghostId}`, { done: true });
+    const rest = await stack.apiAs(memberToken, 'GET', `/data/showcase_task/${ghostId}`);
 
     expect(rest.status).toBe(404);
     const body = (await rest.json()) as Record<string, unknown>;
@@ -590,6 +597,10 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     // in its own shape, with no `??` chain across the two (#5632's rule, which
     // this file already enforces for the 401 bodies).
     expect(body.code).toBe('RECORD_NOT_FOUND');
+
+    const patch = await stack.apiAs(memberToken, 'PATCH', `/data/showcase_task/${ghostId}`, { done: true });
+    expect(patch.status).toBe(403);
+    expect(((await patch.json()) as Record<string, unknown>).code).toBe('PERMISSION_DENIED');
   });
 
   // ── /automation (dispatcher-mounted; runtime domains/automation.ts) ─────

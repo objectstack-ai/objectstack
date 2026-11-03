@@ -33,6 +33,17 @@
  * annotated the copy "keep identical to the original" — a copy is exactly what
  * this file must not become.
  *
+ * ## Since objectstack ADR-0146 D1 (N-28)
+ *
+ * Setup carries no metadata editor and no metadata catalog, and app-shell's
+ * canonical `…/metadata/*` routes themselves redirect into Studio's "All
+ * metadata" area. Aiming at them would be the same two-hop shape this file was
+ * written against, one level up, so the host now aims at Studio directly:
+ * `/studio/<leg>/metadata/…`, the query kept (`?package=`, `?scope=`,
+ * `?review=`). A datasource is the exception — it stays in Setup — and still
+ * lands on the canonical route. The canonical probes are kept, so a host that
+ * drifted back onto them renders them and fails.
+ *
  * ## Scope
  *
  * This measures the HOST's rewrite only. What app-shell then does with the
@@ -55,7 +66,7 @@ import { systemRoutes } from '../AppContent';
  */
 function ChainRecorder({ sink }: { sink: string[] }) {
   const location = useLocation();
-  const here = `${location.pathname}${location.search}`;
+  const here = `${location.pathname}${location.search}${location.hash}`;
   if (sink[sink.length - 1] !== here) sink.push(here);
   return null;
 }
@@ -87,6 +98,8 @@ function renderAt(url: string): string[] {
           <Route path="component/metadata/resource/*" element={<Probe id="alias-resource" />} />
           <Route path="component/metadata/resource" element={<Probe id="alias-resource" />} />
         </Route>
+        {/* The Studio app the host mounts beside `/apps/*` (objectstack ADR-0146 D1). */}
+        <Route path="/studio/*" element={<Probe id="studio" />} />
         <Route path="*" element={<Probe id="unmatched" />} />
       </Routes>
     </MemoryRouter>,
@@ -101,80 +114,66 @@ function expectNoAliasAnywhere(chain: string[]) {
   expect(screen.queryByTestId('alias-directory')).not.toBeInTheDocument();
 }
 
-describe('console host legacy redirects → canonical metadata routes (objectui#3639)', () => {
-  it('system/metadata/:type reaches metadata/:type in ONE hop', () => {
-    const chain = renderAt('/apps/x/system/metadata/object');
-
-    // The whole point: two entries, i.e. a single `<Navigate>`. Before the fix
-    // this was three, with the alias in the middle.
-    expect(chain).toEqual(['/apps/x/system/metadata/object', '/apps/x/metadata/object']);
-    expect(screen.getByTestId('canonical-list')).toHaveTextContent('"type":"object"');
+describe('console host legacy redirects → Studio\'s All metadata area, in ONE hop (objectui#3639, ADR-0146 D1)', () => {
+  /** One `<Navigate>`, straight to Studio: no stop on Setup's canonical route or on the alias. */
+  function expectStudioInOneHop(chain: string[], from: string, to: string) {
+    expect(chain).toEqual([from, to]);
+    expect(screen.getByTestId('studio')).toBeInTheDocument();
+    expect(screen.queryByTestId('canonical-list')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('canonical-item')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('canonical-directory')).not.toBeInTheDocument();
     expectNoAliasAnywhere(chain);
+  }
+
+  it.each([
+    ['/apps/x/system/metadata/object', '/studio/~all/metadata/object'],
+    ['/apps/x/system/metadata/object/account', '/studio/~all/metadata/object/account'],
+    ['/apps/x/system/metadata', '/studio/~all/metadata'],
+    ['/apps/x/system/objects/account', '/studio/~all/metadata/object/account'],
+    ['/apps/x/system/objects', '/studio/~all/metadata/object'],
+    ['/apps/my-app/system/metadata/permission/admin', '/studio/~all/metadata/permission/admin'],
+  ])('%s → %s', (from, to) => {
+    expectStudioInOneHop(renderAt(from), from, to);
   });
 
-  it('system/metadata/:type/:name reaches metadata/:type/:name in ONE hop', () => {
-    const chain = renderAt('/apps/x/system/metadata/object/account');
-
-    expect(chain).toEqual([
-      '/apps/x/system/metadata/object/account',
-      '/apps/x/metadata/object/account',
-    ]);
-    const probe = screen.getByTestId('canonical-item');
-    expect(probe).toHaveTextContent('"type":"object"');
-    expect(probe).toHaveTextContent('"name":"account"');
-    expectNoAliasAnywhere(chain);
+  it.each([
+    ['/apps/x/system/metadata/object?package=crm', '/studio/crm/metadata/object?package=crm'],
+    ['/apps/x/system/metadata/position?scope=environment', '/studio/~all/metadata/position?scope=environment'],
+    ['/apps/x/system/metadata/object/account?review=1', '/studio/~all/metadata/object/account?review=1'],
+    ['/apps/x/system/objects/account?package=crm#fields', '/studio/crm/metadata/object/account?package=crm#fields'],
+    ['/apps/x/system/metadata/object?keep=me#frag', '/studio/~all/metadata/object?keep=me#frag'],
+  ])('the query and hash are carried, onto the leg the query names: %s', (from, to) => {
+    // The old chain arrived with a bare path (objectui#3639 measured it, and
+    // kept it). The area gives `?package=`, `?scope=` and `?review=` their
+    // Setup meaning, so they are kept now, and the leg is chosen here, so the
+    // area adds no second hop.
+    expectStudioInOneHop(renderAt(from), from, to);
   });
 
-  it('bare system/metadata reaches the metadata directory in ONE hop', () => {
-    // The typeless arm used to aim at `component/metadata/directory`, the
-    // second alias — a different route from the resource one, same detour.
-    const chain = renderAt('/apps/x/system/metadata');
-
-    expect(chain).toEqual(['/apps/x/system/metadata', '/apps/x/metadata']);
-    expect(screen.getByTestId('canonical-directory')).toBeInTheDocument();
-    expectNoAliasAnywhere(chain);
+  it.each([
+    ['/apps/x/system/positions', '/studio/~all/metadata/position?scope=environment'],
+    ['/apps/x/system/roles', '/studio/~all/metadata/position?scope=environment'],
+    ['/apps/x/system/permissions', '/studio/~all/metadata/permission?scope=environment'],
+  ])('the retired catalog page %s opens the catalog in Studio', (from, to) => {
+    expectStudioInOneHop(renderAt(from), from, to);
   });
 
-  it('system/objects/:objectName reaches metadata/object/:name in ONE hop', () => {
-    const chain = renderAt('/apps/x/system/objects/account');
-
-    expect(chain).toEqual(['/apps/x/system/objects/account', '/apps/x/metadata/object/account']);
-    const probe = screen.getByTestId('canonical-item');
-    expect(probe).toHaveTextContent('"type":"object"');
-    expect(probe).toHaveTextContent('"name":"account"');
-    expectNoAliasAnywhere(chain);
-  });
-
-  it('bare system/objects reaches the object list in ONE hop', () => {
-    const chain = renderAt('/apps/x/system/objects');
-
-    expect(chain).toEqual(['/apps/x/system/objects', '/apps/x/metadata/object']);
-    expect(screen.getByTestId('canonical-list')).toHaveTextContent('"type":"object"');
-    expectNoAliasAnywhere(chain);
-  });
-
-  it('the app prefix is preserved, not just stripped to the root', () => {
-    // `prefix` is cut with a regex off `location.pathname`; a mistake there is
-    // invisible in the single-segment cases above.
+  it('a datasource stays in Setup: the canonical route, the app prefix preserved', () => {
+    // ADR-0146 D1 places the datasource in Setup, and the area sends it back
+    // there, so the host must not send it to Studio.
     const chain = renderAt('/apps/my-app/system/metadata/datasource');
 
-    expect(chain).toEqual([
-      '/apps/my-app/system/metadata/datasource',
-      '/apps/my-app/metadata/datasource',
-    ]);
+    expect(chain).toEqual(['/apps/my-app/system/metadata/datasource', '/apps/my-app/metadata/datasource']);
+    expect(screen.getByTestId('canonical-list')).toHaveTextContent('"type":"datasource"');
+    expect(screen.queryByTestId('studio')).not.toBeInTheDocument();
     expectNoAliasAnywhere(chain);
   });
 
-  it('MEASUREMENT: the endpoint is byte-identical to what the old two-hop produced', () => {
-    // Equivalence, not improvement: `LegacyMetadataRedirect` dropped
-    // `location.search` on its resource arm and the host never forwarded the
-    // incoming query either, so the old chain also arrived with a bare path.
-    // Preserving query/hash would be a real behaviour change and is NOT part of
-    // this issue — pinned here so a future reader can see the omission was
-    // measured rather than overlooked.
-    const chain = renderAt('/apps/x/system/metadata/object?keep=me#frag');
+  it('a datasource item stays in Setup too', () => {
+    const chain = renderAt('/apps/x/system/metadata/datasource/main');
 
-    expect(chain[chain.length - 1]).toBe('/apps/x/metadata/object');
-    expect(chain).toHaveLength(2);
+    expect(chain).toEqual(['/apps/x/system/metadata/datasource/main', '/apps/x/metadata/datasource/main']);
+    expect(screen.getByTestId('canonical-item')).toHaveTextContent('"name":"main"');
+    expectNoAliasAnywhere(chain);
   });
 });

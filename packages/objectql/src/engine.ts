@@ -144,10 +144,14 @@ import { buildEvalUser, buildProvenance, buildSession, buildUser } from './engin
 // [#25522 cut 10] The write path's reference check and the caller's read of a
 // master-detail header; the methods of the same names below hand each body the
 // members it reads (`ReferentialIntegrityHost`).
-import { assertReferencesResolve, masterDetailHeadersCallerReads } from './engine-referential-integrity.js';
+import { assertReferencesResolve, masterDetailHeadersCallerReads, type StoredReferenceRows } from './engine-referential-integrity.js';
 // [#25522 cut 11] File-field hydration on read; the methods of the same names
 // below hand each body the members it reads (`FileReferenceHydrationHost`).
 import { callerMayReadSysFile, readParentDerivedFiles, resolveFileReferences, servableFileRows, serveRefusedFileHydration } from './engine-file-reference-hydration.js';
+// [#29460] A `referenceNameVisible` reference's refused targets served by name
+// and id on the expanded read; the method of the same name below hands the body
+// the members it reads (`ReferenceNameVisibleHost`).
+import { serveReferenceNames } from './engine-reference-name-visible.js';
 // [#25522 cut 12] The driver options every driver call receives, and the tenancy
 // posture and Layer 0 verdict they are scoped by; the methods of the same names
 // below hand each body the members it reads (`DriverOptionsHost`).
@@ -157,7 +161,7 @@ import { buildDriverOptions, driverReadScope, driverWriteTarget, engineLayer0Ver
 // methods of the same names below hand each body the members it reads (`MigrationFlagsHost`).
 import { announceOpenMigrationGates, isOrganizationOwnershipCertified, isValueShapesMigrationVerified, noteAdmittedValueShapeViolation, readFileReferencesFlagRow, readMigrationFlagVerified, supplyTenantKeyCertifiedResolver, wasDatastoreCreatedFromEmpty } from './engine-migration-flags.js';
 import { ExecutionContext, ExecutionContextSchema, type InstalledPackageSource } from '@objectstack/spec/kernel';
-import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
+import { isStoredMetadataBodyObject, judgeCollectionItemOwnerStamp } from '@objectstack/spec/kernel';
 // [#27884] The stored-row read gate, registered on the family's tables below.
 import { STORED_METADATA_TYPE_READ_GATE_OBJECTS, storedMetadataTypeReadGate } from './stored-metadata-type-read-gate.js';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
@@ -166,7 +170,7 @@ import type { FlowFunctionEffect } from '@objectstack/spec/automation';
 // contract is new (#5945).
 import type { IPubSub, IScopedContext, IScopedObjectRepository, IntrospectedSchema as SpecIntrospectedSchema } from '@objectstack/spec/contracts';
 // [#20157] The judge-only filter-admission member's verdict and options.
-import type { EngineFilterJudgement, EngineFilterJudgementOptions } from '@objectstack/spec/contracts';
+import type { EngineFilterJudgement, EngineFilterJudgementOptions, InternalFieldEvaluationOptions, InternalFieldEvaluationQuery } from '@objectstack/spec/contracts';
 import {
   IDataDriver,
   IDataEngine,
@@ -201,7 +205,7 @@ import {
 } from '@objectstack/core';
 import { WriteEpoch, isWriteEpochOperation } from './write-epoch.js';
 import { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
-import { SummaryRecomputeError, type SummaryRecomputeFailure } from './summary-errors.js';
+import { SummaryRecomputeError, cascadeStoppedRefusal, hookStoppedRefusal, rollbackFailedRefusal, rolledBackRefusal, type SummaryRecomputeFailure } from './summary-errors.js';
 import { TransactionUnsupportedError } from './transaction-errors.js';
 import {
   aggregateSummaryValue,
@@ -312,6 +316,7 @@ import { count, rejectCredentialAggregation } from './engine-count-aggregate.js'
 // ADR-0100: the credential-column guard's filter / sort half, beside the
 // aggregate half above — one collector, one envelope.
 import { rejectCredentialEvaluation } from './credential-evaluation-guard.js';
+import { assertNoInternalFieldEvaluated, rejectInternalFieldEvaluation } from './internal-field-evaluation-guard.js';
 import { assertGroupByNamesNoJsonStoredField } from './group-by-structured-json-door.js';
 import { assertProjectionNamesAField, refuseProjectionOfUnknownColumns } from './empty-projection-door.js';
 import { assertAggregationFieldTypesAccepted } from './aggregate-field-type-door.js';
@@ -334,7 +339,7 @@ import { applyProtection, pluralToSingular, ExternalWriteForbiddenError } from '
 import { SchemaRegistry, type ArtifactInstallScope } from './registry.js';
 import { expandSearchToFilter, normalizeSearch, SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES } from './search-filter.js';
 import { stripSearchCompanion } from './search-companion.js';
-import { ExpressionEngine, analyzeRelationshipTraversals, type EvalError, type EvalOptionLabels, type EvalPermissions } from '@objectstack/formula';
+import { ExpressionEngine, analyzeRelationshipTraversals, isUnparseableDate, type EvalError, type EvalOptionLabels, type EvalPermissions } from '@objectstack/formula';
 import { declaredOptionLabels, readerOptionLabels } from './formula-option-labels.js';
 import type { Expression } from '@objectstack/spec';
 import {
@@ -385,7 +390,10 @@ import {
   PLATFORM_PROVISIONED_COLUMNS,
   declaredColumnSet,
   rowsWithDeclaredColumnsOnly,
+  rowsWithSelectedColumnsAnswered,
+  selectedStoredColumns,
   withDeclaredColumnsOnly,
+  withSelectedColumnsAnswered,
 } from './declared-read-columns.js';
 // [#21777] "Is this schema the remote's?" One predicate, shared with the boot sync.
 // [#21910, #21918] And its injected-column refinement, which both cascade walks ask.
@@ -442,6 +450,7 @@ import {
 // members it reads (`ValidateHost`). Imported after every module that body
 // imports, so the engine's module evaluation order is what it was.
 import { validate } from './engine-validate.js';
+import { bindHookNotice } from './hook-notice.js';
 import {
   applyHaving,
   aggregatedRowColumns,
@@ -1804,23 +1813,69 @@ export function declaredMultiValued(field: { type?: unknown; multiple?: unknown 
  * materialized default included, was inert: a parent delete left its children
  * holding the deleted id.
  *
- * ⛔ `user` stays out. It stores like a `lookup`, but the spec's parse puts it
- * on the other side of the line and materializes no `deleteBehavior` on it, so
- * no `user` field declares a delete outcome by default. Moving it is a change
- * to the declaration, made in the spec, never here.
+ * `user` is not a member of this set: see {@link USER_REFERENCE_TYPE}, which
+ * takes part only when it declares a delete outcome of its own.
  */
 const DELETE_SEMANTICS_REFERENCE_TYPES: ReadonlySet<string> = new Set(['master_detail', 'lookup', 'tree']);
 
 /**
- * [#22957] Does `fdef` belong to {@link DELETE_SEMANTICS_REFERENCE_TYPES}? This
+ * [#29253] A `user` field takes part in the referential delete walk when, and
+ * only when, it DECLARES a `deleteBehavior` (one of the enum's three values).
+ *
+ * It stores like a `lookup` (the target is fixed to `sys_user` by the type,
+ * {@link referenceTargetOf}), but the spec's parse materializes no
+ * `deleteBehavior` on it: a `user` field that authors nothing declares no
+ * delete outcome, so deleting the user leaves it as it was, exactly as before.
+ * A `user` field that authors one is a declaration the spec accepts and
+ * round-trips, and the walk used to read it never, so an authored `restrict`
+ * refused nothing and an authored `cascade` deleted nothing. It now reads like
+ * a `lookup`'s authored value: `cascade` deletes the rows holding the deleted
+ * user, `set_null` clears them (on a multi-valued field, removes the member),
+ * and `restrict` refuses the delete with the walk's own `DELETE_RESTRICTED`;
+ * a `set_null` on a REQUIRED `user` field escalates to that refusal as a
+ * required `lookup`'s does.
+ *
+ * Every door that deletes a user reaches this walk: better-auth deletes the
+ * user row (admin remove-user, self delete-user) through the plugin-auth
+ * adapter's `engine.delete` by id, and the generic data doors refuse a
+ * caller-context `sys_user` delete before it (ADR-0092 D2).
+ *
+ * ⛔ No default is invented here. "Absent" stays outside the walk, because the
+ * spec's parse decides what a bare `user` field declares, not this file.
+ */
+const USER_REFERENCE_TYPE = 'user';
+const DECLARED_DELETE_BEHAVIORS: ReadonlySet<string> = new Set(['set_null', 'cascade', 'restrict']);
+
+/**
+ * [#22957] Does `fdef` belong to {@link DELETE_SEMANTICS_REFERENCE_TYPES}, or
+ * [#29253] is it a `user` field that declares a `deleteBehavior`
+ * ({@link USER_REFERENCE_TYPE})? This
  * is the ONE family test every reader of the referential delete walk asks:
  * {@link ObjectQL.cascadeRelationBehavior}, through it the collection walk and
  * the dependents walk, and {@link ObjectQL.planCascadeAtomicity}. So the walk
  * that runs and the verdict on whether it runs as one unit of work cannot
  * disagree about which relations take part. ⛔ Never a type literal at a site.
  */
-function statesDeleteSemantics(fdef: { type?: unknown } | null | undefined): boolean {
-  return typeof fdef?.type === 'string' && DELETE_SEMANTICS_REFERENCE_TYPES.has(fdef.type);
+function statesDeleteSemantics(fdef: { type?: unknown; deleteBehavior?: unknown } | null | undefined): boolean {
+  if (typeof fdef?.type !== 'string') return false;
+  if (fdef.type === USER_REFERENCE_TYPE) {
+    return typeof fdef.deleteBehavior === 'string' && DECLARED_DELETE_BEHAVIORS.has(fdef.deleteBehavior);
+  }
+  return DELETE_SEMANTICS_REFERENCE_TYPES.has(fdef.type);
+}
+
+/**
+ * [#29253] The object a delete-walk relation points at. The `reference`
+ * carrier is read through the one arbiter ({@link referenceCarrierOf}), so an
+ * unreadable carrier still throws and an absent one still answers `undefined`.
+ * A `user` field's target is fixed by its type, so it answers `sys_user`
+ * ({@link referenceTargetOf}) whether or not the carrier spells it: a raw
+ * `{ type: 'user' }` registration names no `reference` and still references a
+ * user.
+ */
+function deleteWalkTargetOf(fdef: { type?: unknown } | null | undefined, reader: string): string | undefined {
+  const carrier = referenceCarrierOf(fdef, reader);
+  return fdef?.type === USER_REFERENCE_TYPE ? referenceTargetOf(fdef) : carrier;
 }
 
 /**
@@ -3084,6 +3139,18 @@ function formulaHopRefusal(field: string, b: RelatedFieldBinding, named: Readonl
   }
 }
 
+/**
+ * What a formula field reports when it evaluated to the invalid Date that
+ * `date()` / `datetime()` answer for text they cannot parse
+ * ({@link isUnparseableDate}). An EMPTY source is not this fault: it reads
+ * `null` and says nothing. The record's text is not quoted — a log line is no
+ * place for row data.
+ */
+const UNPARSEABLE_DATE_FAULT =
+  'date() / datetime() was handed text it cannot parse as a date, so the formula has no value on this record; '
+  + 'they take ISO text (`2026-03-04`, `2026-03-04T09:30:00Z`), a timestamp or epoch milliseconds, and an empty '
+  + 'source reads null without a report.';
+
 function applyFormulaPlan(
   plan: FormulaPlanEntry[],
   records: any[],
@@ -3126,7 +3193,13 @@ function applyFormulaPlan(
         scope = hop.record;
         empty = hop.empty;
       }
-      const r = ExpressionEngine.evaluate(fp.expression, { now, timezone, user, org, permissions, optionLabels, record: scope });
+      const evaluated = ExpressionEngine.evaluate(fp.expression, { now, timezone, user, org, permissions, optionLabels, record: scope });
+      // An invalid Date minted from text `date()` could not parse evaluates
+      // `ok` (a predicate relies on that) but serializes to the `null` an empty
+      // source gives: for a field it is a fault, said like any other.
+      const r = evaluated.ok && isUnparseableDate(evaluated.value)
+        ? { ok: false as const, error: { kind: 'runtime' as const, message: UNPARSEABLE_DATE_FAULT } }
+        : evaluated;
       if (r.ok) {
         rec[fp.name] = roundFormulaValue(r.value, fp.scale);
         continue;
@@ -4789,8 +4862,13 @@ export function stampPackage<T>(item: T, packageId: string, packageVersion: stri
  * `name` (`viewContainerNameRefusal`), which the same loop throws one statement
  * earlier. `issues[]` locates the key, as the metadata write doors' refusal of
  * the same rule does. No code is minted.
+ *
+ * Exported for the stack's RESIDUAL registration (`registerUnclaimedTopLevelItems`
+ * in `plugin.ts`), which files a top-level permission set under the stack's id
+ * and refuses the same set in this same envelope. ⛔ Never rebuild the envelope
+ * at a second door.
  */
-function permissionSetOwnerRegistrationRefusal(
+export function permissionSetOwnerRegistrationRefusal(
   item: unknown,
   name: string,
   ownerId: string | undefined,
@@ -4804,6 +4882,404 @@ function permissionSetOwnerRegistrationRefusal(
   err.status = 400;
   err.httpStatus = 400;
   err.issues = [{ path: 'packageId', message: refusal.issueMessage, code: 'custom' }];
+  return err;
+}
+
+/**
+ * [#28534] The `_packageId` each item object was stamped with BY A
+ * REGISTRATION of this process — written onto the caller's own object by
+ * `stampPackage` / `registerItem`, recorded by {@link noteRegistrationStamp}.
+ * Weakly held and process-wide: the earlier registration may have been
+ * another engine's. Read by {@link collectionItemOwnerStampRefusal} only.
+ */
+const REGISTRATION_WRITTEN_STAMPS = new WeakMap<object, unknown>();
+
+/**
+ * [#28534] Record that a registration just wrote `item`'s `_packageId`: it was
+ * unset before (`stampBefore`) and is set now. A stamp the object already
+ * carried is never recorded, so it stays a stamp the body arrived with.
+ */
+function noteRegistrationStamp(item: unknown, stampBefore: unknown): void {
+  if (stampBefore !== undefined || !item || typeof item !== 'object') return;
+  const written = (item as { _packageId?: unknown })._packageId;
+  if (written !== undefined) REGISTRATION_WRITTEN_STAMPS.set(item, written);
+}
+
+/**
+ * [#28534] The registration door's refusal of a collection item whose body
+ * already carries a `_packageId` other than the package it is registered under
+ * (`ownerId`; none for a manifest that carries no id).
+ *
+ * `_packageId` is the ADR-0010 envelope stamp: the package that registered the
+ * item, written by the door (`stampPackage` here, `registerItem` behind it,
+ * both through `applyProtection`). `applyProtection` writes it only while it is
+ * `undefined`, and every item schema that spreads `MetadataProtectionFields`
+ * (a connector entry among them) declares the key, so a body could arrive
+ * wearing ANOTHER package's id and keep it: an installed package naming the
+ * host's own id, or an id no package holds, and every reader that asks an
+ * item's owner (the connector materializer judging whose root a file ref
+ * resolves against, the disabled-package filter, the ADR-0130 artifact gates)
+ * then reads a stamp the body wrote about itself.
+ *
+ * Refused rather than overwritten, beside the two other body-against-key
+ * refusals of the same loop (the divergent view-container `name`, the
+ * permission set's `packageId`): resolving a disagreement between the body and
+ * the key it is filed under silently, in either direction, files the item
+ * under something nobody wrote (commit d0ee598e6). A stamp EQUAL to the owner
+ * is accepted — it is what an item re-registered under its own package (a
+ * ledger rehydrate, an artifact the metadata door already stamped in place
+ * with the same body id) carries. `null` and the empty string are stamps too:
+ * neither is overwritten by `applyProtection`, so either would survive as an
+ * owner no row answers.
+ *
+ * The judgement and its words are the one judge both doors of the rule call,
+ * `judgeCollectionItemOwnerStamp` (`@objectstack/spec/kernel`, whose header
+ * holds the verdict table and the collections): the stack schema runs it at
+ * the build door (`defineStack`, `os validate`, `os build`, the artifact door's
+ * parse), so this seam is the door for a body no schema parse judged — an
+ * installed body, a programmatic `registerApp`, a nested plugin, a
+ * `strict: false` stack. ⛔ Never a second comparison here. What stays here is
+ * the exemption below, which is this process's state, not a body rule.
+ *
+ * `VALIDATION_ERROR` / 400, `issues[]` at `_packageId`: the envelope of
+ * {@link permissionSetOwnerRegistrationRefusal}. Exported for the stack's
+ * RESIDUAL registration (`registerUnclaimedTopLevelItems` in `plugin.ts`),
+ * which files top-level items under the residual owner and refuses the same
+ * stamp in this same envelope. ⛔ Never rebuild the envelope at a second door.
+ *
+ * ## A stamp a registration wrote is not a body's claim
+ *
+ * `stampPackage` and `registerItem` stamp the CALLER'S object in place, so an
+ * item object registered once keeps that registration's `_packageId` for as
+ * long as it lives — a module constant handed to a second registration (a
+ * fixture another test registered under its own package, measured in
+ * `engine-picklist.test.ts`) arrives wearing the first registration's stamp,
+ * which no body wrote. Those stamps are recorded where they are written
+ * ({@link noteRegistrationStamp}) and are not refused here: the item
+ * registers as it always has. Only a stamp the object ARRIVED with is judged —
+ * which every installed body's is, since an install door parses its body
+ * fresh, so no registration has touched it.
+ */
+export function collectionItemOwnerStampRefusal(
+  item: unknown,
+  type: string,
+  name: string,
+  ownerId: string | undefined,
+): (Error & { code: 'VALIDATION_ERROR'; status: 400; httpStatus: 400; issues: Array<{ path: string; message: string; code: string }> }) | undefined {
+  if (item && typeof item === 'object') {
+    const stamped = (item as { _packageId?: unknown })._packageId;
+    if (stamped !== undefined && REGISTRATION_WRITTEN_STAMPS.get(item) === stamped) return undefined;
+  }
+  const refusal = judgeCollectionItemOwnerStamp(item, type, name, ownerId, 'register');
+  if (!refusal) return undefined;
+  const issueMessage = refusal.issueMessage;
+  const err = new Error(refusal.message) as Error & {
+    code: 'VALIDATION_ERROR'; status: 400; httpStatus: 400; issues: Array<{ path: string; message: string; code: string }>;
+  };
+  err.code = 'VALIDATION_ERROR';
+  err.status = 400;
+  err.httpStatus = 400;
+  err.issues = [{ path: '_packageId', message: issueMessage, code: 'custom' }];
+  return err;
+}
+
+/**
+ * [#28697] {@link collectionItemOwnerStampRefusal} for the two collections a
+ * package body files through verbs of their own rather than the collection
+ * loop: its OBJECTS (`registerObject`, the array and the name-keyed map form)
+ * and its APPS (`registerApp`: each `apps[]` entry the loop would register,
+ * and the body itself when it registers as its own app). The first refusal
+ * found, in that order, or `undefined`.
+ *
+ * Asked BEFORE the body registers anything, so a refused body leaves no
+ * package record, object or app behind. An app wearing another package's
+ * `_packageId` kept it (`applyProtection` stamps an unset key only), and every
+ * reader that asks an app's owner — the per-package list filter, the
+ * disabled-package filter, the packaged-base gate — then filed it under the
+ * package it named. An object's stamp is read by the action-parse predicate
+ * of `registerObject` (`schema._packageId ?? packageId`). Refused, not
+ * overwritten, for the reason the collection loop refuses: one judge, so the
+ * build door (the stack schema, which judges `objects` and `apps` too) and
+ * this door cannot disagree.
+ *
+ * Called by {@link ObjectQL.registerApp} and by a nested plugin's
+ * registration (`registerPlugin`, which registers objects and the plugin
+ * itself as an app, and no `apps[]`).
+ *
+ * @param body    The package body or nested plugin, as it arrived.
+ * @param ownerId The package the door registers it under.
+ * @param scope   Which of the app shapes this door registers.
+ */
+export function packageBodyObjectAndAppOwnerStampRefusal(
+  body: any,
+  ownerId: string | undefined,
+  scope: { apps: boolean; selfAsApp: boolean },
+): ReturnType<typeof collectionItemOwnerStampRefusal> {
+  const objects = body?.objects;
+  if (objects && typeof objects === 'object') {
+    const entries: Array<[unknown, unknown]> = Array.isArray(objects)
+      ? objects.map((def: any) => [def?.name, def])
+      : Object.entries(objects);
+    for (const [name, def] of entries) {
+      const refusal = collectionItemOwnerStampRefusal(def, 'object', typeof name === 'string' && name !== '' ? name : '(unnamed)', ownerId);
+      if (refusal) return refusal;
+    }
+  }
+  if (scope.apps && Array.isArray(body?.apps)) {
+    for (const app of body.apps) {
+      // The loop registers an app with a name only; a nameless one is skipped.
+      const appName = app?.name || app?.id;
+      if (!appName) continue;
+      const refusal = collectionItemOwnerStampRefusal(app, 'app', String(appName), ownerId);
+      if (refusal) return refusal;
+    }
+  }
+  if (scope.selfAsApp) {
+    const refusal = collectionItemOwnerStampRefusal(body, 'app', String(body?.name), ownerId);
+    if (refusal) return refusal;
+  }
+  return undefined;
+}
+
+/**
+ * [#28697] Every refusal the collection seam (`registerMetadataCollections`)
+ * raises that the body alone decides, asked over a package body or a nested
+ * plugin BEFORE anything of the package registers. The first refusal found,
+ * walking the collections and items in the order the seam registers them, or
+ * `undefined`.
+ *
+ * Asked first so a body refused by one of them leaves nothing of the package
+ * registered, and a refused re-register of an installed id leaves that
+ * install as it was. Every judge here reads the item, its derived name, the
+ * source label and the owning id, and nothing the registry holds, so asking
+ * it first gives the same answer in the same words. ⛔ No second copy of any
+ * judge: each is the one function its own record names.
+ *
+ * Called by {@link ObjectQL.registerApp} for the body (`'manifest'`) and for
+ * each nested plugin (`'nested plugin'`, under the parent's id, as
+ * `registerPlugin` registers it).
+ */
+export function packageBodyCollectionRefusal(
+  source: any,
+  ownerId: string,
+  sourceLabel: string,
+): Error | undefined {
+  for (const key of METADATA_ARRAY_KEYS) {
+    // A `picklistExtensions` entry is not an item (the seam hands it to
+    // `registerPicklistExtension`, whose refusal reads the registry).
+    if (key === 'picklistExtensions') continue;
+    const items = (source as any)?.[key];
+    if (!Array.isArray(items) || items.length === 0) continue;
+    for (const item of items) {
+      const itemName = resolveMetadataItemName(key, item);
+      // The seam skips (and warns about) an item with no derivable name.
+      if (!itemName) continue;
+      // [commit d0ee598e6] The DIVERGENT-container refusal (maintainer ruling
+      // 2026-09-03, direction 2). The collection seam used to reconcile a
+      // container's own `name` to the derived key silently: the author's
+      // field discarded with no diagnostic, while
+      // the OTHER source registrar
+      // (`MetadataPlugin._parseAndRegisterArtifact` ->
+      // `assertMetadataRegisterContract`, #7378 row 1) hard-failed the
+      // whole artifact load on that very same document. One document,
+      // two SOURCE registrars, opposite outcomes, and which one an
+      // author got depended on how their package was loaded. #7378
+      // row 1 already rules that resolving a name/key disagreement
+      // silently "in either direction" files the item under a key the
+      // caller never wrote, so the boot loop converges onto the
+      // refusal; the artifact door was not moved onto the rewrite.
+      //
+      // MEASURED, and it is why only this site changed: the second
+      // `toRegister` ternary in the seam (the assembled
+      // `viewItems:` channel below) cannot carry a container at all —
+      // `AssembledViewArtifactSchema` is the view vocabulary MINUS the
+      // container branch, and every body it admits is
+      // `isAggregatedViewContainer === false`. Its ternary can only
+      // MINT a `name` onto an overlay that has none; it can never
+      // discard an authored one, because `resolveMetadataItemName`
+      // reads a non-container's own `name` FIRST.
+      //
+      // Scope is the ruling's named main risk, so the gate is three
+      // independent narrowings and each one is load-bearing. The first
+      // stays here:
+      //   * `key === 'views'` — the seam is the GENERIC metadata loop; no
+      //     other kind changes behaviour and they all keep the
+      //     reconcile.
+      // The other two — the CONTAINER branch only, and `name` present
+      // AND different — and the message, the envelope and the reason
+      // the prose is this seam's own live in `viewContainerNameRefusal`
+      // (`view-container-name-refusal.ts`).
+      //
+      // [#20331] Moved there so that `os validate` runs the SAME
+      // judgment, in the same words, instead of passing a document this
+      // loop then refuses at boot. The message and the envelope moved
+      // unchanged. The `!itemName` skip just above is this loop's
+      // precondition for the check, so the function carries it too: it
+      // answers `undefined` for a falsy derived key, and a door calling
+      // it without this loop cannot refuse an entry this loop skips.
+      // ⛔ Do not re-inline it here, and do not write a second copy of
+      // it anywhere else: one judge, two doors.
+      if (key === 'views') {
+        const refusal = viewContainerNameRefusal(item, sourceLabel, ownerId);
+        if (refusal) return refusal;
+      }
+      // [ADR-0086 D3] A permission set whose body `packageId` disagrees
+      // with the package the seam registers it under is refused, in
+      // the same envelope as the container refusal above:
+      // `registerItem` stamps `ownerId` as the set's `_packageId`, the
+      // owner every reader reads, so the body's key used to be
+      // registered over in silence. See
+      // {@link permissionSetOwnerRegistrationRefusal}.
+      if (key === 'permissions') {
+        const refusal = permissionSetOwnerRegistrationRefusal(item, itemName, ownerId);
+        if (refusal) return refusal;
+      }
+      // [#28534] …and an item of ANY collection whose body already wears
+      // a `_packageId` other than `ownerId`: `stampPackage` and
+      // `registerItem` stamp the owner only while the key is unset, so
+      // the body's own stamp used to win. See
+      // {@link collectionItemOwnerStampRefusal}.
+      {
+        const refusal = collectionItemOwnerStampRefusal(item, pluralToSingular(key), itemName, ownerId);
+        if (refusal) return refusal;
+      }
+      // [#5320] The `views:` tighten — containers ONLY, the contract the
+      // stack schema has always declared (`stack.zod.ts`,
+      // `z.array(ViewSchema)`). The seam used to register EVERY entry
+      // as type `view` — the "runtime wider than schema" hole #5320
+      // records: a ViewItem or flattened overlay that `defineStack`
+      // refuses registered there in silence. Judged by the SAME
+      // classifier the manifest assemblers partition with
+      // (`isViewContainerShaped`), so a produced manifest cannot carry
+      // a `views:` entry the seam refuses. Deliberately a SHAPE-CLASS
+      // judgement, not a full `ViewSchema.parse`: which class an entry
+      // belongs to is the seam's contract; whether a container's
+      // internals are well-formed stays the authoring/publish doors'
+      // job (defineStack, `os validate`, the metadata door).
+      // The envelope and the words: {@link viewsEntryNotContainerRefusal},
+      // which the residual registration throws too. Judged on the body the
+      // seam registers (its `name` reconciled to the derived key).
+      if (key === 'views') {
+        const toRegister = item.name === itemName ? item : { ...item, name: itemName };
+        if (!isViewContainerShaped(toRegister)) return viewsEntryNotContainerRefusal(itemName, sourceLabel, ownerId);
+      }
+    }
+  }
+  // [#5320] The `viewItems:` channel, each entry judged by its schema and
+  // the PARSED body's owner stamp (#28534), as the seam registers it.
+  const assembledItems = (source as any)?.[ASSEMBLED_VIEW_ITEMS_KEY];
+  if (Array.isArray(assembledItems)) {
+    for (const item of assembledItems) {
+      const parsed = AssembledViewArtifactSchema.safeParse(item);
+      if (!parsed.success) return assembledViewItemRefusal(item, parsed.error, sourceLabel, ownerId);
+      const body = parsed.data as Record<string, unknown>;
+      const itemName = resolveMetadataItemName('views', body);
+      if (!itemName) continue;
+      const refusal = collectionItemOwnerStampRefusal(body, 'view', itemName, ownerId);
+      if (refusal) return refusal;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * [#28697] The seed step's owner-stamp refusal ({@link collectionItemOwnerStampRefusal},
+ * #28534: the one collection filed outside the collection seam), asked over a
+ * package body's `data` datasets before anything of the package registers.
+ * The first refusal found, or `undefined`. Called by {@link ObjectQL.registerApp}.
+ */
+export function packageBodySeedDataRefusal(manifest: any, ownerId: string): Error | undefined {
+  const seedData = manifest?.data;
+  if (!Array.isArray(seedData)) return undefined;
+  for (const dataset of seedData) {
+    // The seed step registers a dataset with a target object only.
+    if (!dataset?.object) continue;
+    const refusal = collectionItemOwnerStampRefusal(dataset, 'data', String(dataset.object), ownerId);
+    if (refusal) return refusal;
+  }
+  return undefined;
+}
+
+/**
+ * [#5320] The refusal of a `viewItems:` entry its schema
+ * (`AssembledViewArtifactSchema`) does not admit: `INVALID_METADATA` / 422,
+ * naming the entry and its source. Asked by {@link packageBodyCollectionRefusal}
+ * and by the collection seam, which parses the entry again for the body it
+ * registers. ⛔ Never a second copy of the text.
+ */
+export function assembledViewItemRefusal(
+  item: unknown,
+  error: { issues: ReadonlyArray<{ message: string }> },
+  sourceLabel: string,
+  ownerId: string | undefined,
+): Error & { code: 'INVALID_METADATA'; status: 422; httpStatus: 422 } {
+  const itemName = resolveMetadataItemName('views', item) ?? '(unnamed)';
+  const err = new Error(
+    `Invalid \`${ASSEMBLED_VIEW_ITEMS_KEY}:\` entry '${itemName}' from ${sourceLabel} '${ownerId}': `
+    + 'the assembled-manifest channel carries non-container view artifacts only — a ViewItem '
+    + 'record (`viewKind` + `config`) or a flattened list/form overlay '
+    + '(`AssembledViewArtifactSchema`, @objectstack/spec). A view CONTAINER travels in `views:`. '
+    + `First issue: ${error.issues[0]?.message ?? 'no issue detail'}`,
+  ) as Error & { code: 'INVALID_METADATA'; status: 422; httpStatus: 422 };
+  err.code = 'INVALID_METADATA';
+  err.status = 422;
+  err.httpStatus = 422;
+  return err;
+}
+
+/**
+ * [#28697] Stamp an app object ({@link stampPackage}) and register it through
+ * the registry's app verb, recording the stamp the registration writes onto
+ * the caller's own object ({@link noteRegistrationStamp}): `stampPackage` (with
+ * a version) and `registerItem` (without one) stamp the object in place, so a
+ * module constant handed to a second registration arrives wearing the first
+ * one's stamp, which no body wrote. The stamp before is read BEFORE
+ * `stampPackage`, the order the collection and seed loops keep, so a versioned
+ * registration is recorded too.
+ */
+export function registerAppNotingStamp(
+  registry: SchemaRegistry,
+  app: any,
+  ownerId: string,
+  ownerVersion: string | undefined,
+): void {
+  const stampBefore = (app as { _packageId?: unknown } | null | undefined)?._packageId;
+  registry.registerApp(stampPackage(app, ownerId, ownerVersion), ownerId);
+  noteRegistrationStamp(app, stampBefore);
+}
+
+/**
+ * [#5320] The registration door's refusal of a `views:` entry that is not a
+ * view CONTAINER (`isViewContainerShaped` is false: a ViewItem's
+ * `viewKind`/`config`, a flattened overlay's inline view config): the stack
+ * `views:` collection carries containers only, the contract the stack schema
+ * declares (`z.array(ViewSchema)`). The caller judges the shape; this is the
+ * envelope and the words — `INVALID_METADATA` / 422, naming the entry by the
+ * name it would be filed under and the source it came from.
+ *
+ * Called by {@link ObjectQL.registerApp}'s metadata loop and by the stack's
+ * RESIDUAL registration (`registerUnclaimedTopLevelItems` in `plugin.ts`, with
+ * the `manifest` source label), so a residual entry and a body's are refused
+ * in one spelling. ⛔ Never a second copy of the text.
+ */
+export function viewsEntryNotContainerRefusal(
+  itemName: string | undefined,
+  sourceLabel: string,
+  ownerId: string | undefined,
+): Error & { code: 'INVALID_METADATA'; status: 422; httpStatus: 422 } {
+  const err = new Error(
+    `Invalid \`views:\` entry '${itemName}' from ${sourceLabel} '${ownerId}': the stack `
+    + '`views:` collection carries view CONTAINERS only. `viewKind`/`config`/inline view '
+    + 'config belong to a single VIEW, not to the container — wrap it: '
+    + '`defineView({ list: { type, data, columns, … } })`, or name it — '
+    + '`defineView({ listViews: { my_view: { … } } })`. A machine-assembled manifest '
+    + `(package export, environment artifact) carries non-container view artifacts under `
+    + `\`${ASSEMBLED_VIEW_ITEMS_KEY}:\` instead — re-export the package with a runtime that `
+    + 'writes that channel.',
+  ) as Error & { code: 'INVALID_METADATA'; status: 422; httpStatus: 422 };
+  err.code = 'INVALID_METADATA';
+  err.status = 422;
+  err.httpStatus = 422;
   return err;
 }
 
@@ -5008,6 +5484,40 @@ export class ObjectQL implements IObjectQLEngine {
 
   // Package manifests registry (for defaultDatasource lookup)
   private manifests = new Map<string, any>();
+
+  // [#28534] Where each ADR-0130 residual owner came from — see
+  // {@link recordResidualOwner}.
+  private readonly residualOwnerSources = new Map<string, 'code' | 'marketplace'>();
+
+  /**
+   * [#28534] Record the origin of an artifact's RESIDUAL owner: the id the
+   * residual rule files a multi-package stack's unclaimed top-level items
+   * under (`unclaimedTopLevel`, `@objectstack/metadata`), as the door that
+   * registered the artifact states it — `'code'` for the deployment's own
+   * boot, `'marketplace'` for an install.
+   *
+   * The residual is not a package, so no package row records that id (unless
+   * a body carries it, and then the body's row answers), yet its items wear it
+   * as their `_packageId`. Without this record a reader asking an item's
+   * origin could not tell the host's own residual from an installed bundle's.
+   * Called by the `manifest` service, the one place that knows both the
+   * residual's id and the door's statement. Once an id is recorded as
+   * `'marketplace'` it stays so for this engine: an install can never turn
+   * into the host's own by re-registering under the same id.
+   */
+  recordResidualOwner(ownerId: string, source: 'code' | 'marketplace'): void {
+    if (this.residualOwnerSources.get(ownerId) === 'marketplace') return;
+    this.residualOwnerSources.set(ownerId, source);
+  }
+
+  /**
+   * [#28534] The origin {@link recordResidualOwner} recorded for a residual
+   * owner id, or `undefined` when no artifact this engine registered named it
+   * as its residual's owner.
+   */
+  residualOwnerSource(ownerId: string): 'code' | 'marketplace' | undefined {
+    return this.residualOwnerSources.get(ownerId);
+  }
 
   // Datasource definitions by name (ADR-0015): carries schemaMode +
   // external.allowWrites so the write gate (Gate 3) can enforce federation
@@ -5475,7 +5985,10 @@ export class ObjectQL implements IObjectQLEngine {
    */
   public async triggerHooks(event: string, context: HookContext) {
     const entries = this.hooks.get(event) || [];
-    
+    // [#28251] `ctx.notice` — the write's own `onNotice` listener, bound here
+    // so every insert / update dispatch site carries it (see hook-notice.ts).
+    bindHookNotice(event, context);
+
     if (entries.length === 0) {
       this.logger.debug('No hooks registered for event', { event });
       return;
@@ -5502,7 +6015,13 @@ export class ObjectQL implements IObjectQLEngine {
         this.logger.debug('Skipping metadata-bound hook (skipAutomations)', { event, hook: entry.hookName });
         continue;
       }
-      await entry.handler(context);
+      // [#29422] A stale-roll-up refusal a hook's own `ctx.api` write raised
+      // describes THAT write, not this one: `hookStoppedRefusal`.
+      try {
+        await entry.handler(context);
+      } catch (e) {
+        throw hookStoppedRefusal(e, event, context.object, entry.hookName);
+      }
     }
   }
 
@@ -5550,7 +6069,9 @@ export class ObjectQL implements IObjectQLEngine {
    * (`transaction()` covers that one alone and would refuse the write), or when
    * that driver has no transactions (ADR-0119 D1; asking would only warn).
    * `SummaryRecomputeError` means "the records WERE written": it is rethrown
-   * after the commit, never through the rollback.
+   * after the commit, never through the rollback. Only the write's OWN refusal
+   * arrives here: one a hook's `ctx.api` write raised was already converted
+   * where it left the handler (#29422, `hookStoppedRefusal`), so it rolls back.
    */
   private opensAfterAbortUnit(event: 'afterInsert' | 'afterUpdate' | 'afterDelete', object: string, context: ExecutionContext | undefined): boolean {
     const threaded = context?.transaction;
@@ -5816,7 +6337,12 @@ export class ObjectQL implements IObjectQLEngine {
     } as unknown as HookContext;
     for (const entry of flagged) {
       if (skipAutomations && entry.meta) continue;
-      await entry.handler(wholeOpCtx);
+      // [#29422] As in `triggerHooks`.
+      try {
+        await entry.handler(wholeOpCtx);
+      } catch (e) {
+        throw hookStoppedRefusal(e, event, object, entry.hookName);
+      }
     }
     // `input` is identity-shared with the batch context, so the observation
     // covers everything the handlers touched.
@@ -8758,8 +9284,64 @@ export class ObjectQL implements IObjectQLEngine {
       // Stamped beside `id` on every item below ({@link stampPackage}), so an
       // item served from this path tells an upgrade's new item from its old one.
       const version = manifest.version as string | undefined;
+      // [#28697] The owner-stamp refusal for the objects and apps below, which
+      // file through verbs of their own (steps 2-4), asked before anything of
+      // this body registers. See {@link packageBodyObjectAndAppOwnerStampRefusal}.
+      {
+          const refusal = packageBodyObjectAndAppOwnerStampRefusal(manifest, id, {
+              apps: true,
+              selfAsApp: Boolean(manifest.name && manifest.navigation && !manifest.apps?.length),
+          });
+          if (refusal) throw refusal;
+          // …and each nested plugin's objects and plugin-as-app (step 7, which
+          // registers them under this package after everything above), so a
+          // nested plugin's stamp is refused before this body registers too.
+          // `registerPlugin` asks the same of the plugin it is handed.
+          if (Array.isArray(manifest.plugins)) {
+              for (const plugin of manifest.plugins) {
+                  if (!plugin || typeof plugin !== 'object') continue;
+                  const nested = packageBodyObjectAndAppOwnerStampRefusal(plugin, id, {
+                      apps: false,
+                      selfAsApp: Boolean(plugin.name && plugin.navigation),
+                  });
+                  if (nested) throw nested;
+              }
+          }
+          // [#28697] …and every refusal the collection seam (steps 5 and 7)
+          // and the seed step (step 6) can judge from the body alone, so a
+          // body refused there leaves nothing of itself behind either, and a
+          // refused re-register of an installed id leaves that install as it
+          // was. See {@link packageBodyCollectionRefusal}.
+          const collections = packageBodyCollectionRefusal(manifest, id, 'manifest');
+          if (collections) throw collections;
+          const seed = packageBodySeedDataRefusal(manifest, id);
+          if (seed) throw seed;
+          if (Array.isArray(manifest.plugins)) {
+              for (const plugin of manifest.plugins) {
+                  if (!plugin || typeof plugin !== 'object') continue;
+                  const nested = packageBodyCollectionRefusal(plugin, id, 'nested plugin');
+                  if (nested) throw nested;
+              }
+          }
+      }
       this.invalidateSummaryIndex(); // new objects may add/change summary fields
       this.logger.debug('Registering package manifest', { id, namespace });
+
+      // [#28697] What remains can only be refused part-way, by the registry's
+      // own verbs (an object another package owns, a field with no `type`, a
+      // picklist value already added, …). Refused, the registry puts back
+      // exactly the entries this registration wrote: a first install leaves no
+      // package record, object, app, item or namespace of itself, and a
+      // re-register of an installed id (an upgrade) leaves the installed
+      // version serving whole. Whatever sat there before — a tenant's object
+      // or overlay this package layers over (ADR-0029 D9 §6.1), another
+      // package's extension of its objects — reads as it did. Never through
+      // uninstall, which refuses an extended object and drops a tenant's
+      // overlay with its owner (D9.7). See {@link SchemaRegistry.restoringOnRefusal}.
+      this._registry.restoringOnRefusal(() => this.registerPackageBody(manifest, id, namespace, version, source, scope));
+
+      // [#28697] Written only once nothing above threw, so a refused body
+      // leaves none of them. Nothing above reads any of them.
 
       // Store manifest for defaultDatasource lookup
       if (id) {
@@ -8778,6 +9360,55 @@ export class ObjectQL implements IObjectQLEngine {
         }
       }
 
+      // Register navigation contributions (ADR-0029 D7) — nav items this
+      // package injects into apps owned by other packages (e.g. a capability
+      // plugin adding its menu into the `setup` app). Merged into the target
+      // app's navigation on read by group id + priority, so registration order
+      // does not matter.
+      if (Array.isArray((manifest as any).navigationContributions) && (manifest as any).navigationContributions.length > 0) {
+          for (const contribution of (manifest as any).navigationContributions) {
+              this._registry.registerAppNavContribution(contribution, id);
+          }
+          this.logger.debug('Registered navigation contributions', {
+              from: id,
+              count: (manifest as any).navigationContributions.length,
+          });
+      }
+
+      // Register contributed kinds (owned by no package, so written last).
+      if (manifest.contributes?.kinds) {
+          this.logger.debug('Registering kinds from manifest', { id, kindCount: manifest.contributes.kinds.length });
+          for (const kind of manifest.contributes.kinds) {
+            this._registry.registerKind(kind);
+            // [commit 10485009a] Name the kind by its declared `id`. `contributes.kinds`
+            // items are `{ id, description? }` (`manifest.zod.ts`; `globs` was
+            // retired unread, #11169) and
+            // `registerKind` keys the item on `id` (`registerItem('kind', kind, 'id')`),
+            // so `id` is BOTH the only identifying field the schema declares and the
+            // exact key the item is stored under — a reader of this line can look the
+            // item straight back up. The previous `kind.name || kind.type` reached for
+            // two fields NEITHER shape declares, so every conforming manifest logged
+            // `kind: undefined`. Do not re-add those as a fallback: reading undeclared
+            // aliases here is the consumer-side tolerance Prime Directive #12 rejects.
+            this.logger.debug('Registered Kind', { kind: kind.id, from: id });
+          }
+      }
+  }
+
+  /**
+   * [#28697] The part of {@link registerApp} a registry verb can refuse
+   * part-way: the package record, its objects, extensions, apps, collections,
+   * seed data and nested plugins, in that order. Every body-only refusal was
+   * judged before this runs; what is written after it is in `registerApp`.
+   */
+  private registerPackageBody(
+      manifest: any,
+      id: string,
+      namespace: string | undefined,
+      version: string | undefined,
+      source: Exclude<InstalledPackageSource, 'authored'>,
+      scope: ArtifactInstallScope | undefined,
+  ): void {
       // 1. Register the Package (manifest + lifecycle state).
       // [ADR-0130 D1/D3] `scope` is the artifact's own package list, passed by
       // the load path that read the artifact. It is what lets the install gate
@@ -8821,6 +9452,11 @@ export class ObjectQL implements IObjectQLEngine {
               const extDef = {
                   name: targetFqn, // Use the target FQN as name
                   fields: ext.fields,
+                  // [ADR-0146 D10, second rule] The per-field display patches,
+                  // the slot as `ObjectExtensionSchema.fieldPatches` declares
+                  // it — applied by the registry's `mergeObjectDefinitions`,
+                  // whose fold every object read shares.
+                  fieldPatches: ext.fieldPatches,
                   label: ext.label,
                   pluralLabel: ext.pluralLabel,
                   description: ext.description,
@@ -8842,7 +9478,7 @@ export class ObjectQL implements IObjectQLEngine {
               const appName = app.name || app.id;
               if (appName) {
                   const resolved = namespace ? this.resolveNavObjectNames(app, namespace) : app;
-                  this._registry.registerApp(stampPackage(resolved, id, version), id);
+                  registerAppNotingStamp(this._registry, resolved, id, version);
                   this.logger.debug('Registered App', { app: appName, from: id });
               }
           }
@@ -8852,23 +9488,12 @@ export class ObjectQL implements IObjectQLEngine {
       //    This handles the case where the manifest IS the app definition (legacy/simple packages)
       if (manifest.name && manifest.navigation && !manifest.apps?.length) {
           const resolved = namespace ? this.resolveNavObjectNames(manifest, namespace) : manifest;
-          this._registry.registerApp(stampPackage(resolved, id, version), id);
+          registerAppNotingStamp(this._registry, resolved, id, version);
           this.logger.debug('Registered manifest-as-app', { app: manifest.name, from: id });
       }
 
-      // 4b. Register navigation contributions (ADR-0029 D7) — nav items this
-      //     package injects into apps owned by other packages (e.g. a
-      //     capability plugin adding its menu into the `setup` app). Merged
-      //     into the target app's navigation on read by group id + priority.
-      if (Array.isArray((manifest as any).navigationContributions) && (manifest as any).navigationContributions.length > 0) {
-          for (const contribution of (manifest as any).navigationContributions) {
-              this._registry.registerAppNavContribution(contribution, id);
-          }
-          this.logger.debug('Registered navigation contributions', {
-              from: id,
-              count: (manifest as any).navigationContributions.length,
-          });
-      }
+      // (Navigation contributions, ADR-0029 D7, register in `registerApp`
+      // once this body has registered whole.)
 
       // 5. Register all other metadata types generically — the SAME seam the
       //    nested-plugin path uses (`registerMetadataCollections`), so the two
@@ -8881,29 +9506,19 @@ export class ObjectQL implements IObjectQLEngine {
           this.logger.debug('Registering seed data datasets', { id, count: seedData.length });
           for (const dataset of seedData) {
               if (dataset.object) {
+                  // [#28534] The collection loop's owner-stamp refusal for the
+                  // one collection filed outside it was judged before anything
+                  // registered ({@link packageBodySeedDataRefusal}).
+                  const stampBefore = (dataset as { _packageId?: unknown })._packageId;
                   this._registry.registerItem('data', stampPackage(dataset, id, version), 'object' as any, id);
+                  noteRegistrationStamp(dataset, stampBefore);
               }
           }
       }
 
-      // 6. Register contributions
-       if (manifest.contributes?.kinds) {
-          this.logger.debug('Registering kinds from manifest', { id, kindCount: manifest.contributes.kinds.length });
-          for (const kind of manifest.contributes.kinds) {
-            this._registry.registerKind(kind);
-            // [commit 10485009a] Name the kind by its declared `id`. `contributes.kinds`
-            // items are `{ id, description? }` (`manifest.zod.ts`; `globs` was
-            // retired unread, #11169) and
-            // `registerKind` keys the item on `id` (`registerItem('kind', kind, 'id')`),
-            // so `id` is BOTH the only identifying field the schema declares and the
-            // exact key the item is stored under — a reader of this line can look the
-            // item straight back up. The previous `kind.name || kind.type` reached for
-            // two fields NEITHER shape declares, so every conforming manifest logged
-            // `kind: undefined`. Do not re-add those as a fallback: reading undeclared
-            // aliases here is the consumer-side tolerance Prime Directive #12 rejects.
-            this.logger.debug('Registered Kind', { kind: kind.id, from: id });
-          }
-       }
+      // (Contributed kinds register in `registerApp` once this body has
+      // registered whole: they belong to no package, so no restore of a
+      // refused body could take them back.)
 
       // 7. Recursively register nested plugins
       if (Array.isArray(manifest.plugins) && manifest.plugins.length > 0) {
@@ -9013,97 +9628,17 @@ export class ObjectQL implements IObjectQLEngine {
                   this.logger.warn(`Skipping ${pluralToSingular(key)} without a derivable name`, { id: ownerId });
                   continue;
               }
-              // [commit d0ee598e6] The DIVERGENT-container refusal (maintainer ruling
-              // 2026-09-03, direction 2). This seam used to reconcile a
-              // container's own `name` to the derived key silently, one line
-              // below: the author's field discarded with no diagnostic, while
-              // the OTHER source registrar
-              // (`MetadataPlugin._parseAndRegisterArtifact` ->
-              // `assertMetadataRegisterContract`, #7378 row 1) hard-failed the
-              // whole artifact load on that very same document. One document,
-              // two SOURCE registrars, opposite outcomes, and which one an
-              // author got depended on how their package was loaded. #7378
-              // row 1 already rules that resolving a name/key disagreement
-              // silently "in either direction" files the item under a key the
-              // caller never wrote, so the boot loop converges onto the
-              // refusal; the artifact door was not moved onto the rewrite.
-              //
-              // MEASURED, and it is why only this site changed: the second
-              // `toRegister` ternary in this method (the assembled
-              // `viewItems:` channel below) cannot carry a container at all —
-              // `AssembledViewArtifactSchema` is the view vocabulary MINUS the
-              // container branch, and every body it admits is
-              // `isAggregatedViewContainer === false`. Its ternary can only
-              // MINT a `name` onto an overlay that has none; it can never
-              // discard an authored one, because `resolveMetadataItemName`
-              // reads a non-container's own `name` FIRST.
-              //
-              // Scope is the ruling's named main risk, so the gate is three
-              // independent narrowings and each one is load-bearing. The first
-              // stays here:
-              //   * `key === 'views'` — this is the GENERIC metadata loop; no
-              //     other kind changes behaviour and they all keep the
-              //     reconcile below.
-              // The other two — the CONTAINER branch only, and `name` present
-              // AND different — and the message, the envelope and the reason
-              // the prose is this seam's own live in `viewContainerNameRefusal`
-              // (`view-container-name-refusal.ts`).
-              //
-              // [#20331] Moved there so that `os validate` runs the SAME
-              // judgment, in the same words, instead of passing a document this
-              // loop then refuses at boot. The message and the envelope moved
-              // unchanged. The `!itemName` skip just above is this loop's
-              // precondition for the check, so the function carries it too: it
-              // answers `undefined` for a falsy derived key, and a door calling
-              // it without this loop cannot refuse an entry this loop skips.
-              // ⛔ Do not re-inline it here, and do not write a second copy of
-              // it anywhere else: one judge, two doors.
-              if (key === 'views') {
-                  const refusal = viewContainerNameRefusal(item, sourceLabel, ownerId);
-                  if (refusal) throw refusal;
-              }
-              // [ADR-0086 D3] A permission set whose body `packageId` disagrees
-              // with the package this seam registers it under is refused, in
-              // the same place and envelope as the container refusal above:
-              // `registerItem` stamps `ownerId` as the set's `_packageId`, the
-              // owner every reader reads, so the body's key used to be
-              // registered over in silence. See
-              // {@link permissionSetOwnerRegistrationRefusal}.
-              if (key === 'permissions') {
-                  const refusal = permissionSetOwnerRegistrationRefusal(item, itemName, ownerId);
-                  if (refusal) throw refusal;
-              }
+              // [#28697] Every refusal this seam used to raise here — the
+              // divergent view container, the permission set's owner, an
+              // item's own `_packageId`, a `views:` entry that is not a
+              // container — is judged from the body alone, so it is asked
+              // before anything of the package registers, with the reasons it
+              // exists: {@link packageBodyCollectionRefusal}. Both callers ask
+              // it first (`registerApp`, for the body and each nested plugin).
               const toRegister = item.name === itemName ? item : { ...item, name: itemName };
-              // [#5320] The `views:` tighten — containers ONLY, the contract the
-              // stack schema has always declared (`stack.zod.ts`,
-              // `z.array(ViewSchema)`). This loop used to register EVERY entry
-              // as type `view` — the "runtime wider than schema" hole #5320
-              // records: a ViewItem or flattened overlay that `defineStack`
-              // refuses registered here in silence. Judged by the SAME
-              // classifier the manifest assemblers partition with
-              // (`isViewContainerShaped`), so a produced manifest cannot carry
-              // a `views:` entry this seam refuses. Deliberately a SHAPE-CLASS
-              // judgement, not a full `ViewSchema.parse`: which class an entry
-              // belongs to is this seam's contract; whether a container's
-              // internals are well-formed stays the authoring/publish doors'
-              // job (defineStack, `os validate`, the metadata door).
-              if (key === 'views' && !isViewContainerShaped(toRegister)) {
-                  const err: Error & { code?: string; status?: number; httpStatus?: number } = new Error(
-                      `Invalid \`views:\` entry '${itemName}' from ${sourceLabel} '${ownerId}': the stack `
-                      + '`views:` collection carries view CONTAINERS only. `viewKind`/`config`/inline view '
-                      + 'config belong to a single VIEW, not to the container — wrap it: '
-                      + '`defineView({ list: { type, data, columns, … } })`, or name it — '
-                      + '`defineView({ listViews: { my_view: { … } } })`. A machine-assembled manifest '
-                      + `(package export, environment artifact) carries non-container view artifacts under `
-                      + `\`${ASSEMBLED_VIEW_ITEMS_KEY}:\` instead — re-export the package with a runtime that `
-                      + 'writes that channel.',
-                  );
-                  err.code = 'INVALID_METADATA';
-                  err.status = 422;
-                  err.httpStatus = 422;
-                  throw err;
-              }
+              const stampBefore = (toRegister as { _packageId?: unknown })._packageId;
               this._registry.registerItem(pluralToSingular(key), stampPackage(toRegister, ownerId, ownerVersion), 'name' as any, ownerId);
+              noteRegistrationStamp(toRegister, stampBefore);
               // "Object has-many View" (ADR-0017): a `defineView` document
               // aggregates an object's views. Register the container under the
               // bare <object> key (above, back-compat) AND expand it into
@@ -9136,27 +9671,23 @@ export class ObjectQL implements IObjectQLEngine {
       if (Array.isArray(assembledItems) && assembledItems.length > 0) {
           this.logger.debug(`Registering ${ASSEMBLED_VIEW_ITEMS_KEY} from ${sourceLabel}`, { id: ownerId, count: assembledItems.length });
           for (const item of assembledItems) {
+              // [#28697] The entry's parse refusal and its owner stamp were
+              // judged before anything registered ({@link packageBodyCollectionRefusal});
+              // the parse is repeated for the body it registers.
               const parsed = AssembledViewArtifactSchema.safeParse(item);
-              if (!parsed.success) {
-                  const itemName = resolveMetadataItemName('views', item) ?? '(unnamed)';
-                  const err: Error & { code?: string; status?: number; httpStatus?: number } = new Error(
-                      `Invalid \`${ASSEMBLED_VIEW_ITEMS_KEY}:\` entry '${itemName}' from ${sourceLabel} '${ownerId}': `
-                      + 'the assembled-manifest channel carries non-container view artifacts only — a ViewItem '
-                      + 'record (`viewKind` + `config`) or a flattened list/form overlay '
-                      + '(`AssembledViewArtifactSchema`, @objectstack/spec). A view CONTAINER travels in `views:`. '
-                      + `First issue: ${parsed.error.issues[0]?.message ?? 'no issue detail'}`,
-                  );
-                  err.code = 'INVALID_METADATA';
-                  err.status = 422;
-                  err.httpStatus = 422;
-                  throw err;
-              }
+              if (!parsed.success) throw assembledViewItemRefusal(item, parsed.error, sourceLabel, ownerId);
               const body = parsed.data as Record<string, unknown>;
               const itemName = resolveMetadataItemName('views', body);
               if (!itemName) {
                   this.logger.warn('Skipping viewItems entry without a derivable name', { id: ownerId });
                   continue;
               }
+              // No {@link noteRegistrationStamp} follows the `registerItem` below, on
+              // purpose: what it stamps is `parsed.data`, the parse's own new
+              // object, never the caller's entry, so this site leaves no in-place
+              // stamp on anything a later registration could be handed
+              // (`collection-item-owner-stamp.test.ts` pins the caller's entry
+              // unstamped).
               const toRegister = body.name === itemName ? body : { ...body, name: itemName };
               this._registry.registerItem('view', stampPackage(toRegister, ownerId, ownerVersion), 'name' as any, ownerId);
           }
@@ -9938,10 +10469,28 @@ export class ObjectQL implements IObjectQLEngine {
    *   would turn an ordering detail into a boot failure. This leaves a real
    *   residual — an `isSystem` caller can still write a dangling reference —
    *   which is recorded on the issue rather than silently accepted.
+   *   [#28881] ⛔ Except a flow run's elevated write (`runAs: 'system'`):
+   *   its context carries the flow-write mark (`keepsFlowWriteReferenceCheck`,
+   *   `@objectstack/core`, set by `resolveRunDataContext` in
+   *   service-automation) and is checked like a user write. Its elevation is
+   *   for authorization (other people's rows, past RLS and FLS), never for a
+   *   link to a row that does not exist, and it keeps every authorization
+   *   exemption `isSystem` gives it. A write it sets off (a hook's `ctx.api`,
+   *   its `sudo()`, a cascade leg) spreads that context and is checked as
+   *   the flow's own.
    * - **Empty values are not references.** `null` / `undefined` / `''` mean
    *   "no link", which is what `deleteBehavior: 'set_null'` produces.
    * - **Already-expanded objects are skipped.** A read round-trip can hand back
    *   `{id, name, …}` in the slot; that is not an id write.
+   * - **A value the row already stores is not the write's (#29062).** The
+   *   check judges only the references a write ADDS. An update's `storedRows`
+   *   (the by-id prior row; a predicate update's matched rows) forgive a
+   *   refused value, or a multi-valued member, that every one of those rows
+   *   already holds: an edit form carries the whole record back, and a stored
+   *   id that has since stopped resolving (the delete walk leaves a `user`
+   *   value in place, `DELETE_SEMANTICS_REFERENCE_TYPES`) is not the editor's
+   *   to answer for. A value new to any of the rows is refused as before, and
+   *   an insert has no stored rows, so every value it supplies is judged.
    *
    * ## Why the probe bypasses RLS — and why it keeps the tenant wall
    *
@@ -9996,13 +10545,14 @@ export class ObjectQL implements IObjectQLEngine {
     supplied: Record<string, unknown> | null | undefined,
     context: any,
     msgCtx?: { locale?: string; translate?: any; objectName?: string },
+    storedRows?: StoredReferenceRows,
   ): Promise<void> {
     // [#25522 cut 10] The body moved to `engine-referential-integrity.ts` (see `ReferentialIntegrityHost`).
     const host: ThisParameterType<typeof assertReferencesResolve> = {
       masterDetailHeaderExists: (...a) => this.masterDetailHeaderExists(...a),
       referenceExists: (...a) => this.referenceExists(...a),
     };
-    return assertReferencesResolve.call(host, schema, data, supplied, context, msgCtx);
+    return assertReferencesResolve.call(host, schema, data, supplied, context, msgCtx, storedRows);
   }
 
   /**
@@ -10051,8 +10601,11 @@ export class ObjectQL implements IObjectQLEngine {
    * that exists nowhere.
    *
    * `null` (fail-open) only where {@link referenceExists} answers it, and for
-   * an unregistered master, which has no read door to ask either. Never reached
-   * by a SYSTEM caller: {@link assertReferencesResolve} returns before it.
+   * an unregistered master, which has no read door to ask either. A SYSTEM
+   * caller reaches it only as a flow run's elevated write, or a write that
+   * write sets off (#28881): its read door returns every header
+   * ({@link masterDetailHeadersCallerReads}), so the header's existence in the
+   * caller's tenant is what is asked.
    *
    * ⛔ `master_detail` only — the plain `lookup` probe is not this rule's.
    */
@@ -13282,9 +13835,69 @@ export class ObjectQL implements IObjectQLEngine {
           error: (e as Error).message,
         });
       }
+
+      // [#29460] `referenceNameVisible` (ruling 6574398310, letter B): the ids
+      // the caller's own expansion above left bare are asked whether the
+      // caller was REFUSED them, and a refused target is served by its name
+      // and id only. Every other value keeps the answer the loop gave it. See
+      // {@link serveReferenceNames}.
+      if ((fieldDef as { referenceNameVisible?: unknown }).referenceNameVisible === true) {
+        await this.serveReferenceNames(objectName, records, fieldName, referenceObject, execCtx);
+      }
     }
 
     return records;
+  }
+
+  /**
+   * [#29460] Serve `FieldSchema.referenceNameVisible` on an expanded read
+   * (director ruling 6574398310, letter B). Runs from
+   * {@link expandRelatedRecords} for a field declaring the key, after the
+   * caller's own expansion of it, and rewrites only the ids that expansion
+   * left bare.
+   *
+   * For each such id it asks, as the caller and with none of the caller's
+   * `$expand` nesting, whether the caller may read it (the security service's
+   * object-level admission, then an id-only read for the row scope). A refused
+   * id whose record exists in the caller's tenant becomes
+   * `{ id, name, readRefused: true }`: `name` is ADR-0079's display name,
+   * read by the engine under the tenant-kept elevation from exactly `id` and
+   * the resolved name field, with the floor `Record #<id>` when field-level
+   * security keeps that field from the caller. A readable target keeps its
+   * expansion, an id the caller's own nested filter left bare stays bare, an
+   * id no record has stays bare. `multiple: true` is judged per element.
+   *
+   * ⛔ Never served on an unexpanded read: ADR-0104 D1's stored form is the
+   * bare id for every caller. ⛔ The caller's projection, filter, order and
+   * nested expand never reach the elevated read, and the field's
+   * `displayField` does not choose its column.
+   */
+  private async serveReferenceNames(
+    objectName: string,
+    records: any[],
+    fieldName: string,
+    referenceObject: string,
+    execCtx?: ExecutionContext,
+  ): Promise<void> {
+    // The body lives in `engine-reference-name-visible.ts` (see `ReferenceNameVisibleHost`).
+    const readRegistry = () => this._registry;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof serveReferenceNames> = {
+      get _registry() { return readRegistry(); },
+      get logger() { return readLogger(); },
+      find: (...a) => this.find(...a),
+      resolveReadableIdsSecurity: (...a) => this.resolveReadableIdsSecurity(...a),
+      formulaReadsReference: (name, def, fields) => {
+        try {
+          const entry = formulaPlanEntry(name, def, fields);
+          return entry.hops !== undefined || entry.hopConflict !== undefined;
+        } catch {
+          // An expression the planner cannot compile is not served by name.
+          return true;
+        }
+      },
+    };
+    return serveReferenceNames.call(host, objectName, records, fieldName, referenceObject, execCtx);
   }
 
   /**
@@ -13667,6 +14280,12 @@ export class ObjectQL implements IObjectQLEngine {
    * allowed set, never widened. All drivers already execute `$or`/`$icontains`,
    * so this needs no driver changes.
    *
+   * [#29394] A resolved field whose declared type can never hold a string (the
+   * #15661 door's verdict) gets no clause — `expandSearchToFilter` skips it —
+   * because that door judges only the caller's `where`, above, and never this
+   * expansion. The set itself is not narrowed, so the refusals below judge it
+   * as before, and a set of only such fields answers no rows.
+   *
    * The keys are deleted whether or not anything expanded — leaving them on
    * would hand the driver a key it does not read, which is the same silent drop
    * one layer down.
@@ -13977,6 +14596,10 @@ export class ObjectQL implements IObjectQLEngine {
     // for a non-system caller — judged on the caller's own `where` / `orderBy`
     // / `expand`, before the search term is expanded into `where` and before
     // the middlewares inject their server-authored filters.
+    // [internal: true] …and a flagged column is never evaluated for one either,
+    // judged first so the refusal is the data door's own (the door asks the
+    // same definition before the engine runs).
+    rejectInternalFieldEvaluation(object, ast, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
     rejectCredentialEvaluation(object, 'find', ast, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
 
     // Plan formula projection: rewrite ast.fields to drop virtual formula
@@ -14082,6 +14705,13 @@ export class ObjectQL implements IObjectQLEngine {
           // declared record. See `declared-read-columns.ts`.
           if (Array.isArray(result)) {
             result = rowsWithDeclaredColumnsOnly(result, declaredColumnSet(_findSchema));
+            // [#29408] …and answered on every stored declared column the read
+            // SELECTED: one the driver returned no key for (a driver that
+            // stores only written columns) is `null`, as driver-sql's column
+            // answers — the row's persisted state is in hand. Unselected,
+            // formula and FLS-refused columns stay absent; see
+            // `selectedStoredColumns`.
+            result = rowsWithSelectedColumnsAnswered(result, selectedStoredColumns(_findSchema, driverAst?.fields));
           }
 
           // Post-process: evaluate formula virtual fields against the raw rows.
@@ -14303,7 +14933,8 @@ export class ObjectQL implements IObjectQLEngine {
     // [commit 74155c735] And the same default-filling as find(), for the same reason.
     const { context: _findOneContext, ...findOneQuery } = query ?? {};
     const ast: QueryAST = { ...this.fillQueryAstDefaults(findOneQuery), object: objectName, limit: 1 };
-    // [ADR-0100] Same credential-column refusal as `find`, same position.
+    // [ADR-0100] Same internal-field and credential-column refusals as `find`, same position.
+    rejectInternalFieldEvaluation(objectName, ast, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
     rejectCredentialEvaluation(objectName, 'findOne', ast, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
 
     // Plan formula projection (same as find): rewrite ast.fields so the driver
@@ -14381,6 +15012,8 @@ export class ObjectQL implements IObjectQLEngine {
       // [#21571] Same default projection as `find`, same position: the
       // declared field set, applied to the row as the driver returned it.
       result = withDeclaredColumnsOnly(result, declaredColumnSet(_findOneSchema));
+      // [#29408] Same answer on the selected stored columns as `find`.
+      result = withSelectedColumnsAnswered(result, selectedStoredColumns(_findOneSchema, driverAst?.fields));
 
       // Post-process: evaluate formula virtual fields against the raw row
       // ([#20082] with the caller's permission map when a formula calls `can`).
@@ -17678,9 +18311,12 @@ export class ObjectQL implements IObjectQLEngine {
                const permissionsForUpdate = (await this.resolveOptionPermissions(updateSchema, [updatePayload], permissionResolution))(updatePayload);
                emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: roWhenParent, previousParent: roWhenPreviousParent, related: relatedForUpdate, permissions: permissionsForUpdate }), this.logger, object);
                // [#4441] A repoint is as capable of dangling as an initial link.
+               // [#29062] …but a value the row already stores is not a repoint:
+               // the prior row is what the check forgives a refused value against.
                await this.assertReferencesResolve(
                  updateSchema, hookContext.input.data as Record<string, unknown>,
                  opCtx.data as Record<string, unknown>, opCtx.context, updateMsgCtx,
+                 async () => [priorRecord],
                );
                // [commit 9d7f7259f] The by-id driver exit — where a driver's refusal
                // leaves this door, and where a recognised unique violation
@@ -18104,9 +18740,13 @@ export class ObjectQL implements IObjectQLEngine {
                // [#4441] The bulk call site too — a guard wired into single-id
                // writes only is still a hole one call site over (AGENTS.md
                // PD #10's own worked example, #3106).
+               // [#29062] A refused value is forgiven only when EVERY matched row
+               // already stores it (the `readPriorRows` memo, read only then);
+               // a row it is new to makes it this write's reference.
                await this.assertReferencesResolve(
                  updateSchema, hookContext.input.data as Record<string, unknown>,
                  opCtx.data as Record<string, unknown>, opCtx.context, updateMsgCtx,
+                 readPriorRows,
                );
                // `updateMany` presence is part of the ladder verdict resolved above.
                // [commit 9d7f7259f] The predicate driver exit, enveloped on the same
@@ -18439,7 +19079,7 @@ export class ObjectQL implements IObjectQLEngine {
           //    verdict that asserts something POSITIVE about the schema
           //    ("nothing references this object"). An unreadable carrier can
           //    no more support that claim than an unreadable registry can.
-          const ref = referenceCarrierOf(fdef, 'ObjectQL.planCascadeAtomicity');
+          const ref = deleteWalkTargetOf(fdef, 'ObjectQL.planCascadeAtomicity');
           if (!ref) continue;
           let resolvedRef: string | undefined;
           try { resolvedRef = this.resolveObjectName(ref); } catch { resolvedRef = undefined; }
@@ -18822,7 +19462,8 @@ export class ObjectQL implements IObjectQLEngine {
   /**
    * Apply referential delete behavior for relations pointing AT this record,
    * before it is removed. For every registered object with a `master_detail`,
-   * `lookup` or `tree` field ({@link statesDeleteSemantics}) referencing
+   * `lookup` or `tree` field, or a `user` field that declares a
+   * `deleteBehavior` ({@link statesDeleteSemantics}), referencing
    * `object`, honor the field's `deleteBehavior`:
    *   - `cascade`  → delete the dependent rows (recursively, so grandchildren
    *                  are handled by each child's own delete),
@@ -19017,7 +19658,7 @@ export class ObjectQL implements IObjectQLEngine {
     // removed the parent, left a `master_detail` child behind, and
     // reported success. No `restrict` refusal, no `set_null`, nothing
     // logged. Absence still skips the field here exactly as before.
-    const ref = referenceCarrierOf(fdef, 'ObjectQL.cascadeDeleteRelations');
+    const ref = deleteWalkTargetOf(fdef, 'ObjectQL.cascadeDeleteRelations');
     if (!ref) return undefined;
     // Match the target object by raw or resolved name.
     let resolvedRef: string | undefined;
@@ -19059,6 +19700,10 @@ export class ObjectQL implements IObjectQLEngine {
     // honoured as written. Its `cascade` is a subtree delete, and a cycle in
     // the data (a corrupt row pointing at its own descendant) terminates on
     // the cascade set, the same membership test any self-reference has.
+    //
+    // [#29253] A `user` field reaches here only with an authored value
+    // ({@link statesDeleteSemantics}), and reads it as a `lookup` reads its
+    // own: the `|| 'set_null'` fallback below is never what a `user` gets.
     //
     // [#9625] "Only an explicit `restrict` deviates" is the whole of it:
     // every other value a master_detail can declare — including an
@@ -20418,8 +21063,13 @@ export class ObjectQL implements IObjectQLEngine {
               // wrapping its cascade. `buildDriverOptions` only fills keys that
               // are still `undefined`, so re-running it adds the handle and
               // changes nothing else.
+              //
+              // A dependent's stale-roll-up refusal stops the walk before this
+              // row is removed, so it is not this delete's answer:
+              // `cascadeStoppedRefusal` says what it is instead.
               const runByIdDelete = async (writeContext?: ExecutionContext) => {
-                await this.cascadeDeleteRelations(object, [hookContext.input.id as string | number], writeContext);
+                await this.cascadeDeleteRelations(object, [hookContext.input.id as string | number], writeContext)
+                  .catch((e: unknown) => { throw cascadeStoppedRefusal(e, object); });
                 return await driver.delete(
                   object,
                   hookContext.input.id as string,
@@ -20511,8 +21161,11 @@ export class ObjectQL implements IObjectQLEngine {
                    const matchedIds = matched.map((row) => row?.id).filter((v): v is string | number => v != null);
                    if (summaryKeyColumns.length > 0) summaryPriorRows = withoutDeletedSelfParents(object, matched, matchedIds, this.getSummaryDescriptors(object));
                    deletedSecrets = deletedSecretSlots(deleteSchema, matched);
-                   // [#27004] One walk, rooted at the whole matched set.
-                   await this.cascadeDeleteRelations(object, matchedIds, writeContext);
+                   // [#27004] One walk, rooted at the whole matched set. A
+                   // dependent's stale-roll-up refusal is not this delete's
+                   // answer, as in the by-id branch.
+                   await this.cascadeDeleteRelations(object, matchedIds, writeContext)
+                     .catch((e: unknown) => { throw cascadeStoppedRefusal(e, object); });
                    // The id set rides an `$in`; batched so one statement never
                    // outgrows a driver's bind-parameter limit.
                    const batchSize = ObjectQL.REFERENCE_PROBE_BATCH;
@@ -20674,6 +21327,21 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * The `internal: true` evaluate refusal for EVERY caller — the
+   * `QueryEvaluationGate` member of the `objectql` slot contract. The body is
+   * `internal-field-evaluation-guard.ts`, the one definition, which this
+   * engine's own read path also applies to every non-system caller; a door
+   * asks this method and never restates it.
+   */
+  assertNoInternalFieldEvaluated(
+    object: string,
+    query: InternalFieldEvaluationQuery,
+    options?: InternalFieldEvaluationOptions,
+  ): void {
+    assertNoInternalFieldEvaluated(object, query, this.relatedSchemaOf, options);
+  }
+
+  /**
    * Fail-closed guard (ADR-0100 / #3171 / #7922): refuse to aggregate over a
    * field whose value is withheld on the generic read path. Such fields reach
    * this guard through **two independent collectors**, and it needs both:
@@ -20733,6 +21401,11 @@ export class ObjectQL implements IObjectQLEngine {
       // [ADR-0100] The filter half of the credential-column guard — `where`
       // and every `aggregations[i].filter` — before the search term joins
       // `where`; the aggregate half (`rejectCredentialAggregation`) follows.
+      // [internal: true] The flagged-column refusal goes first, over every
+      // position at once (`where`, `groupBy`, each aggregation's `field` and
+      // `filter`), so a non-system caller meets the data door's words here
+      // too rather than the aggregate guard's.
+      rejectInternalFieldEvaluation(object, query, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
       rejectCredentialEvaluation(object, 'aggregate', query, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
       // ADR-0061 `search` → the rows are searched BEFORE they are grouped, by
       // the one expander `find` runs, at the same point in the sequence (after
@@ -21336,17 +22009,22 @@ export class ObjectQL implements IObjectQLEngine {
       else if (drv.commitTransaction) await drv.commitTransaction(trx);
       return result;
     } catch (err) {
+      let rollbackFailed = false;
       try {
         if (drv.rollback) await drv.rollback(trx);
         else if (drv.rollbackTransaction) await drv.rollbackTransaction(trx);
       } catch {
         // swallow rollback failures so the original error surfaces
+        rollbackFailed = true;
       }
       // [#21274] A boundary outside the middleware seam: a commit failure, or
       // a callback that reached the driver through the transaction handle.
       // An error that already crossed an engine boundary inside the callback
-      // comes back as the same reference.
-      throw redactPropagatedDriverFault(err);
+      // comes back as the same reference. A stale-roll-up refusal ("stored")
+      // is no longer true once this rollback has run: `rolledBackRefusal`.
+      // [#29421] Nor is "rolled back" once the rollback threw:
+      // `rollbackFailedRefusal`.
+      throw redactPropagatedDriverFault(rollbackFailed ? rollbackFailedRefusal(err) : rolledBackRefusal(err));
     }
   }
 
@@ -22336,8 +23014,9 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
     } catch (error) {
       if (driver.rollback) await driver.rollback(trx);
       else if (driver.rollbackTransaction) await driver.rollbackTransaction(trx);
-      // [#21274] The engine surface's twin (`ObjectQL.transaction`).
-      throw redactPropagatedDriverFault(error);
+      // [#21274] The engine surface's twin (`ObjectQL.transaction`), the
+      // stale-roll-up conversion included.
+      throw redactPropagatedDriverFault(rolledBackRefusal(error));
     }
   }
 

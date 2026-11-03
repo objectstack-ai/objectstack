@@ -33,6 +33,9 @@ import {
   // RAW for the same reason: the spec's own refinement function, chained on
   // every navigation arm below (objectui#13076).
   navItemVisibleDataNeedsDataSource,
+  // RAW for the same reason: the spec's own `AppSchema.landing` check, chained
+  // on `AppComponentSchema` below (objectstack-ai/objectstack#28450).
+  checkAppLandingItems,
 } from '@objectstack/spec/ui';
 import {
   EvaluatedExpressionInputSchema as SpecEvaluatedExpressionInputSchema,
@@ -803,7 +806,14 @@ export const AppComponentSchema = BaseSchema.extend(SpecAppFields.shape).extend(
     'No renderer read app-level ARIA attributes. Declare `aria` on the page component that renders the DOM node '
     + '(`page.components[].aria`; `page.aria` and the list view\'s `aria` are live too). Delete the key.',
   ),
-});
+})
+  // The spec's own object-level check for `landing` (objectstack-ai/objectstack#28450,
+  // objectui#7715's rule): a landing `item` must name an entry of this app's own
+  // `navigation` or `areas[].navigation` that opens something, and its `visible`
+  // reads no `data`. `landing` flows in by reference through `SpecAppFields`; this
+  // node's `navigation` / `areas` are its own, and carry the same `id` / `type` the
+  // check reads. `__tests__/spec-object-refinements-7715.test.ts` re-derives the count.
+  .superRefine(checkAppLandingItems);
 
 /**
  * objectui#11440 — ONE refusal string for both content channels of

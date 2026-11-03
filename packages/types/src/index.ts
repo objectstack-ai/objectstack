@@ -66,6 +66,11 @@ export * from './unique-violation.js';
 // so adopting the predicate adds no edge. `@objectstack/metadata/errors` still
 // re-exports `isMissingTableError` for its published consumers.
 export * from './driver-error-classification.js';
+// [#29503] The one "did this read fail because the object does not exist?"
+// predicate: the missing-table refusal above or the engine's `OBJECT_NOT_FOUND`,
+// each attributed to the object read. The sharing and approvals recipient reads
+// answer "no holders" for that and refuse every other failure.
+export * from './object-absence.js';
 // [#21385, maintainer ruling 2026-10-02 letter A] THE driver-fault redaction:
 // the one cut that keeps a statement's bound values and inlined literals out of
 // every log face and out of the error that leaves the engine. Moved here from
@@ -120,6 +125,12 @@ export * from './share-link-resolve-answer.js';
 // with. Producer and consumer are two services neither of which may import
 // the other; both already depend on this package, so the seam adds no edge.
 export * from './connector-credential-source.js';
+// [#28661] The answer a data write EARNED, carried on the engine's stale
+// roll-up refusal (`ERR_SUMMARY_RECOMPUTE`): attached by the protocol's data
+// methods, answered by `RestServer`'s data routes and the runtime dispatcher's
+// `/data` domain. `rest` has the protocol as a dev dependency only; all three
+// already depend on this package, so the seam adds no edge.
+export * from './summary-recompute-answer.js';
 // [#27966] The one sentence a refused switched-off packaged item reads as,
 // action or flow. Its producers (objectql, service-automation) cannot import
 // each other; both already depend on this package.

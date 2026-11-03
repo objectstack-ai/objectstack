@@ -75,7 +75,7 @@
  *
  * ## Cost, stated rather than hidden
  *
- * THREE real boots, each a `tsx` spawn (this package's measured floor is ~6s)
+ * THREE real boots, each a source-entry spawn (this package's measured floor is ~6s)
  * plus a kernel boot. They buy the three arms of the acceptance criterion —
  * `--port 0`, a free non-zero port, and a port taken out from under the boot —
  * and none of them substitutes for another. The cheap half of the same
@@ -103,7 +103,6 @@ import { join } from 'node:path';
 import { runtimeStateFileName } from '../src/commands/serve.js';
 import {
   CLI,
-  TSX,
   boundPortFromBanner,
   childEnv,
   E2E_SECRET_KEY,
@@ -216,13 +215,13 @@ interface Booted {
  * three channels plus a teardown.
  *
  * The child is `detached` so it leads its own process group, and `stop()` kills
- * that GROUP: `tsx` runs the CLI in a grandchild, so signalling the direct
- * child alone is what leaves orphans behind (see the header).
+ * that GROUP, so no process the boot started can outlive the teardown (see
+ * the header).
  */
 function bootServe(cwd: string, args: string[], home: string): Promise<Booted> {
   return new Promise((resolveBoot, rejectBoot) => {
     const child: ChildProcess = spawn(
-      TSX,
+      process.execPath,
       [CLI, 'serve', 'objectstack.config.ts', ...args],
       {
         cwd,
@@ -266,8 +265,8 @@ function bootServe(cwd: string, args: string[], home: string): Promise<Booted> {
         }
         child.on('exit', () => done());
         try {
-          // NEGATIVE pid = the whole process group. `tsx` runs the CLI in a
-          // grandchild; killing `child.pid` alone leaves it running.
+          // NEGATIVE pid = the whole process group, so no process the boot
+          // started outlives `child.pid`.
           process.kill(-(child.pid as number), 'SIGTERM');
         } catch {
           try { child.kill('SIGTERM'); } catch { /* already gone */ }
@@ -424,9 +423,9 @@ describe('#13062 `os serve --port 0` — the request that can never be the answe
       }
 
       // ⚠️ Teardown really tore down — the same probe, the other way. This is
-      // the orphan check too: `tsx` runs the CLI in a GRANDCHILD, so a teardown
-      // that signalled only the direct child would leave a server still
-      // answering here (13 such orphans took this container to 14.4GB once).
+      // the orphan check too: a teardown that left any process of the boot
+      // running would leave a server still answering here (13 such orphans
+      // took this container to 14.4GB once).
       expect(await reachable(announced)).toBe(false);
     },
     240_000,
@@ -490,8 +489,7 @@ describe('#13062 the non-zero half — nothing an ordinary boot publishes may mo
       // the child is gone, so the port THIS server held is gone with it. A boot
       // that published the port it was ASKED for while binding another would
       // leave that number still answering here, held by whatever took it; and a
-      // surviving grandchild (`tsx` runs the CLI one level down) would leave the
-      // real one answering.
+      // surviving process of the boot would leave the real one answering.
       expect(await reachable(published)).toBe(false);
     },
     240_000,

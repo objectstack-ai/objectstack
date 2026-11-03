@@ -13,7 +13,7 @@
  *    third-party plugins can't ship runaway predicates.
  */
 
-import { Environment, EvaluationError, ParseError, serialize } from '@marcbachmann/cel-js';
+import { Environment, EvaluationError, ParseError, TypeError as CelTypeError, serialize } from '@marcbachmann/cel-js';
 import type { ASTNode } from '@marcbachmann/cel-js';
 import type { Expression } from '@objectstack/spec';
 
@@ -965,7 +965,13 @@ const UNSOUND_OVERLOAD_RE = /no such overload:\s*([\w.]+)\s*(<=|>=|<|>|\+|-|\*|\
 function buildTypedEnv(
   fieldCelTypes: Readonly<Record<string, FieldCelType>>,
   scope: 'record' | 'flattened',
+  temporalAsText = false,
 ): Environment {
+  // `temporalAsText` declares a `date`/`datetime` field as the text the runtime
+  // holds ({@link DATE_TEXT_CEL_TYPE}) instead of a Timestamp — see
+  // {@link firstDateTextVerdict}.
+  const typeName = (t: FieldCelType): string =>
+    temporalAsText && t === 'timestamp' ? DATE_TEXT_CEL_TYPE : celTypeName(t);
   if (scope === 'flattened') {
     const env = new Environment({
       unlistedVariablesAreDyn: true,
@@ -974,13 +980,14 @@ function buildTypedEnv(
     });
     registerStdLib(env, () => new Date(0));
     registerNullComparisons(env);
+    if (temporalAsText) registerDateTextOverloads(env);
     for (const root of SCOPE_ROOTS) {
       try { env.registerVariable(root, 'map'); } catch { /* duplicate — ignore */ }
     }
     // Fields are bound bare at top level; a name that collides with a root
     // (unlikely) is skipped by the duplicate guard.
     for (const [name, t] of Object.entries(fieldCelTypes)) {
-      try { env.registerVariable(name, celTypeName(t)); } catch { /* duplicate / reserved — ignore */ }
+      try { env.registerVariable(name, typeName(t)); } catch { /* duplicate / reserved — ignore */ }
     }
     return env;
   }
@@ -991,8 +998,9 @@ function buildTypedEnv(
   });
   registerStdLib(env, () => new Date(0));
   registerNullComparisons(env);
+  if (temporalAsText) registerDateTextOverloads(env);
   const fields: Record<string, string> = {};
-  for (const [name, t] of Object.entries(fieldCelTypes)) fields[name] = celTypeName(t);
+  for (const [name, t] of Object.entries(fieldCelTypes)) fields[name] = typeName(t);
   try { env.registerType('OsRecordScope', { fields }); } catch { /* invalid field name — ignore */ }
   // The record namespaces carry the typed struct; every other root stays a
   // `map` (dyn members) so a reference through it never faults.
@@ -1051,7 +1059,10 @@ function offendingField(
  *    {@link UNSOUND_OVERLOAD_RE}), and concatenation (`"Due: " + date` → runtime
  *    string+string) are all runtime-tolerated, so they are never flagged. Two
  *    date fields (`date − date` → Duration, `date + date` → runtime string concat)
- *    also aren't flagged — only date/duration paired with a NUMBER.
+ *    also aren't flagged HERE — only date/duration paired with a NUMBER. This
+ *    typing declares a date field a Timestamp, which the runtime never holds;
+ *    {@link firstDateTextVerdict} re-checks what this passes with the field
+ *    declared as its text, and catches `date − date` there (#28944).
  *  - Equality (`==` / `!=`) is excluded ({@link UNSOUND_OVERLOAD_RE}): a
  *    heterogeneous equality is runtime-safe.
  *
@@ -1107,6 +1118,115 @@ export function firstTypeMismatch(
   } catch {
     // A parse/other fault is the syntax checker's job (celEngine.compile); this
     // helper only reports a clean type-soundness verdict.
+    return null;
+  }
+}
+
+/**
+ * The CEL type a `date` / `datetime` field is declared as by
+ * {@link firstDateTextVerdict}: what the runtime actually holds for it. Every
+ * read door hands a `Field.date` out as its `YYYY-MM-DD` text and a
+ * `Field.datetime` as its canonical ISO-8601 instant text (the SQL driver folds
+ * every dialect's storage to that text, ADR-0053 D-F1), so in an evaluated
+ * expression the operand is a string, never a Timestamp. A named type rather
+ * than plain `string` because the evaluator treats this text differently from a
+ * text field's: it coerces it to a date where the other operand is a Timestamp
+ * (`rewriteFaultedOperands`), which a text field's value never gets.
+ */
+const DATE_TEXT_CEL_TYPE = 'DateText';
+
+/**
+ * Declare, for the check-only env, the overloads the evaluator ANSWERS on a
+ * date field's text — and only those, so every other operator on it faults the
+ * check exactly where it faults the evaluator (measured on cel-js 8.0.0 through
+ * `celEngine.evaluate` over `{ d: '2026-11-01', at: '2026-11-01T10:00:00.000Z' }`):
+ *  - ordering against another date field or a text literal → string-lex, and
+ *    against a Timestamp → the text operand is coerced to a date: `bool`;
+ *  - equality against the same → `bool` (equality never faults);
+ *  - a Timestamp minus the text, or the text minus a Timestamp → the text
+ *    operand is coerced to a date, and the answer is a `Duration`;
+ *  - `+` with text, or with another date field's text → string concatenation.
+ * NOT declared, because the evaluator faults on them and the field reads null:
+ * the text minus the text (`record.end_date - record.start_date`, either kind),
+ * the text with a number (`record.d + 1`), with a Duration
+ * (`record.d - duration('24h')`) and a Timestamp plus the text.
+ * Handlers are no-ops: this env is checked, never evaluated.
+ */
+function registerDateTextOverloads(env: Environment): void {
+  const T = DATE_TEXT_CEL_TYPE;
+  const TS = 'google.protobuf.Timestamp';
+  const declare = (signature: string): void => {
+    try { env.registerOperator(signature, () => null); } catch { /* already/invalid — ignore */ }
+  };
+  try { env.registerType(T, { fields: {} }); } catch { /* already registered — ignore */ }
+  for (const op of ['<', '<=', '>', '>=', '==']) {
+    for (const other of [T, TS, 'string']) {
+      declare(`${T} ${op} ${other}: bool`);
+      if (other !== T) declare(`${other} ${op} ${T}: bool`);
+    }
+  }
+  declare(`${T} == null: bool`);
+  declare(`null == ${T}: bool`);
+  declare(`${TS} - ${T}: google.protobuf.Duration`);
+  declare(`${T} - ${TS}: google.protobuf.Duration`);
+  declare(`${T} + ${T}: string`);
+  declare(`${T} + string: string`);
+  declare(`string + ${T}: string`);
+}
+
+/**
+ * A verdict of the date-text check ({@link firstDateTextVerdict}):
+ *  - `fault` — arithmetic on a date field's text that the evaluator cannot
+ *    answer, so the expression faults and the field reads null;
+ *  - `type` — the expression checks clean, and `type` is the CEL type it
+ *    computes (`google.protobuf.Duration` for `today() - record.start_date`).
+ */
+export type DateTextVerdict =
+  | { readonly kind: 'fault'; readonly operator: string; readonly operands: string; readonly field: string | null }
+  | { readonly kind: 'type'; readonly type: string; readonly field: string | null };
+
+/**
+ * #28944 — type-check `source` with every `date`/`datetime` field declared as
+ * the text the runtime holds ({@link DATE_TEXT_CEL_TYPE}), not as the Timestamp
+ * {@link firstTypeMismatch} declares it.
+ *
+ * The Timestamp typing reads `record.end_date - record.start_date` as a legal
+ * `Duration`, so it is blind to the two shapes that cannot produce a value: the
+ * evaluator faults on the subtraction of two date texts (the field reads null),
+ * and `today() - record.start_date` evaluates to a `Duration`, which a field
+ * serialises as `{}`. Declared as what it is, the first faults this check
+ * exactly where it faults the evaluator, and the second's computed type is
+ * `Duration`; the caller words both. Nothing is matched in the source text.
+ *
+ * It answers only what the Timestamp typing passes: the caller asks
+ * {@link firstTypeMismatch} first, so a shape that check already refuses (the
+ * `… + 1` of `(record.end_date - record.start_date) + 1`) keeps its words.
+ *
+ * Returns `null` when the source does not parse, or the check faults on
+ * anything other than arithmetic with a date field's text — that is another
+ * check's to report, and this one never guesses.
+ */
+export function firstDateTextVerdict(
+  source: string,
+  fieldCelTypes: Readonly<Record<string, FieldCelType>>,
+  scope: 'record' | 'flattened' = 'record',
+): DateTextVerdict | null {
+  if (typeof source !== 'string' || !source.trim()) return null;
+  try {
+    const env = buildTypedEnv(fieldCelTypes, scope, true);
+    const result = env.parse(rewriteNullableTernary(rewriteIndexedHas(source))).check?.() as
+      | { valid?: boolean; type?: unknown; error?: { message?: string } }
+      | undefined;
+    if (!result) return null;
+    const field = offendingField(source, fieldCelTypes, 'timestamp', scope);
+    if (result.valid !== false) {
+      return typeof result.type === 'string' ? { kind: 'type', type: result.type, field } : null;
+    }
+    const m = UNSOUND_OVERLOAD_RE.exec(result.error?.message ?? '');
+    if (!m || !ARITH_OPS.has(m[2]) || (m[1] !== DATE_TEXT_CEL_TYPE && m[3] !== DATE_TEXT_CEL_TYPE)) return null;
+    return { kind: 'fault', operator: m[2], operands: `${m[1]} ${m[2]} ${m[3]}`, field };
+  } catch {
+    // A parse/other fault is the syntax checker's job (celEngine.compile).
     return null;
   }
 }
@@ -1969,44 +2089,112 @@ function classifyCelFault(err: unknown): 'parse' | 'bounds' | 'type' | 'runtime'
  *
  * All four are one native regex-compilation failure, i.e. `runtime`.
  */
-function classifyError(err: unknown): EvalResult<never> {
+function classifyError(err: unknown, located = false): EvalResult<never> {
   const message = err instanceof Error ? err.message : String(err);
   const kind = classifyCelFault(err) ?? 'runtime';
-  return { ok: false, error: { kind, message } };
+  const pos = located ? celFaultRange(err) : undefined;
+  return { ok: false, error: pos ? { kind, message, pos } : { kind, message } };
+}
+
+/** A cel-js error object — the three classes that carry a structured `code` and `range`. */
+function isCelFault(err: unknown): err is ParseError | EvaluationError | CelTypeError {
+  return err instanceof ParseError || err instanceof EvaluationError || err instanceof CelTypeError;
+}
+
+/**
+ * The source range a cel-js fault points at (#27904): `ParseError#range` /
+ * `TypeError#range` / `EvaluationError#range`, UTF-16 offsets into the text
+ * cel-js read, `end` exclusive. `undefined` when the fault carries none
+ * (`expression_must_be_string`, a non-cel-js throw) — ⛔ never a guessed `0`.
+ *
+ * The offsets are into the text cel-js READ. Every caller passes `located`
+ * only when that text is the author's source byte for byte; a source the
+ * #3306 / #25267 rewrites reserialized is read as different text, and a range
+ * into it would point the author at characters they never wrote.
+ */
+function celFaultRange(err: unknown): { start: number; end: number } | undefined {
+  if (!isCelFault(err)) return undefined;
+  const range = err.range;
+  if (!range || !Number.isInteger(range.start) || !Number.isInteger(range.end)) return undefined;
+  return { start: range.start, end: range.end };
+}
+
+/**
+ * cel-js's own structured code for a fault (#27904) — the parser's
+ * (`unexpected_token`, `expected_token`, `unexpected_character`,
+ * `unterminated_string`, …) or the checker's (`no_such_overload`, …). Read off
+ * the error object, never off its prose (the #6223 rule {@link classifyCelFault}
+ * follows); `undefined` for anything that is not a cel-js error.
+ */
+function celFaultCode(err: unknown): string | undefined {
+  if (!isCelFault(err)) return undefined;
+  return typeof err.code === 'string' && err.code ? err.code : undefined;
+}
+
+/**
+ * What {@link compileCel} answers: the {@link DialectEngine.compile} verdict,
+ * and beside it the engine's own fault code when it refused.
+ *
+ * Package-internal — `validateExpression` reads `celCode` into the
+ * `invalid-cel` refusal's params. Not on {@link EvalError}: that type reaches
+ * callers that put it into logs and error bodies, where a second `code` beside
+ * an ADR-0112 `error.code` would read as one.
+ */
+export interface CelCompileOutcome {
+  readonly result: EvalResult<unknown>;
+  /** cel-js's code for the fault ({@link celFaultCode}); absent on success or when it named none. */
+  readonly celCode?: string;
+}
+
+/**
+ * {@link celEngine.compile}, keeping the fault's cel-js code (#27904).
+ * `celEngine.compile` is this with the code dropped, so the two can never
+ * disagree about a verdict.
+ */
+export function compileCel(source: string): CelCompileOutcome {
+  let parsed: string | undefined;
+  try {
+    // The canonical parse env (#24536): parsing and checking neither mutate
+    // it nor call the stdlib, so one environment serves every compile.
+    const env = (canonicalParseEnv ??= buildEnv(() => new Date(0)));
+    // #3306 — accept the null-guard idiom `cond ? <value> : null`, which cel-js's
+    // ternary unifier otherwise rejects (`int`/`double`/`string` ≠ `null`). Same
+    // rewrite the runtime uses, so build and eval agree on what is valid.
+    // #25267 — and `has()` over an indexed receiver, lowered the same way.
+    parsed = rewriteNullableTernary(rewriteIndexedHas(source));
+    const compiled = env.parse(parsed);
+    // Surface check errors eagerly. cel-js's `check()` returns a
+    // `TypeCheckResult` object (`{ valid, type?, error? }`) — NOT an array —
+    // so the type fault (including `found no matching overload for 'PRIOR(dyn)'`
+    // when a condition calls an UNKNOWN function) only surfaces when we read
+    // `valid === false`. The previous `Array.isArray(...)` guard never matched
+    // an object, so unknown-function predicates type-checked clean and were
+    // silently accepted by `objectstack build` / `registerFlow`, then no-op'd
+    // the flow at runtime (#1877). Reading the documented shape closes that.
+    const checkResult = compiled.check?.();
+    if (checkResult && checkResult.valid === false) {
+      const fault: unknown = checkResult.error;
+      const message = checkResult.error?.message ?? 'expression failed type checking';
+      // #27904 — the range only when the checker read the author's own text.
+      const pos = parsed === source ? celFaultRange(fault) : undefined;
+      const celCode = celFaultCode(fault);
+      return {
+        result: { ok: false, error: pos ? { kind: 'type', message, pos } : { kind: 'type', message } },
+        ...(celCode ? { celCode } : {}),
+      };
+    }
+    return { result: { ok: true, value: compiled.ast } };
+  } catch (err) {
+    const celCode = celFaultCode(err);
+    return { result: classifyError(err, parsed === source), ...(celCode ? { celCode } : {}) };
+  }
 }
 
 export const celEngine: DialectEngine = {
   dialect: 'cel',
 
   compile(source: string): EvalResult<unknown> {
-    try {
-      // The canonical parse env (#24536): parsing and checking neither mutate
-      // it nor call the stdlib, so one environment serves every compile.
-      const env = (canonicalParseEnv ??= buildEnv(() => new Date(0)));
-      // #3306 — accept the null-guard idiom `cond ? <value> : null`, which cel-js's
-      // ternary unifier otherwise rejects (`int`/`double`/`string` ≠ `null`). Same
-      // rewrite the runtime uses, so build and eval agree on what is valid.
-      // #25267 — and `has()` over an indexed receiver, lowered the same way.
-      const compiled = env.parse(rewriteNullableTernary(rewriteIndexedHas(source)));
-      // Surface check errors eagerly. cel-js's `check()` returns a
-      // `TypeCheckResult` object (`{ valid, type?, error? }`) — NOT an array —
-      // so the type fault (including `found no matching overload for 'PRIOR(dyn)'`
-      // when a condition calls an UNKNOWN function) only surfaces when we read
-      // `valid === false`. The previous `Array.isArray(...)` guard never matched
-      // an object, so unknown-function predicates type-checked clean and were
-      // silently accepted by `objectstack build` / `registerFlow`, then no-op'd
-      // the flow at runtime (#1877). Reading the documented shape closes that.
-      const checkResult = compiled.check?.();
-      if (checkResult && checkResult.valid === false) {
-        return {
-          ok: false,
-          error: { kind: 'type', message: checkResult.error?.message ?? 'expression failed type checking' },
-        };
-      }
-      return { ok: true, value: compiled.ast };
-    } catch (err) {
-      return classifyError(err);
-    }
+    return compileCel(source).result;
   },
 
   evaluate<T = unknown>(expr: Expression, ctx: EvalContext): EvalResult<T> {
@@ -2030,6 +2218,9 @@ export const celEngine: DialectEngine = {
     }
 
     const now = () => ctx.now ?? new Date();
+    // #27904 — the text cel-js read, so a fault's range is reported only when
+    // that text is the author's source (see `celFaultRange`).
+    let readSource: string | undefined;
     try {
       // Scope FIRST: `can` is answered about the acting subject by IDENTITY, and
       // the subject is the canonical `EvalUser` object `buildScope` mints. The
@@ -2064,6 +2255,7 @@ export const celEngine: DialectEngine = {
         // which cel-js's macro refuses, to the spec-equivalent `e.?f.hasValue()`.
         // All rewrites are no-ops for sources that don't need them.
         const evalSource = rewriteNullableTernary(rewriteTemporalEquality(rewriteIndexedHas(source), scope));
+        readSource = evalSource;
         try {
           const raw = runProgram(env, evalSource, scope);
           return { ok: true, value: coerce(raw) as T };
@@ -2096,7 +2288,7 @@ export const celEngine: DialectEngine = {
         activeBinding = outer;
       }
     } catch (err) {
-      return classifyError(err);
+      return classifyError(err, readSource === source);
     }
   },
 };

@@ -366,7 +366,10 @@ export interface ConnectorProviderContext {
  * (#3017): a throw carrying the `CONNECTOR_UPSTREAM_UNAVAILABLE` code (see
  * `connector-provider-errors.ts`) marks an *operational* fault — the upstream
  * the factory must contact is temporarily unreachable — which the materializer
- * degrades and retries instead of failing boot.
+ * degrades and retries instead of failing boot. A throw carrying
+ * `CONNECTOR_CREDENTIAL_REJECTED` or `CONNECTOR_UPSTREAM_CHANGED` (an upstream
+ * serving a definition that differs from the instance's pin, #27401) degrades
+ * the instance too, each with its own wording and retry policy.
  */
 export type ConnectorProviderFactory = (
   ctx: ConnectorProviderContext,

@@ -97,17 +97,17 @@ export function artifactLockLayerAt(
 /** The body of `ObjectStackProtocolImplementation#shippedArtifactsOf`; the method's docblock there is its contract. */
 export function shippedArtifactsOf(
     this: Pick<ArtifactLookupHost, 'lookupArtifactItem' | 'shippingPackagesOf'>,
-    type: string, name: string, shipping?: ShippingPackages,
+    type: string, name: string, shipping?: ShippingPackages, member?: string,
 ): unknown[] {
     const shipped: unknown[] = [];
     const add = (artifact: unknown): void => {
         if (artifact !== undefined && artifact !== null && !shipped.includes(artifact)) shipped.push(artifact);
     };
-    add(this.lookupArtifactItem(type, name));
+    add(this.lookupArtifactItem(type, name, undefined, member));
     if ((PLURAL_TO_SINGULAR[type] ?? type) === 'object') return shipped;
     const packages = shipping ?? this.shippingPackagesOf(type);
     for (const packageId of new Set([...(packages.byName.get(name) ?? []), ...packages.anyName])) {
-        const own = this.lookupArtifactItem(type, name, packageId) as { _packageId?: unknown } | undefined;
+        const own = this.lookupArtifactItem(type, name, packageId, member) as { _packageId?: unknown } | undefined;
         if (own?._packageId === packageId) add(own);
     }
     return shipped;

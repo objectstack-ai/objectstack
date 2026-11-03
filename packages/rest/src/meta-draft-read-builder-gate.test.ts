@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: one real-stack boot (better-sqlite3 :memory:, the real sys_metadata objects, protocol and routes) seeded with seven saves and shared by the 21 cases, which only read, each case's door reads its subject; slowest CI reading 10.3 s (scheduled full-battery run 41255489006, Test Core shard log) x 1.25, rounded up; read before the 21 identical boots became one
 
 /**
  * [#20338] A PENDING draft — unpublished authoring work — is read only by a
@@ -47,7 +48,7 @@
  * arrive ungated, is `meta-draft-read-door-census.test.ts`.
  */
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterAll, beforeAll, beforeEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
@@ -115,7 +116,7 @@ const DATASET_DRAFT_ONLY = { ...DATASET, name: 'pipeline', label: 'Pipeline' };
 const DRAFT_ONLY_TEXT = ['Atlas (draft)', 'nav_atlas_launch_plan', 'Beacon', 'nav_beacon_home'];
 
 const liveEngines: ObjectQL[] = [];
-afterEach(async () => {
+afterAll(async () => {
     while (liveEngines.length) {
         try { await liveEngines.pop()?.destroy(); } catch { /* noop */ }
     }
@@ -218,6 +219,20 @@ async function boot() {
     return { item, list, drafts, datasetQuery, queryDataset };
 }
 
+/**
+ * One boot, seeded once, for every case: after the seeding every case only
+ * reads (`GET` on the doors, and the dataset door, whose analytics service is
+ * the `queryDataset` spy and stores nothing), so no case writes what another
+ * reads. The spy is cleared before each case, as a boot of its own left it.
+ */
+let shared: Awaited<ReturnType<typeof boot>>;
+beforeAll(async () => {
+    shared = await boot();
+});
+beforeEach(() => {
+    shared?.queryDataset.mockClear();
+});
+
 const navIds = (doc: any): string[] => (doc?.navigation ?? []).map((e: any) => e.id);
 const envelope = (res: any) => ({ status: res.statusCode, code: res.body?.error?.code ?? res.body?.code });
 const text = (res: any): string => JSON.stringify(res.body ?? null);
@@ -233,7 +248,7 @@ const ITEM_SWITCHES: Record<string, Record<string, string>> = {
 describe('[#20338] GET /meta/:type/:name — ?state=draft and ?preview=draft', () => {
     for (const [label, query] of Object.entries(ITEM_SWITCHES)) {
         it(`${label}: a member without an authoring capability reads the PUBLISHED app — the plain read's answer, byte for byte`, async () => {
-            const { item } = await boot();
+            const { item } = shared;
             const plain = await item('member', 'app', 'atlas');
             const res = await item('member', 'app', 'atlas', query);
 
@@ -245,7 +260,7 @@ describe('[#20338] GET /meta/:type/:name — ?state=draft and ?preview=draft', (
         }, 60_000);
 
         it(`${label}: a draft-only app answers the member the plain read's absence — 404, never the draft`, async () => {
-            const { item } = await boot();
+            const { item } = shared;
             const plain = await item('member', 'app', 'beacon');
             const res = await item('member', 'app', 'beacon', query);
 
@@ -256,7 +271,7 @@ describe('[#20338] GET /meta/:type/:name — ?state=draft and ?preview=draft', (
         }, 60_000);
 
         it(`${label}: every builder reads the draft (the control) — Studio, Setup and a metadata author alike`, async () => {
-            const { item } = await boot();
+            const { item } = shared;
             for (const who of BUILDERS) {
                 const res = await item(who, 'app', 'atlas', query);
                 expect(res.statusCode, who).toBe(200);
@@ -271,7 +286,7 @@ describe('[#20338] GET /meta/:type/:name — ?state=draft and ?preview=draft', (
     }
 
     it('?state=draft tells a member nothing about whether a draft exists: an app with none answers the same published read, never NO_DRAFT', async () => {
-        const { item } = await boot();
+        const { item } = shared;
         const plain = await item('member', 'app', 'quiet');
         const res = await item('member', 'app', 'quiet', { state: 'draft' });
 
@@ -285,7 +300,7 @@ describe('[#20338] GET /meta/:type/:name — ?state=draft and ?preview=draft', (
 
 describe('[#20338] GET /meta/:type — ?preview=draft', () => {
     it('a member reads the published list — the plain list, byte for byte: no draft-only item, no draft label', async () => {
-        const { list } = await boot();
+        const { list } = shared;
         const plain = await list('member', 'app');
         const res = await list('member', 'app', { preview: 'draft' });
 
@@ -297,7 +312,7 @@ describe('[#20338] GET /meta/:type — ?preview=draft', () => {
     }, 60_000);
 
     it('every builder reads the draft overlay (the control): the pending draft wins, and the draft-only app is listed', async () => {
-        const { list } = await boot();
+        const { list } = shared;
         for (const who of BUILDERS) {
             const res = await list(who, 'app', { preview: 'draft' });
             expect(res.statusCode, who).toBe(200);
@@ -317,7 +332,7 @@ describe('[#20338] POST /analytics/dataset/query — previewDrafts', () => {
 
     for (const [label, bodyFlag, query] of SWITCHES) {
         it(`${label}: a member's query runs over the PUBLISHED dataset and never asks for draft rows`, async () => {
-            const { datasetQuery, queryDataset } = await boot();
+            const { datasetQuery, queryDataset } = shared;
             const res = await datasetQuery('member', { datasetName: 'revenue', selection, ...bodyFlag }, query);
 
             expect(res.statusCode).toBe(200);
@@ -328,7 +343,7 @@ describe('[#20338] POST /analytics/dataset/query — previewDrafts', () => {
         }, 60_000);
 
         it(`${label}: a draft-only dataset answers the member the door's own 404, and nothing is queried`, async () => {
-            const { datasetQuery, queryDataset } = await boot();
+            const { datasetQuery, queryDataset } = shared;
             const res = await datasetQuery('member', { datasetName: 'pipeline', selection, ...bodyFlag }, query);
 
             expect(envelope(res)).toEqual({ status: 404, code: 'NOT_FOUND' });
@@ -336,7 +351,7 @@ describe('[#20338] POST /analytics/dataset/query — previewDrafts', () => {
         }, 60_000);
 
         it(`${label}: an INLINE dataset posted by a member runs over live data, never the pending seed draft's rows`, async () => {
-            const { datasetQuery, queryDataset } = await boot();
+            const { datasetQuery, queryDataset } = shared;
             const res = await datasetQuery('member', { dataset: { ...DATASET }, selection, ...bodyFlag }, query);
 
             expect(res.statusCode).toBe(200);
@@ -344,7 +359,7 @@ describe('[#20338] POST /analytics/dataset/query — previewDrafts', () => {
         }, 60_000);
 
         it(`${label}: every builder's query runs over the draft dataset, with the draft rows asked for (the control)`, async () => {
-            const { datasetQuery, queryDataset } = await boot();
+            const { datasetQuery, queryDataset } = shared;
             for (const who of BUILDERS) {
                 queryDataset.mockClear();
                 const res = await datasetQuery(who, { datasetName: 'revenue', selection, ...bodyFlag }, query);
@@ -362,7 +377,7 @@ describe('[#20338] POST /analytics/dataset/query — previewDrafts', () => {
 
 describe('[#20338] one predicate: every draft door admits exactly the callers GET /meta/_drafts admits', () => {
     it('for each caller, /meta/_drafts refuses them 403 exactly when the item, list and dataset doors serve them the published version', async () => {
-        const { item, list, drafts, datasetQuery, queryDataset } = await boot();
+        const { item, list, drafts, datasetQuery, queryDataset } = shared;
         for (const who of ['member', ...BUILDERS] as const) {
             const listing = await drafts(who);
             const admitted = listing.statusCode !== 403;

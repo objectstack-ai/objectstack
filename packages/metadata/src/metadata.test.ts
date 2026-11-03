@@ -548,7 +548,11 @@ describe('MetadataPlugin', () => {
   });
 
   // Mock the spec kernel import
-  vi.mock('@objectstack/spec/kernel', () => ({
+  // The rest of the module is the real one: the artifact door judges a body's
+  // `_packageId` through `judgeCollectionItemOwnerStamp` over
+  // `OWNER_STAMP_JUDGED_COLLECTIONS` (#28697), and only the type registry is narrowed here.
+  vi.mock('@objectstack/spec/kernel', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('@objectstack/spec/kernel')>()),
     DEFAULT_METADATA_TYPE_REGISTRY: [
       { type: 'object', label: 'Object', filePatterns: ['**/*.object.ts'], supportsOverlay: true, allowRuntimeCreate: false, supportsVersioning: true, loadOrder: 10, domain: 'data' },
       { type: 'view', label: 'View', filePatterns: ['**/*.view.ts'], supportsOverlay: true, allowRuntimeCreate: true, supportsVersioning: false, loadOrder: 50, domain: 'ui' },

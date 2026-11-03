@@ -116,6 +116,9 @@ describe('[#25572] POST /forms/:slug/submit: an anonymous submission carries no 
       if (request?.type === 'object') return [SUPPLIER];
       return realGetMetaItems(request);
     };
+    // [#28409] The doors judge withdrawal against the effective list beside
+    // the per-package layer: the injected list is that whole layer here.
+    protocol.getMetaItemsPerPackage = async (request: any) => (request?.type === 'view' ? [FORM] : []);
     const realCreateData = protocol.createData.bind(protocol);
     createData = vi.fn(realCreateData);
     protocol.createData = createData;

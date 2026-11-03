@@ -98,7 +98,7 @@
  * number only exists once Node has exited and the kernel has masked it to
  * `& 0xFF`. `test/migrate-exit-code.e2e.test.ts` is the precedent and states
  * this in the same words — the audience `--json` exists for reads the SHELL, so
- * that is what gets asserted. Spawned through `bin/run-dev.js` + tsx, so the
+ * that is what gets asserted. Spawned through `bin/run-dev.js` + `node`, so the
  * suite does not depend on `packages/cli/dist` having been built.
  *
  * ## Why this file is not beside its siblings in `packages/cli/test/`
@@ -143,7 +143,6 @@ function linkSpec(dir: string): void {
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../../node_modules/.bin/tsx');
 
 /**
  * The test-only live conversion the child loads with `--import` (its header
@@ -230,7 +229,7 @@ interface Run {
 function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...args],
       {
         cwd,

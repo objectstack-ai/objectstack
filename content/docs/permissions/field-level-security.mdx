@@ -157,7 +157,9 @@ only constrain fields they explicitly enumerate, and field grants union
 most-permissively across a user's sets (one set's `readable: true`
 out-votes another set's `false`). Until a subtractive muting layer lands
 (ADR-0066 ⑧), a `{ readable: false }` rule masks the field only as long
-as **no other set the user holds** declares it `readable: true` — so
+as **no other set the user holds** declares it `readable: true` or holds
+View All (`viewAllRecords`, reads every field of the object) or Modify All
+(`modifyAllRecords`, reads and edits every field) on that object — so
 protect sensitive fields by granting them only in the sets that need
 them, and treat a sensitive field on a broadly-granted object as a
 review smell — see the

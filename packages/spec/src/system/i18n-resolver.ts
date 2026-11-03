@@ -17,6 +17,7 @@
  *   objects.<object>._actions.<action_name>.successMessage
  *   objects.<object>._actions.<action_name>.disabledReason
  *   objects.<object>._actions.<action_name>.submitText
+ *   objects.<object>._actions.<action_name>.cancelText
  *   objects.<object>._actions.<action_name>.outcomeMessages.<outcome>
  *   objects.<object>._actions.<action_name>.params.<param_name>.label
  *   objects.<object>._actions.<action_name>.params.<param_name>.helpText
@@ -48,7 +49,7 @@
  * object-less action (no `objectName`) reads only:
  *
  *   globalActions.<action_name>.label / .description / .confirmText /
- *     .successMessage / .disabledReason / .submitText /
+ *     .successMessage / .disabledReason / .submitText / .cancelText /
  *     .outcomeMessages.<outcome> / .params.<param_name>.* / .resultDialog.*
  *
  * That is the declaration `TranslationDataSchema.globalActions` makes: global
@@ -235,6 +236,12 @@ export interface ActionLike {
    * label. Narrowed to `string` for the same reason `label` is.
    */
   submitText?: string;
+  /**
+   * `ActionSchema.cancelText` (#28519) — the dismiss button label of the
+   * action's confirm or param dialog. Narrowed to `string` for the same reason
+   * `label` is.
+   */
+  cancelText?: string;
   /**
    * `ActionSchema.outcomeMessages` — success copy per handler `outcome`, each
    * entry a `template` slot like `successMessage` (#27948).
@@ -667,7 +674,7 @@ function actionTranslationNode(
 function lookupActionField(
   bundle: TranslationBundle | undefined,
   action: ActionLike,
-  field: 'label' | 'description' | 'confirmText' | 'successMessage' | 'disabledReason' | 'submitText',
+  field: 'label' | 'description' | 'confirmText' | 'successMessage' | 'disabledReason' | 'submitText' | 'cancelText',
   opts?: ResolveOptions,
 ): string | undefined {
   if (!bundle) return undefined;
@@ -1545,7 +1552,8 @@ export function translateView<T extends ViewLike>(
 /**
  * Apply the active locale to an action metadata document by overwriting
  * `label`, `description`, `confirmText`, `successMessage`, `disabledReason`,
- * `submitText` (for an action that declares `params`), each declared
+ * `submitText` (for an action that declares `params`), `cancelText` (for an
+ * action that declares `confirmText` or `params`), each declared
  * `outcomeMessages` entry, the `params[]` copy and the `resultDialog` copy
  * with translated values when available. The
  * original document is not mutated; a shallow copy is returned.
@@ -1587,6 +1595,15 @@ export function translateAction<T extends ActionLike>(
   const submitText = Array.isArray(action.params) && action.params.length > 0
     ? lookupActionField(bundle, action, 'submitText', opts) ?? action.submitText
     : action.submitText;
+  // [#28519] The dismiss button, overlaid the same way, for an action that
+  // opens either dialog that carries it: the confirm dialog of a declared
+  // `confirmText`, or the param dialog of a non-empty `params`. Judged on the
+  // AUTHORED `confirmText`, the declaration `ActionSchema` judges the key
+  // against, so a bundle cannot give a button to a dialog that never opens.
+  const opensDialog = action.confirmText != null || (Array.isArray(action.params) && action.params.length > 0);
+  const cancelText = opensDialog
+    ? lookupActionField(bundle, action, 'cancelText', opts) ?? action.cancelText
+    : action.cancelText;
   const outcomeMessages = resolveActionOutcomeMessages(bundle, action, opts);
   const resultDialog = resolveActionResultDialog(bundle, action, opts);
   const params = translateActionParams(action, bundle, opts);
@@ -1598,6 +1615,7 @@ export function translateAction<T extends ActionLike>(
     ...(successMessage !== undefined ? { successMessage } : {}),
     ...(disabledReason !== undefined ? { disabledReason } : {}),
     ...(submitText !== undefined ? { submitText } : {}),
+    ...(cancelText !== undefined ? { cancelText } : {}),
     ...(outcomeMessages !== action.outcomeMessages ? { outcomeMessages } : {}),
     ...(resultDialog !== undefined ? { resultDialog } : {}),
     ...(params !== action.params ? { params } : {}),
@@ -3581,12 +3599,15 @@ export interface ObjectLike {
  * Minimal field shape consumed by `translateObject`. It names only keys
  * `FieldSchema` declares: there is no `help` here, because a field spells its
  * help text `description` / `inlineHelpText`. The bundle's field `help` entry
- * is served on `description` (see {@link translateObject}).
+ * is served on an authored `inlineHelpText` when the field has one, and on
+ * `description` only when it has none (see {@link translateObject}).
  */
 export interface ObjectFieldLike {
   name?: string;
   label?: string;
   description?: string;
+  /** `FieldSchema.inlineHelpText` — the help line the console draws first; `''` reads as absent. */
+  inlineHelpText?: string;
   /** `FieldSchema.inlineTitle` — the inline child grid's heading on the parent's form. */
   inlineTitle?: string;
   options?: Array<{ label?: string; value: string | number | boolean }>;
@@ -3848,6 +3869,23 @@ export function flowRefusalMessageKey(flowName: string, nodeId: string): string 
 }
 
 /**
+ * Dot-notation i18n key for a `save_notice` node's message —
+ * `flows.<flow>.notices.<node_id>.message` (#28251).
+ *
+ * The sibling of {@link flowRefusalMessageKey}, for the same reason and with
+ * the same reader: the automation engine picks the translated TEMPLATE before
+ * it renders the `{{ }}` holes, here in the triggering writer's locale (the
+ * record-change trigger hands it with the notice channel), because the
+ * create/update answer carries the notice already rendered.
+ *
+ * `flowName` is `Flow.name` and `nodeId` the `save_notice` node's
+ * `FlowNode.id`.
+ */
+export function flowNoticeMessageKey(flowName: string, nodeId: string): string {
+  return `flows.${flowName}.notices.${nodeId}.message`;
+}
+
+/**
  * Dot-notation i18n key for a hook's declared refusal message —
  * `hooks.<hook>.refusals.<CODE>.message` (#26170, maintainer ruling 6431311681
  * letter A).
@@ -3885,6 +3923,25 @@ export function hookRefusalMessageKey(hookName: string, code: string): string {
  */
 export function flowScreenCopyKey(flowName: string, nodeId: string, key: FlowScreenCopyKey): string {
   return `flows.${flowName}.screens.${nodeId}.${key}`;
+}
+
+/**
+ * Dot-notation i18n key for a flow's terminal text —
+ * `flows.<flow>.successMessage` / `flows.<flow>.errorMessage` (#28054).
+ *
+ * The sibling of {@link flowScreenCopyKey}, for the same reason and with the
+ * same reader. Both are `{{ }}` templates the engine renders at the run's
+ * terminal exit (`FLOW_TEXT_SLOTS` in `automation/flow-text-slot-template.ts`),
+ * so it picks the translated TEMPLATE in the run's locale through the `i18n`
+ * service and only then fills the holes — the rule of the maintainer's ruling
+ * on #22507: a user-read flow string the server renders per run is translated
+ * where it is rendered, and a client overlay never touches a server-rendered
+ * slot.
+ *
+ * `flowName` is `Flow.name` and `key` one of {@link FLOW_TERMINAL_MESSAGE_KEYS}.
+ */
+export function flowTerminalMessageKey(flowName: string, key: FlowTerminalMessageKey): string {
+  return `flows.${flowName}.${key}`;
 }
 
 export function resolveObjectFieldLabels(
@@ -3959,7 +4016,7 @@ function lookupObjectFieldOption(
  */
 const SYSTEM_FIELD_LABELS: Record<string, Record<string, string>> = {
   organization_id: { en: 'Organization', 'zh-CN': '组织', 'ja-JP': '組織', 'es-ES': 'Organización' },
-  owner_id: { en: 'Owner', 'zh-CN': '所有者', 'ja-JP': '所有者', 'es-ES': 'Propietario' },
+  owner_id: { en: 'Owner', 'zh-CN': '负责人', 'ja-JP': '所有者', 'es-ES': 'Propietario' },
   created_at: { en: 'Created At', 'zh-CN': '创建时间', 'ja-JP': '作成日時', 'es-ES': 'Creado el' },
   created_by: { en: 'Created By', 'zh-CN': '创建人', 'ja-JP': '作成者', 'es-ES': 'Creado por' },
   updated_at: { en: 'Last Modified At', 'zh-CN': '更新时间', 'ja-JP': '更新日時', 'es-ES': 'Actualizado el' },
@@ -4069,6 +4126,18 @@ function valueOverridesPackagedBase(base: unknown, key: string, value: unknown):
   if (!base || typeof base !== 'object') return false;
   if (typeof value !== 'string' || value.length === 0) return false;
   return (base as Record<string, unknown>)[key] !== value;
+}
+
+/**
+ * Whether a field authors help text on `inlineHelpText` — a non-empty string,
+ * as the i18n extractor and the console's `inlineHelpText || description`
+ * read it (`''` is absent). {@link translateObject} asks it of the served
+ * field and of the packaged one to find the slot a field's `help` entry was
+ * seeded from.
+ */
+function authorsInlineHelpText(field: Record<string, unknown> | undefined): boolean {
+  const value = field?.inlineHelpText;
+  return typeof value === 'string' && value.length > 0;
 }
 
 /**
@@ -4270,8 +4339,9 @@ function packagedRulesByName(packagedBase: unknown): Map<string, Record<string, 
 /**
  * Apply the active locale to an object metadata document. Translates the
  * object's `label` / `pluralLabel` / `description`, walks each field to
- * translate its `label`, its `description` (from the bundle's field `help`
- * entry — see below), and per-option `label`s, walks any
+ * translate its `label`, its authored `inlineHelpText` or else its
+ * `description` (from the bundle's field `help` entry — see below), and per-option
+ * `label`s, walks any
  * inline-declared `actions` through {@link translateAction}, and overlays the
  * copy of each EMBEDDED `listViews` entry from the `_views` keys the i18n
  * extractor writes for it ({@link translateObjectListViews}), and each
@@ -4316,36 +4386,66 @@ function packagedRulesByName(packagedBase: unknown): Map<string, Record<string, 
  * conservative edges. `?layers=true` stays untranslated and diagnostic,
  * unchanged.
  *
- * The ruling covers the three SCALARS. A field's `label` stays a flat
- * `catalog ?? document`: `fields` is a key-keyed spread whose per-field labels
- * have their own (per-field) catalog keys, and no read has been measured to
- * diverge on them. The embedded `listViews` follow the VIEW translator's
+ * The ruling covers the three SCALARS, and a field's `label` and its options'
+ * labels follow it too, judged per field against the same field in the
+ * packaged base (and per option against that field's option of the same
+ * `value`) by {@link valueOverridesPackagedBase}: an object extension's
+ * `fieldPatches` label (ADR-0146 D10) and a tenant's field rename are authored
+ * on top of the declaration the catalog translates, and the served read kept
+ * the shipped label while only `/layers` showed the patch. A picklist-bound
+ * field's options are the list's, resolved on every read and absent from the
+ * packaged field, so they have no field-level baseline and the catalog
+ * (field-level, then `picklists.<name>`) applies to them as before. A field the
+ * base does not declare counts as diverged on every slot, as below; the
+ * built-in system-field labels apply only where the catalog may.
+ * The embedded `listViews` follow the VIEW translator's
  * application of the same rule (ADR-0029 D9.2a, as {@link translateView}
  * applies it), judged per view against the packaged object's own `listViews` —
  * see {@link translateObjectListViews}.
  * Each `validations[].message` follows it too, judged against the packaged
  * rule of the same name — see {@link translateObjectValidations}.
  *
- * ## A field's translated help is served on `description` — ADR-0029 D9.2a
+ * ## A field's translated help — on the slot the entry was seeded from — ADR-0029 D9.2a
  *
  * The bundle addresses a field's help as `objects.<object>.fields.<field>.help`
- * (`FieldTranslationSchema.help`), and the i18n extractor writes that entry
- * from the field's `description` (`packages/cli/src/utils/i18n-extract.ts`;
- * its other source, a field `help`, is a key `FieldSchema` refuses). So the
- * entry is the translation of `description`, and it is served THERE. It is
- * ⛔ never served on a `help` key, which `FieldSchema` does not declare: the
- * served field def then carried a key the contract refuses, every consumer
- * that reads only declared keys rendered the source-language `description`,
- * and the console's ingestion step warned once per such field (#21948). It is
- * ⛔ not served on `inlineHelpText` either, which the extractor never reads.
+ * (`FieldTranslationSchema.help`). One derivation decides which text that
+ * entry translates, and three places hold it:
  *
- * `description` is a key the catalog had never touched, so it follows the
- * rule above, as every string this translator added since does: the catalog
- * applies only while the served field's `description` still equals the same
- * field's in {@link TranslateDocumentOptions.packagedBase}, judged by
+ *   - the i18n extractor writes the entry from `help ?? inlineHelpText ??
+ *     description`, an empty string reading as absent
+ *     (`packages/cli/src/utils/i18n-extract.ts`; `help` is a key `FieldSchema`
+ *     refuses and points at `inlineHelpText`, so no stored field carries it);
+ *   - the console draws a field's help line from `inlineHelpText ||
+ *     description` (`fieldHelpText` in `@object-ui/fields`);
+ *   - so this translator serves the entry on the ONE slot it translates: on
+ *     the field's non-empty `inlineHelpText` when it authors one, and on
+ *     `description` only when it authors none. Serving it on `description`
+ *     alone left the translation masked (the console read the source-language
+ *     `inlineHelpText` first); serving it on both put the `inlineHelpText`'s
+ *     translation on a `description` that says something else, which every
+ *     reader of `description` (Studio, the designer) then showed.
+ *
+ * A field that authors no `inlineHelpText` (absent or `''`, which the console
+ * reads as absent) gains no `inlineHelpText` key: the console already draws
+ * `description` for it. A field that authors one keeps its source-language
+ * `description`, and gains none when it has none, until a description-specific
+ * bundle key exists. "Authors one" is asked of the served field AND of the
+ * packaged field the extractor read: a served `inlineHelpText` blanked over a
+ * packaged one leaves an entry that still translates the packaged
+ * `inlineHelpText`, never the `description`. The entry is ⛔ never served on a `help` key, which
+ * `FieldSchema` does not declare: the served field def then carried a key the
+ * contract refuses, every consumer that reads only declared keys rendered the
+ * source-language text, and the console's ingestion step warned once per such
+ * field (#21948).
+ *
+ * `description` and `inlineHelpText` are keys the catalog had never touched,
+ * so the slot chosen above follows the rule above, as every string this
+ * translator added since does, judged per key: the catalog applies to a slot only while the served
+ * field's value there still equals the same field's in
+ * {@link TranslateDocumentOptions.packagedBase}, judged by
  * {@link valueOverridesPackagedBase} (⛔ never a second comparison). A field
- * the base does not declare was authored after the fact, and its description
- * counts as diverged; no base supplied means nothing is inferred and the
+ * the base does not declare was authored after the fact, and both its slots
+ * count as diverged; no base supplied means nothing is inferred and the
  * catalog applies.
  *
  * ## A field's `inlineTitle` — the inline child grid's heading
@@ -4386,22 +4486,41 @@ export function translateObject<T extends ObjectLike>(
 
   const translateField = (name: string, def: ObjectFieldLike): ObjectFieldLike => {
     const next: ObjectFieldLike = { ...def };
-    const translatedLabel =
-      lookupObjectFieldAttr(bundle, objectName, name, 'label', opts) ??
-      builtinSystemFieldLabel(name, def.label, opts);
-    if (translatedLabel) next.label = translatedLabel;
-    // The bundle's field `help` entry translates `description`, and is served
-    // there — never on an undeclared `help` — unless the served description
-    // diverged from the packaged field's (ADR-0029 D9.2a; see the docblock).
-    if (!valueOverridesPackagedBase(packagedObjectField(packagedObject, name), 'description', def.description)) {
-      const translatedDescription = lookupObjectFieldAttr(bundle, objectName, name, 'help', opts);
-      if (translatedDescription) next.description = translatedDescription;
+    const packagedField = packagedObjectField(packagedObject, name);
+    // The field `label` keeps a value that diverged from the packaged field's
+    // — an extension's `fieldPatches` label, a tenant's rename — under the one
+    // comparison its sibling slots use (ADR-0029 D9.2a; see the docblock).
+    if (!valueOverridesPackagedBase(packagedField, 'label', def.label)) {
+      const translatedLabel =
+        lookupObjectFieldAttr(bundle, objectName, name, 'label', opts) ??
+        builtinSystemFieldLabel(name, def.label, opts);
+      if (translatedLabel) next.label = translatedLabel;
+    }
+    // The bundle's field `help` entry is served on the slot the extractor
+    // seeded it from: the field's own `inlineHelpText` when it authors one —
+    // the slot the console draws first — and `description` only when neither
+    // the served nor the packaged field authors one; never on an undeclared
+    // `help`. The slot keeps a value that diverged from the packaged field's
+    // (ADR-0029 D9.2a; see the docblock).
+    const translatedHelp = lookupObjectFieldAttr(bundle, objectName, name, 'help', opts);
+    if (translatedHelp) {
+      const servedInlineHelp = authorsInlineHelpText(def);
+      if (servedInlineHelp) {
+        if (!valueOverridesPackagedBase(packagedField, 'inlineHelpText', def.inlineHelpText)) {
+          next.inlineHelpText = translatedHelp;
+        }
+      } else if (
+        !authorsInlineHelpText(packagedField) &&
+        !valueOverridesPackagedBase(packagedField, 'description', def.description)
+      ) {
+        next.description = translatedHelp;
+      }
     }
     // The inline child grid's heading, under the same divergence rule. The
     // console's inline-subform pass copies the served value onto the parent's
     // form, so this is the one place it is localized. An untranslated heading
     // keeps its authored text — never the child's plural label in its place.
-    if (!valueOverridesPackagedBase(packagedObjectField(packagedObject, name), 'inlineTitle', def.inlineTitle)) {
+    if (!valueOverridesPackagedBase(packagedField, 'inlineTitle', def.inlineTitle)) {
       const translatedInlineTitle = lookupObjectFieldAttr(bundle, objectName, name, 'inlineTitle', opts);
       if (translatedInlineTitle) next.inlineTitle = translatedInlineTitle;
     }
@@ -4411,8 +4530,20 @@ export function translateObject<T extends ObjectLike>(
       // labels (`picklists.<name>.options.<value>`); a field-level entry, when
       // one exists, is the more specific and wins.
       const picklist = typeof def.picklist === 'string' ? def.picklist : undefined;
+      // An option label that diverged from the packaged field's option of the
+      // same value keeps its text, under the same comparison. A picklist-bound
+      // field's options are the LIST's, resolved onto the served field on every
+      // read and never on the packaged declaration, so no field-level baseline
+      // exists for them and the catalog applies as before.
+      const packagedOptionsOwner = picklist === undefined ? packagedField : undefined;
       next.options = def.options.map((opt) => {
         if (!opt || typeof opt !== 'object' || opt.value === undefined) return opt;
+        const packagedOption = packagedPart(
+          packagedOptionsOwner,
+          'options',
+          (candidate) => isOptionValue(candidate.value) && String(candidate.value) === String(opt.value),
+        );
+        if (valueOverridesPackagedBase(packagedOption, 'label', opt.label)) return opt;
         const translated =
           lookupObjectFieldOption(bundle, objectName, name, opt.value, opts) ??
           (picklist !== undefined ? lookupPicklistOption(bundle, picklist, opt.value, opts) : undefined);
@@ -5245,9 +5376,9 @@ export interface FlowLike {
   /** `Flow.name` — the machine name the `flows` group is keyed by. */
   name: string;
   label?: string;
-  /** The completion toast (`Flow.successMessage`, served verbatim as `AutomationResult.successMessage`). */
+  /** The completion toast (`Flow.successMessage`, a `{{ }}` template the engine renders into `AutomationResult.successMessage`, #28054). */
   successMessage?: string;
-  /** The failure toast (`Flow.errorMessage`, served verbatim as `AutomationResult.errorMessage`). */
+  /** The failure toast (`Flow.errorMessage`, a `{{ }}` template the engine renders into `AutomationResult.errorMessage`, #28054). */
   errorMessage?: string;
   nodes?: FlowNodeLike[];
   [key: string]: any;
@@ -5340,12 +5471,17 @@ export type FlowScreenFieldCopyKey = typeof FLOW_SCREEN_FIELD_COPY_KEYS[number];
  * `flows.<flow>.successMessage` and `flows.<flow>.errorMessage`, each spelled
  * as `FlowSchema` spells the string it overlays.
  *
- * The engine carries both VERBATIM on the terminal `AutomationResult` (plain
- * strings, never interpolated), so a runner translates the served string by
- * handing it to {@link translateFlow} under its own key, the way it already
- * resolves the served `flowLabel`. Exported for the same one-list-both-sides
- * reason as {@link FLOW_SCREEN_COPY_KEYS}: the CLI's skeleton writer offers
- * exactly these keys, and `translation.test.ts` pins the schema to them.
+ * Since #28054 both are `{{ }}` templates the engine renders at the run's
+ * terminal exit, so the ENGINE picks each translation, in the run's locale,
+ * before it fills the holes ({@link flowTerminalMessageKey}), and the served
+ * `AutomationResult.successMessage` / `.errorMessage` arrive translated and
+ * filled: a runner draws them as served and overlays neither (maintainer
+ * ruling A on #22507, which moved a screen's heading and body text the same
+ * way). Until then the engine carried both verbatim and the runner handed the
+ * served string to {@link translateFlow}, which still applies these keys to a
+ * flow DOCUMENT. Exported for the same one-list-both-sides reason as
+ * {@link FLOW_SCREEN_COPY_KEYS}: the CLI's skeleton writer offers exactly these
+ * keys, and `translation.test.ts` pins the schema to them.
  */
 export const FLOW_TERMINAL_MESSAGE_KEYS = ['successMessage', 'errorMessage'] as const;
 
@@ -5605,16 +5741,16 @@ export function resolveFlowScreenTitle(
  * label the engine serves on every run result as `AutomationResult.flowLabel`,
  * and draws the answer (the API name when no label was served) in its header
  * and its completion toast. Both `flows` rows in the ledger are `live`, and
- * cite these reads. The terminal toasts and the option
- * labels (#22507) take the same client side — the runner hands the served
- * `successMessage` / `errorMessage` to this function as it does the label,
- * and overlays each served field's options through
- * {@link resolveFlowScreenFieldOptions} — in a downstream objectui change;
- * their ledger rows are `planned` until it lands. A screen's heading and body
- * text do NOT take the client side any more (maintainer ruling A on #22507):
- * the server renders both per run, so the engine picks their translated
- * templates in the run's locale ({@link flowScreenCopyKey}), and the runner
- * stops overlaying the served heading.
+ * cite these reads. The option labels (#22507) take the same client side —
+ * the runner overlays each served field's options through
+ * {@link resolveFlowScreenFieldOptions}. A screen's heading and body text do
+ * NOT take the client side any more (maintainer ruling A on #22507): the
+ * server renders both per run, so the engine picks their translated templates
+ * in the run's locale ({@link flowScreenCopyKey}), and the runner stops
+ * overlaying the served heading. The terminal toasts followed them (#28054):
+ * the engine renders `successMessage` / `errorMessage` as `{{ }}` templates,
+ * so it picks their translations ({@link flowTerminalMessageKey}) and the
+ * runner draws the served strings as they arrive.
  */
 export function translateFlow<T extends FlowLike>(
   flow: T,

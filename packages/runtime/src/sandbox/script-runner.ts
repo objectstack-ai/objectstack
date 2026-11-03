@@ -413,6 +413,23 @@ export interface ScriptContext {
    */
   title?: (field: string | undefined, api: unknown) => Promise<string | undefined>;
   /**
+   * The engine's save-notice member, marshalled for the HOOK face (#28251) —
+   * `HookContextSchema.notice` (`@objectstack/spec/data`), which objectql's
+   * `triggerHooks` binds from the write's own `onNotice` listener on every
+   * insert / update dispatch. `installCtx` wires it onto the VM's `ctx.notice`
+   * as a synchronous host function that hands the body's string over
+   * unchanged, so a sandboxed body (and a `handler` the build lowers into one)
+   * reaches the same listener an in-process handler does — the body's
+   * `ctx.input.options` is the frozen `{ multi, where }` projection and never
+   * carried it.
+   *
+   * No capability token: it reads nothing and writes nothing but the
+   * requester's own answer. The member itself refuses a message that is not a
+   * non-empty string (a `TypeError` relayed into the VM). Absent on `find` /
+   * `delete` dispatches and on the action and job faces.
+   */
+  notice?: (message: string) => void;
+  /**
    * Host-provided log seam for the `['log']` capability — four levels, matching
    * the four `installCtx` (quickjs-runner.ts) wires onto the VM's `ctx.log` and
    * the four the CLI's capability extractor infers `log` from.

@@ -27,18 +27,6 @@ import {
 } from '@object-ui/components';
 import { Input } from '@object-ui/components';
 import { Badge } from '@object-ui/components';
-import { Switch } from '@object-ui/components';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  buttonVariants,
-} from '@object-ui/components';
 import { toast } from 'sonner';
 import {
   Select,
@@ -72,15 +60,24 @@ import {
 import { t, tFormat, translateMetadataType, useMetadataLocale } from './i18n.js';
 import { buildPackageScopeOptions } from './package-scope.js';
 import { ENVIRONMENT_SCOPE_QUERY, isEnvironmentScope, useWalledCatalogReadOnly } from './catalog-scope.js';
+import { useMetadataAreaHost } from './metadataAreaHost.js';
+import { customizationPackageId } from '@objectstack/spec/kernel';
+import { CustomizationMark, usePackageCustomizations } from '../studio-design/CustomizationMark.js';
+import {
+  customizationBaseOfRow,
+  customizationMarkOf,
+  customizationTotal,
+  type CustomizationMarkKind,
+} from '../studio-design/customizationMarks.js';
 import {
   audienceAnchorsOf,
   hasCatalogActivation,
   isCatalogItemActive,
   readCatalogActivation,
   writeCatalogActivation,
-  type CatalogActivation,
 } from './catalog-activation.js';
-import { countsCatalogHolders, readCatalogHolderCount, type CatalogHolderCount } from './catalog-holders.js';
+import { countsCatalogHolders, readCatalogHolderCount } from './catalog-holders.js';
+import { CatalogActiveCell, DeactivateConfirmDialog, type CatalogLedger, type PendingDeactivation } from './CatalogActiveSwitch.js';
 import { useCanAuthorMetadata } from '../../hooks/useCanAuthorMetadata.js';
 import { declarationOnlyAuthoredObject } from './sharing-rule-catalog.js';
 import { resolveAffordance, type SchemaLike } from '@object-ui/core';
@@ -190,6 +187,28 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // the description. Read off the route's `:appName`; the same page anywhere
   // else (the directory, Studio's "Open in Setup" target) keeps its shell.
   const inSetup = useInSetupApp();
+  // objectstack ADR-0146 D1 (#28561) — under Studio's "All metadata" area the
+  // package scope is the area's, never picked or repaired here, and a
+  // read-only package offers no create.
+  const host = useMetadataAreaHost();
+  // objectstack#29566 — the area's cross-package leg (`/studio/~all/metadata`)
+  // outside the environment scope: the list of a type across packages. It
+  // names no package and never repairs one into the URL (`?package=X` would
+  // move it onto X's leg, `areaLocationRedirect`); only create picks one.
+  const allLeg = !!host && host.packageId === null && !envScope;
+  // objectstack ADR-0146 D3 (#28568) — "On top, one surface": with a base open
+  // in the area, its list holds the base's items and its paired
+  // `<base>.custom` package's items together, each item of the pair marked
+  // from the server's customization read ("customized (base)" for a served
+  // override, "added" for the rest), filterable to those alone. A pending or
+  // failed read draws no mark; Setup (no host) reads nothing.
+  const customizations = usePackageCustomizations(host?.packageId ?? null);
+  const pairId = React.useMemo(() => {
+    if (!host?.packageId) return null;
+    const pair = customizationPackageId(host.packageId);
+    return pair.ok ? pair.value : null;
+  }, [host?.packageId]);
+  const [onlyCustomized, setOnlyCustomized] = React.useState(false);
   // objectstack#27356 — under Setup the header names the page as the sidebar
   // entry that opens it does ("Positions"); the type's label otherwise.
   const { app } = useExpressionContext();
@@ -214,11 +233,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // naming how many users lose the access: the holder count, read from the
   // server when the confirm opens (`catalog-holders.ts`). Switching on asks
   // nothing. `holders` is `null` while the count is read.
-  const [pendingOff, setPendingOff] = React.useState<{
-    name: string;
-    label: string;
-    holders: CatalogHolderCount | { error: string } | null;
-  } | null>(null);
+  const [pendingOff, setPendingOff] = React.useState<PendingDeactivation | null>(null);
   const adapter = useAdapter();
   const locale = useMetadataLocale();
   // objectui#12982 — a declaration-only catalog (declared sharing rules): the
@@ -302,10 +317,11 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     return () => { cancelled = true; };
   }, [client, appName]);
 
-  // Resolve the active package from the URL, validated against the project
-  // package set. `null` while packages are still loading (fail closed).
+  // Resolve the package Setup's list would scope to from the URL, validated
+  // against the project package set. `null` while packages are still loading
+  // (fail closed).
   const urlPackage = searchParams.get('package');
-  const activePackage = React.useMemo(() => {
+  const pickedPackage = React.useMemo(() => {
     if (!projectPackages) return null;
     if (urlPackage && projectPackages.some((p) => p.id === urlPackage)) return urlPackage;
     if (projectPackages.length === 0) return null;
@@ -329,6 +345,9 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     }
     return best ?? projectPackages[0]?.id ?? null;
   }, [projectPackages, urlPackage, items, appPackage]);
+  // The package the list is scoped to: the area's own, none on the
+  // cross-package leg, else the pick above.
+  const activePackage = host?.packageId ? host.packageId : allLeg ? null : pickedPackage;
 
   // Repair `?package=` so the sidebar selector, deep-links and create/edit
   // navigation all agree on the active scope. Runs once packages resolve
@@ -336,6 +355,8 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   React.useEffect(() => {
     // The environment scope lists every package's items: no package to repair.
     if (envScope) return;
+    // The area's package is its route's; its cross-package leg has none.
+    if (host) return;
     if (!projectPackages || projectPackages.length === 0) return;
     if (urlPackage && projectPackages.some((p) => p.id === urlPackage)) return;
     // If the current app's package is known we can repair immediately; otherwise
@@ -349,7 +370,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     next.set('package', activePackage);
     setSearchParams(next, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectPackages, urlPackage, items, activePackage, appPackage]);
+  }, [projectPackages, urlPackage, items, activePackage, appPackage, host]);
 
   // Carry the active package into create/edit navigation as `?package=` so
   // the editor binds newly-saved rows to that software package.
@@ -369,7 +390,20 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       navigate(`./new?${ENVIRONMENT_SCOPE_QUERY}`);
       return;
     }
+    // The Studio area creates into its own package.
+    if (host?.packageId) {
+      navigate(`./new${pkgSuffix}`);
+      return;
+    }
     const bases = projectPackages ?? [];
+    // The cross-package leg creates into the package Setup's list would pick;
+    // the area then opens that package's create (`areaLocationRedirect`).
+    if (allLeg) {
+      const pick = pickedPackage ?? bases[0]?.id;
+      if (pick) navigate(`./new?package=${encodeURIComponent(pick)}`);
+      else if (projectPackages !== null) setShowCreateBase(true);
+      return;
+    }
     if (projectPackages !== null && bases.length === 0) {
       setShowCreateBase(true);
       return;
@@ -379,7 +413,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       return;
     }
     navigate(`./new${pkgSuffix}`);
-  }, [projectPackages, activePackage, pkgSuffix, navigate, envScope]);
+  }, [projectPackages, activePackage, pickedPackage, pkgSuffix, navigate, envScope, host?.packageId, allLeg]);
 
   // objectui#7611 — the activation state the switch column shows. Re-read on
   // the list's own refresh, never on an unrelated render. The anchors arrive
@@ -525,8 +559,9 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
         // Per-type hide hook (e.g. `view` drops the bare aggregated
         // container the framework keeps for runtime dual-read).
         if (config.listFilter && !config.listFilter(row.item)) return false;
-        // objectui#7611 — the environment scope is the whole registry list.
-        if (envScope) return true;
+        // objectui#7611 — the environment scope is the whole registry list,
+        // and so is the area's cross-package leg (objectstack#29566).
+        if (envScope || allLeg) return true;
         // Mandatory project-package scope: show nothing until a concrete
         // project package is active, then only rows tagged with it. The
         // 'sys_metadata' sentinel and untagged rows never match.
@@ -535,15 +570,45 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
         // Only rows tagged with the active writable base match. Untagged /
         // `sys_metadata`-provenance legacy rows have no scope of their own
         // (ADR-0070 D5 — the package-less "Local / Custom" scope is removed).
-        return pkg === activePackage;
+        // Under the area a base's list also holds its pair's items (ADR-0146 D3).
+        return pkg === activePackage || (pairId !== null && pkg === pairId);
       }),
-    [items, activePackage, config, envScope],
+    [items, activePackage, config, envScope, allLeg, pairId],
   );
+
+  // The customization mark of each row, from the base's served read only.
+  const markPrimaryKey = config.primaryKey ?? 'name';
+  const markMemberField = config.bundleMemberField;
+  const markOf = React.useCallback(
+    (row: ItemRow): CustomizationMarkKind | null => {
+      if (customizations.status !== 'read') return null;
+      return customizationMarkOf(
+        {
+          type,
+          name: String(row.item[markPrimaryKey] ?? ''),
+          member: bundleMemberOf(row.item, markMemberField),
+          packageId: (row.item as { _packageId?: string })._packageId,
+        },
+        customizations.index,
+      );
+    },
+    [customizations, markPrimaryKey, markMemberField, type],
+  );
+  const markedCount = React.useMemo(
+    () => scopedItems.filter((row) => markOf(row) !== null).length,
+    [scopedItems, markOf],
+  );
+  // The filter is offered once the read has answered and the base has a
+  // customization to show; a base with no pair is unchanged.
+  const showCustomizedFilter =
+    customizations.status === 'read' && (markedCount > 0 || customizationTotal(customizations.read) > 0);
+  const filteringCustomized = onlyCustomized && showCustomizedFilter;
 
   // User-driven filters (search query + source provenance) on top of scope.
   const filtered = scopedItems.filter((row) => {
     if (!matchesQuery(row.item, query, searchableFields)) return false;
     if (sourceFilter !== 'all' && row.source !== sourceFilter) return false;
+    if (filteringCustomized && markOf(row) === null) return false;
     if (activation && statusFilter !== 'all') {
       // Only a KNOWN state filters: while the ledger is unread or unreadable,
       // no item is either active or inactive to this filter.
@@ -599,14 +664,14 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   const typeWritable = !!(entry?.allowEnvironmentOverlay || entry?.allowRuntimeCreate);
   // A declaration-only catalog is never authored here: its items are created
   // on the authored object's page.
-  const canCreate = typeWritable && !walled && (!envScope || canAuthor) && !authoredObject;
+  const canCreate = typeWritable && !walled && (!envScope || canAuthor) && !authoredObject && !host?.readOnly;
   // The wall is the gate to NAME only where the type would otherwise admit a
   // write: a type with no runtime write channel is read-only for the operator
   // too, and its page says nothing about the wall.
   const walledDeciding = walled && typeWritable;
-  // Packages load only for the package scope; the environment scope never
-  // waits on them.
-  const packagesPending = !envScope && projectPackages === null;
+  // Packages load only for the package scope; the environment scope and the
+  // area never wait on them.
+  const packagesPending = !envScope && !host && projectPackages === null;
 
   // Localise default column labels — registered columns keep their
   // hand-authored labels (consumers may want bespoke wording).
@@ -706,7 +771,24 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
               </SelectContent>
             </Select>
           )}
+          {showCustomizedFilter && (
+            <Button
+              size="sm"
+              variant={filteringCustomized ? 'default' : 'outline'}
+              className={inSetup ? 'h-8 rounded-full px-3 text-xs' : undefined}
+              aria-pressed={filteringCustomized}
+              onClick={() => setOnlyCustomized((v) => !v)}
+              data-testid="metadata-only-customizations"
+            >
+              {tFormat('engine.list.customizations.only', locale, { marked: markedCount })}
+            </Button>
+          )}
         </div>
+        {customizations.status === 'failed' && (
+          <div className="text-xs text-muted-foreground" data-testid="metadata-customizations-failed">
+            {tFormat('engine.customizationMark.readFailed', locale, { message: customizations.message })}
+          </div>
+        )}
 
         {/* objectui#7611 — the environment scope says WHY a caller cannot
             define here, in the posture's own terms (#22621 → A): under
@@ -784,7 +866,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
             {error}
           </div>
         )}
-        {!loading && !error && !envScope && projectPackages !== null && projectPackages.length === 0 && (
+        {!loading && !error && !envScope && !host && projectPackages !== null && projectPackages.length === 0 && (
           <Empty>
             <EmptyTitle>No project packages installed</EmptyTitle>
             <EmptyDescription>
@@ -793,7 +875,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
             </EmptyDescription>
           </Empty>
         )}
-        {!loading && !error && !packagesPending && (envScope || (projectPackages?.length ?? 0) > 0) && filtered.length === 0 && (
+        {!loading && !error && !packagesPending && (envScope || !!host || (projectPackages?.length ?? 0) > 0) && filtered.length === 0 && (
           <Empty>
             <EmptyTitle>
               {scopedItems.length === 0
@@ -911,6 +993,22 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
                     rowEditSuffix,
                     rowMember ? `${BUNDLE_MEMBER_PARAM}=${encodeURIComponent(rowMember)}` : '',
                   )}`;
+                  // ADR-0146 D3 — the row's customization mark: under a base,
+                  // from its served read; in the cross-package leg, an item of a
+                  // pair names its base.
+                  const mark = markOf(row);
+                  const pairBase = host && host.packageId === null ? customizationBaseOfRow(rowPkg) : null;
+                  const markNode =
+                    mark && customizations.status === 'read' ? (
+                      <CustomizationMark
+                        kind={mark}
+                        baseName={customizations.baseName}
+                        pairId={customizations.index.pairId}
+                        locale={locale}
+                      />
+                    ) : pairBase ? (
+                      <CustomizationMark kind="customizationOf" baseName={pairBase} pairId={rowPkg} locale={locale} />
+                    ) : null;
                   return (
                     <tr
                       key={name + i}
@@ -972,6 +1070,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
                                     {cell}
                                   </Link>
                                 )}
+                                {markNode}
                               </span>
                             ) : inSetup && c.key === 'description' && typeof value === 'string' && value !== '' ? (
                               // objectstack#27356 — two lines at most, so a row
@@ -1179,133 +1278,6 @@ const HEAD_ROW_TINT = '[--os-row-tint:color-mix(in_oklab,var(--color-muted)_30%,
 const INVALID_ROW_TINT = '[--os-row-tint:color-mix(in_oklab,var(--color-destructive)_4%,transparent)]';
 const WARN_ROW_TINT = '[--os-row-tint:color-mix(in_oklab,var(--color-amber-500)_5%,transparent)]';
 const HOVER_ROW_TINT = 'hover:[--os-row-tint:color-mix(in_oklab,var(--color-accent)_50%,transparent)]';
-
-/**
- * objectui#13338 — the confirm a permission set's or a position's switch asks
- * before it switches the item OFF, naming how many users lose the access. The
- * count is the server's, read when the confirm opens; while it is read the
- * confirm says so and its Deactivate waits. A count that could not be read is
- * said as such (never as "0 users"), and the admin may still go ahead: the
- * confirm informs, it does not gate. Cancel leaves the item on.
- */
-function DeactivateConfirmDialog({
-  pending,
-  locale,
-  onCancel,
-  onConfirm,
-}: {
-  pending: { name: string; label: string; holders: CatalogHolderCount | { error: string } | null } | null;
-  locale: string;
-  onCancel: () => void;
-  onConfirm: (name: string) => void;
-}) {
-  const holders = pending?.holders ?? null;
-  let impact: string;
-  if (holders === null) impact = t('engine.catalog.deactivate.counting', locale);
-  else if ('error' in holders) impact = tFormat('engine.catalog.deactivate.countFailed', locale, { message: holders.error });
-  else if (holders.everyone) impact = t('engine.catalog.deactivate.everyone', locale);
-  else if (holders.truncated) impact = tFormat('engine.catalog.deactivate.holdersAtLeast', locale, { count: holders.count });
-  else if (holders.count === 1) impact = t('engine.catalog.deactivate.holdersOne', locale);
-  else impact = tFormat('engine.catalog.deactivate.holders', locale, { count: holders.count });
-  return (
-    <AlertDialog
-      open={pending !== null}
-      onOpenChange={(open) => {
-        if (!open) onCancel();
-      }}
-    >
-      <AlertDialogContent data-testid="catalog-deactivate-dialog">
-        <AlertDialogHeader>
-          <AlertDialogTitle>
-            {tFormat('engine.catalog.deactivate.title', locale, { name: pending?.label ?? '' })}
-          </AlertDialogTitle>
-          <AlertDialogDescription data-testid="catalog-deactivate-impact">{impact}</AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel data-testid="catalog-deactivate-cancel">{t('engine.cancel', locale)}</AlertDialogCancel>
-          <AlertDialogAction
-            className={buttonVariants({ variant: 'destructive' })}
-            disabled={holders === null}
-            data-testid="catalog-deactivate-confirm"
-            onClick={() => {
-              if (pending) onConfirm(pending.name);
-            }}
-          >
-            {t('engine.catalog.deactivate.confirm', locale)}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-}
-
-/** The activation ledger's states for a type, and the names its door refuses. */
-interface CatalogLedger {
-  states: CatalogActivation;
-  anchors: ReadonlySet<string>;
-}
-
-/**
- * objectui#7611 — one item's active switch in the environment scope, showing
- * the activation ledger's state (see `catalog-activation.ts`). Its non-switch
- * states are each said, never rendered as a guessed "on": the state is still
- * loading, or the read failed (said in words, with the server's reason). An audience anchor shows its state on a
- * disabled switch with the reason, because the door refuses to switch it.
- */
-function CatalogActiveCell({
-  itemName,
-  ledger,
-  refusal,
-  canSwitch,
-  busy,
-  locale,
-  onToggle,
-}: {
-  itemName: string;
-  ledger: CatalogLedger | 'error' | null;
-  /** Why the read failed: the server's refusal, as `actionErrorDetail` read it. */
-  refusal: string | null;
-  canSwitch: boolean;
-  busy: boolean;
-  locale: string;
-  onToggle: (itemName: string, enabled: boolean) => void;
-}) {
-  if (ledger === null) return <span className="text-xs text-muted-foreground">…</span>;
-  if (ledger === 'error') {
-    // objectui#13091 — said in plain words, never a bare "?"; the server's
-    // own sentence for why rides in the title.
-    const why = [t('engine.catalog.active.unknown', locale), refusal].filter(Boolean).join(' ');
-    return (
-      <span
-        className="text-xs text-muted-foreground whitespace-nowrap"
-        title={why}
-        data-testid={`catalog-active-unreadable-${itemName}`}
-      >
-        {t('engine.catalog.active.notVisible', locale)}
-      </span>
-    );
-  }
-  const enabled = isCatalogItemActive(ledger.states, itemName);
-  const anchor = ledger.anchors.has(itemName);
-  // A switch the caller cannot use states the state, and offers no click; the
-  // page's read-only reason says why.
-  const label = anchor
-    ? t('engine.catalog.active.anchor', locale)
-    : canSwitch
-      ? t(enabled ? 'engine.catalog.active.on' : 'engine.catalog.active.off', locale)
-      : t(enabled ? 'engine.catalog.status.active' : 'engine.catalog.status.inactive', locale);
-  return (
-    <span className="inline-flex" title={label}>
-      <Switch
-        checked={enabled}
-        disabled={anchor || !canSwitch || busy}
-        onCheckedChange={() => onToggle(itemName, enabled)}
-        aria-label={label}
-        data-testid={`catalog-active-${itemName}`}
-      />
-    </span>
-  );
-}
 
 /**
  * The whole row opens its item (objectstack#25333), the way a record list's

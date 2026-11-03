@@ -67,6 +67,16 @@
         "types": "./dist/view-container-name.d.cts",
         "default": "./dist/view-container-name.cjs"
       }
+    },
+    "./picklist-references": {
+      "import": {
+        "types": "./dist/picklist-references.d.ts",
+        "default": "./dist/picklist-references.js"
+      },
+      "require": {
+        "types": "./dist/picklist-references.d.cts",
+        "default": "./dist/picklist-references.cjs"
+      }
     }
   },
   "files": [

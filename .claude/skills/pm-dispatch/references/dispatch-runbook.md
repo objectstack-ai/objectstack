@@ -36,13 +36,13 @@
 - 写序:标签翻转只在认领评论写成功之后,两笔不原子。
 - 评论失败而标签已翻即制造一记真半状态;顺序反了就带重试义务,重试未成即回滚标签。
 
-## 巡查常设项(每项目巡查与总监席摘要)
+## 巡查常设项(每席巡查与总监席摘要)
 
 - 座位贴活性归总监席摘要:扫 `label:pm:seat` 挂 `🟢 <github-login>` 的贴,Routine 席读调度器。
 - 判据只认在任者自有产出(评论、认领、改正文)及其作者与时间戳,⛔ 收到的通知不算。
 - >24h 无自有产出 ⇒ 当场降级:改 `⏳ vacant` + 摘 assignee 同笔 + 证据评论(时间戳与链接)。
-- 跨账户复审:每项目巡查跑 `is:pr is:open label:needs:contract-review`,剔除本账户署名的 PR。
-- 复核前在 PR 留 `Claim:` 形评论(会话、账户);已有他账户的认领即跳过,⛔ 不双做。
+- 跨账户复审:每席巡查跑 `is:pr is:open label:needs:contract-review`,剔除本账户署名的 PR。
+- 复核前在 PR 留 `Claim:` 形评论(会话、账户);已有他席认领即跳过(同账户亦然),⛔ 不双做。
 - 复核照 `contract-review.md`;PASS 同笔摘标记、FAIL 不摘;总监席摘要列等候逾 24h 的 PR。
 - 车道巡查同跑:hold/closed 解锁重验回队;本仓无卡 fork PR 按 `external-contributions.md` 立卡。
 

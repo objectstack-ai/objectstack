@@ -218,6 +218,16 @@ const CALLERS: Record<string, Classification> = {
       "serves nothing of the target — the expanded read itself is the engine's `expandRelatedRecords`. Pinned by " +
       '`packages/objectql/src/credential-evaluation-guard.test.ts` (the expand refusals assert the driver was never asked)',
   },
+  // The `internal: true` evaluate refusal's expand half (QueryEvaluationGate).
+  'packages/objectql/src/internal-field-evaluation-guard.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "names the object an `expand` entry the caller wrote targets, only to read that object's DECLARED `internal: true` " +
+      'fields from the registry and refuse (`INVALID_FIELD` / 400) a filter or sort key on one; it reads no record and ' +
+      "serves nothing of the target. A door's own exposure question runs first at each hop, through the gate's " +
+      '`beforeRelationTarget` hook (the data door hands it `refuseUnservedRelationTarget`). Pinned by ' +
+      '`packages/objectql/src/internal-field-evaluation-guard.test.ts` (the refusals assert the driver was never asked)',
+  },
   // [#25522 cut 10] The write-path reference check, moved out of engine.ts.
   'packages/objectql/src/engine-referential-integrity.ts': {
     kind: 'not-a-served-read',

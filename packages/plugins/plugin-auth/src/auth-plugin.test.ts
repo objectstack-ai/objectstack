@@ -2040,14 +2040,23 @@ describe('AuthPlugin', () => {
       };
     };
 
-    /** Boot the plugin against a context whose `cache` resolution is under test control. */
+    /**
+     * Boot the plugin against a context whose `cache` resolution is under test
+     * control — through the accessor a plugin context really carries: the
+     * kernel `getKernel()` hands out, whose `getServiceAsync` answers value and
+     * factory registrations alike. (A `getServiceAsync` stubbed on the context
+     * itself is a member no kernel provides; this suite used to stub exactly
+     * that, and passed while production never reached the cache.)
+     */
     const bootWith = async (resolveCache: () => Promise<unknown>) => {
       const ctx = {
         ...mockContext,
-        getServiceAsync: vi.fn(async (name: string) => {
-          if (name === 'cache') return await resolveCache();
-          return undefined;
-        }),
+        getKernel: vi.fn(() => ({
+          getServiceAsync: vi.fn(async (name: string) => {
+            if (name === 'cache') return await resolveCache();
+            return undefined;
+          }),
+        })),
       } as unknown as PluginContext;
       const plugin = new AuthPlugin({
         secret: 'test-secret-at-least-32-chars-long',
@@ -2103,7 +2112,7 @@ describe('AuthPlugin', () => {
     it('leaves the counters to better-auth when the host supplies its own secondaryStorage', async () => {
       const ctx = {
         ...mockContext,
-        getServiceAsync: vi.fn(async () => undefined),
+        getKernel: vi.fn(() => ({ getServiceAsync: vi.fn(async () => undefined) })),
       } as unknown as PluginContext;
       const plugin = new AuthPlugin({
         secret: 'test-secret-at-least-32-chars-long',

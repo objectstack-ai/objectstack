@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: fifteen in-process os doctor runs, one per NODE_ENV value, project shape and flag, each shelling out to pnpm -v, tsc -v and git --version and bundling its own config, the first also paying the cold config-loader load; the twenty-one row-builder cases are pure; slowest CI reading 11.4 s (run 41271604267) of the five scheduled CI runs 41199450735, 41217827347, 41237094739, 41255489006, 41271604267, x 1.25, rounded up
 
 /**
  * `os doctor`'s unset-`NODE_ENV` row (#5673).

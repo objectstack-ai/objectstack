@@ -354,6 +354,17 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'record',
     why: "planned, not yet rendered — the binding's one-row query is validated at parse and refused on every page that is not `type: 'app'`, but no renderer mounts it as the page's `record` until the console's page-root binding lands. A form control offered today would let an author bind a row no predicate can read yet",
   },
+  // #28979 — a record page's app scope landed spec-first the same way and is
+  // `live` since the console's page assignment reads the route's app. The
+  // form offer was decided with the enforcement: not offered yet, for the
+  // reason below.
+  {
+    kind: 'omit',
+    type: 'page',
+    path: ROOT_PATH,
+    key: 'apps',
+    why: "live, not offered in this form — the console opens the scoped page inside each app the list names (the page assignment reads the route's app), but no registered form widget spells a list of app names: there is no app picker, and a free-text list would let an author type a package id or a label where an app name is required, which the parse refuses only after the fact. Authored in source or the page JSON until an app-name picker exists",
+  },
   // #28022 — an app's per-audience landing list lands spec-first the same way:
   // `planned` in the liveness ledger, read by no console until the landing
   // redirect card. Offering it in the app form first would be the UI half of
@@ -396,6 +407,7 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'pressed',
     why: "planned, not yet rendered — the reader's pressed-state predicate is validated at parse (CEL only, no boolean literal) and judged at the authoring doors in the `record` scope, but no action surface draws the pressed face until the console's header buttons read it. A form control offered today would let an author write a predicate nothing shows",
   },
+
   // #27945 — a lookup's pick autofill lands spec-first the same way: `planned`
   // in the liveness ledger, read by no form or grid until the ui card's lookup
   // widget writes the declared targets on pick.
@@ -443,13 +455,6 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     path: ROOT_PATH,
     key: 'titleFormat',
     why: "`[DEPRECATED → nameField (ADR-0079)]` render-only title template the server cannot return or query, deliberately not offered to new authors; its own describe prescribes the migration — a single-field title to `nameField`, a composite title that import, sort or search must match to a stored computed field (a non-formula field with an `expression`) designated as `nameField`, a text formula staying legal for display only — and every target is authorable",
-  },
-  {
-    kind: 'omit',
-    type: 'view',
-    path: ROOT_PATH,
-    key: 'drawerWidth',
-    why: '`[DEPRECATED → size buckets]` pixel drawer width, deliberately not offered to new authors: a pixel width cannot be chosen without knowing the client viewport, so the renderer derives it from the size bucket',
   },
   {
     kind: 'omit',

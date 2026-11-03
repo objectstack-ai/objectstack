@@ -18,7 +18,7 @@
  *
  * Integration tier: it spawns the source CLI (`packages/cli/vitest-tiers.ts`).
  * Two spawns, one per fixture. The CLI runs through `bin/run-dev.js` (source,
- * via tsx), and `@objectstack/spec` resolves through `exports` to `dist/`.
+ * spawned by this process's own `node`), and `@objectstack/spec` resolves through `exports` to `dist/`.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -31,8 +31,13 @@ import { childEnv } from './helpers/serve-process.js';
 import { writeDefineStackConfig } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
+/**
+ * Spawned by this process's own `node`, not through the `tsx` binary: the entry, its
+ * `src/` and its pinned `NODE_ENV=development` are the same either way, and the
+ * `.bin/tsx` launcher only adds a second node process in front of the CLI, about half
+ * of every spawn's wall (#23181).
+ */
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 /** A service module contributing `nav_case` into an app another package owns. */
 const stackOf = (navCase: Record<string, string>) => ({
@@ -77,7 +82,7 @@ interface Run {
 function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...args],
       { cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {

@@ -13,12 +13,12 @@
 
 ## Summary
 
-147 records under `docs/adr/` (142 numbers), 11 under `ui/docs/adr/` (listed separately below).
+148 records under `docs/adr/` (143 numbers), 11 under `ui/docs/adr/` (listed separately below).
 
 | Status | Records |
 |---|---|
 | Accepted | 129 |
-| Proposed | 4 |
+| Proposed | 5 |
 | Superseded | 4 |
 | Draft | 3 |
 | Deferred | 2 |
@@ -26,7 +26,7 @@
 | Amended | 1 |
 | Partially implemented | 1 |
 | Revised | 1 |
-| **Total** | **147** |
+| **Total** | **148** |
 
 ## Shared numbers
 
@@ -117,7 +117,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0044](./0044-approval-send-back-for-revision.md) | Flow-level send-back-for-revision — `revise` branch + typed back-edge re-entry | Accepted — engine + model implemented; designer pending (objectui) (propos… | 2026-06-12 | — | — |
 | [ADR-0045](./0045-additive-materialization-and-visibility-gate.md) | Additive materialization with a visibility gate — drafts narrow to mutations | Accepted — 2026-06-12 · Amended 2026-08-09 (#4829, maintainer ruling 2026-… | 2026-06-12 | — | — |
 | [ADR-0046](./0046-package-docs-as-metadata.md) | Package documentation as metadata — flat `src/docs/.md` compiled into the manifest | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 2; proposed 2… | 2026-10-28 | — | — |
-| [ADR-0047](./0047-object-ui-run-modes.md) | Two run modes for object UI — data views vs interface pages, user filters, and runtime visualization choice | Accepted — 2026-06-12; revised 2026-06-19 — framework scope implemented (`… | 2026-06-12 | — | — |
+| [ADR-0047](./0047-object-ui-run-modes.md) | Two run modes for object UI — data views vs interface pages, user filters, and runtime visualization choice | Accepted — 2026-06-12; revised 2026-06-19; amended 2026-11-02, interface-p… | 2026-06-12 | — | — |
 | [ADR-0048](./0048-cross-package-metadata-collision.md) | Cross-package metadata collision — package-id identity, namespace install gate, package-scoped resolution | Revised — 2026-06-13 — supersedes the original per-item collision detecti… | 2026-06-13 | — | ADR-0146 |
 | [ADR-0049](./0049-no-unenforced-security-properties.md) | Spec must not declare security properties the runtime does not enforce (enforce-or-remove gate) | Accepted — 2026-06-15 — implemented: fail-closed `DESTRUCTIVEOPERATIONS` (… | 2026-06-15 | — | — |
 | [ADR-0050](./0050-form-layout-vs-presentation.md) | Form layout vs presentation — split the overloaded `FormView.type` | Proposed — 2026-06-15 · Amended (2026-10-20, letter B′ on #24692, ruling r… | 2026-06-15 | — | — |
@@ -214,6 +214,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0144](./0144-multi-currency-record-currency-dated-rates-write-time-home-projection.md) | Multi-currency — a record currency in a sibling code field, dated exchange rates, and a home-currency amount… | Accepted — 2026-10-28, ruled on objectstack#27119 (ruling `6465431966`, de… | 2026-10-28 | — | — |
 | [ADR-0145](./0145-ui-deprecation-tombstones-retire-on-the-spec-window.md) | A `?: never` tombstone on the ui authoring face retires on the spec's own window — one major after the retire… | Accepted — 2026-10-28, #27251 · Amended (2026-10-28, #27291 — one clause e… | 2026-10-28 | — | — |
 | [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md) | Package-level override — every customization of an installed package lives in its paired `.custom` package, t… | Accepted — 2026-10-31 — rewritten in place from the Proposed draft of 2026… | 2026-10-31 | ADR-0126, ADR-0131, ADR-0005, ADR-0048, ADR-0141, ADR-0070 | — |
+| [ADR-0147](./0147-membership-scoped-rls-lowers-to-an-engine-internal-org-member-semi-join-leaf.md) | Membership-scoped RLS (`FIELD in currentuser.orguserids`) lowers to an engine-internal organization-member se… | Proposed — 2026-11-02. `docs/adr/` is Tier H (Prime Directive #14): the re… | 2026-11-02 | — | — |
 
 ## ObjectUI registry — `ui/docs/adr/` (`ui-` prefix)
 

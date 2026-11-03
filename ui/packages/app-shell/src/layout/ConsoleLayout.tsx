@@ -30,6 +30,8 @@ import { ConsoleNotificationBanners } from './ConsoleNotificationBanners.js';
 import { UnifiedSidebar } from './UnifiedSidebar.js';
 import { AppHeader } from './AppHeader.js';
 import { useResponsiveSidebar } from '../hooks/useResponsiveSidebar.js';
+import { usePhoneNavDrawerHistory } from './usePhoneNavDrawerHistory.js';
+import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 import { primeConsoleSidebarOpen } from './consoleSidebarRail.js';
 import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
@@ -118,9 +120,19 @@ function SkipToContentLink({ targetRef }: { targetRef: React.RefObject<HTMLDivEl
   );
 }
 
+/**
+ * Is `pathname` a record page, the console route `RecordDetailView` draws:
+ * `/apps/APP/OBJECT/record/ID`, or the same record on a named record page
+ * (`.../page/PAGE`)? The record's edit form (`.../edit`) is not one.
+ */
+export function isRecordPagePath(pathname: string): boolean {
+  return /^\/apps\/[^/]+\/[^/]+\/record\/[^/]+(?:\/page\/[^/]+)?\/?$/.test(pathname);
+}
+
 /** Inner component that can access SidebarProvider context */
 function ConsoleLayoutInner({ children }: { children: React.ReactNode }) {
   useResponsiveSidebar();
+  usePhoneNavDrawerHistory();
   useAdvertiseShortcut(TOGGLE_SIDEBAR_SHORTCUT);
   return <>{children}</>;
 }
@@ -167,6 +179,14 @@ export function ConsoleLayout({
   // rail's `hidden md:` classes alone) decides which one MOUNTS, so the phone
   // never pays for an invisible rail's chat graph.
   const isMobile = useIsMobile();
+  // objectstack#28483 (ruling letter A) — on a phone a record page has one
+  // bar, its own top bar (「‹ <object plural>」 and the stepper), so the app
+  // bar is not mounted there. The app menu, search, notifications and account
+  // stay on every other route, one 「‹」 away. From 768 px up every route keeps
+  // the app bar. The width is read synchronously, at the breakpoint the record
+  // page draws its phone face at, so the two never disagree for a frame.
+  const phone = usePhoneViewport();
+  const recordPageOwnsTopBar = phone && isRecordPagePath(location.pathname);
   // "/ai = the dock maximized": record where we maximized FROM at click time,
   // so the page's collapse-to-dock returns exactly here (history-back could
   // land on a prior /ai URL after in-page conversation switches).
@@ -221,6 +241,7 @@ export function ConsoleLayout({
            railOverlay
          />
       }
+      showHeader={!recordPageOwnsTopBar}
       navbar={
           <AppHeader
             variant="app"

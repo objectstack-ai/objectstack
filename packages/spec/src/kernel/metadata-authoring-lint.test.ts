@@ -81,15 +81,23 @@ describe('coverage derivation (no third hand-written list)', () => {
     // rather than the campaign advancing. See the block below — `view` moves
     // into the excluded list, `connectors` is the honest remainder, and the
     // count stays 1 because the number was never counting what it claimed to.
-    expect(lintables.length).toBeGreaterThanOrEqual(1);
-    // `connectors` is the LAST open root. When it closes, this layer has
-    // nothing left to warn about at a ROOT. That is the campaign finishing, not
-    // the lint breaking. At that point change the floor to 0 and assert the
-    // empty set DELIBERATELY — do not delete this test, because an empty result
-    // that nobody chose is indistinguishable from a derivation that broke.
-    for (const expected of ['connector']) {
-      expect(lintableTypes, `expected '${expected}' to be lint-covered`).toContain(expected);
-    }
+    // `connectors` was the LAST open root, and it closed: an authored connector
+    // entry refuses an undeclared top-level key at the parse
+    // (`integration/connector-entry-undeclared-keys.test.ts`). So this layer
+    // has nothing left to warn about at a ROOT — the campaign finishing, not
+    // the lint breaking — and the floor is 0, asserted as the empty set
+    // DELIBERATELY. The departed root was confirmed REJECTED by the parse
+    // before the number moved, the check this list asks of every shrink, and
+    // it is asserted here so a walk that broke cannot pass in its place.
+    expect(lintables).toEqual([]);
+    expect(lintableTypes.has('connector')).toBe(false);
+    const departed = ObjectStackDefinitionSchema.safeParse({ connectors: [{ name: 'c', label: 'C', type: 'api', zzz: 1 }] });
+    expect(departed.success, 'the departed connector root is REJECTED by the parse').toBe(false);
+    expect(JSON.stringify(departed.success ? [] : departed.error.issues)).toContain('"keys":["zzz"]');
+    expect(
+      ObjectStackDefinitionSchema.safeParse({ connectors: [{ name: 'c', label: 'C', type: 'api' }] }).success,
+      'control: the entry without the key parses',
+    ).toBe(true);
   });
 
   it('reads posture from the schema the PARSE applies, not the type registry', () => {
@@ -252,13 +260,15 @@ describe('the object/field unknown-key warnings survive the generalization', () 
     // broken walk cannot hide behind the same empty result).
     //
     // The open-collection fixture was `views` until #10039 established that the
-    // parse had been REFUSING those keys all along; `connectors` is the honest
-    // remainder, and it is carried here alongside two closed collections so the
-    // "must not contaminate" property still has something to be true about.
+    // parse had been REFUSING those keys all along, then `connectors` until its
+    // root closed too. No open ROOT is left, so the open half is now a nested
+    // strip site under a closed root — `connectors[].retryConfig`, which the
+    // walk still visits per node — carried alongside two closed collections so
+    // the "must not contaminate" property still has something to be true about.
     const findings = lintAuthoring({
       objects: [{ name: 'a', label: 'A', indexes: [{ fields: ['a'], zzz: 1 }] }],
       views: [{ name: 'v', object: 'a', zzz: 1 }],
-      connectors: [{ name: 'c', zzz: 1 }],
+      connectors: [{ name: 'c', retryConfig: { zzz: 1 } }],
     });
     // NOT deduped. This assertion used to run through a `new Set(...)` because
     // the walk emitted every union-root finding twice (#10039) — a mask over a
@@ -266,7 +276,7 @@ describe('the object/field unknown-key warnings survive the generalization', () 
     // is asserted now, so a re-introduced duplicate fails here rather than
     // being absorbed on the way to the assertion.
     expect(findings.map((f) => `${f.surface}:${f.path}`).sort()).toEqual([
-      'connector:connectors.c.zzz',
+      'connector:connectors.c.retryConfig.zzz',
     ]);
     // The hand-off half for the view fixture: not unreported — rejected, by the
     // strict container that made the old warning a contradiction.
@@ -595,13 +605,15 @@ describe('one voice, and a single report per record', () => {
     // The key is unique to this test: `warnedUnknownAuthoringKeys` is a
     // MODULE-level set, so a path any other test already warned on would make
     // this one read zero warnings and pass vacuously.
+    // A nested strip site (`retryConfig`) since the connector root closed —
+    // see 'reports across collections in one walk' above.
     const connectorStack = {
       manifest: { ...MANIFEST, id: 'com.example.connectors' },
-      connectors: [{ name: 'c1', zzz_once_probe_key: 1 }],
+      connectors: [{ name: 'c1', retryConfig: { zzz_once_probe_key: 1 } }],
     };
     const findings = lintAuthoring(connectorStack);
     expect(findings.map((f) => `${f.surface}:${f.path}`)).toEqual([
-      'connector:connectors.c1.zzz_once_probe_key',
+      'connector:connectors.c1.retryConfig.zzz_once_probe_key',
     ]);
 
     const warned: string[] = [];

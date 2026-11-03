@@ -69,8 +69,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ExpressionEvaluator } from '@object-ui/core';
 import {
   UNRESOLVABLE_VISIBILITY_PREFIX,
-  __resetVisibilityPredicateWarnings,
 } from '@object-ui/react';
+import { __resetVisibilityPredicateWarnings } from '../../../react/src/utils/visibilityDiagnostic';
 import { hasVisibleNavigationItems } from '@object-ui/layout';
 import { buildExpressionScope, evaluateVisibility } from './ExpressionProvider';
 

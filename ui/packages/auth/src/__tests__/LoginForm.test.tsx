@@ -118,19 +118,21 @@ describe('LoginForm — SSO-only (enforced) mode', () => {
       registerUrl: '/register',
     });
 
-    // The break-glass link appears (federated buttons are the path)…
+    // The break-glass link appears beside the SSO path itself…
     await screen.findByRole('button', BREAK_GLASS);
-    // …the local password form is hidden…
-    expect(screen.queryByLabelText('Email')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Sign in with SSO' })).toBeTruthy();
+    // …the local password field is hidden…
     expect(screen.queryByLabelText('Password')).toBeNull();
     // …and the sign-up link is hidden (no self-registration under enforced).
     expect(screen.queryByText('Sign up')).toBeNull();
   });
 
-  it('treats emailPassword.enabled === false as enforced (belt-and-suspenders)', async () => {
+  it('does not read emailPassword.enabled === false as enforcement: with no other door it says none exists', async () => {
+    // The full matrix lives in noSignInMethod-29159.test.tsx.
     renderLogin(createMockClient({ emailPassword: { enabled: false } }));
 
-    await screen.findByRole('button', BREAK_GLASS);
+    await screen.findByTestId('login-no-sign-in-method');
+    expect(screen.queryByRole('button', BREAK_GLASS)).toBeNull();
     expect(screen.queryByLabelText('Email')).toBeNull();
   });
 

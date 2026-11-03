@@ -15,5 +15,5 @@ What leaves, and what to write instead:
 
 - FROM `useCommentSearch` TO a `useMemo` over your own comment list that keeps the entries whose `text` or `author` contains the trimmed, lower-cased query.
 - FROM `CommentSearchConfig` TO `{ comments: CommentEntry[] }`, with `CommentEntry` from `@object-ui/types`.
-- FROM `CommentSearchReturn` TO the shape your own search state returns; the result rows can keep using `CommentSearchResult` from `@object-ui/types`.
+- FROM `CommentSearchReturn` TO the shape your own search state returns; type the result rows with a local interface, `{ comment: CommentEntry; objectName: string; recordId: string; highlight?: string }` (`CommentSearchResult` leaves `@object-ui/types` in the same release).
 - FROM `createPresenceUpdater` TO a `Map<string, PresenceUser>` keyed by `userId` that you update from your realtime channel, or `PresenceProvider` with `useTenantPresence` / `useRecordPresence`, which the package keeps exporting.

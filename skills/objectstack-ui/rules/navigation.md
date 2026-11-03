@@ -124,24 +124,19 @@ export const TaskWorkbenchPage = definePage({
 
 A record's create / edit / detail **presents itself adaptively**. You do **not**
 author the surface, the overlay width, or the column count — all three are derived
-at runtime from how heavy the record is + the client viewport, because an author
+at runtime from the client viewport, because an author
 (especially an AI) cannot know the client's screen. **Write the data (fields,
 `fieldGroups`); let the platform lay it out.**
 
-- **Surface.** A clicked record opens in a **drawer** that expands to the full
-  page (on mobile, a **page**); create/edit opens in a **modal** for a
-  field-heavy record, otherwise a drawer. Set `navigation.mode: 'page'` on the
-  list view only for an object whose record should open as a full page — or,
-  for bespoke layout, assign a record `Page`.
+- **Surface.** A clicked record opens in the **drawer**, which expands to the full
+  page; `page` only by declaration ([Record Page](./record-page.md) §5–6). Create /
+  edit opens in a **modal**, or the full-page route when the object declares `editMode: 'page'`.
 - **Field width.** **Omit it** (`auto` sizes by widget type × current columns —
   textarea / rich-text / file take the row). Both keys are valid: `colSpan`
   (1–4) is clamped to the current column count, grid-aligned at every width;
   `span: 'full'` resolves to the form grid's full column count, but the shipped
   renderer emits it at the widest tier only (a 3-column form: one cell of two
   in a modal).
-- **Overlay width.** Never author pixels. If you must nudge, use the **`size`**
-  bucket (`sm` | `md` | `lg` | `xl` | `full`) on `navigation`; the pixel
-  `width` / `drawerWidth` are deprecated.
 - **Column count.** Not authored. The form grid follows its **real rendered width**
   via container queries — the same form is 1 column in a narrow drawer and up to 4
   on a wide page. Author *grouping* with `fieldGroups` + `Field.group`.

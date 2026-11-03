@@ -563,7 +563,12 @@ export function versionNotFoundError(
  * the same request in different words. [#23495] And the per-item draft
  * publish (`publish`) and the draft discard (`delete`) that name no package,
  * whose draft address the protocol resolves as the draft save's
- * (`ObjectStackProtocolImplementation.packagelessDraftAddress`).
+ * (`ObjectStackProtocolImplementation.packagelessDraftAddress`). [#28337] And
+ * the layered view naming no package (`layered read`: `GET /meta/:type/:name/layers`
+ * and the deprecated `?layers=true`), which served one holder's overlay,
+ * picked silently, for the address these writes refuse: its door asks
+ * `ObjectStackProtocolImplementation.packagelessLayeredReadRefusal`, which
+ * answers this refusal over the same rows the direct save reads.
  *
  * A `sys_metadata` row is keyed `(org, type, name, package_id)`, so such a
  * write has no one row to write or remove. Before this refusal the save wrote
@@ -590,7 +595,7 @@ export function versionNotFoundError(
  * predicate.
  */
 export function packagelessAddressAmbiguityRefusal(
-  verb: 'save' | 'delete' | 'publish',
+  verb: 'save' | 'delete' | 'publish' | 'layered read',
   type: string,
   name: string,
   packageIds: readonly string[],
@@ -601,7 +606,9 @@ export function packagelessAddressAmbiguityRefusal(
     ? ['Nothing was written.', 'no single row to write']
     : verb === 'publish'
       ? ['Nothing was published.', 'no single draft to promote']
-      : ['Nothing was deleted.', 'no single row to remove'];
+      : verb === 'layered read'
+        ? ['Nothing was served.', 'no single row to show']
+        : ['Nothing was deleted.', 'no single row to remove'];
   const err = new Error(
     `Name the package this ${verb} is for, then send it again: on the REST door add ?package= with the package id, `
     + `in process pass packageId. ${nothing} ${type} '${name}' belongs to ${packageIds.length} packages `

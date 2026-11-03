@@ -80,7 +80,6 @@ import {
   requireBuiltCli,
   holdPort,
   KERNEL_ASSIGNED_PORT,
-  TSX,
   RUN_JS_RESOLVES_FROM_DIST,
 } from './helpers/serve-process.js';
 
@@ -299,7 +298,7 @@ describe('`os start` — every address it prints is the port it bound', () => {
         const output = await bootStart(
           {},
           ['--port', String(held.port)],
-          { exec: TSX, argv: [RUN_DEV_JS] },
+          { exec: process.execPath, argv: [RUN_DEV_JS] },
         );
 
         const readback = boundPortFromBanner(output);

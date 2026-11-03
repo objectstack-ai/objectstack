@@ -76,7 +76,7 @@ _N sites, M conversions. Ported into sources from `os migrate meta --out`._
 
 - [ ] `os migrate files-to-references` — media values only warn until it passes.
 - [ ] `os migrate value-shapes` — stored reference/JSON values unchecked until it passes.
-- [ ] `os migrate meta --stored --apply` — rows rehydrate correctly today; this makes it durable.
+- [ ] `os migrate meta --stored --apply` — before any release that drops their conversions.
 
 ## 5 · Not changed, and why
 

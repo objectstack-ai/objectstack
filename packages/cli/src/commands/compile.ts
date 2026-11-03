@@ -16,6 +16,7 @@ import {
 } from '@objectstack/spec';
 import { loadConfig, namedExportRejectionHints } from '../utils/config.js';
 import { collectSeedFiles, placeSeedFiles } from '../utils/bundle-seed-files.js';
+import { collectConnectorSpecFiles, placeConnectorSpecFiles } from '../utils/bundle-connector-spec-files.js';
 import { judgeSeedRecordValues } from '../utils/seed-record-values.js';
 import { refuseUnbuiltStack } from '../utils/stack-provenance-refusal.js';
 import { isExtractionRefusal, lowerCallables } from '../utils/lower-callables.js';
@@ -75,6 +76,17 @@ import { findViewContainerNameRefusals } from '../utils/view-container-names.js'
 // A field `picklist` that names no picklist the stack declares — the walk
 // `os validate` step 2d runs, over the same judge.
 import { judgePicklistReferences, picklistRefusalHeading, printPicklistReferenceNotices } from '../utils/picklist-references.js';
+// [ADR-0146 D2, #28643] The override write gate — the walk `os validate` step
+// 3a-iii runs, over the publish door's own judge (`judgeOverrideWrite`).
+import { findOverrideDeclarationRefusals } from '../utils/override-declarations.js';
+// [ADR-0146 D10, #28727] The `__c` extension-field reservation — the walk
+// `os validate` step 3a-iv runs, over the save and install doors' own judge
+// (`judgeExtensionFieldSuffix`).
+import { findExtensionFieldSuffixRefusals } from '../utils/extension-field-suffix.js';
+
+// [#29051] An undeclared top-level flow cycle — the walk `os validate` step
+// 3a-vii runs, over the automation engine's own judge.
+import { findFlowCycleRefusals } from '../utils/flow-undeclared-cycle.js';
 
 export default class Compile extends Command {
   static override description = 'Compile ObjectStack configuration to JSON artifact';
@@ -767,6 +779,93 @@ export default class Compile extends Command {
         );
       }
 
+      // 3b-iii. [ADR-0146 D2, #28643] The override write gate, at build time —
+      //     the SAME call `os validate` makes at its step 3a-iii, over the
+      //     walk `utils/override-declarations.ts` takes and the publish door's
+      //     own judge (`judgeOverrideWrite`). Only the base's paired
+      //     `<base>.custom` declares an override; a dependent's item bearing a
+      //     name a package in its closure ships, and an `overrides` declaration
+      //     the gate does not admit, are refused. Before this the build emitted
+      //     such an artifact and the managed install or a publish door refused
+      //     it later with the same judge; now the door that ships refuses it
+      //     and writes no artifact.
+      //
+      //     Beside the dependency-range check below and ahead of every artifact
+      //     write. The `--json` face is this command's failure envelope
+      //     (`errors`, the rows `os validate --json` carries); the text face is
+      //     `os validate`'s. No step line, as on `os validate`.
+      const overrideRefusals = findOverrideDeclarationRefusals(result.data as Record<string, unknown>);
+      if (overrideRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({ success: false, errors: overrideRefusals, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
+          this.exit(1);
+        }
+        const n = overrideRefusals.length;
+        console.log('');
+        printError(`The publish door would refuse ${n} item${n > 1 ? 's' : ''} under the override write gate (ADR-0146 D2)`);
+        printBulletList(
+          overrideRefusals.map((r) => `${r.path} [${r.code}] ${r.message}`),
+          { noun: 'override refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
+      }
+
+      // 3b-iii-bis. [ADR-0146 D10, #28727] The `__c` extension-field
+      //     reservation, at build time — the SAME call `os validate` makes at
+      //     its step 3a-iv, over the walk `utils/extension-field-suffix.ts`
+      //     takes and the save and install doors' own judge
+      //     (`judgeExtensionFieldSuffix`): a field spelled `__c` only in a
+      //     base's paired `.custom` package, and every
+      //     `objectExtensions[].fields` key of a `.custom` pair suffixed. Before
+      //     this the build emitted such an artifact and the marketplace install
+      //     or a save or publish door refused it later with the same judge; now
+      //     the door that ships refuses it and writes no artifact.
+      //
+      //     Beside the override gate above, ahead of every artifact write, with
+      //     the same two faces: this command's failure envelope under `--json`
+      //     (`errors`, the rows `os validate --json` carries), `os validate`'s
+      //     text otherwise.
+      const suffixRefusals = findExtensionFieldSuffixRefusals(result.data as Record<string, unknown>);
+      if (suffixRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({ success: false, errors: suffixRefusals, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
+          this.exit(1);
+        }
+        const n = suffixRefusals.length;
+        console.log('');
+        printError(`${n} field${n > 1 ? 's break' : ' breaks'} the \`__c\` extension-field reservation (ADR-0146 D10)`);
+        printBulletList(
+          suffixRefusals.map((r) => `${r.path} [${r.code}] ${r.message}`),
+          { noun: 'extension-field refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
+      }
+
+      // 3b-iii-ter. [#28893] Flow region shape (ADR-0031) is judged by the
+      //     rule table at step 3b since #29049 (`flow-region-shape-invalid`),
+      //     the same verdict `os validate` and `os lint` give.
+
+      // 3b-iii-quater. [#29051] An undeclared top-level flow cycle (ADR-0044),
+      //     at build time — the SAME call `os validate` makes at its step
+      //     3a-vii: the engine's registration judge (`findUndeclaredFlowCycle`).
+      //     Before this the build emitted a flow the engine then refused at
+      //     boot; now the door that ships refuses it and writes no artifact.
+      const cycleRefusals = findFlowCycleRefusals(result.data as Record<string, unknown>);
+      if (cycleRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({ success: false, errors: cycleRefusals, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
+          this.exit(1);
+        }
+        const n = cycleRefusals.length;
+        console.log('');
+        printError(`The automation engine would refuse to register ${n} flow${n > 1 ? 's' : ''} for a cycle no back edge declares (ADR-0044)`);
+        printBulletList(
+          cycleRefusals.map((r) => `${r.path} [${r.code}] ${r.message}`),
+          { noun: 'flow cycle refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
+      }
+
       // 3b-quater. ADR-0141 D2, author side — every `manifest.dependencies`
       //     range of the packages one install act would deliver, judged by the
       //     install's own predicate (`utils/dependency-range-check.ts`).
@@ -1120,6 +1219,30 @@ export default class Compile extends Command {
       placeSeedFiles(seedFiles);
       if (seedFiles.files > 0 && !flags.json) {
         printStep(`Bundling seed files... ${seedFiles.files} file${seedFiles.files === 1 ? '' : 's'} (${(seedFiles.bytes / 1024).toFixed(1)} KB)`);
+      }
+
+      // 4a-bis. The OpenAPI document a `provider: 'openapi'` connector names
+      //     by package-relative file (ADR-0097), read relative to the
+      //     directory holding the config and carried in the artifact as the
+      //     inline document. An installed artifact has no package directory —
+      //     the runtime it is installed into caches the JSON alone — so a
+      //     reference left as a path resolves against that runtime's own root
+      //     and names nothing. A path that names no file fails the build here
+      //     rather than the instance after install.
+      const connectorSpecs = collectConnectorSpecFiles(absolutePath, finalBundle);
+      if (connectorSpecs.issues.length > 0) {
+        if (flags.json) {
+          await emitJson({ success: false, error: 'connector spec file bundling failed', issues: connectorSpecs.issues, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
+          this.exit(1);
+        }
+        console.log('');
+        printError(`Connector spec file bundling failed (${connectorSpecs.issues.length} issue${connectorSpecs.issues.length > 1 ? 's' : ''})`);
+        for (const issue of connectorSpecs.issues) console.log(chalk.red(`  ✗ ${issue.location}: ${issue.message}`));
+        this.exit(1);
+      }
+      placeConnectorSpecFiles(connectorSpecs);
+      if (connectorSpecs.files > 0 && !flags.json) {
+        printStep(`Bundling connector spec files... ${connectorSpecs.files} document${connectorSpecs.files === 1 ? '' : 's'} (${(connectorSpecs.bytes / 1024).toFixed(1)} KB)`);
       }
 
       // 4b. Bundle handler functions into `<artifactDir>/objectstack-runtime.{hash}.mjs`

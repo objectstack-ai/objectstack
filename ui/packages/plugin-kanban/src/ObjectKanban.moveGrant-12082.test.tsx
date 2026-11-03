@@ -28,7 +28,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act, cleanup, waitFor } from '@testing-library/react';
 import { registerAllFields } from '@object-ui/fields';
 import { toast } from '@object-ui/components';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import type { DataSource, ObjectKanbanSchema } from '@object-ui/types';
 import { ObjectKanban } from './ObjectKanban';
 
@@ -88,11 +88,12 @@ const SHAPES: Array<{ shape: string; bits: Record<string, boolean>; update: bool
   { shape: 'full', bits: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: true }, update: true },
 ];
 
-const envelope = (bits: Record<string, unknown>): MePermissionsResponse => ({
+const envelope = (bits: Record<string, unknown>): MePermissionsAuthenticatedResponse => ({
   authenticated: true,
   userId: 'u-pin',
   tenantId: null,
-  roles: ['member'],
+  hasAnyQueue: false,
+  positions: ['member'],
   permissionSets: ['member'],
   objects: { [OBJECT]: bits as never },
   fields: {},

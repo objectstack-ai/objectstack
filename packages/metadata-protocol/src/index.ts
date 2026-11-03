@@ -31,6 +31,14 @@ export { SDUI_MANIFEST_SERVICE } from './runtime-authoring-gate.js';
 // "package author's own bootstrap channel", replacing the `environmentId ===
 // undefined` proxy the #4463 gate used to key its activation off.
 export type { MetadataAuthoringChannel } from './protocol.js';
+// [ADR-0146 D2, #28410] The override write gate's one rule, exported for the
+// two gate points outside this package — `os validate` and the marketplace
+// managed install — so all three doors ask one judgement and cannot drift.
+export { judgeOverrideWrite, overrideWriteIdentityOf, overrideWriteItemsOf, type OverrideWriteItem, type OverrideWriteSubject, type OverrideWriteClosure, type OverrideWriteRule, type OverrideWriteVerdict } from './protocol-packaged-base-refusal.js';
+// [ADR-0146 D10, #28564] The `__c` extension-field reservation's one judge,
+// exported for the doors outside this package — `os validate` and the
+// marketplace install — so every door that lets a field in asks one judgement.
+export { judgeExtensionFieldSuffix, extensionFieldSuffixRefusalError, objectBodyExtensionFieldSuffixRefusal, type ExtensionFieldSuffixRefusal, type ExtensionFieldSuffixRule, type ExtensionFieldSuffixSubject } from './protocol-extension-field-suffix.js';
 
 // The probe-first replacement's shared vocabulary: the raw-SQL seam type the
 // exported migrations below take, and the dialect classifier their reports
@@ -226,12 +234,36 @@ export type { MetadataHostEngine } from './host-engine.js';
 export { isWritablePackage, READ_ONLY_PACKAGE_SCOPES } from './package-writability.js';
 export type { PackageWritabilityEngine } from './package-writability.js';
 
+// [#28409, ADR-0146 D8 item 2] "Is this stored row the served override of base
+// X's name": the one predicate the effective read asks, exported so the flow
+// override, the per-package customization read and the package-less overlay
+// migration (ADR-0146 Rollout N-11, N-15, N-16) ask the same one. ⛔ No second
+// spelling.
+export { isServedOverrideRowOf } from './served-override.js';
+export type { ServedOverrideRow } from './served-override.js';
+export type { ServedOverrideEntry } from './protocol-served-overrides.js';
+export type { PackagelessOverlayCensus, PackagelessOverlayMigration } from './protocol-packageless-overlay-migration.js';
+
+// [#28412, ADR-0146 D9 item 1] The `package_id` column of the stored row a
+// registry body was hydrated from, recorded by the protocol's hydration and
+// read by the automation boot pull, which judges a flow override on the
+// column (`isServedOverrideRowOf`), ⛔ never on the body's `_packageId`.
+export { bindStoredRow, storedRowBindingOf } from './stored-row-binding.js';
+export { shadowedStoredRowsOf } from './stored-flow-slot.js';
+
 // [ADR-0131 D6] The `unmanaged` install mode's walled-posture refusal — the
 // function `importUnmanagedPackage` raises, exported so the install door
 // (`@objectstack/cloud-connection` install-local) answers it with the same
 // code, status and sentence before it judges anything else about a package,
 // instead of keeping a second copy of the requested-posture rule.
 export { unmanagedInstallPostureRefusal } from './package-unmanaged-install.js';
+
+// [ADR-0146 D3] The pair-shaped-id predicate: an install of `<base>.custom`
+// must carry the explicit pair namespace and the dependency on the base. The
+// install primitive and the duplicate ask it; exported so `POST /packages`
+// (`@objectstack/runtime`) asks the same one ahead of both its install limbs,
+// its no-protocol fallback included, instead of keeping a second copy.
+export { customizationPairManifestRefusal } from './protocol-customization-package.js';
 
 // #4556 — the `sys_metadata_history.recorded_by` sentinel → NULL conversion,
 // as an ADR-0119 D2 migration plan. Run by `os migrate recorded-by`.

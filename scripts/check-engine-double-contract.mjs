@@ -2193,12 +2193,31 @@ function refusalKindOf(fn, sf, envelopeNames, localFns, methodFns) {
   return { kind, at: earliest };
 }
 
-/** The position of the LAST receipt-shaped `return` in `fn`, or -1. */
+/**
+ * The position of the LAST receipt-shaped `return` in `fn`, or -1.
+ *
+ * [#28661] A receipt returned through a same-function `const answer = { … }`
+ * is the same receipt as the literal returned inline — the `const opts =
+ * { where: { id } }` reading `localWhereIdBindings` makes for the write's
+ * options, applied to its answer. `protocol.updateData` / `deleteData` build
+ * their answer once, attach it to a stale-roll-up refusal when one was thrown,
+ * and return it.
+ */
 function receiptReturnPos(fn, sf) {
   let pos = -1;
+  const bound = new Map();
+  const bind = (n) => {
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer) {
+      const o = objectLiteral(n.initializer);
+      if (o) bound.set(n.name.text, o);
+    }
+    ts.forEachChild(n, bind);
+  };
+  if (fn.body) bind(fn.body);
   const visit = (n) => {
     if (ts.isReturnStatement(n) && n.expression) {
-      const o = objectLiteral(n.expression);
+      const o = objectLiteral(n.expression)
+        ?? (ts.isIdentifier(n.expression) ? bound.get(n.expression.text) ?? null : null);
       if (o) {
         for (const p of o.properties) {
           if (!p.name) continue;
@@ -4479,6 +4498,24 @@ class Svc {
     if (request.id) return { object: request.object, id: request.id, success: true };
     throw recordNotFoundError(request.object, request.id);`, ENV));
   expect('a refusal AFTER the receipt does not count', s.length === 1 && s[0].refusal === null);
+
+  // [#28661] A receipt returned through a const the function binds to an object
+  // literal is read as the inline literal is — A/B: the same seam, refusal
+  // deleted, is still REPORTED through the bound receipt.
+  s = scanSeams('a.ts', seamSrc(`
+    const current = await this.probe(request.object, request.id);
+    if (!current) throw recordNotFoundError(request.object, request.id);
+    await this.engine.update(request.object, request.data, { where: { id: request.id } });
+    const answer = { object: request.object, id: request.id, success: true };
+    return answer;`, ENV));
+  expect('a receipt returned through a const-bound literal is a seam, and its refusal counts',
+    s.length === 1 && s[0].refusal === 'shared');
+  s = scanSeams('a.ts', seamSrc(`
+    await this.engine.update(request.object, request.data, { where: { id: request.id } });
+    const answer = { object: request.object, id: request.id, success: true };
+    return answer;`, ENV));
+  expect('…and the same bound receipt with no refusal is reported',
+    s.length === 1 && s[0].refusal === null);
 
   // Wiring: the seam scan must reach the real tree, and specifically the seam
   // the card names. Deliberately NOT asserted: that every seam refuses — that

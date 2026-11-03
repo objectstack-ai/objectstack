@@ -1314,6 +1314,15 @@ describe('flow-inert-node-condition (#4414)', () => {
     expect(fnds[0].hint).toContain("incoming edge's `condition`");
   });
 
+  it('flags it on a save_notice node — its executor never reads the key (#28786)', () => {
+    const fnds = lintFlowPatterns(
+      conditionNodeFlow('save_notice', { message: 'Sent for approval', condition: 'record.amount > 1000' }),
+    ).filter((f) => f.rule === FLOW_INERT_NODE_CONDITION);
+    expect(fnds).toHaveLength(1);
+    expect(fnds[0].where).toContain("node 'n' (save_notice)");
+    expect(fnds[0].hint).toContain("incoming edge's `condition`");
+  });
+
   it('does NOT flag the start node — that is where the key is read', () => {
     expect(lintFlowPatterns({
       flows: [{
@@ -2134,6 +2143,9 @@ describe('per-iteration containment (#13681 / #14394)', () => {
         { id: 'n9', type: 'subflow', label: 'Subflow', config: { flowName: 'child' } },
         { id: 'n10', type: 'map', label: 'Map', config: { collection: { dialect: 'cel', source: 'items' } } },
         { id: 'n11', type: 'approval', label: 'Approval', config: { approvers: ['{$User.Id}'] } },
+        // [#28786] A message whose holes all render empty, or a run that holds
+        // no write to answer (a resumed leg, a subflow/map child), fails it.
+        { id: 'n12', type: 'save_notice', label: 'Tell', config: { message: '{{ currentCase.name }}' } },
       ];
       const fnds = lintFlowPatterns(sweep(fallible)).filter((f) => f.rule === FLOW_LOOP_BODY_UNCONTAINED);
       expect(fnds.map((f) => f.where)).toEqual(

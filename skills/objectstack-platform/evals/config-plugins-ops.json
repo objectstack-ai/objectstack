@@ -7,8 +7,17 @@
       "expected_output": "`defineStack` with a `manifest` of `id`, `version`, `type: 'app'`, `name`, `namespace: 'crm'`, `engines: { protocol: '^18' }`; barrel imports, `objects: Object.values(objects)` (likewise `views` / `flows`); prefixed object names (`crm_account`), no object-level `namespace`, no `tableName`; no driver in `plugins:` (the CLI resolves it); no `workflows` / `approvals` keys (refused).",
       "files": [],
       "assertions": {
-        "must_contain": ["defineStack", "manifest", "engines", "Object.values("],
-        "must_not_contain": ["workflows:", "approvals:", "tableName:"]
+        "must_contain": [
+          "defineStack",
+          "manifest",
+          "engines",
+          "Object.values("
+        ],
+        "must_not_contain": [
+          "workflows:",
+          "approvals:",
+          "tableName:"
+        ]
       }
     },
     {
@@ -17,8 +26,17 @@
       "expected_output": "A `Plugin` with `name`, `init(ctx)` calling `ctx.registerService('audit', ...)` and `ctx.hook('metadata:reloaded', ...)`, `start(ctx)`, `destroy()`. Record events are not kernel hooks — a `data:*` kernel hook registers and never fires — so the task insert is a data hook (objectstack-data). No install / enable / disable hooks.",
       "files": [],
       "assertions": {
-        "must_contain": ["registerService", "ctx.hook(", "metadata:reloaded", "init(", "destroy"],
-        "must_not_contain": ["data:beforeInsert", "onInstall"]
+        "must_contain": [
+          "registerService",
+          "ctx.hook(",
+          "metadata:reloaded",
+          "init(",
+          "destroy"
+        ],
+        "must_not_contain": [
+          "data:beforeInsert",
+          "onInstall"
+        ]
       }
     },
     {
@@ -27,8 +45,16 @@
       "expected_output": "`requires: ['automation', 'triggers', 'job', 'messaging']` on the stack root: `triggers` alone arms record-change triggers, schedule and time-relative ones run on the `job` service, and without `messaging` notify returns success with `skipped: true`. Declaring is a demand (missing provider = hard boot error); `defineStack` rejects an unknown token at authoring time.",
       "files": [],
       "assertions": {
-        "must_contain": ["requires", "job", "messaging", "triggers"],
-        "must_not_contain": ["plugins: [new ServiceJobPlugin", "@objectstack/adapter-"]
+        "must_contain": [
+          "requires",
+          "job",
+          "messaging",
+          "triggers"
+        ],
+        "must_not_contain": [
+          "plugins: [new ServiceJobPlugin",
+          "@objectstack/adapter-"
+        ]
       }
     },
     {
@@ -37,8 +63,15 @@
       "expected_output": "`createHonoApp({ kernel })` from `@objectstack/hono` (prefix defaults to `/api`) in the host app — `HonoServerPlugin` only when ObjectStack owns the server; `LiteKernel` for a cold-start-sensitive host; `/auth/*` follows the auth `basePath`, not `prefix`; no `adapter-*` packages exist.",
       "files": [],
       "assertions": {
-        "must_contain": ["createHonoApp", "@objectstack/hono", "LiteKernel"],
-        "must_not_contain": ["@objectstack/adapter-", "HonoServerPlugin("]
+        "must_contain": [
+          "createHonoApp",
+          "@objectstack/hono",
+          "LiteKernel"
+        ],
+        "must_not_contain": [
+          "@objectstack/adapter-",
+          "HonoServerPlugin("
+        ]
       }
     },
     {
@@ -47,8 +80,16 @@
       "expected_output": "`os migrate plan` previews the drift, `os migrate apply` (`--allow-destructive` for type changes / drops) reconciles, then `os validate` and `os lint --score`; not done until `os validate` passes, which `os lint` does not replace.",
       "files": [],
       "assertions": {
-        "must_contain": ["os migrate plan", "os migrate apply", "os validate", "os lint"],
-        "must_not_contain": ["os rollback", "os data seed"]
+        "must_contain": [
+          "os migrate plan",
+          "os migrate apply",
+          "os validate",
+          "os lint"
+        ],
+        "must_not_contain": [
+          "os rollback",
+          "os data seed"
+        ]
       }
     },
     {
@@ -57,8 +98,16 @@
       "expected_output": "`os start` as the entrypoint, `PORT` pinned (production fails loudly on a busy port), `driver-sql` by database URL (no `DriverPlugin` in `plugins:`), TLS on the proxy, app on an internal port, `OS_AUTH_URL` / `OS_TRUSTED_ORIGINS` / app `hostname` in sync; health: `GET /health`, `GET /ready`.",
       "files": [],
       "assertions": {
-        "must_contain": ["os start", "PORT", "OS_TRUSTED_ORIGINS", "driver-sql"],
-        "must_not_contain": ["new DriverPlugin", "@objectstack/plugin-prometheus"]
+        "must_contain": [
+          "os start",
+          "PORT",
+          "OS_TRUSTED_ORIGINS",
+          "driver-sql"
+        ],
+        "must_not_contain": [
+          "new DriverPlugin",
+          "@objectstack/plugin-prometheus"
+        ]
       }
     },
     {
@@ -67,8 +116,16 @@
       "expected_output": "Both go in `demoStaff` — `name` as the seed references them, `email`, a `position` / `permissionSets` the stack declares — and `os dev` creates the accounts with the seed password: no `password` key, no `role` alias, no platform set, no hand-written `sys_user` seed row. `devLogins` creates nothing (at most a banner entry); `os build` drops `demoStaff`; production creates no demo account.",
       "files": [],
       "assertions": {
-        "must_contain": ["demoStaff", "position", "permissionSets", "os dev"],
-        "must_not_contain": ["role:", "admin_full_access"]
+        "must_contain": [
+          "demoStaff",
+          "position",
+          "permissionSets",
+          "os dev"
+        ],
+        "must_not_contain": [
+          "role:",
+          "admin_full_access"
+        ]
       }
     },
     {
@@ -77,8 +134,15 @@
       "expected_output": "On Paralegal 1's `demoStaff` entry, `manager: 'counsel1@example.com'` — Legal Counsel 1's entry `email`, never the display name — and nothing else: `os dev` writes `sys_user.manager_id` once every demo account exists. No seed row or hook writing `manager_id`, no `reportsTo` / `managerEmail` alias (refused); a manager naming no entry, itself or a loop is refused at load.",
       "files": [],
       "assertions": {
-        "must_contain": ["demoStaff", "manager: '", "os dev"],
-        "must_not_contain": ["manager_id:", "reportsTo:"]
+        "must_contain": [
+          "demoStaff",
+          "manager: '",
+          "os dev"
+        ],
+        "must_not_contain": [
+          "manager_id:",
+          "reportsTo:"
+        ]
       }
     },
     {
@@ -87,8 +151,51 @@
       "expected_output": "Two stack collections: `queues: [defineQueue({ name: 'support_intake', label: 'Support Intake', members: [{ type: 'position', value: 'service_agent' }] })]` and `assignmentRules: [defineAssignmentRule(...)]` with one entry, `assignTo: { type: 'queue', value: 'support_intake' }`; plus `'sharing'` in `requires`: the keys need `@objectstack/plugin-sharing`'s ownership-queue service (`queue` is the job queue), else the boot is refused.",
       "files": [],
       "assertions": {
-        "must_contain": ["queues:", "assignmentRules:", "defineQueue", "'sharing'"],
-        "must_not_contain": ["assigned_to", "beforeInsert"]
+        "must_contain": [
+          "queues:",
+          "assignmentRules:",
+          "defineQueue",
+          "'sharing'"
+        ],
+        "must_not_contain": [
+          "assigned_to",
+          "beforeInsert"
+        ]
+      }
+    },
+    {
+      "id": 10,
+      "prompt": "We installed HotCRM (`hotcrm`, version 3.2.0). Replace its `crm_account_grid` list view with our own columns so every read of that view serves ours, and keep the change exportable to staging.",
+      "expected_output": "The whole view, under the same name `crm_account_grid`, authored in HotCRM's paired writable package `hotcrm.custom` (which depends on `hotcrm`) with `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` in its body — the base's `manifest.id` and `manifest.version`, `basedOn` recorded and never judged. Every read of the name (no `?package`, `?package=hotcrm`, the layered read, both lists) then serves it under `_packageId: 'hotcrm'`, and `GET /packages/hotcrm.custom/export` carries it with the declaration. Not an in-place edit of HotCRM's own read-only item, not a package-unbound Setup row (that path wins only until the D11 migration), not an object extension (that adds fields and replaces no view), and no declaration from any other package (ignored).",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "hotcrm.custom",
+          "overrides:",
+          "package: 'hotcrm'",
+          "basedOn"
+        ],
+        "must_not_contain": [
+          "PUT /api/v1/meta/view/crm_account_grid",
+          "PUT /meta/view/crm_account_grid"
+        ]
+      }
+    },
+    {
+      "id": 11,
+      "prompt": "Our partner package `com.acme.crm_addon` depends on `hotcrm` and wants to ship its own `crm_account_grid` view and a narrower `crm_sales_rep` permission set. Can it override HotCRM's?",
+      "expected_output": "No. Only HotCRM's paired `hotcrm.custom` declares an override (`overrides: { package: 'hotcrm', basedOn }`); a dependent package's item under a base item's name is refused at save, publish and install, by `os validate` and `os build`, and its one fix is a new name — ship the view as `com.acme.crm_addon`'s own `acme_account_grid` and reach it through its own navigation. A permission set is never overridden by anyone, the pair included: copy `crm_sales_rep` under a new name (\"new similar\"; the clone door lands a copy of a packaged set in `hotcrm.custom` unless `package` names a writable package) and narrow the copy.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "hotcrm.custom",
+          "new name",
+          "new similar"
+        ],
+        "must_not_contain": [
+          "overrides: { package: 'hotcrm.custom'",
+          "PUT /api/v1/meta/permission/crm_sales_rep"
+        ]
       }
     }
   ]

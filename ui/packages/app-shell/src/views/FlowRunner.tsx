@@ -124,7 +124,7 @@
  * (objectui#12274). This file adds only its own default, the catalog's
  * sentence.
  *
- * ## The AUTHOR's copy is localized; the chrome is not (objectui#5920, objectui#12075)
+ * ## The AUTHOR's copy is localized; the chrome is not (objectui#5920, objectstack#28054)
  *
  * A screen's heading, its body text, each field's copy and each option's
  * label, and the flow's own completion and failure toasts are the flow
@@ -150,10 +150,12 @@
  *   spec's `resolveFlowScreenFieldOptions`, each option addressed by its value
  *   read as text. Every key, and every option, falls back to the authored
  *   string on its own.
- * - **The flow's own toasts** — `FlowSchema.successMessage` and
- *   `errorMessage`, served verbatim on the run result — are translated by
- *   `interpretFlowResponse` (`utils/flowResponse`), handed this run's flow and
- *   bundle, so the resume and both launch hosts answer the same words.
+ * - **The flow's own toasts are served already translated, too.**
+ *   `FlowSchema.successMessage` and `errorMessage` are `{{ }}` templates the
+ *   engine renders at the run's terminal exit (objectstack#28054), so it picks
+ *   their translations as it picks the heading's, and `interpretFlowResponse`
+ *   (`utils/flowResponse`) answers them as served, for the resume and both
+ *   launch hosts alike.
  *
  * WHERE the bundle comes from is the channel the console already has:
  * `activeFlowsBundle` (`utils/flowsBundle`) reads the `flows` group back out
@@ -595,10 +597,10 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
     // STRING: handing the nested `{code, message}` object to `toast.error()`
     // renders nothing at best and crashes the page as a React child (React
     // #31). See utils/flowResponse.
-    // Handed this run's flow and bundle, it also answers the flow's own
-    // `successMessage` / `errorMessage` in the active language (objectui#12075
-    // — see the header).
-    const outcome = interpretFlowResponse<ScreenSpec>(res, json, 'Resume', { flowName, bundle, locale: language });
+    // The flow's own `successMessage` / `errorMessage` arrive rendered and
+    // translated by the engine (see the header); `language` is the one a
+    // refused write's permission line is read in.
+    const outcome = interpretFlowResponse<ScreenSpec>(res, json, 'Resume', language);
     if (outcome.kind === 'failed') {
       // Two carriers on purpose (`c40f3b8ca`): the toast is the console's
       // viewport-fixed failure idiom; the inline Alert stays in the dialog,

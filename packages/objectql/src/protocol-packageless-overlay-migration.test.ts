@@ -1,0 +1,786 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * [#28413, ADR-0146 D11, N-16a] A package-less overlay row of a name a code
+ * package X ships moves into X's paired `<X>.custom` as a declared override —
+ * `listPackagelessOverlays` / `migratePackagelessOverlays`, the protocol half
+ * of `os migrate packageless-overlays` — and, after it, the package-less
+ * write onto a packaged item closed (#28576, ADR-0146 D11).
+ *
+ * Pinned through the real protocol over the real `ObjectQL` engine and an
+ * in-memory driver (the harness of `protocol-custom-override-effective-read.test.ts`):
+ *
+ *  - THE MOVE: the row lands in the pair, created through the ensure door,
+ *    declaring `{ package: X, basedOn: X's version }`, in its own state; the
+ *    unbound row is gone; the five reads serve the same content as before; a
+ *    re-run moves 0;
+ *  - LEFT ALONE: a name no package ships, a name two packages ship, and a row
+ *    the pair already overrides (`shadowed`), each untouched;
+ *  - a stored pair declaration with no `basedOn` gains it (#28644's reading);
+ *  - THE CLOSE (#28576): after the move, a package-less save (draft or
+ *    publish, with or without `overrides`), publish, DELETE and rollback are
+ *    refused `403 NOT_OVERRIDABLE` naming the pair and the ceremony, and the
+ *    pair's row is untouched; the same save and DELETE naming the pair
+ *    succeed; a name no package ships keeps its package-less write; an
+ *    unmigrated row is served, and its package-less write is refused; a
+ *    rollback of the pair's declared row is the declared override (a page);
+ *  - ADOPT-ORPHANS (Wanted 5): adopting into a writable package skips the
+ *    shipped-name row and rebinds an environment one;
+ *  - [#29392] A ROW BOUND TO THE BASE (a save naming it, before #28905's
+ *    close): listed and moved the same way, never merged over another row of
+ *    its item; rows bound to a writable package or to a package that does not
+ *    ship the name are not listed.
+ *
+ * Test-path resolution: the protocol is `@objectstack/metadata-protocol`'s
+ * `dist/`, so a change there is read here after that package is rebuilt.
+ */
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { ServiceObject } from '@objectstack/spec/data';
+import {
+    ObjectStackProtocolImplementation,
+    isServedOverrideRowOf,
+    resetEnvWritableMetadataTypes,
+} from '@objectstack/metadata-protocol';
+import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject } from '@objectstack/metadata-core';
+import { ObjectQL } from './engine.js';
+
+const BASE = 'com.example.showcase';
+const PAIR = 'com.example.showcase.custom';
+const OTHER = 'com.example.other';
+const WORKSPACE = 'com.default.workspace';
+const VIEW = 'showcase_task.default';
+const SHARED_VIEW = 'shared_task.default';
+const ENV_VIEW = 'env_only.default';
+const BASE_COLUMNS = ['title', 'project', 'assignee', 'status', 'priority', 'due_date'];
+const UNBOUND_COLUMNS = ['title', 'priority'];
+const EDITED_COLUMNS = ['title', 'status'];
+const ACTOR = 'os migrate packageless-overlays';
+
+const sysMetadataObject: ServiceObject = {
+    name: 'sys_metadata',
+    label: 'System Metadata',
+    fields: {
+        id: { name: 'id', label: 'ID', type: 'text' as const },
+        type: { name: 'type', label: 'Type', type: 'text' as const, required: true },
+        name: { name: 'name', label: 'Name', type: 'text' as const, required: true },
+        organization_id: { name: 'organization_id', label: 'Org', type: 'text' as const },
+        package_id: { name: 'package_id', label: 'Package', type: 'text' as const },
+        bundle_member: { name: 'bundle_member', label: 'Bundle Member', type: 'text' as const, maxLength: 100 },
+        metadata: { name: 'metadata', label: 'Body', type: 'textarea' as const },
+        draft_changes: { name: 'draft_changes', label: 'Draft Changes', type: 'textarea' as const },
+        checksum: { name: 'checksum', label: 'Checksum', type: 'text' as const, maxLength: 71 },
+        state: { name: 'state', label: 'State', type: 'text' as const },
+        version: { name: 'version', label: 'Version', type: 'number' as const },
+        created_at: { name: 'created_at', label: 'Created', type: 'datetime' as const },
+        updated_at: { name: 'updated_at', label: 'Updated', type: 'datetime' as const },
+    },
+};
+
+function makeMemoryDriver() {
+    const stores = new Map<string, Map<string, Record<string, unknown>>>();
+    const storeFor = (obj: string) => {
+        let s = stores.get(obj);
+        if (!s) { s = new Map(); stores.set(obj, s); }
+        return s;
+    };
+    let nextId = 0;
+    const matchesWhere = (row: Record<string, unknown>, where: any): boolean => {
+        if (!where || typeof where !== 'object') return true;
+        for (const [k, v] of Object.entries(where)) {
+            if (k === '$and' && Array.isArray(v)) {
+                if (!v.every((w: any) => matchesWhere(row, w))) return false;
+                continue;
+            }
+            if (k === '$or' && Array.isArray(v)) {
+                if (!v.some((w: any) => matchesWhere(row, w))) return false;
+                continue;
+            }
+            if (k.startsWith('$')) continue;
+            const rowVal = row[k];
+            if (v && typeof v === 'object' && Array.isArray((v as any).$in)) {
+                if (!(v as any).$in.includes(rowVal === undefined ? null : rowVal)) return false;
+                continue;
+            }
+            const expected = (v && typeof v === 'object' && '$eq' in (v as any)) ? (v as any).$eq : v;
+            const a = rowVal === undefined ? null : rowVal;
+            const b = expected === undefined ? null : expected;
+            if (a !== b) return false;
+        }
+        return true;
+    };
+    const driver: any = {
+        name: 'memory', version: '0.0.0', supports: {} as any,
+        async connect() {}, async disconnect() {}, async checkHealth() { return true; },
+        async execute() { return null; },
+        async find(object: string, ast: any) {
+            const rows = Array.from(storeFor(object).values()).filter((r) => matchesWhere(r, ast?.where));
+            return typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
+        },
+        async findOne(object: string, ast: any) {
+            for (const r of storeFor(object).values()) if (matchesWhere(r, ast?.where)) return r;
+            return null;
+        },
+        async create(object: string, data: Record<string, unknown>) {
+            nextId += 1;
+            const id = (data.id as string) ?? `r_${nextId}`;
+            const row = { ...data, id };
+            storeFor(object).set(id, row);
+            return row;
+        },
+        async update(object: string, id: string, data: Record<string, unknown>) {
+            const s = storeFor(object);
+            const cur = s.get(id);
+            if (!cur) throw new Error(`not found: ${object}/${id}`);
+            const updated = { ...cur, ...data, id };
+            s.set(id, updated);
+            return updated;
+        },
+        async upsert(object: string, data: Record<string, unknown>) {
+            const id = data.id as string | undefined;
+            if (id && storeFor(object).has(id)) return this.update(object, id, data);
+            return this.create(object, data);
+        },
+        async delete(object: string, id: string) { return storeFor(object).delete(id); },
+        async count(object: string, ast: any) { return (await this.find(object, ast)).length; },
+        async bulkCreate(object: string, rows: Record<string, unknown>[]) {
+            return Promise.all(rows.map((r) => this.create(object, r)));
+        },
+        async bulkUpdate() { return []; }, async bulkDelete() {},
+        async beginTransaction() { return { commit: async () => {}, rollback: async () => {} }; },
+        async commit() {}, async rollback() {},
+    };
+    return { driver, stores };
+}
+const PAGE = 'showcase_home';
+const pageBody = (name: string, label: string) => ({ name, label, type: 'app', regions: [] });
+const listBody = (name: string, object: string, columns: readonly string[]) => ({
+    name,
+    object,
+    viewKind: 'list',
+    label: 'All',
+    config: {
+        type: 'grid',
+        data: { provider: 'object', object },
+        columns: columns.map((field) => ({ field })),
+    },
+});
+
+const objectOf = (name: string, fields: readonly string[]) => ({
+    name,
+    label: name,
+    sharingModel: 'private',
+    fields: Object.fromEntries(fields.map((f) => [f, { name: f, label: f, type: 'text' }])),
+});
+const listView = (object: string, columns: readonly string[]) => ({
+    object,
+    list: { label: 'All', type: 'grid', data: { provider: 'object', object }, columns: columns.map((field) => ({ field })) },
+});
+
+async function boot() {
+    const engine = new ObjectQL();
+    const { driver, stores } = makeMemoryDriver();
+    engine.registerDriver(driver, true);
+    await engine.init();
+    engine.registry.registerObject(sysMetadataObject, 'test-package');
+    for (const o of [SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) {
+        engine.registry.registerObject(o as any, 'test-package');
+    }
+    // X ships `showcase_task.default` and `shared_task.default`; another code
+    // package ships `shared_task.default` too (a name two packages ship).
+    engine.registerApp({
+        id: BASE, name: 'showcase', version: '1.2.0', namespace: 'showcase',
+        objects: [objectOf('showcase_task', BASE_COLUMNS), objectOf('shared_task', BASE_COLUMNS)],
+        views: [listView('showcase_task', BASE_COLUMNS), listView('shared_task', BASE_COLUMNS)],
+    });
+    engine.registerApp({
+        id: OTHER, name: 'other', version: '2.0.0', namespace: 'other',
+        views: [listView('shared_task', BASE_COLUMNS)],
+    });
+    const protocol = new ObjectStackProtocolImplementation(engine, () => new Map());
+    const rows = (name: string) => Array.from(stores.get('sys_metadata')?.values() ?? [])
+        .filter((r) => r.type === 'view' && r.name === name)
+        .map((r) => [r.package_id ?? null, r.state] as const);
+    const rowOf = (name: string, packageId: string | null, state = 'active') =>
+        Array.from(stores.get('sys_metadata')?.values() ?? [])
+            .find((r) => r.type === 'view' && r.name === name && (r.package_id ?? null) === packageId && r.state === state);
+    return { engine, protocol, rows, rowOf, stores };
+}
+
+/** A row laid down through the engine as an older release stored it. */
+const storeRow = (
+    engine: ObjectQL,
+    name: string,
+    object: string,
+    columns: readonly string[],
+    packageId: string | null = null,
+    state = 'active',
+    extra: Record<string, unknown> = {},
+) => engine.insert('sys_metadata', {
+    type: 'view', name, organization_id: null, package_id: packageId,
+    metadata: JSON.stringify({ ...listBody(name, object, columns), ...extra }), state, version: 1,
+}, { context: { isSystem: true } });
+
+const columnsOf = (item: any): string[] => (item?.config?.columns ?? item?.columns ?? []).map((c: any) => c?.field ?? c);
+const read = async (protocol: ObjectStackProtocolImplementation, packageId?: string) =>
+    ((await protocol.getMetaItem({ type: 'view', name: VIEW, ...(packageId ? { packageId } : {}) })) as any).item;
+const layered = async (protocol: ObjectStackProtocolImplementation, packageId?: string): Promise<any> =>
+    (protocol as any).getMetaItemLayered({ type: 'view', name: VIEW, ...(packageId ? { packageId } : {}) });
+const listed = async (protocol: ObjectStackProtocolImplementation, packageId?: string) => {
+    const res: any = await protocol.getMetaItems({ type: 'view', ...(packageId ? { packageId } : {}) });
+    return (res.items as any[]).filter((i) => i?.name === VIEW).map((i) => columnsOf(i));
+};
+/** The five reads of `VIEW` (N-10): no package, naming X, layered effective, X's list, env-wide list. */
+const fiveReads = async (protocol: ObjectStackProtocolImplementation) => [
+    columnsOf(await read(protocol)),
+    columnsOf(await read(protocol, BASE)),
+    columnsOf((await layered(protocol)).effective),
+    ...(await listed(protocol, BASE)),
+    ...(await listed(protocol)),
+];
+
+const census = (protocol: ObjectStackProtocolImplementation): Promise<any> => (protocol as any).listPackagelessOverlays();
+const migrate = (protocol: ObjectStackProtocolImplementation): Promise<any> =>
+    (protocol as any).migratePackagelessOverlays({ actor: ACTOR });
+const dispositions = (c: any) => (c.rows as any[]).map((r) => `${r.name}@${r.state} ${r.disposition}`);
+
+const savedWritable = process.env.OS_METADATA_WRITABLE;
+beforeEach(() => {
+    delete process.env.OS_METADATA_WRITABLE;
+    ObjectStackProtocolImplementation.resetEnvWritableCache();
+    resetEnvWritableMetadataTypes();
+});
+afterEach(() => {
+    if (savedWritable === undefined) delete process.env.OS_METADATA_WRITABLE;
+    else process.env.OS_METADATA_WRITABLE = savedWritable;
+    ObjectStackProtocolImplementation.resetEnvWritableCache();
+    resetEnvWritableMetadataTypes();
+});
+
+describe('[#28413] the census and the move', () => {
+    it('THE MOVE: the row lands in the pair as the declared override, the unbound row goes, the five reads serve the same content, a re-run moves 0', async () => {
+        const { engine, protocol, rows, rowOf } = await boot();
+        await storeRow(engine, VIEW, 'showcase_task', UNBOUND_COLUMNS);
+        await storeRow(engine, VIEW, 'showcase_task', EDITED_COLUMNS, null, 'draft');
+        const before = await fiveReads(protocol);
+        expect(before).toEqual([UNBOUND_COLUMNS, UNBOUND_COLUMNS, UNBOUND_COLUMNS, UNBOUND_COLUMNS, UNBOUND_COLUMNS]);
+        expect(dispositions(await census(protocol))).toEqual([`${VIEW}@active movable`, `${VIEW}@draft movable`]);
+        expect((engine.registry as any).getPackage(PAIR)).toBeUndefined();
+
+        const result = await migrate(protocol);
+        expect(result.outcomes.map((o: any) => o.outcome)).toEqual(['moved', 'moved']);
+        expect(result.bases).toEqual([{ base: BASE, pair: PAIR, pairCreated: true, moved: 2, declarationsCompleted: 0, failed: 0, shadowed: 0 }]);
+        // The pair came through the ensure door: installed, with the pair namespace.
+        expect((engine.registry as any).getPackage(PAIR)?.manifest?.namespace).toBe('showcase_custom');
+        expect(rows(VIEW).slice().sort()).toEqual([[PAIR, 'active'], [PAIR, 'draft']]);
+        for (const state of ['active', 'draft']) {
+            const moved = rowOf(VIEW, PAIR, state)!;
+            expect(isServedOverrideRowOf(moved as any, BASE), state).toBe(true);
+            expect(JSON.parse(String(moved.metadata)).overrides).toEqual({ package: BASE, basedOn: '1.2.0' });
+        }
+        expect(columnsOf(JSON.parse(String(rowOf(VIEW, PAIR, 'draft')!.metadata)))).toEqual(EDITED_COLUMNS);
+
+        expect(await fiveReads(protocol)).toEqual(before);
+
+        const again = await migrate(protocol);
+        expect(again.outcomes).toEqual([]);
+        expect(again.rows).toEqual([]);
+        expect(rows(VIEW).slice().sort()).toEqual([[PAIR, 'active'], [PAIR, 'draft']]);
+    });
+
+    it('LEFT ALONE: a name no package ships, a name two packages ship, and a row the pair already overrides', async () => {
+        const { engine, protocol, rows } = await boot();
+        await (protocol as any).ensureCustomizationPackage({ basePackageId: BASE });
+        // A Studio customization made first (N-17): the pair's declared row.
+        await storeRow(engine, VIEW, 'showcase_task', EDITED_COLUMNS, PAIR, 'active', { overrides: { package: BASE, basedOn: '1.0.0' } });
+        await storeRow(engine, VIEW, 'showcase_task', UNBOUND_COLUMNS);
+        // …and a Setup DRAFT of the same name: the pair's override is per
+        // name, so a draft beside its ACTIVE override is shadowed too — moved
+        // in as the pair's draft, its publish would replace the Studio
+        // customization (the merge Wanted 2 forbids).
+        await storeRow(engine, VIEW, 'showcase_task', UNBOUND_COLUMNS, null, 'draft');
+        await storeRow(engine, SHARED_VIEW, 'shared_task', UNBOUND_COLUMNS);
+        await storeRow(engine, ENV_VIEW, 'showcase_task', UNBOUND_COLUMNS);
+
+        const listedCensus = await census(protocol);
+        expect(dispositions(listedCensus)).toEqual([
+            `${SHARED_VIEW}@active multi_shipped`, `${VIEW}@active shadowed`, `${VIEW}@draft shadowed`,
+        ]);
+        expect(listedCensus.rows.find((r: any) => r.disposition === 'multi_shipped').shippers).toEqual([OTHER, BASE]);
+        expect(listedCensus.rows.filter((r: any) => r.disposition === 'shadowed').map((r: any) => r.shadowDeclares)).toEqual([true, true]);
+        expect(listedCensus.environmentRows).toBe(1);
+
+        const result = await migrate(protocol);
+        expect(result.outcomes).toEqual([]);
+        expect(result.bases).toEqual([{ base: BASE, pair: PAIR, pairCreated: false, moved: 0, declarationsCompleted: 0, failed: 0, shadowed: 2 }]);
+        expect(rows(VIEW).slice().sort((a, b) => `${a[0]}${a[1]}`.localeCompare(`${b[0]}${b[1]}`))).toEqual([[PAIR, 'active'], [null, 'active'], [null, 'draft']]);
+        expect(rows(SHARED_VIEW)).toEqual([[null, 'active']]);
+        expect(rows(ENV_VIEW)).toEqual([[null, 'active']]);
+        // The pair's declared row is still the one served.
+        expect(columnsOf(await read(protocol))).toEqual(EDITED_COLUMNS);
+    });
+
+    it('READ BACK FIRST: a save that leaves no declared row in the pair keeps the unbound row, and the row is reported failed', async () => {
+        const { engine, protocol, rows } = await boot();
+        await storeRow(engine, VIEW, 'showcase_task', UNBOUND_COLUMNS);
+        // A save door that answers and writes nothing.
+        (protocol as any).saveMetaItem = async () => ({ success: true });
+        const result = await migrate(protocol);
+        expect(result.outcomes.map((o: any) => o.outcome)).toEqual(['failed']);
+        expect(result.outcomes[0].error).toContain('does not read back as the declared override');
+        expect(rows(VIEW)).toEqual([[null, 'active']]);
+        expect(result.bases[0]).toMatchObject({ moved: 0, failed: 1 });
+    });
+
+    it('a stored pair declaration with no basedOn gains the base\'s version', async () => {
+        const { engine, protocol, rowOf } = await boot();
+        await (protocol as any).ensureCustomizationPackage({ basePackageId: BASE });
+        await storeRow(engine, VIEW, 'showcase_task', EDITED_COLUMNS, PAIR, 'active', { overrides: { package: BASE } });
+        const listedCensus = await census(protocol);
+        expect(listedCensus.incompleteDeclarations.map((d: any) => [d.name, d.pair, d.base])).toEqual([[VIEW, PAIR, BASE]]);
+
+        const result = await migrate(protocol);
+        expect(result.outcomes.map((o: any) => [o.outcome, o.basedOn])).toEqual([['declaration_completed', '1.2.0']]);
+        expect(JSON.parse(String(rowOf(VIEW, PAIR)!.metadata)).overrides).toEqual({ package: BASE, basedOn: '1.2.0' });
+        expect(columnsOf(await read(protocol))).toEqual(EDITED_COLUMNS);
+        expect((await census(protocol)).incompleteDeclarations).toEqual([]);
+    });
+
+    it('…on every overridable type, not only the five overlay types (a page)', async () => {
+        const { engine, protocol, stores } = await boot();
+        engine.registerApp({ id: BASE, name: 'showcase', version: '1.2.0', namespace: 'showcase', pages: [pageBody(PAGE, 'Home')] } as any);
+        await (protocol as any).ensureCustomizationPackage({ basePackageId: BASE });
+        await engine.insert('sys_metadata', {
+            type: 'page', name: PAGE, organization_id: null, package_id: PAIR,
+            metadata: JSON.stringify({ ...pageBody(PAGE, 'Edited home'), overrides: { package: BASE } }), state: 'active', version: 1,
+        }, { context: { isSystem: true } });
+        const pageRow = () => Array.from(stores.get('sys_metadata')?.values() ?? [])
+            .find((r) => r.type === 'page' && r.name === PAGE && r.package_id === PAIR && r.state === 'active');
+
+        expect((await census(protocol)).incompleteDeclarations.map((d: any) => [d.type, d.name, d.pair])).toEqual([['page', PAGE, PAIR]]);
+        const result = await migrate(protocol);
+        expect(result.outcomes.map((o: any) => [o.outcome, o.basedOn, o.error])).toEqual([['declaration_completed', '1.2.0', undefined]]);
+        const body = JSON.parse(String(pageRow()!.metadata));
+        expect(body.overrides).toEqual({ package: BASE, basedOn: '1.2.0' });
+        expect(body.label).toBe('Edited home');
+    });
+});
+
+/**
+ * The state the move leaves, laid down without the ceremony (so these cases
+ * read the write doors alone): the pair ensured through its door, and the
+ * item's row bound to it, declaring the override.
+ */
+async function movedState(engine: ObjectQL, protocol: ObjectStackProtocolImplementation): Promise<void> {
+    await (protocol as any).ensureCustomizationPackage({ basePackageId: BASE });
+    await storeRow(engine, VIEW, 'showcase_task', UNBOUND_COLUMNS, PAIR, 'active', { overrides: { package: BASE, basedOn: '1.2.0' } });
+}
+
+/** A write's refusal as an HTTP boundary relays it, or `undefined` when it was not refused. */
+const refusalOf = (write: Promise<unknown>) => write.then(
+    () => undefined,
+    (e: any) => ({ code: e?.code, status: e?.status, message: String(e?.message ?? '') }),
+);
+
+/** The close's refusal: the sealed write's code and status, naming the pair and the ceremony (ADR-0146 D11). */
+const expectClosed = (refusal: { code?: unknown; status?: unknown; message: string } | undefined) => {
+    expect(refusal).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+    expect(refusal!.message).toContain(`'${PAIR}'`);
+    expect(refusal!.message).toContain('os migrate packageless-overlays');
+};
+
+/**
+ * A package-less row of `VIEW` as an older release's door stored it: through
+ * the repository itself (the row and its history), versions 1 and 2, with no
+ * protocol door in front — the close refuses that write through every door.
+ */
+async function legacyRowWithHistory(protocol: ObjectStackProtocolImplementation): Promise<void> {
+    const repo = (protocol as any).getOverlayRepo();
+    const ref = { type: 'view', name: VIEW, org: 'env' };
+    const opts = { actor: null, source: 'older-release', intent: 'override-artifact', packageId: null } as const;
+    const first = await repo.put(ref, listBody(VIEW, 'showcase_task', UNBOUND_COLUMNS), { ...opts, parentVersion: null });
+    await repo.put(ref, listBody(VIEW, 'showcase_task', EDITED_COLUMNS), { ...opts, parentVersion: first.version });
+}
+
+describe('[#28576] after the close: a package-less write onto a packaged item is refused, naming the pair', () => {
+    for (const withOverrides of [false, true]) {
+        it(`a migrated item: a package-less draft save and publish-mode save ${withOverrides ? 'carrying' : 'without'} \`overrides\` are refused, and the pair's row is untouched`, async () => {
+            const { engine, protocol, rows, rowOf } = await boot();
+            await movedState(engine, protocol);
+            // Setup's form save: the item as the editor read it, naming no package.
+            const served = await read(protocol);
+            const body: Record<string, unknown> = { ...listBody(VIEW, 'showcase_task', EDITED_COLUMNS) };
+            if (withOverrides) body.overrides = served.overrides;
+
+            expectClosed(await refusalOf(protocol.saveMetaItem({ type: 'view', name: VIEW, item: body, mode: 'draft' } as any)));
+            expectClosed(await refusalOf(protocol.saveMetaItem({ type: 'view', name: VIEW, item: body } as any)));
+            // `packageId: null` names no package too, as the request contract states.
+            expectClosed(await refusalOf(protocol.saveMetaItem({ type: 'view', name: VIEW, item: body, packageId: null } as any)));
+
+            expect(rows(VIEW)).toEqual([[PAIR, 'active']]);
+            expect(isServedOverrideRowOf(rowOf(VIEW, PAIR) as any, BASE)).toBe(true);
+            expect(await fiveReads(protocol)).toEqual([UNBOUND_COLUMNS, UNBOUND_COLUMNS, UNBOUND_COLUMNS, UNBOUND_COLUMNS, UNBOUND_COLUMNS]);
+        });
+    }
+
+    it('a migrated item: a package-less DELETE (Setup\'s reset) and a package-less publish are refused, and nothing moves', async () => {
+        const { engine, protocol, rows } = await boot();
+        await movedState(engine, protocol);
+        expectClosed(await refusalOf(protocol.deleteMetaItem({ type: 'view', name: VIEW } as any)));
+        expect(rows(VIEW)).toEqual([[PAIR, 'active']]);
+
+        // A draft in the pair, published naming no package: refused, the draft stays a draft.
+        await protocol.saveMetaItem({
+            type: 'view', name: VIEW, packageId: PAIR, mode: 'draft',
+            item: { ...listBody(VIEW, 'showcase_task', EDITED_COLUMNS), overrides: { package: BASE, basedOn: '1.2.0' } },
+        } as any);
+        expectClosed(await refusalOf(protocol.publishMetaItem({ type: 'view', name: VIEW } as any)));
+        expect(rows(VIEW).sort()).toEqual([[PAIR, 'active'], [PAIR, 'draft']]);
+        expect(columnsOf(await read(protocol))).toEqual(UNBOUND_COLUMNS);
+        // …and naming the pair publishes it.
+        await protocol.publishMetaItem({ type: 'view', name: VIEW, packageId: PAIR } as any);
+        expect(columnsOf(await read(protocol))).toEqual(EDITED_COLUMNS);
+    });
+
+    it('a migrated item: a save and a DELETE naming ?package=<base>.custom succeed', async () => {
+        const { engine, protocol, rows, rowOf } = await boot();
+        await movedState(engine, protocol);
+        await protocol.saveMetaItem({
+            type: 'view', name: VIEW, packageId: PAIR,
+            item: { ...listBody(VIEW, 'showcase_task', EDITED_COLUMNS), overrides: { package: BASE, basedOn: '1.2.0' } },
+        } as any);
+        expect(rows(VIEW)).toEqual([[PAIR, 'active']]);
+        expect(isServedOverrideRowOf(rowOf(VIEW, PAIR) as any, BASE)).toBe(true);
+        expect(await fiveReads(protocol)).toEqual([EDITED_COLUMNS, EDITED_COLUMNS, EDITED_COLUMNS, EDITED_COLUMNS, EDITED_COLUMNS]);
+
+        await protocol.deleteMetaItem({ type: 'view', name: VIEW, packageId: PAIR } as any);
+        expect(rows(VIEW)).toEqual([]);
+        expect(await fiveReads(protocol)).toEqual([BASE_COLUMNS, BASE_COLUMNS, BASE_COLUMNS, BASE_COLUMNS, BASE_COLUMNS]);
+    });
+
+    it('CONTROL: a package-less save and DELETE of a name no package ships (environment metadata) still succeed', async () => {
+        const { protocol, rows } = await boot();
+        await protocol.saveMetaItem({ type: 'view', name: ENV_VIEW, item: listBody(ENV_VIEW, 'showcase_task', UNBOUND_COLUMNS) } as any);
+        expect(rows(ENV_VIEW)).toEqual([[null, 'active']]);
+        await protocol.deleteMetaItem({ type: 'view', name: ENV_VIEW } as any);
+        expect(rows(ENV_VIEW)).toEqual([]);
+    });
+
+    it('an unmigrated row is served, and its package-less save, DELETE and rollback are refused naming the ceremony', async () => {
+        const { protocol, rows, rowOf } = await boot();
+        await legacyRowWithHistory(protocol);
+        const before = rowOf(VIEW, null);
+        expect(columnsOf(await read(protocol))).toEqual(EDITED_COLUMNS);
+        expect(columnsOf((await layered(protocol)).effective)).toEqual(EDITED_COLUMNS);
+
+        expectClosed(await refusalOf(protocol.saveMetaItem({ type: 'view', name: VIEW, item: listBody(VIEW, 'showcase_task', BASE_COLUMNS) } as any)));
+        expectClosed(await refusalOf(protocol.deleteMetaItem({ type: 'view', name: VIEW } as any)));
+        expectClosed(await refusalOf((protocol as any).rollbackMetaItem({ type: 'view', name: VIEW, toVersion: 1 })));
+
+        expect(rows(VIEW)).toEqual([[null, 'active']]);
+        expect(rowOf(VIEW, null)).toEqual(before);
+        expect(columnsOf(await read(protocol))).toEqual(EDITED_COLUMNS);
+        // The ceremony still moves it, and the item is the pair's then.
+        expect((await migrate(protocol)).outcomes.map((o: any) => o.outcome)).toEqual(['moved']);
+        expect(rows(VIEW)).toEqual([[PAIR, 'active']]);
+    });
+
+    it('the rollback refusal\'s remedy holds: after the move, a version from before it is restored by saving its body into the pair, declaring the override', async () => {
+        const { protocol, rows, rowOf } = await boot();
+        await legacyRowWithHistory(protocol);
+        const refused = await refusalOf((protocol as any).rollbackMetaItem({ type: 'view', name: VIEW, toVersion: 1 }));
+        expectClosed(refused);
+        expect(refused!.message).toContain("save that version's body there");
+        expect((await migrate(protocol)).outcomes.map((o: any) => o.outcome)).toEqual(['moved']);
+        // A rollback to that version in the pair restores an undeclared body,
+        // which the override write gate refuses (D2), not the close…
+        const inPair = await refusalOf((protocol as any).rollbackMetaItem({ type: 'view', name: VIEW, toVersion: 1 }));
+        expect(inPair?.message).toContain('declares no override');
+        expect(inPair?.message).not.toContain('os migrate packageless-overlays');
+        // …so the sentence prescribes the save into the pair, which succeeds.
+        await protocol.saveMetaItem({
+            type: 'view', name: VIEW, packageId: PAIR,
+            item: { ...listBody(VIEW, 'showcase_task', UNBOUND_COLUMNS), overrides: { package: BASE, basedOn: '1.2.0' } },
+        } as any);
+        expect(rows(VIEW)).toEqual([[PAIR, 'active']]);
+        expect(isServedOverrideRowOf(rowOf(VIEW, PAIR) as any, BASE)).toBe(true);
+        expect(columnsOf(await read(protocol))).toEqual(UNBOUND_COLUMNS);
+    });
+
+    it('a rollback of the pair\'s own declared row is the pair\'s declared override, never an artifact override (a page)', async () => {
+        const { engine, protocol, stores } = await boot();
+        engine.registerApp({ id: BASE, name: 'showcase', version: '1.2.0', namespace: 'showcase', pages: [pageBody(PAGE, 'Home')] } as any);
+        await (protocol as any).ensureCustomizationPackage({ basePackageId: BASE });
+        const declared = (label: string) => ({ ...pageBody(PAGE, label), overrides: { package: BASE, basedOn: '1.2.0' } });
+        await protocol.saveMetaItem({ type: 'page', name: PAGE, packageId: PAIR, item: declared('Edited home') } as any);
+        await protocol.saveMetaItem({ type: 'page', name: PAGE, packageId: PAIR, item: declared('Second edit') } as any);
+        const pageRow = () => Array.from(stores.get('sys_metadata')?.values() ?? [])
+            .filter((r) => r.type === 'page' && r.name === PAGE);
+
+        const rolled = await refusalOf((protocol as any).rollbackMetaItem({ type: 'page', name: PAGE, toVersion: 1 }));
+        expect(rolled).toBeUndefined();
+        expect(pageRow().map((r) => [r.package_id, r.state])).toEqual([[PAIR, 'active']]);
+        const body = JSON.parse(String(pageRow()[0]!.metadata));
+        expect(body.label).toBe('Edited home');
+        expect(body.overrides).toEqual({ package: BASE, basedOn: '1.2.0' });
+    });
+});
+
+/**
+ * [#28576 ruling 2, ADR-0146 D11] The close reaches exactly what the ceremony
+ * moves: every row it lists and does not move keeps its package-less save,
+ * DELETE and rollback, as before the close — the census's own classification
+ * (`classifyPackagelessRow`) and the ceremony's own steps decide it. Each case
+ * lays down the row, reads the census's disposition, and writes it naming no
+ * package.
+ */
+describe('[#28576] the close reaches only what the ceremony moves: every row it leaves keeps its package-less write', () => {
+    /** A code package (read-only) shipping one list view of `object`. */
+    const shipping = (engine: ObjectQL, id: string, object: string, manifest: Record<string, unknown>) => engine.registerApp({
+        id, name: id, objects: [objectOf(object, BASE_COLUMNS)], views: [listView(object, BASE_COLUMNS)], ...manifest,
+    } as any);
+    /** The package-less save, then DELETE, of `name`: both succeed and leave no row. */
+    const expectOpen = async (protocol: ObjectStackProtocolImplementation, rows: (n: string) => unknown, name: string, object: string) => {
+        expect(await refusalOf(protocol.saveMetaItem({ type: 'view', name, item: listBody(name, object, EDITED_COLUMNS) } as any))).toBeUndefined();
+        expect(await refusalOf(protocol.deleteMetaItem({ type: 'view', name } as any))).toBeUndefined();
+        return rows(name);
+    };
+
+    it('multi_shipped: a name two read-only packages ship — the stored row\'s package-less save and DELETE succeed', async () => {
+        const { engine, protocol, rows } = await boot();
+        await storeRow(engine, SHARED_VIEW, 'shared_task', UNBOUND_COLUMNS);
+        expect(dispositions(await census(protocol))).toEqual([`${SHARED_VIEW}@active multi_shipped`]);
+        expect(await expectOpen(protocol, rows, SHARED_VIEW, 'shared_task')).toEqual([]);
+    });
+
+    it('no_pair: a base whose id forms no pair — the first package-less save and DELETE succeed', async () => {
+        const { engine, protocol, rows } = await boot();
+        // An id ending in `.custom` derives no pair (`base_is_customization_package`).
+        shipping(engine, 'com.vendor.custom', 'vendor_task', { version: '1.0.0', namespace: 'vendor' });
+        const name = 'vendor_task.default';
+        await storeRow(engine, name, 'vendor_task', UNBOUND_COLUMNS);
+        expect(dispositions(await census(protocol))).toEqual([`${name}@active no_pair`]);
+        expect(await expectOpen(protocol, rows, name, 'vendor_task')).toEqual([]);
+    });
+
+    for (const [why, manifest] of [
+        ['no namespace', { version: '1.0.0' }],
+        ['a non-SemVer version', { version: 'latest', namespace: 'plain' }],
+    ] as const) {
+        it(`an unensurable pair (${why}): the census lists the row movable, the ceremony fails it, and its package-less save and DELETE succeed`, async () => {
+            const { engine, protocol, rows } = await boot();
+            shipping(engine, 'com.example.plain', 'plain_task', manifest);
+            const name = 'plain_task.default';
+            await storeRow(engine, name, 'plain_task', UNBOUND_COLUMNS);
+            expect(dispositions(await census(protocol))).toEqual([`${name}@active movable`]);
+            const result = await migrate(protocol);
+            expect(result.outcomes.map((o: any) => o.outcome)).toEqual(['failed']);
+            expect(rows(name)).toEqual([[null, 'active']]);
+            expect(await expectOpen(protocol, rows, name, 'plain_task')).toEqual([]);
+        });
+    }
+
+    it('foreign_declaration: a stored row whose `overrides` names another package — its package-less save and DELETE succeed', async () => {
+        const { engine, protocol, rows } = await boot();
+        await storeRow(engine, VIEW, 'showcase_task', UNBOUND_COLUMNS, null, 'active', { overrides: { package: OTHER } });
+        expect(dispositions(await census(protocol))).toEqual([`${VIEW}@active foreign_declaration`]);
+        // The save corrects the key; the row is still the package-less one.
+        expect(await refusalOf(protocol.saveMetaItem({ type: 'view', name: VIEW, item: listBody(VIEW, 'showcase_task', EDITED_COLUMNS) } as any))).toBeUndefined();
+        expect(rows(VIEW)).toEqual([[null, 'active']]);
+        expect(dispositions(await census(protocol))).toEqual([`${VIEW}@active movable`]);
+        // …and, now movable, its next package-less write is the closed one.
+        expectClosed(await refusalOf(protocol.deleteMetaItem({ type: 'view', name: VIEW } as any)));
+    });
+
+    it('CONTROL foreign_declaration: its package-less DELETE succeeds', async () => {
+        const { engine, protocol, rows } = await boot();
+        await storeRow(engine, VIEW, 'showcase_task', UNBOUND_COLUMNS, null, 'active', { overrides: { package: OTHER } });
+        expect(await refusalOf(protocol.deleteMetaItem({ type: 'view', name: VIEW } as any))).toBeUndefined();
+        expect(rows(VIEW)).toEqual([]);
+    });
+
+    it('shadowed (S5): a stored row beside the pair\'s declared row — its package-less rollback, save and DELETE are not the close\'s to refuse', async () => {
+        const { engine, protocol, rows, rowOf } = await boot();
+        await legacyRowWithHistory(protocol);
+        await (protocol as any).ensureCustomizationPackage({ basePackageId: BASE });
+        await storeRow(engine, VIEW, 'showcase_task', BASE_COLUMNS.slice(0, 1), PAIR, 'active', { overrides: { package: BASE, basedOn: '1.2.0' } });
+        expect(dispositions(await census(protocol))).toEqual([`${VIEW}@active shadowed`]);
+        const pairRow = rowOf(VIEW, PAIR);
+        expect(columnsOf(await read(protocol))).toEqual(['title']);
+
+        // The rollback's row is the first active row of the name in store
+        // order (`resolveOverlayPackageBinding`): here the package-less one,
+        // which is rolled back to its version 1.
+        expect(await refusalOf((protocol as any).rollbackMetaItem({ type: 'view', name: VIEW, toVersion: 1 }))).toBeUndefined();
+        expect(columnsOf(JSON.parse(String(rowOf(VIEW, null)!.metadata)))).toEqual(UNBOUND_COLUMNS);
+        // The package-less save and DELETE are not the close's to refuse:
+        // they are addressed as before the close (`packagelessAddress`: the
+        // one bound row of the name, the pair's), so the override write gate
+        // answers the save there (D2), and the DELETE removes the pair's row —
+        // what "Restore package original" does — never this package-less one.
+        const saved = await refusalOf(protocol.saveMetaItem({ type: 'view', name: VIEW, item: listBody(VIEW, 'showcase_task', EDITED_COLUMNS) } as any));
+        expect(saved?.message).toContain('declares no override');
+        expect(saved?.message).not.toContain('os migrate packageless-overlays');
+        expect(rowOf(VIEW, PAIR)).toEqual(pairRow);
+        expect(await refusalOf(protocol.deleteMetaItem({ type: 'view', name: VIEW } as any))).toBeUndefined();
+        expect(rows(VIEW)).toEqual([[null, 'active']]);
+        // …which leaves the package-less row movable: the ceremony's remedy.
+        expect(dispositions(await census(protocol))).toEqual([`${VIEW}@active movable`]);
+        expect(columnsOf(await read(protocol))).toEqual(UNBOUND_COLUMNS);
+    });
+
+    it('CONTROL movable: the same stored row with no pair row beside it — its package-less rollback, save and DELETE are refused', async () => {
+        const { protocol, rows } = await boot();
+        await legacyRowWithHistory(protocol);
+        expect(dispositions(await census(protocol))).toEqual([`${VIEW}@active movable`]);
+        expectClosed(await refusalOf((protocol as any).rollbackMetaItem({ type: 'view', name: VIEW, toVersion: 1 })));
+        expectClosed(await refusalOf(protocol.saveMetaItem({ type: 'view', name: VIEW, item: listBody(VIEW, 'showcase_task', EDITED_COLUMNS) } as any)));
+        expectClosed(await refusalOf(protocol.deleteMetaItem({ type: 'view', name: VIEW } as any)));
+        expect(rows(VIEW)).toEqual([[null, 'active']]);
+    });
+});
+
+/**
+ * [#29392, ADR-0146 D1, D11] A row bound to the read-only base itself, as a
+ * save naming the base stored it before #28905 closed that write (laid down
+ * through the engine, as `storeRow` lays down every older release's row), is
+ * in the census beside the package-less rows: listed `movable` with
+ * `boundToBase`, its binding as its base, and moved into the pair by
+ * `--apply` with the declaration — the same outcome a package-less row's move
+ * answers. Before, the census read package-less rows only, so the dry run
+ * listed nothing and the row's one exit was a delete, which drops it.
+ */
+describe('[#29392] the census and the move reach a row bound to the read-only base, stored before the #28905 close', () => {
+    const listedRows = (c: any) => (c.rows as any[]).map((r) => `${r.name}@${r.state} ${r.disposition} ${r.base} → ${r.pair}${r.boundToBase ? ' bound' : ''}`);
+
+    it('the dry run lists it with its target pair; --apply moves it with its `overrides` declaration; the base\'s address serves the customization over the base\'s document after; a re-run moves 0', async () => {
+        const { engine, protocol, rows, rowOf } = await boot();
+        await storeRow(engine, VIEW, 'showcase_task', UNBOUND_COLUMNS, BASE);
+        await storeRow(engine, VIEW, 'showcase_task', EDITED_COLUMNS, BASE, 'draft');
+        const servedBefore = columnsOf(await read(protocol, BASE));
+        expect(servedBefore).toEqual(UNBOUND_COLUMNS);
+
+        const dry = await census(protocol);
+        expect(listedRows(dry)).toEqual([
+            `${VIEW}@active movable ${BASE} → ${PAIR} bound`,
+            `${VIEW}@draft movable ${BASE} → ${PAIR} bound`,
+        ]);
+        expect(dry.environmentRows).toBe(0);
+        // The dry run writes nothing.
+        expect(rows(VIEW).slice().sort()).toEqual([[BASE, 'active'], [BASE, 'draft']]);
+        expect((engine.registry as any).getPackage(PAIR)).toBeUndefined();
+
+        const result = await migrate(protocol);
+        expect(result.outcomes.map((o: any) => [o.outcome, o.packageId, o.basedOn])).toEqual([
+            ['moved', PAIR, '1.2.0'], ['moved', PAIR, '1.2.0'],
+        ]);
+        expect(result.bases).toEqual([{ base: BASE, pair: PAIR, pairCreated: true, moved: 2, declarationsCompleted: 0, failed: 0, shadowed: 0 }]);
+        expect(rows(VIEW).slice().sort()).toEqual([[PAIR, 'active'], [PAIR, 'draft']]);
+        for (const state of ['active', 'draft']) {
+            const moved = rowOf(VIEW, PAIR, state)!;
+            expect(isServedOverrideRowOf(moved as any, BASE), state).toBe(true);
+            expect(JSON.parse(String(moved.metadata)).overrides).toEqual({ package: BASE, basedOn: '1.2.0' });
+        }
+        expect(columnsOf(JSON.parse(String(rowOf(VIEW, PAIR, 'draft')!.metadata)))).toEqual(EDITED_COLUMNS);
+        // The base's document is the code layer; the customization, now the
+        // pair's declared override, is served over it at every read.
+        const view = await layered(protocol, BASE);
+        expect(columnsOf(view.code)).toEqual(BASE_COLUMNS);
+        expect(columnsOf(view.effective)).toEqual(UNBOUND_COLUMNS);
+        expect(await fiveReads(protocol)).toEqual([UNBOUND_COLUMNS, UNBOUND_COLUMNS, UNBOUND_COLUMNS, UNBOUND_COLUMNS, UNBOUND_COLUMNS]);
+
+        const again = await migrate(protocol);
+        expect(again.rows).toEqual([]);
+        expect(again.outcomes).toEqual([]);
+    });
+
+    it('a name two read-only packages ship, bound to one of them: the binding names its base, so it is movable into that base\'s pair, never `multi_shipped`', async () => {
+        const { engine, protocol, rows, rowOf } = await boot();
+        await storeRow(engine, SHARED_VIEW, 'shared_task', UNBOUND_COLUMNS, BASE);
+        const dry = await census(protocol);
+        expect(listedRows(dry)).toEqual([`${SHARED_VIEW}@active movable ${BASE} → ${PAIR} bound`]);
+        expect(dry.rows[0].shippers).toEqual([OTHER, BASE]);
+        expect((await migrate(protocol)).outcomes.map((o: any) => o.outcome)).toEqual(['moved']);
+        expect(rows(SHARED_VIEW)).toEqual([[PAIR, 'active']]);
+        expect(JSON.parse(String(rowOf(SHARED_VIEW, PAIR)!.metadata)).overrides).toEqual({ package: BASE, basedOn: '1.2.0' });
+    });
+
+    it('a body declaring another package: listed `foreign_declaration`, bound, and left as it is', async () => {
+        const { engine, protocol, rows } = await boot();
+        await storeRow(engine, VIEW, 'showcase_task', UNBOUND_COLUMNS, BASE, 'active', { overrides: { package: OTHER } });
+        expect(listedRows(await census(protocol))).toEqual([`${VIEW}@active foreign_declaration ${BASE} → ${PAIR} bound`]);
+        expect((await migrate(protocol)).outcomes).toEqual([]);
+        expect(rows(VIEW)).toEqual([[BASE, 'active']]);
+    });
+
+    it('beside the pair\'s declared row: listed `shadowed`, and left as it is', async () => {
+        const { engine, protocol, rows } = await boot();
+        await (protocol as any).ensureCustomizationPackage({ basePackageId: BASE });
+        await storeRow(engine, VIEW, 'showcase_task', EDITED_COLUMNS, PAIR, 'active', { overrides: { package: BASE, basedOn: '1.2.0' } });
+        await storeRow(engine, VIEW, 'showcase_task', UNBOUND_COLUMNS, BASE);
+        const dry = await census(protocol);
+        expect(listedRows(dry)).toEqual([`${VIEW}@active shadowed ${BASE} → ${PAIR} bound`]);
+        expect(dry.rows[0].shadowDeclares).toBe(true);
+        const result = await migrate(protocol);
+        expect(result.outcomes).toEqual([]);
+        expect(result.bases).toEqual([{ base: BASE, pair: PAIR, pairCreated: false, moved: 0, declarationsCompleted: 0, failed: 0, shadowed: 1 }]);
+        expect(rows(VIEW).slice().sort()).toEqual([[BASE, 'active'], [PAIR, 'active']]);
+    });
+
+    it('a package-less row and a row bound to the base of one item: the package-less row moves, the bound row is kept (never merged over it), and the next run lists it `shadowed`', async () => {
+        const { engine, protocol, rows, rowOf } = await boot();
+        await storeRow(engine, VIEW, 'showcase_task', UNBOUND_COLUMNS);
+        await storeRow(engine, VIEW, 'showcase_task', EDITED_COLUMNS, BASE);
+        const dry = await census(protocol);
+        expect(listedRows(dry).slice().sort()).toEqual([
+            `${VIEW}@active movable ${BASE} → ${PAIR}`,
+            `${VIEW}@active movable ${BASE} → ${PAIR} bound`,
+        ]);
+        const bound = dry.rows.find((r: any) => r.boundToBase);
+
+        const result = await migrate(protocol);
+        expect(result.outcomes.map((o: any) => [o.id === bound.id ? 'bound' : 'package-less', o.outcome])).toEqual([
+            ['package-less', 'moved'], ['bound', 'failed'],
+        ]);
+        expect(result.outcomes[1].error).toContain(`'${PAIR}' now holds this item`);
+        expect(result.bases).toEqual([{ base: BASE, pair: PAIR, pairCreated: true, moved: 1, declarationsCompleted: 0, failed: 1, shadowed: 0 }]);
+        // Nothing overwritten: the pair holds the package-less row's content, the bound row is untouched.
+        expect(rows(VIEW).slice().sort()).toEqual([[BASE, 'active'], [PAIR, 'active']]);
+        expect(columnsOf(JSON.parse(String(rowOf(VIEW, PAIR)!.metadata)))).toEqual(UNBOUND_COLUMNS);
+        expect(columnsOf(JSON.parse(String(rowOf(VIEW, BASE)!.metadata)))).toEqual(EDITED_COLUMNS);
+        expect(listedRows(await census(protocol))).toEqual([`${VIEW}@active shadowed ${BASE} → ${PAIR} bound`]);
+    });
+
+    it('CONTROL: a package-less row still moves as before, beside a row bound to a writable package (not listed) and a row bound to a read-only package that does not ship the name (not listed)', async () => {
+        const { engine, protocol, rows } = await boot();
+        await (protocol as any).installPackage({ manifest: { id: WORKSPACE, name: 'workspace', version: '0.1.0', type: 'app' } });
+        await storeRow(engine, VIEW, 'showcase_task', UNBOUND_COLUMNS);
+        await storeRow(engine, ENV_VIEW, 'showcase_task', UNBOUND_COLUMNS, WORKSPACE);
+        await storeRow(engine, SHARED_VIEW, 'shared_task', UNBOUND_COLUMNS, WORKSPACE);
+        // OTHER is read-only and does not ship `env_only.default`.
+        await storeRow(engine, ENV_VIEW, 'showcase_task', EDITED_COLUMNS, OTHER);
+
+        const dry = await census(protocol);
+        expect(listedRows(dry)).toEqual([`${VIEW}@active movable ${BASE} → ${PAIR}`]);
+        expect(dry.rows[0]).not.toHaveProperty('boundToBase');
+        expect(dry.environmentRows).toBe(0);
+
+        const result = await migrate(protocol);
+        expect(result.outcomes.map((o: any) => [o.outcome, o.basedOn])).toEqual([['moved', '1.2.0']]);
+        expect(rows(VIEW)).toEqual([[PAIR, 'active']]);
+        expect(rows(ENV_VIEW).slice().sort()).toEqual([[WORKSPACE, 'active'], [OTHER, 'active']]);
+        expect(rows(SHARED_VIEW)).toEqual([[WORKSPACE, 'active']]);
+    });
+});
+
+describe('[#28413] adopt-orphans leaves a shipped name to the ceremony', () => {
+    it('adopting into a writable package skips the shipped-name row and rebinds an environment one', async () => {
+        const { engine, protocol, rows } = await boot();
+        await (protocol as any).installPackage({ manifest: { id: WORKSPACE, name: 'workspace', version: '0.1.0', type: 'app' } });
+        await storeRow(engine, VIEW, 'showcase_task', UNBOUND_COLUMNS);
+        await storeRow(engine, ENV_VIEW, 'showcase_task', UNBOUND_COLUMNS);
+        const result = await (protocol as any).reassignOrphanedMetadata({ targetPackageId: WORKSPACE });
+        expect(result.reassigned).toEqual([{ type: 'view', name: ENV_VIEW }]);
+        expect(rows(VIEW)).toEqual([[null, 'active']]);
+        expect(rows(ENV_VIEW)).toEqual([[WORKSPACE, 'active']]);
+    });
+});

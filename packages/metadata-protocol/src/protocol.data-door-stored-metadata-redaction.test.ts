@@ -348,3 +348,42 @@ describe('[#21086] the door follows the redactor registry, not a datasource rule
         expect(JSON.parse(result.records[0].metadata)).toEqual({ name: 'all_tasks', label: 'All Tasks', type: 'grid' });
     });
 });
+
+describe('the data door serves a sys_metadata datasource body without its declared ssl secret member', () => {
+    const SSL_KEY = 'TEST_PLACEHOLDER_SSL_KEY';
+    const SSL_PUBLIC = { enabled: true, ca: 'TEST_CA_PEM', cert: 'TEST_CERT_PEM' };
+    const TLS_BODY = { name: 'tls_pg', driver: 'postgres', config: { host: 'db.internal' }, ssl: { ...SSL_PUBLIC, key: SSL_KEY } };
+    const PUBLIC_TLS_BODY = { name: 'tls_public', driver: 'postgres', config: { host: 'db.internal' }, ssl: SSL_PUBLIC };
+    const rows = {
+        sys_metadata: [
+            { id: 'm_tls', type: 'datasource', name: 'tls_pg', state: 'active', metadata: stored(TLS_BODY) },
+            { id: 'm_tls_public', type: 'datasource', name: 'tls_public', state: 'active', metadata: stored(PUBLIC_TLS_BODY) },
+        ],
+        sys_metadata_history: [
+            { id: 'h_tls_1', type: 'datasource', name: 'tls_pg', version: 1, operation_type: 'create', metadata: stored(TLS_BODY) },
+        ],
+    };
+
+    it('findData (list) and getData (by id) withhold ssl.key and keep the public members', async () => {
+        const { p } = makeProtocol(rows);
+        const list: any = await p.findData({ object: 'sys_metadata', query: {} });
+        expect(JSON.stringify(list.records)).not.toContain(SSL_KEY);
+        expect(JSON.parse(byId(list.records, 'm_tls').metadata).ssl).toEqual(SSL_PUBLIC);
+
+        const one: any = await p.getData({ object: 'sys_metadata', id: 'm_tls' });
+        expect(JSON.stringify(one.record)).not.toContain(SSL_KEY);
+        expect(JSON.parse(one.record.metadata).ssl).toEqual(SSL_PUBLIC);
+    });
+
+    it('a version snapshot withholds it too', async () => {
+        const { p } = makeProtocol(rows);
+        const history: any = await p.findData({ object: 'sys_metadata_history', query: {} });
+        expect(JSON.stringify(history.records)).not.toContain(SSL_KEY);
+    });
+
+    it('control: a body whose ssl block holds no key reaches the caller as its stored bytes', async () => {
+        const { p } = makeProtocol(rows);
+        const list: any = await p.findData({ object: 'sys_metadata', query: {} });
+        expect(byId(list.records, 'm_tls_public').metadata).toBe(stored(PUBLIC_TLS_BODY));
+    });
+});

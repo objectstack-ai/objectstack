@@ -242,6 +242,9 @@ describe('#23889 — the approval lists read engine-written display columns', ()
       }),
       created_at: stamp, updated_at: stamp,
     }, { context: SYSTEM } as any);
+    // The approver index as the plugin's boot backfill leaves it for such a row
+    // — what makes its approver a reader of it, and so able to act on it.
+    await svc.rebuildApproverIndex();
 
     await svc.comment('areq_legacy', { actorId: 'u_alice', comment: 'looking' }, asUser('u_alice'));
     const comment = (await actionsOf('areq_legacy')).find((a) => a.action === 'comment');

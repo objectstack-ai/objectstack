@@ -57,6 +57,15 @@ export interface Surface {
   filters?: ObjectNavItem['filters'];
   /** An `object` entry's `viewName`, carried as authored for the canvas preview (objectui#11774). */
   viewName?: ObjectNavItem['viewName'];
+  /**
+   * objectstack#28572 (ADR-0146 D3) — on a read-only base's surface, the
+   * base's paired `<base>.custom` package when this row is an item that pair
+   * ADDS (the base's own list does not hold its name). Such an item opens
+   * writable there: read and saved at this package. Absent for every item of
+   * the open package, an override the pair serves under the base's name
+   * included.
+   */
+  addedIn?: string;
 }
 
 /**

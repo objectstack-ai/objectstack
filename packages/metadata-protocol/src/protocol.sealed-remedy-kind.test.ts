@@ -12,7 +12,9 @@
  * The sentence states what the door knows and where the names are listed:
  * "'TYPE/NAME' is provided by a managed package and is sealed: it cannot be
  * written here. GET /api/v1/meta/TYPE lists the names in use." The wording is
- * the ruled text, so it is pinned whole for a type with no regime row. A type
+ * the ruled text, so it is pinned whole for a type with no regime row; on a
+ * type a declared override can replace it gains the declare-or-rename sentence
+ * (ADR-0146 D2, #28410). A type
  * with a regime row keeps its regime sentence (ADR-0126 §2: a Regime C refusal
  * names its sanctioned path; the origin-gated row names the source a
  * code-defined datasource is declared in).
@@ -29,7 +31,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
-import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
+import { DEFAULT_METADATA_TYPE_REGISTRY, getOverrideTypeClassification } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { PACKAGED_BASE_REGIME } from './packaged-base-regime.js';
 
@@ -64,10 +66,30 @@ const TYPES = [...DEFAULT_METADATA_TYPE_REGISTRY.map((e) => e.type), PLUGIN_TYPE
 /** The type's listing route — where the names in use are read. */
 const listingOf = (type: string) => `GET /api/v1/meta/${type}`;
 
+/**
+ * [ADR-0146 D2, #28410] The sealed write's declare-or-rename sentence, on a
+ * type whose override channel is open (overridable, waiting for no D9
+ * condition), read from the closed list, never transcribed.
+ */
+const declareOrRename = (type: string) => {
+    const row = getOverrideTypeClassification(type);
+    return row?.disposition === 'overridable' && (row.conditions?.length ?? 0) === 0
+        ? ` To change it, declare an override from '${PACKAGE_ID}.custom' `
+            + `(overrides: { package: '${PACKAGE_ID}', basedOn }), or rename the item.`
+        : '';
+};
+
+/**
+ * [#28412] The Regime C types whose declared override is open although the
+ * closed list records D9 conditions for them: the conditions are delivered
+ * (`CONDITIONS_DELIVERED` in `protocol-packaged-base-refusal.ts`).
+ */
+const OPEN_REGIME_C: ReadonlySet<string> = new Set(['flow']);
+
 /** The ruled sentence, for a type with no regime row. */
 const oneSentence = (type: string, name: string) =>
     `'${type}/${name}' is provided by a managed package and is sealed: it cannot be written here. `
-    + `${listingOf(type)} lists the names in use.`;
+    + `${listingOf(type)} lists the names in use.${declareOrRename(type)}`;
 
 /** Advice the door cannot give truthfully: a create's, and the source artifact's. */
 const CREATE_ADVICE = /choose a name|name no package|author your own/i;
@@ -107,7 +129,17 @@ describe('[#23577] every write over a sealed, package-held name reads one senten
                     rowless += 1;
                 } else if (row.regime === 'C') {
                     // ADR-0126 §2: the sanctioned path, read from the row.
-                    for (const route of Object.values(row.routes)) if (route) expect(message, type).toContain(route);
+                    // [#28412, ADR-0146 D9] A Regime C type whose declared
+                    // override is open names the declaration in place of its
+                    // clone route: the clone is a second item beside the base,
+                    // and both would run.
+                    const declares = declareOrRename(type) !== '' || OPEN_REGIME_C.has(type);
+                    for (const [kind, route] of Object.entries(row.routes)) {
+                        if (!route) continue;
+                        if (declares && kind === 'clone') expect(message, type).not.toContain(route);
+                        else expect(message, type).toContain(route);
+                    }
+                    if (declares) expect(message, type).toContain(`Declare an override from '${PACKAGE_ID}.custom'`);
                     expect(message, type).not.toMatch(SOURCE_ADVICE);
                 } else {
                     // The origin-gated row: a code-defined datasource, whose one

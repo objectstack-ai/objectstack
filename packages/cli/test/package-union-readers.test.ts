@@ -42,7 +42,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { CLI, TSX, childEnv } from './helpers/serve-process.js';
+import { CLI, childEnv } from './helpers/serve-process.js';
 import { linkSpec } from './helpers/define-stack-fixture.js';
 
 interface Run { code: number; stdout: string; stderr: string }
@@ -50,7 +50,7 @@ interface Run { code: number; stdout: string; stderr: string }
 function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...args],
       { cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {
@@ -95,7 +95,7 @@ const app = { name: 'unr_app', label: 'Union', navigation: [{ id: 'nav_tickets',
 const ticketZh = { 'zh-CN': { objects: { unr_ticket: { label: '工单', pluralLabel: '工单', fields: { title: { label: '标题' } } } },
   apps: { unr_app: { label: '联合', navigation: { nav_tickets: { label: '工单' } } } } } };
 const noteZh = { 'zh-CN': { objects: { unr_note: { label: '笔记', fields: { name: { label: '名称' } } } } } };
-const conn = { name: 'unr_conn', label: 'Conn', type: 'api', zzzUnionProbeKey: 1 };
+const conn = { name: 'unr_conn', label: 'Conn', type: 'api', retryConfig: { zzzUnionProbeKey: 1 } };
 `;
 
 const CONFIGS: Record<string, string> = {
@@ -121,6 +121,9 @@ export default defineStack({ manifest: appManifest, objects: [ticket, note], app
 `,
   // An undeclared connector key. \`strict: false\` keeps it past the producer's
   // parse, so the doors' own pre-parse walk is the only carrier into \`--json\`.
+  // It sits one level down, in \`retryConfig\` (a strip-mode shape the walk still
+  // visits): the connector entry's own root is closed, so a top-level key there
+  // is refused by the artifact load rather than warned about.
   keyTwo: `${PIECES}
 const svc = defineStack({ manifest: svcManifest, objects: [note], connectors: [conn] } as any, { strict: false });
 const appStack = defineStack({ manifest: appManifest, objects: [ticket], apps: [app] } as any);
@@ -259,6 +262,6 @@ describe('#22238 — the undeclared-authoring-key walk reads the package union',
   it('`os validate --json` carries the finding in `warnings` for a two-package app', () => {
     const run = r.validateTwo;
     expect(run.code, `${run.stdout}\n${run.stderr}`).toBe(0);
-    expect(named(run)).toEqual([expect.stringContaining('connectors.unr_conn.zzzUnionProbeKey')]);
+    expect(named(run)).toEqual([expect.stringContaining('connectors.unr_conn.retryConfig.zzzUnionProbeKey')]);
   });
 });

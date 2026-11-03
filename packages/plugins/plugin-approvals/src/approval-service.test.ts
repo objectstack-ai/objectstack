@@ -632,8 +632,10 @@ describe('ApprovalService (node era)', () => {
   });
 
   it('decision outputs: accepted keys return from decideNode and snapshot as __decisionOutputs', async () => {
+    // A list answer needs `multiple: true` on its declaration: a bare key takes
+    // one value since #28658.
     const req = await svc.openNodeRequest(
-      openInput(['u9'], {}, { decisionOutputs: ['next_reviewers', 'note'] }), CTX,
+      openInput(['u9'], {}, { decisionOutputs: [{ key: 'next_reviewers', multiple: true }, 'note'] }), CTX,
     );
     const out = await svc.decideNode(req.id, {
       decision: 'approve', actorId: 'u9', outputs: { next_reviewers: ['u2', 'u3'] },
@@ -661,8 +663,8 @@ describe('ApprovalService (node era)', () => {
 
   // ── required decision outputs (objectui#2955) ───────────────────
   //
-  // `type`/`multiple` only shape the input widget; `required` is the one
-  // declaration the RUNTIME enforces. Without it the author's only backstop
+  // `required` is enforced by the RUNTIME (and, since #28658, `type` and
+  // `multiple` too — see the block below). Without it the author's only backstop
   // was `onEmptyApprovers`: the approve went through with the key missing, the
   // next node's `expression` approver resolved nobody, and the run stalled for
   // an admin rescue — long after the approver who could have supplied it left.
@@ -717,6 +719,12 @@ describe('ApprovalService (node era)', () => {
   });
 
   it('required outputs: a filled approve goes through and hands the value to the flow', async () => {
+    // The values are position machine names someone holds: `type: 'position'`
+    // is judged at the decision since #28658.
+    engine._tables['sys_user_position'] = [
+      { id: 'up1', user_id: 'u5', position: 'pos_1', organization_id: 't1' },
+      { id: 'up2', user_id: 'u2', position: 'pos_2', organization_id: 't1' },
+    ];
     const req = await svc.openNodeRequest(requiredInput(), CTX);
     const out = await svc.decideNode(req.id, {
       decision: 'approve', actorId: 'u9', outputs: { parallel_positions: ['pos_1', 'pos_2'] },
@@ -752,6 +760,8 @@ describe('ApprovalService (node era)', () => {
         decisionOutputs: [{ key: 'co_signer', type: 'user', required: true }],
       }), CTX,
     );
+    // `u7` and `u8` must be accounts: `type: 'user'` is judged at the decision since #28658.
+    engine._tables['sys_user'].push({ id: 'u7' }, { id: 'u8' });
     await expect(svc.decideNode(req.id, {
       decision: 'approve', actorId: 'u1',
     }, SYS)).rejects.toThrow(/VALIDATION_FAILED.*co_signer.*required to approve/s);
@@ -766,6 +776,269 @@ describe('ApprovalService (node era)', () => {
     // Last decision wins the merge — the finalizing approver's pick is what
     // the flow resumes with.
     expect(second.outputs).toEqual({ co_signer: 'u8' });
+  });
+
+  // ── typed decision outputs: `type` and `multiple` at the decision (#28658) ──
+  //
+  // Ruling 6566731522 letter A: a typed output's declared `type` and `multiple`
+  // are enforced at the decision. A value the next step cannot use is refused
+  // with VALIDATION_FAILED naming `outputs.KEY` (the approvals door answers it
+  // 400), before any write: no action row, no snapshot, the request pending.
+  // Before this a wrong user id was recorded as an approval, and a stage-2
+  // `expression` approver with `onEmptyApprovers: 'fail'` then stranded the run.
+
+  describe('typed decision outputs are judged against their declaration (#28658)', () => {
+    const typedInput = (defs: unknown[], extra: Record<string, any> = {}) =>
+      openInput(['u9'], {}, { decisionOutputs: defs, ...extra });
+    const NEXT_REVIEWERS = { key: 'next_reviewers', type: 'user', multiple: true, required: true };
+
+    /** The refusal wrote nothing: the open's submit row only, the request pending, no output snapshot. */
+    const expectNothingRecorded = () => {
+      expect((engine._tables['sys_approval_action'] ?? []).map((a: any) => a.action)).toEqual(['submit']);
+      const raw = engine._tables['sys_approval_request'][0];
+      expect(raw.status).toBe('pending');
+      expect(raw.pending_approvers).toBe('u9');
+      expect(JSON.parse(raw.node_config_json).__decisionOutputs).toBeUndefined();
+    };
+
+    const refusal = async (defs: unknown[], outputs: Record<string, unknown>, decision: 'approve' | 'reject' = 'approve') => {
+      const req: any = await svc.openNodeRequest(typedInput(defs), CTX);
+      return svc.decideNode(req.id, { decision, actorId: 'u9', outputs }, SYS).then(
+        () => { throw new Error('expected a refusal'); },
+        (e: any) => String(e?.message ?? e),
+      );
+    };
+
+    it('user: an id no account carries is refused, naming the output, and nothing is recorded', async () => {
+      const msg = await refusal([NEXT_REVIEWERS], { next_reviewers: ['u2', 'usr_does_not_exist'] });
+      expect(msg).toMatch(/^VALIDATION_FAILED: /);
+      expect(msg).toContain('`outputs.next_reviewers`');
+      expect(msg).toContain("'usr_does_not_exist' names no user");
+      expectNothingRecorded();
+    });
+
+    it('user: a slot address or an email is not a user id', async () => {
+      for (const v of ['position:sales_manager', 'alice@example.test']) {
+        engine._tables['sys_approval_request'] = [];
+        engine._tables['sys_approval_action'] = [];
+        const msg = await refusal([NEXT_REVIEWERS], { next_reviewers: [v] });
+        expect(msg, v).toContain(`\`outputs.next_reviewers\`: '${v}' is not a user id`);
+        expectNothingRecorded();
+      }
+    });
+
+    it('multiple: true takes a list — a single value is refused', async () => {
+      const msg = await refusal([NEXT_REVIEWERS], { next_reviewers: 'u2' });
+      expect(msg).toMatch(/^VALIDATION_FAILED: `outputs\.next_reviewers` takes a list of user ids/);
+      expectNothingRecorded();
+    });
+
+    it('multiple absent takes one value — a list is refused', async () => {
+      const msg = await refusal([{ key: 'co_signer', type: 'user' }], { co_signer: ['u2'] });
+      expect(msg).toMatch(/^VALIDATION_FAILED: `outputs\.co_signer` takes one user id/);
+      expectNothingRecorded();
+    });
+
+    it('multiple: false takes one value too', async () => {
+      const msg = await refusal([{ key: 'co_signer', type: 'user', multiple: false }], { co_signer: ['u2', 'u3'] });
+      expect(msg).toMatch(/`outputs\.co_signer` takes one user id/);
+      expectNothingRecorded();
+    });
+
+    it('a list holds no entry twice', async () => {
+      const msg = await refusal([NEXT_REVIEWERS], { next_reviewers: ['u2', 'u3', 'u2'] });
+      expect(msg).toContain("`outputs.next_reviewers` lists 'u2' more than once");
+      expectNothingRecorded();
+    });
+
+    it('a picker value that is not text is refused', async () => {
+      const msg = await refusal([NEXT_REVIEWERS], { next_reviewers: ['u2', 42] });
+      expect(msg).toContain('`outputs.next_reviewers` must hold user ids as text');
+      expectNothingRecorded();
+    });
+
+    it('every mismatched output is named in the one refusal', async () => {
+      const msg = await refusal(
+        [NEXT_REVIEWERS, { key: 'co_signer', type: 'user' }],
+        { next_reviewers: 'u2', co_signer: 'nobody_here' },
+      );
+      expect(msg).toContain('`outputs.next_reviewers` takes a list');
+      expect(msg).toContain("`outputs.co_signer`: 'nobody_here' names no user");
+      expectNothingRecorded();
+    });
+
+    it('a valid user list is recorded and handed to the flow', async () => {
+      const req: any = await svc.openNodeRequest(typedInput([NEXT_REVIEWERS]), CTX);
+      const out = await svc.decideNode(req.id, {
+        decision: 'approve', actorId: 'u9', outputs: { next_reviewers: ['u2', 'u3'] },
+      }, SYS);
+      expect(out.finalized).toBe(true);
+      expect(out.outputs).toEqual({ next_reviewers: ['u2', 'u3'] });
+      expect(engine._tables['sys_approval_request'][0].status).toBe('approved');
+    });
+
+    it('position: judged by machine name — a held name passes, a sys_position id is refused', async () => {
+      engine._tables['sys_position'] = [{ id: 'pos_7f3a', name: 'sales_manager', active: true }];
+      engine._tables['sys_user_position'] = [
+        { id: 'up1', user_id: 'u5', position: 'sales_manager', organization_id: 't1' },
+      ];
+      const defs = [{ key: 'co_sign', type: 'position', multiple: true }];
+      const msg = await refusal(defs, { co_sign: ['pos_7f3a'] });
+      expect(msg).toContain("`outputs.co_sign`: 'pos_7f3a' is not a position anyone holds in this request's organization");
+      expectNothingRecorded();
+
+      engine._tables['sys_approval_request'] = [];
+      engine._tables['sys_approval_action'] = [];
+      const req: any = await svc.openNodeRequest(typedInput(defs), CTX);
+      const out = await svc.decideNode(req.id, {
+        decision: 'approve', actorId: 'u9', outputs: { co_sign: ['sales_manager'] },
+      }, SYS);
+      expect(out.outputs).toEqual({ co_sign: ['sales_manager'] });
+    });
+
+    it("position: a name held only in another organization does not resolve in this request's", async () => {
+      engine._tables['sys_user_position'] = [
+        { id: 'up1', user_id: 'u5', position: 'cfo', organization_id: 't2' },
+      ];
+      const msg = await refusal([{ key: 'escalate_to', type: 'position' }], { escalate_to: 'cfo' });
+      expect(msg).toContain("`outputs.escalate_to`: 'cfo' is not a position anyone holds");
+      expectNothingRecorded();
+    });
+
+    it('department: an active department of the organization passes; unknown, inactive or foreign ones are refused', async () => {
+      engine._tables['sys_business_unit'] = [
+        { id: 'd1', active: true, organization_id: 't1' },
+        { id: 'd_off', active: false, organization_id: 't1' },
+        { id: 'd_t2', active: true, organization_id: 't2' },
+      ];
+      const defs = [{ key: 'route_to', type: 'department', multiple: true }];
+      const msg = await refusal(defs, { route_to: ['d1', 'd_none', 'd_off', 'd_t2'] });
+      for (const id of ['d_none', 'd_off', 'd_t2']) {
+        expect(msg, id).toContain(`\`outputs.route_to\`: '${id}' names no active department in this request's organization`);
+      }
+      expect(msg).not.toContain("'d1'");
+      expectNothingRecorded();
+
+      engine._tables['sys_approval_request'] = [];
+      engine._tables['sys_approval_action'] = [];
+      const req: any = await svc.openNodeRequest(typedInput(defs), CTX);
+      const out = await svc.decideNode(req.id, {
+        decision: 'approve', actorId: 'u9', outputs: { route_to: ['d1'] },
+      }, SYS);
+      expect(out.outputs).toEqual({ route_to: ['d1'] });
+    });
+
+    it("team: a team row passes; an unknown team or another organization's team is refused", async () => {
+      engine._tables['sys_team'] = [
+        { id: 'tm1', organization_id: 't1' },
+        { id: 'tm_t2', organization_id: 't2' },
+      ];
+      const defs = [{ key: 'reviewers', type: 'team', multiple: true }];
+      const msg = await refusal(defs, { reviewers: ['tm1', 'tm_none', 'tm_t2'] });
+      expect(msg).toContain("`outputs.reviewers`: 'tm_none' names no team");
+      expect(msg).toContain("`outputs.reviewers`: 'tm_t2' is a team of another organization");
+      expect(msg).not.toContain("'tm1'");
+      expectNothingRecorded();
+
+      engine._tables['sys_approval_request'] = [];
+      engine._tables['sys_approval_action'] = [];
+      const req: any = await svc.openNodeRequest(typedInput(defs), CTX);
+      const out = await svc.decideNode(req.id, {
+        decision: 'approve', actorId: 'u9', outputs: { reviewers: ['tm1'] },
+      }, SYS);
+      expect(out.outputs).toEqual({ reviewers: ['tm1'] });
+    });
+
+    it('a REJECT that carries a mismatched output is refused too; a reject with none goes through', async () => {
+      const msg = await refusal([NEXT_REVIEWERS], { next_reviewers: ['usr_does_not_exist'] }, 'reject');
+      expect(msg).toContain("`outputs.next_reviewers`: 'usr_does_not_exist' names no user");
+      expectNothingRecorded();
+
+      engine._tables['sys_approval_request'] = [];
+      engine._tables['sys_approval_action'] = [];
+      const req: any = await svc.openNodeRequest(typedInput([NEXT_REVIEWERS]), CTX);
+      const out = await svc.decideNode(req.id, { decision: 'reject', actorId: 'u9' }, SYS);
+      expect(out.finalized).toBe(true);
+    });
+
+    it('a mid-tally co-sign vote is judged before it is counted', async () => {
+      const req: any = await svc.openNodeRequest(
+        openInput(['u1', 'u2'], {}, { behavior: 'unanimous', decisionOutputs: [{ key: 'co_signer', type: 'user' }] }), CTX,
+      );
+      await expect(svc.decideNode(req.id, {
+        decision: 'approve', actorId: 'u1', outputs: { co_signer: 'ghost' },
+      }, SYS)).rejects.toThrow(/VALIDATION_FAILED: `outputs\.co_signer`: 'ghost' names no user/);
+      expect((engine._tables['sys_approval_action'] ?? []).map((a: any) => a.action)).toEqual(['submit']);
+      expect(engine._tables['sys_approval_request'][0].pending_approvers).toBe('u1,u2');
+    });
+
+    it('text: free values in the declared shape are accepted, unresolved', async () => {
+      const req: any = await svc.openNodeRequest(
+        typedInput(['note', { key: 'reason', type: 'text' }, { key: 'tags', type: 'text', multiple: true }]), CTX,
+      );
+      const outputs = { note: 'looks fine', reason: 7, tags: ['urgent', 'nobody_resolves_this'] };
+      const out = await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9', outputs }, SYS);
+      expect(out.outputs).toEqual(outputs);
+    });
+
+    it('text with multiple: true takes a list — a single value is refused', async () => {
+      const msg = await refusal([{ key: 'tags', type: 'text', multiple: true }], { tags: 'urgent' });
+      expect(msg).toMatch(/^VALIDATION_FAILED: `outputs\.tags` takes a list of values/);
+      expectNothingRecorded();
+    });
+
+    it('text without multiple takes one value — a list is refused, a bare key included', async () => {
+      for (const defs of [[{ key: 'note', type: 'text' }], ['note']]) {
+        engine._tables['sys_approval_request'] = [];
+        engine._tables['sys_approval_action'] = [];
+        const msg = await refusal(defs, { note: ['a', 'b'] });
+        expect(msg, JSON.stringify(defs)).toMatch(/^VALIDATION_FAILED: `outputs\.note` takes one value/);
+        expectNothingRecorded();
+      }
+    });
+
+    it('a text list holds no entry twice', async () => {
+      const msg = await refusal([{ key: 'tags', type: 'text', multiple: true }], { tags: ['urgent', 'later', 'urgent'] });
+      expect(msg).toContain("`outputs.tags` lists 'urgent' more than once");
+      expectNothingRecorded();
+    });
+
+    it("the Console's decide body passes: a tags list for a list output, one string (comma and all) otherwise", async () => {
+      // The shape `decisionOutputParams` + `TagsField` send from both decision
+      // surfaces (ui/packages/app-shell): a `multiple: true` free-value output
+      // as a trimmed, distinct string list, a single-value one as one string
+      // whose comma is literal, a picker list as record ids.
+      const defs = [
+        NEXT_REVIEWERS,
+        { key: 'labels', type: 'text', multiple: true },
+        { key: 'watchers', multiple: true },
+        'note',
+      ];
+      const outputs = {
+        next_reviewers: ['u2', 'u3'],
+        labels: ['alpha', 'beta', 'gamma'],
+        watchers: ['ops'],
+        note: 'a, b',
+      };
+      const req: any = await svc.openNodeRequest(typedInput(defs), CTX);
+      const out = await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9', outputs }, SYS);
+      expect(out.finalized).toBe(true);
+      expect(out.outputs).toEqual(outputs);
+    });
+
+    it('the comma string the Console used to send for a list output is refused', async () => {
+      const msg = await refusal([{ key: 'labels', type: 'text', multiple: true }], { labels: 'alpha, beta' });
+      expect(msg).toMatch(/^VALIDATION_FAILED: `outputs\.labels` takes a list of values/);
+      expectNothingRecorded();
+    });
+
+    it('a blank optional picker output is left to `required`, not judged', async () => {
+      const req: any = await svc.openNodeRequest(typedInput([{ key: 'co_signer', type: 'user', multiple: true }]), CTX);
+      const out = await svc.decideNode(req.id, {
+        decision: 'approve', actorId: 'u9', outputs: { co_signer: [] },
+      }, SYS);
+      expect(out.finalized).toBe(true);
+    });
   });
 
   // ── approver expansion: position (ADR-0090 D3) ──────────────────
@@ -1602,7 +1875,10 @@ describe('ApprovalService (node era)', () => {
 
   it('reassign: blocks a non-holder and duplicate targets', async () => {
     const req = await svc.openNodeRequest(openInput(['u9', 'u2']), CTX);
-    await expect(svc.reassign(req.id, { actorId: 'intruder', to: 'u7' }, asUser('intruder'))).rejects.toThrow(/FORBIDDEN/);
+    // No participant, so no reader of the request: answered as for a missing id.
+    await expect(svc.reassign(req.id, { actorId: 'intruder', to: 'u7' }, asUser('intruder'))).rejects.toThrow(/^REQUEST_NOT_FOUND: /);
+    // A reader who holds no slot — the submitter — is refused by the door's own rule.
+    await expect(svc.reassign((req as { id: string }).id, { actorId: 'u1', to: 'u7' }, CTX)).rejects.toThrow(/^FORBIDDEN/);
     await expect(svc.reassign(req.id, { actorId: 'u9', to: 'u2' }, asUser('u9'))).rejects.toThrow(/VALIDATION_FAILED/);
   });
 
@@ -1710,13 +1986,21 @@ describe('ApprovalService (node era)', () => {
 
     it('a caller who may not move the slot is refused FORBIDDEN before the target is resolved: no directory answer leaks', async () => {
       const id = await openOn(['u9']);
-      const reads = engine._finds.length;
-      await expect(svc.reassign(id, { actorId: 'intruder', to: 'nobody-at-all' }, asUser('intruder')))
+      const targetLookups = (from: number) => engine._finds.slice(from)
+        .filter(f => JSON.stringify(f.options?.where ?? f.options?.filter ?? {}).includes('nobody-at-all'));
+      // A reader of the request who holds no slot — the submitter.
+      let reads = engine._finds.length;
+      await expect(svc.reassign(id, { actorId: 'u1', to: 'nobody-at-all' }, CTX))
         .rejects.toThrow(/^FORBIDDEN:/);
       // The caller's OWN account is read (its email is an acting address);
       // the target is never looked up.
-      expect(engine._finds.slice(reads).filter(f => JSON.stringify(f.options?.where ?? f.options?.filter ?? {})
-        .includes('nobody-at-all'))).toEqual([]);
+      expect(targetLookups(reads)).toEqual([]);
+      // A caller who cannot read the request is answered as for a missing id,
+      // and the target is not looked up for them either.
+      reads = engine._finds.length;
+      await expect(svc.reassign(id, { actorId: 'intruder', to: 'nobody-at-all' }, asUser('intruder')))
+        .rejects.toThrow(/^REQUEST_NOT_FOUND:/);
+      expect(targetLookups(reads)).toEqual([]);
     });
 
     it('moves the slot to a user id of a member here, and to one with no membership rows at all (no tenancy fact, as the sibling screens read it)', async () => {
@@ -1810,8 +2094,9 @@ describe('ApprovalService (node era)', () => {
     const req = await svc.openNodeRequest(openInput(['u9']), CTX);
     await svc.comment(req.id, { actorId: 'u1', comment: 'Numbers attached.' }, CTX);
     await svc.comment(req.id, { actorId: 'u9', comment: 'Thanks, reviewing.' }, asUser('u9'));
+    // An outsider does not read the request: answered as for a missing id.
     await expect(svc.comment(req.id, { actorId: 'outsider', comment: 'hi' }, asUser('outsider')))
-      .rejects.toThrow(/FORBIDDEN/);
+      .rejects.toThrow(/^REQUEST_NOT_FOUND: /);
     const actions = await svc.listActions(req.id, SYS);
     expect(actions.filter(a => a.action === 'comment')).toHaveLength(2);
   });
@@ -2474,9 +2759,13 @@ describe('ApprovalService — admin override (#3424)', () => {
   it('the stuck request is undecidable by any normal user (repro)', async () => {
     const req = await svc.openNodeRequest(stuckInput(), CTX);
     expect(req.pending_approvers).toEqual(['position:sales_manager']);
-    // Even the org owner-by-id is not in the resolved (empty) slate.
+    // Even the org owner-by-id is not in the resolved (empty) slate — and no
+    // participant, so no reader of it: answered as for a missing id.
     await expect(svc.decideNode(req.id, { decision: 'approve', actorId: 'nobody' }, MEMBER))
-      .rejects.toThrow(/FORBIDDEN/);
+      .rejects.toThrow(/^REQUEST_NOT_FOUND: /);
+    // The submitter reads it, and is refused by the door's own rule.
+    await expect(svc.decideNode((req as { id: string }).id, { decision: 'approve' } as any, CTX))
+      .rejects.toThrow(/^FORBIDDEN/);
   });
 
   it('a tenant admin can approve a stuck request, finalizing it (which releases the lock)', async () => {
@@ -2530,8 +2819,10 @@ describe('ApprovalService — admin override (#3424)', () => {
 
   it('a tenant admin of a DIFFERENT org cannot override (privilege is org-scoped)', async () => {
     const req = await svc.openNodeRequest(stuckInput(), CTX); // organization_id = t1
+    // Behind the tenancy wall for them, and no override here: answered as for a missing id.
     await expect(svc.decideNode(req.id, { decision: 'approve', actorId: 'owner2' }, OTHER_TENANT_ADMIN))
-      .rejects.toThrow(/FORBIDDEN/);
+      .rejects.toThrow(/^REQUEST_NOT_FOUND: /);
+    expect((await svc.getRequest((req as { id: string }).id, SYS))?.status).toBe('pending');
   });
 
   it('viewer.can_override reflects the privilege, and drops once finalized', async () => {
@@ -2632,7 +2923,8 @@ describe('approval_comment — its visible gate is the comment route\'s admissio
       ['pending · a pending approver', pending, asUser('u9'), true, true],
       ['pending · a holder of a position slot', stuck, SALES_MANAGER, true, true],
       ['pending · an override admin on no slot', pending, PLATFORM_ADMIN, false, 'FORBIDDEN'],
-      ['pending · a stranger', pending, asUser('u_stranger'), false, 'FORBIDDEN'],
+      // Not served the request, and answered by the route as for a missing id.
+      ['pending · a stranger', pending, asUser('u_stranger'), false, 'REQUEST_NOT_FOUND'],
       ['approved · the submitter', approved, CTX, false, 'INVALID_STATE'],
       ['approved · the approver who decided', approved, asUser('u9'), false, 'INVALID_STATE'],
       ['recalled · the submitter', recalled, CTX, false, 'INVALID_STATE'],
@@ -2734,22 +3026,38 @@ describe('ApprovalService — org-filtered read-back refuses loudly (#12769)', (
     expect(String(err.message)).toContain('NOT rolled back');
   });
 
-  it('decide: an ordinary org-scoped slot holder hits the same refusal — no override involved', async () => {
+  it('decide: the override actor\'s decision lands and the echo refuses the same way', async () => {
     const req = await openOrgless();
-    await expect(svc.decideNode(req.id, { decision: 'approve', actorId: 'u9' }, ORG_APPROVER))
+    await expect(svc.decideNode(req.id, { decision: 'approve', actorId: 'root' }, PLATFORM_ADMIN))
       .rejects.toThrow(/^READ_BACK_FAILED: /);
     const after = await svc.getRequest(req.id, SYS);
     expect(after?.status).toBe('approved'); // the decision landed
   });
 
-  it('comment (thread interaction): same refusal shape', async () => {
+  it('comment (thread interaction): same refusal shape, for an org-scoped system context', async () => {
     const req = await openOrgless();
-    await expect(svc.comment(req.id, { actorId: 'u9', comment: 'reviewing' }, ORG_APPROVER))
+    // A system context that names an organization — what a flow running in one
+    // carries — acts under the slot it names, and its echo narrows to 't1'.
+    const ORG_SYSTEM = { isSystem: true, tenantId: 't1', positions: [], permissions: [] } as any;
+    await expect(svc.comment(req.id, { actorId: 'u9', comment: 'reviewing' }, ORG_SYSTEM))
       .rejects.toThrow(/^READ_BACK_FAILED: /);
     const acts = await svc.listActions(req.id, SYS);
     // `[length - 1]`, not `.at(-1)`: this package's test layer type-checks under
     // lib ES2021 in the TEST_DEBT re-measure, where `.at` is a TS2550 (#5278).
-    expect(acts[acts.length - 1]).toMatchObject({ action: 'comment', actor_id: 'u9' }); // the comment landed
+    expect(acts[acts.length - 1]).toMatchObject({ action: 'comment', acted_as: 'u9' }); // the comment landed
+  });
+
+  it('an ordinary org-scoped slot holder does not read the org-less row, so the act doors answer it as a missing id — before any write', async () => {
+    const req = await openOrgless();
+    // The read door's own verdict first: the org narrowing hides the row.
+    expect(await svc.getRequest(req.id, ORG_APPROVER)).toBeNull();
+    const actionsBefore = (await svc.listActions(req.id, SYS)).length;
+    await expect(svc.decideNode(req.id, { decision: 'approve', actorId: 'u9' }, ORG_APPROVER))
+      .rejects.toThrow(`REQUEST_NOT_FOUND: ${req.id}`);
+    await expect(svc.comment(req.id, { actorId: 'u9', comment: 'reviewing' }, ORG_APPROVER))
+      .rejects.toThrow(`REQUEST_NOT_FOUND: ${req.id}`);
+    expect((await svc.getRequest(req.id, SYS))?.status).toBe('pending');
+    expect(await svc.listActions(req.id, SYS)).toHaveLength(actionsBefore);
   });
 
   it('control: an org-less caller (trigger/system context shape) reads back fine — no narrowing, no refusal', async () => {
@@ -4944,8 +5252,15 @@ describe('ApprovalService — every slot reader takes the acting addresses (#213
     ({ userId, tenantId: 't1', positions, permissions: [], ...extra }) as any;
   /** Staffed into the routed position; neither the submitter nor an admin. */
   const HOLDER = holding('u_holder', ['sales_manager']);
-  /** Holds a position — just not the routed one. */
+  /** Holds a position — just not the routed one. A participant of nothing, so no reader either. */
   const BYSTANDER = holding('u_bystander', ['finance']);
+  /**
+   * A bystander who READS the request — its submitter (`u1`), holding another
+   * position — so a refusal of theirs is the slot test's, not the read rule's.
+   */
+  const READING_BYSTANDER = holding('u1', ['finance']);
+  /** The submitter, holding the position whose name a retired `role:` slot spells. */
+  const READING_HOLDER = holding('u1', ['sales_manager']);
   /** `CTX` (u1) submits every request here and holds no position. */
   const SUBMITTER = CTX;
   /** A platform admin who holds no slot — the #3424 override, not a slot holder. */
@@ -5001,7 +5316,14 @@ describe('ApprovalService — every slot reader takes the acting addresses (#213
       // route passes when the body names nobody).
       const decided = await svc.decideNode(req.id, { decision: 'approve' } as any, ctx).then(
         () => (actionsOf(engine, req.id, 'approve')[0]?.via_override ? 'override' : 'slot'),
-        (err: Error) => { expect(err.message, label).toMatch(/^FORBIDDEN: actor '.+' is not a pending approver$/); return 'refused'; },
+        (err: Error) => {
+          // The bystander does not read the request (see `served` above), so the
+          // door answers as for a missing id; a reader is refused by the slot test.
+          expect(err.message, label).toMatch(label === 'bystander'
+            ? new RegExp(`^REQUEST_NOT_FOUND: ${req.id}$`)
+            : /^FORBIDDEN: actor '.+' is not a pending approver$/);
+          return 'refused';
+        },
       );
       expect(decided, `${label}: decision`).toBe(want.decides);
       // ⭐ The rule the docblock states: can_act IS "admitted as a slot holder".
@@ -5035,14 +5357,21 @@ describe('ApprovalService — every slot reader takes the acting addresses (#213
     // nothing there, under the default actor either.
     const legacy = await open(svc, toPosition);
     await storeLegacyRoleSlot(engine, svc, legacy.id);
+    // The slot test, on a holder who READS the request — its submitter.
+    await expect(svc.decideNode(legacy.id, { decision: 'reject' } as any, READING_HOLDER))
+      .rejects.toThrow("FORBIDDEN: actor 'u1' is not a pending approver");
+    // A holder with no other part in it does not even read it: answered as for a missing id.
     await expect(svc.decideNode(legacy.id, { decision: 'reject' } as any, HOLDER))
-      .rejects.toThrow("FORBIDDEN: actor 'u_holder' is not a pending approver");
+      .rejects.toThrow(`REQUEST_NOT_FOUND: ${legacy.id}`);
     expect(actionsOf(engine, legacy.id, 'reject')).toEqual([]);
 
-    // This widens nobody: holding A position is not holding THIS one.
+    // This widens nobody: holding A position is not holding THIS one — asked
+    // of a bystander who reads the request, so the slot test is what answers.
     const req = await open(svc, toPosition);
+    await expect(svc.decideNode(req.id, { decision: 'approve' } as any, READING_BYSTANDER))
+      .rejects.toThrow("FORBIDDEN: actor 'u1' is not a pending approver");
     await expect(svc.decideNode(req.id, { decision: 'approve' } as any, BYSTANDER))
-      .rejects.toThrow("FORBIDDEN: actor 'u_bystander' is not a pending approver");
+      .rejects.toThrow(`REQUEST_NOT_FOUND: ${req.id}`);
     await expect(svc.decideNode(req.id, { decision: 'approve', actorId: 'role:sales_manager' }, BYSTANDER))
       .rejects.toThrow(/^FORBIDDEN: cannot act as 'role:sales_manager'/);
   });
@@ -5054,25 +5383,33 @@ describe('ApprovalService — every slot reader takes the acting addresses (#213
     // Send back's slot test runs before it looks for the flow's revise edge,
     // so the holder gets PAST it (to the missing-flow refusal) and the
     // bystander does not.
+    await expect(svc.sendBack(req.id, { comment: 'rework' } as any, READING_BYSTANDER))
+      .rejects.toThrow("FORBIDDEN: actor 'u1' is not a pending approver");
     await expect(svc.sendBack(req.id, { comment: 'rework' } as any, BYSTANDER))
-      .rejects.toThrow("FORBIDDEN: actor 'u_bystander' is not a pending approver");
+      .rejects.toThrow(`REQUEST_NOT_FOUND: ${req.id}`);
     await expect(svc.sendBack(req.id, { comment: 'rework' } as any, HOLDER))
       .rejects.toThrow(/^VALIDATION_FAILED: send-back requires the owning flow definition/);
 
+    await expect(svc.requestInfo(req.id, { comment: 'why?' } as any, READING_BYSTANDER))
+      .rejects.toThrow("FORBIDDEN: actor 'u1' is not a pending approver");
     await expect(svc.requestInfo(req.id, { comment: 'why?' } as any, BYSTANDER))
-      .rejects.toThrow("FORBIDDEN: actor 'u_bystander' is not a pending approver");
+      .rejects.toThrow(`REQUEST_NOT_FOUND: ${req.id}`);
     await svc.requestInfo(req.id, { comment: 'why?' } as any, HOLDER);
     const [asked] = actionsOf(engine, req.id, 'request_info');
     expect([asked.actor_id, asked.acted_as]).toEqual(['u_holder', SLOT]);
 
+    // The reading bystander is the submitter, whom comment admits; the other
+    // bystander does not read the request.
     await expect(svc.comment(req.id, { comment: 'hi' } as any, BYSTANDER))
-      .rejects.toThrow("FORBIDDEN: actor 'u_bystander' is not on this request");
+      .rejects.toThrow(`REQUEST_NOT_FOUND: ${req.id}`);
     await svc.comment(req.id, { comment: 'hi' } as any, HOLDER);
     const [said] = actionsOf(engine, req.id, 'comment');
     expect([said.actor_id, said.acted_as]).toEqual(['u_holder', SLOT]);
 
+    await expect(svc.reassign(req.id, { to: 'u_next' } as any, READING_BYSTANDER))
+      .rejects.toThrow("FORBIDDEN: 'u1' is not a pending approver on this request");
     await expect(svc.reassign(req.id, { to: 'u_next' } as any, BYSTANDER))
-      .rejects.toThrow("FORBIDDEN: 'u_bystander' is not a pending approver on this request");
+      .rejects.toThrow(`REQUEST_NOT_FOUND: ${req.id}`);
     // With `from` unnamed, the slot handed over is the one the holder takes.
     staffDirectory(engine, 'u_next');
     const moved = await svc.reassign(req.id, { to: 'u_next' } as any, HOLDER);
@@ -5129,8 +5466,9 @@ describe('ApprovalService — every slot reader takes the acting addresses (#213
     // Control: another account's email is not this slot.
     expect(await svc.getRequest(req.id, OTHER)).toBeNull();
     expect(await servedCanAct(svc, req, OTHER)).toBe(false);
+    // Not served the request, so answered as for a missing id.
     await expect(svc.decideNode(req.id, { decision: 'approve' } as any, OTHER))
-      .rejects.toThrow("FORBIDDEN: actor 'u_other' is not a pending approver");
+      .rejects.toThrow(`REQUEST_NOT_FOUND: ${req.id}`);
 
     const out = await svc.decideNode(req.id, { decision: 'approve' } as any, MAIL);
     expect(out.finalized).toBe(true);
@@ -5265,8 +5603,9 @@ describe('ApprovalService — the `role:` arm retired; the override decides what
       }
       expect(await svc.getRequest(id, HOLDER)).toBeNull();
       expect(await servedCanAct(svc, row, HOLDER)).toBe(false);
+      // Not served the request, so answered as for a missing id.
       await expect(svc.decideNode(id, { decision: 'approve' } as any, HOLDER))
-        .rejects.toThrow("FORBIDDEN: actor 'u_holder' is not a pending approver");
+        .rejects.toThrow(`REQUEST_NOT_FOUND: ${id}`);
       await expect(svc.decideNode(id, { decision: 'approve', actorId: 'role:sales_manager' }, HOLDER))
         .rejects.toThrow(/^FORBIDDEN: cannot act as 'role:sales_manager'/);
       expect(actionsOf(engine, id, 'approve')).toEqual([]);
@@ -5782,5 +6121,258 @@ describe('status mirror identity (#3783)', () => {
     await open();
     expect(engine._tables['sys_approval_request'][0].organization_id).toBe('t1');
     expect(mirrorContext()).toEqual({ isSystem: true, userId: 'u1', tenantId: 't1' });
+  });
+});
+
+// ── The doors that act on a request answer an unreadable one as a missing one ──
+//
+// `getRequest` serves a request to its participants and to the override actor,
+// and answers `null` alike for an id it does not hold and for a request the
+// caller may not read. Every door that acts on a request — decide, recall,
+// send back, resubmit, reassign, remind, request info, comment — asks that same
+// rule (`requestRowForCaller`) right after the row is found, before any refusal
+// that depends on it: a caller who may not read the request is answered
+// `REQUEST_NOT_FOUND: <id>`, byte for byte what an id that names nothing gets,
+// and nothing is written. A caller who CAN read it is judged by the door's own
+// rule, as before; the override actor and a system context are not asked.
+// The HTTP door is pinned in
+// `packages/qa/dogfood/test/approval-act-doors-read-visibility.dogfood.test.ts`.
+describe('ApprovalService — the act doors answer an unreadable request as a missing one', () => {
+  const MISSING = 'areq_missing_0001';
+  const SUBMITTER = CTX; // u1, tenant t1
+  const APPROVER = asUser('u2');
+  /** Same tenant, participant of nothing. */
+  const STRANGER = asUser('u5');
+  /** The administrator of ANOTHER organization: their override stops at their own. */
+  const OTHER_ORG_ADMIN = { userId: 'adm_t2', tenantId: 't2', positions: [], permissions: [], posture: 'TENANT_ADMIN' } as any;
+  /** A platform administrator whose active organization is another one: the override crosses the wall. */
+  const PLATFORM_ADMIN_ELSEWHERE = { userId: 'root', tenantId: 't2', positions: [], permissions: ['admin_full_access'] } as any;
+
+  let seq = 0;
+  const setup = (opts: Record<string, unknown> = {}) => {
+    const engine = makeFakeEngine();
+    let n = 0;
+    const svc = new ApprovalService({
+      engine: engine as any, clock: { now: () => new Date(1757000000000 + (n++) * 1000) }, ...opts,
+    });
+    return { engine, svc };
+  };
+  const open = async (svc: ApprovalService, engine: ReturnType<typeof makeFakeEngine>) => {
+    const recordId = `actvis_${++seq}`;
+    (engine._tables['opportunity'] ??= []).push({ id: recordId, amount: 100 });
+    const out: any = await svc.openNodeRequest({
+      object: 'opportunity', recordId, runId: `run_actvis_${seq}`, nodeId: 'approve_step',
+      flowName: 'deal_approval', config: nodeConfig(['u2']), record: { id: recordId, amount: 100 },
+    }, SUBMITTER);
+    expect(out.id, 'the request opened').toBeTruthy();
+    expect(out.pending_approvers).toEqual(['u2']);
+    return out as { id: string };
+  };
+  /** Every door that acts on one request, each with a body it would accept from a caller it admits. */
+  const DOORS: Array<[string, (svc: ApprovalService, id: string, ctx: any) => Promise<unknown>]> = [
+    ['approve', (svc, id, ctx) => svc.decide(id, { decision: 'approve' } as any, ctx)],
+    ['approve with outputs', (svc, id, ctx) => svc.decide(id, { decision: 'approve', outputs: { next: ['u5'] } } as any, ctx)],
+    ['reject', (svc, id, ctx) => svc.decide(id, { decision: 'reject', comment: 'no' } as any, ctx)],
+    ['recall', (svc, id, ctx) => svc.recall(id, {} as any, ctx)],
+    ['send back', (svc, id, ctx) => svc.sendBack(id, { comment: 'rework' } as any, ctx)],
+    ['resubmit', (svc, id, ctx) => svc.resubmit(id, {} as any, ctx)],
+    ['reassign', (svc, id, ctx) => svc.reassign(id, { to: 'u3' } as any, ctx)],
+    ['remind', (svc, id, ctx) => svc.remind(id, {} as any, ctx)],
+    ['request info', (svc, id, ctx) => svc.requestInfo(id, { comment: 'why?' } as any, ctx)],
+    ['comment', (svc, id, ctx) => svc.comment(id, { comment: 'hi' } as any, ctx)],
+  ];
+  const refusalOf = (p: Promise<unknown>) => p.then(() => 'ADMITTED', (err: Error) => err.message);
+  const snapshot = (engine: ReturnType<typeof makeFakeEngine>, id: string) => ({
+    row: { ...(engine._tables['sys_approval_request'] ?? []).find((r) => r.id === id) },
+    actions: (engine._tables['sys_approval_action'] ?? []).length,
+  });
+
+  it('every act door answers a caller who may not read the request what it answers an id that names nothing, and writes nothing', async () => {
+    const { engine, svc } = setup();
+    const req = await open(svc, engine);
+    // The read door's own verdict on the two callers, first.
+    expect(await svc.getRequest(req.id, STRANGER), 'the stranger is no participant').toBeNull();
+    expect(await svc.getRequest(req.id, OTHER_ORG_ADMIN), 'another organization is behind the wall').toBeNull();
+    const before = snapshot(engine, req.id);
+    for (const [door, act] of DOORS) {
+      for (const [who, ctx] of [['stranger', STRANGER], ['another organization\'s admin', OTHER_ORG_ADMIN]] as const) {
+        const existing = await refusalOf(act(svc, req.id, ctx));
+        const missing = await refusalOf(act(svc, MISSING, ctx));
+        expect(existing, `${door} · ${who}`).toBe(`REQUEST_NOT_FOUND: ${req.id}`);
+        expect(existing.replace(req.id, 'ID'), `${door} · ${who}: the same bytes as no request`)
+          .toBe(missing.replace(MISSING, 'ID'));
+      }
+    }
+    expect(snapshot(engine, req.id), 'no refused door wrote anything').toEqual(before);
+
+    // Decided: its state is not told to a non-reader either — and still is to a reader.
+    await svc.decideNode(req.id, { decision: 'approve' } as any, APPROVER);
+    for (const [door, act] of DOORS) {
+      expect(await refusalOf(act(svc, req.id, STRANGER)), `decided · ${door}`).toBe(`REQUEST_NOT_FOUND: ${req.id}`);
+    }
+    expect(await refusalOf(svc.decide(req.id, { decision: 'approve' } as any, SUBMITTER)))
+      .toBe('INVALID_STATE: request is approved');
+  });
+
+  it('a caller who can read the request keeps the door\'s own answer, and the approver still decides', async () => {
+    const { engine, svc } = setup();
+    const req = await open(svc, engine);
+    expect(await svc.getRequest(req.id, SUBMITTER)).not.toBeNull();
+    expect(await svc.getRequest(req.id, APPROVER)).not.toBeNull();
+    // The submitter, on the approver's verbs.
+    expect(await refusalOf(svc.decide(req.id, { decision: 'approve' } as any, SUBMITTER)))
+      .toBe("FORBIDDEN: actor 'u1' is not a pending approver");
+    expect(await refusalOf(svc.sendBack(req.id, { comment: 'rework' } as any, SUBMITTER)))
+      .toBe("FORBIDDEN: actor 'u1' is not a pending approver");
+    expect(await refusalOf(svc.requestInfo(req.id, { comment: 'why?' } as any, SUBMITTER)))
+      .toBe("FORBIDDEN: actor 'u1' is not a pending approver");
+    expect(await refusalOf(svc.reassign(req.id, { to: 'u3' } as any, SUBMITTER)))
+      .toBe("FORBIDDEN: 'u1' is not a pending approver on this request");
+    expect(await refusalOf(svc.resubmit(req.id, {} as any, SUBMITTER)))
+      .toBe('INVALID_STATE: request is pending (resubmit applies to returned requests)');
+    // The approver, on the submitter's verbs.
+    expect(await refusalOf(svc.recall(req.id, {} as any, APPROVER))).toMatch(/^FORBIDDEN: /);
+    expect(await refusalOf(svc.remind(req.id, {} as any, APPROVER)))
+      .toBe('FORBIDDEN: only the submitter may send reminders');
+    // And the approver decides.
+    const out = await svc.decideNode(req.id, { decision: 'approve' } as any, APPROVER);
+    expect(out.request.status).toBe('approved');
+  });
+
+  it('follows the read rule, not a copy of it: a reader the record-reader tier admits is judged by the door', async () => {
+    // With the opt-in tier on for `opportunity`, a caller who can read the
+    // target record may read its requests — so the act doors now hold the
+    // stranger to their own rule instead of answering "no such request".
+    const { engine, svc } = setup({ recordReaderVisibleObjects: ['opportunity'] });
+    const req = await open(svc, engine);
+    expect(await svc.getRequest(req.id, STRANGER), 'the tier serves the stranger').not.toBeNull();
+    expect(await refusalOf(svc.decide(req.id, { decision: 'approve' } as any, STRANGER)))
+      .toBe("FORBIDDEN: actor 'u5' is not a pending approver");
+    expect(await refusalOf(svc.comment(req.id, { comment: 'hi' } as any, STRANGER)))
+      .toBe("FORBIDDEN: actor 'u5' is not on this request");
+  });
+
+  it('the override actor and a system context act as before — across the organization wall the read door keeps', async () => {
+    const { engine, svc } = setup();
+    const crossOrg = await open(svc, engine);
+    // The read door does not serve it to the platform admin in their own organization…
+    expect(await svc.getRequest(crossOrg.id, PLATFORM_ADMIN_ELSEWHERE)).toBeNull();
+    // …and their override still decides it, as it did: the decision lands, and
+    // the echo — read inside their own organization — refuses as it always has
+    // (`READ_BACK_FAILED`, the #12769 block above), never as a missing request.
+    await expect(svc.decideNode(crossOrg.id, { decision: 'approve' } as any, PLATFORM_ADMIN_ELSEWHERE))
+      .rejects.toThrow(/^READ_BACK_FAILED: /);
+    expect((await svc.getRequest(crossOrg.id, SYS))?.status).toBe('approved');
+    const [act] = (engine._tables['sys_approval_action'] ?? [])
+      .filter((a) => a.request_id === crossOrg.id && a.action === 'approve');
+    expect(act.via_override).toBe(true);
+    // A decided request is still told to them as decided, not hidden.
+    expect(await refusalOf(svc.decide(crossOrg.id, { decision: 'approve' } as any, PLATFORM_ADMIN_ELSEWHERE)))
+      .toBe('INVALID_STATE: request is approved');
+
+    const bySystem = await open(svc, engine);
+    const out = await svc.decideNode(bySystem.id, { decision: 'reject', actorId: SLA_ACTOR_ID } as any, SYS);
+    expect(out.request.status).toBe('rejected');
+  });
+});
+
+describe('ApprovalService — one spec names each resolved person once (#28684)', () => {
+  // The #28658 measurement: a lead hands `['ADMIN', 'ADMIN']` to the next
+  // node's expression approver, and that node opened two slots for one person.
+  const NOW = new Date('2026-05-27T10:00:00Z').getTime();
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let svc: ApprovalService;
+
+  beforeEach(() => {
+    engine = makeFakeEngine();
+    let n = 0;
+    svc = new ApprovalService({ engine: engine as any, clock: { now: () => new Date(NOW + (n++) * 1000) } });
+  });
+
+  const exprInput = (picked: unknown, approverExtra: Record<string, any> = {}, configExtra: Record<string, any> = {}) => ({
+    ...openInput([]),
+    variables: { picked },
+    config: {
+      approvers: [{ type: 'expression' as const, value: 'vars.picked', ...approverExtra }],
+      behavior: 'unanimous' as const,
+      lockRecord: false,
+      ...configExtra,
+    },
+  });
+  const snapshotGroups = () =>
+    JSON.parse(engine._tables['sys_approval_request'][0].node_config_json).__approverGroups;
+
+  it('an expression yielding the same id twice opens one slot', async () => {
+    const req = await svc.openNodeRequest(exprInput(['u2', 'u2']) as any, CTX) as any;
+    expect(req.pending_approvers).toEqual(['u2']);
+    expect(engine._tables['sys_approval_request'][0].pending_approvers).toBe('u2');
+    expect(snapshotGroups()).toEqual({ u2: ['#0'] });
+  });
+
+  it('keeps first-appearance order: `[u3, u2, u3]` opens u3 then u2', async () => {
+    const req = await svc.openNodeRequest(exprInput(['u3', 'u2', 'u3']) as any, CTX) as any;
+    expect(req.pending_approvers).toEqual(['u3', 'u2']);
+  });
+
+  it('two ids an out-of-office delegation routes to the same delegate open one slot', async () => {
+    engine._tables['sys_approval_delegation'] = ['u2', 'u3'].map((delegator, i) => ({
+      id: `del${i}`, delegator_id: delegator, delegate_id: 'u9', organization_id: 't1',
+      valid_from: '2026-05-26T00:00:00Z', valid_until: '2026-05-30T00:00:00Z', reason: 'leave',
+    }));
+    const req = await svc.openNodeRequest(exprInput(['u2', 'u3']) as any, CTX) as any;
+    expect(req.pending_approvers).toEqual(['u9']);
+    // Both hops are still recorded: each delegator was routed away.
+    const hops = engine._tables['sys_approval_action'].filter((a: any) => a.action === 'ooo_substitute');
+    expect(hops.map((a: any) => a.comment).sort()).toEqual(['u2 → u9 — leave', 'u3 → u9 — leave']);
+  });
+
+  it('per_group: a repeated id is one signature, not two toward minApprovals', async () => {
+    const req = await svc.openNodeRequest(
+      exprInput(['u2', 'u2', 'u3'], {}, { behavior: 'per_group', minApprovals: 2 }) as any, CTX,
+    ) as any;
+    expect(req.pending_approvers).toEqual(['u2', 'u3']);
+    const first = await svc.decideNode(req.id, { decision: 'approve', actorId: 'u2' }, SYS);
+    expect(first.finalized).toBe(false);
+    expect(first.request.status).toBe('pending');
+    const second = await svc.decideNode(req.id, { decision: 'approve', actorId: 'u3' }, SYS);
+    expect(second.finalized).toBe(true);
+  });
+
+  it('a `field` approver holding the same id twice opens one slot (same seam)', async () => {
+    engine._tables['opportunity'] = [{ id: 'opp1', approvers_dynamic: 'u2,u3,u2' }];
+    const req = await svc.openNodeRequest({
+      ...openInput([]),
+      config: { approvers: [{ type: 'field', value: 'approvers_dynamic' }], behavior: 'unanimous', lockRecord: false },
+    } as any, CTX) as any;
+    expect(req.pending_approvers).toEqual(['u2', 'u3']);
+  });
+
+  it('resolveAs department: a repeated department, or one member of two, opens one slot and keeps every group', async () => {
+    engine._tables['sys_business_unit'] = [
+      { id: 'd1', active: true, organization_id: 't1' },
+      { id: 'd2', active: true, organization_id: 't1' },
+    ];
+    engine._tables['sys_business_unit_member'] = [
+      { id: 'm1', business_unit_id: 'd1', user_id: 'u2', organization_id: 't1' },
+      { id: 'm2', business_unit_id: 'd2', user_id: 'u2', organization_id: 't1' },
+      { id: 'm3', business_unit_id: 'd2', user_id: 'u3', organization_id: 't1' },
+    ];
+    const req = await svc.openNodeRequest(
+      exprInput(['d1', 'd2', 'd1'], { resolveAs: 'department' }, { behavior: 'per_group' }) as any, CTX,
+    ) as any;
+    expect(req.pending_approvers).toEqual(['u2', 'u3']);
+    expect(snapshotGroups()).toEqual({ u2: ['#0:d1', '#0:d2'], u3: ['#0:d2'] });
+  });
+
+  it('two specs naming one person are unchanged: once per spec, tagged once per group', async () => {
+    const req = await svc.openNodeRequest({
+      ...openInput([]),
+      config: {
+        approvers: [{ type: 'user', value: 'l1', group: 'legal' }, { type: 'user', value: 'l1', group: 'finance' }],
+        behavior: 'per_group', lockRecord: false,
+      },
+    } as any, CTX) as any;
+    expect(req.pending_approvers).toEqual(['l1', 'l1']);
+    expect(snapshotGroups()).toEqual({ l1: ['legal', 'finance'] });
   });
 });

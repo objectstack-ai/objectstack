@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: eight spawns of the emitted projects' own scripts, each on its own fixture state (five `test` runs through vitest: init plugin, its empty-suite control, create plugin fresh, after `build`, and its empty-suite control; three tsc runs: `build`, `typecheck` clean and `typecheck` with the planted error); slowest CI reading 14.9 s (run 41217827347) of the five scheduled ci.yml runs 41199450735 to 41271604267 (slice 23's offender table), x 1.25, rounded up
 
 /**
  * PIN (#25175) — an `os init` template that declares a `test` script ships a

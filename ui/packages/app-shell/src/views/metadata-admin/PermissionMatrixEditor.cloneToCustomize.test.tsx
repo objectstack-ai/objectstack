@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * "Clone to customize" — the locked permission matrix's primary action
+ * "New similar" (formerly "Clone to customize") — the locked permission matrix's primary action
  * (objectui#5987, the UI half of objectstack#11513), calling the server's
  * clone door (objectui#7611, PR-4).
  *
@@ -15,7 +15,7 @@
  * whole definition under a new name, "objectui calling it with a name and a
  * label". This suite pins that the editor:
  *
- *   1. renders "Clone to customize" as the locked editor's PRIMARY action, in
+ *   1. renders "New similar" as the locked editor's PRIMARY action, in
  *      the slot Save would occupy, and names cloning FIRST in its guidance
  *      (en-US and zh-CN);
  *   2. asks for a new name and label, and POSTs exactly `{ name, label }` to
@@ -250,8 +250,10 @@ async function renderPlain(props?: { packageId?: string; readOnly?: boolean; emb
   await screen.findByText('Account');
 }
 
-const CLONE_EN = /^Clone to customize$/;
-const CLONE_ZH = /^克隆后自定义$/;
+// objectstack#28573 (ADR-0146 D6) — the action reads "New similar" on Setup's
+// catalog as in Studio's Access pillar.
+const CLONE_EN = /^New similar$/;
+const CLONE_ZH = /^新建类似$/;
 const cloneButtons = () => screen.queryAllByRole('button', { name: CLONE_EN });
 const saveButton = () => screen.queryByRole('button', { name: /^Save$/ });
 const createCopy = () => screen.getByRole('button', { name: /^Create copy$/ });
@@ -284,8 +286,8 @@ afterEach(() => {
 
 /* ────────────────────────────────────────────────────────────────────────── */
 
-describe('PermissionMatrixEditPage — the locked editor offers Clone to customize (objectui#5987)', () => {
-  it('renders "Clone to customize" as the primary action where Save would be, and no Save', async () => {
+describe('PermissionMatrixEditPage — the locked editor offers New similar (objectui#5987)', () => {
+  it('renders "New similar" as the primary action where Save would be, and no Save', async () => {
     await renderRouted();
 
     expect(saveButton()).toBeNull();
@@ -293,7 +295,7 @@ describe('PermissionMatrixEditPage — the locked editor offers Clone to customi
     expect(clone).toBeInTheDocument();
     expect(clone).toBeEnabled();
     // The visible locked-state guidance names cloning.
-    expect(screen.getByRole('note')).toHaveTextContent(/Clone to customize/);
+    expect(screen.getByRole('note')).toHaveTextContent(/New similar/);
   });
 
   it('the artifact badge hint names cloning FIRST; the former remedies follow as secondary routes', async () => {
@@ -301,7 +303,7 @@ describe('PermissionMatrixEditPage — the locked editor offers Clone to customi
 
     const badge = screen.getByText(/provided by a code package/);
     const hint = badge.getAttribute('title') ?? '';
-    const clone = hint.indexOf('Clone to customize');
+    const clone = hint.indexOf('New similar');
     expect(clone).toBeGreaterThan(-1);
     for (const secondary of ['redeploy', 'new runtime set']) {
       const at = hint.indexOf(secondary);
@@ -325,16 +327,16 @@ describe('PermissionMatrixEditPage — the locked editor offers Clone to customi
 
     expect(screen.getByRole('button', { name: CLONE_ZH })).toBeInTheDocument();
     expect(cloneButtons()).toHaveLength(0);
-    expect(screen.getByRole('note')).toHaveTextContent(/克隆后自定义/);
+    expect(screen.getByRole('note')).toHaveTextContent(/新建类似/);
     // Exact: the guidance note above also says 由代码包提供.
     const badge = screen.getByText('只读（该权限集由代码包提供）', { exact: true });
     const hint = badge.getAttribute('title') ?? '';
-    expect(hint.indexOf('克隆后自定义')).toBeGreaterThan(-1);
-    expect(hint.indexOf('克隆后自定义')).toBeLessThan(hint.indexOf('重新部署'));
+    expect(hint.indexOf('新建类似')).toBeGreaterThan(-1);
+    expect(hint.indexOf('新建类似')).toBeLessThan(hint.indexOf('重新部署'));
   });
 });
 
-describe('PermissionMatrixEditPage — Clone to customize calls the clone door with a name and a label (objectui#7611)', () => {
+describe('PermissionMatrixEditPage — New similar calls the clone door with a name and a label (objectui#7611)', () => {
   it('POSTs exactly { name, label } to the door for THIS set, and nothing else', async () => {
     await renderRouted();
     fireEvent.click(cloneButtons()[0]);
@@ -504,7 +506,7 @@ describe('PermissionMatrixEditPage — a save the server refuses as a packaged s
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent(/Save refused \(403 not_overridable\)/);
-    expect(alert).toHaveTextContent(/Clone to customize instead/);
+    expect(alert).toHaveTextContent(/New similar instead/);
     expect(within(alert).getByRole('button', { name: CLONE_EN })).toBeEnabled();
     // The server's own sentence is kept for diagnosis, not shown alone.
     expect(within(alert).getByText(SERVER_TEXT)).toBeInTheDocument();

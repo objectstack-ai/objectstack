@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 50 — spawns the real producer once per single-cause fixture: two sequential boots of the source `os serve --dev` on one database file, the restart being the subject, each stopped by SIGTERM; slowest CI reading 35.1 s of the five scheduled runs 41199450735…41271604267 (spawned through the tsx binary then), x 1.25, rounded up
 
 /**
  * #17676 ruling A' item 5 — the card's acceptance, run as HTTP against the real
@@ -63,7 +64,6 @@ import {
   CLI,
   E2E_SECRET_KEY,
   KERNEL_ASSIGNED_PORT,
-  TSX,
   childEnv,
   probeThroughChild,
   readKernelAssignedPort,
@@ -110,7 +110,9 @@ const dirs: string[] = [];
 /** Boot `os serve --dev` on `db` and keep it running until {@link stop}. */
 function bootServe(dir: string, db: string): Promise<LiveServe> {
   return new Promise((resolveBoot, rejectBoot) => {
-    const child = spawn(TSX, [CLI, 'serve', 'objectstack.config.ts', '-p', KERNEL_ASSIGNED_PORT, '--dev'], {
+    // `process.execPath`, not the tsx binary: the same `bin/run-dev.js` entry and
+    // the same `src/`, without the second node process tsx's launcher starts.
+    const child = spawn(process.execPath, [CLI, 'serve', 'objectstack.config.ts', '-p', KERNEL_ASSIGNED_PORT, '--dev'], {
       cwd: dir,
       stdio: ['pipe', 'pipe', 'pipe'],
       // `childEnv`, never a bare `...process.env` — see its header.

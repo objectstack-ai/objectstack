@@ -58,6 +58,21 @@ export interface EmbeddedItemEditorProps {
   onSaved?: (item: Record<string, unknown>) => void;
 }
 
+/**
+ * The parent's owning package, as the hosting edit page's URL names it
+ * (`?package=`, the metadata list's row link). Read when the request is
+ * issued, as that page's own save binding is. `all` is the list's
+ * every-package scope, not a package.
+ */
+function readParentOwnerPackage(): string | undefined {
+  try {
+    const p = new URLSearchParams(window.location.search).get('package');
+    return p && p !== 'all' ? p : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function EmbeddedItemEditor({
   parentType,
   parentName,
@@ -132,9 +147,15 @@ export function EmbeddedItemEditor({
         // which the client resolves as every layer `null`. ⛔ That absence is
         // never a body: an empty base would PUT a stub of the one item over
         // the parent. With nothing readable, the save is refused.
+        // ADR-0048 — at the parent's owner, the package the hosting edit
+        // page's URL names (`?package=`); with none, the read names none, and
+        // a parent two packages hold is refused with the server's sentence,
+        // which the `catch` below shows.
+        const ownerPackageId = readParentOwnerPackage();
         const layered = await client.layered<Record<string, unknown>>(
           parentType,
           parentName,
+          ownerPackageId ? { packageId: ownerPackageId } : {},
         );
         const published = layered.effective ?? layered.code;
         if (!published) {

@@ -108,7 +108,7 @@ afterEach(() => cleanup());
 describe('MetadataProvider.readObjectScope, the names-only scope (objectui#12980)', () => {
   it('asks each name by name, never the package list or the whole registry', async () => {
     const m = mount();
-    await waitFor(() => expect(m.server.calls).toContain('view'));
+    await waitFor(() => expect(m.server.calls).toContain('app'));
     act(() => {
       m.ctx().readObjectScope!({ names: ['crm_case', 'sys_user'] });
     });
@@ -124,7 +124,7 @@ describe('MetadataProvider.readObjectScope, the names-only scope (objectui#12980
 
   it('is not settled until every name answers, and lists a name the server does not answer as missing', async () => {
     const m = mount();
-    await waitFor(() => expect(m.server.calls).toContain('view'));
+    await waitFor(() => expect(m.server.calls).toContain('app'));
     m.server.holdByName = true;
     act(() => {
       m.ctx().readObjectScope!({ names: ['crm_case', 'no_such_object'] });
@@ -139,7 +139,7 @@ describe('MetadataProvider.readObjectScope, the names-only scope (objectui#12980
 
   it('with the whole registry loaded, is cut from it and asks for nothing', async () => {
     const m = mount();
-    await waitFor(() => expect(m.server.calls).toContain('view'));
+    await waitFor(() => expect(m.server.calls).toContain('app'));
     act(() => {
       void m.ctx().ensureType('object');
     });
@@ -156,7 +156,7 @@ describe('MetadataProvider.readObjectScope, the names-only scope (objectui#12980
 
   it('a refresh asks its names again, and no package list', async () => {
     const m = mount();
-    await waitFor(() => expect(m.server.calls).toContain('view'));
+    await waitFor(() => expect(m.server.calls).toContain('app'));
     act(() => {
       m.ctx().readObjectScope!({ names: ['crm_case'] });
     });
@@ -171,7 +171,7 @@ describe('MetadataProvider.readObjectScope, the names-only scope (objectui#12980
 
   it('CONTROL: no package id and no names is the whole registry, and so is an empty names list', async () => {
     const m = mount();
-    await waitFor(() => expect(m.server.calls).toContain('view'));
+    await waitFor(() => expect(m.server.calls).toContain('app'));
     act(() => {
       m.ctx().readObjectScope!({ names: [] });
     });

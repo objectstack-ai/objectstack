@@ -17,7 +17,7 @@
  * out — not run, and not merely hidden from the report.
  *
  * A real child process, because `process.exit(1)` inside a vitest worker is
- * not an exit status. Spawned through `bin/run-dev.js` + tsx so the suite does
+ * not an exit status. Spawned through `bin/run-dev.js` + `node` so the suite does
  * not depend on `packages/cli/dist`. The target is a stub `node:http` server
  * in this process: the runner's HTTP adapter is what is exercised, and no
  * ObjectStack server is booted.
@@ -30,9 +30,9 @@ import type { AddressInfo } from 'node:net';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CLI, TSX, childEnv } from './helpers/serve-process.js';
+import { CLI, childEnv } from './helpers/serve-process.js';
 
-/** oclif + tsx cold start; a healthy run here is a few seconds. */
+/** oclif cold start; a healthy run here is a few seconds. */
 const RUN_TIMEOUT_MS = 120_000;
 
 interface Run {
@@ -44,7 +44,7 @@ interface Run {
 function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...args],
       { cwd, maxBuffer: 8 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {

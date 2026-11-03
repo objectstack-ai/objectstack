@@ -152,7 +152,7 @@ const pathname = () => screen.getByTestId('pathname').textContent;
  * answers. That the packs answer in the caller's language is the sibling
  * file's pin.
  */
-const NOTICE = 'You need Studio access to open Studio. An administrator can grant it with a permission set in Setup → Permission Sets.';
+const NOTICE = 'You need Studio access to open Studio. An administrator can grant it with a permission set in Setup → Permission Set Assignment.';
 const WAY_HOME = 'Back to home';
 
 /**

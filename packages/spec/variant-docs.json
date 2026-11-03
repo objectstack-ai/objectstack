@@ -188,6 +188,20 @@
         "content/docs/automation/flows.mdx"
       ],
       "note": "The automation engine's verdict the flow meta read serves beside a stored flow (#23316). Not authored — the engine answers it — but GOVERNED rather than exempt: a reader acts on each state differently, and automation/flows.mdx ('Discovery & Registration') names all three in its state table."
+    },
+    {
+      "key": "authenticated:false|true",
+      "label": "/auth/me/permissions response body",
+      "exempt": "not-authorable",
+      "reason": "Wire response of GET /auth/me/permissions (#28508): the server answers the anonymous or the authenticated body from the session, and nobody writes either into metadata. content/docs/references/api/auth.mdx is generated from MePermissionsResponseSchema."
+    },
+    {
+      "key": "kind:field|flow|nav",
+      "label": "customizations read contribution entry",
+      "docs": [
+        "content/docs/api/metadata-api.mdx"
+      ],
+      "note": "The per-kind entry of GET /packages/:id/customizations `contributions` (#27928, ruling 6566915346 letter E). Not authored (the server answers it), but GOVERNED rather than exempt, as the flow registration verdict is: Studio draws each kind differently, and api/metadata-api.mdx names the list and its `nav` kind. The `field` / `flow` arm discriminates by a `z.enum`; the walker reads its members into the key, so adding or dropping a kind there moves the key and sends the author back to that doc."
     }
   ]
 }

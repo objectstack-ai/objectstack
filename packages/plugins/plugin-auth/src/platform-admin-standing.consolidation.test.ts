@@ -40,10 +40,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
 import { AuthManager } from './auth-manager';
-// ⚠️ Imported from a sibling TEST file on purpose — the same trade
-// `admin-impersonate-endpoint.test.ts` measured and documented at its own
-// import of it: re-registering that file's `describe`s here is cheaper than
-// minting a second engine double (a second looseness risk plus new
+// ⚠️ Imported from a sibling TEST file on purpose, for the reason
+// `admin-impersonate-endpoint.test.ts` documents at its own import of it (that
+// file registers its `describe`s only when it is the one run): sharing its
+// double is better than minting a second engine double (a second looseness risk plus new
 // `check:engine-double-contract` ledger entries) and far cheaper than moving it
 // to a plain `.ts` helper, which would remove it from that gate's sight
 // entirely (the gate discovers doubles by walking `*.test.ts` only).
@@ -56,7 +56,7 @@ import { memoizeScrypt } from './__tests__/scrypt-memo.testkit';
 // through a lazy `await import()` (the package root stays light on purpose), so
 // without these lines the file's first case paid about half a second of vendor
 // module evaluation on a dev container. The list is what the managers in this
-// file (and the bearer-rotation cases it imports) boot through; a module it
+// file (and, until #23181 slice 30, the bearer-rotation cases it imported) boot through; a module it
 // misses is still loaded in the first case, as before. The module cache hands
 // `AuthManager` these same instances, and this file changes no environment the
 // vendor reads at load (better-auth captures `NODE_ENV` when its env module is

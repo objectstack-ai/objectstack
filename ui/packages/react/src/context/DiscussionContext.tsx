@@ -64,6 +64,13 @@ export interface DiscussionContextValue {
    *  input can suggest after the user types `@`. When omitted the input
    *  falls back to free-text @-mentions without autocompletion. */
   mentionSuggestions?: DiscussionMentionSuggestion[];
+  /**
+   * Ask the host for {@link mentionSuggestions} (objectstack#28470). A comment
+   * composer calls it on its first focus, so the host reads the list when a
+   * reader is about to write, never when the record opens. Idempotent: the
+   * host reads once, and a host that already holds the list ignores it.
+   */
+  onMentionSuggestionsWanted?: () => void;
   /** Optional uploader. When provided, the comment composer renders a
    *  drag-and-drop attachment panel; returned attachments are passed
    *  alongside the comment text to `onAddComment`. */
@@ -82,6 +89,22 @@ export interface DiscussionContextValue {
   activityDenied?: boolean;
   /** The same, for the host's `sys_comment` read. */
   commentsDenied?: boolean;
+  /**
+   * The host's `sys_activity` read FAILED: a 5xx or a network failure, not a
+   * refusal (objectstack#29188). The feed renderers then show a load-failure
+   * notice with a Retry instead of claiming the record has no activity. Set by
+   * the host that owns the fetch; a refusal, an answered read and a 404 leave
+   * it unset.
+   */
+  activityFailed?: boolean;
+  /** The same, for the host's `sys_comment` read. */
+  commentsFailed?: boolean;
+  /**
+   * Read the failed feed reads again (objectstack#29188). Offered by the host
+   * alongside {@link activityFailed} / {@link commentsFailed}; the notice's
+   * Retry calls it. Re-reads only the reads that failed.
+   */
+  onRetryFeed?: () => void;
 }
 
 const DiscussionContext = React.createContext<DiscussionContextValue | null>(null);
@@ -102,11 +125,15 @@ export const DiscussionContextProvider: React.FC<DiscussionContextProviderProps>
     value.onEditComment,
     value.onDeleteComment,
     value.mentionSuggestions,
+    value.onMentionSuggestionsWanted,
     value.onUploadAttachments,
     value.loading,
     value.error,
     value.activityDenied,
     value.commentsDenied,
+    value.activityFailed,
+    value.commentsFailed,
+    value.onRetryFeed,
   ]);
   return (
     <DiscussionContext.Provider value={memo}>{children}</DiscussionContext.Provider>

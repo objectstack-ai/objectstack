@@ -288,13 +288,17 @@ describe('#7728: the `internal` field flag omits a value from the generic data p
     });
 
     it('keeps the field usable as a WHERE filter — the verifier lookup', async () => {
-      // `resolveApiKeyPrincipal` does exactly this: match the at-rest hash,
-      // then read `expires_at`/`user_id`/`scopes` off the row. If the flag were
-      // implemented by dropping the column from the QUERY instead of from the
-      // response, this returns nothing and authentication breaks platform-wide.
+      // `resolveApiKeyPrincipal` does exactly this, as a system context: match
+      // the at-rest hash, then read `expires_at`/`user_id`/`scopes` off the
+      // row. If the flag were implemented by dropping the column from the
+      // QUERY instead of from the response, this returns nothing and
+      // authentication breaks platform-wide. Any other caller is refused the
+      // filter (`internal-field-evaluation-guard.test.ts`); the system context
+      // is the server's own lookup.
       const created = await seed();
+      const SYSTEM = { isSystem: true } as any;
 
-      const found = await ctx.engine.find('itest_api_key', { where: { key: HASH, revoked: false }, limit: 1 });
+      const found = await ctx.engine.find('itest_api_key', { where: { key: HASH, revoked: false }, limit: 1, context: SYSTEM });
       expect(found).toHaveLength(1);
       expect((found[0] as any).id).toBe(created.id);
       // …and the matched row still hands back the columns the verifier reads,
@@ -303,15 +307,16 @@ describe('#7728: the `internal` field flag omits a value from the generic data p
       expect(Object.keys(found[0] as any)).not.toContain('key');
 
       // A wrong hash still misses — the filter is real, not ignored.
-      expect(await ctx.engine.find('itest_api_key', { where: { key: 'sha256:wrong' } })).toHaveLength(0);
+      expect(await ctx.engine.find('itest_api_key', { where: { key: 'sha256:wrong' }, context: SYSTEM })).toHaveLength(0);
     });
 
     it('survives repeated reads — the strip is not cumulative on storage', async () => {
       await seed();
+      const SYSTEM = { isSystem: true } as any;
       for (let i = 0; i < 3; i++) {
-        await ctx.engine.find('itest_api_key', { where: { key: HASH } });
+        await ctx.engine.find('itest_api_key', { where: { key: HASH }, context: SYSTEM });
       }
-      const found = await ctx.engine.find('itest_api_key', { where: { key: HASH } });
+      const found = await ctx.engine.find('itest_api_key', { where: { key: HASH }, context: SYSTEM });
       expect(found).toHaveLength(1);
     });
   });

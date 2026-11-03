@@ -499,7 +499,7 @@ const NOT_RELAYED: Record<string, NotRelayed> = {
   addRecord: { kind: 'page-owned', from: 'addRecord', reason: "The page config's add-record entry point. The page states its own; the referenced view's would add a button the page author never configured." },
   showRecordCount: { kind: 'page-owned', from: 'showRecordCount', reason: "The page config's record-count toggle, page presentation policy; the referenced view's toggle does not stand in for it." },
   allowPrinting: { kind: 'page-owned', from: 'allowPrinting', reason: "The page config's \"Allow users to print the page\". It went unwritten until objectui#11572, so the declared toggle drew no print button; the page's value only, like its siblings." },
-  userActions: { kind: 'page-owned', from: 'userActions', reason: "The page config's toolbar toggles, with interface-mode defaults (closed unless opted in, #2890). The view's toolbar vocabulary is the object page's policy, not this page's." },
+  userActions: { kind: 'page-owned', from: 'userActions', reason: "The page config's toolbar toggles, read with the published `UserActionsConfigSchema` defaults (a control is withheld by writing `false`; rowColor is opt-in). The view's toolbar vocabulary is the object page's policy, not this page's." },
   inlineEdit: { kind: 'page-owned', from: 'userActions', reason: "Read from the page's `userActions.editInline` (default on since objectstack#22605; `editInline: false` opts out). Whether this page's cells are editable is the page author's decision, not the referenced view's." },
   navigation: { kind: 'page-prop', from: 'recordAction', prop: 'onRowClick', reason: "The page config's `recordAction` (drawer / page / modal / none) decides how a record opens, wired through `onRowClick` to this page's own overlay. The view's `navigation` would be a second, competing answer." },
 
@@ -517,7 +517,7 @@ const NOT_RELAYED: Record<string, NotRelayed> = {
   // The spec scopes `sourceView` to "columns/filter/sort", and the page config
   // declares none of these. Each also has a page-layer reason of its own.
   aria: { kind: 'not-inherited', reason: "Accessible naming of the list region. The page owns the region it renders; the referenced view's label would name the region after a view the page only borrows columns from." },
-  compactToolbar: { kind: 'not-inherited', reason: 'Toolbar layout. The toolbar on this surface is page policy (`userActions`, closed by default), and the page config has no compact-toolbar key to set.' },
+  compactToolbar: { kind: 'not-inherited', reason: 'Toolbar layout. The toolbar on this surface is page policy (`userActions`), and the page config has no compact-toolbar key to set.' },
   conditionalFormatting: { kind: 'not-inherited', reason: "Row styling rules, outside the spec's columns/filter/sort inheritance. ⚠️ `rowColor` IS relayed: a pre-existing relay outside the line, recorded in this file's header and not extended here." },
   // `filterableFields` was answered here (`not-inherited`) until objectui#13118:
   // the spec retires it (objectstack#24640, ruling C) and `ListView` reads it

@@ -407,6 +407,30 @@ export interface RecordPagePayload {
   fieldAccess?: RecordFieldAccess | { error: RecordPagePartRefusal };
   explain?: Partial<Record<RecordPageOperation, unknown>>;
   approvals?: { requests: Record<string, any>[]; lock: { locked: boolean } | null } | { error: RecordPagePartRefusal };
+  /**
+   * The record's comment thread and those comments' reactions
+   * (objectstack#28470), or the comment read's refusal. The reactions carry
+   * their own refusal, which leaves the comments answered.
+   */
+  discussion?:
+    | {
+        comments: Record<string, any>[];
+        reactions: { records: Record<string, any>[] } | { error: RecordPagePartRefusal };
+      }
+    | { error: RecordPagePartRefusal };
+  /** The record's newest activity rows and their count, or their read's refusal (objectstack#28470). */
+  activity?: { total: number; records: Record<string, any>[] } | { error: RecordPagePartRefusal };
+  /** The record's newest attachments and their count, or their read's refusal (objectstack#28470). */
+  attachments?: { total: number; records: Record<string, any>[] } | { error: RecordPagePartRefusal };
+  /**
+   * The size of the record's 动态 stream over the sources the request named
+   * (objectstack#28737), or the refusal of a comment or activity read. The
+   * total counts the sources' rows, so it is an upper bound of the entries the
+   * 动态 panel draws, not their number: the panel draws fewer where its
+   * `showCompleted` / `types` configuration filters entries out, and where a
+   * ledger row has no displayable diff and so draws no entry.
+   */
+  timeline?: { total: number } | { error: RecordPagePartRefusal };
 }
 
 /**

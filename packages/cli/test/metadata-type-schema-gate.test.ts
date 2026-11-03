@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 30 — spawns the real producer once per single-cause fixture: four source-CLI spawns, one per distinct (command, fixture) pair (`os validate` on the control, the planted key and the `lg` breakpoint stacks; `os build` on the planted key, for its no-artifact claim); slowest CI reading 16.1 s (run 41217827347) of the five scheduled ci.yml runs 41199450735 to 41271604267 (slice 23's offender table), x 1.25, rounded up
 
 /**
  * Does the CLI hold metadata to the SAME schema the write path does? (#5000)

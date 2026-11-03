@@ -21,6 +21,13 @@
 // registered after boot runs last, right before the driver), and what the
 // caller is told (status, envelope, and that no byte of the row comes back).
 //
+// Flow start admission's third question (#29365) runs before the executor: a
+// start input the definition reads as a record id is judged as the caller, for
+// every runAs, before the run exists. The guest is a caller like any other
+// (`isSystem: false`), so a guest start naming a row it cannot read is refused
+// `404 RECORD_NOT_FOUND` and the executor is never asked; the executor pin
+// below uses a start that names no row.
+//
 // The fixture is inline and throwaway on purpose, like the policy fixture: it
 // exists only to be probed. Every anonymous endpoint carries the armed rate
 // limit ADR-0121 D6 makes its publish obligation, so booting at all is a
@@ -282,10 +289,12 @@ describe('[#22147] object_operation at authRequired:false — the anonymous requ
 describe('[#22147] flow at authRequired:false — the flow executor is handed the guest', () => {
   it('carries the guest position with no user and no elevation, and the run\'s data call never reaches the engine principal-less', async () => {
     resetProbes();
+    // A start that names no row: flow start admission has nothing to load, so
+    // the executor is reached and its own identity rule is what answers.
     const res = await stack.api('/apps/anonguest/read', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ params: { noteId: seededId } }),
+      body: JSON.stringify({ params: {} }),
     });
     const text = await res.text();
 
@@ -303,6 +312,29 @@ describe('[#22147] flow at authRequired:false — the flow executor is handed th
     expect(((JSON.parse(text)) as { error?: { code?: string } }).error?.code).toBe('FLOW_FAILED');
     expect(text).not.toContain(SEEDED_NAME);
     expect(engineCalls).toEqual([]);
+    expect(driverReached).toEqual([]);
+  });
+
+  it('a guest start naming a row the guest cannot read is refused at the door as the guest — 404, no run, nothing disclosed', async () => {
+    resetProbes();
+    const res = await stack.api('/apps/anonguest/read', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ params: { noteId: seededId } }),
+    });
+    const text = await res.text();
+    expect(res.status, text).toBe(404);
+    const body = JSON.parse(text) as { success?: boolean; data?: unknown; error?: { code?: string } };
+    expect(body.success).toBe(false);
+    expect(body.error?.code).toBe('RECORD_NOT_FOUND');
+    expect(body).not.toHaveProperty('data');
+    expect(text).not.toContain(SEEDED_NAME);
+    // Refused before the run exists: the executor was never asked.
+    expect(flowContexts).toEqual([]);
+    // The door's load of the row ran in the GUEST's scope — never principal-less,
+    // never the system principal — and no security layer let it reach the driver.
+    expect(engineCalls.length).toBeGreaterThan(0);
+    for (const call of engineCalls) expectGuest(call.context);
     expect(driverReached).toEqual([]);
   });
 });

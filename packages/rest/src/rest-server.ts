@@ -99,6 +99,8 @@ import {
     // them to `meta-item-read-routes.ts` (#23050 slice 13b).
 } from '@objectstack/metadata-core';
 import { RouteManager, type RouteEntry } from './route-manager.js';
+import { presentedForwardCredential, redeemForwardCredential } from './forward-credential.js';
+import { scopesToAgentPermissionSets, MCP_OAUTH_SCOPE_ACTIONS } from '@objectstack/spec/ai';
 // [#6877] Query-parameter multiplicity. `IHttpRequest.query` declares
 // `string | string[]`; the array arm is real (`NodeHttpServer` produces it,
 // measured over a socket on #6878) and this file used it as a string at ~50
@@ -277,6 +279,14 @@ import { sendError as sendEnvelopeError } from '@objectstack/types';
 export type RestProtocol = DataProtocol & MetadataProtocol & {
     getMetaItemForExecution?: MetadataProtocol['getMetaItem'];
     getMetaItemsForExecution?: MetadataProtocol['getMetaItems'];
+    /**
+     * [#28337] The layered view's door refusal for a name several packages
+     * hold, read naming none (metadata-protocol's
+     * `packagelessLayeredReadRefusal`), equally optional: the layered chain
+     * asks it ({@link RestServer.metaItemReadGateSources}); a protocol without
+     * it refuses nothing, as before.
+     */
+    packagelessLayeredReadRefusal?(request: { type: string; name: string; member?: string }): Promise<Error | undefined>;
 };
 
 // [#23050 slice 10] `TransportScopedMetaRequest`, the meta doors' request envelope, moved to
@@ -420,7 +430,8 @@ import {
     thrownAnswerIsBareNotFound,
     // `logUnexpectedRouteError` and `applyDroppedFieldsHeader`, read only by the CRUD doors' catches
     // and their two write answers, moved with `registerCrudEndpoints`' body to `crud-routes.ts`
-    // (#23050 slice 12).
+    // (#23050 slice 12); the header is now also set by the batch, createMany, updateMany, clone
+    // and import doors, in their own modules.
     // `isExpectedRouteError`, read only by the public form submit door's catch, moved with
     // `registerFormEndpoints`' body to `form-routes.ts` (#23050 slice 11).
 } from './error-response.js';
@@ -3385,6 +3396,19 @@ export class RestServer {
             // are the composition's; each parameter below is this door's answer
             // from before the composition existed (its docblock tables them).
             let admittedBy: 'api_key' | 'session' | undefined;
+            // [ADR-0090 D10 rule 5, #28367] The ONE agent provenance this face
+            // accepts: a forward credential the action door minted for an AI
+            // agent's in-process `api` forward, redeemed here (once: the
+            // resolution is memoized per request by `resolveExecCtx`). It is
+            // only ever minted from an agent the MCP OAuth door already
+            // admitted, and resolves to the SAME agent principal. ⛔ An OAuth
+            // access token presented from outside stays unaccepted on this
+            // face: nothing below reads one, and a forward credential is
+            // redeemable only inside the forward's own in-process call.
+            const presentedForward = presentedForwardCredential(headers);
+            const forwardAgent = presentedForward
+                ? redeemForwardCredential(presentedForward, String(req?.method ?? ''), String(req?.path ?? req?.url ?? ''))
+                : undefined;
             const base = await resolveRequestExecutionContext({
                 headers,
                 ql,
@@ -3419,7 +3443,18 @@ export class RestServer {
                 // rule: this request answers with its OWN response, so a request
                 // carrying a session cookie reads without renewal (only
                 // `/get-session`, which re-issues the cookie, renews it).
-                session: 'request',
+                // A redeemed forward credential establishes the session for the
+                // agent's delegating user, in the one organization the consent
+                // bound, exactly as the dispatcher's `/mcp` face does for a
+                // verified token; nothing is read from the request for it.
+                session: forwardAgent
+                    ? {
+                        established: {
+                            user: { id: forwardAgent.userId },
+                            session: { userId: forwardAgent.userId, activeOrganizationId: forwardAgent.organizationId },
+                        },
+                    }
+                    : 'request',
                 // The reference localization from this door's settings provider;
                 // a provider that throws or rejects reads as no service.
                 localization: {
@@ -3438,13 +3473,28 @@ export class RestServer {
                 accessToken: 'withhold',
                 // OAuth access tokens are honoured on the `/mcp` door alone
                 // (`acceptOAuthAccessToken`), precisely so coarse tool-family
-                // scopes cannot ride onto REST — so `principalKind: 'agent'`,
-                // `onBehalfOf` and `oauthScopes` are not representable here.
-                oauth: undefined,
+                // scopes cannot ride onto REST. [ADR-0090 D10 rule 5] The agent
+                // principal (`principalKind: 'agent'`, `onBehalfOf`,
+                // `oauthScopes`) is represented here for one caller only: an
+                // agent a forward credential carried. Its ceiling is derived
+                // from the consented scopes exactly as the MCP door derives it.
+                oauth: forwardAgent
+                    ? {
+                        userId: forwardAgent.userId,
+                        clientId: forwardAgent.clientId,
+                        scopes: forwardAgent.scopes,
+                        ...(forwardAgent.organizationId ? { organizationId: forwardAgent.organizationId } : {}),
+                        scopePermissions: scopesToAgentPermissionSets(forwardAgent.scopes),
+                        delegatesActions: forwardAgent.scopes.includes(MCP_OAUTH_SCOPE_ACTIONS),
+                    }
+                    : undefined,
                 // Which credential admitted the caller, kept on THIS request for
                 // `enforceApiAccess`'s API-key management rule. The ADR-0069 gate
                 // is still enforced off the envelope, at `enforceAuth`.
-                onAdmission: (admission) => { admittedBy = admission.credential; },
+                // [ADR-0090 D10 rule 5] Not for a forward-credential agent: no
+                // credential of its own admitted it here, and the key-management
+                // rule must not read it as a signed-in session.
+                onAdmission: forwardAgent ? undefined : (admission) => { admittedBy = admission.credential; },
             });
             if (!base) return undefined;
 
@@ -3593,6 +3643,9 @@ export class RestServer {
      * reached through {@link wiredEngineOrLoud}: none wired withholds nothing,
      * as before; one that cannot be resolved is the loud outage, never "not
      * withheld".
+     *
+     * [#28337] `packagelessLayeredReadRefusal`, the layered chain's step 1c:
+     * the protocol's own judge, handed through when it has one.
      */
     private metaItemReadGateSources(
         environmentId: string | undefined,
@@ -3622,6 +3675,9 @@ export class RestServer {
                 const envelope = await p.getMetaItem(itemRequest) as { item?: unknown; packageId?: unknown } | undefined;
                 return envelope?.item == null && registry.isPackageDisabled(envelope?.packageId) === true;
             },
+            ...(typeof p.packagelessLayeredReadRefusal === 'function'
+                ? { packagelessLayeredReadRefusal: (item: { type: string; name: string; member?: string }) => p.packagelessLayeredReadRefusal!(item) }
+                : {}),
         };
     }
 
@@ -4296,6 +4352,8 @@ export class RestServer {
                 metaType: RestServer.metaTypeSingular(req.params.type),
                 name: req.params.name,
                 ...(layeredPackageId ? { packageId: layeredPackageId } : {}),
+                // [#28337] The member the layers were read at, for step 1c.
+                ...metaReadGate.metaMemberSelector(req.query),
                 maskPosture,
             },
         )(layered);
@@ -5350,21 +5408,24 @@ export class RestServer {
         /**
          * [#15542 / #15854] Register a route only when the per-item switch —
          * `metadata.endpoints.item` — is on. Its radius is the WHOLE per-item
-         * face: `GET` / `PUT` / `DELETE {metaPath}/:type/:name`, the
-         * `/references` and `/layers` reads, the history family (`/history`,
-         * `/audit`, `/diff`, `/published`, `/publish`, `/rollback`) and the
-         * book tree. The first four of those are inside the `if` block that
+         * face, thirteen mounts: `GET` / `PUT` / `DELETE {metaPath}/:type/:name`,
+         * the `/references` and `/layers` reads, the history family (`GET`
+         * `/history`, `/audit`, `/diff`, `/published`; `POST` `/publish`,
+         * `/rollback`), the book tree and the app metadata bundle
+         * `GET {metaPath}/app/:appId/bundle` (#27627). The four reads are inside the `if` block that
          * moved with them to `meta-item-read-routes.ts`; every later member
-         * goes through this call, which reaches `meta-item-write-routes.ts` and
-         * `meta-item-history-routes.ts` in `scope` (#23050 slices 13b–13e).
+         * goes through this call, which reaches `meta-item-write-routes.ts`,
+         * `meta-item-history-routes.ts` and `meta-app-bundle-routes.ts` in
+         * `scope` (#23050 slices 13b–13e; nine calls: two writes, six history,
+         * one bundle). Count pinned by `rest-config-mount-table.pin.test.ts`.
          *
          * A call rather than one more `if` block, for two reasons that are not
          * cosmetic:
          *  1. **No single brace pair contains exactly the right set.** The
-         *     later members are registered by three calls below, in two
-         *     modules, with `GET {metaPath}/object/:name/state/:field` —
-         *     deliberately NOT part of this face — registered between the last
-         *     two of them.
+         *     later members are registered by nine calls, in three
+         *     modules, and `GET {metaPath}/object/:name/state/:field` —
+         *     deliberately NOT part of this face — is registered after all
+         *     nine.
          *  2. **A gate that travels with its registration cannot be inherited
          *     or shed by moving a route past a brace**, which is exactly how
          *     this switch came to gate four reads and none of its own writes:

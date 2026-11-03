@@ -29,7 +29,6 @@ export const SysImportJob = ObjectSchema.create({
   description: 'Asynchronous bulk-import job state, progress, and history',
   displayNameField: 'object_name',
   nameField: 'object_name', // [ADR-0079] canonical primary-title pointer
-  titleFormat: '{object_name} import @ {created_at}',
   highlightFields: ['object_name', 'status', 'processed_rows', 'total_rows', 'created_at'],
 
   fields: {
@@ -67,7 +66,7 @@ export const SysImportJob = ObjectSchema.create({
     treat_as_historical: Field.boolean({ label: 'Treat As Historical', required: false, defaultValue: false, group: 'Request' }),
 
     // ── outcome ──
-    error: Field.textarea({ label: 'Fatal Error', required: false, group: 'Outcome' }),
+    error: Field.textarea({ label: 'Failure Reason', required: false, group: 'Outcome' }),
     results: Field.json({
       label: 'Row Results (sample)',
       required: false,

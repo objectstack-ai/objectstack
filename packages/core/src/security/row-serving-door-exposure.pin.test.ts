@@ -109,6 +109,14 @@ const CALLERS: Record<string, Classification> = {
       + 'that only narrows the read the caller addressed, whose own door already admitted it; no row and no field of the '
       + 'parent is served, and a refused parent answers `$in: []`',
   },
+  'packages/metadata-protocol/src/protocol-batch-data.ts': {
+    kind: 'not-a-door',
+    reason:
+      "the by-id upsert fork of `batchData` (`callerMayReadObject`): it asks the admission only to choose between the "
+      + 'update and create arms of a row the caller addressed on the batch data route, whose own door already judged the '
+      + "object's exposure; `true` still reads the row as the caller, through the engine middleware, and it serves no row "
+      + 'of its own',
+  },
   // [#25522 cut 11] File-field hydration's `sys_file` admission, moved out of engine.ts.
   'packages/objectql/src/engine-file-reference-hydration.ts': {
     kind: 'not-a-door',
@@ -116,6 +124,15 @@ const CALLERS: Record<string, Classification> = {
       "file-field hydration's ask before the caller's own `sys_file` sub-read (`callerMayReadSysFile`, #24335): it only "
       + 'narrows what is read (`true` still reads as the caller, through the engine middleware; anything else serves the '
       + "refused marker), and it serves no row of its own; the record read it hydrates was admitted by that read's door",
+  },
+  // [#29460] `referenceNameVisible`'s ask, inside the `$expand` sub-read.
+  'packages/objectql/src/engine-reference-name-visible.ts': {
+    kind: 'not-a-door',
+    reason:
+      "`referenceNameVisible`'s ask (`callerRefusedIds`, #29460): it runs only from `expandRelatedRecords`, after the "
+      + "caller's own expansion of a read whose door already admitted it through the exposure decision, and only to tell "
+      + 'which of the ids that expansion left bare the caller is refused; for those it puts, in that same read\'s value, '
+      + 'the id the row already holds and the target\'s display name (or the `Record #` floor), and it serves no row of its own',
   },
 };
 

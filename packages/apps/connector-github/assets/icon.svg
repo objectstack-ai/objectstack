@@ -1,0 +1,7 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="GitHub connector">
+  <rect x="16" y="16" width="224" height="224" rx="56" fill="#334155"/>
+  <rect x="100" y="56" width="16" height="44" rx="6" fill="#FFFFFF"/>
+  <rect x="140" y="56" width="16" height="44" rx="6" fill="#FFFFFF"/>
+  <path d="M80 108a12 12 0 0 1 12-12h72a12 12 0 0 1 12 12v28a48 48 0 0 1-48 48 48 48 0 0 1-48-48z" fill="#FFFFFF"/>
+  <rect x="120" y="180" width="16" height="36" rx="6" fill="#FFFFFF"/>
+</svg>

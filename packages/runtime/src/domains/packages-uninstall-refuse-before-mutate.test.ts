@@ -44,6 +44,19 @@
  * are refused the same way. The platform operator (an `admin_full_access`
  * grant owned by the Default Organization) uninstalls, with or without an
  * active organization, naming none.
+ *
+ * ## [#28408, ADR-0146 D3] A base under its paired customization package
+ *
+ * The epic's two-minute check, verbatim: 「卸载 HotCRM 被拒并点名
+ * `hotcrm.custom`」. While the registry holds `com.acme.crm.custom`, the
+ * operator's `DELETE` of `com.acme.crm` is refused `409 RESOURCE_CONFLICT`
+ * naming the pair, and nothing moves: the stored rows, the registry entry, its
+ * object and its disable record stay. The `protocol` double asks the registry
+ * that refusal before its store delete, as `deletePackage` does; a host with
+ * no persisted half meets it in the registry's own uninstall. Deleting the pair
+ * first is a real way out. And on a base the deployment ships (a booted code
+ * package) the read-only `422` still answers first: this door cannot remove
+ * that base with or without its pair, so it is the truer answer.
  */
 
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -53,8 +66,11 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } 
 import { SchemaRegistry } from '@objectstack/objectql';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import { bindCatalogFromTables } from '../security/security-catalog.testkit.js';
+import { loadDisabledPackageIds, setPackageDisabled } from '../package-state-store.js';
 
 const PKG = 'com.acme.crm';
+/** `PKG`'s paired customization package (ADR-0146 D3): the id `customizationPackageId` derives. */
+const PAIR = 'com.acme.crm.custom';
 const ALPHA = 'org_alpha';
 const BETA = 'org_beta';
 /** The Default Organization, which owns the operator's grant. */
@@ -155,7 +171,11 @@ interface Rig {
     call(method: string, who: Who, path: string): Promise<{ status: number; code?: string; body: any }>;
 }
 
-function rig(opts: { persistedHalf?: boolean } = {}): Rig {
+function rig(opts: {
+    persistedHalf?: boolean;
+    /** `PKG` is a booted code package — the engine's manifest map holds it — so the deployment ships it. */
+    managed?: boolean;
+} = {}): Rig {
     const registry = new SchemaRegistry({ multiTenant: false, collisionPolicy: 'error' });
     (registry as any).logLevel = 'silent';
     registry.installPackage({ id: PKG, namespace: 'crm', name: 'CRM', version: '1.0.0', type: 'app', scope: 'project' } as any, 'code');
@@ -176,7 +196,11 @@ function rig(opts: { persistedHalf?: boolean } = {}): Rig {
                     code: 'INVALID_REQUEST', status: 400,
                 });
             }
-            const deleted = rows.splice(0);
+            // The registry's uninstall refusal, asked before the store delete and
+            // thrown as is with nothing removed, as `deletePackage` asks it.
+            registry.assertPackageUninstallable(req.packageId);
+            // The stored rows are `PKG`'s: another package's delete removes none.
+            const deleted = req.packageId === PKG ? rows.splice(0) : [];
             return { success: true, deletedCount: deleted.length, failedCount: 0, deleted: [], failed: [], cleanups: [] };
         },
     };
@@ -184,6 +208,7 @@ function rig(opts: { persistedHalf?: boolean } = {}): Rig {
     const services: Record<string, unknown> = {
         objectql: bindCatalogFromTables({
             registry,
+            ...(opts.managed ? { manifests: new Map([[PKG, {}]]) } : {}),
             find: async (object: string, q: any = {}) => {
                 const found = (TABLES[object] ?? []).filter((row: any) => matchesWhere(row, q?.where));
                 return typeof q?.limit === 'number' ? found.slice(0, q.limit) : found;
@@ -296,4 +321,70 @@ describe('[ADR-0131 D6] DELETE /packages/:id names no organization, whoever the 
             });
         });
     }
+});
+
+// ── [#28408, ADR-0146 D3] a base under its paired customization package ──────
+
+/** Install `PKG`'s paired customization package, declaring its base as the pair does. */
+function installPair(r: Rig): void {
+    r.registry.installPackage({
+        id: PAIR, namespace: 'crm_custom', name: 'CRM customizations', version: '1.0.0', type: 'app', scope: 'project',
+        dependencies: { [PKG]: '^1' },
+    } as any, 'authored');
+}
+
+describe('[#28408, ADR-0146 D3] DELETE /packages/:id of a base whose paired customization package is installed', () => {
+    // The disable record is a real file under the temp home: none outlives its test.
+    afterEach(() => { setPackageDisabled(undefined, PKG, false); });
+
+    it('409 RESOURCE_CONFLICT naming the pair; the stored rows, the registry entry, its object and its disable record stay', async () => {
+        const r = rig();
+        installPair(r);
+        expect((await r.call('PATCH', 'admin', `/packages/${PKG}/disable`)).status, 'precondition: disabled').toBe(200);
+        expect(loadDisabledPackageIds().has(PKG), 'precondition: the disable record is written').toBe(true);
+
+        const answer = await r.call('DELETE', 'admin', `/packages/${PKG}`);
+
+        expect({ status: answer.status, code: answer.code }).toEqual({ status: 409, code: 'RESOURCE_CONFLICT' });
+        expect(String(answer.body?.error?.message).startsWith(`Delete the customization package "${PAIR}" first`),
+            String(answer.body?.error?.message)).toBe(true);
+        expect(await observed(r)).toEqual(UNTOUCHED);
+        expect(r.registry.getPackage(PKG)?.enabled, 'the registry entry is still disabled').toBe(false);
+        expect(loadDisabledPackageIds().has(PKG), 'the disable record is intact').toBe(true);
+        expect(r.registry.getPackage(PAIR), 'the pair is untouched').toBeDefined();
+    });
+
+    it('a host with no persisted half: the registry\'s own uninstall refuses the same way, and nothing moves', async () => {
+        const r = rig({ persistedHalf: false });
+        installPair(r);
+
+        const answer = await r.call('DELETE', 'admin', `/packages/${PKG}`);
+
+        expect({ status: answer.status, code: answer.code }).toEqual({ status: 409, code: 'RESOURCE_CONFLICT' });
+        expect(String(answer.body?.error?.message)).toContain(`"${PAIR}"`);
+        expect(await observed(r)).toEqual(UNTOUCHED);
+    });
+
+    it('control — the pair deleted first through the same door, the same uninstall succeeds', async () => {
+        const r = rig();
+        installPair(r);
+
+        expect((await r.call('DELETE', 'admin', `/packages/${PAIR}`)).status, 'the pair itself uninstalls as before').toBe(200);
+        const answer = await r.call('DELETE', 'admin', `/packages/${PKG}`);
+
+        expect(answer.status).toBe(200);
+        expect(answer.body?.data).toMatchObject({ packageId: PKG, success: true, registryRemoved: true });
+        expect((await observed(r)).inRegistry).toBe(false);
+    });
+
+    it('a base the deployment ships (a booted code package) still answers the read-only 422 first, and deletePackage is never asked', async () => {
+        const r = rig({ managed: true });
+        installPair(r);
+
+        const answer = await r.call('DELETE', 'admin', `/packages/${PKG}`);
+
+        expect({ status: answer.status, code: answer.code }).toEqual({ status: 422, code: 'WRITABLE_PACKAGE_REQUIRED' });
+        expect(r.deleteRequests).toEqual([]);
+        expect(await observed(r)).toEqual(UNTOUCHED);
+    });
 });

@@ -18,7 +18,7 @@ export { ViewSwitcherDropdown } from './ViewSwitcher';
 export { TabBar, TabBarSelect } from './components/TabBar';
 export type { TabBarProps, ViewTab } from './components/TabBar';
 export { UserFilters } from './UserFilters';
-export type { UserFiltersProps } from './UserFilters';
+export type { UserFiltersProps, UserFiltersHandle } from './UserFilters';
 export { evaluateConditionalFormatting, normalizeFilterCondition, normalizeFilters } from './ListView';
 // The provider-less fallback table, exported so objectui#4401's mirror gate can
 // compare it against the `en` pack from a package that depends on both.

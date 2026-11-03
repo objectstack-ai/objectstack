@@ -109,7 +109,7 @@ export function GroupingEditor({
             >
               <SelectTrigger
                 data-testid={`grouping-field-${idx}`}
-                className="h-7 min-w-0 flex-1 px-2 py-0 text-xs"
+                className="h-7 min-w-0 flex-1 px-2 py-0 text-xs max-sm:h-11"
               >
                 <SelectValue />
               </SelectTrigger>
@@ -132,7 +132,7 @@ export function GroupingEditor({
               type="button"
               title={g.order === 'asc' ? L.ascendingTitle : L.descendingTitle}
               data-testid={`grouping-order-${idx}`}
-              className="flex h-7 w-7 items-center justify-center rounded-md border border-input bg-background text-foreground hover:bg-muted"
+              className="flex h-7 w-7 items-center justify-center rounded-md border border-input bg-background text-foreground hover:bg-muted max-sm:h-11 max-sm:w-11"
               onClick={() => {
                 const next = [...current];
                 next[idx] = { ...g, order: g.order === 'asc' ? 'desc' : 'asc' };
@@ -143,7 +143,8 @@ export function GroupingEditor({
             </button>
             <label
               title={L.collapseTitle}
-              className="flex items-center text-xs text-muted-foreground"
+              // Below `sm` the label is the checkbox's 44 px touch target.
+              className="flex items-center text-xs text-muted-foreground max-sm:h-11 max-sm:w-11 max-sm:justify-center"
             >
               <input
                 type="checkbox"
@@ -161,7 +162,7 @@ export function GroupingEditor({
               type="button"
               title={L.removeTitle}
               data-testid={`grouping-remove-${idx}`}
-              className="flex h-7 w-7 items-center justify-center rounded-md border border-input bg-background text-muted-foreground hover:bg-muted hover:text-destructive"
+              className="flex h-7 w-7 items-center justify-center rounded-md border border-input bg-background text-muted-foreground hover:bg-muted hover:text-destructive max-sm:h-11 max-sm:w-11"
               onClick={() => {
                 const next = current.filter((_, i) => i !== idx);
                 writeFields(next);
@@ -179,7 +180,7 @@ export function GroupingEditor({
           <button
             type="button"
             data-testid="grouping-add"
-            className="flex h-7 items-center gap-1 self-start rounded-md border border-dashed border-input bg-background px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+            className="flex h-7 items-center gap-1 self-start rounded-md border border-dashed border-input bg-background px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground max-sm:h-11"
             onClick={() => {
               const next: GroupingFieldEntry[] = [
                 ...current,

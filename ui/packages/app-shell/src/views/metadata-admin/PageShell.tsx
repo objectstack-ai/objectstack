@@ -22,6 +22,7 @@ import { ChevronRight } from 'lucide-react';
 import type { RichMetadataTypeEntry } from './useMetadata.js';
 import { useMetadataLocale, t, translateMetadataType, translateMetadataDomain } from './i18n.js';
 import { environmentScopeSuffix } from './catalog-scope.js';
+import { useMetadataAreaHost } from './metadataAreaHost.js';
 
 export interface PageShellProps {
   /** The type entry from `/meta/types` (or a synthesized stub). */
@@ -142,9 +143,14 @@ export function PageShell({
   stats,
   actions,
   embedded = false,
-  readOnly = false,
+  readOnly: readOnlyProp = false,
   children,
 }: PageShellProps) {
+  // objectstack ADR-0146 D1 (#28561) — under Studio's "All metadata" area a
+  // read-only package is the host gate whatever the page passed, and the
+  // breadcrumb climbs to the area's root.
+  const host = useMetadataAreaHost();
+  const readOnly = readOnlyProp || !!host?.readOnly;
   const type = entry?.type ?? '';
   const locale = useMetadataLocale();
   // Prefer locale-table translation over server's English label.
@@ -154,9 +160,10 @@ export function PageShell({
   // of how deep the current route is (list, edit, history, …).
   const { pathname } = useLocation();
   const metadataBase = React.useMemo(() => {
+    if (host) return host.basePath;
     const idx = pathname.indexOf('/metadata');
     return idx >= 0 ? pathname.slice(0, idx + '/metadata'.length) : '/metadata';
-  }, [pathname]);
+  }, [host, pathname]);
   // objectui#7611 — an editor opened from the Setup catalog returns to the
   // Setup catalog, not to the package-scoped Studio list of the same type.
   const [search] = useSearchParams();

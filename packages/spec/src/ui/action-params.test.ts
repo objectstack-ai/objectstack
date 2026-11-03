@@ -33,6 +33,29 @@ describe('validateActionParams (ADR-0104 D2)', () => {
     expect(issues[0].param).toBe('title');
   });
 
+  it('a name declared more than once is required only when EVERY declaration is (#28280)', () => {
+    const optionalThenRequired: ResolvedActionParam[] = [
+      { name: 'email', type: 'email', required: false },
+      { name: 'email', type: 'email', required: true },
+    ];
+    expect(validateActionParams(optionalThenRequired, {})).toEqual([]);
+    expect(validateActionParams([...optionalThenRequired].reverse(), {})).toEqual([]);
+    const bothRequired: ResolvedActionParam[] = [
+      { name: 'email', type: 'email', required: true },
+      { name: 'email', type: 'email', required: true },
+    ];
+    expect(codes(validateActionParams(bothRequired, {}))).toEqual(['required']);
+  });
+
+  it('a name declared more than once is judged by the FIRST declaration\'s value shape (#28280)', () => {
+    const resolved: ResolvedActionParam[] = [
+      { name: 'stage', type: 'select', options: [{ value: 'a' }] },
+      { name: 'stage', type: 'text' },
+    ];
+    expect(codes(validateActionParams(resolved, { stage: 'zzz' }))).toEqual(['invalid_shape']);
+    expect(validateActionParams(resolved, { stage: 'a' })).toEqual([]);
+  });
+
   it('does not flag a missing OPTIONAL param', () => {
     const resolved: ResolvedActionParam[] = [{ name: 'note', type: 'text' }];
     expect(validateActionParams(resolved, {})).toEqual([]);

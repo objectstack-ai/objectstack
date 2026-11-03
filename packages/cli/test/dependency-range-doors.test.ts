@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 40 — spawns the real producer once per single-cause fixture: five spawns of the source CLI, each a distinct (command, fixture) pair (`os validate --json` and `os build --json` over the unreadable-range artifact, `os validate --json` and `os lint --json` over the unmet-range artifact, `os validate --json` over the met-range control); slowest CI reading 27.6 s (run 41199450735, over the five scheduled ci.yml runs 41199450735 to 41271604267) x 1.25, rounded up
 
 /**
  * ADR-0141 D2, author side — `os validate`, `os build` and `os lint` report
@@ -23,8 +24,13 @@ import { childEnv } from './helpers/serve-process.js';
 import { linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
+/**
+ * Spawned by this process's own `node`, not through the `tsx` binary: the entry, its
+ * `src/` and its pinned `NODE_ENV=development` are the same either way, and the
+ * `.bin/tsx` launcher only adds a second node process in front of the CLI, about half
+ * of every spawn's wall (#23181).
+ */
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 const pkg = (id: string, type: 'app' | 'module', version: string, dependencies?: Record<string, string>) => ({
   manifest: {
@@ -65,7 +71,7 @@ interface Run {
 function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...args],
       { cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {

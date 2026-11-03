@@ -43,6 +43,9 @@ grid. All gestures use pointer events and snap to `slotMinutes` (default
   start time. Refuses to cross the existing end.
 - **Resize end** — drag the bottom edge to adjust only the end time.
   Refuses to cross the existing start.
+- **No end field, no resize** — when the view declares no `endDateField`
+  (`CalendarView`'s `endEditable={false}`), events have no stored end, so
+  no resize handle is drawn in any view; moving an event still works.
 - **Drag-to-create** — click-drag on an empty area of the time grid to
   open the quick-create dialog with start/end pre-filled to the dragged
   time range.

@@ -29,7 +29,7 @@ Layout components are automatically registered when you import ObjectUI.
 The `AppShell` provides a complete application structure with a top navbar, a sidebar, and
 a main content area.
 
-**`AppShell` is a React component, not an authorable JSON node.** Four of its seven props
+**`AppShell` is a React component, not an authorable JSON node.** Four of its eight props
 are `React.ReactNode` slots — `sidebar`, `navbar`, `children` and `rightRail` — and a JSON
 document has no way to put a node into any of them. Compose the shell in React, and render
 your JSON pages *inside* it. `app-shell` is not a component key either — what a
@@ -64,7 +64,7 @@ the component's `children`; there is no `body` prop either.
 
 ### Props
 
-`AppShellProps` (`packages/layout/src/AppShell.tsx`) declares exactly these seven. The
+`AppShellProps` (`packages/layout/src/AppShell.tsx`) declares exactly these eight. The
 component destructures that fixed key list with **no rest element**, so anything else you
 pass is built and then dropped on the floor.
 
@@ -80,6 +80,7 @@ These are React props, passed in JSX. None of them is authorable in JSON — the
 | `defaultOpen` | `boolean` | no | Initial open state of the underlying Shadcn `SidebarProvider`. Defaults to `true`. |
 | `branding` | `AppShellBranding` | no | App branding, applied by `useAppShellBranding`: `primaryColor` / `accentColor` become CSS custom properties on the document root, `favicon` sets the icon link's `href`, and `title` sets `document.title`. |
 | `rightRail` | `React.ReactNode` | no | Optional right-side rail. It reflows the content beside it rather than overlaying it; absent → unchanged single-pane layout. |
+| `showHeader` | `boolean` | no | Whether the shell draws its top bar. Defaults to `true`; `false` draws no `<header>` element and does not mount `navbar`, for a page that draws its own top bar. Leaving `navbar` out alone still draws the bar. |
 
 ### There is no `app-shell` node
 
@@ -93,7 +94,7 @@ does not register it, and nothing else in this repo does either, so a
   `unknown-component` and the message `<app-shell> is not a known component`.
 
 It **was** registered until objectui#4841, and the registration could never produce a
-shell. Four of the seven props are `React.ReactNode` slots that a JSON document cannot
+shell. Four of the eight props are `React.ReactNode` slots that a JSON document cannot
 fill, so a node had exactly two outcomes: `children` was stripped by `SchemaRenderer`
 before a node's keys were spread as props — `AppShell` reads its `children` prop, never
 `schema.children` — so the `<main>` element rendered **empty with nothing logged**; and a

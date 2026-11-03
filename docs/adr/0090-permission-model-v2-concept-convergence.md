@@ -418,8 +418,10 @@ depends on:
      agent may *initiate*, not what it may *complete alone*.
   4. **Dual attribution**: every write **by an agent principal** records `performed_by` (agent) +
      `on_behalf_of` (user) + run id; explain (D6) reports both sides of the intersection. An
-     agent principal is a caller a door resolves to `principalKind: 'agent'` — today the OAuth /
-     MCP client door alone. A caller of any other kind records the principal it authenticates as,
+     agent principal is a caller a door resolves to `principalKind: 'agent'`: the OAuth / MCP
+     client door, and (since #28367) a door serving an `api` action's forward that carries the
+     forward credential of rule 5, which is minted only for an agent that first door admitted.
+     A caller of any other kind records the principal it authenticates as,
      and the missing `performed_by` is itself the record that the principal acted for itself; for
      the API-key case see the 2026-09-16 note at the end of this decision.
   5. **A forward carries the agent, never the user** (amended 2026-10-31): when an agent runs an
@@ -454,10 +456,11 @@ alias tax on every API.
 > on **every** door that runs
 > `packages/core/src/security/resolve-authz-context.ts#resolveAuthzContext` — REST, the runtime /
 > MCP **HTTP** dispatcher, and the MCP **stdio** transport — and none of the three turns one into
-> an agent, by two different mechanisms. REST and stdio hand the assembler
-> `oauth: undefined` **by construction** (`packages/rest/src/rest-server.ts`,
-> `packages/mcp/src/plugin.ts#resolveStdioExecutionContext`), so agent provenance is not
-> representable on either. On the HTTP dispatcher — the one door that does mint agent principals —
+> an agent, by two different mechanisms. stdio hands the assembler `oauth: undefined` **by
+> construction** (`packages/mcp/src/plugin.ts#resolveStdioExecutionContext`), so agent provenance
+> is not representable there; REST did the same until #28367, and since then represents it for
+> one caller only, a request carrying a rule 5 forward credential
+> (`packages/rest/src/rest-server.ts`), never for a key. On the HTTP dispatcher — the one door that does mint agent principals —
 > it is a **guard** rather than a structural impossibility:
 > `packages/runtime/src/security/resolve-execution-context.ts#extractJwtBearer` refuses an
 > `osk_`-prefixed bearer and anything that is not a three-segment JWS, so no OAuth provenance is

@@ -89,7 +89,13 @@ import {
 import { useMetadata } from '@object-ui/react';
 import { useAuth } from '@object-ui/auth';
 import { resolveViewId } from '@object-ui/core';
-import { extractDraftBody, readDraftChanges, type DraftChange, type MetadataClient } from '@object-ui/data-objectstack';
+import {
+  extractDraftBody,
+  formatMetadataError,
+  readDraftChanges,
+  type DraftChange,
+  type MetadataClient,
+} from '@object-ui/data-objectstack';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { NavigationModeSchema, resolveI18nLabel, type I18nLabel, type NavigationMode } from '@objectstack/spec/ui';
 import { InspectorReorderButtons, InspectorShell } from '../metadata-admin/inspectors/_shared.js';
@@ -346,8 +352,10 @@ export interface ObjectListViewDraft {
    * The last load's or save's failure, as thrown. Read at render, in the
    * designer locale, the way the pillar reads its own (objectui#11785): a
    * refused save as an author sentence over its raw text, a load as the text.
+   * objectstack#29148 — `draftUnreadable`: the server refused to read the
+   * view's pending draft (`403`), so no buffer was installed over it.
    */
-  failure: { during: 'load' | 'save'; error: unknown } | null;
+  failure: { during: 'load' | 'save' | 'draftUnreadable'; error: unknown } | null;
   /** Replace the view item with an edited one. */
   edit: (row: Row) => void;
   /**
@@ -379,6 +387,28 @@ export type NewViewPayload = Parameters<CreateViewDialogProps['onCreate']>[0];
 export type ViewCreateRefusal = { taken: string } | { error: unknown };
 
 /**
+ * objectstack#28562 (ADR-0146 D2) — where a read-only base's list view is
+ * customized: read in the base's paired customization package, written there
+ * as an override of the base's view. The Interfaces pillar passes it on a
+ * read-only base only; without it the view is read and written at `packageId`.
+ */
+export interface ListViewCustomization {
+  /**
+   * The package the view's draft is read in when a load runs: the pair when
+   * the package list lists one, else `null` (the view is then read at
+   * `packageId`, where no pair draft can be). Asked at load time, so a pair
+   * the first save creates is never a reason to reload the buffer it saved.
+   */
+  readAt: () => string | null;
+  /**
+   * The write: the package the save addresses (the ensure door's answer) and
+   * the body it sends (the view, declaring the override). Rejects with the
+   * door's refusal, and then nothing is saved.
+   */
+  writeTarget: (viewId: string, row: Row) => Promise<{ packageId: string; body: Row }>;
+}
+
+/**
  * The open leaf's list-view buffer, held by the Interfaces pillar so the
  * canvas and the panel read one copy (the folded layout unmounts the panel
  * between tabs; the buffer outlives it). The pillar runs the autosave over it
@@ -391,6 +421,7 @@ export function useObjectListViewDraft({
   publishNonce,
   draftOnlyObjects,
   onDraftSaved,
+  customization = null,
 }: {
   client: MetadataClient;
   packageId: string;
@@ -403,6 +434,12 @@ export function useObjectListViewDraft({
    */
   draftOnlyObjects?: DraftOnlyObjects | null;
   onDraftSaved?: () => void;
+  /**
+   * objectstack#28562 — on a read-only base, where the view is customized
+   * ({@link ListViewCustomization}). Read through a ref: only its presence is
+   * a reason to load again.
+   */
+  customization?: ListViewCustomization | null;
 }): ObjectListViewDraft {
   const metadata = useMetadata();
   const { user, activeOrganization } = useAuth();
@@ -494,6 +531,16 @@ export function useObjectListViewDraft({
   React.useEffect(() => {
     draftOnlyRef.current = draftOnlyObjects;
   }, [draftOnlyObjects]);
+  // objectstack#28562 — read when a load or a save runs; `customizing` is
+  // the one fact of it a load is keyed on.
+  const customizationRef = React.useRef(customization);
+  React.useLayoutEffect(() => {
+    customizationRef.current = customization;
+  });
+  const customizing = customization !== null;
+  // objectstack#28562 — the view and package the installed buffer's draft
+  // read was asked at: the address its pin describes.
+  const readAtRef = React.useRef<{ viewId: string; at: string } | null>(null);
 
   React.useEffect(() => {
     setFailure(null);
@@ -505,9 +552,22 @@ export function useObjectListViewDraft({
     (async () => {
       try {
         // objectui#11773 — read at the address the save below writes, so the
-        // version it serves pins that save.
-        const draftRead = await readDraftForSave<Row>(client, 'view', viewId, packageId);
+        // version it serves pins that save. objectstack#28562 — on a
+        // read-only base that is the pair, when one is listed.
+        const readAt = customizationRef.current?.readAt() ?? packageId;
+        const draftRead = await readDraftForSave<Row>(client, 'view', viewId, readAt);
         if (cancelled) return;
+        // objectstack#29148 — a pending draft the server refused to read (its
+        // audience gate names a capability this author does not hold) is no
+        // absence. No buffer is installed over it, so nothing is shown to edit
+        // and nothing is saved: one seeded from the published layer would be
+        // saved over the draft, dropping its keys and its gate.
+        if ('refused' in draftRead) {
+          readAtRef.current = null;
+          setBuffer({ for: '', row: null, dirty: false, hasDraft: true, draftChanges: null, published: undefined });
+          setFailure({ during: 'draftUnreadable', error: draftRead.refused });
+          return;
+        }
         const draftResp = draftRead.answer;
         // A served draft is the whole document, taken as-is (objectui#10765);
         // the published layer only without one. Both lose the read
@@ -536,12 +596,17 @@ export function useObjectListViewDraft({
           !draftChanges.some((c) => c.path.length === 0);
         // A failure of that added read costs the element marks only, never the
         // editor: the draft is the buffer either way.
+        // ADR-0048 — the published layer is read at this package, the view's
+        // owner here: a layered read naming no package is refused for a name
+        // two packages hold. On a read-only base that is the base, whose read
+        // serves its declared override (ADR-0146 D8).
+        const layeredAt = { packageId };
         const lay = objectDraftOnly
           ? null
           : !draft
-            ? await client.layered<Row>('view', viewId)
+            ? await client.layered<Row>('view', viewId, layeredAt)
             : marksNeedPublished
-              ? await client.layered<Row>('view', viewId).catch(() => undefined)
+              ? await client.layered<Row>('view', viewId, layeredAt).catch(() => undefined)
               : null;
         if (cancelled) return;
         const published = (lay as { effective?: unknown; code?: unknown } | null)?.effective ?? (lay as { code?: unknown } | null)?.code;
@@ -558,7 +623,8 @@ export function useObjectListViewDraft({
               ? publishedRow
               : undefined;
         // objectui#11773 — the next save is pinned to what the draft read served.
-        recordRead('view', viewId, packageId, draftRead.pin);
+        recordRead('view', viewId, readAt, draftRead.pin);
+        readAtRef.current = { viewId, at: readAt };
         setBuffer({
           for: listViewBufferKey(viewId),
           row,
@@ -574,7 +640,7 @@ export function useObjectListViewDraft({
     return () => {
       cancelled = true;
     };
-  }, [client, viewId, objectName, packageId, publishNonce, reloadNonce, recordRead]);
+  }, [client, viewId, objectName, packageId, publishNonce, reloadNonce, recordRead, customizing]);
 
   const edit = React.useCallback((row: Row) => {
     setBuffer((b) => ({ ...b, row, dirty: true }));
@@ -618,7 +684,24 @@ export function useObjectListViewDraft({
       if (!viewId || !row || notList) return;
       setSaving(true);
       try {
-        const outcome = await guardedSave('view', viewId, row, { mode: 'draft', packageId, surface: 'studio' });
+        // objectstack#28562 — a customization is written where the ensure
+        // door says, with its declaration; a refused door saves nothing.
+        const custom = customizationRef.current;
+        const target = custom ? await custom.writeTarget(viewId, row) : { packageId, body: row };
+        // The buffer was read at another package (the base, before its pair
+        // was listed): the pair is taken to hold no draft of the view, so a
+        // draft there is a conflict the author is asked about, never one
+        // this save overwrites. Its receipt pins the saves after it.
+        const readAt = readAtRef.current;
+        if (custom && !(readAt?.viewId === viewId && readAt.at === target.packageId)) {
+          recordRead('view', viewId, target.packageId, { ifNoneMatch: '*' });
+          readAtRef.current = { viewId, at: target.packageId };
+        }
+        const outcome = await guardedSave('view', viewId, target.body, {
+          mode: 'draft',
+          packageId: target.packageId,
+          surface: 'studio',
+        });
         // objectui#11773 — the author chose the saved version; the load replaces the buffer.
         if (outcome === 'reloaded') return;
         // objectui#11204 — clean only if nothing was edited while it was in flight.
@@ -632,7 +715,7 @@ export function useObjectListViewDraft({
         setSaving(false);
       }
     },
-    [guardedSave, viewId, row, notList, packageId, onDraftSaved],
+    [guardedSave, recordRead, viewId, row, notList, packageId, onDraftSaved],
   );
 
   const current = buffer.for === targetKey && targetKey !== '';
@@ -1057,6 +1140,7 @@ function KanbanCardSection({
 export function ObjectListViewInspector({
   listView,
   readOnly,
+  canCreate = !readOnly,
   locale,
   selection,
   onSelectionChange,
@@ -1065,6 +1149,12 @@ export function ObjectListViewInspector({
 }: {
   listView: ObjectListViewDraft;
   readOnly: boolean;
+  /**
+   * objectstack#28562 — whether "Add view" is offered; `!readOnly` by default.
+   * A read-only base's view is customized in its pair, while a new view would
+   * be a new item in the base, which it does not take.
+   */
+  canCreate?: boolean;
   locale: string;
   /**
    * objectstack#27836 — called as "Add view" opens its dialog: the host sends
@@ -1141,7 +1231,9 @@ export function ObjectListViewInspector({
     ? null
     : failure.during === 'save'
       ? issueRefusal(failure.error, locale)
-      : plainRefusal(failure.error);
+      : failure.during === 'draftUnreadable'
+        ? { message: t('engine.studio.refusal.draftUnreadable', locale), detail: formatMetadataError(failure.error) }
+        : plainRefusal(failure.error);
   const working = row ?? newListViewItem(target, seedColumns);
   const objectText = navTargetLabel({ kind: 'object', objectName: target.objectName }) ?? target.objectName;
   const title = listViewTitle(target, working, objectText, locale);
@@ -1320,7 +1412,7 @@ export function ObjectListViewInspector({
             variant="outline"
             size="sm"
             className="h-7 gap-1 text-xs"
-            disabled={readOnly || fieldState.loading || !!fieldState.error}
+            disabled={!canCreate || fieldState.loading || !!fieldState.error}
             onClick={() => {
               onAddViewOpen?.();
               setAddOpen(true);

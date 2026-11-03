@@ -73,11 +73,48 @@ function startOfDayUtc(d: Date): Date {
   return out;
 }
 
-/** Coerce a CEL value (Date | ISO string | epoch number) to a Date. */
+/**
+ * The invalid Dates {@link toDate} minted from TEXT it could not parse — not
+ * from an empty source. Read through {@link isUnparseableDate}.
+ *
+ * `date()` / `datetime()` answer an invalid Date for both, and that answer is
+ * deliberate: a predicate compares it and stays `false` (`date(record.d) ==
+ * today()` on a non-date string is simply not today), which is what the
+ * temporal-equality rewrite in `cel-engine.ts` relies on. So the VALUE never
+ * changes here. A formula FIELD, though, serializes an invalid Date to `null`,
+ * the same bytes an empty source gives, and its reader must be able to tell
+ * "the text was not a date" (a fault worth one warn line) from "there was no
+ * text" (no fault). This side table is that distinction, held off the value.
+ *
+ * Weakly held, so it keeps nothing alive; it records a fact about an argument
+ * and never changes what any function returns.
+ */
+const unparseableDates = new WeakSet<Date>();
+
+/**
+ * Coerce a CEL value (Date | ISO string | epoch number) to a Date.
+ *
+ * Non-empty text that does not parse yields an invalid Date marked in
+ * {@link unparseableDates}; an empty source (`null`, `undefined`, blank text)
+ * yields an unmarked invalid Date.
+ */
 function toDate(v: unknown): Date {
   if (v instanceof Date) return v;
   if (typeof v === 'number' || typeof v === 'bigint') return new Date(Number(v));
-  return new Date(String(v));
+  const out = new Date(String(v));
+  if (typeof v === 'string' && v.trim() !== '' && Number.isNaN(out.getTime())) unparseableDates.add(out);
+  return out;
+}
+
+/**
+ * True when `value` is the invalid Date `date()` / `datetime()` (or a stdlib
+ * date function over one) answered for non-empty text it could not parse.
+ * False for an invalid Date from an empty source, for every valid Date and for
+ * anything that is not a Date. A formula-field reader reports a `true` as an
+ * evaluation fault; a predicate never asks.
+ */
+export function isUnparseableDate(value: unknown): boolean {
+  return value instanceof Date && unparseableDates.has(value);
 }
 
 /** One UTC day in milliseconds. */
@@ -113,6 +150,8 @@ function isoTimestampText(fn: string, d: Date): string {
 
 /** Add `n` days to a Date in UTC; returns a new Date. */
 function addDaysUtc(d: Date, n: number): Date {
+  // Unparseable text stays the same invalid Date, so its mark survives.
+  if (unparseableDates.has(d)) return d;
   const out = new Date(d.getTime());
   out.setUTCDate(out.getUTCDate() + n);
   return out;
@@ -125,6 +164,7 @@ function addDaysUtc(d: Date, n: number): Date {
  * "next service date = last + N months" rule to behave.
  */
 function addMonthsUtc(d: Date, n: number): Date {
+  if (unparseableDates.has(d)) return d;
   const out = new Date(d.getTime());
   const day = out.getUTCDate();
   out.setUTCDate(1); // avoid roll-over while shifting the month
@@ -380,12 +420,74 @@ const LABEL_ARGUMENT_REFUSAL =
 /**
  * The field `label()`'s argument names — `kind` for `label(record.kind)` — or
  * `undefined` when the argument is any other shape.
+ *
+ * Package-internal, not re-exported from the entry: the macro reads its field
+ * through it, and `validateExpression`'s option check (#28659) reads the field
+ * of each `label(` call in a parsed source through it too, so the authoring
+ * gate and the evaluator agree on WHICH field a call names.
  */
-function optionLabelFieldOf(node: CelMacroNode | undefined): string | undefined {
+export function optionLabelFieldOf(node: CelMacroNode | undefined): string | undefined {
   if (!node || node.op !== '.' || !Array.isArray(node.args)) return undefined;
   const [receiver, field] = node.args as [CelMacroNode | undefined, unknown];
   if (!receiver || receiver.op !== 'id' || receiver.args !== 'record') return undefined;
   return typeof field === 'string' && field.length > 0 ? field : undefined;
+}
+
+/**
+ * Does this SERVED field definition declare options — the reading of "has
+ * options" `label()` depends on at evaluation (#28659)?
+ *
+ * A field whose served definition carries an `options` list is a field the
+ * engine builds a label map for (`@objectstack/objectql`'s
+ * `formula-option-labels.ts` reads the served object's fields through this),
+ * so `label(record.<field>)` answers on it. Any other field is absent from
+ * that map, and {@link optionLabelOf} faults on every row.
+ *
+ * It reads the declaration, not the type: a `select` that declares no options
+ * has no labels either (and is refused for that by its own completeness rule),
+ * and any field type that does declare a list is answered.
+ *
+ * An AUTHORED definition is read through {@link declaresOptionsOnceServed}
+ * instead: a field bound to a shared picklist is authored without `options`
+ * and served with them.
+ */
+export function declaresOptions(def: unknown): boolean {
+  return !!def && typeof def === 'object' && Array.isArray((def as { options?: unknown }).options);
+}
+
+/**
+ * Will this AUTHORED field definition declare options once it is served — the
+ * reading an authoring gate judges `label()` by (#28659)?
+ *
+ * The spec gives a `select` / `radio` two option sources, mutually exclusive
+ * (`FieldSchema`): inline `options`, or a `picklist` naming a shared list.
+ * The registry writes a picklist-bound field's resolved options onto the
+ * served object (`@objectstack/objectql`'s `picklist-resolution.ts`), so the
+ * served definition {@link declaresOptions} and `label()` reads the list's
+ * labels; a name no list declares is refused at load. So an authored field
+ * answers when it declares `options` or names a picklist — the R8 reading in
+ * `@objectstack/lint`'s `data-model-rules.ts` — and `@objectstack/lint`'s
+ * formula pass reads the authored body through this, so the authoring gate
+ * refuses exactly the fields the evaluator would fault on.
+ */
+export function declaresOptionsOnceServed(def: unknown): boolean {
+  if (declaresOptions(def)) return true;
+  const picklist = !!def && typeof def === 'object' ? (def as { picklist?: unknown }).picklist : undefined;
+  return typeof picklist === 'string' && picklist !== '';
+}
+
+/**
+ * The sentence for `label(record.<field>)` on a field that declares no options.
+ * Shared by the evaluation fault ({@link optionLabelOf}) and the authoring
+ * refusal (`validateExpression`'s `label-field-no-options`, #28659), so the
+ * author reads the same prescription at the door that the log line carries.
+ */
+export function optionlessLabelSentence(field: string): string {
+  return (
+    `label(record.${field}): \`${field}\` declares no options, so it has no option label. ` +
+    'label() reads a select field\'s option label; read any other field directly ' +
+    `(record.${field}).`
+  );
 }
 
 /**
@@ -410,13 +512,7 @@ function optionLabelOf(field: string, value: unknown, labels: EvalOptionLabels |
   // The field's options first, so a field that declares none faults on EVERY
   // row, not only on the rows where it happens to hold a value.
   const options = Object.prototype.hasOwnProperty.call(labels, field) ? labels[field] : undefined;
-  if (options === undefined) {
-    throw new Error(
-      `label(record.${field}): \`${field}\` declares no options, so it has no option label. ` +
-      'label() reads a select field\'s option label; read any other field directly ' +
-      `(record.${field}).`,
-    );
-  }
+  if (options === undefined) throw new Error(optionlessLabelSentence(field));
   if (value === null || value === undefined) return '';
   if (typeof value === 'object') {
     throw new Error(

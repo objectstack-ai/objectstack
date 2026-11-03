@@ -191,7 +191,7 @@ const ENGINE_BOUND_ROOTS: readonly string[] = ['previous', 'vars', 'current_user
  *
  * | type | binds |
  * |---|---|
- * | `start`, `end`, `decision`, `http`, `notify`, `delete_record` | nothing but its node id's outputs |
+ * | `start`, `end`, `decision`, `http`, `notify`, `save_notice`, `delete_record` | nothing but its node id's outputs |
  * | `assignment` | its targets |
  * | `create_record`, `update_record`, `get_record` | `outputVariable` |
  * | `loop` | `iteratorVariable` (default `item`), `indexVariable` |
@@ -214,6 +214,7 @@ const CLOSED_BINDER_NODE_TYPES: ReadonlySet<string> = new Set([
   'get_record',
   'http',
   'notify',
+  'save_notice',
   'screen',
   LOOP_NODE_TYPE,
   PARALLEL_NODE_TYPE,

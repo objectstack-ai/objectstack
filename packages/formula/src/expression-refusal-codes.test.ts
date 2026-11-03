@@ -159,12 +159,12 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
   'invalid-cel': [
     {
       produce: () => onlyError('predicate', 'record.rating >='),
-      params: { role: 'predicate', detail: celDetail('record.rating >=') },
+      params: { role: 'predicate', detail: celDetail('record.rating >='), celCode: 'unexpected_token', pos: { start: 16, end: 16 } },
       message: `invalid CEL predicate: ${celDetail('record.rating >=')} — predicates are bare CEL (e.g. \`record.rating >= 4\`).`,
     },
     {
       produce: () => onlyError('value', "1 + 'a'"),
-      params: { role: 'value', detail: celDetail("1 + 'a'") },
+      params: { role: 'value', detail: celDetail("1 + 'a'"), celCode: 'no_such_overload', pos: { start: 0, end: 7 } },
       message: `invalid CEL value: ${celDetail("1 + 'a'")} — values are bare CEL (e.g. \`record.rating >= 4\`).`,
     },
   ],
@@ -305,6 +305,53 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         'in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
     },
   ],
+  'date-text-arithmetic': [
+    {
+      produce: () =>
+        onlyError('value', 'record.end_date - record.start_date', {
+          scope: 'record',
+          fieldTypes: { start_date: 'date', end_date: 'date' },
+        }),
+      params: { operands: 'DateText - DateText', reference: 'record.start_date' },
+      message:
+        'date arithmetic `DateText - DateText` — `record.start_date` is a date field, and the runtime holds a date field ' +
+        'as its text (`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which CEL can\'t do arithmetic on: this ' +
+        'faults at runtime, so the field silently evaluates to null. Use `daysBetween(a, b)` for the span in whole days, ' +
+        'and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+    },
+    {
+      produce: () =>
+        onlyError('predicate', 'end_at - start_at > duration("1h")', {
+          fields: ['start_at', 'end_at'],
+          fieldTypes: { start_at: 'datetime', end_at: 'datetime' },
+        }),
+      params: { operands: 'DateText - DateText', reference: 'start_at' },
+      message:
+        'date arithmetic `DateText - DateText` — `start_at` is a date field, and the runtime holds a date field ' +
+        'as its text (`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which CEL can\'t do arithmetic on: this ' +
+        'faults at runtime, so the field silently evaluates to null. Use `daysBetween(a, b)` for the span in whole days, ' +
+        'and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+    },
+  ],
+  'date-duration-value': [
+    {
+      produce: () =>
+        onlyError('value', 'today() - record.start_date', { scope: 'record', fieldTypes: { start_date: 'date' } }),
+      params: { reference: 'record.start_date' },
+      message:
+        'date arithmetic — this computes a `google.protobuf.Duration` from `record.start_date`, and a field can\'t hold ' +
+        'a duration: it reads `{}` at runtime. Use `daysBetween(a, b)` for the span in whole days, and ' +
+        '`daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+    },
+    {
+      produce: () => onlyError('value', 'today() - daysAgo(3)', { scope: 'record', fieldTypes: { name: 'text' } }),
+      params: {},
+      message:
+        'date arithmetic — this computes a `google.protobuf.Duration`, and a field can\'t hold ' +
+        'a duration: it reads `{}` at runtime. Use `daysBetween(a, b)` for the span in whole days, and ' +
+        '`daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+    },
+  ],
   'type-mismatch': [
     {
       produce: () => onlyWarning('predicate', 'record.name > 5', { scope: 'record', fieldTypes: { name: 'text' } }),
@@ -372,6 +419,22 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         '`record.account` is read through more than one relationship hop. Predicates resolve ONE hop ' +
         '(`record.account.<related field>`); a second hop is not loaded, so the expression would fault at evaluation ' +
         'time and reject the write. Denormalise the value you need onto `account`\'s object, or read it in a hook instead.',
+    },
+  ],
+  'label-field-no-options': [
+    {
+      // #28659: the evaluator's own fault sentence, at author time.
+      produce: () =>
+        onlyError('value', 'label(record.first)', {
+          scope: 'record',
+          objectName: 'p4',
+          fields: ['first', 'kind'],
+          optionFields: ['kind'],
+        }),
+      params: { field: 'first' },
+      message:
+        'label(record.first): `first` declares no options, so it has no option label. ' +
+        "label() reads a select field's option label; read any other field directly (record.first).",
     },
   ],
   'empty-expression': [
@@ -444,6 +507,8 @@ const SWEEP_SOURCES: readonly string[] = [
   "current_user.positions.contains('zzz')",
   'record.close_date + 1',
   'close_date + 1 > 3',
+  'record.close_date - record.close_date',
+  'today() - record.close_date',
   'record.name > 5',
   'record.active + 1 > 5',
   "record.account == 'a1' && record.account.name == 'x'",
@@ -451,6 +516,7 @@ const SWEEP_SOURCES: readonly string[] = [
   "type == 'grid' && status == 'q'",
   'has(status) && other == 1',
   'daysBetween(record.a, record.b) > 3',
+  "label(record.name) + label(record.status)",
 ];
 
 const SWEEP_INPUTS: readonly ExprInput[] = [
@@ -477,6 +543,7 @@ const SWEEP_SCHEMAS: readonly (ExprSchemaHint | undefined)[] = [
     fields: ['amount', 'close_date', 'name', 'active', 'account', 'status'],
     fieldTypes: { close_date: 'date', name: 'text', active: 'boolean', account: 'lookup' },
     roleCatalog: ['org_admin', 'sales'],
+    optionFields: ['status'],
   },
   { fields: ['status', 'close_date'], objectName: 'deal', fieldTypes: { close_date: 'date' } },
   { fields: ['status'] },
@@ -488,14 +555,40 @@ const VALIDATE_CODES: ReadonlySet<string> = new Set(
 );
 const ROOTS_CODES: ReadonlySet<CelRootsRefusalCode> = new Set<CelRootsRefusalCode>(['empty-expression', 'cel-parse-failed']);
 
+/**
+ * The LOCATOR params (`expression-refusal.ts`): a structured reading of the
+ * fault `detail` renders, not text the message interpolates. Judged by
+ * {@link expectLocatorsRead} instead of by containment.
+ */
+const LOCATOR_PARAMS: ReadonlySet<string> = new Set(['celCode', 'pos']);
+
 /** Every string a param carries, flattened — lists element by element, numbers as text. */
 function paramStrings(params: unknown): string[] {
   const out: string[] = [];
-  for (const value of Object.values(params as Record<string, unknown>)) {
+  for (const [key, value] of Object.entries(params as Record<string, unknown>)) {
+    if (LOCATOR_PARAMS.has(key)) continue;
     if (Array.isArray(value)) out.push(...value.map(String));
     else out.push(String(value));
   }
   return out;
+}
+
+/**
+ * A locator param, where present, is a reading of the engine's fault: only
+ * `invalid-cel` carries them, the code is a cel-js snake_case token, and the
+ * range lies inside the source it was read against.
+ */
+function expectLocatorsRead(said: { code: string; params: unknown; source: string }): void {
+  const params = said.params as Record<string, unknown>;
+  const present = Object.keys(params).filter((k) => LOCATOR_PARAMS.has(k));
+  if (present.length === 0) return;
+  expect(said.code).toBe('invalid-cel');
+  if ('celCode' in params) expect(params.celCode).toMatch(/^[a-z]+(?:_[a-z]+)*$/);
+  if ('pos' in params) {
+    const { start, end } = params.pos as { start: number; end: number };
+    expect(Number.isInteger(start) && Number.isInteger(end)).toBe(true);
+    expect(0 <= start && start <= end && end <= said.source.length, `${JSON.stringify(params.pos)} in ${JSON.stringify(said.source)}`).toBe(true);
+  }
 }
 
 describe('expression refusal codes — the closed set', () => {
@@ -523,6 +616,7 @@ describe('expression refusal codes — the closed set', () => {
             expect(typeof said.params).toBe('object');
             expect(said.params).not.toBeNull();
             for (const part of paramStrings(said.params)) expect(said.message).toContain(part);
+            expectLocatorsRead(said);
             provoked.add(said.code);
           }
         }

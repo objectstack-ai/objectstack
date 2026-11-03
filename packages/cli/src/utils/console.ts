@@ -831,8 +831,14 @@ const DEFAULT_MAP_STYLE_ORIGIN = 'https://demotiles.maplibre.org';
  *   stores; `readStorageUploadOrigin`), and the hosts an operator names in
  *   `OS_CONSOLE_CSP_CONNECT_SRC`.
  * - `default-src 'self'` covers the rest the Console uses: the module workers
- *   maplibre starts from its own file, the PWA manifest, and the same-origin
+ *   maplibre starts from its own file, its Service Worker, and the same-origin
  *   frames (the Studio's live canvas). The build ships no web fonts.
+ * - `manifest-src 'self' blob:`: the Console builds its web app manifest from
+ *   the runtime branding and links it as a `blob:` URL, so the installed app
+ *   carries the product's name and icon. Under `default-src 'self'` alone that
+ *   manifest is refused and the Console is not installable (objectstack#29155).
+ *   A `blob:` URL can only be minted by a script the page already runs, which
+ *   `script-src` governs.
  * - `object-src 'none'` and `base-uri 'self'`: no plugins, and only the
  *   server's own `<base href>`.
  * - `frame-ancestors 'self'`, except on the public form page: the Console's
@@ -868,6 +874,7 @@ function consoleContentSecurityPolicy(input: {
     ['style-src', "'self'", "'unsafe-inline'"],
     ['img-src', "'self'", 'data:', 'blob:', 'https:'],
     ['connect-src', ...new Set(connectSrc)],
+    ['manifest-src', "'self'", 'blob:'],
     ['object-src', "'none'"],
     ['base-uri', "'self'"],
   ];

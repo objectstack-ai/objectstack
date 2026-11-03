@@ -46,7 +46,28 @@
  * day by. A `date` (`CALENDAR_DATE_TYPES`) and a `datetime` (`INSTANT_TYPES`)
  * pass. **Not judged:** a field the declaration cannot type — undeclared (the
  * ingress door answers an unknown one first; a system column the map does not
- * declare is bucketed as before), a `formula`, or a registry-less host.
+ * declare is bucketed as before), or a registry-less host.
+ *
+ * ## A virtual field (`formula`) is refused, on its storage ground [#29167]
+ *
+ * A `formula` names no stored value class (its value is the expression's), so
+ * the class reading above cannot judge it. It is refused on the ground the
+ * sort, filter, search and value-aggregate axes already refuse it on: it is
+ * VIRTUAL — computed on read, no column — judged by the spec's
+ * `isVirtualSearchField` (`SEARCH_VIRTUAL_TYPES`), never a local type list,
+ * and whatever its `returnType` says. Measured on `origin/main` `7788eedb`
+ * before this arm, a month bucket over a `formula` with `returnType: 'date'`:
+ *
+ * | caller | answer |
+ * |:--|:--|
+ * | a SQL driver | `INVALID_FIELD` / 400 from the driver's missing-column backstop: no `path`, and a "run schema sync" prescription that cannot help |
+ * | a driver with no native `aggregate` (the in-memory aggregation) | `200`, one `null` group holding every row |
+ *
+ * Both now answer {@link virtualDateBucketMessage}, `INVALID_FIELD` / 400 at
+ * `groupBy.N.dateGranularity`, with the remedy those axes give: store the
+ * value on a stored field and use that. `@objectstack/service-analytics`'s
+ * `dataset-date-bucket-door.ts` gives the same refusal on the two faces that
+ * reach no engine (the `/analytics/sql` dry run and the draft preview).
  *
  * ## The column names
  *
@@ -65,6 +86,7 @@
  */
 
 import { StandardErrorCode } from '@objectstack/spec/api';
+import { isVirtualSearchField } from '@objectstack/spec/data';
 import { declaredFieldClasses } from './having-filter.js';
 
 type ShapeRefusal = Error & {
@@ -88,9 +110,28 @@ function refusal(
 }
 
 /**
+ * [#29167] The refusal of a date bucket over a VIRTUAL field (see the module
+ * header): the position, the field, its type and the granularity it was
+ * bucketed by, then the store-the-value remedy the sort and filter axes give.
+ * `@objectstack/service-analytics`'s `dataset-date-bucket-door.ts` carries the
+ * one copy, compared field for field by its tests.
+ */
+function virtualDateBucketMessage(
+  object: string, path: string, field: string, type: string, dateGranularity: string,
+): string {
+  return `aggregate('${object}'): ${path} buckets '${field}' by '${dateGranularity}', but '${field}' `
+    + `is a ${type} field — its value is computed on read and never stored, so no driver materialises a `
+    + `column to bucket. The query was NOT run. Denormalise the value onto '${object}' (a stored date or `
+    + 'datetime field, written when the source changes) and bucket that. A formula field is virtual: with '
+    + 'no column behind it the bucket reached the driver as a column that does not exist, and an engine '
+    + 'that aggregates in memory put every row into one null group while the answer looked served.';
+}
+
+/**
  * Refuse a `groupBy` entry whose `dateGranularity` buckets a field the object
- * declares neither a date nor a datetime — `INVALID_FIELD` / 400, naming the
- * position, the field and its declared type. See the module header.
+ * declares neither a date nor a datetime, or a virtual (`formula`) field —
+ * `INVALID_FIELD` / 400, naming the position, the field and its declared type.
+ * See the module header.
  */
 export function assertDateBucketTargetsAreTemporal(
   object: string,
@@ -105,11 +146,23 @@ export function assertDateBucketTargetsAreTemporal(
     if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) continue;
     const { field, dateGranularity } = entry as { field?: unknown; dateGranularity?: unknown };
     if (dateGranularity == null || typeof field !== 'string') continue;
+    const path = `groupBy.${i}.dateGranularity`;
+    const declared = Object.prototype.hasOwnProperty.call(fields, field)
+      ? (fields as Record<string, { type?: unknown }>)[field]
+      : undefined;
+    // [#29167] A virtual field first: the class reading below has no class
+    // for it, so it would otherwise be skipped unjudged.
+    if (isVirtualSearchField(declared as never)) {
+      throw refusal(
+        'INVALID_FIELD',
+        virtualDateBucketMessage(object, path, field, String(declared?.type), String(dateGranularity)),
+        { field, fields: [field], object, param: 'groupBy', path },
+      );
+    }
     classes ??= declaredFieldClasses(fields);
     const cls = classes.get(field);
     if (cls === undefined || cls === 'date' || cls === 'datetime') continue;
     const type = String((fields as Record<string, { type?: unknown }>)[field]?.type);
-    const path = `groupBy.${i}.dateGranularity`;
     throw refusal(
       'INVALID_FIELD',
       `aggregate('${object}'): ${path} buckets '${field}' by '${String(dateGranularity)}', but '${field}' `

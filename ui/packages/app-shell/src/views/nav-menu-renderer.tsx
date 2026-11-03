@@ -138,7 +138,8 @@ import { useNavDocTargetCheck } from '../hooks/useNavDocTargetCheck.js';
 import { withoutUnreadableObjectEntries } from '../utils/navObjectReadGate.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
 import { getIcon } from '../utils/getIcon.js';
-import { appRouteSegment, matchAppBySegment } from '../utils/index.js';
+import { matchAppBySegment } from '../utils/index.js';
+import { appAddressSegment } from '../utils/appRoute.js';
 import { navigationNames } from '../console/appObjectScope.js';
 
 /** Keep the designer's own data attributes on the wrapper, drop the rest. */
@@ -293,7 +294,9 @@ export const NavMenuRenderer: React.FC<NavMenuRendererProps> = ({
     return readable(activeApp?.navigation as NavigationItem[] | undefined);
   }, [activeApp, guards, can]);
 
-  const basePath = activeApp ? `/apps/${appRouteSegment(activeApp) ?? activeApp.name}` : '';
+  // The app's one address among the metadata list `/apps/SEGMENT` resolves on,
+  // as the sidebar builds it: a package's second app is addressed by name.
+  const basePath = activeApp ? `/apps/${appAddressSegment(apps, activeApp)}` : '';
 
   const templateContext: NavTemplateContext = useMemo(
     () => ({ currentUserId: user?.id ?? null, currentOrgId: activeOrganization?.id ?? null }),

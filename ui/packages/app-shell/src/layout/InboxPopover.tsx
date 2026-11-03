@@ -105,6 +105,18 @@ function openingTab(hasItems: Record<InboxTab, boolean>, picked: InboxTab | null
   return INBOX_TABS.find((t) => hasItems[t]) ?? picked ?? 'notifications';
 }
 
+/**
+ * The phone floor for a tap target: 44 px tall below `md`, the width at which
+ * the Console is the phone app's UI. Desktop sizes are untouched.
+ */
+const PHONE_TAP = 'max-md:min-h-11';
+
+/**
+ * Below `md` the three tabs share the strip by content width with their icons
+ * dropped, so the third tab is not pushed past a 359 px popover.
+ */
+const TAB_TRIGGER_CLASS = `text-xs gap-1.5 data-[state=active]:bg-transparent ${PHONE_TAP} max-md:flex-auto max-md:px-1.5`;
+
 export interface InboxPopoverProps {
   notifications: InboxNotification[];
   unreadCount: number;
@@ -368,7 +380,7 @@ export function InboxPopover({
         <Button
           variant="ghost"
           size="icon"
-          className={`h-8 w-8 relative shrink-0 ${pulse ? 'motion-safe:animate-bounce' : ''}`}
+          className={`h-8 w-8 max-md:size-11 relative shrink-0 ${pulse ? 'motion-safe:animate-bounce' : ''}`}
           aria-label={ariaLabel}
           title={t('sidebar.inbox', { defaultValue: 'Inbox' }) as string}
         >
@@ -384,7 +396,14 @@ export function InboxPopover({
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" sideOffset={8} className="w-96 p-0">
+      {/* Never wider than the viewport less a 0.5 rem gutter on each side, and
+          kept that far from its edges: a 375 px phone is narrower than w-96. */}
+      <PopoverContent
+        align="end"
+        sideOffset={8}
+        collisionPadding={8}
+        className="w-96 max-w-[calc(100vw-1rem)] p-0"
+      >
         <div className="flex items-center justify-between px-3 pt-3 pb-1">
           <div className="text-sm font-semibold">
             {t('sidebar.inbox', { defaultValue: 'Inbox' })}
@@ -393,7 +412,7 @@ export function InboxPopover({
             <button
               type="button"
               onClick={onMarkAllRead}
-              className="text-xs text-muted-foreground hover:text-foreground"
+              className={`text-xs text-muted-foreground hover:text-foreground ${PHONE_TAP} max-md:px-2`}
             >
               {t('notifications.markAllRead', { defaultValue: 'Mark all read' })}
             </button>
@@ -438,9 +457,9 @@ export function InboxPopover({
           </div>
         )}
         <Tabs value={shownTab} onValueChange={handleTabChange} className="w-full">
-          <TabsList className="w-full justify-start rounded-none border-b bg-transparent px-1 h-9">
-            <TabsTrigger value="notifications" className="text-xs gap-1.5 data-[state=active]:bg-transparent">
-              <Bell className="h-3.5 w-3.5" />
+          <TabsList className="w-full justify-start rounded-none border-b bg-transparent px-1 h-9 max-md:h-auto">
+            <TabsTrigger value="notifications" className={TAB_TRIGGER_CLASS}>
+              <Bell className="h-3.5 w-3.5 max-md:hidden" aria-hidden />
               {t('sidebar.notifications', { defaultValue: 'Notifications' })}
               {unreadTopics > 0 && (
                 <span
@@ -451,8 +470,8 @@ export function InboxPopover({
                 </span>
               )}
             </TabsTrigger>
-            <TabsTrigger value="approvals" className="text-xs gap-1.5 data-[state=active]:bg-transparent">
-              <CheckSquare className="h-3.5 w-3.5" />
+            <TabsTrigger value="approvals" className={TAB_TRIGGER_CLASS}>
+              <CheckSquare className="h-3.5 w-3.5 max-md:hidden" aria-hidden />
               {t('sidebar.approvals', { defaultValue: 'Approvals' })}
               {pendingApprovalsCount > 0 && (
                 <span
@@ -464,8 +483,8 @@ export function InboxPopover({
               )}
             </TabsTrigger>
             {showActivity && (
-              <TabsTrigger value="activity" className="text-xs gap-1.5 data-[state=active]:bg-transparent">
-                <ActivityIcon className="h-3.5 w-3.5" />
+              <TabsTrigger value="activity" className={TAB_TRIGGER_CLASS}>
+                <ActivityIcon className="h-3.5 w-3.5 max-md:hidden" aria-hidden />
                 {t('sidebar.activityFeed', { defaultValue: 'Activity feed' })}
               </TabsTrigger>
             )}
@@ -479,7 +498,7 @@ export function InboxPopover({
               <button
                 type="button"
                 onClick={() => setNotifFilter('unread')}
-                className={`text-xs px-2 py-1 rounded-md transition-colors ${
+                className={`text-xs px-2 py-1 rounded-md transition-colors ${PHONE_TAP} max-md:min-w-11 max-md:px-3 ${
                   notifFilter === 'unread'
                     ? 'bg-accent text-foreground font-medium'
                     : 'text-muted-foreground hover:text-foreground'
@@ -493,7 +512,7 @@ export function InboxPopover({
               <button
                 type="button"
                 onClick={() => setNotifFilter('all')}
-                className={`text-xs px-2 py-1 rounded-md transition-colors ${
+                className={`text-xs px-2 py-1 rounded-md transition-colors ${PHONE_TAP} max-md:min-w-11 max-md:px-3 ${
                   notifFilter === 'all'
                     ? 'bg-accent text-foreground font-medium'
                     : 'text-muted-foreground hover:text-foreground'
@@ -624,7 +643,7 @@ export function InboxPopover({
               <button
                 type="button"
                 onClick={goToAllNotifications}
-                className="text-xs text-primary hover:underline"
+                className={`text-xs text-primary hover:underline ${PHONE_TAP} max-md:w-full`}
               >
                 {t('notifications.viewAll', { defaultValue: 'View all notifications' })}
               </button>
@@ -642,7 +661,7 @@ export function InboxPopover({
                       count: pendingApprovalsCount,
                     })}
                   </div>
-                  <Button size="sm" className="mt-3" onClick={goToApprovals}>
+                  <Button size="sm" className={`mt-3 ${PHONE_TAP}`} onClick={goToApprovals}>
                     {t('notifications.viewApprovals', { defaultValue: 'View approvals' })}
                   </Button>
                 </>
@@ -656,7 +675,7 @@ export function InboxPopover({
                   <button
                     type="button"
                     onClick={goToApprovals}
-                    className="mt-2 text-xs text-primary hover:underline"
+                    className={`mt-2 text-xs text-primary hover:underline ${PHONE_TAP} max-md:px-3`}
                   >
                     {t('notifications.openApprovalsInbox', { defaultValue: 'Open Approvals Inbox' })}
                   </button>
@@ -731,7 +750,7 @@ export function InboxPopover({
                 <button
                   type="button"
                   onClick={goToAllActivity}
-                  className="text-xs text-primary hover:underline"
+                  className={`text-xs text-primary hover:underline ${PHONE_TAP} max-md:w-full`}
                 >
                   {t('layout.activityFeed.viewAll', { defaultValue: 'View all activity' })}
                 </button>

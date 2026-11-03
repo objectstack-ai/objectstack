@@ -22,7 +22,7 @@
  * `invocation-loudness.e2e.test.ts` documents at length: `process.exitCode`
  * inside a vitest worker is not an exit status (a CI script judges this
  * command by `$?`), and these commands print through `utils/format.ts`, whose
- * `printError` writes to stdout. Spawned through `bin/run-dev.js` + tsx so the
+ * `printError` writes to stdout. Spawned through `bin/run-dev.js` + `node` so the
  * suite does not depend on `packages/cli/dist` having been built.
  *
  * The refusal's pointer at skills is asserted here only as TEXT. That the
@@ -41,9 +41,8 @@ import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
-/** oclif + tsx cold start, with every command module loaded; ~2-10 s when healthy. */
+/** oclif cold start, with every command module loaded; ~2-10 s when healthy. */
 const RUN_TIMEOUT_MS = 180_000;
 
 interface Run {
@@ -52,10 +51,10 @@ interface Run {
   stderr: string;
 }
 
-function runTsx(args: string[], cwd: string): Promise<Run> {
+function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       args,
       { cwd, maxBuffer: 8 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {
@@ -83,11 +82,11 @@ let survivor: Run;
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'os-g-agent-retired-'));
 
-  // Sequential on purpose: three cold tsx starts, each loading every command
+  // Sequential on purpose: three cold CLI starts, each loading every command
   // module, in a container several agents share.
-  retired = await runTsx([CLI, 'g', 'agent', 'support'], dir);
-  unknown = await runTsx([CLI, 'g', 'nonexistent-type', 'support'], dir);
-  survivor = await runTsx([CLI, 'g', 'object', 'customer', '--dry-run'], dir);
+  retired = await runCli([CLI, 'g', 'agent', 'support'], dir);
+  unknown = await runCli([CLI, 'g', 'nonexistent-type', 'support'], dir);
+  survivor = await runCli([CLI, 'g', 'object', 'customer', '--dry-run'], dir);
 }, RUN_TIMEOUT_MS);
 
 afterAll(() => {

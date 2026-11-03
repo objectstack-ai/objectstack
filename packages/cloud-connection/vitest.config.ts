@@ -12,6 +12,12 @@ export default defineConfig({
     // Mechanism + measured costs: examples/app-showcase/vitest.config.ts.
     // Enforced repo-wide by scripts/check-console-intercept-disarm.mjs.
     disableConsoleIntercept: true,
+    // #13517: quiet the registry's per-item registration chatter — the
+    // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
+    // default. Enforced by scripts/check-registry-log-declared.mjs, which
+    // selects this suite since the install-local uninstall suite constructs a
+    // real `SchemaRegistry` (#28511).
+    env: { OS_REGISTRY_LOG: 'warn' },
   },
   resolve: {
     // Two entries. The first is for `canonical-expression-envelopes.test.ts`
@@ -97,8 +103,9 @@ export default defineConfig({
     ],
   },
   // Discovery is untouched — but this file is NOT "the alias and nothing else".
-  // The `test` block above carries exactly one key, and it is a run-exit fix
-  // (`disableConsoleIntercept`, #10374), not a discovery key: no `include`,
+  // The `test` block above carries two keys, a run-exit fix
+  // (`disableConsoleIntercept`, #10374) and the registry log level (`env`,
+  // #13517), and neither is a discovery key: no `include`,
   // `exclude` or `dir` is set anywhere here, so this package's suite is still
   // discovered on vitest's defaults, as it was before this file existed.
   //

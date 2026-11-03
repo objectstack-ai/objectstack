@@ -28,6 +28,7 @@ import { scopesToAgentPermissionSets, MCP_OAUTH_SCOPE_ACTIONS } from '@objectsta
 import { preferredLocaleFromHeader } from '@objectstack/spec/system';
 
 import { resolveRequestExecutionContext, type RequestAdmission } from '@objectstack/core';
+import { presentedForwardCredential, redeemForwardCredential, type ForwardAgentProvenance } from '@objectstack/rest';
 
 /**
  * [#4127 batch 4] The lookup facade, typed by slot like the ones on
@@ -118,6 +119,32 @@ function toHeaders(input: any): any {
   return h;
 }
 
+/**
+ * [ADR-0090 D10 rule 5, #28367] The agent a forward credential carried to this
+ * request, redeemed ONCE per request object: the credential is spent by its
+ * first presentation, and a door that resolves the same request again must read
+ * the same agent rather than a spent handle. Keyed weakly, so nothing outlives
+ * the request.
+ */
+const forwardAgents = new WeakMap<object, ForwardAgentProvenance | null>();
+
+/**
+ * The agent provenance this request's forward credential redeems to, or
+ * `undefined`. Only a request the action door itself injected in-process can
+ * carry a redeemable one (`@objectstack/rest` `redeemForwardCredential`); a
+ * request from the network presenting the header resolves as if it carried
+ * nothing.
+ */
+function forwardAgentOf(request: any, headers: Headers): ForwardAgentProvenance | undefined {
+  const presented = presentedForwardCredential(headers);
+  if (!presented) return undefined;
+  const key = request && typeof request === 'object' ? request : undefined;
+  if (key && forwardAgents.has(key)) return forwardAgents.get(key) ?? undefined;
+  const agent = redeemForwardCredential(presented, String(request?.method ?? ''), String(request?.path ?? request?.url ?? ''));
+  if (key) forwardAgents.set(key, agent ?? null);
+  return agent;
+}
+
 export async function resolveExecutionContext(opts: ResolveOptions): Promise<ExecutionContext> {
   const headers = toHeaders(opts.request?.headers);
   const ql = await opts.getQl();
@@ -136,7 +163,22 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
   // package deliberately does not depend on.
   let oauthPrincipal: VerifiedMcpAccessToken | undefined;
   let oauthBearerPresented = false;
-  if (opts.acceptOAuthAccessToken) {
+  // [ADR-0090 D10 rule 5, #28367] The second way this door resolves an agent:
+  // a forward credential the action door minted for an agent's in-process
+  // `api` forward. It is only ever minted from the first way (an agent the MCP
+  // OAuth door below already admitted), and it resolves to the SAME agent
+  // principal through the same assembler input: the provenance handed over at
+  // the mint, never re-derived from a token. The forward carries no caller
+  // header, so nothing else here can answer for it.
+  const forwardAgent = forwardAgentOf(opts.request, headers);
+  if (forwardAgent) {
+    oauthPrincipal = {
+      userId: forwardAgent.userId,
+      clientId: forwardAgent.clientId,
+      scopes: forwardAgent.scopes,
+      ...(forwardAgent.organizationId ? { organizationId: forwardAgent.organizationId } : {}),
+    };
+  } else if (opts.acceptOAuthAccessToken) {
     const jwtBearer = extractJwtBearer(headers);
     if (jwtBearer) {
       oauthBearerPresented = true;
@@ -229,7 +271,11 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
       // invoke actions on their behalf; without it the agent holds none.
       delegatesActions: oauthPrincipal.scopes?.includes(MCP_OAUTH_SCOPE_ACTIONS) ?? false,
     },
-    onAdmission: opts.onAdmission,
+    // [ADR-0090 D10 rule 5] A forward-credential principal reports no
+    // admission: it was admitted by no credential of its own presented here,
+    // and every reader of the admission (the API-key gate, the key-management
+    // rule) must read it as the agent it is, never as a signed-in session.
+    onAdmission: forwardAgent ? undefined : opts.onAdmission,
   });
 }
 
