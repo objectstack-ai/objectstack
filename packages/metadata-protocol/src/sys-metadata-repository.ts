@@ -1687,9 +1687,10 @@ export class SysMetadataRepository implements MetadataRepository {
        * [#29414] The package whose active row is restored. Stated → the
        * active row (its parent hash and its binding) is resolved under the
        * ADR-0048 key `(org, type, name, package_id)`, so another package's
-       * row of the same name is never the one restored; no such row → the
-       * unbound row, as below. Omitted → the "match any package" resolution,
-       * as before. A LOCAL extension, as on {@link delete}.
+       * row of the same name is never the one restored, and the restore is
+       * written under it, creating that package's row again when it is gone.
+       * Omitted → the "match any package" resolution and, with no active row,
+       * the unbound row, as before. A LOCAL extension, as on {@link delete}.
        */
       packageId?: string | null;
     },
@@ -1764,7 +1765,8 @@ export class SysMetadataRepository implements MetadataRepository {
       intent: opts.intent ?? 'override-artifact',
       state: 'active',
       opType: 'revert',
-      packageId: activePackageId,
+      // [#29414] The stated package's row, found or not.
+      packageId: 'packageId' in opts ? (opts.packageId ?? null) : activePackageId,
     });
   }
 

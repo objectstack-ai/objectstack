@@ -516,24 +516,77 @@ describe('the commit doors: restoring a row bound to the base is closed, removin
         ]);
     });
 
-    it('[#29414] a revert of the base\'s edit commit whose row was since deleted is refused by the package-less close, as the per-item rollback is; nothing is written', async () => {
+    it('[#29414] a revert of the base\'s edit commit whose row was since deleted restores into the base\'s own row, so the named-base close refuses it; nothing is written', async () => {
         const { protocol, rows } = makeProtocol();
         await intoBaseBeforeClose(protocol, 'First');
         const edit = await intoBaseBeforeClose(protocol, 'Second');
         expect(await protocol.deleteMetaItem({ type: VIEW.type, name: VIEW.name, packageId: BASE })).toMatchObject({ success: true });
         expect(rows(VIEW.type, VIEW.name)).toEqual([]);
-        // The per-item rollback on the same `null` binding: the one predicate, its rollback sentence.
-        const rollback = await thrown(() => protocol.rollbackMetaItem({ type: VIEW.type, name: VIEW.name, toVersion: 1 }));
-        expect(resolveThrownHttpError(rollback)).toMatchObject({ status: 403, code: 'NOT_OVERRIDABLE' });
 
         tick();
         const result = await protocol.revertCommit({ commitId: edit, packageId: BASE, actor: 'admin' });
 
         expect(result).toMatchObject({ success: false, revertedCount: 0, failedCount: 1, reverted: [] });
         expect(result.failed).toEqual([expect.objectContaining({ type: VIEW.type, name: VIEW.name, code: 'NOT_OVERRIDABLE' })]);
-        expect(result.failed[0].error).toBe(rollback.message);
-        expect(result.failed[0].error).toContain('a rollback of its package-less row is closed');
+        expectClosedSentence(result.failed[0].error, VIEW.type, VIEW.name, 'rollback');
         expect(rows(VIEW.type, VIEW.name)).toEqual([]);
         expect((await protocol.getMetaItem({ type: VIEW.type, name: VIEW.name })).item.label).toBe(PACKAGED);
+    });
+
+    it('[#29414] a pair commit recorded before #29414 beside a row bound to the base names the base row\'s version: its revert is refused by the override write gate, and the pair\'s declared row is unchanged', async () => {
+        const { protocol, rows } = makeProtocol();
+        await intoBaseBeforeClose(protocol, 'BaseRow');
+        const created = await publishCommit(protocol, PAIR, declared('PairFirst'));
+        // The plan such a commit recorded before #29414: the base row's version, read off any package's row.
+        const engine = protocol.engine;
+        const baseVersion = (await engine.findOne('sys_metadata', { where: { type: VIEW.type, name: VIEW.name, state: 'active', package_id: BASE } })).version;
+        expect(typeof baseVersion).toBe('number');
+        await engine.update('sys_metadata_commit', {
+            items: JSON.stringify([{ type: VIEW.type, name: VIEW.name, existedBefore: true, prevVersion: baseVersion }]),
+        }, { where: { id: created } });
+        expect(await planOf(protocol, PAIR, created)).toEqual([
+            expect.objectContaining({ existedBefore: true, prevVersion: baseVersion }),
+        ]);
+
+        tick();
+        const result = await protocol.revertCommit({ commitId: created, packageId: PAIR, actor: 'admin' });
+
+        expect(result).toMatchObject({ success: false, revertedCount: 0, failedCount: 1, reverted: [] });
+        expect(result.failed).toEqual([expect.objectContaining({ type: VIEW.type, name: VIEW.name, code: 'NOT_OVERRIDABLE' })]);
+        expect(rows(VIEW.type, VIEW.name)).toEqual([
+            { package_id: BASE, state: 'active', label: 'BaseRow' },
+            { package_id: PAIR, state: 'active', label: 'PairFirst' },
+        ]);
+        const pairRow = await engine.findOne('sys_metadata', { where: { type: VIEW.type, name: VIEW.name, state: 'active', package_id: PAIR } });
+        expect(JSON.parse(pairRow.metadata).overrides).toEqual({ package: BASE, basedOn: BASE_VERSION });
+        expect((await protocol.getMetaItem({ type: VIEW.type, name: VIEW.name })).item.label).toBe('PairFirst');
+    });
+
+    it('[#29414] CONTROL: the pair\'s edit commit whose row was since deleted restores the pair\'s declared row again', async () => {
+        const { protocol, rows } = makeProtocol();
+        await publishCommit(protocol, PAIR, declared('PairFirst'));
+        const edit = await publishCommit(protocol, PAIR, declared('PairSecond'));
+        expect(await protocol.deleteMetaItem({ type: VIEW.type, name: VIEW.name, packageId: PAIR })).toMatchObject({ success: true });
+        expect(rows(VIEW.type, VIEW.name)).toEqual([]);
+
+        tick();
+        const result = await protocol.revertCommit({ commitId: edit, packageId: PAIR, actor: 'admin' });
+
+        expect(result).toMatchObject({ success: true, revertedCount: 1, failed: [], reverted: [{ type: VIEW.type, name: VIEW.name, action: 'restored' }] });
+        expect(rows(VIEW.type, VIEW.name)).toEqual([{ package_id: PAIR, state: 'active', label: 'PairFirst' }]);
+        expect((await protocol.getMetaItem({ type: VIEW.type, name: VIEW.name })).item.label).toBe('PairFirst');
+    });
+
+    it('[#29414] CONTROL: a writable package\'s edit commit whose row was since deleted restores into that package\'s row, never a package-less one', async () => {
+        const { protocol, rows } = makeProtocol();
+        await publishCommit(protocol, WRITABLE, VIEW.body('First'));
+        const edit = await publishCommit(protocol, WRITABLE, VIEW.body('Second'));
+        expect(await protocol.deleteMetaItem({ type: VIEW.type, name: VIEW.name, packageId: WRITABLE })).toMatchObject({ success: true });
+
+        tick();
+        const result = await protocol.revertCommit({ commitId: edit, packageId: WRITABLE, actor: 'admin' });
+
+        expect(result).toMatchObject({ success: true, revertedCount: 1, failed: [], reverted: [{ type: VIEW.type, name: VIEW.name, action: 'restored' }] });
+        expect(rows(VIEW.type, VIEW.name)).toEqual([{ package_id: WRITABLE, state: 'active', label: 'First' }]);
     });
 });
