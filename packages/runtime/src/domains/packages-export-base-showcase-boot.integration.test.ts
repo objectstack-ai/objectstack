@@ -36,6 +36,17 @@
  *  - CONTROL: the pair's override row is published, and the effective read of
  *    the base's name serves it, so the base export's answer is the export's
  *    own.
+ *
+ * [#29903] A second describe pins the same rule for an object the pair
+ * EXTENDS (ADR-0146 D10: objects are extended, never replaced). The published
+ * extension adds `region__c` and relabels a base field; the registry folds it
+ * into the base's object, and the per-package layer the export reads served
+ * that merged object, so the base's export carried the customer's field and
+ * label as if the base shipped them. Now the base's export is byte-identical to
+ * its export before the extension (and after a restart that hydrates the
+ * extension from storage), the pair's export carries the extension as its
+ * `objectExtensions` entry, and the served object reads keep the merged field
+ * and label.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -256,6 +267,13 @@ async function boot(dir: string, { installPair }: { installPair: boolean }) {
 
     return {
         protocol,
+        /** [#29903] `GET /meta/<path>` through the door, as the console reads it. */
+        async served(path: string): Promise<any> {
+            const res = await dispatcher.handleMetadata(path, CALLER, 'GET');
+            expect(res.response?.status, JSON.stringify(res.response?.body)).toBe(200);
+            const body: any = JSON.parse(JSON.stringify(res.response?.body ?? null));
+            return body?.data ?? body;
+        },
         /** The pair's active (published) rows of `(type, name)`, read off the store. */
         async publishedRows(type: string, name: string): Promise<unknown[]> {
             return await driver.find('sys_metadata', { where: { type, name, package_id: PAIR, state: 'active' } });
@@ -321,4 +339,59 @@ describe('[#29649] GET /packages/<base>/export carries the base unchanged on a s
             expect(JSON.stringify(await restarted.exported(BASE)), `the base's whole export after a restart`).toBe(JSON.stringify(before));
         });
     }
+});
+
+const EXTENSION_FIELD = 'region__c';
+const PATCHED_LABEL = 'Title (customized)';
+/** Studio's add-field body on the base's object: an extension in the pair, its field suffixed, a base field relabelled. */
+const extensionBody = () => ({
+    extend: OBJECT,
+    fields: { [EXTENSION_FIELD]: { type: 'text', label: 'Region' } },
+    fieldPatches: { title: { label: PATCHED_LABEL } },
+});
+
+describe('[#29903] GET /packages/<base>/export carries the base\'s object without its pair\'s extension', () => {
+    const objectOf = (manifest: Record<string, any>) => itemsOf(manifest, 'objects', OBJECT);
+    /** The object as `GET /meta/object/<name>` and `GET /meta/object` serve it. */
+    const servedObject = async (door: Awaited<ReturnType<typeof boot>>) => {
+        const byName: any = await door.served(`/object/${OBJECT}`);
+        const list: any = await door.served('/object');
+        const listed = (Array.isArray(list) ? list : list?.items ?? []).find((o: any) => o?.name === OBJECT);
+        return [byName?.item ?? byName, listed].map((o) => ({ field: !!o?.fields?.[EXTENSION_FIELD], title: o?.fields?.title?.label }));
+    };
+
+    it('the base\'s export is byte-identical with the extension published, and after a restart that hydrates it', async () => {
+        const dir = mkdtempSync(join(tmpdir(), 'os-29903-db-'));
+        cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
+
+        const door = await boot(dir, { installPair: true });
+        const before = await door.exported(BASE);
+        expect(objectOf(before), 'the base\'s object before the extension').toHaveLength(1);
+        expect(Object.keys(objectOf(before)[0].fields)).not.toContain(EXTENSION_FIELD);
+
+        await door.override('object_extension', OBJECT, extensionBody());
+        // CONTROL: the extension is published, and both served object reads fold it in.
+        expect(await door.publishedRows('object_extension', OBJECT), 'the pair\'s published extension row').toHaveLength(1);
+        const merged = [{ field: true, title: PATCHED_LABEL }, { field: true, title: PATCHED_LABEL }];
+        expect(await servedObject(door), 'GET /meta/object/<name> and GET /meta/object').toEqual(merged);
+
+        const after = await door.exported(BASE);
+        expect(objectOf(after), 'the base\'s object with the extension live').toEqual(objectOf(before));
+        expect(Object.keys(objectOf(after)[0].fields)).not.toContain(EXTENSION_FIELD);
+        expect(objectOf(after)[0].fields.title.label).toBe('Title');
+        expect(after.objectExtensions, 'the base\'s export carries no extension').toBeUndefined();
+        expect(JSON.stringify(after), 'the base\'s whole export with the extension live').toBe(JSON.stringify(before));
+
+        const pair = await door.exported(PAIR);
+        expect(pair.objectExtensions, 'the pair\'s export carries the extension').toEqual([extensionBody()]);
+        expect(pair.objects, 'the pair owns no object').toBeUndefined();
+
+        // A restart over the same database: the published extension is hydrated
+        // from storage and folds into the served object again.
+        const restarted = await boot(dir, { installPair: false });
+        const hydrated = await restarted.protocol.loadMetaFromDb();
+        expect(hydrated?.errors, 'the boot pull').toBe(0);
+        expect(await servedObject(restarted), 'the served object reads after the restart').toEqual(merged);
+        expect(JSON.stringify(await restarted.exported(BASE)), 'the base\'s whole export after a restart').toBe(JSON.stringify(before));
+    });
 });
