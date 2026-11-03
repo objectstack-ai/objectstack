@@ -24,11 +24,12 @@
 //   3. an UNMANAGED install of the same export, on a SECOND boot that never
 //      held the package (the import "elsewhere" the export exists for),
 //      answers 200 and names each map the same way. The per-package export
-//      writes only its identity (`id`, `name`, `version`, `label`) and its
-//      collections, so it carries neither `installModes` nor `type`, and the
-//      copy refuses a body without them (measured: `manifest.type` refused);
-//      that is the export's manifest-key family, not this file's. The test adds
-//      the two keys an operator adds before importing an export as a copy.
+//      writes its identity (`id`, `name`, `version`, `label`, `namespace`,
+//      `dependencies`) and its collections, so it carries neither
+//      `installModes` nor `type`, and the copy refuses a body without them
+//      (measured: `manifest.type` refused); that is the export's manifest-key
+//      family, not this file's. The test adds the two keys an operator adds
+//      before importing an export as a copy.
 //
 // Boots fixture stacks of its own (the install-local plugin mounted), so it
 // stays out of `SHARED_SHOWCASE`.
