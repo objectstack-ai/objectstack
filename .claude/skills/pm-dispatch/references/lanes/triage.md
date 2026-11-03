@@ -13,3 +13,5 @@
   先敲其席(无信箱按名)过下轮无答且回收需其一句;待裁或被具名 `Blocked-by:`、`status:parked`
   卡、所骑栈阻者与信箱、Version PR 不算。⑦席位或子代理被拒、需人做的动作,⛔ 不代做。
 - 不推:定级、治半状态、解锁、契约复核(PASS/FAIL 归车道)、门铃答复、健康绿读数。
+- 安全发现:即推 ① 后转交 `security#1` 席即止(`security.md`);有公开卡只定 `security`+p1,余不判。
+- `security#1` 空缺时沿用 `security-findings.md` 第 7 节处置,⛔ 不代席、不追加细节。
