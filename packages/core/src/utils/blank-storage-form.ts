@@ -50,6 +50,12 @@
  * a `defaultValue` would fill) nor a lifecycle column the engine owns
  * ({@link ENGINE_LIFECYCLE_COLUMNS}), and never whitespace (a value on every
  * row of the `$empty` table they touch). A non-empty list is never touched.
+ * The `'emptyList'` arm also never reaches a `readonly: true` column
+ * (ruling record 6598733139): a readonly column is platform-stamped and never
+ * cleared by a writer (a non-system write of it is stripped), so the `[]` the
+ * platform writes there is a stamped value, not a cleared field, and is stored
+ * as written — `sys_activity.changed_fields`, where `[]` is "stamped, nothing
+ * changed" and `null` is "unstamped" (ADR-0139 E6).
  */
 
 import {
@@ -125,6 +131,8 @@ export type BlankAsNullReach = 'blank' | 'empty' | 'emptyList';
 export interface BlankAsNullFieldDef extends ValueShapeFieldDef {
   required?: boolean;
   unique?: unknown;
+  /** Platform-stamped: the `'emptyList'` arm never reaches it (record 6598733139). */
+  readonly?: boolean;
 }
 
 /**
@@ -148,7 +156,8 @@ export function blankAsNullColumns(
     if (LIFECYCLE.has(name) || def.required === true) continue;
     const { arm } = expandEmptyOperator(def);
     if (arm === 'multi_value') {
-      out.set(name, 'emptyList');
+      // A readonly column keeps the `[]` the platform stamps (record 6598733139).
+      if (def.readonly !== true) out.set(name, 'emptyList');
       continue;
     }
     const empty = UNIQUE_BLANK_TEXT_TYPES.has(def.type)

@@ -68,6 +68,23 @@ describe('blankAsNullColumns: the four arms of the write door\'s blank-as-null r
     expect(list.get('ref')).toBe('empty');
   });
 
+  it('[#29343] a readonly optional tags column written [] keeps [] — platform-stamped, never cleared (record 6598733139)', () => {
+    const cols = blankAsNullColumns({
+      fields: {
+        changed_fields: { type: 'tags', required: false, readonly: true },
+        tg: { type: 'tags' },
+        stage_ro: { type: 'select', readonly: true, options: [{ value: 'a' }] },
+      },
+    });
+    expect(cols.has('changed_fields')).toBe(false);
+    const stamped: string[] = [];
+    expect(blankStorageForm(stamped, cols.get('changed_fields'))).toBe(stamped);
+    // Controls: the same type without readonly still takes the arm, and the
+    // 'empty' arm is untouched by readonly.
+    expect(cols.get('tg')).toBe('emptyList');
+    expect(cols.get('stage_ro')).toBe('empty');
+  });
+
   it('lifecycle names are the five engine-owned columns', () => {
     expect([...ENGINE_LIFECYCLE_COLUMNS]).toEqual(['id', 'created_at', 'created_by', 'updated_at', 'updated_by']);
   });
