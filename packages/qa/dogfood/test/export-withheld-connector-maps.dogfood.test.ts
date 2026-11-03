@@ -21,15 +21,16 @@
 //      as served, no header name and no header value in the manifest;
 //   2. a MANAGED install of that export (the Studio import button's request)
 //      answers 200 and names each map in `withheldMaps`, as the export wrote it;
-//   3. an UNMANAGED install of the same export answers 200 and names each map
-//      the same way. The export carries no `installModes` (the per-package
-//      export writes only its identity and collections, the family the
-//      whole-deployment export card carries), so the test adds the key an
-//      operator would add before importing it as a copy; the managed install
-//      is removed first, because a managed package holds the namespace the
-//      copy keeps.
+//   3. an UNMANAGED install of the same export, on a SECOND boot that never
+//      held the package (the import "elsewhere" the export exists for),
+//      answers 200 and names each map the same way. The per-package export
+//      writes only its identity (`id`, `name`, `version`, `label`) and its
+//      collections, so it carries neither `installModes` nor `type`, and the
+//      copy refuses a body without them (measured: `manifest.type` refused);
+//      that is the export's manifest-key family, not this file's. The test adds
+//      the two keys an operator adds before importing an export as a copy.
 //
-// Boots a fixture stack of its own (the install-local plugin mounted), so it
+// Boots fixture stacks of its own (the install-local plugin mounted), so it
 // stays out of `SHARED_SHOWCASE`.
 
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -100,33 +101,39 @@ async function json(res: Response): Promise<Answer> {
 
 describe('dogfood: a package export names each connector map it withheld, and both install modes name each as incomplete', () => {
   let stack: VerifyStack;
-  let storageDir: string;
+  let elsewhere: VerifyStack;
+  const storageDirs: string[] = [];
   let source: Answer;
   let exported: Answer;
   let managed: Answer;
-  let removed: Answer;
   let unmanaged: Answer;
 
+  const boot = async (): Promise<VerifyStack> => {
+    const storageDir = mkdtempSync(join(tmpdir(), 'dogfood-export-withheld-maps-'));
+    storageDirs.push(storageDir);
+    return bootShowcase({ extraPlugins: [new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir })] });
+  };
+
   beforeAll(async () => {
-    storageDir = mkdtempSync(join(tmpdir(), 'dogfood-export-withheld-maps-'));
-    stack = await bootShowcase({
-      extraPlugins: [new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir })],
-    });
+    stack = await boot();
     const token = await stack.signIn();
     source = await json(await stack.apiAs(token, 'POST', '/marketplace/install-local', SOURCE_BODY));
     exported = await json(await stack.apiAs(token, 'GET', `/packages/${encodeURIComponent(PACKAGE_ID)}/export`));
     const manifest = exported.body?.data ?? {};
     managed = await json(await stack.apiAs(token, 'POST', '/marketplace/install-local', { manifest }));
-    removed = await json(await stack.apiAs(token, 'DELETE', `/marketplace/install-local/${encodeURIComponent(PACKAGE_ID)}`));
-    unmanaged = await json(await stack.apiAs(token, 'POST', '/marketplace/install-local', {
-      manifest: { ...manifest, installModes: ['managed', 'unmanaged'] },
+    await stack.stop();
+
+    elsewhere = await boot();
+    const other = await elsewhere.signIn();
+    unmanaged = await json(await elsewhere.apiAs(other, 'POST', '/marketplace/install-local', {
+      manifest: { ...manifest, type: 'app', installModes: ['managed', 'unmanaged'] },
       installMode: 'unmanaged',
     }));
   }, 300_000);
 
   afterAll(async () => {
-    await stack?.stop?.();
-    if (storageDir) rmSync(storageDir, { recursive: true, force: true });
+    await elsewhere?.stop?.();
+    for (const dir of storageDirs) rmSync(dir, { recursive: true, force: true });
   });
 
   it('the source package installs and its export answers 200', () => {
@@ -152,8 +159,7 @@ describe('dogfood: a package export names each connector map it withheld, and bo
     expect(managed.body?.data?.withheldMaps).toEqual(WITHHELD);
   });
 
-  it('3. an unmanaged install of the export answers 200 and names each map', () => {
-    expect(removed.status, JSON.stringify(removed.body)).toBe(200);
+  it('3. an unmanaged install of the export, on a boot that never held the package, answers 200 and names each map', () => {
     expect(unmanaged.status, JSON.stringify(unmanaged.body)).toBe(200);
     expect(unmanaged.body?.data?.installMode).toBe('unmanaged');
     expect(unmanaged.body?.data?.withheldMaps).toEqual(WITHHELD);
