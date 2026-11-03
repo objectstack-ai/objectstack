@@ -112,9 +112,11 @@ async function boot(extra: number, opts: { omit?: string[] } = {}): Promise<Rig>
     if (/^select .* from [`"]sys_business_unit[`"]/i.test(q.sql) && /parent_business_unit_id/.test(q.sql)
       && (q.bindings ?? []).includes(ROOT)) rootChildReads += 1;
   });
+  // The driver's own `find`, taken once: a second fault wraps it again rather
+  // than wrapping the first fault's spy.
+  const d = e.getDriverForObject('sys_business_unit');
+  const real = d.find.bind(d);
   const failUnitReads = (which: UnitRead, times = Number.POSITIVE_INFINITY) => {
-    const d = e.getDriverForObject('sys_business_unit');
-    const real = d.find.bind(d);
     let left = times;
     vi.spyOn(d, 'find').mockImplementation(((obj: string, ...rest: unknown[]) => {
       const descent = JSON.stringify(rest).includes('parent_business_unit_id');
