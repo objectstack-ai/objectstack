@@ -229,7 +229,15 @@ export { metaItemPackageBinding } from './rest-server.js';
 // [#27745] The two capabilities the federation routes gate on, exported so the
 // MCP federation tools (`list_remote_tables` / `import_object`) refuse a caller
 // exactly where `GET …/external/tables` and `POST …/tables/:remote/import` do.
-export { FEDERATION_READ_CAPABILITY, FEDERATION_WRITE_CAPABILITY } from './external-datasource-routes.js';
+// The rule itself — the read capability on every kind, the write one added on
+// a write — is `federationCapabilityRefusal`, exported for the same reason: a
+// door that re-derived it could admit a caller the routes refuse.
+export {
+    FEDERATION_READ_CAPABILITY,
+    FEDERATION_WRITE_CAPABILITY,
+    federationCapabilityRefusal,
+    type FederationCallKind,
+} from './external-datasource-routes.js';
 
 // [ADR-0090 D10 rule 5, #28367] The agent forward credential: the action door
 // mints it for an AI agent's in-process `api` forward, and every door that

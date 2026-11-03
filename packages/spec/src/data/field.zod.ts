@@ -1313,11 +1313,12 @@ export const FieldSchema = lazySchema(() => {
    *
    * On a multi-value lookup (`multiple: true`), `required` means NON-EMPTY
    * array: an emptied required set fails validation loudly — `[]` does not
-   * satisfy `required` (#9447, maintainer ruling 2026-08-18). The empty set is
-   * always representable (it reads back as `[]`, never `null` — see
-   * `multiple`), so the required check judges emptiness, not absence. The
-   * describe is form help in Studio and carries the rule, not the ruling date
-   * (#22093).
+   * satisfy `required` (#9447, maintainer ruling 2026-08-18; this half stands
+   * under ruling A on #29343, record 6591577985). An emptied OPTIONAL
+   * multi-value field is stored as `null`, the same as one never set (see
+   * `multiple`), so the required check judges emptiness: `null` and `[]` both
+   * fail it. The describe is form help in Studio and carries the rule, not the
+   * ruling date (#22093).
    */
   required: z.boolean().default(false).describe('Write-time contract (ADR-0113): an insert must provide a non-null value, and an update may not null it out. On a multi-value lookup (`multiple: true`) required means NON-EMPTY array — an emptied required set fails validation loudly; `[]` does not satisfy it. NOT a column constraint — the physical NOT NULL is a separate explicit opt-in (`storage.notNull`), so tightening this on a deployed object is safe: existing null rows stay readable, and editable as long as the write does not touch this field.'),
 
@@ -1354,21 +1355,29 @@ export const FieldSchema = lazySchema(() => {
     + 'is the whole search set and this flag is not read (ADR-0061).',
   ),
   /**
-   * Multi-value empty representation (#9447, maintainer ruling 2026-08-18):
-   * an emptied multi-value lookup reads back as `[]`, never `null`. This
-   * binds the field's empty representation for EVERY writer — cascade repair
-   * (`set_null` member removal), form clears, API writes — not as a
-   * cascade-only convention: an array field always reads as an array, so
-   * readers (generated code, formula/filter predicates) never need a null
-   * branch. Same ruling: `required` on a multi-value lookup means non-empty
-   * array (see `required` above).
+   * Multi-value empty representation (ruling A on #29343, record 6591577985,
+   * amending #9447, maintainer ruling 2026-08-18): a cleared OPTIONAL
+   * multi-value field — every type `isMultiValueField` answers true for:
+   * multiselect, checkboxes, tags, and select / lookup / user / file / image
+   * with `multiple: true` — is stored as `null` by the write door, the same as
+   * one never set, unique-covered or not: `[]` and `''` written to it store
+   * `null`. This binds the field's empty representation for EVERY writer —
+   * cascade repair (`set_null` member removal), form clears, API writes — not
+   * as a cascade-only convention. It reverses #9447's "an emptied multi-value
+   * lookup reads back as `[]`, never `null`" for optional columns: readers
+   * (generated code, formula/filter predicates) meet `null` for an empty set,
+   * and read `null` and `[]` alike as empty, since a row stored before the
+   * rule can still hold `[]`. The `$empty` table's `multi_value` row
+   * (`filter-empty-operator.ts`) is unchanged: `null` and `[]` both read as
+   * empty. #9447's other half stands: `required` on a multi-value field means
+   * non-empty list (see `required` above).
    *
    * Declarability: `multiple: true` outside the multi-capable types is refused
    * at parse (maintainer ruling 2026-09-13), and on `radio` by the narrower
    * 2026-08-22 ruling. The rulings and their dates live in these comments; the
    * describe is form help in Studio and carries only the rule (#22093).
    */
-  multiple: z.boolean().default(false).describe('Allow multiple values (Stores as Array/JSON). Declarable ONLY on the multi-capable types — select, lookup, user, file, image — and redundantly on the inherently-multi option types (multiselect, checkboxes, tags); `multiple: true` on any other type, `radio` included, is REFUSED at parse. An emptied multi-value lookup reads back as `[]`, never `null` — the rule binds every writer (cascade repair, form clears, API writes), not just cascade repair.'),
+  multiple: z.boolean().default(false).describe('Allow multiple values (Stores as Array/JSON). Declarable ONLY on the multi-capable types — select, lookup, user, file, image — and redundantly on the inherently-multi option types (multiselect, checkboxes, tags); `multiple: true` on any other type, `radio` included, is REFUSED at parse. A cleared optional multi-value field is stored as `null`, the same as one never set: an empty list `[]` or an empty string written to it stores `null`, and the rule binds every writer (cascade repair, form clears, API writes). Read `null` and `[]` alike as empty, as the `is_empty` filter (`$empty`) does, since a row stored before this rule can still hold `[]`. On a `required` multi-value field the empty list is refused: `required` means a non-empty list.'),
   // `true` = unique WITHIN the tenant on a tenant-scoped object (composite
   // `(tenantField, field)` index); `'global'` = platform-wide single-column
   // unique. See {@link UniqueScopeSchema} for the scope vocabulary (ADR-0120).
@@ -1908,25 +1917,24 @@ export const FieldSchema = lazySchema(() => {
    * Tri-state (ADR-0085 semantic-role style — a statement about the
    * relationship, not a layout switch):
    *   - `false`         → suppress this child from the parent's detail page.
-   *   - `true` / absent  → shown as a supporting list: a side card in the
-   *                       record's related column (under the tabbed page, the
-   *                       shared "Related" tab). There is no count-based
-   *                       auto-split.
-   *   - `'primary'`     → part of the record's MAIN CONTENT (#27069): drawn in
-   *                       the record's body — the details column, after its
-   *                       first field section — as a full-width table, not as
-   *                       a side card (under the tabbed page, inside the
-   *                       Details tab: a primary list gets no tab of its
-   *                       own). A field group's `relatedList` can place it
-   *                       among the field sections instead. `'primary'` no
-   *                       longer ORDERS lists: the parent's
-   *                       `ObjectSchema.relatedLists` does, among the body
-   *                       tables and among the side cards alike.
+   *   - `true` / absent  → shown as an auxiliary panel on the parent's record
+   *                       page. There is no count-based auto-split.
+   *   - `'primary'`     → part of the record's MAIN CONTENT (#27069): shown as
+   *                       a full-width table in the record's detail body, not
+   *                       as an auxiliary panel. A field group's `relatedList`
+   *                       can place it among the field sections instead.
+   *                       `'primary'` no longer ORDERS lists: the parent's
+   *                       `ObjectSchema.relatedLists` does, among the
+   *                       full-width tables and among the auxiliary panels
+   *                       alike.
+   *
+   * How the record page lays these out is ADR-0085's to define; this key states
+   * the relationship's role, not the page's chrome.
    *
    * Absent on a `master_detail` field that sets `inlineEdit`, the list is
    * `'primary'` by default: line items edited inside the parent's form are part
    * of its main content (a quote's lines belong under the quote, not beside
-   * it). Write `relatedList: true` to keep such a list a side card.
+   * it). Write `relatedList: true` to keep such a list an auxiliary panel.
    *
    * SORT INHERITANCE (#13294, following #11345's browser-verified acceptance
    * run): a derived related list (`relatedList: 'primary'`) inherits its row
@@ -1939,7 +1947,7 @@ export const FieldSchema = lazySchema(() => {
    * A child object with no list-view sort emits no ordering parameter at all,
    * and rows fall back to record-id order.
    */
-  relatedList: z.union([z.boolean(), z.literal('primary')]).optional().describe('Show this child collection as a related list on the parent\'s detail page (read-side mirror of inlineEdit). false = suppress; true/absent = shown as a supporting list, a side card in the record\'s related column (the shared "Related" tab on the tabbed page); \'primary\' = part of the record\'s main content, drawn in the record\'s body (the details column, after its first field section) as a full-width table (inside the Details tab on the tabbed page, with no tab of its own). Absent on a master_detail field that sets inlineEdit, the list is \'primary\' by default; write true to keep it a side card. \'primary\' places a list and does not order it: the parent object\'s relatedLists orders the body tables and the side cards (ADR-0085). A derived related list (relatedList: \'primary\') inherits its row order from the child object\'s DEFAULT list view sort — the isDefault view, or the first declared list item when none is marked default; wire spelling is sort=<field> / sort=-<field>, never $orderby. A child object with no list-view sort emits no ordering parameter, and rows fall back to record-id order.'),
+  relatedList: z.union([z.boolean(), z.literal('primary')]).optional().describe('Show this child collection as a related list on the parent\'s detail page (read-side mirror of inlineEdit). false = the child object is not shown on the parent record page; true/absent = shown as an auxiliary panel on the record page; \'primary\' = part of the record\'s main content, shown as a full-width table in the record\'s detail body. Absent on a master_detail field that sets inlineEdit, the list is \'primary\' by default; write true to keep it an auxiliary panel. \'primary\' places a list and does not order it: the parent object\'s relatedLists orders the full-width tables and the auxiliary panels. The page layout is defined by ADR-0085. A derived related list (relatedList: \'primary\') inherits its row order from the child object\'s DEFAULT list view sort — the isDefault view, or the first declared list item when none is marked default; wire spelling is sort=<field> / sort=-<field>, never $orderby. A child object with no list-view sort emits no ordering parameter, and rows fall back to record-id order.'),
   /** Optional section title for the detail-page related list (defaults to the child object label). */
   relatedListTitle: z.string().optional().describe('Title for the detail-page related list'),
   /**

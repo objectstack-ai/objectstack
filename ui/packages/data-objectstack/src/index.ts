@@ -39,6 +39,7 @@ import { isRefusedTextComparand, textComparandRefusalReason } from '@objectstack
 import type { ApiError, BatchUpdateResponse, ValidateDataIssue } from '@objectstack/spec/api';
 import { ValidateDataIssueSchema } from '@objectstack/spec/api';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
+import { isPlatformProvidedObjectName } from '@objectstack/spec/system';
 // #4237 — the metadata save door's advisory reader, shared with `MetadataClient`
 // rather than forked. ONE reader, two call sites: the other client class calls it
 // from `MetadataClient.save` (#4133/#4236), this one from the interceptor below.
@@ -3448,10 +3449,13 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
   private inflightFieldAccess = new Map<string, Promise<RecordFieldAccess | null>>();
   private unansweredFieldAccess = new Set<string>();
   private fieldAccessUnsupported = false;
-  // Resources that have responded 404 at least once (collection not installed
-  // on this backend). Subsequent find() calls short-circuit to an empty result
-  // so optional collections like sys_presence don't hammer the server with
-  // failing requests on every record open / panel render.
+  // Platform collections that have responded 404 at least once (the package
+  // that registers them is not installed on this backend). Subsequent find()
+  // calls short-circuit to an empty result so optional collections like
+  // sys_presence don't hammer the server with failing requests on every record
+  // open / panel render. Only names in the platform registry
+  // (`isPlatformProvidedObjectName`, @objectstack/spec) ever enter it: a 404
+  // on any other object is the surface's own object missing, and is rethrown.
   private missingResources = new Set<string>();
   // Set once the server has told us it can't do a cross-object transactional
   // batch (the client SDK's data.batchTransaction threw HTTP 404/405/501). After
@@ -3812,9 +3816,10 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    * Converts OData-style params to ObjectStack query options.
    */
   async find(resource: string, params?: QueryParams): Promise<QueryResult<T>> {
-    // Short-circuit when this resource has previously responded 404 — the
-    // collection isn't installed on this backend. Callers (AppHeader,
-    // RecordDetailView, …) treat empty data as "feature unavailable".
+    // Short-circuit when this platform collection has previously responded
+    // 404 — the package that registers it isn't installed on this backend.
+    // Callers (AppHeader, RecordDetailView, …) treat empty data as "feature
+    // unavailable". Only registry names are ever memoised (see the catch).
     if (this.missingResources.has(resource)) {
       return { data: [], total: 0 } as QueryResult<T>;
     }
@@ -3849,7 +3854,21 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
         // (objectui#4408). Rethrow so the surface can say what happened; the
         // `missingResources` memo must not absorb it either, or the very first
         // denial would silently pin every later call to empty.
-        if (!isApiAccessDeniedError(err) && is404Error(err)) {
+        //
+        // A 404 degrades to empty ONLY for a platform-provided collection
+        // (the curated registry in @objectstack/spec): there, absence means
+        // "this deployment does not install the feature", and the optional
+        // probes read empty as exactly that. The error code cannot make this
+        // split: an uninstalled sys_presence and a list's own unregistered
+        // object both answer 404 `OBJECT_NOT_FOUND`. Any other object is the
+        // surface's own, so its 404 is rethrown, unmemoised, and the surface's
+        // load-failure state shows the server's code and sentence instead of
+        // "no data yet" (an object that failed to register is not empty).
+        if (
+          !isApiAccessDeniedError(err)
+          && is404Error(err)
+          && isPlatformProvidedObjectName(resource)
+        ) {
           // Mark the resource so subsequent calls don't repeat the 404.
           this.missingResources.add(resource);
           return { data: [], total: 0 } as QueryResult<T>;

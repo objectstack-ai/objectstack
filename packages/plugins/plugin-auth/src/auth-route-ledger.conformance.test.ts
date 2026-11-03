@@ -43,6 +43,9 @@ const LEDGERED_PLUGIN_CONFIG = {
   deviceAuthorization: true,
 };
 
+/** Registered app schemes: mounts the mobile sign-in hand-off's `one-time-token` plugin. */
+const LEDGERED_APP_SCHEMES = ['com.example.ledger'];
+
 /**
  * `buildPluginList` reads env vars that can flip plugins on top of the config
  * above (`OS_SSO_ENABLED`, `OS_SCIM_ENABLED`, …). A developer with any of them
@@ -76,6 +79,10 @@ beforeAll(async () => {
     secret: 'route-ledger-conformance-secret-32-chars',
     baseUrl: 'http://localhost:9',
     plugins: LEDGERED_PLUGIN_CONFIG,
+    // The one-time-token plugin is switched by a registered app scheme, not
+    // by a `plugins` flag: one is registered so the maximal surface carries
+    // its two vendor routes.
+    trustedAppSchemes: LEDGERED_APP_SCHEMES,
   } as never);
   // No dataEngine: createDatabaseConfig() falls back to better-auth's in-memory
   // adapter. Route registration does not touch the database — only request
@@ -215,6 +222,12 @@ describe('auth route ledger hygiene', () => {
     expect(own).toEqual([
       'GET /api/v1/auth/bootstrap-status',
       'GET /api/v1/auth/config',
+      // On this pin's own terms: `auth-plugin.ts` mounts it itself (a
+      // `rawApp.get` on the `${basePath}/one-time-token/handoff`
+      // template, ahead of the catch-all), and the `live.has(route)` loop
+      // below holds it to the same proof — the vendor plugin publishes only
+      // `/one-time-token/generate` and `/one-time-token/verify`.
+      'GET /api/v1/auth/one-time-token/handoff',
       // [#26020] On this pin's own terms: `auth-plugin.ts` mounts it itself (a
       // `rawApp.get` on the `${basePath}/organization/invitation-preview`
       // template, ahead of the catch-all), and the `live.has(route)` loop below

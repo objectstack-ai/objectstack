@@ -41,6 +41,8 @@
  * theirs: the last rows pin them by name, as before the arm.
  */
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import '../lint-root-preload.testkit.js';
 import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';

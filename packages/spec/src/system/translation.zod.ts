@@ -24,8 +24,8 @@ import { textSlotTemplateRefusal } from '../automation/flow-text-slot-template';
  *
  * Shape only, by decision: membership has no registry to check against
  * (`Intl.getCanonicalLocales('xx-YY')` succeeds, which is why
- * `shared/value-domain.zod.ts` dropped a `bcp47_locale` domain), and case is
- * not judged because the resolvers fold it (`zh-cn` resolves to `zh-CN`).
+ * `shared/value-domain.zod.ts` dropped a `bcp47_locale` domain). Case is not
+ * refused either; it is corrected, see {@link canonicalLocaleCase}.
  * The primary subtag is held to the 2–3 letters of the ISO 639 codes every
  * tag in use starts with: BCP-47 reserves 4 letters and registers no 5–8
  * letter language, so the only values that wider grammar ever admitted were
@@ -42,11 +42,108 @@ const LOCALE_TAG_REFUSAL =
   + 'is under a locale no session ever asks for, so its strings never render. Separate subtags with '
   + '`-`, not `_`, and write the tag, not the name (`zh-CN`, not `Chinese`).';
 
+const LOCALE_TAG_DESCRIPTION = 'BCP-47 Language Tag (e.g. en-US, zh-CN)';
+
+/**
+ * A tag's BCP-47 case (RFC 5646 §2.1.1): the language subtag lower case, a
+ * 2-character subtag upper case (the region: `CN`), a 4-character one title
+ * case (the script: `Hans`), everything else lower case, and every subtag
+ * after a singleton (`-u-`, `-x-`) lower case. `zh-cn` → `zh-CN`,
+ * `ZH-HANS-cn` → `zh-Hans-CN`, `EN` → `en`; a canonical tag is returned as is.
+ *
+ * Why the parse corrects case instead of leaving it to the resolvers: a
+ * resolver answers ONE locale for a request, exact match first, so a
+ * translation stored under `zh-cn` beside the stock `zh-CN` bundle was never
+ * merged into it; a `zh-CN` session kept rendering the stock strings, with no
+ * diagnostic (#28993). Folding at the parse gives every reader one spelling,
+ * and a lowercase author is corrected rather than refused, so nothing that
+ * parsed before is refused now.
+ *
+ * Case only, deliberately not `Intl.getCanonicalLocales`, measured on Node 22:
+ * that also replaces legacy and macrolanguage subtags (`iw` → `he`,
+ * `tl` → `fil`, `cmn` → `zh`), which would move a translation to a locale its
+ * author never named, and it THROWS on tags {@link LOCALE_TAG_SHAPE} accepts
+ * (`zh-Hans-Hans`, `en-GB-oed`), which would turn a shape refusal into a
+ * crash. Its output also depends on the runtime's ICU data, where this fold
+ * is the same string in every runtime the spec ships to.
+ *
+ * ⛔ Package-internal: the public answer is a {@link LocaleSchema} parse, and
+ * an exported fold would be an invitation to fold a second time in a consumer.
+ */
+function canonicalLocaleCase(tag: string): string {
+  let afterSingleton = false;
+  return tag
+    .split('-')
+    .map((subtag, index) => {
+      if (index === 0 || afterSingleton) return subtag.toLowerCase();
+      if (subtag.length === 1) {
+        afterSingleton = true;
+        return subtag.toLowerCase();
+      }
+      if (subtag.length === 2) return subtag.toUpperCase();
+      if (subtag.length === 4) return subtag.charAt(0).toUpperCase() + subtag.slice(1).toLowerCase();
+      return subtag.toLowerCase();
+    })
+    .join('-');
+}
+
+/**
+ * The tag shape alone, without the case fold: the KEY of the two bundle
+ * records below. A record cannot fold its keys one at a time, because two
+ * keys that fold to one tag would land on one entry and the later one would
+ * silently replace the earlier; the records judge their keys together
+ * ({@link refuseLocaleKeysFoldingTogether}) and then fold them
+ * ({@link foldLocaleKeys}). Same pattern, same refusal and description as
+ * {@link LocaleSchema}, so the published shape of a bundle key does not move.
+ */
+const LocaleTagKeySchema = lazySchema(() => z
+  .string()
+  .regex(LOCALE_TAG_SHAPE, LOCALE_TAG_REFUSAL)
+  .describe(LOCALE_TAG_DESCRIPTION));
+
 export const LocaleSchema = lazySchema(() => z
   .string()
   .regex(LOCALE_TAG_SHAPE, LOCALE_TAG_REFUSAL)
-  .describe('BCP-47 Language Tag (e.g. en-US, zh-CN)'));
+  .overwrite(canonicalLocaleCase)
+  .describe(LOCALE_TAG_DESCRIPTION));
 export type Locale = z.input<typeof LocaleSchema>;
+
+/**
+ * Refuses a bundle holding two locale keys that fold to one tag (`zh-cn` and
+ * `zh-CN`), naming both. Picking a winner would discard one translator's
+ * strings without a word, which is the policy the stored-row conversion
+ * (`translation-locale-tag-case-folded`) already follows for the same
+ * collision. Runs before {@link foldLocaleKeys}, so it sees the keys as written.
+ */
+function refuseLocaleKeysFoldingTogether(bundle: Record<string, unknown>, ctx: z.RefinementCtx): void {
+  const firstByTag = new Map<string, string>();
+  for (const key of Object.keys(bundle)) {
+    const tag = canonicalLocaleCase(key);
+    const first = firstByTag.get(tag);
+    if (first === undefined) {
+      firstByTag.set(tag, key);
+      continue;
+    }
+    ctx.addIssue({
+      code: 'custom',
+      path: [key],
+      message:
+        `locale keys \`${first}\` and \`${key}\` are one locale, \`${tag}\`. Refused since `
+        + "@objectstack/spec 18, because a locale tag's case is corrected on parse, so both entries would "
+        + 'land on one key and one set of strings would be dropped. Merge the two by hand and keep one '
+        + `key, \`${tag}\`.`,
+    });
+  }
+}
+
+/** Every locale key in its BCP-47 case; the input itself when none moves. */
+function foldLocaleKeys<T>(bundle: Record<string, T>): Record<string, T> {
+  const keys = Object.keys(bundle);
+  if (keys.every((key) => canonicalLocaleCase(key) === key)) return bundle;
+  const folded: Record<string, T> = {};
+  for (const key of keys) folded[canonicalLocaleCase(key)] = bundle[key] as T;
+  return folded;
+}
 
 /**
  * Shared history sentence for every shape in this file.
@@ -2364,7 +2461,11 @@ export type ServedTranslationData = z.input<typeof ServedTranslationDataSchema>;
 // Translation Bundle (all locales)
 // ────────────────────────────────────────────────────────────────────────────
 
-export const TranslationBundleSchema = lazySchema(() => z.record(LocaleSchema, TranslationDataSchema).describe('Map of locale codes to per-app translation data'));
+export const TranslationBundleSchema = lazySchema(() => z
+  .record(LocaleTagKeySchema, TranslationDataSchema)
+  .superRefine(refuseLocaleKeysFoldingTogether)
+  .overwrite(foldLocaleKeys)
+  .describe('Map of locale codes to per-app translation data'));
 
 export type TranslationBundle = z.input<typeof TranslationBundleSchema>;
 
@@ -2374,7 +2475,11 @@ export type TranslationBundle = z.input<typeof TranslationBundleSchema>;
  * the bundle that needs it; a platform package authoring only groups the
  * per-app face also declares can keep the narrower {@link TranslationBundle}.
  */
-export const PlatformTranslationBundleSchema = lazySchema(() => z.record(LocaleSchema, PlatformTranslationDataSchema).describe('Map of locale codes to platform translation data'));
+export const PlatformTranslationBundleSchema = lazySchema(() => z
+  .record(LocaleTagKeySchema, PlatformTranslationDataSchema)
+  .superRefine(refuseLocaleKeysFoldingTogether)
+  .overwrite(foldLocaleKeys)
+  .describe('Map of locale codes to platform translation data'));
 
 export type PlatformTranslationBundle = z.input<typeof PlatformTranslationBundleSchema>;
 

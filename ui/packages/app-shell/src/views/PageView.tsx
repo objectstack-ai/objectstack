@@ -17,6 +17,7 @@ import { useParams, useSearchParams, useNavigate, useLocation, useHref } from 'r
 import {
   ElementDataSourceGate,
   SchemaRenderer,
+  answeredLoadFailure,
   classifyLoadError,
   noDataSourceMessage,
   notifyDataChanged,
@@ -24,6 +25,7 @@ import {
   useDataInvalidation,
   useFilterScope,
   useResolvedFilter,
+  type AnsweredLoadFailure,
   type ElementDataSourceMapping,
   type RelatedRecordActionsValue,
 } from '@object-ui/react';
@@ -101,7 +103,8 @@ type PageRow = Record<string, unknown>;
 /** One settled read of the page row, tagged with the query it answered. */
 type PageRowRead =
   | { key: string; status: 'loaded'; row: PageRow | null }
-  | { key: string; status: 'failed' };
+  // `answer`: the server's code and sentence when it answered (objectstack#29704).
+  | { key: string; status: 'failed'; answer: AnsweredLoadFailure | null };
 
 /** The first row of a `find` answer: `QueryResult.data`, or a bare array. */
 const firstRow = (result: unknown): PageRow | null => {
@@ -248,7 +251,7 @@ function AppPageRecordRead({
           setRead(
             classifyLoadError(err) === 'forbidden'
               ? { key: readKey, status: 'loaded', row: null }
-              : { key: readKey, status: 'failed' },
+              : { key: readKey, status: 'failed', answer: answeredLoadFailure(err) },
           );
         },
       );
@@ -274,10 +277,20 @@ function AppPageRecordRead({
         <DataErrorState
           data-testid="page-record-load-failed"
           title={t('empty.recordLoadFailed', { defaultValue: 'Couldn’t load this record' })}
-          message={t('empty.recordLoadFailedDescription', {
+          // The server's sentence when it answered — the record page's rule; the
+          // network sentence only for a read that got no answer (objectstack#29704).
+          message={current.answer?.message ?? t('empty.recordLoadFailedDescription', {
             defaultValue: 'Something went wrong while loading it. Check your connection and try again.',
           })}
         >
+          {current.answer?.code ? (
+            <code
+              data-testid="page-record-load-failed-code"
+              className="mb-3 rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground"
+            >
+              {current.answer.code}
+            </code>
+          ) : null}
           <Button
             variant="outline"
             size="sm"

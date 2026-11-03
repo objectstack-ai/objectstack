@@ -275,6 +275,7 @@
     "data/ExternalDatasourceSettings:connector",
     "data/ExternalDatasourceSettings:credentialsRef",
     "data/ExternalDatasourceSettings:queryTimeoutMs",
+    "data/ExternalDatasourceSettings:rowCap",
     "data/ExternalDatasourceSettings:validation",
     "data/ExternalTable:columns",
     "data/ExternalTable:indexes",

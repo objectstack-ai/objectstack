@@ -2,7 +2,7 @@ import React, { useRef, useState, useCallback } from 'react';
 import { Button, EmptyValue, cn } from '@object-ui/components';
 import { useUpload } from '@object-ui/providers';
 import { useObjectTranslation } from '@object-ui/i18n';
-import { Upload, X, File as FileIcon, ImageIcon, Camera, Loader2, Lock } from 'lucide-react';
+import { Upload, X, File as FileIcon, ImageIcon, Images, Camera, Loader2, Lock } from 'lucide-react';
 import { FieldWidgetComponentProps } from './types.js';
 import { toDomProps } from './toDomProps.js';
 import { toHostGroupProps } from './toHostGroupProps.js';
@@ -20,6 +20,7 @@ import {
   type FileValueView,
 } from './file-value.js';
 import { fileValueForResubmit } from './file-refused.js';
+import { pickNativeImage, useNativeImagePickOffered } from './nativeImagePick.js';
 // The one view/download affordance every `file` surface renders
 // (objectui#9161) — shared with `FileCellRenderer` rather than copied.
 import { FileValueAffordance, useRestrictedFileText } from './file-affordance.js';
@@ -164,7 +165,14 @@ export function FileField({ value, onChange, field, readonly, onUploadingChange,
   );
   // Auto-enable camera button on touch devices when image upload is permitted, unless explicitly disabled.
   const isTouchDevice = typeof navigator !== 'undefined' && (navigator.maxTouchPoints > 0 || /Mobi|Android/i.test(navigator.userAgent));
-  const cameraEnabled = captureMode === false ? false : (captureMode ?? (acceptsImages && isTouchDevice ? 'environment' : null));
+  // Inside the mobile shell, when it announces `pickImage`, the photo buttons
+  // go through the shell's own camera and library (`nativeImagePick`) and are
+  // offered whenever the field accepts images, touch probe or not. The camera
+  // button still honours `capture: false`.
+  const nativePickOffered = useNativeImagePickOffered() && acceptsImages;
+  const cameraEnabled = captureMode === false
+    ? false
+    : (captureMode ?? (acceptsImages && (isTouchDevice || nativePickOffered) ? 'environment' : null));
   const [isDragOver, setIsDragOver] = useState(false);
 
   const files = value ? (Array.isArray(value) ? value : [value]) : [];
@@ -172,6 +180,8 @@ export function FileField({ value, onChange, field, readonly, onUploadingChange,
   const { processFiles, errors, uploading, uploadProgress, recent } = useFileUploads({
     files, multiple, maxSize, onChange, holdScope,
   });
+  // The picked photo enters the same `processFiles` an input pick does.
+  const pickNative = (camera: boolean) => pickNativeImage(camera, t as TranslateFn).then(processFiles);
   const fallbackName = t('fields.file.fileFallback', { defaultValue: 'File' });
   // Normalised for display: accepts a bare reference id, the expanded
   // `{ id, name, size, mimeType, url }`, or a legacy inline blob.
@@ -271,7 +281,7 @@ export function FileField({ value, onChange, field, readonly, onUploadingChange,
         onChange={handleFileChange}
         className="hidden"
       />
-      {cameraEnabled && (
+      {cameraEnabled && !nativePickOffered && (
         <input
           ref={cameraRef}
           type="file"
@@ -348,7 +358,8 @@ export function FileField({ value, onChange, field, readonly, onUploadingChange,
             className={cn('w-full', PHONE_TOUCH_HEIGHT)}
             onClick={(e) => {
               e.stopPropagation();
-              cameraRef.current?.click();
+              if (nativePickOffered) void pickNative(true);
+              else cameraRef.current?.click();
             }}
             data-testid="file-field-camera-button"
           >
@@ -356,6 +367,23 @@ export function FileField({ value, onChange, field, readonly, onUploadingChange,
             {cameraEnabled === 'user'
               ? t('fields.file.takeSelfie', { defaultValue: 'Take selfie' })
               : t('fields.file.takePhoto', { defaultValue: 'Take photo' })}
+          </Button>
+        )}
+
+        {nativePickOffered && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className={cn('w-full', PHONE_TOUCH_HEIGHT)}
+            onClick={(e) => {
+              e.stopPropagation();
+              void pickNative(false);
+            }}
+            data-testid="file-field-library-button"
+          >
+            <Images className="size-4 mr-2" />
+            {t('fields.file.choosePhoto', { defaultValue: 'Choose photo' })}
           </Button>
         )}
 

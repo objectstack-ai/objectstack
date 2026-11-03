@@ -210,6 +210,7 @@ import { createAuthInstance, type AuthInstanceHost } from './auth-manager-auth-i
 // with it.
 import { buildPluginList, type PluginListHost } from './auth-manager-plugin-list.js';
 import { resolveTurnstileKeys } from './turnstile-sign-up.js';
+import { assertTrustedAppSchemes, registeredAppSchemesOf } from './one-time-token-handoff.js';
 
 /**
  * Detect WebContainer (StackBlitz) environment.
@@ -1610,6 +1611,12 @@ export class AuthManager {
     // `applyConfigPatch` re-runs it on the merged result.
     assertPasswordResetEndsSessions(config.emailAndPassword);
 
+    // The mobile sign-in hand-off's registered app schemes — same
+    // boot-loudly rationale: an entry that is not a reverse-domain app scheme
+    // is refused here, never dropped (`one-time-token-handoff.ts`).
+    // `applyConfigPatch` re-runs it on the merged result.
+    assertTrustedAppSchemes(config.trustedAppSchemes);
+
     // WebContainer (StackBlitz) compatibility — install a synchronous
     // AsyncLocalStorage polyfill for better-auth's request-state global
     // BEFORE better-auth ever instantiates its own. See the helper for the
@@ -1789,6 +1796,15 @@ export class AuthManager {
    * fine but could not actually sign (#3585) — the plugin's endpoints are
    * mounted, they just cannot mint a token.
    */
+  /**
+   * The app schemes the mobile sign-in hand-off may redirect a token to,
+   * normalised — the same reading the plugin list mounts the one-time-token
+   * plugin from, so the route and the plugin cannot disagree.
+   */
+  getRegisteredAppSchemes(): string[] {
+    return registeredAppSchemesOf(this.config);
+  }
+
   getDegradedAuthFeatures(): Array<{ feature: string; error: string }> {
     return Array.from(this.degradedFeatures, ([feature, error]) => ({ feature, error }));
   }
@@ -2071,6 +2087,9 @@ export class AuthManager {
     // sessions. Refused loudly and the standing config keeps ruling.
     if ('emailAndPassword' in patch) {
       assertPasswordResetEndsSessions(next.emailAndPassword);
+    }
+    if ('trustedAppSchemes' in patch) {
+      assertTrustedAppSchemes(next.trustedAppSchemes);
     }
 
     this.config = next;

@@ -254,21 +254,36 @@ function kindIcon(kind?: NavKind) {
  * something inside the app. Mirrors `findFirstRoute` / `resolveLandingRoute`
  * in `console/AppContent.tsx` — `group` recurses, and `url` / `separator` /
  * `action` are skipped because none of them yields an in-app route.
+ *
+ * `docs` picks the pass: the first pass passes over `doc` entries, which the
+ * runtime lands on only when no other entry lands; the second takes only
+ * them (objectstack-ai/objectstack#29678). A `component` entry lands here as it
+ * does there, which the runtime learned in objectui#12113.
  */
-function findFirstLanding(items: NavItem[]): NavItem | undefined {
+function findFirstLanding(items: NavItem[], docs = false): NavItem | undefined {
   for (const it of items) {
     if (it.kind === 'group') {
-      const hit = it.children ? findFirstLanding(it.children) : undefined;
+      const hit = it.children ? findFirstLanding(it.children, docs) : undefined;
       if (hit) return hit;
       continue;
     }
     if (it.kind === 'url' || it.kind === 'separator' || it.kind === 'action') continue;
-    // A `doc` entry has an href (the docs portal) but is never a landing: the
-    // runtime's `findFirstRoute` lands on object / page / dashboard / report /
-    // component only (objectui#11197). A `component` entry lands here as it
-    // does there, which the runtime learned in objectui#12113.
-    if (it.kind === 'doc') continue;
+    if ((it.kind === 'doc') !== docs) continue;
     if (it.href) return it;
+  }
+  return undefined;
+}
+
+/**
+ * `findFirstLanding` across every tree, in order: the top-level navigation,
+ * then each area's, as `firstRouteAcross` walks them in `console/AppContent.tsx`
+ * (objectstack-ai/objectstack#29771). The pass holds across the trees: a
+ * working entry in any area outranks a `doc` entry anywhere.
+ */
+function findFirstLandingAcross(trees: NavItem[][], docs = false): NavItem | undefined {
+  for (const tree of trees) {
+    const hit = findFirstLanding(tree, docs);
+    if (hit) return hit;
   }
   return undefined;
 }
@@ -308,8 +323,28 @@ export function AppPreview({ name, draft, editing, selection, onSelectionChange,
   // Resolve the landing entry the same way `resolveLandingRoute` does in the
   // console shell, so the author sees WHICH entry the app will open on:
   // depth-first, first item that yields a route (`group` recurses; `url`,
-  // `separator` and `action` address nothing inside the app).
-  const homeItem = React.useMemo(() => findFirstLanding(navItems), [navItems]);
+  // `separator` and `action` address nothing inside the app; a `doc` entry
+  // only when nothing else lands). The areas' trees follow the top-level one
+  // (objectstack-ai/objectstack#29771), so an areas-only app names its landing.
+  const areaNavItems = React.useMemo<NavItem[][]>(
+    () =>
+      Array.isArray(draft.areas)
+        ? draft.areas.map((area: unknown) =>
+            normalizeNav(
+              area && typeof area === 'object' ? (area as Record<string, unknown>).navigation : undefined,
+              appName,
+              unnamed,
+              locale,
+              targetLabel,
+            ),
+          )
+        : [],
+    [draft.areas, appName, unnamed, locale, targetLabel],
+  );
+  const homeItem = React.useMemo(() => {
+    const trees = [navItems, ...areaNavItems];
+    return findFirstLandingAcross(trees) ?? findFirstLandingAcross(trees, true);
+  }, [navItems, areaNavItems]);
 
   const areas = readAreas(draft.areas, locale);
 

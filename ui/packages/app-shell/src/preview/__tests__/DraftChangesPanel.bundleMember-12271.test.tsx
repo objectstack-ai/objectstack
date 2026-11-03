@@ -147,9 +147,10 @@ describe('two members of one email_template are two rows (objectui#12271)', () =
 
     await waitFor(() => expect(screen.getByTestId('draft-entry-detail')).toBeInTheDocument());
     const detail = screen.getByTestId('draft-entry-detail');
-    // zh-CN is new: its draft adds `body` and `subject` against no published body.
-    expect(detail).toHaveTextContent('+ body');
-    expect(detail).toHaveTextContent('+ Subject');
+    // zh-CN is new: no published body, so it is added whole and lists no key
+    // list (objectstack#29704) — what it says comes from ITS draft read below.
+    expect(within(detail).getByTestId('draft-entry-new')).toBeInTheDocument();
+    expect(within(detail).queryAllByTestId('draft-key-row')).toHaveLength(0);
     expect(urls).toContain('/api/v1/meta/email_template/welcome?state=draft&package=com.x&member=zh-CN');
     // The canonical body was never read for this row.
     expect(urls).not.toContain('/api/v1/meta/email_template/welcome?state=draft&package=com.x');
