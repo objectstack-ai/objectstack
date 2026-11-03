@@ -5479,7 +5479,9 @@ const FLOW_REGION_SHAPE_INVALID_EXPLANATION: RuleExplanation = {
       'same region check the engine runs when it registers the flow, and the message is the engine\'s ' +
       'refusal behind the flow\'s name. Like the engine it reports a flow\'s first malformed region, so a ' +
       'flow with two may need two fixes. A flow the flow schema refuses cannot be judged and is reported ' +
-      'as such, with the schema\'s issues.',
+      'as such, with the schema\'s issues. The server asks it too, when a flow is saved active or a draft ' +
+      'is published, of the flow with its legacy spellings converted to the current ones: the body the ' +
+      'engine registers.',
     'Not judged: a cycle in the flow\'s top-level graph, outside any region. The engine refuses that too, ' +
       'with a check this rule cannot reach.',
     'To fix a multi-exit region, add one node every exit of the region leads to; to fix a cycle, remove ' +
