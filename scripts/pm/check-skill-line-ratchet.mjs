@@ -1332,7 +1332,13 @@ export const CEILINGS = new Map([
   // §8's pointer list in place. Ruling of record: that card's body, filed under the maintainer's verbatim
   // 「设 security#1 座位」, and its amendment comment 6592303181 (「这个应该算一个车道吧？…」) naming this file's
   // new section. Measured delta +6 (56 → 62 lines); landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/security-findings.md', 62],
+  // 62 → 64 (#29731): the finder reports and never fixes in place — no widening of the PR or branch in hand, no
+  // own fix branch, no hardening on the same surface — and the task that cannot proceed without that code path
+  // stops as `blocked` with the opaque cause line while the seat parks the card. Ruling of record: that card's
+  // body, filed under the maintainer's verbatim 「开发中遇到的问题应该通过安全通道上报而不是直接处理」. The
+  // dev's route and the fix-only-by-order sentence folded into existing lines (§9 L60, §3 L28). Measured
+  // delta +2 (62 → 64 lines); landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/security-findings.md', 64],
   ['.claude/skills/pm-dispatch/references/external-contributions.md', 22],
   ['.claude/skills/pm-dispatch/references/reading-discipline.md', 37],
   // Lowered 51 → 47 by #25712 item 4: objectui stopped being a sister repo, so

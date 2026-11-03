@@ -25,7 +25,7 @@
 - 两操作皆被拒 ⇒ 会话专递(选 A):机制只在会话里交维护者,由其建草稿,⛔ 不换账号重发。
 - 私有仓无私密漏洞报告功能,那些操作上线后仍会话专递。
 - 回退时座位贴只写不透明编号与状态,⛔ 无细节。
-- 修复经 pm-dispatch 以无卡派发令派 `os-dev`,`xhigh`;机制只进派发令与公告。
+- 修复只由 `security#1` 席以无卡派发令派 `os-dev`,`xhigh`;机制只进派发令与公告。
 - 用到公告的临时私有 fork ⇒ 修复从该 fork 落地。
 
 ## 4. 跨仓发现者(应用仓量框架、cloud 席位)
@@ -57,6 +57,8 @@
 
 ## 9. 归属:`security#1` 席
 
-- 每份安全发现从接收到发布归 `security#1` 席(章程 `lanes/security.md`),⛔ 不归发现者。
-- 发现者只做两件:经中继 `advisory_create` 建草稿;向该席敲 `Notify: security · GHSA-ID`,只带编号。
+- 每份安全发现从接收到发布归 `security#1` 席(章程 `lanes/security.md`),发现者只报不修。
+- ⛔ 不扩本 PR 或分支,不自开修复分支,不在同一面顺手加固;dev 只走第 5 节上报。
+- 席位与 QA runner 两件事:中继 `advisory_create` 建草稿;敲 `Notify: security · GHSA-ID`,只带编号。
 - 中继拒(第 3 节)⇒ 机制在会话里交 `security#1` 席;席空缺 ⇒ 交维护者;发布恒归维护者。
+- 任务绕不开它 ⇒ 报 `blocked`,只写「a security item is with the owner seat」;席位停卡,⛔ 不绕行。
