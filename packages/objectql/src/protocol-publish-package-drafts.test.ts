@@ -157,9 +157,9 @@ describe('protocol.publishPackageDrafts (ADR-0033 / ADR-0067 D2)', () => {
     // one per draft, in draft order, each in the draft's own scope. (Reads
     // after these belong to the ADR-0038 L3 probes, which run post-commit.)
     expect(captureReads.slice(0, 3)).toEqual([
-      { type: 'object', name: 'course', state: 'active' },
-      { type: 'object', name: 'student', state: 'active' },
-      { type: 'view', name: 'course_list', state: 'active' },
+      { type: 'object', name: 'course', state: 'active', package_id: 'app.edu' },
+      { type: 'object', name: 'student', state: 'active', package_id: 'app.edu' },
+      { type: 'view', name: 'course_list', state: 'active', package_id: 'app.edu' },
     ]);
     expect(promote).toHaveBeenCalledTimes(3);
     expect((promote.mock.calls[0][0] as any)).toMatchObject({ type: 'object', name: 'course' });
@@ -205,10 +205,12 @@ describe('protocol.publishPackageDrafts (ADR-0033 / ADR-0067 D2)', () => {
 
     expect(res).toMatchObject({ success: true, publishedCount: 2 });
     // The capture ran for both items, in their own scope — this is what makes
-    // the values below evidence rather than defaults.
+    // the values below evidence rather than defaults. [#29414] The scope names
+    // the publishing package: another package's row of the name is not the
+    // item's pre-publish state.
     expect(captureReads.slice(0, 2)).toEqual([
-      { type: 'object', name: 'course', state: 'active' },
-      { type: 'object', name: 'student', state: 'active' },
+      { type: 'object', name: 'course', state: 'active', package_id: 'app.edu' },
+      { type: 'object', name: 'student', state: 'active', package_id: 'app.edu' },
     ]);
     // One commit, carrying one entry per promoted item, each with the state
     // that was actually READ.

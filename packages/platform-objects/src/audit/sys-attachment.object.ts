@@ -97,9 +97,16 @@ export const SysAttachment = ObjectSchema.create({
     }),
 
     // ── Authoring ──────────────────────────────────────────────
+    // Platform-written: a row's uploader is read-only after creation, like a
+    // comment's author. service-storage's create hook stamps the session user
+    // (and refuses a non-system create whose session names no user);
+    // `readonly` makes the engine's update-side strip drop a non-system
+    // caller's value and report it (`droppedFields`). System writes keep the
+    // value they supply.
     uploaded_by: Field.lookup('sys_user', {
       label: 'Uploaded By',
       required: false,
+      readonly: true,
       group: 'System',
     }),
 

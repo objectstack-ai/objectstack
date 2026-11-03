@@ -306,9 +306,15 @@ async function attempt<T>(run: () => Promise<T>): Promise<{ result: T | null; er
 
 afterEach(() => vi.restoreAllMocks());
 
-const commitRow = (items: unknown[]) => ({
+/**
+ * [#29414] `packageId` — the package the commit is recorded for, which a
+ * revert addresses the rows of; omitted, no `package_id` (the package-less
+ * rows those cases seed).
+ */
+const commitRow = (items: unknown[], packageId?: string) => ({
     id: 'c1',
     commit_id: 'c1',
+    ...(packageId !== undefined ? { package_id: packageId } : {}),
     organization_id: null,
     operation: 'apply',
     message: 'the commit under revert',
@@ -457,7 +463,7 @@ describe('[ADR-0146 D10] the restore doors refuse a stored version carrying a `_
     it('revertCommit\'s restore limb reports it in failed[] with the envelope\'s code; nothing is written', async () => {
         const h = makeProtocol();
         const before = await threeVersionsWithFieldResidueAtV2(h, BOUND);
-        h.serveCommit(commitRow([{ type: 'object', name: 'probe_ticket', existedBefore: true, prevVersion: 2 }]));
+        h.serveCommit(commitRow([{ type: 'object', name: 'probe_ticket', existedBefore: true, prevVersion: 2 }], BOUND));
         vi.spyOn(console, 'warn').mockImplementation(() => {});
 
         const res = await h.protocol.revertCommit({ commitId: 'c1' });

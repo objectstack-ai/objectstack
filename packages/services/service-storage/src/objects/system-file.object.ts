@@ -180,9 +180,19 @@ export const SystemFile = ObjectSchema.create({
       readonly: true,
     }),
 
+    // The uploader: a row's uploader is read-only after creation, like a
+    // comment's author. The upload doors record it from the session, under
+    // the system context; `readonly` makes the engine's update-side strip drop
+    // a non-system caller's value and report it (`droppedFields`), a holder of
+    // the ownership-transfer grant included, since this column is authorship
+    // and not a transferable record owner. The reason is provenance
+    // integrity: the row names the user who uploaded it. The storage
+    // service's own writes, all under the system context, keep what they
+    // supply.
     owner_id: Field.text({
       label: 'Owner ID',
       description: 'User who uploaded the file (authorship, not the field-reference owner)',
+      readonly: true,
     }),
 
     // ── Field-reference ownership (ADR-0104 D3 wave 2) ──────────────

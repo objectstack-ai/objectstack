@@ -55,6 +55,7 @@ import { aiJsonSchemaSlot } from '../shared/ai-json-schema-slot';
 import { ACTION_TARGET_ALIASES } from './action-target-aliases';
 import { ON_SUCCESS_EXECUTORS, onSuccessBesideExecutorRefusal } from './action-on-success-executor';
 import { refuseDeclarativeUpdateContradictions, type DeclarativeUpdateSurface } from './action-declarative-update';
+import { CONFIRM_BESIDE_PARAMS_REFUSAL, declaresConfirmBesideParams } from './action-confirm-beside-params';
 import { navigationTargetRefusal } from './navigation-target';
 
 /**
@@ -1512,9 +1513,12 @@ const actionObject = () => strictObject({
   /** UX Behavior */
   // NB this describe() renders into the InlineAction reference table too (both
   // tables derive from this one field factory). The #7428 refusal lives on
-  // both doors' refine chains — `ActionSchema`'s and, since #29383,
+  // both these tables' refine chains — `ActionSchema`'s and, since #29383,
   // `InlineActionSchema`'s — so the pair sentence below is unqualified; a
-  // view's `bulkActionDefs` declares its own `confirmText`, not this one.
+  // view's `bulkActionDefs` declares its own `confirmText`, not this one. The
+  // page `action:button` row declares its own `confirmText` too and, since
+  // #29844, refuses the pair through the same predicate
+  // (`./action-confirm-beside-params.ts`).
   //
   // [#24814, ADR-0032 Decisions 2–3] `confirmText` and `successMessage` are
   // `template` slots, one family with the page action rows' copy keys
@@ -2200,33 +2204,6 @@ function refuseIdentityAssignmentBodyWrite(
   }
 }
 
-/**
- * `confirmText` beside a non-empty `params`: TWO sequential dialogs for ONE
- * decision. The console action runner awaits the confirm, THEN the param
- * prompt (objectui `packages/core/src/actions/ActionRunner.ts`), so the first
- * dialog already reads as "the action ran" while nothing has been sent. The
- * `element:button` renderer hands an inline action to that same runner, so the
- * pair opens the same two dialogs on both doors that refuse it here —
- * {@link ActionSchema} and {@link InlineActionSchema} — and each spells the
- * rule through this one predicate and this one refusal. An empty `params`
- * collects nothing and opens no second dialog, so it is not the pair.
- */
-function declaresConfirmBesideParams(data: { confirmText?: unknown; params?: unknown }): boolean {
-  return data.confirmText != null && Array.isArray(data.params) && data.params.length > 0;
-}
-
-const CONFIRM_BESIDE_PARAMS_REFUSAL = {
-  message:
-    'An action that declares `confirmText` beside a non-empty `params` shows the user TWO dialogs '
-    + 'for one decision — the confirm, then the param prompt, with nothing sent until the second. '
-    + "Carry the confirm question in the action's top-level `description` instead (it renders under "
-    + 'the param dialog\'s title) and drop `confirmText`: one condition, one wording, one dialog. '
-    + 'Not `ai.description` — that is the LLM-facing tool contract. `confirmText` stays '
-    + 'correct for a param-LESS action, where the confirm IS the only dialog, and for a view\'s '
-    + '`bulkActionDefs`, where the pair renders one dialog by that schema\'s own contract.',
-  path: ['confirmText'],
-};
-
 export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
   // Require `target` for types that reference an external resource
   if (TARGET_REQUIRED_TYPES.has(data.type) && !data.target) {
@@ -2328,6 +2305,10 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
   // (#29383, ruling record 6595808462 letter A): an inline action is drawn by
   // the same runner, so the pair opens the same two dialogs there, and its
   // pick carries `description`, so the remedy has a slot on that door too.
+  // The page `action:button` row (`ActionButtonPropsSchema`, `component.zod.ts`)
+  // is the third door (#29844, ruling record 6597621758 letter A): it forwards
+  // its `confirmText` and an array `params` to the same runner. All three read
+  // the predicate and the refusal from `./action-confirm-beside-params.ts`.
   return !declaresConfirmBesideParams(data);
 }, CONFIRM_BESIDE_PARAMS_REFUSAL).refine((data) => {
   // [#27944] The mirror of the rule above, for the param dialog's button copy.
