@@ -12,10 +12,14 @@
  * ## Why it is a file in the repository
  *
  * The rule text (the pm-dispatch skill's `references/contract-review.md`,
- * 〈复核归属与资格〉) says the dispatching seat reviews its own pull requests in
- * its own seat, and a hand-off or an owed head goes to a review seat or a
- * sibling seat of the lane — ⛔ never to triage, which takes no contract review
- * and only counts the owed heads per lane in its round record. Before it existed the list was a
+ * 〈复核归属与资格〉, and the review seat's charter `references/lanes/review.md`)
+ * says the dispatching seat reviews its own pull requests in its own seat, and
+ * a hand-off or an owed head goes to a REVIEW SEAT FIRST (`review#N`, a seat
+ * whose only job is the review, on any account that reaches the tier) — the
+ * lane's own seat takes it only while no review seat is seated, or once the
+ * head has waited one further round past (b) with no claim — ⛔ never to
+ * triage, which takes no contract review and only counts the owed heads per
+ * lane in its round record. Before it existed the list was a
  * session-local scratch script: lost when a container was replaced, rebuilt
  * without drafts and without the hand-off lines, and two Tier H drafts waited
  * about five rounds with a hand-off naming their head. A list every seat can
@@ -55,6 +59,8 @@
  *              lapse.
  *   lane seat  the lane of the PR's card (`domain:*`) against the open seat
  *              posts: `seated`, `stood-down`, `absent`, `unknown`.
+ *   review seat the review seats (`review#N`) against the same posts: `seated`
+ *              (and which), `stood-down`, `absent`, `unknown` (roster unread).
  *   status     `TAKE` (owed, nobody on it, a trigger holds), `WAIT` (owed,
  *              nobody on it, no trigger yet — the lane's own, a lane's live hold
  *              included), `HELD` (a live claim on this head), `DONE` (a record on
@@ -67,8 +73,11 @@
  *              absent from the seat roster. A live hold holds (b) alone: the
  *              lane that holds ends it with (a), and a lane gone is (c).
  *   taker      on a TAKE row, who takes it: the seat the hand-off names; else
- *              the lane seat or a review seat; with the lane seat gone (c), a
- *              review seat or the lane's next seat. ⛔ Never triage.
+ *              a seated review seat FIRST (named), the lane seat joining only
+ *              once the head has waited a further round past (b); with no
+ *              review seat seated, the lane seat; with the lane seat gone (c),
+ *              a review seat or the lane's next seat; with the roster unread,
+ *              either is named. ⛔ Never triage.
  *
  * ## Report-only — the exit is 0 on every completed or incomplete read
  *
@@ -110,6 +119,10 @@ export const WAITING_LABEL = 'needs:contract-review';
 export const TRIAGE_ROUND_MINUTES = 60;
 /** The seat posts' label (`seat-post-protocol.md`); `parseSeat` reads each one. */
 export const SEAT_LABEL = 'pm:seat';
+/** The review seat's lane word, as its seat post and signature spell it (`lanes/review.md`, `mailbox-open.mjs` bare lanes). */
+export const REVIEW_LANE = 'review';
+/** The lane seat joins a seated review seat as taker once the head has waited this many rounds — one further round past (b). */
+export const LANE_JOINS_AFTER_ROUNDS = 2;
 
 const REPO_SHAPE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const VERDICT_LINE = /^[ \t>]*(?:\*\*)?VERDICT:[ \t]*(PASS|FAIL)\b/im;
@@ -233,6 +246,18 @@ export function laneSeatOf(cardLabels, seats) {
 }
 
 /**
+ * The review seats (`lanes/review.md`: lane `review`, seats `review#N`) on the open seat posts. Pure.
+ * `seats` null means the roster could not be read. `seated` names every seated one, canonically.
+ */
+export function reviewSeatsOf(seats) {
+  if (!Array.isArray(seats)) return { state: 'unknown', seated: [] };
+  const rows = seats.filter((s) => s?.lane === REVIEW_LANE);
+  const seated = rows.filter((s) => s.status === 'seated').map((s) => `${REVIEW_LANE}#${Number(s.seat) > 0 ? Number(s.seat) : 1}`).sort();
+  if (seated.length > 0) return { state: 'seated', seated };
+  return { state: rows.length > 0 ? 'stood-down' : 'absent', seated: [] };
+}
+
+/**
  * One row for one pull request, or null when its face owes no review. Pure.
  *
  * @param {object} pull  a REST pull row plus `files` (paths), `comments`, `card`, `cardComments`,
@@ -253,6 +278,7 @@ export function owedReviewRow(pull, { now, seats, repo = DEFAULT_REPO }) {
   const claim = contractReviewClaims(pull.comments, head, { now });
   const hold = contractReviewHold(pull.comments, head, { now });
   const lane = laneSeatOf(pull.cardLabels, seats);
+  const review = reviewSeatsOf(seats);
   const triggers = [];
   if (handoff.state === 'handed') triggers.push('(a) hand-off');
   if (owed.limbs.includes('label')) triggers.push('(a) label');
@@ -292,24 +318,36 @@ export function owedReviewRow(pull, { now, seats, repo = DEFAULT_REPO }) {
     },
     lane: lane.lane,
     laneSeat: lane.seat,
+    reviewSeat: review.state,
+    reviewSeats: review.seated,
     status,
     trigger: status === 'TAKE' || status === 'WAIT' ? (triggers[0] ?? 'none yet') : null,
-    taker: takerOf(status, handoff, lane),
+    taker: takerOf(status, handoff, lane, review, waited),
     gaps: Array.isArray(pull.gaps) ? pull.gaps : [],
   };
 }
 
 /**
- * Who takes a TAKE row (null on every other status). Pure. The rule text: the seat a hand-off on this
- * head names; otherwise the lane's seat or a review seat; a lane whose seat is gone waits for a review
- * seat or its next seat. ⛔ Never triage — it takes no contract review.
+ * Who takes a TAKE row (null on every other status). Pure. The rule text (`contract-review.md`,
+ * `lanes/review.md`): the seat a hand-off on this head names; otherwise a seated review seat FIRST,
+ * the lane's own seat joining only once the head has waited `LANE_JOINS_AFTER_ROUNDS` rounds with no
+ * claim; with no review seat seated, the lane's seat; a lane whose seat is gone waits for a review
+ * seat or its next seat; with the roster unread, either is named. ⛔ Never triage — it takes no
+ * contract review.
  */
-export function takerOf(status, handoff, lane) {
+export function takerOf(status, handoff, lane, review = { state: 'unknown', seated: [] }, waited = null) {
   if (status !== 'TAKE') return null;
   if (handoff?.state === 'handed' && typeof handoff.to === 'string') return handoff.to;
   const seat = lane?.lane ? `the ${lane.lane} seat` : 'the lane seat';
-  if (lane?.seat === 'stood-down' || lane?.seat === 'absent') return `a review seat, or ${seat} next on duty`;
-  return `${seat} or a review seat`;
+  const laneGone = lane?.seat === 'stood-down' || lane?.seat === 'absent';
+  if (review?.state === 'seated') {
+    const named = `a review seat (${review.seated.join(', ')})`;
+    if (laneGone) return `${named}, or ${seat} next on duty`;
+    if (waited !== null && waited >= LANE_JOINS_AFTER_ROUNDS * TRIAGE_ROUND_MINUTES) return `${named} first, or ${seat} (a further round waited, no claim)`;
+    return `${named} first`;
+  }
+  if (review?.state === 'unknown') return laneGone ? `a review seat, or ${seat} next on duty` : `${seat} or a review seat`;
+  return laneGone ? `${seat} next on duty (no review seat seated)` : `${seat} (no review seat seated)`;
 }
 
 const STATUS_ORDER = Object.freeze(['TAKE', 'WAIT', 'HELD', 'DONE']);
@@ -342,6 +380,7 @@ export function renderRow(row) {
     `claim ${claim}`,
     `hold ${holdText(row.hold)}`,
     `lane ${row.lane ?? '?'} ${row.laneSeat}`,
+    `review seat ${row.reviewSeat}${row.reviewSeats.length > 0 ? ` ${row.reviewSeats.join(',')}` : ''}`,
   ];
   const tail = row.trigger === null ? '' : ` → ${row.trigger}${row.taker ? ` · take: ${row.taker}` : ''}`;
   const listed = row.hold.listed ? `  ⏳ HOLD ${holdAge(row.hold)} — list it in the triage round record` : '';
@@ -413,7 +452,7 @@ export function readSnapshot({ repo, board, get = ghApi }) {
   if (!pullsRead.ok) return { repo, pulls: [], seats: null, gaps: [`the open pull list (${pullsRead.error})`] };
   const seatsRead = list(`/repos/${board}/issues?state=open&labels=${encodeURIComponent(SEAT_LABEL)}`);
   const seats = seatsRead.ok ? seatsRead.value.map((post) => parseSeat(post, board)).filter((s) => s !== null) : null;
-  if (!seatsRead.ok) gaps.push(`the seat posts on ${board} (${seatsRead.error}) — trigger (c) is not judged`);
+  if (!seatsRead.ok) gaps.push(`the seat posts on ${board} (${seatsRead.error}) — trigger (c) and the review seats are not judged`);
   const pulls = [];
   for (const raw of pullsRead.value) {
     const pull = { ...raw, files: [], comments: [], card: null, cardComments: [], cardLabels: [], headCommittedAt: null, gaps: [] };
@@ -456,7 +495,8 @@ const USAGE = [
   '',
   '  Lists the open pull requests, drafts included, whose face owes a contract review, with the record,',
   '  hand-off and claim on the current head, the trigger, and who takes it: the seat the hand-off',
-  '  names, the lane seat or a review seat — never triage.',
+  '  names; else a seated review seat first (`review#N`), the lane seat once a further round has',
+  '  passed with no claim, or the lane seat alone while no review seat is seated — never triage.',
   `  --repo   the repository whose pulls are read (default ${DEFAULT_REPO}); --board, where the seat posts live`,
   '  --now    the clock (default: now); --json prints the rows as JSON',
   '  Report-only: reads through `gh api`, writes nothing, exits 0 on every read; 2 on a usage error.',
@@ -493,13 +533,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the owed face: paths, the Clause-② line, the label — drafts included, nothing else owes': 9,
   'the record: on this head (by whom, as stated), on an earlier head, none, unjudged': 8,
   'the triggers: (a) hand-off or label the same round, (b) a full round, (c) the lane seat': 10,
+  'review-seat first: a seated review seat takes before the lane, the lane joins after a further round, and takes alone while none is seated': 10,
   'a live claim holds the head and a record settles it; a lapsed claim holds nothing': 6,
   'the live instance: two Tier H drafts with a hand-off on the current head list as TAKE under (a)': 4,
   'the live read: every read through one reader; a failed read is INCOMPLETE, never clean': 6,
   'the report: one line per owing PR, TAKE first, exit 0': 5,
   'the hold: a live hold on this head holds (b) alone, (a) and (c) still fire; a new head clears it; at 24 hours it is listed, still WAIT': 14,
 });
-const SELF_TEST_BATTERY_FLOOR = 9;
+const SELF_TEST_BATTERY_FLOOR = 10;
 const UNATTRIBUTED_BATTERY = '(no battery open)';
 
 export function selfTest() {
@@ -581,15 +622,30 @@ export function selfTest() {
   battery('the triggers: (a) hand-off or label the same round, (b) a full round, (c) the lane seat');
   const fresh = '2026-10-28T12:30:00Z';
   t('⭐ (a) a hand-off naming the current head ⇒ TAKE the same round, even 30 minutes in', (() => { const r = row({ headCommittedAt: fresh, comments: [handoff(HEAD, '2026-10-28T12:40:00Z')] }); return r.status === 'TAKE' && r.trigger === '(a) hand-off' && r.handoff.state === 'handed' && r.handoff.to === 'review#1' && r.taker === 'review#1'; })());
-  t('⭐ (a) the waiting label ⇒ TAKE the same round, taken by the lane seat or a review seat', (() => { const r = row({ headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }); return r.status === 'TAKE' && r.trigger === '(a) label' && r.taker === 'the domain:ui seat or a review seat'; })());
+  t('⭐ (a) the waiting label ⇒ TAKE the same round, taken by the lane seat (no review seat seated on this roster)', (() => { const r = row({ headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }); return r.status === 'TAKE' && r.trigger === '(a) label' && r.taker === 'the domain:ui seat (no review seat seated)'; })());
   t('⭐ a hand-off to a sibling lane seat names that seat as the taker — the fallback while no review seat is seated', (() => { const r = row({ headCommittedAt: fresh, comments: [handoff(HEAD, '2026-10-28T12:40:00Z', 'domain:ui#2')] }); return r.status === 'TAKE' && r.taker === 'domain:ui#2' && renderRow(r).includes('hand-off handed domain:ui#2 (6463525633)') && renderRow(r).includes('→ (a) hand-off · take: domain:ui#2'); })());
-  t('⛔ a hand-off line still naming `triage` hands to nobody: unreadable, no (a) from it, and the taker is never triage', (() => { const r = row({ headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }], comments: [handoff(HEAD, '2026-10-28T12:40:00Z', 'triage')] }); return r.handoff.state === 'unreadable' && r.trigger === '(a) label' && r.taker === 'the domain:ui seat or a review seat' && !/take: [^·]*triage/.test(renderRow(r)); })());
+  t('⛔ a hand-off line still naming `triage` hands to nobody: unreadable, no (a) from it, and the taker is never triage', (() => { const r = row({ headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }], comments: [handoff(HEAD, '2026-10-28T12:40:00Z', 'triage')] }); return r.handoff.state === 'unreadable' && r.trigger === '(a) label' && r.taker === 'the domain:ui seat (no review seat seated)' && !/take: [^·]*triage/.test(renderRow(r)); })());
   t('a hand-off on an EARLIER head is no (a) — stale', (() => { const r = row({ headCommittedAt: fresh, comments: [handoff(HEAD2, '2026-10-28T12:40:00Z')] }); return r.handoff.state === 'stale' && r.status === 'WAIT'; })());
-  t('⭐ (b) the head has waited a full triage round with no record and no claim ⇒ TAKE', (() => { const r = row({ headCommittedAt: '2026-10-28T11:59:00Z' }); return r.status === 'TAKE' && r.trigger === '(b) waited 61 min' && r.taker === 'the domain:ui seat or a review seat'; })());
+  t('⭐ (b) the head has waited a full triage round with no record and no claim ⇒ TAKE', (() => { const r = row({ headCommittedAt: '2026-10-28T11:59:00Z' }); return r.status === 'TAKE' && r.trigger === '(b) waited 61 min' && r.taker === 'the domain:ui seat (no review seat seated)'; })());
   t('under a full round, nothing else holding ⇒ WAIT (the lane\'s own), trigger none yet', (() => { const r = row({ headCommittedAt: '2026-10-28T12:01:00Z' }); return r.status === 'WAIT' && r.trigger === 'none yet' && r.waited === 59; })());
-  t('⭐ (c) the lane seat stood down, or absent from the roster ⇒ TAKE, by a review seat or the lane\'s next seat', row({ headCommittedAt: fresh }, [{ lane: 'domain:ui', status: 'paused' }]).trigger === '(c) lane seat stood-down' && row({ headCommittedAt: fresh }, [{ lane: 'domain:skills', status: 'seated' }]).trigger === '(c) lane seat absent' && row({ headCommittedAt: fresh }, [{ lane: 'domain:ui', status: 'paused' }]).taker === 'a review seat, or the domain:ui seat next on duty');
+  t('⭐ (c) the lane seat stood down, or absent from the roster ⇒ TAKE, by the lane\'s next seat (no review seat seated)', row({ headCommittedAt: fresh }, [{ lane: 'domain:ui', status: 'paused' }]).trigger === '(c) lane seat stood-down' && row({ headCommittedAt: fresh }, [{ lane: 'domain:skills', status: 'seated' }]).trigger === '(c) lane seat absent' && row({ headCommittedAt: fresh }, [{ lane: 'domain:ui', status: 'paused' }]).taker === 'the domain:ui seat next on duty (no review seat seated)');
   t('an unread roster or a card with no lane judges no (c)', row({ headCommittedAt: fresh }, null).laneSeat === 'unknown' && row({ headCommittedAt: fresh, cardLabels: [] }).laneSeat === 'unknown');
   t('an unknown commit time judges no (b); a PR opened after its head commit waits from its opening', row({ headCommittedAt: null }).waited === null && row({ headCommittedAt: null }).status === 'WAIT' && row({ headCommittedAt: '2026-10-28T07:30:00Z', created_at: '2026-10-28T12:30:00Z' }).waited === 30);
+
+  battery('review-seat first: a seated review seat takes before the lane, the lane joins after a further round, and takes alone while none is seated');
+  const WITH_REVIEW = [...SEATED, { lane: REVIEW_LANE, seat: 2, status: 'seated' }, { lane: REVIEW_LANE, seat: 1, status: 'seated' }];
+  const rv = (o, seats = WITH_REVIEW) => owedReviewRow(pull(o), { now: NOW, seats });
+  const BOTH = 'a review seat (review#1, review#2)';
+  t('⭐ the roster reads the review seats: the seated ones named canonically and sorted; stood-down; absent; unknown when the roster was not read; a post with no number is seat 1', (() => { const s = reviewSeatsOf(WITH_REVIEW); return s.state === 'seated' && s.seated.join() === 'review#1,review#2' && reviewSeatsOf([...SEATED, { lane: REVIEW_LANE, seat: 1, status: 'paused' }]).state === 'stood-down' && reviewSeatsOf(SEATED).state === 'absent' && reviewSeatsOf(SEATED).seated.length === 0 && reviewSeatsOf(null).state === 'unknown' && reviewSeatsOf([{ lane: REVIEW_LANE, status: 'seated' }]).seated.join() === 'review#1'; })());
+  t('⭐ (a) the label with a review seat seated ⇒ the review seat FIRST; the lane is not yet named', (() => { const r = rv({ headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }); return r.status === 'TAKE' && r.reviewSeat === 'seated' && r.reviewSeats.join() === 'review#1,review#2' && r.taker === `${BOTH} first`; })());
+  t('⭐ (b) one round waited ⇒ still the review seat first; a FURTHER round waited with no claim ⇒ the lane seat joins the taker line', rv({ headCommittedAt: '2026-10-28T11:59:00Z' }).taker === `${BOTH} first` && rv({ headCommittedAt: '2026-10-28T10:59:00Z' }).taker === `${BOTH} first, or the domain:ui seat (a further round waited, no claim)` && LANE_JOINS_AFTER_ROUNDS === 2);
+  t('⭐ the card\'s acceptance case: NO review seat seated ⇒ the lane\'s own seat takes, at (b) and after — never triage', (() => { const r = rv({ headCommittedAt: '2026-10-28T10:59:00Z' }, SEATED); return r.status === 'TAKE' && r.reviewSeat === 'absent' && r.taker === 'the domain:ui seat (no review seat seated)' && !/triage/.test(renderRow(r)); })());
+  t('a review seat that stood down is no review seat: the lane seat takes, and the row says stood-down', (() => { const r = rv({ headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }, [...SEATED, { lane: REVIEW_LANE, seat: 1, status: 'paused' }]); return r.reviewSeat === 'stood-down' && r.taker === 'the domain:ui seat (no review seat seated)'; })());
+  t('(c) the lane seat gone: a seated review seat, or the lane\'s next seat; none seated ⇒ the next seat alone', rv({ headCommittedAt: fresh }, [{ lane: REVIEW_LANE, status: 'seated' }]).taker === 'a review seat (review#1), or the domain:ui seat next on duty' && rv({ headCommittedAt: fresh }, [{ lane: 'domain:skills', status: 'seated' }]).taker === 'the domain:ui seat next on duty (no review seat seated)');
+  t('the roster unread: either is named, as before, and the row says unknown', (() => { const r = rv({ headCommittedAt: '2026-10-28T11:59:00Z' }, null); return r.reviewSeat === 'unknown' && r.taker === 'the domain:ui seat or a review seat'; })());
+  t('a hand-off names its seat whatever the roster says — a sibling lane seat under a seated review seat included', rv({ headCommittedAt: fresh, comments: [handoff(HEAD, '2026-10-28T12:40:00Z', 'domain:ui#2')] }).taker === 'domain:ui#2' && rv({ headCommittedAt: fresh, comments: [handoff(HEAD, '2026-10-28T12:40:00Z')] }, SEATED).taker === 'review#1');
+  t('⭐ a live claim by a review seat ⇒ HELD on the review side, no taker, nobody else starts', (() => { const r = rv({ labels: [{ name: WAITING_LABEL }], comments: [claimRow(REVIEWER, HEAD, '2026-10-28T12:18:56Z', `review#1 · os-zhuang · ${REVIEWER}`)] }); return r.status === 'HELD' && r.claim.holder.side === 'review' && r.taker === null && renderRow(r).includes('(review,'); })());
+  t('the printed row carries the review-seat reading and the taker', renderRow(rv({ headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] })).includes(`review seat seated review#1,review#2 → (a) label · take: ${BOTH} first`) && renderRow(rv({ headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }, SEATED)).includes('review seat absent → (a) label · take: the domain:ui seat (no review seat seated)'));
 
   battery('a live claim holds the head and a record settles it; a lapsed claim holds nothing');
   t('⭐ a live claim on the current head ⇒ HELD, naming the holder — whatever trigger holds', (() => { const r = row({ labels: [{ name: WAITING_LABEL }], comments: [claimRow(TRIAGE, HEAD, '2026-10-28T12:18:56Z', `triage#1 · os-zhuang · ${TRIAGE}`)] }); return r.status === 'HELD' && r.claim.holder.session === TRIAGE && r.trigger === null; })());
@@ -641,7 +697,7 @@ export function selfTest() {
   const noList = readSnapshot({ repo: DEFAULT_REPO, board: DEFAULT_REPO, get: fake({}) });
   t('⛔ a failed pull list is a gap and zero rows — never an empty board reported clean', noList.pulls.length === 0 && noList.gaps.length === 1 && renderReport([], { repo: DEFAULT_REPO, now: NOW, read: { pulls: 0, drafts: 0 }, gaps: noList.gaps }).some((l) => l.includes('sweep INCOMPLETE')));
   const noSeats = readSnapshot({ repo: DEFAULT_REPO, board: DEFAULT_REPO, get: fake({ ...routes, '/repos/objectstack-ai/objectstack/issues?': { ok: false, error: 'HTTP 403' } }) });
-  t('an unread seat roster is a gap and judges no (c)', noSeats.seats === null && noSeats.gaps.some((g) => g.includes('trigger (c) is not judged')));
+  t('an unread seat roster is a gap and judges no (c)', noSeats.seats === null && noSeats.gaps.some((g) => g.includes('trigger (c) and the review seats are not judged')));
 
   battery('the report: one line per owing PR, TAKE first, exit 0');
   const printed = [];

@@ -50,7 +50,12 @@
  *                    seat's repo; a `repo:x` lane is every card of repo x plus
  *                    the post's own repo's cards labelled `repo:x`. An account
  *                    on two seats of one lane shows them on its lowest seat
- *                    only; the other reads `= seat N`.
+ *                    only; the other reads `= seat N`. A `review` seat
+ *                    (`lanes/review.md`) holds no card: its in-flight is the
+ *                    open pulls whose CURRENT head a live
+ *                    `Contract-review-claim:` signed `review#N` holds, read
+ *                    off the signed-comment read below — per seat, so two
+ *                    review seats never share and never read `= seat N`.
  *   awaiting ruling  open `needs-user-decision` cards of the lane (issues, not
  *                    pulls): on the seat whose account is assigned, else on
  *                    the lane's lowest seated seat number, else its lowest.
@@ -129,6 +134,7 @@ import { LEDGER_EXCLUSION, MAILBOX_BRANCH_PREFIX, MAILBOX_LABEL, mailboxOwner, S
 // check-half-states itself, so this import loads nothing new there. The opener's lane-word lists cannot import it
 // (the patrol loads the opener lazily, so that edge would be a cycle); the self-test holds the two equal.
 import { SEAT_SIGNATURE_LINE } from './check-half-states.mjs';
+import { contractReviewClaimLapse, readContractReviewClaim } from './record-recognisers.mjs';
 // The seat record's heading and verdict have ONE reading, shared with H69 in
 // check-half-states; this file asks it, never re-spells the heading.
 import * as seatRecord from './seat-record.mjs';
@@ -317,6 +323,36 @@ export function signedActivity(snapshot) {
   return out;
 }
 
+/** The review lane's bare word (`lanes/review.md`), one of the opener's `SEAT_BARE_LANES` — pinned equal in the self-test. */
+export const REVIEW_LANE = 'review';
+
+/**
+ * The review seats' in-flight: `review#N` → the open pulls whose CURRENT head a live
+ * `Contract-review-claim:` signed by that seat holds (`readContractReviewClaim`, lapse by
+ * `contractReviewClaimLapse` from the comment's own `created_at`), over every repo's
+ * `recentComments` — the claim lapses in 2 h and the read starts `STALE_HOURS` back, so no
+ * live claim is ever past the read. An expired claim, one on a moved head, one on a closed
+ * pull or one signed by any other seat is nothing here. Pure.
+ */
+export function reviewClaims(snapshot, { now }) {
+  const nowMs = Date.parse(now);
+  const out = new Map();
+  for (const repo of Object.keys(snapshot?.repos ?? {})) {
+    const s = snapshot.repos[repo] ?? {};
+    const heads = new Map((s.pulls ?? []).filter((p) => p.state !== 'closed' && p?.head?.sha).map((p) => [p.number, p.head.sha]));
+    for (const c of s.recentComments ?? []) {
+      const seat = signedSeatOf(c?.body);
+      if (seat === null || !seat.startsWith(`${REVIEW_LANE}#`)) continue;
+      const number = Number(/\/issues\/(\d+)$/.exec(String(c?.issue_url ?? ''))?.[1]);
+      const claim = readContractReviewClaim(c?.body);
+      if (!heads.has(number) || claim.state !== 'read') continue;
+      if (contractReviewClaimLapse(claim, { headSha: heads.get(number), now: nowMs, postedAt: Date.parse(c?.created_at ?? '') }) !== 'live') continue;
+      out.set(seat, [...(out.get(seat) ?? []), ref(repo, number)]);
+    }
+  }
+  return out;
+}
+
 /** Where the signed-comment read starts: `STALE_HOURS` before `now` — no older comment can lift a flag. Pure. */
 export const activitySince = (now) => new Date(Date.parse(now) - STALE_HOURS * 3_600_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
 
@@ -368,6 +404,7 @@ export function buildRows(snapshot, { now }) {
   const pulls = [];
   const mailboxes = readMailboxes(snapshot);
   const signed = signedActivity(snapshot);
+  const claimed = reviewClaims(snapshot, { now });
   const pullUpdatedAt = new Map(); // pull key → its updated_at, for the mailbox's share of last activity
   for (const repo of repos) {
     const s = snapshot.repos[repo] ?? {};
@@ -406,21 +443,23 @@ export function buildRows(snapshot, { now }) {
 
   const out = rows.map((row) => {
     const acct = lc(row.account);
+    // A review seat's claims are signed per seat, so it never shares: its in-flight is the pulls its live claims hold.
+    const claims = row.lane === REVIEW_LANE ? (claimed.get(`${row.lane}#${row.seat}`) ?? []).sort(byRef) : null;
     // One account on two seats of one lane: the cards cannot say which seat, so the lowest seat shows them once.
-    const first = row.account ? rows.find((r) => r.repo === row.repo && r.lane === row.lane && lc(r.account) === acct) : row;
+    const first = row.account && claims === null ? rows.find((r) => r.repo === row.repo && r.lane === row.lane && lc(r.account) === acct) : row;
     const sharesWith = first !== row ? first.seat : null;
-    const inFlight = row.account && sharesWith === null ? cards.filter((c) => cardLaneMatch(c, row) && c.assignees.includes(acct)) : [];
+    const inFlight = row.account && sharesWith === null && claims === null ? cards.filter((c) => cardLaneMatch(c, row) && c.assignees.includes(acct)) : [];
     const awaitingLanding = inFlight.flatMap((c) => landing.get(keyOf(c)) ?? []);
     // Per seat, never per account: one account holds several seats, and each seat opens its own.
     const mailbox = mailboxes.filter((m) => m.slug !== null && m.slug === seatSlugOf(row)).map((m) => m.ref);
     // The seat's own traces: a seat sharing its lane's account with a lower seat has no in-flight cards of its own.
-    const times = [row.updatedAt, ...inFlight.map((c) => c.updatedAt), ...mailbox.map((m) => pullUpdatedAt.get(keyOf(m))), signed.get(`${row.lane}#${row.seat}`)].filter(Boolean).sort();
+    const times = [row.updatedAt, ...inFlight.map((c) => c.updatedAt), ...(claims ?? []).map((m) => pullUpdatedAt.get(keyOf(m))), ...mailbox.map((m) => pullUpdatedAt.get(keyOf(m))), signed.get(`${row.lane}#${row.seat}`)].filter(Boolean).sort();
     const lastActivity = times.at(-1) ?? null;
     const ageHours = lastActivity && Number.isFinite(nowMs) ? (nowMs - Date.parse(lastActivity)) / 3_600_000 : null;
     return {
       ...row,
       sharesWith,
-      inFlight: inFlight.map((c) => ref(c.repo, c.number)).sort(byRef),
+      inFlight: claims ?? inFlight.map((c) => ref(c.repo, c.number)).sort(byRef),
       awaitingRuling: [],
       awaitingLanding: awaitingLanding.sort(byRef),
       lastActivity,
@@ -459,7 +498,7 @@ export function readsFor(repos) {
     `GET /repos/${r}/issues?state=open&labels=pm:dispatched`,
     `GET /repos/${r}/issues?state=open&labels=needs-user-decision`,
     `GET /repos/${r}/pulls?state=open`,
-    `GET /repos/${r}/issues/comments?since=(now − ${STALE_HOURS} h), each read for its first-line seat signature`,
+    `GET /repos/${r}/issues/comments?since=(now − ${STALE_HOURS} h), each read for its first-line seat signature and, signed review#N, for a live Contract-review-claim`,
     `GET /repos/${r}/issues/{n}/comments for each claude/ pull closing an in-flight card (${LEDGER_EXCLUSION} excluded)`,
   ]);
 }
@@ -652,10 +691,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'arguments: modes and every refusal': 9,
   'seat titles: lane, seat, repo, status, account, project': 13,
   'wall notes, closing refs, verdicts and mailboxes': 13,
-  'the fixture snapshot: rows for the three repos': 25,
+  // 25 → 29: the review seat's row, its claim reading, the lane-word pin (lanes/review.md, #29242).
+  'the fixture snapshot: rows for the three repos': 29,
   // 13 → 14: the lane-grammar pin (the signature alternation equals the opener's lane-word lists, `coordinator` aside).
   'one account on two seats of a lane: the second seat reads its own traces': 14,
-  'the rendered body: marker, columns, footer, determinism': 10,
+  'the rendered body: marker, columns, footer, determinism': 11,
   'refusing to overwrite what is not the roster': 6,
   'the CLI: fixture runs offline, usage errors are exit 2': 6,
   'paging: a three-page read through the loop equals the slurped array': 4,
@@ -749,12 +789,13 @@ async function selfTest() {
     'objectstack:epic:#27293:1',
     'objectstack:epic:#27293:2',
     'objectstack:epic:#28800:2',
+    'objectstack:review:1',
     'objectstack:triage:1',
     'objectui:domain:ui:1',
     'objectui:domain:ui:4',
   ]);
   const laneListed = (lane) => (lane.includes(':') ? [...mailboxOpen.SEAT_LANE_KINDS, mailboxOpen.SEAT_EPIC_KIND].includes(lane.slice(0, lane.indexOf(':'))) : mailboxOpen.SEAT_BARE_LANES.includes(lane));
-  t('every fixture lane is a kind or bare word from the opener\'s lane-word lists — imported, not re-spelled', [...new Set(rows.map((r) => r.lane))].map((lane) => `${lane}:${laneListed(lane)}`), ['repo:hotcrm:true', 'domain:devx:true', 'domain:skills:true', 'epic:#26676:true', 'epic:#27293:true', 'epic:#28800:true', 'triage:true', 'domain:ui:true']);
+  t('every fixture lane is a kind or bare word from the opener\'s lane-word lists — imported, not re-spelled', [...new Set(rows.map((r) => r.lane))].map((lane) => `${lane}:${laneListed(lane)}`), ['repo:hotcrm:true', 'domain:devx:true', 'domain:skills:true', 'epic:#26676:true', 'epic:#27293:true', 'epic:#28800:true', 'review:true', 'triage:true', 'domain:ui:true']);
   const os = (number) => ({ repo: 'objectstack-ai/objectstack', number });
   const ep = (post) => (({ lane, seat, status, mark, account, mailbox, suspectedWall, inFlight }) => ({ lane, seat, status, mark, account, mailbox, suspectedWall, inFlight }))(row(post));
   t('⭐ an epic parent is a row: lane epic:#n, the seat its open mailbox names, seated by that login, the mailbox in its column — and, stale with no in-flight read, never 疑似撞墙', ep(27293), { lane: 'epic:#27293', seat: 1, status: 'seated', mark: '🟢', account: 'sunhaolin', mailbox: [os(25397)], suspectedWall: false, inFlight: [] });
@@ -779,6 +820,11 @@ async function selfTest() {
   t('⛔ a legacy per-login mailbox and a seat no post or open epic parent carries sit on no row — flagged, never attributed to the login\'s seats', [unassignedMailboxes(fixture, rows).map((m) => [m.ref.number, m.seat, m.login, m.why]), [row(5560, 'objectstack-ai/objectui').mailbox, row(10243, 'objectstack-ai/objectui').mailbox]], [[[25395, null, 'os-sales', 'legacy per-login, names no seat'], [25396, 'domain:spec#5', 'os-tesla', 'no seat post or epic parent carries this seat'], [25398, 'epic:#28130#1', 'os-zhuang', 'no seat post or epic parent carries this seat']], [[], []]]);
   t('stale and no wall note ⇒ 疑似撞墙; a wall note silences it; vacant never', [row(20163).suspectedWall, row(5560, 'objectstack-ai/objectui').suspectedWall, row(5560, 'objectstack-ai/objectui').wallNote, row(7623).suspectedWall], [true, false, 'limit reached, resets at 15:00Z', false]);
   t('last activity is the newest of post and in-flight cards', row(6023).lastActivity, '2026-10-23T13:28:00Z');
+  const rv = (({ lane, seat, status, account, sharesWith, inFlight, awaitingLanding, awaitingRuling, mailbox, lastActivity, suspectedWall }) => ({ lane, seat, status, account, sharesWith, inFlight, awaitingLanding, awaitingRuling, mailbox, lastActivity, suspectedWall }))(row(25500));
+  t('⭐ a review seat is a row: lane `review`, seated by its login, never sharing; in flight = the open pulls whose current head its live Contract-review-claim holds, its mailbox in its column, and its last activity the claim comment', rv, { lane: REVIEW_LANE, seat: 1, status: 'seated', account: 'os-zhuang', sharesWith: null, inFlight: [os(25433)], awaitingLanding: [], awaitingRuling: [], mailbox: [os(25434)], lastActivity: '2026-10-23T13:30:00Z', suspectedWall: false });
+  t('⛔ of the fixture\'s three review-signed claims only the live one on the current head counts: the expired one (2 h) and the one on a moved head hold nothing', [fixture.repos['objectstack-ai/objectstack'].recentComments.filter((c) => /^review#/.test(c.body)).length, [...reviewClaims(fixture, { now: fixture.now }).entries()].map(([k, v]) => `${k}=${v.map((r) => r.number)}`)], [3, ['review#1=25433']]);
+  t('⛔ a claim signed by a lane seat, or by nobody, is no review in-flight; a review seat holds no dispatched card of the lanes', [reviewClaims({ repos: { r: { pulls: [{ number: 1, state: 'open', head: { sha: 'a'.repeat(40) } }], recentComments: [{ issue_url: 'x/issues/1', created_at: fixture.now, body: `domain:ui#1 · a · session_01Abcdef\n\nContract-review-claim: session_01Abcdef · head ${'a'.repeat(40)} · ${fixture.now}` }, { issue_url: 'x/issues/1', created_at: fixture.now, body: `Contract-review-claim: session_01Abcdef · head ${'a'.repeat(40)} · ${fixture.now}` }] } } }, { now: fixture.now }).size, rows.filter((r) => r.lane === REVIEW_LANE && r.inFlight.some((p) => fixture.repos['objectstack-ai/objectstack'].dispatched.some((d) => d.number === p.number))).length], [0, 0]);
+  t('the review lane word is one of the opener\'s bare lanes — imported, not a third spelling', mailboxOpen.SEAT_BARE_LANES.includes(REVIEW_LANE), true);
   t('one account on two seats of a lane: cards on the lowest seat, the other reads = seat 1', [row(5560, 'objectstack-ai/objectui').inFlight.length, row(10243, 'objectstack-ai/objectui').sharesWith, row(10243, 'objectstack-ai/objectui').inFlight, row(10243, 'objectstack-ai/objectui').suspectedWall], [1, 1, [], true]);
 
   battery('one account on two seats of a lane: the second seat reads its own traces');
@@ -839,6 +885,7 @@ async function selfTest() {
   t('the footer names the generation time and each read', [body.includes(`Generated ${fixture.now}`), body.includes('`GET /repos/objectstack-ai/hotcrm/issues?state=open&labels=pm:seat`')], [true, true]);
   t('the suspected wall is spelled in the row', body.includes(`⚠️ ${SUSPECTED_WALL}`), true);
   t('a shared seat reads = seat N in the in-flight cell', body.includes('| = seat 1 |'), true);
+  t('⭐ a review row renders its claimed pull in the in-flight cell, never `= seat N`', body.includes('| objectstack | review | [1](https://github.com/objectstack-ai/objectstack/issues/25500) | 🟢 `os-zhuang` | objectstack#25433 | — | — | — |'), true);
   t('the mailboxes on no seat row are flagged under the table, each with its owner and why', (() => {
     const flagged = renderBody(rows, { now: fixture.now, repos: Object.keys(fixture.repos).sort(), unassigned: unassignedMailboxes(fixture, rows) });
     return [flagged.includes('⚠️ 3 mailbox PR(s) on no seat row'), flagged.includes('objectstack#25395 (os-sales: legacy per-login, names no seat)'), flagged.includes('objectstack#25396 (domain:spec#5 · os-tesla: no seat post or epic parent carries this seat)'), body.includes('on no seat row')];
