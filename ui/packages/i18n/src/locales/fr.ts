@@ -4602,6 +4602,7 @@ const fr = {
       draftedByMcp: 'Inclut des modifications rédigées par un client MCP',
       detailChangedKeys: 'Également modifié :',
       detailNewKeys: 'Inclut :',
+      detailNewItem: 'La publication ajoute cet élément.',
       generatedGroup: 'Généré par la plateforme ({{n}})',
       confirmNote: 'La publication libère ensemble les {{count}} brouillons en attente de ce paquet : tous sont mis en ligne, ou aucun.',
       confirmNote_one: 'La publication libère {{count}} brouillon en attente de ce paquet : il est mis en ligne, ou rien ne change.',
@@ -4666,6 +4667,10 @@ const fr = {
         email_template_one: '{{count}} modèle d’e-mail',
         email_template_many: '{{count}} de modèles d’e-mail',
         email_template_other: '{{count}} modèles d’e-mail',
+        object_extension: '{{count}} extensions d’objet',
+        object_extension_one: '{{count}} extension d’objet',
+        object_extension_many: '{{count}} d’extensions d’objet',
+        object_extension_other: '{{count}} extensions d’objet',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.
