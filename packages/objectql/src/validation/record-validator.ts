@@ -9,29 +9,36 @@
  * we walk the field map directly, which is both faster and lets us
  * produce per-field error envelopes shaped for REST consumption.
  *
- * Rules applied (in order, stop at first error per field):
+ * Rules applied (in order, stop at first error per field), in the order
+ * `validateOne` runs them:
  *
- *  - operator object  a value carrying declared filter operators (`{ $in: […] }`)
- *                   is refused on every field whose declared value is a SCALAR
- *                   — a `where` clause pasted into the SET half of a write
- *                   (#5922).
  *  - `required`     ADR-0113 write contract: on INSERT a missing/null/empty
  *                   value is rejected; on UPDATE a SUPPLIED missing value is
  *                   rejected (a PATCH may not null out a required field) while
  *                   an omitted field never 400s — legacy null rows rest. On a
  *                   multi-value field `[]` is an empty value (#9476 — the
- *                   #9447 ruling: required means non-empty array).
- *  - `maxLength` / `minLength`            (text/textarea/email/url/phone/password)
- *  - `valueDomain`  a declared standard domain's membership, judged by the
+ *                   #9447 ruling: required means non-empty array). A missing
+ *                   value that is not required ends the walk here.
+ *  - operator object  a value carrying declared filter operators (`{ $in: […] }`)
+ *                   is refused on every field whose declared value is a SCALAR
+ *                   — a `where` clause pasted into the SET half of a write
+ *                   (#5922).
+ *  - string types   (`BOUNDED_STRING_FIELD_TYPES`) a plain object or an array
+ *                   is `invalid_type`, never stringified (#29133); a number or
+ *                   a boolean is judged, and stored, as its string reading
+ *                   (#29241). Then, on that string:
+ *    - `maxLength` / `minLength`
+ *    - `valueDomain`  a declared standard domain's membership, judged by the
  *                   spec's shared `isValueDomainMember` — the WRITTEN value
  *                   only (#14168, maintainer ruling 2026-09-02 option A)
+ *    - format       email / url / phone   (lightweight RFC-aware regex)
  *  - number types   an array, boolean or object is `invalid_number`, never
  *                   coerced (#20309); a number must be finite, and a string
  *                   must be one the spec's numeric grammar reads
- *                   (`parseNumericString`) — stored as that number
- *  - `min` / `max`  (number/currency/percent/rating/slider/progress — `progress`
+ *                   (`parseNumericString`) — stored as that number. Then:
+ *    - `min` / `max`  (number/currency/percent/rating/slider/progress — `progress`
  *                   since #20386; it takes neither `scale` nor `precision`)
- *  - `scale`        more decimal places than the field's STORED allowance →
+ *    - `scale`      more decimal places than the field's STORED allowance →
  *                   `max_scale` (#7501; rejection, NEVER rounding —
  *                   maintainer ruling 2026-08-11), on `number` / `percent` /
  *                   `rating` / `slider` — ⛔ NOT `currency`, from which the
@@ -43,7 +50,7 @@
  *                   and the stored fraction carries the same quantity two
  *                   places further right (ruling batch #161 item 3 letter B,
  *                   2026-09-18).
- *  - `precision`    more digits in total than the field's declared count →
+ *    - `precision`  more digits in total than the field's declared count →
  *                   `max_precision` (#19992; rejection, never rounding), on
  *                   `number` / `currency` / `percent` / `rating` / `slider`.
  *                   The DECIMAL(p, s) reading: the value's digits counted at
@@ -51,12 +58,6 @@
  *                   value's own, when it applies none), so `precision: 5,
  *                   scale: 2` refuses `1234.5`. A fraction-stored `percent` is
  *                   always counted two places further right. No column change.
- *  - format         email / url / phone   (lightweight RFC-aware regex)
- *  - select / multiselect: value must appear in `options`, or be one the write
- *                   names for the field in `keptOptionValues` (an import's kept
- *                   cell, #22183); a single value that is a plain object or an
- *                   array, or an array element that is one, is `invalid_type`
- *                   whether or not `options` are declared (#29244)
  *  - boolean / toggle: must coerce to boolean
  *  - date / datetime: must be ISO-parsable, naming a year from 0001 to 9999
  *                   for a `date` and from 1000 to 9999 for a `datetime` (#20280);
@@ -68,6 +69,22 @@
  *  - time:          a zone-less wall clock `HH:MM[:SS[.f]]`, or an ISO instant
  *                   with a four-digit UTC year (#20671); a `Z` / offset suffix
  *                   on a time of day is refused with its own sentence
+ *  - select / radio (single value): one option code. Any object (a plain
+ *                   object, an array, a `Date`, a `Map`, a class instance) is
+ *                   `invalid_type`, whether or not `options` are declared
+ *                   (#29244, #29562); a number or a boolean is judged, and
+ *                   stored, as its string reading (#29562). Then the value must
+ *                   appear in `options`, or be one the write names for the
+ *                   field in `keptOptionValues` (an import's kept cell, #22183).
+ *  - multi-value fields: the value must be an array. On an option type
+ *                   (`multiple: true` select / radio, multiselect, checkboxes,
+ *                   tags) each element is one option code, judged as the
+ *                   single value is: an object element is `invalid_type`, a
+ *                   number or boolean element is judged and stored as its
+ *                   string, and each element must appear in `options`.
+ *  - value shape    references, media and structured JSON parse against the
+ *                   spec's `valueSchemaFor` (ADR-0104 D1), under the
+ *                   deployment's posture (see the arm).
  *
  * System-injected fields (`id`, `created_at`, `created_by`,
  * `updated_at`, `updated_by`, and provenance-flagged `system`/`readonly`
@@ -95,6 +112,8 @@ import {
   ALL_OPERATORS,
   RETIRED_FILTER_OPERATORS,
   BOUNDED_STRING_FIELD_TYPES,
+  SINGLE_OPTION_TYPES,
+  MULTI_OPTION_TYPES,
   VALUE_DOMAIN_FIELD_TYPES,
   REFERENCE_VALUE_TYPES,
   FILE_REFERENCE_TYPES,
@@ -679,8 +698,8 @@ export function normalizeMultiValueFields(
  * the declared type at all", with the same wire code and the same sentence a
  * non-readonly field gets: a `date` / `datetime` / `time` the platform reads,
  * a number for a number-typed field, a boolean, an array for a multi-value
- * field, no plain object or array on a string-typed field or as a select's
- * value or option element, no filter-operator object, and the ADR-0104 reference / media / structured-JSON shape under
+ * field, no plain object or array on a string-typed field, no object of any
+ * kind as a select's value or option element, no filter-operator object, and the ADR-0104 reference / media / structured-JSON shape under
  * the object's own posture (warn-first until the deployment's evidence says
  * otherwise). It is never REQUIRED.
  *
@@ -866,6 +885,22 @@ function isPlainObjectValue(value: unknown): boolean {
 }
 
 /**
+ * [#29562] Any object: a plain object, an array, a `Date`, a `Map`, a class
+ * instance. The option arms' shape test. An option code is a string, and no
+ * object has a string reading a caller meant as one (`String(new Date())` is
+ * not a code), so the option arms refuse every object rather than only the
+ * plain ones {@link isPlainObjectValue} names.
+ */
+function isObjectValue(value: unknown): value is object {
+  return typeof value === 'object' && value !== null;
+}
+
+/** [#29562] The received-shape word an option arm's refusal names. */
+function receivedObjectShape(value: object): string {
+  return Array.isArray(value) ? 'an array' : 'an object';
+}
+
+/**
  * [#20309] A STRING on a number-typed field that the platform's numeric grammar
  * reads is written as the NUMBER it denotes — so what the record validator's
  * number arm judges is what the driver stores.
@@ -936,7 +971,27 @@ function isPlainObjectValue(value: unknown): boolean {
  * ⛔ Not touched: a string (judged and written as itself), `null` and a missing
  * key, a plain object or an array (the arm refuses them, #29133), every other
  * non-scalar, and every field outside the set — `json` and the structured
- * types, the number and boolean fields, select and the reference types.
+ * types, the number and boolean fields and the reference types. The option
+ * types have their own half, below.
+ *
+ * ## [#29562] The option arms' half: a number or a boolean on an option field
+ *
+ * The same split on the option family (`SINGLE_OPTION_TYPES` select / radio,
+ * `MULTI_OPTION_TYPES` multiselect / checkboxes / tags, and a `multiple: true`
+ * select / radio). The spec's stored value is an option code, a string, or an
+ * array of them (`valueSchemaFor`), and the record validator's option arms judge
+ * membership by `String(value)` (per element on a multi-value field). The write
+ * carried the raw scalar, so `3` on a select was stored as the number `3` on
+ * driver-memory and as the TEXT `"3.0"` on SQLite, and `[3]` on a multiselect
+ * as `[3]` on both, beside rows holding the code `"3"`. This writes the string
+ * the arm judged: `3` as `"3"`, `true` as `"true"`, and each number or boolean
+ * element of a multi-value option field's array the same way (a lone scalar
+ * there is written as its string, and the engine then wraps it). A single write
+ * is admitted or refused exactly as before; a `unique` option field's key now
+ * compares the string, so `3` after `"3"` collides. ⛔ Not touched: a string,
+ * `null`, an object (the arm refuses any object, #29244 / #29562), an array on a
+ * single-value field (refused) and every element that is not a number or a
+ * boolean.
  *
  * Same contract as {@link normalizeBlankTypedValues}: one record or an array of
  * them, pure — the same reference comes back when nothing changed, else a
@@ -964,7 +1019,8 @@ function normalizeNumericStringRow(fields: Record<string, FieldDef>, row: unknow
   let out: Record<string, unknown> | undefined;
   for (const [name, value] of Object.entries(row)) {
     const isString = typeof value === 'string';
-    if (!isString && !isStringReadScalar(value)) continue;
+    const isArray = Array.isArray(value);
+    if (!isString && !isArray && !isStringReadScalar(value)) continue;
     // Own-property: a field name may be `constructor` / `valueOf`.
     const def = Object.prototype.hasOwnProperty.call(fields, name) ? fields[name] : undefined;
     if (!def || !isInReadonlyScope(name, def, 'include')) continue;
@@ -973,12 +1029,46 @@ function normalizeNumericStringRow(fields: Record<string, FieldDef>, row: unknow
       const n = parseNumericString(value);
       if (n === undefined) continue;
       (out ??= { ...row })[name] = n;
-    } else if (BOUNDED_STRING_FIELD_TYPES.has(def.type)) {
-      // [#29241] The string arm's reading of a number or a boolean.
+    } else if (isArray) {
+      // [#29562] A multi-value option field's elements, each read as the
+      // single value is. An array on any other field is not this door's: a
+      // single select refuses it, and a reference or JSON array is its own.
+      if (!isOptionType(def.type) || !isMultiValueField(def)) continue;
+      const elements = optionElementsAsStrings(value as unknown[]);
+      if (elements !== value) (out ??= { ...row })[name] = elements;
+    } else if (BOUNDED_STRING_FIELD_TYPES.has(def.type) || isOptionType(def.type)) {
+      // [#29241] The string arm's reading of a number or a boolean, and
+      // [#29562] the option arms' reading of one (a lone scalar on a
+      // multi-value option field too: the engine wraps the string it gets).
       (out ??= { ...row })[name] = String(value);
     }
   }
   return out ?? row;
+}
+
+/**
+ * [#29562] An option-family type: a single-value `select` / `radio`
+ * (`SINGLE_OPTION_TYPES`) or a multi-option `multiselect` / `checkboxes` /
+ * `tags` (`MULTI_OPTION_TYPES`), the spec's two sets. Its stored value is an
+ * option code, a string, or an array of them (`valueSchemaFor`).
+ */
+function isOptionType(type: string): boolean {
+  return SINGLE_OPTION_TYPES.has(type) || MULTI_OPTION_TYPES.has(type);
+}
+
+/**
+ * [#29562] A multi-value option field's array with each number or boolean
+ * element written as its string reading — the same `String(value)` the option
+ * arm judges membership by. Every other element (a string, `null`, an object
+ * the arm refuses) is left as sent. The same array comes back when nothing
+ * changed, else a copy.
+ */
+function optionElementsAsStrings(value: readonly unknown[]): readonly unknown[] {
+  let out: unknown[] | undefined;
+  for (let i = 0; i < value.length; i++) {
+    if (isStringReadScalar(value[i])) (out ??= value.slice())[i] = String(value[i]);
+  }
+  return out ?? value;
 }
 
 /**
@@ -1667,10 +1757,17 @@ function validateOne(
     // Same posture and sentence as the string arm's #29133 rule. A SHAPE test,
     // so it runs ahead of `shapeOnly` and of option membership; a filter
     // operator object was already refused above, with its own sentence.
-    if (isPlainObjectValue(value) || Array.isArray(value)) {
+    //
+    // [#29562] Every object, not only a plain one: a `Date`, a `Map` or a class
+    // instance fell through to membership, so a free select stored it as sent
+    // (SQLite as its epoch or JSON text). It is never stringified. A number or
+    // a boolean is judged by its string reading below, and
+    // `normalizeNumericStringValues` has already written that string into the
+    // payload at the door, so the driver stores what was judged.
+    if (isObjectValue(value)) {
       return fail(
         'invalid_type',
-        { type: t, detail: `expected one option value, received ${Array.isArray(value) ? 'an array' : 'an object'}` },
+        { type: t, detail: `expected one option value, received ${receivedObjectShape(value)}` },
         'invalid_value_shape',
       );
     }
@@ -1720,12 +1817,14 @@ function validateOne(
       // no `options` this branch admitted any array, and with `options` a
       // nested `['a']` passed membership as `String(['a'])`. A shape test, so
       // ahead of `shapeOnly`; an array of scalars is judged as before.
-      const nested = value.find((v) => isPlainObjectValue(v) || Array.isArray(v));
+      // [#29562] Every object element, as for a single value: a `Date` element
+      // was stored as its ISO text and a `Map` as `{}`. A number or boolean
+      // element is judged by its string reading, and the door wrote that string.
+      const nested = value.find(isObjectValue);
       if (nested !== undefined) {
-        const received = Array.isArray(nested) ? 'an array' : 'an object';
         return fail(
           'invalid_type',
-          { type: t, detail: `expected an array of option values, received an element that is ${received}` },
+          { type: t, detail: `expected an array of option values, received an element that is ${receivedObjectShape(nested)}` },
           'invalid_value_shape',
         );
       }

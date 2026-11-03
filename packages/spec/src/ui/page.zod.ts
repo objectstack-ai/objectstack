@@ -2072,13 +2072,13 @@ export const PageSchema = lazySchema(() => strictObject({
    * bound to an object ({@link checkPageDefaultPlacement}). Entries are app
    * names (`AppSchema.name`), non-empty and unique.
    *
-   * Declared ahead of its renderer (ADR-0049): the console's page assignment
-   * reads the route's app in the ui follow-up; until it does, the console
-   * opens the default record page in every app, as before the key existed.
+   * Renderer: the console's page assignment (`usePageAssignment` in
+   * `@object-ui/react`, and the record route's object scope, which picks the
+   * same page) resolves the route's app segment to its app and reads that
+   * app's NAME here, never the segment itself.
    */
-  // Renderer half: the console's usePageAssignment (ui lane follow-up of #28979).
   apps: z.array(SnakeCaseIdentifierSchema).min(1).superRefine(checkPageAppsUnique).optional()
-    .describe("[PLANNED — not yet rendered] The apps whose routes open this record page for its `object`: inside an app named here, the object's record view (`/apps/<app>/<object>/record/<id>`) opens this page; everywhere else, Setup included, the object's one `isDefault` record page still opens, so the default and an app's page coexist. App names, non-empty and unique. At most one record page per object per app: a second page naming the same app for the same object is refused (by defineStack / os validate, at package registration and at metadata save), naming both pages. Refused on any page that is not a record page bound to an object. Until the console reads it, every app opens the default record page."),
+    .describe("The apps whose routes open this record page for its `object`: inside an app named here, the object's record view (`/apps/<app>/<object>/record/<id>`) opens this page; everywhere else, Setup included, the object's one `isDefault` record page still opens, so the default and an app's page coexist. App names, non-empty and unique. At most one record page per object per app: a second page naming the same app for the same object is refused (by defineStack / os validate, at package registration and at metadata save), naming both pages. Refused on any page that is not a record page bound to an object."),
   // `assignedProfiles` REMOVED (ADR-0090 D2 / ADR-0049) — it named the concept
   // D2 deleted and nothing anywhere enforced it, so a page that "assigned
   // profiles" was open to everyone who could reach it. Page audience is the
