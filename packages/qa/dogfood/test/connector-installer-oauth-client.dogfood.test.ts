@@ -11,11 +11,15 @@
 //  - ⛔ REFUSED: a begin with no client, and a begin body carrying a key other
 //    than `clientId` / `clientSecret`, answer `400 VALIDATION_ERROR` and store
 //    nothing; no refusal repeats a value the caller sent.
+//  - SERVED: the connection's read answers `redirectUri`, the URI to register
+//    with the vendor before any client exists, derived from the deployment's
+//    fixed origin; a connect then names exactly that URI.
 //  - CONNECTED: a begin with the administrator's client sends the browser to
 //    the vendor as that client; the callback exchanges the code as it (its
 //    secret in HTTP Basic); the connection's read shows which client is set,
 //    never its secret; the stored row keeps the id in plain text and the
-//    secret only behind the masked column; revoke removes it.
+//    secret only behind the masked column; a reconnect naming no client
+//    reuses the kept one; revoke removes it.
 //
 // Every credential below is an obviously-fake placeholder, and every
 // assertion on the secret is its absence from what a door served.
@@ -131,7 +135,12 @@ describe("connector connection door: an `oauth2` instance that takes the install
     expect(JSON.stringify(entry)).not.toContain('clientId');
     const read = await stack.apiAs(admin, 'GET', door);
     expect(read.status, await read.clone().text()).toBe(200);
-    expect(dataOf(await read.json())).toMatchObject({ connector: NAME, status: 'not_connected' });
+    const state = dataOf(await read.json());
+    expect(state).toMatchObject({ connector: NAME, status: 'not_connected' });
+    // The URI an administrator registers with the vendor, answered before any
+    // client exists: the deployment's origin plus the callback path.
+    const origin = String(process.env.OS_AUTH_URL || process.env.OS_BASE_URL).trim().replace(/\/+$/, '');
+    expect(state.redirectUri).toBe(`${origin}/api/v1/automation/connectors/oauth/callback`);
   });
 
   it('⛔ a begin with no client is refused 400 VALIDATION_ERROR, naming the vendor registration step; nothing is stored', async () => {
@@ -164,6 +173,9 @@ describe("connector connection door: an `oauth2` instance that takes the install
     const authorizationUrl = new URL(dataOf(JSON.parse(beginText)).authorizationUrl);
     expect(authorizationUrl.origin + authorizationUrl.pathname).toBe(`${idpUrl}/authorize`);
     expect(authorizationUrl.searchParams.get('client_id')).toBe(INSTALLER_ID);
+    // The connect names the very redirect URI the read showed.
+    const shown = dataOf(await (await stack.apiAs(admin, 'GET', door)).json()).redirectUri;
+    expect(authorizationUrl.searchParams.get('redirect_uri')).toBe(shown);
     const state = authorizationUrl.searchParams.get('state');
     expect(state).toBeTruthy();
 
@@ -192,6 +204,14 @@ describe("connector connection door: an `oauth2` instance that takes the install
     const [row] = await stored();
     expect(row).toMatchObject({ connector_name: NAME, client_id: INSTALLER_ID });
     expect(JSON.stringify(row)).not.toContain(INSTALLER_SECRET);
+
+    // A reconnect naming no client reuses the kept one: the Console never
+    // reads the secret back, so it could never resend it.
+    const reconnect = await stack.apiAs(admin, 'POST', door);
+    const reconnectText = await reconnect.text();
+    expect(reconnect.status, reconnectText.slice(0, 400)).toBe(200);
+    expect(reconnectText).not.toContain(INSTALLER_SECRET);
+    expect(new URL(dataOf(JSON.parse(reconnectText)).authorizationUrl).searchParams.get('client_id')).toBe(INSTALLER_ID);
 
     const revoked = await stack.apiAs(admin, 'DELETE', door);
     expect(revoked.status, await revoked.clone().text()).toBe(200);
