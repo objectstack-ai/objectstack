@@ -100,6 +100,11 @@ function buildFormPreviewSchema(
     formType,
     sections,
     fields: Array.isArray(body.fields) ? body.fields : undefined,
+    // objectstack#29676 — the view's `layout` (`vertical` | `horizontal`, the
+    // label above or beside its control). `ObjectForm` and every layout under
+    // it read `schema.layout`; this canvas dropped it, so a horizontal view
+    // drew stacked in Studio Design and Run while the console drew it beside.
+    layout: body.layout,
     showSubmit: false,
     showCancel: false,
   };
