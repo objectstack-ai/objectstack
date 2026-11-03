@@ -14,6 +14,6 @@ Metadata-protocol: none
 - **Now.** A preference belongs to the user it was saved for. An update that sends a different `user_id` is refused `403 PERMISSION_DENIED`, for every caller but the system: a member, an organization administrator and a platform administrator alike. The refusal names the row and the `user_id` column. The row is unchanged.
 - **Unchanged.** An update that echoes the stored `user_id`, or does not send it, saves as before. The console's preference writer updates `value` only and creates rows in the caller's own name, so it is not affected. A system write (the platform's own writers) is not judged.
 - **Shared rule.** `sys_personal_view` and `sys_user_preference` now hold this with one check, `owner-fixed-rule.ts`. The personal view's behaviour and message are unchanged.
-- **Who sees it.** A client that moved a preference row to another user through `PATCH /api/v1/data/sys_user_preference/:id`.
+- **Who sees it.** A client that changes the `user_id` of a saved preference.
 
 **The remedy.** Save a new preference in the other user's name, as that user, instead of moving one.

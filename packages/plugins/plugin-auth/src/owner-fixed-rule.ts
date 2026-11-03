@@ -2,21 +2,17 @@
 
 /**
  * **The owner of a per-user row is fixed when the row is saved.** The one
- * spelling of that rule, shared by every per-user object whose owner column is
- * `user_id` rather than the engine-stamped `created_by`: `sys_personal_view`
+ * spelling of that rule, shared by `sys_personal_view`
  * (`personal-view-hooks.ts`) and `sys_user_preference`
- * (`user-preference-hooks.ts`).
+ * (`user-preference-hooks.ts`), whose owner column is `user_id`.
  *
  * An update that sends an owner other than the stored one is refused
  * `403 PERMISSION_DENIED`, for every caller but the system: a member, an
  * organization administrator and a platform administrator alike. An echo of
  * the stored owner is no change, and saves.
  *
- * The row scope alone does not hold this: for an organization member,
- * `member_default`'s `'*'` update floor (`created_by == current_user.id`) is a
- * held update policy for every object, beside the object's own row scope, and
- * the post-image of a re-parent still carries the member's own `created_by`.
- * A save rule is the one place that judges the CHANGE of owner.
+ * A save rule is the one place that judges the CHANGE of owner; why the row
+ * scope alone does not is row 26c of `content/docs/permissions/system-context.mdx`.
  *
  * The refusal names the row and the owner column, and never the id the write
  * sent.
