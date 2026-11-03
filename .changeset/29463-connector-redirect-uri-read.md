@@ -4,7 +4,7 @@
 
 feat(automation): the connector connection read answers the deployment's OAuth `redirectUri`, and a client-less reconnect of an installer-client instance reuses the kept client
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 Two answers an administrator connecting an `oauth2` `authorization_code` instance with `clientSource: 'installer'` needs from the connector connection door (`/api/v1/automation/connectors/NAME/connection`):
