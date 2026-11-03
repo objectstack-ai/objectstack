@@ -236,8 +236,8 @@ export const INTERACTIVE_REVOKE_REASON: Readonly<Record<string, string>> = {
   '/reset-password': 'password_reset',
   '/phone-number/reset-password': 'password_reset',
   // The vendor email-OTP plugin's own reset door. The platform does not mount
-  // that plugin today; the entry is keyed on the plugin's declared path, so a
-  // deployment that mounts it records the same trail.
+  // that plugin today; the entry is keyed on the plugin's declared path, so
+  // the door records the same trail the day the platform mounts it.
   '/email-otp/reset-password': 'password_reset',
 };
 

@@ -25,8 +25,8 @@
  * reset token or code inherits the rule without a door of its own.
  *
  * A session a password reset ends leaves a revocation trail. Every reset door
- * — the two above, and the email-OTP door on its own path — is in the
- * interactive-revoke ledger (`session-tombstone.ts`,
+ * — the two above, and the email-OTP door, unmounted, on its own path — is in
+ * the interactive-revoke ledger (`session-tombstone.ts`,
  * `INTERACTIVE_REVOKE_REASON`) with the value `password_reset`, and is not an
  * erasure path. better-auth's bulk delete reaches the adapter's per-row
  * reconcile, so each session row is stamped in place rather than deleted —
