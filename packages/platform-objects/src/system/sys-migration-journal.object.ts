@@ -80,7 +80,6 @@ export const SysMigrationJournal = ObjectSchema.create({
   description:
     'Append-only trace of migration runs: which chunks committed, which were compensated, and where a killed run stopped.',
   nameField: 'run_id', // [ADR-0079] canonical primary-title pointer
-  titleFormat: '{run_id} #{seq} {kind}',
   highlightFields: ['run_id', 'seq', 'kind', 'chunk_index', 'created_at'],
   listViews: {
     recent: {

@@ -21,8 +21,7 @@
         "$TURBO_ROOT$/ui/scripts/build-plugin-stylesheet.mjs",
         "$TURBO_ROOT$/ui/scripts/check-dist-completeness.mjs",
         "$TURBO_ROOT$/ui/scripts/invoked-as.mjs",
-        "$TURBO_ROOT$/ui/scripts/vitest-invocation-guard.mjs",
-        "$TURBO_ROOT$/ui/packages/mobile/src/serviceWorkerSource.ts"
+        "$TURBO_ROOT$/ui/scripts/vitest-invocation-guard.mjs"
       ]
     },
     "test": {
@@ -71,8 +70,7 @@
         "$TURBO_ROOT$/ui/packages/cli/src/utils/issue-path.ts",
         "$TURBO_ROOT$/ui/packages/cli/src/utils/union-arm-diagnostics.ts",
         "$TURBO_ROOT$/ui/scripts/check-doc-component-types.mjs",
-        "$TURBO_ROOT$/ui/scripts/markdown-fence-scan.mjs",
-        "$TURBO_ROOT$/ui/packages/mobile/src/serviceWorkerSource.ts"
+        "$TURBO_ROOT$/ui/scripts/markdown-fence-scan.mjs"
       ]
     },
     "lint": {
@@ -611,6 +609,7 @@
         "$TURBO_ROOT$/packages/services/service-storage/src/storage-route-ledger.ts",
         "$TURBO_ROOT$/packages/services/service-i18n/src/i18n-route-ledger.ts",
         "$TURBO_ROOT$/packages/services/service-settings/src/settings-route-ledger.ts",
+        "$TURBO_ROOT$/packages/plugins/plugin-auth/src/personal-view-route-ledger.ts",
         "$TURBO_ROOT$/packages/spec/src/automation/**",
         "$TURBO_ROOT$/packages/spec/src/data/**",
         "$TURBO_ROOT$/examples/app-showcase/**",
@@ -679,7 +678,8 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
-        "$TURBO_ROOT$/scripts/check-durability-degradation-log-level.mjs"
+        "$TURBO_ROOT$/scripts/check-durability-degradation-log-level.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs"
       ]
     },
     "@objectstack/downstream-contract#test": {

@@ -43,6 +43,13 @@ declared a VERSION rollback against the live COMMIT-rollback path;
 `RollbackToPackageCommitResponseSchema` below is the true contract,
 authored after that retirement per the ruling's sequencing (3A).
 
+Two declarations are not transcriptions but DECLARED AHEAD OF THEIR
+PRODUCER (ADR-0049), each describe opening `[PLANNED — not yet served]`
+until the change that serves it drops the marker:
+`PackageExportManifestSchema.withheldMaps` (#28640 ruling ③A, served by
+#29342) and `PackageExportBundleSchema` (`GET /packages/export`, #28914).
+Their own docblocks say what is not served yet.
+
 <Callout type="info">
 **Source:** `packages/spec/src/api/package-lifecycle.zod.ts`
 </Callout>
@@ -50,8 +57,8 @@ authored after that retirement per the ruling's sequencing (3A).
 ## TypeScript Usage
 
 ```typescript
-import { DiscardPackageDraftsResponseSchema, DuplicatePackageResponseSchema, EnsureCustomizationPackageRequestSchema, EnsureCustomizationPackageResponseSchema, GetPackageCustomizationsRequestSchema, GetPackageCustomizationsResponseSchema, ImportUnmanagedPackageRequestSchema, ImportUnmanagedPackageResponseSchema, ListPackageCommitsResponseSchema, PackageExportManifestSchema, PackagePublishResultSchema, ReassignOrphanedMetadataResponseSchema, RevertPackageCommitResponseSchema, RollbackToPackageCommitResponseSchema } from '@objectstack/spec/api';
-import type { DiscardPackageDraftsResponse, DuplicatePackageResponse, EnsureCustomizationPackageRequest, EnsureCustomizationPackageResponse, GetPackageCustomizationsRequest, GetPackageCustomizationsResponse, ImportUnmanagedPackageRequest, ImportUnmanagedPackageResponse, ListPackageCommitsResponse, PackageExportManifest, PackagePublishResult, ReassignOrphanedMetadataResponse, RevertPackageCommitResponse, RollbackToPackageCommitResponse } from '@objectstack/spec/api';
+import { DiscardPackageDraftsResponseSchema, DuplicatePackageResponseSchema, EnsureCustomizationPackageRequestSchema, EnsureCustomizationPackageResponseSchema, GetPackageCustomizationsRequestSchema, GetPackageCustomizationsResponseSchema, ImportUnmanagedPackageRequestSchema, ImportUnmanagedPackageResponseSchema, ListPackageCommitsResponseSchema, PackageExportBundleSchema, PackageExportManifestSchema, PackagePublishResultSchema, ReassignOrphanedMetadataResponseSchema, RevertPackageCommitResponseSchema, RollbackToPackageCommitResponseSchema } from '@objectstack/spec/api';
+import type { DiscardPackageDraftsResponse, DuplicatePackageResponse, EnsureCustomizationPackageRequest, EnsureCustomizationPackageResponse, GetPackageCustomizationsRequest, GetPackageCustomizationsResponse, ImportUnmanagedPackageRequest, ImportUnmanagedPackageResponse, ListPackageCommitsResponse, PackageExportBundle, PackageExportManifest, PackagePublishResult, ReassignOrphanedMetadataResponse, RevertPackageCommitResponse, RollbackToPackageCommitResponse } from '@objectstack/spec/api';
 
 // Validate data
 const result = DiscardPackageDraftsResponseSchema.parse(data);
@@ -163,7 +170,7 @@ Per-package customization read request: the base package id, no query parameters
 
 ## GetPackageCustomizationsResponse
 
-Per-package customization read: overrides, extensions and switched-off items of one installed base, and the fields, flows and (not yet served) navigation items other packages contribute to it.
+Per-package customization read: overrides, extensions and switched-off items of one installed base, and the fields, flows and navigation items other packages contribute to it.
 
 ### Properties
 
@@ -173,7 +180,7 @@ Per-package customization read: overrides, extensions and switched-off items of 
 | **overrides** | `{ type: string; name: string; member?: string; basedOn?: string; … }[]` | ✅ | Every ACTIVE item of the base's paired `<base>.custom` package that declares `overrides.package` = the base and that the effective read serves over the base's item of the same name: the rows the served-override predicate admits (a declaration from any other package, and an undeclared pair item, are not listed), minus the stored rows every read declines (a shipped flow name). Ordered by type, name and member. |
 | **extensions** | `{ object: string; kind: Enum<'field' \| 'validation' \| 'index'>; name?: string; fields?: string[] }[]` | ✅ | Every field, validation rule and index the paired `<base>.custom` package declares in an object extension (`objectExtensions`) of an object the base owns, one entry per member, as the extension declares it. Ordered by object, kind and name. |
 | **switchedOff** | `{ type: string; name: string }[]` | ✅ | Every activation-ledger row (`sys_metadata_activation`) that records the base as its package and `active: false`: the base's items this deployment switched off. Ordered by type and name. |
-| **contributions** | `({ kind: Enum<'field' \| 'flow'>; object: string; name: string; packageId: string } \| { kind: 'nav'; app: string; group?: string; name: string; … })[]` | ✅ | Every field, flow and navigation item another installed package contributes to the base, one entry per item and contributing package: the fields of every object extension of an object the base owns, from any package but the base and its pair; every flow registered under such a package whose trigger object the base owns (a flow of a disabled package is not served, so not listed); and, declared ahead of its producer and not yet served, every navigation item such a package contributes to an app the base owns. The entry shape is per `kind`: `object` for `field` and `flow`, `app` and an optional `group` for `nav`. Ordered: the `field` and `flow` entries first, by object, kind, name and package; then the `nav` entries, by app, group (an entry with no group first), name and package. |
+| **contributions** | `({ kind: Enum<'field' \| 'flow'>; object: string; name: string; packageId: string } \| { kind: 'nav'; app: string; group?: string; name: string; … })[]` | ✅ | Every field, flow and navigation item another installed package contributes to the base, one entry per item and contributing package: the fields of every object extension of an object the base owns, from any package but the base and its pair; every flow registered under such a package whose trigger object the base owns (a flow of a disabled package is not served, so not listed); and every navigation item such a package contributes to an app the base owns (a disabled package's are not listed). The entry shape is per `kind`: `object` for `field` and `flow`, `app` and an optional `group` for `nav`. Ordered: the `field` and `flow` entries first, by object, kind, name and package; then the `nav` entries, by app, group (an entry with no group first), name and package. |
 | **counts** | `{ overrides: integer; extensions: integer; switchedOff: integer; contributions: integer }` | ✅ | Each list's length, derived from the lists in this same answer. |
 
 ### Nested Shape: `GetPackageCustomizationsResponse.overrides[number]`
@@ -215,7 +222,7 @@ A field or flow another package contributes to one of the base's objects.
 
 ### Nested Shape: `GetPackageCustomizationsResponse.contributions[number][option 2]`
 
-[PLANNED — not yet served] Declared ahead of its producer (ADR-0049): the read lists no `nav` entry yet. A navigation item another installed package contributes to an app the base owns, one entry per item of the contribution's `items` (a contributed group's children ride inside it and are not entries of their own), read from the same contribution registry the served app's navigation fold reads (ADR-0029 D7). An item that declares no `id` (a separator may omit it) has no `name` to give and is not an entry. A disabled package's contributions are not listed, as the fold drops them.
+A navigation item another installed package contributes to an app the base owns, one entry per item of the contribution's `items` (a contributed group's children ride inside it and are not entries of their own), read from the same contribution registry the served app's navigation fold reads (ADR-0029 D7). An item that declares no `id` (a separator may omit it) has no `name` to give and is not an entry. A disabled package's contributions are not listed, as the fold drops them.
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -308,6 +315,31 @@ A field or flow another package contributes to one of the base's objects.
 
 ---
 
+## PackageExportBundle
+
+[PLANNED — not yet served] Whole-deployment export: every installed package the deployment's own code does not register (registry `source` other than `code`), as installable packages in dependency order. Carries no credential value and no enabled state. Declared ahead of its producer (ADR-0049): no runtime serves `GET /packages/export` yet. The server half of the whole-deployment package export mounts it, together with a future CLI command that calls it; until then this is the contract that door must answer, not a read a client can make.
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **packages** | `({ id: string; name: string; version: string; namespace?: string; … } & Record<string, any>)[]` | ✅ | Every package whose registry row's `source` is not `code` (the marketplace and authored packages, a `.custom` pair among them), enabled or not, each once and each as `GET /packages/:id/export` answers it, dependencies first: an entry comes after every entry its package's `manifest.dependencies` names, so a `.custom` pair comes after its base. Install the entries in this order; never re-sort them. No entry carries an enabled state, so every entry installs enabled. Empty when every package of the deployment is registered by its own code. |
+
+### Nested Shape: `PackageExportBundle.packages[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | The exported package's id. |
+| **name** | `string` | ✅ | The exported package's machine name. |
+| **version** | `string` | ✅ | The exported package's version. |
+| **namespace** | `string` | optional | The namespace the package was installed with, as its registry row's manifest declares it; absent when the row declares none. An install of the export keeps it instead of deriving one from the id, so a `.custom` pair is reinstalled under its own namespace rather than `custom`. |
+| **dependencies** | `Record<string, string>` | optional | The packages this package depends on, each id mapped to its version range, as its registry row's manifest declares them; absent when the row declares none. An install of the export orders it after each of them (ADR-0141 D5), and a `.custom` pair keeps the edge to its base that admits its overrides (ADR-0146 D2). |
+| **label** | `string` | optional | Display label, when the package declares one. |
+| **withheldMaps** | `{ type: 'connector'; name: string; path: Enum<'providerConfig.headers' \| 'providerConfig.defaultHeaders' \| …> }[]` | optional | [PLANNED — not yet served] Declared ahead of its producer (ADR-0049): no export writes this list yet and no install door reads it yet. Every map the export withheld WHOLE because a served read never carries it: a connector's header and environment-variable maps. The item is written with that map absent, so once served an import reads this list to tell an incomplete map from one the package never had, and names each one for an operator to re-enter. Positions only: no header or variable name is listed. Absence says nothing about what was withheld when the exporter predates this key; from an exporter that writes it, absence means nothing was withheld. |
+
+
+---
+
 ## PackageExportManifest
 
 ### Properties
@@ -317,7 +349,18 @@ A field or flow another package contributes to one of the base's objects.
 | **id** | `string` | ✅ | The exported package's id. |
 | **name** | `string` | ✅ | The exported package's machine name. |
 | **version** | `string` | ✅ | The exported package's version. |
+| **namespace** | `string` | optional | The namespace the package was installed with, as its registry row's manifest declares it; absent when the row declares none. An install of the export keeps it instead of deriving one from the id, so a `.custom` pair is reinstalled under its own namespace rather than `custom`. |
+| **dependencies** | `Record<string, string>` | optional | The packages this package depends on, each id mapped to its version range, as its registry row's manifest declares them; absent when the row declares none. An install of the export orders it after each of them (ADR-0141 D5), and a `.custom` pair keeps the edge to its base that admits its overrides (ADR-0146 D2). |
 | **label** | `string` | optional | Display label, when the package declares one. |
+| **withheldMaps** | `{ type: 'connector'; name: string; path: Enum<'providerConfig.headers' \| 'providerConfig.defaultHeaders' \| …> }[]` | optional | [PLANNED — not yet served] Declared ahead of its producer (ADR-0049): no export writes this list yet and no install door reads it yet. Every map the export withheld WHOLE because a served read never carries it: a connector's header and environment-variable maps. The item is written with that map absent, so once served an import reads this list to tell an incomplete map from one the package never had, and names each one for an operator to re-enter. Positions only: no header or variable name is listed. Absence says nothing about what was withheld when the exporter predates this key; from an exporter that writes it, absence means nothing was withheld. |
+
+### Nested Shape: `PackageExportManifest.withheldMaps[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'connector'` | ✅ | Metadata type of the item whose map was withheld. |
+| **name** | `string` | ✅ | Name of the item whose map was withheld. |
+| **path** | `Enum<'providerConfig.headers' \| 'providerConfig.defaultHeaders' \| …>` | ✅ | Dot path of the withheld map inside the item. |
 
 
 ---

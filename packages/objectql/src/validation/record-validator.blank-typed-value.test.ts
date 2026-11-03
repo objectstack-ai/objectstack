@@ -26,9 +26,12 @@ import {
 import { normalizeBlankTypedValues, validateRecord, ValidationError } from './record-validator.js';
 
 const typed = [...NON_TEXT_STORED_VALUE_TYPES];
-// The string-stored controls: the whole string class, plus the other types
-// whose stored value is a string (`str_empty`'s side of the line).
-const stringStored = [...STRING_VALUE_TYPES, 'select', 'radio', 'lookup', 'master_detail', 'user', 'autonumber'];
+// The string-stored controls: the whole string class, plus a computed string
+// type (`str_empty`'s side of the line). The single-value option and reference
+// types store `''` as `null` since #29277, by their own arm
+// (`record-validator.single-value-blank.test.ts`); they are still not typed.
+const stringStored = [...STRING_VALUE_TYPES, 'autonumber'];
+const singleValueCode = ['select', 'radio', 'lookup', 'master_detail', 'user', 'tree'];
 
 function schemaOf(types: readonly string[]) {
   const fields: Record<string, { name: string; type: string; reference?: string; options?: unknown[] }> = {};
@@ -54,7 +57,7 @@ describe('normalizeBlankTypedValues (#20308)', () => {
     expect(typed.sort()).toEqual(
       ['boolean', 'currency', 'date', 'datetime', 'number', 'percent', 'progress', 'rating', 'slider', 'summary', 'time', 'toggle'],
     );
-    for (const t of stringStored) expect(NON_TEXT_STORED_VALUE_TYPES.has(t)).toBe(false);
+    for (const t of [...stringStored, ...singleValueCode]) expect(NON_TEXT_STORED_VALUE_TYPES.has(t), t).toBe(false);
   });
 
   it.each([[''], ['   '], ['\t\n']])('a blank %j on every non-string-typed column becomes null', (blank) => {

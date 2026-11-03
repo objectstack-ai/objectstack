@@ -344,6 +344,8 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.lookup.searchHostFields': '搜索本对象的字段…',
   'designer.field.lookup.pageSize': '选择器分页大小',
   'designer.field.lookup.allowCreate': '允许快速创建',
+  'designer.field.lookup.referenceNameVisible': '不可读时显示名称',
+  'designer.field.lookup.referenceNameVisible.help': '允许此记录的读者看到被引用记录的名称（纯文本，不带链接），即使其无权打开该记录。该记录的其他内容一律不显示；名称字段上的字段级规则仍然生效（此时名称显示为 Record # 加 id）。未设置：此类引用显示为「受限记录」。',
   'designer.field.relatedList.heading': '父记录上的关联列表',
   'designer.field.relatedList.shown': '显示',
   'designer.field.relatedList.hidden': '不显示',
@@ -2267,6 +2269,10 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.access.bannerTitle':
     '此矩阵仅列出本包声明的对象,「Save」只合并本包切片 —— 其他包贡献的授权原样保留。编辑保存为软件包草稿,点击顶栏「发布」后随整个包一起生效(与数据、界面一致)。',
   'engine.studio.access.banner': '仅本包对象 · 保存为草稿',
+  // objectstack#29674 — the note on an open set the base's pair adds: its matrix lists the base's objects too.
+  'engine.studio.access.bannerPair': '本包及 {package} 的对象 · 保存为草稿',
+  'engine.studio.access.bannerTitlePair':
+    '此权限集位于 {package} 的定制包中，因此矩阵除本包声明的对象外，也列出 {package} 的对象；「Save」只合并这一切片 —— 其他包贡献的授权原样保留。编辑保存为软件包草稿,点击顶栏「发布」后随整个包一起生效。',
   'engine.studio.access.bannerTitleReadOnly':
     '此矩阵仅列出本包声明的对象。本软件包为只读:其权限集可在此查看,但不能修改。',
   // ADR-0090 D5/D9 — 待确认的受众绑定建议(isDefault 权限集,管理员确认后生效,服务端绝不自动绑定)
@@ -2862,7 +2868,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.interfaces.create.descriptionInPair': '存为本部署对 {baseName} 定制的草稿，并在画布上打开。{baseName} 的导航保持安装时的样子。',
   'engine.studio.app.scaffoldNav': '将本包的对象添加为菜单项',
   'engine.studio.landing.title': '应用构建',
-  'engine.studio.landing.description': '在一个可写软件包里设计对象、表单、自动化与界面;编辑存为草稿,整包一次发布。源码与已安装的软件包为只读：可在此浏览，并用环境覆盖进行定制。',
+  'engine.studio.landing.description': '在一个可写软件包里设计对象、表单、自动化与界面;编辑存为草稿,整包一次发布。源码与已安装的软件包为只读：可在此浏览，并用「自定义」或「新建类似」修改其条目，修改保存在该软件包的 .custom 定制包中。',
   'engine.studio.landing.mineHeading': '我的软件包(可写)',
   'engine.studio.landing.noneWritable': '还没有可写软件包 — 新建一个开始。',
   'engine.studio.landing.dup': '复制',
@@ -2874,7 +2880,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.landing.dupCreated': '已复制为可写软件包「{name}」',
   'engine.studio.landing.installedHeading': '已安装(只读 · 可浏览)',
   // objectui#11808 — the routes a read-only package does have.
-  'engine.studio.landing.readonlyHint': '源码与已安装的软件包为只读，不能在此编辑或复制。对于接受环境覆盖的元数据类型，可用环境覆盖（overlay）进行定制。',
+  'engine.studio.landing.readonlyHint': '源码与已安装的软件包为只读，不能在此编辑或复制。要修改其中一个，请打开条目并选择「自定义」或「新建类似」：修改保存在该软件包的 .custom 定制包中，升级仍会到达已安装的软件包。',
   'engine.studio.landing.marketplace': '或从应用市场安装一个模板应用',
   'engine.studio.landing.customizations.customized': '已定制 {customized} 项',
   'engine.studio.landing.customizations.separator': '，',
@@ -3218,6 +3224,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.list.col.label': '标签',
   'engine.list.col.source': '来源',
   'engine.list.col.object': '对象',
+  // objectstack#29569 — an object_extension lists by the object it extends.
+  'engine.list.col.extend': '对象',
   'engine.list.col.type': '类型',
   'engine.list.col.description': '描述',
   'engine.list.col.sharedWith': '共享给',

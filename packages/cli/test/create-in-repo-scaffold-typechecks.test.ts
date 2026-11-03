@@ -144,9 +144,14 @@ describe('os create plugin --in-repo: the scaffold passes its own scripts', () =
 
 describe('os create plugin: the TypeScript each placement declares', () => {
   it('in-repo declares the workspace\'s TypeScript, the range of the tsc the cases above spawn', () => {
-    const own = JSON.parse(fs.readFileSync(path.join(PKG, 'package.json'), 'utf8')) as Manifest;
-    expect(manifestFor('in-repo').devDependencies.typescript).toBe(own.devDependencies.typescript);
-    expect(IN_REPO_TYPESCRIPT_RANGE).toBe(own.devDependencies.typescript);
+    // This package declares `typescript` under `dependencies`: the CLI runs the
+    // compiler at runtime, and `TSC` above resolves that same declaration.
+    const own = JSON.parse(fs.readFileSync(path.join(PKG, 'package.json'), 'utf8')) as {
+      dependencies: Record<string, string>;
+    };
+    expect(own.dependencies.typescript, 'packages/cli no longer declares typescript under dependencies').toBeTypeOf('string');
+    expect(manifestFor('in-repo').devDependencies.typescript).toBe(own.dependencies.typescript);
+    expect(IN_REPO_TYPESCRIPT_RANGE).toBe(own.dependencies.typescript);
   });
 
   it('in-repo\'s TypeScript floor accepts the base\'s ignoreDeprecations (TS5103)', () => {

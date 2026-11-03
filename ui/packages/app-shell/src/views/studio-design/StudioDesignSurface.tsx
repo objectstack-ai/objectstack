@@ -359,6 +359,7 @@ import {
   newField,
   toFieldNameLoose,
 } from '../metadata-admin/previews/object-fields-io.js';
+import { romanizeHan } from '../metadata-admin/romanizeHan.js';
 import type { FieldTypeId } from '../metadata-admin/previews/field-types.js';
 import {
   ExternalObjectNotice,
@@ -391,6 +392,7 @@ import {
   fetchListedPackageManifests,
   fetchPackages,
   listedCustomizationPairOf,
+  listedPackageEntry,
   listedPackageVersion,
   prefixObjectName,
   type EnsuredCustomizationPackage,
@@ -907,9 +909,17 @@ function PackageSwitcher({
   tab,
   beforeNavigate,
   app = null,
+  openEntry = null,
 }: {
   /** The package's app, drawn as the chip's icon tile (objectui#12459); `null` draws the neutral tile. */
   app?: AppMarkApp | null;
+  /**
+   * objectstack#29567 — the surface's own entry for the open package, which
+   * the trigger reads when this list does not carry it: a kernel package is
+   * left out of the list (it is not offered), yet when it is open the chip
+   * still names it and says it is read-only. The menu never reads it.
+   */
+  openEntry?: PkgEntry | null;
   /** The open package, or `null` in the package-less scope (objectui#11553). */
   packageId: string | null;
   tab: string;
@@ -985,7 +995,9 @@ function PackageSwitcher({
     };
   }, [packageId]);
 
-  const current = pkgs?.find((p) => p.id === packageId) ?? null;
+  const listedCurrent = pkgs?.find((p) => p.id === packageId) ?? null;
+  // Only once the list has answered, so the three trigger states stay its own.
+  const current = listedCurrent ?? (pkgs !== null && openEntry?.id === packageId ? openEntry : null);
   // objectstack#28572 (ADR-0146 D3) — a base's paired `<base>.custom` has no
   // row of its own: it is folded under its base, which names it.
   const folded = React.useMemo(() => foldCustomizationPairs(pkgs ?? []), [pkgs]);
@@ -1493,10 +1505,10 @@ function PackageSwitcher({
             </div>
 
             <div className="mt-1 space-y-0.5 border-t pt-1.5">
-              {current && (
+              {listedCurrent && (
                 <button
                   type="button"
-                  onClick={() => void openManage(current.id)}
+                  onClick={() => void openManage(listedCurrent.id)}
                   disabled={manageBusy}
                   className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
                 >
@@ -1632,26 +1644,43 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     listedIds.catch(() => {});
     const listedManifests = fetchListedPackageManifests();
     listedManifests.catch(() => {});
+    const settle = (entry: PkgEntry | null) => {
+      setPkgWritable(entry?.writable ?? null);
+      setPkgEntry(entry);
+      if (!entry || entry.writable) return;
+      listedManifests.then(
+        (manifests) => {
+          if (cancelled) return;
+          setBaseFacts({
+            for: packageId,
+            basedOn: listedPackageVersion(manifests, packageId),
+            listedPair: listedCustomizationPairOf(manifests, packageId),
+          });
+        },
+        () => {},
+      );
+    };
     fetchPackages()
       .then((list) => {
         if (cancelled) return;
         const entry = list.find((p) => p.id === packageId) ?? null;
-        setPkgWritable(entry?.writable ?? null);
-        setPkgEntry(entry);
-        if (entry && !entry.writable) {
-          listedManifests.then(
-            (manifests) => {
-              if (cancelled) return;
-              setBaseFacts({
-                for: packageId,
-                basedOn: listedPackageVersion(manifests, packageId),
-                listedPair: listedCustomizationPairOf(manifests, packageId),
-              });
-            },
-            () => {},
-          );
+        if (entry) {
+          settle(entry);
+          return;
         }
-        if (entry) return;
+        // objectstack#29567 — the switcher's entries leave the kernel packages
+        // out, but an open one is still judged: the listed row carries the
+        // server's verdict (read-only by scope), so the surface reads it
+        // read-only and offers Customize, as for a code-booted base.
+        // `pkgWritable` stays "still asking" until that answer lands.
+        listedManifests.then(
+          (manifests) => {
+            if (!cancelled) settle(listedPackageEntry(manifests, packageId));
+          },
+          () => {
+            if (!cancelled) settle(null);
+          },
+        );
         listedIds.then(
           (ids) => {
             if (!cancelled) setPkgMissing(!ids.has(packageId));
@@ -2484,7 +2513,13 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 <HomeIcon className="h-4 w-4" />
               </button>
               <div className="flex min-w-0">
-                <PackageSwitcher packageId={packageId} tab={tab} beforeNavigate={confirmLeavePillar} app={packageApp} />
+                <PackageSwitcher
+                  packageId={packageId}
+                  tab={tab}
+                  beforeNavigate={confirmLeavePillar}
+                  app={packageApp}
+                  openEntry={pkgEntry?.id === packageId ? pkgEntry : null}
+                />
               </div>
             </div>
             <nav className={STUDIO_HEADER_PILLAR_NAV} data-testid="studio-pillar-nav">
@@ -2823,6 +2858,9 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
           publishing={publishing}
           posture={changesPosture}
           renderEntryNote={renderPublishRefusal}
+          // ADR-0146 D3 — reviewing the pair's drafts, the sheet names the
+          // base they are saved for.
+          customizationOf={pairId !== null ? baseLabel : undefined}
         />
 
         <CreateItemDialog
@@ -7119,14 +7157,15 @@ function nextFieldName(existing: string[]): string {
 
 /**
  * The api name of a field added with `label` (objectui#12516): the name the
- * field inspector's Label derives from it (`toFieldNameLoose`), or, as the
+ * field inspector's Label derives from it (`toFieldNameLoose`, a Chinese label
+ * through its pinyin as the popover previewed it — `romanizeHan`), or, as the
  * inspector keeps the default when that derivation is empty (a label with no
  * Latin letters) or names another field, the next free `field_<N>`. The Add
  * field popover asks for the name in those two cases (objectui#13389), so the
  * `field_<N>` fallback is left for a caller that hands no name.
  */
 function addedFieldName(label: string, existing: string[]): string {
-  const derived = toFieldNameLoose(label);
+  const derived = toFieldNameLoose(romanizeHan(label));
   return derived && !existing.includes(derived) ? derived : nextFieldName(existing);
 }
 
@@ -7136,7 +7175,7 @@ function addedFieldName(label: string, existing: string[]): string {
  * free `field_<N>__c`.
  */
 function addedExtensionFieldName(label: string, existing: string[]): string {
-  const derived = extensionFieldName(toFieldNameLoose(label).replace(/_+$/, ''));
+  const derived = extensionFieldName(toFieldNameLoose(romanizeHan(label)).replace(/_+$/, ''));
   if (derived && !existing.includes(derived)) return derived;
   let i = existing.length + 1;
   let name = extensionFieldName(`field_${i}`);
@@ -9783,11 +9822,26 @@ async function readFlowDefinitions(client: MetadataClient, packageId: string | n
 async function readObjectLabels(client: MetadataClient, packageId: string | null, locale: string): Promise<Map<string, string>> {
   const labels = new Map<string, string>();
   try {
-    const objects = await client.list<Record<string, unknown>>('object', packageId === null ? {} : { packageId });
+    // The package's pending object drafts too, as the Data rail lists them: a
+    // flow on an object not published yet is grouped under it, and the header
+    // reads its label (the `_drafts` row carries one), not its name. A
+    // published object keeps its published label; a failed draft read adds
+    // none and leaves the published index whole (an async function, so even
+    // a throw before the read is sent rejects into the catch).
+    const readDrafts = async (): Promise<Array<{ name?: string | null; label?: I18nLabel | null }>> =>
+      (await client.listDrafts(packageId === null ? { type: 'object' } : { packageId, type: 'object' })) ?? [];
+    const [objects, drafts] = await Promise.all([
+      client.list<Record<string, unknown>>('object', packageId === null ? {} : { packageId }),
+      readDrafts().catch(() => []),
+    ]);
     for (const object of objects ?? []) {
       if (!object || typeof object.name !== 'string' || !object.name) continue;
       const label = resolveI18nLabel(object.label as I18nLabel | undefined, locale)?.trim();
       labels.set(object.name, label || object.name);
+    }
+    for (const draft of drafts) {
+      if (!draft || typeof draft.name !== 'string' || !draft.name || labels.has(draft.name)) continue;
+      labels.set(draft.name, resolveI18nLabel(draft.label ?? undefined, locale)?.trim() || draft.name);
     }
   } catch {
     /* an empty index */
@@ -12166,9 +12220,18 @@ export function AccessPillar({
   // The note speaks for what the main panel shows: the open set, or the
   // package-wide OWD overview and empty header, which are the base's.
   const noteReadOnly = owdOpen || current === null ? packageReadOnly : readOnly;
+  // objectstack#29674 — an open set the pair adds lists its base's objects
+  // too (`permissionObjectScopePackages`), so its note names the base instead
+  // of claiming "this package's objects" only.
+  const notePairBase = !owdOpen && current !== null && currentAddedIn ? (customization?.baseLabel ?? railPackageId) : null;
   const accessStatus: StudioItemStatus | undefined = noteReadOnly
     ? undefined
-    : { label: t('engine.studio.access.banner', locale), title: t('engine.studio.access.bannerTitle', locale) };
+    : notePairBase !== null
+      ? {
+          label: tFormat('engine.studio.access.bannerPair', locale, { package: notePairBase }),
+          title: tFormat('engine.studio.access.bannerTitlePair', locale, { package: notePairBase }),
+        }
+      : { label: t('engine.studio.access.banner', locale), title: t('engine.studio.access.bannerTitle', locale) };
   const accessNoteEl = accessStatus ? (
     <StudioStatusChip {...accessStatus} />
   ) : (

@@ -204,13 +204,21 @@ export async function defaultRecordPageSaveRefusal(
     verb: 'saved' | 'published' | 'restored' = 'saved',
 ): Promise<(Error & { code: 'DEFAULT_RECORD_PAGE_CONFLICT'; status: 422 }) | undefined> {
     if (type !== 'page') return undefined;
+    // Every slot the page holds: its object's default (no app), and the record
+    // page of its object inside each app its `apps` names (ruling A on
+    // objectstack#28979) — each judged by the one reading, `defaultRecordPageObject`.
+    const slots: Array<{ object: string; app?: string }> = [];
     const object = defaultRecordPageObject(item);
-    if (object === undefined) return undefined;
+    if (object !== undefined) slots.push({ object });
+    const apps = (item as { apps?: unknown } | null | undefined)?.apps;
+    if (Array.isArray(apps)) {
+        for (const app of new Set(apps.filter((a): a is string => typeof a === 'string'))) {
+            const scoped = defaultRecordPageObject(item, app);
+            if (scoped !== undefined) slots.push({ object: scoped, app });
+        }
+    }
+    if (slots.length === 0) return undefined;
 
-    // `shipped`: a page a package ships through the registry, which no save
-    // can edit; a stored row (bound to a package or not) is editable here.
-    type Holder = { page: string; packageId?: string; shipped: boolean };
-    const holders: Holder[] = [];
     let records: any[] = [];
     try {
         // [ADR-0131 D6] A save lands environment-wide, so the pages it meets
@@ -221,52 +229,75 @@ export async function defaultRecordPageSaveRefusal(
     }
     const stored = this.storedOverlayEntries({ type }, records);
     const storedNames = new Set(stored.map((entry) => entry.name));
-    for (const entry of stored) {
-        if (entry.name === saveName || defaultRecordPageObject(entry.data) !== object) continue;
-        holders.push(entry.packageId
-            ? { page: entry.name, packageId: entry.packageId, shipped: false }
-            : { page: entry.name, shipped: false });
-    }
     const registry = this.engine.registry;
-    if (typeof registry?.defaultRecordPageHoldersOf === 'function') {
-        const registered = registry.defaultRecordPageHoldersOf(object) as Array<
-            { kind: 'package'; packageId: string; page: string } | { kind: 'environment'; page: string }
-        >;
-        for (const holder of registered) {
-            if (holder.page === saveName || storedNames.has(holder.page)) continue;
-            holders.push(holder.kind === 'package'
-                ? { page: holder.page, packageId: holder.packageId, shipped: true }
-                : { page: holder.page, shipped: false });
-        }
-    }
-    if (holders.length === 0) return undefined;
 
-    const seen = new Set<string>();
-    const unique = holders.filter((h) => {
-        const key = `${h.packageId ?? ''}|${h.page}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-    });
-    const describe = (h: Holder) =>
-        h.packageId ? `page '${h.page}' of package '${h.packageId}'` : `page '${h.page}', authored in this system`;
-    const named = unique.map(describe);
-    const others = named.length === 1 ? `${named[0]} already is` : `${named.join(' and ')} already are`;
-    const remedy = unique.some((h) => h.shipped)
-        ? `Save '${saveName}' with \`isDefault: false\`: a page a package ships stays the default unless the `
-          + `deployment is composed without that package's page.`
-        : `Save '${saveName}' with \`isDefault: false\`, or first save ${unique.map((h) => `'${h.page}'`).join(' and ')} `
-          + `with \`isDefault: false\` to make '${saveName}' the default instead.`;
-    const err = new Error(
-        `Default record page conflict: page '${saveName}' cannot be ${verb} as the default record page of object `
-        + `'${object}': ${others}. ${remedy} At most one \`isDefault: true\` record page may exist for an object `
-        + `in a deployment: the record view opens that page with no tie-break.`,
-    ) as Error & { code: 'DEFAULT_RECORD_PAGE_CONFLICT'; status: 422; object: string; holders: readonly Holder[] };
-    err.code = 'DEFAULT_RECORD_PAGE_CONFLICT';
-    err.status = 422;
-    err.object = object;
-    err.holders = unique;
-    return err;
+    // `shipped`: a page a package ships through the registry, which no save
+    // can edit; a stored row (bound to a package or not) is editable here.
+    type Holder = { page: string; packageId?: string; shipped: boolean };
+    for (const { object, app } of slots) {
+        const holders: Holder[] = [];
+        for (const entry of stored) {
+            if (entry.name === saveName || defaultRecordPageObject(entry.data, app) !== object) continue;
+            holders.push(entry.packageId
+                ? { page: entry.name, packageId: entry.packageId, shipped: false }
+                : { page: entry.name, shipped: false });
+        }
+        if (typeof registry?.defaultRecordPageHoldersOf === 'function') {
+            const registered = (app === undefined
+                ? registry.defaultRecordPageHoldersOf(object)
+                : registry.defaultRecordPageHoldersOf(object, app)) as Array<
+                { kind: 'package'; packageId: string; page: string } | { kind: 'environment'; page: string }
+            >;
+            for (const holder of registered) {
+                if (holder.page === saveName || storedNames.has(holder.page)) continue;
+                holders.push(holder.kind === 'package'
+                    ? { page: holder.page, packageId: holder.packageId, shipped: true }
+                    : { page: holder.page, shipped: false });
+            }
+        }
+        if (holders.length === 0) continue;
+
+        const seen = new Set<string>();
+        const unique = holders.filter((h) => {
+            const key = `${h.packageId ?? ''}|${h.page}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+        const describe = (h: Holder) =>
+            h.packageId ? `page '${h.page}' of package '${h.packageId}'` : `page '${h.page}', authored in this system`;
+        const named = unique.map(describe);
+        const others = named.length === 1 ? `${named[0]} already is` : `${named.join(' and ')} already are`;
+        const message = app === undefined
+            ? `Default record page conflict: page '${saveName}' cannot be ${verb} as the default record page of object `
+                + `'${object}': ${others}. `
+                + (unique.some((h) => h.shipped)
+                    ? `Save '${saveName}' with \`isDefault: false\`: a page a package ships stays the default unless the `
+                      + `deployment is composed without that package's page.`
+                    : `Save '${saveName}' with \`isDefault: false\`, or first save ${unique.map((h) => `'${h.page}'`).join(' and ')} `
+                      + `with \`isDefault: false\` to make '${saveName}' the default instead.`)
+                + ` At most one \`isDefault: true\` record page may exist for an object `
+                + `in a deployment: the record view opens that page with no tie-break.`
+            : `Default record page conflict: page '${saveName}' cannot be ${verb} as the record page of object `
+                + `'${object}' in app '${app}': ${others}. `
+                + (unique.some((h) => h.shipped)
+                    ? `Save '${saveName}' without '${app}' in \`apps\`: a page a package ships stays that app's page unless the `
+                      + `deployment is composed without that package's page.`
+                    : `Save '${saveName}' without '${app}' in \`apps\`, or first save ${unique.map((h) => `'${h.page}'`).join(' and ')} `
+                      + `without it to make '${saveName}' that app's page instead.`)
+                + ` At most one record page may name an app in \`apps\` for an object: that app's record view `
+                + `opens it with no tie-break.`;
+        const err = new Error(message) as Error & {
+            code: 'DEFAULT_RECORD_PAGE_CONFLICT'; status: 422; object: string; app?: string; holders: readonly Holder[];
+        };
+        err.code = 'DEFAULT_RECORD_PAGE_CONFLICT';
+        err.status = 422;
+        err.object = object;
+        if (app !== undefined) err.app = app;
+        err.holders = unique;
+        return err;
+    }
+    return undefined;
 }
 
 /**

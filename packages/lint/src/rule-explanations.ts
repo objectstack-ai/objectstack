@@ -405,8 +405,9 @@ const DASHBOARD_FILTER_BINDING_UNKNOWN_EXPLANATION: RuleExplanation = {
       'way the widget counts different rows than the author wrote, with nothing on the page to say so, ' +
       'which is why the rule is an error and is not suppressible.',
     'To fix it, rename the key to a declared filter name (the finding names the nearest one), declare ' +
-      'the filter on the dashboard, or delete the entry. A `dateRange` key on a dashboard that declares ' +
-      'no `dateRange` is reported the same way: there is no date range for it to bind.',
+      'the filter on the dashboard, or delete the entry. A `dateRange` key is reported the same way ' +
+      'only when the dashboard declares neither `dateRange` nor a `globalFilters` entry named `dateRange`: ' +
+      'either one is a declared filter under that name, and with neither there is nothing for it to bind.',
   ],
 };
 
@@ -885,6 +886,30 @@ const SECURITY_MODIFY_ALL_DELETE_WITHHELD_EXPLANATION: RuleExplanation = {
       'The object needs an owner field and an owner-write default (`private` or `public_read`), and the ' +
       'rule\'s `condition` must be a field predicate every row satisfies, such as `record.id != \'\'`: a literal ' +
       '`true` lowers to an empty filter, which the sharing service never serves.',
+  ],
+};
+
+const SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION: RuleExplanation = {
+  rule: 'security-superuser-field-mask-inert',
+  covers: 'why a field mask beside View All or Modify All hides nothing',
+  paragraphs: [
+    '`viewAllRecords` (View All) and `modifyAllRecords` (Modify All) are the super-user bypass on an object. ' +
+      'A set that holds one votes on every field of that object when the field permissions are merged: View ' +
+      'All votes `readable: true`, Modify All votes `readable: true` and `editable: true` (ADR-0066 D2 as ' +
+      'amended). The merge is a union, so a `readable: false` the same set declares on that object hides the ' +
+      'field from none of the set\'s holders, and under Modify All its edit lock (`editable: false`, or ' +
+      '`editable` omitted, which parses to false) holds none of them back either. The stored set still reads ' +
+      'as masked, which is why an author or a reviewer takes the field to be protected.',
+    'The set\'s bypass is read the way the runtime reads it: its own entry for the object when it has one, ' +
+      'otherwise its `\'*\'` entry, as a lookup and never a merge. View All beside an edit lock is not ' +
+      'reported, because View All never widens a write, so that lock still binds. Only the set that declares ' +
+      'the entry is judged: a holder of two sets is unmasked by the other set\'s bypass too, but no author ' +
+      'wrote an inert entry there.',
+    'This is a warning, not an error: the pair is legal and no door refuses it. To fix it, decide which half ' +
+      'is meant. If the field must stay hidden or read-only, remove the bypass bit from the object entry and ' +
+      'reach every row another way, with `readScope: \'org\'` / `writeScope: \'org\'` on the entry or a ' +
+      '`rowLevelSecurity` policy whose condition every row satisfies; the mask then binds. If the bypass is ' +
+      'meant, delete the field entry, which never took effect.',
   ],
 };
 
@@ -2071,6 +2096,33 @@ const FLOW_TRIGGER_UNKNOWN_OBJECT_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// `flow-input-unknown-object` (#29442) shares the rule file, the hedge and the
+// closure split with `flow-trigger-unknown-object` above; what differs is the
+// position it reads and what a wrong name costs.
+
+const FLOW_INPUT_UNKNOWN_OBJECT_EXPLANATION: RuleExplanation = {
+  rule: 'flow-input-unknown-object',
+  covers: 'why an unknown start-input object warns, and when it refuses',
+  paragraphs: [
+    'A flow input may declare that its value is the id of a record of a named object, with `objectName` on ' +
+      'the variable. The start doors are to load such an input from exactly that name in the caller\'s own ' +
+      'scope before the run exists, so a name no object answers to would refuse every start that supplies ' +
+      'the input. Names match exactly — `app_candidate`, not `candidate`. The declaration is planned: no ' +
+      'door reads it yet, and the property lint says so separately.',
+    'The rule asks whether this stack defines the object. One it does not define may be declared by ' +
+      'another installed package, which a build of this stack cannot see, so the finding is a warning and ' +
+      'can be ignored when such a package declares the object; a `sys_` name is a platform object and is ' +
+      'not judged. A start that omits the input is not affected, so this is not a verdict that the flow ' +
+      'never runs.',
+    'A write into a package is judged against that package\'s closure instead: its own objects, the objects ' +
+      'of the packages its manifest declares in `dependencies`, and platform objects. An object outside it ' +
+      'is one the package never declared it may reference, so there the finding is an error and the publish ' +
+      'is refused, the verdict `flow-trigger-unknown-object` gives a trigger object. Declare a dependency on ' +
+      'the package that defines the object, or name an object inside the closure. A `sys_` name is not ' +
+      'judged there either.',
+  ],
+};
+
 // ── Validation rules that compile at publish time ───────────────────────────
 // `validate-rule-compilability.ts` and `validate-rule-schema-formats.ts`: the
 // write path's fail-open skip and the runtime's ajv environment are shared,
@@ -3038,8 +3090,12 @@ const TITLE_FORMAT_RETIRED_EXPLANATION: RuleExplanation = {
       'write; point `nameField` at it. A formula with `returnType: \'text\'` is title-eligible too and ' +
       'stays legal for a title shown for display only: its value is computed on read and stored nowhere, ' +
       'so a sort by it is refused, search never reaches it, and an import cannot match a lookup cell ' +
-      'against it. Then drop `titleFormat`, which this warning reports for as long as it is declared.',
-    'A warning, not an error: the schema still parses the key, so existing metadata keeps loading.',
+      'against it. Then drop `titleFormat`: an object definition that declares it is refused at the ' +
+      'metadata save gate (an active save, a draft promotion, a restore) and by `os validate`, ' +
+      '`os build` and `os lint`.',
+    'An error, not a warning, though the schema still parses the key: a stored object that carries it ' +
+      'keeps loading and reading, and is refused only when it is next saved or validated. A draft ' +
+      'save passes; its publish is refused.',
   ],
 };
 
@@ -4862,10 +4918,20 @@ const CONNECTOR_CREDENTIAL_LITERAL_EXPLANATION: RuleExplanation = {
       'literal moves by shape: an `Authorization` bearer value to `auth: { type: \'bearer\', credentialRef }`, ' +
       'a key header to `{ type: \'api-key\', headerName, credentialRef }`, a Basic pair to ' +
       '`{ type: \'basic\', username, credentialRef }`.',
-    'A stdio MCP server takes no `auth`: the provider folds a resolved credential into an http ' +
-      'transport\'s headers only, and a stdio server\'s credentials ride `transport.env`. So the env ' +
-      'finding names `auth.credentialRef` with its condition, an http transport, and promises nothing ' +
-      'for stdio. The connector guide is content/docs/automation/connectors.mdx.',
+    'A stdio MCP server takes the same `auth`, and `providerConfig.transport.credentialEnv` names the ' +
+      'environment variable the `mcp` provider hands the resolved credential to the server in, so an env ' +
+      'literal moves to `auth: { type: \'bearer\', credentialRef }` plus `credentialEnv: \'VARIABLE_NAME\'`, ' +
+      'and the env entry is dropped. Without `credentialEnv` a stdio transport does not apply `auth` at ' +
+      'all, so the env finding names both keys. The connector guide is content/docs/automation/connectors.mdx.',
+    // Both route findings are held to the rule by its test.
+    'Two more findings sit on that route. A stdio `mcp` entry that declares a `bearer`, `api-key` or `basic` ' +
+      '`auth` and no `credentialEnv` is reported at `auth`: the reference is still resolved, and a missing one ' +
+      'still degrades the instance, but the provider hands the credential to a stdio server only in the variable ' +
+      '`credentialEnv` names, so without it the credential reaches nothing and nothing else says so. Add the key, ' +
+      'or drop `auth` when the server takes no credential. And `credentialEnv` holds a variable name that is ' +
+      'served on every metadata read, so a value there that reads as a credential (it opens with an auth scheme, ' +
+      'or carries a run of 16 or more letters and digits that switches between the two at least four times, as a ' +
+      'generated token does) is reported at that key. A conventional name such as `REPO_MCP_TOKEN` never draws.',
     'Always a warning, and nothing is refused: the predicate is a heuristic (a value under a name ' +
       'that reads as a credential, or a value that opens with an auth scheme), so a key named ' +
       '`token` can hold something that is not a secret, and a false positive costs a line of ' +
@@ -5458,6 +5524,31 @@ const NAMESPACE_NO_CUSTOMIZATION_PAIR_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// The verdict is `validateControlFlow` from `@objectstack/spec/automation`, the
+// call the automation engine's `registerFlow` makes; the rule file holds no copy.
+const FLOW_REGION_SHAPE_INVALID_EXPLANATION: RuleExplanation = {
+  rule: 'flow-region-shape-invalid',
+  covers: 'what makes a flow region one the engine registers',
+  paragraphs: [
+    'A `loop` body, each `parallel` branch and a `try_catch` try or catch region is a small graph of its ' +
+      'own (ADR-0031). The automation engine runs it from its one entry node to its one exit node, so when ' +
+      'it registers a flow it refuses a region that has more than one entry or exit, or a cycle, at any ' +
+      'depth, and a `parallel` with fewer than two branches. A refused flow is not registered: the server ' +
+      'logs a warning at boot and runs without it, so its trigger never fires.',
+    'The rule asks the engine\'s own question: each flow is parsed with the flow schema and handed to the ' +
+      'same region check the engine runs when it registers the flow, and the message is the engine\'s ' +
+      'refusal behind the flow\'s name. Like the engine it reports a flow\'s first malformed region, so a ' +
+      'flow with two may need two fixes. A flow the flow schema refuses cannot be judged and is reported ' +
+      'as such, with the schema\'s issues. The server asks it too, when a flow is saved active or a draft ' +
+      'is published, of the flow with its legacy spellings converted to the current ones: the body the ' +
+      'engine registers.',
+    'Not judged: a cycle in the flow\'s top-level graph, outside any region. The engine refuses that too, ' +
+      'with a check this rule cannot reach.',
+    'To fix a multi-exit region, add one node every exit of the region leads to; to fix a cycle, remove ' +
+      'the edge that leads back; give a `parallel` a second branch or replace it with its one branch.',
+  ],
+};
+
 export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Object.freeze({
   [FIELD_NO_CONSUMERS_EXPLANATION.rule]: FIELD_NO_CONSUMERS_EXPLANATION,
   [SECURITY_OWD_UNSET_EXPLANATION.rule]: SECURITY_OWD_UNSET_EXPLANATION,
@@ -5496,6 +5587,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION.rule]: SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION,
   [SECURITY_WILDCARD_VAMA_EXPLANATION.rule]: SECURITY_WILDCARD_VAMA_EXPLANATION,
   [SECURITY_MODIFY_ALL_DELETE_WITHHELD_EXPLANATION.rule]: SECURITY_MODIFY_ALL_DELETE_WITHHELD_EXPLANATION,
+  [SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION.rule]: SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION,
   [SECURITY_OWD_ALIAS_EXPLANATION.rule]: SECURITY_OWD_ALIAS_EXPLANATION,
   [SECURITY_DELEGATION_MISSING_REASON_EXPLANATION.rule]: SECURITY_DELEGATION_MISSING_REASON_EXPLANATION,
   [VISIBILITY_ROOT_MISLAYERED_EXPLANATION.rule]: VISIBILITY_ROOT_MISLAYERED_EXPLANATION,
@@ -5539,6 +5631,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [FLOW_TRIGGER_UNKNOWN_EVENT_EXPLANATION.rule]: FLOW_TRIGGER_UNKNOWN_EVENT_EXPLANATION,
   [FLOW_API_TRIGGER_SECRET_MISSING_EXPLANATION.rule]: FLOW_API_TRIGGER_SECRET_MISSING_EXPLANATION,
   [FLOW_TRIGGER_UNKNOWN_OBJECT_EXPLANATION.rule]: FLOW_TRIGGER_UNKNOWN_OBJECT_EXPLANATION,
+  [FLOW_INPUT_UNKNOWN_OBJECT_EXPLANATION.rule]: FLOW_INPUT_UNKNOWN_OBJECT_EXPLANATION,
   [VALIDATION_RULE_REGEX_UNCOMPILABLE_EXPLANATION.rule]: VALIDATION_RULE_REGEX_UNCOMPILABLE_EXPLANATION,
   [VALIDATION_RULE_JSON_SCHEMA_UNCOMPILABLE_EXPLANATION.rule]: VALIDATION_RULE_JSON_SCHEMA_UNCOMPILABLE_EXPLANATION,
   [VALIDATION_RULE_JSON_SCHEMA_UNKNOWN_FORMAT_EXPLANATION.rule]: VALIDATION_RULE_JSON_SCHEMA_UNKNOWN_FORMAT_EXPLANATION,
@@ -5670,6 +5763,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [REPORT_DATE_RANGE_DIMENSION_AMBIGUOUS_EXPLANATION.rule]: REPORT_DATE_RANGE_DIMENSION_AMBIGUOUS_EXPLANATION,
   [REPORT_DATE_RANGE_DIMENSION_NONE_EXPLANATION.rule]: REPORT_DATE_RANGE_DIMENSION_NONE_EXPLANATION,
   [NAMESPACE_NO_CUSTOMIZATION_PAIR_EXPLANATION.rule]: NAMESPACE_NO_CUSTOMIZATION_PAIR_EXPLANATION,
+  [FLOW_REGION_SHAPE_INVALID_EXPLANATION.rule]: FLOW_REGION_SHAPE_INVALID_EXPLANATION,
 });
 
 /** The explanation for `rule`, or `undefined` when the rule has none. Exact id match. */

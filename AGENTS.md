@@ -143,6 +143,8 @@ ruling (`RULED_CEILING_RAISES`); a test file over 10 s of wall, unless the file 
 measured budget with its class (ruling record 6181973363), is its lane's card, fixed and ⛔
 never deleted; a test is deleted only when its PR names a duplicate pinning that assertion at a
 layer at least as close to the code (ruling record 6120820653).
+A new pin for a component that already has a shared harness file goes into that file as a
+top-level `describe`, not a new file (ruling record 6583487846).
 
 ### Running the dev server
 
@@ -633,8 +635,6 @@ Root also exports: `defineStack`, `composeStacks`, `defineView`, `defineApp`, `d
 | `ObjectKernel` | Default production runtime. Full DI / EventBus / Plugin lifecycle. |
 | `LiteKernel` | Tests (vitest), serverless, edge (Workers). |
 
-`EnhancedObjectKernel` is deprecated — do not use.
-
 ---
 
 ## Documentation Guardrails
@@ -724,8 +724,8 @@ test regenerate; the wrapper reports all three each run rather than staying sile
 | `packages/core/**` | Kernel Engineer | Runtime logic OK here |
 | `packages/runtime/**` | Runtime Engineer | Bootstrap, plugin registration |
 | `packages/rest/**` | API Engineer | Route gen, middleware |
-| `packages/plugins/**` | Plugin Developer | Implements spec contracts |
-| `packages/services/**` | Service Engineer | Kernel-managed services |
+| `packages/plugins/**` | Plugin Developer | Implements spec contracts. A new package here is named by its kind (`embedder-*`, `knowledge-*`, …); drivers and connectors have their own directories (`packages/drivers/driver-*`, `packages/connectors/connector-*`). The `plugin-` prefix is frozen to the ten that carry it today (`plugin-approvals`, `plugin-audit`, `plugin-auth`, `plugin-dev`, `plugin-email`, `plugin-hono-server`, `plugin-pinyin-search`, `plugin-security`, `plugin-sharing`, `plugin-webhooks`) and is never coined again; none of the ten is renamed |
+| `packages/services/**` | Service Engineer | Kernel-managed services. A new one (fills a `core-services` slot, registers a service, or holds transports/credentials) is `@objectstack/service-<name>` in `packages/services/service-<name>`. For any new package, in this row or the one above: a package name in an ADR is a proposal; where the tree's precedent differs, the PR that creates the package follows the precedent and amends that ADR's status line in the same change |
 | `packages/adapters/**` | Integration Engineer | Framework bindings, zero business logic |
 | `packages/client*/**` | SDK Engineer | Public API, DX, type safety |
 | `apps/docs/**` | Docs Engineer | Fumadocs + Next.js, MDX |

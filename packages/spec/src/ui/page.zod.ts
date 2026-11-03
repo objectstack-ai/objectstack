@@ -1698,16 +1698,25 @@ export const PageTemplateSchema = lazySchema(() => enumWithRetiredValues(
  * The sentence is {@link misplacedDefaultPageRefusal}'s, the one the registry
  * door prints for a page a package registers without a parse.
  *
+ * `apps` (ruling A on objectstack#28979) is placed where `isDefault` is — it
+ * chooses the record page an app's routes open for the page's object — so the
+ * same check refuses it on the same pages, at `apps`, in the same function's
+ * sentence for that key.
+ *
  * Exported for the reason {@link checkPageSourceCompleteness} is, and
  * attached by identifier — pinned in `object-refinement-check-exports.test.ts`.
  */
 export function checkPageDefaultPlacement(
-  page: { isDefault?: unknown; type?: unknown; object?: unknown },
+  page: { isDefault?: unknown; apps?: unknown; type?: unknown; object?: unknown },
   ctx: z.RefinementCtx,
 ): void {
-  const refusal = misplacedDefaultPageRefusal(page);
-  if (refusal === undefined) return;
-  ctx.addIssue({ code: 'custom', path: ['isDefault'], message: refusal });
+  // Each key is judged on its own, so a page carrying both misplaced keys is
+  // told about both, each at its own path, in the one sentence per key the
+  // registry door prints too.
+  const isDefaultRefusal = misplacedDefaultPageRefusal({ ...page, apps: undefined });
+  if (isDefaultRefusal !== undefined) ctx.addIssue({ code: 'custom', path: ['isDefault'], message: isDefaultRefusal });
+  const appsRefusal = misplacedDefaultPageRefusal({ ...page, isDefault: undefined });
+  if (appsRefusal !== undefined) ctx.addIssue({ code: 'custom', path: ['apps'], message: appsRefusal });
 }
 
 /**
@@ -1875,6 +1884,25 @@ export function checkPageMainRegionWidth(
   });
 }
 
+/**
+ * The `apps` list names each app once: a repeat is the same slot twice and
+ * decides nothing, so it is refused at the repeat (ruling A on
+ * objectstack#28979). Attached to the array, so a `.shape.apps` mirror keeps it.
+ */
+function checkPageAppsUnique(apps: readonly string[], ctx: z.RefinementCtx): void {
+  const seen = new Set<string>();
+  apps.forEach((app, i) => {
+    if (seen.has(app)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [i],
+        message: `App '${app}' is listed twice in \`apps\`. Each app is one slot: list it once.`,
+      });
+    }
+    seen.add(app);
+  });
+}
+
 export const PageSchema = lazySchema(() => strictObject({
   surface: 'this page',
   history: PAGE_HISTORY,
@@ -2023,6 +2051,34 @@ export const PageSchema = lazySchema(() => strictObject({
    */
   isDefault: z.boolean().default(false)
     .describe('Whether this record page is the default record page of its `object` — the page the record view opens. At most one `isDefault: true` record page may exist for an object in a deployment: a second is refused (by defineStack / os validate, at package registration and at metadata save), naming both pages. Saving a page under the existing default\'s own name is that page, not a second default. Refused on any other page — a page that is not a record page bound to an object: nothing reads it there. An app opens on its first navigation item, and the root landing follows the app\'s own isDefault.'),
+  /**
+   * App scope — the apps whose routes open this record page for its `object`
+   * (maintainer ruling A on objectstack#28979, record 6573557633).
+   *
+   * Inside an app this list names, the record view of the page's object
+   * (`/apps/<app>/<object>/record/<id>`) opens this page. Everywhere else —
+   * every other app, Setup included — the deployment's one `isDefault` record
+   * page still opens: ruling A on objectstack#23015 (one default per object per
+   * deployment) is unchanged, and no precedence ladder is added. The default
+   * and an app's page are two slots, and one page may hold both.
+   *
+   * **At most one record page per object per app.** Two record pages for the
+   * same object that both name the same app are refused at the doors that
+   * refuse a second default — `defineStack` / `composeStacks`, package
+   * registration, metadata save — naming both pages, through the same reading
+   * (`defaultRecordPageObject(page, app)`, `default-record-page.ts`).
+   *
+   * Placed where `isDefault` is: refused on a page that is not a record page
+   * bound to an object ({@link checkPageDefaultPlacement}). Entries are app
+   * names (`AppSchema.name`), non-empty and unique.
+   *
+   * Renderer: the console's page assignment (`usePageAssignment` in
+   * `@object-ui/react`, and the record route's object scope, which picks the
+   * same page) resolves the route's app segment to its app and reads that
+   * app's NAME here, never the segment itself.
+   */
+  apps: z.array(SnakeCaseIdentifierSchema).min(1).superRefine(checkPageAppsUnique).optional()
+    .describe("The apps whose routes open this record page for its `object`: inside an app named here, the object's record view (`/apps/<app>/<object>/record/<id>`) opens this page; everywhere else, Setup included, the object's one `isDefault` record page still opens, so the default and an app's page coexist. App names, non-empty and unique. At most one record page per object per app: a second page naming the same app for the same object is refused (by defineStack / os validate, at package registration and at metadata save), naming both pages. Refused on any page that is not a record page bound to an object."),
   // `assignedProfiles` REMOVED (ADR-0090 D2 / ADR-0049) — it named the concept
   // D2 deleted and nothing anywhere enforced it, so a page that "assigned
   // profiles" was open to everyone who could reach it. Page audience is the

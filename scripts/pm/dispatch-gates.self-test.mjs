@@ -7544,7 +7544,7 @@ export function selfTest({ tier = 'full' } = {}) {
   }
   const censusRows = liveMarkerCensus.map((r) => `${r.file}:${r.line} ${r.key}`).sort();
   t(
-    `the live tree carries the nine declarations measured for this census, and no others (${censusRows.join(' · ') || 'none'})`,
+    `the live tree carries the ten declarations measured for this census, and no others (${censusRows.join(' · ') || 'none'})`,
     censusRows.join(' · ') === [
       // Seventh row, added with the declaration it names: `checklist-status.yml`
       // is paths-filtered (its `pull_request:` trigger is filtered to itself) and
@@ -7557,6 +7557,10 @@ export function selfTest({ tier = 'full' } = {}) {
       '.github/workflows/merged-branch-reaper.yml:212 no-check-families',
       '.github/workflows/os-create-smoke.yml:48 no-check-families',
       '.github/workflows/scaffold-e2e.yml:23 no-check-families',
+      // Tenth row, added with the declaration it names: `ui-test-timings-refresh.yml`
+      // is paths-filtered (its own file and the three ui scripts it loads) and
+      // runs a generator's select and merge, so it discovers no `check:` family.
+      '.github/workflows/ui-test-timings-refresh.yml:64 no-check-families',
       // Eighth row, added with the declaration it names (#20278): the checker's
       // bare diff-scoped run declares the two step-`env:` values it does not need.
       'scripts/check-issue-citations.mjs:204 local-env',
@@ -7577,7 +7581,7 @@ export function selfTest({ tier = 'full' } = {}) {
   const censusCut = liveMarkerCensus.filter((r) => !r.whole).map((r) => `${r.file}:${r.line} ${r.key}`);
   t(
     `every live reason on those markers ENDS on its own marker line (cut: ${censusCut.join(', ') || 'none'})`,
-    censusCut.length === 0 && liveMarkerCensus.length === 9,
+    censusCut.length === 0 && liveMarkerCensus.length === 10,
   );
   t(
     'and every one of them carries a non-empty reason — whole is not the same claim as present, and both are owed',
@@ -7985,6 +7989,70 @@ export function selfTest({ tier = 'full' } = {}) {
       'every ledger row carries a reason that says what the gate reads INSTEAD — a reason-less exclusion is the ' +
         'placeholder shape both markers refuse',
       ROOT_WALK_RESIDUE_LEDGER.every(([, why]) => typeof why === 'string' && why.trim().length > 40),
+    );
+  }
+
+  // ── A package-root config edit derives the console-intercept gate (#29353) ──
+  //
+  // The card's acceptance, held against the LIVE tree. The gate's scan opens a
+  // package-root `package.json` and vitest config under each workspace glob and
+  // nothing else, and it declares exactly that population in its own source, so
+  // BOTH invocations CI runs (scan and `--self-test`, one lint.yml step) are
+  // placed by every such file, while a test file under an existing package —
+  // tracked, or one a card adds — places neither. The rows it left in
+  // ROOT_WALK_RESIDUE_LEDGER are held gone by the stale limb above.
+  {
+    const gate = 'scripts/check-console-intercept-disarm.mjs';
+    const invocations = [gate, `${gate} --self-test`];
+    const entries = invocations.map((c) => liveDiscovery.byCheck.get(c));
+    t('both console-intercept invocations are discovered families', entries.every(Boolean));
+    const tracked = [...liveTree.files];
+    const trackedSet = new Set(tracked);
+    // Package roots read off the tree, not off a copy of the workspace globs:
+    // a tracked vitest config whose own directory carries a tracked manifest,
+    // under one of the three workspace top-level roots.
+    const rootConfigs = tracked.filter((f) => {
+      const m = /^((?:packages|apps|examples)\/(?:[^/]+\/)?[^/]+)\/vitest\.config\.[cm]?[jt]s$/.exec(f);
+      return m && trackedSet.has(`${m[1]}/package.json`);
+    });
+    t(
+      `control: the live tree carries package-root vitest configs to probe with (${rootConfigs.length})`,
+      rootConfigs.length >= 60,
+    );
+    const unplacedBy = (entry, probe) => placeFamily(entry, [probe]).verdict !== 'matched';
+    const missedConfigs = rootConfigs.filter((f) => entries.some((e) => e && unplacedBy(e, f)));
+    t(
+      'every package-root vitest config places both invocations — the card PR #29345 paid a CI round for' +
+        (missedConfigs.length ? ` — not placed by: ${missedConfigs.slice(0, 5).join(', ')}` : ''),
+      entries.every(Boolean) && missedConfigs.length === 0,
+    );
+    const manifests = rootConfigs.map((f) => f.replace(/\/[^/]+$/, '/package.json'));
+    const missedManifests = manifests.filter((f) => entries.some((e) => e && unplacedBy(e, f)));
+    t(
+      'and so does the package-root package.json beside each — the other file the scan opens' +
+        (missedManifests.length ? ` — not placed by: ${missedManifests.slice(0, 5).join(', ')}` : ''),
+      entries.every(Boolean) && missedManifests.length === 0,
+    );
+    // A card's file surface is often paths that do not exist yet: a NEW package.
+    const newPackage = ['packages', 'plugins', 'plugin-not-yet-written'].join('/');
+    t(
+      'a NEW package\'s root config and manifest place both invocations too',
+      entries.every((e) => e && !unplacedBy(e, `${newPackage}/vitest.config.ts`) && !unplacedBy(e, `${newPackage}/package.json`)),
+    );
+    const testFiles = tracked.filter((f) => /^(?:packages|apps|examples)\/.+\.(?:test|spec)\.[cm]?[jt]sx?$/.test(f));
+    t(
+      `control: the live tree carries test files under packages to probe with (${testFiles.length})`,
+      testFiles.length >= 1000,
+    );
+    t(
+      'no test file under an existing package places either invocation, tracked or brand new',
+      entries.every((e) => e
+        && placeFamily(e, testFiles).verdict !== 'matched'
+        && unplacedBy(e, ['packages', 'services', 'service-sms', 'src', 'not-yet-written.test.ts'].join('/'))),
+    );
+    t(
+      'nor does a vitest config BELOW a package root — the scan deliberately reads the root one only',
+      entries.every((e) => e && unplacedBy(e, ['packages', 'services', 'service-sms', 'test', 'fixtures', 'vitest.config.ts'].join('/'))),
     );
   }
 

@@ -17,10 +17,12 @@
  * metadata type's own `allowRuntimeCreate` flag in
  * `DEFAULT_METADATA_TYPE_REGISTRY`, the flag the save door reads.
  *
- * `unmanaged-install.test.ts` holds the table TOTAL against both schemas a
- * package body is read with — `ManifestSchema` and `ObjectStackDefinitionSchema`
- * — so a key either schema gains reddens a spec test on the PR that adds it,
- * instead of being refused at an install door with no reason on record.
+ * `unmanaged-install.test.ts` holds the table TOTAL against the three schemas a
+ * package body is read with — `ManifestSchema`, `ObjectStackDefinitionSchema`
+ * and the fixed keys of `PackageExportManifestSchema` (`@objectstack/spec/api`),
+ * the body `GET /packages/:id/export` writes for an import elsewhere — so a key
+ * any of them gains reddens a spec test on the PR that adds it, instead of
+ * being refused at an install door with no reason on record.
  */
 
 /**
@@ -39,7 +41,8 @@
  *  - `code`       — refused: code, or a descriptor of a code-bearing artifact.
  *  - `uncopyable` — refused: package content the environment ledger has no row for.
  *  - `envelope`   — refused: it describes an artifact, not one package.
- *  - `door`       — not the copy's: read or applied by the install door, and
+ *  - `door`       — not the copy's: read or applied by the install door (or,
+ *                   for an export's display `label`, set aside by it), and
  *                   never written onto the base.
  *  - `deployment` — not the copy's: deployment configuration no install applies.
  */
@@ -62,8 +65,8 @@ export const UNMANAGED_INSTALL_REFUSING_DISPOSITIONS: ReadonlySet<UnmanagedInsta
 
 /**
  * Every non-collection key a package body may carry — the union of
- * `ManifestSchema`'s live keys and the stack definition's non-collection keys —
- * classified for an unmanaged install.
+ * `ManifestSchema`'s live keys, the stack definition's non-collection keys and
+ * the package export's fixed keys — classified for an unmanaged install.
  */
 export const UNMANAGED_INSTALL_KEY_DISPOSITIONS: Readonly<Record<string, UnmanagedInstallKeyDisposition>> = {
   // ── The package's identity ──
@@ -112,6 +115,17 @@ export const UNMANAGED_INSTALL_KEY_DISPOSITIONS: Readonly<Record<string, Unmanag
   // Read by the door to judge the requested mode; the base is the
   // environment's own package and makes no promise about how it installs.
   installModes: 'door',
+  // [#28640 ruling ③A] The export's list of the maps it withheld whole,
+  // declared ahead of its producer: the server half (#29342) has the door read
+  // it to name each incomplete map in its answer. This row is live today — it
+  // keeps the import from refusing an export that carries the key. It
+  // describes the exchange, not the package, so the base never carries it.
+  withheldMaps: 'door',
+  // The export's display label. No manifest the base is installed with
+  // declares one (`PackageInstallManifestSchema` is closed and has no
+  // `label`), so carrying it would refuse the base; the base is named by the
+  // request's `targetName` or the source `name`.
+  label: 'door',
 
   // ── Deployment configuration: read by a stack's boot, by no install ──
   i18n: 'deployment',

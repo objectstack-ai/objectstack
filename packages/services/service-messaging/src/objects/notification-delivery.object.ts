@@ -75,14 +75,13 @@ export const NotificationDelivery = ObjectSchema.create({
     // pointer declared, the registry's designate-only pass stamped
     // `nameField: 'id'` (the first title-eligible field), so a renderer
     // honouring ADR-0079's order (an explicit `nameField` wins over
-    // `titleFormat`) drew the raw id as the record page's H1. `titleFormat`
-    // stays for renderers that still read it first; the formula names the
-    // recipient as a PERSON where `titleFormat` names the raw recipient, so the
-    // two no longer read the same text
+    // `titleFormat`) drew the raw id as the record page's H1. The retired
+    // `titleFormat` template beside it is gone (refused at save and by
+    // `os validate`); the formula names the recipient as a PERSON where that
+    // template named the raw recipient, so the two no longer read the same text
     // (`../delivery-recipient-user.integration.test.ts`).
     displayNameField: 'display_title',
     nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-    titleFormat: '{channel} → {recipient_id}',
     highlightFields: ['notification_id', 'recipient_id', 'channel', 'status', 'attempts'],
 
     fields: {

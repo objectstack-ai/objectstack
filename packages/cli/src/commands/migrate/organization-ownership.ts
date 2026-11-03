@@ -41,6 +41,7 @@ import {
 import {
   applyOrganizationOwnership,
   checkpointFromDetails,
+  protocolCustomizationPairs,
   MetadataChoiceRefusal,
   ORGANIZATION_OWNERSHIP_MIGRATION_ID,
   judgeDeclaredSharingRules,
@@ -751,7 +752,7 @@ export default class OrganizationOwnershipCeremony extends Command {
       // The dialect, once, before the first statement: an unresolved one is
       // refused here, naming the driver, and never read as SQLite.
       const dialect = ceremonyDialectOf(stack.driver);
-      const { normalizeRows } = await import('@objectstack/metadata-protocol');
+      const { isWritablePackage, normalizeRows } = await import('@objectstack/metadata-protocol');
       // [#23816] A boot that skipped schema sync measured no table absent, so
       // the ledger's presence is read from the catalog instead.
       const ledgerAbsent = stack.schemaSync === 'skipped'
@@ -774,6 +775,7 @@ export default class OrganizationOwnershipCeremony extends Command {
         getMetaItems?: (request: { type: string }) => Promise<{ items?: unknown[] } | unknown[]>;
         getMetaItemsForExecution?: (request: { type: string }) => Promise<{ items?: unknown[] }>;
         getMetaItem?: (request: { type: string; name: string; packageId?: string }) => Promise<unknown>;
+        ensureCustomizationPackage?: (request: { basePackageId: string }) => Promise<{ packageId: string }>;
       } | undefined;
       const catalog = createSecurityCatalogReader({
         registry: engine.registry as never,
@@ -926,6 +928,21 @@ export default class OrganizationOwnershipCeremony extends Command {
             };
           },
         },
+        // [ADR-0146 D1, D3] A withdrawal onto a read-only package's view goes
+        // into its `.custom` pair: the save door's own writability predicate,
+        // and the ensure door, in process.
+        pairs: protocolCustomizationPairs({
+          ensureCustomizationPackage: async (request) => {
+            if (typeof protocol?.ensureCustomizationPackage !== 'function') {
+              throw new Error('no metadata protocol is composed on this stack');
+            }
+            return protocol.ensureCustomizationPackage(request);
+          },
+          isWritablePackage: (packageId) => isWritablePackage(engine, packageId),
+          baseVersion: (packageId) =>
+            (engine.registry as { getPackage?(id: string): { manifest?: { version?: unknown } } | undefined } | undefined)
+              ?.getPackage?.(packageId)?.manifest?.version,
+        }),
         views: {
           // The env-wide view list, exactly as the anonymous form doors read it.
           list: async () => {

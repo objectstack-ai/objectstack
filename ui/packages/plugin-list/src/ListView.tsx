@@ -9,7 +9,7 @@
 import * as React from 'react';
 import { cn, Button, Input, Popover, PopoverContent, PopoverTrigger, FilterBuilder, SortBuilder, NavigationOverlay, GroupingEditor, RefreshIndicator, DataErrorState, resolveIcon, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@object-ui/components';
 import type { SortItem } from '@object-ui/components';
-import { Search, Funnel, ArrowUpDown, X, EyeOff, Pencil, Group, Paintbrush, Download, Rows4, Rows3, Rows2, Share2, Lock, Printer, Plus, Trash2, CheckSquare, AlertTriangle, ShieldAlert, RotateCw, Loader2, Info, Inbox } from 'lucide-react';
+import { Search, Funnel, ArrowUpDown, X, EyeOff, Pencil, Group, Paintbrush, Download, Rows4, Rows3, Rows2, Lock, Printer, Plus, Trash2, CheckSquare, AlertTriangle, ShieldAlert, RotateCw, Loader2, Info, Inbox } from 'lucide-react';
 import type { FilterBuilderRowGroup } from '@object-ui/components';
 import { VALUELESS_FILTER_BUILDER_OPERATORS, isFilterValueComplete, isCurrencyCompanion } from '@object-ui/components';
 import { ViewSwitcherDropdown } from './ViewSwitcher';
@@ -48,7 +48,7 @@ import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLoc
 // objectui's keyed `{ key, defaultValue, params }` ref — that vocabulary lives
 // on the FLAT `schema.ariaLabel` and is resolved by `SchemaRenderer` instead
 // (objectui#5134).
-import { resolveI18nLabel as resolveInlineI18nLabel, normalizeFilterOperator, PaginationConfigSchema, ViewSharingSchema } from '@objectstack/spec/ui';
+import { resolveI18nLabel as resolveInlineI18nLabel, normalizeFilterOperator, PaginationConfigSchema } from '@objectstack/spec/ui';
 import type { GroupingConfig } from '@objectstack/spec/ui';
 import { resolveInjectedSystemColumns, resolveSearchFieldResolution, type SearchFieldMeta } from '@objectstack/spec/data';
 import { SystemFieldName } from '@objectstack/spec/system';
@@ -1267,8 +1267,6 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'list.sittingInQueue': 'In a queue',
   'list.sittingInQueueHint': 'Show only records waiting in a queue for someone to claim them',
   'list.share': 'Share',
-  'list.sharingPersonal': 'Personal view',
-  'list.sharingCollaborative': 'Shared view',
   'list.sharingLockedBy': 'Locked by {{user}}',
   'list.print': 'Print',
   // objectui#4462 — the Print button's tooltip/aria sentence. Borrowed from
@@ -1365,20 +1363,19 @@ function readSpecDisplayPageSize(): number {
 const DEFAULT_LIST_DISPLAY_PAGE_SIZE = readSpecDisplayPageSize();
 
 /**
- * The ownership type a `sharing` block means when it declares none. READ from
- * `@objectstack/spec`, not restated, the same read as the page size above:
- * `ViewSharingSchema` declares `type` with a default, nothing on the render
- * path parses the served view, so an authored `{ lockedBy }` arrives with
- * `type` absent, and parsing an empty block is the spec's own answer.
+ * Who locked the view configuration, when the `sharing` block names someone —
+ * the one live key of the spec's `ViewSharingSchema`, and the only thing the
+ * toolbar's sharing indicator draws.
+ *
+ * objectstack#29037 retired the block's ownership `type` (ADR-0049): this
+ * indicator was its one reader, and it labelled a view "Personal view" that
+ * every user who can read the object was shown, because nothing restricts a
+ * view to one user. No view is labelled personal or shared any more; a block
+ * without `lockedBy` draws nothing.
  */
-const SPEC_DEFAULT_SHARING_TYPE = ViewSharingSchema.parse({}).type;
-
-/**
- * Whether the toolbar draws the sharing indicator: a declared `type` or a
- * `lockedBy`. The lock keys on `lockedBy` alone and never waits on `type`.
- */
-function hasSharingIndicator(sharing: { type?: string; lockedBy?: string } | undefined): boolean {
-  return !!(sharing?.type || sharing?.lockedBy);
+function sharingLockedBy(sharing: { lockedBy?: unknown } | undefined): string | undefined {
+  const lockedBy = sharing?.lockedBy;
+  return typeof lockedBy === 'string' && lockedBy !== '' ? lockedBy : undefined;
 }
 
 /**
@@ -6572,35 +6569,25 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             </Popover>
           )}
 
-          {/* Sharing — a read-only indicator of the spec's `ViewSharingSchema`
-              (`type` + optional `lockedBy`), never a button. No view-sharing
+          {/* Sharing — a read-only lock indicator from the spec's
+              `ViewSharingSchema.lockedBy`, never a button: no view-sharing
               control or endpoint exists to open, so a clickable "Share" here
               was a dead button. `lockedBy` is the spec's free string ("User
-              who locked the view configuration"), rendered as written. A
-              block with `lockedBy` and no `type` shows the lock beside the
-              spec's default type. */}
-          {hasSharingIndicator(schema.sharing) && (() => {
-            const sharingType = schema.sharing?.type ?? SPEC_DEFAULT_SHARING_TYPE;
-            const sharingLabel = sharingType === 'personal'
-              ? t('list.sharingPersonal')
-              : t('list.sharingCollaborative');
-            const lockedBy = schema.sharing?.lockedBy;
-            const lockedLabel = lockedBy ? t('list.sharingLockedBy', { user: lockedBy }) : undefined;
-            const hint = lockedLabel ? `${sharingLabel} · ${lockedLabel}` : sharingLabel;
+              who locked the view configuration"), rendered as written. The
+              block's ownership `type` is retired (objectstack#29037): it
+              claimed "Personal view" for a view everyone could read. */}
+          {(() => {
+            const lockedBy = sharingLockedBy(schema.sharing);
+            if (!lockedBy) return null;
+            const lockedLabel = t('list.sharingLockedBy', { user: lockedBy });
             return (
               <span
                 className="inline-flex h-7 items-center px-2 text-muted-foreground text-xs"
-                title={hint}
-                data-testid="share-button"
+                title={lockedLabel}
+                data-testid="sharing-locked-by"
               >
-                <Share2 className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
-                <span className="hidden sm:inline">{sharingLabel}</span>
-                {lockedLabel && (
-                  <span className="inline-flex items-center ml-1.5" data-testid="sharing-locked-by">
-                    <Lock className="h-3 w-3 mr-1" aria-hidden="true" />
-                    <span className="hidden sm:inline">{lockedLabel}</span>
-                  </span>
-                )}
+                <Lock className="h-3 w-3 mr-1" aria-hidden="true" />
+                <span className="hidden sm:inline">{lockedLabel}</span>
               </span>
             );
           })()}
@@ -6633,7 +6620,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
 
           {/* --- Separator: Print/Share/Export | Search --- */}
           {(() => {
-            const hasLeftSideItems = schema.allowPrinting || hasSharingIndicator(schema.sharing)
+            const hasLeftSideItems = schema.allowPrinting || sharingLockedBy(schema.sharing) !== undefined
               || (!toolbarFlags.compactToolbar && resolvedExportOptions && exportPermitted && exportableFormats.length > 0);
             return toolbarFlags.showSearch && hasLeftSideItems ? (
               <div className="h-5 w-px bg-border/50 mx-1 shrink-0" />

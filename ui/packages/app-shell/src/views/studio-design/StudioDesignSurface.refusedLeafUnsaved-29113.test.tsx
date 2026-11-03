@@ -266,6 +266,18 @@ function reloadAsks(): boolean {
   return e.defaultPrevented;
 }
 
+/**
+ * Wait until a reload asks (`true`) or no longer asks (`false`). The guard is
+ * not part of the commit that shows or clears the refusal: the pillar reports
+ * the change from an effect, and the surface installs or removes its
+ * `beforeunload` listener from an effect of the render that report causes. So
+ * a read straight after the refusal shows can run before either effect has
+ * (objectstack#29468: red once on a loaded Test UI shard).
+ */
+async function untilReloadAsks(expected: boolean): Promise<void> {
+  await waitFor(() => expect(reloadAsks()).toBe(expected));
+}
+
 const pillarLink = (name: string) => within(screen.getByTestId('studio-pillar-nav')).getByRole('link', { name });
 const railRow = (name: string) => screen.getByTitle(`report · ${name}`);
 
@@ -276,7 +288,7 @@ describe('a leaf edit whose save was refused guards every departure (objectstack
     await editAndSave();
 
     // Red on base: the pillar reported only its nav edits, so neither asked.
-    expect(reloadAsks()).toBe(true);
+    await untilReloadAsks(true);
     fireEvent.click(pillarLink('Data'));
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     expect(confirmSpy).toHaveBeenCalledWith(LEAVE_QUESTION);
@@ -285,7 +297,7 @@ describe('a leaf edit whose save was refused guards every departure (objectstack
     // The next edit is sent again, and this time it lands.
     state.refuse = false;
     await editAndSave();
-    expect(reloadAsks()).toBe(false);
+    await untilReloadAsks(false);
     fireEvent.click(pillarLink('Data'));
     await screen.findByTestId('studio-rail-data');
     expect(confirmSpy).toHaveBeenCalledTimes(1);
@@ -311,7 +323,7 @@ describe('a leaf edit whose save was refused guards every departure (objectstack
     await waitFor(() => expect(screen.getByTestId('stub-label')).toHaveTextContent('Ops report'), { timeout: 8000 });
     // The other leaf's buffer is installed clean: the refusal went with the edit.
     expect(screen.queryByTestId('studio-refusal')).toBeNull();
-    expect(reloadAsks()).toBe(false);
+    await untilReloadAsks(false);
   });
 
   // CONTROL: an untouched leaf, and an edit whose save landed, never ask.

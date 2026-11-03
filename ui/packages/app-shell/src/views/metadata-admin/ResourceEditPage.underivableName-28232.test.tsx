@@ -5,8 +5,9 @@
  * next to Name.
  *
  * The permission set's create form fills `name` from `label` through
- * `slugify`, which keeps only `[a-z0-9]`. A label written all in Chinese leaves
- * Name empty and required:
+ * `slugify`, which keeps only `[a-z0-9]`. A label written all in Japanese
+ * leaves Name empty and required (a Chinese one derives through its pinyin
+ * since objectstack#29690, the last block):
  *
  *   (a) the Name row carries one line saying the label cannot be turned into a
  *       name, and the line goes away once a Name is typed (and comes back when
@@ -28,6 +29,10 @@ import { z } from 'zod';
 import { getMetadataCreateSeed, getMetadataTypeSchema } from '@objectstack/spec/kernel';
 import { METADATA_FORM_REGISTRY } from '@objectstack/spec/system';
 import { t } from './i18n';
+// The pinyin dictionary a Chinese label derives through, resident before any
+// case, as it is once a Console door has fetched it (objectstack#29690).
+import { loadHanRomanizer } from './romanizeHan';
+await loadHanRomanizer();
 
 const NOTE = t('engine.create.nameNotDerived', 'en-US');
 
@@ -101,9 +106,9 @@ function rowOf(control: HTMLElement): HTMLElement {
 const noteIn = (row: HTMLElement) => within(row).queryByTestId('schema-form-field-note');
 
 describe('a label that cannot fill Name says so next to Name (objectstack#28232)', () => {
-  it('(a) an all-Chinese label: the Name row says so until a Name is typed', async () => {
+  it('(a) an all-Japanese label: the Name row says so until a Name is typed', async () => {
     const { nameBox, labelBox } = await openNewPermissionSet();
-    fireEvent.change(labelBox, { target: { value: '销售运营' } });
+    fireEvent.change(labelBox, { target: { value: 'セールス' } });
     await waitFor(() => expect(noteIn(rowOf(nameBox))).toHaveTextContent(NOTE));
     expect(nameBox.value).toBe('');
     expect(screen.getAllByTestId('schema-form-field-note')).toHaveLength(1);
@@ -120,12 +125,29 @@ describe('a label that cannot fill Name says so next to Name (objectstack#28232)
     const { nameBox, labelBox } = await openNewPermissionSet();
     expect(screen.queryByTestId('schema-form-field-note')).toBeNull();
 
-    fireEvent.change(labelBox, { target: { value: 'Sales 运营' } });
-    await waitFor(() => expect(nameBox.value).toBe('sales'));
+    fireEvent.change(labelBox, { target: { value: 'Sales Ops' } });
+    await waitFor(() => expect(nameBox.value).toBe('sales_ops'));
     expect(screen.queryByTestId('schema-form-field-note')).toBeNull();
 
     fireEvent.change(labelBox, { target: { value: '' } });
     await waitFor(() => expect(nameBox.value).toBe(''));
     expect(screen.queryByTestId('schema-form-field-note')).toBeNull();
+  });
+});
+
+describe('a Chinese label fills Name by pinyin on the generic create form (objectstack#29690)', () => {
+  it('fills an editable Name and says nothing; a mixed label keeps its Latin word', async () => {
+    const { nameBox, labelBox } = await openNewPermissionSet();
+    fireEvent.change(labelBox, { target: { value: '销售运营' } });
+    await waitFor(() => expect(nameBox.value).toBe('xiaoshou_yunying'));
+    expect(screen.queryByTestId('schema-form-field-note')).toBeNull();
+
+    fireEvent.change(labelBox, { target: { value: 'Sales 运营' } });
+    await waitFor(() => expect(nameBox.value).toBe('sales_yunying'));
+
+    fireEvent.change(nameBox, { target: { value: 'sales_ops' } });
+    fireEvent.change(labelBox, { target: { value: '销售运营部' } });
+    await waitFor(() => expect(labelBox.value).toBe('销售运营部'));
+    expect(nameBox.value).toBe('sales_ops');
   });
 });

@@ -129,7 +129,6 @@ const ja = {
   actions: {
     decisionOutput: {
       help: '決定の出力としてフローに渡されます。',
-      helpMultiValue: '決定の出力としてフローに渡されます。複数の値はカンマで区切ってください。',
     },
     resultDialog: {
       // objectui#13461 — the secret block's reveal toggle, an icon-only button.
@@ -261,6 +260,11 @@ const ja = {
       copy: '値をコピー',
       show: 'QR コードを表示',
       hide: 'QR コードを非表示',
+    },
+    // The scan button text and lookup fields show inside the mobile shell.
+    scan: {
+      button: 'コードをスキャン',
+      failed: 'スキャンできませんでした',
     },
     image: {
       upload: "画像をアップロード",
@@ -859,8 +863,6 @@ const ja = {
     pullToRefresh: "引っ張って更新",
     refreshing: "更新中…",
     share: "共有",
-    sharingPersonal: "個人ビュー",
-    sharingCollaborative: "共有ビュー",
     sharingLockedBy: "{{user}} がロック中",
     print: "印刷",
     hideFieldsTitle: "フィールドを非表示",
@@ -1119,6 +1121,10 @@ const ja = {
       pin: "固定：このビューを既定で開く",
       unpin: "固定を解除：リストは既定のビューを再び開きます",
       inMenu: "すでにメニューにあります",
+      // objectstack#29635 — the reader's own views (My views).
+      myViews: "マイビュー",
+      saveAsMyView: "マイビューとして保存",
+      myViewName: "ビュー名",
     },
     dragToReorder: "ドラッグして並べ替え",
     defaultView: "デフォルトビュー",
@@ -1133,7 +1139,6 @@ const ja = {
     undo: "元に戻す",
     redo: "やり直す",
     canvasMinimap: "キャンバスのミニマップ",
-    versionHistory: "バージョン履歴",
   },
   detail: {
     editInlineHint: "ダブルクリックで編集",
@@ -4487,6 +4492,7 @@ const ja = {
     changes: {
       title: '保留中の変更',
       description: '公開で何が変わるか。新規項目は追加され、更新は公開中のバージョンを上書きします。',
+      savedToCustomization: '{{package}} のカスタマイズに保存',
       loading: '保留中の変更を読み込み中…',
       loadFailed: '保留中の変更を読み込めませんでした:',
       empty: '保留中の変更はありません — すべてのドラフトが公開済みです。',
@@ -4876,6 +4882,26 @@ const ja = {
     retry: "再試行",
     emptyTitle: "接続が必要なコネクタはありません",
     emptyBody: "インストール済みのアプリに、管理者が OAuth でサインインするコネクタはありません。",
+    clientKeptWithSecret: "OAuth クライアント {{clientId}}（シークレット保存済み）",
+    clientKept: "OAuth クライアント {{clientId}}（シークレットなし）",
+    clientTitle: "{{name}} の OAuth クライアント",
+    clientIntro: "このコネクタは、組織がこのデプロイ用に下記のリダイレクト URI でベンダーへ登録した OAuth クライアントでサインインします。クライアントの ID と、ベンダーが発行した場合はシークレットを入力し、ベンダーのサインインへ進んでください。",
+    clientStored: "保存済みのクライアント: {{clientId}}",
+    clientStoredSecret: "クライアントシークレットが一緒に保存されています。表示されることはありません。",
+    clientStoredNoSecret: "クライアントシークレットは保存されていません。",
+    clientResend: "置き換えると新しいクライアントを送信します。クライアント ID と、ベンダーが発行した場合はシークレットを入力してください。",
+    clientId: "クライアント ID",
+    clientSecret: "クライアントシークレット",
+    clientSecretHint: "パブリッククライアントの場合は空のままにします。シークレットは接続とともに暗号化して保存され、再表示されません。",
+    clientContinue: "サインインへ進む",
+    redirectUriLabel: "リダイレクト URI",
+    redirectUriCopy: "コピー",
+    redirectUriCopied: "コピーしました",
+    redirectUriHint: "続行する前に、この URI をそのままベンダーの OAuth クライアントに登録してください。",
+    redirectUriMissing: "このデプロイには固定の公開アドレスがないため、リダイレクト URI がなく、接続は拒否されます。サーバーで OS_BASE_URL（または OS_AUTH_URL）を設定してください。",
+    clientKeepHint: "再接続ではこのクライアントと保存済みのシークレットを引き続き使います。ここで入力する必要はありません。",
+    clientKeep: "保存済みのクライアントを使う",
+    clientReplace: "保存済みのクライアントを置き換える",
   },
   setupAssignments: {
     positionsTitle: "役職の保持者",

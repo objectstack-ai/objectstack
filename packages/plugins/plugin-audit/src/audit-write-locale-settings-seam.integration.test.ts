@@ -8,6 +8,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
+import { SysUser } from '@objectstack/platform-objects/identity';
 import { AuditPlugin } from './audit-plugin.js';
 import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
@@ -106,7 +107,6 @@ describe('audit writers — a localization change reaches the very next @mention
       {
         thread_id: `biz_task:${taskId}`,
         author_id: 'u_admin',
-        author_name: 'Ada',
         body: `note ${comments}`,
         mentions: '["u_bob"]',
       },
@@ -129,10 +129,14 @@ describe('audit writers — a localization change reaches the very next @mention
     engine.registerDriver(driver, true);
     engine.registry.registerObject(sysSetting as any, HARNESS_PACKAGE);
     engine.registry.registerObject(task as any, HARNESS_PACKAGE);
+    // The mention's actor is named from the author's own profile: a comment's
+    // display name is stamped from the session, like its author id.
+    engine.registry.registerObject(SysUser as any, HARNESS_PACKAGE);
     await engine.syncSchemas();
     // A real `single` install's Default Organization: the system writes below
     // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
     await installDefaultOrganization(engine);
+    await engine.insert('sys_user', { id: 'u_admin', name: 'Ada', email: 'ada@seam.test' }, SYSTEM as any);
 
     sql = async (statement, bindings) => {
       const result = await (driver as unknown as { execute(s: string, b: unknown[]): Promise<unknown> }).execute(

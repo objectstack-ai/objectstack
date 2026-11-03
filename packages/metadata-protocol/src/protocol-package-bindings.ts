@@ -297,6 +297,80 @@ function boundPackageOf(packageId: unknown): string | undefined {
 }
 
 /**
+ * [#29600] The types whose stored row stays out of the registry's bare slot
+ * when it is bound to a package that ships no artifact of its name while
+ * another package does: the row would wear the other package's envelope
+ * there, and the per-package layer would list the copy under that package.
+ * Every protocol read of these types serves such a row from the row itself
+ * (the by-name read, both lists, the layered read), so the bare entry served
+ * no reader the row does not. `view` is not here: it has its own, wider rule
+ * (#22057, `anotherPackageShips`).
+ *
+ * ⛔ A closed list, judged on the canonical type. [#29613] It includes the
+ * five {@link SEALED_ROW_SERVED_OVERRIDE_TYPES} since their reads serve a
+ * `.custom` pair's declared override from its row, as these three types'
+ * reads do. `flow` registers with no artifact envelope at all (Regime C,
+ * #20913), and the boot pull arms its declared override from the bare slot.
+ */
+const BORROWED_ENVELOPE_DECLINED_TYPES: ReadonlySet<string> = new Set([
+    'dashboard',
+    'report',
+    'email_template',
+    // [#29613] The SEALED_ROW_SERVED_OVERRIDE_TYPES, spelled out (`protocol-package-bindings.sealed-override.test.ts` pins both lists).
+    'page',
+    'app',
+    'dataset',
+    'doc',
+    'book',
+]);
+
+/**
+ * [#29613, ADR-0146 D8 item 2] The SEALED types (ADR-0131 D6: a registry
+ * entry with `allowEnvironmentOverlay: false`) whose stored row the reads
+ * serve when it is the shipping package's declared `.custom` override
+ * ({@link isServedOverrideRowOf}): `page`, `app`, `dataset`, `doc` and
+ * `book`, the overridable types of ADR-0146 D2 that open no environment
+ * overlay. Every other stored row of a name a managed package ships stays
+ * unserved for them ({@link isUnservedSealedOverlay}).
+ *
+ * Before, the reads declined the override's row with the rest, and the
+ * override was served only from the registry's bare slot, where the hydrator
+ * registered it wearing the base's envelope. With a metadata service (every
+ * real boot) the by-name read answered the service's copy of the base's body
+ * instead, while the lists answered the override, and the layered read's
+ * effective layer and the pair's per-package layer never saw it.
+ *
+ * ⛔ A closed list, judged on the canonical type. `mapping` is overridable and
+ * sealed too, and is not here: no card has measured its reads. `action` and
+ * `flow` wait for ADR-0146 D9's conditions (`flow` has its own admission,
+ * `declinesStoredRow`'s first branch). Every type here is also in
+ * {@link BORROWED_ENVELOPE_DECLINED_TYPES}: the bare entry served no reader
+ * the row does not serve now.
+ */
+const SEALED_ROW_SERVED_OVERRIDE_TYPES: ReadonlySet<string> = new Set(['page', 'app', 'dataset', 'doc', 'book']);
+
+/** [#29613] Whether `type` is one of {@link SEALED_ROW_SERVED_OVERRIDE_TYPES}, folded to the canonical singular. */
+function servesSealedOverrideRow(type: string): boolean {
+    return SEALED_ROW_SERVED_OVERRIDE_TYPES.has(canonicalMetaType(type));
+}
+
+/**
+ * [#29600] Whether the hydrator keeps a stored row of `canonicalType`, bound
+ * to `packageId`, out of the registry's bare slot because `artifact` (the
+ * envelope it would graft on) is ANOTHER package's: the artifact lookup
+ * scopes to the row's package and falls back to whichever package ships the
+ * name. A row of a package that ships its own artifact of the name keeps its
+ * bare entry with its own envelope (#4624, ADR-0048); a package-less row, and
+ * a row of a name (or bundle member) no package ships, register as before.
+ */
+function declinesBorrowedEnvelope(canonicalType: string, packageId: unknown, artifact: unknown): boolean {
+    if (!BORROWED_ENVELOPE_DECLINED_TYPES.has(canonicalType)) return false;
+    const bound = boundPackageOf(packageId);
+    if (bound === undefined || !artifact || typeof artifact !== 'object') return false;
+    return (artifact as { _packageId?: unknown })._packageId !== bound;
+}
+
+/**
  * [#16702] ADR-0010 §3.3 — the three protection keys that are READ-SIDE
  * DERIVED, and therefore must never be persisted from a caller's body.
  *
@@ -422,10 +496,12 @@ function isShippedViewItem(artifact: unknown): boolean {
 export {
     boundPackageOf,
     bundleMemberOf,
+    declinesBorrowedEnvelope,
     envelopePackageId,
     isShippedViewItem,
     mergeArtifactProtection,
     perPackageLayerEnvelope,
+    servesSealedOverrideRow,
     stateTenantAuthorship,
     stripDerivedProvenance,
 };

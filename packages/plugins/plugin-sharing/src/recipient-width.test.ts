@@ -583,3 +583,66 @@ describe('#14547 — an org-stamped rule against a SEEDED business unit', () => 
     });
   });
 });
+
+describe('#29362 — the per-record pass is best-effort per rule', () => {
+  // A rule whose recipients cannot be read now REFUSES (the role read past a
+  // failed `sys_member` read throws instead of answering nobody). The record's
+  // write hook reconciles every rule on the object in one pass, so the refusal
+  // must stay with its own rule: that rule's grants stay as they were, it is
+  // reported, and the rules after it still reconcile.
+  const POSITION_RULE = 'share_note_with_sales_reps';
+  const USER_RULE = 'share_note_with_auditor';
+
+  it('the first rule refuses, its grant stays, and the second rule still reconciles', async () => {
+    const engine = makeEngine();
+    const warn = vi.fn();
+    const sharing = new SharingService({ engine: engine as any });
+    const rules = new SharingRuleService({ engine: engine as any, sharing, logger: { warn, info: vi.fn(), error: vi.fn(), debug: vi.fn() } as any });
+    engine.seed('showcase_private_note', [{ id: 'note_1', tag: 'shared', owner_id: 'author' }]);
+    engine.seed('sys_member', [{ id: 'mem_rep', user_id: 'u_rep', organization_id: null, role: 'sales_rep' }]);
+    // Listed in this order: the position rule is reconciled FIRST.
+    engine.seed('sys_sharing_rule', [
+      {
+        id: 'srule_position', organization_id: null, name: POSITION_RULE,
+        label: 'Note → sales reps', object_name: 'showcase_private_note',
+        criteria_json: JSON.stringify({ tag: 'shared' }),
+        recipient_type: 'position', recipient_id: 'sales_rep',
+        access_level: 'read', active: true, managed_by: 'package',
+      },
+      {
+        id: 'srule_user', organization_id: null, name: USER_RULE,
+        label: 'Note → auditor', object_name: 'showcase_private_note',
+        criteria_json: JSON.stringify({ tag: 'shared' }),
+        recipient_type: 'user', recipient_id: 'u_auditor',
+        access_level: 'read', active: true, managed_by: 'package',
+      },
+    ]);
+    const grantsOf = (sourceId: string) => (engine._tables.sys_record_share ?? [])
+      .filter((r) => r.record_id === 'note_1' && r.source === 'rule' && r.source_id === sourceId)
+      .map((r) => String(r.recipient_id));
+
+    // Both rules materialise while the membership is readable.
+    await rules.evaluateAllForRecord('showcase_private_note', 'note_1', SYS);
+    expect(grantsOf('srule_position')).toEqual(['u_rep']);
+    expect(grantsOf('srule_user')).toEqual(['u_auditor']);
+
+    // The auditor's grant goes missing, and the membership read starts failing.
+    const shares = engine._tables.sys_record_share!;
+    shares.splice(shares.findIndex((r) => r.source_id === 'srule_user'), 1);
+    const find = engine.find.bind(engine);
+    engine.find = async (o: string, opts?: any) => {
+      if (o === 'sys_member') throw new Error('SQLITE_IOERR: disk I/O error');
+      return find(o, opts);
+    };
+
+    const results = await rules.evaluateAllForRecord('showcase_private_note', 'note_1', SYS);
+
+    expect(grantsOf('srule_position')).toEqual(['u_rep']);       // not revoked on a read it could not make
+    expect(grantsOf('srule_user')).toEqual(['u_auditor']);       // the next rule still reconciled
+    expect(results).toHaveLength(1);
+    const failed = warn.mock.calls.filter(([line]) => line === '[sharing-rule] record reconcile failed for rule');
+    expect(failed).toHaveLength(1);
+    expect(failed[0]![1]).toMatchObject({ rule: POSITION_RULE, recordId: 'note_1' });
+    expect(failed[0]![1].error).toMatch(/could not be read/);
+  });
+});

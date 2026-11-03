@@ -184,6 +184,25 @@ export function parseListedPackageManifests(payload: unknown): ReadonlyMap<strin
   return out;
 }
 
+/**
+ * [objectstack#29567] The listed package `id` as a {@link PkgEntry}, or `null`
+ * when the list does not name it. Unlike {@link parsePackages}, a kernel
+ * package (manifest scope `system` / `cloud`) answers too, with the server's
+ * verdict on its row, so a surface that has one OPEN reads it read-only as the
+ * server's write gate does. The switcher's list still leaves kernel packages
+ * out: that is which packages it offers, not what an open one is.
+ */
+export function listedPackageEntry(
+  manifests: ReadonlyMap<string, ListedPackageManifest>,
+  id: string,
+): PkgEntry | null {
+  const listed = manifests.get(id);
+  if (!listed) return null;
+  const declared = listed.manifest.namespace;
+  const namespace = typeof declared === 'string' && declared ? declared : deriveNamespaceFromPackageId(id);
+  return { id, name: listed.name, writable: listed.writable, namespace };
+}
+
 /** {@link parseListedPackageManifests}, read from the request {@link fetchPackages} shares. */
 export async function fetchListedPackageManifests(): Promise<ReadonlyMap<string, ListedPackageManifest>> {
   return parseListedPackageManifests(await readPackagesPayload());

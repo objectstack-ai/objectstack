@@ -144,7 +144,8 @@ describe('a cascade dependent\'s ERR_SUMMARY_RECOMPUTE never answers for a paren
     const { engine, driver } = await makeEngine(true);
     const err: any = await engine.delete('acct', { where: { id: 'a1' } }).then(() => null, (e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
-    expect(err.code).toBeUndefined();
+    expect(err.code).toBe('INTERNAL_ERROR');
+    expect(err.status).toBe(500);
     expect(err.cause?.code).toBe('ERR_SUMMARY_RECOMPUTE');
     expect(err.written).toBeUndefined();
     expect(driver.rolledBack).toHaveLength(1);
@@ -156,7 +157,8 @@ describe('a cascade dependent\'s ERR_SUMMARY_RECOMPUTE never answers for a paren
     const { engine, driver } = await makeEngine(false);
     const err: any = await engine.delete('acct', { where: { id: 'a1' } }).then(() => null, (e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
-    expect(err.code).toBeUndefined();
+    expect(err.code).toBe('INTERNAL_ERROR');
+    expect(err.status).toBe(500);
     expect(err.cause?.code).toBe('ERR_SUMMARY_RECOMPUTE');
     expect(ids(driver.rowsOf('acct'))).toEqual(['a1']);
     // The dependent the walk reached first is gone: nothing can roll it back.
@@ -167,7 +169,8 @@ describe('a cascade dependent\'s ERR_SUMMARY_RECOMPUTE never answers for a paren
     const { engine, driver } = await makeEngine(false);
     const err: any = await engine.delete('acct', { where: { name: 'A' }, multi: true }).then(() => null, (e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
-    expect(err.code).toBeUndefined();
+    expect(err.code).toBe('INTERNAL_ERROR');
+    expect(err.status).toBe(500);
     expect(err.cause?.code).toBe('ERR_SUMMARY_RECOMPUTE');
     expect(ids(driver.rowsOf('acct'))).toEqual(['a1']);
   });
@@ -178,7 +181,8 @@ describe('a cascade dependent\'s ERR_SUMMARY_RECOMPUTE never answers for a paren
       .transaction(async (trx: any) => engine.delete('line', { where: { id: 'l1' }, context: trx }))
       .then(() => null, (e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
-    expect(err.code).toBeUndefined();
+    expect(err.code).toBe('INTERNAL_ERROR');
+    expect(err.status).toBe(500);
     expect(err.cause?.code).toBe('ERR_SUMMARY_RECOMPUTE');
     expect(driver.rolledBack).toHaveLength(1);
     expect(ids(driver.rowsOf('line'))).toEqual(['l1', 'l2']);
@@ -191,7 +195,8 @@ describe('a cascade dependent\'s ERR_SUMMARY_RECOMPUTE never answers for a paren
       .transaction(async (trx: any) => trx.object('line').deleteById('l1'))
       .then(() => null, (e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
-    expect(err.code).toBeUndefined();
+    expect(err.code).toBe('INTERNAL_ERROR');
+    expect(err.status).toBe(500);
     expect(err.cause?.code).toBe('ERR_SUMMARY_RECOMPUTE');
     expect(driver.rolledBack).toHaveLength(1);
     expect(ids(driver.rowsOf('line'))).toEqual(['l1', 'l2']);

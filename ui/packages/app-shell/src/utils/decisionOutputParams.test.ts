@@ -93,7 +93,9 @@ describe('decisionOutputParams — declaration → param', () => {
     const [typed] = decisionOutputParams([{ key: 'r', type: 'user' }], t);
     const [free] = decisionOutputParams([{ key: 'note' }], t);
     expect(typed.helpText).toBe('t:actions.decisionOutput.help');
-    expect(free.helpText).toBe('t:actions.decisionOutput.helpMultiValue');
+    // No comma sentence: a single-value output's comma is literal and a list
+    // output collects its entries one by one (objectstack#28658).
+    expect(free.helpText).toBe('t:actions.decisionOutput.help');
   });
 
   it('leaves an undeclared output optional', () => {
@@ -183,6 +185,46 @@ describe('decisionOutputParams — the params survive resolution (objectui#2955)
  * to be a `sys_position` lookup: a fresh database holds no `sys_position` rows,
  * so the picker offered nothing, and a row it did offer committed a row id.
  */
+describe('decisionOutputParams — a free-value output is sent in its declared shape (objectstack#28658)', () => {
+  // The decision door judges every output's shape against its declaration:
+  // `multiple: true` takes a list of strings, anything else one string. A
+  // comma-separated string for a list output is refused there, so the Console
+  // must never send one.
+  it('a `text` output declared `multiple: true` reaches the widget as a tags list', () => {
+    const [param] = decisionOutputParams([{ key: 'labels', type: 'text', multiple: true }], t);
+    expect(param).toMatchObject({ type: 'tags', multiple: true, helpText: 't:actions.decisionOutput.help' });
+    expect(widgetFor(param)).toMatchObject({ type: 'tags', multiple: true });
+  });
+
+  it('an untyped output declared `multiple: true` is a tags list too', () => {
+    const [param] = decisionOutputParams([{ key: 'labels', multiple: true }], t);
+    expect(widgetFor(param)).toMatchObject({ type: 'tags', multiple: true });
+  });
+
+  it('a `position` list with no registry reader degrades to the tags list, not a comma box', () => {
+    const [param] = decisionOutputParams([{ key: 'p', type: 'position', multiple: true }], t);
+    expect(widgetFor(param)).toMatchObject({ type: 'tags', multiple: true });
+  });
+
+  it('a bare key takes one value: it stays a single text box', () => {
+    const defs = decisionOutputDefs({ decision_outputs: ['note'] });
+    const [param] = decisionOutputParams(defs, t);
+    expect(param.multiple).toBeUndefined();
+    expect(widgetFor(param)).toMatchObject({ type: 'text' });
+  });
+
+  it('`multiple: false` stays a single text box', () => {
+    const [param] = decisionOutputParams([{ key: 'note', type: 'text', multiple: false }], t);
+    expect(widgetFor(param)).toMatchObject({ type: 'text' });
+  });
+
+  it('the fold hands a list on as a list and a single value as one string, comma and all', () => {
+    expect(
+      foldDecisionOutputs({ 'outputs.labels': ['alpha', 'beta'], 'outputs.note': 'a, b' }),
+    ).toEqual({ rest: {}, outputs: { labels: ['alpha', 'beta'], note: 'a, b' } });
+  });
+});
+
 describe('decisionOutputParams — a position output lists the registry (objectui#7611)', () => {
   const POSITIONS = [
     { name: 'manager', label: 'Project Manager' },
@@ -235,7 +277,7 @@ describe('decisionOutputParams — a position output lists the registry (objectu
     // An absent reader is a different fact from an empty registry — the same
     // split `RecipientPickerField` draws on the same registry.
     const [param] = decisionOutputParams([{ key: 'p', type: 'position' }], t);
-    expect(param).toMatchObject({ type: 'text', helpText: 't:actions.decisionOutput.helpMultiValue' });
+    expect(param).toMatchObject({ type: 'text', helpText: 't:actions.decisionOutput.help' });
   });
 
   it('keeps `required` on approve, so a blank registry pick blocks Confirm', () => {

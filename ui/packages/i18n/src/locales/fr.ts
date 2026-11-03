@@ -131,7 +131,6 @@ const fr = {
   actions: {
     decisionOutput: {
       help: 'Transmis au flux comme sortie de décision.',
-      helpMultiValue: 'Transmis au flux comme sortie de décision. Séparez les valeurs multiples par des virgules.',
     },
     resultDialog: {
       // objectui#13461 — the secret block's reveal toggle, an icon-only button.
@@ -263,6 +262,11 @@ const fr = {
       copy: 'Copier la valeur',
       show: 'Afficher le code QR',
       hide: 'Masquer le code QR',
+    },
+    // The scan button text and lookup fields show inside the mobile shell.
+    scan: {
+      button: 'Scanner un code',
+      failed: 'Échec du scan',
     },
     image: {
       upload: "Téléverser une image",
@@ -884,8 +888,6 @@ const fr = {
     pullToRefresh: "Tirer pour actualiser",
     refreshing: "Actualisation…",
     share: "Partager",
-    sharingPersonal: "Vue personnelle",
-    sharingCollaborative: "Vue partagée",
     sharingLockedBy: "Verrouillée par {{user}}",
     print: "Imprimer",
     hideFieldsTitle: "Masquer les champs",
@@ -1147,6 +1149,10 @@ const fr = {
       pin: "Épingler : ouvrir cette vue par défaut",
       unpin: "Désépingler : la liste rouvre sa vue par défaut",
       inMenu: "Déjà dans le menu",
+      // objectstack#29635 — the reader's own views (My views).
+      myViews: "Mes vues",
+      saveAsMyView: "Enregistrer comme ma vue",
+      myViewName: "Nom de la vue",
     },
     dragToReorder: "Glisser pour réorganiser",
     defaultView: "Vue par défaut",
@@ -1161,7 +1167,6 @@ const fr = {
     undo: "Annuler",
     redo: "Rétablir",
     canvasMinimap: "Mini-carte du canevas",
-    versionHistory: "Historique des versions",
   },
   detail: {
     editInlineHint: "Double-cliquez pour modifier",
@@ -4581,6 +4586,7 @@ const fr = {
     changes: {
       title: 'Modifications en attente',
       description: 'Ce que la publication changera. Les nouveaux éléments sont ajoutés ; les mises à jour remplacent la version en ligne.',
+      savedToCustomization: 'Enregistré dans les personnalisations de {{package}}',
       loading: 'Chargement des modifications en attente…',
       loadFailed: 'Impossible de charger les modifications en attente :',
       empty: 'Rien en attente — tous les brouillons ont été publiés.',
@@ -4994,6 +5000,26 @@ const fr = {
     retry: "Réessayer",
     emptyTitle: "Aucun connecteur à connecter",
     emptyBody: "Aucune des applications installées n'a de connecteur auquel un administrateur se connecte avec OAuth.",
+    clientKeptWithSecret: "Client OAuth {{clientId}}, secret enregistré",
+    clientKept: "Client OAuth {{clientId}}, sans secret",
+    clientTitle: "Client OAuth pour {{name}}",
+    clientIntro: "Ce connecteur se connecte avec un client OAuth que votre organisation enregistre auprès du fournisseur pour ce déploiement, avec l'URI de redirection ci-dessous. Saisissez l'identifiant du client et, si le fournisseur en a émis un, son secret, puis poursuivez vers la connexion du fournisseur.",
+    clientStored: "Client enregistré : {{clientId}}",
+    clientStoredSecret: "Un secret client est enregistré avec lui. Il n'est jamais affiché.",
+    clientStoredNoSecret: "Aucun secret client n'est enregistré avec lui.",
+    clientResend: "Le remplacer envoie un nouveau client : saisissez son identifiant client et, si le fournisseur en a émis un, son secret.",
+    clientId: "Identifiant client",
+    clientSecret: "Secret client",
+    clientSecretHint: "Laissez vide pour un client public. Le secret est stocké chiffré avec la connexion et n'est plus jamais affiché.",
+    clientContinue: "Continuer vers la connexion",
+    redirectUriLabel: "URI de redirection",
+    redirectUriCopy: "Copier",
+    redirectUriCopied: "Copié",
+    redirectUriHint: "Enregistrez exactement cet URI dans le client OAuth du fournisseur avant de continuer.",
+    redirectUriMissing: "Ce déploiement n'a pas d'adresse publique fixe : il n'a donc pas d'URI de redirection et toute connexion est refusée. Définissez OS_BASE_URL (ou OS_AUTH_URL) sur le serveur.",
+    clientKeepHint: "La reconnexion conserve ce client et son secret enregistré ; rien n'est à saisir ici.",
+    clientKeep: "Conserver le client enregistré",
+    clientReplace: "Remplacer le client enregistré",
   },
   setupAssignments: {
     positionsTitle: "Titulaires de postes",

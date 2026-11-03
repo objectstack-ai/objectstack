@@ -131,7 +131,6 @@ const pt = {
   actions: {
     decisionOutput: {
       help: 'Entregue ao fluxo como saída da decisão.',
-      helpMultiValue: 'Entregue ao fluxo como saída da decisão. Separe vários valores por vírgulas.',
     },
     resultDialog: {
       // objectui#13461 — the secret block's reveal toggle, an icon-only button.
@@ -263,6 +262,11 @@ const pt = {
       copy: 'Copiar valor',
       show: 'Mostrar código QR',
       hide: 'Ocultar código QR',
+    },
+    // The scan button text and lookup fields show inside the mobile shell.
+    scan: {
+      button: 'Escanear código',
+      failed: 'Falha ao escanear',
     },
     image: {
       upload: "Enviar imagem",
@@ -884,8 +888,6 @@ const pt = {
     pullToRefresh: "Puxar para atualizar",
     refreshing: "Atualizando…",
     share: "Compartilhar",
-    sharingPersonal: "Visualização pessoal",
-    sharingCollaborative: "Visualização compartilhada",
     sharingLockedBy: "Bloqueada por {{user}}",
     print: "Imprimir",
     hideFieldsTitle: "Ocultar campos",
@@ -1147,6 +1149,10 @@ const pt = {
       pin: "Fixar: abrir esta exibição por padrão",
       unpin: "Desafixar: a lista volta a abrir a exibição padrão",
       inMenu: "Já está no menu",
+      // objectstack#29635 — the reader's own views (My views).
+      myViews: "Minhas visualizações",
+      saveAsMyView: "Salvar como minha visualização",
+      myViewName: "Nome da visualização",
     },
     dragToReorder: "Arrastar para reordenar",
     defaultView: "Exibição padrão",
@@ -1161,7 +1167,6 @@ const pt = {
     undo: "Desfazer",
     redo: "Refazer",
     canvasMinimap: "Minimapa da tela",
-    versionHistory: "Histórico de versões",
   },
   detail: {
     editInlineHint: "Clique duas vezes para editar",
@@ -4580,6 +4585,7 @@ const pt = {
     changes: {
       title: 'Alterações pendentes',
       description: 'O que a publicação vai mudar. Itens novos são adicionados; atualizações sobrescrevem a versão publicada.',
+      savedToCustomization: 'Salvo nas personalizações de {{package}}',
       loading: 'Carregando alterações pendentes…',
       loadFailed: 'Não foi possível carregar as alterações pendentes:',
       empty: 'Nada pendente — todos os rascunhos foram publicados.',
@@ -4993,6 +4999,26 @@ const pt = {
     retry: "Tentar novamente",
     emptyTitle: "Nenhum conector precisa ser conectado",
     emptyBody: "Nenhum dos aplicativos instalados tem um conector em que um administrador entre com OAuth.",
+    clientKeptWithSecret: "Cliente OAuth {{clientId}}, segredo armazenado",
+    clientKept: "Cliente OAuth {{clientId}}, sem segredo",
+    clientTitle: "Cliente OAuth para {{name}}",
+    clientIntro: "Este conector entra com um cliente OAuth que sua organização registra no fornecedor para esta implantação, usando o URI de redirecionamento abaixo. Informe o ID do cliente e, se o fornecedor emitiu um, o segredo; depois continue para o login do fornecedor.",
+    clientStored: "Cliente armazenado: {{clientId}}",
+    clientStoredSecret: "Um segredo do cliente está armazenado com ele. Ele nunca é exibido.",
+    clientStoredNoSecret: "Nenhum segredo do cliente está armazenado com ele.",
+    clientResend: "Substituí-lo envia um novo cliente: informe o ID do cliente e, se o fornecedor emitiu um, o segredo.",
+    clientId: "ID do cliente",
+    clientSecret: "Segredo do cliente",
+    clientSecretHint: "Deixe vazio para um cliente público. O segredo é armazenado criptografado com a conexão e nunca mais é exibido.",
+    clientContinue: "Continuar para o login",
+    redirectUriLabel: "URI de redirecionamento",
+    redirectUriCopy: "Copiar",
+    redirectUriCopied: "Copiado",
+    redirectUriHint: "Registre exatamente este URI no cliente OAuth do fornecedor antes de continuar.",
+    redirectUriMissing: "Esta implantação não tem um endereço público fixo, então não tem URI de redirecionamento e a conexão é recusada. Defina OS_BASE_URL (ou OS_AUTH_URL) no servidor.",
+    clientKeepHint: "Reconectar mantém este cliente e o segredo armazenado; nada é informado aqui.",
+    clientKeep: "Manter o cliente armazenado",
+    clientReplace: "Substituir o cliente armazenado",
   },
   setupAssignments: {
     positionsTitle: "Titulares de cargos",

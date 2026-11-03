@@ -38,6 +38,7 @@ import { useSafeFieldLabel, useDisplayLocale } from '@object-ui/i18n';
 import { SchemaRendererContext as ImportedSchemaRendererContext, useAction, useHasActionProvider } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { useFieldTranslation } from './useFieldTranslation.js';
+import { ScanFieldButton, useFieldScanOffered } from './ScanFieldButton.js';
 
 export interface LookupOption {
   value: string | number;
@@ -310,6 +311,7 @@ function OptionPreviewLine({ children }: { children: React.ReactNode }) {
 export function LookupField({ value, onChange, field, readonly, error: fieldError, ...props }: FieldWidgetComponentProps<any>) {
   const [isOpen, setIsOpen] = useState(false);
   const { t } = useFieldTranslation();
+  const scanOffered = useFieldScanOffered();
   // Same two i18n channels RecordPickerDialog reads, so the inline dropdown
   // resolves option labels and formats dates exactly as the picker does
   // (objectui#5492). Both are provider-safe.
@@ -722,6 +724,9 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
 
   // State for the full Record Picker dialog (Level 2)
   const [isPickerOpen, setIsPickerOpen] = useState(false);
+  // The search a scanned code opens the search-first picker with; cleared when
+  // that picker closes, so the next ordinary open starts with an empty box.
+  const [pickerInitialSearch, setPickerInitialSearch] = useState<string | undefined>(undefined);
 
   // Dependent-lookup chain as a hard QueryParams.$filter record. Shared by
   // EVERY candidate surface — quick-select popover, Level-2 table picker and
@@ -814,6 +819,22 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
       popoverQuery.setSearch(query);
     },
     [popoverQuery.setSearch],
+  );
+
+  // A scanned code searches the lookup's target: the search-first variant
+  // opens its picker seeded with the code; the classic and static-option
+  // variants open the dropdown with the code in its search box.
+  const handleScanned = useCallback(
+    (code: string) => {
+      if (pickerVariant === 'search' && hasDataSource) {
+        setPickerInitialSearch(code);
+        setIsPickerOpen(true);
+        return;
+      }
+      setIsOpen(true);
+      handleSearchChange(code);
+    },
+    [pickerVariant, hasDataSource, handleSearchChange],
   );
 
   /**
@@ -1694,6 +1715,18 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
     </Button>
   ) : null;
 
+  /**
+   * The scan button (inside the mobile shell only, `useFieldScanOffered`).
+   * Gated like the trigger and the browse button: a disabled field or one
+   * whose `dependsOn` is unmet offers no scan, and a classic lookup whose
+   * target has no search (`searchOffered`) has nothing to search with.
+   */
+  const searchVariant = pickerVariant === 'search' && hasDataSource && !!dataSource && !!referenceTo;
+  const lookupScan =
+    scanOffered && !compact && !props.disabled && !dependenciesMissing && (searchVariant || searchOffered) ? (
+      <ScanFieldButton onScan={handleScanned} />
+    ) : null;
+
   return (
     <div className={compact ? '' : 'space-y-2'}>
       {/* Selected values display — a multi-select field's chips (full mode
@@ -1753,7 +1786,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
 
       {/* Field control: search-first inline combobox (anchored dropdown / mobile
           sheet), else the classic quick-select popover. */}
-      {pickerVariant === 'search' && hasDataSource && dataSource && referenceTo ? (
+      {searchVariant && dataSource && referenceTo ? (
         // A single-select field's row holds the trigger and its clear control,
         // as the classic row below does; a multi-select field is unchanged.
         <div className={multiple ? 'contents' : 'flex items-center gap-1.5'}>
@@ -1761,7 +1794,11 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
           inline
           trigger={triggerButton}
           open={isPickerOpen}
-          onOpenChange={setIsPickerOpen}
+          onOpenChange={(o) => {
+            setIsPickerOpen(o);
+            if (!o) setPickerInitialSearch(undefined);
+          }}
+          initialSearch={pickerInitialSearch}
           title={lookupField?.label || t('common.select')}
           multiple={multiple}
           dataSource={dataSource}
@@ -1777,6 +1814,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
           lookupFilters={lookupFilters}
           baseFilter={dependentFilter}
         />
+        {lookupScan}
         {singleClear}
         </div>
       ) : (
@@ -1964,6 +2002,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         </PopoverContent>
       </Popover>
 
+      {lookupScan}
       {singleClear}
 
       {/* "Browse All" button — classic lookups only; search fields open the

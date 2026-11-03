@@ -129,7 +129,6 @@ const de = {
   actions: {
     decisionOutput: {
       help: 'Wird dem Flow als Entscheidungsausgabe übergeben.',
-      helpMultiValue: 'Wird dem Flow als Entscheidungsausgabe übergeben. Mehrere Werte durch Komma trennen.',
     },
     resultDialog: {
       // objectui#13461 — the secret block's reveal toggle, an icon-only button.
@@ -261,6 +260,11 @@ const de = {
       copy: 'Wert kopieren',
       show: 'QR-Code anzeigen',
       hide: 'QR-Code verbergen',
+    },
+    // The scan button text and lookup fields show inside the mobile shell.
+    scan: {
+      button: 'Code scannen',
+      failed: 'Scannen fehlgeschlagen',
     },
     image: {
       upload: "Bild hochladen",
@@ -859,8 +863,6 @@ const de = {
     pullToRefresh: "Zum Aktualisieren ziehen",
     refreshing: "Aktualisiere…",
     share: "Teilen",
-    sharingPersonal: "Persönliche Ansicht",
-    sharingCollaborative: "Geteilte Ansicht",
     sharingLockedBy: "Gesperrt von {{user}}",
     print: "Drucken",
     hideFieldsTitle: "Felder ausblenden",
@@ -1119,6 +1121,10 @@ const de = {
       pin: "Anheften: diese Ansicht standardmäßig öffnen",
       unpin: "Lösen: die Liste öffnet wieder ihre Standardansicht",
       inMenu: "Bereits im Menü",
+      // objectstack#29635 — the reader's own views (My views).
+      myViews: "Meine Ansichten",
+      saveAsMyView: "Als meine Ansicht speichern",
+      myViewName: "Name der Ansicht",
     },
     dragToReorder: "Zum Neuanordnen ziehen",
     defaultView: "Standardansicht",
@@ -1133,7 +1139,6 @@ const de = {
     undo: "Rückgängig",
     redo: "Wiederholen",
     canvasMinimap: "Minikarte der Arbeitsfläche",
-    versionHistory: "Versionsverlauf",
   },
   detail: {
     editInlineHint: "Zum Bearbeiten doppelklicken",
@@ -4485,6 +4490,7 @@ const de = {
     changes: {
       title: 'Ausstehende Änderungen',
       description: 'Was die Veröffentlichung ändert. Neue Elemente werden hinzugefügt; Aktualisierungen überschreiben die Live-Version.',
+      savedToCustomization: 'Gespeichert in den Anpassungen von {{package}}',
       loading: 'Ausstehende Änderungen werden geladen…',
       loadFailed: 'Ausstehende Änderungen konnten nicht geladen werden:',
       empty: 'Nichts ausstehend — alle Entwürfe wurden veröffentlicht.',
@@ -4875,6 +4881,26 @@ const de = {
     retry: "Erneut versuchen",
     emptyTitle: "Kein Connector muss verbunden werden",
     emptyBody: "Keine der installierten Apps hat einen Connector, bei dem sich ein Administrator per OAuth anmeldet.",
+    clientKeptWithSecret: "OAuth-Client {{clientId}}, Secret gespeichert",
+    clientKept: "OAuth-Client {{clientId}}, kein Secret",
+    clientTitle: "OAuth-Client für {{name}}",
+    clientIntro: "Dieser Connector meldet sich mit einem OAuth-Client an, den Ihre Organisation für diese Bereitstellung mit dem unten stehenden Weiterleitungs-URI beim Anbieter registriert. Geben Sie die Client-ID und, falls der Anbieter eines ausgestellt hat, das Secret ein und fahren Sie mit der Anmeldung beim Anbieter fort.",
+    clientStored: "Gespeicherter Client: {{clientId}}",
+    clientStoredSecret: "Ein Client-Secret ist dazu gespeichert. Es wird nie angezeigt.",
+    clientStoredNoSecret: "Dazu ist kein Client-Secret gespeichert.",
+    clientResend: "Beim Ersetzen wird ein neuer Client gesendet: Geben Sie seine Client-ID und, falls der Anbieter eines ausgestellt hat, sein Secret ein.",
+    clientId: "Client-ID",
+    clientSecret: "Client-Secret",
+    clientSecretHint: "Für einen öffentlichen Client leer lassen. Das Secret wird verschlüsselt mit der Verbindung gespeichert und nie wieder angezeigt.",
+    clientContinue: "Weiter zur Anmeldung",
+    redirectUriLabel: "Weiterleitungs-URI",
+    redirectUriCopy: "Kopieren",
+    redirectUriCopied: "Kopiert",
+    redirectUriHint: "Registrieren Sie genau diesen URI beim OAuth-Client des Anbieters, bevor Sie fortfahren.",
+    redirectUriMissing: "Diese Bereitstellung hat keine feste öffentliche Adresse, daher keinen Weiterleitungs-URI, und ein Verbinden wird abgelehnt. Setzen Sie OS_BASE_URL (oder OS_AUTH_URL) auf dem Server.",
+    clientKeepHint: "Beim erneuten Verbinden bleiben dieser Client und sein gespeichertes Secret erhalten; hier wird nichts eingegeben.",
+    clientKeep: "Gespeicherten Client behalten",
+    clientReplace: "Gespeicherten Client ersetzen",
   },
   setupAssignments: {
     positionsTitle: "Positionsinhaber",

@@ -131,7 +131,6 @@ const es = {
   actions: {
     decisionOutput: {
       help: 'Se transfiere al flujo como salida de la decisión.',
-      helpMultiValue: 'Se transfiere al flujo como salida de la decisión. Separe varios valores con comas.',
     },
     resultDialog: {
       // objectui#13461 — the secret block's reveal toggle, an icon-only button.
@@ -268,6 +267,11 @@ const es = {
       copy: 'Copiar valor',
       show: 'Mostrar código QR',
       hide: 'Ocultar código QR',
+    },
+    // The scan button text and lookup fields show inside the mobile shell.
+    scan: {
+      button: 'Escanear código',
+      failed: 'No se pudo escanear',
     },
     image: {
       upload: "Subir imagen",
@@ -889,8 +893,6 @@ const es = {
     pullToRefresh: "Tirar para actualizar",
     refreshing: "Actualizando…",
     share: "Compartir",
-    sharingPersonal: "Vista personal",
-    sharingCollaborative: "Vista compartida",
     sharingLockedBy: "Bloqueada por {{user}}",
     print: "Imprimir",
     hideFieldsTitle: "Ocultar campos",
@@ -1152,6 +1154,10 @@ const es = {
       pin: "Fijar: abrir esta vista de forma predeterminada",
       unpin: "Desfijar: la lista vuelve a abrir su vista predeterminada",
       inMenu: "Ya está en el menú",
+      // objectstack#29635 — the reader's own views (My views).
+      myViews: "Mis vistas",
+      saveAsMyView: "Guardar como mi vista",
+      myViewName: "Nombre de la vista",
     },
     dragToReorder: "Arrastrar para reordenar",
     defaultView: "Vista predeterminada",
@@ -1166,7 +1172,6 @@ const es = {
     undo: "Deshacer",
     redo: "Rehacer",
     canvasMinimap: "Minimapa del lienzo",
-    versionHistory: "Historial de versiones",
   },
   detail: {
     editInlineHint: "Haga doble clic para editar",
@@ -4585,6 +4590,7 @@ const es = {
     changes: {
       title: 'Cambios pendientes',
       description: 'Lo que cambiará al publicar. Los elementos nuevos se añaden; las actualizaciones sobrescriben la versión publicada.',
+      savedToCustomization: 'Guardado en las personalizaciones de {{package}}',
       loading: 'Cargando cambios pendientes…',
       loadFailed: 'No se pudieron cargar los cambios pendientes:',
       empty: 'Nada pendiente — todos los borradores se han publicado.',
@@ -4998,6 +5004,26 @@ const es = {
     retry: "Reintentar",
     emptyTitle: "Ningún conector necesita conexión",
     emptyBody: "Ninguna de las aplicaciones instaladas tiene un conector en el que un administrador inicie sesión con OAuth.",
+    clientKeptWithSecret: "Cliente OAuth {{clientId}}, secreto guardado",
+    clientKept: "Cliente OAuth {{clientId}}, sin secreto",
+    clientTitle: "Cliente OAuth para {{name}}",
+    clientIntro: "Este conector inicia sesión con un cliente OAuth que su organización registra con el proveedor para esta implementación, usando el URI de redirección de abajo. Introduzca el ID del cliente y, si el proveedor emitió uno, su secreto; luego continúe al inicio de sesión del proveedor.",
+    clientStored: "Cliente guardado: {{clientId}}",
+    clientStoredSecret: "Hay un secreto de cliente guardado con él. Nunca se muestra.",
+    clientStoredNoSecret: "No hay ningún secreto de cliente guardado con él.",
+    clientResend: "Reemplazarlo envía un cliente nuevo: introduzca su ID de cliente y, si el proveedor emitió uno, su secreto.",
+    clientId: "ID de cliente",
+    clientSecret: "Secreto de cliente",
+    clientSecretHint: "Déjelo vacío para un cliente público. El secreto se guarda cifrado con la conexión y no se vuelve a mostrar.",
+    clientContinue: "Continuar al inicio de sesión",
+    redirectUriLabel: "URI de redirección",
+    redirectUriCopy: "Copiar",
+    redirectUriCopied: "Copiado",
+    redirectUriHint: "Registre exactamente este URI en el cliente OAuth del proveedor antes de continuar.",
+    redirectUriMissing: "Esta implementación no tiene una dirección pública fija, así que no tiene URI de redirección y la conexión se rechaza. Defina OS_BASE_URL (u OS_AUTH_URL) en el servidor.",
+    clientKeepHint: "Al reconectar se conservan este cliente y su secreto guardado; no hay que introducir nada aquí.",
+    clientKeep: "Conservar el cliente guardado",
+    clientReplace: "Reemplazar el cliente guardado",
   },
   setupAssignments: {
     positionsTitle: "Titulares de puestos",

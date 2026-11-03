@@ -36,7 +36,7 @@ import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { useBundledItem } from '../providers/bundledReads.js';
 import { PageRecordScope, useExpressionContext } from '../providers/ExpressionProvider.js';
-import { preferLocal } from '../utils/preferLocal.js';
+import { readItemPreferLocal, useReadItemsByName } from '../hooks/useObjectPresence.js';
 import { appStudioRoutePath } from '../utils/appRoute.js';
 import { ConsoleActionRuntimeProvider } from '../hooks/useConsoleActionRuntime.js';
 import { useStudioDesignGate } from '../hooks/useStudioDesignGate.js';
@@ -323,12 +323,14 @@ export function PageView() {
   // this app's package owns; else the `/meta/page` list, prefer-local, as
   // before. While the bundle is on the wire the page is not yet known.
   const bundledPage = useBundledItem('page', pageName, (activeApp as any)?._packageId);
-  const page =
-    bundledPage.state === 'hit'
-      ? bundledPage.value
-      : bundledPage.state === 'miss'
-        ? preferLocal(metadata.pages as any[], pageName, (activeApp as any)?._packageId)
-        : undefined;
+  // objectstack#29416 — a page the bundle does not hold is read by name, and
+  // from the list only when that answer cannot be the prefer-local pick.
+  const readItemsByName = useReadItemsByName(metadata);
+  const pageRead =
+    bundledPage.state === 'miss' && pageName
+      ? readItemPreferLocal(readItemsByName, 'page', pageName, (activeApp as any)?._packageId, () => metadata.pages, getTypeStatus?.('page'))
+      : undefined;
+  const page = bundledPage.state === 'hit' ? bundledPage.value : pageRead?.item;
 
   // Where "Edit in studio" goes: the page's surface in Studio's Interfaces
   // pillar, through the one derivation the app bar's pencil, the app
@@ -355,8 +357,7 @@ export function PageView() {
     // race where the app's home page is the first thing rendered. Show a
     // loading state until the `page` type is actually resolved, then trust the
     // not-found. (getTypeStatus absent = hand-rolled context = always ready.)
-    const pageStatus = bundledPage.state === 'pending' ? 'loading' : getTypeStatus?.('page');
-    if (pageStatus === 'idle' || pageStatus === 'loading') {
+    if (bundledPage.state === 'pending' || (pageRead && !pageRead.settled)) {
       return (
         <div className="h-full flex items-center justify-center p-8" data-testid="page-loading">
           <Spinner className="h-5 w-5 text-muted-foreground" />

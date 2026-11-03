@@ -172,9 +172,12 @@ describe('[ADR-0010 · ADR-0130 D4] a residual\'s foreign stamp: refused at the 
             expect(await bootRefusesStamp(stack), `${key}: the metadata door refuses what it lists`).toBe(listed);
             if (!listed) notResidual.push(key);
         }
-        // The reading, so the equality above is not vacuous: the three
-        // collections the boot reads off the stack whole, never as items.
-        expect(notResidual.sort()).toEqual(['data', 'datasets', 'jobs']);
+        // The reading, so the equality above is not vacuous: the two judged
+        // collections the residual rule does not walk. Seed `data` is applied
+        // by the seed loader and `jobs` are scheduled, both straight off the
+        // stack, never registered as items. `datasets` left this list when the
+        // rule began registering a residual dataset under the stack's id.
+        expect(notResidual.sort()).toEqual(['data', 'jobs']);
     });
 });
 

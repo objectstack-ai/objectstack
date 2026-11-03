@@ -56,7 +56,7 @@ export const MyObject = ObjectSchema.create({
 | `icon` | string | Icon identifier | `'building'` |
 | `description` | string | Help text | `'Companies...'` |
 | `nameField` | string | Canonical primary title field — the stored field used as the record display name (ADR-0079); the deprecated alias `displayNameField` is still accepted | `'name'` |
-| `titleFormat` | string | Deprecated (ADR-0079 → `nameField`). Render-only title template (`{{record.field}}` interpolation); an explicit `nameField` now takes precedence | `'{{record.name}} - {{record.id}}'` |
+| `titleFormat` | string | Deprecated (ADR-0079 → `nameField`). Render-only title template (`{{record.field}}` interpolation); an explicit `nameField` now takes precedence. Refused at save and by `os validate`; a stored object that carries it still loads | `'{{record.name}} - {{record.id}}'` |
 | `highlightFields` | string[] | Most-important fields, in priority order (default columns, cards, previews, detail highlight strip; ADR-0085 — formerly `compactLayout`; the old spelling was retired and is now rejected) | `['name', 'status']` |
 
 ### Enable Features

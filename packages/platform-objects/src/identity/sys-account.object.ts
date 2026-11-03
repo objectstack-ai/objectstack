@@ -28,15 +28,15 @@ export const SysAccount = ObjectSchema.create({
   },
   description: 'OAuth and authentication provider accounts',
   // [ADR-0079] The record title is `display_title`, a text formula over the
-  // columns `titleFormat` names. With no pointer declared, the registry's
+  // columns `titleFormat` named. With no pointer declared, the registry's
   // designate-only pass stamped `nameField: 'id'` (the first title-eligible
   // field), so a renderer honouring ADR-0079's order (an explicit `nameField`
-  // wins over `titleFormat`) drew the raw id as the record page's H1.
-  // `titleFormat` stays for renderers that still read it first;
-  // `identity-display-title.test.ts` holds the two to the same text.
+  // wins over `titleFormat`) drew the raw id as the record page's H1. The
+  // retired `titleFormat` template beside it is gone (refused at save and by
+  // `os validate`); `identity-display-title.test.ts` holds the formula to the
+  // text that template drew.
   displayNameField: 'display_title',
   nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{provider_id} - {account_id}',
   highlightFields: ['provider_id', 'user_id', 'account_id'],
 
   // Custom actions — sysadmins routinely need to revoke a user's OAuth

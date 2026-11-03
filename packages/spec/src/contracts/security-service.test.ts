@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, expectTypeOf } from 'vitest';
+import type { z } from 'zod';
 import type {
   ISecurityService,
   AuthoredRowWriteVerdict,
@@ -9,7 +10,36 @@ import type {
   ControlledByParentWriteOutcome,
   ControlledByParentWriteDenialLeg,
   ControlledByParentWriteUnresolvedReason,
+  ExplainAccessRequest,
 } from './security-service';
+import type { ExplainRequestSchema } from '../security/explain.zod';
+
+// ---------------------------------------------------------------------------
+// `ExplainAccessRequest.recordIds` — the service contract's batch selector.
+//
+// The wire schema (`ExplainRequestSchema`) declared `recordIds` and both the
+// REST explain route and the reference security service honour it, while the
+// service contract the route calls did not declare it. These pins hold the two
+// declarations to one type: the member is OPTIONAL (every singular and
+// object-level caller omits it) and EQUAL to the wire schema's input member, so
+// a retype on either side turns this file red under `check:test-typecheck`.
+//
+// The optionality pin is a type alias, not `expectTypeOf`: `toEqualTypeOf`
+// cannot tell `recordIds?: string[]` from a REQUIRED `recordIds: string[] |
+// undefined`, while `{} extends Pick<…>` can. Exported so TS6196 does not
+// flag an alias nothing reads.
+// ---------------------------------------------------------------------------
+
+type Eq<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
+type Assert<T extends true> = T;
+
+/** Optional: a request may omit it. A required member turns this alias red. */
+export type ExplainRecordIdsIsOptional = Assert<{} extends Pick<ExplainAccessRequest, 'recordIds'> ? true : false>;
+
+/** The wire schema's own input type for the member — neither side may drift. */
+export type ExplainRecordIdsMatchesWire = Assert<
+  Eq<ExplainAccessRequest['recordIds'], z.input<typeof ExplainRequestSchema>['recordIds']>
+>;
 
 /**
  * These tests pin the two things a consumer of the `security` service reasons
@@ -561,6 +591,29 @@ describe('Security Service Contract', () => {
       { userId: 'admin' },
     );
     expect(seen[0]).toEqual({ object: 'deal', operation: 'update', userId: 'u2', recordId: 'r1' });
+  });
+
+  it('explain accepts a batch request: recordIds is the wire schema\'s member, typed as a list of ids', async () => {
+    expectTypeOf<ExplainAccessRequest['recordIds']>()
+      .toEqualTypeOf<z.input<typeof ExplainRequestSchema>['recordIds']>();
+    expectTypeOf<ExplainAccessRequest['recordIds']>().toEqualTypeOf<string[] | undefined>();
+
+    const seen: ExplainAccessRequest[] = [];
+    const service = makeService({
+      explain: async (request) => { seen.push(request); return {} as any; },
+    });
+    // The literal compiling is the point: before the contract declared the
+    // member, this call was an excess-property error.
+    await service.explain(
+      { object: 'deal', operation: 'read', recordIds: ['r1', 'r2', 'r1'] },
+      { userId: 'admin' },
+    );
+    expect(seen[0]?.recordIds).toEqual(['r1', 'r2', 'r1']);
+
+    // A bare id is the singular selector's job, not a one-element batch.
+    // @ts-expect-error — `recordIds` is a list, never a lone string.
+    const bare: ExplainAccessRequest = { object: 'deal', operation: 'read', recordIds: 'r1' };
+    expect(bare.object).toBe('deal');
   });
 
   it('contributeOwnershipFloorAlternates is OPTIONAL — absence is typed, and an alternate names exactly one floor limb', () => {

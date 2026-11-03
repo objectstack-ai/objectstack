@@ -740,7 +740,8 @@ no package provenance (#9612); a provenance it cannot read narrows nothing at al
 That changes what a rule can **resolve**, never which rules run, and nothing at
 this door walks `packages[]`. Two rules are told the closure is in force. A flow
 whose trigger object is outside it is refused with `flow-trigger-unknown-object`
-instead of advised (#24669), and a list
+instead of advised (#24669), as is a flow with a start input declared a record of
+an object outside it, with `flow-input-unknown-object` (#29442), and a list
 view bound to an object outside it is refused with
 `list-view-object-outside-closure` instead of having its field references
 skipped (#24563). With no closure in force — a write that names no package —
@@ -760,7 +761,7 @@ A clean run walks the registry and reports timing:
   Config: /path/to/support-desk/objectstack.config.ts
   Load time: 21ms
   → Validating against ObjectStack Protocol...
-  → Running author-time rules (61)...
+  → Running author-time rules (63)...
   → Checking that every required capability has a provider installable in this edition...
   → Checking package docs (ADR-0046)...
 

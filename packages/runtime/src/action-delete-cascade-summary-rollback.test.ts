@@ -13,14 +13,15 @@
  * recompute refuses), so the first line's refusal stops the cascade and the
  * transaction rolls everything back. The engine now answers that delete with a
  * refusal that is not the stale-roll-up one, so the body does not run on and
- * the action door answers it as it answers any other throw out of a body: a
- * `400` refusal carrying the engine's message, `success: false`.
+ * the action door answers it as the internal failure it declares (#29421: `500
+ * INTERNAL_ERROR`, before that the `400` any undeclared throw out of a body
+ * gets) carrying the engine's message, `success: false`.
  *
  * Pinned through the real stack: `HttpDispatcher` → the action door →
  * `ctx.engine` → `ObjectQL` → a real `SqlDriver` on better-sqlite3, which rolls
  * back for real (the harness of `dispatcher-unique-violation-wire-code.test.ts`).
  *
- * - the account's delete: the action answers `400`, the body's next line never
+ * - the account's delete: the action answers `500`, the body's next line never
  *   ran, and the account and its lines are all still stored;
  * - CONTROL a line's own delete landed: the action answers its body's own
  *   result and the line is gone.
@@ -133,10 +134,11 @@ const rowIds = async (object: string) =>
     ((await engine.find(object, { fields: ['id'] })) as Array<{ id: string }>).map((r) => r.id).sort();
 
 describe('an action\'s ctx.engine.delete whose cascade a dependent\'s failing roll-up stops is refused', () => {
-    it('the account\'s delete: the action answers a 400 refusal, the body stopped there, and nothing is deleted', async () => {
+    it('the account\'s delete: the action answers a 500 INTERNAL_ERROR refusal, the body stopped there, and nothing is deleted', async () => {
         const response = await postAction(`${ACCOUNT}/delete_account`);
-        expect(response.status, JSON.stringify(response.body)).toBe(400);
+        expect(response.status, JSON.stringify(response.body)).toBe(500);
         expect(response.body?.success, JSON.stringify(response.body)).toBe(false);
+        expect(response.body?.error?.code, JSON.stringify(response.body)).toBe('INTERNAL_ERROR');
         expect(response.body?.error?.message).toContain('The delete of "qca_account" did not complete');
         expect(bodyRanOn).not.toContain('delete_account');
         expect(await rowIds(ACCOUNT)).toEqual(['a1']);

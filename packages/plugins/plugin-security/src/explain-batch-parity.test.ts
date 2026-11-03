@@ -23,17 +23,24 @@
 //    person row are read once for a batch, as for one singular explanation,
 //    never once per id: that per-id repetition is what made a 31-row list page
 //    wait seconds for its row menus.
+// 3. THE TYPED DOOR. `SecurityPlugin#explainAccessForCaller`, the method the
+//    service's `explain` delegates to, declares the contract's
+//    `ExplainAccessRequest` as its request, so a typed caller passes
+//    `recordIds` without a cast and gets the service's answer. Compile-time
+//    half: `expectTypeOf` plus a `@ts-expect-error` control, both live because
+//    `tsconfig.test.json` compiles this file.
 //
 // The real `SecurityPlugin`, `SharingService` and sharing middleware over a
 // real `ObjectQL` and SQL driver (better-sqlite3, in memory), asked through
 // the registered `security` service, the member the REST door calls.
 
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, expectTypeOf, beforeAll, afterAll, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SharingService, buildSharingMiddleware, SysRecordShare } from '@objectstack/plugin-sharing';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import type { ExplainDecision, ExplainOperation } from '@objectstack/spec/security';
+import type { ExplainAccessRequest } from '@objectstack/spec/contracts';
 import { SysOrganization, SysUser, SysMember } from '@objectstack/platform-objects/identity';
 
 import { SysPosition } from './__tests__/legacy-catalog-objects.testkit.js';
@@ -99,6 +106,7 @@ const IDS: Record<string, string[]> = {
 };
 
 let engine: ObjectQL;
+let plugin: SecurityPlugin;
 let security: { explain: (request: Record<string, unknown>, ctx?: unknown) => Promise<ExplainDecision> };
 /** Engine reads, by `<verb> <object>`, while counting is on. */
 let reads: Map<string, number> | undefined;
@@ -199,7 +207,7 @@ beforeAll(async () => {
       return services[name];
     },
   };
-  const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+  plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
   await plugin.init(ctx as never);
   await plugin.start(ctx as never);
   wireEngineSecuritySource(engine, () => plugin);
@@ -274,6 +282,23 @@ describe('[#29112] security/explain: a batch answers what N singular explanation
     await expect(
       security.explain(request(SELF, LINE, 'update', { recordId: 'l_mine', recordIds: ['l_mine'] }), { ...SELF }),
     ).rejects.toThrow(/mutually exclusive/);
+  });
+});
+
+describe('SecurityPlugin#explainAccessForCaller: the request is typed as the contract declares it', () => {
+  it('declares the contract request, so recordIds is a typed member and not an extra key', () => {
+    expectTypeOf<Parameters<SecurityPlugin['explainAccessForCaller']>[0]>().toEqualTypeOf<ExplainAccessRequest>();
+    // Control: the matcher can fail. The request without its batch member is a different type.
+    // @ts-expect-error -- the declared request carries recordIds, so it is not the selector without it
+    expectTypeOf<Parameters<SecurityPlugin['explainAccessForCaller']>[0]>().toEqualTypeOf<Omit<ExplainAccessRequest, 'recordIds'>>();
+  });
+
+  it('a typed caller passes recordIds with no cast and gets the answer the service gives', async () => {
+    // An object literal, so the compiler checks every key against the declared request.
+    const direct = await plugin.explainAccessForCaller({ object: LINE, operation: 'update', recordIds: IDS[LINE] }, { ...SELF });
+    const viaService = await security.explain(request(SELF, LINE, 'update', { recordIds: IDS[LINE] }), { ...SELF });
+    expect(direct.records?.map((r) => r.recordId)).toEqual(IDS[LINE]);
+    expect(direct).toEqual(viaService);
   });
 });
 

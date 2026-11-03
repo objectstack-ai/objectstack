@@ -36,6 +36,7 @@ import { PackageIdInput } from './PackageIdInput.js';
 import { studioOrgScopePath } from './studioScope.js';
 import { STUDIO_ALL_PACKAGES_SEGMENT, studioMetadataAreaPath } from './metadataArea.js';
 import { STUDIO_NEW_PARAM, STUDIO_NEW_PACKAGE_VALUE } from './studioNewPackage.js';
+import { foldCustomizationPairs } from './StudioRailCustomizations.js';
 
 /**
  * objectui#11808 — where a read-only package's card sends the author beyond
@@ -117,8 +118,15 @@ export function BuilderLanding(): React.ReactElement {
           .filter((item): item is RecentNamedItem => item.type === 'package')
           .slice(0, RECENT_PACKAGES_SHOWN);
 
-  const writable = pkgs?.filter((p) => p.writable) ?? [];
-  const readonly = pkgs?.filter((p) => !p.writable) ?? [];
+  // ADR-0146 D3 — a base's `.custom` pair has no card of its own: it is
+  // folded under its base, the way the package switcher folds it
+  // (`foldCustomizationPairs`). The base's card carries the pair through its
+  // customized line and link, and the pair's export and delete stay on the
+  // Packages page, which lists every package. A pair whose base is not listed
+  // keeps its card.
+  const cards = pkgs === null ? [] : foldCustomizationPairs(pkgs).rows;
+  const writable = cards.filter((p) => p.writable);
+  const readonly = cards.filter((p) => !p.writable);
 
   // ADR-0146 D3 — each read-only BASE's card carries "n customized, m switched
   // off", the server's counts (`GET /packages/:id/customizations`), one read
@@ -217,11 +225,11 @@ export function BuilderLanding(): React.ReactElement {
   // Duplicate (ADR-0070 D4) clones a writable BASE into a new writable package,
   // the "duplicate base" gesture, and drops the user straight into the copy's
   // builder. It is offered on writable bases only. A read-only code or
-  // installed package is not a duplicate source: ADR-0070 D2 customizes it by
-  // environment overlay, where the item's metadata type declares `allowEnvironmentOverlay`
-  // (ADR-0005), so its card points there instead (the read-only section
-  // below). Home's "Start with a template" is not this gesture either: it
-  // opens the marketplace.
+  // installed package is not a duplicate source: its items are customized in
+  // its paired `.custom` package through Customize or New similar (objectstack
+  // ADR-0146 D2, D3), never by a package-less overlay (D11), and the read-only
+  // section below says so. Home's "Start with a template" is not this gesture
+  // either: it opens the marketplace.
   const [dupFor, setDupFor] = React.useState<string | null>(null);
   const [dupName, setDupName] = React.useState('');
   const [dupId, setDupId] = React.useState('');
@@ -327,7 +335,7 @@ export function BuilderLanding(): React.ReactElement {
               {/* ADR-0070 D4 — Duplicate clones a writable base: the copy is a new
                 * writable package holding the base's sys_metadata rows. It is
                 * offered here, on writable bases only; a read-only package's card
-                * offers the routes that exist for it (environment overlay, the
+                * offers the routes that exist for it (its `.custom` pair, the
                 * marketplace). */}
               <button
                 type="button"

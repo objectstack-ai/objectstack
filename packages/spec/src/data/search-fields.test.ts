@@ -309,13 +309,18 @@ describe('a virtual field declared in searchableFields — not admitted, since n
 
   it('CONTROL — the declared branch still bypasses the auto-default exclusions', () => {
     // The dividing line is STORAGE, not search quality. `lookup` and `json` are
-    // auto-EXCLUDED types, and declaring them is still the author's choice: the
-    // engine runs a `$contains` over the stored foreign key / the stored JSON
-    // text. Narrow and rarely useful, but a scan that CAN match — so it must not
-    // be swept up by the virtual filter. This control is what keeps #6674 from
-    // silently becoming "the declared branch is type-filtered after all", which
-    // would reject metadata the runtime accepts (ADR-0072 D1, and the #4830
-    // changeset's explicit carve-out).
+    // auto-EXCLUDED types, and declaring them is still the author's choice, so
+    // both are ADMITTED here. What each then contributes is the expansion's call
+    // (`expandSearchToFilter`, `@objectstack/objectql`): a single-valued
+    // `lookup` becomes an `$icontains` over the stored foreign key, a narrow scan
+    // that can match;
+    // [#29394] `json` can never hold a string (the text-operator door's
+    // `door-refusal` verdict), so it contributes NO clause, and a set made only
+    // of such columns answers no rows. Neither is swept up by the virtual
+    // filter, which drops only an entry with no column at all. This control is
+    // what keeps #6674 from silently becoming "the declared branch is
+    // type-filtered after all", which would reject metadata the runtime accepts
+    // (ADR-0072 D1, and the #4830 changeset's explicit carve-out).
     expect(
       resolveSearchFieldResolution({
         fields,

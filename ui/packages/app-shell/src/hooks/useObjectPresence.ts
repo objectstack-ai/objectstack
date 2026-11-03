@@ -56,6 +56,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { useMetadata, type MetadataContextValue, type MetadataTypeStatus } from '@object-ui/react';
 import { useExpressionContext } from '../providers/ExpressionProvider.js';
+import { preferLocal } from '../utils/preferLocal.js';
 
 type ReadObjectScope = NonNullable<MetadataContextValue['readObjectScope']>;
 
@@ -107,6 +108,8 @@ export type ReadItemsByName = (
   type: string,
   names: readonly string[],
   list: () => readonly unknown[] | undefined,
+  /** Called with each asked name whose by-name read has not answered yet (objectstack#29416). */
+  pending?: (name: string) => void,
 ) => readonly unknown[];
 
 const NO_ANSWERS: ReadonlyMap<string, unknown> = new Map();
@@ -139,7 +142,7 @@ export function useReadItemsByName(
   // `getTypeStatus` is rebuilt with it) starts a new set.
   const askedRef = useRef<{ of: unknown; keys: Set<string> }>({ of: undefined, keys: new Set() });
   return useCallback<ReadItemsByName>(
-    (type, names, list) => {
+    (type, names, list, pending) => {
       if (typeof getItem !== 'function' || getTypeStatus?.(type) !== 'idle') return list() ?? NO_OBJECTS;
       if (askedRef.current.of !== getTypeStatus) askedRef.current = { of: getTypeStatus, keys: new Set() };
       const asked = askedRef.current.keys;
@@ -155,11 +158,56 @@ export function useReadItemsByName(
         }
         const item = answers.get(key);
         if (item) found.push(item);
+        else if (!answers.has(key)) pending?.(name);
       }
       return found;
     },
     [getItem, getTypeStatus, answers],
   );
+}
+
+/** One item a route resolves by name, and whether its read has settled. */
+export interface ItemByNameRead {
+  item: any;
+  settled: boolean;
+}
+
+/**
+ * The `type` item named `name` as the prefer-local pick over the type's list
+ * resolves it (`preferLocal`, ADR-0048), without reading that list while the
+ * by-name read can answer it (objectstack#29416): a route that names one item
+ * (a page the app bundle does not hold) asked the whole `/meta/<type>` list.
+ *
+ * The by-name read (`GET /meta/<type>/<name>`) takes no package and answers
+ * the first match (ADR-0048 §3.3), so its answer is the pick only when it
+ * cannot differ from it: in an app with no package (`ownerPackageId` unset,
+ * where the pick is the first match too), or when it is the app's own
+ * package's item, which the pick prefers. Otherwise, another package's item
+ * while the app's own may exist, or no item at all (absent, or a failed read),
+ * the list is read and picked from, as before. Once the list is loaded, or on
+ * its way, the pick reads it and nothing is asked by name.
+ */
+export function readItemPreferLocal(
+  readItemsByName: ReadItemsByName,
+  type: string,
+  name: string,
+  ownerPackageId: unknown,
+  list: () => readonly unknown[] | undefined,
+  status: MetadataTypeStatus | undefined,
+): ItemByNameRead {
+  const fromList = (): ItemByNameRead => {
+    const listed = list();
+    const now = status === 'idle' ? 'loading' : status;
+    return { item: preferLocal(listed as any[] | undefined, name, ownerPackageId), settled: metadataTypeSettled(now) };
+  };
+  if (status !== 'idle') return fromList();
+  let waiting = false;
+  const [answer] = readItemsByName(type, [name], () => undefined, () => {
+    waiting = true;
+  }) as Array<{ _packageId?: unknown } | undefined>;
+  if (waiting) return { item: undefined, settled: false };
+  if (answer && (!ownerPackageId || answer._packageId === ownerPackageId)) return { item: answer, settled: true };
+  return fromList();
 }
 
 /** What the metadata registry can say about one object name. */

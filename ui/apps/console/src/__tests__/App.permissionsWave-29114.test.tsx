@@ -225,6 +225,11 @@ describe('/auth/me/permissions leaves in the organization/list wave when the ses
 
     organizationsAnswer(ORG);
     await waitFor(() => expect(screen.getByTestId('home-page')).toBeInTheDocument());
+    // The launcher's `/me/apps` read leaves from its provider's effect, which can
+    // run after the commit that shows the page (objectstack#29468: red once on a
+    // loaded Test UI shard). Wait for it, then let any second request show.
+    await waitFor(() => expect(launcherCalls()).toHaveLength(1));
+    await settle();
     // No second request and no duplicate URL: the answer asked early is the one used.
     expect(permissionsCalls()).toHaveLength(1);
     expect(launcherCalls()).toHaveLength(1);

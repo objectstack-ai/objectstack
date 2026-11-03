@@ -19,7 +19,8 @@
 
 - 私卡 = 受影响仓上一份未发布的安全公告,只有管理员、安全经理与受邀协作者可见。
 - 首选中继 `advisory_create` 建草稿公告,再 `advisory_collaborators_add` 带具名账号进公告。
-- `advisory_report` 只留给 App 无公告写权的仓:GitHub 按账号限每日新私报,全队共一个 App。
+- 读公告只走中继 `advisory_read`(席位账号读被拒):一次性密钥只在席位进程,只回密文。
+- `advisory_report` 与 `advisory_create` 同铸公告写权,无此权的仓两者皆拒;私报另有账号日限。
 - ⛔ 席位永不以自身账号私报或写公告:GitHub 写只走中继,以 App 身份;发布归维护者。
 - 两操作皆被拒 ⇒ 会话专递(选 A):机制只在会话里交维护者,由其建草稿,⛔ 不换账号重发。
 - 私有仓无私密漏洞报告功能,那些操作上线后仍会话专递。
@@ -51,5 +52,11 @@
 
 ## 8. 一处成文
 
-- 立卡门、server 车道、信箱、`checklist-test` 与 `os-dev` 只指向本文,⛔ 不留第二份。
+- 立卡门、server 与 security 车道、信箱、`checklist-test` 与 `os-dev` 只指向本文,⛔ 不留第二份。
 - ⛔ 本规则不新增门禁、不新增标签。
+
+## 9. 归属:`security#1` 席
+
+- 每份安全发现从接收到发布归 `security#1` 席(章程 `lanes/security.md`),⛔ 不归发现者。
+- 发现者只做两件:经中继 `advisory_create` 建草稿;向该席敲 `Notify: security · GHSA-ID`,只带编号。
+- 中继拒(第 3 节)⇒ 机制在会话里交 `security#1` 席;席空缺 ⇒ 交维护者;发布恒归维护者。

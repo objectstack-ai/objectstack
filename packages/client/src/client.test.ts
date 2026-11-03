@@ -937,6 +937,28 @@ describe('Notifications namespace', () => {
         expect(url).toContain('/api/v1/notifications/read/all');
         expect(opts.method).toBe('POST');
     });
+
+    it('registers a push device with POST /notifications/devices (ADR-0012 §6)', async () => {
+        const { client, fetchMock } = createMockClient({
+            success: true,
+            data: { deviceId: 'install-1', success: true }
+        });
+        const result = await client.notifications.registerDevice({ token: 'tok', platform: 'ios', deviceId: 'install-1', locale: 'zh-CN' });
+        expect(result).toEqual({ deviceId: 'install-1', success: true });
+        const [url, opts] = fetchMock.mock.calls[0];
+        expect(url).toBe('http://localhost:3000/api/v1/notifications/devices');
+        expect(opts.method).toBe('POST');
+        expect(JSON.parse(opts.body)).toEqual({ token: 'tok', platform: 'ios', deviceId: 'install-1', locale: 'zh-CN' });
+    });
+
+    it('unregisters a push device with DELETE /notifications/devices/:deviceId, the id encoded', async () => {
+        const { client, fetchMock } = createMockClient({ success: true, data: { success: true } });
+        const result = await client.notifications.unregisterDevice('install/1');
+        expect(result).toEqual({ success: true });
+        const [url, opts] = fetchMock.mock.calls[0];
+        expect(url).toBe('http://localhost:3000/api/v1/notifications/devices/install%2F1');
+        expect(opts.method).toBe('DELETE');
+    });
 });
 
 describe('AI namespace (#3718)', () => {

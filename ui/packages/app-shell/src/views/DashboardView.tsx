@@ -34,6 +34,8 @@ import { useMetadata } from '../providers/MetadataProvider.js';
 import { useExpressionContext } from '../providers/ExpressionProvider.js';
 import { resolveKeyedI18nLabel, preferLocal } from '../utils/index.js';
 import { useAdapter } from '../providers/AdapterProvider.js';
+import { useBundledItem } from '../providers/bundledReads.js';
+import { readDashboardWidgetObjects } from '../console/appObjectScope.js';
 import { useObjectTranslation, useSafeTranslate } from '@object-ui/i18n';
 
 /**
@@ -174,12 +176,25 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
     queueMicrotask(() => setIsLoading(false));
   }, [dashboardName]);
 
-  // `dashboards` is read first: its getter starts the list's fetch, and the
-  // status read after it is that fetch's.
-  const { dashboards, objects: metadataObjects, getTypeStatus } = useMetadata();
+  // ⛔ Neither `dashboards` nor `objects` is destructured: reading `dashboards`
+  // loads the `/meta/dashboard` list, which the app bundle spares, and reading
+  // `objects` loads the whole object registry, which this view needs only to
+  // ask whether its widgets' objects are registered (objectstack#28784).
+  const metadata = useMetadata();
+  const { getTypeStatus, readObjectScope } = metadata;
   // ADR-0048 Phase 2 — prefer the dashboard owned by the current app's package.
   const { app: activeApp } = useExpressionContext();
-  const dashboard = preferLocal(dashboards as any[], dashboardName, (activeApp as any)?._packageId);
+  // objectstack#28784 — the dashboard the app bundle holds, when it holds the
+  // one this app's package owns; else the `/meta/dashboard` list,
+  // prefer-local, as before. While the bundle is on the wire the dashboard is
+  // not yet known.
+  const bundledDashboard = useBundledItem('dashboard', dashboardName, (activeApp as any)?._packageId);
+  const dashboard =
+    bundledDashboard.state === 'hit'
+      ? bundledDashboard.value
+      : bundledDashboard.state === 'miss'
+        ? preferLocal(metadata.dashboards as any[], dashboardName, (activeApp as any)?._packageId)
+        : undefined;
 
   // ---- A miss: refused, or not there? (objectui#12112) ---------------------
   // The server lists only the dashboards this caller may open
@@ -190,7 +205,8 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
   // preview: the probe reads the published world, and this page reads the
   // draft one — `AppContent` skips its app probe there for the same reason.
   const previewDrafts = usePreviewDrafts();
-  const dashboardsStatus = getTypeStatus?.('dashboard') ?? 'ready';
+  const dashboardsStatus =
+    bundledDashboard.state === 'pending' ? 'loading' : bundledDashboard.state === 'hit' ? 'ready' : getTypeStatus?.('dashboard') ?? 'ready';
   const dashboardsSettled = dashboardsStatus === 'ready' || dashboardsStatus === 'error';
   const missedName = !dashboard && dashboardsSettled && !previewDrafts && dashboardName ? dashboardName : null;
   const access = useMetaItemRefusal('dashboard', missedName);
@@ -201,25 +217,37 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
   // when not set, so any object-bound widget disappears gracefully when its
   // backing object isn't in this runtime (e.g. cloud-only
   // `sys_package_installation` on system_overview).
-  const registeredObjectNamesForFilter = useMemo(
-    () => new Set<string>((metadataObjects || []).map((o: any) => o?.name).filter(Boolean)),
-    [metadataObjects],
-  );
-  const previewSchema = useMemo(() => {
-    if (!dashboard) return dashboard;
+  //
+  // objectstack#28784 — asked by name (`readDashboardWidgetObjects`): a widget
+  // is hidden once the server answered its object absent. A hand-rolled
+  // metadata context has no scope to offer, and its `objects` is what it holds.
+  const widgetObjects = readObjectScope && dashboard ? readDashboardWidgetObjects(readObjectScope, activeApp as Record<string, any> | undefined, dashboard) : null;
+  const absentObjectNames = widgetObjects ? widgetObjects.missing : null;
+  const listedObjects = readObjectScope ? null : metadata.objects;
+  const unregistered = useMemo((): ((name: string) => boolean) | null => {
+    if (absentObjectNames) {
+      if (absentObjectNames.length === 0) return null;
+      const absent = new Set(absentObjectNames);
+      return (name) => absent.has(name);
+    }
+    const registered = new Set<string>((listedObjects || []).map((o: any) => o?.name).filter(Boolean));
     // Defer pruning until metadata has actually loaded — otherwise the
     // empty Set would hide every object-bound widget on first render.
-    if (registeredObjectNamesForFilter.size === 0) return dashboard;
+    if (registered.size === 0) return null;
+    return (name) => !registered.has(name);
+  }, [absentObjectNames, listedObjects]);
+  const previewSchema = useMemo(() => {
+    if (!dashboard || !unregistered) return dashboard;
     const widgets = (dashboard as any).widgets;
     if (!Array.isArray(widgets) || widgets.length === 0) return dashboard;
     const filtered = widgets.filter((w: any) => {
       const required = w?.requiresObject ?? w?.object;
       if (!required) return true;
-      return registeredObjectNamesForFilter.has(required);
+      return !unregistered(required);
     });
     if (filtered.length === widgets.length) return dashboard;
     return { ...dashboard, widgets: filtered };
-  }, [dashboard, registeredObjectNamesForFilter]);
+  }, [dashboard, unregistered]);
 
   // ---- Loading / not-found guards -----------------------------------------
   if (isLoading) {

@@ -5,6 +5,7 @@ import { TimeRelativeTriggerSchema } from '@objectstack/spec/automation';
 import {
   validateFlowTriggerReadiness as validateFlowTriggerReadinessUnrecorded,
   FLOW_TRIGGER_UNKNOWN_OBJECT,
+  FLOW_INPUT_UNKNOWN_OBJECT,
   FLOW_DRAFT_STATUS_AMBIGUOUS,
   FLOW_TRIGGER_UNKNOWN_EVENT,
   FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
@@ -127,6 +128,71 @@ describe('validateFlowTriggerReadiness', () => {
       flows: [flow],
     });
     expect(findings).toEqual([]);
+  });
+
+  // #29442 (#29425 ruling A) — a start input declared a record reference
+  // names the object every start door loads it from.
+  describe('a start input declared a record reference (variables[].objectName)', () => {
+    const inputFlow = (variables: unknown[]) =>
+      recordFlow({ name: 'close_candidate', type: 'screen', status: 'active', variables, nodes: [
+        { id: 'start', type: 'start' },
+        { id: 'end', type: 'end' },
+      ] });
+
+    it('warns when the declared object is not defined in the stack, at the entry the author wrote', () => {
+      const findings = validateFlowTriggerReadiness({
+        objects: [candidateObject],
+        flows: [inputFlow([
+          { name: 'note', type: 'text', isInput: true },
+          { name: 'candidateId', type: 'text', isInput: true, objectName: 'app_candidat' },
+        ])],
+      });
+      expect(findings).toHaveLength(1);
+      expect(findings[0].rule).toBe(FLOW_INPUT_UNKNOWN_OBJECT);
+      expect(findings[0].severity).toBe('warning');
+      expect(findings[0].path).toBe('flows[0].variables[1].objectName');
+      expect(findings[0].where).toBe('flow "close_candidate" › input "candidateId"');
+      expect(findings[0].message).toContain("'app_candidat'");
+      expect(findings[0].message).toContain('Did you mean "app_candidate"?');
+      expect(findings[0].hint).toMatch(/another installed package/);
+    });
+
+    it('is silent on a declared object the stack defines, a sys_* object, and an undeclared input', () => {
+      expect(validateFlowTriggerReadiness({
+        objects: [candidateObject],
+        flows: [inputFlow([
+          { name: 'candidateId', type: 'text', isInput: true, objectName: 'app_candidate' },
+          { name: 'ownerId', type: 'text', isInput: true, objectName: 'sys_user' },
+          { name: 'note', type: 'text', isInput: true },
+        ])],
+      })).toEqual([]);
+    });
+
+    it('refuses under a stated package closure, naming the dependency remedy', () => {
+      const findings = validateFlowTriggerReadiness(
+        {
+          objects: [candidateObject],
+          flows: [inputFlow([{ name: 'invoiceId', type: 'text', isInput: true, objectName: 'billing_invoice' }])],
+        },
+        { packageScope: { packageId: 'app_hr', dependencies: [] } },
+      );
+      expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+        [FLOW_INPUT_UNKNOWN_OBJECT, 'error', 'flows[0].variables[0].objectName'],
+      ]);
+      expect(findings[0].message).toContain("declares input 'invoiceId' a record of object 'billing_invoice'");
+      expect(findings[0].hint).toContain("set the input's objectName to an object inside that closure");
+    });
+
+    it('routes the hedge and the closure split to `os explain`, keeping the fix one line', () => {
+      expect(explanationOf(FLOW_INPUT_UNKNOWN_OBJECT)).toMatch(/another installed package/);
+      expect(explanationOf(FLOW_INPUT_UNKNOWN_OBJECT)).toMatch(/closure/);
+      const [finding] = validateFlowTriggerReadiness({
+        objects: [candidateObject],
+        flows: [inputFlow([{ name: 'invoiceId', type: 'text', isInput: true, objectName: 'billing_invoice' }])],
+      });
+      expect(finding.hint).not.toContain('\n');
+      expect(finding.hint.length).toBeLessThanOrEqual(200);
+    });
   });
 
   it('warns when an auto-triggered flow has no explicit status (defaults to draft)', () => {
@@ -1099,13 +1165,17 @@ describe('validateFlowTriggerReadiness', () => {
       config: Record<string, unknown>,
       overrides: Record<string, unknown> = {},
     ): Record<string, unknown> {
+      // [#29233] A label on the flow and its nodes: the runtime publish gate
+      // the cases below cross now runs the region-shape rule, which refuses a
+      // body the flow schema refuses.
       return {
         name: 'inbound_order',
+        label: 'Inbound order',
         type: 'api',
         status: 'active',
         nodes: [
-          { id: 'start', type: 'start', config },
-          { id: 'end', type: 'end' },
+          { id: 'start', type: 'start', label: 'Start', config },
+          { id: 'end', type: 'end', label: 'End' },
         ],
         edges: [{ id: 'e1', source: 'start', target: 'end' }],
         ...overrides,
@@ -1298,8 +1368,8 @@ describe('validateFlowTriggerReadiness', () => {
         // it `flows[0].nodes[1].config.secret`, the rule's own finding path.
         const startSecond = apiFlow({ hookId: 'intake' }, {
           nodes: [
-            { id: 'end', type: 'end' },
-            { id: 'start', type: 'start', config: { hookId: 'intake' } },
+            { id: 'end', type: 'end', label: 'End' },
+            { id: 'start', type: 'start', label: 'Start', config: { hookId: 'intake' } },
           ],
         });
         const at = (paths: string[]) =>
@@ -1474,6 +1544,23 @@ describe('validateFlowTriggerReadiness', () => {
           ],
         },
       ],
+      // [#29442] The start-input declaration shares the trigger object's hedge.
+      [
+        FLOW_INPUT_UNKNOWN_OBJECT,
+        'warning',
+        {
+          objects: [candidateObject],
+          flows: [
+            {
+              name: 'other_package_input',
+              type: 'screen',
+              status: 'active',
+              variables: [{ name: 'invoiceId', type: 'text', isInput: true, objectName: 'billing_invoice' }],
+              nodes: [{ id: 'start', type: 'start' }],
+            },
+          ],
+        },
+      ],
       [
         FLOW_DRAFT_STATUS_AMBIGUOUS,
         'warning',
@@ -1500,7 +1587,7 @@ describe('validateFlowTriggerReadiness', () => {
       // what earns `flow-trigger-unknown-object` its warning.
       for (const [rule, severity, stack] of provoke) {
         for (const f of cliFlowFamily(stack).filter((x) => x.rule === rule)) {
-          if (severity === 'warning' && rule === FLOW_TRIGGER_UNKNOWN_OBJECT) {
+          if (severity === 'warning' && (rule === FLOW_TRIGGER_UNKNOWN_OBJECT || rule === FLOW_INPUT_UNKNOWN_OBJECT)) {
             expect(f.hint, rule).toMatch(/another installed package/);
           }
           if (severity === 'error') {

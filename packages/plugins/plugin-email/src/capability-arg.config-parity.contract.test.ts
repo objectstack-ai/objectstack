@@ -267,6 +267,7 @@ describe('a config the schema accepts reaches the plugin intact', () => {
     }).options;
     expect(withEnv.defaultTemplateContext).toEqual({
       appName: 'From The Env',
+      baseUrl: 'http://localhost:3000',  // the deployment address, resolved beside appName
       supportEmail: 'help@acme.test',   // every other context key still spreads verbatim
     });
     // The blast radius #5448 named: the placeholder sender is slugged from the

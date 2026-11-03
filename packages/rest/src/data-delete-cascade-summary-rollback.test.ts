@@ -134,8 +134,10 @@ describe('a DELETE whose cascade a dependent\'s failing roll-up stops answers a 
   it('DELETE of the account answers 500 INTERNAL_ERROR, and nothing is deleted', async () => {
     const res = await call('DELETE', '/:object/:id', { params: { object: ACCOUNT, id: 'a1' } });
     expect(res._status, JSON.stringify(res._json)).toBe(500);
-    expect(res._json?.code, JSON.stringify(res._json)).toBe('INTERNAL_ERROR');
-    expect(res._json.success).toBeUndefined();
+    // [#29421] The whole body, byte for byte: the refusal now DECLARES `500
+    // INTERNAL_ERROR`, and the door answers exactly what it answered when it
+    // reached the same 500 by falling through every message heuristic.
+    expect(res._json).toEqual({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
     expect(await rowIds(ACCOUNT)).toEqual(['a1']);
     expect(await rowIds(LINE)).toEqual(['l1', 'l2', 'l3']);
   });

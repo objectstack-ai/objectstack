@@ -26,6 +26,8 @@
  * addressed to an unregistered channel are dead-lettered, not delivered.
  */
 import type { NotificationChannel } from '../system/notification.zod';
+import type { RegisterDeviceRequest, RegisterDeviceResponse, UnregisterDeviceResponse } from '../api/protocol.zod';
+import type { UserDevice } from '../system/push-device.zod';
 export type { NotificationChannel } from '../system/notification.zod';
 
 /**
@@ -207,4 +209,92 @@ export interface INotificationService {
      * @param userId - Owner of the inbox
      */
     markAllRead?(userId: string): Promise<MarkReadResult>;
+
+    /* ------------------------------------------------------------------ */
+    /*  Push devices — the device registry (ADR-0012 §6)                   */
+    /* ------------------------------------------------------------------ */
+
+    /*
+     * All four are OPTIONAL, for the reason the inbox trio is: a provider
+     * with no push channel (SMTP, an SMS gateway, the dev stub) fills this
+     * slot legitimately with no device registry. Absence means the
+     * capability is unavailable — the device routes answer that, not a
+     * crash — so every implementation written before these members stays
+     * valid. Shapes are the wire contract the device routes serialize:
+     * `RegisterDeviceRequestSchema` / `RegisterDeviceResponseSchema` /
+     * `UnregisterDeviceResponseSchema` (`api/protocol.zod.ts`), and the stored
+     * device `UserDeviceSchema` (`system/push-device.zod.ts`).
+     *
+     * Implemented by `@objectstack/service-messaging` (`MessagingService`,
+     * over `sys_user_device`); `registerDevice` and `unregisterDevice` are
+     * served by `POST` / `DELETE /api/v1/notifications/devices`.
+     * `listDevices` has no route, and `invalidateDeviceToken` is called by
+     * the push channel's invalid-recipient path.
+     */
+
+    /**
+     * Register or refresh a push device for this user.
+     *
+     * - **Refresh, not duplicate.** A `request.deviceId` this user already
+     *   holds refreshes that device (token, vendor, app, locale, last seen)
+     *   and re-enables it; an absent `deviceId` is minted here and answered
+     *   in the response, which the client keeps.
+     * - **One live row per token.** A token this user already holds under
+     *   another `deviceId` (the app's storage was cleared, so the request
+     *   carries no `deviceId`) refreshes that row and answers its `deviceId`,
+     *   never a second live row. Registering a token another user's device
+     *   holds moves it to this user, and the other user's device stops
+     *   receiving it. A push meant for the previous owner never reaches the
+     *   phone's new user.
+     * - An absent `request.vendor` is derived from `request.platform`
+     *   (`ios` → `apns`, `android` → `fcm`). `web` has no default vendor: a
+     *   `web` registration names `apns` or `fcm`, and one without `vendor` is
+     *   refused as a validation error, never stored with a guessed vendor.
+     *
+     * @param userId - The signed-in user, from the session; never a body member
+     * @param request - The registration body
+     */
+    registerDevice?(userId: string, request: RegisterDeviceRequest): Promise<RegisterDeviceResponse>;
+
+    /**
+     * Unregister one of this user's devices (sign-out, account switch).
+     *
+     * Resolves `{ success: true }` once the device is removed. A `deviceId`
+     * this user does not hold — unknown, or another user's — never resolves:
+     * the call throws an error whose `code` is `NOT_FOUND`, which the device
+     * route answers as 404. It is never a distinct "forbidden", so a caller
+     * cannot learn that a device id exists for somebody else, and cannot
+     * remove it.
+     *
+     * @param userId - The signed-in user, from the session
+     * @param deviceId - The id {@link registerDevice} answered
+     */
+    unregisterDevice?(userId: string, deviceId: string): Promise<UnregisterDeviceResponse>;
+
+    /**
+     * List this user's devices, newest `lastSeenAt` first; a device with no
+     * `lastSeenAt` comes last.
+     *
+     * Disabled devices (a token the vendor reported dead) are listed too,
+     * with `enabled: false` and their `invalidatedAt`, so a settings screen
+     * can say why a phone stopped receiving pushes. Only this user's devices
+     * are ever answered; there is no listing across users.
+     *
+     * @param userId - The signed-in user, from the session
+     */
+    listDevices?(userId: string): Promise<UserDevice[]>;
+
+    /**
+     * Retire a token the vendor reported dead (APNs `BadDeviceToken` /
+     * `Unregistered`, FCM `UNREGISTERED`), called by the push channel's
+     * invalid-recipient path (ADR-0012 §6, §12).
+     *
+     * The device row is KEPT, disabled, with the time of invalidation, so
+     * "why did this phone stop getting pushes" stays answerable and a later
+     * registration of the same device re-enables it. Nothing is delivered to
+     * a disabled device. A token no device holds is a no-op.
+     *
+     * @param token - The vendor token as the vendor reported it
+     */
+    invalidateDeviceToken?(token: string): Promise<void>;
 }

@@ -146,7 +146,6 @@ const en = {
   actions: {
     decisionOutput: {
       help: 'Handed to the flow as a decision output.',
-      helpMultiValue: 'Handed to the flow as a decision output. Comma-separate multiple values.',
     },
     resultDialog: {
       // objectui#13461 — the secret block's reveal toggle, an icon-only button.
@@ -423,6 +422,11 @@ const en = {
       uploadIncomplete: 'Upload of "{{name}}" did not complete: no file id was returned, so nothing was saved',
       restricted: 'Restricted file',
       restrictedHint: 'You do not have access to the details of this file',
+    },
+    // The scan button text and lookup fields show inside the mobile shell.
+    scan: {
+      button: 'Scan code',
+      failed: 'Could not scan',
     },
     image: {
       upload: 'Upload image',
@@ -1125,8 +1129,6 @@ const en = {
     pullToRefresh: 'Pull to refresh',
     refreshing: 'Refreshing…',
     share: 'Share',
-    sharingPersonal: 'Personal view',
-    sharingCollaborative: 'Shared view',
     sharingLockedBy: 'Locked by {{user}}',
     print: 'Print',
     hideFieldsTitle: 'Hide Fields',
@@ -1391,6 +1393,10 @@ const en = {
       pin: 'Pin: open this view by default',
       unpin: 'Unpin: the list opens its default view again',
       inMenu: 'Already in the menu',
+      // objectstack#29635 — the reader's own views (My views).
+      myViews: 'My views',
+      saveAsMyView: 'Save as my view',
+      myViewName: 'View name',
     },
     dragToReorder: 'Drag to reorder',
     defaultView: 'Default view',
@@ -1859,7 +1865,6 @@ const en = {
     undo: 'Undo',
     redo: 'Redo',
     canvasMinimap: 'Canvas minimap',
-    versionHistory: 'Version history',
   },
   dashboard: {
     total: 'Total',
@@ -3948,6 +3953,8 @@ const en = {
     changes: {
       title: 'Pending changes',
       description: 'What publishing will change. New items are added; updates overwrite the live version.',
+      // ADR-0146 D3 — where a customization of a read-only base is saved: its `.custom` pair.
+      savedToCustomization: 'Saved to {{package}}’s customizations',
       loading: 'Loading pending changes…',
       loadFailed: 'Could not load pending changes:',
       empty: 'Nothing pending — every draft has been published.',
@@ -5677,6 +5684,26 @@ const en = {
     retry: 'Try again',
     emptyTitle: 'No connector needs connecting',
     emptyBody: 'None of the installed apps has a connector that an administrator signs in to with OAuth.',
+    clientKeptWithSecret: 'OAuth client {{clientId}}, secret stored',
+    clientKept: 'OAuth client {{clientId}}, no secret',
+    clientTitle: 'OAuth client for {{name}}',
+    clientIntro: 'This connector signs in with an OAuth client your organization registers with the vendor for this deployment, using the redirect URI below. Enter the client\'s ID, and its secret if the vendor issued one, then continue to the vendor\'s sign-in.',
+    clientStored: 'Stored client: {{clientId}}',
+    clientStoredSecret: 'A client secret is stored with it. It is never shown.',
+    clientStoredNoSecret: 'No client secret is stored with it.',
+    clientResend: 'Replacing it sends a new client: enter its client ID, and its secret if the vendor issued one.',
+    clientId: 'Client ID',
+    clientSecret: 'Client secret',
+    clientSecretHint: 'Leave it empty for a public client. The secret is stored encrypted with the connection and never shown again.',
+    clientContinue: 'Continue to sign-in',
+    redirectUriLabel: 'Redirect URI',
+    redirectUriCopy: 'Copy',
+    redirectUriCopied: 'Copied',
+    redirectUriHint: 'Register this exact URI with the vendor\'s OAuth client before you continue.',
+    redirectUriMissing: 'This deployment has no fixed public address, so it has no redirect URI and a connect is refused. Set OS_BASE_URL (or OS_AUTH_URL) on the server.',
+    clientKeepHint: 'Reconnecting keeps this client and its stored secret; nothing is entered here.',
+    clientKeep: 'Keep the stored client',
+    clientReplace: 'Replace the stored client',
   },
   // Setup → People & organization: Position holders and Permission set
   // assignment (ADR-0146 D7).

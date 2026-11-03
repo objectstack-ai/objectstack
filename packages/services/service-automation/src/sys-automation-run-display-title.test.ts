@@ -28,6 +28,17 @@ import { resolveDisplayField } from '@objectstack/spec/data';
 import { SysAutomationRun } from './sys-automation-run.object.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
+/**
+ * The `titleFormat` template each object declared before the ruling of record
+ * on #29007 (6574393684, letter B) retired it: an object definition that
+ * declares one is refused at the metadata save gate and by `os validate`, so
+ * the object no longer carries it. Kept here as the reference text the title
+ * has to reproduce — the text the template drew — not as a title resolver.
+ */
+const RETIRED_TITLE_TEMPLATES: Readonly<Record<string, string>> = {
+  sys_automation_run: '{flow_name} · {node_id}',
+};
+
 const SYS = { context: { isSystem: true } } as any;
 
 /**
@@ -95,7 +106,7 @@ describe('[#20015] sys_automation_run resolves a real record title under ADR-007
 
     expect(h1Of(row!)).toBe('quote_approval · manager_gate');
     expect(h1Of(row!)).not.toBe(row!.id);
-    expect(h1Of(row!)).toBe(renderTitleFormat(SysAutomationRun.titleFormat, row!));
+    expect(h1Of(row!)).toBe(renderTitleFormat(RETIRED_TITLE_TEMPLATES[SysAutomationRun.name], row!));
     expect(resolveRecordTitle(SysAutomationRun, storedOnly(row!))).toBe('quote_approval · manager_gate');
   });
 

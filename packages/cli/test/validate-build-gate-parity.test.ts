@@ -213,15 +213,14 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // (#28727), so the row moved here — deleted there rather than reworded, for
   // the reason the `runPerPackageAuthoringRules` row above gives.
   'findExtensionFieldSuffixRefusals',
-  // [#28893] Flow region shape (ADR-0031): every `loop` body, `parallel`
-  // branch and `try_catch` region single-entry/single-exit and acyclic, and a
-  // `parallel` with two branches, judged by the automation engine's own
-  // registration call (`FlowSchema`, then the spec's `validateControlFlow`).
-  // Wired into both commands in one card. Not a registry rule today, so
-  // `os lint` is blind to it: the parity test pins that gap
-  // (`authoring-rule-command-parity.test.ts`, `OUTSIDE_THE_TABLE`), and moving
-  // it into `authoring-rules.ts` is the reported follow-up.
-  'findFlowRegionRefusals',
+  // [#29051] An undeclared cycle in a flow's top-level graph (ADR-0044),
+  // judged by the automation engine's own registration judge
+  // (`findUndeclaredFlowCycle`, `@objectstack/metadata-core`), which the
+  // publish doors run too. Not a registry rule: `@objectstack/lint` does not
+  // depend on metadata-core, so the rule table cannot reach the judge without
+  // a new package edge, and a copy of the walk is what the ruling forbids. So
+  // `os lint` does not give this verdict; validate and build do.
+  'findFlowCycleRefusals',
 ];
 
 /**

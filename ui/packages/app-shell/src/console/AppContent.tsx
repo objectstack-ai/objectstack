@@ -34,6 +34,7 @@ import {
 import { buildExpressionUser } from '../providers/expressionUser.js';
 import { useTrackRouteAsRecent } from '../hooks/useTrackRouteAsRecent.js';
 import { useHomePath } from '../hooks/useHomePath.js';
+import { readItemPreferLocal, useReadItemsByName } from '../hooks/useObjectPresence.js';
 import { useLauncherApps } from '../hooks/useLauncherApps.js';
 import { useSignedInUserLocale } from '../hooks/useUserLocale.js';
 import { resolveRecordFormTarget, resolveRecordFormModalLayout, resolveFormViewChrome, selectRecordFormView, resolveNavigateCreateUrl, resolveNavigateEditUrl, resolvePostCreateTarget, recordFormCreateValues, readRecordFormCreateValues, RECORD_FORM_CREATE_VALUES_STATE } from '../utils/recordFormNavigation.js';
@@ -343,6 +344,8 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // objectstack#28645 — what the app bundle answers in render (null outside a
   // `MetadataProvider`): the page a page route opens is read there first.
   const bundledReads = useBundledReads();
+  // objectstack#29416 — a page the bundle does not hold is asked by name.
+  const readItemsByName = useReadItemsByName(metadata);
   // objectui#7373 — where this file's two "you cannot be here" exits land. Both
   // sit BELOW the readiness gate further down (`metadataLoading` &c), so the
   // list they resolve against has settled; an app list that failed to load is
@@ -481,15 +484,20 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     hostRoutePaths,
     (pageName) => {
       // objectstack#28645 — the bundle's page when it holds this package's;
-      // the `/meta/page` list, prefer-local, for a page it does not hold.
+      // objectstack#29416 — else the page by name, prefer-local, and the
+      // `/meta/page` list only when the by-name answer cannot be the pick.
       const bundled = bundledReads?.item('page', pageName, (activeApp as any)?._packageId);
       if (bundled?.state === 'hit') return { page: bundled.value, settled: true };
       if (bundled?.state === 'pending') return { page: undefined, settled: false };
-      const status = getTypeStatus?.('page');
-      return {
-        page: preferLocal(metadata.pages as any[], pageName, (activeApp as any)?._packageId),
-        settled: status === undefined || status === 'ready' || status === 'error',
-      };
+      const { item, settled } = readItemPreferLocal(
+        readItemsByName,
+        'page',
+        pageName,
+        (activeApp as any)?._packageId,
+        () => metadata.pages,
+        getTypeStatus?.('page'),
+      );
+      return { page: item, settled };
     },
     // objectui#13046 — a record route reads the objects its declared record
     // page binds, picked from the page list as `RecordDetailView` picks it.
@@ -497,6 +505,19 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
       const status = getTypeStatus?.('page');
       return {
         pages: Array.isArray(metadata.pages) ? (metadata.pages as unknown[]) : [],
+        settled: status === undefined || status === 'ready' || status === 'error',
+      };
+    },
+    // objectstack#28784 — a dashboard route reads the objects its widgets
+    // require: the bundle's dashboard when it holds this package's; the
+    // `/meta/dashboard` list, prefer-local, for one it does not hold.
+    (dashboardName) => {
+      const bundled = bundledReads?.item('dashboard', dashboardName, (activeApp as any)?._packageId);
+      if (bundled?.state === 'hit') return { dashboard: bundled.value, settled: true };
+      if (bundled?.state === 'pending') return { dashboard: undefined, settled: false };
+      const status = getTypeStatus?.('dashboard');
+      return {
+        dashboard: preferLocal(metadata.dashboards as any[], dashboardName, (activeApp as any)?._packageId),
         settled: status === undefined || status === 'ready' || status === 'error',
       };
     },
@@ -525,11 +546,16 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // objectstack#28645 — a page route reads its page bundle-first (`PageView`,
   // the page scope above), so it does not wait for the `/meta/page` list: a
   // page outside the bundle is read from the list by those readers, which
-  // wait for it themselves.
+  // wait for it themselves. objectstack#28784 — a dashboard route reads its
+  // dashboard the same way (`DashboardView`, the dashboard scope above).
   const pageRouteReadsBundle = !!bundledReads && /^page\/[^/]+$/.test(appSubPath);
+  const dashboardRouteReadsBundle = !!bundledReads && /^dashboard\/[^/]+$/.test(appSubPath);
   const routeReadsKey = [
     ...routeReads.filter(
-      (type) => (type !== 'object' || readsWholeRegistry) && !(type === 'page' && pageRouteReadsBundle),
+      (type) =>
+        (type !== 'object' || readsWholeRegistry) &&
+        !(type === 'page' && pageRouteReadsBundle) &&
+        !(type === 'dashboard' && dashboardRouteReadsBundle),
     ),
     ...(searchParamsHasRecordForm(location.search) && !routeReads.includes('object') ? ['object'] : []),
   ].join(',');
@@ -1733,27 +1759,25 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   );
 }
 
-function findFirstRoute(items: any[], ctx?: NavTemplateContext): string {
+// objectui#12113 — a `component` entry lands too: its URL is the one the
+// sidebar follows, through `buildItemRoute` → `resolveHref`. Without it the
+// Studio app, whose navigation is all `component` entries, had no landing at
+// all.
+const WORKING_LANDING_TYPES: ReadonlySet<string> = new Set(['object', 'page', 'dashboard', 'report', 'component']);
+// objectstack-ai/objectstack#29678 — the last resort: a `doc` entry opens the
+// in-app docs portal (`/docs/BOOK[/DOC]` under the app, `resolveHref`).
+const DOC_LANDING_TYPES: ReadonlySet<string> = new Set(['doc']);
+
+function findFirstRoute(items: any[], ctx?: NavTemplateContext, types: ReadonlySet<string> = WORKING_LANDING_TYPES): string {
   if (!items || items.length === 0) return '';
   for (const item of items) {
-    // objectui#12113 — a `component` entry lands too: its URL is the one the
-    // sidebar follows, through `buildItemRoute` → `resolveHref`. Without it
-    // the Studio app, whose navigation is all `component` entries, had no
-    // landing at all.
-    if (
-      item.type === 'object' ||
-      item.type === 'page' ||
-      item.type === 'dashboard' ||
-      item.type === 'report' ||
-      item.type === 'component'
-    ) {
+    if (types.has(item.type)) {
       const route = buildItemRoute(item, ctx);
       if (route) return route;
       continue;
     }
-    if (item.type === 'url') continue;
     if (item.type === 'group' && item.children) {
-      const childRoute = findFirstRoute(item.children, ctx);
+      const childRoute = findFirstRoute(item.children, ctx, types);
       if (childRoute !== '') return childRoute;
     }
   }
@@ -1793,8 +1817,16 @@ function buildItemRoute(item: any, ctx?: NavTemplateContext): string {
  * shown (`navigation` arrives already gated, objectui#12426) — `findFirstRoute`
  * walks groups and lands on an `object`, `page`, `dashboard`, `report` or
  * `component` entry (objectui#12113 added `component`). It skips the item
- * types that address nothing inside the app (`url`, `separator`, `action`),
- * and a `doc` entry is never that fallback landing (objectui#11197). Which app
+ * types that address nothing inside the app (`url`, `separator`, `action`).
+ * A `doc` entry is passed over there: a working entry outranks reading
+ * material, so an app whose first entry is its manual still opens on its first
+ * working entry. Only when no entry lands does the root open the FIRST `doc`
+ * entry the member is shown, in the in-app docs portal
+ * (objectstack-ai/objectstack#29678): an app whose navigation holds only docs
+ * used to render an empty `main`. That doc is gated as a declared `doc`
+ * landing is (objectstack-ai/objectstack#28450): by the server's audience gate
+ * on the app read and on the doc read, not by the sidebar's doc-readability
+ * answer, which is a lazy list read the root would have to wait on. Which app
  * the ROOT lands on is a separate question, decided by `isDefault`.
  *
  * The retired `app.homePageId` (spec 17.0.0, objectstack#4667) is not read: it
@@ -1811,7 +1843,8 @@ function resolveLandingRoute(
   const declared = resolveDeclaredLandingRoute(app?.landing, shownTrees, evaluateVisibility, (item) =>
     buildItemRoute(item, ctx),
   );
-  return declared || findFirstRoute(shownTrees[0] ?? [], ctx);
+  const tree = shownTrees[0] ?? [];
+  return declared || findFirstRoute(tree, ctx) || findFirstRoute(tree, ctx, DOC_LANDING_TYPES);
 }
 
 /**
@@ -1941,11 +1974,12 @@ function AppRootLanding({
   if (appServesNoNavigation(shownApp)) {
     return <AppNoAccessEmptyState app={app} setupPath={setupPath} />;
   }
-  // A navigation with no landing: every entry the sidebar draws is a `url`,
-  // `action` or `doc` link, or the items live only under `areas`, which the
-  // resolver does not walk. The root renders no page of its own and the
-  // sidebar offers the entries. It used to render the Studio app's overview,
-  // `StudioHomePage`, which objectui#12113 retired.
+  // A navigation with no landing: every entry the sidebar draws is a `url` or
+  // `action` link, or the items live only under `areas`, which the resolver
+  // does not walk (a `doc` entry lands, objectstack-ai/objectstack#29678). The
+  // root renders no page of its own and the sidebar offers the entries. It used
+  // to render the Studio app's overview, `StudioHomePage`, which objectui#12113
+  // retired.
   return null;
 }
 

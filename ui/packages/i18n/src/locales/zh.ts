@@ -134,7 +134,6 @@ const zh = {
   actions: {
     decisionOutput: {
       help: '作为决策输出传递给流程。',
-      helpMultiValue: '作为决策输出传递给流程。多个值请用逗号分隔。',
     },
     resultDialog: {
       // objectui#13461 — the secret block's reveal toggle, an icon-only button.
@@ -291,6 +290,11 @@ const zh = {
       uploadIncomplete: '“{{name}}” 上传未完成：未返回文件 ID，未保存任何内容',
       restricted: '受限文件',
       restrictedHint: '你无权查看此文件的详细信息',
+    },
+    // The scan button text and lookup fields show inside the mobile shell.
+    scan: {
+      button: '扫码',
+      failed: '扫码失败',
     },
     image: {
       upload: '上传图片',
@@ -882,8 +886,6 @@ const zh = {
     pullToRefresh: '下拉刷新',
     refreshing: '刷新中…',
     share: '分享',
-    sharingPersonal: '个人视图',
-    sharingCollaborative: '共享视图',
     sharingLockedBy: '由 {{user}} 锁定',
     print: '打印',
     hideFieldsTitle: '隐藏字段',
@@ -1142,6 +1144,10 @@ const zh = {
       pin: '固定：默认打开此视图',
       unpin: '取消固定：列表恢复打开默认视图',
       inMenu: '已在菜单中',
+      // objectstack#29635 — the reader's own views (My views).
+      myViews: '我的视图',
+      saveAsMyView: '另存为我的视图',
+      myViewName: '视图名称',
     },
     dragToReorder: '拖动排序',
     defaultView: '默认视图',
@@ -1156,7 +1162,6 @@ const zh = {
     undo: '撤销',
     redo: '重做',
     canvasMinimap: '画布缩略图',
-    versionHistory: '版本历史',
   },
   detail: {
     back: '返回',
@@ -3415,6 +3420,7 @@ const zh = {
     changes: {
       title: '待发布的变更',
       description: '发布将带来以下变更。“新增”为全新内容，“更新”将覆盖线上版本。',
+      savedToCustomization: '保存到 {{package}} 的定制',
       loading: '正在加载待发布变更…',
       loadFailed: '无法加载待发布变更：',
       empty: '没有待发布的内容 —— 所有草稿均已发布。',
@@ -4933,6 +4939,26 @@ const zh = {
     retry: "重试",
     emptyTitle: "没有需要连接的连接器",
     emptyBody: "已安装的应用中没有需要管理员通过 OAuth 登录的连接器。",
+    clientKeptWithSecret: "OAuth 客户端 {{clientId}}，已存储密钥",
+    clientKept: "OAuth 客户端 {{clientId}}，无密钥",
+    clientTitle: "{{name}} 的 OAuth 客户端",
+    clientIntro: "此连接器使用贵组织为本部署在供应商处注册的 OAuth 客户端登录，注册时使用下方的重定向 URI。请输入该客户端的 ID，若供应商签发了密钥也一并输入，然后继续前往供应商登录。",
+    clientStored: "已存储的客户端：{{clientId}}",
+    clientStoredSecret: "已随其存储客户端密钥，该密钥永不显示。",
+    clientStoredNoSecret: "未随其存储客户端密钥。",
+    clientResend: "替换会发送新的客户端：请输入其客户端 ID，若供应商签发了密钥也一并输入。",
+    clientId: "客户端 ID",
+    clientSecret: "客户端密钥",
+    clientSecretHint: "公共客户端请留空。密钥随连接加密存储，之后不再显示。",
+    clientContinue: "继续登录",
+    redirectUriLabel: "重定向 URI",
+    redirectUriCopy: "复制",
+    redirectUriCopied: "已复制",
+    redirectUriHint: "继续之前，请在供应商的 OAuth 客户端中登记这个完全一致的 URI。",
+    redirectUriMissing: "此部署没有固定的公开地址，因此没有重定向 URI，连接会被拒绝。请在服务器上设置 OS_BASE_URL（或 OS_AUTH_URL）。",
+    clientKeepHint: "重新连接将沿用此客户端及其已存储的密钥，此处无需输入。",
+    clientKeep: "沿用已存储的客户端",
+    clientReplace: "替换已存储的客户端",
   },
   setupAssignments: {
     positionsTitle: '岗位持有人',

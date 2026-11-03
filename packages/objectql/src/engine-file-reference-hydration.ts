@@ -8,7 +8,7 @@
  * `serveRefusedFileHydration` (the refused arm), `servableFileRows` (the one
  * servability rule both arms serve by) and `readParentDerivedFiles` (#22637:
  * the field-owned verdict a refused caller is still served by), with the
- * three module helpers only they use: `isReadRefusal`, `toFileValue` and
+ * three module helpers they use: `isReadRefusal`, `toFileValue` and
  * `PARENT_DERIVED_FILE_COLUMNS`.
  *
  * A MOVE, not a redesign. Each exported function below is the body of the
@@ -17,7 +17,9 @@
  * `sys_file` read, the same fail-open `catch` and its three answers, the same
  * tombstone rule and the same parent-derived read. Each method's docblock
  * stays on the method in `engine.ts`, which is still the contract. The three
- * helpers move with their docblocks, byte for byte, and are not exported.
+ * helpers move with their docblocks, byte for byte. `isReadRefusal` alone is
+ * exported, for the one other sub-read that serves a refusal in the value
+ * (`engine-reference-name-visible.ts`, #29460), so the two read one predicate.
  *
  * Nothing stays behind in this section: every member of it moved.
  *
@@ -87,7 +89,7 @@ export interface FileReferenceHydrationHost {
  * prose, and never by a driver's own ACL code (`42501` is the deployment's
  * database refusing the platform, not the platform refusing a reader).
  */
-function isReadRefusal(error: unknown): boolean {
+export function isReadRefusal(error: unknown): boolean {
   return (error as { code?: unknown } | null | undefined)?.code === 'PERMISSION_DENIED';
 }
 
