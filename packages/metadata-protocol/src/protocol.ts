@@ -4162,8 +4162,11 @@ export class ObjectStackProtocolImplementation implements
      * BEFORE the one effective read: {@link getMetaItems} with the served
      * decorations, with every package's item of a name kept (ADR-0048,
      * one item per package of a name), and with no package's declared
-     * override served over that package's own item. The same sources, the
-     * same merges, the same envelope; two steps of the effective read are not
+     * override served over that package's own item, and [#29871] with a
+     * DISABLED package's items kept: a disable hides them from every served
+     * and executed read and leaves them stored (they come back on enable), so
+     * the package's own address still holds them. The same sources, the same
+     * merges, the same envelope; three steps of the effective read are not
      * taken, and nothing else differs.
      *
      * The list {@link getMetaItems} served before ADR-0146 D8, kept for its
@@ -4175,11 +4178,16 @@ export class ObjectStackProtocolImplementation implements
      *    hard requirement ruled on #28238, option 3). So the doors judge it
      *    against this layer beside the effective list, never against a layer
      *    narrower than this one — it still holds a dependent package's
-     *    same-named row and the base's own document under a declared override;
+     *    same-named row and the base's own document under a declared override
+     *    (and a disabled package's view, whose withdrawal can only close a
+     *    form: the doors offer only the effective list's forms);
      *  - **the package export** (`GET /packages/:id/export` in
      *    `@objectstack/runtime`). A package exports its own items: the base's
      *    export carries the base unchanged, and its pair's export carries the
-     *    overriding item with its `overrides` block (ADR-0146 D8 item 3).
+     *    overriding item with its `overrides` block (ADR-0146 D8 item 3); and a
+     *    disabled package's export carries its items, as
+     *    `PackageExportBundleSchema` declares (every package exported, enabled
+     *    or not, and installed enabled).
      *
      * ⛔ Not a second list for anything else. Every door that serves a
      * package's name serves {@link getMetaItems}, the one effective read.

@@ -7589,8 +7589,13 @@ export class SchemaRegistry {
 
   /**
    * Universal List Method
+   *
+   * [#29871] `options.includeDisabledPackages` keeps a disabled package's
+   * items. Only the protocol's per-package layer passes it (the package
+   * export, which carries a package's own items enabled or not); every
+   * served read leaves it unset and hides them.
    */
-  listItems<T>(type: string, packageId?: string): T[] {
+  listItems<T>(type: string, packageId?: string, options?: { includeDisabledPackages?: boolean }): T[] {
     // Special handling for 'object' and 'objects' types - use objectContributors
     if (type === 'object' || type === 'objects') {
       return this.getAllObjects(packageId) as unknown as T[];
@@ -7606,7 +7611,7 @@ export class SchemaRegistry {
     // `package` type itself is never filtered — the Packages page must still
     // list disabled packages so they can be re-enabled. Disable is reversible:
     // items remain registered and reappear on enable.
-    if (type !== 'package') {
+    if (type !== 'package' && options?.includeDisabledPackages !== true) {
       result = result.filter((item: any) => !this.isPackageDisabled((item as any)?._packageId));
     }
     return result;
