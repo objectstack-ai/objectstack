@@ -426,11 +426,19 @@ export function StudioItemHeaderFoldedItems({ separator = true }: { separator?: 
     <>
       {/* One menu entry, reachable by the keys like the others; choosing it
           keeps the menu open, so a chip with its own control (the override
-          chip) is used from here as from the row. */}
+          chip) is used from here as from the row. objectstack#29692 — a menu
+          holds the focus on its items, so choosing the entry by the keys
+          presses the chip's control (`data-studio-chip-control`); the control
+          keeps its own click from reaching the entry, so a pointer press
+          toggles it once. */}
       {hasChips && (
         <DropdownMenuItem
           data-testid="studio-item-header-folded-chips"
-          onSelect={(event) => event.preventDefault()}
+          onSelect={(event) => {
+            event.preventDefault();
+            const target = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+            target?.querySelector<HTMLElement>('[data-studio-chip-control]')?.click();
+          }}
           className="flex flex-wrap items-center gap-1.5"
         >
           {fold.apiName && <StudioApiChip apiName={fold.apiName} />}
