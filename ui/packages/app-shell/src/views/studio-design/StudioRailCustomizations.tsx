@@ -49,7 +49,7 @@ import {
   type ContributedNav,
   type ContributedOnObject,
 } from './contributionRows.js';
-import { fetchListedPackageManifests } from './packages-io.js';
+import type { ListedPackageManifest } from './packages-io.js';
 import { fetchPackageCustomizations, type PackageCustomizations } from './packageCustomizations-io.js';
 
 /** A rail row as the one-surface helpers read it. */
@@ -402,6 +402,8 @@ export function ContributedRailRow({
  *
  * Asked only while `active` (the Interfaces pillar's no-app empty state) and
  * only for a package whose listed manifest declares `navigationContributions`.
+ * `manifests` is the package list the Studio surface already read: no
+ * package-list request is sent here.
  * Per declared target app, at most two reads:
  *  1. the served app read (`GET /meta/app/:app`, through `readApp`), for the
  *     app's owner (`_packageId`) — the declared app is an ADDRESS only;
@@ -414,6 +416,7 @@ export function ContributedRailRow({
 export function useContributedElsewhere(
   packageId: string | null,
   active: boolean,
+  manifests: ReadonlyMap<string, ListedPackageManifest> | null,
   readApp: (name: string) => Promise<Record<string, unknown> | null>,
 ): readonly ContributedElsewhere[] | null {
   const [answer, setAnswer] = React.useState<{ id: string; found: readonly ContributedElsewhere[] | null } | null>(null);
@@ -423,11 +426,10 @@ export function useContributedElsewhere(
     readAppRef.current = readApp;
   });
   React.useEffect(() => {
-    if (!active || !packageId || isCustomizationPackage(packageId)) return;
+    if (!active || !packageId || !manifests || isCustomizationPackage(packageId)) return;
     let cancelled = false;
     (async () => {
-      const manifests = await fetchListedPackageManifests().catch(() => null);
-      const apps = declaredNavTargetApps(manifests?.get(packageId)?.manifest);
+      const apps = declaredNavTargetApps(manifests.get(packageId)?.manifest);
       const reads = new Map<string, Promise<PackageCustomizations | null>>();
       const found = await Promise.all(
         apps.map(async (app): Promise<ContributedElsewhere | null> => {
@@ -443,7 +445,7 @@ export function useContributedElsewhere(
           if (!customizations) return null;
           const count = contributedNavCountOf(customizations, packageId, app);
           if (count === 0) return null;
-          return { app, ownerId: owner, ownerName: manifests?.get(owner)?.name ?? owner, count };
+          return { app, ownerId: owner, ownerName: manifests.get(owner)?.name ?? owner, count };
         }),
       );
       if (cancelled) return;
@@ -453,7 +455,7 @@ export function useContributedElsewhere(
     return () => {
       cancelled = true;
     };
-  }, [packageId, active]);
+  }, [packageId, active, manifests]);
   if (!active || !packageId || answer?.id !== packageId) return null;
   return answer.found;
 }

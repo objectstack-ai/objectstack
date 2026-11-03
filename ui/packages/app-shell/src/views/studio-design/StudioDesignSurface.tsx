@@ -399,6 +399,7 @@ import {
   prefixObjectName,
   type EnsuredCustomizationPackage,
   type PkgEntry,
+  type ListedPackageManifest,
 } from './packages-io.js';
 import { usePackageCustomizations, type PackageCustomizationsState } from './CustomizationMark.js';
 import {
@@ -1652,6 +1653,14 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     basedOn: string | null;
     listedPair: string | null;
   } | null>(null);
+  // objectstack#29851 — the listed manifests this same read answered, held
+  // with the id it answered for: the Interfaces pillar's no-app empty state
+  // reads the open package's declared navigation targets off it (addresses
+  // only), so it sends no package-list request of its own.
+  const [listedManifests, setListedManifests] = React.useState<{
+    for: string;
+    manifests: ReadonlyMap<string, ListedPackageManifest>;
+  } | null>(null);
   React.useEffect(() => {
     // objectui#11553 — the package-less scope has no package to look up; its
     // writability is decided below, not fetched.
@@ -1665,7 +1674,12 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     const listedIds = fetchListedPackageIds();
     listedIds.catch(() => {});
     const listedManifests = fetchListedPackageManifests();
-    listedManifests.catch(() => {});
+    listedManifests.then(
+      (manifests) => {
+        if (!cancelled) setListedManifests({ for: packageId, manifests });
+      },
+      () => {},
+    );
     const settle = (entry: PkgEntry | null) => {
       setPkgWritable(entry?.writable ?? null);
       setPkgEntry(entry);
@@ -2829,6 +2843,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                   readOnly={readOnly}
                   readOnlySettled={pkgWritable !== undefined}
                   customization={customization}
+                  listedManifests={listedManifests?.for === packageId ? listedManifests.manifests : null}
                   onDirtyChange={setPillarDirty}
                   onSurfaceLabelChange={setSurfaceLabel}
                   onHeldEditChange={setHeldEdit}
@@ -4431,8 +4446,14 @@ export function InterfacesPillar({
   onSurfaceLabelChange,
   onHeldEditChange,
   customization = null,
+  listedManifests = null,
 }: {
   packageId: string;
+  /** objectstack#29851 — the package list's manifests, as the Studio surface
+   * already read them; `null` until that read answers (or when it failed).
+   * The no-app empty state reads the open package's declared navigation
+   * targets off it, as addresses only. */
+  listedManifests?: ReadonlyMap<string, ListedPackageManifest> | null;
   /** objectui#12718 — the package's display name, as the Studio top bar
    * reads it; `undefined` until the package list answers. The pillar names a
    * package with no app by it, so the id shows only when neither exists. */
@@ -4830,6 +4851,7 @@ export function InterfacesPillar({
   const contributedElsewhere = useContributedElsewhere(
     packageId,
     appStatus === 'missing' && !error,
+    listedManifests,
     (name) => client.get<Record<string, unknown>>('app', name),
   );
   const openContributor = useOpenContributor();

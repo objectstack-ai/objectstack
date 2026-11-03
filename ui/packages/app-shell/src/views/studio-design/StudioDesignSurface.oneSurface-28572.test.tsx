@@ -753,6 +753,8 @@ describe('contributed nav entries show their served label, and a contributor say
     expect(within(cases).queryByTestId('contributed-id')).toBeNull();
   });
 
+  /** The package-list reads this harness's surface sends for an app-less package, with or without the empty state's reads. */
+  const SURFACE_PACKAGE_LIST_READS = 2;
   const NO_APP = () => t('engine.studio.if.noApp', 'en');
   const ADDS_TWO = () => tFormat('engine.studio.if.contributesOther', 'en', { count: 2, package: 'HotCRM' });
 
@@ -772,7 +774,10 @@ describe('contributed nav entries show their served label, and a contributor say
     const pane = screen.getByTestId('if-contributes-elsewhere');
     expect(pane).toHaveTextContent(t('engine.studio.if.noOwnAppTitle', 'en'));
     expect(pane).toHaveTextContent(ADDS_TWO());
-    // The request budget: one owner lookup and one customization read for the one target.
+    // The request budget: one owner lookup and one customization read for the one target,
+    // and no package-list request of its own: the surface's reads are reused, as many as
+    // the CONTROL below (a package declaring nothing) sends.
+    expect(srv.reads.filter((r) => r === '/api/v1/packages')).toHaveLength(SURFACE_PACKAGE_LIST_READS);
     expect(srv.reads.filter((r) => r === '/api/v1/meta/app/crm_app')).toHaveLength(1);
     expect(srv.reads.filter((r) => r.startsWith(`/api/v1/packages/${BASE}/customizations`))).toHaveLength(1);
     fireEvent.click(within(pane).getByTestId('if-open-owner'));
@@ -834,5 +839,6 @@ describe('contributed nav entries show their served label, and a contributor say
     srv.declaredApp = '';
     await keepsTodaysText();
     expect(srv.reads.filter((r) => r.startsWith('/api/v1/meta/app/'))).toEqual([]);
+    expect(srv.reads.filter((r) => r === '/api/v1/packages')).toHaveLength(SURFACE_PACKAGE_LIST_READS);
   });
 });
