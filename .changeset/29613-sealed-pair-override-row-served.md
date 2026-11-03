@@ -14,7 +14,7 @@ The reads now serve the pair's declared override from its row, as they already d
 
 - `GET /meta/TYPE/NAME` with no package, the base or the pair: the override on every server (item 2). Before, it served the base's shipped item whenever a metadata service was present.
 - The layered read naming the base, `effective`: the override (item 2). Before, the base's shipped item.
-- The per-package layer naming the pair: the override (item 3). Before, empty.
+- The per-package layer naming the pair: the override (item 3). Before, empty. So the pair's export (`GET /packages/PAIR/export`) now carries the override with its `overrides` block, as it does for a dashboard.
 - The per-package layer naming the base: the base's own item only (item 3). Before, it also listed the override, or listed only the override when a metadata service was present.
 - `GET /me/apps` (`@objectstack/plugin-hono-server`): it now lists the protocol's served apps (what `GET /meta/app` serves) when the protocol service is present, so the pair's override of an app is listed. With no protocol service it reads the registry as before.
 - A registry read that names the item directly answers the base's own item.
