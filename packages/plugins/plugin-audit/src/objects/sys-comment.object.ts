@@ -122,6 +122,26 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *   gate answers them with the bounded thread probe (fail closed), never a
  *   leaf.
  *
+ * ## Platform-written: the author `author_id`
+ *
+ * A comment's author is the server's, recorded once, at creation: a row's
+ * author is read-only after creation, like the comment's display name below.
+ * The reason is provenance integrity: the row names the user who wrote it, so
+ * it keeps the value the create stamped for the life of the row.
+ *
+ * - **The stamp.** The create hook in `comment-access-hooks.ts` assigns the
+ *   session user over any value the client sent. A non-system create whose
+ *   session names no user has nobody to record, and is refused (403
+ *   `RECORD_NOT_ACCESSIBLE`), as a reaction with no signed-in user is.
+ * - **Read-only on update.** `readonly: true`, so the engine's update-side
+ *   strip drops a non-system caller's value and reports it (`droppedFields`),
+ *   the author's and a parent editor's alike; the rest of the write lands.
+ * - **System writes** (seeds, imports, migrations) and a `preserveAudit`
+ *   update (a historical import, which only the system principal may start)
+ *   keep the value they supply. On those writes the column's presence is the writer's
+ *   to supply: the engine's record validator does not enforce `required` on a
+ *   `readonly` field, as `sys_file`'s storage-owned `key` and `status` record.
+ *
  * ## Platform-written: the author's display identity `author_name` / `author_avatar_url`
  *
  * The name and avatar a reader is shown beside a comment are the server's,
@@ -204,9 +224,12 @@ export const SysComment = ObjectSchema.create({
     }),
 
     // ── Author ───────────────────────────────────────────────────
+    // Platform-written (see "Platform-written: the author" above): stamped on
+    // create from the session user, read-only on update.
     author_id: Field.lookup('sys_user', {
       label: 'Author',
       required: true,
+      readonly: true,
       searchable: true,
       group: 'Author',
     }),
