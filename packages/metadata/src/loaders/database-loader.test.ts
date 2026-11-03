@@ -375,6 +375,45 @@ describe('DatabaseLoader', () => {
     });
   });
 
+  // [#29596] The stored-row conversion notice names a row by its row name,
+  // the identity every type is stored under. An `object_extension` body
+  // carries `extend` and no `name`, and its row is stored under its target,
+  // so this seam (unlike the protocol's, which reads the body) already names
+  // each stale extension and keys the warn-once set by it. Measured on a real
+  // store: the two rows read here as `crm_account` and `crm_contact`.
+  describe('stored conversion notice names the row (#29596)', () => {
+    const subjects = (warn: ReturnType<typeof vi.spyOn>) => warn.mock.calls
+      .map((c) => String(c[0]))
+      .filter((line) => line.includes('carries a pre-protocol shape'))
+      .map((line) => /stored (\S+) carries/.exec(line)?.[1]);
+    const staleTime = { type: 'time', label: 'Opens', defaultValue: '12:00Z' };
+
+    it('two stale extension rows give two notices, each naming its target', async () => {
+      await loader.save('object_extension', 'crm_account', { extend: 'crm_account', fields: { opens_at__c: staleTime } });
+      await loader.save('object_extension', 'crm_contact', { extend: 'crm_contact', fields: { opens_at__c: staleTime } });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const items = await new DatabaseLoader({ driver: mockDriver }).loadMany<{ extend: string; fields: Record<string, { defaultValue: string }> }>('object_extension');
+        expect(items.map((i) => i.fields.opens_at__c.defaultValue)).toEqual(['12:00', '12:00']);
+        expect(subjects(warn)).toEqual(['object_extension/crm_account', 'object_extension/crm_contact']);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('CONTROL — a non-extension row is named by its row name the same way', async () => {
+      await loader.save('object', 'shift', { name: 'shift', fields: { opens_at: staleTime } });
+      await loader.save('object', 'rota', { name: 'rota', fields: { opens_at: staleTime } });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        await new DatabaseLoader({ driver: mockDriver }).loadMany('object');
+        expect(subjects(warn)).toEqual(['object/shift', 'object/rota']);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+  });
+
   describe('stat', () => {
     it('should return null for missing items', async () => {
       const stats = await loader.stat('object', 'missing');
