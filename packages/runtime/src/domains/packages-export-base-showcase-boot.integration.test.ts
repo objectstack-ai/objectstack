@@ -257,7 +257,7 @@ async function boot(dir: string, { installPair }: { installPair: boolean }) {
         protocol,
         /** The pair's active (published) rows of `(type, name)`, read off the store. */
         async publishedRows(type: string, name: string): Promise<unknown[]> {
-            return await driver.find('sys_metadata', { where: { type, name, package_id: PAIR, state: 'active' } } as any) as unknown[];
+            return await driver.find('sys_metadata', { where: { type, name, package_id: PAIR, state: 'active' } });
         },
         async exported(id: string): Promise<Record<string, any>> {
             const res = await dispatcher.handlePackages(`/${encodeURIComponent(id)}/export`, 'GET', undefined, {}, CALLER);
