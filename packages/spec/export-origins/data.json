@@ -236,6 +236,8 @@
     "EMPTY_OPERATOR_ARMS": "src/data/filter-empty-operator.ts#EMPTY_OPERATOR_ARMS (const)",
     "ENGINE_UPDATE_UPSERT_REMOVED": "src/data/data-engine.zod.ts#ENGINE_UPDATE_UPSERT_REMOVED (const)",
     "EXTENSION_FIELD_SUFFIX": "src/data/field-customization.ts#EXTENSION_FIELD_SUFFIX (const)",
+    "EXTERNAL_ROW_CAP_CEILING": "src/data/datasource.zod.ts#EXTERNAL_ROW_CAP_CEILING (const)",
+    "EXTERNAL_ROW_CAP_DEFAULT": "src/data/datasource.zod.ts#EXTERNAL_ROW_CAP_DEFAULT (const)",
     "EffectiveApiMethods": "src/data/api-derivation.ts#EffectiveApiMethods (interface)",
     "EmptyOperatorArm": "src/data/filter-empty-operator.ts#EmptyOperatorArm (type)",
     "EmptyOperatorExpansion": "src/data/filter-empty-operator.ts#EmptyOperatorExpansion (interface)",

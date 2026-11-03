@@ -241,6 +241,8 @@
     "EMPTY_OPERATOR_ARMS (const)",
     "ENGINE_UPDATE_UPSERT_REMOVED (const)",
     "EXTENSION_FIELD_SUFFIX (const)",
+    "EXTERNAL_ROW_CAP_CEILING (const)",
+    "EXTERNAL_ROW_CAP_DEFAULT (const)",
     "EffectiveApiMethods (interface)",
     "EmptyOperatorArm (type)",
     "EmptyOperatorExpansion (interface)",
