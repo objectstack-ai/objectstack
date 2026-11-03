@@ -32,6 +32,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { decideTextScalar, migrateTextScalars, textScalarFields, type TextScalarsEngine } from './text-scalars.js';
 
 const OBJ = {
@@ -96,7 +97,7 @@ function memoryFace(engine: ObjectQL, raw: Record<string, Record<string, unknown
     getObject: (name) => engine.getObject(name),
     getConfigs: () => engine.getConfigs(),
     find: async (object, options) =>
-      ((await engine.find(object, options as any)) as Array<Record<string, unknown>>).map((row) => {
+      ((await engine.find(object, options as EngineQueryOptions)) as Array<Record<string, unknown>>).map((row) => {
         const planted = raw[`${object}:${String(row.id)}`];
         if (!planted) return row;
         const out = { ...row };
