@@ -5717,9 +5717,9 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       // objectstack#29728 — the rewrap keeps the transport's own error as its
       // cause, as the 404 arm above does. `createErrorFromResponse` replaces
       // the server's ADR-0112 code with its own taxonomy (`CONNECTION_ERROR`,
-      // `UNKNOWN_ERROR`), and it stamps `500` on an error that carries no
-      // status at all (a dropped connection), so the wrapper alone cannot say
-      // whether the server answered or in what words. The cause can: the
+      // `UNKNOWN_ERROR`) and its sentence with its own ("Connection error:
+      // ..."), so the wrapper alone cannot say what the server answered (a
+      // dropped connection carries no status, objectstack#29885). The cause can: the
       // by-name route read throws `status` + the server's `code` and sentence
       // for an answer, and the bare fetch failure for none.
       const wrapped = createErrorFromResponse(errorObj, `getObjectSchema(${objectName})`);
