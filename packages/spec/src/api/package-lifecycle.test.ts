@@ -370,14 +370,15 @@ describe('PackageExportBundleSchema declares the whole-deployment export as comp
     expect((result.error.issues[0] as { keys?: string[] }).keys).toEqual(['cycles']);
   });
 
-  // Declared before it is served (ADR-0049): no runtime mounts
-  // `GET /packages/export` until the server slice of #28914 lands. That
-  // change drops the marker, adds the route's ledger row and flips this test.
-  it('is PLANNED until a runtime serves the route: the describe says so, naming no tracker id', () => {
+  // Served (#28914's server slice mounted `GET /packages/export` on the runtime
+  // dispatcher, with its ledger row): the ADR-0049 marker is gone, and the
+  // describe names the route and the command that calls it.
+  it('is served: the describe carries no PLANNED marker, names the route and the command, and no tracker id', () => {
     const description = PackageExportBundleSchema.description ?? '';
-    expect(description).toMatch(/^\[PLANNED — not yet served\] /);
-    expect(description).toContain('ADR-0049');
-    expect(description).toContain('no runtime serves `GET /packages/export` yet');
+    expect(description).not.toMatch(/PLANNED/);
+    expect(description).not.toMatch(/not yet served/);
+    expect(description).toContain('`GET /packages/export`');
+    expect(description).toContain('`os package export`');
     // Customer-facing prose carries no tracker id (check:doc-authoring); the slice is named in the comments.
     expect(description).not.toMatch(/#\d{3,}/);
   });

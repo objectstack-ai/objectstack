@@ -2940,6 +2940,7 @@ runtime**.
 |---------|----------|-------------|
 | `os package publish [artifact]` | ObjectOS Cloud | Upload a compiled artifact as a versioned package in your organization |
 | `os package install <package>` | A running runtime | Install a package into a live kernel, from that runtime's catalog or from a local artifact |
+| `os package export` | A running runtime | Export the deployment's whole ontology as installable packages, one directory per package, in install order |
 
 For which one to reach for and the preview patterns around them, see
 [Publish & preview](/docs/deployment/publish-and-preview). This section is the
@@ -3133,6 +3134,54 @@ A `404` means the target runtime does not mount `MarketplaceInstallLocalPlugin`
 composed without it will not accept installs.
 
 In catalog mode, a runtime connected to an ObjectOS Cloud account presents its connection credential to the cloud catalog — see [Cloud Connection](/docs/deployment/cloud-connection).
+
+#### `os package export`
+
+Takes a running deployment's whole ontology out as packages you can install on
+any runtime, the open Apache-2.0 one included. One read,
+`GET /api/v1/packages/export`, answers every installed package the deployment's
+own code does not register: the marketplace and authored packages, each base's
+`.custom` customization package among them. Each comes exactly as
+`GET /api/v1/packages/:id/export` answers it, with the namespace and
+dependencies it was installed with, and dependencies come first, so a `.custom`
+package follows its base. A package registered by the deployment's own code
+(`defineStack()`, a plugin, the platform) is not exported: it travels with that
+code.
+
+```bash
+os package export --out ./ontology --url https://acme.example.com
+# ./ontology/01-com.acme.crm/objectstack.json
+# ./ontology/02-com.acme.crm.custom/objectstack.json
+# ./ontology/03-com.acme.billing/objectstack.json
+
+# on the target runtime, in the numbered order:
+os package install ./ontology/01-com.acme.crm/objectstack.json
+os package install ./ontology/02-com.acme.crm.custom/objectstack.json
+os package install ./ontology/03-com.acme.billing/objectstack.json
+```
+
+Each file is one package's export, installable as it stands with
+[`os package install`](#os-package-install). Install them in the numbered order;
+the command prints that order too, and never re-sorts what the read answered.
+
+- **No secret leaves.** Credential positions are withheld, as on every served
+  metadata read, and a connector's `auth.credentialRef` stays the reference it
+  is: fill the secret it names on the target runtime.
+- **No enabled state.** Every package installs enabled, including one that was
+  switched off where it was exported.
+- **Whole or nothing.** A package whose export cannot be assembled fails the
+  read, and the command prints the runtime's refusal, which names the package,
+  and writes nothing. It refuses an `--out` directory that already holds files.
+- **Who can export.** The same callers who can read a single package's export:
+  `studio.access` or `setup.access`.
+
+**Options:**
+
+| Flag | Env equivalent | Purpose |
+|---|---|---|
+| `-o, --out <dir>` | — | Directory to write into (default `./objectstack-export`); created, and refused when it already holds files |
+| `-u, --url <url>` | `OS_CLOUD_URL` | Server URL of the deployment to export (default: the stored `os login` session's, else `http://localhost:3000`) |
+| `-t, --token <token>` | `OS_TOKEN` | Authentication token (default: the stored `os login` session's) |
 
 ## Configuration
 
