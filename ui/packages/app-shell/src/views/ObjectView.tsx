@@ -734,9 +734,11 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // objectstack#29635 — Save as my view, and Rename and Delete on the
     // reader's own views. Save is offered to any reader the server lets save
     // one (`sys_personal_view` read and create), not to admins only; the name
-    // is asked in `PersonalViewNameDialog`.
+    // is asked in `PersonalViewNameDialog`. A reader who cannot read the
+    // list's own object is offered no Save: there is no list to keep.
     const personalViewsReady = personalViews.status === 'ready';
     const personalGrant = (action: 'create' | 'update') => !perms.isLoaded || perms.can(PERSONAL_VIEW_OBJECT, action);
+    const listReadable = !perms.isLoaded || perms.can(objectDef.name, 'read');
     const [personalViewDialog, setPersonalViewDialog] = useState<{ mode: 'save' } | { mode: 'rename'; viewId: string } | null>(null);
     const openPersonalView = (id: string) => {
         if (viewId) navigate(`../${id}`, { relative: 'path' });
@@ -949,7 +951,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         appSegment: appName,
         viewTotal,
         personalViewIds,
-        onSavePersonalView: personalViewsReady && personalGrant('create') && !!activeView && !viewAccess.refusal
+        onSavePersonalView: personalViewsReady && personalGrant('create') && listReadable && !!activeView && !viewAccess.refusal
             ? () => setPersonalViewDialog({ mode: 'save' })
             : undefined,
         onRenamePersonalView: personalViewsReady && personalGrant('update')

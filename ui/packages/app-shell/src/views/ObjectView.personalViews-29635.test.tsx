@@ -34,6 +34,12 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
 import { ListViewSchema } from '@objectstack/spec/ui';
 
+/**
+ * The reader's grants. Unloaded (every action allowed) unless a case loads
+ * them; `denied` lists the `object:action` pairs a loaded set refuses.
+ */
+const grants = vi.hoisted(() => ({ isLoaded: false, denied: new Set<string>() }));
+
 vi.mock('@object-ui/permissions', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@object-ui/permissions')>();
   // Stable identities — `ListView` names `perms` in its fetch dependencies.
@@ -44,10 +50,10 @@ vi.mock('@object-ui/permissions', async (importOriginal) => {
     getRowFilter: () => undefined,
     getObjectApiOperations: () => undefined,
     roles: [],
-    isLoaded: false,
+    get isLoaded() { return grants.isLoaded; },
     hasCapabilities: () => true,
-    can: () => true,
-    cannot: () => false,
+    can: (object: string, action: string) => !grants.denied.has(`${object}:${action}`),
+    cannot: (object: string, action: string) => grants.denied.has(`${object}:${action}`),
   };
   const fieldPerms = { canRead: () => true, canWrite: () => true, permissions: [] };
   return { ...actual, usePermissions: () => perms, useFieldPermissions: () => fieldPerms };
@@ -196,6 +202,8 @@ const leadReads = (dataSource: ReturnType<typeof mountLeads>['dataSource']) =>
     .map(([, params]) => params);
 
 beforeEach(() => {
+  grants.isLoaded = false;
+  grants.denied.clear();
   localStorage.clear();
   fetchCalls.length = 0;
   Object.defineProperty(window, 'innerWidth', { value: 1440, configurable: true, writable: true });
@@ -348,5 +356,25 @@ describe('objectstack#29635 — My views in the list view switcher', () => {
     expect(within(menu).queryByTestId('list-view-switcher-mine')).toBeNull();
     expect(within(menu).queryByTestId('list-view-switcher-save-mine')).toBeNull();
     expect(sectionRowIds('list-view-switcher-all')).toEqual(['v1', 'v2']);
+  });
+
+  it('a reader who may save a view but cannot read the list\'s object is not offered Save as my view', async () => {
+    grants.isLoaded = true;
+    grants.denied.add('crm_lead:read');
+    mountLeads('/apps/crm/crm_lead/view/v1');
+    await listToolbar();
+    const menu = openSwitcher();
+    // The reader's own views were read: the section is drawn, Save is not.
+    await waitFor(() => expect(within(menu).getByTestId('list-view-switcher-mine')).toBeInTheDocument());
+    expect(within(menu).queryByTestId('list-view-switcher-save-mine')).toBeNull();
+  });
+
+  it('CONTROL: with the same loaded grants and the list\'s object readable, Save as my view is offered', async () => {
+    grants.isLoaded = true;
+    mountLeads('/apps/crm/crm_lead/view/v1');
+    await listToolbar();
+    const menu = openSwitcher();
+    await waitFor(() => expect(within(menu).getByTestId('list-view-switcher-mine')).toBeInTheDocument());
+    expect(within(menu).getByTestId('list-view-switcher-save-mine')).toBeInTheDocument();
   });
 });
