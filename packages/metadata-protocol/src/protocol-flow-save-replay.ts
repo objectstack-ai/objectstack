@@ -29,6 +29,16 @@
  * imports from it; what it imports from elsewhere, it imports from where
  * `protocol.ts` imported it. Nothing re-exports this module, so the published
  * surface does not move.
+ *
+ * ## [#29557] The flow verdict body, one seam for every door that judges a flow
+ *
+ * {@link flowVerdictBody} below is the conversion the save door's fallback
+ * verdict (#21982) applies, and {@link storedFlowVerdictBody} is that same
+ * conversion asked of a STORED flow draft: the body the per-item publish, the
+ * package publish (both through `promoteDraftForPublish`) and the draft read's
+ * publish verdict (`draftPublishVerdict`) judge. One judge, one spelling: a
+ * legacy D2 spelling the save door accepted and stored raw is accepted at
+ * publish too, and what goes live is still the stored bytes.
  */
 
 import { ALL_CONVERSIONS, applyConversionsToFlow, type ConversionNotice } from '@objectstack/spec';
@@ -112,4 +122,40 @@ export async function flowSaveReplaysRetired(
     if (!active) return false;
     strikeCarried(active.body);
     return uncarried.size === 0;
+}
+
+/**
+ * [#21982] The body a flow is JUDGED in when the save door's canonicalizer did
+ * not resolve or threw: the request body with the spec's ADR-0087 D2
+ * conversions applied (`applyConversionsToFlow`), the full chain minus
+ * {@link FLOW_FALLBACK_VERDICT_NOT_REPLAYED}, with the retired entries when
+ * `includeRetired` says so. For the VERDICT only: the caller stores the body
+ * it was handed, never this one. A key no conversion rewrites is judged
+ * exactly as written.
+ */
+export function flowVerdictBody(body: unknown, options: { includeRetired: boolean }): unknown {
+    return applyConversionsToFlow(body, {
+        includeRetired: options.includeRetired,
+        excludeConversionIds: FLOW_FALLBACK_VERDICT_NOT_REPLAYED,
+    });
+}
+
+/**
+ * [#29557] The body a publish judges a STORED draft in: for a `flow`, the
+ * {@link flowVerdictBody} of the draft row with the retired entries included;
+ * every other type, the draft as stored. The two publish doors and the draft
+ * read's publish verdict judge through here and promote, store and serve the
+ * draft as stored.
+ *
+ * A stored draft is a row at rest, so the chain is the full one: the one the
+ * automation engine replays when it registers the published row (its stored-
+ * flow canonicalizer, which every caller but the save door calls with no
+ * options) and the one `applyConversionsToStoredItem` replays on read. The
+ * retired-entry predicate of the save door ({@link flowSaveReplaysRetired},
+ * #23903 ruling B') is not asked again: it judges authored input, and the
+ * draft's own save asked it, in draft mode as in publish mode. `type` is the
+ * singular type name.
+ */
+export function storedFlowVerdictBody(type: string, body: unknown): unknown {
+    return type === 'flow' ? flowVerdictBody(body, { includeRetired: true }) : body;
 }

@@ -175,6 +175,7 @@ describe('platform-object predicates', () => {
       'sys_notification_preference',
       'sys_notification_receipt',
       'sys_notification_template',
+      'sys_user_device',
     ]);
     expect(isPlatformProvidedObjectName('sys_notification_subscription')).toBe(false);
     expect(isPlatformProvidedObjectName('sys_notification_preference')).toBe(true);
