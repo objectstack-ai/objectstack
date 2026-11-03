@@ -2299,7 +2299,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
                 t={t}
               />
               {objectInheritedLegendEl}
-              <MatrixScrollPane className="flex-1" testId="perm-matrix-pane">
+              <MatrixScrollPane className={MATRIX_PANE} testId="perm-matrix-pane">
                 <StudioObjectMatrix
                   objects={filteredObjects}
                   draft={draft}
@@ -2500,7 +2500,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         {objectInheritedLegendEl}
 
         {/* Matrix */}
-        <MatrixScrollPane className="flex-1" testId="perm-matrix-pane">
+        <MatrixScrollPane className={MATRIX_PANE} testId="perm-matrix-pane">
           <PermissionTable
             objects={filteredObjects}
             draft={draft}
@@ -3197,11 +3197,27 @@ function StudioObjectRow({
 }
 
 /**
- * objectstack#26846 — the field sub-table's name cell, header and rows alike:
- * pinned to the left edge of the matrix's scroll container, over an opaque
- * background so the boxes scrolling under it do not show through.
+ * objectstack#29677 — the matrix's scroll pane is a size container, so the
+ * field panel under an expanded object can be as wide as the pane shows
+ * ({@link FIELD_PANEL}).
  */
-const FIELD_NAME_CELL = 'sticky left-0 z-[1] bg-background pr-2';
+const MATRIX_PANE = 'flex-1 @container';
+
+/**
+ * objectstack#29677 — the field panel under an expanded object (toolbar,
+ * legend and sub-table): pinned at the expanded cell's own left inset (`pl-12`
+ * on both hosts) while the matrix scrolls sideways, and no wider than the
+ * pane shows less both insets. The field table needs four columns, not the
+ * matrix's floor, so it never scrolls with the object columns: every Read and
+ * Edit box stays in view and clickable at any scroll offset, and the field
+ * name beside it stays readable.
+ *
+ * It replaces objectstack#26846's pinned name column. That column was the
+ * table's flexible one, so it took all the width the floor left over (697 px
+ * at a 1304 px matrix), and once pinned it covered both boxes from a scroll of
+ * 80 px on; below 1304 px of pane the boxes could not be reached at all.
+ */
+const FIELD_PANEL = 'sticky left-12 max-w-[calc(100cqi-6rem)]';
 
 /**
  * objectstack#27866 — the field sub-table's header cells: pinned to the top of
@@ -3389,7 +3405,7 @@ function FieldsSubTable({
   }
   const sharesLabel = (f: FieldSummary) => (labelCounts.get((f.label ?? f.name).trim().toLowerCase()) ?? 0) > 1;
   return (
-    <div className="space-y-2">
+    <div className={cn('space-y-2', FIELD_PANEL)} data-testid={`perm-field-panel-${objectName}`}>
       {/* Field toolbar (B4): filter + bulk over the visible field set. The
           filter only appears once one-by-one would actually hurt. */}
       {/* objectstack#26846 — the count sits beside the filter it counts. At
@@ -3456,12 +3472,13 @@ function FieldsSubTable({
         <table className="w-full text-xs">
           <thead data-testid={`perm-field-head-${objectName}`}>
             <tr className="text-muted-foreground">
-              {/* objectstack#26846 — the name column stays in view while the
-                  matrix scrolls sideways (FIELD_NAME_CELL).
+              {/* objectstack#29677 — the whole panel stays in view while the
+                  matrix scrolls sideways (FIELD_PANEL), so the name column
+                  needs no pin of its own.
                   objectstack#27866 — the header pins under the matrix's own
                   (FIELD_HEAD_CELL), so a long field list scrolled into view is
                   labelled by its own columns, not by the object columns above. */}
-              <th className={cn('text-left py-1 font-medium', FIELD_NAME_CELL, FIELD_HEAD_CELL, 'z-[3]')}>{t('perm.field.col.name')}</th>
+              <th className={cn('text-left py-1 pr-2 font-medium', FIELD_HEAD_CELL)}>{t('perm.field.col.name')}</th>
               <th className={cn('px-2 py-1 font-medium w-16 text-center', FIELD_HEAD_CELL)} title={t('perm.field.read')}>{t('perm.field.read')}</th>
               <th className={cn('px-2 py-1 font-medium w-16 text-center', FIELD_HEAD_CELL)} title={t('perm.field.edit')}>{t('perm.field.edit')}</th>
               <th className={cn('px-2 py-1 font-medium text-left', FIELD_HEAD_CELL)} title={t('perm.field.when.tip')}>{t('perm.field.when')}</th>
@@ -3478,7 +3495,7 @@ function FieldsSubTable({
                 <React.Fragment key={f.name}>
                   <tr className="border-t border-muted">
                     <td
-                      className={cn('py-1', FIELD_NAME_CELL)}
+                      className="py-1 pr-2"
                       data-testid={`perm-field-name-${objectName}-${f.name}`}
                       data-shared-label={sharesLabel(f) || undefined}
                     >
