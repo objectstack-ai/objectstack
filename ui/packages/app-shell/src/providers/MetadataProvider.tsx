@@ -1068,24 +1068,40 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
     },
     [peekBundle],
   );
+  // objectstack#29552 — `objectsReferencing` asked for an app whose bundle is
+  // not the one held, and the apps a held bundle answered without.
+  const bundleAppAskedRef = useRef<string | null>(null);
+  const bundleAppMissRef = useRef(new Set<string>());
+  useEffect(() => {
+    const asked = bundleAppAskedRef.current;
+    if (!asked) return;
+    bundleAppAskedRef.current = null;
+    const peek = peekBundle();
+    // No bundle at all: the readers' next read misses on its own.
+    if (!peek) {
+      bump();
+      return;
+    }
+    // Not entered yet (the effect above settles that), or a load on the wire,
+    // which re-renders the readers when it lands.
+    if (peek.status !== 'ready' || peek.settled) return;
+    if (!peek.items.get('app')?.has(asked)) bundleAppMissRef.current.add(asked);
+    bump();
+  });
   const readBundledReferencing = useCallback(
     (appName: string, objectName: string): BundledRead<readonly string[]> => {
       const peek = peekBundle();
       if (!peek) return BUNDLE_MISS;
       if (peek.status !== 'ready') return BUNDLE_PENDING;
-      const apps = peek.items.get('app');
-      const app = apps?.get(appName);
+      const app = peek.items.get('app')?.get(appName);
       if (!app) {
-        // objectstack#29552 — the bundle held is another app's: `appName` is
-        // entered from an effect of this same commit, so the read stays
-        // pending, and this provider's effect below looks again once it is
-        // (its load re-renders the readers when it lands). A bundle that holds
-        // no app at all is the answer for this one: there is none.
-        if (apps && apps.size > 0) {
-          bundleNoneAskedRef.current = true;
-          return BUNDLE_PENDING;
-        }
-        return BUNDLE_MISS;
+        // The bundle held is not `appName`'s: it is entered from an effect of
+        // this same commit, so the read stays pending, and this provider's
+        // effect below looks again once it is. Only a bundle that has answered
+        // without the app, with nothing on the wire, is the answer: none.
+        if (bundleAppMissRef.current.has(appName)) return BUNDLE_MISS;
+        bundleAppAskedRef.current = appName;
+        return BUNDLE_PENDING;
       }
       if (!navigationReachesObject(app.item, objectName) || !peek.items.get('object')?.has(objectName)) {
         return BUNDLE_MISS;
