@@ -576,27 +576,27 @@ describe('GetPackageCustomizationsResponseSchema.contributions: the entry shape 
   });
 });
 
-describe('the `nav` kind of `contributions` is declared ahead of its producer (ADR-0049)', () => {
+describe('the `nav` kind of `contributions` is served: no planned marker is left (ADR-0049)', () => {
   type Described = { description?: string };
   const member = (GetPackageCustomizationsResponseSchema as unknown as {
     shape: { contributions: Described & { element: { options: Described[] } } };
   }).shape.contributions;
   const [objectArm, navArm] = member.element.options;
 
-  it('the nav arm\'s describe opens with the planned marker and names the ADR, never a tracker id', () => {
-    expect(navArm.description).toMatch(/^\[PLANNED — not yet served\] /);
-    expect(navArm.description).toContain('ADR-0049');
+  it('the nav arm\'s describe carries no planned marker and names no tracker id', () => {
+    expect(navArm.description).not.toMatch(/PLANNED|not yet served/);
     expect(navArm.description).not.toMatch(/#\d{3,}/);
   });
 
-  it('the member and the field / flow arm say the nav kind is not yet served, and the field / flow arm carries no marker', () => {
-    expect(member.description).toContain('not yet served');
-    expect(objectArm.description).not.toMatch(/PLANNED/);
+  it('neither the member nor the field / flow arm says any kind is not yet served', () => {
+    expect(member.description).not.toMatch(/PLANNED|not yet served/);
+    expect(objectArm.description).not.toMatch(/PLANNED|not yet served/);
     expect(member.description).not.toMatch(/#\d{3,}/);
   });
 
-  it('the schema-level describe says the navigation items are not yet served, so serving them drops that too', () => {
-    expect(GetPackageCustomizationsResponseSchema.description).toContain('not yet served');
+  it('the schema-level describe no longer says the navigation items are not yet served', () => {
+    expect(GetPackageCustomizationsResponseSchema.description).not.toContain('not yet served');
+    expect(GetPackageCustomizationsResponseSchema.description).toContain('navigation items');
   });
 
   it('the nav arm says an item with no id (a separator may omit it) is not an entry: `name` is required', () => {

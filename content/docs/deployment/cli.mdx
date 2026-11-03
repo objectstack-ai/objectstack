@@ -1305,6 +1305,7 @@ where the data lives.
 | `os migrate summary-nulls` | Backfill roll-up `count` / `sum` columns still stored as `NULL` on parent rows created before the insert-time seed. Repairs values; no flag, nothing depends on it having run |
 | `os migrate blank-single-values` | Rewrite the empty strings (`''`) still stored on optional single-value option, reference and file columns to `null`, the form a cleared value is stored in today, so `$empty` finds those rows. Repairs values; no flag, nothing depends on it having run. See [below](#os-migrate-blank-single-values) |
 | `os migrate option-codes` | Rewrite option values still stored as a number, a boolean or SQLite `"N.0"` text (rows written before option fields stored the code string) to that code string, so filters, reads and unique keys see one value. Values it cannot decide are listed, never rewritten. No flag; idempotent. See [below](#os-migrate-option-codes) |
+| `os migrate text-scalars` | Rewrite numbers and booleans still stored raw on text fields (rows written before text fields stored the string) to that string, so filters, reads and unique keys see one value. SQLite `"N.0"` text it cannot decide is listed, never rewritten. No flag; idempotent. See [below](#os-migrate-text-scalars) |
 | `os migrate record-currency-codes` | Write the currency code you give into the rows of a record-mode currency field that hold an amount and no code, the rows stored before the field was switched to `currencyMode: 'record'`. The code is never derived. No flag; idempotent. See [below](#os-migrate-record-currency-codes) |
 | `os migrate comment-reactions` | Carry the emoji reactions a 17.x deployment stored in the retired `sys_comment.reactions` column into `sys_comment_reaction` records, list every stored value that does not read, and record the verified run that lets `os migrate apply --allow-destructive` drop the column |
 | `os migrate organization-ownership` | The v18 ownership ceremony (ADR-0131 D10): write a plan of what each table's rows will become, then `--apply` that reviewed plan. It upgrades a database 17.x or an 18.0 pre-release (`18.0.0-next.*`) created; a v18 server refuses to start on one until it has run. See [below](#os-migrate-organization-ownership) |
@@ -1555,6 +1556,32 @@ declared options (it may be text someone typed), a `"1.0"` on a field declaring
 both `"1"` and `"true"`, and a value whose reading the field no longer
 declares. A row that would collide with a unique value already stored is
 listed as a failure and the walk goes on. Idempotent: re-running until it
+reports nothing to rewrite is the verification, so it records no flag.
+
+#### `os migrate text-scalars`
+
+A number or a boolean written to a text field (`text`, `textarea`, `email`,
+`url`, `phone`, `password`, `markdown`, `html`, `richtext`, `code`,
+`signature`, `qrcode`) is stored as its string: `42` as `"42"`, `true` as
+`"true"`. Rows written before that rule keep the form the database stored: the
+raw number or boolean on driver-memory with persistence, the text `"42.0"`,
+`"1.0"` or `"0.0"` on SQLite. A filter on `"42"` does not find those rows, a
+read hands back the old form, and a unique field admits a new `"42"` beside an
+old `42` or `"42.0"`.
+
+```bash
+os migrate text-scalars                  # Dry run: counts per object and field, writes no rows
+os migrate text-scalars --apply          # Rewrite the raw numbers and booleans (prompts)
+os migrate text-scalars --apply --yes --json   # CI / scripts
+os migrate text-scalars --object account       # Restrict to one object (repeatable)
+```
+
+A raw number or boolean becomes its string. A SQLite `"42.0"` on a text field
+is listed per object and field and left as stored, for you to fix by hand: a
+text field declares no values, so it may be an old number or text someone
+typed. A row whose rewrite the write door refuses (a unique value already
+stored, or a string the field's format no longer admits) is listed as a
+failure, left whole, and the walk goes on. Idempotent: re-running until it
 reports nothing to rewrite is the verification, so it records no flag.
 
 #### `os migrate record-currency-codes`

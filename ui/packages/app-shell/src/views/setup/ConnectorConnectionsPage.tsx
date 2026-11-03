@@ -20,13 +20,17 @@
  * An instance declaring `clientSource: 'installer'` (ADR-0143 D2.1, the
  * 2026-11-02 amendment) first asks for the OAuth client the administrator
  * registered with the vendor: its client id and, when the vendor issued one,
- * its secret. Continue opens the window on that click and begins the connect
- * with the client. The secret input is masked, starts empty on every opening
- * (a reconnect included: the stored secret is never read back, only whether
- * one is kept), and is cleared the moment the begin is sent. A reconnect
- * shows the stored client id and whether a secret is kept, and sends the
- * client again: the server takes a client on every begin of such an
- * instance. Every other instance connects with no form.
+ * its secret. The form shows the redirect URI to register with that client,
+ * exactly as the status read answers it (`redirectUri`, derived by the server
+ * and never guessed here), with a copy button; when the read answers none,
+ * the form says the deployment has no redirect URI. Continue opens the window
+ * on that click and begins the connect with the client. The secret input is
+ * masked, starts empty on every opening (the stored secret is never read
+ * back, only whether one is kept), and is cleared the moment the begin is
+ * sent. A reconnect of a connection that keeps a client keeps it by default:
+ * the begin then sends no body, and the server reuses the kept client.
+ * Replacing it shows the client fields again. Every other instance connects
+ * with no form.
  *
  * ⛔ It never displays a token, a code, a client secret or the authorization
  * URL: none of the door's status answers carries a token or a secret, and
@@ -108,6 +112,12 @@ interface ClientDraft {
   before?: string;
   /** The client the connection keeps (`client` on the status), shown on a reconnect. */
   stored?: { clientId: string; hasSecret: boolean };
+  /** Whether the administrator replaces the stored client; always `true` when none is stored. */
+  replacing: boolean;
+  /** The redirect URI the status read answered (`redirectUri`); absent when the server derives none. */
+  redirectUri?: string;
+  /** Whether the redirect URI was copied since the form opened. */
+  copied: boolean;
   clientId: string;
   clientSecret: string;
   busy: boolean;
@@ -227,7 +237,10 @@ export function ConnectorConnectionsPage({ pollMs = 2000 }: ConnectorConnections
       label: instance.label,
       before: state.connectedAt,
       ...(state.client ? { stored: { clientId: state.client.clientId, hasSecret: state.client.hasSecret } } : {}),
-      clientId: state.client?.clientId ?? '',
+      replacing: !state.client,
+      ...(state.redirectUri ? { redirectUri: state.redirectUri } : {}),
+      copied: false,
+      clientId: '',
       clientSecret: '',
       busy: false,
       refusal: null,
@@ -237,20 +250,35 @@ export function ConnectorConnectionsPage({ pollMs = 2000 }: ConnectorConnections
   const submitClient = async (e: FormEvent) => {
     e.preventDefault();
     if (!clientDraft || clientDraft.busy) return;
-    const clientId = clientDraft.clientId.trim();
-    if (clientId.length === 0) return;
-    const client: InstallerClientInput = {
-      clientId,
-      ...(clientDraft.clientSecret.length > 0 ? { clientSecret: clientDraft.clientSecret } : {}),
-    };
+    let client: InstallerClientInput | undefined;
+    if (clientDraft.replacing) {
+      const clientId = clientDraft.clientId.trim();
+      if (clientId.length === 0) return;
+      client = {
+        clientId,
+        ...(clientDraft.clientSecret.length > 0 ? { clientSecret: clientDraft.clientSecret } : {}),
+      };
+    }
     // The secret leaves the form with this begin: clear it before anything is awaited.
-    setClientDraft({ ...clientDraft, clientId, clientSecret: '', busy: true, refusal: null });
+    // Keeping the stored client sends no client at all: the server reuses the one it keeps.
+    setClientDraft({ ...clientDraft, clientSecret: '', busy: true, refusal: null });
     const refusal = await connect(clientDraft.name, clientDraft.before, client);
     if (refusal === null) {
       setClientDraft(null);
       return;
     }
     setClientDraft((cur) => (cur ? { ...cur, busy: false, refusal } : cur));
+  };
+
+  const copyRedirectUri = async () => {
+    const uri = clientDraft?.redirectUri;
+    if (!uri) return;
+    try {
+      await navigator.clipboard.writeText(uri);
+      setClientDraft((cur) => (cur ? { ...cur, copied: true } : cur));
+    } catch {
+      // Denied or unavailable: the URI is on screen and selectable.
+    }
   };
 
   const confirmRevoke = async () => {
@@ -262,7 +290,10 @@ export function ConnectorConnectionsPage({ pollMs = 2000 }: ConnectorConnections
       setRevokeDraft({ name, busy: false, refusal: out.message });
       return;
     }
-    applyConnection(name, out);
+    // The revoke answer carries the status alone; the status read also answers
+    // the deployment's redirect URI, which the next Connect shows. Re-read it.
+    const read = await fetchConnection(name);
+    applyConnection(name, read.ok ? read : out);
     setRevokeDraft(null);
     setNotice({ tone: 'ok', kind: 'disconnected', name });
   };
@@ -492,10 +523,39 @@ export function ConnectorConnectionsPage({ pollMs = 2000 }: ConnectorConnections
               <DialogDescription>
                 {t('connectorConnections.clientIntro', {
                   defaultValue:
-                    'This connector signs in with an OAuth client your organization registers with the vendor for this deployment. Enter its client ID, and its client secret if the vendor issued one, then continue to the vendor\'s sign-in. The Connectors documentation describes the redirect URI to register with the client.',
+                    'This connector signs in with an OAuth client your organization registers with the vendor for this deployment, using the redirect URI below. Enter the client\'s ID, and its secret if the vendor issued one, then continue to the vendor\'s sign-in.',
                 })}
               </DialogDescription>
             </DialogHeader>
+            <div className="space-y-1.5" data-testid="connector-client-redirect">
+              <p className="text-sm font-medium">{t('connectorConnections.redirectUriLabel', { defaultValue: 'Redirect URI' })}</p>
+              {clientDraft?.redirectUri ? (
+                <>
+                  <div className="flex items-center gap-2">
+                    <code className="min-w-0 flex-1 break-all rounded-md border bg-muted/40 px-2 py-1.5 font-mono text-xs" data-testid="connector-client-redirect-uri">
+                      {clientDraft.redirectUri}
+                    </code>
+                    <Button type="button" size="sm" variant="outline" onClick={() => void copyRedirectUri()}>
+                      {clientDraft.copied
+                        ? t('connectorConnections.redirectUriCopied', { defaultValue: 'Copied' })
+                        : t('connectorConnections.redirectUriCopy', { defaultValue: 'Copy' })}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {t('connectorConnections.redirectUriHint', {
+                      defaultValue: 'Register this exact URI with the vendor\'s OAuth client before you continue.',
+                    })}
+                  </p>
+                </>
+              ) : (
+                <p role="alert" className="text-xs text-destructive" data-testid="connector-client-redirect-missing">
+                  {t('connectorConnections.redirectUriMissing', {
+                    defaultValue:
+                      'This deployment has no fixed public address, so it has no redirect URI and a connect is refused. Set OS_BASE_URL (or OS_AUTH_URL) on the server.',
+                  })}
+                </p>
+              )}
+            </div>
             {clientDraft?.stored ? (
               <div className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground" data-testid="connector-client-stored">
                 <p className="font-medium text-foreground">
@@ -507,43 +567,63 @@ export function ConnectorConnectionsPage({ pollMs = 2000 }: ConnectorConnections
                     : t('connectorConnections.clientStoredNoSecret', { defaultValue: 'No client secret is stored with it.' })}
                 </p>
                 <p className="mt-1">
-                  {t('connectorConnections.clientResend', {
-                    defaultValue:
-                      'Reconnecting sends the client again: keep the client ID and enter its secret again if it has one, or enter another client to replace it.',
+                  {clientDraft.replacing
+                    ? t('connectorConnections.clientResend', {
+                      defaultValue:
+                        'Replacing it sends a new client: enter its client ID, and its secret if the vendor issued one.',
+                    })
+                    : t('connectorConnections.clientKeepHint', {
+                      defaultValue: 'Reconnecting keeps this client and its stored secret; nothing is entered here.',
+                    })}
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="link"
+                  className="mt-1 h-auto p-0 text-xs"
+                  disabled={clientDraft.busy}
+                  onClick={() => setClientDraft((cur) => (cur ? { ...cur, replacing: !cur.replacing, clientId: cur.replacing ? '' : (cur.stored?.clientId ?? ''), clientSecret: '' } : cur))}
+                >
+                  {clientDraft.replacing
+                    ? t('connectorConnections.clientKeep', { defaultValue: 'Keep the stored client' })
+                    : t('connectorConnections.clientReplace', { defaultValue: 'Replace the stored client' })}
+                </Button>
+              </div>
+            ) : null}
+            {clientDraft?.replacing ? (
+              <>
+              <div className="space-y-1.5">
+                <Label htmlFor={clientIdInput}>{t('connectorConnections.clientId', { defaultValue: 'Client ID' })}</Label>
+                <Input
+                  id={clientIdInput}
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={clientDraft?.clientId ?? ''}
+                  onChange={(e) => setClientDraft((cur) => (cur ? { ...cur, clientId: e.target.value } : cur))}
+                  disabled={clientDraft?.busy}
+                  className="font-mono text-xs"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor={clientSecretInput}>{t('connectorConnections.clientSecret', { defaultValue: 'Client secret' })}</Label>
+                <Input
+                  id={clientSecretInput}
+                  type="password"
+                  autoComplete="new-password"
+                  spellCheck={false}
+                  value={clientDraft?.clientSecret ?? ''}
+                  onChange={(e) => setClientDraft((cur) => (cur ? { ...cur, clientSecret: e.target.value } : cur))}
+                  disabled={clientDraft?.busy}
+                  className="font-mono text-xs"
+                />
+                <p className="text-xs text-muted-foreground">
+                  {t('connectorConnections.clientSecretHint', {
+                    defaultValue: 'Leave it empty for a public client. The secret is stored encrypted with the connection and never shown again.',
                   })}
                 </p>
               </div>
+              </>
             ) : null}
-            <div className="space-y-1.5">
-              <Label htmlFor={clientIdInput}>{t('connectorConnections.clientId', { defaultValue: 'Client ID' })}</Label>
-              <Input
-                id={clientIdInput}
-                autoComplete="off"
-                spellCheck={false}
-                value={clientDraft?.clientId ?? ''}
-                onChange={(e) => setClientDraft((cur) => (cur ? { ...cur, clientId: e.target.value } : cur))}
-                disabled={clientDraft?.busy}
-                className="font-mono text-xs"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor={clientSecretInput}>{t('connectorConnections.clientSecret', { defaultValue: 'Client secret' })}</Label>
-              <Input
-                id={clientSecretInput}
-                type="password"
-                autoComplete="new-password"
-                spellCheck={false}
-                value={clientDraft?.clientSecret ?? ''}
-                onChange={(e) => setClientDraft((cur) => (cur ? { ...cur, clientSecret: e.target.value } : cur))}
-                disabled={clientDraft?.busy}
-                className="font-mono text-xs"
-              />
-              <p className="text-xs text-muted-foreground">
-                {t('connectorConnections.clientSecretHint', {
-                  defaultValue: 'Leave it empty for a public client. The secret is stored encrypted with the connection and never shown again.',
-                })}
-              </p>
-            </div>
             {clientDraft?.refusal ? (
               <p role="alert" className="text-sm text-destructive">{clientDraft.refusal}</p>
             ) : null}
@@ -551,7 +631,7 @@ export function ConnectorConnectionsPage({ pollMs = 2000 }: ConnectorConnections
               <Button type="button" variant="outline" onClick={() => setClientDraft(null)} disabled={clientDraft?.busy}>
                 {t('connectorConnections.cancel', { defaultValue: 'Cancel' })}
               </Button>
-              <Button type="submit" disabled={clientDraft?.busy || (clientDraft?.clientId.trim().length ?? 0) === 0}>
+              <Button type="submit" disabled={clientDraft?.busy || (clientDraft?.replacing === true && clientDraft.clientId.trim().length === 0)}>
                 {t('connectorConnections.clientContinue', { defaultValue: 'Continue to sign-in' })}
               </Button>
             </DialogFooter>
