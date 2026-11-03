@@ -1,6 +1,6 @@
 # ADR-0012: Messaging Platform — Outbound Notifications on a Generalized Outbox
 
-**Status**: Draft (2026-05-25 · scope-revised 2026-05-26) · **Superseded by [ADR-0030](./0030-notification-platform-convergence.md)** (2026-06-01) — the M1 implementation drifted (two conflated inbox objects); ADR-0030 records the correction and realizes this layered model.
+**Status**: Draft (2026-05-25 · scope-revised 2026-05-26) · **Superseded by [ADR-0030](./0030-notification-platform-convergence.md)** (2026-06-01) — the M1 implementation drifted (two conflated inbox objects); ADR-0030 records the correction and realizes this layered model. · **Amended (2026-11-03, #29041)**: push ships as `@objectstack/service-push` (the direct APNs and FCM transports, the kernel's `push` service; the hosted relay, the default transport per cloud#3519, is not yet served, #29920) with its channel shell `push-channel.ts` in `@objectstack/service-messaging`, which also owns `sys_user_device`; every `plugin-notification-push` below reads that way. ADR-0030 is unchanged.
 **Authors**: Platform team — surfaced from GitHub Issue #1292 ("[P0] notification: no outbound notification channel")
 **Consumers**: `@objectstack/spec` (new `messaging/` domain), `@objectstack/service-messaging` (new), `@objectstack/plugin-notification-inbox` (new), `@objectstack/plugin-notification-email` (replaces `plugin-email`), `@objectstack/plugin-notification-webhook` (extracted from `plugin-webhooks`), `@objectstack/plugin-notification-push` (new), every flow that has a `notify` node, every template that ships notification rules
 **Sibling**: [ADR-0013 — Bidirectional Messaging & Conversational Channels](./0013-bidirectional-messaging.md)
@@ -306,7 +306,7 @@ These cost ~5 columns and one empty table in M1. They are non-negotiable: introd
 | `inbox` | `plugin-notification-inbox` | Writes to `sys_inbox_message`; fires `service-realtime` event for online users | **MUST ship M1** |
 | `email` | `plugin-notification-email` (replaces `plugin-email`) | SMTP + transport plugins (SendGrid baseline) | **MUST ship M1** |
 | `webhook` | `plugin-notification-webhook` (extracted from `plugin-webhooks`) | HTTP POST with HMAC | **MUST ship M1** (port existing) |
-| `push` | `plugin-notification-push` | APNs (HTTP/2) + FCM (HTTP v1) | **MUST ship M1** |
+| `push` | `service-push` (transports) + `push-channel.ts` in `service-messaging` (channel); amended 2026-11-03, #29041 | Direct: APNs (HTTP/2, token auth) + FCM (HTTP v1) with the operator's own credentials, for a white-label build. The hosted relay is the default transport (cloud#3519) and is not yet served (#29920) | Direct shipped (#29041); relay not yet served (#29920) |
 
 All four bind into `channel-registry` during `onEnable`.
 
@@ -375,6 +375,7 @@ Lifecycle hooks:
 
 * Client SDK calls `POST /api/v1/notifications/devices` on login → `device-registry.upsert(...)`.
 * APNs / FCM `BadDeviceToken` / `Unregistered` response → channel returns `classifyError = 'invalid_recipient'` → dispatcher calls `device-registry.invalidate(token)` (sets `invalidated_at`, `enabled=false`) without dead-lettering the notification (it just routes around the dead token).
+  > Amended (2026-11-03, #29041): the push channel (`push-channel.ts` in service-messaging) retires the dead token itself, through `INotificationService.invalidateDeviceToken`, because one delivery fans out to all of the recipient's devices and only the channel knows which token died; the other devices still get the push. The delivery is graded `invalid_recipient` (suppressed, not dead-lettered) only when every device was reported dead. The shipped device shape is `UserDeviceSchema` in `packages/spec/src/system/push-device.zod.ts`, narrowed to `apns` | `fcm` and `ios` | `android` | `web`. `service-push` ships the direct transport; the hosted relay, the default per cloud#3519, is not yet served (#29920), and `PushServicePlugin` refuses a relay configuration at init until it is.
 * Domestic vendors (HMS / Xiaomi / OPPO / VIVO) plug in as **alternate channel implementations** (`plugin-notification-push-hms` etc.), not as transports — their on-device SDKs and quotas are too different to share a code path.
 
 ### 7. Topic + Preference matrix

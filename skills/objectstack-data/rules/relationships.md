@@ -335,12 +335,11 @@ audit_ref: { type: 'master_detail', reference: 'invoice', relatedList: false },
 
 `relatedList` is tri-state — placement (ADR-0085):
 
-- `'primary'` — main content: a full-width table in the details column after
-  the first field section (in the Details tab, no tab of its own). Default for a
-  `master_detail` FK with `inlineEdit`.
-- `false` — hidden from the parent's page.
-- `true`, or omitted (except inline-edited `master_detail`) — a side card
-  (the shared **Related** tab).
+- `'primary'` — part of the record's main content: a full-width table in the
+  record's detail body. Default for a `master_detail` FK with `inlineEdit`.
+- `false` — the child object is not shown on the parent record page.
+- `true`, or omitted (except inline-edited `master_detail`) — an auxiliary
+  panel on the record page.
 - Order is the parent's: `relatedLists: ['task', 'event.related_to']` (child, or
   `object.field`) lists those first. A child in the stack with no inbound FK is
   refused everywhere; one that exists nowhere is refused by `os validate` /

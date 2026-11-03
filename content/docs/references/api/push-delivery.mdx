@@ -18,10 +18,10 @@ vendor payload. On FCM (HTTP v1) these members go in `message.data`, a map
 of string values. On APNs they sit at the top level of the payload, beside
 `aps`, and never under a `data` key.
 
-**Declared ahead of its producer.** No push channel delivers yet, so
-nothing produces this data today; `PushDeliveryDataSchema` carries a
-`[PLANNED — not yet served]` marker in its `.describe()` until the push
-channel ships. The route rule below is the contract that channel owes.
+**Produced by the `push` channel** (`push-channel.ts` in
+`@objectstack/service-messaging`), which builds it per delivery and hands it
+to the push service's transports (`@objectstack/service-push`). The route
+rule below is the contract that channel keeps.
 
 **What `route` is — the inbox's `actionUrl`, derived, never authored.**
 There is no `notify` key for it. It is the value the inbox already serves:
@@ -81,7 +81,7 @@ const result = PushDeliveryDataSchema.parse(data);
 
 ## PushDeliveryData
 
-[PLANNED — not yet served] The data a push delivery carries to the shell: the notification id, its actionUrl as a same-server route, and the origin of the server that sent it. No push channel delivers yet
+The data a push delivery carries to the shell: the notification id, its actionUrl as a same-server route, and the origin of the server that sent it
 
 ### Properties
 

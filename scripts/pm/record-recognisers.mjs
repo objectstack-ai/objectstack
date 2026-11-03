@@ -1267,6 +1267,15 @@ export function contractReviewHold(rows, headSha, { now } = {}) {
  * card's amendments 6595244387 and 6595840476): a nudge is no longer 「不敲」
  * but a RATE — one `Request: progress` per item per 60 min, read off the
  * item's own progress, answered with `Notify: progress` naming the record.
+ * `main-green` was admitted on the maintainer's word about PRs a lane parks
+ * while main is red, verbatim and untranslated: 「如果到时候发现有哪个 PR 确实因为
+ * 这次红被挡住（比如有车道把 PR 停下来等 main 绿），我会敲对应车道的邮箱，让它继续
+ * 推进。」 — the held PR says what it waits on (a line-leading `Waits-on:
+ * main-red #n` in its body, `landing-operations.md` §C), and when the
+ * anchor card closes triage (the director when triage is absent) rings the
+ * seat of every open PR carrying that line, one knock per PR, in the same
+ * round (`triage-duties.md`); the seat merges `origin/main`, drops the line
+ * and resumes its landing. No gate, label, state or patrol row rides on it.
  *
  * `from` / `to` / `when` are the row in English, for the printout; the rules
  * text is the authority on who rings whom.
@@ -1281,6 +1290,7 @@ export const MAILBOX_KEYS = Object.freeze([
   { id: 'request:urgent-triage', kind: 'Request', key: 'urgent-triage', from: 'any seat', to: 'triage', when: 'a p0 suspect, main red, a deterministic queue red', template: 'Request: urgent-triage · #n · ONE-LINE-CRITERION' },
   { id: 'request:main-red', kind: 'Request', key: 'main-red', from: 'the seat that files the main-red anchor card', to: 'triage, or the director when triage is absent', when: 'the anchor card is filed', template: 'Request: main-red · CHECK-NAME · anchor #n · suggested lane X' },
   { id: 'notify:main-red', kind: 'Notify', key: 'main-red', from: 'the seat that files the main-red anchor card', to: 'the seat that landed the breaking PR, and the anchor card\'s lane', when: 'the anchor card is filed', template: 'Notify: main-red · anchor #n · breaking PR #m or none' },
+  { id: 'notify:main-green', kind: 'Notify', key: 'main-green', from: 'triage, or the director when triage is absent', to: 'the seat of each open PR whose body carries a line-leading `Waits-on: main-red #n` naming the closed anchor', when: 'the main-red anchor card closes: one knock per held PR, all in the same round, the count in the round record; the seat merges `origin/main`, drops the line and resumes its landing', template: 'Notify: main-green · anchor #n · PR #m' },
   { id: 'notify:contract-review', kind: 'Notify', key: 'contract-review', from: 'the review seat or sibling lane seat that rendered the record', to: 'lane', when: 'with the record, only when the lane is not subscribed to the PR', template: 'Notify: contract-review PASS or FAIL · PR #n · record ID' },
   { id: 'notify:release-blocker', kind: 'Notify', key: 'release-blocker', from: 'triage', to: 'the lane it is graded into', when: 'a p0/p1 release blocker is graded into a lane', template: 'Notify: release-blocker · #n' },
   { id: 'notify:unblocked', kind: 'Notify', key: 'unblocked', from: 'the seat that moved the card to `pm:queue` (triage or an epic seat)', to: 'the card\'s lane seats', when: 'a p0/p1 card\'s `Blocked-by` target closed', template: 'Notify: unblocked · #n · p0 or p1' },
@@ -1408,6 +1418,13 @@ const MAILBOX_FIELD_READERS = Object.freeze({
     if (!anchor || !pr) return null;
     const breaking = pr[1] === undefined ? null : Number(pr[1]);
     return { anchor: Number(anchor[1]), pr: breaking, numbers: breaking === null ? [Number(anchor[1])] : [Number(anchor[1]), breaking] };
+  },
+  // The closed anchor and the ONE held PR this knock resumes: a seat holding two PRs is rung twice.
+  'notify:main-green': (p) => {
+    if (p.length !== 3) return null;
+    const anchor = ANCHOR_REF.exec(p[1]);
+    const pr = PR_REF.exec(p[2]);
+    return anchor && pr ? { anchor: Number(anchor[1]), pr: Number(pr[1]), numbers: [Number(anchor[1]), Number(pr[1])] } : null;
   },
   'notify:release-blocker': (p) => {
     if (p.length !== 2) return null;
@@ -2242,7 +2259,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // verbatim-template pin, the placeholder-is-no-event pin, the `--mailbox-keys` printout, the invented
   // keys that stay refused, and the two end-to-end pins through check-half-states H72 (31 → 44 cases).
   // Raised 40 → 41 with the `Notify: security · #n` reading (a labelled public card handed to the security seat).
-  '⭐ the mailbox doorbell: `To: <seat>`, then one key of the table read — seat, kind, numbers, sha, login, time — and anything else refused': 41,
+  // Raised 41 → 42 with the `Notify: main-green` reading (the knock that resumes a PR held for a main red).
+  '⭐ the mailbox doorbell: `To: <seat>`, then one key of the table read — seat, kind, numbers, sha, login, time — and anything else refused': 42,
   '⭐ the signature line: the reader reads LANE#N · ACCOUNT · SESSION exactly, and one leading signature changes no first-line reading': 22,
   '⭐ the `Contract-review-claim:` line — session, FULL head, time; lapses on a moved head or after two hours; the earliest live claim holds': 21,
   '⭐ the `Contract-review-hold:` line — session, head, reason, until; a new head clears it; at 24 hours it reads overdue and still holds': 23,
@@ -2809,6 +2827,7 @@ export async function selfTest() {
     sp: MSG('Notify: split · domain:skills#2 · takes: #27077 #27062 · leaves: #27047', 'domain:skills#1'),
     tq: MSG('Request: triage · #27123 · may it close, or does it route to server?', 'triage'),
     nm: MSG('Notify: main-red · anchor #28622 · breaking PR #28595', 'domain:server#2'),
+    mg: MSG('Notify: main-green · anchor #29426 · PR #29444', 'domain:skills#3'),
     rb: MSG('Notify: release-blocker · #28657', 'domain:devx#1'),
     ub: MSG('Notify: unblocked · #28560 · p1', 'domain:spec#4'),
     ru: MSG('Notify: ruling · #28117 · A · record 6545646924', 'domain:server#2'),
@@ -2829,6 +2848,7 @@ export async function selfTest() {
   t('⭐ `Notify: split` reads the seat and the takes and leaves lists', (() => { const r = readMailboxLine(DB.sp); return r.state === 'read' && r.id === 'notify:split' && r.seat.lane === 'domain:skills' && r.takes.join() === '27077,27062' && r.leaves.join() === '27047' && r.numbers.join() === '27077,27062,27047'; })());
   t('⭐ `Request: triage` reads the card and the one-line question — the question may carry a comma', (() => { const r = readMailboxLine(DB.tq); return r.state === 'read' && r.id === 'request:triage' && r.to === 'triage#1' && r.card === 27123 && r.question === 'may it close, or does it route to server?' && r.numbers.join() === '27123'; })());
   t('⭐ `Notify: main-red` reads the anchor card and the breaking PR — a key of its own beside `Request: main-red`, told apart by its kind', (() => { const r = readMailboxLine(DB.nm); const q = readMailboxLine(DB.mr); return r.state === 'read' && r.id === 'notify:main-red' && r.anchor === 28622 && r.pr === 28595 && r.numbers.join() === '28622,28595' && q.id === 'request:main-red'; })());
+  t('⭐ `Notify: main-green` reads the closed anchor and the ONE held PR it resumes — both in `numbers`; the misspelt variants `maingreen`, `main-grean` and `green` are keys outside the table and REFUSED, while the anchor alone, a bare `#m`, `PR none`, a bare anchor number, a trailing reason and the placeholder stay unreadable', (() => { const r = readMailboxLine(DB.mg); return r.state === 'read' && r.id === 'notify:main-green' && r.kind === 'Notify' && r.key === 'main-green' && r.to === 'domain:skills#3' && r.anchor === 29426 && r.pr === 29444 && r.numbers.join() === '29426,29444' && ['Notify: maingreen · anchor #29426 · PR #29444', 'Notify: main-grean · anchor #29426 · PR #29444', 'Notify: green · anchor #29426 · PR #29444', 'Request: main-green · anchor #29426 · PR #29444'].every((l) => { const u = readMailboxLine(MSG(l)); return u.state === 'refused' && /not a key of the table/.test(u.reason); }) && ['Notify: main-green · anchor #29426', 'Notify: main-green · anchor #29426 · #29444', 'Notify: main-green · anchor #29426 · PR none', 'Notify: main-green · #29426 · PR #29444', 'Notify: main-green · anchor #29426 · PR #29444 · resume now', 'Notify: main-green · anchor #n · PR #m'].every((l) => { const u = readMailboxLine(MSG(l)); return u.state === 'unreadable' && /does not spell/.test(u.reason); }); })());
   t('⭐ `Notify: release-blocker` reads the card', (() => { const r = readMailboxLine(DB.rb); return r.state === 'read' && r.id === 'notify:release-blocker' && r.card === 28657 && r.numbers.join() === '28657'; })());
   t('⭐ `Notify: unblocked` reads the card and its priority — p0 and p1 only, the priorities it is owed for', (() => { const r = readMailboxLine(DB.ub); const p0 = readMailboxLine(DB.ub.replace('p1', 'p0')); return r.state === 'read' && r.id === 'notify:unblocked' && r.card === 28560 && r.priority === 'p1' && p0.priority === 'p0' && r.numbers.join() === '28560' && ['p2', 'P1', 'p0 or p1'].every((v) => readMailboxLine(DB.ub.replace('p1', v)).state === 'unreadable'); })());
   t('⭐ `Notify: ruling` reads the card, the letter and the record id — a primed or CJK letter reads, a sentence does not', (() => { const r = readMailboxLine(DB.ru); return r.state === 'read' && r.id === 'notify:ruling' && r.card === 28117 && r.letter === 'A' && r.record === 6545646924 && r.numbers.join() === '28117' && readMailboxLine(DB.ru.replace(' A ', ' B′ ')).letter === 'B′' && readMailboxLine(DB.ru.replace(' A ', ' 乙 ')).letter === '乙' && readMailboxLine(MSG('Notify: ruling · #28117 A (record 6545646924, 「同意」) · your draft #28430')).state === 'unreadable'; })());
@@ -2881,7 +2901,7 @@ export async function selfTest() {
     t('⭐ ONE reader: check-half-states H72 judges the REAL reader\'s readings — a free-form question, an off-table key and a five-field `seat-online` are listed, a table key is not, and a bell older than the window has aged out', row.includes('3 comment(s)') && ['comment 7002', 'comment 7003', 'comment 7004'].every((c) => row.includes(c)) && !row.includes('comment 7001') && !row.includes('comment 7005') && hs.h72OffTableMailboxLines(mailboxEvents([rows72[0]]), NOW72) === null);
     t('⭐ …and its population is the OPENER\'s label — an open mailbox touched inside the window owes a page, the same PR without the label does not', hs.h72NeedsThread({ number: 28646, state: 'open', labels: [{ name: MAILBOX_LABEL }], updated_at: '2026-11-01T13:00:00Z' }, MAILBOX_LABEL, NOW72) === true && hs.h72NeedsThread({ number: 28646, state: 'open', labels: [], updated_at: '2026-11-01T13:00:00Z' }, MAILBOX_LABEL, NOW72) === false);
   }
-  t('the roster: seventeen keys, unique ids, each of the two kinds with a reader, every row spelled (from, to, when), the byte cap the text states', MAILBOX_KEYS.length === 17 && new Set(MAILBOX_KEYS.map((k) => k.id)).size === 17 && MAILBOX_KEYS.every((k) => ['Request', 'Notify'].includes(k.kind) && k.id === `${k.kind.toLowerCase()}:${k.key}` && k.template.startsWith(`${k.kind}: ${k.key}`) && typeof MAILBOX_FIELD_READERS[k.id] === 'function' && [k.from, k.to, k.when].every((v) => typeof v === 'string' && v !== '')) && Object.keys(MAILBOX_FIELD_READERS).length === 17 && MAILBOX_LINE_MAX_BYTES === 200);
+  t('the roster: eighteen keys, unique ids, each of the two kinds with a reader, every row spelled (from, to, when), the byte cap the text states', MAILBOX_KEYS.length === 18 && new Set(MAILBOX_KEYS.map((k) => k.id)).size === 18 && MAILBOX_KEYS.every((k) => ['Request', 'Notify'].includes(k.kind) && k.id === `${k.kind.toLowerCase()}:${k.key}` && k.template.startsWith(`${k.kind}: ${k.key}`) && typeof MAILBOX_FIELD_READERS[k.id] === 'function' && [k.from, k.to, k.when].every((v) => typeof v === 'string' && v !== '')) && Object.keys(MAILBOX_FIELD_READERS).length === 18 && MAILBOX_LINE_MAX_BYTES === 200);
 
   // -- the signature line (#27113) ----------------------------------------------
   //

@@ -30,7 +30,8 @@
  * 1. **The enumeration** reads `sql-driver.ts` and its cross-field seam module
  *    `sql-driver-cross-field-comparison.ts` (#25521 cut 13), plus the read-exit
  *    fault module `sql-driver-read-exit-fault.ts` (#25521 cut 15) and the
- *    predicate-emitter module `sql-driver-predicate-emitters.ts` (#25521 cut 16),
+ *    predicate-emitter module `sql-driver-predicate-emitters.ts` (#25521 cut 16)
+ *    and the generated top-level leaf `sql-driver-top-level.ts` (#29520 codemod),
  *    and lists every function that builds an `INVALID_FILTER` error. Only three may call
  *    `unsupportedFilterError` directly (the seam itself, the `'author'`
  *    re-issue, and the column refusal raised from a dialect error AFTER the
@@ -290,11 +291,14 @@ function enumerateRefusalBuilders(): {
   // `unresolvableFilterColumnError`; the scan reads it too.
   // [#25521 cut 16] The leaf predicate emitters moved to a fourth, with the two
   // `$empty` refusals; the scan reads it too.
+  // [#29520 codemod] The top-level declarations ahead of the class moved to a
+  // generated leaf, with the refusal builders among them; the scan reads it too.
   const sources = [
     ['sql-driver.ts', readFileSync(new URL('./sql-driver.ts', import.meta.url), 'utf8')],
     ['sql-driver-cross-field-comparison.ts', readFileSync(new URL('./sql-driver-cross-field-comparison.ts', import.meta.url), 'utf8')],
     ['sql-driver-read-exit-fault.ts', readFileSync(new URL('./sql-driver-read-exit-fault.ts', import.meta.url), 'utf8')],
     ['sql-driver-predicate-emitters.ts', readFileSync(new URL('./sql-driver-predicate-emitters.ts', import.meta.url), 'utf8')],
+    ['sql-driver-top-level.ts', readFileSync(new URL('./sql-driver-top-level.ts', import.meta.url), 'utf8')],
   ] as const;
   const directCallers = new Set<string>();
   const seamCallers = new Set<string>();

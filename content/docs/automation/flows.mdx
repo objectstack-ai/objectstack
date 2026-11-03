@@ -431,6 +431,12 @@ than guarding it to `null`. To match an empty field, write the literal `null`
 operator map, `{ dialect: { $eq: 'x' } }`, since an object naming a string
 `dialect` at an operand is read as an envelope.
 
+**A computed operand is a value, never a query operator**: a string, number,
+bigint, boolean or date, or at an `$in` / `$nin` / `$between` comparand a list
+of them with no empty entry. Anything else fails the node as a guard before the
+query runs. Make the expression evaluate to the compared value (for a record,
+its `id`), and write conditions in the filter itself.
+
 **Where an envelope is data, the remedy names none there.** An envelope
 evaluates only as the top-level value of a value slot — `fields`,
 `assignments`, a callee's `input` / `inputs`, a screen's `defaults`,
@@ -1983,7 +1989,8 @@ succeed, **and** the fix is to edit metadata. In practice that is a missing
 required config key (a data node with no `objectName`, an `http` node with no
 `url`, a `subflow` or `map` with no `flowName`, a `connector_action` with no
 `connectorId`/`actionId`), a filter operand that evaluated to nothing (`null`),
-so the condition would have widened the query, a graph that recurses past the nesting
+so the condition would have widened the query, a filter operand that evaluated to
+something other than a value, a graph that recurses past the nesting
 ceiling, or a run that would execute unscoped.
 
 The split is deliberate. A dropped filter condition does not narrow a query, it
