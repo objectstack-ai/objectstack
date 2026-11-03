@@ -275,6 +275,15 @@ const CALLERS: Record<string, Classification> = {
       "judged as such) and the engine's system delete. It reads those records back only through the harness's " +
       'system read, to see whether the delete removed them, and serves no field of the target to any caller',
   },
+  // [#29946] The record page's related-list check.
+  'packages/rest/src/record-page-routes.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "compares a related list's field target with the page's own object, only to admit the entry or refuse it " +
+      '(`invalid_relationship` / 400) before anything is read; it reads no record of the target. The target is the ' +
+      "ADDRESSED object, whose record is `getData` behind the route's own `get` exposure gate, and the related rows " +
+      "are the child's `findData` behind the child's `list` exposure. Pinned by `packages/rest/src/record-page-routes.test.ts`",
+  },
 };
 
 const SCAN_TIMEOUT_MS = 60_000;
