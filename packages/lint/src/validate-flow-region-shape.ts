@@ -81,6 +81,22 @@ const SCHEMA_HINT =
   'Fix the flow so the flow schema accepts it (`os validate` names each issue); its regions are judged then.';
 
 /**
+ * The container the engine's refusal names, read off the refusal itself:
+ * `validateControlFlow` throws `FlowRegionShapeError`, carrying the
+ * container's node id and its path inside the flow. Anything else it throws
+ * names no container, and the flow stays the anchor.
+ */
+function containerAtFault(err: unknown): { nodeId: string; path: readonly (string | number)[] } | undefined {
+  // PLACEHOLDER: reads the spec's FlowRegionShapeError once that export lands.
+  void err;
+  return undefined;
+}
+
+/** `['nodes', 1, 'config', 'try']` → `.nodes[1].config.try`, the lint path spelling. */
+const spellPath = (segments: readonly (string | number)[]): string =>
+  segments.map((s) => (typeof s === 'number' ? `[${s}]` : `.${s}`)).join('');
+
+/**
  * Every flow of `stack.flows` the automation engine would refuse to register
  * for its region shape, one finding each. Pure.
  */
@@ -112,11 +128,12 @@ export function validateFlowRegionShape(stack: AnyRec): FlowRegionShapeFinding[]
       validateControlFlow(result.data);
     } catch (err) {
       const name = result.data.name;
+      const container = containerAtFault(err);
       findings.push({
         severity: 'error',
         rule: FLOW_REGION_SHAPE_INVALID,
-        where: `flow '${name}'`,
-        path,
+        where: container ? `flow '${name}' › node '${container.nodeId}'` : `flow '${name}'`,
+        path: container ? `${path}${spellPath(container.path)}` : path,
         message: `Flow '${name}' would be refused at registration: ${err instanceof Error ? err.message : String(err)}`,
         hint: HINT,
       });
