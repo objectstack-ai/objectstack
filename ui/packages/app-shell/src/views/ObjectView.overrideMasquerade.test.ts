@@ -43,6 +43,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { ObjectStackAdapter } from '@object-ui/data-objectstack';
 import { buildViewTabs } from './ObjectView';
 import { viewRowId, isSavedViewId } from '../utils/viewIdentity';
+import { answerObjectViewRead } from './__tests__/objectViewRoute';
 
 const OBJECT_NAME = 'crm_lead';
 
@@ -66,15 +67,18 @@ function normalizeSavedViews(rows: any[]) {
 function makeAdapterWithItems(items: any[]) {
   const ds: any = new ObjectStackAdapter({
     baseUrl: 'http://test.local',
-    fetch: vi.fn(async () =>
-      new Response(JSON.stringify({ success: true, data: { capabilities: {}, routes: {} } }), {
+    // objectstack#29550: the adapter reads one object's views on
+    // `GET /meta/view?object=`, answered here from the same rows.
+    fetch: vi.fn(async (input: RequestInfo | URL) =>
+      (await answerObjectViewRead(input, () => items))
+      ?? new Response(JSON.stringify({ success: true, data: { capabilities: {}, routes: {} } }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       })),
   });
   ds.connected = true;
   ds.connectionState = 'connected';
-  ds.client = { meta: { getItems: vi.fn(async () => ({ items })) } };
+  ds.client = { meta: { getItems: vi.fn(async () => ({ items })) }, getLocale: () => undefined };
   return ds;
 }
 
@@ -87,7 +91,10 @@ describe('a system view stays readonly even with a personalization row (objectui
     [
       'marked row (new writes, post-fix)',
       {
-        name: 'crm_lead.default', object: 'crm_lead', type: 'grid',
+        // objectstack#29550: `viewKind` as the server stores it, inherited
+        // from the registry entry the row shadows (objectstack#2555), so the
+        // marker alone is what excludes it.
+        name: 'crm_lead.default', object: 'crm_lead', viewKind: 'list', type: 'grid',
         data: { provider: 'object', object: 'crm_lead' }, columns: ['name'],
         rowHeight: 40, _isOverride: true,
       },

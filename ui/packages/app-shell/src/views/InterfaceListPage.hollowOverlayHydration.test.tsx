@@ -91,6 +91,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 
 import { ObjectStackAdapter } from '@object-ui/data-objectstack';
 import { InterfaceListPage } from './InterfaceListPage';
+import { answerObjectViewRead } from './__tests__/objectViewRoute';
 
 const OBJECT_NAME = 'crm_lead';
 const VIEW_ID = `${OBJECT_NAME}.default`;
@@ -133,15 +134,18 @@ function plantOverlay(rows: Map<string, any>, body: Record<string, unknown>) {
 function makeAdapter(meta: any) {
   const ds: any = new ObjectStackAdapter({
     baseUrl: 'http://test.local',
-    fetch: vi.fn(async () =>
-      new Response(JSON.stringify({ success: true, data: { capabilities: {}, routes: {} } }), {
+    // objectstack#29550: the adapter reads one object's views on
+    // `GET /meta/view?object=`, answered here from the same store.
+    fetch: vi.fn(async (input: RequestInfo | URL) =>
+      (await answerObjectViewRead(input, () => meta.getItems('view')))
+      ?? new Response(JSON.stringify({ success: true, data: { capabilities: {}, routes: {} } }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       })),
   });
   ds.connected = true;
   ds.connectionState = 'connected';
-  ds.client = { meta };
+  ds.client = { meta, getLocale: () => undefined };
   return ds;
 }
 
