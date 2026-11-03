@@ -1287,6 +1287,33 @@ function isFlattenedNearMissFor(diagnostic: string, roots: readonly string[]): b
  * refused on: the two field-rule slots the server evaluates on a write, and a
  * select option's own `visibleWhen`.
  */
+/**
+ * [#29904] The predicate sites whose runtime FAILS CLOSED — an expression that
+ * cannot be evaluated refuses the write (or aborts the operation) it guards,
+ * never skipped — handed to the shared validator as
+ * `ExprSchemaHint.faultOutcome`. There a `type-mismatch` (a text or boolean
+ * field ordered or arithmetic'd against a number) is an ERROR, as the
+ * nullable-comparison verdict (`checkNullGuards`, `'fail-closed'`) already is
+ * at the same sites; everywhere else it stays the advisory warning.
+ *
+ * The one decision of which site fails closed, read off each evaluator:
+ *
+ * | site                                   | runtime on a fault                                         | passes |
+ * |:---------------------------------------|:-----------------------------------------------------------|:-------|
+ * | validation rule `condition` / `when`, nested branches | `rule-validator.ts` `checkPredicate` / `checkConditional`: "write rejected" (#4649) | yes |
+ * | field `requiredWhen`, `readonlyWhen`   | `rule-validator.ts`: refuses the write (ADR-0137 D2)         | yes |
+ * | option `visibleWhen`                   | `evaluateOptionVisibility`: refuses a write picking it (ADR-0137 D2, #22402) | yes |
+ * | hook `condition`                       | `hook-wrappers.ts`: aborts the operation (#4775)             | yes |
+ * | field `expression` (formula)           | reads null                                                   | no — the warning's text is true |
+ * | flow start / edge / `decision` condition | the run fails; the write that fired it lands (`'run-fails'`) | no — not a write gate |
+ * | field `visibleWhen` / `settledWhen`, `conditionalFormatting`, field group `visibleWhen`, action `visible` / `disabled` / `pressed`, app landing `visible` | evaluated by the renderer: shows, hides or styles, never refuses a write | no |
+ * | sharing rule `condition`               | compiled to a query filter, not evaluated as CEL per row     | no |
+ *
+ * RLS / permission-set row predicates never reach this validator: they are
+ * judged by their own enforceability gates and compiled to a filter too.
+ */
+const FAIL_CLOSED = 'fail-closed' as const;
+
 type FieldTraversalSlot = 'requiredWhen' | 'readonlyWhen' | 'option visibleWhen';
 
 /** [#20078] A root a field-level predicate binds, with the record shape it binds. */
@@ -2410,6 +2437,12 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
      * byte for byte what it was.
      */
     extraRoots?: readonly string[],
+    /**
+     * [#29904] {@link FAIL_CLOSED} where this site's runtime refuses the write
+     * (or aborts the operation) when the predicate faults. Absent everywhere
+     * else; see the constant for the ledger of which sites pass it.
+     */
+    faultOutcome?: typeof FAIL_CLOSED,
   ): void => {
     if (raw == null) return;
     // Absent unless this is a served-row site on an object that declares a
@@ -2422,7 +2455,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // Spread only when given, so every other site's hint is unchanged.
     const roots = extraRoots ? { roots: extraRoots } : {};
     const res = validateExpression('predicate', raw as string | { dialect?: string; source?: string },
-      objectName ? { objectName, fields, attachedOnRead, fieldTypes, scope, traversalHydration, ...roots } : { scope, ...roots });
+      objectName
+        ? { objectName, fields, attachedOnRead, fieldTypes, scope, traversalHydration, ...roots, ...(faultOutcome ? { faultOutcome } : {}) }
+        : { scope, ...roots });
     for (const e of res.errors) {
       if (fieldRuleVerdictIssued && isBareReferenceToAny(e.message, FIELD_RULE_NOWHERE_BOUND_ROOTS)) continue;
       issues.push({ where, message: e.message, source: e.source, severity: 'error' });
@@ -3122,10 +3157,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // (#22042), and on a formula field's `expression` (`judgeFieldFormula`,
       // #24197), and NOWHERE else.
       let first = issues.length;
-      check(where, rule.condition, objectName, 'record', undefined, true);
+      check(where, rule.condition, objectName, 'record', undefined, true, undefined, undefined, FAIL_CLOSED);
       atSlot('condition', first);
       first = issues.length;
-      check(`${where} when`, (rule as AnyRec).when, objectName, 'record', undefined, true);
+      check(`${where} when`, (rule as AnyRec).when, objectName, 'record', undefined, true, undefined, undefined, FAIL_CLOSED);
       atSlot('when', first);
       const predicates = rulePredicates(rule, '');
       // [#22042] The same verdict one level down, and every level below it: a
@@ -3142,7 +3177,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       for (const p of predicates) {
         if (p.depth === 0) continue;
         first = issues.length;
-        check(`object '${objectName}' · ${p.label}`, p.raw, objectName, 'record', undefined, true);
+        check(`object '${objectName}' · ${p.label}`, p.raw, objectName, 'record', undefined, true, undefined, undefined, FAIL_CLOSED);
         atSlot(p.key, first);
       }
       // [#24720] The rule's root verdict, over every predicate it carries,
@@ -3366,7 +3401,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         // root this rule has claimed so the two partitions stay disjoint; the
         // push order below is the pre-#13935 one.
         const verdict = fieldRuleRootVerdict(key, raw);
-        check(where, raw, objectName, 'record', verdict !== null);
+        // [#29904] Only the two slots the server judges a write by fail closed
+        // (ADR-0137 D2); `visibleWhen` / `settledWhen` are display only.
+        const writeGate = key === 'requiredWhen' || key === 'readonlyWhen' ? FAIL_CLOSED : undefined;
+        check(where, raw, objectName, 'record', verdict !== null, undefined, undefined, undefined, writeGate);
         if (verdict) {
           issues.push({ where, message: verdict.message, source: verdict.source, severity: 'error' });
         }
@@ -3440,7 +3478,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       for (const [oi, opt] of recordsOf(f.options).entries()) {
         const label = typeof opt.value === 'string' ? `'${opt.value}'` : `#${oi}`;
         const optionWhere = `object '${objectName}' · field '${fname}' option ${label} visibleWhen`;
-        check(optionWhere, opt.visibleWhen, objectName, 'record');
+        // [#29904] Fail-closed on the write path (ADR-0137 D2, #22402): a fault
+        // refuses every write that picks this option.
+        check(optionWhere, opt.visibleWhen, objectName, 'record', undefined, undefined, undefined, undefined, FAIL_CLOSED);
         // [#22157] After `check`, before the traversal refusal: every root this
         // verdict judges is declared in the strict env, so `check` never
         // reports a bare reference to it and the two stay disjoint.
@@ -3695,7 +3735,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   for (const hook of objectWrite ? [] : recordsOf(stack.hooks)) {
     const hookName = (hook.name as string) ?? '?';
     if (typeof hook.object === 'string') {
-      check(`hook '${hookName}' (${hook.object}) condition`, hook.condition, hook.object, 'record');
+      check(`hook '${hookName}' (${hook.object}) condition`, hook.condition, hook.object, 'record', undefined, undefined, undefined, undefined, FAIL_CLOSED);
       // #4763 — the third instance the issue found lived on exactly this path.
       checkNullGuards(
         `hook '${hookName}' (${hook.object}) condition`,
@@ -3728,7 +3768,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     const kept: ExprIssue[] = [];
     for (const target of targets) {
       const mark = issues.length;
-      check(`hook '${hookName}' (${target}) condition`, hook.condition, target, 'record');
+      check(`hook '${hookName}' (${target}) condition`, hook.condition, target, 'record', undefined, undefined, undefined, undefined, FAIL_CLOSED);
       checkNullGuards(
         `hook '${hookName}' (${target}) condition`,
         `hook '${hookName}' condition`,

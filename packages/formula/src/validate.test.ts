@@ -764,6 +764,27 @@ describe('validateExpression (ADR-0032)', () => {
       expect(r.warnings[0].message).toMatch(/evaluates to null/);
     });
 
+    // [#29904] The caller declares a fail-closed site; there the fault is a
+    // refused write, not a null, and the verdict is an error saying so.
+    it('errors on the same comparison where the caller declares the site fail-closed (#29904)', () => {
+      const r = validateExpression('predicate', 'record.name > 5', { ...schema, faultOutcome: 'fail-closed' });
+      expect(r.ok).toBe(false);
+      expect(r.warnings).toHaveLength(0);
+      expect(r.errors).toHaveLength(1);
+      expect(r.errors[0]).toMatchObject({
+        code: 'type-mismatch',
+        params: { operands: 'string > int', operator: '>', held: 'text', reference: 'record.name', outcome: 'fail-closed' },
+      });
+      expect(r.errors[0].message).not.toMatch(/evaluates to null/);
+      const bool = validateExpression('predicate', 'record.is_active > 0', { ...schema, faultOutcome: 'fail-closed' });
+      expect(bool.errors.map((e) => e.code)).toEqual(['type-mismatch']);
+      // The conversions the message names validate clean in this dialect.
+      for (const fixed of ['size(record.name) > 5', 'double(record.name) > 5']) {
+        const ok = validateExpression('predicate', fixed, { ...schema, faultOutcome: 'fail-closed' });
+        expect([ok.errors, ok.warnings], fixed).toEqual([[], []]);
+      }
+    });
+
     it('warns on a text field ordered against a number', () => {
       const r = validateExpression('predicate', 'record.title >= 5', schema);
       expect(r.ok).toBe(true);

@@ -222,6 +222,23 @@ export interface ExprSchemaHint {
    * {@link fields}; without it nothing is judged.
    */
   optionFields?: readonly string[];
+  /**
+   * [#29904] What the site's runtime does when this expression FAULTS, as
+   * declared by the caller that knows the site — the validator cannot tell a
+   * validation rule's `predicate` from a flow condition's.
+   *
+   * `'fail-closed'`: an expression that cannot be evaluated refuses the write
+   * (or aborts the operation) it guards instead of being skipped — an object
+   * validation rule, a field `requiredWhen` / `readonlyWhen`, an option
+   * `visibleWhen` on the write path, a hook `condition`. There a
+   * `type-mismatch` (text or a boolean ordered / arithmetic'd against a
+   * number) is an ERROR worded for that outcome, the severity the
+   * nullable-comparison verdict already has at the same sites.
+   *
+   * Absent: a fault reads as null (a formula field), and `type-mismatch` stays
+   * the advisory warning whose "evaluates to null" text is true there.
+   */
+  faultOutcome?: 'fail-closed';
 }
 
 /**
@@ -308,7 +325,9 @@ function toCelFieldTypes(fieldTypes: Readonly<Record<string, string>>): Record<s
  *    recovers, so it blocks the build.
  *  - `type-mismatch` (**warning**): a text/boolean field used with an
  *    arithmetic/ordering operator against a number — nulls unless the text value
- *    happens to be numeric, so it stays advisory.
+ *    happens to be numeric, so it stays advisory. An **error** where the caller
+ *    declares the site fail-closed (`faultOutcome`, #29904): there the fault is
+ *    not a null, it is a refused write on every value that is not numeric text.
  *  - `date-text-arithmetic` / `date-duration-value` (**error**, #28944): what
  *    the Timestamp typing passes, re-checked with a date field declared as the
  *    text the runtime holds — see {@link dateTextIssue}.
@@ -319,6 +338,7 @@ function typeSoundnessIssue(
   fieldTypes: Readonly<Record<string, string>>,
   scope: 'record' | 'flattened',
   role: 'predicate' | 'value',
+  faultOutcome: ExprSchemaHint['faultOutcome'],
 ): { issue: ExprValidationError; severity: 'error' | 'warning' } | null {
   const celFieldTypes = toCelFieldTypes(fieldTypes);
   const mismatch = firstTypeMismatch(source, celFieldTypes, scope);
@@ -345,6 +365,37 @@ function typeSoundnessIssue(
   const heldKind = mismatch.celType === 'bool' ? 'boolean' : 'text';
   const held = heldKind === 'boolean' ? 'a boolean' : 'text';
   const subject = ref ? `${ref} holds ${held}` : `${held === 'a boolean' ? 'a boolean' : 'a text'} field`;
+  if (faultOutcome === 'fail-closed') {
+    // [#29904] Measured on the evaluator: `record.name > 5` faults on `"abc"`
+    // and on null, and the ADR-0032 §1c rescue answers only numeric text
+    // (`"7"`). `size()` answers text; `double()` / `int()` validate clean but
+    // fault on text that is not a number — so the hint says so.
+    const operand = reference ?? (heldKind === 'boolean' ? 'the field' : 'the text');
+    const convert = heldKind === 'boolean'
+      ? 'Compare a boolean with `true` / `false`, or use a number field.'
+      : `Compare like with like: use a number field, compare text with text, or convert ` +
+        `explicitly — \`size(${operand})\` for its length, \`double(${operand})\` for its value ` +
+        `(which itself faults on text that is not a number).`;
+    return {
+      severity: 'error',
+      issue: refusal(
+        'type-mismatch',
+        {
+          operands: mismatch.operands,
+          operator: mismatch.operator,
+          held: heldKind,
+          ...(reference !== undefined ? { reference } : {}),
+          outcome: 'fail-closed',
+        },
+        source,
+        `type mismatch \`${mismatch.operands}\` — ${subject} but is used with \`${mismatch.operator}\` ` +
+          `against a number. CEL has no such operation, so wherever the value is not numeric text ` +
+          `(an empty value included) the expression faults, and here an expression that cannot be ` +
+          `evaluated fails closed: the write (or the operation a hook guards) is refused, not skipped. ` +
+          convert,
+      ),
+    };
+  }
   return {
     severity: 'warning',
     issue: refusal(
@@ -1208,10 +1259,11 @@ export function validateExpression(
         // #1928 / #3306 — with per-field types in hand, flag a type-unsound
         // operator use that faults at runtime and silently nulls: a text/boolean
         // field arithmetic'd/ordered against a number (advisory warning — a
-        // numeric text value can succeed), or date-field arithmetic (hard error —
+        // numeric text value can succeed — or an error where the site fails
+        // closed, #29904), or date-field arithmetic (hard error —
         // always nulls). Only runs when there is no bare-ref error (the typed
         // check needs the canonical `record.<field>` form).
-        const r = typeSoundnessIssue(source, schema.fieldTypes, 'record', role);
+        const r = typeSoundnessIssue(source, schema.fieldTypes, 'record', role, schema.faultOutcome);
         if (r) (r.severity === 'error' ? errors : warnings).push(r.issue);
       }
     } else if (schema?.fields && schema.fields.length > 0) {
@@ -1246,7 +1298,7 @@ export function validateExpression(
       // date-field arithmetic (error). Flow variables stay `dyn` (never flagged);
       // equality/ordering of a date is runtime-safe (never flagged).
       if (schema.fieldTypes) {
-        const r = typeSoundnessIssue(source, schema.fieldTypes, 'flattened', role);
+        const r = typeSoundnessIssue(source, schema.fieldTypes, 'flattened', role, schema.faultOutcome);
         if (r) (r.severity === 'error' ? errors : warnings).push(r.issue);
       }
     }
