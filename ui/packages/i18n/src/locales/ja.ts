@@ -1221,6 +1221,7 @@ const ja = {
     owner: "所有者",
     relatedCardMenu: "{{title}} のその他の操作",
     relatedCardEnlarge: "拡大",
+    relatedCardAllColumns: "すべての列",
     relatedCardExpand: "展開",
     relatedCardHide: "非表示",
     relatedCardNew: "新規",

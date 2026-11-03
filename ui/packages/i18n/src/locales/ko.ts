@@ -1390,6 +1390,7 @@ const ko = {
     owner: "소유자",
     relatedCardMenu: "{{title}} 추가 작업",
     relatedCardEnlarge: "확대",
+    relatedCardAllColumns: "모든 열",
     relatedCardExpand: "펼치기",
     relatedCardHide: "숨기기",
     relatedCardNew: "새 항목",

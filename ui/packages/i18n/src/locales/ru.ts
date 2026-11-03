@@ -1294,6 +1294,7 @@ const ru = {
     owner: "Владелец",
     relatedCardMenu: "Ещё для «{{title}}»",
     relatedCardEnlarge: "Увеличить",
+    relatedCardAllColumns: "Все столбцы",
     relatedCardExpand: "Развернуть",
     relatedCardHide: "Скрыть",
     relatedCardNew: "Новое",
