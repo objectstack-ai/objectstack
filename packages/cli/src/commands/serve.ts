@@ -12,6 +12,7 @@ import { provisionTelemetryDatasource, standaloneTelemetryPrimary } from '../uti
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
 import { registerInstalledPlugins } from '../utils/installed-plugins-boot.js';
 import { readInternalArtifactPath, readInternalConfigOutputPath } from '../utils/internal-artifact-channel.js';
+import { readAuthSecretFileChannel } from '../utils/internal-auth-secret-channel.js';
 import { compileForDevBoot, devCompilesAtBoot } from '../utils/dev-compile-at-boot.js';
 import { makeDirectorySync } from '../utils/make-directory.js';
 // The precedence's last rung — whether the cwd config takes part — decided by
@@ -4194,8 +4195,13 @@ export default class Serve extends Command {
         const { OrganizationOwnershipBootGuardPlugin } = await import('@objectstack/runtime');
         // A development boot's refusal names the ceremony with `--dev`, so the
         // ceremony boots the way this one did (its secret, .env* files and
-        // `telemetry` sibling).
-        await kernel.use(new OrganizationOwnershipBootGuardPlugin({ dev: isDev }));
+        // `telemetry` sibling). A boot `os start` supervises with the secret it
+        // persisted in its home names that file, so the ceremony runs with the
+        // secret this server composes its security plugin with.
+        await kernel.use(new OrganizationOwnershipBootGuardPlugin({
+          dev: isDev,
+          authSecretFile: readAuthSecretFileChannel(process.env),
+        }));
         trackPlugin('OrganizationOwnershipBootGuard');
       }
 

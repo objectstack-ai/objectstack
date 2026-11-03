@@ -52,12 +52,20 @@ const BASE_VERSION = '3.2.0';
 const NO_PAIR_BASE = 'com.legacy.app';
 /** A writable runtime package: no manifest booted it. */
 const WRITABLE = 'com.acme.workspace';
+/** A read-only code package whose id forms no pair: an id ending in `.custom` (ADR-0146 D3). */
+const NO_PAIR_ID_BASE = 'com.vendor.custom';
+/** A read-only code package that records no version, with its pair already installed. */
+const NO_VERSION_BASE = 'com.nover.app';
+const NO_VERSION_PAIR = 'com.nover.app.custom';
 
 const MANIFESTS: Record<string, Record<string, unknown>> = {
     [BASE]: { dependencies: {}, version: BASE_VERSION, namespace: 'acme' },
     [PAIR]: { dependencies: { [BASE]: '^3' }, version: '0.1.0', namespace: 'acme_custom' },
     [NO_PAIR_BASE]: { dependencies: {}, version: '1.0.0' },
     [WRITABLE]: { dependencies: {} },
+    [NO_PAIR_ID_BASE]: { dependencies: {}, version: '1.0.0', namespace: 'vendor' },
+    [NO_VERSION_BASE]: { dependencies: {}, namespace: 'nover' },
+    [NO_VERSION_PAIR]: { dependencies: { [NO_VERSION_BASE]: '*' }, version: '0.1.0', namespace: 'nover_custom' },
 };
 
 /** One item of each overlay type the base ships, and a body a write carries. */
@@ -78,6 +86,8 @@ const VIEW = ITEMS[0]!;
 const SHIPPED = [
     ...ITEMS.map((i) => ({ type: i.type, name: i.name, pkg: BASE })),
     { type: 'dashboard', name: 'legacy_board', pkg: NO_PAIR_BASE },
+    { type: 'dashboard', name: 'vendor_board', pkg: NO_PAIR_ID_BASE },
+    { type: 'dashboard', name: 'nover_board', pkg: NO_VERSION_BASE },
 ];
 const PACKAGED = 'Packaged';
 
@@ -109,7 +119,7 @@ function makeProtocol() {
     const packageRecord = (id: string) => (MANIFESTS[id] ? { manifest: { id, ...MANIFESTS[id] } } : undefined);
     const engine: any = {
         // A booted code package is read-only (`isWritablePackage` reads `manifests` first).
-        manifests: new Map([[BASE, {}], [NO_PAIR_BASE, {}]]),
+        manifests: new Map([[BASE, {}], [NO_PAIR_BASE, {}], [NO_PAIR_ID_BASE, {}], [NO_VERSION_BASE, {}]]),
         async find(t: string, q?: { where?: Record<string, unknown>; limit?: number }) {
             const rows = table(t).filter((r) => matches(r, q?.where));
             return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
@@ -377,6 +387,52 @@ describe('CONTROLS: the writes the close leaves open, as on main', () => {
  * the commit CREATED is reverted by removing the row, which writes nothing and
  * stays open.
  */
+/**
+ * Each step of "the fix the refusal names can be taken" (the pair id, the
+ * ensure door, the base's version, the override write gate admitting the
+ * declared body) leaves the write naming the base open where it fails: the
+ * refusal would name a door the author cannot take. The ensure door's step is
+ * the CONTROL above (`a read-only base whose pair cannot be ensured`); a
+ * shipped member's closed save is the five-type case at the top.
+ */
+describe('CONTROLS: every step the fix takes, failing, leaves the write naming the base open (ADR-0146 D1, D11)', () => {
+    it('a read-only base whose id forms no pair (an id ending in `.custom`) keeps the write naming it: there is no pair to name', async () => {
+        const { protocol, rows } = makeProtocol();
+
+        const saved = await protocol.saveMetaItem({
+            type: 'dashboard', name: 'vendor_board', item: { name: 'vendor_board', label: 'Vendor', widgets: [] }, packageId: NO_PAIR_ID_BASE,
+        });
+
+        expect(saved).toMatchObject({ success: true });
+        expect(rows('dashboard', 'vendor_board')).toEqual([{ package_id: NO_PAIR_ID_BASE, state: 'active', label: 'Vendor' }]);
+    });
+
+    it('a read-only base that records no version, its pair installed, keeps the write naming it: there is no `basedOn` to declare', async () => {
+        // The ensure door answers an installed pair without reading the base's
+        // version, so this is the version step's own case.
+        const { protocol, rows } = makeProtocol();
+
+        const saved = await protocol.saveMetaItem({
+            type: 'dashboard', name: 'nover_board', item: { name: 'nover_board', label: 'Nover', widgets: [] }, packageId: NO_VERSION_BASE,
+        });
+
+        expect(saved).toMatchObject({ success: true });
+        expect(rows('dashboard', 'nover_board')).toEqual([{ package_id: NO_VERSION_BASE, state: 'active', label: 'Nover' }]);
+    });
+
+    it('an email template at a locale the base does not ship keeps the write naming the base: the override write gate refuses its declared body', async () => {
+        const { protocol, rows } = makeProtocol();
+        const email = ITEMS.find((i) => i.type === 'email_template')!;
+
+        const saved = await protocol.saveMetaItem({
+            type: email.type, name: email.name, item: { ...email.body('Bienvenue'), locale: 'fr-FR' }, packageId: BASE,
+        });
+
+        expect(saved).toMatchObject({ success: true });
+        expect(rows(email.type, email.name)).toEqual([{ package_id: BASE, state: 'active', label: 'Bienvenue' }]);
+    });
+});
+
 describe('the commit doors: restoring a row bound to the base is closed, removing one stays open (#29390)', () => {
     /** Each commit a second apart, so the package rollback's "strictly newer" reads an order. */
     let clock = Date.parse('2026-11-02T00:00:00.000Z');
