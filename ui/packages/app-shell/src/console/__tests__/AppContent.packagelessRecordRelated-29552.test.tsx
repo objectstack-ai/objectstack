@@ -502,6 +502,8 @@ describe('a tracked object’s record route asks sys_audit_log by name (objectst
 
   beforeEach(() => {
     server.objects = TRACKED;
+    // The bundle is built from the objects the server holds.
+    server.peek = { status: 'ready', items: serverBundle(OPS_APP) };
   });
 
   it('a packaged app: the view’s first render holds sys_audit_log, read by name through the package scope', async () => {
@@ -552,6 +554,7 @@ describe('a tracked object’s record route asks sys_audit_log by name (objectst
 
   it('an absent sys_audit_log (404) keeps history off and the page drawn', async () => {
     server.objects = TRACKED.filter((o) => o.name !== 'sys_audit_log');
+    server.peek = { status: 'ready', items: serverBundle(OPS_APP) };
     boot('/apps/ops/crm_account/record/r1');
     await waitFor(() => expect(screen.getByTestId('record-view')).toHaveTextContent('sys_user'));
     await settle();
