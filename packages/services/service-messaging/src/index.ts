@@ -70,6 +70,8 @@ export {
     resolveRecipientLocale,
 } from './recipient-locale.js';
 export type { SmsChannelOptions, SmsSenderSurface } from './sms-channel.js';
+export { createPushChannel } from './push-channel.js';
+export type { PushChannelOptions, PushSenderSurface, PushDeviceSurface } from './push-channel.js';
 
 // [#24978] Keyed notification text — `EmitInput.keyedText`, rendered per
 // recipient at delivery from the `i18n` service's catalog.

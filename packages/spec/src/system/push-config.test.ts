@@ -199,16 +199,22 @@ describe('PushServiceConfigSchema — direct vendor blocks', () => {
   });
 });
 
-// Declared ahead of its reader (ADR-0049): nothing reads this shape until the
-// push channel plugin ships, and each block says so in its description.
-describe('push transport configuration is declared, not yet read', () => {
+// Read by `PushServicePlugin` (`@objectstack/service-push`, #29041): the direct
+// transport and its vendor blocks are served, so they claim nothing unread
+// (ADR-0049: a marker states a fact). The relay is refused at boot until its
+// sender ships (#29920), so its block keeps a marker that says so.
+describe('push transport configuration is read', () => {
+  it('marks the relay block not yet served, and says the push service refuses it', () => {
+    expect(PushRelayTransportConfigSchema.description).toMatch(/^\[PLANNED — not yet served\] /);
+    expect(PushRelayTransportConfigSchema.description).toMatch(/refuses it at boot/);
+  });
+
   it.each([
     ['PushServiceConfigSchema', PushServiceConfigSchema],
-    ['PushRelayTransportConfigSchema', PushRelayTransportConfigSchema],
     ['PushDirectTransportConfigSchema', PushDirectTransportConfigSchema],
     ['ApnsTransportConfigSchema', ApnsTransportConfigSchema],
     ['FcmTransportConfigSchema', FcmTransportConfigSchema],
-  ] as const)('%s carries the PLANNED marker', (_name, schema) => {
-    expect(schema.description).toMatch(/^\[PLANNED — /);
+  ] as const)('%s carries no PLANNED marker', (_name, schema) => {
+    expect(schema.description).not.toMatch(/PLANNED/);
   });
 });

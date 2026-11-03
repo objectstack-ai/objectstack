@@ -13,6 +13,7 @@ import { DEFAULT_MAX_IDLE_INTERVAL_MS, NotificationDispatcher, type DispatchClus
 import { HttpDispatcher } from './http-dispatcher.js';
 import { createEmailChannel } from './email-channel.js';
 import { createSmsChannel } from './sms-channel.js';
+import { createPushChannel } from './push-channel.js';
 import {
     NotificationTemplateStore,
     TEMPLATE_DECLARED_FALLBACK_LOCALE,
@@ -506,6 +507,25 @@ export class MessagingServicePlugin implements Plugin {
                     resolveTransport: getSms,
                     create: () => createSmsChannel({ getSms, getData, store: templateStore, getDefaultTemplateLocale }),
                     announce: '[messaging] sms channel registered (renders sys_notification_template — resolved per recipient: sys_user.locale, else the deployment default)',
+                    logger: ctx.logger,
+                }));
+            });
+
+            // Push channel (#29041): same pattern — mounted while a `push`
+            // service (`@objectstack/service-push`) is resolvable. The devices
+            // it addresses are this service's own registry (`sys_user_device`).
+            const getPush = () => {
+                try {
+                    return ctx.getService<import('./push-channel.js').PushSenderSurface>('push');
+                } catch {
+                    return undefined;
+                }
+            };
+            ctx.hook('kernel:ready', async () => {
+                service.registerChannelProvider('push', lazyChannelMount({
+                    resolveTransport: getPush,
+                    create: () => createPushChannel({ getPush, devices: service }),
+                    announce: '[messaging] push channel registered (delivers to the recipient\'s enabled sys_user_device rows through the push service)',
                     logger: ctx.logger,
                 }));
             });

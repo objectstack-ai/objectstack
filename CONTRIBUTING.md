@@ -416,6 +416,7 @@ start when you add a component.
 | [`@objectstack/service-i18n`](packages/services/service-i18n) | Internationalization |
 | [`@objectstack/service-messaging`](packages/services/service-messaging) | Outbound notification dispatch across channels |
 | [`@objectstack/service-sms`](packages/services/service-sms) | SMS delivery (Aliyun, Twilio, log) |
+| [`@objectstack/service-push`](packages/services/service-push) | Mobile push delivery (APNs, FCM) |
 | [`@objectstack/service-knowledge`](packages/services/service-knowledge) | Knowledge / RAG orchestration over pluggable adapters |
 | [`@objectstack/service-package`](packages/services/service-package) | Package registry — publish, install, manage metadata packages |
 | [`@objectstack/cloud-connection`](packages/cloud-connection) | Runtime-side client for an ObjectStack cloud control plane |
