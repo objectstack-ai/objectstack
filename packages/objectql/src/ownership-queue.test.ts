@@ -157,6 +157,25 @@ describe('[ADR-0142 D3] the injected `queue` column', () => {
     expect(engine.registry.getObject('job')).toBeUndefined();
   });
 
+  it('[#29673] `objectRegistrationRefusal` answers the throw `registerObject` makes, and registers nothing', () => {
+    const engine = new ObjectQL();
+    const declared = { name: 'job', fields: { queue: { type: 'text', label: 'Print queue' } } } as any;
+    const asked = engine.registry.objectRegistrationRefusal(declared, 'pkg');
+    expect(asked).toMatchObject({ code: 'INVALID_METADATA', status: 422, name: 'ObjectQueueColumnRefusedError', objectName: 'job' });
+    expect(engine.registry.getObject('job')).toBeUndefined();
+    let thrown: any;
+    try { engine.registry.registerObject(declared, 'pkg'); } catch (err) { thrown = err; }
+    expect(thrown?.name).toBe(asked?.name);
+    expect(thrown?.message).toBe(asked?.message);
+    // The field-type door, the other body door, answers the same way.
+    expect(engine.registry.objectRegistrationRefusal({ name: 'job', fields: { x: { label: 'X' } } } as any, 'pkg'))
+      .toMatchObject({ code: 'INVALID_METADATA', status: 422 });
+    // The platform's own definition coming back, and an ordinary body: no refusal, and still nothing registered.
+    expect(engine.registry.objectRegistrationRefusal({ name: 'job', fields: { queue: { ...QUEUE_FIELD_DEF } } } as any, 'pkg')).toBeNull();
+    expect(engine.registry.objectRegistrationRefusal({ name: 'job', fields: { title: { type: 'text' } } } as any, 'pkg')).toBeNull();
+    expect(engine.registry.getObject('job')).toBeUndefined();
+  });
+
   it('the platform\'s own definition coming back passes, and so does `queue` on a tier that carries none', () => {
     expect(objectQueueColumnRefusal({ name: 'ticket', fields: { queue: { ...QUEUE_FIELD_DEF } } })).toBeNull();
     expect(objectQueueColumnRefusal({ name: 'catalog', ownership: 'org', fields: { queue: { type: 'text' } } })).toBeNull();

@@ -412,6 +412,8 @@ const en = {
       takePhoto: 'Take photo',
       takeSelfie: 'Take selfie',
       cameraCapture: 'Camera capture',
+      choosePhoto: 'Choose photo',
+      photoFailed: 'Could not get the photo',
       uploading: 'Uploading…',
       uploadingPct: 'Uploading… ({{pct}}%)',
       fileFallback: 'File',
@@ -3923,6 +3925,9 @@ const en = {
     appNothingAvailableGrantDescription: 'This app has no pages your account can open. You can grant access in Setup.',
     appNoReadableObjectDescription: 'Your account cannot read any of the records in this app yet. Ask an administrator to assign you a permission set.',
     appNoReadableObjectGrantDescription: 'Your account cannot read any of the records in this app yet. You can grant access in Setup.',
+    // objectstack-ai/objectstack#29771 — the app root when every entry it shows is a `url` or `action` link (`AppNoAccessEmptyState`, reason `menu-only`).
+    appOpensFromMenu: '{{app}} opens from its menu',
+    appOpensFromMenuDescription: 'This app has no page of its own. Choose an entry in its menu to open a link or run an action.',
     openSetup: 'Open Setup',
     createFirstApp: 'Create Your First App',
     systemSettings: 'System Settings',

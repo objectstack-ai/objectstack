@@ -1,7 +1,7 @@
 ---
 title: Protocol reference — every schema by module
 navTitle: Protocol Reference
-description: Every schema published by @objectstack/spec — 1605 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1609 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -21,7 +21,7 @@ counts are sums of the rows they head. Regenerate with
 | Module | Pages | Schemas | Description |
 | :--- | ---: | ---: | :--- |
 | [AI Protocol](/docs/references/ai) | 12 | 68 | Agents, tools, skills, RAG and knowledge sources, model registry, conversations. |
-| [API Protocol](/docs/references/api) | 35 | 474 | REST contracts, endpoints, routing, realtime, batch, discovery. |
+| [API Protocol](/docs/references/api) | 35 | 477 | REST contracts, endpoints, routing, realtime, batch, discovery. |
 | [Automation Protocol](/docs/references/automation) | 15 | 78 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
 | [Data Protocol](/docs/references/data) | 31 | 175 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
 | [Identity Protocol](/docs/references/identity) | 5 | 27 | Users and accounts, organizations, positions, SCIM provisioning. |
@@ -32,9 +32,9 @@ counts are sums of the rows they head. Regenerate with
 | [Security Protocol](/docs/references/security) | 6 | 37 | Permission sets, row-level security, sharing rules, tenancy posture. |
 | [Shared Protocol](/docs/references/shared) | 10 | 31 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
-| [System Protocol](/docs/references/system) | 39 | 292 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
+| [System Protocol](/docs/references/system) | 39 | 293 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
 | [UI Protocol](/docs/references/ui) | 16 | 175 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **208** | **1605** | 14 protocol modules |
+| **Total** | **208** | **1609** | 14 protocol modules |
 
 ---
 
@@ -63,7 +63,7 @@ Agents, tools, skills, RAG and knowledge sources, model registry, conversations.
 
 ## API Protocol
 
-**Source:** `packages/spec/src/api/` · **Import:** `@objectstack/spec/api` · **35 pages, 474 schemas**
+**Source:** `packages/spec/src/api/` · **Import:** `@objectstack/spec/api` · **35 pages, 477 schemas**
 
 REST contracts, endpoints, routing, realtime, batch, discovery.
 
@@ -72,7 +72,7 @@ REST contracts, endpoints, routing, realtime, batch, discovery.
 | [`analytics.zod.ts`](/docs/references/api/analytics) | `AnalyticsEndpoint`, `AnalyticsMetadataResponse`, `AnalyticsQueryRequest`, `AnalyticsResultResponse`, `AnalyticsSqlResponse`, `DatasetCompareTo`, `DatasetSelection`, `DatasetTotals`, `GetAnalyticsMetaRequest` |
 | [`app-bundle.zod.ts`](/docs/references/api/app-bundle) | `AppMetadataBundleResponse` |
 | [`auth.zod.ts`](/docs/references/api/auth) | `AuthProvider`, `LoginRequest`, `LoginType`, `MePermissionsAnonymousResponse`, `MePermissionsAuthenticatedResponse`, `MePermissionsResponse`, `RefreshTokenRequest`, `RegisterRequest`, `Session`, `SessionResponse`, `SessionUser`, `UserProfileResponse` |
-| [`auth-endpoints.zod.ts`](/docs/references/api/auth-endpoints) | `AuthEndpoint`, `AuthFeaturesConfig`, `AuthProviderInfo`, `DeviceRequestResponse`, `DeviceTokenResponse`, `EmailPasswordConfigPublic`, `GetAuthConfigResponse` |
+| [`auth-endpoints.zod.ts`](/docs/references/api/auth-endpoints) | `AuthEndpoint`, `AuthFeaturesConfig`, `AuthProviderInfo`, `DeviceRequestResponse`, `DeviceTokenResponse`, `EmailPasswordConfigPublic`, `GetAuthConfigResponse`, `OneTimeTokenHandoffQuery`, `OneTimeTokenVerifyRequest`, `OneTimeTokenVerifyResponse` |
 | [`automation-api.zod.ts`](/docs/references/api/automation-api) | `AutomationApiErrorCode`, `AutomationFlowPathParams`, `AutomationRunPathParams`, `CloneFlowRequest`, `CloneFlowResponse`, `CreateFlowRequest`, `CreateFlowResponse`, `DeleteFlowRequest`, `DeleteFlowResponse`, `FlowFailureDetails`, `FlowInnerRefusal`, `GetFlowRequest`, `GetFlowResponse`, `GetRunRequest`, `GetRunResponse`, `ListRunsRequest`, `ListRunsResponse`, `ResumeFailureDetails`, `ToggleFlowRequest`, `ToggleFlowResponse`, `TriggerFlowRequest`, `TriggerFlowResponse`, `UpdateFlowRequest`, `UpdateFlowResponse` |
 | [`batch.zod.ts`](/docs/references/api/batch) | `BatchConfig`, `BatchOperationResult`, `BatchOperationType`, `BatchOptions`, `BatchRecord`, `BatchUpdateRequest`, `BatchUpdateResponse`, `CrossObjectBatchDroppedFields`, `CrossObjectBatchOperation`, `CrossObjectBatchRequest`, `CrossObjectBatchResponse`, `DeleteManyRequest`, `UpdateManyRecord`, `UpdateManyRequest` |
 | [`contract.zod.ts`](/docs/references/api/contract) | `ApiError`, `BaseResponse`, `BatchLoadingStrategy`, `BulkRequest`, `BulkResponse`, `CreateRequest`, `DataLoaderConfig`, `DeleteResponse`, `ExportRequest`, `IdRequest`, `ListRecordResponse`, `ModificationResult`, `QueryOptimizationConfig`, `RecordData`, `SingleRecordResponse`, `UpdateRequest` |
@@ -325,14 +325,14 @@ Studio designer metadata — the authoring surfaces for the protocols above.
 
 ## System Protocol
 
-**Source:** `packages/spec/src/system/` · **Import:** `@objectstack/spec/system` · **39 pages, 292 schemas**
+**Source:** `packages/spec/src/system/` · **Import:** `@objectstack/spec/system` · **39 pages, 293 schemas**
 
 The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance.
 
 | File | Schemas |
 | :--- | :--- |
 | [`app-install.zod.ts`](/docs/references/system/app-install) | `AppCompatibilityCheck`, `AppInstallRequest`, `AppInstallResult`, `AppManifest` |
-| [`auth-config.zod.ts`](/docs/references/system/auth-config) | `AdvancedAuthConfig`, `AudienceConfig`, `AuthConfig`, `AuthPluginConfig`, `AuthProviderConfig`, `EmailAndPasswordConfig`, `EmailVerificationConfig`, `MutualTLSConfig`, `OidcProviderConfig`, `OidcProvidersConfig`, `SocialProviderConfig` |
+| [`auth-config.zod.ts`](/docs/references/system/auth-config) | `AdvancedAuthConfig`, `AudienceConfig`, `AuthConfig`, `AuthPluginConfig`, `AuthProviderConfig`, `EmailAndPasswordConfig`, `EmailVerificationConfig`, `MutualTLSConfig`, `OidcProviderConfig`, `OidcProvidersConfig`, `SocialProviderConfig`, `TrustedAppScheme` |
 | [`book.zod.ts`](/docs/references/system/book) | `Book`, `BookAudience`, `BookGroup`, `BookInclude`, `BookNode`, `ResolvedBook`, `ResolvedEntry`, `ResolvedGroup` |
 | [`cache.zod.ts`](/docs/references/system/cache) | `CacheAvalanchePrevention`, `CacheConfig`, `CacheConsistency`, `CacheInvalidation`, `CacheStrategy`, `CacheTier`, `CacheWarmup`, `DistributedCacheConfig` |
 | [`collaboration.zod.ts`](/docs/references/system/collaboration) | `AwarenessEvent`, `AwarenessSession`, `AwarenessUpdate`, `AwarenessUserState`, `CRDTMergeResult`, `CRDTState`, `CRDTType`, `CollaborationMode`, `CollaborationSession`, `CollaborationSessionConfig`, `CollaborativeCursor`, `CounterOperation`, `CursorColorPreset`, `CursorSelection`, `CursorStyle`, `CursorUpdate`, `GCounter`, `LWWRegister`, `ORSet`, `ORSetElement`, `OTComponent`, `OTOperation`, `OTOperationType`, `OTTransformResult`, `PNCounter`, `TextCRDTOperation`, `TextCRDTState`, `UserActivityStatus`, `VectorClock` |

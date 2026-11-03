@@ -46,9 +46,9 @@
  *   judge of the object refinement ({@link duplicateActionNames}), and the
  *   one-key-per-global-filter judge of the dashboard refinement
  *   ({@link duplicateGlobalFilterNames}), and its reserved-`dateRange` judge
- *   ({@link reservedDateRangeGlobalFilters}), and the `fieldPatches` key
- *   grammar of `ObjectExtensionSchema`'s own parse
- *   ({@link refusedFieldPatchKeys}). A site is listed here exactly
+ *   ({@link reservedDateRangeGlobalFilters}), and the `fieldPatches` and
+ *   `fields` key grammar of `ObjectExtensionSchema`'s own parse
+ *   ({@link refusedFieldPatchKeys}, {@link refusedExtensionFieldKeys}). A site is listed here exactly
  *   when that door refuses it. One door lives outside this package: the
  *   page/view `visibleWhen` rule in `@objectstack/lint` judges a `has()`
  *   argument on the engine's AST, which this package cannot parse, so its
@@ -628,12 +628,25 @@ const dashboardReservedDateRangeGlobalFilter: RefusedStoredShape = {
  * a key is listed here exactly when that parse refuses it as a key.
  */
 function refusedFieldPatchKeys(extension: Dict): Array<{ key: string; message: string }> {
-  if (!isDict(extension.fieldPatches)) return [];
+  return refusedExtensionRecordKeys(extension, 'fieldPatches');
+}
+
+/**
+ * The keys of one field-name-keyed record of an object extension (`fields` or
+ * `fieldPatches`) that `ObjectExtensionSchema` refuses as no field name: each
+ * `invalid_key` issue the extension's own parse locates at `SLOT.KEY`, with
+ * that issue's message.
+ */
+function refusedExtensionRecordKeys(
+  extension: Dict,
+  slot: 'fields' | 'fieldPatches',
+): Array<{ key: string; message: string }> {
+  if (!isDict(extension[slot])) return [];
   const parsed = ObjectExtensionSchema.safeParse(extension);
   if (parsed.success) return [];
   const refused: Array<{ key: string; message: string }> = [];
   for (const issue of parsed.error.issues) {
-    if (issue.code !== 'invalid_key' || issue.path.length !== 2 || issue.path[0] !== 'fieldPatches') continue;
+    if (issue.code !== 'invalid_key' || issue.path.length !== 2 || issue.path[0] !== slot) continue;
     const key = issue.path[1];
     if (typeof key === 'string') refused.push({ key, message: issue.message });
   }
@@ -665,6 +678,45 @@ const objectExtensionFieldPatchKeyGrammar: RefusedStoredShape = {
   },
 };
 
+// ── #29523: an object extension whose `fields` key cannot be a field name ──
+
+/**
+ * The `fields` keys `ObjectExtensionSchema` refuses as no field name, read as
+ * {@link refusedFieldPatchKeys} reads `fieldPatches`: the extension's own
+ * parse, the one the save door and the sync that registers stored extensions
+ * run, so a key is listed here exactly when that parse refuses it as a key.
+ */
+function refusedExtensionFieldKeys(extension: Dict): Array<{ key: string; message: string }> {
+  return refusedExtensionRecordKeys(extension, 'fields');
+}
+
+const objectExtensionFieldKeyGrammar: RefusedStoredShape = {
+  id: 'object-extension-field-key-grammar-refused',
+  toMajor: 18,
+  surface: 'objectExtensions[].fields — a key outside the snake_case grammar of an object\'s `fields` keys',
+  detect(stack, report) {
+    mapCollection(stack, 'objectExtensions', (extension, path) => {
+      const target = typeof extension.extend === 'string' ? `\`${extension.extend}\`` : 'its target';
+      for (const { key, message } of refusedExtensionFieldKeys(extension)) {
+        report({
+          path: `${path}.fields.${key}`,
+          // The key and the field's type only: the body is the author's, the key is what is refused.
+          from: JSON.stringify({ [key]: { type: ((extension.fields as Dict)[key] as Dict | undefined)?.type } }),
+          reason: `The extension of ${target} adds a field under \`${key}\`. `
+            + 'No lossless rewrite: the key is the name the field is stored and read under, and re-spelling it '
+            + '(lower-casing it, turning `-` or a space into `_`) names a different column than the one rows, '
+            + 'views and formulas may already read, or lands on a field the object already declares, so the '
+            + 'name is the author\'s to choose. Left as stored, the row no longer parses: the sync that registers '
+            + 'stored extensions counts it as an error and registers none of it, its `fieldPatches` included, '
+            + 'and its next save is refused with 422 INVALID_METADATA until the field is renamed. '
+            + message,
+        });
+      }
+      return extension;
+    });
+  },
+};
+
 /**
  * Every refused stored shape, in report order. A new entry is a reviewed edit:
  * `refused-shapes.test.ts` pins each one.
@@ -680,6 +732,7 @@ export const REFUSED_STORED_SHAPES: readonly RefusedStoredShape[] = [
   dashboardDuplicateGlobalFilterName,
   dashboardReservedDateRangeGlobalFilter,
   objectExtensionFieldPatchKeyGrammar,
+  objectExtensionFieldKeyGrammar,
 ];
 
 /**

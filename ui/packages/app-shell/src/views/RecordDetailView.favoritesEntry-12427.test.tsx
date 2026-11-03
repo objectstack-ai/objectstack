@@ -210,3 +210,84 @@ describe('record page: the favorites entry is in the overflow, ahead of Share (o
     );
   });
 });
+
+/**
+ * The overflow's Share inside the ObjectStack mobile shell, when it announces
+ * `share` (objectstack-ai/mobile `docs/HYBRID-SHELL.md`, "Files"): the OS share
+ * sheet through the shell, with the record's page link and its title. Only
+ * that record URL crosses the bridge. The control cases (a plain browser, an
+ * older shell without `share`, a shell refusing the call) keep today's
+ * path: `navigator.share` when present, else the clipboard copy.
+ */
+describe('record page: Share through the mobile shell', () => {
+  const GLOBAL = 'ObjectStackNative';
+
+  function installShell(opts: { capabilities?: string[]; refuse?: boolean } = {}) {
+    const capabilities = opts.capabilities ?? ['share', 'openFile'];
+    const share = vi.fn(async (_content: { url?: string; text?: string }) => {
+      if (opts.refuse) throw Object.assign(new Error('url must be http(s)'), { code: 'bad_args' });
+      return null;
+    });
+    const host = {
+      version: 1,
+      platform: 'ios',
+      appVersion: '2.2.0',
+      capabilities,
+      safeArea: { top: 0, bottom: 0, left: 0, right: 0 },
+      has: (c: string) => capabilities.includes(c),
+      share,
+      openFile: vi.fn(async () => null),
+      openExternal: vi.fn(async () => null),
+      ready: vi.fn(),
+      routeChanged: vi.fn(),
+    };
+    (window as unknown as Record<string, unknown>)[GLOBAL] = host;
+    return host;
+  }
+
+  let writeText: ReturnType<typeof vi.fn>;
+  beforeEach(() => {
+    document.title = 'Intro call · CRM';
+    writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+  });
+  afterEach(() => {
+    delete (window as unknown as Record<string, unknown>)[GLOBAL];
+  });
+
+  async function chooseShare() {
+    await mountRecordPage();
+    await openOverflow();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Share' }));
+  }
+
+  it('opens the shell share sheet with the record URL and title, and copies nothing', async () => {
+    const host = installShell();
+    await chooseShare();
+    await waitFor(() => expect(host.share).toHaveBeenCalledTimes(1));
+    // Exactly the record's page link and its title: nothing else crosses the bridge.
+    expect(host.share).toHaveBeenCalledWith({ url: window.location.href, text: 'Intro call · CRM' });
+    expect(host.openFile).not.toHaveBeenCalled();
+    expect(host.openExternal).not.toHaveBeenCalled();
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('a shell refusing the call keeps the browser path', async () => {
+    const host = installShell({ refuse: true });
+    await chooseShare();
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(window.location.href));
+    expect(host.share).toHaveBeenCalledTimes(1);
+  });
+
+  it('CONTROL: an older shell without share copies the link as today', async () => {
+    const host = installShell({ capabilities: ['openFile'] });
+    await chooseShare();
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(window.location.href));
+    expect(host.share).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: a plain browser copies the link as today', async () => {
+    await chooseShare();
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(window.location.href));
+  });
+});
