@@ -603,7 +603,8 @@ function readObjectRouteNames(
   if (new URLSearchParams(search).has(COMMAND_PALETTE_PARAM)) {
     names.push(...navigationNames(app?.navigation, (item) => (item.type === 'object' ? item.objectName : undefined)));
   }
-  const first = read(names);
+  const asked = read(names);
+  const first = relatedNames.length > 0 ? inRelatedOrder(asked, relatedNames) : asked;
   const routeDef = objectName ? first.objects.find((o: any) => o?.name === objectName) : undefined;
   const lookups = routeDef ? lookupTargetNames(routeDef) : [];
   if (lookups.length === 0) return { scope: first, ready, ...routeOutcome };
@@ -616,6 +617,30 @@ function readObjectRouteNames(
   if (packageId) readWithoutViews({ packageId, names: lookups, views: false });
   else readWithoutViews({ names: lookups, views: false });
   return { scope: first, ready, ...routeOutcome };
+}
+
+/**
+ * objectstack#29552 — a scope whose objects that `relatedNames` names come in
+ * that order. A record page synthesized for an object draws its related lists
+ * in the order of the objects it is handed (`deriveRelatedLists`), and the
+ * registry hands them in the object list's order. A names-only scope holds its
+ * names in the order they landed, across every reader of the shared entry (an
+ * app's `requiresObject` names land first), so the related objects are put in
+ * the order the bundle lists them. One array per (scope objects, names), so a
+ * reader's memo on it holds.
+ */
+const RELATED_ORDER = new WeakMap<readonly unknown[], WeakMap<readonly string[], any[]>>();
+function inRelatedOrder(scope: AppObjectScope, relatedNames: readonly string[]): AppObjectScope {
+  let byNames = RELATED_ORDER.get(scope.objects);
+  if (!byNames) RELATED_ORDER.set(scope.objects, (byNames = new WeakMap()));
+  let objects = byNames.get(relatedNames);
+  if (!objects) {
+    const rank = (o: any) => relatedNames.indexOf(o?.name);
+    // Stable: the objects outside `relatedNames` keep their places ahead of them.
+    objects = [...scope.objects].sort((a, b) => rank(a) - rank(b));
+    byNames.set(relatedNames, objects);
+  }
+  return { ...scope, objects } as AppObjectScope;
 }
 
 /** An adapter that loads app metadata bundles (`ObjectStackAdapter.loadAppBundle`). */

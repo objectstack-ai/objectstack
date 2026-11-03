@@ -30,6 +30,9 @@
  *       draws today;
  *   (c) while the app's bundle is on the wire the route reads nothing, then
  *       reads by name;
+ *   (e) with the bundle in the object list's order, the related lists are
+ *       drawn in the order the registry draws them, even when an app's
+ *       `requiresObject` names one of the related objects (it lands first);
  *   (d) CONTROLs, the registry as before: an object outside the app's
  *       navigation, no bundle, a bundle that holds no app, a record drawer
  *       over the route, and a packaged app's record route (byte-identical:
@@ -104,15 +107,17 @@ import { MetadataProvider } from '../../providers/MetadataProvider';
 type Doc = { name: string; [key: string]: unknown };
 
 const CRM = 'app.crm';
+/** In the order the registry lists them (app-crm's: registration order, not the alphabet). */
 const OBJECTS: Doc[] = [
   { name: 'crm_account', _packageId: CRM, fields: { owner: { type: 'lookup', reference: 'sys_user' } } },
+  { name: 'crm_activity', _packageId: CRM, fields: { what: { type: 'lookup', reference: 'crm_account' } } },
   { name: 'crm_contact', _packageId: CRM, fields: { account: { type: 'lookup', reference: 'crm_account' } } },
+  { name: 'crm_lead', _packageId: CRM, fields: { account: { type: 'lookup', reference: 'crm_account' } } },
   {
     name: 'crm_opportunity',
     _packageId: CRM,
     fields: { account: { type: 'master_detail', reference: 'crm_account' }, partner: { type: 'lookup', reference: 'crm_account' } },
   },
-  { name: 'crm_activity', _packageId: CRM, fields: { what: { type: 'lookup', reference: 'crm_account' } } },
   { name: 'crm_campaign', _packageId: CRM, fields: {} },
   { name: 'crm_case', _packageId: 'app.service', fields: { contact: { type: 'lookup', reference: 'crm_contact' } } },
   { name: 'sys_user', _packageId: 'plugin.auth', fields: {} },
@@ -121,10 +126,19 @@ const objectEntry = (name: string) => ({ id: `nav_${name}`, type: 'object', labe
 
 /** The console-created app: no `_packageId`. Its navigation reaches the account and the contact. */
 const OPS_APP = { name: 'ops', label: 'Ops', navigation: [objectEntry('crm_account'), { id: 'g', type: 'group', label: 'More', children: [objectEntry('crm_contact')] }] };
+/** A console-created app whose account entry requires a related object: that name is asked, and lands, first. */
+const REQUIRES_APP = {
+  name: 'requires',
+  label: 'Requires',
+  navigation: [{ ...objectEntry('crm_account'), requiresObject: 'crm_opportunity' }, objectEntry('crm_contact')],
+};
 /** The packaged app, over the same objects. */
 const CRM_APP = { name: 'crm', label: 'CRM', _packageId: CRM, navigation: [objectEntry('crm_account'), objectEntry('crm_contact')] };
 
-/** What the server's bundle holds for an app: its navigation's objects, and every object pointing at one. */
+/**
+ * What the server's bundle holds for an app: its navigation's objects, and
+ * every object pointing at one, in the object list's order.
+ */
 function serverBundle(app: Doc) {
   const reach = ['crm_account', 'crm_contact'];
   const points = (o: Doc) =>
@@ -160,7 +174,7 @@ function makeAdapter() {
       meta: {
         getItems: (type: string, options?: { packageId?: string }) => {
           server.calls.push(options?.packageId ? `${type}?package=${options.packageId}` : type);
-          const all: Doc[] = type === 'object' ? OBJECTS : type === 'app' ? [OPS_APP, CRM_APP] : [];
+          const all: Doc[] = type === 'object' ? OBJECTS : type === 'app' ? [OPS_APP, REQUIRES_APP, CRM_APP] : [];
           const items = options?.packageId ? all.filter((o) => o._packageId === options.packageId) : all;
           return Promise.resolve({ type, items: structuredClone(items) });
         },
@@ -246,7 +260,7 @@ describe('a package-less app’s record route with no declared record page reads
     // Every bundled object is answered from the bundle; the lookup target outside it is asked by name.
     expect(objectCalls()).toEqual(['object/sys_user']);
     expect(sorted((screen.getByTestId('record-view').textContent ?? '').split(','))).toEqual(
-      sorted(['crm_account', 'crm_contact', 'crm_opportunity', 'crm_activity', 'sys_user']),
+      sorted(['crm_account', 'crm_activity', 'crm_contact', 'crm_lead', 'crm_opportunity', 'sys_user']),
     );
   });
 
@@ -255,7 +269,7 @@ describe('a package-less app’s record route with no declared record page reads
     await waitFor(() => expect(screen.getByTestId('record-view')).toHaveTextContent('crm_activity'));
     await settle();
 
-    expect(registryRelated('crm_account')).toHaveLength(4);
+    expect(registryRelated('crm_account')).toHaveLength(5);
     expect(sorted(drawnRelated())).toEqual(sorted(registryRelated('crm_account')));
   });
 
@@ -284,6 +298,33 @@ describe('a package-less app’s record route with no declared record page reads
     await waitFor(() => expect(screen.getByTestId('record-view')).toHaveTextContent('crm_activity'));
     await settle();
     expect(objectCalls()).toEqual(['object/sys_user']);
+  });
+});
+
+describe('the related lists keep the registry’s order (objectstack#29552)', () => {
+  it('(e) with the bundle in the object list’s order, the lists are drawn in the order the registry draws them', async () => {
+    boot('/apps/ops/crm_account/record/r1');
+    await waitFor(() => expect(screen.getByTestId('record-view')).toHaveTextContent('crm_lead'));
+    await settle();
+
+    expect(registryRelated('crm_account')).toEqual([
+      'crm_opportunity.account',
+      'crm_activity.what',
+      'crm_contact.account',
+      'crm_lead.account',
+      'crm_opportunity.partner',
+    ]);
+    expect(drawnRelated()).toEqual(registryRelated('crm_account'));
+  });
+
+  it('(e) …even when the app’s `requiresObject` names a related object, which lands first', async () => {
+    server.peek = { status: 'ready', items: serverBundle(REQUIRES_APP) };
+    boot('/apps/requires/crm_account/record/r1');
+    await waitFor(() => expect(screen.getByTestId('record-view')).toHaveTextContent('crm_lead'));
+    await settle();
+
+    expect(objectCalls()).not.toContain('object');
+    expect(drawnRelated()).toEqual(registryRelated('crm_account'));
   });
 });
 
