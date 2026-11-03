@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useRef } from 'react';
 import type { CreateDeriveRule } from './registry.js';
+import { romanizeHan, romanizerPending, useHanRomanizer } from './romanizeHan.js';
 
 // ── Pure transforms ───────────────────────────────────────────────────
 
@@ -21,7 +22,10 @@ import type { CreateDeriveRule } from './registry.js';
  *
  * Non-Latin scripts (CJK, Arabic, …) leave the result empty rather than
  * silently writing garbage; {@link underivableTargets} is how the create
- * form detects that and prompts the user to enter `name` manually.
+ * form detects that and prompts the user to enter `name` manually. A create
+ * door that derives a name from a label romanises Chinese first
+ * (`slugify(romanizeHan(label))`, as the `slugify` transform below does), so
+ * only a script with no romanisation reaches that prompt.
  */
 export function slugify(input: string): string {
   if (typeof input !== 'string') return '';
@@ -97,7 +101,8 @@ export function applyTransform(
   const str = typeof value === 'string' ? value : value == null ? '' : String(value);
   switch (transform) {
     case 'slugify':
-      return slugify(str);
+      // A Chinese label derives through its pinyin (`维修中心` → `weixiu_zhongxin`).
+      return slugify(romanizeHan(str));
     case 'plural-en':
       return naivePlural(str);
     case 'titlecase':
@@ -128,7 +133,9 @@ export function underivableTargets(
     if (typeof source !== 'string' || source.trim() === '') continue;
     const target = draft[rule.to];
     if (target != null && String(target).trim() !== '') continue;
-    if (slugify(source) === '') out.push(rule.to);
+    // A Chinese source still waiting on the pinyin dictionary is about to
+    // derive; it is not underivable.
+    if (slugify(romanizeHan(source)) === '' && !romanizerPending(source)) out.push(rule.to);
   }
   return out;
 }
@@ -184,6 +191,16 @@ export function useCreateDerive<T extends Record<string, unknown>>(
   // *changes* and avoid re-firing on every keystroke unrelated to a
   // given source field.
   const prevFromRef = useRef<Record<string, unknown>>({});
+  // A Chinese source derives through the pinyin dictionary, which loads on
+  // first use: when it lands, every `slugify` rule re-derives once, as if its
+  // source had just changed (a touched target still keeps the author's value).
+  const romanizerVersion = useHanRomanizer(
+    ...(rules ?? [])
+      .filter((rule) => rule.transform === 'slugify')
+      .map((rule) => draft[rule.from])
+      .filter((v): v is string => typeof v === 'string'),
+  );
+  const prevRomanizerRef = useRef(romanizerVersion);
 
   const markTouched = useCallback((path: string) => {
     touchedRef.current.add(path);
@@ -194,11 +211,14 @@ export function useCreateDerive<T extends Record<string, unknown>>(
     const patch: Record<string, unknown> = {};
     const prev = prevFromRef.current;
     const nextSnapshot: Record<string, unknown> = {};
+    const romanizerLanded = prevRomanizerRef.current !== romanizerVersion;
+    prevRomanizerRef.current = romanizerVersion;
 
     for (const rule of rules) {
       const fromVal = draft[rule.from];
       nextSnapshot[rule.from] = fromVal;
-      const fromChanged = !Object.is(prev[rule.from], fromVal);
+      const fromChanged =
+        !Object.is(prev[rule.from], fromVal) || (romanizerLanded && rule.transform === 'slugify');
       if (!fromChanged) continue;
       const respectTouched = rule.untilUserEdits !== false;
       if (respectTouched && touchedRef.current.has(rule.to)) continue;
@@ -221,7 +241,7 @@ export function useCreateDerive<T extends Record<string, unknown>>(
     // rule.from — the rules array is treated as stable across the
     // lifetime of the form.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft, enabled]);
+  }, [draft, enabled, romanizerVersion]);
 
   return {
     markTouched,

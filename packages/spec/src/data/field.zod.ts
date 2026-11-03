@@ -1845,9 +1845,12 @@ export const FieldSchema = lazySchema(() => {
    * it per the #9689 idempotent-materialization ruling). On every other type
    * the key was inert by construction — the engine's referential delete walk
    * reads it only on a `master_detail`, `lookup` or `tree` field that carries a
-   * `reference` (the family predicate `statesDeleteSemantics` in
+   * `reference`, and on a `user` field that declares a `deleteBehavior` (the
+   * family predicate `statesDeleteSemantics` in
    * `packages/objectql/src/engine.ts`; a `tree`'s `reference` is its own
-   * object, written by the object's parse when the author leaves it out) — yet
+   * object, written by the object's parse when the author leaves it out; a
+   * `user` field's target is `sys_user`, fixed by the type, and #29253 made its
+   * authored value take effect) — yet
    * the materialized value shipped in every built artifact as an apparent
    * explicit declaration (the #4447 shadowing mechanism). A bare `text` /
    * `datetime` / `number` field now parses to output WITHOUT the key; an
@@ -2760,8 +2763,10 @@ export const FieldSchema = lazySchema(() => {
   // No ADR-0087 conversion carries it (the D3 entry
   // `user-field-foreign-reference-refused` says why): rewriting the field to a
   // `lookup` would add it to the referential delete walk with
-  // `deleteBehavior: 'set_null'`, which a `user` field never joined, and
-  // `deleteBehavior` has no value meaning "leave it", so the author decides.
+  // `deleteBehavior: 'set_null'`, while a `user` field that declares no
+  // `deleteBehavior` stays out of that walk (#29253: one that declares a value
+  // joins it), and `deleteBehavior` has no value meaning "leave it", so the
+  // author decides.
   if (
     field.type === 'user'
     && field.reference !== undefined
@@ -2776,7 +2781,8 @@ export const FieldSchema = lazySchema(() => {
         `\`reference: '${field.reference}'\`. To link records of \`${field.reference}\`, declare a ` +
         `\`lookup\`: \`{ type: 'lookup', reference: '${field.reference}' }\` (\`Field.lookup('${field.reference}', …)\`), ` +
         "and choose its `deleteBehavior` (a `lookup` defaults to `'set_null'` when the target record is " +
-        'deleted; a `user` field never did). If a person was meant, drop `reference`.',
+        'deleted; a `user` field has no default and keeps the id unless it declares one). If a person was ' +
+        'meant, drop `reference`.',
     });
   }
 
@@ -3324,9 +3330,12 @@ export const FieldSchema = lazySchema(() => {
     // stay legal. `tree` (hierarchical reference) keeps materializing with
     // `lookup`: it is in the relational family, where the key states delete
     // semantics, and the delete walk reads it there (#22957). `user` is
-    // stored identically to `lookup` but sits outside the delete walk's family
-    // (`master_detail`, `lookup`, `tree`) exactly like `text` does, so it takes
-    // the non-reference side; an authored value there still round-trips.
+    // stored identically to `lookup` but takes the non-reference side: it
+    // joins the delete walk only when its author DECLARES a `deleteBehavior`
+    // (#29253, `statesDeleteSemantics`), so a materialized value here would be
+    // a delete outcome nobody chose. A bare `user` field therefore parses with
+    // no key and keeps the deleted user's id; an authored value round-trips
+    // and takes effect.
     if (field.deleteBehavior === undefined && (field.type === 'lookup' || field.type === 'tree')) {
       patch.deleteBehavior = 'set_null';
     }

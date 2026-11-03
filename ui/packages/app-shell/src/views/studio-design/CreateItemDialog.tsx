@@ -14,9 +14,14 @@
  *
  * It owns the two input fields and derives the identifier exactly the way the
  * old inline forms did (`toFieldNameLoose` while typing, `toFieldName` on
- * submit — the latter emits the `field` fallback for CJK-only input, which we
- * treat as "needs an explicit identifier"). Persistence stays with the caller:
- * `onSubmit({ label, name })` runs the type-specific skeleton + draft save.
+ * submit — the latter emits the `field` fallback for input that derives
+ * nothing, which we treat as "needs an explicit identifier"). A Chinese display
+ * name derives through its pinyin first (`romanizeHan`: `维修中心` →
+ * `weixiu_zhongxin`), shown in the identifier box and editable there; until
+ * the author types into that box it follows the display name, so the pinyin
+ * dictionary landing a moment after the first keystroke fills it in.
+ * Persistence stays with the caller: `onSubmit({ label, name })` runs the
+ * type-specific skeleton + draft save.
  */
 
 import * as React from 'react';
@@ -33,6 +38,7 @@ import {
 } from '@object-ui/components';
 import { t, type SupportedLocale } from '../metadata-admin/i18n.js';
 import { toFieldName, toFieldNameLoose } from '../metadata-admin/previews/object-fields-io.js';
+import { romanizeHan, romanizerPending, useHanRomanizer } from '../metadata-admin/romanizeHan.js';
 
 export interface CreateItemDialogProps {
   open: boolean;
@@ -86,8 +92,11 @@ export function CreateItemDialog({
   onSubmit,
 }: CreateItemDialogProps): React.ReactElement {
   const [label, setLabel] = React.useState('');
-  const [name, setName] = React.useState('');
+  // What the author typed into the identifier box; until they do, the box
+  // shows the identifier the display name derives (`name` below).
+  const [typedName, setTypedName] = React.useState('');
   const [nameTouched, setNameTouched] = React.useState(false);
+  useHanRomanizer(label);
   // objectui#13128 — each label names its input (`htmlFor` + `id`), unique
   // per mount, so a screen reader and `getByLabelText` reach both fields.
   const labelInputId = React.useId();
@@ -98,19 +107,23 @@ export function CreateItemDialog({
   React.useEffect(() => {
     if (open) {
       setLabel('');
-      setName('');
+      setTypedName('');
       setNameTouched(false);
     }
   }, [open]);
 
+  const name = nameTouched ? typedName : toFieldNameLoose(romanizeHan(label));
+
   // Same identifier rule the inline forms enforced: need a label and a usable
   // identifier that isn't the `field` fallback `toFieldName` emits for
   // CJK-only input (the user must then type an explicit identifier).
-  const finalName = toFieldName((name.trim() || label).trim());
+  const finalName = toFieldName((name.trim() || romanizeHan(label)).trim());
   const valid = !!label.trim() && !!finalName && finalName !== 'field';
-  // objectui#13389 — a display name with no Latin letters (a Chinese one, say)
-  // derives no identifier; the empty box says why instead of staying silent.
-  const notDerived = !!label.trim() && !name.trim() && !toFieldNameLoose(label);
+  // objectui#13389 — a display name that derives no identifier (a Japanese
+  // one, say) leaves the box empty; it says why instead of staying silent.
+  // Not while the pinyin dictionary is still loading for a Chinese one.
+  const notDerived =
+    !!label.trim() && !name.trim() && !toFieldNameLoose(romanizeHan(label)) && !romanizerPending(label);
 
   const submit = () => {
     if (!valid || busy) return;
@@ -131,10 +144,7 @@ export function CreateItemDialog({
               id={labelInputId}
               autoFocus
               value={label}
-              onChange={(e) => {
-                setLabel(e.target.value);
-                if (!nameTouched) setName(toFieldNameLoose(e.target.value));
-              }}
+              onChange={(e) => setLabel(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') submit();
               }}
@@ -149,7 +159,7 @@ export function CreateItemDialog({
               value={name}
               onChange={(e) => {
                 setNameTouched(true);
-                setName(toFieldNameLoose(e.target.value));
+                setTypedName(toFieldNameLoose(e.target.value));
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') submit();

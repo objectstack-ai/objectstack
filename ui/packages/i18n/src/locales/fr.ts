@@ -4586,6 +4586,7 @@ const fr = {
     changes: {
       title: 'Modifications en attente',
       description: 'Ce que la publication changera. Les nouveaux éléments sont ajoutés ; les mises à jour remplacent la version en ligne.',
+      savedToCustomization: 'Enregistré dans les personnalisations de {{package}}',
       loading: 'Chargement des modifications en attente…',
       loadFailed: 'Impossible de charger les modifications en attente :',
       empty: 'Rien en attente — tous les brouillons ont été publiés.',

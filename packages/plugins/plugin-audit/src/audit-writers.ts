@@ -140,6 +140,29 @@ export interface AuditI18nSurface {
   t(key: string, locale: string, params?: Record<string, unknown>): string;
 }
 
+/**
+ * A user's display identity as the platform holds it: the `sys_user` title
+ * column (the display name) and `sys_user.image` (the avatar URL), each `null`
+ * where it cannot be read. The rule is `resolveActorSnapshot`'s, inside
+ * {@link installAuditWriters}.
+ */
+export interface AuditActorSnapshot {
+  name: string | null;
+  avatarUrl: string | null;
+}
+
+/** What {@link installAuditWriters} hands back to the plugin that composes it. */
+export interface AuditWritersHandle {
+  /**
+   * The display identity of `userId`, read from `sys_user` with the system's
+   * own read through `api` (a hook context's `api`) — the one resolution the
+   * `sys_activity` actor columns are written with, so every other platform
+   * writer of a user's display identity asks it rather than keeping a second
+   * one. It never rejects: an unreadable identity answers `null` for both.
+   */
+  resolveActorSnapshot(api: unknown, userId: string): Promise<AuditActorSnapshot>;
+}
+
 /** Options for {@link installAuditWriters}. */
 export interface AuditWriterOptions {
   /**
@@ -1239,8 +1262,8 @@ export function installAuditWriters(
   engine: any,
   packageId = 'com.objectstack.audit',
   opts: AuditWriterOptions = {},
-): void {
-  if (!engine || typeof engine.registerHook !== 'function') return;
+): AuditWritersHandle | undefined {
+  if (!engine || typeof engine.registerHook !== 'function') return undefined;
 
   const getMessaging = opts.getMessaging ?? (() => undefined);
   const getI18n = opts.getI18n ?? (() => undefined);
@@ -1733,7 +1756,7 @@ export function installAuditWriters(
    * rows written after the window; rows already written keep what they were
    * written with, which is what a snapshot is.
    */
-  type ActorSnapshot = { name: string | null; avatarUrl: string | null };
+  type ActorSnapshot = AuditActorSnapshot;
   const NO_ACTOR_SNAPSHOT: ActorSnapshot = { name: null, avatarUrl: null };
   /** `sys_user`'s profile-image column (ADR-0092 Tier 1: "`image` — avatar URL"). */
   const USER_AVATAR_FIELD = 'image';
@@ -2668,6 +2691,10 @@ export function installAuditWriters(
   // judged and notified like one written with it. The registration is what
   // has the engine bind `previous` on this object's update.
   engine.registerHook('afterUpdate', writeCommentMentions, { object: 'sys_comment', packageId });
+
+  // The comment author's display identity is stamped from this same
+  // resolution (`installCommentAccessHooks`, wired by `AuditPlugin`).
+  return { resolveActorSnapshot };
 }
 
 /**
