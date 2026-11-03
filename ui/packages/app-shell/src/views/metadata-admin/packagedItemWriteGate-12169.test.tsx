@@ -220,7 +220,7 @@ function designerEditing(): string | null {
 }
 
 function writabilityBadge(): HTMLElement {
-  return screen.getByText('writable', { exact: true });
+  return screen.getByText('Writable', { exact: true });
 }
 
 const ARTIFACT_CAPTION = /provided by a code package/;

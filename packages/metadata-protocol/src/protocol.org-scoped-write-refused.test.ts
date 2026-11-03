@@ -39,6 +39,8 @@
  * `saveMetaItem` / `publishMetaItem` / `publishPackageDrafts`, so a harness
  * that mocks them cannot see it.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { afterEach, describe, expect, it } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decisions (#4550 delete /
 // #5480 update). Imported from `@objectstack/metadata-core`, never from

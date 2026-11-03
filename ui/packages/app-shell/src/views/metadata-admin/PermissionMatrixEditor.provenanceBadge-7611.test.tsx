@@ -2,14 +2,14 @@
 
 /**
  * objectui#7611 (F2) — the identity strip's provenance badge reads the layered
- * envelope, so a set a code package SHIPS reads "Package", not "Custom".
+ * envelope, so a set a code package SHIPS reads "Package", not "Added".
  *
  * ## The defect
  *
  * The badge read only `draft.managedBy` and the `packageId` prop. The registry
  * serves no `managedBy` on a permission set, and the Setup catalog (the
  * environment scope) passes no `packageId`, so every packaged set opened there
- * read "Custom" — beside the artifact lock that says a code package provides
+ * read "Added" — beside the artifact lock that says a code package provides
  * it. The editor already holds the fact that answers the question: the layered
  * envelope's `code` layer and its ADR-0010 `provenance`, read by
  * `isArtifactBackedLayer` into `codeIsArtifact` for the artifact gate. The badge
@@ -21,7 +21,7 @@
  * exclusions (`PermissionMatrixEditor.artifactTier.test.tsx` pins them for the
  * lock): a set with no code layer, an organization-authored set read back with
  * a code-looking `_packageId`, and the `sys_metadata` save-path sentinel. Each
- * must still read "Custom", so the fix cannot be "always Package".
+ * must still read "Added", so the fix cannot be "always Package".
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -98,7 +98,7 @@ async function renderMatrix() {
 const badgeText = () => screen.getByTestId('perm-provenance-badge').textContent;
 
 describe('the provenance badge reads the layered envelope (objectui#7611, F2)', () => {
-  it('a set a code package ships reads "Package" beside its lock, not "Custom"', async () => {
+  it('a set a code package ships reads "Package" beside its lock, not "Added"', async () => {
     codeLayer = { _packageId: 'com.example.showcase', name: 'showcase_contributor' };
     provenance = 'package';
     await renderMatrix();
@@ -107,21 +107,21 @@ describe('the provenance badge reads the layered envelope (objectui#7611, F2)', 
     expect(screen.getByText(/^Read-only \(/)).toBeInTheDocument();
   });
 
-  it('a set with no code layer (authored in this environment) still reads "Custom"', async () => {
+  it('a set with no code layer (authored in this environment) still reads "Added"', async () => {
     await renderMatrix();
-    expect(badgeText()).toBe('Custom');
+    expect(badgeText()).toBe('Added');
   });
 
-  it('an organization-authored set read back with a code-looking _packageId still reads "Custom"', async () => {
+  it('an organization-authored set read back with a code-looking _packageId still reads "Added"', async () => {
     codeLayer = { _packageId: 'com.example.showcase', name: 'showcase_contributor' };
     provenance = 'org';
     await renderMatrix();
-    expect(badgeText()).toBe('Custom');
+    expect(badgeText()).toBe('Added');
   });
 
-  it('the sys_metadata save-path sentinel still reads "Custom"', async () => {
+  it('the sys_metadata save-path sentinel still reads "Added"', async () => {
     codeLayer = { _packageId: 'sys_metadata', name: 'showcase_contributor' };
     await renderMatrix();
-    expect(badgeText()).toBe('Custom');
+    expect(badgeText()).toBe('Added');
   });
 });

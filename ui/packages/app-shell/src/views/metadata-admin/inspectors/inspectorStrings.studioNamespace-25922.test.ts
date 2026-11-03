@@ -117,7 +117,6 @@ const FAMILY_FLOOR: Readonly<Record<string, number>> = Object.freeze({
   'engine.appNav.': 8,
   'engine.embedded.': 7,
   'engine.quickfind.': 5,
-  'engine.badge.': 3,
   'engine.fieldsListEditor.': 3,
   'engine.typeAction.': 2,
   'engine.celTest.': 2,

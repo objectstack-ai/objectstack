@@ -290,6 +290,7 @@
     "system/TranslationDiffItem",
     "system/TranslationDiffStatus",
     "system/TranslationItem",
+    "system/TrustedAppScheme",
     "system/UserActivityStatus",
     "system/UserDevice",
     "system/VectorClock",

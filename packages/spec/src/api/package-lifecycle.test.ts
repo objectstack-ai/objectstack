@@ -241,10 +241,13 @@ describe('PackageExportManifestSchema.withheldMaps names each map the export wit
     if (result.success) expect(result.data).toEqual(manifest);
   });
 
-  it('is declared ahead of its producer: the describe opens with the planned marker and names the ADR, never a tracker id', () => {
+  it('is served: the describe carries no planned marker, and names no tracker id', () => {
+    // The export writes the list and both install modes read it (runtime
+    // `assemblePackageManifest`, cloud-connection's install-local door), so the
+    // ADR-0049 declared-ahead marker is dropped in the change that serves it.
     const description = PackageExportManifestSchema.shape.withheldMaps.description ?? '';
-    expect(description).toMatch(/^\[PLANNED — not yet served\] /);
-    expect(description).toContain('ADR-0049');
+    expect(description).not.toContain('PLANNED');
+    expect(description).toMatch(/^Every map the export withheld WHOLE/);
     expect(description).not.toMatch(/#\d{3,}/);
   });
 
@@ -370,14 +373,15 @@ describe('PackageExportBundleSchema declares the whole-deployment export as comp
     expect((result.error.issues[0] as { keys?: string[] }).keys).toEqual(['cycles']);
   });
 
-  // Declared before it is served (ADR-0049): no runtime mounts
-  // `GET /packages/export` until the server slice of #28914 lands. That
-  // change drops the marker, adds the route's ledger row and flips this test.
-  it('is PLANNED until a runtime serves the route: the describe says so, naming no tracker id', () => {
+  // Served (#28914's server slice mounted `GET /packages/export` on the runtime
+  // dispatcher, with its ledger row): the ADR-0049 marker is gone, and the
+  // describe names the route and the command that calls it.
+  it('is served: the describe carries no PLANNED marker, names the route and the command, and no tracker id', () => {
     const description = PackageExportBundleSchema.description ?? '';
-    expect(description).toMatch(/^\[PLANNED — not yet served\] /);
-    expect(description).toContain('ADR-0049');
-    expect(description).toContain('no runtime serves `GET /packages/export` yet');
+    expect(description).not.toMatch(/PLANNED/);
+    expect(description).not.toMatch(/not yet served/);
+    expect(description).toContain('`GET /packages/export`');
+    expect(description).toContain('`os package export`');
     // Customer-facing prose carries no tracker id (check:doc-authoring); the slice is named in the comments.
     expect(description).not.toMatch(/#\d{3,}/);
   });

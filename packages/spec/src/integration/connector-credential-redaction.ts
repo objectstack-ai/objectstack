@@ -58,8 +58,8 @@
  *     one came from outside them, and what it holds cannot be judged key by
  *     key: an `auth: '<token>'` is the secret itself. Withheld whole, fail
  *     closed, rather than served as stored.
- *  5. **The credential parts of every URL under `providerConfig`** — rewritten,
- *     not removed: the userinfo (`https://user:pass@host`, and the
+ *  5. **The credential parts of every URL under `providerConfig` and
+ *     `auth`** — rewritten, not removed: the userinfo (`https://user:pass@host`, and the
  *     `https://<token>@host` form several HTTP APIs read as a token, so the
  *     user part goes too) and each credential query parameter
  *     ({@link CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES}, plus the
@@ -70,10 +70,16 @@
  *     It covers `providerConfig.baseUrl` (`rest`, `openapi`),
  *     `providerConfig.transport.url` (`mcp` over http) and a URL
  *     `providerConfig.spec` (`openapi`), and any other URL a provider keeps at
- *     an OBJECT depth of `providerConfig`: a string is judged when it starts
- *     with `scheme://`.
- *  6. **An array under `providerConfig` that holds such a URL, WHOLE**, and
- *     **a key under `providerConfig` whose own name carries a dot that holds
+ *     an OBJECT depth of `providerConfig`; and the endpoints an instance-auth
+ *     kind declares (`auth.tokenUrl`, `auth.authorizationUrl`, `auth.resource`)
+ *     and any URL a kind declares later. A string is judged when it starts
+ *     with `scheme://`. What a credential part is, and the walk that finds
+ *     every URL holding one, live in ONE place,
+ *     `./connector-url-credentials.ts`, which the write door's refinement
+ *     runs too: an authored URL holding one is refused, so only a row stored
+ *     before that refusal can carry one to this read.
+ *  6. **An array under `providerConfig` or `auth` that holds such a URL,
+ *     WHOLE**, and **a key under them whose own name carries a dot that holds
  *     such a URL at any depth, WHOLE.** The carry-forward cannot address an
  *     array element by position, nor a dotted key segment by segment (its
  *     dotted name is indistinguishable from a nested path once `redactedKeys`
@@ -115,6 +121,19 @@
  *     judged. An element is never removed on its own, which would shift every
  *     later index; the carry-forward keeps the stored value at rest.
  *
+ *     **A key inside an object `retryConfig`: withheld and NOT carried
+ *     forward** (the maintainer's ruling 6593804783): each is named in
+ *     `notCarriedForwardKeys` as well as in `redactedKeys`, as item 1's are.
+ *     The authored `retryConfig` is closed, so every door refuses such a key,
+ *     and nothing at runtime reads one: the instance materialization parses
+ *     the stored policy with the open {@link RetryConfigSchema}, which drops
+ *     it, and hands the provider only the parsed policy. So a save that sends
+ *     `retryConfig` — the served form, `{}`, any object — replaces the stored
+ *     container whole, and the save names each key it dropped; a save that
+ *     leaves `retryConfig` out removes the container, as it always did. An
+ *     `actions` element's key, and a `retryConfig` that is not an object
+ *     (withheld whole), stay carried forward.
+ *
  * ## Cleared forms, and what is never touched
  *
  * A position holding nothing — `null`, `''`, or an empty map — is served as
@@ -137,70 +156,34 @@
 import { ConnectorInstanceAuthSchema } from '../shared/connector-auth.zod';
 import { ConnectorActionSchema, DeclarativeConnectorEntrySchema, RetryConfigSchema } from './connector.zod';
 import { METADATA_READ_DECORATIONS } from '../kernel/metadata-read-decorations';
-import { CREDENTIAL_URL_QUERY_PARAM_NAMES } from '../data/driver/common.zod';
 import { redactUrlCredentialQueryParams } from '../data/datasource-credential-redaction';
+import {
+  CONNECTOR_CREDENTIAL_MAP_PATHS,
+  CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES,
+  URL_USERINFO_RE,
+  connectorCredentialQueryParamsOf,
+  connectorUrlCredentialPositionOf,
+  findConnectorUrlCredentials,
+} from './connector-url-credentials';
 import { objectShapeOf, wrapperChainOf, zodDefOf } from '../kernel/metadata-credential-fields';
 import type { MetadataRedactionResult } from '../kernel/metadata-type-redaction';
 
 /** The map positions under `providerConfig` withheld whole (see the module note, item 3). */
-export const CONNECTOR_CREDENTIAL_MAP_PATHS: readonly (readonly string[])[] = Object.freeze([
-  ['providerConfig', 'headers'],
-  ['providerConfig', 'defaultHeaders'],
-  ['providerConfig', 'transport', 'headers'],
-  ['providerConfig', 'transport', 'env'],
-]);
+export { CONNECTOR_CREDENTIAL_MAP_PATHS };
 
 /**
  * The query parameters whose value a connector URL is read as carrying a
- * credential in (see the module note, item 5): the datasource set
- * (`password`, `authToken`) and the names HTTP APIs conventionally take a key,
- * token or signature under. Matched case-insensitively on the decoded name
- * (`credentialQueryParamOf`). A name here that holds no secret on some API
- * costs that API's served URL the parameter, never its stored value: the
- * carry-forward keeps it on a save of the served form.
+ * credential in (see the module note, item 5) — declared once, beside the
+ * walk the write door shares (`./connector-url-credentials.ts`). A name here
+ * that holds no secret on some API costs that API's served URL the parameter,
+ * never its stored value: the carry-forward keeps it on a save of the served
+ * form.
  */
-export const CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES: readonly string[] = Object.freeze([
-  ...CREDENTIAL_URL_QUERY_PARAM_NAMES,
-  'access_token',
-  'api_key',
-  'api-key',
-  'apikey',
-  'auth_token',
-  'client_secret',
-  'id_token',
-  'key',
-  'passwd',
-  'refresh_token',
-  'secret',
-  'sig',
-  'signature',
-  'token',
-  'x-api-key',
-]);
-
-/** `scheme://` — the strings item 5 judges. */
-const URL_SCHEME_RE = /^[a-z][a-z0-9+.\-]*:\/\//i;
-
-/**
- * `scheme://userinfo@` — the whole userinfo. Every class excludes `/?#`, so the
- * `@` must sit in the authority; the greedy class backtracks to the LAST `@`
- * before the path, the userinfo boundary RFC 3986 defines (the reading
- * `URL_USERINFO_RE` in the datasource module documents).
- */
-const URL_USERINFO_RE = /^([a-z][a-z0-9+.\-]*:\/\/)[^/?#]*@/i;
+export { CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES };
 
 /** One URL with its userinfo and credential query parameters removed; the input when there is none. */
 function redactConnectorUrl(value: string, params: readonly string[]): string {
   return redactUrlCredentialQueryParams(value.replace(URL_USERINFO_RE, '$1'), params);
-}
-
-/** The query parameter names item 5 strips for `item`: the fixed set plus its own `auth.paramName`. */
-function credentialQueryParamsOf(item: Record<string, unknown>): readonly string[] {
-  const auth = item.auth;
-  const own = isPlainRecord(auth) && auth.type === 'api-key' && typeof auth.paramName === 'string' && auth.paramName !== ''
-    ? auth.paramName
-    : undefined;
-  return own === undefined ? CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES : [...CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES, own];
 }
 
 /** One instance-auth kind as the union declares it: its literal-valued keys, and every key it declares. */
@@ -354,19 +337,17 @@ function nestedKeys(): { retryConfig: ReadonlySet<string>; action: ReadonlySet<s
 }
 
 /**
- * Item 8: every key `retryConfig` and each `actions` element do not declare,
- * as item-relative paths (an `actions` hop is the element's index), or the
- * container itself when it is not the shape the entry declares.
+ * Item 8, the carried-forward half: every key each `actions` element does not
+ * declare, as item-relative paths (an `actions` hop is the element's index),
+ * or the container itself when `retryConfig` or `actions` is not the shape the
+ * entry declares. The keys of an object `retryConfig` are
+ * {@link undeclaredRetryConfigKeysOf}'s.
  */
 function undeclaredNestedKeysOf(item: Record<string, unknown>): string[][] {
   const declared = nestedKeys();
   const paths: string[][] = [];
   const retryConfig = item.retryConfig;
-  if (isPlainRecord(retryConfig)) {
-    for (const key of Object.keys(retryConfig)) if (!declared.retryConfig.has(key)) paths.push(['retryConfig', key]);
-  } else if (!isClearedForm(retryConfig)) {
-    paths.push(['retryConfig']);
-  }
+  if (!isPlainRecord(retryConfig) && !isClearedForm(retryConfig)) paths.push(['retryConfig']);
   const actions = item.actions;
   if (Array.isArray(actions) && actions.every(isPlainRecord)) {
     actions.forEach((action, index) => {
@@ -378,6 +359,19 @@ function undeclaredNestedKeysOf(item: Record<string, unknown>): string[][] {
     paths.push(['actions']);
   }
   return paths;
+}
+
+/**
+ * Item 8, the half NOT carried forward: every key an object `retryConfig`
+ * does not declare, as item-relative paths — withheld whatever its value (see
+ * the module note). `[]` when `retryConfig` is not an object
+ * ({@link undeclaredNestedKeysOf} withholds that whole, carried forward).
+ */
+function undeclaredRetryConfigKeysOf(item: Record<string, unknown>): string[][] {
+  const retryConfig = item.retryConfig;
+  if (!isPlainRecord(retryConfig)) return [];
+  const declared = nestedKeys().retryConfig;
+  return Object.keys(retryConfig).filter((key) => !declared.has(key)).map((key) => ['retryConfig', key]);
 }
 
 /**
@@ -415,64 +409,43 @@ function withValueAt(item: Record<string, unknown>, path: readonly string[], val
   return { ...item, [head]: withValueAt(item[head] as Record<string, unknown>, rest, value) };
 }
 
-/** Whether `value` is a URL whose credential parts {@link redactConnectorUrl} removes. */
-function isCredentialUrl(value: string, params: readonly string[]): boolean {
-  return URL_SCHEME_RE.test(value) && redactConnectorUrl(value, params) !== value;
-}
-
-/** Whether `value` holds, at any depth, a URL {@link isCredentialUrl} judges (item 6). */
-function holdsCredentialUrl(value: unknown, params: readonly string[]): boolean {
-  if (typeof value === 'string') return isCredentialUrl(value, params);
-  if (Array.isArray(value)) return value.some((element) => holdsCredentialUrl(element, params));
-  if (isPlainRecord(value)) return Object.values(value).some((child) => holdsCredentialUrl(child, params));
-  return false;
-}
-
 /**
- * Items 5 and 6: every URL under `providerConfig`, at object depth, whose
- * credential parts {@link redactConnectorUrl} removes — the path and the
- * rewritten value — and every array there holding such a URL, withheld whole
- * (`value` absent).
+ * Items 5 and 6: every URL the write door's own walk returns
+ * ({@link findConnectorUrlCredentials} — the one traversal both doors run), at
+ * the position {@link connectorUrlCredentialPositionOf} names. A URL reached
+ * through object keys alone is rewritten in place — the path and the value
+ * {@link redactConnectorUrl} leaves. An array holding such a URL, and a key
+ * whose own name carries a dot holding one at any depth, cannot be addressed
+ * part for part, so each is withheld WHOLE (`value` absent), once however many
+ * URLs it holds: fail closed, and the carry-forward keeps the stored value at
+ * rest by the whole-string fallback. Item 5's "avoid silent deletion" yields to
+ * item 7's fail-closed there.
  */
 function credentialUrlRewritesOf(
   item: Record<string, unknown>,
 ): Array<{ path: string[]; value?: string }> {
   const rewrites: Array<{ path: string[]; value?: string }> = [];
-  const providerConfig = item.providerConfig;
-  if (!isPlainRecord(providerConfig)) return rewrites;
-  const params = credentialQueryParamsOf(item);
-  const walk = (node: Record<string, unknown>, prefix: readonly string[]): void => {
-    for (const [key, value] of Object.entries(node)) {
-      const path = [...prefix, key];
-      // A key whose own name carries a dot cannot be addressed segment by
-      // segment (its dotted name is indistinguishable from a nested path once
-      // `redactedKeys` joins on dots), so it is never rewritten in place or
-      // descended into. Fail closed instead: if it holds a credential URL at
-      // any depth, withhold the key WHOLE — the carry-forward keeps the stored
-      // value at rest by the whole-string fallback. Item 5's "avoid silent
-      // deletion" yields to item 7's fail-closed here.
-      if (key.includes('.')) {
-        if (holdsCredentialUrl(value, params)) rewrites.push({ path });
-        continue;
-      }
-      if (typeof value === 'string') {
-        if (isCredentialUrl(value, params)) rewrites.push({ path, value: redactConnectorUrl(value, params) });
-      } else if (Array.isArray(value)) {
-        if (holdsCredentialUrl(value, params)) rewrites.push({ path });
-      } else if (isPlainRecord(value)) {
-        walk(value, path);
-      }
+  const withheld = new Set<string>();
+  const params = connectorCredentialQueryParamsOf(item);
+  for (const found of findConnectorUrlCredentials(item)) {
+    const position = connectorUrlCredentialPositionOf(found.path);
+    if (position.rewrite) {
+      rewrites.push({ path: position.path, value: redactConnectorUrl(found.url, params) });
+      continue;
     }
-  };
-  walk(providerConfig, ['providerConfig']);
+    const key = JSON.stringify(position.path);
+    if (withheld.has(key)) continue;
+    withheld.add(key);
+    rewrites.push({ path: position.path });
+  }
   return rewrites;
 }
 
 /**
  * The built-in `connector` redactor: withholds the positions the module note
- * lists, names each in `redactedKeys` (dotted, sorted) and item 1's in
- * `notCarriedForwardKeys` too, and returns the input by reference when there
- * is nothing to withhold.
+ * lists, names each in `redactedKeys` (dotted, sorted) and item 1's and an
+ * object `retryConfig`'s undeclared keys in `notCarriedForwardKeys` too, and
+ * returns the input by reference when there is nothing to withhold.
  */
 export function redactConnectorItem(item: Record<string, unknown>): MetadataRedactionResult {
   let served = item;
@@ -486,9 +459,10 @@ export function redactConnectorItem(item: Record<string, unknown>): MetadataReda
     served = withoutKeyAt(served, path);
     redactedKeys.push(path.join('.'));
   }
-  // Item 1: an undeclared `auth` key, whatever its value, withheld and not
-  // carried forward — a save of the served form drops it.
-  for (const path of undeclaredAuthKeysOf(item)) {
+  // Item 1, and item 8's keys of an object `retryConfig`: an undeclared key,
+  // whatever its value, withheld and not carried forward — a save of the
+  // served form drops it.
+  for (const path of [...undeclaredRetryConfigKeysOf(item), ...undeclaredAuthKeysOf(item)]) {
     const { present } = readAt(served, path);
     if (!present) continue;
     served = withoutKeyAt(served, path);

@@ -16,7 +16,7 @@
 // ## What these cases pin
 //
 // The draft still saves (drafts are never gated). Its read answers
-// `valid: false` with the `flow-region-shape-invalid` finding on the flow, in
+// `valid: false` with the `flow-region-shape-invalid` finding on the container, in
 // the engine's own sentence; `publish-drafts`, the per-item publish and a live
 // save each refuse it before any write. Control: a well-formed loop, parallel
 // and try_catch region each read valid, publish, and the engine registers them.
@@ -117,8 +117,8 @@ describe('dogfood: a flow with a malformed region is refused at publish, and its
     const diagnostics = JSON.stringify(read.json);
     expect(diagnostics).toContain('"valid":false');
     expect(diagnostics).toContain('"code":"flow-region-shape-invalid"');
-    // The registry rule anchors the flow itself: the item root, in item-relative spelling.
-    expect(diagnostics).toContain('"path":""');
+    // The registry rule anchors the container the engine names (the loop at nodes[1]), in item-relative spelling.
+    expect(diagnostics).toContain('"path":"nodes.1"');
     expect(diagnostics).toContain(JSON.stringify(`Flow 'rgnprobe_loop' would be refused at registration: ${REGION_SENTENCE}`));
 
     const published = await call('POST', `/packages/${PKG_BAD}/publish-drafts`, {});

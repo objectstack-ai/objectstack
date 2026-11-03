@@ -5,6 +5,9 @@ import { TEXT_SLOT_TEMPLATE_REFUSAL } from '../automation/flow-text-slot-templat
 import { FlowSchema } from '../automation/flow.zod';
 import { ScreenConfigSchema, ScreenFieldConfigSchema } from '../automation/builtin-node-config.zod';
 import { ALL_CONVERSIONS } from '../conversions/registry';
+import { applyConversionsToStoredItem } from '../conversions/stored';
+import { SeedSchema } from '../data/seed.zod';
+import { SeedLoaderConfigSchema } from '../data/seed-loader.zod';
 import {
   TranslationDataSchema,
   TranslationBundleSchema,
@@ -47,7 +50,7 @@ describe('LocaleSchema', () => {
     });
   });
 
-  it.each(['en', 'zh-CN', 'zh-Hans-CN', 'es-419', 'yue-HK', 'zh-cn'])('accepts the tag %j (case is not judged)', (locale) => {
+  it.each(['en', 'zh-CN', 'zh-Hans-CN', 'es-419', 'yue-HK', 'zh-cn'])('accepts the tag %j (case is corrected, never refused)', (locale) => {
     expect(LocaleSchema.safeParse(locale).success).toBe(true);
   });
 
@@ -117,6 +120,125 @@ describe('LocaleSchema', () => {
       stack.translations[1],
       { 'ja-JP': { messages: { x: 'c' } } },
     ]);
+  });
+});
+
+// #28993: a translation saved under `zh-cn` answered 200 and never reached a
+// `zh-CN` session, because a resolver answers one locale, exact match first,
+// and the stock `zh-CN` bundle won. The parse now corrects a tag's case.
+describe('LocaleSchema corrects a tag to its BCP-47 case (#28993)', () => {
+  it.each([
+    ['zh-cn', 'zh-CN'],
+    ['ZH-CN', 'zh-CN'],
+    ['zh-hans-cn', 'zh-Hans-CN'],
+    ['ZH-HANS-cn', 'zh-Hans-CN'],
+    ['EN', 'en'],
+    ['en-us', 'en-US'],
+    ['yue-hk', 'yue-HK'],
+    ['sr-LATN-rs', 'sr-Latn-RS'],
+    ['es-419', 'es-419'],
+    ['de-1996', 'de-1996'],
+    // Every subtag after a singleton is lower case (RFC 5646 §2.1.1).
+    ['en-US-u-CA-Gregory', 'en-US-u-ca-gregory'],
+    ['en-x-US', 'en-x-us'],
+  ])('%j parses to %j', (input, canonical) => {
+    expect(LocaleSchema.parse(input)).toBe(canonical);
+  });
+
+  it.each(['en', 'zh-CN', 'zh-Hans-CN', 'es-419', 'pt-BR', 'en-US-u-ca-gregory'])('a canonical tag %j is returned unchanged', (locale) => {
+    expect(LocaleSchema.parse(locale)).toBe(locale);
+  });
+
+  it('folds case only: no legacy-subtag replacement, and no throw on a tag the shape accepts', () => {
+    // `Intl.getCanonicalLocales` answers `he`, `fil` and `zh` for these, which
+    // would move a translation to a locale its author never named.
+    expect(LocaleSchema.parse('iw')).toBe('iw');
+    expect(LocaleSchema.parse('TL')).toBe('tl');
+    expect(LocaleSchema.parse('cmn-cn')).toBe('cmn-CN');
+    // ...and throws on this one, which the shape accepts.
+    expect(LocaleSchema.parse('zh-hans-hans')).toBe('zh-Hans-Hans');
+  });
+
+  it('every reader of LocaleSchema sees the canonical spelling', () => {
+    // The item door: `defineTranslation` and the metadata save door's parse.
+    expect(TranslationItemSchema.parse({ name: 'zh_cn', locale: 'zh-cn', messages: { x: 'y' } }).locale).toBe('zh-CN');
+    expect(defineTranslation({ name: 'zh_cn', locale: 'ZH-cn', messages: { x: 'y' } }).locale).toBe('zh-CN');
+    // The stack's i18n configuration.
+    expect(TranslationConfigSchema.parse({ defaultLocale: 'EN', supportedLocales: ['en', 'zh-cn'], fallbackLocale: 'en-us' }))
+      .toEqual({ defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'], fallbackLocale: 'en-US' });
+    // A seed dataset's locale scope and the seed loader's own locale.
+    expect(SeedSchema.parse({ object: 'crm_lead', locale: ['zh-cn'], records: [] }).locale).toEqual(['zh-CN']);
+    expect(SeedLoaderConfigSchema.parse({ locale: 'zh-cn' }).locale).toBe('zh-CN');
+  });
+
+  it('a bundle\'s locale keys are folded, in authored order, values untouched', () => {
+    const data = { messages: { commonSave: '保存' } };
+    const parsed = TranslationBundleSchema.parse({ 'zh-cn': data, en: { messages: { commonSave: 'Save' } } });
+    expect(Object.keys(parsed)).toEqual(['zh-CN', 'en']);
+    expect(parsed['zh-CN']).toEqual(data);
+    expect(Object.keys(defineTranslationBundle({ 'ja-jp': data }))).toEqual(['ja-JP']);
+    expect(Object.keys(PlatformTranslationBundleSchema.parse({ 'zh-hans-cn': data }))).toEqual(['zh-Hans-CN']);
+  });
+
+  it.each([
+    ['TranslationBundleSchema', TranslationBundleSchema],
+    ['PlatformTranslationBundleSchema', PlatformTranslationBundleSchema],
+  ] as const)('%s refuses two keys that fold to one tag, naming both, instead of dropping one', (_name, schema) => {
+    const result = schema.safeParse({
+      'zh-cn': { messages: { commonSave: '保存(lower)' } },
+      'zh-CN': { messages: { commonSave: '保存' } },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.map((i) => [i.code, i.path.join('.')])).toEqual([['custom', 'zh-CN']]);
+    const message = result.error!.issues[0]!.message;
+    expect(message).toContain('`zh-cn`');
+    expect(message).toContain('`zh-CN`');
+  });
+
+  it('CONTROL: distinct tags in one bundle, and one tag across two bundles, are both accepted', () => {
+    // Distinct after the fold: nothing collides.
+    const bundle = { 'zh-CN': { messages: { x: 'a' } }, 'zh-TW': { messages: { x: 'b' } }, 'zh-hans-cn': { messages: { x: 'c' } } };
+    expect(Object.keys(TranslationBundleSchema.parse(bundle))).toEqual(['zh-CN', 'zh-TW', 'zh-Hans-CN']);
+    // Two bundles of `stack.translations` are separate records; the runtime
+    // deep-merges them per locale, so `zh-cn` in one and `zh-CN` in the other
+    // is not a collision, it is one locale.
+    expect(TranslationBundleSchema.safeParse({ 'zh-cn': { messages: { x: 'a' } } }).success).toBe(true);
+    expect(TranslationBundleSchema.safeParse({ 'zh-CN': { messages: { x: 'b' } } }).success).toBe(true);
+  });
+
+  it('data at rest: a stored row under `zh-cn` is read back as `zh-CN` by the stored-row seam', () => {
+    // `applyConversionsToStoredItem` is what every rehydration seam replays,
+    // the runtime-authored translation sync included, before it keys the row
+    // by its locale. The save door stores the authored body, so this is the
+    // seam that carries the fold to a stored row.
+    const row = { name: 'zh_cn', locale: 'zh-cn', objects: { project: { label: '项目(lower)' } } };
+    expect(applyConversionsToStoredItem('translation', row)).toEqual({ ...row, locale: 'zh-CN' });
+    // Canonical rows come back untouched: the pass is idempotent.
+    const canonical = { name: 'zh_cn', locale: 'zh-CN', messages: { x: 'y' } };
+    expect(applyConversionsToStoredItem('translation', canonical)).toEqual(canonical);
+    // An underscore spelling is made a tag by the entry before and folded by
+    // the case entry after it: the order is what takes `zh_cn` to `zh-CN`.
+    const underscored = { name: 'zh_cn', locale: 'zh_cn', messages: { x: 'y' } };
+    expect(applyConversionsToStoredItem('translation', underscored)).toEqual({ ...underscored, locale: 'zh-CN' });
+  });
+
+  it('data at rest: the case entry reports a case collision instead of guessing, and merges an identical twin', () => {
+    const conversion = ALL_CONVERSIONS.find((c) => c.id === 'translation-locale-tag-case-folded')!;
+    expect(conversion.retiredAfter).toBe('18.2.0');
+    const todos: { path: string }[] = [];
+    const notices: { path: string }[] = [];
+    const stack = {
+      translations: [
+        // `zh-cn` is `zh-CN` in another case, which the entry already holds with other strings.
+        { 'zh-cn': { messages: { x: 'a' } }, 'zh-CN': { messages: { x: 'b' } } },
+        // An identical twin is merged: nothing is lost.
+        { 'ja-jp': { messages: { x: 'c' } }, 'ja-JP': { messages: { x: 'c' } } },
+      ],
+    };
+    const out = conversion.apply(stack, (n) => notices.push(n), { reportTodo: (t) => todos.push(t) });
+    expect(todos.map((t) => t.path)).toEqual(['translations[0].zh-cn']);
+    expect(notices.map((n) => n.path)).toEqual(['translations[1].ja-jp']);
+    expect(out.translations).toEqual([stack.translations[0], { 'ja-JP': { messages: { x: 'c' } } }]);
   });
 });
 

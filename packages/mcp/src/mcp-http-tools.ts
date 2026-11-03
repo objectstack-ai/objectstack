@@ -341,9 +341,12 @@ export interface McpActionBridge {
  * page makes (`GET …/external/tables`, `POST …/tables/:remote/import`).
  *
  * The host binds both to the caller and refuses as the REST routes refuse:
- * listing needs the federation READ capability, importing the WRITE one
- * (`FEDERATION_READ_CAPABILITY` / `FEDERATION_WRITE_CAPABILITY`,
- * `@objectstack/rest`), thrown with the ADR-0112 `code` / `status`.
+ * listing needs the federation READ capability, importing the READ capability
+ * AND the WRITE one — the import answers with the remote table's structure,
+ * which needs the read capability on every door
+ * (`FEDERATION_READ_CAPABILITY` / `FEDERATION_WRITE_CAPABILITY`, judged by
+ * `federationCapabilityRefusal`, `@objectstack/rest`), thrown with the
+ * ADR-0112 `code` / `status`.
  *
  * OPTIONAL as a pair: a bridge without both registers neither tool. The
  * runtime's bridge carries both and answers `503 SERVICE_UNAVAILABLE` per call
@@ -840,7 +843,7 @@ export function registerFederationTools(
         'read-only unless writable is true (which also needs the datasource to allow writes), and maps the ' +
         'remote types to field types. A navigation becomes a lookup only when its target is already imported, ' +
         'so import targets first; the result\'s review lists lossy columns and navigations left out. ' +
-        'Requires the federation write capability.',
+        'Requires the federation read and write capabilities.',
       inputSchema: strictToolInput(
         {
           surface: 'this import_object call',
