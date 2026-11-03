@@ -4501,6 +4501,7 @@ const de = {
       draftedByMcp: 'Enthält Änderungen, die ein MCP-Client entworfen hat',
       detailChangedKeys: 'Ebenfalls geändert:',
       detailNewKeys: 'Enthält:',
+      detailNewItem: 'Beim Veröffentlichen wird dieses Element hinzugefügt.',
       generatedGroup: 'Von der Plattform erzeugt ({{n}})',
       confirmNote: 'Beim Veröffentlichen werden alle {{count}} ausstehenden Entwürfe dieses Pakets gemeinsam freigegeben: Entweder gehen alle live oder keiner.',
       confirmNote_one: 'Beim Veröffentlichen wird der {{count}} ausstehende Entwurf dieses Pakets freigegeben: Er geht live, oder nichts ändert sich.',
@@ -4551,6 +4552,9 @@ const de = {
         email_template: '{{count}} E-Mail-Vorlagen',
         email_template_one: '{{count}} E-Mail-Vorlage',
         email_template_other: '{{count}} E-Mail-Vorlagen',
+        object_extension: '{{count}} Objekterweiterungen',
+        object_extension_one: '{{count}} Objekterweiterung',
+        object_extension_other: '{{count}} Objekterweiterungen',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

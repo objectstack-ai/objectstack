@@ -4500,6 +4500,7 @@ const ko = {
       draftedByMcp: 'MCP 클라이언트가 초안으로 작성한 변경 사항 포함',
       detailChangedKeys: '기타 변경:',
       detailNewKeys: '포함:',
+      detailNewItem: '게시하면 이 항목이 추가됩니다.',
       generatedGroup: '플랫폼에서 생성됨 ({{n}})',
       confirmNote: '게시하면 이 패키지의 대기 중인 초안 {{count}}개가 함께 게시됩니다. 모두 게시되거나, 하나도 게시되지 않습니다.',
       confirmNote_one: '게시하면 이 패키지의 대기 중인 초안 {{count}}개가 게시됩니다. 게시되거나, 아무것도 바뀌지 않습니다.',
@@ -4550,6 +4551,9 @@ const ko = {
         email_template: '이메일 템플릿 {{count}}',
         email_template_one: '이메일 템플릿 {{count}}',
         email_template_other: '이메일 템플릿 {{count}}',
+        object_extension: '객체 확장 {{count}}',
+        object_extension_one: '객체 확장 {{count}}',
+        object_extension_other: '객체 확장 {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

@@ -3431,6 +3431,7 @@ const zh = {
       draftedByMcp: '包含由 MCP 客户端起草的更改',
       detailChangedKeys: '其他变更：',
       detailNewKeys: '包含：',
+      detailNewItem: '发布后将新增此项。',
       generatedGroup: '平台生成（{{n}}）',
       confirmNote: '发布将一次性发布此包全部 {{count}} 个待发布草稿：要么全部生效，要么都不生效。',
       confirmNote_one: '发布将一次性发布此包全部 {{count}} 个待发布草稿：要么全部生效，要么都不生效。',
@@ -3481,6 +3482,9 @@ const zh = {
         email_template: '邮件模板 {{count}}',
         email_template_one: '邮件模板 {{count}}',
         email_template_other: '邮件模板 {{count}}',
+        object_extension: '对象扩展 {{count}}',
+        object_extension_one: '对象扩展 {{count}}',
+        object_extension_other: '对象扩展 {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

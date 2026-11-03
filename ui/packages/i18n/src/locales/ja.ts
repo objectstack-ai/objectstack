@@ -4503,6 +4503,7 @@ const ja = {
       draftedByMcp: 'MCP クライアントが下書きした変更を含みます',
       detailChangedKeys: 'その他の変更：',
       detailNewKeys: '含まれるもの：',
+      detailNewItem: '公開するとこの項目が追加されます。',
       generatedGroup: 'プラットフォームが生成（{{n}}）',
       confirmNote: '公開すると、このパッケージの保留中ドラフト {{count}} 件がまとめて公開されます。すべて公開されるか、何も公開されないかのどちらかです。',
       confirmNote_one: '公開すると、このパッケージの保留中ドラフト {{count}} 件が公開されます。公開されるか、何も変わらないかのどちらかです。',
@@ -4553,6 +4554,9 @@ const ja = {
         email_template: 'メールテンプレート {{count}}',
         email_template_one: 'メールテンプレート {{count}}',
         email_template_other: 'メールテンプレート {{count}}',
+        object_extension: 'オブジェクト拡張 {{count}}',
+        object_extension_one: 'オブジェクト拡張 {{count}}',
+        object_extension_other: 'オブジェクト拡張 {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.
