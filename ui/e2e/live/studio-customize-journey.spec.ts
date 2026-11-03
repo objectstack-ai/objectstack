@@ -95,6 +95,29 @@ async function publishPair(page: Page) {
   expect((await res.json()).data.outcome).toBe('published');
 }
 
+/**
+ * The override chip is reachable on the item header once the pair is published.
+ * When the row has room it is in the row. On a narrower content column (the
+ * job's 1280 px window with the inspector open) the header folds its identity
+ * chips into the item's ⋯ menu first, so the item's name stays readable
+ * (objectstack#29693), and there the chip sits in the menu's chips entry. The
+ * menu is closed again so the next step opens it fresh.
+ */
+async function expectOverrideChip(page: Page) {
+  const chip = page.getByTestId('studio-override-chip');
+  const entry = page.getByTestId('studio-item-header-folded-chips');
+  await expect(async () => {
+    if (await chip.isVisible()) return;
+    await page.getByTestId('if-item-more').click();
+    try {
+      await expect(entry.getByTestId('studio-override-chip')).toBeVisible({ timeout: 1_000 });
+    } finally {
+      await page.keyboard.press('Escape');
+    }
+  }).toPass({ timeout: 10_000 });
+  await expect(entry).toHaveCount(0);
+}
+
 test('a read-only base is customized, restored and extended through Studio, and its uninstall is refused', async ({ page, request }) => {
   const baseRes = await request.get(`${API}/api/v1/packages/${BASE}`);
   expect(baseRes.ok(), await baseRes.text()).toBeTruthy();
@@ -134,7 +157,7 @@ test('a read-only base is customized, restored and extended through Studio, and 
 
       await publishPair(page);
       expect(await threeReads(request)).toEqual({ bare: customized, base: customized, list: customized });
-      await expect(page.getByTestId('studio-override-chip')).toBeVisible();
+      await expectOverrideChip(page);
     });
 
     await test.step('Restore package original: the pair\'s draft and row go, and the shipped columns are served again', async () => {
