@@ -1169,7 +1169,7 @@ function EntryDetail({
           : t('preview.changes.draftedByMcp', { defaultValue: 'Includes changes drafted by an MCP client' })}
     </p>
   ));
-  if (!isNew && isEmptyChangeDetail(detail)) {
+  if (isEmptyChangeDetail(detail)) {
     return (
       <p className="px-2 py-1 text-xs text-muted-foreground">
         {t('preview.changes.detailNone', {
