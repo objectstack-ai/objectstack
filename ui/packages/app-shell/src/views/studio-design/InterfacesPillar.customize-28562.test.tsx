@@ -307,11 +307,20 @@ async function customize(): Promise<void> {
   await waitFor(() => expect(within(header()).queryByTestId('studio-customize')).toBeNull());
 }
 
+/**
+ * objectstack#29692 — Restore is asked from the override mark's popover, and
+ * confirmed in the same dialog the item menu opened before.
+ */
+async function openRestoreDialog(): Promise<HTMLElement> {
+  fireEvent.click(await within(header()).findByTestId('studio-override-chip', undefined, { timeout: 8000 }));
+  const popover = await screen.findByTestId('studio-override-popover');
+  await waitFor(() => expect(within(popover).getByTestId('studio-override-restore')).toBeEnabled(), { timeout: 8000 });
+  fireEvent.click(within(popover).getByTestId('studio-override-restore'));
+  return screen.findByTestId('studio-restore-original-dialog');
+}
+
 async function restore(): Promise<void> {
-  fireEvent.pointerDown(await screen.findByTestId('if-item-more', undefined, { timeout: 8000 }), { button: 0, ctrlKey: false });
-  fireEvent.click(await screen.findByTestId('studio-restore-original'));
-  const dialog = await screen.findByTestId('studio-restore-original-dialog');
-  fireEvent.click(within(dialog).getByTestId('studio-restore-original-confirm'));
+  fireEvent.click(within(await openRestoreDialog()).getByTestId('studio-restore-original-confirm'));
 }
 
 describe('Customize a read-only base’s dashboard into its pair (objectstack#28562)', () => {
@@ -351,7 +360,13 @@ describe('Customize a read-only base’s dashboard into its pair (objectstack#28
     // The badge reads the declaration the pair's draft now serves.
     const chip = await within(header()).findByTestId('studio-override-chip', undefined, { timeout: 8000 });
     expect(chip).toHaveTextContent(tFormat('engine.studio.customize.overrides', 'en', { package: 'HotCRM' }));
-    expect(chip).toHaveAttribute('title', tFormat('engine.studio.customize.overridesTitle', 'en', { package: 'HotCRM', basedOn: '4.0.0' }));
+    // objectstack#29692 — pressed, the mark says the version it was taken from.
+    fireEvent.click(chip);
+    expect(await screen.findByTestId('studio-override-popover-facts')).toHaveTextContent(
+      tFormat('engine.studio.customize.overridesTitle', 'en', { package: 'HotCRM', basedOn: '4.0.0' }),
+    );
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('studio-override-popover')).toBeNull());
 
     // A later edit of the same item asks the door no more.
     patchBoard();
@@ -480,12 +495,36 @@ describe('Restore package original (objectstack#28562)', () => {
       overrides: { package: BASE, basedOn: '4.0.0' },
     });
     mount({ listedPair: PAIR });
-    await within(header()).findByTestId('studio-override-chip', undefined, { timeout: 8000 });
-    fireEvent.pointerDown(screen.getByTestId('if-item-more'), { button: 0, ctrlKey: false });
-    fireEvent.click(await screen.findByTestId('studio-restore-original'));
-    fireEvent.click(within(await screen.findByTestId('studio-restore-original-dialog')).getByTestId('studio-restore-original-cancel'));
+    fireEvent.click(within(await openRestoreDialog()).getByTestId('studio-restore-original-cancel'));
     await sleep(300);
     expect(srv.resets).toEqual([]);
+  });
+
+  it('objectstack#29692 — one door: the item’s ⋯ menu offers no Restore, and the dialog names the item as its rail row does', async () => {
+    srv.pairExists = true;
+    srv.pairActive.set('dashboard/pipeline', {
+      name: 'pipeline',
+      label: 'Pipeline (ours)',
+      widgets: [],
+      overrides: { package: BASE, basedOn: '4.0.0' },
+    });
+    mount({ listedPair: PAIR });
+    await within(header()).findByTestId('studio-override-chip', undefined, { timeout: 8000 });
+    fireEvent.pointerDown(screen.getByTestId('if-item-more'), { button: 0, ctrlKey: false });
+    await screen.findByTestId('if-item-view-definition');
+    expect(screen.queryByTestId('studio-restore-original')).toBeNull();
+    fireEvent.keyDown(screen.getByTestId('if-item-view-definition'), { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('if-item-view-definition')).toBeNull());
+
+    const railRow = within(screen.getByTestId('studio-rail-interfaces')).getByRole('button', { name: /Pipeline/ });
+    // The row's label, without the kind word the row prints after it.
+    const railText = railRow.querySelector('.flex-1')?.textContent?.trim() ?? '';
+    expect(railText).toBe('Pipeline');
+    const dialog = await openRestoreDialog();
+    expect(within(dialog).getByRole('heading')).toHaveTextContent(
+      tFormat('engine.studio.customize.restoreConfirm', 'en', { package: 'HotCRM', item: railText }),
+    );
+    fireEvent.click(within(dialog).getByTestId('studio-restore-original-cancel'));
   });
 });
 

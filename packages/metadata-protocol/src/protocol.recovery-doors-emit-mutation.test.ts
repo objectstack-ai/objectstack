@@ -161,9 +161,11 @@ function matchesWhere(r: Row, where: Record<string, unknown>): boolean {
 }
 
 /** One `sys_metadata_commit` row in the driver's snake_case wire shape. */
+/** [#29414] Recorded for `PKG`, the package the rows below are bound to: a commit's revert addresses its own package's rows. */
 const commitRow = (items: unknown[]) => ({
     id: 'c1',
     commit_id: 'c1',
+    package_id: PKG,
     organization_id: null,
     operation: 'apply',
     message: 'the commit under revert',

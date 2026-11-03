@@ -27,6 +27,11 @@ export * from './native-error-name.js';
 // Seek-based pagination for batch walks — the offset alternative that neither
 // skips rows when the walk mutates as it goes, nor costs O(n²/p) (#4363).
 export * from './keyset-walk.js';
+// The data API's host-configured read limits — default and maximum page size,
+// and a per-query row budget (`OS_DATA_*`). The list doors (`metadata-protocol`)
+// and the analytics doors (`service-analytics`) plan every read through the same
+// rule, and both already depend on this package.
+export * from './query-read-limits.js';
 export * from './module-not-found.js';
 export * from './response-envelope.js';
 export * from './representation-validator.js';

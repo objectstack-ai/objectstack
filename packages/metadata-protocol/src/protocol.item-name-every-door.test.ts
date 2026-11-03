@@ -391,9 +391,15 @@ async function threeVersionsWithResidueAtV2(h: Harness) {
     return { historyBefore: h.historyRows.length, activeBefore: JSON.stringify(stored(h, 'dashboard')) };
 }
 
-const commitRow = (items: unknown[]) => ({
+/**
+ * [#29414] `packageId` — the package the commit is recorded for, which a
+ * revert addresses the rows of; omitted, no `package_id` (the package-less
+ * rows those cases seed).
+ */
+const commitRow = (items: unknown[], packageId?: string) => ({
     id: 'c1',
     commit_id: 'c1',
+    ...(packageId !== undefined ? { package_id: packageId } : {}),
     organization_id: null,
     operation: 'apply',
     message: 'the commit under revert',
@@ -794,7 +800,7 @@ describe('[ADR-0086 D3] the restore doors refuse a stored version whose body `pa
     it('revertCommit\'s restore limb reports a disagreeing version in failed[] with the envelope\'s code; nothing is written', async () => {
         const h = makeProtocol();
         const before = await threeSetVersionsWithOwnerResidueAtV2(h, BOUND, OTHER);
-        h.serveCommit(commitRow([{ type: 'permission', name: 'probe_member', existedBefore: true, prevVersion: 2 }]));
+        h.serveCommit(commitRow([{ type: 'permission', name: 'probe_member', existedBefore: true, prevVersion: 2 }], BOUND));
         vi.spyOn(console, 'warn').mockImplementation(() => {});
 
         const res = await h.protocol.revertCommit({ commitId: 'c1' });
@@ -812,7 +818,7 @@ describe('[ADR-0086 D3] the restore doors refuse a stored version whose body `pa
     it('CONTROL: revertCommit\'s restore limb restores a version whose body agrees with the binding', async () => {
         const h = makeProtocol();
         await threeSetVersionsWithOwnerResidueAtV2(h, BOUND, BOUND);
-        h.serveCommit(commitRow([{ type: 'permission', name: 'probe_member', existedBefore: true, prevVersion: 2 }]));
+        h.serveCommit(commitRow([{ type: 'permission', name: 'probe_member', existedBefore: true, prevVersion: 2 }], BOUND));
 
         const res = await h.protocol.revertCommit({ commitId: 'c1' });
 

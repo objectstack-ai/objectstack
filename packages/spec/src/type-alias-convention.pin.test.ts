@@ -287,9 +287,11 @@ import type * as M195 from './security/queue.zod.js';
 import type * as M196 from './system/push-config.zod.js';
 import type * as M197 from './api/push-delivery.zod.js';
 import type * as M198 from './system/push-device.zod.js';
+// The server -> push relay wire shape -- new module, next free index.
+import type * as M199 from './api/push-relay.zod.js';
 
 // ---------------------------------------------------------------------------
-// 822 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 828 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -661,6 +663,15 @@ export type Iso_api_protocol__ValidateDataResponseSchema = Assert<Eq< z.input< t
 // api/push-delivery.zod.ts
 export type Iso_api_pushDelivery__PushDeliveryDataSchema = Assert<Eq< z.input< typeof M197.PushDeliveryDataSchema >, z.infer< typeof M197.PushDeliveryDataSchema > >>;
 export type Iso_api_pushDelivery__PushRouteSchema = Assert<Eq< z.input< typeof M197.PushRouteSchema >, z.infer< typeof M197.PushRouteSchema > >>;
+
+// api/push-relay.zod.ts
+export type Iso_api_pushRelay__PushRelayDeliverySchema = Assert<Eq< z.input< typeof M199.PushRelayDeliverySchema >, z.infer< typeof M199.PushRelayDeliverySchema > >>;
+export type Iso_api_pushRelay__PushRelayPayloadSchema = Assert<Eq< z.input< typeof M199.PushRelayPayloadSchema >, z.infer< typeof M199.PushRelayPayloadSchema > >>;
+export type Iso_api_pushRelay__PushRelayPrioritySchema = Assert<Eq< z.input< typeof M199.PushRelayPrioritySchema >, z.infer< typeof M199.PushRelayPrioritySchema > >>;
+export type Iso_api_pushRelay__PushRelayRequestSchema = Assert<Eq< z.input< typeof M199.PushRelayRequestSchema >, z.infer< typeof M199.PushRelayRequestSchema > >>;
+export type Iso_api_pushRelay__PushRelayResponseSchema = Assert<Eq< z.input< typeof M199.PushRelayResponseSchema >, z.infer< typeof M199.PushRelayResponseSchema > >>;
+export type Iso_api_pushRelay__PushRelayResultSchema = Assert<Eq< z.input< typeof M199.PushRelayResultSchema >, z.infer< typeof M199.PushRelayResultSchema > >>;
+export type Iso_api_pushRelay__PushRelayResultStatusSchema = Assert<Eq< z.input< typeof M199.PushRelayResultStatusSchema >, z.infer< typeof M199.PushRelayResultStatusSchema > >>;
 
 // api/query-adapter.zod.ts
 export type Iso_api_queryAdapter__OperatorMappingSchema = Assert<Eq< z.input< typeof M29.OperatorMappingSchema >, z.infer< typeof M29.OperatorMappingSchema > >>;
@@ -1423,7 +1434,6 @@ export type Iso_system_objectStorage__StorageScopeSchema = Assert<Eq< z.input< t
 // system/push-config.zod.ts
 export type Iso_system_pushConfig__ApnsTransportConfigSchema = Assert<Eq< z.input< typeof M196.ApnsTransportConfigSchema >, z.infer< typeof M196.ApnsTransportConfigSchema > >>;
 export type Iso_system_pushConfig__FcmTransportConfigSchema = Assert<Eq< z.input< typeof M196.FcmTransportConfigSchema >, z.infer< typeof M196.FcmTransportConfigSchema > >>;
-export type Iso_system_pushConfig__PushServiceConfigSchema = Assert<Eq< z.input< typeof M196.PushServiceConfigSchema >, z.infer< typeof M196.PushServiceConfigSchema > >>;
 export type Iso_system_pushConfig__PushVendorSchema = Assert<Eq< z.input< typeof M196.PushVendorSchema >, z.infer< typeof M196.PushVendorSchema > >>;
 
 // system/push-device.zod.ts
@@ -1766,7 +1776,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 822 isomorphic pins', () => {
+  it('still declares all 828 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2770,7 +2780,17 @@ describe('ADR-0122 type-alias convention', () => {
     // no default and no transform in any of them
     // (Iso_api_authEndpoints__OneTimeToken*, Iso_system_authConfig__TrustedAppSchemeSchema).
     // +3 added.
-    expect(pins).toHaveLength(822);
+    // 822 -> 828 is the push relay transport: `PushServiceConfigSchema`
+    // became the `transport` union whose members default `transport`, so
+    // input !== infer; Iso_system_pushConfig__PushServiceConfigSchema leaves
+    // and `PushServiceConfigParsed` is declared (-1). The server -> relay wire
+    // shape (`api/push-relay.zod.ts`: the priority and outcome enums, the
+    // payload, delivery, request, result and response) is plain or strict
+    // objects with no default and no transform (Iso_api_pushRelay__*, +7).
+    // Its error schemas extend the house error envelope, whose `retryable`
+    // defaults, so they carry `PushRelayErrorParsed` and
+    // `PushRelayErrorResponseParsed` instead of a pin.
+    expect(pins).toHaveLength(828);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

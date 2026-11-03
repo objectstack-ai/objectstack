@@ -51,6 +51,14 @@
 // restoring it would write the row bound to the read-only base again. The
 // last case pins both on such a commit, recorded with the close shadowed on
 // the booted instance only (what a build before the close did).
+//
+// [#29414] A commit names its own package's rows. The pair's first publish
+// beside such a base-bound row is recorded as a create (its plan used to read
+// the base row's version), so its revert removes the pair's row and the base
+// row is served again. A revert whose row was deleted since restores into the
+// committing package's own row, never a package-less one, so the base's own
+// commit is refused by the close naming the pair. Control: a writable
+// package's edit commit restores its own row in place.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
@@ -285,5 +293,90 @@ describe('dogfood: package commit revert and rollback act only on a commit of th
       success: true, revertedCount: 1, reverted: [{ type: 'view', name: OVERLAY, action: 'removed' }],
     });
     expect(await served()).toBe(shipped);
+  });
+
+  // [#29414] The commit a package records names its OWN rows: the plan reads the
+  // pre-publish state of the publishing package's row, and the revert removes or
+  // restores that row and no other package's. Before, both read any package's
+  // active row, so the pair's first publish beside a base-bound row was recorded
+  // as an edit of the base row's version, and its revert addressed the base row.
+  const view = (label: string) => ({
+    name: OVERLAY, object: 'showcase_task', viewKind: 'list', label,
+    config: { type: 'grid', columns: [{ field: 'title' }] },
+  });
+  const servedLabel = async () => (await call('GET', `/meta/view/${OVERLAY}`)).json?.item?.label;
+  const publishBaseBound = async (label: string): Promise<string> => {
+    const protocol = (stack.kernel as any).getService('protocol');
+    protocol.namedBaseOverlayWriteRefusal = () => null;
+    try {
+      const saved = await call('PUT', `/meta/view/${OVERLAY}?mode=draft&package=${SHOWCASE}`, view(label));
+      expect(saved.status, JSON.stringify(saved.json)).toBe(200);
+      const published = await call('POST', `/packages/${SHOWCASE}/publish-drafts`, {});
+      expect(published.status, JSON.stringify(published.json)).toBe(200);
+      return published.json?.data?.commitId as string;
+    } finally {
+      delete protocol.namedBaseOverlayWriteRefusal;
+    }
+  };
+
+  it('[#29414] a pair commit beside a base-bound row records the pair\'s own row, and its revert removes the pair row and serves the base row again', async () => {
+    const shipped = await servedLabel();
+    await publishBaseBound('Base-bound row');
+    expect(await servedLabel()).toBe('Base-bound row');
+
+    const pair = await ensurePair(stack, admin, SHOWCASE);
+    const saved = await call('PUT', inPair(`/meta/view/${OVERLAY}?mode=draft`, SHOWCASE), declaredOverride(view('Pair override'), SHOWCASE, '0.1.0'));
+    expect(saved.status, JSON.stringify(saved.json)).toBe(200);
+    const published = await call('POST', `/packages/${pair}/publish-drafts`, {});
+    expect(published.status, JSON.stringify(published.json)).toBe(200);
+    const commitId = published.json?.data?.commitId as string;
+    expect(await servedLabel()).toBe('Pair override');
+
+    const commit = (await commitsOf(pair)).find((c) => c.id === commitId) as any;
+    expect(commit?.items, JSON.stringify(commit)).toEqual([
+      expect.objectContaining({ type: 'view', name: OVERLAY, existedBefore: false, prevVersion: null }),
+    ]);
+
+    const res = await call('POST', `/packages/${pair}/commits/${commitId}/revert`, {});
+    expect(res.status, JSON.stringify(res.json)).toBe(200);
+    expect(res.json?.data).toMatchObject({
+      success: true, revertedCount: 1, failedCount: 0, reverted: [{ type: 'view', name: OVERLAY, action: 'removed' }],
+    });
+    expect(await servedLabel()).toBe('Base-bound row');
+
+    // The base-bound row is cleared the one way the close leaves open: a delete naming the base.
+    const cleared = await call('DELETE', `/meta/view/${OVERLAY}?package=${SHOWCASE}`);
+    expect(cleared.status, JSON.stringify(cleared.json)).toBe(200);
+    expect(await servedLabel()).toBe(shipped);
+  });
+
+  it('[#29414] a commit that edited a base-bound row since deleted restores into the base\'s own row, so it is refused by the close naming the pair, and writes nothing', async () => {
+    const shipped = await servedLabel();
+    await publishBaseBound('Deleted later 1');
+    const edited = await publishBaseBound('Deleted later 2');
+    const cleared = await call('DELETE', `/meta/view/${OVERLAY}?package=${SHOWCASE}`);
+    expect(cleared.status, JSON.stringify(cleared.json)).toBe(200);
+    expect(await servedLabel()).toBe(shipped);
+
+    const res = await call('POST', `/packages/${SHOWCASE}/commits/${edited}/revert`, {});
+    expect(res.status, JSON.stringify(res.json)).toBe(200);
+    expect(res.json?.data).toMatchObject({ success: false, revertedCount: 0, failedCount: 1 });
+    expect(res.json?.data?.failed?.[0]).toMatchObject({ type: 'view', name: OVERLAY, code: 'NOT_OVERRIDABLE' });
+    expect(res.json.data.failed[0].error).toContain('a rollback of its row bound to the read-only base is closed');
+    expect(res.json.data.failed[0].error).toContain(`?package=${SHOWCASE}.custom`);
+    expect(await servedLabel()).toBe(shipped);
+  });
+
+  it('[#29414] control: a writable package\'s edit commit restores its own row in place', async () => {
+    await publishObject(A, 'cmtpa_edited', 'A edited 1');
+    await publishObject(A, 'cmtpa_edited', 'A edited 2');
+    const edit = (await commitsOf(A))[0] as any;
+    expect(edit.items).toEqual([expect.objectContaining({ type: 'object', name: 'cmtpa_edited', existedBefore: true })]);
+    const res = await call('POST', `/packages/${A}/commits/${edit.id}/revert`, {});
+    expect(res.status, JSON.stringify(res.json)).toBe(200);
+    expect(res.json?.data).toMatchObject({
+      success: true, revertedCount: 1, reverted: [{ type: 'object', name: 'cmtpa_edited', action: 'restored' }],
+    });
+    expect((await call('GET', '/meta/object/cmtpa_edited')).json?.item?.label).toBe('A edited 1');
   });
 });

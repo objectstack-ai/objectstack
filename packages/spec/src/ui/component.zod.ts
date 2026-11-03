@@ -68,6 +68,7 @@ import { AggregationFunction } from '../data/query.zod';
 // outside the `ui` barrel so the two carriers share it without publishing it.
 import { ListViewExportOptionsSchema } from './list-view-export-options';
 import { ActionSchema, ActionType, InlineActionSchema, ActionLocationSchema } from './action.zod';
+import { CONFIRM_BESIDE_PARAMS_REFUSAL, declaresConfirmBesideParams } from './action-confirm-beside-params';
 import { ACTION_TARGET_ALIASES } from './action-target-aliases';
 import { ON_SUCCESS_EXECUTORS, onSuccessBesideExecutorRefusal } from './action-on-success-executor';
 import { refuseDeclarativeUpdateContradictions } from './action-declarative-update';
@@ -3980,7 +3981,8 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
   bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
   operation: actionOperation().optional().describe('Declarative single-record write: `ActionSchema`\'s own `operation`, whose one member is `update`. The row runs the declared action its `name` names. The runner reads `operation` before any executor and posts the row\'s values to the platform action route under that `name`; the route resolves that action by name and writes ITS `patch`, so the row has no `patch` of its own and needs a `name`. What the row\'s `params` supply rides the request as params, written only where that action declares them and otherwise refused by the route. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape`, `recordIdField` and `onSuccess` are refused, and `list_toolbar` is not a location'),
   patch: rowPatchRetired("An `action:button`'s"),
-  confirmText: actionRowCopy('confirmText').optional().describe(ACTION_ROW_COPY_DESCRIBE.confirmText),
+  confirmText: actionRowCopy('confirmText').optional()
+    .describe(`${ACTION_ROW_COPY_DESCRIBE.confirmText} Beside a non-empty array \`params\` it is refused — the runner would show the confirm and then the param dialog, two dialogs for one decision; put the question on \`description\` instead. Correct with no \`params\`, beside \`params: []\`, and beside an object \`params\` (static values, no param dialog)`),
   successMessage: actionRowCopy('successMessage').optional().describe(ACTION_ROW_COPY_DESCRIBE.successMessage),
   errorMessage: actionRowCopy('errorMessage').optional().describe(ACTION_ROW_COPY_DESCRIBE.errorMessage),
   refreshAfter: z.boolean().optional().describe('Refresh the surrounding data after the action runs'),
@@ -3997,7 +3999,15 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
 }).superRefine(rowDeclarativeUpdate('actionType', "An `action:button`'s"))
   .superRefine(refuseUnopenableRowUrlTarget('actionType', "An `action:button`'s"))
   .superRefine(refuseRowUrlExecutorAlias('actionType', "An `action:button`'s `actionType: 'navigation'`"))
-  .superRefine(refuseRowOnSuccessBesideExecutor('actionType', "An `action:button`'s")));
+  .superRefine(refuseRowOnSuccessBesideExecutor('actionType', "An `action:button`'s"))
+  // #29844 (ruling record 6597621758, letter A): the third door of the
+  // `confirmText` + non-empty `params` refusal, beside `ActionSchema` and
+  // `InlineActionSchema`, with their predicate and their message. This block
+  // forwards `confirmText` and an ARRAY `params` (as `actionParams`) to the
+  // same runner, which awaits the confirm and then opens the param dialog. An
+  // object `params` is the static values, which open no dialog, and the
+  // predicate's `Array.isArray` read leaves it alone.
+  .refine((data) => !declaresConfirmBesideParams(data), CONFIRM_BESIDE_PARAMS_REFUSAL));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ActionButtonProps = z.input<typeof ActionButtonPropsSchema>;
 /**

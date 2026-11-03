@@ -1383,7 +1383,7 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **type** | `string` | ✅ | Metadata type name |
 | **name** | `string` | ✅ | Item name |
-| **packageId** | `string` | optional | Optional package ID — scopes the `code` layer so a same-name collision resolves to the requested package's artifact (ADR-0048). |
+| **packageId** | `string` | optional | Optional package ID — scopes the `code` layer so a same-name collision resolves to the requested package's artifact (ADR-0048), and the `draft` layer to that package's pending draft row. |
 | **member** | `string` | optional | Bundle member selector, for a metadata type whose identity is a pair (today only `email_template`, identified by `(name, locale)`): the member this request addresses, spelled as its discriminator value (`zh-CN`). Absent, the canonical member (`en-US` for `email_template`), which is what a bare-name read answers; naming the canonical value is the same request. It is not the response translation locale, which `?locale=` and `Accept-Language` choose. Refused with 400 `VALIDATION_ERROR` on a type that has no members, and for a blank value or one longer than a stored member can be (100 characters). A well-formed member with nothing stored or shipped answers as that door answers an absent item. |
 
 
@@ -1401,6 +1401,7 @@ This schema accepts one of the following structures:
 | **overlay** | `any` | ✅ | LAYER 2 — the stored customization row ALONE, not merged with `code`. `null` when the environment has not customized the item. |
 | **overlayScope** | `Enum<'env'> \| null` | ✅ | Which scope the `overlay` row was read from: `env`, the environment layer — the only layer a read serves (ADR-0131 D6). `null` exactly when `overlay` is null. |
 | **effective** | `any` | ✅ | LAYER 3 — the merged result, i.e. the value an ordinary `GET /meta/:type/:name` would return under `item`. `null` when the item resolves to nothing at all. |
+| **draft** | `any` | optional | LAYER — the pending draft row exactly as stored: untranslated, ungoverned, with no injected columns (unlike the `?state=draft` item read, which serves the draft translated and governed). For the requested `packageId` when one is given. `null` when no draft is pending. A client building an edit buffer reads `draft ?? overlay ?? code`. ABSENT from a server that does not serve this layer: absence means "not served", never "no draft". |
 | **_diagnostics** | `{ valid: boolean; errors?: object[]; warnings?: object[] }` | optional | Load-time spec-validation verdict for `effective`, so the Studio edit page can raise invalid-metadata banners and inline field errors without a second round trip. ABSENT for metadata types that register no Zod schema (function / service / router) — absence means "no opinion", never "valid". |
 | **lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | ✅ | Resolved lock verdict (ADR-0010 §3.3), artifact winning over overlay. Always present on this path. |
 | **lockReason** | `string` | optional | Human-readable explanation shown next to a refused write. Present only when the resolved item declares `_lockReason`. |

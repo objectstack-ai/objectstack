@@ -460,12 +460,15 @@ describe('[#9362] the dependents probe reads a multi-value reference field the w
 
 /**
  * [#9438] `set_null` on a SET-valued foreign key removes the deleted MEMBER
- * and writes what remains; the emptied set is written as `[]`, never `null`.
+ * and writes what remains; an emptied set on an optional column is stored as
+ * `null`, the same as one never set.
  *
  * The residual-shape sentence is NOT this suite's finding: `FieldSchema` pins
  * it (`packages/spec/src/data/field.zod.ts`, the `multiple` and `required`
- * doc blocks — #9447, maintainer ruling 2026-08-18, binding for every
- * writer). This suite pins that the cascade repair CONSUMES that contract.
+ * doc blocks — ruling A on #29343, record 6591577985, amending #9447's
+ * "`[]`, never `null`" for optional columns; binding for every writer). The
+ * repair writes `[]` and the write door stores it as `null`, so this suite
+ * pins that the cascade repair CONSUMES that contract.
  *
  * The #9437 holding position — refusing these deletes 409 while the residual
  * shape was undecided — is REMOVED by the same change, so the success pins
@@ -522,18 +525,18 @@ describe('[#9438] set_null on a multi-value reference removes the deleted member
     expect(stores.get('mv_explicit_set_null')?.get('h1')?.accounts).toEqual(['acc_b']);
   });
 
-  it('removing the LAST member writes `[]`, never `null` — the ruled representation', async () => {
+  it('removing the LAST member stores `null` on an optional column — the ruled representation', async () => {
     const a = await engine.insert('mv_acct', { id: 'acc_a', name: 'A' });
     await engine.insert('mv_zoo', { id: 'z1', name: 'z', f_lookups: ['acc_a'] });
 
     await engine.delete('mv_acct', { where: { id: a.id } } as any);
 
-    const stored = stores.get('mv_zoo')?.get('z1')?.f_lookups;
-    // Assert the literal shape, both ways: the contract sentence is exactly
-    // "`[]`, never `null`" (field.zod.ts, `multiple` doc block).
-    expect(stored).toEqual([]);
-    expect(stored).not.toBeNull();
-    expect(Array.isArray(stored)).toBe(true);
+    const z1 = stores.get('mv_zoo')?.get('z1');
+    // Assert the literal shape: the contract sentence is "a cleared optional
+    // multi-value field is stored as `null`" (field.zod.ts, `multiple` doc
+    // block). The key is present and null, not dropped and not `[]`.
+    expect(z1 && 'f_lookups' in z1).toBe(true);
+    expect(z1?.f_lookups).toBeNull();
   });
 
   it('removal compares WHOLE members — an id keeps a member it is only a prefix of', async () => {
@@ -557,7 +560,7 @@ describe('[#9438] set_null on a multi-value reference removes the deleted member
     await engine.delete('mv_acct', { where: { id: a.id } } as any);
 
     expect(stores.get('mv_zoo')?.get('z1')?.f_lookups).toEqual(['acc_b']);
-    expect(stores.get('mv_zoo')?.get('z2')?.f_lookups).toEqual([]);
+    expect(stores.get('mv_zoo')?.get('z2')?.f_lookups).toBeNull();
     // A row that never referenced the deleted record is not touched.
     expect(stores.get('mv_zoo')?.get('z3')?.f_lookups).toEqual(['acc_b']);
   });

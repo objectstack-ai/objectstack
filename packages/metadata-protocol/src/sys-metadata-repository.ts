@@ -1683,6 +1683,16 @@ export class SysMetadataRepository implements MetadataRepository {
        * of ANOTHER member of the bundle is not this member's version.
        */
       member?: string | null;
+      /**
+       * [#29414] The package whose active row is restored. Stated → the
+       * active row (its parent hash and its binding) is resolved under the
+       * ADR-0048 key `(org, type, name, package_id)`, so another package's
+       * row of the same name is never the one restored, and the restore is
+       * written under it, creating that package's row again when it is gone.
+       * Omitted → the "match any package" resolution and, with no active row,
+       * the unbound row, as before. A LOCAL extension, as on {@link delete}.
+       */
+      packageId?: string | null;
     },
   ): Promise<{ version: string; seq: number; item: MetadataItem }> {
     this.assertOpen();
@@ -1739,8 +1749,9 @@ export class SysMetadataRepository implements MetadataRepository {
     // A missing active row (deleted, or never published) yields `null` — the
     // unbound row, which is the only defined answer: `sys_metadata_history`
     // carries no `package_id` column, so a vanished binding is not recoverable.
+    // [#29414] …under the package the caller names, when it names one.
     const activeRow = await this.findEnvironmentRow({
-      where: this.whereFor(ref, 'active', undefined, member),
+      where: this.whereFor(ref, 'active', 'packageId' in opts ? (opts.packageId ?? null) : undefined, member),
       context: { isSystem: true },
     });
     const activePackageId =
@@ -1754,7 +1765,8 @@ export class SysMetadataRepository implements MetadataRepository {
       intent: opts.intent ?? 'override-artifact',
       state: 'active',
       opType: 'revert',
-      packageId: activePackageId,
+      // [#29414] The stated package's row, found or not.
+      packageId: 'packageId' in opts ? (opts.packageId ?? null) : activePackageId,
     });
   }
 
@@ -2649,9 +2661,9 @@ export class SysMetadataRepository implements MetadataRepository {
     // package A promoted package B's pending draft, drained B's row, recorded
     // it under A's commit, and left A's own edit pending while answering
     // `success: true`. A caller that KNOWS the binding must state it — see
-    // {@link promoteDraft}'s `packageId`. The same question is open for the
-    // `delete` and `restoreVersion` resolving reads (#6215); they are
-    // deliberately unchanged here.
+    // {@link promoteDraft}'s `packageId`. The `delete` and `restoreVersion`
+    // resolving reads take the same option (#6215); [#29414] the commit revert
+    // states it on both.
     if (packageId !== undefined) where.package_id = packageId; // string → eq; null → IS NULL
     if (member !== undefined) where[OVERLAY_MEMBER_COLUMN] = member; // string → eq; null → IS NULL
     return where;

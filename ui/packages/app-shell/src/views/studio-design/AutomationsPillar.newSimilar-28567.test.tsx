@@ -28,6 +28,10 @@ import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation, useParams } from 'react-router-dom';
+import { I18nProvider, createI18n } from '@object-ui/i18n';
+// objectstack#29727 — the zh pins read the studio zh catalogue, which loads lazily.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 const BASE = 'com.acme.crm';
 const PAIR = 'com.acme.crm.custom';
@@ -97,6 +101,7 @@ vi.mock('../../hooks/useCanAuthorMetadata', async (importOriginal) => ({
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import { AutomationsPillar } from './StudioDesignSurface';
+import { t } from '../metadata-admin/i18n';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 
 const dataSource = createEmptyDataSource();
@@ -119,8 +124,8 @@ vi.stubGlobal('fetch', fetchMock);
 const cloneCalls = () => fetchMock.mock.calls.filter(([u]) => String(u).endsWith('/clone'));
 const cloneBody = (i = 0) => JSON.parse(String(cloneCalls()[i][1]?.body));
 
-/** The clone door's success answer (`CloneFlowResponseSchema`). */
-function landedIn(packageId: string | undefined) {
+/** The clone door's success answer (`CloneFlowResponseSchema`); `noticeCode` only when given. */
+function landedIn(packageId: string | undefined, noticeCode?: string) {
   return {
     status: 200,
     body: {
@@ -129,6 +134,7 @@ function landedIn(packageId: string | undefined) {
         flow: { ...FLOW, name: 'approval_copy', label: 'Approval (copy)', status: 'obsolete' },
         ...(packageId ? { packageId } : {}),
         notice: NOTICE,
+        ...(noticeCode === undefined ? {} : { noticeCode }),
       },
     },
   };
@@ -156,14 +162,20 @@ function PackageRoute({ readOnlyIds }: { readOnlyIds: readonly string[] }) {
   return <AutomationsPillar key={pkg} packageId={pkg} readOnly={readOnlyIds.includes(pkg)} />;
 }
 
-function mount(packageId: string, readOnlyIds: readonly string[] = []) {
-  render(
+function mount(packageId: string, readOnlyIds: readonly string[] = [], lang: 'en' | 'zh' = 'en') {
+  const tree = (
     <MemoryRouter initialEntries={[`/studio/${packageId}/automations`]}>
       <Routes>
         <Route path="/studio/:pkg/automations" element={<><PackageRoute readOnlyIds={readOnlyIds} /><Where /></>} />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
+  if (lang === 'en') {
+    render(tree);
+    return;
+  }
+  const zh = createI18n({ defaultLanguage: 'zh', detectBrowserLanguage: false, resources: { zh: {} } });
+  render(<I18nProvider instance={zh}>{tree}</I18nProvider>);
 }
 
 /** Open the ⋯ menu on the open flow. */
@@ -306,5 +318,47 @@ describe('Automations — New similar on a flow (#28567)', () => {
         opts?.packageId ? server.flows[opts.packageId] ?? [] : [],
       );
     }
+  });
+});
+
+/**
+ * objectstack#29727 — the door names its sentence by a code (`data.noticeCode`,
+ * `FLOW_CLONE_DISABLED_COPY`), so a zh screen shows the sentence in zh. The
+ * wire `notice` stays the sentence for a code this console does not know, and
+ * for an answer that sends none (CONTROL).
+ */
+describe('Automations — New similar: the copy notice in the reader\'s language (#29727)', () => {
+  /** The zh row for the flow copy notice; a missing row echoes its key. */
+  const ZH_NOTICE = t('engine.studio.auto.newSimilar.notice', 'zh-CN');
+
+  async function copyInZh(noticeCode: string | undefined): Promise<HTMLElement> {
+    server.clone = landedIn(PAIR, noticeCode);
+    mount(BASE, [BASE], 'zh');
+    await openMenu();
+    fireEvent.click(await screen.findByTestId('auto-item-new-similar'));
+    const dialog = await screen.findByTestId('auto-new-similar-dialog');
+    server.flows[PAIR] = [{ name: 'approval_copy', label: 'Approval (copy)' }];
+    fireEvent.click(within(dialog).getByTestId('auto-new-similar-submit'));
+    // The copy opens in the pair, so the code rides the navigation to it.
+    await waitFor(() =>
+      expect(screen.getByTestId('where')).toHaveTextContent(`/studio/${PAIR}/automations?surface=flow%3Aapproval_copy`),
+    );
+    await screen.findByTestId('auto-new-similar-strip', undefined, { timeout: 8000 });
+    return screen.getByTestId('auto-new-similar-notice');
+  }
+
+  it('zh: the known code shows the zh sentence, not the wire English', async () => {
+    const notice = await copyInZh('FLOW_CLONE_DISABLED_COPY');
+    expect(notice).not.toHaveTextContent(/switched off/i);
+    expect(ZH_NOTICE).not.toBe('engine.studio.auto.newSimilar.notice');
+    expect(notice.textContent).toBe(ZH_NOTICE);
+  });
+
+  it('CONTROL zh: a code this console does not know shows the wire notice as sent', async () => {
+    expect((await copyInZh('FLOW_CLONE_SOMETHING_NEWER')).textContent).toBe(NOTICE);
+  });
+
+  it('CONTROL zh: an answer with no code shows the wire notice as sent', async () => {
+    expect((await copyInZh(undefined)).textContent).toBe(NOTICE);
   });
 });

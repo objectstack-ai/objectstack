@@ -213,10 +213,11 @@ describe('[#27004] a multi delete_record walks its matched rows as a set', () =>
     const links = new Map((await rows(LINK.name)).map((r) => [r.id, r.parent ?? null]));
     expect([links.get(l600), links.get(l1000), links.get(keptLink)]).toEqual([null, null, kept]);
     // set_null multiple lookup: every deleted member removed, the kept one
-    // stays, and an emptied set is written as `[]`, never `null`.
+    // stays, and an emptied optional set is stored as `null`, the same as one
+    // never set (ruling A on #29343, record 6591577985).
     const tags = new Map((await rows(TAGS.name)).map((r) => [r.id, r.parents]));
     expect(tags.get(spanning)).toEqual([kept]);
-    expect(tags.get(emptied)).toEqual([]);
+    expect(tags.get(emptied)).toBeNull();
   });
 
   it('a required multiple lookup emptied only by the whole set refuses, naming the row whose removal empties it', async () => {

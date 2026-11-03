@@ -32,6 +32,12 @@ import {
 // only reason this package depends on `@objectstack/types` — see the module's
 // docblock for why the edge is acyclic and why it was worth adding.
 import { matchMissingColumnOfRelation } from '@objectstack/types';
+import {
+  assertQueryReadRows,
+  planQueryReadWindow,
+  resolveQueryReadLimits,
+  type QueryReadRequest,
+} from '@objectstack/types';
 import { CubeRegistry } from './cube-registry.js';
 import { cubeNotFoundError, isCubePublic } from './cube-visibility.js';
 import { cubeNameRequiredError } from './cube-name-refusal.js';
@@ -1548,6 +1554,9 @@ export class AnalyticsService implements IAnalyticsService {
 
   constructor(config: AnalyticsServiceConfig = {}) {
     this.logger = config.logger || createLogger({ level: 'info', format: 'pretty' });
+    // Fail at construction on a misconfigured read limit (`OS_DATA_*`): a typo
+    // is a boot fault naming the variable, never a guard that is silently off.
+    resolveQueryReadLimits();
     // [#22663] Every write to the shared registry is admitted by the
     // generic-exit gate's registration face: a cube that reads an object the
     // API does not serve for the aggregate operation can never answer a query,
@@ -2493,7 +2502,22 @@ export class AnalyticsService implements IAnalyticsService {
    * Any other error propagates untouched.
    */
   async query(queryInput: AnalyticsQuery, context?: ExecutionContext): Promise<AnalyticsResult> {
-    return this.queryIn(this.requestScope(), queryInput, context);
+    // The deployment's read limits (`OS_DATA_*`, `@objectstack/types`'
+    // `query-read-limits.ts`) judge the caller's own window here, at the
+    // public door, and never inside `queryIn`: the dataset executor's
+    // sub-queries (totals, measure-scoped passes) run unwindowed by design and
+    // are judged as the one selection `queryDataset` was asked for.
+    const read: QueryReadRequest = {
+      surface: 'analytics',
+      object: String(queryInput?.cube ?? ''),
+      limit: queryInput?.limit,
+      offset: queryInput?.offset,
+    };
+    const plan = planQueryReadWindow(read, resolveQueryReadLimits(), this.logger);
+    const windowed = plan.limit !== queryInput?.limit ? { ...queryInput, limit: plan.limit } : queryInput;
+    const result = await this.queryIn(this.requestScope(), windowed, context);
+    assertQueryReadRows(read, plan, result.rows?.length ?? 0, this.logger);
+    return result;
   }
 
   /**
@@ -2763,7 +2787,19 @@ export class AnalyticsService implements IAnalyticsService {
     context?: ExecutionContext,
     options?: { previewDrafts?: boolean },
   ): Promise<AnalyticsResult> {
-    const answer = await this.answerDataset(dataset, selection, context, options);
+    // The deployment's read limits judge the selection's own window — the
+    // one a report or dashboard asked for — before anything runs (see
+    // {@link query} for why not per sub-query).
+    const read: QueryReadRequest = {
+      surface: 'analytics',
+      object: dataset.object,
+      limit: selection?.limit,
+      offset: selection?.offset,
+    };
+    const plan = planQueryReadWindow(read, resolveQueryReadLimits(), this.logger);
+    const windowed = plan.limit !== selection?.limit ? { ...selection, limit: plan.limit } : selection;
+    const answer = await this.answerDataset(dataset, windowed, context, options);
+    assertQueryReadRows(read, plan, answer.rows?.length ?? 0, this.logger);
     // A copy rather than a write onto `answer`, which may be the very object a
     // strategy returned (the same ownership rule `applySqlEchoPolicy` keeps).
     return { ...answer, object: dataset.object };

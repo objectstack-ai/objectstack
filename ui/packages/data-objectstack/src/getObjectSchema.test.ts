@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { ObjectStackAdapter, clearSharedDiscoveryCache } from './index';
+import { ObjectStackAdapter, clearSharedDiscoveryCache, ConnectionError, MetadataNotFoundError, ObjectStackError } from './index';
 
 /**
  * A fetch mock that answers discovery + records the `GET /meta/object/:name`
@@ -144,5 +144,76 @@ describe('ObjectStackAdapter.getObjectSchema', () => {
     // `in_progress` (so the editor must not offer `in_review`).
     expect(sm.transitions.done).toEqual(['in_progress']);
     expect(sm.transitions.in_review).toEqual(['done', 'in_progress']);
+  });
+});
+
+/**
+ * objectstack#29728 — a failed by-name read that is not a 404 is rewrapped by
+ * `createErrorFromResponse`, which replaces the server's ADR-0112 code with its
+ * own taxonomy and stamps `500` on a request that got no answer. The rewrap
+ * keeps the transport's own error as `details.originalError` (as the 404 arm's
+ * `MetadataNotFoundError` does), so a reader can tell whether, and what, the
+ * server answered. The wrapper's class, code, statusCode and message are
+ * unchanged.
+ */
+describe('ObjectStackAdapter.getObjectSchema keeps the server answer as the cause of a non-404 failure (objectstack#29728)', () => {
+  beforeEach(() => clearSharedDiscoveryCache());
+
+  const discovery = { ok: true, status: 200, statusText: 'OK', json: async () => ({ success: true, data: { version: 'v1', routes: {} } }) };
+
+  function adapterAnswering(byName: () => unknown) {
+    const fetchImpl = vi.fn(async (url: any) => {
+      const u = String(url);
+      if (u.includes('/api/v1/discovery')) return discovery as any;
+      if (u.includes('/api/v1/meta/object/')) return byName() as any;
+      return { ok: true, status: 200, statusText: 'OK', json: async () => ({}) } as any;
+    });
+    return new ObjectStackAdapter({ baseUrl: 'http://localhost:3000', autoReconnect: false, fetch: fetchImpl as any });
+  }
+
+  const answered = (status: number, body: unknown) => () => ({ ok: false, status, statusText: 'Error', json: async () => body });
+
+  it('an answered 503: the ConnectionError as before, caused by the server status, code and sentence', async () => {
+    const adapter = adapterAnswering(
+      answered(503, { success: false, error: { code: 'SERVICE_UNAVAILABLE', message: 'The metadata store is down.' } }),
+    );
+    const err: any = await adapter.getObjectSchema('account').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConnectionError);
+    expect(err.code).toBe('CONNECTION_ERROR');
+    expect(err.statusCode).toBe(503);
+    expect(err.message).toBe('Connection error: The metadata store is down.');
+    expect(err.details.originalError).toBeInstanceOf(Error);
+    expect(err.details.originalError).toMatchObject({ status: 503, code: 'SERVICE_UNAVAILABLE', message: 'The metadata store is down.' });
+  });
+
+  it('an answered 500: the UNKNOWN_ERROR wrapper as before, caused by the server code', async () => {
+    const adapter = adapterAnswering(answered(500, { error: 'Database connection refused.', code: 'INTERNAL_ERROR' }));
+    const err: any = await adapter.getObjectSchema('account').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ObjectStackError);
+    expect(err.code).toBe('UNKNOWN_ERROR');
+    expect(err.statusCode).toBe(500);
+    expect(err.message).toBe('Database connection refused.');
+    expect(err.details.originalError).toMatchObject({ status: 500, code: 'INTERNAL_ERROR', message: 'Database connection refused.' });
+  });
+
+  it('no answer: the wrapper still reads 500, and its cause is the bare fetch failure, with no status', async () => {
+    const drop = new TypeError('Failed to fetch');
+    const adapter = adapterAnswering(() => {
+      throw drop;
+    });
+    const err: any = await adapter.getObjectSchema('account').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ObjectStackError);
+    expect(err.code).toBe('UNKNOWN_ERROR');
+    expect(err.statusCode).toBe(500);
+    expect(err.message).toBe('Failed to fetch');
+    expect(err.details.originalError).toBe(drop);
+  });
+
+  it('CONTROL: a 404 is the MetadataNotFoundError it was, its cause the client error', async () => {
+    const adapter = adapterAnswering(answered(404, { success: false, error: { code: 'RESOURCE_NOT_FOUND', message: 'not found' } }));
+    const err: any = await adapter.getObjectSchema('account').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(MetadataNotFoundError);
+    expect(err.statusCode).toBe(404);
+    expect(err.details.originalError).toMatchObject({ status: 404, code: 'RESOURCE_NOT_FOUND' });
   });
 });
