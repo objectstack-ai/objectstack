@@ -417,5 +417,69 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "待处理"
       }
     }
+  },
+  sys_user_device: {
+    label: "用户设备",
+    pluralLabel: "用户设备",
+    description: "用户的推送设备：每次应用安装一行，保存其厂商推送令牌。",
+    fields: {
+      id: {
+        label: "行 ID"
+      },
+      device_id: {
+        label: "设备 ID",
+        help: "由客户端保存的设备 ID，每次应用安装保持不变。同一用户内唯一。"
+      },
+      user_id: {
+        label: "用户",
+        help: "设备所属的用户：注册该设备的已登录用户。"
+      },
+      vendor: {
+        label: "厂商",
+        help: "令牌所属的推送厂商。",
+        options: {
+          apns: "APNs",
+          fcm: "FCM"
+        }
+      },
+      token: {
+        label: "推送令牌",
+        help: "厂商推送令牌。同一时间只由一台设备持有。"
+      },
+      platform: {
+        label: "平台",
+        options: {
+          ios: "iOS",
+          android: "Android",
+          web: "Web"
+        }
+      },
+      app_id: {
+        label: "应用 ID",
+        help: "令牌签发给的 iOS Bundle ID 或 Android 应用 ID。"
+      },
+      locale: {
+        label: "语言区域",
+        help: "发送到此设备的推送所使用的设备语言区域。"
+      },
+      name: {
+        label: "设备名称"
+      },
+      enabled: {
+        label: "已启用",
+        help: "厂商报告令牌失效后为否；不会向已停用的设备投递任何内容。"
+      },
+      invalidated_at: {
+        label: "失效时间",
+        help: "厂商报告令牌失效的时间。重新启用该设备的注册会将其清除。"
+      },
+      last_seen_at: {
+        label: "最近活跃时间",
+        help: "设备最近一次注册或刷新的时间。"
+      },
+      created_at: {
+        label: "创建时间"
+      }
+    }
   }
 };
