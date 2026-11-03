@@ -42,8 +42,8 @@
  * a login as a seat any more.
  *
  * A seat is spelled `LANE#N` — `domain:ui#4`, `repo:cloud#1`, `triage`,
- * `epic:#27293#1` — its lane one of the five a seat post's title names
- * (`domain:<x>`, `repo:<x>`, `triage`, `director`, `security`) or the epic lane
+ * `epic:#27293#1` — its lane one of the six a seat post's title names
+ * (`domain:<x>`, `repo:<x>`, `triage`, `director`, `security`, `review`) or the epic lane
  * `epic:#<parent>`, the seat signature's spelling for the PM delegated a
  * `pm:epic` parent card (pm-dispatch `seat-lifecycle.md` 〈Epic 子树车道〉), so a
  * login never reads as a seat, and an absent number read as seat 1
@@ -51,8 +51,8 @@
  * number (`triage#1`, `epic:#12#1`). Its SLUG is that key as one ref segment,
  * because a ref cannot carry `:` or `#`: the default `domain:` kind dropped,
  * every other `:` (with the epic lane's `#` after it) and the seat's `#` turned
- * into `-` (`ui-4`, `repo-cloud-1`, `triage-1`, `security-1`, `epic-27293-1`). No `domain:`
- * lane may be named `triage`, `director`, `security`, `repo-…` or `epic-…` — `seatKey`
+ * into `-` (`ui-4`, `repo-cloud-1`, `triage-1`, `security-1`, `review-1`, `epic-27293-1`). No `domain:`
+ * lane may be named `triage`, `director`, `security`, `review`, `repo-…` or `epic-…` — `seatKey`
  * refuses one — which keeps the slug one-to-one.
  *
  * ## What it does, in order (open)
@@ -163,17 +163,17 @@ const REPO_SHAPE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const LOGIN_SHAPE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
 const BRANCH_SHAPE = /^(?!\/|.*\/\/|.*\.\.|.*[\s~^:?*[\\]|.*\.lock$|.*\/$)[A-Za-z0-9._/-]+$/;
 const SESSION_SHAPE = /^(?:session|cse)_[A-Za-z0-9]+$/;
-// A seat: its lane — `domain:<x>`, `repo:<x>`, `triage`, `director`, `security`, the five a seat post's title names,
-// or the epic lane `epic:#<parent>` — then `#N`; absent = seat 1. Read lower-cased. The bare lanes are a closed set of
-// three, so a login is never read as a seat. The lists below are the ONE spelling of those lane words: the shape is
-// built from them, and so is the reserved set a `domain:` lane may not be named after (`seatKey`). The same three
-// words close the seat signature's lane alternation (`SIGNATURE_LANE_SOURCE`, check-half-states.mjs), which this
+// A seat: its lane — `domain:<x>`, `repo:<x>`, `triage`, `director`, `security`, `review`, the six a seat post's title
+// names, or the epic lane `epic:#<parent>` — then `#N`; absent = seat 1. Read lower-cased. The bare lanes are a closed
+// set of four, so a login is never read as a seat. The lists below are the ONE spelling of those lane words: the shape is
+// built from them, and so is the reserved set a `domain:` lane may not be named after (`seatKey`). The same
+// four words close the seat signature's lane alternation (`SIGNATURE_LANE_SOURCE`, check-half-states.mjs), which this
 // list cannot import (the patrol loads this file lazily, so that edge would be a cycle); fleet-roster's self-test,
 // which imports both, holds the two equal, `coordinator` (it signs and has no mailbox) aside.
 /** The lane kinds that carry a name after the colon: `domain:<x>`, `repo:<x>`. `domain` is the default kind the slug drops. */
 export const SEAT_LANE_KINDS = Object.freeze(['domain', 'repo']);
-/** The bare lanes, a closed set: `triage`, `director`, `security` (the seat that owns security findings, `lanes/security.md`). */
-export const SEAT_BARE_LANES = Object.freeze(['triage', 'director', 'security']);
+/** The bare lanes, a closed set: `triage`, `director`, `security` (the seat that owns security findings, `lanes/security.md`), `review` (the contract-review seat, `lanes/review.md`). */
+export const SEAT_BARE_LANES = Object.freeze(['triage', 'director', 'security', 'review']);
 /** The epic lane's kind: `epic:#<parent>` names the `pm:epic` parent card's number, never a word (`epic:#27293#1`). */
 export const SEAT_EPIC_KIND = 'epic';
 const SEAT_SHAPE = new RegExp(`^((?:${SEAT_LANE_KINDS.join('|')}):[a-z0-9._-]+|${SEAT_EPIC_KIND}:#[1-9][0-9]*|${SEAT_BARE_LANES.join('|')})(?:#([1-9][0-9]*))?$`);
@@ -542,6 +542,7 @@ async function selfTest() {
   t('domain:ui#4 → key domain:ui#4, slug ui-4 (the default kind dropped)', seatKey('domain:ui#4'), { key: 'domain:ui#4', slug: 'ui-4' });
   t('an absent number is seat 1, spelled', [seatKey('triage'), seatKey('domain:skills')], [{ key: 'triage#1', slug: 'triage-1' }, { key: 'domain:skills#1', slug: 'skills-1' }]);
   t('⭐ the security seat is a bare lane: `security#1` → key security#1, slug security-1; `security` alone is seat 1; `security#2` is its own seat', [seatKey('security#1'), seatKey('security'), seatKey('security#2').slug], [{ key: 'security#1', slug: 'security-1' }, { key: 'security#1', slug: 'security-1' }, 'security-2']);
+  t('⭐ the review seat is a bare lane: `review#1` → key review#1, slug review-1; `review` alone is seat 1; `review#2` is its own seat, and a `Mailbox-of: review#2 · login` body reads back as it', [seatKey('review#1'), seatKey('review'), seatKey('review#2').slug, mailboxOwner({ head: { ref: 'claude/project-thread-r' }, body: 'Mailbox-of: review#2 · os-zhuang', labels: [{ name: MAILBOX_LABEL }] })], [{ key: 'review#1', slug: 'review-1' }, { key: 'review#1', slug: 'review-1' }, 'review-2', { seat: 'review#2', slug: 'review-2', login: 'os-zhuang' }]);
   t('another kind keeps its name, its colon turned into a hyphen', [seatKey('repo:cloud#1').slug, seatKey('repo:www.objectos.ai#2').slug], ['repo-cloud-1', 'repo-www.objectos.ai-2']);
   t('read lower-cased, so one seat has one key', [seatKey('Domain:UI#4').key, seatKey(' domain:ui#4 ').key], ['domain:ui#4', 'domain:ui#4']);
   t('not a seat ⇒ null — ⛔ a login above all, the confusion a per-login mailbox made', ['', 'ui 4', 'domain:ui#0', '#4', 'domain:', null, 'os-bill', 'marchtian'].map(seatKey), [null, null, null, null, null, null, null, null]);
@@ -550,9 +551,9 @@ async function selfTest() {
   t('⛔ a `domain:` lane named `epic-…` is refused — its slug would be an epic seat\'s — while `domain:epic` and `domain:epics` read', [seatKey('domain:epic-12#1'), seatKey('domain:epic-tools'), seatKey('domain:epic').slug, seatKey('domain:epics').slug], [null, null, 'epic-1', 'epics-1']);
   t('⭐ the epic slug collides with no lane slug: one key per slug across every lane kind', (() => { const keys = ['epic:#12#1', 'domain:epic#12', 'domain:epic-12#1', 'repo:epic-12#1', 'domain:12#1', 'triage#12', 'epic:#1#21', 'epic:#12#1'].map(seatKey).filter(Boolean); return new Set(keys.map((k) => k.slug)).size === new Set(keys.map((k) => k.key)).size; })(), true);
   t('⛔ a short form is not a seat — `skills#2` names no lane, so it is refused as a login is', ['skills#2', 'ui#4', 'server', 'skills'].map(seatKey), [null, null, null, null]);
-  t('⛔ a `domain:` lane named after a reserved lane word is refused — its slug would be another seat\'s', ['domain:triage', 'domain:director#2', 'domain:repo-cloud#1', 'Domain:Triage#1', 'domain:security#1'].map(seatKey), [null, null, null, null, null]);
+  t('⛔ a `domain:` lane named after a reserved lane word is refused — its slug would be another seat\'s', ['domain:triage', 'domain:director#2', 'domain:repo-cloud#1', 'Domain:Triage#1', 'domain:security#1', 'domain:review#1'].map(seatKey), [null, null, null, null, null, null]);
   t('…while a `domain:` lane that merely CONTAINS a reserved word, and the reserved words as their own lanes, still read', [seatKey('domain:triage-tools#1').slug, seatKey('domain:directory').slug, seatKey('domain:repository').slug, seatKey('triage#2').slug, seatKey('repo:cloud').slug], ['triage-tools-1', 'directory-1', 'repository-1', 'triage-2', 'repo-cloud-1']);
-  t('the shape and the reserved set are built from the ONE set of lane-word lists', SEAT_LANE_KINDS.join() === 'domain,repo' && SEAT_BARE_LANES.join() === 'triage,director,security' && SEAT_EPIC_KIND === 'epic' && SEAT_BARE_LANES.every((w) => seatKey(w)?.key === `${w}#1` && seatKey(`domain:${w}`) === null) && seatKey(`${SEAT_EPIC_KIND}:#7`)?.key === 'epic:#7#1' && seatKey(`domain:${SEAT_EPIC_KIND}-7`) === null, true);
+  t('the shape and the reserved set are built from the ONE set of lane-word lists', SEAT_LANE_KINDS.join() === 'domain,repo' && SEAT_BARE_LANES.join() === 'triage,director,security,review' && SEAT_EPIC_KIND === 'epic' && SEAT_BARE_LANES.every((w) => seatKey(w)?.key === `${w}#1` && seatKey(`domain:${w}`) === null) && seatKey(`${SEAT_EPIC_KIND}:#7`)?.key === 'epic:#7#1' && seatKey(`domain:${SEAT_EPIC_KIND}-7`) === null, true);
   t('the branch is mailbox/<login>/<slug> — no `:` and no `#` in a ref', mailboxBranch('os-bill', seatKey('domain:ui#4')), 'mailbox/os-bill/ui-4');
   t('an epic seat\'s branch is mailbox/<login>/epic-N-K', mailboxBranch('sunhaolin', seatKey('epic:#27293#1')), 'mailbox/sunhaolin/epic-27293-1');
   t('⭐ two seats under ONE login get two branches', [mailboxBranch('os-sales', seatKey('domain:server#1')), mailboxBranch('os-sales', seatKey('domain:ui#1'))], ['mailbox/os-sales/server-1', 'mailbox/os-sales/ui-1']);

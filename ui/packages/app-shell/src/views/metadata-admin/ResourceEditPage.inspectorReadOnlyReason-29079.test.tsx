@@ -22,6 +22,7 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { MetadataAreaHostContext, type MetadataAreaHost } from './metadataAreaHost';
 
@@ -41,6 +42,8 @@ const FLOW = {
 };
 
 const POSITION = { name: 'sales_rep', label: 'Sales rep' };
+
+const OBJECT = { name: 'task', label: 'Task', fields: { title: { type: 'text', label: 'Title' } } };
 
 /** The layered envelope each case serves; reset per test. */
 let layered: Record<string, unknown> = {};
@@ -68,6 +71,7 @@ vi.mock('./useMetadata', async (importOriginal) => ({
     entries: [
       { type: 'flow', label: 'Flow', domain: 'automation', allowEnvironmentOverlay: false, allowRuntimeCreate: true },
       { type: 'position', label: 'Position', domain: 'security', allowEnvironmentOverlay: false, allowRuntimeCreate: true },
+      { type: 'object', label: 'Object', domain: 'data', allowEnvironmentOverlay: false, allowRuntimeCreate: true },
     ],
   }),
 }));
@@ -132,6 +136,7 @@ function HostPositionInspector({ readOnly, readOnlyReason }: MetadataInspectorPr
 const realFlowPreview = getMetadataPreview('flow');
 const realPositionPreview = getMetadataPreview('position');
 const realPositionInspector = getMetadataInspector('position');
+const realObjectPreview = getMetadataPreview('object');
 
 beforeEach(() => {
   layered = { effective: FLOW, code: null, overlay: null, editable: true, deletable: true };
@@ -140,6 +145,7 @@ beforeEach(() => {
   registerMetadataPreview('flow', stubCanvas({ kind: 'node', id: 'set_status', label: 'Set status' }) as never);
   registerMetadataPreview('position', stubCanvas({ kind: 'node', id: 'sales_rep', label: 'Sales rep' }) as never);
   registerMetadataInspector('position', HostPositionInspector);
+  registerMetadataPreview('object', stubCanvas({ kind: 'field', id: 'title', label: 'Title' }) as never);
 });
 
 afterEach(() => {
@@ -148,6 +154,7 @@ afterEach(() => {
   if (realFlowPreview) registerMetadataPreview('flow', realFlowPreview);
   if (realPositionPreview) registerMetadataPreview('position', realPositionPreview);
   if (realPositionInspector) registerMetadataInspector('position', realPositionInspector);
+  if (realObjectPreview) registerMetadataPreview('object', realObjectPreview);
 });
 
 const READ_ONLY_HOST: MetadataAreaHost = {
@@ -239,5 +246,105 @@ describe('the metadata editor page names the read-only cause to the scoped inspe
         tFormat('engine.catalog.readOnly.walled', 'en-US', { type: 'Position' }),
       ),
     );
+  });
+});
+
+/** A full lock with a served reason, over `effective`. */
+function lockedEnvelope(effective: Record<string, unknown>) {
+  return {
+    effective,
+    code: null,
+    overlay: null,
+    editable: false,
+    deletable: false,
+    lock: 'full',
+    lockReason: 'Managed by the release pipeline.',
+  };
+}
+
+const LOCK_REASON = () => `${t('engine.edit.lockFull', 'en-US')} Managed by the release pipeline.`;
+
+/** Open the item and leave the canvas unselected: the page's own panel shows. */
+async function openUnselected(type: string, name: string) {
+  render(
+    <MemoryRouter initialEntries={[`/apps/setup/metadata/${type}/${name}`]}>
+      <MetadataResourceEditPage type={type} name={name} />
+    </MemoryRouter>,
+  );
+  await screen.findByRole('button', { name: 'select on canvas' });
+}
+
+/** The Properties panel's form controls: the ones the reason is about. */
+const panelControls = (root: HTMLElement) =>
+  [...root.querySelectorAll<HTMLElement>('input, select, textarea, button[role="combobox"], button[role="switch"]')];
+
+/** The controls a pointer and Tab cannot reach: those the panel speaks for. */
+const disabledControls = (root: HTMLElement) =>
+  panelControls(root).filter((el) => (el as HTMLInputElement).disabled);
+
+/** Tab from the top of the page until `target` has focus, or the page runs out. */
+async function tabTo(user: ReturnType<typeof userEvent.setup>, target: HTMLElement): Promise<boolean> {
+  for (let i = 0; i < 80 && document.activeElement !== target; i++) await user.tab();
+  return document.activeElement === target;
+}
+
+const LOCKED_ITEMS = [
+  ['object', 'task', OBJECT],
+  ['flow', 'close_case', FLOW],
+] as const;
+
+describe('the panel shown with nothing selected names the read-only cause too (objectstack#29897)', () => {
+  it.each(LOCKED_ITEMS)(
+    'a locked %s: the Properties panel is a described tab stop holding its disabled controls',
+    async (type, name, effective) => {
+      layered = lockedEnvelope(effective);
+      await openUnselected(type, name);
+      const panel = await screen.findByTestId('metadata-properties-readonly-reason');
+      expect(panel).toHaveAttribute('tabindex', '0');
+      expect(panel).toHaveAccessibleName(t('engine.edit.inspector.properties', 'en-US'));
+      expect(panel).toHaveAccessibleDescription(LOCK_REASON());
+
+      // A vacuous pass over an empty panel is not one. A text input the generic
+      // form renders read-only (not disabled) still takes focus on its own.
+      expect(disabledControls(panel).length).toBeGreaterThanOrEqual(1);
+      for (const el of panelControls(panel)) {
+        expect((el as HTMLInputElement).disabled || el.hasAttribute('readonly')).toBe(true);
+      }
+    },
+  );
+
+  it.each(LOCKED_ITEMS)(
+    'a locked %s: hovering a disabled control opens a tooltip with the reason',
+    async (type, name, effective) => {
+      const user = userEvent.setup();
+      layered = lockedEnvelope(effective);
+      await openUnselected(type, name);
+      const panel = await screen.findByTestId('metadata-properties-readonly-reason');
+      const [control] = disabledControls(panel);
+      expect(control).toBeDisabled();
+      await user.hover(control);
+      expect(await screen.findByRole('tooltip')).toHaveTextContent(LOCK_REASON());
+    },
+  );
+
+  it.each(LOCKED_ITEMS)(
+    'a locked %s: a keyboard user reaches the reason, Tab lands on the panel and opens it',
+    async (type, name, effective) => {
+      const user = userEvent.setup();
+      layered = lockedEnvelope(effective);
+      await openUnselected(type, name);
+      const panel = await screen.findByTestId('metadata-properties-readonly-reason');
+      expect(await tabTo(user, panel)).toBe(true);
+      expect(await screen.findByRole('tooltip')).toHaveTextContent(LOCK_REASON());
+    },
+  );
+
+  it('a writable object: the Properties panel is live and carries no reason', async () => {
+    layered = { effective: OBJECT, code: null, overlay: null, editable: true, deletable: true };
+    await openUnselected('object', 'task');
+    const label = await screen.findByDisplayValue('Task');
+    await waitFor(() => expect(label).toBeEnabled());
+    expect(screen.queryByTestId('metadata-properties-readonly-reason')).toBeNull();
+    expect(screen.queryByText(LOCK_REASON())).toBeNull();
   });
 });

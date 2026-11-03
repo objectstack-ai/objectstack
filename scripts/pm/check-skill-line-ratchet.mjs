@@ -1662,6 +1662,18 @@ export const CEILINGS = new Map([
   // 兄弟席」, the idle reading and the sibling hand-over, which names this
   // file). Measured delta +3 (17 → 20 lines); landed count, headroom 0.
   ['.claude/skills/pm-dispatch/references/lanes/triage.md', 20],
+  // Review seat charter (`review#N`): the seat whose only job is the contract
+  // review, held on any account that reaches CONTRACT_REVIEW_TIER — its seat
+  // word, mailbox, review-seat-first routing of `Request: contract-review`
+  // and the owed-review list, the earliest-claim mutual exclusion, the delta
+  // rule, independence (never a PR its own account dispatched or implemented)
+  // and what it never does; the review itself stays in contract-review.md.
+  // Ruling of record: the maintainer's question 「契约复审我想分拆到其他账户，怎么处理。」
+  // and ruling 「选 B，立卡」 (dedicated review seats), quoted verbatim on the
+  // card that ordered this file (filing gate ③). A NEW file, so this is an
+  // added row and no other row moves; set at the landed line count (headroom
+  // 0, same convention as every lane charter above).
+  ['.claude/skills/pm-dispatch/references/lanes/review.md', 21],
   // 399 → 405 (#11126): maintainer-ruled (2026-08-23, option B, quoted in that
   // PR) — the +6-line cross-repo dispatch-gates caveat, sized so the queued
   // #11137 (395→399 on main) and this PR's +6 compose to exactly 405.
@@ -2462,6 +2474,7 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/lanes/security.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/director.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/triage.md', 0],
+  ['.claude/skills/pm-dispatch/references/lanes/review.md', 0],
   ['.claude/agents/os-dev.md', 0],
   ['.claude/skills/checklist-test/SKILL.md', 221],
   ['.claude/skills/checklist-author/SKILL.md', 0],

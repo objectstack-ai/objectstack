@@ -9,7 +9,8 @@
  * default record page of an object, an `external` object binding on a managed
  * datasource (both halves of the pair), an object `datasource` that names no
  * datasource (#26724), a permission-set grant on an object that does not
- * exist (#28990), a keyed seed whose `externalId` names no field of its
+ * exist (#28990), a field bound to a picklist no loaded package declares
+ * (#29898), a keyed seed whose `externalId` names no field of its
  * object (#28952), a `runAs: 'system'` flow an anonymous
  * endpoint names, the shared runtime authoring rules, and the authoring gate a
  * domain plugin registers. Measured on `origin/main` `5801a4f2c` before this
@@ -99,6 +100,8 @@ function makeStubEngine() {
     const drivers = new Set<string>();
     /** The engine's registered objects, by name (empty unless a case stages one). */
     const objects = new Map<string, unknown>();
+    /** [#29898] The picklists the registry resolves, by name (empty unless a case stages one). */
+    const picklists = new Set<string>();
     let nextId = 0;
     let commit: unknown = null;
 
@@ -193,6 +196,7 @@ function makeStubEngine() {
             getItem: (type: string, name: string) => registered.get(type)?.get(name),
             getAllObjects: () => [],
             getObject: (name: string) => objects.get(name),
+            resolvePicklistOptions: (name: string) => (picklists.has(name) ? [{ value: 'gold', label: 'Gold' }] : undefined),
             getPackage: () => undefined,
             getArtifactItem: () => undefined,
             isPackageDisabled: () => false,
@@ -205,6 +209,7 @@ function makeStubEngine() {
         registered,
         drivers,
         objects,
+        picklists,
         serveCommit: (c: unknown) => { commit = c; },
     };
 }
@@ -526,6 +531,31 @@ pinBothDoors({
     expectDetail: (error) => {
         expect(error.issues).toEqual([expect.objectContaining({ path: 'objects.qa_widget', code: 'custom' })]);
         expect(error.issues[0].message.startsWith("Permission 'qa_widget_editor' grants on object 'qa_widget' which is not defined in objects")).toBe(true);
+    },
+});
+
+pinBothDoors({
+    title: 'an object restored with a field bound to a picklist no loaded package declares now (unknownPicklistBindingSaveRefusal)',
+    type: 'object',
+    name: 'qa_deal',
+    code: 'INVALID_METADATA',
+    status: 422,
+    async stage(h) {
+        h.picklists.add('qa_tier');
+        const deal = (fields: Record<string, unknown>, label = 'Deal') => ({
+            name: 'qa_deal', label, sharingModel: 'private', fields: { name: { type: 'text', label: 'Name' }, ...fields },
+        });
+        await h.protocol.saveMetaItem({ type: 'object', name: 'qa_deal', item: deal({ tier: { type: 'select', label: 'Tier', picklist: 'qa_tier' } }) });
+        // v2 drops the field (a destructive change, so `force`).
+        await h.protocol.saveMetaItem({ type: 'object', name: 'qa_deal', item: deal({}), force: true });
+        await h.protocol.saveMetaItem({ type: 'object', name: 'qa_deal', item: deal({}, 'Deal v3') });
+        // The list v1 was bound to is gone, and the object holds no binding to it now.
+        h.picklists.delete('qa_tier');
+        return { refused: 1, accepted: 2 };
+    },
+    expectDetail: (error) => {
+        expect(error.issues).toEqual([expect.objectContaining({ path: 'fields.tier.picklist', code: 'custom' })]);
+        expect(error.issues[0].message.startsWith("Field 'qa_deal.tier' is bound to picklist 'qa_tier', which no loaded package declares")).toBe(true);
     },
 });
 

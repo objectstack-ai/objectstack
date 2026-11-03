@@ -2087,6 +2087,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.unknown-picklist-binding-refusal.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.unknown-picklist-binding-refusal.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.unknown-picklist-binding-refusal.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.unrecognised-meta-type.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -4459,6 +4474,11 @@
     {
       "file": "packages/qa/http-conformance/src/hono-webhooks-redeliver.conformance.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/email-send-display-name.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {

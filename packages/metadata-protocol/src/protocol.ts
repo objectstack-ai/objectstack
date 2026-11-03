@@ -325,6 +325,7 @@ import {
     seedExternalIdSaveRefusal,
     unknownDatasourceSaveRefusal,
     unknownGrantObjectSaveRefusal,
+    unknownPicklistBindingSaveRefusal,
 } from './protocol-save-door-refusals.js';
 // [#25467 cut 7] Package install and update.
 import {
@@ -1608,6 +1609,9 @@ export class ObjectStackProtocolImplementation implements
      *  - [#28990] a permission set restored with a grant on an object that
      *    does not exist here, when the set does not hold that grant now
      *    ({@link unknownGrantObjectSaveRefusal});
+     *  - [#29898] an object (or object extension) restored with a field bound
+     *    to a picklist no loaded package declares, when the object does not
+     *    hold that binding now ({@link unknownPicklistBindingSaveRefusal});
      *  - [#27818] a datasource restored with an `external.credentialsRef` the
      *    active row it is restored into does not hold now
      *    ({@link datasourceCredentialsRefSaveRefusal}, in its restore words);
@@ -1671,6 +1675,7 @@ export class ObjectStackProtocolImplementation implements
             runAuthoringGate: (...a) => this.runAuthoringGate(...a),
             unknownDatasourceSaveRefusal: (...a) => this.unknownDatasourceSaveRefusal(...a),
             unknownGrantObjectSaveRefusal: (...a) => this.unknownGrantObjectSaveRefusal(...a),
+            unknownPicklistBindingSaveRefusal: (...a) => this.unknownPicklistBindingSaveRefusal(...a),
             seedExternalIdSaveRefusal: (...a) => this.seedExternalIdSaveRefusal(...a),
         };
         return refuseRestoredBodyTheSaveDoorRefuses.call(host, type, name, body, binding, source);
@@ -12872,6 +12877,54 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#29898] The save doors refuse an `object` (or an `object_extension`)
+     * whose field is bound to a picklist no loaded package declares. Before
+     * this, such a body was stored and published (200, its draft reading
+     * `_diagnostics.valid: true`), the field was served with no options, and
+     * the record validator refused every value of it — the shape the boot and
+     * the late-install load already refuse
+     * (`describeUnresolvedPicklistReferences`) and `os validate` / `os build`
+     * refuse for a stack's own fields (`picklist-reference-unknown`); this is
+     * the same judgement at the runtime door.
+     *
+     * A binding is known when any of these holds, and the refusal fires on
+     * none:
+     *  - the engine's registry resolves the list (`resolvePicklistOptions`,
+     *    the read that serves the field's options): a list the package
+     *    itself, a dependency, the base package of a `.custom` pair or any
+     *    other package installed here declares. A registry that cannot
+     *    resolve a list refuses nothing;
+     *  - the object's current definition already binds that field to that
+     *    list: the binding is not this write's. A re-save or a restore that
+     *    keeps it is not judged, and neither is a list that has gone since.
+     *
+     * No pending arm: a picklist is not runtime-creatable, so no draft of
+     * this batch can declare one.
+     *
+     * Asked in draft and in publish mode by {@link saveMetaItem} after the
+     * schema gate (except a `migrate-stored` re-save, the platform healing
+     * its own storage), again by {@link promoteDraftForPublish} on the draft
+     * body (a draft stored before this refusal, or whose list went between
+     * its save and its publish), and by the restore doors
+     * ({@link refuseRestoredBodyTheSaveDoorRefuses}). Answered as the schema
+     * gate answers: `422 INVALID_METADATA`, one finding per unknown binding
+     * at `fields.<field>.picklist`, naming the field and the list.
+     */
+    private unknownPicklistBindingSaveRefusal(
+        singularType: string,
+        item: unknown,
+        name: string,
+        writeFace?: MetadataWriteFace,
+    ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof unknownPicklistBindingSaveRefusal> = {
+            get engine() { return readEngine(); },
+            readMetaItem: (...a) => this.readMetaItem(...a),
+        };
+        return unknownPicklistBindingSaveRefusal.call(host, singularType, item, name, writeFace);
+    }
+
+    /**
      * [#28952] The refusal of a `seed` whose `externalId` names no field of
      * the seed's object: a load in a keyed mode (`upsert`, `update`,
      * `ignore`) keys each existing row and each incoming record by that
@@ -14656,6 +14709,20 @@ export class ObjectStackProtocolImplementation implements
                 singularType, request.item, request.name, mode === 'draft' ? 'drafts' : undefined, request.writeFace,
             );
             if (grantRefusal) throw grantRefusal;
+        }
+
+        // [#29898] An `object` (or an `object_extension`) whose field is bound
+        // to a picklist no loaded package declares is refused, in draft and in
+        // publish mode, after the schema and before the authoring gate and
+        // every write: stored, the field is served with no options and every
+        // write that sets it is refused. A `migrate-stored` re-save rewrites a
+        // row the store already holds and is not judged; a draft-only row is
+        // judged at its publish. See {@link unknownPicklistBindingSaveRefusal}.
+        if (writeSource !== 'migrate-stored') {
+            const picklistRefusal = await this.unknownPicklistBindingSaveRefusal(
+                singularType, request.item, request.name, request.writeFace,
+            );
+            if (picklistRefusal) throw picklistRefusal;
         }
 
         // [#28952] A keyed `seed` whose `externalId` names no field of its
@@ -16625,6 +16692,16 @@ export class ObjectStackProtocolImplementation implements
                 singularType, draftForGate.body, request.name, request.batchObjects, undefined, 'publish',
             );
             if (grantRefusal) throw grantRefusal;
+        }
+        // [#29898] …and an object (or object-extension) draft whose field is
+        // bound to a picklist no loaded package declares by the time it is
+        // published: a draft stored before this refusal, or one whose list
+        // went between its save and its publish. Judged on the draft body,
+        // before `repo.promoteDraft` writes, so a batch publish aborts on it
+        // too. See {@link unknownPicklistBindingSaveRefusal}.
+        if (draftForGate) {
+            const picklistRefusal = await this.unknownPicklistBindingSaveRefusal(singularType, draftForGate.body, request.name);
+            if (picklistRefusal) throw picklistRefusal;
         }
         // [#28952] …and a seed draft whose `externalId` names no field of its
         // object by the time it is published: a draft saved before this
