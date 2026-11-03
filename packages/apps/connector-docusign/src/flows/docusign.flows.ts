@@ -19,8 +19,8 @@ import { defineFlow } from '@objectstack/spec';
  *
  * An `openapi` action takes its path parameters as one `path` object and its
  * request body as one `body` value, each a single CEL value envelope. A CEL
- * map's values share one type, so the body's top-level values are wrapped in
- * `dyn(…)`.
+ * map's values share one type, so every literal beside a variable read is
+ * wrapped in `dyn(…)`, at every level.
  */
 export const DocuSignSendEnvelopeFlow = defineFlow({
   name: 'docusign_send_envelope',
@@ -51,9 +51,9 @@ export const DocuSignSendEnvelopeFlow = defineFlow({
           body: {
             dialect: 'cel',
             source:
-              '{"emailSubject": dyn(email_subject), "status": dyn("sent"), ' +
-              '"documents": dyn([{"documentId": "1", "name": document_name, "documentBase64": document_base64}]), ' +
-              '"recipients": dyn({"signers": [{"recipientId": "1", "routingOrder": "1", "name": signer_name, "email": signer_email}]})}',
+              '{"emailSubject": email_subject, "status": dyn("sent"), ' +
+              '"documents": dyn([{"documentId": dyn("1"), "name": document_name, "documentBase64": document_base64}]), ' +
+              '"recipients": dyn({"signers": [{"recipientId": dyn("1"), "routingOrder": dyn("1"), "name": signer_name, "email": signer_email}]})}',
           },
         },
       },
@@ -182,7 +182,7 @@ export const DocuSignPollStatusChangesFlow = defineFlow({
         actionId: 'Envelopes_GetEnvelopes',
         input: {
           path: { dialect: 'cel', source: '{"accountId": account_id}' },
-          query: { dialect: 'cel', source: '{"from_date": from_date, "count": "100"}' },
+          query: { dialect: 'cel', source: '{"from_date": from_date, "count": dyn("100")}' },
         },
       },
     },

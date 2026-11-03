@@ -181,7 +181,11 @@ describe('connector-docusign app — boot, connect with the installer client, an
     });
     const text = await res.text();
     expect(res.status, text.slice(0, 400)).toBe(400);
-    expect((JSON.parse(text) as { error?: { code?: string } }).error?.code).toBe('FLOW_FAILED');
+    const error = (JSON.parse(text) as { error?: { code?: string; message?: string } }).error;
+    expect(error?.code).toBe('FLOW_FAILED');
+    // The README's promise: the failure names the connector and why.
+    expect(error?.message).toContain(`'${NAME}'`);
+    expect(error?.message).toContain('not connected');
     expect(requests).toEqual([]);
   });
 

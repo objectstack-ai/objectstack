@@ -4,6 +4,7 @@ import { defineStack } from '@objectstack/spec';
 import { ConnectorOpenApiPlugin } from '@objectstack/connector-openapi';
 import { DocuSignConnector } from './src/connectors/docusign.connector.js';
 import { DocuSignEnvelope } from './src/objects/docusign-envelope.object.js';
+import { DocuSignEnvelopeViews } from './src/views/docusign-envelope.view.js';
 import { allFlows } from './src/flows/docusign.flows.js';
 
 /**
@@ -12,8 +13,8 @@ import { allFlows } from './src/flows/docusign.flows.js';
  * against the runtime at HEAD. One declarative connector over DocuSign's own
  * OpenAPI document, authorized by OAuth with the OAuth client each
  * deployment's administrator registers (ADR-0143 D2.1, `clientSource:
- * 'installer'`), one object that keeps each envelope's signature status, and
- * three flows that use them; no secret and no client of anyone's. The
+ * 'installer'`), one object that keeps each envelope's signature status (and the
+ * list view that shows it), and three flows that use them; no secret and no client of anyone's. The
  * listing is `objectstack.manifest.json`, and the README is what the
  * administrator reads before installing.
  */
@@ -39,6 +40,7 @@ export default defineStack({
   plugins: [new ConnectorOpenApiPlugin()],
 
   objects: [DocuSignEnvelope],
+  views: [DocuSignEnvelopeViews],
   connectors: [DocuSignConnector],
   flows: allFlows,
 });

@@ -24,7 +24,8 @@ the app carries no key of anyone's.
   `envelope_id` (DocuSign's envelope id), `signature_status` (DocuSign's own
   status word: `sent`, `delivered`, `completed`, `declined`, `voided`, …),
   `email_subject` and `status_changed_at`. The status is DocuSign's, mirrored
-  each time a flow below reads it.
+  each time a flow below reads it. Its list view, **DocuSign Envelopes**,
+  shows the newest status change first.
 - **Three flows that use them**, ready to run or to copy:
   - `docusign_send_envelope` takes `account_id`, `email_subject`,
     `document_name` (for example `contract.pdf`), `document_base64`,
@@ -42,8 +43,8 @@ the app carries no key of anyone's.
 `account_id` is your DocuSign account's API account id (a GUID): in the
 DocuSign developer console it is **API Account ID** on **Apps and Keys**.
 
-An install adds the connector, the object and the three flows, and nothing
-else: no sample data and no demo users.
+An install adds the connector, the object, its list view and the three
+flows, and nothing else: no sample data and no demo users.
 
 ## Credentials
 
@@ -63,10 +64,10 @@ fail, naming the connector.
 1. Read your deployment's redirect URI. It is your deployment's origin plus
    `/api/v1/automation/connectors/oauth/callback`, and the server answers the
    exact value, before any client exists, as `redirectUri` of
-   `GET /api/v1/automation/connectors/docusign/connection` (the Console's
-   **Setup → Integrations → Connector Connections** page shows it too). Use
-   that answer, never your browser's address bar: behind a proxy, or when
-   `OS_AUTH_URL` / `OS_BASE_URL` name another origin, the two differ.
+   `GET /api/v1/automation/connectors/docusign/connection`; the Console's
+   **Connect** dialog (step 3) shows the same value. Use that answer, never
+   your browser's address bar: behind a proxy, or when `OS_AUTH_URL` /
+   `OS_BASE_URL` name another origin, the two differ.
 2. In the DocuSign developer console, add an app and integration key, choose
    **Authorization Code Grant**, add a secret key, and add the redirect URI
    from step 1. The app needs the `signature` scope, which is DocuSign's
@@ -143,7 +144,8 @@ previous run as `from_date`, or `docusign_get_envelope` for one envelope.
   envelopes. Poll often enough that one page covers the interval.
 - Not measured live: the tests run against a fake DocuSign. A round trip
   against the DocuSign sandbox (connect, send, read, poll) is owed to the
-  acceptance run.
+  acceptance run, and the DocuSign console steps under Credentials follow
+  DocuSign's documentation.
 - The response and body schemas in the packaged document are expanded two
   levels deep (see Provenance); deeper schemas are described by their type
   and title only. The answer itself is DocuSign's full JSON.
