@@ -2,7 +2,7 @@
 '@objectstack/spec': minor
 ---
 
-feat(spec)!: a URL is judged after trimming surrounding whitespace; a credential query parameter is refused in any string of a connector entry
+feat(spec)!: a URL is judged after trimming surrounding whitespace and removing tab and newline characters, as a URL parser does; a credential query parameter is refused in any string of a connector entry
 
 Clause-②: no (narrowing)
 Metadata-protocol: narrowed
@@ -11,7 +11,8 @@ Metadata-protocol: narrowed
 
 **BREAKING** accept-set narrowing at the two metadata doors that judge a URL credential: an authored connector instance (`DeclarativeConnectorEntrySchema` — `defineStack({ connectors })`, `os validate` / `os compile`, the artifact load, `PUT /api/v1/meta/connector/:name`) and a datasource driver config's URL keys (`config.url` on postgres, mysql, mongo and turso, turso `config.syncUrl`) at every door that parses the datasource.
 
-- **One value-level rule at both doors.** A URL is judged where a URL parser reads it: after its leading and trailing C0 control characters and spaces are trimmed. A connector URL holding a userinfo, and a datasource URL holding a userinfo password, are refused whatever surrounds them; a bare username in a datasource URL stays accepted.
+- **One value-level rule at both doors.** A value is judged as a URL parser reads it: after its leading and trailing C0 control characters and spaces are trimmed and every tab, newline and carriage return in it is removed. A connector URL holding a userinfo, and a datasource URL holding a userinfo password, are refused as the parser reads them; a bare username in a datasource URL stays accepted. The same cleaning applies to each query pair before its name is read, at both doors.
+- **One userinfo grammar at both doors.** The connector entry locates a userinfo with the grammar the datasource doors already use: an authority starts at `scheme://` or at a scheme-relative `//`.
 - **A credential query parameter is refused in any string of a connector entry.** The connector query rule is the single value-level parse the datasource doors already run, applied to every string under `providerConfig` and `auth` — whether or not it starts with a scheme. Same names as before (`api_key`, `token`, `access_token`, `key`, `secret`, `signature` and the rest of the connector list, matched case-insensitively on the decoded name, plus the instance's own `auth.paramName`), same located refusal (`422 INVALID_METADATA` at the save door, one issue per string, naming the parts, never the value).
 - **Read.** The connector read redactor and the datasource read redactor rewrite exactly what the write refuses, at the position the write judged, and serve every other character as stored. The datasource read locates a userinfo password by the write door's own boundary parse.
 - **Unchanged.** `ConnectorSchema` (a plugin's `registerConnector` def) keeps its posture; a header or environment map under `providerConfig` is still judged by neither door; a stored row is never re-judged: a save of its served form keeps the stored value, and an edit of the served value stores exactly the edit.

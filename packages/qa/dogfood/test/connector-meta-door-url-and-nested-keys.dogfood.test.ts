@@ -453,6 +453,12 @@ describe('connector metadata doors: an authored connector keeps no credential in
           () => instance('cun_t_note', { providerConfig: { baseUrl: `${upstreamUrl}/v1`, note: `sandbox ?token=${PLACEHOLDERS.urlQuery}` } }), 'providerConfig.note'],
         ['a userinfo in `auth.tokenUrl` behind a leading space', 'cun_t_token_url',
           () => oauth2('cun_t_token_url', { tokenUrl: ` https://c:${PLACEHOLDERS.authEndpoint}@auth.vendor.example.com/token` }), 'auth.tokenUrl'],
+        ['`api_key` in the `providerConfig.baseUrl` query, a tab inside its name', 'cun_t_key_tab',
+          () => instance('cun_t_key_tab', { providerConfig: { baseUrl: `${upstreamUrl}/v1?api${TAB}_key=${PLACEHOLDERS.urlQuery}` } }), 'providerConfig.baseUrl'],
+        ['a userinfo in `providerConfig.baseUrl`, a tab inside its scheme', 'cun_t_scheme_tab',
+          () => instance('cun_t_scheme_tab', { providerConfig: { baseUrl: `ht${TAB}tps://u:${PLACEHOLDERS.urlPassword}@api.vendor.example.com/v1` } }), 'providerConfig.baseUrl'],
+        ['a userinfo in a scheme-relative `providerConfig.baseUrl`', 'cun_t_scheme_relative',
+          () => instance('cun_t_scheme_relative', { providerConfig: { baseUrl: `//u:${PLACEHOLDERS.urlPassword}@api.vendor.example.com/v1` } }), 'providerConfig.baseUrl'],
       ];
 
       it.each(cases)('%s', async (_label, name, body, at) => {
@@ -474,6 +480,28 @@ describe('connector metadata doors: an authored connector keeps no credential in
       expect(out?.status, JSON.stringify(out)).toBe(200);
       expect(received.length).toBe(before + 1);
       expect(received[received.length - 1]).toBe('/v1/probe?region=eu');
+    });
+
+    it('CONTROL: an ordinary query parameter with a tab inside its name saves and dispatches as a URL parser reads it; a scheme-relative URL with no userinfo saves', async () => {
+      const name = 'cun_trim_tab_control';
+      const put = await stack.apiAs(admin, 'PUT', `/meta/connector/${name}`, instance(name, {
+        providerConfig: { baseUrl: `${upstreamUrl}/v1?reg${TAB}ion=eu` },
+      }));
+      expect(put.status, await put.clone().text()).toBe(200);
+      await waitReady(name);
+      const handler = automation.resolveConnectorAction(name, 'request');
+      expect(handler, `${name} is materialized with its request action`).toBeTypeOf('function');
+      const before = received.length;
+      const out = await handler({ method: 'GET', path: '/probe' }, {});
+      expect(out?.status, JSON.stringify(out)).toBe(200);
+      expect(received.length).toBe(before + 1);
+      expect(received[received.length - 1]).toBe('/v1/probe?region=eu');
+      // Saved disabled: the pin is the door's answer, not a materialization.
+      const relative = await stack.apiAs(admin, 'PUT', '/meta/connector/cun_trim_relative_control', instance('cun_trim_relative_control', {
+        enabled: false,
+        providerConfig: { baseUrl: '//api.vendor.example.com/v1' },
+      }));
+      expect(relative.status, await relative.clone().text()).toBe(200);
     });
 
     it('READ: the stored row is served with each credential part removed at the position the write door judged, every other character as stored', async () => {
