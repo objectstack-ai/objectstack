@@ -71,7 +71,7 @@ node -e "console.log(require('fs').readFileSync(require.resolve('@objectstack/sp
 # 3 · acceptance — all four, not three
 os validate                      # green (compare against validate-before.txt)
 tsc --noEmit                     # tombstones type the retired keys as `never`
-os migrate meta --from 17 --to 18 --json   # `applied` [] and no `replayedNothing` (see §3.3)
+os migrate meta --from 16 --to 18 --json   # `applied` [] and no `replayedNothing` (see §3.3)
 # → write .upgrade/REPORT.md (template in §3.4)
 ```
 
@@ -389,25 +389,25 @@ that output as the control.
 > Some conversions are **migration-chain-only**: the loader deliberately does
 > not apply them and no tombstone rejects the old shape, because the change is a
 > default flip rather than a rename — auto-applying it would stamp a constraint
-> onto sources that deliberately omit it. The 16 → 17 crossing has one:
-> `field-required-notnull-explicit`, which writes the physical `storage.notNull`
-> that `required` used to imply on its own.
+> onto sources that deliberately omit it. This build ships none (every
+> conversion it carries is tombstoned, so the parse refuses the old shape too),
+> but a later one can, and the chain, not the parse, is what knows.
 >
-> A project carrying only that shape validates **green** while the chain still
+> A project carrying only such a shape validates **green** while the chain still
 > has work. So `validate` green is necessary and not sufficient, and the
-> criterion that closes the gap is a replay of the last hop you ported:
+> criterion that closes the gap is a replay of the whole range you ported:
 >
 > ```bash
-> os migrate meta --from <target-major − 1> --to <target-major> --json
+> os migrate meta --from <authored-major> --to <target-major> --json
 > # `applied` must be [] and `replayedNothing` absent
 > ```
 >
 > `--from <target-major>` proves nothing: `--to` defaults to the highest major
 > this build carries a step for, so the range is empty — no step runs, `applied`
 > is `[]` whatever the metadata holds, and the JSON says so with
-> `replayedNothing`, whose `widestRange` names the range that would run — or it
-> holds only the next major's step. `todos` is semantic residue, Layer 2's
-> business, not a failure.
+> `replayedNothing` (its `widestRange` is `null` there: no wider range exists
+> from that `--from`) — or it holds only the next major's step. `todos` is
+> semantic residue, Layer 2's business, not a failure.
 
 → Moved verbatim to [references/examples-upgrade.md](./references/examples-upgrade.md) § 3.4 The report — the human half.
 
@@ -461,7 +461,7 @@ recognises it and answers `0`. Nothing gates on it having run.
 
 | Symptom | What it actually is | Fix |
 |:--|:--|:--|
-| `migrate meta` reports changes, but the files are unchanged | Working as designed — the default run only lists. | Pass `--write`, or port the printed edits by hand; then replay the ported hop to confirm 0 changes. |
+| `migrate meta` reports changes, but the files are unchanged | Working as designed — the default run only lists. | Pass `--write`, or port the printed edits by hand; then replay the ported range to confirm 0 changes. |
 | The acceptance replay still applies changes | The port is incomplete, or a source builds metadata at runtime from a shape the chain never saw. | Diff against `--out`; grep for the `conversionId`'s surface in code that constructs metadata dynamically. |
 | `validate` green, but a feature silently stopped working | An R2 residue item: code reading a renamed key now reads `undefined`. | Exercise the path for real. A green parse says nothing about a `??` chain in the project's own code. |
 | `validate` reports findings that have nothing to do with retired keys | The author-time rule pass, not the schema pass. | Diff against the pre-upgrade `validate` control. Pre-existing findings are not this upgrade's scope. |

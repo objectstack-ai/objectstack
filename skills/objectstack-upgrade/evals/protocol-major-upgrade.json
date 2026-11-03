@@ -34,10 +34,10 @@
     {
       "id": 4,
       "prompt": "We bumped @objectstack/spec 16 → 17 and `os validate` is green, so there was nothing to upgrade, right? Production also has `sys_metadata` rows written under 16.",
-      "expected_output": "No: `validate` green is necessary, not sufficient — migration-chain-only conversions (16 → 17 has `field-required-notnull-explicit`) reject nothing at parse. Replays the ported hop, `os migrate meta --from 16 --to 17 --json`, and reads `applied` (must be `[]`) with `replayedNothing` absent — `--from 17` alone names an empty range, so its `applied: []` proves nothing. Stored rows rehydrate through `applyConversionsToStoredItem` only while the installed release carries their conversions (18.3 drops those retired at or below 16.x), so before moving past 18.2 it runs `os migrate meta --stored` (read-only) then `os migrate meta --stored --apply --yes` (`--yes` is mandatory in a non-TTY), and never hand-edits `sys_metadata`. Any per-deployment data-migration gates the run prints go into the report as pending, by name.",
+      "expected_output": "No: `validate` green is necessary, not sufficient — migration-chain-only conversions reject nothing at parse (this build ships none, but the chain, not the parse, is the authority). Replays the ported hop, `os migrate meta --from 16 --to 17 --json`, and reads `applied` (must be `[]`) with `replayedNothing` absent — `--from 17` alone names an empty range, so its `applied: []` proves nothing. Stored rows rehydrate through `applyConversionsToStoredItem` only while the installed release carries their conversions (18.3 drops those retired at or below 16.x), so before moving past 18.2 it runs `os migrate meta --stored` (read-only) then `os migrate meta --stored --apply --yes` (`--yes` is mandatory in a non-TTY), and never hand-edits `sys_metadata`. Any per-deployment data-migration gates the run prints go into the report as pending, by name.",
       "files": [],
       "assertions": {
-        "must_contain": ["applied", "replayedNothing", "--stored", "--yes", "field-required-notnull-explicit", "applyConversionsToStoredItem"],
+        "must_contain": ["applied", "replayedNothing", "--stored", "--yes", "applyConversionsToStoredItem"],
         "must_not_contain": ["UPDATE sys_metadata"]
       }
     },
