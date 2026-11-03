@@ -87,7 +87,7 @@
 
 import { existsSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import type { ts as TS } from 'ts-morph';
+import type TS from 'typescript';
 import type { MigrationApplication } from '@objectstack/spec/migrations';
 import { packageOwnedCollectionKeys } from './stack-collections.js';
 import { syntacticDiagnostics } from './emitted-source-parses.js';
@@ -1757,7 +1757,7 @@ function withValueAt(root: unknown, path: readonly Segment[], value: unknown): R
  * A {@link RangeRewrite} rides the same plan as one more entry (#22219).
  */
 export async function planAuthoredSourceWrite(input: AuthoredSourceWriteInput): Promise<AuthoredSourceWritePlan> {
-  const { ts } = await import('ts-morph');
+  const { default: ts } = await import('typescript');
   const configPath = realpathSafe(input.configPath);
   const projectRoot = dirname(configPath);
   const graph = new SourceGraph(ts, projectRoot);

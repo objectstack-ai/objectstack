@@ -49,7 +49,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { ts } from 'ts-morph';
+import ts from 'typescript';
 import { TEMPLATES, sanitizeNamespace } from '../src/commands/init.js';
 import { GENERATOR_SCAFFOLD_TARGETS } from '../src/commands/generate.js';
 
