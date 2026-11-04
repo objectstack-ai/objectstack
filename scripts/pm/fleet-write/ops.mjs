@@ -167,11 +167,11 @@
  * `/contents/**` and `/git/**`; `REFUSED_PATH_FAMILIES` refuses both for every
  * row. The workflow-run dispatch (`workflow_dispatch`) and the failed-jobs
  * re-run (`run_rerun_failed`), both below, are `actions: write`, the two rows
- * spending it; the four advisory rows that write (`advisory_report`,
- * `advisory_create`, `advisory_collaborators_add` and `advisory_state`, below)
- * are `repository-advisories: write`, and the one that reads (`advisory_read`,
- * below) spends the same grant at `read` alone (its row's `grant`), the five
- * rows spending it; the sender gate's
+ * spending it; the five advisory rows that write (`advisory_report`,
+ * `advisory_create`, `advisory_collaborators_add`, `advisory_versions` and
+ * `advisory_state`, below) are `repository-advisories: write`, and the one
+ * that reads (`advisory_read`, below) spends the same grant at `read` alone
+ * (its row's `grant`), the six rows spending it; the sender gate's
  * `GET /repos/{o}/{r}/collaborators/{login}/permission` is `metadata: read`.
  * `PERMISSIONS` is that set and nothing wider. The workflow declares the five
  * grants every stroke gets as literal `permission-*` inputs on
@@ -373,7 +373,7 @@
  * judgment; `execute.mjs --self-test` pins the reads, the one write, every
  * refusal and the landing.
  *
- * ## The four rows that touch a security advisory — no advisory text on a public surface
+ * ## The rows that write a security advisory — no advisory text on a public surface
  *
  * Private vulnerability reporting is on for this repository, and GitHub lets
  * only an administrator, a security manager or an advisory's own
@@ -385,12 +385,21 @@
  * the next section). The maintainer's scope, verbatim
  * as the body of issue 29160 (the card that filed these rows) records it:
  * 「按这个范围更新 #29160：上报正文经中继并读事件文件，加人、接受、关闭只改状态，读取用席位自己的账号，发布留给我。先测令牌。」
+ * Its clause 「发布留给我」 is SUPERSEDED. Told that the relay did not let an
+ * advisory be set to published, so the seat had handed over a list to publish
+ * by hand, the maintainer ruled, verbatim as the body of issue 30110 records it:
+ * 「中继不允许把公告设为已发布 ，立卡解决」. WHAT is published is unchanged and
+ * stays the maintainer's, by the standing rule 「哪些高危要发布应该在我版本发布前决策吧」:
+ * the maintainer decides the list before each release, and the relay only
+ * carries out a list the maintainer approved — the seat's half of that lives
+ * in pm-dispatch's `references/security-findings.md`, never here.
  *
  *   row                          request                                         the payload carries
  *   `advisory_report`            `POST …/security-advisories/reports`            `summary`, `description`; optional `severity`, `cwe_ids`
  *   `advisory_create`            `POST …/security-advisories`                    the report's keys, and `packages`
  *   `advisory_collaborators_add` `GET`, then `PATCH …/security-advisories/{id}`  `ghsa_id` and logins
- *   `advisory_state`             `GET`, then `PATCH …/security-advisories/{id}`  `ghsa_id` and `draft` or `closed`
+ *   `advisory_versions`          `GET`, then `PATCH …/security-advisories/{id}`  `ghsa_id` and `versions`: package, range, patched versions
+ *   `advisory_state`             `GET`, then `PATCH …/security-advisories/{id}`  `ghsa_id` and `draft`, `closed` or `published`
  *
  * `advisory_create` is the maintainer's naming of a second way in, verbatim
  * as the body of issue 29410 records it: 「立一张 skills 卡，我现在就派发，然后你再试」.
@@ -403,13 +412,33 @@
  * reports does not reach it, are documentation readings the first live run
  * confirms (below).
  *
- * Publishing stays with the maintainer, by hand: `published` is refused BY
- * NAME as a value (`ADVISORY_REFUSED_STATES`), and no body can carry it — the
- * report's and the draft's bodies are the row's, holding no state (the
- * endpoint creates a draft and takes none), and the two PATCH bodies are the
- * executor's (`validate.mjs --self-test` pins all four). Listing advisories,
- * editing an advisory's text, removing a collaborator, the CVE request and the
- * temporary fork are out of reach of every row, and reading an advisory's text
+ * Publishing a fixed advisory is three strokes, each alone. A fixed advisory
+ * here is `closed` once its fix merges, so `advisory_state` first moves it back
+ * to `draft` (the reopen); `advisory_versions` then sets each affected
+ * package's vulnerable range and patched versions; and `advisory_state` last
+ * moves it to `published`. The versions row carries NO prose: its one key
+ * beside the id is `versions`, a capped list of closed entries, each exactly
+ * `package` (`NPM_PACKAGE_SHAPE`), `vulnerable_version_range`
+ * (`ADVISORY_VERSION_RANGE_SHAPE`: one comparator, or a lower bound then an
+ * upper bound, each an operator, one space and a release version) and
+ * `patched_versions` (`ADVISORY_PATCHED_VERSIONS_SHAPE`: one to
+ * `MAX_ADVISORY_PATCHED_VERSIONS` release versions, a comma and a space
+ * between). `advisoryVersionEntryFailure` judges each, and also refuses a pair
+ * whose bounds do not rise and a patched version inside its own range. Its
+ * PATCH body is `{ vulnerabilities }` alone: per entry the npm ecosystem, the
+ * name and the two version strings, never a vulnerable function.
+ *
+ * `published` is reached by ONE row and ONE transition: `advisory_state`, from
+ * `draft` alone, and only once the executor's own GET reads at least one
+ * `vulnerabilities` entry, every one in the versions row's spelling (the
+ * `versions` fence, `ADVISORY_FENCES`) — the versions are set first. No other
+ * field takes it as a value, and no body but the executor's `{ state }` can
+ * carry it: the report's and the draft's bodies are the row's, holding no state
+ * (the endpoint creates a draft and takes none), the versions row's is its
+ * entries alone, and the other two PATCH bodies are the executor's
+ * (`validate.mjs --self-test` pins every one). Editing an advisory's summary or
+ * description, listing advisories, removing a collaborator, the CVE request and
+ * the temporary fork are out of reach of every row, and reading an advisory's text
  * is one row's alone, which seals it (`advisory_read`, the next section):
  * `REFUSED_PATH_FAMILIES` refuses each `security-advisories` path but one
  * advisory's (`ADVISORY_PATH_SHAPE`), the reports endpoint
@@ -438,13 +467,16 @@
  *     shape (`advisoryPrintable`), and the platform's `message` only when it
  *     is one the relay knows (`ADVISORY_PLATFORM_MESSAGES`) — never a
  *     summary, a description, a vulnerability, a credit, a CVE or CWE, a URL
- *     or the answer's body. `advisoryReportLandedText`,
+ *     or the answer's body. Of the versions it prints COUNTS alone — entries
+ *     and packages, never a name or a version, which are the unpublished
+ *     advisory's until the publish. `advisoryReportLandedText`,
  *     `advisoryCreateLandedText`, `advisoryLandedText`,
- *     `advisoryStateLandedText` and `advisoryFenceText` are the only spellings
- *     of an advisory row. An id exposes no content, but it is public in the log.
- *     A draft's package names are `quiet` too: a refusal never echoes one.
+ *     `advisoryVersionsLandedText`, `advisoryStateLandedText` and
+ *     `advisoryFenceText` are the only spellings of an advisory row. An id
+ *     exposes no content, but it is public in the log. A draft's package names
+ *     and the versions row's entries are `quiet` too: a refusal never echoes one.
  *
- * The executor's four paths (`execute.mjs`, in the shape of the hierarchy rows'):
+ * The executor's five paths (`execute.mjs`, in the shape of the hierarchy rows'):
  *
  *   - `advisory_report` is one POST of the row's body. It LANDS on a 2xx
  *     whose answer carries a `ghsa_id` (`advisoryReportReadBack`); the row and
@@ -466,11 +498,27 @@
  *     EXISTING logins plus the missing ones, so the merge holds whether the
  *     platform replaces the list or merges it. It LANDS only when the answer
  *     lists every login sent (`advisoryReadBack`);
+ *   - `advisory_versions` reads the advisory the same way and refuses with
+ *     nothing sent unless it reads `draft` (`ADVISORY_VERSIONS_STATES`) and the
+ *     `versions` fence holds. The PATCH REPLACES the whole list — GitHub's own
+ *     example of the call: "To add vulnerable versions, include existing
+ *     versions in the array" — so every package the advisory already lists
+ *     must be one the action names, and no listed entry may be another
+ *     ecosystem's, nameless, or carry `vulnerable_functions`, which this row
+ *     does not write and the PATCH would drop. It LANDS only when the answer,
+ *     still `draft`, lists exactly the entries sent (`advisoryVersionsReadBack`);
  *   - `advisory_state` reads the advisory the same way and refuses an illegal
- *     transition with nothing sent (`ADVISORY_TRANSITIONS`: `draft` only from
- *     `triage`, `closed` only from `triage` or `draft`). Its PATCH body is
- *     `{ state }` and nothing else, and it LANDS only when the answer shows
- *     that state (`advisoryStateReadBack`).
+ *     transition with nothing sent (`ADVISORY_TRANSITIONS`: `draft` from
+ *     `triage` — the accept — or from `closed` — the reopen; `closed` from
+ *     `triage` or `draft`; `published` from `draft` alone, through the
+ *     `versions` fence; nothing from `published` or `withdrawn`, and a state
+ *     the table does not name fails closed). Its PATCH body is `{ state }` and
+ *     nothing else, and it LANDS only when the answer shows that state
+ *     (`advisoryStateReadBack`) — a publish only when the published answer
+ *     also lists exactly the entries the preflight read: the advisory read back
+ *     as `published`, with the versions it was sent. A landed publish alone
+ *     earns a notice annotation naming the id (`relayAdvisoryAnnotationMessage`,
+ *     `dispatch.mjs`): it is public once published, which is the point.
  *
  * Each row travels `alone` and spends `repository-advisories: write`, a grant
  * minted only for its stroke (`STROKE_SCOPED_PERMISSIONS`), so every other
@@ -492,6 +540,25 @@
  * three drafts land in one hour where reports stop at one a day. A refusal
  * on any of them is a FAILED action carrying `ADVISORY_ACCESS_REMEDY`, and ⛔
  * never a retry under an un-narrowed token: the reading goes to the maintainer.
+ *
+ * What a publish needs on the platform, read 2026-11-04 from GitHub's REST
+ * description (`github/rest-api-description`, operation
+ * `security-advisories/update-repository-advisory`) and the permission ledger
+ * cited above: the one PATCH takes `state` (`published`, `closed` or `draft`)
+ * and `vulnerabilities` (per entry `package`, `vulnerable_version_range`,
+ * `patched_versions`, `vulnerable_functions`), under `repository_advisories:
+ * write` alone, server-to-server, with no additional permission; the
+ * description's own refused move is `published` → `draft` (422, "Invalid state
+ * transition"). The App's PATCH of `state` is measured: `triage` → `draft` and
+ * `draft` → `closed` landed on the live runs after these rows merged (runs
+ * 41443030055 and 41443112178). NOT measured, so the first live publish after
+ * merge confirms each: that the platform takes `closed` → `draft` (the
+ * description names that move neither way), that it takes `draft` →
+ * `published` and the versions from the App, that it answers the versions in
+ * the spelling sent, and whether it needs them before it publishes — the relay
+ * needs them either way. A refusal is a FAILED action carrying
+ * `ADVISORY_ACCESS_REMEDY`; a token that cannot reopen or publish is a fork for
+ * the maintainer, ⛔ never a widened grant.
  *
  * The sender gate does NOT change for these rows: write, maintain or admin on
  * the target passes, by the maintainer's ruling, verbatim as the body of issue
@@ -563,7 +630,7 @@
  * (`execute.mjs`, the sender gate), and the executor then holds a read to the
  * row's `senderGate`, a key of `ADVISORY_READ_SENDER_GATES`; `target-write`
  * asks nothing more: write, maintain or admin on the target, the gate the
- * four rows above keep. The ruling settles the question this row landed
+ * five rows above keep. The ruling settles the question this row landed
  * with, whether a read should instead need the sender on the advisory's own
  * `collaborating_users`. That gate excluded no one, since a sender with write
  * on the target can add itself to any advisory whose id it holds (above), and
@@ -926,7 +993,7 @@ export function subIssueLandedText({ mode, parentNumber, childNumber, childId, c
 }
 
 /**
- * One repository advisory's id (header: "The four rows that touch a security advisory"): `GHSA` and three groups
+ * One repository advisory's id (header: "The rows that write a security advisory"): `GHSA` and three groups
  * of four lowercase letters or digits. It is spelled into a path, so the field kind `ghsa` admits this and nothing else.
  */
 export const GHSA_ID_SHAPE = /^GHSA(-[0-9a-z]{4}){3}$/;
@@ -945,15 +1012,157 @@ export const ADVISORY_CREATE_ECOSYSTEM = 'npm';
 export const NPM_PACKAGE_SHAPE = /^(?:@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/;
 /** The states an advisory takes a collaborator in through the relay: an unpublished, open advisory's. */
 export const ADVISORY_OPEN_STATES = Object.freeze(['triage', 'draft']);
+/** The state a publish lands in — reached by `advisory_state` from `draft` alone, through the `versions` fence (header). */
+export const ADVISORY_PUBLISHED_STATE = 'published';
 /**
  * The transitions `advisory_state` may make, as target → the states it may leave (header): accepting a report is
- * `triage` → `draft`, and closing is `triage` or `draft` → `closed`. Its keys are the field's closed enum.
+ * `triage` → `draft` and reopening a closed advisory `closed` → `draft`; closing is `triage` or `draft` → `closed`;
+ * publishing is `draft` → `published`, once the versions are set (the `versions` fence of `ADVISORY_FENCES`). Nothing
+ * leaves `published` or `withdrawn`. Its keys are the field's closed enum; a state it does not name fails closed.
  */
-export const ADVISORY_TRANSITIONS = Object.freeze({ draft: Object.freeze(['triage']), closed: Object.freeze(['triage', 'draft']) });
+export const ADVISORY_TRANSITIONS = Object.freeze({
+  draft: Object.freeze(['triage', 'closed']),
+  closed: Object.freeze(['triage', 'draft']),
+  [ADVISORY_PUBLISHED_STATE]: Object.freeze(['draft']),
+});
 /** The states `advisory_state` may ask for — exactly `ADVISORY_TRANSITIONS`' keys. */
 export const ADVISORY_SETTABLE_STATES = Object.freeze(Object.keys(ADVISORY_TRANSITIONS));
-/** A state refused BY NAME, with why — never reachable by any row, as a value or through a body (header). */
-export const ADVISORY_REFUSED_STATES = Object.freeze({ published: 'publishing stays with the maintainer, by hand, and no relay row reaches it' });
+/**
+ * A state refused BY NAME as a value, with why — none since the maintainer's ruling that the relay publishes
+ * (header): `published` left this table for `ADVISORY_TRANSITIONS`. Kept as the field's `named` refusals.
+ */
+export const ADVISORY_REFUSED_STATES = Object.freeze({});
+/** The states `advisory_versions` writes in: a draft — a closed advisory is reopened to one first (header). */
+export const ADVISORY_VERSIONS_STATES = Object.freeze(['draft']);
+
+/** One release version as the versions row spells one: MAJOR.MINOR.PATCH, no leading zero, no pre-release or build tag. */
+const RELEASE_VERSION = '(?:0|[1-9][0-9]{0,5})\\.(?:0|[1-9][0-9]{0,5})\\.(?:0|[1-9][0-9]{0,5})';
+/** A release version, whole. */
+export const ADVISORY_VERSION_SHAPE = new RegExp(`^${RELEASE_VERSION}$`);
+/**
+ * A `vulnerable_version_range` in the spelling of GitHub's own example (`>= 1.0.0, < 1.0.1`): ONE comparator — an
+ * operator, one space, a release version — or a lower bound (`>`, `>=`) then an upper bound (`<`, `<=`), a comma and
+ * a space between. `advisoryVersionEntryFailure` also requires a pair's bounds to rise.
+ */
+export const ADVISORY_VERSION_RANGE_SHAPE = new RegExp(`^(?:(?:<|<=|>|>=|=) ${RELEASE_VERSION}|(?:>|>=) ${RELEASE_VERSION}, (?:<|<=) ${RELEASE_VERSION})$`);
+/** Release versions one `patched_versions` names, at most. */
+export const MAX_ADVISORY_PATCHED_VERSIONS = 5;
+/** A `patched_versions`: one release version (GitHub's example: `1.0.1`) or a few, a comma and a space between. */
+export const ADVISORY_PATCHED_VERSIONS_SHAPE = new RegExp(`^${RELEASE_VERSION}(?:, ${RELEASE_VERSION}){0,${MAX_ADVISORY_PATCHED_VERSIONS - 1}}$`);
+/** The keys one `versions` entry carries — exactly these three, each required (header). */
+export const ADVISORY_VERSION_KEYS = Object.freeze(['package', 'vulnerable_version_range', 'patched_versions']);
+
+/** Two release versions compared: negative, zero or positive. Pure; each must already be in `ADVISORY_VERSION_SHAPE`. */
+export function compareReleaseVersions(a, b) {
+  const [x, y] = [a.split('.').map(Number), b.split('.').map(Number)];
+  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] - y[i];
+  return 0;
+}
+
+const COMPARATOR = /^(<=|>=|<|>|=) (\S+)$/;
+const COMPARATOR_HOLDS = Object.freeze({ '<': (d) => d < 0, '<=': (d) => d <= 0, '>': (d) => d > 0, '>=': (d) => d >= 0, '=': (d) => d === 0 });
+
+/** A range in `ADVISORY_VERSION_RANGE_SHAPE` as its comparators, `[{ op, version }]`; null for any other value. Pure. */
+export function advisoryRangeComparators(range) {
+  if (typeof range !== 'string' || !ADVISORY_VERSION_RANGE_SHAPE.test(range)) return null;
+  return range.split(', ').map((c) => {
+    const [, op, version] = COMPARATOR.exec(c);
+    return { op, version };
+  });
+}
+
+/** Does a release version lie inside a range — every one of its comparators holding? Pure. */
+export function inAdvisoryRange(version, comparators) {
+  return comparators.every((c) => COMPARATOR_HOLDS[c.op](compareReleaseVersions(version, c.version)));
+}
+
+const describedQuietly = (v) =>
+  typeof v === 'string' ? `a string of ${Buffer.byteLength(v, 'utf8')} byte(s)` : Array.isArray(v) ? `an array of ${v.length} item(s)` : v === null ? 'null' : isObject(v) ? 'an object' : typeof v;
+const KEY_NAME_SHAPE = /^[a-z_]{1,40}$/;
+
+/**
+ * Why one `versions` entry is not one the relay sends, as a sentence whose subject is `where`, or null when it is
+ * one (header): exactly `ADVISORY_VERSION_KEYS`; `package` an npm name (`NPM_PACKAGE_SHAPE`, at most
+ * `MAX_NPM_PACKAGE_CHARS`); `vulnerable_version_range` in `ADVISORY_VERSION_RANGE_SHAPE`, a pair's lower bound below
+ * its upper; `patched_versions` in `ADVISORY_PATCHED_VERSIONS_SHAPE`, each version once and none inside the entry's
+ * own range. ⛔ The sentence never carries a value — a refusal reaches the public run log, and before the publish a
+ * package and its versions are the unpublished advisory's; a key is named only in a key's shape. Pure; never throws.
+ */
+export function advisoryVersionEntryFailure(entry, where = 'the entry') {
+  if (!isObject(entry) || Array.isArray(entry)) return `${where} must be an object of ${ADVISORY_VERSION_KEYS.join(', ')}, got ${describedQuietly(entry)}`;
+  const extra = Object.keys(entry).filter((k) => !ADVISORY_VERSION_KEYS.includes(k));
+  if (extra.length) return `${where} carries ${extra.map((k) => (KEY_NAME_SHAPE.test(k) ? k : '(a key not echoed)')).join(', ')} — an entry is exactly ${ADVISORY_VERSION_KEYS.join(', ')}`;
+  const missing = ADVISORY_VERSION_KEYS.filter((k) => !Object.hasOwn(entry, k));
+  if (missing.length) return `${where} has no ${missing.join(' or ')} — an entry carries all three`;
+  const name = entry.package;
+  if (typeof name !== 'string' || Buffer.byteLength(name, 'utf8') > MAX_NPM_PACKAGE_CHARS || !NPM_PACKAGE_SHAPE.test(name)) return `${where}.package must be an npm package name, got ${describedQuietly(name)} that is not one — not echoed`;
+  const range = advisoryRangeComparators(entry.vulnerable_version_range);
+  if (!range) {
+    return `${where}.vulnerable_version_range must be one comparator, or a lower bound then an upper bound — an operator, one space and a release version each, as in ">= 1.0.0, < 1.0.1" — got ${describedQuietly(entry.vulnerable_version_range)} that is not one — not echoed`;
+  }
+  if (range.length === 2 && compareReleaseVersions(range[0].version, range[1].version) >= 0) return `${where}.vulnerable_version_range has a lower bound that is not below its upper bound`;
+  const patched = entry.patched_versions;
+  if (typeof patched !== 'string' || !ADVISORY_PATCHED_VERSIONS_SHAPE.test(patched)) {
+    return `${where}.patched_versions must be one to ${MAX_ADVISORY_PATCHED_VERSIONS} release versions, a comma and a space between, as in "1.0.1" — got ${describedQuietly(patched)} that is not one — not echoed`;
+  }
+  const versions = patched.split(', ');
+  if (new Set(versions).size !== versions.length) return `${where}.patched_versions names a version twice`;
+  const inside = versions.filter((v) => inAdvisoryRange(v, range)).length;
+  if (inside) return `${where}.patched_versions names ${inside} version(s) inside the entry's own vulnerable_version_range — a patched version is never a vulnerable one`;
+  return null;
+}
+
+/** The `vulnerabilities` a versions PATCH sends for the action's entries: per entry the npm ecosystem, the name and the two strings. Pure. */
+export function advisoryVersionsOnTheWire(versions) {
+  return versions.map((v) => ({ package: { ecosystem: ADVISORY_CREATE_ECOSYSTEM, name: v.package }, vulnerable_version_range: v.vulnerable_version_range, patched_versions: v.patched_versions }));
+}
+
+/**
+ * An advisory answer's `vulnerabilities`, as the versions row spells an entry: `{ total, entries, foreign, functions }`
+ * — `entries` the npm entries naming a package, as `{ package, vulnerable_version_range, patched_versions }` exactly as
+ * the platform answered them; `foreign` the count of entries of another ecosystem or naming no package; `functions` the
+ * count carrying a non-empty `vulnerable_functions`. Pure; an answer with no list reads as none.
+ */
+export function advisoryVersionsOf(json) {
+  const list = Array.isArray(json?.vulnerabilities) ? json.vulnerabilities : [];
+  const entries = [];
+  let foreign = 0;
+  let functions = 0;
+  for (const v of list) {
+    if (Array.isArray(v?.vulnerable_functions) && v.vulnerable_functions.length > 0) functions++;
+    if (v?.package?.ecosystem !== ADVISORY_CREATE_ECOSYSTEM || typeof v.package.name !== 'string' || v.package.name === '') {
+      foreign++;
+      continue;
+    }
+    entries.push({ package: v.package.name, vulnerable_version_range: v.vulnerable_version_range ?? null, patched_versions: v.patched_versions ?? null });
+  }
+  return { total: list.length, entries, foreign, functions };
+}
+
+const versionKey = (v) => JSON.stringify([v?.package ?? null, v?.vulnerable_version_range ?? null, v?.patched_versions ?? null]);
+
+/**
+ * How two lists of entries differ, as a multiset — order is the platform's, never judged: `{ same, missing, extra }`,
+ * `missing` the count of `want`'s entries `got` does not list, `extra` the count `got` lists beyond them. Pure.
+ */
+export function advisoryVersionsDiff(want = [], got = []) {
+  const pool = new Map();
+  for (const v of got) pool.set(versionKey(v), (pool.get(versionKey(v)) ?? 0) + 1);
+  let missing = 0;
+  for (const v of want) {
+    const n = pool.get(versionKey(v)) ?? 0;
+    if (n > 0) pool.set(versionKey(v), n - 1);
+    else missing++;
+  }
+  const extra = [...pool.values()].reduce((a, b) => a + b, 0);
+  return { same: missing === 0 && extra === 0, missing, extra };
+}
+
+const entriesText = (n) => `${n} entr${n === 1 ? 'y' : 'ies'}`;
+const packagesText = (entries) => {
+  const n = new Set(entries.map((v) => v.package)).size;
+  return `${n} package${n === 1 ? '' : 's'}`;
+};
 /** The severities a report or a draft may carry — GitHub's own enum for both. */
 export const ADVISORY_SEVERITIES = Object.freeze(['critical', 'high', 'medium', 'low']);
 /** A weakness id as a report or a draft carries one, `CWE-` and a number. */
@@ -994,19 +1203,22 @@ export function advisoryCollaboratorLogins(json) {
 /** What a refused advisory request prints after its status (header): the reading goes to the maintainer, ⛔ never a wider token. */
 export const ADVISORY_ACCESS_REMEDY =
   'the relay token carries repository-advisories write for this stroke alone, and what the App may do to a report, ' +
-  'a draft, its collaborators and its state is decided by the first live run — put this reading to the maintainer; ⛔ never ' +
+  'a draft, its collaborators, its versions and its state is decided by the first live run — put this reading to the maintainer; ⛔ never ' +
   're-send it under a wider or un-narrowed token';
 
 /**
  * The fences on the advisory (the header's section), each judged on the executor's own `GET` of it — `ctx` is
- * `{ ghsaId, answer, from, to }`: `answer` that read's `{ status, json }`, `from` the states the action may act
- * in (`ADVISORY_OPEN_STATES` for the collaborators, `ADVISORY_TRANSITIONS[to]` for a state change) and `to` the
- * state asked for, if any. A fence whose read did not answer an advisory FAILS, naming that — an unread fact is
- * never a pass. `got` is built by `advisoryPrintable` alone: a fence sentence carries the id, the state and
- * nothing else of the answer.
+ * `{ ghsaId, answer, from, to, versions }`: `answer` that read's `{ status, json }`, `from` the states the action may
+ * act in (`ADVISORY_OPEN_STATES` for the collaborators, `ADVISORY_VERSIONS_STATES` for the versions,
+ * `ADVISORY_TRANSITIONS[to]` for a state change), `to` the state asked for, if any, and `versions` the versions row's
+ * entries, if any. A target the transitions do not name has no `from` and fails closed. A fence whose read did not
+ * answer an advisory FAILS, naming that — an unread fact is never a pass. `got` is built by `advisoryPrintable` and
+ * counts alone: a fence sentence carries the id, the state, numbers and nothing else of the answer.
  */
 const advisoryRead = (c) => c.answer?.status === 200 && advisoryShaped(c.answer.json);
-const fromOf = (c) => (Array.isArray(c.from) ? c.from : ADVISORY_OPEN_STATES);
+const fromOf = (c) => (Array.isArray(c.from) ? c.from : c.to ? [] : ADVISORY_OPEN_STATES);
+const setsVersions = (c) => Array.isArray(c.versions);
+const publishes = (c) => c.to === ADVISORY_PUBLISHED_STATE;
 export const ADVISORY_FENCES = Object.freeze([
   Object.freeze({
     fence: 'read',
@@ -1023,10 +1235,41 @@ export const ADVISORY_FENCES = Object.freeze([
   }),
   Object.freeze({
     fence: 'state',
-    wants: (c) => (c.to ? `a move to ${c.to} from ${fromOf(c).join(' or ')} alone` : `an unpublished advisory — state ${fromOf(c).join(' or ')}; never published, closed or withdrawn`),
+    wants: (c) => {
+      if (!c.to) return `an unpublished advisory — state ${fromOf(c).join(' or ')}; never published, closed or withdrawn`;
+      const to = advisoryPrintable(c.to, ADVISORY_STATE_SHAPE, 'advisory state');
+      return fromOf(c).length ? `a move to ${to} from ${fromOf(c).join(' or ')} alone` : `no move to ${to} — the relay's transitions name none, so it fails closed`;
+    },
     fails: (c) => {
       if (!advisoryRead(c)) return 'not judged, because the advisory was not read';
       return fromOf(c).includes(c.answer.json.state) ? null : `the advisory reads state ${advisoryPrintable(c.answer.json.state, ADVISORY_STATE_SHAPE, 'advisory state')}`;
+    },
+  }),
+  // The versions (header): judged for the versions row, whose PATCH replaces the whole list, and for a publish, which
+  // needs them set first; any other action passes it untouched. Counts alone — never a package name or a version.
+  Object.freeze({
+    fence: 'versions',
+    wants: (c) =>
+      setsVersions(c)
+        ? 'a list the action may replace whole — every package the advisory lists named by the action, every listed entry an npm package with a name and no vulnerable_functions, which this row does not write and the PATCH would drop'
+        : "versions set first — at least one vulnerabilities entry, every one an npm package with a vulnerable_version_range and patched_versions in the versions row's spelling",
+    fails: (c) => {
+      if (!setsVersions(c) && !publishes(c)) return null;
+      if (!advisoryRead(c)) return 'not judged, because the advisory was not read';
+      const listed = advisoryVersionsOf(c.answer.json);
+      if (setsVersions(c)) {
+        const named = new Set(c.versions.map((v) => v?.package));
+        const dropped = new Set(listed.entries.map((v) => v.package).filter((name) => !named.has(name))).size;
+        const lacks = [
+          ...(listed.foreign ? [`${entriesText(listed.foreign)} of another ecosystem or naming no package`] : []),
+          ...(listed.functions ? [`${entriesText(listed.functions)} carrying vulnerable_functions`] : []),
+          ...(dropped ? [`${dropped} listed package(s) the action does not name`] : []),
+        ];
+        return lacks.length ? `the advisory lists ${entriesText(listed.total)}: ${lacks.join('; ')}` : null;
+      }
+      if (listed.total === 0) return 'the advisory lists no vulnerabilities entry';
+      const unspelled = listed.foreign + listed.entries.filter((v) => advisoryVersionEntryFailure(v) !== null).length;
+      return unspelled ? `${unspelled} of the advisory's ${entriesText(listed.total)} carry no npm package, version range or patched versions in the versions row's spelling` : null;
     },
   }),
 ]);
@@ -1092,19 +1335,54 @@ export function advisoryLandedText({ ghsaId, state, logins = [], added = [], noo
 
 /**
  * What LANDED means for `advisory_state` (the header's section): the PATCH answered 2xx with the advisory the
- * action names, in the state it asked for. Answers `{ ok, why }`; `why` carries the id and the state alone. Pure.
+ * action names, in the state it asked for — and, for a publish, listing exactly `versions`, the entries the
+ * preflight's GET read: the advisory read back as `published`, with the versions it was sent. Answers
+ * `{ ok, why, ghsaId?, entries? }` — `ghsaId` and `entries` (the count) on a landed publish alone, for its row and
+ * its annotation; `why` carries the id, the state and counts alone. Pure.
  */
-export function advisoryStateReadBack({ ghsaId, to, answer } = {}) {
+export function advisoryStateReadBack({ ghsaId, to, answer, versions = [] } = {}) {
   if (!twoXX(answer)) return { ok: false, why: `HTTP ${answer?.status ?? 'none'}` };
   if (!advisoryShaped(answer.json)) return { ok: false, why: `HTTP ${answer.status}, but the answer is not an advisory, so its state cannot be read back` };
   if (answer.json.ghsa_id !== ghsaId) return { ok: false, why: `HTTP ${answer.status}, but the answer names ${advisoryPrintable(answer.json.ghsa_id, GHSA_ID_SHAPE, 'advisory id')}` };
   if (answer.json.state !== to) return { ok: false, why: `HTTP ${answer.status}, but the answer reads state ${advisoryPrintable(answer.json.state, ADVISORY_STATE_SHAPE, 'advisory state')}, not ${to}` };
-  return { ok: true, why: '' };
+  if (to !== ADVISORY_PUBLISHED_STATE) return { ok: true, why: '' };
+  const listed = advisoryVersionsOf(answer.json);
+  const diff = advisoryVersionsDiff(versions, listed.entries);
+  if (listed.foreign || !diff.same) {
+    return { ok: false, why: `HTTP ${answer.status}, the answer reads state ${to}, but it lists ${entriesText(listed.total)} — ${diff.missing} of the ${entriesText(versions.length)} read before the publish missing, ${diff.extra + listed.foreign} other` };
+  }
+  return { ok: true, why: '', ghsaId, entries: listed.total };
 }
 
-/** The row a landed `advisory_state` prints: the id and the move, nothing else. Pure. */
-export function advisoryStateLandedText({ ghsaId, from, to }) {
-  return `${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(from, ADVISORY_STATE_SHAPE, 'advisory state')} → ${advisoryPrintable(to, ADVISORY_STATE_SHAPE, 'advisory state')}`;
+/** The row a landed `advisory_state` prints: the id and the move, and for a publish the count of entries — nothing else. Pure. */
+export function advisoryStateLandedText({ ghsaId, from, to, entries = null }) {
+  const head = `${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(from, ADVISORY_STATE_SHAPE, 'advisory state')} → ${advisoryPrintable(to, ADVISORY_STATE_SHAPE, 'advisory state')}`;
+  return Number.isInteger(entries) ? `${head} · ${entriesText(entries)}, each with its versions` : head;
+}
+
+/**
+ * What LANDED means for `advisory_versions` (the header's section): the PATCH answered 2xx with the advisory the
+ * action names, still `draft`, listing exactly the entries sent — order is the platform's. Answers
+ * `{ ok, why, entries }`; `why` carries the id, the state and counts alone, ⛔ never a name or a version. Pure.
+ */
+export function advisoryVersionsReadBack({ ghsaId, sent = [], answer } = {}) {
+  if (!twoXX(answer)) return { ok: false, why: `HTTP ${answer?.status ?? 'none'}` };
+  if (!advisoryShaped(answer.json)) return { ok: false, why: `HTTP ${answer.status}, but the answer is not an advisory, so its versions cannot be read back` };
+  if (answer.json.ghsa_id !== ghsaId) return { ok: false, why: `HTTP ${answer.status}, but the answer names ${advisoryPrintable(answer.json.ghsa_id, GHSA_ID_SHAPE, 'advisory id')}` };
+  if (!ADVISORY_VERSIONS_STATES.includes(answer.json.state)) {
+    return { ok: false, why: `HTTP ${answer.status}, but the answer reads state ${advisoryPrintable(answer.json.state, ADVISORY_STATE_SHAPE, 'advisory state')}, not ${ADVISORY_VERSIONS_STATES.join(' or ')}` };
+  }
+  const listed = advisoryVersionsOf(answer.json);
+  const diff = advisoryVersionsDiff(sent, listed.entries);
+  if (listed.foreign || !diff.same) {
+    return { ok: false, why: `HTTP ${answer.status}, but the answer lists ${entriesText(listed.total)} — ${diff.missing} of the ${entriesText(sent.length)} sent missing or answered in another spelling, ${diff.extra + listed.foreign} other` };
+  }
+  return { ok: true, why: '', entries: listed.total };
+}
+
+/** The row a landed `advisory_versions` prints: the id, the state and counts — never a package name or a version. Pure. */
+export function advisoryVersionsLandedText({ ghsaId, state, versions = [] }) {
+  return `${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')} · versions set: ${entriesText(versions.length)} across ${packagesText(versions)}`;
 }
 
 /**
@@ -1445,6 +1723,8 @@ export const MAX_CWE_ID_CHARS = 9;
 /** Packages per draft advisory — one `vulnerabilities` entry each — and the registry's own cap on a name. */
 export const MAX_ADVISORY_PACKAGES = 10;
 export const MAX_NPM_PACKAGE_CHARS = 214;
+/** Entries per `advisory_versions` — a package may take more than one, one per release line it was fixed on. */
+export const MAX_ADVISORY_VERSION_ENTRIES = 10;
 
 /** The platform's ceilings on `client_payload`, quoted in the header. */
 export const CLIENT_PAYLOAD_MAX_TOP_LEVEL = 10;
@@ -1479,10 +1759,15 @@ export const TARGET_REPO_SHAPE = new RegExp(`^${TARGET_OWNER}/[A-Za-z0-9_.-]+$`)
  *   `x25519` one X25519 public key, base64 SPKI DER in its one spelling,
  *           judged by `advisoryReadKeyFailure` (header: "The one row that
  *           READS an advisory") — a refusal names the key, the byte count and
- *           what the value failed to be, and never echoes it.
+ *           what the value failed to be, and never echoes it;
+ *   `versions` an array of 1..`max` closed entries — exactly `package`,
+ *           `vulnerable_version_range` and `patched_versions` — each judged by
+ *           `advisoryVersionEntryFailure` (header: "The rows that write a
+ *           security advisory"), no entry twice; a refusal names the entry and
+ *           the key, ⛔ never a value.
  *
- * Two modifiers, both for the advisory rows (header: "The four rows that
- * touch a security advisory"): `shape` holds each item of a `list` to a
+ * Two modifiers, both for the advisory rows (header: "The rows that write
+ * a security advisory"): `shape` holds each item of a `list` to a
  * pattern, named by `itemWhat`; `quiet` makes an `enum` or `list` refusal
  * describe a failing value by its type and size, ⛔ never echo it — a value in
  * the wrong key may be an advisory's prose, and a refusal reaches the public
@@ -1512,7 +1797,7 @@ export const FIELDS = Object.freeze({
   inputs: Object.freeze({ kind: 'inputs' }),
   // The child of a hierarchy link, by NUMBER — the executor resolves its REST id (header: "The two rows that write an issue's hierarchy").
   sub_issue: Object.freeze({ kind: 'int' }),
-  // The advisory rows' keys (header: "The four rows that touch a security advisory"). A report's or a draft's prose is
+  // The advisory rows' keys (header: "The rows that write a security advisory"). A report's or a draft's prose is
   // `summary` and `description`, read from the event file and printed nowhere; every other key is quiet.
   summary: Object.freeze({ kind: 'str', max: MAX_ADVISORY_SUMMARY_BYTES }),
   description: Object.freeze({ kind: 'str', max: MAX_ADVISORY_DESCRIPTION_BYTES }),
@@ -1522,6 +1807,8 @@ export const FIELDS = Object.freeze({
   packages: Object.freeze({ kind: 'list', max: MAX_ADVISORY_PACKAGES, itemMax: MAX_NPM_PACKAGE_CHARS, shape: NPM_PACKAGE_SHAPE, itemWhat: 'an npm package name', quiet: true }),
   ghsa_id: Object.freeze({ kind: 'ghsa' }),
   collaborators: Object.freeze({ kind: 'list', max: MAX_LOGINS_PER_ACTION, itemMax: MAX_LOGIN_CHARS, shape: LOGIN_SHAPE, itemWhat: 'a GitHub login', quiet: true }),
+  // The versions row's entries — a package and its two version strings each, no prose; quiet like every advisory key.
+  versions: Object.freeze({ kind: 'versions', max: MAX_ADVISORY_VERSION_ENTRIES, quiet: true }),
   advisory_state: Object.freeze({ kind: 'enum', values: ADVISORY_SETTABLE_STATES, quiet: true, named: ADVISORY_REFUSED_STATES }),
   // The seat's one-time public key for ONE read (header: "The one row that READS an advisory") — its own kind.
   public_key: Object.freeze({ kind: 'x25519' }),
@@ -1539,7 +1826,7 @@ export const FIELDS = Object.freeze({
  * maintainer's ruling, comment 6104822731 (header). `actions: write` is spent
  * by the `workflow_dispatch` and `run_rerun_failed` rows alone, and minted
  * only for a stroke carrying one of them (`STROKE_SCOPED_PERMISSIONS`).
- * `repository-advisories: write` is spent by the four advisory rows that
+ * `repository-advisories: write` is spent by the five advisory rows that
  * write alone, and minted only for a stroke carrying one of them, the same
  * way; `advisory_read` spends that grant at `read` (its row's `grant`), so a
  * read's stroke is minted the lower level and never write.
@@ -1549,7 +1836,7 @@ export const PERMISSIONS = Object.freeze({ issues: 'write', 'pull-requests': 'wr
 /**
  * The permissions minted ONLY for a stroke carrying an op that spends them —
  * `actions: write`, the `workflow_dispatch` and `run_rerun_failed` rows'
- * alone, and `repository-advisories`, the five advisory rows' alone — at
+ * alone, and `repository-advisories`, the six advisory rows' alone — at
  * write, or at the row's `grant` (`advisory_read`'s `read`); each of those
  * rows travels alone in its stroke. `validate.mjs`
  * computes a stroke's permission set (`tokenPermissionsOf`) and writes each of
@@ -1670,7 +1957,7 @@ export function transferRemedy(source, target) {
  *   `alone`       (optional) true for a row whose stroke carries exactly that
  *                 one action — `workflow_dispatch`'s and `run_rerun_failed`'s,
  *                 the two rows spending `actions: write`, and
- *                 the five advisory rows', the ones spending
+ *                 the six advisory rows', the ones spending
  *                 `repository-advisories` (header above);
  *   `closedInputs` (optional) the per-workflow closed inputs —
  *                 `WORKFLOW_DISPATCH_INPUTS`, `workflow_dispatch`'s alone: the
@@ -1714,8 +2001,14 @@ export function transferRemedy(source, target) {
  *                 and the logins to add, whose fences the executor reads
  *                 before the PATCH, whose merged list is the body it sends,
  *                 and whose answer it reads back (`advisoryPreflight` /
- *                 `confirmAdvisoryCollaborators`, execute.mjs) — it carries no
- *                 `body` either; an `advisoryRead` descriptor carries the
+ *                 `confirmAdvisory`, execute.mjs) — it carries no
+ *                 `body` either; an `advisoryVersions` descriptor carries the
+ *                 advisory's id and the entries, whose fences the executor
+ *                 reads before the PATCH and whose answer it reads back — its
+ *                 `body` is the table's, the entries on the wire; an
+ *                 `advisoryState` descriptor carries the id and the state
+ *                 asked for, the executor's `{ state }` its body; an
+ *                 `advisoryRead` descriptor carries the
  *                 advisory's id and the seat's public key, whose GET the
  *                 executor fences, seals and emits as notice parts and prints
  *                 nothing else of (`advisoryReadAction`, execute.mjs); a `fromAnswer` descriptor names the
@@ -1913,11 +2206,11 @@ export const OPS = Object.freeze({
     alone: true,
     requests: (a, repo) => [{ verb: 'POST', path: `/repos/${repo}/actions/runs/${a.run_id}/rerun-failed-jobs`, rerunFailed: { runId: a.run_id } }],
   }),
-  // The four rows that touch a security advisory — see the header. Each travels alone, and its token alone carries
+  // The five rows that write a security advisory — see the header. Each travels alone, and its token alone carries
   // `repository-advisories: write`, minted for that stroke only. The sender gate is unchanged, by the maintainer's
   // ruling (the body of issue 29160): 「所有车队账户都能发这个操作」 — so any fleet account with write on the target
   // can add itself to an advisory whose id it holds; an id exposes no content, but it is in the public run log.
-  // The report: ONE POST of its body, the only advisory body a row spells — no state, so never `published`. Its
+  // The report: ONE POST of its body, which names no state, so never `published`. Its
   // prose reaches the runner through the event file and is printed nowhere; the row and the annotation name the id.
   advisory_report: Object.freeze({
     permission: 'repository-advisories',
@@ -1966,8 +2259,29 @@ export const OPS = Object.freeze({
     alone: true,
     requests: (a, repo) => [{ verb: 'PATCH', path: `/repos/${repo}/security-advisories/${a.ghsa_id}`, advisoryCollaborators: { ghsaId: a.ghsa_id, add: [...a.collaborators] } }],
   }),
-  // The state: accept (`draft`) or close (`closed`), nothing else — `published` is refused by name. The body
-  // `{ state }` is the executor's, sent only after its own GET shows a transition `ADVISORY_TRANSITIONS` allows.
+  // The versions: the id and closed entries — `package`, `vulnerable_version_range`, `patched_versions` — and no prose.
+  // The body `{ vulnerabilities }` is the table's, from the action's entries alone: per entry the npm ecosystem, the name
+  // and the two version strings, never a vulnerable function, a summary or a description. The executor sends it only
+  // after its own GET reads a draft whose whole list the action may replace (the `versions` fence), and it lands only
+  // when the answer lists exactly the entries sent.
+  advisory_versions: Object.freeze({
+    permission: 'repository-advisories',
+    required: Object.freeze(['ghsa_id', 'versions']),
+    optional: Object.freeze([]),
+    alone: true,
+    requests: (a, repo) => [
+      {
+        verb: 'PATCH',
+        path: `/repos/${repo}/security-advisories/${a.ghsa_id}`,
+        body: { vulnerabilities: advisoryVersionsOnTheWire(a.versions) },
+        advisoryVersions: { ghsaId: a.ghsa_id, versions: a.versions.map((v) => ({ ...v })) },
+      },
+    ],
+  }),
+  // The state: accept a report or reopen a closed advisory (`draft`), close (`closed`) or publish (`published`), each
+  // from the states `ADVISORY_TRANSITIONS` names and nothing else. The body `{ state }` is the executor's, sent only
+  // after its own GET shows a transition the table allows — a publish only through the `versions` fence too — and a
+  // landed publish is the one landing of this row the run annotates, naming the id: it is public once published.
   advisory_state: Object.freeze({
     permission: 'repository-advisories',
     required: Object.freeze(['ghsa_id', 'advisory_state']),
@@ -1977,7 +2291,7 @@ export const OPS = Object.freeze({
   }),
   // The one row that READS an advisory — see the header. ONE GET, nothing written; the executor seals the answer to the
   // seat's one-time key and prints nothing of it, not even the id. It spends repository-advisories at READ alone and
-  // travels alone. ⚖ The sender gate is `target-write`, the gate the four rows above keep (`ADVISORY_READ_SENDER_GATES`),
+  // travels alone. ⚖ The sender gate is `target-write`, the gate the five rows above keep (`ADVISORY_READ_SENDER_GATES`),
   // by the maintainer's ruling, verbatim: 「同意改成对仓库有写权限,立卡派发修复」 (the header says why). ⛔ The grant stays
   // `read`: a read refused under it is the maintainer's to rule on, never a raise to write.
   advisory_read: Object.freeze({

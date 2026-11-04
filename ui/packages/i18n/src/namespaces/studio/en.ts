@@ -2466,6 +2466,18 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.data.form.sourceLabel': 'Preview source',
   'engine.studio.data.form.sourceDraft': 'Draft',
   'engine.studio.data.form.sourcePublished': 'Published',
+  // objectstack#30057 — which layout the Form tab edits: the form view the
+  // app's create and edit dialogs open, or the object's field groups when it
+  // has none; and, where create and edit open different form views, which one.
+  'engine.studio.data.form.layoutSource.formView': 'Form view: {name}',
+  'engine.studio.data.form.layoutSource.formViewTitle':
+    'New and Edit in the app open this form view, so the layout here is saved to it.',
+  'engine.studio.data.form.layoutSource.fieldGroups': 'Field groups',
+  'engine.studio.data.form.layoutSource.fieldGroupsTitle':
+    'This object has no form view: New and Edit in the app lay out its fields by these groups.',
+  'engine.studio.data.form.flowLabel': 'Form opened by',
+  'engine.studio.data.form.flowCreate': 'New',
+  'engine.studio.data.form.flowEdit': 'Edit',
   'engine.studio.data.fieldProps': 'Field properties',
   'engine.studio.data.groupProps': 'Group properties',
   'engine.studio.data.fieldInspectorMissing':
@@ -3351,6 +3363,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.designer.dropHere': 'Drag fields here',
   'engine.studio.designer.relatedTable': 'Related table: {name} — this group places a related list, so it holds no fields',
   'engine.studio.designer.ungrouped': 'Ungrouped',
+  // objectstack#30057 — on a form view, the fields no section lists.
+  'engine.studio.designer.offForm': 'Not on this form',
+  'engine.studio.designer.sectionDeleteTitle': 'Delete section (its fields leave the form)',
   'engine.studio.designer.newGroup': 'New group',
   // objectui#12453 — a read-only field card's title: what a click still does.
   'engine.studio.designer.fieldTitleReadOnly': 'Click a field to view its properties',

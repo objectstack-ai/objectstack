@@ -96,6 +96,7 @@ import { PACKAGE_LIST_TOAST_ID, PackageSwitcher, STUDIO_LANDING_PATH } from './P
 import {
   ContributedNavRows,
   InterfacesNavContributionsContext,
+  InterfacesNavOverrideMark,
   InterfacesRailMarksContext,
   NavTree,
   OFF_NAV_TYPES,
@@ -379,6 +380,14 @@ import { AddFieldPopover } from './AddFieldPopover.js';
 import { useDraftAutoSave, type DraftSend } from './useDraftAutoSave.js';
 import { FLOW_PRESETS, flowPresetTrigger, type FlowPreset } from './flowPresets.js';
 import { FormToolbar, ObjectFormDesigner } from './ObjectFormDesigner.js';
+import { formLayoutChoiceOf, useFormViewDraft } from './useFormViewDraft.js';
+import { formViewBodyOf, formViewSectionsOf } from './formViewSections.js';
+import {
+  resolveFormViewLayout,
+  type FormViewDefinition,
+  type ObjectDefinitionForFormView,
+  type RecordFormFlow,
+} from '../../utils/recordFormNavigation.js';
 import { isStudioHiddenSystemField } from './studioHiddenSystemField.js';
 import { ObjectGroupInspector } from './ObjectGroupInspector.js';
 import { ObjectValidationsPanel } from './ObjectValidationsPanel.js';
@@ -2068,6 +2077,20 @@ export function InterfacesPillar({
   // spinner.
   const [appStatus, setAppStatus] = React.useState<'loading' | 'ready' | 'missing'>('loading');
 
+  // objectstack#30059 (ADR-0146 D2) — on a read-only base the navigation is
+  // customized as the app's override in the base's pair: the nav editor edits
+  // the app document as on a writable package, and its first saved edit
+  // copies the whole app into the pair, declaring the override, as a view's
+  // Customize does. Unless the ensure door refuses this caller (`walled`), or
+  // the base's manifest declares no version: no override can be declared then
+  // (`basedOn`), so every save of the copy would be refused and the editor is
+  // not offered, as before.
+  // ⛔ The pair a write names is the door's answer (`pairFor`); the pair a
+  // read names is the surface's (`navPairAt`).
+  const navOverridable = readOnly && customization !== null && isStudioCustomizeType('app');
+  const navCustomizable = navOverridable && customization?.walled !== true && !!customization?.basedOn;
+  const navPairAt = navOverridable ? (customization?.pairId ?? null) : null;
+
   // objectui#11167 — a read-only answer closes nav editing. The Studio surface
   // learns the package's write state from its own request (see
   // `readOnlySettled`), and an unknown state stays ungated, so the toggle is on
@@ -2086,8 +2109,9 @@ export function InterfacesPillar({
   // declaration order, and the answer that closes editing is also the one
   // that settles a pending link, so the link applies after the close and its
   // read-only selection is not cleared by it. Both read the same `readOnly`.
+  // objectstack#30059 — unless the navigation is customized into the pair.
   React.useEffect(() => {
-    if (!readOnly) return;
+    if (!readOnly || navCustomizable) return;
     if (editNav) {
       setEditNav(false);
       setNavSel(null);
@@ -2098,7 +2122,7 @@ export function InterfacesPillar({
       // objectui#11776 — a failure of the buffer just put back is moot.
       setNavError(null);
     }
-  }, [readOnly, editNav, navDirty]);
+  }, [readOnly, navCustomizable, editNav, navDirty]);
 
   // #2272 — designer deep-link: `?sel=nav:<id>` selects the nav item with
   // that spec `id` and switches the pillar into nav editing. The id is the
@@ -2166,6 +2190,7 @@ export function InterfacesPillar({
   const {
     save: saveNavDraft,
     recordRead: recordNavRead,
+    forget: forgetNavVersion,
     dialog: navConflictDialog,
   } = useDraftSaveGuard(client, reloadNavDraft);
   // The app load also re-reads after every draft save in the package (the
@@ -2174,6 +2199,10 @@ export function InterfacesPillar({
   // any other install forgets it. Holds the `publishNonce` the save landed
   // under: a publish in between dropped the draft, version and all.
   const navEchoRef = React.useRef<number | null>(null);
+  // objectstack#30059 — the package the nav buffer's draft read was asked at:
+  // the address its pin describes. A first save into a pair the buffer was not
+  // read at pins no draft there (`doNavSave`).
+  const navReadAtRef = React.useRef<string | null>(null);
   // objectui#7255 — the copilot dock shares this document, so a turn that
   // staged/published metadata converges the rail here instead of waiting for a
   // page reload. HELD while the nav editor has unsaved (or in-flight) edits:
@@ -2348,7 +2377,9 @@ export function InterfacesPillar({
   const [error, setError] = React.useState<StudioRefusal | null>(null);
   // Objects in THIS package (published ∪ draft) — the nav item inspector's
   // object picker, so nav can be wired to sibling objects before publishing.
-  const [pkgObjects, setPkgObjects] = React.useState<Array<{ name: string; label: string; icon?: string }>>([]);
+  const [pkgObjects, setPkgObjects] = React.useState<Array<{ name: string; label: string; icon?: string; pair?: true }>>(
+    [],
+  );
   const objectIconMap = React.useMemo(
     () => Object.fromEntries(pkgObjects.map((o) => [o.name, o.icon])),
     [pkgObjects],
@@ -2367,27 +2398,40 @@ export function InterfacesPillar({
     [draftOnlyObjects, publishNonce],
   );
 
+  // objectstack#30059 — on a read-only base, its pair's objects follow the
+  // base's, so a customized navigation can open an object the pair adds. A
+  // failed read of the pair leaves the base's.
   React.useEffect(() => {
     let cancelled = false;
     const readUnder = publishNonce;
     (async () => {
       try {
-        const [pub, drafts] = await Promise.all([
+        const noRows = () => [] as Array<Record<string, unknown>>;
+        const [pub, drafts, pairPub, pairDrafts] = await Promise.all([
           client.list('object', { packageId }) as Promise<Array<Record<string, unknown>>>,
-          client.listDrafts({ packageId, type: 'object' }).catch(() => [] as Array<Record<string, unknown>>),
+          client.listDrafts({ packageId, type: 'object' }).catch(noRows),
+          railPairId
+            ? (client.list('object', { packageId: railPairId }) as Promise<Array<Record<string, unknown>>>).catch(noRows)
+            : noRows(),
+          railPairId ? client.listDrafts({ packageId: railPairId, type: 'object' }).catch(noRows) : noRows(),
         ]);
         if (cancelled) return;
-        const byName = new Map<string, { name: string; label: string; icon?: string }>();
-        for (const raw of [...(pub || []), ...(drafts || [])]) {
+        const byName = new Map<string, { name: string; label: string; icon?: string; pair?: true }>();
+        const baseRows = [...(pub || []), ...(drafts || [])];
+        for (const raw of [...baseRows, ...(pairPub || []), ...(pairDrafts || [])]) {
           const o = raw as Record<string, unknown>;
           const name = String(o.name ?? '');
           if (!name || byName.has(name)) continue;
-          byName.set(name, { name, label: String(o.label ?? o.name ?? name), icon: o.icon ? String(o.icon) : undefined });
+          const row = { name, label: String(o.label ?? o.name ?? name), icon: o.icon ? String(o.icon) : undefined };
+          // Held by the pair only: the entry bound to it gates on it (`requiresObject`).
+          byName.set(name, baseRows.includes(raw) ? row : { ...row, pair: true });
         }
         setPkgObjects([...byName.values()]);
-        const publishedNames = new Set((pub || []).map((o) => String((o as Record<string, unknown>).name ?? '')));
+        const publishedNames = new Set(
+          [...(pub || []), ...(pairPub || [])].map((o) => String((o as Record<string, unknown>).name ?? '')),
+        );
         const draftOnly = new Set<string>();
-        for (const d of drafts || []) {
+        for (const d of [...(drafts || []), ...(pairDrafts || [])]) {
           const name = String((d as Record<string, unknown>).name ?? '');
           if (name && !publishedNames.has(name)) draftOnly.add(name);
         }
@@ -2402,7 +2446,7 @@ export function InterfacesPillar({
     return () => {
       cancelled = true;
     };
-  }, [client, packageId, publishNonce, draftNonce, metadataRefreshNonce]);
+  }, [client, packageId, railPairId, publishNonce, draftNonce, metadataRefreshNonce]);
 
   // objectstack#26889 — the package's pages, dashboards, reports and views,
   // published ∪ draft, each narrowed by its type's own list filter, as
@@ -2521,11 +2565,15 @@ export function InterfacesPillar({
         const saved = !!published?.[0]?.name;
         // objectui#11773 — the draft is read at the address the nav save writes
         // (`?package=` this package), so the version it serves pins that save.
+        // objectstack#30059 — on a read-only base, its pair, when one is
+        // listed: the pair's draft of the app is the customized navigation.
+        const navReadAt = navPairAt ?? packageId;
         const [layRaw, appDraftRead] = await Promise.all([
           // ADR-0048 — read at this package, the app's owner: a layered read
-          // naming no package is refused for a name two packages hold.
+          // naming no package is refused for a name two packages hold. On a
+          // read-only base it serves the app's declared override (ADR-0146 D8).
           saved ? client.layered<Record<string, unknown>>('app', name, { packageId }) : null,
-          readDraftForSave<Record<string, unknown>>(client, 'app', name, packageId),
+          readDraftForSave<Record<string, unknown>>(client, 'app', name, navReadAt),
         ]);
         if (cancelled) return;
         // objectstack#29148 — an app draft the server refused to read (`403`:
@@ -2577,8 +2625,9 @@ export function InterfacesPillar({
           // served, unless it is the read-back of this pillar's own nav save
           // (see `navEchoRef`), whose receipt already pins it.
           if (!isSameApp || navEchoRef.current !== publishNonce) {
-            recordNavRead('app', name, packageId, appDraftRead.pin);
+            recordNavRead('app', name, navReadAt, appDraftRead.pin);
           }
+          navReadAtRef.current = navReadAt;
           navEchoRef.current = null;
         }
         navBaselineRef.current = body;
@@ -2627,7 +2676,7 @@ export function InterfacesPillar({
     return () => {
       cancelled = true;
     };
-  }, [client, packageId, publishNonce, draftNonce, metadataRefreshNonce, navReloadNonce, recordNavRead]);
+  }, [client, packageId, navPairAt, publishNonce, draftNonce, metadataRefreshNonce, navReloadNonce, recordNavRead]);
 
   const Preview = useRegisteredMetadataPreview(current?.type ?? '');
   // Studio-canvas surface override: the SAME type can render as a different
@@ -2753,6 +2802,23 @@ export function InterfacesPillar({
   const leafInPairRef = React.useRef(leafInPair);
   React.useLayoutEffect(() => {
     leafInPairRef.current = leafInPair;
+  });
+  // objectstack#30059 — the app's override the server serves (the pair's
+  // draft, else the read's overlay): the rail's mark and its Restore read it.
+  // The navigation is editable on a read-only base once the pair holds the
+  // override, or while the version to declare is known.
+  const navServed = useServedOverride(
+    client,
+    navOverridable && appName ? { type: 'app', name: appName } : null,
+    customizeBase,
+    customizePair,
+    servedKey,
+  );
+  const navInPair = navOverridable && navServed.declaration !== null;
+  const navWritable = !readOnly || (navCustomizable && (navInPair || customizeBlock === null));
+  const navInPairRef = React.useRef(navInPair);
+  React.useLayoutEffect(() => {
+    navInPairRef.current = navInPair;
   });
   // objectui#5800 — Design ⇄ Run: one canvas, two modes (ADR-0080's pivot made
   // visible). Run mode is pure subtraction: `editing=false` drops the design
@@ -3293,8 +3359,39 @@ export function InterfacesPillar({
     const sentNav = navPayloadOf(editorNav);
     try {
       const leftOut = sentNav.length !== editorNav.length || sentNav.some((n, i) => n !== editorNav[i]);
-      const saved = { ...doc, navigation: sentNav };
-      const outcome = await saveNavDraft('app', appName, saved, { mode: 'draft', packageId, surface: 'studio' });
+      let saved: Record<string, unknown> = { ...doc, navigation: sentNav };
+      let target = packageId;
+      let entering = false;
+      // objectstack#30059 (ADR-0146 D2) — on a read-only base the app is saved
+      // into the pair the ensure door answers, whole, declaring the override
+      // at the base's version (`overrideDraftBody`). A refused door is shown
+      // as it was sent, and nothing is saved.
+      const custom = readOnly ? customizationRef.current : null;
+      if (custom) {
+        let pair: string;
+        try {
+          pair = await pairFor(custom, 'app', appName);
+        } catch (e) {
+          setNavError(plainRefusal(e));
+          return;
+        }
+        const declared = overrideDraftBody(saved, custom.base, custom.basedOn);
+        if (declared === null) {
+          setNavError({ message: tFormat('engine.studio.customize.noVersion', locale, { package: custom.baseLabel }) });
+          return;
+        }
+        // The buffer was read at another package (the base, before its pair
+        // was listed): the pair is taken to hold no draft of the app, so one
+        // there is a conflict the author is asked about, never overwritten.
+        if (navReadAtRef.current !== pair) {
+          recordNavRead('app', appName, pair, { ifNoneMatch: '*' });
+          navReadAtRef.current = pair;
+        }
+        entering = !navInPairRef.current;
+        saved = declared;
+        target = pair;
+      }
+      const outcome = await saveNavDraft('app', appName, saved, { mode: 'draft', packageId: target, surface: 'studio' });
       // objectui#11773 — the author chose the saved version; the load replaces
       // the buffer, and with it any failure this editor showed (objectui#11776).
       if (outcome === 'reloaded') {
@@ -3304,6 +3401,8 @@ export function InterfacesPillar({
       navEchoRef.current = publishNonce;
       navBaselineRef.current = saved;
       setNavHasDraft(true);
+      // The rail's mark reads the declaration the server now serves.
+      if (entering) setServedNonce((n) => n + 1);
       // objectui#11776 — the save landed: the failure an earlier one showed goes.
       setNavError(null);
       // objectui#11189, objectui#11204 — clean only if the buffer is still what
@@ -3328,7 +3427,7 @@ export function InterfacesPillar({
     } finally {
       setNavSaving(false);
     }
-  }, [saveNavDraft, appName, appDraft, appLabel, onDraftSaved, packageId, publishNonce, locale]);
+  }, [saveNavDraft, appName, appDraft, appLabel, onDraftSaved, packageId, publishNonce, locale, readOnly, pairFor, recordNavRead]);
   // objectui#5813 — nav edits auto-save while edit mode is open.
   const { flush: flushNavSave, sending: navSending } = useDraftAutoSave({
     // objectui#11232 — the app `doNavSave` addresses. The package is this
@@ -3336,7 +3435,7 @@ export function InterfacesPillar({
     target: `app:${appName ?? ''}`,
     loadedFor: appDraftFor,
     dirty: navDirty,
-    blocked: !appName || !editNav || !!navSaving || readOnly,
+    blocked: !appName || !editNav || !!navSaving || !navWritable || restoring,
     snapshot: appDraft,
     save: doNavSave,
   });
@@ -3399,7 +3498,7 @@ export function InterfacesPillar({
   // canvas edits it and the nav autosave sends it.
   const addNavEntry = React.useCallback(
     (kind: NavigationItemType) => {
-      if (readOnly || !appName) return;
+      if (!navWritable || !appName) return;
       const navigation = Array.isArray(appDraft.navigation) ? (appDraft.navigation as NavNode[]) : [];
       const taken = new Set(navigation.map((n) => (typeof n.id === 'string' ? n.id : '')).filter(Boolean));
       let id = `nav_item_${navigation.length + 1}`;
@@ -3411,7 +3510,7 @@ export function InterfacesPillar({
       setInspectorCollapsed(false);
       if (isMobile) setRailOpen(false);
     },
-    [readOnly, appName, appDraft, onNavPatch, setInspectorCollapsed, isMobile],
+    [navWritable, appName, appDraft, onNavPatch, setInspectorCollapsed, isMobile],
   );
   const doCreateSurface = React.useCallback(
     async (
@@ -3808,16 +3907,26 @@ export function InterfacesPillar({
   // this item's saves named, else the surface's; never asked of the door
   // again. The base's item reads back, and the server's refusal is shown as
   // it is sent.
-  const [restoreFor, setRestoreFor] = React.useState<NonNullable<typeof headerCustomize> | null>(null);
+  // objectstack#30059 — and the app whose navigation the rail customizes (`nav`).
+  const [restoreFor, setRestoreFor] = React.useState<{
+    type: string;
+    name: string;
+    key: string;
+    label: string;
+    listView: boolean;
+    nav?: boolean;
+    hasDraft: boolean;
+  } | null>(null);
   const restoreOriginal = React.useCallback(
-    async (item: { type: string; name: string; key: string; label: string; listView: boolean }) => {
+    async (item: { type: string; name: string; key: string; label: string; listView: boolean; nav?: boolean }) => {
       const custom = customizationRef.current;
       if (!custom) return;
       const held = pairsByItemRef.current.get(item.key);
       const pair = (held ? await held.catch(() => null) : null) ?? custom.pairId;
       if (!pair) return;
       setRestoring(true);
-      setError(null);
+      if (item.nav) setNavError(null);
+      else setError(null);
       try {
         await client.reset(item.type, item.name, { state: 'draft', packageId: pair });
         await client.reset(item.type, item.name, { packageId: pair });
@@ -3828,7 +3937,15 @@ export function InterfacesPillar({
           next.delete(item.key);
           return next;
         });
-        if (item.listView) {
+        if (item.nav) {
+          // The base's navigation reads back: editing closes, and the next
+          // read's pin replaces the deleted draft's.
+          setEditNav(false);
+          setNavSel(null);
+          navEchoRef.current = null;
+          forgetNavVersion();
+          reloadNavDraft();
+        } else if (item.listView) {
           setListViewRestoreNonce((n) => n + 1);
         } else {
           setIfDirty(false);
@@ -3839,12 +3956,13 @@ export function InterfacesPillar({
         emitMetadataRefresh();
         toast.success(tFormat('engine.studio.customize.restoreDone', locale, { item: item.label, package: custom.baseLabel }));
       } catch (e) {
-        setError(plainRefusal(e));
+        if (item.nav) setNavError(plainRefusal(e));
+        else setError(plainRefusal(e));
       } finally {
         setRestoring(false);
       }
     },
-    [client, forgetLeafVersion, reloadLeafDraft, locale],
+    [client, forgetLeafVersion, reloadLeafDraft, forgetNavVersion, reloadNavDraft, locale],
   );
   const restoreDialogEl = (
     <StudioRestoreOriginalDialog
@@ -4265,6 +4383,8 @@ export function InterfacesPillar({
           appDraft={appDraft}
           objects={pkgObjects}
           packageId={packageId}
+          // objectstack#30059 — a customized navigation can open what the pair adds.
+          pairId={railPairId}
           onNavPatch={onNavPatch}
           onClear={() => setNavSel(null)}
         />
@@ -4513,8 +4633,27 @@ export function InterfacesPillar({
     itemsRead && railMarks
       ? (packageItems?.byType[type] ?? []).filter((item) => railMarks.markOf({ type, name: item.name, addedIn: item.addedIn }) !== null)
       : [];
-  const markedCount = OFF_NAV_TYPES.reduce((n, type) => n + markedOf(type).length, 0);
+  // objectstack#30059 — the app's override is a customization too: one more,
+  // and "only customizations" keeps the (customized) navigation it is.
+  const navMarked = navServed.declaration !== null;
+  const markedCount = OFF_NAV_TYPES.reduce((n, type) => n + markedOf(type).length, navMarked ? 1 : 0);
   const listOnlyCustomized = onlyCustomized && railMarks !== null && railMarks.failed === null;
+  // objectstack#30059 — the navigation entries the "+" adds, on a read-only
+  // base into the app's override.
+  const navAddable = appStatus === 'ready' && navWritable;
+  const navCustomizeKey = appName && customizeBase ? customizeItemKey(customizeBase, 'app', appName) : '';
+  const navRestoreTarget =
+    appName && navInPair
+      ? {
+          type: 'app',
+          name: appName,
+          key: navCustomizeKey,
+          label: navItemLabelText(appLabel, locale) || appName,
+          listView: false,
+          nav: true,
+          hasDraft: navHasDraft,
+        }
+      : null;
   const offNavSections = OFF_NAV_TYPES.map((type) => ({
     type,
     items: listOnlyCustomized
@@ -4628,6 +4767,22 @@ export function InterfacesPillar({
                   package is writable, as the create flow always was. */}
               {/* objectstack#28572 — on a read-only base, the kinds that
                   create an item, which lands in the base's pair. */}
+              {/* objectstack#30059 — the app's override: its mark, whose popover offers Restore. */}
+              {navServed.declaration && (
+                <InterfacesNavOverrideMark
+                  baseLabel={customizeBaseLabel}
+                  pairId={customizePair ?? ''}
+                  basedOn={navServed.declaration.basedOn}
+                  locale={locale}
+                  onRestore={navRestoreTarget ? () => setRestoreFor(navRestoreTarget) : undefined}
+                  restoreDisabled={
+                    restoring ||
+                    !!navSaving ||
+                    navDirty ||
+                    (customizePair === null && !pairsByItemRef.current.has(navCustomizeKey))
+                  }
+                />
+              )}
               {((appStatus === 'ready' && !readOnly) || (appStatus !== 'loading' && newInPair)) && !editNav && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -4648,10 +4803,10 @@ export function InterfacesPillar({
                     {NAV_ENTRY_TYPES.map((kind) => {
                       const KindIcon = navIcon(kind);
                       const creates = kind === 'page' || kind === 'dashboard' || kind === 'report';
-                      if (readOnly && !creates) return null;
+                      if (readOnly && !creates && !navAddable) return null;
                       return (
                         <React.Fragment key={kind}>
-                          {kind === 'group' && !readOnly && <DropdownMenuSeparator />}
+                          {kind === 'group' && (!readOnly || navAddable) && <DropdownMenuSeparator />}
                           <DropdownMenuItem
                             data-testid={creates ? `if-create-${kind}` : `if-add-nav-${kind}`}
                             onSelect={() => (creates ? openCreate(kind) : addNavEntry(kind))}
@@ -4671,9 +4826,12 @@ export function InterfacesPillar({
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}
-              {appStatus === 'ready' && !readOnly && (
+              {/* objectstack#30059 — on a read-only base, Edit customizes the
+                  navigation: nothing is written until an edit is saved. */}
+              {appStatus === 'ready' && navWritable && (
                 <button
                   type="button"
+                  data-testid="if-edit-nav"
                   onClick={() => {
                     // objectui#11189 — "Done" closes through the effect beside
                     // the nav autosave, which sends an unsent edit first.
@@ -4734,7 +4892,13 @@ export function InterfacesPillar({
                 )}
               </div>
           )}
-            {listOnlyCustomized && !editNav ? null : appStatus === 'missing' && !error ? (
+          {/* objectstack#30059 — where a read-only base's navigation edit is saved. */}
+          {editNav && readOnly && (
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              <SavedToCustomizationNote baseLabel={customizeBaseLabel} testId="if-nav-saved-to" />
+            </p>
+          )}
+            {listOnlyCustomized && !editNav && !navMarked ? null : appStatus === 'missing' && !error ? (
               <div className="px-2 py-3">
                 <p className="text-[11px] text-muted-foreground">{t('engine.studio.if.noApp', locale)}</p>
                 {onCreateApp && (
@@ -5744,14 +5908,70 @@ export function DataPillar({
     [formFieldsExtKey ?? formFieldsComputed],
   );
 
+  // objectstack#30057 — the form view the app's New and Edit dialogs open for
+  // this object, asked of the app's own resolver over the shell's merged
+  // objects (`formLayoutChoiceOf` → `selectRecordFormView`). With one, the
+  // Form tab lays out THAT view's sections and saves them to its draft (on a
+  // read-only base, as a declared override in its pair, ADR-0146 D2); with
+  // none, the object's field groups, as before. Where New and Edit open
+  // different form views, the author picks which one is shown.
+  const shellMetadata = useMetadata();
+  const [formFlow, setFormFlow] = React.useState<RecordFormFlow>('create');
+  const servedFormObject = current
+    ? (findByName(shellMetadata.objects, current.name) as ObjectDefinitionForFormView | undefined)
+    : undefined;
+  const formChoice = formLayoutChoiceOf(servedFormObject, formFlow);
+  const formViewCustomization = extendsBase ? customization : null;
+  const formViewId = formChoice.viewId;
+  const formView = useFormViewDraft({
+    client,
+    packageId,
+    viewId: formViewId,
+    publishNonce,
+    customization: formViewCustomization,
+    locale,
+    onDraftSaved: () => onDraftSaved?.({ type: 'view', name: formViewId }),
+  });
+  // A read-only package edits a form view only where its pair takes the override.
+  const formViewReadOnly = !formViewId || (readOnly && (formViewCustomization === null || formViewCustomization.walled));
+  const { flush: flushFormView } = useDraftAutoSave({
+    target: formView.targetKey,
+    loadedFor: formView.loadedFor,
+    dirty: formView.dirty,
+    blocked: !formView.row || formView.saving || formViewReadOnly,
+    snapshot: formView.row,
+    save: formView.save,
+  });
+  const formViewDirty = formView.dirty;
+  // Until the buffer loads, the served view's sections, read-only.
+  const formViewLayout = formChoice.view
+    ? formView.sections && !formViewReadOnly
+      ? { sections: formView.sections, onSectionsChange: formView.setSections }
+      : { sections: formView.sections ?? formViewSectionsOf(formChoice.view as Record<string, unknown>), onSectionsChange: () => {} }
+    : null;
+
   // objectui#12515 — what the Form tab's Preview renders. The draft differs
   // from the published definition when there is no published one, a pending
   // draft, or an unsaved edit; then Preview shows the draft unless the author
   // picked Published (offered only when a published version exists).
-  const draftDiffers = !hasBaseline || hasDraft || dirty || (extOpen !== null && (extHasDraft || extDirty));
+  // objectstack#30057 — the form view's draft counts too.
+  const draftDiffers =
+    !hasBaseline ||
+    hasDraft ||
+    dirty ||
+    (extOpen !== null && (extHasDraft || extDirty)) ||
+    (formChoice.view !== null && (formView.hasDraft || formViewDirty));
   const previewShowsDraft = !hasBaseline || (draftDiffers && previewSource === 'draft');
   const previewDraft = previewShowsDraft ? shownDraft : null;
   const previewObjectName = current?.name ?? '';
+  // objectstack#30057 — Preview lays the form out as the dialog it previews
+  // does: the chosen form view's sections (its draft beside a draft preview),
+  // through the dialog's own resolver.
+  const previewFormView =
+    formChoice.view && previewShowsDraft && formView.row ? formViewBodyOf(formView.row) : formChoice.view;
+  const previewFormLayout = resolveFormViewLayout(
+    previewFormView ? { name: previewObjectName, form: previewFormView as FormViewDefinition } : null,
+  );
   const previewDataSource = React.useMemo(
     () =>
       formPreviewSource(
@@ -6037,27 +6257,34 @@ export function DataPillar({
         return true;
       }
       // objectstack#28575 — and the base object's extension buffer the same way.
-      if (saving || (dirty && objHeld === null && flushObjSave()) || (extDirty && flushExtSave())) {
+      // objectstack#30057 — and the form view's buffer.
+      if (
+        saving ||
+        (dirty && objHeld === null && flushObjSave()) ||
+        (extDirty && flushExtSave()) ||
+        (formViewDirty && flushFormView())
+      ) {
         setSwitchTo(next);
         return true;
       }
-      if (!confirmDropUnsavedWork(dirty || extDirty, locale)) return false;
+      if (!confirmDropUnsavedWork(dirty || extDirty || formViewDirty, locale)) return false;
       setSwitchTo(null);
       setCurrent(next);
       return true;
     },
-    [current, saving, dirty, extDirty, objHeld, flushObjSave, flushExtSave, locale],
+    [current, saving, dirty, extDirty, formViewDirty, objHeld, flushObjSave, flushExtSave, flushFormView, locale],
   );
   React.useEffect(() => {
-    if (!switchTo || saving) return;
+    if (!switchTo || saving || formView.saving) return;
     if (dirty && objHeld === null && flushObjSave()) return;
     if (extDirty && flushExtSave()) return;
+    if (formViewDirty && flushFormView()) return;
     setSwitchTo(null);
     // Still dirty: the save was refused (on screen) or an edit taken meanwhile
     // is held. The author stays; the next switch asks.
-    if (dirty || extDirty) return;
+    if (dirty || extDirty || formViewDirty) return;
     setCurrent(switchTo);
-  }, [switchTo, saving, dirty, extDirty, objHeld, flushObjSave, flushExtSave]);
+  }, [switchTo, saving, dirty, extDirty, formViewDirty, formView.saving, objHeld, flushObjSave, flushExtSave, flushFormView]);
   // The live request's apply (see `requestedSurface` above). objectstack#26845
   // — another object's load replaces the buffer a held edit lives in, so it
   // goes through the rail's own switch (`openObject`): an unsent edit is sent
@@ -6300,6 +6527,54 @@ export function DataPillar({
       </button>
     </div>
   );
+  // objectstack#30057 — which layout the tab shows, and, where New and Edit
+  // open different form views, the pick between them. A pending edit of the
+  // shown view is sent before the other one loads, or the author is asked.
+  const switchFormFlow = (next: RecordFormFlow) => {
+    if (next === formFlow) return;
+    if (formViewDirty && !flushFormView() && !confirmDropUnsavedWork(true, locale)) return;
+    setFormFlow(next);
+  };
+  const formLayoutSource = current ? (
+    <div className="inline-flex items-center gap-2" data-testid="form-layout-source">
+      {formChoice.flowsDiffer && (
+        <div
+          role="group"
+          aria-label={t('engine.studio.data.form.flowLabel', locale)}
+          data-testid="form-layout-flow"
+          className="inline-flex items-center gap-0.5 rounded-md bg-muted p-0.5"
+        >
+          {(['create', 'edit'] as const).map((flow) => (
+            <button
+              key={flow}
+              type="button"
+              onClick={() => switchFormFlow(flow)}
+              aria-pressed={formFlow === flow}
+              className={formModeItem(formFlow === flow)}
+            >
+              {t(flow === 'create' ? 'engine.studio.data.form.flowCreate' : 'engine.studio.data.form.flowEdit', locale)}
+            </button>
+          ))}
+        </div>
+      )}
+      <span
+        data-testid="form-layout-source-chip"
+        data-source={formChoice.view ? 'form-view' : 'field-groups'}
+        data-view={formViewId || undefined}
+        title={t(
+          formChoice.view
+            ? 'engine.studio.data.form.layoutSource.formViewTitle'
+            : 'engine.studio.data.form.layoutSource.fieldGroupsTitle',
+          locale,
+        )}
+        className="inline-flex h-6 items-center rounded bg-muted px-2 text-[11px] text-muted-foreground"
+      >
+        {formChoice.view
+          ? tFormat('engine.studio.data.form.layoutSource.formView', locale, { name: formViewId || current.name })
+          : t('engine.studio.data.form.layoutSource.fieldGroups', locale)}
+      </span>
+    </div>
+  ) : null;
   // objectstack#28575 — on a base object the Form toolbar's Add field sits
   // beside the Layout / Preview control: the designer, read-only on a base
   // object, draws none, and the field goes into the pair's extension.
@@ -6307,6 +6582,7 @@ export function DataPillar({
     extendsBase && canAddFields ? (
       <div className="inline-flex items-center gap-2">
         {formModeControl}
+        {formLayoutSource}
         <AddFieldPopover onCreate={addField} takenNames={addFieldTakenNames} extensionField align="start">
           <button
             type="button"
@@ -6318,7 +6594,10 @@ export function DataPillar({
         </AddFieldPopover>
       </div>
     ) : (
-      formModeControl
+      <div className="inline-flex items-center gap-2">
+        {formModeControl}
+        {formLayoutSource}
+      </div>
     );
 
   // The selected object's own icon (from its metadata) — prefer the loaded
@@ -6390,6 +6669,7 @@ export function DataPillar({
     <div ref={pillarRef} className="flex h-full flex-col">
       {objConflictDialog}
       {extConflictDialog}
+      {formView.conflictDialog}
       <div className="relative flex min-h-0 flex-1">
         {isMobile && railOpen && (
           <div
@@ -6799,6 +7079,16 @@ export function DataPillar({
                   Layout, `FormToolbar` in Preview), and the caption that used
                   to trail it is each item's title. */}
               {formMode === 'layout' ? (
+                <>
+                {formChoice.view && formView.failure && (
+                  <div
+                    role="alert"
+                    data-testid="form-view-failure"
+                    className="shrink-0 border-b bg-destructive/5 px-6 py-2 text-xs text-destructive"
+                  >
+                    {plainRefusal(formView.failure.error).message}
+                  </div>
+                )}
                 <ObjectFormDesigner
                   draft={shownDraft}
                   objectName={current.name}
@@ -6808,11 +7098,15 @@ export function DataPillar({
                   onSelectField={(name) => setFieldSel({ kind: 'field', id: name })}
                   selectedGroup={fieldSel?.kind === 'group' ? fieldSel.id : null}
                   onSelectGroup={(key) => setFieldSel({ kind: 'group', id: key })}
-                  onAddField={canAddFields ? addField : undefined}
-                  readOnly={readOnly}
+                  // objectstack#30057 — on a base object a new field goes into
+                  // the pair's extension, from the toolbar beside the mode control.
+                  onAddField={canAddFields && !extendsBase ? addField : undefined}
+                  readOnly={formViewLayout ? formViewReadOnly || !formView.sections : readOnly}
                   modeControl={formToolbarLeading}
                   contributedFields={contributedFields}
+                  formView={formViewLayout}
                 />
+                </>
               ) : (
               <>
               <FormToolbar
@@ -6912,6 +7206,9 @@ export function DataPillar({
                           type: 'object-form',
                           objectName: current.name,
                           mode: 'create',
+                          // objectstack#30057 — the chosen form view's layout, as the dialog lays it out.
+                          ...(previewFormLayout.sections ? { sections: previewFormLayout.sections } : {}),
+                          ...(previewFormLayout.contentLayout === 'tabbed' ? { formType: 'tabbed' } : {}),
                           // Memoized above at the top of the component: this array's
                           // IDENTITY is a dependency of ObjectForm's field-generation
                           // effect, so rebuilding it inline here re-ran that effect on

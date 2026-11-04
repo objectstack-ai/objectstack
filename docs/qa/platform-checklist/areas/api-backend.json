@@ -1477,7 +1477,7 @@
       "title": "Every date-range preset resolves to its declared macro window, and a bare preset name used as a raw comparand is refused with the prescription",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1489,7 +1489,7 @@
           "an object with a date/datetime field carrying rows spread across the preset windows (today, this week, last quarter, last 90 days) so each preset has a distinguishable answer set"
         ],
         "knownGaps": [
-          "Stock seeds are unlikely to place rows in every one of the 13 windows. Presets whose window contains no seeded row prove only that the window RESOLVED, not that it selected correctly — the run must record which presets were answer-discriminating and which were merely well-formed. Seeding rows at known offsets during the run is the honest way to close this; record it if done.",
+          "Stock seeds are unlikely to place rows in every one of the 16 windows, and the three forward ones (next_month, next_quarter, next_30_days) select only future-dated rows. Presets whose window contains no seeded row prove only that the window RESOLVED, not that it selected correctly — the run must record which presets were answer-discriminating and which were merely well-formed. Seeding rows at known offsets during the run is the honest way to close this; record it if done.",
           "Presets are relative to run time, so a run near a period boundary (month/quarter/year rollover, or a run spanning midnight) can legitimately shift an answer set. Capture the run's clock alongside the results."
         ]
       },
@@ -1539,18 +1539,21 @@
         "last_week",
         "this_month",
         "last_month",
+        "next_month",
         "this_quarter",
         "last_quarter",
+        "next_quarter",
         "this_year",
         "last_year",
         "last_7_days",
         "last_30_days",
-        "last_90_days"
+        "last_90_days",
+        "next_30_days"
       ],
       "enumSource": {
         "file": "packages/spec/src/data/date-range-presets.ts",
         "export": "DATE_RANGE_PRESETS",
-        "expect": 13
+        "expect": 16
       },
       "traps": [
         "clock-skew",
@@ -1574,6 +1577,12 @@
           "date": "2026-10-02",
           "change": "split clause 3 into its two designed arms. The clause expected the preset prescription for step 5's own example, an EQUALITY (where: { created: 'today' }); the platform deliberately raises that message only in ordering positions (18.filter-preset-ordering-comparand-refused.ts) and refuses an equality on a date field at the temporal door (400 INVALID_FILTER). Measured on 17.6.0 by the release-verification run: equality → INVALID_FILTER with the temporal message, $gte → VALIDATION_FAILED with bareDateRangePresetComparandMessage, neither ever 200. Step 5 now drives both arms",
           "ref": "#21330"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-04",
+          "change": "variants widened from 13 to 16: DATE_RANGE_PRESETS gained the forward presets next_month, next_quarter and next_30_days (ruling A on the card). Their windows are [{next_month_start}, {next_month_end}], [{next_quarter_start}, {next_quarter_end}] and [{today}, {30_days_from_now}]; the bare-comparand refusal prescribes them like every other preset. A forward window needs future-dated rows to discriminate, which the knownGaps line now says",
+          "ref": "#30076"
         }
       ]
     },
@@ -3295,7 +3304,7 @@
       "title": "Error answers made honest on v18: a hook refusal on a hand-built write route answers 400 with the hook's own sentence, a crash answers a generic 500 that withholds the caught message, and a unique-constraint refusal is 409 UNIQUE_VIOLATION with details at the action door, MCP and sandboxed bodies too",
       "since": "v18",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -3310,7 +3319,7 @@
         ]
       },
       "steps": [
-        "POST a /data write route on the object whose hook refuses (POST /api/v1/data/OBJECT, or its /batch or /createMany door); read the body",
+        "POST a /data write route on the object whose hook refuses (POST /api/v1/data/OBJECT, or its /createMany door; not /batch: POST /api/v1/data/OBJECT/batch answers 200 with a per-row report, each refusal in results[i].errors[0] with its code and httpStatus, so it never answers the 400 this item reads, packages/rest/src/batch-routes.ts); read the body",
         "invoke the script action that inserts a duplicate value: POST /api/v1/actions/OBJECT/ACTION",
         "force a server fault on a storage route (e.g. a malformed adapter config on the scratch boot — QA run #24558 set storage.local_root under /dev/null through PUT /api/settings/storage) and read error.message"
       ],
@@ -3387,6 +3396,12 @@
           "date": "2026-11-02",
           "change": "acceptance[1] (clause, verify) and the automated.ref prose re-pointed to HOOK_ABORTED — stale spec from QA run #28929 (release-18.3.0-w4-c2a, at 7fa9873f), api-backend.error-sentences-and-unique-violation-wire-code acceptance[1], re-point card #28936. r5 asserted the pre-ruling shape: no `code` on the /data doors and 400 VALIDATION_ERROR (REFUSED_400) on the nested-envelope rows. #27597 gave an undeclared hook abort the ledgered ADR-0112 code HOOK_ABORTED (UNDECLARED_HOOK_REFUSAL_CODE in packages/types/src/thrown-http-error.ts, stamped by mapDataError) and #27672 carried it to the doors that resolve through resolveThrownHttpError (package publish). Re-read at base 135054ebaa: error-sentences-live.dogfood.test.ts asserts code HOOK_ABORTED on both /data doors, rest-hook-script-fault-envelope.test.ts asserts HOOK_ABORTED and no declaredCode through mapDataError, and rest-write-route-hook-refusal-sentence.ledger.test.ts answers HOOK_ABORTED_400 on every sharing-rule, suggested-binding, approval and package-publish row (no REFUSED_400 remains). Status and sentence unchanged; the clause now names the code instead of its absence, so it is narrower, not weaker. No other clause changed",
           "ref": "#28936"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-04",
+          "change": "steps[0] corrected from QA run #29890 (W5-FAIL, at 589049b0): the /batch door is dropped from the doors that answer the clause's 400. It answers 200 with a per-row report (results[i].errors[0]). Read at base f68b47ca",
+          "ref": "#29906"
         }
       ]
     }

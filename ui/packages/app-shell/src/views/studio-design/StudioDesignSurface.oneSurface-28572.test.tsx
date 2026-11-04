@@ -372,8 +372,9 @@ describe('the Interfaces rail lists a base and its pair as one list (objectstack
     renderAt(`/studio/${BASE}/interfaces`);
     await interfacesReady();
     await userEvent.click(await within(ifRail()).findByTestId('if-create-menu'));
-    // Only the kinds that create an item: a nav entry of the base takes no edit.
-    expect(screen.queryByTestId('if-add-nav-url')).toBeNull();
+    // objectstack#30059 — the "+" also adds navigation entries now (customizing
+    // the app into the pair); creating an item still links none.
+    expect(screen.getByTestId('if-add-nav-url')).toBeInTheDocument();
     await userEvent.click(await screen.findByTestId('if-create-dashboard'));
     const dialog = await screen.findByRole('dialog');
     expect(dialog).toHaveTextContent(tFormat('engine.studio.interfaces.create.descriptionInPair', 'en', { baseName: 'HotCRM' }));

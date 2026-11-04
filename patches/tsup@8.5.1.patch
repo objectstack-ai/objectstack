@@ -1,5 +1,5 @@
 diff --git a/dist/rollup.js b/dist/rollup.js
-index e128b61b9558318b9f86dc11d72c31f09a8eb7db..35f85e39c2af6c645fb2d3da115742df445d2343 100644
+index e128b61b9558318b9f86dc11d72c31f09a8eb7db..b69ec9c39d208a378cdc96b3886e4279c34b3b27 100644
 --- a/dist/rollup.js
 +++ b/dist/rollup.js
 @@ -4915,6 +4915,11 @@ var require_rollup_plugin_dts = _chunkTWFEYLU4js.__commonJS.call(void 0, {
@@ -14,3 +14,67 @@ index e128b61b9558318b9f86dc11d72c31f09a8eb7db..35f85e39c2af6c645fb2d3da115742df
        const { fileNames, options, errors } = configByPath.get(cacheKey);
        dtsFiles = fileNames.filter((name) => DTS_EXTENSIONS.test(name));
        if (errors.length) {
+@@ -6351,6 +6356,38 @@ export { ${[...exportedNames].join(", ")} };
+         return null;
+       }
+     }
++    var emittedInProgramOrder = /* @__PURE__ */ new WeakMap();
++    function emitInProgramOrder(program) {
++      // objectstack patch: one ts.Program serves every entry, so its checker
++      // creates each type once, on first use, and the declaration printer
++      // writes union members (and the object members derived from them) in
++      // type-creation order. Emitting per file in rollup's transform order --
++      // set by async module loading, different on every run -- made the
++      // published .d.ts bytes and chunk hashes differ between two builds of
++      // one source. Emitting every source file once, in the program's own
++      // (deterministic) file order, before any is handed to rollup, fixes the
++      // type-creation order. Each file is still emitted exactly once.
++      let emitted = emittedInProgramOrder.get(program);
++      if (emitted) return emitted;
++      emitted = /* @__PURE__ */ new Map();
++      emittedInProgramOrder.set(program, emitted);
++      for (const sourceFile of program.getSourceFiles()) {
++        if (sourceFile.isDeclarationFile || program.isSourceFileFromExternalLibrary(sourceFile) || !TS_EXTENSIONS.test(sourceFile.fileName)) {
++          continue;
++        }
++        let declarationText;
++        const { emitSkipped, diagnostics } = program.emit(
++          sourceFile,
++          (_, text) => {
++            declarationText = text;
++          },
++          void 0,
++          true
++        );
++        emitted.set(sourceFile.fileName, { declarationText, emitSkipped, diagnostics });
++      }
++      return emitted;
++    }
+     var plugin = (options = {}) => {
+       const transformPlugin = transform();
+       const ctx = { programs: [], resolvedOptions: resolveDefaultOptions(options) };
+@@ -6413,15 +6450,21 @@ export { ${[...exportedNames].join(", ")} };
+             watchFiles(module2);
+             const declarationId = id.replace(TS_EXTENSIONS, dts);
+             let generated;
+-            const { emitSkipped, diagnostics } = module2.program.emit(
++            // objectstack patch: read this file's declaration off the
++            // program's one ordered emit (emitInProgramOrder) instead of
++            // emitting it here, in whatever order rollup loads modules.
++            const { declarationText, emitSkipped, diagnostics } = emitInProgramOrder(module2.program).get(module2.source.fileName) || module2.program.emit(
+               module2.source,
+-              (_, declarationText) => {
+-                generated = transformPlugin.transform.call(this, declarationText, declarationId);
++              (_, text) => {
++                generated = transformPlugin.transform.call(this, text, declarationId);
+               },
+               void 0,
+               // cancellationToken
+               true
+             );
++            if (declarationText !== void 0) {
++              generated = transformPlugin.transform.call(this, declarationText, declarationId);
++            }
+             if (emitSkipped) {
+               const errors = diagnostics.filter((diag) => diag.category === ts2.DiagnosticCategory.Error);
+               if (errors.length) {
