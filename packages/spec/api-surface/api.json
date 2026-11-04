@@ -390,6 +390,7 @@
     "ExportRequestParsed (type)",
     "ExportRequestSchema (const)",
     "FIELD_SORTABLE_UNPROVISIONED_ANCHOR (const)",
+    "FIELD_UNSORTABLE_AUTHOR_DECLARED (const)",
     "FIELD_UNSORTABLE_VIRTUAL_TYPE (const)",
     "FieldError (type)",
     "FieldErrorCode (const)",
