@@ -58,3 +58,30 @@ export function emitBalancedGroup<B, M>(
   into[attach]((subQb) => emitBalancedGroup(subQb, members.slice(0, half), attach, emit));
   into[attach]((subQb) => emitBalancedGroup(subQb, members.slice(half), attach, emit));
 }
+
+/**
+ * [cloud#3485] The same regrouping, for a compiler that writes SQL TEXT rather
+ * than driving a query builder: `TursoDriver`'s remote face
+ * (`RemoteTransport`), which compiles every hosted environment's reads itself
+ * and so never passed through {@link emitBalancedGroup}. One rule, both faces:
+ * a second copy of it in that package is how the two would drift.
+ *
+ * `members` are the group's compiled members, each a self-contained boolean
+ * fragment the caller has already parenthesised; `joiner` is the operator the
+ * group's members are joined with. At most {@link FLAT_GROUP_MAX_MEMBERS}
+ * members are joined flat, byte-identical to `members.join(joiner)`; above that
+ * the two halves are joined once, each in its own parentheses, recursively.
+ *
+ * The members keep their order, so the bind values a caller collected in
+ * member order still line up with the placeholders the text holds. An empty
+ * list joins to `''`: the caller decides what an empty group means.
+ */
+export function joinBalancedGroup(members: readonly string[], joiner: ' AND ' | ' OR '): string {
+  if (members.length <= FLAT_GROUP_MAX_MEMBERS) return members.join(joiner);
+  const half = Math.ceil(members.length / 2);
+  return (
+    `(${joinBalancedGroup(members.slice(0, half), joiner)})` +
+    joiner +
+    `(${joinBalancedGroup(members.slice(half), joiner)})`
+  );
+}
