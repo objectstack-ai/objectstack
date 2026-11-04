@@ -197,11 +197,9 @@ describe('[#29894] an undeclared hook abort is HOOK_ABORTED on every data door, 
         expect(row, JSON.stringify(row)).toMatchObject({ ok: false, action: 'failed', code: 'IMPORT_ROW_FAILED' });
       });
 
-      it(`${door}: CONTROL a malformed row keeps its own code`, async () => {
+      it(`${door}: CONTROL a malformed row keeps its own cell code`, async () => {
         const [row] = await doors[door]('bra_plain', [{ name: '' }]);
-        expect(row, JSON.stringify(row)).toMatchObject({ ok: false, action: 'failed' });
-        expect(row!.code, JSON.stringify(row)).not.toBe('HOOK_ABORTED');
-        console.log(`[#29978 reading] ${door} malformed row: ${JSON.stringify(row)}`);
+        expect(row, JSON.stringify(row)).toMatchObject({ ok: false, action: 'failed', code: 'required', field: 'name' });
       });
     }
 
