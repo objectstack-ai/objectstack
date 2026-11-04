@@ -1217,11 +1217,11 @@ export function registerAuthzMiddleware(
           // apart from a missing one. A caller the read door REFUSES (the read
           // grant withheld, a capability the object requires for a read and
           // not for a write) is answered that refusal, thrown by the question
-          // itself, for every id alike: without it nothing here would stop
-          // the write from landing on a row and answering not-found for an id
-          // naming none. (The branch above needs no such step: a caller whose
-          // read is refused makes the caller-context re-read throw for every
-          // id, and the record-level 403 is one answer for all of them.)
+          // itself, for every id alike: a caller who cannot read the object
+          // writes none of its records by id. (The branch above needs no such
+          // step: a caller whose read is refused makes the caller-context
+          // re-read throw for every id, and the record-level 403 is one answer
+          // for all of them.)
           throw recordNotFoundError(opCtx.object, addressedId as string | number);
         }
       }
