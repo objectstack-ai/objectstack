@@ -1316,7 +1316,7 @@ function isFlattenedNearMissFor(diagnostic: string, roots: readonly string[]): b
  * | the same, time-relative flow sweeping the flow's own object | `evaluateCondition` throws; `time-relative-trigger.ts` launches each run with the swept row of that object as `record` (`{ record: row }`, the stored row a find returns), so the field's type is what the name holds there too (#29959) | `run-fails` |
  * | flow condition, any other flow (API, schedule, no trigger, or a sweep of another object than the one the conditions are typed against) | `evaluateCondition` throws there too, but no row of the typed object is bound (see `validate-null-guards.ts`'s ledger): the run holds what its entrance handed it — an API request body, an action's partial record, a parent's record, or nothing — so the field's type is not proven to be what the name holds | — not declared: the `type-mismatch-run-may-fail` WARNING, worded for the run (#29959) |
  * | a bare name the flow's run binds as a variable (a declared variable, a node id, a `screen` field's `name`) | the run seeds it before the flattening, which skips a bound name, or a screen's resume lands it over the flattened field: it holds the variable, not the field | — not typed as the field at all (`ExprSchemaHint.flowVariables`); `record.<name>` still is (#29959, #30025) |
- | a bare name in a flow whose bound set is not provable (`flowCelRootScope`: an open binder — `script`, `connector_action`, `wait`, `subflow`, `map` —, a screen with no input contract, an entrance whose record is not in hand) | the run can bind the name to a value no reader sees | — no declared outcome for a bare-name mismatch: the `type-mismatch-run-may-fail` WARNING (`ExprSchemaHint.bareNamesUnproven`); `record.<name>` keeps the row's outcome (#30025) |
+ | a bare name in a flow a node of which can bind names no reader sees (`flowCelRootScope` read with no entrance: an open binder — `script`, `connector_action`, `wait`, `subflow`, `map` —, a screen with no input contract) | the run can bind the name to a value no reader sees | — no declared outcome for a bare-name mismatch: the `type-mismatch-run-may-fail` WARNING (`ExprSchemaHint.bareNamesUnproven`); `record.<name>` keeps the row's outcome (#30025) |
  * | a flow node's `condition` other than the top-level start node's | inert (`flow-inert-node-condition`) | — the same warning |
  * | field `expression` (formula)           | reads null                                                   | — the warning's text is true |
  * | field `visibleWhen` / `settledWhen`, `conditionalFormatting`, field group `visibleWhen`, action `visible` / `disabled` / `pressed`, app landing `visible` | evaluated by the renderer: shows, hides or styles, never refuses a write | — |
@@ -2495,8 +2495,8 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
      * field: `variables`, the names its run binds as variables (declared
      * variables, node ids, screen fields, the engine's own), handed to the
      * shared validator as `ExprSchemaHint.flowVariables`, so a bare read of one
-     * is not typed as the field it shadows; `unproven`, the flow's bound set is
-     * not provable (`rootScope.provable` false), handed on as
+     * is not typed as the field it shadows; `unproven`, a node of the flow can
+     * bind a name no reader sees (`flowCelRootScope` with no entrance), handed on as
      * `ExprSchemaHint.bareNamesUnproven`, so a bare-name mismatch is the
      * run-may-fail warning, not the declared outcome. Absent, the call is byte
      * for byte what it was.
@@ -2837,19 +2837,23 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // instead of the field: the type check never types them as the field.
     // [#30025] A screen's declared field names too: a resume lands the
     // collected values under their plain names, over the flattened field. And
-    // where the bound set is not provable (`rootScope`: an open binder such as
-    // `script` / `connector_action` / `wait` / `subflow` / `map`, a screen with
-    // no input contract, or an entrance whose record is not in hand), a bare
-    // name is not proven to be the field at all: the type verdict stands down
-    // to the run-may-fail warning on it — the predicate the null-guard twin's
-    // `nullGuardBare` stands down on, read once here for both.
+    // where a NODE of the flow can bind a name no reader sees (an open binder
+    // such as `script` / `connector_action` / `wait` / `subflow` / `map`, or a
+    // screen with no input contract), a bare name is not proven to be the field
+    // at all: the type verdict stands down to the run-may-fail warning on it.
+    // The judge is `flowCelRootScope`'s own, read with no entrance: an entrance
+    // whose record is not in hand (and the runtime publish gate's per-write
+    // snapshot, which sees none) changes which record `record.<name>` and the
+    // bare name both read, not whether a node rebinds the bare name, so it
+    // moves neither verdict here — while the null-guard twin keeps standing
+    // its bare names down on the whole `rootScope`, as before.
     const screenFields = collectScreenFieldNames(graphs);
     const flowBare: FlowBareNames = {
       variables: [...new Set([...declaredVariables, ...screenFields, ...FLOW_ENGINE_BOUND_NAMES])],
-      unproven: !rootScope.provable,
+      unproven: !flowCelRootScope(flow, graphs, objectName, fieldIndex).provable,
     };
     const nullGuardBare = new Set<string>();
-    if (nullGuardObject && !flowBare.unproven) {
+    if (nullGuardObject && rootScope.provable) {
       for (const name of nullableIndex.get(nullGuardObject) ?? []) {
         if (!declaredVariables.has(name) && !screenFields.has(name) && !FLOW_ENGINE_BOUND_NAMES.has(name)) {
           nullGuardBare.add(name);

@@ -271,8 +271,8 @@ export interface ExprSchemaHint {
    * [#30025] `'flattened'` scope only: the flow's run can bind a name no static
    * reader sees — a node that hands out the live variable map or folds a
    * resume bag in (`script`, `connector_action`, `wait`, `subflow`, `map`, a
-   * screen with no input contract), or an entrance whose record is not in hand
-   * (`@objectstack/lint`'s `flowCelRootScope`, `provable: false`). A bare name
+   * screen with no input contract; `@objectstack/lint`'s `flowCelRootScope`
+   * over the flow's nodes, `provable: false`). A bare name
    * is then not proven to hold the field, so a bare-name `type-mismatch` takes
    * no declared {@link faultOutcome}: it is the `type-mismatch-run-may-fail`
    * warning. A `record.<name>` / `previous.<name>` read still reads the field

@@ -1225,7 +1225,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
 
       it('warns, does not refuse, a bare-name mismatch after a node that can bind any name', () => {
         for (const [flow, mid] of [
-          ['rt_script', { id: 'mid', type: 'script', config: { functionName: 'calc' } }],
+          ['rt_script', { id: 'mid', type: 'script', config: { function: 'calc' } }],
           ['rt_formscreen', { id: 'mid', type: 'screen', config: { kind: 'object-form', objectName: 'crm_opportunity' } }],
         ] as const) {
           const issues = validateStackExpressions({ objects, flows: [rtFlow(flow, mid)] });
