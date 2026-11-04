@@ -27,6 +27,6 @@ export const entry: SemanticMigration = {
   acceptanceCriteria:
     'os validate and os build report no type mismatch error on a validation rule, field requiredWhen / '
     + 'readonlyWhen, option visibleWhen or hook condition; POST /api/v1/packages/PKG/publish-drafts '
-    + 'publishes the object; a create on POST /api/v1/data/OBJECT that the rule should admit answers 200 '
+    + 'publishes the object; a create on POST /api/v1/data/OBJECT that the rule should admit answers 201 '
     + 'where it answered 400 VALIDATION_FAILED "could not be evaluated".',
 };

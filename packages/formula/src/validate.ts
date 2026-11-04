@@ -96,7 +96,9 @@ export interface ExprSchemaHint {
    * text or boolean field used with an arithmetic/ordering operator against a
    * number faults at runtime and the expression silently evaluates to `null`,
    * so it is surfaced as a NON-blocking warning. Absent ⇒ the check is skipped.
-   * Only consulted for `scope: 'record'` sites (where refs are `record.<field>`).
+   * Consulted at both scopes: `record.<field>` at a `'record'` site, the bare
+   * `<field>` and its `record.<field>` / `previous.<field>` read at a
+   * `'flattened'` one (#29959).
    */
   fieldTypes?: Readonly<Record<string, string>>;
   /**
@@ -223,23 +225,55 @@ export interface ExprSchemaHint {
    */
   optionFields?: readonly string[];
   /**
-   * [#29904] What the site's runtime does when this expression FAULTS, as
-   * declared by the caller that knows the site — the validator cannot tell a
-   * validation rule's `predicate` from a flow condition's.
+   * [#29904, #29926] What the site's runtime does when this expression FAULTS,
+   * as declared by the caller that knows the site — the validator cannot tell a
+   * validation rule's `predicate` from a flow condition's. The tokens are the
+   * null-guard verdict's `NullGuardOutcome` (`@objectstack/lint`), so one site
+   * names one outcome to both verdicts.
    *
    * `'fail-closed'`: an expression that cannot be evaluated refuses the write
-   * (or aborts the operation) it guards instead of being skipped — an object
-   * validation rule, a field `requiredWhen` / `readonlyWhen`, an option
-   * `visibleWhen` on the write path, a hook `condition`. There a
-   * `type-mismatch` (text or a boolean ordered / arithmetic'd against a
-   * number) is an ERROR worded for that outcome, the severity the
-   * nullable-comparison verdict already has at the same sites.
+   * (or aborts the operation) it guards instead of being skipped — a
+   * `severity: 'error'` object validation rule, a field `requiredWhen` /
+   * `readonlyWhen`, an option `visibleWhen` on the write path, a hook
+   * `condition`.
    *
-   * Absent: a fault reads as null (a formula field), and `type-mismatch` stays
-   * the advisory warning whose "evaluates to null" text is true there.
+   * `'run-fails'`: a record-triggered flow's start, edge or `decision` branch condition — the
+   * engine's `evaluateCondition` throws on the fault (ADR-0032 §1c), so the
+   * run fails there, while the record-change trigger isolates the write that
+   * fired it: the write lands, the flow's work is not done.
+   *
+   * `'fail-open'`: an advisory (`severity: 'warning' | 'info'`) validation
+   * rule — a rule that cannot be evaluated is skipped and logged, the write
+   * proceeds, and the rule never gives its advisory (#24782).
+   *
+   * With any of the three, a `type-mismatch` (text or a boolean ordered /
+   * arithmetic'd against a number) is an ERROR under that outcome's own code
+   * and wording — the severity the nullable-comparison verdict already has at
+   * the same sites. Absent at a `record`-scoped site: a fault reads as null (a
+   * formula field), and `type-mismatch` stays the advisory warning whose
+   * "evaluates to null" text is true there. Absent at a `'flattened'` (flow)
+   * site: `type-mismatch-run-may-fail`, a warning saying the run fails where
+   * the condition faults (#29959) — a flow condition never reads null.
    */
-  faultOutcome?: 'fail-closed';
+  faultOutcome?: ExprFaultOutcome;
+  /**
+   * [#29959] `'flattened'` scope only: the names the flow's run binds BEFORE it
+   * flattens the record's fields — its declared variables and node ids
+   * (`@objectstack/lint`'s `collectFlowVariableNames`), and the names the
+   * engine binds over the flattening. `seedRunVariables` seeds those first and
+   * the flattening skips a name already bound, so a bare read of one holds the
+   * variable, not the field: the type-soundness check does not type it as the
+   * field. `record.<name>` / `previous.<name>` still read the field and stay
+   * typed. Absent ⇒ every bare field name is typed, exactly as before this key.
+   */
+  flowVariables?: readonly string[];
 }
+
+/**
+ * [#29926] What a site's runtime does once an expression there faults — see
+ * {@link ExprSchemaHint.faultOutcome}.
+ */
+export type ExprFaultOutcome = 'fail-closed' | 'run-fails' | 'fail-open';
 
 /**
  * One refusal (in `errors[]`) or advisory (in `warnings[]`).
@@ -318,6 +352,40 @@ function toCelFieldTypes(fieldTypes: Readonly<Record<string, string>>): Record<s
 }
 
 /**
+ * [#29926] The `type-mismatch` verdict at a site that declares its fault
+ * outcome ({@link ExprSchemaHint.faultOutcome}): the code each outcome is
+ * served under, and the clause that says what the runtime really does. Keyed
+ * by the outcome, so a new outcome without its own code and wording does not
+ * compile.
+ */
+const TYPE_MISMATCH_FAULT_ARMS: {
+  readonly [O in ExprFaultOutcome]: {
+    readonly code: 'type-mismatch-fail-closed' | 'type-mismatch-run-fails' | 'type-mismatch-fail-open';
+    readonly clause: string;
+  };
+} = {
+  'fail-closed': {
+    code: 'type-mismatch-fail-closed',
+    clause:
+      'an expression that cannot be evaluated fails closed: the write (or the operation a hook guards) ' +
+      'is refused, not skipped.',
+  },
+  'run-fails': {
+    code: 'type-mismatch-run-fails',
+    clause:
+      'a flow condition that cannot be evaluated fails the run: the flow stops at this condition, the ' +
+      'write that fired it still lands, and the work the flow exists to do is not done.',
+  },
+  'fail-open': {
+    code: 'type-mismatch-fail-open',
+    clause:
+      'the rule is advisory, so a rule that cannot be evaluated is skipped, not refused: the write ' +
+      'proceeds, the rule is never applied (its advisory never fires), and the only trace is a log line ' +
+      'saying it could not be evaluated.',
+  },
+};
+
+/**
  * #1928 / #3306 — a type-soundness verdict for an expression, or `null` when
  * sound. Two categories, with different severities:
  *  - `date-arith` (**error**): arithmetic on a date field against a number
@@ -326,8 +394,14 @@ function toCelFieldTypes(fieldTypes: Readonly<Record<string, string>>): Record<s
  *  - `type-mismatch` (**warning**): a text/boolean field used with an
  *    arithmetic/ordering operator against a number — nulls unless the text value
  *    happens to be numeric, so it stays advisory. An **error** where the caller
- *    declares the site fail-closed (`faultOutcome`, #29904): there the fault is
- *    not a null, it is a refused write on every value that is not numeric text.
+ *    declares the site's fault outcome (`faultOutcome`, #29904 / #29926):
+ *    there the fault is not a null but a refused write, a failed flow run or a
+ *    rule that never applies, each under its own code
+ *    ({@link TYPE_MISMATCH_FAULT_ARMS}). In a flattened (flow) condition with
+ *    no declared outcome it is `type-mismatch-run-may-fail`, still a warning,
+ *    worded for the failed run a fault there is (#29959); a flattened
+ *    condition's `record.<field>` / `previous.<field>` read is judged as its
+ *    bare name is.
  *  - `date-text-arithmetic` / `date-duration-value` (**error**, #28944): what
  *    the Timestamp typing passes, re-checked with a date field declared as the
  *    text the runtime holds — see {@link dateTextIssue}.
@@ -339,12 +413,25 @@ function typeSoundnessIssue(
   scope: 'record' | 'flattened',
   role: 'predicate' | 'value',
   faultOutcome: ExprSchemaHint['faultOutcome'],
+  flowVariables?: readonly string[],
 ): { issue: ExprValidationError; severity: 'error' | 'warning' } | null {
   const celFieldTypes = toCelFieldTypes(fieldTypes);
-  const mismatch = firstTypeMismatch(source, celFieldTypes, scope);
-  if (!mismatch) return dateTextIssue(source, celFieldTypes, scope, role);
+  // [#29959] A bare name a flow variable holds is not the field (see
+  // `ExprSchemaHint.flowVariables`), for every bare-name verdict here.
+  const shadowed = scope === 'flattened' && flowVariables && flowVariables.length > 0
+    ? new Set(flowVariables)
+    : undefined;
+  const mismatch = firstTypeMismatch(source, celFieldTypes, scope, shadowed);
+  if (!mismatch) {
+    const bareCelTypes = shadowed
+      ? Object.fromEntries(Object.entries(celFieldTypes).filter(([name]) => !shadowed.has(name)))
+      : celFieldTypes;
+    return dateTextIssue(source, bareCelTypes, scope, role);
+  }
   const reference = mismatch.field
-    ? (scope === 'record' ? `record.${mismatch.field}` : mismatch.field)
+    ? (mismatch.root !== undefined
+      ? `${mismatch.root}.${mismatch.field}`
+      : scope === 'record' ? `record.${mismatch.field}` : mismatch.field)
     : undefined;
   const ref = reference !== undefined ? `\`${reference}\`` : null;
   if (mismatch.category === 'date-arith') {
@@ -362,37 +449,57 @@ function typeSoundnessIssue(
       ),
     };
   }
-  const heldKind = mismatch.celType === 'bool' ? 'boolean' : 'text';
+  const heldKind: 'boolean' | 'text' = mismatch.celType === 'bool' ? 'boolean' : 'text';
   const held = heldKind === 'boolean' ? 'a boolean' : 'text';
   const subject = ref ? `${ref} holds ${held}` : `${held === 'a boolean' ? 'a boolean' : 'a text'} field`;
-  if (faultOutcome === 'fail-closed') {
-    // [#29904] Measured on the evaluator: `record.name > 5` faults on `"abc"`
-    // and on null, and the ADR-0032 §1c rescue answers only numeric text
-    // (`"7"`). `size()` answers text; `double()` / `int()` validate clean but
-    // fault on text that is not a number — so the hint says so.
-    const operand = reference ?? (heldKind === 'boolean' ? 'the field' : 'the text');
-    const convert = heldKind === 'boolean'
-      ? 'Compare a boolean with `true` / `false`, or use a number field.'
-      : `Compare like with like: use a number field, compare text with text, or convert ` +
-        `explicitly — \`size(${operand})\` for its length, \`double(${operand})\` for its value ` +
-        `(which itself faults on text that is not a number).`;
+  const params = {
+    operands: mismatch.operands,
+    operator: mismatch.operator,
+    held: heldKind,
+    ...(reference !== undefined ? { reference } : {}),
+  };
+  // [#29904] Measured on the evaluator: `record.name > 5` faults on `"abc"`
+  // and on null, and the ADR-0032 §1c rescue answers only numeric text
+  // (`"7"`). `size()` answers text; `double()` / `int()` validate clean but
+  // fault on text that is not a number — so the hint says so.
+  const operand = reference ?? (heldKind === 'boolean' ? 'the field' : 'the text');
+  const convert = heldKind === 'boolean'
+    ? 'Compare a boolean with `true` / `false`, or use a number field.'
+    : `Compare like with like: use a number field, compare text with text, or convert ` +
+      `explicitly — \`size(${operand})\` for its length, \`double(${operand})\` for its value ` +
+      `(which itself faults on text that is not a number).`;
+  const faults =
+    `type mismatch \`${mismatch.operands}\` — ${subject} but is used with \`${mismatch.operator}\` ` +
+    `against a number. CEL has no such operation, so wherever the value is not numeric text ` +
+    `(an empty value included) the expression faults`;
+  if (faultOutcome !== undefined) {
+    // [#29926] One code per outcome: a code names ONE message template
+    // (`expression-refusal.ts`), and the three outcomes are three sentences.
+    const arm = TYPE_MISMATCH_FAULT_ARMS[faultOutcome];
     return {
       severity: 'error',
+      issue: refusal(arm.code, params, source, `${faults}, and here ${arm.clause} ${convert}`),
+    };
+  }
+  if (scope === 'flattened') {
+    // [#29959] A flattened condition is a flow's, and the engine's
+    // `evaluateCondition` throws on a fault (ADR-0032 §1c) on every flow: it
+    // never reads null. The caller declared no outcome because what the run
+    // binds under the name is not proven to be the field's value there — a
+    // flow whose entrance hands over an API request body, an action's partial
+    // record, a parent's record or nothing; a node's inert `condition` — so
+    // the mismatch stays a warning, worded for the run without naming the
+    // flow's kind (the engine's registration log serves it on every flow).
+    return {
+      severity: 'warning',
       issue: refusal(
-        'type-mismatch',
-        {
-          operands: mismatch.operands,
-          operator: mismatch.operator,
-          held: heldKind,
-          ...(reference !== undefined ? { reference } : {}),
-          outcome: 'fail-closed',
-        },
+        'type-mismatch-run-may-fail',
+        params,
         source,
-        `type mismatch \`${mismatch.operands}\` — ${subject} but is used with \`${mismatch.operator}\` ` +
-          `against a number. CEL has no such operation, so wherever the value is not numeric text ` +
-          `(an empty value included) the expression faults, and here an expression that cannot be ` +
-          `evaluated fails closed: the write (or the operation a hook guards) is refused, not skipped. ` +
-          convert,
+        `${faults}, and a flow condition that faults when it is evaluated fails the run: the flow stops ` +
+          `at this condition and the work it exists to do is not done (it does not read null). Whether ` +
+          `${ref ?? 'the field'} holds ${held} there depends on what the run binds, which this check cannot ` +
+          `prove here, so this is a warning, not a refusal. ${convert}`,
       ),
     };
   }
@@ -1298,7 +1405,7 @@ export function validateExpression(
       // date-field arithmetic (error). Flow variables stay `dyn` (never flagged);
       // equality/ordering of a date is runtime-safe (never flagged).
       if (schema.fieldTypes) {
-        const r = typeSoundnessIssue(source, schema.fieldTypes, 'flattened', role, schema.faultOutcome);
+        const r = typeSoundnessIssue(source, schema.fieldTypes, 'flattened', role, schema.faultOutcome, schema.flowVariables);
         if (r) (r.severity === 'error' ? errors : warnings).push(r.issue);
       }
     }

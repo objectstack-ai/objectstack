@@ -84,6 +84,7 @@ export interface RecordPageRouteHost {
     readonly routeManager: RestServer['routeManager'];
     readonly approvalsServiceProvider: ((environmentId?: string) => Promise<any | undefined>) | undefined;
     resolveProtocol: RestServer['resolveProtocol'];
+    resolveRequestEnvironmentId: RestServer['resolveRequestEnvironmentId'];
     resolveExecCtx: RestServer['resolveExecCtx'];
     enforceAuth: RestServer['enforceAuth'];
     enforceApiAccess: RestServer['enforceApiAccess'];
@@ -429,7 +430,14 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                 const answerApprovals = async () => {
                     try {
                         const provider = this.approvalsServiceProvider;
-                        const svc = provider ? await provider(environmentId).catch(() => undefined) : undefined;
+                        // [#30011] The REQUEST's environment, through the shared
+                        // resolver, as the `/approvals` door asks it — the raw
+                        // `undefined` of the unscoped mount read the host's.
+                        const svc = provider
+                            ? await this.resolveRequestEnvironmentId(environmentId, req)
+                                .then((envId) => provider(envId))
+                                .catch(() => undefined)
+                            : undefined;
                         if (!svc) return { requests: [], lock: null };
                         const rows: any[] = (await svc.listRequests({ object, recordId: id }, context ?? {})) ?? [];
                         const pending = rows.find((r) => r?.status === 'pending');

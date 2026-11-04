@@ -264,13 +264,17 @@ create/update payload.
 
 - **list_objects()** — list available objects (system \`sys_*\` objects are hidden).
 - **describe_object({ objectName })** — an object's fields and features.
-- **validate_expression({ objectName, expression, site? })** — check a CEL
+- **validate_expression({ objectName, expression, site?, severity?, triggerKind? })** — check a CEL
   expression against an object's schema *before* you author it into a formula,
   validation, or flow condition. Returns build-time errors (bare field refs,
   unknown fields/functions) and advisory warnings (text/boolean fields misused
-  in arithmetic; an error at a \`validation\` site, where it refuses the write),
-  plus the fields and stdlib functions in scope. \`site\` is
-  \`formula\` | \`validation\` | \`flow_condition\` | \`template\` (default \`formula\`).
+  in arithmetic; an error at a \`validation\` site, worded for the rule's
+  \`severity\`, and at a \`flow_condition\` of a record-triggered or
+  time-relative flow, where it fails the run; a warning on any other flow), plus the fields and
+  stdlib functions in scope. \`site\` is \`formula\` | \`validation\` |
+  \`flow_condition\` | \`template\` (default \`formula\`). Pass the rule's
+  \`severity\` or the flow's \`triggerKind\` (\`record_change\` by default) to
+  get the verdict the publish gate gives that rule or flow.
 - **query_records({ objectName, where?, fields?, limit?, offset?, orderBy? })** —
   read records. \`where\` is a field→value match, e.g. \`{ "status": "open" }\`.
   Results are page-capped; use \`limit\`/\`offset\` to page.

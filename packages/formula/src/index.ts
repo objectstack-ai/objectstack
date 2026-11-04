@@ -165,7 +165,7 @@ export type { UnknownFunctionCall } from './unknown-function';
 // ADR-0032 — shared validator + introspection (one validator for build,
 // registration, and the agent-callable validate_expression tool).
 export { validateExpression, introspectScope, expectedDialect, inferExpressionType, nearestName, CEL_STDLIB_FUNCTIONS } from './validate';
-export type { FieldRole, ExprInput, ExprSchemaHint, ExprValidationError, ExprValidationResult, InferredValueType } from './validate';
+export type { FieldRole, ExprInput, ExprSchemaHint, ExprFaultOutcome, ExprValidationError, ExprValidationResult, InferredValueType } from './validate';
 // #22727 — the declaration authoring stamps onto a formula field: its
 // `returnType`, and for a provably-money result its currency, copied from the
 // source field's own `currencyConfig`. The producer behind `returnType: 'currency'`.

@@ -128,6 +128,7 @@ import {
   STORED_METADATA_TYPE_COLUMN,
 } from '@objectstack/spec/kernel';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
+import { resolveObjectSortability } from '@objectstack/spec/api';
 // [commit 4810dd628] The repo's ONE single-record 404 (#4435/#5138/#7867). Imported from
 // `@objectstack/core` rather than re-minted here or reached via
 // `@objectstack/metadata-protocol`'s re-export: this package already declares
@@ -620,6 +621,49 @@ export interface McpStoredMetadataBodyRefusal extends Error {
 }
 
 /**
+ * [#29896] The Data API list door's fourth sort verdict, on this transport: a
+ * sort naming a field the served sortability projection calls unsortable,
+ * today a field whose author declared `sortable: false`, is refused with the
+ * same `400 INVALID_SORT` envelope (`code`, `status`, `httpStatus`, `field`,
+ * `fields`, `object`, `param`) before the engine runs the query.
+ *
+ * `query_records` here hands `orderBy` straight to `engine.find`, which judges
+ * only whether a column is stored, so without this the stdio session still
+ * sorted by a field the REST and HTTP-MCP doors refuse. Judged by the same
+ * {@link resolveObjectSortability} over the object this bridge's
+ * `describe_object` serves, never by a second reading of the key. `undefined`
+ * when the definition is unreadable (no field map, no verdict), as the
+ * ingress door returns early when it cannot resolve the field map.
+ */
+export function unofferedSortRefusal(
+  object: string,
+  def: unknown,
+  orderBy: ReadonlyArray<{ field?: unknown }> | undefined,
+): (Error & Record<string, unknown>) | undefined {
+  if (!orderBy || orderBy.length === 0 || !def || typeof def !== 'object') return undefined;
+  const projection = resolveObjectSortability(def).fields;
+  const refused = orderBy
+    .map((node) => (typeof node?.field === 'string' ? node.field : ''))
+    .filter((f) => f !== '' && !f.includes('.') && projection[f]?.sortable === false);
+  if (refused.length === 0) return undefined;
+  const first = refused[0];
+  const err = new Error(
+    `Query parameter 'orderBy' sorts by '${first}', a field on '${object}' that declares \`sortable: false\``
+      + (refused.length > 1 ? ` (also: ${refused.slice(1).join(', ')})` : '')
+      + '. It was not applied: the query was not run. The object\'s author chose not to offer a sort on this'
+      + ' field. Sort by another field, or remove `sortable: false` from the field to make it sortable.',
+  ) as Error & Record<string, unknown>;
+  err.code = 'INVALID_SORT';
+  err.status = 400;
+  err.httpStatus = 400;
+  err.field = first;
+  err.fields = refused;
+  err.object = object;
+  err.param = 'orderBy';
+  return err;
+}
+
+/**
  * The refusal for a read of a stored-metadata-body table (`sys_metadata` /
  * `sys_metadata_history`) whose call would EVALUATE the stored body column
  * rather than serve it, or `undefined` when there is none to make.
@@ -983,6 +1027,12 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // [#21207] …and the same for a stored content-hash column.
       const hashRefusal = storedMetadataHashRefusal(object, { where: opts?.where, orderBy: opts?.orderBy });
       if (hashRefusal) throw hashRefusal;
+      // [#29896] …and a sort on a field its author declared `sortable: false`,
+      // the list door's fourth sort verdict, judged by the served projection.
+      if (opts?.orderBy && opts.orderBy.length > 0) {
+        const sortRefusal = unofferedSortRefusal(object, await objectView.getObject(object), opts.orderBy);
+        if (sortRefusal) throw sortRefusal;
+      }
       // A filter or sort on an `internal: true` field is refused by the engine
       // itself (see the module header), after the refusals above, as the
       // data door orders them.

@@ -19,9 +19,10 @@
  *  - a reset that does not complete (a token that does not match) ends nothing;
  *  - with no configuration at all, the auth instance asks better-auth to end
  *    sessions on every reset door;
- *  - an explicit `revokeSessionsOnPasswordReset: false` is refused at
- *    construction and on a configuration patch, where the standing
- *    configuration keeps ruling; `true` is accepted;
+ *  - the retired `revokeSessionsOnPasswordReset` is refused at any value, with
+ *    the spec tombstone's prescription, at construction and on a
+ *    configuration patch, where the standing configuration keeps ruling; an
+ *    absent key passes;
  *  - a session a password reset ends leaves a revocation trail: on each reset
  *    door every session the account held is still a `sys_session` row
  *    afterwards, stamped `revoked_at` and `revoke_reason: password_reset`, and
@@ -35,6 +36,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { AuthManager } from './auth-manager.js';
 import { runAdminSetUserPassword, type AdminUserEndpointDeps } from './admin-user-endpoints.js';
 import { authIdentityObjects } from './manifest.js';
+import { REVOKE_SESSIONS_ON_PASSWORD_RESET_RETIRED } from '@objectstack/spec/system';
 import { assertPasswordResetEndsSessions } from './password-reset-ends-sessions.js';
 import { memoizeScrypt } from './__tests__/scrypt-memo.testkit';
 import { sqliteEnginePool } from './__tests__/sqlite-engine-pool.testkit';
@@ -51,6 +53,8 @@ const EMAIL = 'reset-ends-sessions@example.com';
 const FIRST = 'F1rst!Password-For-Reset';
 const SECOND = 'S3cond!Password-After-Reset';
 const SYS = { context: { isSystem: true } } as never;
+/** The retired configuration key, spelled once. */
+const RETIRED = 'revokeSessionsOnPasswordReset';
 
 const engines = sqliteEnginePool(async () => {
   const engine = new ObjectQL();
@@ -325,31 +329,49 @@ describe('a session a password reset ends leaves a revocation trail', () => {
   }, 60_000);
 });
 
-describe('revokeSessionsOnPasswordReset: false is refused, never silently overridden', () => {
-  it('is refused at construction', () => {
-    expect(
-      () =>
-        new AuthManager({
-          secret: SECRET,
-          baseUrl: BASE,
-          emailAndPassword: { enabled: true, revokeSessionsOnPasswordReset: false },
-        } as never),
-    ).toThrow(/revokeSessionsOnPasswordReset: false is not supported/);
+describe('the retired revokeSessionsOnPasswordReset is refused at any value, never silently ignored', () => {
+  // The manager takes its configuration unparsed, so the spec tombstone never
+  // sees a host's object: this guard answers it with the tombstone's own text.
+  const PRESCRIPTION =
+    /^\[auth\] `emailAndPassword\.revokeSessionsOnPasswordReset` was removed in @objectstack\/spec 18 \(ADR-0049 enforce-or-remove\) — .*Delete the key; nothing replaces it\.$/s;
+
+  it('the refusal is the spec tombstone\'s prescription, word for word', () => {
+    expect(() => assertPasswordResetEndsSessions({ revokeSessionsOnPasswordReset: true })).toThrow(
+      `[auth] ${REVOKE_SESSIONS_ON_PASSWORD_RESET_RETIRED}`,
+    );
   });
 
-  it('is refused on a configuration patch, and the standing configuration keeps ruling', () => {
-    const manager = new AuthManager({ secret: SECRET, baseUrl: BASE, emailAndPassword: { enabled: true, minPasswordLength: 10 } } as never);
-    expect(() =>
-      manager.applyConfigPatch({ emailAndPassword: { revokeSessionsOnPasswordReset: false, minPasswordLength: 20 } } as never),
-    ).toThrow(/revokeSessionsOnPasswordReset: false is not supported/);
-    const standing = (manager as unknown as { config: { emailAndPassword?: Record<string, unknown> } }).config.emailAndPassword;
-    expect(standing?.minPasswordLength).toBe(10);
-    expect(standing && 'revokeSessionsOnPasswordReset' in standing).toBe(false);
-  });
+  for (const value of [false, true, 'false', 0, null]) {
+    it(`is refused at construction: ${JSON.stringify(value)}`, () => {
+      expect(
+        () =>
+          new AuthManager({
+            secret: SECRET,
+            baseUrl: BASE,
+            emailAndPassword: { enabled: true, revokeSessionsOnPasswordReset: value },
+          } as never),
+      ).toThrow(PRESCRIPTION);
+    });
+  }
 
-  it('accepts true and an absent key', () => {
-    expect(() => assertPasswordResetEndsSessions({ revokeSessionsOnPasswordReset: true })).not.toThrow();
+  for (const value of [false, true]) {
+    it(`is refused on a configuration patch, and the standing configuration keeps ruling: ${value}`, () => {
+      const manager = new AuthManager({ secret: SECRET, baseUrl: BASE, emailAndPassword: { enabled: true, minPasswordLength: 10 } } as never);
+      expect(() =>
+        manager.applyConfigPatch({ emailAndPassword: { revokeSessionsOnPasswordReset: value, minPasswordLength: 20 } } as never),
+      ).toThrow(PRESCRIPTION);
+      const standing = (manager as unknown as { config: { emailAndPassword?: Record<string, unknown> } }).config.emailAndPassword;
+      expect(standing?.minPasswordLength).toBe(10);
+      expect(standing && RETIRED in standing).toBe(false);
+    });
+  }
+
+  it('CONTROL: an absent key, an undefined one and no block at all pass, and the manager is built', () => {
     expect(() => assertPasswordResetEndsSessions({})).not.toThrow();
+    expect(() => assertPasswordResetEndsSessions({ [RETIRED]: undefined })).not.toThrow();
     expect(() => assertPasswordResetEndsSessions(undefined)).not.toThrow();
+    expect(
+      () => new AuthManager({ secret: SECRET, baseUrl: BASE, emailAndPassword: { enabled: true, minPasswordLength: 10 } } as never),
+    ).not.toThrow();
   });
 });

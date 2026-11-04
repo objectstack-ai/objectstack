@@ -1430,6 +1430,7 @@ const pt = {
     owner: "Proprietário",
     relatedCardMenu: "Mais para {{title}}",
     relatedCardEnlarge: "Ampliar",
+    relatedCardAllColumns: "Todas as colunas",
     relatedCardExpand: "Expandir",
     relatedCardHide: "Ocultar",
     relatedCardNew: "Novo",

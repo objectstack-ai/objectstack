@@ -155,7 +155,7 @@ OIDC / Generic OAuth2 provider configuration for enterprise SSO
 | **maxPasswordLength** | `number` | optional | Maximum password length (default 128) |
 | **resetPasswordTokenExpiresIn** | `number` | optional | Reset-password token TTL in seconds (default 3600) (unit per better-auth `emailAndPassword.resetPasswordTokenExpiresIn`) |
 | **autoSignIn** | `boolean` | optional | Auto sign-in after sign-up (default true) |
-| **revokeSessionsOnPasswordReset** | `boolean` | optional | Revoke all other sessions on password reset |
+| **revokeSessionsOnPasswordReset** | `never` | optional | [REMOVED] `emailAndPassword.revokeSessionsOnPasswordReset` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — it could hold only one value: a completed password reset always ends every session the account holds, on every reset door, and no setting turns that off. Delete the key; nothing replaces it. |
 
 ### Nested Shape: `AuthConfig.emailVerification`
 
@@ -252,7 +252,7 @@ Email and password authentication options forwarded to better-auth
 | **maxPasswordLength** | `number` | optional | Maximum password length (default 128) |
 | **resetPasswordTokenExpiresIn** | `number` | optional | Reset-password token TTL in seconds (default 3600) (unit per better-auth `emailAndPassword.resetPasswordTokenExpiresIn`) |
 | **autoSignIn** | `boolean` | optional | Auto sign-in after sign-up (default true) |
-| **revokeSessionsOnPasswordReset** | `boolean` | optional | Revoke all other sessions on password reset |
+| **revokeSessionsOnPasswordReset** | `never` | optional | [REMOVED] `emailAndPassword.revokeSessionsOnPasswordReset` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — it could hold only one value: a completed password reset always ends every session the account holds, on every reset door, and no setting turns that off. Delete the key; nothing replaces it. |
 
 
 ---
