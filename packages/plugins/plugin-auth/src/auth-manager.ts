@@ -1606,9 +1606,10 @@ export class AuthManager {
     assertScimAdminCoherence(config.plugins);
 
     // A completed password reset ends the account's other sessions, always;
-    // an explicit `revokeSessionsOnPasswordReset: false` is refused here, at
-    // boot, rather than silently overridden (`password-reset-ends-sessions.ts`).
-    // `applyConfigPatch` re-runs it on the merged result.
+    // the retired `emailAndPassword.revokeSessionsOnPasswordReset` is refused
+    // here at any value, at boot, rather than silently ignored
+    // (`password-reset-ends-sessions.ts`). `applyConfigPatch` re-runs it on the
+    // merged result.
     assertPasswordResetEndsSessions(config.emailAndPassword);
 
     // The mobile sign-in hand-off's registered app schemes — same
@@ -2083,8 +2084,8 @@ export class AuthManager {
       assertScimAdminCoherence(next.plugins);
     }
     // Same entry validation the constructor runs, on the MERGED block: a patch
-    // cannot ask a completed password reset to keep the account's other
-    // sessions. Refused loudly and the standing config keeps ruling.
+    // cannot write the retired `revokeSessionsOnPasswordReset`, at any value.
+    // Refused loudly and the standing config keeps ruling.
     if ('emailAndPassword' in patch) {
       assertPasswordResetEndsSessions(next.emailAndPassword);
     }

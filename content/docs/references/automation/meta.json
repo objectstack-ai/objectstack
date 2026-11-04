@@ -14,6 +14,7 @@
     "approval",
     "---More---",
     "api-trigger-secret-ref",
+    "api-trigger-signature",
     "assignment-rule",
     "builtin-node-config",
     "flow-function",

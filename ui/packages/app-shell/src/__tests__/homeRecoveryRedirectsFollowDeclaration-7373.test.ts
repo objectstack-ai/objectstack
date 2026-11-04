@@ -110,6 +110,12 @@ function stripComments(src: string): string {
  */
 const RECOVERY_SITES: ReadonlyArray<{
   file: string;
+  /**
+   * Modules cut out of `file` by a move-only split: still the same site's text,
+   * so the scan reads them with it (objectstack#29988; a reader keeps a moved
+   * body in its reading list, ruling 6597555122 item 3).
+   */
+  alsoReads?: readonly string[];
   site: string;
   expression: RegExp;
 }> = [
@@ -130,6 +136,10 @@ const RECOVERY_SITES: ReadonlyArray<{
   },
   {
     file: 'packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx',
+    alsoReads: [
+      'packages/app-shell/src/views/studio-design/StudioNavItemInspector.tsx',
+      'packages/app-shell/src/views/studio-design/PackageSwitcher.tsx',
+    ],
     site: 'Studio: deleted-package eviction + header Home',
     expression: /const homePath = useHomePath\(\)/,
   },
@@ -151,16 +161,20 @@ const RECOVERY_SITES: ReadonlyArray<{
   },
 ];
 
+/** A site's text: its file, then every module split out of it. */
+const readSite = ({ file, alsoReads = [] }: { file: string; alsoReads?: readonly string[] }) =>
+  [file, ...alsoReads].map(read).join('\n');
+
 /** `'/home'`, `"/home"` or `` `/home` `` — the literal in any quoting. */
 const LAUNCHER_LITERAL = /['"`]\/home['"`]/;
 
 describe('objectui#7373 — recovery redirects follow the declared landing', () => {
-  it.each(RECOVERY_SITES)('$site does not hard-code the launcher path', ({ file }) => {
-    expect(stripComments(read(file))).not.toMatch(LAUNCHER_LITERAL);
+  it.each(RECOVERY_SITES)('$site does not hard-code the launcher path', (site) => {
+    expect(stripComments(readSite(site))).not.toMatch(LAUNCHER_LITERAL);
   });
 
-  it.each(RECOVERY_SITES)('$site resolves its target through the policy', ({ file, expression }) => {
-    expect(stripComments(read(file))).toMatch(expression);
+  it.each(RECOVERY_SITES)('$site resolves its target through the policy', (site) => {
+    expect(stripComments(readSite(site))).toMatch(site.expression);
   });
 
   it('the scan can still fail — the literal is what it is looking for', () => {

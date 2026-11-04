@@ -289,9 +289,11 @@ import type * as M197 from './api/push-delivery.zod.js';
 import type * as M198 from './system/push-device.zod.js';
 // The server -> push relay wire shape -- new module, next free index.
 import type * as M199 from './api/push-relay.zod.js';
+// A third-party sender's signature scheme on an api hook (`config.signature`) -- new module, next free index.
+import type * as M200 from './automation/api-trigger-signature.zod.js';
 
 // ---------------------------------------------------------------------------
-// 828 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 831 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -747,6 +749,11 @@ export type Iso_api_websocket__WebSocketPresenceStatus = Assert<Eq< z.input< typ
 
 // automation/api-trigger-secret-ref.zod.ts
 export type Iso_automation_apiTriggerSecretRef__ApiTriggerSecretRefSchema = Assert<Eq< z.input< typeof M191.ApiTriggerSecretRefSchema >, z.infer< typeof M191.ApiTriggerSecretRefSchema > >>;
+
+// automation/api-trigger-signature.zod.ts
+export type Iso_automation_apiTriggerSignature__ApiTriggerBodySignatureSchema = Assert<Eq< z.input< typeof M200.ApiTriggerBodySignatureSchema >, z.infer< typeof M200.ApiTriggerBodySignatureSchema > >>;
+export type Iso_automation_apiTriggerSignature__ApiTriggerSignatureSchema = Assert<Eq< z.input< typeof M200.ApiTriggerSignatureSchema >, z.infer< typeof M200.ApiTriggerSignatureSchema > >>;
+export type Iso_automation_apiTriggerSignature__ApiTriggerTimestampedSignatureSchema = Assert<Eq< z.input< typeof M200.ApiTriggerTimestampedSignatureSchema >, z.infer< typeof M200.ApiTriggerTimestampedSignatureSchema > >>;
 
 // automation/approval.zod.ts
 export type Iso_automation_approval__ApprovalDecision = Assert<Eq< z.input< typeof M37.ApprovalDecision >, z.infer< typeof M37.ApprovalDecision > >>;
@@ -1776,7 +1783,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 828 isomorphic pins', () => {
+  it('still declares all 831 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2790,7 +2797,14 @@ describe('ADR-0122 type-alias convention', () => {
     // Its error schemas extend the house error envelope, whose `retryable`
     // defaults, so they carry `PushRelayErrorParsed` and
     // `PushRelayErrorResponseParsed` instead of a pin.
-    expect(pins).toHaveLength(828);
+    // 828 -> 831 is `ApiTriggerSignatureSchema`
+    // (`automation/api-trigger-signature.zod.ts`), the scheme a third-party
+    // sender signs an `api` hook's posts with, and its two arms
+    // (`ApiTriggerBodySignatureSchema`, `ApiTriggerTimestampedSignatureSchema`):
+    // a discriminated union of two strict objects of enums, literals and regex
+    // strings, no default and no transform
+    // (Iso_automation_apiTriggerSignature__*). +3 added.
+    expect(pins).toHaveLength(831);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either
