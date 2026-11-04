@@ -238,3 +238,145 @@ describe('the enlarged related tab on a desktop is the child object list face (o
     expect(h.props).toEqual({});
   });
 });
+
+/**
+ * objectstack#30033 — with no columns declared for the relation, the columns
+ * come from the child's `highlightFields`, which by design never list the
+ * record's title. The record's name (ADR-0079, `leadWithNameField` in
+ * `@object-ui/core`) leads them, listed once; the grid auto-links its first
+ * column to the record (`the auto-linked primary field gets the same anchor`
+ * in `plugin-grid`'s `ObjectGrid.linkCellAnchor.test.tsx`). Authored columns
+ * are left as authored.
+ */
+describe('the related table leads with the record name when no columns are declared (objectstack#30033)', () => {
+  const NAMED_FIELDS = {
+    name: { type: 'text', label: 'Name' },
+    account: { type: 'lookup', reference: 'account', label: 'Account' },
+    amount: { type: 'currency', label: 'Amount' },
+    close_date: { type: 'date', label: 'Close date' },
+    probability: { type: 'percent', label: 'Probability' },
+  };
+  const NAMED_ROWS = [
+    { id: 'o1', name: 'Acme Renewal', account: 'A-1', amount: 120000, close_date: '2026-12-01', probability: 60 },
+    { id: 'o2', name: 'Acme Expansion', account: 'A-1', amount: 75000, close_date: '2026-12-15', probability: 40 },
+  ];
+
+  function renderDerived({
+    objectSchema,
+    rows = NAMED_ROWS,
+    columns,
+    enlarged = true,
+  }: {
+    objectSchema: Record<string, unknown>;
+    rows?: Record<string, unknown>[];
+    columns?: any[];
+    enlarged?: boolean;
+  }) {
+    const dataSource = {
+      find: vi.fn(async () => ({ data: rows, total: rows.length })),
+      getObjectSchema: vi.fn(async () => ({ name: 'opportunity', ...objectSchema })),
+    };
+    render(
+      <FilterScopeProvider currentUserId="u-1">
+        <RelatedListEnlargedContext.Provider value={enlarged}>
+          <RelatedList
+            title="Opportunities"
+            type="table"
+            api="opportunity"
+            objectName="opportunity"
+            referenceField="account"
+            parentId="A-1"
+            pageSize={25}
+            {...(columns ? { columns } : {})}
+            dataSource={dataSource as never}
+          />
+        </RelatedListEnlargedContext.Provider>
+      </FilterScopeProvider>,
+    );
+  }
+
+  const drawnKeys = (cols: any[]) => cols.map((c: any) => (typeof c === 'string' ? c : c.accessorKey));
+
+  it('highlightFields that omit the name: the enlarged grid’s first column is the name, the highlights follow', async () => {
+    renderDerived({
+      objectSchema: { fields: NAMED_FIELDS, highlightFields: ['account', 'amount', 'close_date', 'probability'] },
+    });
+    await waitFor(() => expect(h.schema?.type).toBe('object-grid'));
+    await waitFor(() => expect(h.schema.data.items).toHaveLength(2));
+    // `account` is the key back to the parent record, so it is dropped as before.
+    expect(h.schema.columns).toEqual(['name', 'amount', 'close_date', 'probability']);
+  });
+
+  it('a declared nameField that is not name-ish leads the same way', async () => {
+    renderDerived({
+      objectSchema: {
+        nameField: 'deal_title',
+        fields: { amount: NAMED_FIELDS.amount, deal_title: { type: 'text', label: 'Deal' } },
+        highlightFields: ['amount'],
+      },
+      rows: [{ id: 'o1', deal_title: 'Acme Renewal', amount: 120000 }],
+    });
+    await waitFor(() => expect(h.schema?.data?.items).toHaveLength(1));
+    expect(h.schema.columns).toEqual(['deal_title', 'amount']);
+  });
+
+  it('the name listed in highlightFields too shows once, first', async () => {
+    renderDerived({
+      objectSchema: { fields: NAMED_FIELDS, highlightFields: ['amount', 'close_date', 'name'] },
+    });
+    await waitFor(() => expect(h.schema?.data?.items).toHaveLength(2));
+    expect(h.schema.columns).toEqual(['name', 'amount', 'close_date']);
+  });
+
+  it('CONTROL: columns declared on the relation are drawn exactly as declared, with no name added', async () => {
+    renderDerived({
+      objectSchema: { fields: NAMED_FIELDS, highlightFields: ['amount', 'close_date'] },
+      columns: [{ field: 'amount', label: 'Amount' }, { field: 'probability', label: 'Probability' }],
+    });
+    await waitFor(() => expect(h.schema?.data?.items).toHaveLength(2));
+    expect(h.schema.columns).toEqual(['amount', 'probability']);
+  });
+
+  it('the related table that is not enlarged reads the same column set: the name leads it too', async () => {
+    renderDerived({
+      objectSchema: { fields: NAMED_FIELDS, highlightFields: ['account', 'amount', 'close_date'] },
+      enlarged: false,
+    });
+    await waitFor(() => expect(h.schema?.type).toBe('data-table'));
+    await waitFor(() => expect(h.schema.data).toHaveLength(2));
+    expect(drawnKeys(h.schema.columns)).toEqual(['name', 'amount', 'close_date']);
+  });
+
+  it('no highlightFields: a declared name leads the field walk too', async () => {
+    renderDerived({
+      objectSchema: {
+        nameField: 'deal_title',
+        fields: {
+          status: { type: 'select', label: 'Status', options: [{ value: 'open', label: 'Open' }] },
+          amount: NAMED_FIELDS.amount,
+          deal_title: { type: 'text', label: 'Deal' },
+        },
+      },
+      rows: [{ id: 'o1', status: 'open', amount: 120000, deal_title: 'Acme Renewal' }],
+    });
+    await waitFor(() => expect(h.schema?.data?.items).toHaveLength(1));
+    expect(h.schema.columns[0]).toBe('deal_title');
+    expect(h.schema.columns.filter((c: string) => c === 'deal_title')).toHaveLength(1);
+  });
+
+  it('a titleFormat object with no nameField: the column is the field the platform derives, not the formatted title', async () => {
+    // `leadWithNameField` answers in field space: `titleFormat` is a
+    // render-only template with no column behind it (ADR-0079), so the lead is
+    // the type-aware derivation, here the first title-eligible field.
+    renderDerived({
+      objectSchema: {
+        titleFormat: '{code} · {amount}',
+        fields: { code: { type: 'text', label: 'Code' }, amount: NAMED_FIELDS.amount },
+        highlightFields: ['amount'],
+      },
+      rows: [{ id: 'o1', code: 'Q-7', amount: 120000 }],
+    });
+    await waitFor(() => expect(h.schema?.data?.items).toHaveLength(1));
+    expect(h.schema.columns).toEqual(['code', 'amount']);
+  });
+});
