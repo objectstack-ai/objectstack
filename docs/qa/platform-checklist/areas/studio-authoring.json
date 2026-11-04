@@ -3439,7 +3439,7 @@
       "title": "A package dashboard renders every widget type the spec declares — those Studio offers and those written through the API — and every global-filter type renders its control and re-scopes the widgets bound to it; Studio's two widget-type entries offer the same set",
       "since": "v18",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3450,7 +3450,7 @@
         "requires": [
           "a fresh boot of the showcase on its own port and DB (dogfood §0) with OS_PORT exported, signed in as the seeded admin, and a console built from this tree with `pnpm console:build` — the root `pnpm build` does not refresh packages/console/dist (QA run #26715 needed the console build on every card)",
           "a writable package with an app whose menu names one dashboard",
-          "a dataset over a package object, with at least one dimension and one measure, written with PUT /api/v1/meta/dataset/NAME?mode=draft&package=PKG and published — Studio has no dataset editor (expected: the Interfaces card read it no-entry), so reports and widgets bind to an API-written dataset. Give it several dimensions (a status-like category and a date) and a few measures over seeded multi-bucket rows — examples/app-showcase/src/ui/dashboards/chart-gallery.dashboard.ts is the model for each type's bindings. Sankey takes no source/target pair: it flows from one root node (the total) to each category of its first dimension; with a second dimension (two or more pivoted series) there is no root: each flow runs from a first-dimension category to a second-dimension value, two columns of nodes (ui/packages/plugin-charts/src/AdvancedChartImpl.tsx, the sankey arm and buildSankeyCellFlows, #27460; the gallery's sankey_flow binds dimensions ['status'])"
+          "a dataset over a package object, with at least one dimension and one measure, written with PUT /api/v1/meta/dataset/NAME?mode=draft&package=PKG and published — the fixture stays API-written for a known shape, though Studio can now create a dataset (the widget inspector's dataset picker and the New report dialog each carry a 'New dataset' button, ui/packages/app-shell/src/views/studio-design/datasetCreate.tsx DatasetCreateEntry, engine.studio.interfaces.newDataset.*), so reports and widgets bind to an API-written dataset. Give it several dimensions (a status-like category and a date) and a few measures over seeded multi-bucket rows — examples/app-showcase/src/ui/dashboards/chart-gallery.dashboard.ts is the model for each type's bindings. Sankey takes no source/target pair: it flows from one root node (the total) to each category of its first dimension; with a second dimension (two or more pivoted series) there is no root: each flow runs from a first-dimension category to a second-dimension value, two columns of nodes (ui/packages/plugin-charts/src/AdvancedChartImpl.tsx, the sankey arm and buildSankeyCellFlows, #27460; the gallery's sankey_flow binds dimensions ['status'])"
         ]
       },
       "steps": [
@@ -3553,6 +3553,12 @@
           "date": "2026-11-04",
           "change": "steps[5], acceptance[4].verify and fixtures.requires[2] corrected from QA run #29890 (W5-FAIL, at 589049b0): the wave-4 shape (Field filled, Options From begun; #29006, fixed by #29300) is its own case (d), and a two-dimension sankey draws no root node: its flows run from the first dimension's categories to the second's values (buildSankeyCellFlows). Read at base f68b47ca",
           "ref": "#29906"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-04",
+          "change": "fixtures.requires[2]: the 'Studio has no dataset editor' parenthetical is stale, as #29906 found for interfaces-create-dialogs and report-authoring-options. Studio's New dataset entry (datasetCreate.tsx DatasetCreateEntry, objectstack#27518) sits beside the widget inspector's dataset picker (DashboardWidgetInspector.tsx) and the New report dialog's. The fixture stays API-written for a known shape. No clause changed. Read at base 232d3bb5ef",
+          "ref": "#30129"
         }
       ]
     },
