@@ -126,6 +126,18 @@ output, describe marks the old key deprecated."*
 
 ### D3 — `titleFormat` is retired in favour of `nameField`
 
+> **Amendment (2026-11-04, #29506).** The diagnostic is no longer advisory.
+> Under the ruling of record on #29007 (6574393684, letter B), PR #29499
+> (`3557366c02`) made `title-format-retired` an **error**: the metadata save
+> gate (`422 INVALID_METADATA` on an active save, a draft promotion and a
+> restore) and `os validate` / `os build` / `os lint` refuse an object that
+> declares `titleFormat`, and the fix is `nameField`. The key is refused, not
+> removed: the schema still parses it, so a stored object that carries it keeps
+> loading and reading until its next save. The decision below stands; only the
+> "advisory, not an error" sentence and its citation describe the code before
+> #29499, and D8's "never errors" no longer covers this rule
+> (`packages/lint/src/validate-record-title.ts`, `validateTitleFormatRetired`).
+
 `titleFormat` is deprecated and lint-warned, and an explicit `nameField` takes
 precedence over it. It **still parses** — existing metadata keeps loading — so
 the diagnostic is advisory, not an error:
