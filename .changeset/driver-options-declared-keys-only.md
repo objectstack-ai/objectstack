@@ -10,7 +10,7 @@ Metadata-protocol: none
 The engine → driver hop is a closed contract, as the engine's own option bags are: every driver call the engine makes is handed the keys `DriverOptionsSchema` declares and no other key.
 
 - **Which calls.** `find`, `findOne`, `count`, `aggregate`, `insert`, `update` and `delete` (by id and multi-row), the reads and writes those verbs make along the way, and the raw `execute` door.
-- **What arrives, unchanged.** `transaction`, `tenantId`, `tenantIds`, `timezone`, `preserveAudit` and `bypassTenantAudit` reach the driver exactly as before, and a caller's explicit value still wins. `timeoutMs`, `skipCache` and `traceContext` pass when a caller sets them. The retired `timeout` tombstone is not handed on.
+- **What arrives, unchanged.** `transaction`, `tenantId`, `tenantIds`, `timezone`, `preserveAudit` and `bypassTenantAudit` reach the driver exactly as before, and a caller's explicit value still wins. The schema's other declared keys pass when a caller sets them. The retired `timeout` tombstone is not handed on.
 - **What stays with the engine.** The rest of a caller's engine option bag (the query keys, the write-observability callbacks and the other `Engine*Options` entries) is read by the engine and is no longer copied onto a driver's options. A driver reads the query from its `query` argument, as the driver contract declares.
 - **Hooks are unchanged.** An `after*` hook still reads `input.options` as the caller's bag with the driver options merged on.
 - **Who moves.** A driver that read a key `DriverOptionsSchema` does not declare off its options argument: read the query from the `query` argument, or have the key declared on `DriverOptionsSchema` first. No driver in this repository reads one.
