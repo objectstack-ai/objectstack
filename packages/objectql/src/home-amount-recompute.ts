@@ -99,6 +99,7 @@ import {
   type HomeAmountServing,
 } from './home-amount-projection.js';
 import { isRecordCurrencyBlank } from './validation/record-currency-code.js';
+import { isFederatedUnprovisionedInjectedColumn } from './federated-object.js';
 import { VALIDATION_FAILED_CODE } from './validation/record-validator.js';
 
 /** Why a stored amount was listed and not written. */
@@ -342,7 +343,8 @@ export async function recomputeHomeAmounts(
   const plan = resolvePlan(engine, options);
   const since = options.since ?? null;
   const maxListed = options.maxListed ?? DEFAULT_MAX_LISTED;
-  const declared = engine.getObject(object)?.fields ?? {};
+  const schema = engine.getObject(object);
+  const declared = schema?.fields ?? {};
 
   const report: HomeAmountRecomputeReport = {
     object,
@@ -377,7 +379,12 @@ export async function recomputeHomeAmounts(
   const organizations = new Map<string, HomeAmountRecomputeOrganization>();
 
   const columns = new Set<string>(['id']);
-  for (const name of ['organization_id', 'updated_at']) if (name in declared) columns.add(name);
+  // The organization a write converts the row under, and the stamp the apply keeps. A federated
+  // object's injected columns are not provisioned, so neither is read there: its rows convert
+  // under the caller's organization, as its writes do, and the apply sends no stamp.
+  for (const name of ['organization_id', 'updated_at']) {
+    if (name in declared && !isFederatedUnprovisionedInjectedColumn(schema, name)) columns.add(name);
+  }
   for (const e of plan) for (const name of [e.amountField, e.codeField, e.rateDateField, e.homeField, e.rateField]) columns.add(name);
 
   // Seek by `id`: this run's claim is about EVERY stored row, which an offset walk cannot promise.

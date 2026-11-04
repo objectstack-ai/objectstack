@@ -26,6 +26,7 @@ import { probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
 import { isExitSignal } from '../../utils/format.js';
 import { recomputeHomeAmounts } from '@objectstack/objectql';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 vi.mock('../../utils/schema-migrate.js', () => ({ bootSchemaStack: vi.fn() }));
 vi.mock('../../utils/migrate-occupancy-gate.js', () => ({
@@ -49,7 +50,10 @@ const RUN_TIMEOUT = 60_000;
 const engine = {
   getObject: () => ({ fields: {} }),
   find: async () => [],
-  update: async () => ({}),
+  update: async (data: Record<string, unknown>, options?: Record<string, unknown>) => {
+    assertEngineUpdateDispatch(data, options);
+    return {};
+  },
   insert: async () => ({}),
   homeAmountReadsFor: () => ({}),
   getConfigs: () => ({ invoice: {}, sys_user: {} }),
