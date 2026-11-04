@@ -21,7 +21,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T07:07:37Z",
-  "updated_at": "2026-11-03T09:53:49Z",
+  "updated_at": "2026-11-04T06:26:06Z",
   "closed_at": "2026-11-03T09:52:19Z",
   "closed_by": {
     "login": "objectstack-fleet[bot]",
@@ -29,7 +29,7 @@
     "type": "Bot"
   },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29844",
   "body": "domain:spec#3 · os-support-ai · session_01WGufzfgvGexKn9vLHsy89K\n\nRuled: 6597621758 · letter A\nRuling-ref: 6597621758\n\nFiling gate: ② a decision the maintainer made. In the project thread \"Discuss pending spec rulings\", the maintainer answered 「同意」 at 2026-11-03T07:05:46Z to an A (refuse) / B (keep) question that recommended A. The question came from the CONTRACT_REVIEW_TIER review of PR #29829 (#29383), record 6597260383, which found this third door outside ruling A on #29383. The ruling text is recorded as this card's first comment. ⛔ Not a claim. Suggested-grade: p3 (same as #29383).\n\n**Business reason.** A page's `action:button` that carries both `confirmText` and an array `params` shows the user a confirm dialog first and a param dialog second, two dialogs for one decision. After #29829, the registered door (`ActionSchema`) and the inline door (`InlineActionSchema`) both refuse that pair, but `action:button` would still accept it. Reader: the `domain:spec` seat (`packages/spec/src/ui/component.zod.ts`).\n\n## What the code does\n\n`ActionButtonPropsSchema` (`packages/spec/src/ui/component.zod.ts` ≈:3947 on `origin/main`) carries `confirmText`, `description` (the param dialog shows it under its title) and `params: z.unknown()`. An array `params` is the list of inputs to collect and is forwarded to the same `ActionRunner` as `actionParams`, so the runner awaits the confirm and then opens the param dialog. An object `params` is static values and opens no dialog. The schema has no pair rule.\n\n## Wanted (ruling A)\n\n- `ActionButtonPropsSchema` refuses `confirmText` beside a non-empty ARRAY `params`, at path `['confirmText']`, with the same predicate and message family `ActionSchema` and `InlineActionSchema` use (reuse `CONFIRM_BESIDE_PARAMS_REFUSAL` / `declaresConfirmBesideParams` from `action.zod.ts` after #29829, or its equivalent).\n- Still accepted: `confirmText` with no `params`, beside `params: []`, and beside an object-form `params`.\n- Census of in-repo `action:button` carriers with both keys before building: `examples/`, `packages/**`, `ui/**`, `skills/**`, templates, cloud fixtures. A coarse grep found only test fixtures.\n- `Clause-②: no (narrowing)` · `Metadata-protocol: narrowed` · `@objectstack/spec` minor, with the ADR-0087 disposition (precedent: #29829's `not-required (no-migration-prescription)` marker).\n\nSerial: after PR #29829 (which moves the shared refusal to module level). One S PR, not a widening of #29829.\n\nDedupe: searched `ActionButtonProps confirmText params`, `action:button confirmText params refuse`: only #29383 (the inline door) and its PR #29829. **New.**\n"

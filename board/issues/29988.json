@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T22:53:33Z",
-  "updated_at": "2026-11-04T02:05:54Z",
+  "updated_at": "2026-11-04T06:37:13Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 14,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29988",
   "body": "domain:devx#1 · os-support-ai · session_01WGufzgBDcBNVmSmo7VFHpj\n\nFiling gate: ruling 6583399215 on #29465 (letter A, maintainer 「同意」 2026-11-02T17:11Z), whose after-ruling stroke names a hand-slice card for this file under #24586's ruling, because a React component's closures are not mechanically separable. The file crossed 10,000 lines after #24586 was ruled and never got its card. The maintainer asked for this programme first while the fleet is quiet: 「现在车队不忙，大文件分拆的问题是否可以优先」 (2026-11-03T22:37Z). ⛔ Not a claim. No grade: triage sets it and routes it.\n\nRuling-ref: 6583399215\nGoverns: #24586 ruling A (6270097840: one `[maintainer]` card per file over 10,000 lines, move-only slices, serial with in-flight PRs); the declaration-file bar of ruling 6348891160; ruling 6597555122 item 3 (a test or gate that reads the file by path gains the new module in its reading list in the same PR).\n\n**Reader who acts:** a `domain:ui` seat, one slice per dispatch.\n\n## What to do\n\n- `ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx` is 12,882 lines on `main` `c92b8872` and one of the busiest files in `ui/` (#29465 measured 60 commits in 7 days on 2026-11-02).\n- Each slice moves one seam (a sub-component, a hook, or a group of pure helpers) into its own module beside the file, move-only: no logic, prop or behaviour change; the moved text is byte-identical apart from imports and `export`.\n- Each slice is serial with the file's in-flight PRs: read the open PRs touching the file before claiming, and take a seam none of them edits.\n- The first slice proposes a seam table (seam, lines, inbound reads, risk), the way #25467 cut 1 did; later slices take the next row.\n\n## Done when\n\n`StudioDesignSurface.tsx` is below 10,000 lines, or a slice report shows the remaining seams cannot move without a logic change (then a decision goes to #29465).\n\nRe-measure: `git show origin/main:ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx | wc -l`.\n\nDedupe (open and closed): `StudioDesignSurface`, `split in:title`, `拆分`, `29465`. Hits: #29465 (names this card as owed), #24586; the `StudioDesignSurface` hits are feature fixes, none a split card. **New.**"

@@ -1,0 +1,32 @@
+{
+  "number": 30009,
+  "kind": "issue",
+  "title": "trigger-api: verify a flow's declared vendor signature (config.signature) on api hooks",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:blocking",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T04:02:24Z",
+  "updated_at": "2026-11-04T04:59:15Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30009",
+  "body": "domain:spec#3 · os-support-ai · session_01WGufzfgvGexKn9vLHsy89K\n\nFiling gate: ③ the server slice that PR #29995 (contract half of #29983, merged) lists for the `domain:server` lane. ⛔ Not a claim. Suggested-grade: p1 (the parent #29983 is p1, and its need is met only by this slice). Route: `domain:server`.\n\n**Business reason.** hotclm's e-signature step wants DocuSign Connect to post envelope status to an `api` flow. Since #29995, `@objectstack/spec` lets a flow declare the sender's signature (`config.signature`: header, HMAC-SHA256, hex or base64, `body` or `timestamp.body`, key through `config.secretRef`), and `ITriggerApiService` states the verifier's obligations. No trigger serves it yet: a hook that declares `signature` still checks only `x-objectstack-signature`, so every vendor post gets `401 INVALID_SIGNATURE` (fail closed). This card makes the trigger verify the declaration.\n\nThe contract is in `packages/spec/src/automation/api-trigger-signature.zod.ts` (`apiTriggerVerifierOf` answers `platform`, `declared` or `unusable`) and the \"declared scheme REPLACES that check\" text in `packages/spec/src/contracts/trigger-api-service.ts`. The contract reviews are on PR #29995 (records 6619711618, 6620065679, 6620688559).\n\n## Wanted (checklist from PR #29995)\n\n\n- [ ] `packages/triggers/trigger-api`: read `apiTriggerVerifierOf(binding.config)` at `start()`. `unusable` never arms a hook that admits a post and never falls back to `x-objectstack-signature`; whether the trigger declines to arm it or refuses each post, every post to it gets the one `401 INVALID_SIGNATURE`.\n- [ ] `serveInboundHook` / `handleRequest`: pass the declared header's value (today only `x-objectstack-signature` and `x-idempotency-key` reach `handleRequest`), on both faces (the self-hosted mount and `handleInboundHook`), read with `Headers.get` so a repeated field arrives as its one comma-joined value, never the first field alone.\n- [ ] The verifier per the contract text: header parse per arm (timestamp element once, decimal as `x-objectstack-signature` writes `t`; digest elements one or more; unknown elements ignored); HMAC-SHA256 over the exact body bytes (`request.text()` re-encodes valid UTF-8 byte for byte; a non-UTF-8 body mismatches and fails closed); decode hex/base64 to 32 bytes; `timingSafeEqual`; the window from core's `HTTP_SIGNATURE_TOLERANCE_SECONDS`.\n- [ ] Every failure through `refuseUnverified` with its own logged cause (header absent, malformed, prefix missing, no digest, mismatch, outside window, declaration unusable) and the one `401 INVALID_SIGNATURE` answer.\n- [ ] Pins: a DocuSign vector (real base64 HMAC) admitted; a Stripe-style vector admitted, with a second `v1` element (key roll) and an outside-window `t` refused; a valid `x-objectstack-signature` on a declared hook refused; a post without the declared header refused; a body-only header sent twice refused; every failure's status and body identical; an `unusable` declaration answers that same `401` and admits nothing.\n- [ ] Runtime `HttpDispatcher`: confirm the forwarded `Request` keeps the vendor header (one pin).\n- [ ] `validate-flow-trigger-readiness` (required): a hook with `secretRef` and `signature` does not grade ready while no trigger serves the key; once the trigger serves it, the grade names the verifier the hook has (`apiTriggerVerifierOf`), and an `unusable` declaration never grades ready.\n- [ ] Skills and docs from the `Skills-docs:` line above, and the `variant-docs.json` exemption replaced by a binding to the new flows.mdx section.\n\n## Binding\n\n- An auth boundary: one verifier per hook, constant-time compare, the window from core's `HTTP_SIGNATURE_TOLERANCE_SECONDS` where a timestamp is signed, the key only through `secretRef`, and one `401 INVALID_SIGNATURE` answer for every failure. A weakness found in today's verifier goes to `security#1`, not into a comment.\n- Its PR closes #29983 too (`Fixes #29983` beside this card's), because #29983's need is met here.\n\nDedupe: searched `api trigger signature`, `x-docusign-signature`, `apiTriggerVerifierOf`. No open card. **New.**"
+}

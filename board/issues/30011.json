@@ -1,0 +1,36 @@
+{
+  "number": 30011,
+  "kind": "issue",
+  "title": "rest: the approvals, email, sharing, sharing-rules and analytics service providers resolve the request's environment kernel, not the host's (ruled A + a on cloud#3553; defect #29999)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T04:42:07Z",
+  "updated_at": "2026-11-04T07:14:21Z",
+  "closed_at": "2026-11-04T07:14:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30011",
+  "body": "repo:cloud#2 · os-zhuang · session_0123kRqqdpAJWYMgsgdAJX4G\n\nFiling gate ②, executed: the maintainer ruled objectstack-ai/cloud#3553 (Sam, 2026-11-04 04:39Z, 「同意」 to the recommended **A + a**: the fix goes in the framework providers, covering all five env-blind providers). This is the pure-objectstack half that triage asked the cloud PM to file on #29999. #29999 stays the defect record. ⛔ Not a claim.\n\n## 维护者速读\n\n托管运行时上只有一个 REST 插件，挂在宿主内核上；审批服务却注册在各个环境自己的内核里。`approvalsServiceProvider` 忽略了传进来的环境 id，直接从宿主内核取服务，所以环境的审批请求在审批中心里看不到（列表返回 `[]`，单条请求返回 501）。数据接口没有这个问题，因为它会按请求所属的环境找到对应内核。本卡让另外五个服务提供者也按环境去找内核，和数据接口用同一套解析。单内核（社区版自部署）的行为不变。\n\n## The fix site (objectstack `main`)\n\n`packages/rest/src/rest-api-plugin.ts`. Each of these ignores its `_environmentId` and reads `ctx.getService(...)` on the plugin's own (host) kernel:\n- `emailServiceProvider` (~:406)\n- `sharingServiceProvider` (~:413)\n- `approvalsServiceProvider` (~:420)\n- `sharingRulesServiceProvider` (~:427)\n- `analyticsServiceProvider` (~:445)\n\nThe data path already resolves per environment, through `kernelManager` / `requestEnvResolver` (`resolveRequestEnvironmentId`, ~:203–252). Reuse that path; do not add a second resolver.\n\n## Cloud facts (why only hosted sees it)\n\n- Cloud mounts ONE `RestApiPlugin` on the host kernel in front of many environment kernels: `apps/objectos/server/index.ts:307` in objectstack-ai/cloud. Each environment's `approvals` (and the other four services) registers on its own environment kernel.\n- Cloud's hosted-shape fixture is `apps/objectos/test/tenant-kernel-e2e.fixture.ts`. It boots the host and environment kernels the way production does, and it is the one cloud will use to re-check after the pin round.\n- Staging evidence (cloud#3305 Team rerun, pin `83d7e4ae`): an approval request `areq_bcb78e81-…` is `pending` on an environment. The data route returns it, `/api/v1/approvals/requests` answers `[]`, and `/api/v1/approvals/requests/areq_bcb78e81-…` answers 501. That request is deliberately kept pending, so it can be used for verification after the pin round.\n\n## Do\n\n1. In the five providers, resolve the request's environment kernel and read the service there:\n   - an environment-scoped route uses the environment id passed in;\n   - a hostname-routed (unscoped) route uses the same resolver the data path uses;\n   - with no multi-environment components registered, keep today's `ctx.getService(...)` on the plugin's own kernel.\n2. For email, sharing, sharing rules and analytics, first confirm each is actually wrong in the hosted shape (same reasoning as approvals), and record the reading per provider in the PR.\n3. A cold environment must not boot twice for one request: one resolution, one kernel.\n\n## Done when\n\n- **Isolation (hard):** a hosted-shape test (two environment kernels behind one host REST plugin) proves that a request for environment A is answered only by A's service, never by B's or the host's. This holds for every changed provider, on both scoped and hostname-routed paths.\n- **Single-kernel unchanged (hard):** a test pins that a single-kernel deployment reads the services exactly as before.\n- Approvals: the list and the single-request routes return environment A's pending request in the hosted-shape test.\n- Then cloud runs a pin round and re-reads `areq_bcb78e81` on staging under cloud#3305 1f. That is cloud's work and not part of this card.\n\n## Business reason\n\nApprovals are unusable on every hosted environment today. This blocks cloud#3305 1f and, behind it, cloud#3307, #3308, #3309 and #3311, which cover the approval-flow authoring tier on paid plans.\n\n## Reader who acts\n\nThe lane owning `packages/rest` (server).\n\n## Dedupe\n\n- `approvalsServiceProvider environment kernel`: only #29999, the defect this card implements.\n- `rest providers resolve environment kernel`: no open card.\n- `sharingServiceProvider environmentId`: 0."
+}

@@ -1,0 +1,31 @@
+{
+  "number": 30017,
+  "kind": "issue",
+  "title": "spec(ui): action:icon and action:group/menu members refuse confirmText beside an array params (ruling A)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T06:24:26Z",
+  "updated_at": "2026-11-04T06:55:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30017",
+  "body": "domain:spec#3 · os-support-ai · session_01WGufzfgvGexKn9vLHsy89K\n\nRuled: 6624208841 · letter A\nRuling-ref: 6624208841\n\nFiling gate: ② a decision the maintainer made. In the project thread \"Discuss pending spec rulings\", the maintainer answered 「以上同意」 at 2026-11-04T06:22:07Z to an A (refuse) / B (keep) question that recommended A. The question came from the review of PR #29869 (#29844), record 6599507683, which found two more doors outside the #29844 ruling: `action:icon` and the `action:group` / `action:menu` member rows. The ruling text is recorded as this card's first comment. ⛔ Not a claim. Suggested-grade: p3 (the same family as #29844 and #29383).\n\n**Business reason.** A page action that carries both `confirmText` and an array `params` shows the user a confirm dialog first and a param dialog second, two dialogs for one decision. `ActionSchema`, `InlineActionSchema` and, since PR #29869, `action:button` refuse that pair. `action:icon` and the members of `action:group` / `action:menu` still accept it. Reader: the `domain:spec` seat (`packages/spec/src/ui/component.zod.ts`).\n\n## What the code does (at `origin/main` `eee41490`)\n\n- `ActionIconPropsSchema` (`packages/spec/src/ui/component.zod.ts` ≈:4055) carries `description`, `params: z.unknown()` and `confirmText`, with no pair rule.\n- `actionContainerMemberShape()` (≈:4212), shared by the `action:group` member (≈:4328) and the `action:menu` member (≈:4349), carries `params` (an array is the inputs to collect; a non-array is refused except on a `type: 'api'` member, where it is the request payload) and `confirmText`, with no pair rule.\n- The shared predicate and message are `declaresConfirmBesideParams` / `CONFIRM_BESIDE_PARAMS_REFUSAL` in `packages/spec/src/ui/action-confirm-beside-params.ts`, already used by `action:button` (≈:4010).\n\n## Wanted (ruling A)\n\n- `ActionIconPropsSchema` and the `action:group` / `action:menu` member rows refuse `confirmText` beside a NON-EMPTY ARRAY `params`, at path `['confirmText']`, with the same predicate and message family. On the members, refine once on the shared shape's consumers so both containers carry it, with the item index in the path.\n- Still accepted: `confirmText` with no `params`, beside `params: []`, and beside an object-form `params` (a `type: 'api'` member's payload).\n- Before building, census in-repo carriers with both keys: `examples/`, `packages/**`, `ui/**`, `skills/**`, templates, cloud fixtures. Zero shipped carriers were known at ruling time.\n- Declarations: `Clause-②: no (narrowing)`, `Metadata-protocol: narrowed`, `@objectstack/spec` minor, and an ADR-0087 disposition (precedent: PR #29869).\n\nSerial: after PR #29869 (merged). One S PR.\n\nCross-references: #29844 (the `action:button` door), #29383 (the inline door), PR #29869 review record 6599507683.\n\nDedupe: searched `action:icon confirmText params` and `action:menu confirmText params`. The only hits are #29844 and #29383. **New.**\n\n_Body updated by the seat with the ruling line: 2026-11-04T06:27Z_\n"
+}

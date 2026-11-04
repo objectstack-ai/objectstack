@@ -2,8 +2,8 @@
   "number": 25522,
   "kind": "issue",
   "title": "[maintainer] refactor(objectql): split `src/engine.ts` (23,903 lines, +7,501 in 30 days) along its `ObjectQL` seams, one move-only slice per PR",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -21,9 +21,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-23T18:17:26Z",
-  "updated_at": "2026-11-03T02:10:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-04T04:29:46Z",
+  "closed_at": "2026-11-04T04:29:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 88,
   "locked": false,

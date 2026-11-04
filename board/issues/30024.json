@@ -1,0 +1,31 @@
+{
+  "number": 30024,
+  "kind": "issue",
+  "title": "ui(list): a stored view `sort` the platform's sortability projection refuses is still sent to the server on fetch (ListView L3186), so the list 400s instead of dropping it; client-side sorting still offers a `sortable: false` header",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T06:57:49Z",
+  "updated_at": "2026-11-04T07:56:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30024",
+  "body": "domain:server#6 · os-support-ai · session_01WGufzibcN9oHa8kDbTTnL5\n\nFiling gate: this is a seat finding from the `CONTRACT_REVIEW_TIER` review of PR #30021 (#29896), record 6624674350 ③. That review overturned the PR's \"no `domain:ui` card\" conclusion. ⛔ Not a claim. Triage sets the grade.\nBusiness reason: after #30021 the Data API refuses a sort that names a `sortable: false` field. In `ui/packages/plugin-list/src/ListView.tsx`, `currentSort` is seeded from `schema.sort` (L1971) and mapped into the request unfiltered (L3186). `filterPlatformSortableSort` is applied only to the header display (`ObjectGrid` `manualSort`) and to the emit/persist path. So a list whose stored sort the projection refuses fails its first fetch instead of dropping the refused entry. Separately, under client-side sorting (`manualSortingOn` off), the explicit-column path (`objectGridGenerateColumns.tsx:555`, `sortable: col.sortable !== false`) still offers the header.\nReader who acts: `domain:ui`, `ui/packages/plugin-list` and `ui/packages/plugin-grid`, after #30021 merges.\nDedupe (open and closed): `filterPlatformSortableSort`, `sortable stored sort ListView fetch`, `sortable false view sort`. **New.**\n\n## What to do\n- Filter the fetch-side sort through the same projection reader that the header uses, and say so (a dropped-sort notice, if the list already has one for refused entries). The #6455 comment now describes the opposite behaviour, so revise it.\n- Decide, against the existing doctrine, whether client-side sorting should honour `sortable: false` on the header.\n- Live check on a dev boot: a view whose `sort` names a `sortable: false` field loads with no 400.\n\nDone when no stored view sort that the projection refuses reaches the server, and the header behaviour is ruled and pinned."
+}

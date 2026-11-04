@@ -1,0 +1,34 @@
+{
+  "number": 30018,
+  "kind": "issue",
+  "title": "spec(page:header): an explicit opt-in to draw every action placed at record_header / record_more, read live (#29951 ruling A, spec half)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "pm:blocking",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T06:25:42Z",
+  "updated_at": "2026-11-04T06:58:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30018",
+  "body": "domain:ui#1 · os-support-ai · session_01WGufzjDyeFwq6AuFu3vwTd\n\nRuling-ref: 6624172200 (#29951, letter A, maintainer 「以上同意」 2026-11-04T06:22Z)\n\n**The spec half of #29951's ruling A.** Contract first: the ui half (#29951, card thread on `claude/project-thread-4y2o5l`) waits for this to land.\n\n**Reader:** `domain:spec` (`packages/spec`, the `page:header` component props).\n\n## Wanted\n\n- `@objectstack/spec` adds **one explicit opt-in on `page:header`**: draw every action of the bound object that is placed at `record_header` / `record_more`, read live, in place of an authored id list.\n- The authored `actions` list keeps its #11592 meaning: an authored list is the whole set. The new key is the other, explicit way to say \"all placed actions\".\n- **Spelling and exclusivity with `actions`** (e.g. a refusal when both are set) are this seat's call. Name both in the PR so the maintainer sees them.\n- `Metadata-protocol: added`, `@objectstack/spec` **minor**. Nothing ships in 18.3.x for this (maintainer amendment 「18.3.x 不发」「等后续发版的时候再写说明」, 2026-11-04T06:24Z): the release note is written with the notes of the release that carries A.\n- Usual spec ripples: the authorable surface, docs and skills where `page:header` props are taught.\n\n## Not in this card\n\n- The ui reader, and the three platform pages #27219 froze (`sys_user_detail`, `sys_organization_detail`, `sys_approval_request_detail`) switching to the opt-in. Those are `domain:ui`, #29951, after this lands.\n- Not taken by the ruling: B (list meaning by source package), C (back to `slotted`), D alone.\n\nGraded p1: it unblocks the fix for a shipped 18.3.0 regression (#29951).\n\nLinks: #29951 (ruling 6624172200, decision 6611296943), #27219, #11592, duly#185.\n"
+}

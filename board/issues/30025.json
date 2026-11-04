@@ -1,0 +1,26 @@
+{
+  "number": 30025,
+  "kind": "issue",
+  "title": "lint: a flow condition's bare-name type verdict ignores names a screen node or an open binder (script, connector_action, wait, subflow, map) binds, so a record-triggered flow can be refused `type-mismatch-run-fails` on a name that holds the bound value",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T08:02:18Z",
+  "updated_at": "2026-11-04T08:02:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30025",
+  "body": "domain:server#6 · os-support-ai · session_01WGufzibcN9oHa8kDbTTnL5\n\nFiling gate: this is a seat finding from the `CONTRACT_REVIEW_TIER` delta review of PR #30015 (#29959), record 6625738206 ① new finding 1, and the dev reported the same gap as out of scope. ⛔ Not a claim. Triage sets the grade.\nBusiness reason: PR #30015 excludes declared flow variables, node ids and engine-bound names (`collectFlowVariableNames` + `FLOW_ENGINE_BOUND_NAMES`) from the bare typing of a flow condition. It does not exclude two other kinds of name. First, a `screen` node's field names, which can be collected. Second, names bound by an open binder (`script`, `connector_action`, `wait`, `subflow`, `map`, a contract-less screen), which cannot be seen (see `flow-cel-root-scope.ts`). A bare condition after such a node that reads a same-named non-text value is still typed as the object field and refused `type-mismatch-run-fails`, which is a false refusal. The null-guard twin has the same blind spot, but it stands down when `rootScope.provable` is false (`nullGuardBare`), and the type check does not. This has been pre-existing at start and edge since #29953 (`9037b13d`), and the decision site added by #30015 carries it too.\nReader who acts: `domain:server`, `packages/lint` (`validate-expressions.ts`, `flow-variable-scope.ts`), after #30015 merges.\nDedupe (open and closed): `flowVariables`, `screen field shadow type-mismatch`, `rootScope.provable type`. **New.**\n\n## What to do\n- Add the collectable screen-field names to the `flowVariables` hint, and to the twin's `nullGuardBare`.\n- Where `rootScope.provable` is false, drop the `run-fails` outcome to the run-may-fail warning, as the twin already stands down.\n- Optional: the engine's registration advisory pass (`flow-registration-checks.ts:460`) passes no `flowVariables`, so its log line still warns on a shadowed bare name that the gate no longer flags. Share the hint.\n- Pins: a record-triggered flow with a screen field `title: number` before a `title > 5` edge gets no refusal; the same flow after a `script` node gets the warning, not the error. Ablate once."
+}

@@ -13,19 +13,21 @@
   "labels": [
     "domain:server",
     "pm:blocking",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2",
     "tech-debt"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T22:52:14Z",
-  "updated_at": "2026-11-03T23:50:32Z",
+  "updated_at": "2026-11-04T05:17:11Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29986",
   "body": "domain:devx#1 · os-support-ai · session_01WGufzgBDcBNVmSmo7VFHpj\n\nFiling gate: ruling 6583399215 on #29465 (letter A, maintainer 「同意」 2026-11-02T17:11Z), whose exit stroke 6583664223 names one card per remaining file, filed into its lane by the `domain:devx` seat once the pilot #29520 merged. It merged as PR #29598 (`d46b1ff23f`, 2026-11-03T16:26Z). The maintainer asked for this programme first while the fleet is quiet: 「现在车队不忙，大文件分拆的问题是否可以优先」 (2026-11-03T22:37Z). ⛔ Not a claim. No grade: triage sets it and routes it.\n\nRuling-ref: 6583399215\nGoverns: the pilot rulings 6591753301 (A: value imports from the host file allowed, out-of-class top-level helpers move whole into leaf modules, a gate that scans the file by path widens in the same PR) and 6597555122 (A: a test or gate that reads the file by path gains the new modules in its reading list in the same PR; a `.d.ts` order-only difference is judged by ruling 6441032442 B's second normalisation), which the pilot carried to this card; the declaration-file bar of ruling 6348891160 on #25222; #24586 ruling A (6270097840); the landing plan 6582376616 on #29465.\n\n**Reader who acts:** a `domain:server` seat (the file is `packages/objectql`), dispatching one dev.\n\n## What to build\n\n1. A deterministic codemod for `packages/objectql/src/engine.ts` (23,245 lines on `main` `c92b8872`; classes `ObjectQL` from line 5384, `ObjectRepository` from 22550, `ScopedContext` from 22749; 25 `engine-*.ts` modules exist from the hand series), modelled on the pilot's `scripts/codemod-split-sql-driver.mjs`: whole sections' method bodies move to section modules, the class keeps one-line stubs, shared members are reached through the host pattern, and the out-of-class top-level helpers (about 5,380 lines ahead of `ObjectQL`) move whole into leaf modules that never import back from `engine.ts`.\n2. The script's own proofs, as the pilot ran them: byte-identity, the declaration bar of ruling 6348891160 judged by 6441032442's second normalisation, determinism, and every census, gate or test that reads `engine.ts` by path widened to the new modules in the same PR. The hand series stopped on exactly this: cut 21's report 6556726794 names `federated-injected-column-readers.test.ts`, which resolves a via in the same file as the calling site.\n3. Type-check and the `objectql` suite plus its direct consumers at the base counts.\n\n## Order with #25522\n\n#25522 (hand series, `pm:blocked` with the series spent) is released into this card (ruling 6583399215). The claiming seat closes #25522 `not_planned` pointing here, in the same stroke. Confidence gap named by #29465: whether the host pattern covers `ObjectQL`'s private members without changing the declaration files. The pilot proved it for `SqlDriver`.\n\n## How it lands (landing plan 6582376616)\n\n- **Phase 0, no pause:** build and prove the codemod and its generated split in a draft PR. Nothing else on the file stops.\n- **Phase 1, a window the maintainer orders** (「车队什么时候空闲是有我安排的」): seats land or park their open PRs on the file, the dev re-runs the script on the latest `main` (regenerated, ⛔ never rebased), CI runs once, the maintainer approves, and the PR enters the merge queue. The diff is over 3,000 lines, so it takes contract review, the final four-piece set and the maintainer's approval.\n- ⛔ The generated split is never hand-edited to pass. A proof that fails is reported as a fork on #29465 for a design ruling.\n\n## Done when\n\nThe draft PR holds the script and the generated split with every proof passing, and it has landed in the maintainer's window; or the fork is reported on #29465.\n\nRe-measure: `git show origin/main:packages/objectql/src/engine.ts | wc -l`; `git log --since='7 days ago' --oneline origin/main -- packages/objectql/src/engine.ts | wc -l`.\n\nDedupe (open and closed): `codemod`, `split in:title`, `拆分`, `large file`, `29465`. Hits: #29465, #29520, #24586, #25467, #25522, #25521. None is a per-file codemod card for this file. **New.**"
