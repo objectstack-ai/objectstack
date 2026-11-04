@@ -12,6 +12,8 @@ The Hide Fields popover on a Console object list (the toolbar's, and the Hide Fi
 
 The addition is the reader's personalization, stored beside their hidden fields in their `ui.list.<object>` preference row (`perView.<view>.addedFields`), never written into the view: another user sees the view's columns, and "Reset to view" drops it with the rest of the reader's list. While it is stored the list's Personalized marker names "Column layout". An added column is fetched and drawn like a declared one, and an added lookup field is expanded in the list read as a declared lookup column is.
 
+A column the view declares with no label of its own (a bare `{ field }` or field name) is now listed in the Hide Fields popover (and in the Group and Row color pickers, which share its list) under the object definition's field label, the label the grid's header shows, instead of under its machine name (`expected_revenue` now reads Expected Revenue); a column's own label and a translation still come first.
+
 It is offered wherever a Hide Fields choice is stored: a view that declares `columns`, and a saved view. On a system view or fallback tab that declares no columns the popover lists the view's columns alone, as before.
 
 For a `ListView` host: two new host props, `addedFields` (the names among `schema.columns` the reader added) and `onAddedFieldsChange` (the door that stores them). Without `onAddedFieldsChange` the popover is exactly what it was. No metadata key and no spec change.
