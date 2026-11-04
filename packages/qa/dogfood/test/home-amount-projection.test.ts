@@ -357,13 +357,19 @@ for (const cell of CELLS) {
         const [rateRow] = await engine.find('sys_exchange_rate', { where: { currency: 'USD', effective_date: '2026-01-01' }, context: SYS.context } as never) as Array<{ id: string }>;
         await engine.update('sys_exchange_rate', { id: rateRow!.id, rate: 0.125 }, SYS);
         try {
+          const stamp = async () => (await engine.findOne(RC.corrected, { where: { id }, context: SYS.context } as never) as Record<string, unknown>).updated_at;
+          const stampBefore = await stamp();
+          expect(stampBefore).toBeTruthy();
           const dry = await run(RC.corrected);
           expect(dry).toMatchObject({ amounts: 1, changed: 1, written: 0, skippedTotal: 0 });
           expect(dry.changes[0]!.to).toEqual({ home: 80000, rate: 0.125 });
           expect(await stored(RC.corrected, id)).toEqual({ home: 71994.24, rate: 0.1389 });
 
+          await new Promise((resolve) => setTimeout(resolve, 20)); // a stamp taken now would differ
           const applied = await run(RC.corrected, { apply: true });
           expect(applied).toMatchObject({ changed: 1, written: 1, failures: [] });
+          // Only the two projected fields move: the row keeps its own updated_at.
+          expect(String(await stamp())).toBe(String(stampBefore));
           const fresh = await engine.insert(RC.corrected, { name: 'fresh', currency_code: 'USD', invoice_date: '2026-03-15', amount: 10000 }, SYS);
           expect(await stored(RC.corrected, id)).toEqual(await stored(RC.corrected, fresh.id));
           expect(await stored(RC.corrected, id)).toEqual({ home: 80000, rate: 0.125 });

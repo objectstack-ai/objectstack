@@ -466,7 +466,7 @@ describe('recompute: a corrected rate reaches stored rows through an explicit, r
     expect(homeAmountRecomputeComplete(report)).toBe(false);
   });
 
-  it('the apply writes only the home and rate fields, keeps updated_at, and a second run finds nothing', async () => {
+  it('the apply writes only the home and rate fields, and a second run finds nothing', async () => {
     const before = { ...stored() };
     const applied = await recompute(t, { apply: true });
     expect(applied).toMatchObject({ applied: true, changed: 1, written: 1, failures: [], audit: { written: true } });
@@ -612,21 +612,23 @@ describe('recompute: the write\'s own rules, per organization', () => {
 
   it('two organizations convert into their own home currencies and are counted apart', async () => {
     const t = await boot();
-    const homes: Record<string, string> = { org_a: 'CNY', org_b: 'USD' };
+    const homes: Record<string, string> = { org_a: 'CNY', org_b: 'JPY' };
     t.engine.setHomeLocalizationResolver(async (org) => ({ currency: org ? homes[org] : undefined }));
     t.rate('USD', '2026-01-01', 0.1389); // org_a's rate for USD (home CNY)
-    t.rate('CNY', '2026-01-01', 7.2); // org_b's rate for CNY (home USD)
+    t.rate('CNY', '2026-01-01', 0.05); // org_b's rate for CNY (home JPY)
     const as = (org: string) => ({ context: { isSystem: true, tenantId: org } }) as any;
     const a = await t.engine.insert('fx_invoice', { title: 'a', currency_code: 'USD', invoice_date: '2026-03-15', amount: 1389, organization_id: 'org_a' }, as('org_a'));
-    const b = await t.engine.insert('fx_invoice', { title: 'b', currency_code: 'CNY', invoice_date: '2026-03-15', amount: 720, organization_id: 'org_b' }, as('org_b'));
-    t.rate('CNY', '2026-01-01', 8); // a correction that only org_b's row reads
+    const b = await t.engine.insert('fx_invoice', { title: 'b', currency_code: 'CNY', invoice_date: '2026-03-15', amount: 721, organization_id: 'org_b' }, as('org_b'));
+    expect(t.storeFor('fx_invoice').get(b.id)).toMatchObject({ amount_home: 14420, amount_rate: 0.05 });
+    t.rate('CNY', '2026-01-01', 0.048); // a correction that only org_b's row reads
     const report = await recompute(t, { apply: true });
     expect(report.organizations).toEqual([
       expect.objectContaining({ organizationId: 'org_a', homeCurrency: 'CNY', amounts: 1, unchanged: 1, changed: 0 }),
-      expect.objectContaining({ organizationId: 'org_b', homeCurrency: 'USD', amounts: 1, unchanged: 0, changed: 1, written: 1 }),
+      expect.objectContaining({ organizationId: 'org_b', homeCurrency: 'JPY', amounts: 1, unchanged: 0, changed: 1, written: 1 }),
     ]);
     expect(t.storeFor('fx_invoice').get(a.id)).toMatchObject({ amount_home: 10000, amount_rate: 0.1389 });
-    expect(t.storeFor('fx_invoice').get(b.id)).toMatchObject({ amount_home: 90, amount_rate: 8 });
+    // 721 ÷ 0.048 = 15020.83…, whole yen: JPY has no fraction digits.
+    expect(t.storeFor('fx_invoice').get(b.id)).toMatchObject({ amount_home: 15021, amount_rate: 0.048 });
   });
 });
 
