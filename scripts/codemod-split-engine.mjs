@@ -190,15 +190,21 @@ const LEAF_MODULE = 'engine-top-level.ts';
  * nothing the file declares stops the script (exit 2), so the table cannot rot
  * into names nobody reads.
  */
+const QUERY_OPTIONS_GUARD = 'eslint query-options/no-any-erasure grandfathering and scripts/check-query-options-erasure-ratchet.mjs (baseline keyed by path, never grows)';
 const PATH_READER_PINS = Object.freeze({
   // The #4918 query-options erasure guard grandfathers its pre-existing sites
   // BY FILE: an `ignores` entry in eslint.config.mjs (QUERY_OPTIONS_UNSWEPT)
   // plus a per-file count in scripts/query-options-erasure-baseline.json, a list
   // that may only shrink. A moved body takes its `opts as any` site to a file
   // the list does not name, so `pnpm lint` and `check:query-options-erasure`
-  // red (measured: both methods below, one site each).
-  seedAutonumber: 'eslint query-options/no-any-erasure grandfathering and scripts/check-query-options-erasure-ratchet.mjs (baseline keyed by path, never grows)',
-  inspectDanglingReferences: 'eslint query-options/no-any-erasure grandfathering and scripts/check-query-options-erasure-ratchet.mjs (baseline keyed by path, never grows)',
+  // red (measured: the six methods below, one site each; the last four once
+  // ruling 6624345766 dropped the no-yield rule and let them move).
+  seedAutonumber: QUERY_OPTIONS_GUARD,
+  inspectDanglingReferences: QUERY_OPTIONS_GUARD,
+  probeReferencingRows: QUERY_OPTIONS_GUARD,
+  referenceExists: QUERY_OPTIONS_GUARD,
+  resolveMasterDetailParent: QUERY_OPTIONS_GUARD,
+  resolveMasterDetailParents: QUERY_OPTIONS_GUARD,
 });
 
 /**
@@ -228,25 +234,19 @@ const CLASS_PATH_READER_NEEDLES = Object.freeze({
  */
 const BOUND_HOST_METHODS = new Set();
 
-/** Reserved words a function declaration may not be named. */
-const RESERVED = new Set(('break case catch class const continue debugger default delete do else enum export extends ' +
-  'false finally for function if import in instanceof new null return super switch this throw true try typeof var ' +
-  'void while with implements interface let package private protected public static yield await').split(' '));
-
 /** Every reason a method stays, with the one-line why the plan prints. */
 const STAY_REASONS = Object.freeze({
   'no-section': 'declared above the first section anchor',
   'section-kept': 'its section maps to no module',
-  'static': 'a static member (the host is an instance)',
+  'static-this': 'a static method whose body reads `this` (the class; a facet static has its own)',
+  'static-name-shared': 'a static method whose name an instance member also takes (one facet cannot hold both)',
   'no-body': 'an overload signature or abstract member',
   'generator': 'a generator',
   'overloaded': 'an overloaded method',
   'decorated': 'a decorated method',
   'not-identifier-name': 'a computed, string or #private name',
-  'reserved-name': 'its name is reserved for a function declaration',
   'inferred-return-type': 'a non-private method whose return type is inferred (the .d.ts would infer it through the module)',
-  'type-parameters': 'a generic method (Function#call does not carry its type parameters)',
-  'parameter-shape': 'a destructured, defaulted or `this` parameter (the stub cannot forward it unchanged)',
+  'parameter-shape': 'a destructured or `this` parameter (the stub cannot forward it unchanged)',
   'comment-in-parameters': 'a comment inside its parameter list (one-line parameters would drop it)',
   'path-reader': 'a reader takes its text out of engine.ts by path (PATH_READER_PINS / PATH_READER_NEEDLES / CLASS_PATH_READER_NEEDLES)',
   'arguments': 'its body reads `arguments`',
@@ -255,17 +255,18 @@ const STAY_REASONS = Object.freeze({
   'this-type': 'it names the polymorphic `this` type',
   'bare-this': 'it uses `this` other than as `this.member`',
   'unknown-member': 'it reads a `this.member` the class does not declare',
-  'this-write': 'it assigns a `this.member` (a host getter cannot be written)',
+  'this-write': 'it assigns a `this.member` that is not a field, or deletes one (the host carries a setter for a field only)',
   'method-as-value': 'it reads a method as a value instead of calling it',
   'field-call': 'it calls a field or accessor as a function (the host would change its receiver)',
   'overloaded-host-method': 'it calls an overloaded method (the host closure cannot be typed)',
-  'non-public-static': 'it reads a private or protected static of ObjectQL (unreachable from a module function)',
+  'static-write': 'its static reads go through ObjectQLStatics and it assigns a static (the forwarder is read-only)',
+  'static-as-value': 'its static reads go through ObjectQLStatics and it reads a static method as a value (a forwarder is another function)',
+  'static-field-call': 'its static reads go through ObjectQLStatics and it calls a static field or accessor (the receiver would change)',
+  'overloaded-static': 'its static reads go through ObjectQLStatics and it calls an overloaded static (one forwarder cannot carry the overloads)',
+  'static-route-conflict': 'its facet module reads the statics through ObjectQLStatics, imported AS `ObjectQL`, and it names `ObjectQL` other than as `ObjectQL.<static>`',
   'module-write': 'it assigns a module-scope binding of engine.ts (an import is read-only)',
   'already-moved': 'its body is already a hand-series seam stub',
-  'name-taken': 'its name is already a module-scope binding in engine.ts',
-  'name-collision': 'its name collides with an import its module needs',
-  'parameter-shadows': 'a parameter shadows the moved function or a stub local',
-  'no-yield': 'its stub would be no shorter than its body (moving it would grow engine.ts)',
+  'parameter-shadows': 'a parameter shadows a stub local (`host`, `readX`, `writeX`)',
 });
 
 /** Every reason a top-level declaration ahead of the class stays in engine.ts. */
@@ -491,26 +492,35 @@ function readMethod(tm, ctx, m) {
     if (!reasons.includes(tag)) reasons.push(tag);
   };
   const host = new Map(); // member -> 'method' | 'getter'
+  const writes = new Set(); // fields the body assigns: the host carries a setter for each
   const imports = new Map(); // local -> { value }
   const moduleRefs = new Map(); // engine.ts top-level name -> { value }
+  // The private-static-through-host rule: the statics the body reads as
+  // `ObjectQL.x`, whether one is non-public (that takes the route), what the
+  // route cannot carry, and whether the body names `ObjectQL` any other way.
+  const classStatics = new Map(); // static -> 'method' | 'getter'
+  const routeBlockers = [];
+  let readsNonPublicStatic = false;
+  let classOther = false;
+  const result = () => ({ reasons, host, writes, imports, moduleRefs, classStatics, routeBlockers, readsNonPublicStatic, classOther });
 
-  if (m.isStatic()) add('static');
+  if (m.isStatic() && ctx.members.has(m.getName())) add('static-name-shared');
   if (!m.getBody()) add('no-body');
   if (m.isAbstract && m.isAbstract()) add('no-body');
   if (m.isGenerator()) add('generator');
   if (m.getOverloads().length > 0) add('overloaded');
   if (m.getDecorators().length > 0) add('decorated');
   const nameNode = m.getNameNode();
-  if (!Node.isIdentifier(nameNode)) { add('not-identifier-name'); return { reasons, host, imports, moduleRefs }; }
+  if (!Node.isIdentifier(nameNode)) { add('not-identifier-name'); return result(); }
   const name = nameNode.getText();
-  if (RESERVED.has(name)) add('reserved-name');
   if (!m.getReturnTypeNode() && m.getScope() !== 'private') add('inferred-return-type');
-  if (m.getTypeParameters().length > 0) add('type-parameters');
   for (const p of m.getParameters()) {
-    if (!Node.isIdentifier(p.getNameNode()) || p.hasInitializer() || p.getName() === 'this') add('parameter-shape', p.getName());
+    // A defaulted identifier forwards as it is: the stub keeps the default and
+    // hands the body the value it produced.
+    if (!Node.isIdentifier(p.getNameNode()) || p.getName() === 'this') add('parameter-shape', p.getName());
   }
   const body = m.getBody();
-  if (!body) return { reasons, host, imports, moduleRefs };
+  if (!body) return result();
 
   // A comment between the parentheses that no parameter's own text carries.
   const params = m.getParameters();
@@ -538,6 +548,7 @@ function readMethod(tm, ctx, m) {
       if (Node.isMetaProperty(node) && node.getKeywordToken() === SyntaxKind.NewKeyword) add('new-target');
       if (kind === SyntaxKind.ThisKeyword) {
         if (thisContainer(tm, node) !== m) continue;
+        if (m.isStatic()) { add('static-this'); continue; }
         const parent = node.getParent();
         if (!Node.isPropertyAccessExpression(parent) || parent.getExpression() !== node) { add('bare-this'); continue; }
         const memberNameNode = parent.getNameNode();
@@ -545,7 +556,12 @@ function readMethod(tm, ctx, m) {
         const member = memberNameNode.getText();
         const info = ctx.members.get(member);
         if (!info) { add('unknown-member', member); continue; }
-        if (isWritten(tm, parent)) add('this-write', member);
+        if (isWritten(tm, parent)) {
+          // A field is written through a host setter; a method, an accessor or
+          // a `delete` cannot be.
+          if (info.kind === 'field' && !Node.isDeleteExpression(parent.getParent())) writes.add(member);
+          else add('this-write', member);
+        }
         const outer = parent.getParent();
         const called = Node.isCallExpression(outer) && outer.getExpression() === parent;
         if (info.kind === 'method') {
@@ -590,12 +606,23 @@ function readMethod(tm, ctx, m) {
         // for it) when it stayed. Two things a module function cannot do:
         // reach a non-public static of the class, and assign an import.
         const declName = decl.name && ts.isIdentifier(decl.name) ? decl.name.text : node.getText();
-        if (ts.isClassDeclaration(decl) && declName === CLASS_NAME && !typePos) {
+        if (ts.isClassDeclaration(decl) && declName === CLASS_NAME) {
           const access = node.getParent();
-          if (Node.isPropertyAccessExpression(access) && access.getExpression() === node) {
+          const info = !typePos && Node.isPropertyAccessExpression(access) && access.getExpression() === node
+            ? ctx.statics.get(access.getName()) : null;
+          if (info) {
             const member = access.getName();
-            const scope = ctx.statics.get(member);
-            if (scope && scope !== 'public') add('non-public-static', member);
+            if (info.scope !== 'public') readsNonPublicStatic = true;
+            const outer = access.getParent();
+            const called = Node.isCallExpression(outer) && outer.getExpression() === access;
+            const block = (tag) => { if (!routeBlockers.includes(tag)) routeBlockers.push(tag); };
+            if (isWritten(tm, access) || info.kind === 'setter') block(`static-write: ${member}`);
+            if (info.kind === 'method' && !called) block(`static-as-value: ${member}`);
+            if (info.kind === 'method' && info.overloaded) block(`overloaded-static: ${member}`);
+            if (info.kind !== 'method' && called) block(`static-field-call: ${member}`);
+            classStatics.set(member, info.kind === 'method' ? 'method' : 'getter');
+          } else {
+            classOther = true;
           }
         }
         if (!typePos && isWritten(tm, node)) add('module-write', declName);
@@ -606,15 +633,19 @@ function readMethod(tm, ctx, m) {
   }
 
   const binding = ctx.scope.bindings.get(name);
-  if (binding) {
-    if (binding.kind === 'import' && SEAM_SPECIFIER.test(binding.specifier)) add('already-moved', binding.specifier);
-    else add('name-taken');
-  }
+  if (binding && binding.kind === 'import' && SEAM_SPECIFIER.test(binding.specifier)) add('already-moved', binding.specifier);
   for (const p of params) {
     const pn = p.getName();
-    if (pn === name || pn === 'host' || /^read[A-Z]/.test(pn)) add('parameter-shadows', pn);
+    if (pn === 'host' || /^(read|write)[A-Z]/.test(pn)) add('parameter-shadows', pn);
   }
-  return { reasons, host, imports, moduleRefs };
+  // A body that reads a non-public static takes the route; what the route
+  // cannot carry keeps it on the class. (A module another mover routes
+  // applies the same to every mover in it: `plan`.)
+  if (readsNonPublicStatic) {
+    for (const tag of routeBlockers) add(tag);
+    if (classOther) add('static-route-conflict');
+  }
+  return result();
 }
 
 function isModuleScopeDecl(ts, decl) {
@@ -638,6 +669,54 @@ function isModuleScopeDecl(ts, decl) {
 function hostNameOf(moduleFile) {
   const slug = moduleFile.replace(/^engine-/, '').replace(/\.ts$/, '');
   return `${slug.split('-').map((w) => w[0].toUpperCase() + w.slice(1)).join('')}Host`;
+}
+
+/** `engine-transactions-section.ts` -> `TransactionsSectionFacet`: the stateless class the bodies move into. */
+function facetNameOf(moduleFile) {
+  return hostNameOf(moduleFile).replace(/Host$/, 'Facet');
+}
+
+/** The object the class fills with forwarders to the statics the facets read, and its type. */
+const STATICS_NAME = `${CLASS_NAME}Statics`;
+const STATICS_HOST_NAME = `${CLASS_NAME}StaticsHost`;
+/** How a routed facet module names the class as a type: `ObjectQL` there is `ObjectQLStatics`. */
+const CLASS_TYPE_ALIAS = `${CLASS_NAME}Class`;
+
+/** The placeholder above a moved public or protected body: its docblock stays on the class. */
+const placeholderDoc = (name) => `/** The body of \`${CLASS_NAME}#${name}\`; the method's docblock there is its contract. */`;
+
+/**
+ * The statics block `engine.ts` carries for the routed facets: the type and
+ * the object ahead of the class, and the static block at the end of the class
+ * that fills the object. `kinds` maps each routed static to `method` (a
+ * forwarder that calls it on the class) or `getter` (read when read). Pure:
+ * `verify` rebuilds both texts from the base class and compares them.
+ */
+function staticsTexts(kinds) {
+  const members = [...kinds.keys()].sort();
+  const ahead = [
+    `// ${MARK} The statics of \`${CLASS_NAME}\` its facet modules read, private ones included, as`,
+    `// the class declares them (an indexed access on the class). The static block at the end of`,
+    `// the class fills \`${STATICS_NAME}\` with forwarders: a method is called on the class at`,
+    '// call time, a field or accessor is read when the body reads it. A facet module imports',
+    `// \`${STATICS_NAME}\` AS \`${CLASS_NAME}\`, so each moved body reads \`${CLASS_NAME}.x\` unedited;`,
+    '// `index.ts` re-exports neither, so neither reaches the package.',
+    `export interface ${STATICS_HOST_NAME} {`,
+    ...members.map((n) => `  readonly ${n}: (typeof ${CLASS_NAME})['${n}'];`),
+    '}',
+    `export const ${STATICS_NAME} = {} as ${STATICS_HOST_NAME};`,
+  ].join('\n');
+  const block = [
+    `  // ${MARK} Fills \`${STATICS_NAME}\` (declared above the class) for the facet modules.`,
+    '  static {',
+    `    Object.defineProperties(${STATICS_NAME}, {`,
+    ...members.map((n) => (kinds.get(n) === 'method'
+      ? `      ${n}: { value: (...args: Parameters<typeof ${CLASS_NAME}.${n}>) => ${CLASS_NAME}.${n}(...args) },`
+      : `      ${n}: { get: () => ${CLASS_NAME}.${n} },`)),
+    '    });',
+    '  }',
+  ].join('\n');
+  return { ahead, block };
 }
 
 /** Is `node` inside a JSDoc comment? A `{@link X}` there is prose, not a use. */
@@ -805,13 +884,25 @@ function plan(tm, text, {
   const cls = sf.getClass(CLASS_NAME);
   if (!cls) refuse(`no class ${CLASS_NAME} in ${HOST_BASENAME}`);
   const sectionOf = readSections(cls, anchors);
+  // The class's statics: scope, and what a forwarder in `ObjectQLStatics`
+  // would be (a method forwards as a function; a field or accessor as a getter).
   const statics = new Map();
   for (const m of cls.getMembers()) {
     if (typeof m.isStatic === 'function' && m.isStatic() && typeof m.getName === 'function') {
-      statics.set(m.getName(), typeof m.getScope === 'function' ? m.getScope() : 'public');
+      const { Node } = tm;
+      const prev = statics.get(m.getName());
+      const kind = Node.isMethodDeclaration(m) ? 'method' : Node.isSetAccessorDeclaration(m) ? (prev ? prev.kind : 'setter')
+        : Node.isGetAccessorDeclaration(m) ? 'getter' : 'field';
+      statics.set(m.getName(), {
+        scope: typeof m.getScope === 'function' ? m.getScope() : 'public', kind,
+        overloaded: Node.isMethodDeclaration(m) && m.getOverloads().length > 0,
+      });
     }
   }
   const ctx = { text, sf, cls, members: instanceMembers(tm, cls), scope: moduleScope(tm, sf), statics, pins, needles, classNeedles };
+  for (const n of [STATICS_NAME, STATICS_HOST_NAME, ...SECTION_ANCHORS.filter((row) => row[2]).map((row) => facetNameOf(row[2]))]) {
+    if (ctx.scope.bindings.has(n)) refuse(`${HOST_BASENAME} already binds ${n}, a name this script generates`);
+  }
   const methodNames = new Set(cls.getMethods().map((m) => m.getName()));
   const stalePins = Object.keys(pins).filter((n) => !methodNames.has(n) && !ctx.scope.bindings.has(n));
   if (stalePins.length > 0) refuse(`PATH_READER_PINS names what ${HOST_BASENAME} no longer declares: ${stalePins.join(', ')}`);
@@ -833,33 +924,55 @@ function plan(tm, text, {
     const lineCount = m.getEndLineNumber() - startLine + 1;
     const body = m.getBody();
     const bodyLines = body ? body.getEndLineNumber() - body.getStartLineNumber() + 1 : 0;
+    // Docblock ownership (ruling 6624345766 item 1): a PRIVATE method's
+    // docblock moves with its body; a public or protected one stays on the
+    // facade, where the published surface prints it.
+    const docStart = m.getStart(true);
+    const doc = m.getScope() === 'private' && docStart < m.getStart() ? text.slice(docStart, m.getStart()) : null;
     const record = {
       name, node: m, section: section ? section[1] : null, module: section ? section[2] : null,
-      startLine, lineCount, bodyLines, ...read,
+      startLine, lineCount, bodyLines, doc, docLines: doc ? doc.split('\n').length - 1 : 0, ...read,
     };
-    if (record.reasons.length === 0) {
-      record.stubLines = stubBody(record, record.module, '  ').split('\n').length;
-      if (record.stubLines >= bodyLines) record.reasons.push('no-yield');
+    if (section && section[2]) {
+      for (const p of m.getParameters()) if (p.getName() === facetNameOf(section[2])) read.reasons.push(`parameter-shadows: ${p.getName()}`);
     }
+    if (record.reasons.length === 0) record.stubLines = stubBody(record, record.module, '  ').split('\n').length;
     records.push(record);
   }
 
-  // A function name its module's imports already use: drop it, recompute, until stable.
+  // The private-static-through-host rule, per facet module: once one mover
+  // reads the statics through `ObjectQLStatics` (imported AS `ObjectQL`),
+  // every mover in that module does, so what the route cannot carry keeps a
+  // mover on the class. A router itself never carries a blocker (readMethod
+  // already kept it), so the set of routed modules is stable.
   for (let changed = true; changed;) {
     changed = false;
-    const byModule = groupMovers(records);
-    for (const [moduleFile, movers] of byModule) {
-      const taken = new Set([CLASS_NAME, hostNameOf(moduleFile), 'ThisParameterType', 'Pick']);
+    for (const movers of groupMovers(records).values()) {
+      if (!movers.some((r) => r.readsNonPublicStatic)) continue;
       for (const r of movers) {
-        for (const local of r.imports.keys()) taken.add(local);
-        for (const local of r.moduleRefs.keys()) taken.add(local);
-      }
-      for (const r of movers) {
-        if (taken.has(r.name)) { r.reasons.push('name-collision'); changed = true; }
+        const extra = [...r.routeBlockers, ...(r.classOther ? ['static-route-conflict'] : [])].filter((t) => !r.reasons.includes(t));
+        if (extra.length > 0) { r.reasons.push(...extra); changed = true; }
       }
     }
   }
   const modules = groupMovers(records);
+  const routedModules = new Set();
+  const routedStatics = new Map();
+  for (const [moduleFile, movers] of modules) {
+    if (!movers.some((r) => r.readsNonPublicStatic)) continue;
+    routedModules.add(moduleFile);
+    for (const r of movers) for (const [member, kind] of r.classStatics) routedStatics.set(member, kind);
+  }
+  for (const [moduleFile, movers] of modules) {
+    const facet = facetNameOf(moduleFile);
+    for (const r of movers) {
+      for (const local of [...r.imports.keys(), ...r.moduleRefs.keys()]) {
+        if (local === facet || local === hostNameOf(moduleFile) || local === CLASS_TYPE_ALIAS) {
+          refuse(`${moduleFile}: ${r.name} reads ${local}, a name this script generates in that module`);
+        }
+      }
+    }
+  }
   const hostUses = hostUsesOfMovers(tm, ctx, top, records);
 
   // What each side imports across the cut: the section modules read moved
@@ -882,7 +995,7 @@ function plan(tm, text, {
     if (r.exported) continue;
     for (const n of r.names) if (hostUses.has(n) || sectionLeafNames.has(n)) leafExports.push(n);
   }
-  return { sf, cls, ctx, records, modules, top, hostUses, leafExports, hostExportsForSections };
+  return { sf, cls, ctx, records, modules, top, hostUses, leafExports, hostExportsForSections, routedModules, routedStatics };
 }
 
 /** Movers grouped by module, modules in the order their first member appears. */
@@ -899,6 +1012,7 @@ function groupMovers(records) {
 // ── Generation ───────────────────────────────────────────────────────────────
 
 const readerName = (member) => `read${member[0].toUpperCase()}${member.slice(1)}`;
+const writerName = (member) => `write${member[0].toUpperCase()}${member.slice(1)}`;
 
 const byName = ([a], [b]) => (a < b ? -1 : a > b ? 1 : 0);
 const leafSpecifier = () => `./${LEAF_MODULE.replace(/\.ts$/, '.js')}`;
@@ -937,7 +1051,7 @@ function importPair(specifier, uses) {
  * engine.ts's import order; then the moved top-level names, from the leaf;
  * then what stayed in engine.ts (lever (a)), including the class.
  */
-function importLines(scope, users, { needsHost = false, moduleRefs = new Map(), leafNames = new Map() } = {}) {
+function importLines(scope, users, { needsHost = false, moduleRefs = new Map(), leafNames = new Map(), routed = false } = {}) {
   const bySpecifier = new Map();
   for (const r of users) {
     for (const [local, use] of r.imports) {
@@ -972,7 +1086,13 @@ function importLines(scope, users, { needsHost = false, moduleRefs = new Map(), 
   const fromLeaf = new Map();
   const fromHost = new Map();
   for (const [n, use] of moduleRefs) (leafNames.has(n) ? fromLeaf : fromHost).set(n, use);
-  if (needsHost && !fromHost.has(CLASS_NAME)) fromHost.set(CLASS_NAME, { value: false });
+  if (routed) {
+    // The private-static-through-host rule: `ObjectQL.x` in a moved body reads
+    // the forwarder object; the host interface names the class by an alias.
+    fromHost.delete(CLASS_NAME);
+    fromHost.set(`${STATICS_NAME} as ${CLASS_NAME}`, { value: true });
+    if (needsHost) fromHost.set(`${CLASS_NAME} as ${CLASS_TYPE_ALIAS}`, { value: false });
+  } else if (needsHost && !fromHost.has(CLASS_NAME)) fromHost.set(CLASS_NAME, { value: false });
   out.push(...importPair(leafSpecifier(), fromLeaf));
   out.push(...importPair('./engine.js', fromHost));
   return out;
@@ -998,10 +1118,14 @@ function forwardList(m) {
   return m.getParameters().map((p) => (p.isRestParameter() ? `...${p.getName()}` : p.getName()));
 }
 
-function moduleText(moduleFile, title, movers, scope, leafNames) {
+function moduleText(moduleFile, title, movers, scope, leafNames, routed = false) {
   const hostName = hostNameOf(moduleFile);
+  const facet = facetNameOf(moduleFile);
+  const classType = routed ? CLASS_TYPE_ALIAS : CLASS_NAME;
   const hostMembers = new Map();
+  const written = new Set();
   for (const r of movers) for (const [member, kind] of r.host) hostMembers.set(member, kind);
+  for (const r of movers) for (const member of r.writes) written.add(member);
   const needsHost = hostMembers.size > 0;
   const moduleRefs = new Map();
   for (const r of movers) {
@@ -1019,22 +1143,31 @@ function moduleText(moduleFile, title, movers, scope, leafNames) {
   out.push(...wrapComment([MARK, 'The', `"${title}"`, 'section', 'of', '`ObjectQL`:', 'the', 'bodies', 'of',
     ...names, 'moved', 'out', 'of', '`engine.ts`', 'whole', 'by', `\`${SCRIPT}\`.`]));
   out.push(' *');
-  out.push(' * A MOVE, not a redesign. Each function below is the body of the `ObjectQL`');
+  out.push(` * A MOVE, not a redesign. {@link ${facet}} is a stateless facet of \`ObjectQL\``);
+  out.push(' * (ruling 6624345766): each static method of it is the body of the `ObjectQL`');
   out.push(' * method of the same name exactly as it stood: not re-indented, not');
-  out.push(' * formatted, not edited. The method stays on the class with its docblock and');
-  out.push(' * signature, so the published `dist/*.d.ts`, an instance spy and a subclass');
-  out.push(' * override are what they were; the docblock there is the contract.');
+  out.push(' * formatted, not edited. The method stays on the class as a one-call stub with');
+  out.push(' * its signature, so the published surface, an instance spy and a subclass');
+  out.push(' * override are what they were. A public or protected method keeps its');
+  out.push(' * docblock on the class, the contract; a private method\'s docblock moved here');
+  out.push(' * with its body. The state stays on `ObjectQL`.');
   out.push(' *');
   if (needsHost) {
     out.push(` * The bodies reach the class through {@link ${hostName}}: exactly the`);
-    out.push(' * `ObjectQL` members they read, private ones included. Each method hands its');
+    out.push(' * `ObjectQL` members they read, private ones included. Each stub hands its');
     out.push(' * body one literal of the members that body reads, plus a `.call`: methods go');
     out.push(' * as closures that call them on the engine at call time, so a subclass');
     out.push(' * override or an instance spy is still the one reached; fields and accessors');
-    out.push(' * go as GETTERS, read when the body reads them, as they were on the class.');
+    out.push(' * go as GETTERS, read when the body reads them, as they were on the class,');
+    out.push(' * and a field a body assigns goes with a SETTER that assigns it on the engine.');
   } else {
-    out.push(' * No body reads an `ObjectQL` member, so each method calls its function');
-    out.push(' * directly.');
+    out.push(' * No body reads an `ObjectQL` member, so each stub calls its body directly.');
+  }
+  if (routed) {
+    out.push(' *');
+    out.push(` * \`ObjectQL\` here is \`${STATICS_NAME}\` (imported AS \`ObjectQL\`): forwarders to the`);
+    out.push(' * statics the bodies read, private ones included, which the class fills in a');
+    out.push(` * static block; the class as a type is \`${CLASS_TYPE_ALIAS}\`.`);
   }
   out.push(' *');
   if (readsHostValues) {
@@ -1048,30 +1181,36 @@ function moduleText(moduleFile, title, movers, scope, leafNames) {
   }
   out.push(' */');
   out.push('');
-  out.push(...importLines(scope, movers, { needsHost, moduleRefs, leafNames }));
+  out.push(...importLines(scope, movers, { needsHost, moduleRefs, leafNames, routed }));
   if (needsHost) {
     out.push('');
     out.push('/**');
-    out.push(' * The `ObjectQL` members the functions below read — every one of them, and');
-    out.push(' * no other. Each is typed AS the class member (an indexed access on the');
-    out.push(' * class), so a change to a member\'s signature on the class is a change here');
-    out.push(' * too. `readonly` members are the getters.');
+    out.push(` * The \`ObjectQL\` members the bodies of {@link ${facet}} read — every one of`);
+    out.push(' * them, and no other. Each is typed AS the class member (an indexed access on');
+    out.push(' * the class), so a change to a member\'s signature on the class is a change');
+    out.push(' * here too. `readonly` members are the getters; the others are fields a body');
+    out.push(' * assigns.');
     out.push(' */');
     out.push(`export interface ${hostName} {`);
     for (const member of [...hostMembers.keys()].sort()) {
-      out.push(`  ${hostMembers.get(member) === 'getter' ? 'readonly ' : ''}${member}: ObjectQL['${member}'];`);
+      const ro = hostMembers.get(member) === 'getter' && !written.has(member);
+      out.push(`  ${ro ? 'readonly ' : ''}${member}: ${classType}['${member}'];`);
     }
     out.push('}');
   }
-  for (const r of movers) {
+  out.push('');
+  out.push(`/** The bodies of the "${title}" section of \`ObjectQL\`: a stateless facet, called by the class's stubs. */`);
+  out.push(`export class ${facet} {`);
+  movers.forEach((r, i) => {
     const m = r.node;
     const picks = [...r.host.keys()].sort().map((k) => `'${k}'`).join(' | ');
     const params = [...(r.host.size > 0 ? [`this: Pick<${hostName}, ${picks}>`] : []), ...paramsText(m)];
     const ret = m.getReturnTypeNode() ? `: ${m.getReturnTypeNode().getText()}` : '';
-    out.push('');
-    out.push(`/** The body of \`ObjectQL#${r.name}\`; the method's docblock there is its contract. */`);
-    out.push(`export ${m.isAsync() ? 'async ' : ''}function ${r.name}(${params.join(', ')})${ret} ${m.getBody().getText()}`);
-  }
+    if (i > 0) out.push('');
+    const typeParams = m.getTypeParameters().length > 0 ? `<${m.getTypeParameters().map((t) => t.getText()).join(', ')}>` : '';
+    out.push(`  ${r.doc ?? `${placeholderDoc(r.name)}\n  `}static ${m.isAsync() ? 'async ' : ''}${r.name}${typeParams}(${params.join(', ')})${ret} ${m.getBody().getText()}`);
+  });
+  out.push('}');
   out.push('');
   return out.join('\n');
 }
@@ -1111,28 +1250,39 @@ function leafText(scope, top, leafExports) {
   return `${text}\n`;
 }
 
+const DOC_MOVED = 'its docblock with it';
+
 function stubBody(r, moduleFile, closeIndent) {
   const ind = `${closeIndent}  `;
   const hostName = hostNameOf(moduleFile);
+  // A generic method calls its body INSTANTIATED with its own type
+  // parameters (`Function#call` alone would erase them).
+  const typeArgs = r.node.getTypeParameters().map((t) => t.getName());
+  const fn = typeArgs.length > 0 ? `(${facetNameOf(moduleFile)}.${r.name}<${typeArgs.join(', ')}>)` : `${facetNameOf(moduleFile)}.${r.name}`;
+  const fnType = `${facetNameOf(moduleFile)}.${r.name}`;
   const out = ['{'];
   const args = forwardList(r.node).join(', ');
+  const doc = r.doc ? `, ${DOC_MOVED}` : '';
   if (r.host.size === 0) {
-    out.push(`${ind}// ${MARK} The body moved to \`${moduleFile}\`.`);
-    out.push(`${ind}return ${r.name}(${args});`);
+    out.push(`${ind}// ${MARK} The body moved to \`${moduleFile}\`${doc}.`);
+    out.push(`${ind}return ${fn}(${args});`);
   } else {
-    out.push(`${ind}// ${MARK} The body moved to \`${moduleFile}\` (see \`${hostName}\`).`);
+    out.push(`${ind}// ${MARK} The body moved to \`${moduleFile}\`${doc} (see \`${hostName}\`).`);
     const members = [...r.host.keys()].sort();
     for (const member of members) {
       if (r.host.get(member) === 'getter') out.push(`${ind}const ${readerName(member)} = () => this.${member};`);
+      if (r.writes.has(member)) out.push(`${ind}const ${writerName(member)} = (v: ${CLASS_NAME}['${member}']) => { this.${member} = v; };`);
     }
-    out.push(`${ind}const host: ThisParameterType<typeof ${r.name}> = {`);
+    out.push(`${ind}const host: ThisParameterType<typeof ${fnType}> = {`);
     for (const member of members) {
-      if (r.host.get(member) === 'getter') out.push(`${ind}  get ${member}() { return ${readerName(member)}(); },`);
-      else if (BOUND_HOST_METHODS.has(member)) out.push(`${ind}  ${member}: this.${member}.bind(this),`);
+      if (r.host.get(member) === 'getter') {
+        out.push(`${ind}  get ${member}() { return ${readerName(member)}(); },`);
+        if (r.writes.has(member)) out.push(`${ind}  set ${member}(v) { ${writerName(member)}(v); },`);
+      } else if (BOUND_HOST_METHODS.has(member)) out.push(`${ind}  ${member}: this.${member}.bind(this),`);
       else out.push(`${ind}  ${member}: (...a) => this.${member}(...a),`);
     }
     out.push(`${ind}};`);
-    out.push(`${ind}return ${r.name}.call(host${args ? `, ${args}` : ''});`);
+    out.push(`${ind}return ${fn}.call(host${args ? `, ${args}` : ''});`);
   }
   out.push(`${closeIndent}}`);
   return out.join('\n');
@@ -1144,7 +1294,7 @@ function stubBody(r, moduleFile, closeIndent) {
  * import bindings the prune dropped. Pure.
  */
 function generate(tm, text, planned) {
-  const { sf, ctx, modules, top, hostUses, leafExports, hostExportsForSections } = planned;
+  const { sf, ctx, modules, top, hostUses, leafExports, hostExportsForSections, routedModules, routedStatics } = planned;
   const edits = [];
   const importBlock = [];
   if (top.movers.length > 0) {
@@ -1169,7 +1319,7 @@ function generate(tm, text, planned) {
     const anyHost = movers.some((r) => r.host.size > 0);
     importBlock.push(`\n// ${MARK} ${title}: the methods of the same names below hand the bodies` +
       `${anyHost ? ` what they read (\`${hostName}\`)` : ' their arguments'}.`);
-    importBlock.push(`\n${namedStatement('import', movers.map((r) => r.name).sort(), ` from './${moduleFile.replace(/\.ts$/, '.js')}';`)}`);
+    importBlock.push(`\nimport { ${facetNameOf(moduleFile)} } from './${moduleFile.replace(/\.ts$/, '.js')}';`);
     for (const r of movers) {
       const body = r.node.getBody();
       const lineStart = text.lastIndexOf('\n', body.getEnd() - 1) + 1;
@@ -1178,7 +1328,17 @@ function generate(tm, text, planned) {
       edits.push({ start: body.getStart(), end: body.getEnd(), text: stubBody(r, moduleFile, closeIndent) });
       const asyncKw = r.node.getModifiers().find((x) => x.getKind() === tm.SyntaxKind.AsyncKeyword);
       if (asyncKw) edits.push({ start: asyncKw.getStart(), end: r.node.getNameNode().getStart(), text: '' });
+      if (r.doc) edits.push({ start: r.node.getStart(true), end: r.node.getStart(), text: '' });
     }
+  }
+  if (routedStatics.size > 0) {
+    // The private-static-through-host rule: the forwarder object ahead of the
+    // class (ahead of its leading comments), the static block that fills it
+    // after the class's last member.
+    const { ahead, block } = staticsTexts(routedStatics);
+    edits.push({ start: ctx.cls.getFullStart(), end: ctx.cls.getFullStart(), text: `\n\n${ahead}` });
+    const last = ctx.cls.getMembers().at(-1);
+    edits.push({ start: last.getEnd(), end: last.getEnd(), text: `\n\n${block}` });
   }
   if (hostExportsForSections.size > 0) {
     const spelled = [...hostExportsForSections.keys()].sort().map((n) => {
@@ -1206,7 +1366,7 @@ function generate(tm, text, planned) {
   const leafNames = top.moverNames;
   if (top.movers.length > 0) moduleTexts.set(LEAF_MODULE, leafText(ctx.scope, top, leafExports));
   for (const [moduleFile, movers] of modules) {
-    moduleTexts.set(moduleFile, moduleText(moduleFile, movers[0].section, movers, ctx.scope, leafNames));
+    moduleTexts.set(moduleFile, moduleText(moduleFile, movers[0].section, movers, ctx.scope, leafNames, routedModules.has(moduleFile)));
   }
   return { host: pruned.text, modules: moduleTexts, pruned: pruned.removed };
 }
@@ -1421,17 +1581,27 @@ function verify(tm, baseText, headText, moduleTexts, { readSibling = null } = {}
       }
       continue;
     }
+    // A facet module: imports, the host interface, and ONE class, the facet,
+    // whose every member is a static method that is a moved body.
     const fns = new Map();
+    const facet = facetNameOf(file);
     for (const st of sf.getStatements()) {
-      if (Node.isFunctionDeclaration(st)) fns.set(st.getName(), st);
-      else if (!Node.isImportDeclaration(st) && !Node.isInterfaceDeclaration(st)) {
-        failures.push(`${file}: a top-level statement that is neither an import, the host interface nor a moved function: ${st.getText().slice(0, 60)}`);
+      if (Node.isImportDeclaration(st)) continue;
+      if (Node.isInterfaceDeclaration(st) && st.getName() === hostNameOf(file)) continue;
+      if (Node.isClassDeclaration(st) && st.getName() === facet && !fns.size) {
+        for (const member of st.getMembers()) {
+          if (Node.isMethodDeclaration(member) && member.isStatic() && member.getBody() && !fns.has(member.getName())) fns.set(member.getName(), member);
+          else failures.push(`${file}: ${facet} has a member that is not a moved body: ${member.getText().slice(0, 60)}`);
+        }
+        continue;
       }
+      failures.push(`${file}: a top-level statement that is neither an import, the host interface nor the facet class ${facet}: ${st.getText().slice(0, 60)}`);
     }
-    modules.set(file, { sf, fns, claimed: new Set() });
+    modules.set(file, { sf, text, fns, claimed: new Set() });
   }
 
-  const marker = new RegExp(`^\\{\\s*// ${MARK.replace(/[[\]]/g, '\\$&')} The body moved to \`(engine-[a-z0-9-]+\\.ts)\``);
+  const marker = new RegExp(`^\\{\\s*// ${MARK.replace(/[[\]]/g, '\\$&')} The body moved to \`(engine-[a-z0-9-]+\\.ts)\`(, ${DOC_MOVED})?`);
+  const movedDocs = [];
   const edits = [];
   for (const m of headCls.getMethods()) {
     const body = m.getBody();
@@ -1443,7 +1613,7 @@ function verify(tm, baseText, headText, moduleTexts, { readSibling = null } = {}
     const fn = mod && mod.fns.get(name);
     if (!fn) { failures.push(`${name}: its stub names ${hit[1]}, which has no function ${name}`); continue; }
     mod.claimed.add(name);
-    const base = baseCls.getMethod(name);
+    const base = baseCls.getMethods().find((x) => x.getName() === name && x.isStatic() === m.isStatic());
     if (!base || !base.getBody()) { failures.push(`${name}: no method of that name with a body at base`); continue; }
     const fnParams = fn.getParameters().filter((p) => p.getName() !== 'this').map((p) => p.getText());
     const baseParams = base.getParameters().map((p) => p.getText());
@@ -1452,15 +1622,61 @@ function verify(tm, baseText, headText, moduleTexts, { readSibling = null } = {}
       params: JSON.stringify(fnParams) === JSON.stringify(baseParams),
       returnType: (fn.getReturnTypeNode()?.getText() ?? null) === (base.getReturnTypeNode()?.getText() ?? null),
       async: fn.isAsync() === base.isAsync(),
-      typeParameters: fn.getTypeParameters().length === 0 && base.getTypeParameters().length === 0,
+      typeParameters: JSON.stringify(fn.getTypeParameters().map((t) => t.getText())) === JSON.stringify(base.getTypeParameters().map((t) => t.getText())),
+      static: m.isStatic() === base.isStatic(),
     };
+    // Docblock ownership: the facet member's leading text is the base
+    // method's docblock (the stub says so, and only a private method's), else
+    // exactly the placeholder; the undo puts a moved docblock back.
+    const lead = mod.text.slice(fn.getStart(true), fn.getStart());
+    const docMoved = Boolean(hit[2]);
+    if (docMoved) {
+      if (m.getStart(true) !== m.getStart()) failures.push(`${name}: its stub says the docblock moved, but the class still carries one`);
+      if (m.getScope() !== 'private') failures.push(`${name}: a ${m.getScope()} method's docblock moved off the class (only a private one may)`);
+      edits.push({ start: m.getStart(), end: m.getStart(), text: lead });
+      movedDocs.push(lead);
+    } else if (lead !== `${placeholderDoc(name)}\n  `) {
+      failures.push(`${name}: the facet member's leading text is neither its moved docblock nor the placeholder`);
+    }
     for (const [what, ok] of Object.entries(same)) if (!ok) failures.push(`${name}: the generated function's ${what} is not the base method's`);
     moved.push({
       name, module: hit[1], bodySha: sha256(fn.getBody().getText()), baseBodySha: sha256(base.getBody().getText()),
-      lines: base.getBody().getEndLineNumber() - base.getBody().getStartLineNumber() + 1, text: fn.getText(), ...same,
+      lines: base.getBody().getEndLineNumber() - base.getBody().getStartLineNumber() + 1, text: fn.getText(), docMoved, ...same,
     });
     edits.push({ start: body.getStart(), end: body.getEnd(), text: fn.getBody().getText() });
     if (fn.isAsync()) edits.push({ start: m.getNameNode().getStart(), end: m.getNameNode().getStart(), text: 'async ' });
+  }
+
+  // The statics route: the forwarder type and object ahead of the class and
+  // the static block that fills them must be exactly what `staticsTexts`
+  // writes for the statics the type names, each forwarded as the BASE class
+  // declares it (a method called, anything else read). Then the undo drops
+  // them.
+  const staticsHost = headSf.getInterface(STATICS_HOST_NAME);
+  const staticsVar = headSf.getVariableStatement(STATICS_NAME);
+  const staticBlocks = headCls.getMembers().filter((x) => Node.isClassStaticBlockDeclaration(x) && x.getFullText().includes(MARK));
+  if (staticsHost || staticsVar || staticBlocks.length > 0) {
+    const kinds = new Map();
+    for (const member of staticsHost ? staticsHost.getProperties() : []) {
+      const n = member.getName();
+      const declared = baseCls.getMembers().filter((x) => typeof x.isStatic === 'function' && x.isStatic() && typeof x.getName === 'function' && x.getName() === n);
+      if (declared.length === 0) failures.push(`${STATICS_HOST_NAME}.${n}: the base class declares no static of that name`);
+      kinds.set(n, declared.some((x) => Node.isMethodDeclaration(x)) ? 'method' : 'getter');
+    }
+    const { ahead, block } = staticsTexts(kinds);
+    const aheadAt = staticsHost ? headText.lastIndexOf(`// ${MARK} The statics of`, staticsHost.getStart()) : -1;
+    const aheadEnd = staticsVar ? staticsVar.getEnd() : -1;
+    if (!staticsHost || !staticsVar || aheadAt < 0 || headText.slice(aheadAt, aheadEnd) !== ahead) {
+      failures.push(`${STATICS_HOST_NAME} / ${STATICS_NAME} are not the generated forwarder declarations for the statics they name`);
+    } else {
+      edits.push({ start: headText.lastIndexOf('\n\n', aheadAt), end: aheadEnd, text: '' });
+    }
+    const blockAt = staticBlocks.length === 1 ? headText.lastIndexOf(`  // ${MARK} Fills`, staticBlocks[0].getStart()) : -1;
+    if (staticBlocks.length !== 1 || blockAt < 0 || headText.slice(blockAt, staticBlocks[0].getEnd()) !== block) {
+      failures.push(`the class's static block is not the generated filler of ${STATICS_NAME} for the statics it names`);
+    } else {
+      edits.push({ start: headText.lastIndexOf('\n\n', blockAt), end: staticBlocks[0].getEnd(), text: '' });
+    }
   }
   for (const [file, mod] of modules) {
     for (const name of mod.fns.keys()) if (!mod.claimed.has(name)) failures.push(`${file}: function ${name} has no stub on the class`);
@@ -1511,7 +1727,7 @@ function verify(tm, baseText, headText, moduleTexts, { readSibling = null } = {}
     rebuilt = assembled;
   }
 
-  const movedText = [...moved.map((m) => m.text), ...(leaf ? leaf.statements.map((s) => s.text) : [])].join('\n');
+  const movedText = [...moved.map((m) => m.text), ...movedDocs, ...(leaf ? leaf.statements.map((s) => s.text) : [])].join('\n');
   for (const n of prune.removed) {
     if (!new RegExp(`(^|[^\\w$])${n.replace(/\$/g, '\\$')}($|[^\\w$])`).test(movedText)) {
       failures.push(`the head dropped the import \`${n}\`, which no moved body or declaration reads`);
@@ -1526,7 +1742,8 @@ function verify(tm, baseText, headText, moduleTexts, { readSibling = null } = {}
       `\n    rebuilt: ${JSON.stringify(a[i] ?? '<end>')}\n    base:    ${JSON.stringify(b[i] ?? '<end>')}`);
   }
   if (moved.length === 0 && movedTop.length === 0) failures.push('no moved method or declaration found: a proof over nothing is not a proof');
-  return { failures, moved, movedTop, pruned: prune.removed, linesBefore: lineCount(baseText), linesAfter: lineCount(headText) };
+  return { failures, moved, movedTop, pruned: prune.removed, linesBefore: lineCount(baseText), linesAfter: lineCount(headText),
+    routedStatics: staticsHost ? staticsHost.getProperties().length : 0 };
 }
 
 /** Lines as `wc -l` counts them: newline characters. */
@@ -1720,7 +1937,8 @@ function valueSpecifiers(src) {
 let selfTestReachedVerdict = false;
 
 const SELF_TEST_BATTERIES = Object.freeze({
-  'stay rules': 12,
+  'stay rules': 20,
+  'facets, statics and docblocks': 11,
   'top-level moves': 11,
   'byte-identity proof': 10,
   'import prune': 4,
@@ -1770,8 +1988,9 @@ export class ObjectQL {
   protected logger: { warn(m: string): void } = console;
   private readonly fn = (x: string): string => x;
   private static readonly SECRET = 1;
+  private static bump = 0;
 
-  /** Docblock that stays. */
+  /** A private docblock: it moves with the body. */
   private async movable(object: string, trx?: Knex.Transaction): Promise<string> {
 ${pad}
     const a = helperImported(object) as ExportedShape | string;
@@ -1779,6 +1998,7 @@ ${pad}
     return this.other(String(a)) + String(trx ? this.count : 0);
   }
 
+  /** A protected docblock: it stays on the facade. */
   protected other(x: string): string {
     return x;
   }
@@ -1830,6 +2050,47 @@ ${pad}
   protected readsStatic(): number {
 ${pad}
     return ObjectQL.SECRET;
+  }
+
+  protected bumpsStatic(): number {
+${pad}
+    ObjectQL.bump += 1;
+    return ObjectQL.SECRET;
+  }
+
+  protected namesClassType(): ObjectQL | null {
+${pad}
+    return null;
+  }
+
+  protected delete(): number {
+${pad}
+    return 4;
+  }
+
+  protected deletesField(): void {
+${pad}
+    delete this.knex;
+  }
+
+  protected destructured({ a }: { a: number }): number {
+${pad}
+    return a;
+  }
+
+  protected generic<T extends string>(x: T): T {
+${pad}
+    return this.other(x) as T;
+  }
+
+  static staticHelper(n: number): number {
+${pad}
+    return n + ObjectQL.SECRET;
+  }
+
+  static usesThis(): number {
+${pad}
+    return this.SECRET;
   }
 
   protected pinnedMethod(): number {
@@ -1884,12 +2145,20 @@ async function selfTest() {
     moves('readsLocal', 'lever (a)/(b): it imports the leaf value and the staying function');
     moves('namesLocalType', 'a non-exported type it names moves to the leaf');
     moves('scoped', 'a method it calls goes as a closure');
-    stays('other', 'no-yield');
-    stays('writes', 'this-write');
+    moves('other', 'a body no longer than its stub moves too: the facade gate counts bodies, not lines');
+    moves('writes', 'a field it assigns goes through a host setter');
+    stays('deletesField', 'this-write');
+    moves('delete', 'a reserved word is a valid facet member name');
     stays('asValue', 'method-as-value');
     stays('inferred', 'inferred-return-type');
-    stays('defaulted', 'parameter-shape');
-    stays('readsStatic', 'non-public-static');
+    moves('defaulted', 'the stub keeps the default and forwards the value');
+    stays('destructured', 'parameter-shape');
+    moves('generic', 'the stub calls the body instantiated with its type parameters');
+    moves('staticHelper', 'a static whose body reads no `this`');
+    stays('usesThis', 'static-this');
+    moves('readsStatic', 'a private static it reads goes through ObjectQLStatics');
+    stays('bumpsStatic', 'static-write');
+    stays('namesClassType', 'static-route-conflict');
     check('a pinned method and a method carrying a needle stay (path-reader)',
       why('pinnedMethod').startsWith('path-reader') && why('carriesNeedle').startsWith('path-reader'),
       `${why('pinnedMethod')} | ${why('carriesNeedle')}`);
@@ -1919,7 +2188,7 @@ async function selfTest() {
       /export \{ DERIVED, type ExportedShape \} from '\.\/engine-top-level\.js';/.test(out.host));
     check('lever (a): the staying function a moved body reads is exported for its module, and the module imports it',
       /export \{ dependsOnPinned \};/.test(out.host) &&
-      /import \{ dependsOnPinned \} from '\.\/engine\.js';/.test(out.modules.get('engine-lifecycle.ts') ?? ''));
+      /import \{ ObjectQLStatics as ObjectQL, dependsOnPinned \} from '\.\/engine\.js';/.test(out.modules.get('engine-lifecycle.ts') ?? ''));
   }
 
   open('byte-identity proof');
@@ -1929,7 +2198,7 @@ async function selfTest() {
     const out = generate(tm, input, planned);
     const again = generate(tm, input, fixturePlan(tm, input));
     const v = verify(tm, input, out.host, out.modules);
-    check('the generated split proves against its base', v.failures.length === 0 && v.moved.length === 4 && v.movedTop.length === 5,
+    check('the generated split proves against its base', v.failures.length === 0 && v.moved.length === 12 && v.movedTop.length === 5,
       [...v.failures, `moved: ${v.moved.map((m) => m.name).join()}`, `top: ${v.movedTop.map((m) => m.name).join()}`].join(' | '));
     check('two runs on one input write byte-identical trees',
       treeHash(new Map([['h', out.host], ...out.modules])) === treeHash(new Map([['h', again.host], ...again.modules])));
@@ -1952,6 +2221,39 @@ async function selfTest() {
     const swapped = leaf.replace('type LocalType = { n: number };\nexport interface ExportedShape { a: number }',
       'export interface ExportedShape { a: number }\ntype LocalType = { n: number };');
     check('two moved declarations out of base order fail', swapped !== leaf && verify(tm, input, out.host, leafWith(swapped)).failures.length > 0);
+  }
+
+  open('facets, statics and docblocks');
+  {
+    const input = fixtureSource();
+    const out = generate(tm, input, fixturePlan(tm, input));
+    const mod = out.modules.get('engine-lifecycle.ts') ?? '';
+    check('the bodies move into one stateless facet class of static methods', /\nexport class LifecycleFacet \{\n/.test(mod) &&
+      /\n  static async movable\(this: Pick<LifecycleHost, /.test(mod) && !/\n  (private|constructor)/.test(mod));
+    check('a routed module imports ObjectQLStatics AS ObjectQL and names the class type by its alias',
+      /import \{ ObjectQLStatics as ObjectQL, dependsOnPinned \} from '\.\/engine\.js';/.test(mod) &&
+      /import type \{ ObjectQL as ObjectQLClass \} from '\.\/engine\.js';/.test(mod) && /count: ObjectQLClass\['count'\];/.test(mod));
+    check('a private docblock moves with its body; the class keeps none for it',
+      mod.includes('  /** A private docblock: it moves with the body. */\n  static async movable(') && !out.host.includes('A private docblock'));
+    check('a protected docblock stays on the facade; the facet member carries the placeholder',
+      out.host.includes('  /** A protected docblock: it stays on the facade. */\n  protected other(') &&
+      mod.includes(`  ${placeholderDoc('other')}\n  static other(`));
+    check('engine.ts declares the forwarder type and object for exactly the routed statics, and the static block fills them',
+      /export interface ObjectQLStaticsHost \{\n  readonly SECRET: \(typeof ObjectQL\)\['SECRET'\];\n\}/.test(out.host) &&
+      out.host.includes('      SECRET: { get: () => ObjectQL.SECRET },\n    });\n  }\n}') && !out.host.includes('bump:'));
+    check('a written field gets a host setter that assigns it on the engine',
+      out.host.includes("const writeCount = (v: ObjectQL['count']) => { this.count = v; };") && out.host.includes('set count(v) { writeCount(v); },'));
+    check('a generic method calls its body instantiated with its own type parameters',
+      out.host.includes('return (LifecycleFacet.generic<T>).call(host, x);') && mod.includes('  static generic<T extends string>(this: Pick<LifecycleHost, '));
+    check('a static method keeps its static stub and calls its facet body directly',
+      out.host.includes('  static staticHelper(n: number): number {\n    // [#29986 codemod] The body moved to `engine-lifecycle.ts`.\n    return LifecycleFacet.staticHelper(n);\n  }'));
+    const withMod = (text) => new Map([...out.modules, ['engine-lifecycle.ts', text]]);
+    check('an edited moved docblock fails', verify(tm, input, out.host,
+      withMod(mod.replace('it moves with the body', 'it moved with the body'))).failures.length > 0);
+    check('an edited placeholder fails', verify(tm, input, out.host,
+      withMod(mod.replace(placeholderDoc('other'), placeholderDoc('other').replace('contract', 'promise')))).failures.length > 0);
+    check('a static forwarded as the wrong kind fails', verify(tm, input,
+      out.host.replace('SECRET: { get: () => ObjectQL.SECRET },', 'SECRET: { value: ObjectQL.SECRET },'), out.modules).failures.length > 0);
   }
 
   open('import prune');
