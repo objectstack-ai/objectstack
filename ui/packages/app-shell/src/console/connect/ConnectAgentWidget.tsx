@@ -10,9 +10,10 @@
  * for people who don't know what MCP is:
  *
  *   1. the environment's MCP URL (from `/discovery` → `routes.mcp`) + copy,
- *   2. per-client connect cards with copy-paste-ready content — claude.ai /
- *      Claude Desktop, Claude Code, Cursor deeplink and Codex CLI first, then
- *      the Chinese clients WorkBuddy, Doubao Work and QwenWork.
+ *   2. per-client connect cards with copy-paste-ready content — one Claude
+ *      card (claude.ai / Claude Desktop and Claude Code), Cursor deeplink and
+ *      Codex CLI first, then the Chinese clients WorkBuddy, Doubao Work and
+ *      QwenWork.
  *      OAuth is the default story on every card (the deployment is its own
  *      authorization server; you sign in as yourself); the Chinese clients'
  *      cards name the API-key header as the fallback for a client version
@@ -259,26 +260,26 @@ export function ConnectAgent() {
 
       {/* ── Per-client cards: international clients first, then the Chinese ones ── */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
+        {/* Claude: one card, two ways in — the claude.ai / Desktop connector and
+            the Claude Code CLI. A full row, so the six cards below pair up. */}
+        <Card className="lg:col-span-2">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Claude (claude.ai / Desktop)</CardTitle>
+            <CardTitle className="text-base">Claude</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <p className="text-muted-foreground">{t('connectAgent.claude.body')}</p>
-            <Snippet text={mcpUrl} />
-            <p className="text-xs text-muted-foreground">{t('connectAgent.claude.reachability')}</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Claude Code</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <p className="text-muted-foreground">{t('connectAgent.claudeCode.body')}</p>
-            <Snippet text={`claude mcp add --transport http objectstack ${mcpUrl}`} />
-            <p className="text-muted-foreground">{t('connectAgent.claudeCode.plugin')}</p>
-            <Snippet text={'claude plugin marketplace add objectstack-ai/claude-plugin'} />
+          <CardContent className="grid gap-4 text-sm lg:grid-cols-2">
+            <div className="min-w-0 space-y-2">
+              <h4 className="font-medium">claude.ai / Claude Desktop</h4>
+              <p className="text-muted-foreground">{t('connectAgent.claude.body')}</p>
+              <Snippet text={mcpUrl} />
+              <p className="text-xs text-muted-foreground">{t('connectAgent.claude.reachability')}</p>
+            </div>
+            <div className="min-w-0 space-y-2">
+              <h4 className="font-medium">Claude Code</h4>
+              <p className="text-muted-foreground">{t('connectAgent.claudeCode.body')}</p>
+              <Snippet text={`claude mcp add --transport http objectstack ${mcpUrl}`} />
+              <p className="text-muted-foreground">{t('connectAgent.claudeCode.plugin')}</p>
+              <Snippet text={'claude plugin marketplace add objectstack-ai/claude-plugin'} />
+            </div>
           </CardContent>
         </Card>
 

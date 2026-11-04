@@ -146,7 +146,9 @@ describe('Connect an Agent offers the Chinese clients after the international on
   it('renders one card list, international clients first, then WorkBuddy, Doubao Work and QwenWork', async () => {
     await renderSettled();
     const order = [
-      'Claude (claude.ai / Desktop)',
+      // One Claude card carries both ways in: the connector, then the CLI.
+      'Claude',
+      'claude.ai / Claude Desktop',
       'Claude Code',
       'Cursor',
       'Codex CLI',
