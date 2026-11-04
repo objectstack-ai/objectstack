@@ -2057,7 +2057,6 @@ describe('AuthManager', () => {
           maxPasswordLength: 64,
           requireEmailVerification: true,
           autoSignIn: false,
-          revokeSessionsOnPasswordReset: true,
         },
       });
       await manager.getAuthInstance();
@@ -2069,8 +2068,10 @@ describe('AuthManager', () => {
         maxPasswordLength: 64,
         requireEmailVerification: true,
         autoSignIn: false,
-        revokeSessionsOnPasswordReset: true,
       });
+      // better-auth's own option, set by the auth instance whatever the host
+      // passes (the spec key of that name is retired; the manager refuses it).
+      expect(capturedConfig.emailAndPassword.revokeSessionsOnPasswordReset).toBe(true);
       expect(typeof capturedConfig.emailAndPassword.sendResetPassword).toBe('function');
     });
   });

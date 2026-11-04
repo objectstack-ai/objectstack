@@ -534,6 +534,7 @@
     "QueueConfigSchema": "src/system/worker.zod.ts#QueueConfigSchema (const)",
     "QuotaEnforcementResult": "src/system/tenant.zod.ts#QuotaEnforcementResult (type)",
     "QuotaEnforcementResultSchema": "src/system/tenant.zod.ts#QuotaEnforcementResultSchema (const)",
+    "REVOKE_SESSIONS_ON_PASSWORD_RESET_RETIRED": "src/system/auth-config.zod.ts#REVOKE_SESSIONS_ON_PASSWORD_RESET_RETIRED (const)",
     "RPO": "src/system/disaster-recovery.zod.ts#RPO (type)",
     "RPOParsed": "src/system/disaster-recovery.zod.ts#RPOParsed (type)",
     "RPOSchema": "src/system/disaster-recovery.zod.ts#RPOSchema (const)",
