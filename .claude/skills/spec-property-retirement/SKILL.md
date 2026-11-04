@@ -173,11 +173,11 @@ conversion 已不再覆盖的那位。
 ⚠ **这是三个独立义务,其中只有一个是字符串匹配。** registry 条目是门禁读的;
 conversion 是消费者跟的;D3 条目是升级方的 agent 读的。三个都要写。
 
-- [ ] **一条 `MetadataConversion`**,在 `packages/spec/src/conversions/registry.ts`:
-      kebab-case 的 `id` 以 `-removed` 结尾、`toMajor`、每键一条
-      `emit({ from, to: '(removed)', path })`(用共享的 `stripKeys` helper),以及一
-      个 `fixture`,其 `expectedNotices` 等于**键**数,不是条目数。walker
-      (`mapCollection`、`mapFlowNodes`、`renameKey`)住在 `conversions/walk.ts`,
+- [ ] **一条 `MetadataConversion`**,单独一个模块 `packages/spec/src/conversions/entries/<toMajor>/<id>.ts`
+      (文件名即 `id`,按名 `export`);手写、无生成器的 `conversions/registry.ts` 加 import 与列表项。
+      kebab-case 的 `id` 以 `-removed` 结尾、`toMajor`、每键一条 `emit({ from, to: '(removed)', path })`
+      (共享的 `stripKeys` 住 `entries/shared.ts`),以及一个 `fixture`,其 `expectedNotices` 等于**键**数,
+      不是条目数。walker(`mapCollection`、`mapFlowNodes`、`renameKey`)住在 `conversions/walk.ts`,
       copy-on-write —— 没命中就原样返回输入引用。
 - [ ] **一条 `RETIRED_KEYS_BY_MAJOR` 条目**,在 `packages/spec/src/migrations/entries/retired-keys/`
       加一个文件(命名见 `entries/README.md`),再跑 `pnpm --filter @objectstack/spec gen:migration-registry`
@@ -213,7 +213,8 @@ conversion 是消费者跟的;D3 条目是升级方的 agent 读的。三个都�
 - [ ] **一步 D3 链**,在 `packages/spec/src/migrations/registry.ts.template`(`registry.ts` 由
       `gen:migration-registry` 从它与 `entries/` 整文件生成并被 git 忽略,在 `registry.ts` 里手改不会
       进提交);`conversion.toMajor` **必须等于**该步的 major。**18 步**:conversion 只进
-      `conversions/registry.ts` 的 `MAJOR_18_CONVERSIONS`,照其头注按标识符排序插入,本步 `conversionIds`
+      `conversions/registry.ts` 的 `MAJOR_18_CONVERSIONS`:照其头注按标识符插入 `{ conversion, order }`;
+      其 import 插在后继条目的 import 正上方(头注的「定义」拆分后即 import),本步 `conversionIds`
       由它派生;`rationale` 只加一个 `STEP18_RATIONALE` 片段,按其头注插在你 D3 semantic id 的排序
       位;尾部追加被两处头注点名的 merge 测试拒收。
       **更早的步**:id 加进 `MIGRATIONS_BY_MAJOR[N].conversionIds`,扩写该步 `rationale`。⚠ 没有东西
@@ -260,7 +261,6 @@ conversion 是消费者跟的;D3 条目是升级方的 agent 读的。三个都�
       `json-schema.manifest/<category>.json`。#5837 起两者都按 category 分片 —— 门
       禁把整个目录读成一个集合,退役流程不变;变的只是那一行住在哪个文件。然后
       `gen:api-surface`、`gen:docs`;新条目跑 `gen:migration-registry`;D4 投影不提交,本地不重生成。
-      「改了 X → 重新生成 Y」的表见 AGENTS.md。
 - [ ] **Forms** —— 从 `packages/spec/src/**/*.form.ts` 剪掉 `{ field: '<key>' }` 输
       入。未强制能力的表单输入是假合规的 UI 半边。原位留一行注释。
 - [ ] **i18n bundle** —— 剪掉表单输入会改变抽取出的标签:`pnpm i18n:extract` 重新生
