@@ -64,6 +64,10 @@ const RETIRED_PRESET_RANGES: Record<string, { from: string; to: string }> = {
   last_90_days: { from: '{90_days_ago}', to: '{today}' },
 };
 
+/** The presets the spec added after the retired table, which never held them. */
+const FORWARD_PRESETS: readonly string[] = ['next_month', 'next_quarter', 'next_30_days'];
+const RETIRED_PRESETS = [...DATE_RANGE_PRESETS].filter((p) => !FORWARD_PRESETS.includes(p));
+
 /**
  * Reference instants (local time, which is what `resolveDateMacros` reads):
  * a mid-quarter Wednesday, a Sunday that closes a week, a Monday that opens
@@ -88,9 +92,38 @@ describe('dashboard date presets lower through the spec window table', () => {
     warn.mockRestore();
   });
 
-  it('covers the same thirteen presets the retired table did', () => {
-    expect([...DATE_RANGE_PRESETS].sort()).toEqual(Object.keys(RETIRED_PRESET_RANGES).sort());
-    expect(DATE_RANGE_PRESETS).toHaveLength(13);
+  it('covers the thirteen presets the retired table did, plus the three forward ones', () => {
+    expect([...DATE_RANGE_PRESETS].filter((p) => !FORWARD_PRESETS.includes(p)).sort())
+      .toEqual(Object.keys(RETIRED_PRESET_RANGES).sort());
+    expect(DATE_RANGE_PRESETS).toHaveLength(16);
+  });
+
+  it.each(FORWARD_PRESETS)('%s resolves to real days ahead of today in the client resolver', (preset) => {
+    const condition = buildFilterCondition(dateDef, { preset }) as { $gte: string; $lte: string };
+    for (const now of REFERENCE_NOWS) {
+      const resolved = resolveDateMacros(condition, now);
+      expect(resolved.$gte, `${preset} @ ${now.toString()}`).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(resolved.$lte, `${preset} @ ${now.toString()}`).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(resolved.$lte > resolved.$gte, `${preset} @ ${now.toString()}`).toBe(true);
+    }
+    // Pinned on a mid-quarter Wednesday, 2026-07-15.
+    const expected = {
+      next_month: { $gte: '2026-08-01', $lte: '2026-08-31' },
+      next_quarter: { $gte: '2026-10-01', $lte: '2026-12-31' },
+      next_30_days: { $gte: '2026-07-15', $lte: '2026-08-14' },
+    }[preset];
+    expect(resolveDateMacros(condition, REFERENCE_NOWS[0])).toEqual(expected);
+  });
+
+  it('the client resolves next_month_end and next_quarter_end across a year rollover', () => {
+    // Seen from a Q4 day, next quarter and next month fall in the next year.
+    const q4 = new Date(2026, 11, 10, 12, 0);
+    expect(resolveDateMacros({ $gte: '{next_quarter_start}', $lte: '{next_quarter_end}' }, q4))
+      .toEqual({ $gte: '2027-01-01', $lte: '2027-03-31' });
+    expect(resolveDateMacros({ $gte: '{next_month_start}', $lte: '{next_month_end}' }, q4))
+      .toEqual({ $gte: '2027-01-01', $lte: '2027-01-31' });
+    // A month-end day: next month is February, and 2028 is a leap year.
+    expect(resolveDateMacros('{next_month_end}', new Date(2028, 0, 31, 12, 0))).toBe('2028-02-29');
   });
 
   it.each([...DATE_RANGE_PRESETS])('emits the spec window for %s', (preset) => {
@@ -99,7 +132,7 @@ describe('dashboard date presets lower through the spec window table', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it.each([...DATE_RANGE_PRESETS])(
+  it.each(RETIRED_PRESETS)(
     '%s resolves to the same days under the retired {current_*} spelling',
     (preset) => {
       const retired = RETIRED_PRESET_RANGES[preset];
@@ -115,7 +148,7 @@ describe('dashboard date presets lower through the spec window table', () => {
     },
   );
 
-  it.each([...DATE_RANGE_PRESETS])(
+  it.each(RETIRED_PRESETS)(
     '%s keeps its previous-period window and trend label for a compareTo widget',
     (preset) => {
       const retired = RETIRED_PRESET_RANGES[preset];
