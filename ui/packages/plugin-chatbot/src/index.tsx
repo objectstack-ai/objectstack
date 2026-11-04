@@ -350,6 +350,8 @@ export {
   detectProposedPlan,
   detectBuilderHandoff,
   detectRecordHandoff,
+  detectRecordWrite,
+  detectSampleDataCleanup,
   detectProposedChanges,
   detectReplayOutcome,
   detectAuthoringVerdict,
@@ -364,6 +366,9 @@ export type {
   DraftReview,
   ProposedPlan,
   BuilderHandoff,
+  RecordWrite,
+  RecordWriteField,
+  SampleDataCleanup,
   ProposedChanges,
   ReplayOutcome,
 } from './mapMessages';
