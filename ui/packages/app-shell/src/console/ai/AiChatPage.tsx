@@ -109,6 +109,7 @@ import {
 import { AppHeader } from '../../layout/AppHeader.js';
 import { CONSOLE_TOP_BAR } from '../../layout/consoleTopBar.js';
 import { armChatDockExpanded, readDockReturnLocation } from '../../layout/chatDockState.js';
+import type { ChatSurfaceContext } from '../../layout/chatSurfaceContext.js';
 import {
   useAdvertiseShortcut,
   type AdvertisedShortcut,
@@ -1572,11 +1573,7 @@ interface ChatPaneProps {
    * `context.surface` on every turn (the transport reads the body per send),
    * and surfaced to the user as a chip above the composer.
    */
-  surfaceContext?: {
-    pillar?: string;
-    artifact?: { type: string; name: string };
-    mode?: string;
-  };
+  surfaceContext?: ChatSurfaceContext;
   /**
    * objectui#8219 — the display label of `surfaceContext.artifact`, when the
    * host knows it (Studio: the Interfaces pillar's open leaf). Display-only: the
@@ -1597,6 +1594,13 @@ interface ChatPaneProps {
   /** ADR-0070 "Edit with AI": the package the user opened to edit (from `?package=`),
    *  forwarded to the build agent as `context.packageId` to scope it to that app. */
   editPackageId?: string;
+  /**
+   * objectstack#30043 — the app the user has selected, by its package: the
+   * console app the dock sits in, whichever agent it runs. Sent as
+   * `context.activeApp`; absent, `editPackageId` (the app picked for editing)
+   * is the selection, and with neither the key is omitted, never a placeholder.
+   */
+  activeAppPackageId?: string;
   /** A1.b bind-on-create: fired when this pane's build history binds to a package
    *  while the surface has no `?package=` — the page re-keys the conversation to
    *  `app:${pkg}:build` and writes `?package=` onto the URL. */
@@ -1636,6 +1640,7 @@ export function ChatPane({
   apiBase,
   conversationId,
   editPackageId,
+  activeAppPackageId,
   surfaceContext,
   surfaceArtifactLabel,
   onPackageBound,
@@ -1869,6 +1874,7 @@ export function ChatPane({
   // pane mounts while the catalog is still loading, and a server without an
   // AI service answers that catalog empty and `/models` with a 501.
   const { models: aiModels, defaultModelId } = useAiModels({ apiBase, enabled: agents.length > 0 });
+  const selectedApp = activeAppPackageId || editPackageId || undefined;
   const [selectedModelId, setSelectedModelId] = useState<string | undefined>(undefined);
   const effectiveModelId = selectedModelId ?? defaultModelId;
 
@@ -1892,7 +1898,10 @@ export function ChatPane({
     onError: handleChatError,
     body: {
       context: {
-        activeApp: 'AI',
+        // objectstack#30043 — the app the user has selected, never a constant:
+        // the agent was told "AI" while the user stood in their CRM. Omitted
+        // when nothing is selected.
+        ...(selectedApp ? { activeApp: selectedApp } : {}),
         agentName: activeAgent,
         // Tell the agent the environment's publish posture so its narration
         // matches reality (an auto-published build is live, not "to publish").
@@ -1902,6 +1911,7 @@ export function ChatPane({
         ...(editPackageId ? { packageId: editPackageId } : {}),
         // cloud#1610 — what the user is currently discussing (advisory; the
         // transport reads the body per send, so this stays fresh per turn).
+        // The console dock sends the page in view too (objectstack#30043).
         ...(surfaceContext ? { surface: surfaceContext } : {}),
       },
     },

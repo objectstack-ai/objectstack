@@ -1534,6 +1534,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
         objects={allObjects}
         connectionState={connectionState}
         userId={user?.id}
+        hostRoutePaths={hostRoutePaths}
       >
         <CommandPalette
           apps={apps}

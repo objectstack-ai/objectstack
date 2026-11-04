@@ -8,17 +8,18 @@
  * @module
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AppShell } from '@object-ui/layout';
 import { useIsMobile } from '@object-ui/components';
-import { useObjectTranslation } from '@object-ui/i18n';
+import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 
 // Lightweight FAB stub — the heavy chat chunk graph (plugin-chatbot,
 // shiki, streamdown, mermaid, @ai-sdk, ~20MB) only downloads on first
 // hover/click. See ConsoleChatbotFab.tsx.
 import { ConsoleChatbotFab } from './ConsoleChatbotFab.js';
 import { useChatDockState, ChatDockPanel, ChatDockMobileSheet } from './ChatDock.js';
+import { consoleChatSurface } from './chatSurfaceContext.js';
 import {
   matchChatDockShortcut,
   rememberDockReturnLocation,
@@ -64,6 +65,12 @@ interface ConsoleLayoutProps {
    * server-backed conversation history. Omit for unauthenticated/local-only.
    */
   userId?: string;
+  /**
+   * objectstack#30043 — the paths of the host's extra app routes
+   * (`AppContent`'s `extraRoutes`). A page one of them draws names no surface
+   * to the dock, the way it shadows `:objectName` in `<Routes>`.
+   */
+  hostRoutePaths?: readonly string[];
 }
 
 /**
@@ -145,6 +152,7 @@ export function ConsoleLayout({
   objects,
   connectionState,
   userId,
+  hostRoutePaths,
 }: ConsoleLayoutProps) {
   const appLabel = resolveKeyedI18nLabel(activeApp?.label) || activeAppName;
   // objectstack#28077 — once, before `AppShell`'s sidebar provider reads its
@@ -187,6 +195,24 @@ export function ConsoleLayout({
   // page draws its phone face at, so the two never disagree for a frame.
   const phone = usePhoneViewport();
   const recordPageOwnsTopBar = phone && isRecordPagePath(location.pathname);
+  // objectstack#30043 — the page in view, handed to the dock as its
+  // `context.surface` (cloud#1610's shape): the object of a list, the object
+  // and record id of a record page, the dashboard, report or page. Read off the
+  // URL each render, so the next send after a navigation carries the new page.
+  const dockSurface = useMemo(
+    () => consoleChatSurface(location.pathname, hostRoutePaths),
+    [location.pathname, hostRoutePaths],
+  );
+  // The chip's label for an object surface: the object's own translated
+  // label, the one its page shows. Display only; it never enters
+  // `context.surface`. No definition in hand → the chip reads `type · name`.
+  const { objectLabel } = useObjectLabel();
+  const dockSurfaceLabel = useMemo(() => {
+    const artifact = dockSurface?.artifact;
+    if (artifact?.type !== 'object') return undefined;
+    const def = (objects as ConsoleObject[] | undefined)?.find((o) => o?.name === artifact.name);
+    return def ? objectLabel({ name: def.name, label: def.label ?? '' }) || undefined : undefined;
+  }, [dockSurface, objects, objectLabel]);
   // "/ai = the dock maximized": record where we maximized FROM at click time,
   // so the page's collapse-to-dock returns exactly here (history-back could
   // land on a prior /ai URL after in-page conversation switches).
@@ -272,6 +298,8 @@ export function ConsoleLayout({
             // objectui#10926 — the app a build thread binds to (authorable
             // packages only; the dock decides).
             appPackageId={activeApp?._packageId}
+            surfaceContext={dockSurface}
+            surfaceArtifactLabel={dockSurfaceLabel}
             // ADR-0057 P3c — "/ai = the dock maximized": the maximize button
             // opens the full-page surface on THE SAME THREAD this rail shows —
             // `/ai` for an app-less thread (canonicalized to the default agent,
@@ -352,6 +380,8 @@ export function ConsoleLayout({
           userId={userId}
           defaultAgent={activeApp?.defaultAgent}
           appPackageId={activeApp?._packageId}
+          surfaceContext={dockSurface}
+          surfaceArtifactLabel={dockSurfaceLabel}
           // Bridge to full-page /ai (history + share live there on mobile). The
           // sheet defers the navigation until it has cleanly closed.
           onMaximize={openDockFullPage}
