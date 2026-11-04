@@ -324,6 +324,8 @@ export interface ListViewProps {
    * the element (readonly T[] in, T[] out) and so preserves whatever it is
    * given. Normalized-vs-raw therefore does not move the TYPE here; it only
    * decides whether platform-unsortable entries are still present (#6455).
+   * Under a served projection they never are: the emit drops them, as every
+   * request this list sends already does (objectstack#30024).
    */
   onSortChange?: (sort: SortItem[]) => void;
   /**
@@ -1882,6 +1884,25 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   const [objectDefLoaded, setObjectDefLoaded] = React.useState(false);
 
   /**
+   * ONE read of the served per-column sortability projection
+   * (objectstack#10235 ruling A, consumed through `@object-ui/core`), for every
+   * leg of this component that asks it: the sort this list SENDS (`serverSort`
+   * below), the sort picker's list, and the sort it emits for a host to persist
+   * (`emitSortChange`). Read more than once, two copies could answer
+   * differently about the same field on the same render, which is the drift
+   * `isPlatformSortableField` was consolidated to end.
+   *
+   * Declared beside `objectDef` because the data fetch reads it, and that
+   * effect's dependency list is evaluated where the effect is declared.
+   * `undefined` is "no signal served" (an older deployment, an inline or mock
+   * data source, or `objectDef` not yet read), never "nothing is sortable".
+   */
+  const platformSortability = React.useMemo(
+    () => readObjectSortability(objectDef),
+    [objectDef],
+  );
+
+  /**
    * objectui#12966 — the object's `search` resolves to no field, so the server
    * refuses any term with `400 INVALID_FIELD`: no quick-search box, and a term
    * restored at mount or carried across a view switch is not applied, for the
@@ -1982,6 +2003,32 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     setCurrentSort(parseSortConfig(schema.sort));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schemaSortKey]);
+
+  /**
+   * objectstack#30024 — the sort this list ASKS THE SERVER FOR: `currentSort`
+   * less every entry the served projection refuses.
+   *
+   * `currentSort` is seeded from the stored view `sort` (and a URL or
+   * restored user sort), so it can name a field the platform will not order
+   * by: a `formula`, an unknown name, or one its author marked
+   * `sortable: false`. The Data API answers such a sort `400 INVALID_SORT`, so
+   * sending it failed the whole list on its first fetch. Every request this
+   * component makes, and every child view that fetches its own rows from the
+   * `sort` handed to it, reads this list instead, so a refused entry never
+   * reaches the server and the rows load in the order of the entries left,
+   * kept in their original order.
+   *
+   * The refused entry stays in `currentSort`: the sort picker still lists it
+   * removable-only, and the persist boundary (`emitSortChange`) drops it from
+   * the next write. No signal served ⇒ sent unchanged, as before
+   * objectstack#10235, because there is no verdict to filter by.
+   */
+  const serverSort = React.useMemo(
+    () => (platformSortability
+      ? filterPlatformSortableSort(currentSort, platformSortability)
+      : currentSort),
+    [currentSort, platformSortability],
+  );
 
   /**
    * The view's DECLARED sort, for the "reset to default" affordance
@@ -3183,8 +3230,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
 
         // Convert sort to query format
         // Use array format to ensure order is preserved (Object keys are not guaranteed ordered)
-        const sort: any = currentSort.length > 0
-          ? currentSort
+        // `serverSort`, not `currentSort`: a stored entry the platform's
+        // sortability projection refuses never reaches the server (objectstack#30024).
+        const sort: any = serverSort.length > 0
+          ? serverSort
               .filter(item => item.field) // Ensure field is selected
               .map(item => ({ field: item.field, order: item.order }))
           : undefined;
@@ -3827,7 +3876,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     // silently un-suppresses nothing, because the finding it was suppressing
     // simply moves elsewhere. Add prose ABOVE this point, never below it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schema.objectName, schema.data, dataSource, authoredFilter, effectivePageSize, currentSort, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, refreshKey, searchTerm, schema.searchableFields, schema.columns, schema.kanban, schema.calendar, schema.gallery, schema.timeline, schema.gantt, schema.map, objectDef?.fields, objectDefLoaded, schema.refreshTrigger, perms, fetchSkip, groupingConfig, predicateProjectionKey, invalidationNonce, groupingNeedsHeaderQuery, calendarWindowKey, rowsCarryConcurrencyToken]); // Re-fetch on filter/sort/search/refreshTrigger/perms/window change; `rowsCarryConcurrencyToken` (objectui#12292) re-reads the rows with their token when inline edit turns on
+  }, [schema.objectName, schema.data, dataSource, authoredFilter, effectivePageSize, serverSort, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, refreshKey, searchTerm, schema.searchableFields, schema.columns, schema.kanban, schema.calendar, schema.gallery, schema.timeline, schema.gantt, schema.map, objectDef?.fields, objectDefLoaded, schema.refreshTrigger, perms, fetchSkip, groupingConfig, predicateProjectionKey, invalidationNonce, groupingNeedsHeaderQuery, calendarWindowKey, rowsCarryConcurrencyToken]); // Re-fetch on filter/sort/search/refreshTrigger/perms/window change; `rowsCarryConcurrencyToken` (objectui#12292) re-reads the rows with their token when inline edit turns on
 
   // Any change to the result-defining inputs (object, filters, sort, search,
   // grouping, page size) invalidates the current page number — snap back to
@@ -4316,7 +4365,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       // chart branch below, and any of these rendered standalone) never saw the
       // view's base filter at all.
       filter: authoredFilter,
-      sort: currentSort,
+      // `serverSort`: the kanban, calendar, timeline and gantt fetch their own
+      // rows from this `sort`, so it carries no entry the platform refuses
+      // (objectstack#30024).
+      sort: serverSort,
       className: "h-full w-full",
       // Disable internal controls that clash with ListView toolbar
       showSearch: false,
@@ -4923,7 +4975,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // asynchronously (`/me/permissions`) and `objectDef` loads into state, so a
   // grid schema built before either resolved must be rebuilt when they do —
   // otherwise `editable` keeps the pre-verdict answer for the session.
-  }, [currentView, schema, authoredFilter, currentSort, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, hostRoutesRowClicks, density.mode, galleryCardSize, inlineEdit, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged]);
+  }, [currentView, schema, authoredFilter, serverSort, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, hostRoutesRowClicks, density.mode, galleryCardSize, inlineEdit, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged]);
 
   // The count the toolbar shows: a record-mode amount's code condition is
   // part of its amount row (objectstack#27188), not a filter of its own, and a
@@ -5169,15 +5221,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // the type read when no projection is served). A field the two rules list
   // anyway carries no flag, whether or not the sort names it.
   //
-  // ONE read of the served projection, for BOTH legs below — the list this
-  // picker renders, and the sort it emits for a host to persist. Read twice,
-  // the two copies could answer differently about the same field on the same
-  // render, which is the drift `isPlatformSortableField` was consolidated to
-  // end. `undefined` stays "no signal served", never "nothing is sortable".
-  const platformSortability = React.useMemo(
-    () => readObjectSortability(objectDef),
-    [objectDef],
-  );
+  // Both legs below — the list this picker renders, and the sort it emits for
+  // a host to persist — read `platformSortability`, the ONE read of the served
+  // projection declared beside `objectDef` (the same read `serverSort` filters
+  // the request by).
 
   const { sortFields, sortHasRelationalField, sortPicksRelationalField } = React.useMemo(() => {
     const inUse = new Set(currentSort.map((item) => item.field).filter(Boolean));
@@ -5234,9 +5281,15 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    * So the two legs part company HERE, at the one boundary every emit crosses,
    * exactly as #5729 parted them at the grid seam (`ObjectGrid`'s
    * `manualSort` / `manualOnSortChange` pair). The refused entry stays in
-   * `currentSort` — listed, removable, and still the order this list asks the
-   * server for — while no write ever carries it. Removing it persists the
-   * removal; a sort with nothing refused in it is emitted unchanged.
+   * `currentSort`, listed and removable, while no write ever carries it.
+   * Removing it persists the removal; a sort with nothing refused in it is
+   * emitted unchanged.
+   *
+   * Nor does any REQUEST carry it (objectstack#30024): the fetch, the export
+   * and the child views read `serverSort`, which drops it through the same
+   * `filterPlatformSortableSort` call. This boundary used to leave it in "the
+   * order this list asks the server for", and the server answers such a sort
+   * `400 INVALID_SORT`, so a stored view naming one failed its first fetch.
    *
    * Every `onSortChange` in this component goes through here rather than each
    * call site filtering for itself: a builder edit, a header click and a
@@ -5385,8 +5438,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         .map((f: any) => columnIdentity(f))
         .filter(Boolean) as string[];
 
-      const sort = currentSort.length > 0
-        ? currentSort
+      // The rows on screen were asked for with `serverSort`, so the file is too:
+      // a refused entry would fail the export the way it failed the list.
+      const sort = serverSort.length > 0
+        ? serverSort
             .filter(item => item.field)
             .map(item => ({ field: item.field, direction: item.order as 'asc' | 'desc' }))
         : undefined;
@@ -5493,7 +5548,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     setShowExport(false);
     // `searchTerm` / `searchableFields` belong here: the export now narrows by
     // the active search, so a stale closure would export the wrong row set.
-  }, [data, effectiveFields, resolvedExportOptions, schema.objectName, authoredFilter, schema.searchableFields, exportPermitted, dataSource, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, currentSort, searchTerm, objectDef, resolveObjectLabel]);
+  }, [data, effectiveFields, resolvedExportOptions, schema.objectName, authoredFilter, schema.searchableFields, exportPermitted, dataSource, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, serverSort, searchTerm, objectDef, resolveObjectLabel]);
 
   // All available fields for hide/show (with i18n)
   //
