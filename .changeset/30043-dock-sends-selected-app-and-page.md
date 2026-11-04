@@ -7,7 +7,7 @@ fix(app-shell): the console AI dock tells the agent which app the user has selec
 Clause-②: no
 Metadata-protocol: none
 
-Every chat request the console sends to `POST /api/v1/ai/agents/:agent/chat` used to carry `context.activeApp: 'AI'`, whatever app the user was in, and the floating dock sent no `context.surface`. So the assistant asked 「哪个应用 / 哪条记录」 while the screen showed both.
+Every chat request the console sends to `POST /api/v1/ai/agents/:agent/chat` used to carry `context.activeApp: 'AI'`, whatever app the user was in, and the floating dock sent no `context.surface`. So the assistant asked "which app?" and "which record?" while the screen showed both.
 
 Now:
 
