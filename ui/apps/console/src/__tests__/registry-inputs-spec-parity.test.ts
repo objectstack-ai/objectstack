@@ -1566,7 +1566,11 @@ const UNPUBLISHED_EXEMPTIONS: Record<string, string> = {
   // (`ParentRecordBinding`) and declared the key on the registration, with its member pin in
   // `MEMBER_PINS`, so the entry went stale and `carries no stale unpublished-key exemption` would
   // refuse it.
-  'page:header.placedActions': 'Booked while no renderer reads it: objectstack#30018 declared the key spec first (ruling record 6624172200, letter A), and PageHeaderRenderer still resolves only the authored `actions` ids. objectstack#29951\'s ui half wires the read and declares the input on the page:header registration, and strikes this entry in that PR (`carries no stale unpublished-key exemption` refuses it once the input is published).',
+  // `page:header.placedActions` — booked here by objectstack#30018 (ruling record 6624172200,
+  // letter A) while no renderer read it — is STRUCK: objectstack#29951's ui half wired the read
+  // (`PageHeaderActions` draws `placedHeaderActions` from `@object-ui/types`) and declared the
+  // key on the page:header registration, so the entry went stale and `carries no stale
+  // unpublished-key exemption` would refuse it.
 
   /*
    * ⚠️ THE 17.5.0 BOOKINGS — objectui#11111 decision 3 = B (record 5902351047).
