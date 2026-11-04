@@ -43,7 +43,7 @@
 //
 // Per widget and measure, fixture rows are written through the seed door
 // (system, hooks and validations live) on known days that straddle every
-// preset's past edges, each row stamped at UTC noon (a `date` field takes the
+// preset's edges (a forward preset's edges are future days), each row stamped at UTC noon (a `date` field takes the
 // day itself), with every column the widget's own filter, the dataset's filter
 // and the measure's filter read held to a value those filters select, and
 // owned by the principal. Each row is read back: a row whose stamp or held
@@ -604,14 +604,21 @@ function shiftDay(day: string, n: number): string {
 /** This family's letter on every string value it varies (`derive.ts`'s `vary`). */
 const FIXTURE_TAG = 'w';
 
-/** The days the fixtures are written on: each preset's first and last day and the day either side, never after today. */
+/**
+ * The days the fixtures are written on: each preset's first and last day and
+ * the day either side. A window that ends by today writes nothing after today;
+ * a FORWARD window (`next_month`, `next_quarter`, `next_30_days`), whose last
+ * day is after today, writes its own future edges too, since no past day can
+ * fall inside it.
+ */
 function fixtureDays(presets: DashboardWindowPreset[], today: string): string[] {
   const days = new Set<string>([today]);
   for (const p of presets) {
     const start = p.resolved.$gte as string;
     const end = p.resolved.$lte as string | undefined;
+    const forward = end !== undefined && end > today;
     for (const d of [start, shiftDay(start, -1), ...(end ? [end, shiftDay(end, 1)] : [])]) {
-      if (d <= today) days.add(d);
+      if (forward || d <= today) days.add(d);
     }
   }
   return [...days].sort().reverse();

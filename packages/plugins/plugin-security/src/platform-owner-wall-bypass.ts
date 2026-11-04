@@ -21,7 +21,11 @@
  *    wall is byte-identical to before the ruling, and WRITES keep today's
  *    behaviour for the owner too — the ADR-0123 D2 org-less write refusal
  *    stands (director's correction on the same card: lifting the write twin
- *    would mint the NULL-organization rows the platform is eliminating).
+ *    would mint the NULL-organization rows the platform is eliminating). Nor
+ *    does a READ cross the one `deny` that judges the object rather than the
+ *    reader: an external object that states no organization scope reads as
+ *    empty for every caller, the platform owner included (ADR-0015 §10; the
+ *    stand-down is at the crossing in `security-plugin-rls-filter.ts`).
  *
  * [#13147] The comparison is no longer spelled here at all. `OS_PLATFORM_OWNER_EMAIL`
  * takes ONE address **or a comma-separated list** of them (#11663 Choice 2B),
