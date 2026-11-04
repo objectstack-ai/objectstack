@@ -1330,11 +1330,13 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
       if (action === 'viewAllRecords' && value) nextObj.allowRead = true;
       // An object permission that edits or deletes a record also reads it —
       // the spec refuses Edit or Delete without read on the entry. So Edit or
-      // Delete on ticks Read, and Read off clears Edit and Delete unless a
-      // super-user bit still grants the read (then the entry stays valid, and
-      // clearing Delete beside Modify All would author the refused #25575 pair).
+      // Delete on ticks Read, and unticking any bit that reads (Read, View
+      // All, Modify All) clears Edit and Delete once no bit that reads is left.
+      // While one still is, the entry stays valid as it is (and clearing
+      // Delete beside Modify All would author the refused #25575 pair).
       if ((action === 'allowEdit' || action === 'allowDelete') && value) nextObj.allowRead = true;
-      if (action === 'allowRead' && !value && !nextObj.viewAllRecords && !nextObj.modifyAllRecords) {
+      const unticksARead = !value && (action === 'allowRead' || action === 'viewAllRecords' || action === 'modifyAllRecords');
+      if (unticksARead && !nextObj.allowRead && !nextObj.viewAllRecords && !nextObj.modifyAllRecords) {
         if (nextObj.allowEdit) nextObj.allowEdit = false;
         if (nextObj.allowDelete) nextObj.allowDelete = false;
       }

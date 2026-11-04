@@ -7,9 +7,10 @@
  * hands the save door one.
  *
  *  - Ticking Edit or Delete ticks Read.
- *  - Unticking Read unticks Edit and Delete — unless View All or Modify All
- *    still grants the read, where the entry stays valid as it is (and clearing
- *    Delete beside Modify All would author the pair the spec refuses).
+ *  - Unticking a bit that reads (Read, View All, Modify All) unticks Edit and
+ *    Delete once no bit that reads is left — while one still is, the entry
+ *    stays valid as it is (and clearing Delete beside Modify All would author
+ *    the pair the spec refuses).
  *
  * Every assertion reads the SAVED payload, the only thing either save door
  * persists.
@@ -134,6 +135,42 @@ describe('an object permission that edits or deletes a record also reads it', ()
     fireEvent.click(within(row('crm_case')).getByLabelText('crm_case Read'));
     const payload = await save(server);
     expect(payload.objects.crm_case).toMatchObject({ allowRead: false, allowEdit: true, allowDelete: true, modifyAllRecords: true });
+    expect(PermissionSetSchema.safeParse(payload).success).toBe(true);
+  });
+
+  it('unticking View All on a stored entry that reads only through it unticks Edit and Delete', async () => {
+    const server = await renderSet({ crm_case: { viewAllRecords: true, allowEdit: true, allowDelete: true } });
+    fireEvent.click(screen.getByLabelText('crm_case View All Records (bypass sharing)'));
+    expect(screen.getByLabelText('crm_case Edit').getAttribute('data-state')).toBe('unchecked');
+    expect(screen.getByLabelText('crm_case Delete').getAttribute('data-state')).toBe('unchecked');
+    const payload = await save(server);
+    expect(payload.objects.crm_case).toEqual({ viewAllRecords: false, allowEdit: false, allowDelete: false });
+    expect(PermissionSetSchema.safeParse(payload).success).toBe(true);
+  });
+
+  it('unticking Modify All on a stored entry that reads only through it unticks Edit and Delete', async () => {
+    const server = await renderSet({ crm_case: { allowEdit: true, allowDelete: true, modifyAllRecords: true } });
+    fireEvent.click(screen.getByLabelText('crm_case Modify All Records (bypass sharing)'));
+    expect(screen.getByLabelText('crm_case Edit').getAttribute('data-state')).toBe('unchecked');
+    expect(screen.getByLabelText('crm_case Delete').getAttribute('data-state')).toBe('unchecked');
+    const payload = await save(server);
+    expect(payload.objects.crm_case).toEqual({ allowEdit: false, allowDelete: false, modifyAllRecords: false });
+    expect(PermissionSetSchema.safeParse(payload).success).toBe(true);
+  });
+
+  it('unticking View All keeps Edit and Delete while Read still reads', async () => {
+    const server = await renderSet({ crm_case: { allowRead: true, viewAllRecords: true, allowEdit: true, allowDelete: true } });
+    fireEvent.click(screen.getByLabelText('crm_case View All Records (bypass sharing)'));
+    const payload = await save(server);
+    expect(payload.objects.crm_case).toEqual({ allowRead: true, viewAllRecords: false, allowEdit: true, allowDelete: true });
+    expect(PermissionSetSchema.safeParse(payload).success).toBe(true);
+  });
+
+  it('unticking View All keeps Edit and Delete while Modify All still reads', async () => {
+    const server = await renderSet({ crm_case: { viewAllRecords: true, modifyAllRecords: true, allowEdit: true, allowDelete: true } });
+    fireEvent.click(screen.getByLabelText('crm_case View All Records (bypass sharing)'));
+    const payload = await save(server);
+    expect(payload.objects.crm_case).toMatchObject({ viewAllRecords: false, modifyAllRecords: true, allowEdit: true, allowDelete: true });
     expect(PermissionSetSchema.safeParse(payload).success).toBe(true);
   });
 });
