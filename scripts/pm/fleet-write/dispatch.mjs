@@ -267,8 +267,8 @@
  *     was judged inside the run (the executor fails the action when the
  *     answer lists fewer than sent), so a login sent and absent here is
  *     another actor's later write, said on the row's line;
- *   - the four advisory rows are NOT read back here, by construction, and
- *     that is no missed case. `advisory_report` and `advisory_create` carry
+ *   - the five advisory rows that write are NOT read back here, by
+ *     construction, and that is no missed case. `advisory_report` and `advisory_create` carry
  *     prose (`summary`, `description`, so each is content-creating for rule
  *     ⑤) but no `body`, and the relay's byte-for-byte read-back cannot apply
  *     to them: the seat cannot read an unpublished advisory, a report or a
@@ -280,11 +280,14 @@
  *     names that id in an annotation this file reads and hands on as
  *     `result.annotations.advisories` (`--json`: `advisories`), so the seat
  *     follows with `advisory_collaborators_add` and then reads the advisory
- *     with `advisory_read`. `advisory_collaborators_add` and `advisory_state` carry
- *     no body and are confirmed inside the run on their own PATCH answer (every
- *     login sent listed, the state asked for shown) after the executor's fences
- *     on the advisory. A run that failed (a fence refused it, or the answer did
- *     not show the result) is exit 5 like any failed run, ⛔ never re-sent;
+ *     with `advisory_read`. `advisory_collaborators_add`, `advisory_versions`
+ *     and `advisory_state` carry no prose and are confirmed inside the run on
+ *     their own PATCH answer (every login sent listed, the entries sent
+ *     listed, the state asked for shown) after the executor's fences on the
+ *     advisory. A landed publish also names its id in an advisory annotation,
+ *     handed on the same way, and the seat records the run on its seat post.
+ *     A run that failed (a fence refused it, or the answer did not show the
+ *     result) is exit 5 like any failed run, ⛔ never re-sent;
  *   - `advisory_read` has NO byte read-back either, and needs none: it writes
  *     nothing. Its outcome is the sealed answer, and reading it back IS the
  *     outcome. This file makes the read's key pair (`armAdvisoryReads`: one
@@ -371,7 +374,8 @@
  *
  * ## The run's annotations — the numbers a seat CAN read
  *
- * (An `advisory_report` or `advisory_create` that landed is annotated too, with its own message —
+ * (An `advisory_report` or `advisory_create` that landed is annotated too, and so is a landed publish — an
+ * `advisory_state` to `published`, its other moves never — with its own message —
  * `fleet-write action=<i> op=<op> ghsa_id=<id>`, spelled by
  * `relayAdvisoryAnnotationMessage` and read by `parseRelayAdvisoryAnnotation`,
  * the id and nothing else — and `readRunAnnotations` hands those rows on as
@@ -488,6 +492,7 @@ import {
   ADVISORY_READ_KEY_TYPE,
   ADVISORY_READ_MAX_PARTS,
   ADVISORY_READ_PART_CHARS,
+  ADVISORY_PUBLISHED_STATE,
   CONTAINER_SESSION_ENV,
   CONTAINER_SESSION_SHAPE,
   FIELDS,
@@ -1139,10 +1144,18 @@ export function parseRelayAnnotation(message) {
  * exposes no content, and the run log is public (`ops.mjs`, the advisory rows).
  */
 export const ADVISORY_ANNOTATED_OPS = Object.freeze(['advisory_report', 'advisory_create']);
+/**
+ * The op whose landing is annotated in the same spelling only when it PUBLISHES (`ops.mjs`, the advisory rows): an
+ * `advisory_state` to `published`, whose id is public once it lands — the run names it, which is the point. Its
+ * other moves are not annotated; a row naming one is ignored (`matchRunAdvisories`).
+ */
+export const ADVISORY_PUBLISH_OP = 'advisory_state';
+/** Does this action publish — the one `advisory_state` landing the run annotates? Pure. */
+export const advisoryPublishes = (action) => action?.op === ADVISORY_PUBLISH_OP && action?.advisory_state === ADVISORY_PUBLISHED_STATE;
 
 const RELAY_ADVISORY_ANNOTATION_SHAPE = new RegExp(`^${RELAY_ANNOTATION_PREFIX} action=([1-9][0-9]*) op=([a-z_]+) ghsa_id=(GHSA(?:-[0-9a-z]{4}){3})$`);
 
-/** The message of the one annotation the executor emits for a landed advisory report or draft. Pure. */
+/** The message of the one annotation the executor emits for a landed advisory report, draft or publish. Pure. */
 export function relayAdvisoryAnnotationMessage({ action, op, ghsaId }) {
   return `${RELAY_ANNOTATION_PREFIX} action=${action} op=${op} ghsa_id=${ghsaId}`;
 }
@@ -1150,7 +1163,7 @@ export function relayAdvisoryAnnotationMessage({ action, op, ghsaId }) {
 /** An advisory annotation's `message` as `{ action, op, ghsaId }`, or null for anything else. Pure; never throws. */
 export function parseRelayAdvisoryAnnotation(message) {
   const m = RELAY_ADVISORY_ANNOTATION_SHAPE.exec(typeof message === 'string' ? message : '');
-  if (!m || !ADVISORY_ANNOTATED_OPS.includes(m[2])) return null;
+  if (!m || !(ADVISORY_ANNOTATED_OPS.includes(m[2]) || m[2] === ADVISORY_PUBLISH_OP)) return null;
   return { action: Number(m[1]), op: m[2], ghsaId: m[3] };
 }
 
@@ -1295,6 +1308,10 @@ export function matchRunAdvisories(payload, parsed) {
       ignored.push({ ...row, why: `the stroke's action ${row.action} is ${action ? action.op : 'absent'}, not ${row.op}` });
       continue;
     }
+    if (row.op === ADVISORY_PUBLISH_OP && !advisoryPublishes(action)) {
+      ignored.push({ ...row, why: `the stroke's action ${row.action} is no publish, and only a publish is annotated` });
+      continue;
+    }
     byAction.set(row.action, [...(byAction.get(row.action) ?? []), row]);
   }
   const rows = [];
@@ -1361,6 +1378,7 @@ function probeValue(spec) {
   if (spec?.kind === 'enum') return spec.values[0];
   if (spec?.kind === 'sha') return '0'.repeat(40);
   if (spec?.kind === 'inputs') return {};
+  if (spec?.kind === 'versions') return [{ package: 'x', vulnerable_version_range: 'x', patched_versions: 'x' }];
   return 'x';
 }
 
@@ -1548,7 +1566,7 @@ export async function readRunAnnotations(runId, deps = {}) {
  */
 async function runAnnotationsFor(payload, run, deps) {
   const annotated = payload.actions.map((a, i) => ({ action: i + 1, op: a.op })).filter((a) => Object.hasOwn(ANNOTATED_OPS, a.op));
-  const filing = payload.actions.map((a, i) => ({ action: i + 1, op: a.op })).filter((a) => ADVISORY_ANNOTATED_OPS.includes(a.op));
+  const filing = payload.actions.map((a, i) => ({ action: i + 1, op: a.op, publishes: advisoryPublishes(a) })).filter((a) => ADVISORY_ANNOTATED_OPS.includes(a.op) || a.publishes);
   const reading = payload.actions.some((a) => ADVISORY_READ_OPS.includes(a.op));
   if (!annotated.length && !filing.length && !reading) return { state: 'none', rows: [], ignored: [], advisories: [], reads: [], why: '' };
   const read = await readRunAnnotations(run.id, deps);
@@ -1557,7 +1575,13 @@ async function runAnnotationsFor(payload, run, deps) {
   const log = deps.log;
   for (const r of rows) log(`fleet-write: run ${run.id}'s annotation names action ${r.action} ${r.op} → ${r.repo}#${r.number} ${r.url} (the platform's own answer).`);
   for (const r of ignored) log(`fleet-write: run ${run.id}'s annotation for action ${r.action} ${r.op} (#${r.number}) is ignored — ${r.why}.`);
-  for (const r of filed.rows) log(`fleet-write: run ${run.id}'s annotation names action ${r.action} ${r.op} → advisory ${r.ghsaId} (the platform's own answer) — add whoever works it with advisory_collaborators_add.`);
+  for (const r of filed.rows) {
+    log(
+      r.op === ADVISORY_PUBLISH_OP
+        ? `fleet-write: run ${run.id}'s annotation names action ${r.action} ${r.op} → advisory ${r.ghsaId} PUBLISHED, read back with its versions — record run ${run.id} on the seat post, the id alone.`
+        : `fleet-write: run ${run.id}'s annotation names action ${r.action} ${r.op} → advisory ${r.ghsaId} (the platform's own answer) — add whoever works it with advisory_collaborators_add.`,
+    );
+  }
   for (const r of filed.ignored) log(`fleet-write: run ${run.id}'s annotation for action ${r.action} ${r.op} is ignored — ${r.why}.`);
   if (read.state === 'unread') log(`fleet-write: run ${run.id}'s annotations could not be read — ${read.why}; a number no annotation above names is read from the board instead.`);
   for (const a of annotated) {
@@ -1565,7 +1589,10 @@ async function runAnnotationsFor(payload, run, deps) {
   }
   // A report has no fallback a seat can read: until it is a collaborator, the advisory is invisible to it.
   for (const a of filing) {
-    if (!filed.rows.some((r) => r.action === a.action)) log(`fleet-write: no annotation on run ${run.id} names action ${a.action} ${a.op}'s advisory id — the run's summary row holds it, which a seat container cannot read, and the seat cannot list the repository's advisories: ask the maintainer for the id; ⛔ do not re-send the ${a.op === 'advisory_create' ? 'draft' : 'report'}.`);
+    if (filed.rows.some((r) => r.action === a.action)) continue;
+    // A publish's id is the one the seat sent; the run's success is the executor's read-back as published.
+    if (a.publishes) log(`fleet-write: no annotation on run ${run.id} names action ${a.action} ${a.op}'s published id — the run succeeded, so the executor read the advisory back as published with its versions; record run ${run.id} on the seat post; ⛔ do not re-send the publish.`);
+    else log(`fleet-write: no annotation on run ${run.id} names action ${a.action} ${a.op}'s advisory id — the run's summary row holds it, which a seat container cannot read, and the seat cannot list the repository's advisories: ask the maintainer for the id; ⛔ do not re-send the ${a.op === 'advisory_create' ? 'draft' : 'report'}.`);
   }
   return { state: read.state, rows, ignored, advisories: filed.rows, reads: read.reads ?? [], why: read.why };
 }
@@ -1927,7 +1954,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the pull request body at the seat's door: an issue_patch body signed only by its LAST-line trailer passes when the platform answers its target is a pull request, before the dry-run exit; an issue, an unread target and a trailer-less body are refused; comment_edit takes no trailer": 19,
   "the run_rerun_failed stroke at the seat: it packs as ONE action carrying run_id alone and travels in ONE dispatch; beside any other action, or with a key that widens it, it is refused before anything is sent; it creates no content, carries no body and names no workflow, so nothing is read back here — a success run is the executor's confirmation; a run that failed at the relay's fence is exit 5 after ONE dispatch, never re-sent": 6,
   "the hierarchy link at the seat: an epic's children pack as sub_issue_add actions carrying the parent and the child by number alone, beside other issue ops in ONE dispatch; a self-link, an id or a replace_parent is refused before anything is sent; neither row creates content, carries a body or names a workflow, so the stroke is paced at rule ①'s gap and nothing is read back here — a success run is the executor's confirmation; a run that failed at the relay's fence is exit 5 after ONE dispatch, never re-sent": 5,
-  "the advisory rows at the seat: a report, a draft, an advisory's collaborators and its state each pack as ONE action in a stroke of its own and travel in ONE dispatch; beside another action, with a malformed id or package, published or a key that carries content, refused before anything is sent and never echoing a value; the report and the draft create content but carry no body, so nothing is read back — by construction, said where the read-back is decided — and each one's id comes back as an advisory annotation the seat reads and hands on; the two id rows read nothing back; a run that failed is exit 5 after ONE dispatch, never re-sent": 14,
+  "the advisory rows at the seat: a report, a draft, an advisory's collaborators, its versions and its state each pack as ONE action in a stroke of its own and travel in ONE dispatch; beside another action, with a malformed id, package or versions entry, a state the relay names no move to or a key that carries content, refused before anything is sent and never echoing a value; the report and the draft create content but carry no body, so nothing is read back — by construction, said where the read-back is decided — and each one's id comes back as an advisory annotation the seat reads and hands on, as does a publish's; the id rows that never publish read nothing back; a run that failed is exit 5 after ONE dispatch, never re-sent": 17,
   "advisory_read at the seat: the key pair made in this process per read — its public half in the action, its private half a KeyObject never exported, written or printed, and a key from the file refused; no byte read-back, said where the read-back is decided; the run's notice parts read back exactly, reassembled 1..n once each and opened with that key byte for byte, end to end through the real executor; what does not open is UNVERIFIED (6) with nothing printed; the text reaches this process's stdout on --reveal alone, never stderr or --json": 17,
 });
 // Raised 21 → 22 with the run_rerun_failed seat battery, 22 → 23 with the signature battery, 23 → 24 with the
@@ -2722,7 +2749,7 @@ export async function selfTest() {
     }
 
     // ── the advisory rows at the seat ───────────────────────────────────────
-    battery("the advisory rows at the seat: a report, a draft, an advisory's collaborators and its state each pack as ONE action in a stroke of its own and travel in ONE dispatch; beside another action, with a malformed id or package, published or a key that carries content, refused before anything is sent and never echoing a value; the report and the draft create content but carry no body, so nothing is read back — by construction, said where the read-back is decided — and each one's id comes back as an advisory annotation the seat reads and hands on; the two id rows read nothing back; a run that failed is exit 5 after ONE dispatch, never re-sent");
+    battery("the advisory rows at the seat: a report, a draft, an advisory's collaborators, its versions and its state each pack as ONE action in a stroke of its own and travel in ONE dispatch; beside another action, with a malformed id, package or versions entry, a state the relay names no move to or a key that carries content, refused before anything is sent and never echoing a value; the report and the draft create content but carry no body, so nothing is read back — by construction, said where the read-back is decided — and each one's id comes back as an advisory annotation the seat reads and hands on, as does a publish's; the id rows that never publish read nothing back; a run that failed is exit 5 after ONE dispatch, never re-sent");
     {
       const REPO = 'objectstack-ai/objectstack';
       // A made-up id: the fixture names no real advisory.
@@ -2732,9 +2759,13 @@ export async function selfTest() {
       const DRAFT = { op: 'advisory_create', summary: `${MARKER} — summary`, description: `${MARKER} — description`, packages: ['@objectstack/rest'], severity: 'low', cwe_ids: ['CWE-863'] };
       const ADD = { op: 'advisory_collaborators_add', ghsa_id: GHSA, collaborators: ['os-dev-a'] };
       const MOVE = { op: 'advisory_state', ghsa_id: GHSA, advisory_state: 'draft' };
+      // The versions and the publish — a made-up package line, naming no real advisory's versions.
+      const ENTRY = { package: '@objectstack/rest', vulnerable_version_range: '<= 18.2.0', patched_versions: '18.3.0' };
+      const VERSIONS = { op: 'advisory_versions', ghsa_id: GHSA, versions: [ENTRY] };
+      const PUBLISH = { op: 'advisory_state', ghsa_id: GHSA, advisory_state: 'published' };
       const pack = (actions) => packRequest({ repo: REPO, session: SESSION, actions, requestId: 'fw-test-1' });
-      const packed = [REPORT, ADD, MOVE, DRAFT].map((a) => pack([a]));
-      t('each row packs as ONE action carrying exactly its keys, in a stroke of its own', packed.map((p) => [p.ok, p.payload?.actions]), [REPORT, ADD, MOVE, DRAFT].map((a) => [true, [a]]), packed.flatMap((p) => p.errors).join(' | '));
+      const packed = [REPORT, ADD, MOVE, DRAFT, VERSIONS, PUBLISH].map((a) => pack([a]));
+      t('each row packs as ONE action carrying exactly its keys, in a stroke of its own — the versions and the publish among them', packed.map((p) => [p.ok, p.payload?.actions]), [REPORT, ADD, MOVE, DRAFT, VERSIONS, PUBLISH].map((a) => [true, [a]]), packed.flatMap((p) => p.errors).join(' | '));
       const refused = (actions) => {
         const p = pack(actions);
         return { ok: p.ok, payload: p.payload, errors: p.errors };
@@ -2743,7 +2774,11 @@ export async function selfTest() {
         [[REPORT, { op: 'comment', issue: 1, body: 'x' }], 'actions[1] is `comment` in a stroke that carries a `advisory_report`'],
         [[ADD, MOVE], 'in a stroke that carries a `advisory_collaborators_add`'],
         [[{ ...ADD, ghsa_id: `${GHSA}/cve` }], "actions[0].ghsa_id must be one repository advisory's id"],
-        [[{ ...MOVE, advisory_state: 'published' }], 'actions[0].advisory_state is "published", refused by name'],
+        [[{ ...MOVE, advisory_state: 'withdrawn' }], 'actions[0].advisory_state must be one of'],
+        [[VERSIONS, PUBLISH], 'actions[1] is `advisory_state` in a stroke that carries a `advisory_versions`'],
+        [[{ ...VERSIONS, versions: [{ ...ENTRY, package: MARKER }] }], 'actions[0].versions[0].package must be an npm package name'],
+        [[{ ...VERSIONS, versions: [{ ...ENTRY, patched_versions: MARKER }] }], 'actions[0].versions[0].patched_versions must be'],
+        [[{ ...VERSIONS, summary: MARKER }], 'actions[0].summary is not a key `advisory_versions` takes'],
         [[{ ...REPORT, vulnerabilities: [{ package: MARKER }] }], 'actions[0].vulnerabilities is not a key `advisory_report` takes'],
         [[{ ...REPORT, severity: MARKER }], 'actions[0].severity must be one of'],
         [[DRAFT, REPORT], 'actions[1] is `advisory_report` in a stroke that carries a `advisory_create`'],
@@ -2754,17 +2789,19 @@ export async function selfTest() {
         const p = refused(actions);
         return [!p.ok && p.payload === null, p.errors.some((e) => e.includes(needle)), p.errors.some((e) => e.includes('ADVISORY MARKER'))];
       });
-      t('⛔ refused at the packer, before anything is sent: a report beside a comment, two advisory rows together, a malformed id, published, a vulnerabilities key and a severity carrying prose, a draft beside a report, a package that is prose and a draft carrying its own vulnerabilities — each named, and ⛔ no refusal echoes the marker', judged, cases.map(() => [true, true, false]));
+      t('⛔ refused at the packer, before anything is sent: a report beside a comment, two advisory rows together, a malformed id, a state the relay names no move to, the versions beside the publish, a versions entry whose package or patched versions are prose, a summary beside the versions, a vulnerabilities key and a severity carrying prose, a draft beside a report, a package that is prose and a draft carrying its own vulnerabilities — each named, and ⛔ no refusal echoes the marker', judged, cases.map(() => [true, true, false]));
       const reportStroke = packed[0].payload;
       const pacing = strokePacing(reportStroke);
       const draftStroke = packed[3].payload;
-      t('derived from the table: the report and the draft create content but are no body op, no run op and no card annotation — an advisory annotation instead — with no read-back locator and no read-back target; the two id rows are none of these; each stroke is ONE write, never batched', [['advisory_report', 'advisory_create', 'advisory_collaborators_add', 'advisory_state'].map((op) => [CONTENT_CREATING_OPS.includes(op), BODY_OPS.includes(op), RUN_OPS.includes(op), Object.hasOwn(ANNOTATED_OPS, op), ADVISORY_ANNOTATED_OPS.includes(op), op in READ_BACK_LOCATORS]), readBackTargets(reportStroke), readBackTargets(draftStroke), pacing.writes, pacing.batched, strokePacing(draftStroke).writes, strokePacing(draftStroke).batched], [[[true, false, false, false, true, false], [true, false, false, false, true, false], [false, false, false, false, false, false], [false, false, false, false, false, false]], [], [], 1, false, 1, false]);
+      t('derived from the table: the report and the draft create content but are no body op, no run op and no card annotation — an advisory annotation instead — with no read-back locator and no read-back target; the three id rows are none of these — the versions carry no prose, so create no content — and each stroke is ONE write, never batched', [['advisory_report', 'advisory_create', 'advisory_collaborators_add', 'advisory_versions', 'advisory_state'].map((op) => [CONTENT_CREATING_OPS.includes(op), BODY_OPS.includes(op), RUN_OPS.includes(op), Object.hasOwn(ANNOTATED_OPS, op), ADVISORY_ANNOTATED_OPS.includes(op), op in READ_BACK_LOCATORS]), readBackTargets(reportStroke), readBackTargets(draftStroke), pacing.writes, pacing.batched, strokePacing(draftStroke).writes, strokePacing(draftStroke).batched, strokePacing(packed[4].payload).writes, strokePacing(packed[5].payload).writes], [[[true, false, false, false, true, false], [true, false, false, false, true, false], [false, false, false, false, false, false], [false, false, false, false, false, false], [false, false, false, false, false, false]], [], [], 1, false, 1, false, 1, 1]);
       const own = readReal(SELF_PATH, 'utf8');
       const at = own.indexOf('export const READ_BACK_LOCATORS');
       t('⛔ the read-back that cannot apply is said WHERE the read-back is decided: the lines above READ_BACK_LOCATORS name advisory_report and advisory_create and why', [at > 0, own.slice(Math.max(0, at - 700), at).includes('No locator for `advisory_report`, on purpose'), own.slice(Math.max(0, at - 700), at).includes('nor for `advisory_create`')], [true, true, true]);
       // The advisory annotation: one spelling, read back exactly.
       const NOTE = relayAdvisoryAnnotationMessage({ action: 1, op: 'advisory_report', ghsaId: GHSA });
-      t('the advisory annotation is one spelling the reader reads back exactly — and nothing else: a card op\'s message, an id row, a malformed id, trailing text or null', [NOTE, parseRelayAdvisoryAnnotation(NOTE), [relayAnnotationMessage({ action: 1, op: 'issue_create', number: 9, url: `https://github.test/${REPO}/issues/9` }), relayAdvisoryAnnotationMessage({ action: 1, op: 'advisory_state', ghsaId: GHSA }), relayAdvisoryAnnotationMessage({ action: 1, op: 'advisory_report', ghsaId: 'GHSA-ABCD-2345-WXYZ' }), `${NOTE} ${MARKER}`, null].map(parseRelayAdvisoryAnnotation)], [`fleet-write action=1 op=advisory_report ghsa_id=${GHSA}`, { action: 1, op: 'advisory_report', ghsaId: GHSA }, [null, null, null, null, null]]);
+      t('the advisory annotation is one spelling the reader reads back exactly — and nothing else: a card op\'s message, an id row that never publishes, a malformed id, trailing text or null', [NOTE, parseRelayAdvisoryAnnotation(NOTE), [relayAnnotationMessage({ action: 1, op: 'issue_create', number: 9, url: `https://github.test/${REPO}/issues/9` }), relayAdvisoryAnnotationMessage({ action: 1, op: 'advisory_collaborators_add', ghsaId: GHSA }), relayAdvisoryAnnotationMessage({ action: 1, op: 'advisory_versions', ghsaId: GHSA }), relayAdvisoryAnnotationMessage({ action: 1, op: 'advisory_report', ghsaId: 'GHSA-ABCD-2345-WXYZ' }), `${NOTE} ${MARKER}`, null].map(parseRelayAdvisoryAnnotation)], [`fleet-write action=1 op=advisory_report ghsa_id=${GHSA}`, { action: 1, op: 'advisory_report', ghsaId: GHSA }, [null, null, null, null, null, null]]);
+      const PUBLISH_NOTE = relayAdvisoryAnnotationMessage({ action: 1, op: 'advisory_state', ghsaId: GHSA });
+      t('⭐ the publish annotation is the same spelling under advisory_state, read back exactly — and used only where the action publishes: an advisory_state row under a close or an accept is ignored, saying so', [ADVISORY_PUBLISH_OP, parseRelayAdvisoryAnnotation(PUBLISH_NOTE), [PUBLISH, MOVE, { ...MOVE, advisory_state: 'closed' }, ADD].map(advisoryPublishes), matchRunAdvisories(packed[5].payload, [parseRelayAdvisoryAnnotation(PUBLISH_NOTE)]).rows, matchRunAdvisories(packed[2].payload, [parseRelayAdvisoryAnnotation(PUBLISH_NOTE)]).ignored.map((r) => r.why)], ['advisory_state', { action: 1, op: 'advisory_state', ghsaId: GHSA }, [true, false, false, false], [{ action: 1, op: 'advisory_state', ghsaId: GHSA }], ["the stroke's action 1 is no publish, and only a publish is annotated"]]);
       t('…and a row is used only when its action is that op, one id per action — another op at the index, or two different ids, ignored', [matchRunAdvisories(reportStroke, [{ action: 1, op: 'advisory_report', ghsaId: GHSA }]).rows.length, matchRunAdvisories(packed[1].payload, [{ action: 1, op: 'advisory_report', ghsaId: GHSA }]).ignored.length, matchRunAdvisories(reportStroke, [{ action: 1, op: 'advisory_report', ghsaId: GHSA }, { action: 1, op: 'advisory_report', ghsaId: 'GHSA-wxyz-2345-abcd' }]).rows.length], [1, 1, 0]);
       const withNote = { path: '.github', annotation_level: 'notice', title: 'fleet-write advisory_report', message: NOTE };
       const filed = await drive({ runs: () => [RUN('completed', 'success')], notes: () => ({ status: 200, json: [RUNNER_NOTICE, withNote] }) }, { stroke: reportStroke });
@@ -2779,17 +2816,21 @@ export async function selfTest() {
       const draftUnnamed = await drive({ runs: () => [RUN('completed', 'success')] }, { stroke: draftStroke });
       t('a created draft no annotation names: still exit 0, no id handed on, and one line saying to ask the maintainer and never to re-send the draft', [draftUnnamed.annotations?.advisories, draftUnnamed.logs.some((l) => l.includes("action 1 advisory_create's advisory id") && l.includes('do not re-send the draft')), exitForResult(draftUnnamed)], [[], true, EXIT_OK], draftUnnamed.logs.join(' | '));
       const idRows = [];
-      for (const p of packed.slice(1, 3)) {
+      for (const p of [packed[1], packed[2], packed[4]]) {
         const r = await drive({ runs: () => [RUN('completed', 'success')] }, { stroke: p.payload });
         idRows.push([r.state, r.readBack?.state, r.annotations?.state, r.seen.filter((s) => s.call === DISPATCH).length, r.seen.filter((s) => !s.call.includes(`/repos/${RELAY_REPO}/`)).length, exitForResult(r)]);
       }
-      t('the two id rows: ONE dispatch each, no annotation read and nothing read back — the executor\'s PATCH answer landed them — exit 0', idRows, [0, 1].map(() => ['success', 'none', 'none', 1, 0, EXIT_OK]));
+      t('the three id rows that never publish — the collaborators, an accept and the versions: ONE dispatch each, no annotation read and nothing read back — the executor\'s PATCH answer landed them — exit 0', idRows, [0, 1, 2].map(() => ['success', 'none', 'none', 1, 0, EXIT_OK]));
+      const published = await drive({ runs: () => [RUN('completed', 'success')], notes: () => ({ status: 200, json: [RUNNER_NOTICE, { ...withNote, title: 'fleet-write advisory_state', message: PUBLISH_NOTE }] }) }, { stroke: packed[5].payload });
+      t("⭐ a publish: ONE dispatch carrying it as judged, nothing read back at the target, and the run's annotation read — the published id handed on, said in one line that names the run to record on the seat post; exit 0", [published.seen.filter((s) => s.call === DISPATCH).map((s) => s.body?.client_payload?.actions), published.state, published.readBack?.state, published.seen.filter((s) => !s.call.includes(`/repos/${RELAY_REPO}/`)).length, published.annotations?.advisories, published.logs.some((l) => l.includes(`advisory ${GHSA} PUBLISHED`) && l.includes('record run') && l.includes('seat post')), exitForResult(published)], [[[PUBLISH]], 'success', 'none', 0, [{ action: 1, op: 'advisory_state', ghsaId: GHSA }], true, EXIT_OK], published.logs.join(' | '));
+      const publishUnnamed = await drive({ runs: () => [RUN('completed', 'success')] }, { stroke: packed[5].payload });
+      t('a publish no annotation names: still exit 0 — the run read it back as published — no id handed on, and one line naming the run to record and never to re-send the publish', [publishUnnamed.annotations?.advisories, publishUnnamed.logs.some((l) => l.includes("action 1 advisory_state's published id") && l.includes('do not re-send the publish')), exitForResult(publishUnnamed)], [[], true, EXIT_OK], publishUnnamed.logs.join(' | '));
       const failed = [];
       for (const p of packed) {
         const r = await drive({ runs: () => [RUN('completed', 'failure')] }, { stroke: p.payload });
         failed.push([r.state, exitForResult(r), r.seen.filter((s) => s.call === DISPATCH).length, r.seen.filter((s) => s.call !== DISPATCH && !s.call.startsWith('GET ')).length]);
       }
-      t('⛔ a run that failed — a fence refused it, or the answer did not show the result — is exit 5 after ONE dispatch for each row, never re-sent and never a direct write', failed, [0, 1, 2, 3].map(() => ['failure', EXIT_PLATFORM_REFUSAL, 1, 0]));
+      t('⛔ a run that failed — a fence refused it, or the answer did not show the result — is exit 5 after ONE dispatch for each row, the publish among them, never re-sent and never a direct write', failed, [0, 1, 2, 3, 4, 5].map(() => ['failure', EXIT_PLATFORM_REFUSAL, 1, 0]));
       t('⛔ no seat line of those runs carries the report\'s or the draft\'s text', [filed, unnamed, drafted, draftUnnamed].some((r) => r.logs.some((l) => l.includes('ADVISORY MARKER'))), false);
       // The CLI hands the id on in --json, beside the card annotations.
       writeFileSync(join(dir, 'advisory-report.json'), JSON.stringify([REPORT]), 'utf8');
@@ -3426,7 +3467,7 @@ export async function selfTest() {
       "only after a lagging issue list was re-read on its bounded schedule — unless the run's annotation named the new number, which is read at once and never listed — the create never re-sent; " +
       "a started workflow run read back from the target's run list within a bounded window, UNCONFIRMED (6) when it is not there; " +
       "a batched stroke waited for as long as the runner is told to pause, and one the relay job cannot hold refused before it leaves; " +
-      "an advisory report or draft never read back, by construction, its id handed on from the run's advisory annotation; " +
+      "an advisory report or draft never read back, by construction, its id handed on from the run's advisory annotation, and a publish's id read off the same annotation; " +
       "an advisory read whose one-time key pair this process made and never let out, its sealed answer reassembled from the run's notices and opened byte for byte, " +
       'UNVERIFIED (6) when it does not open, and printed to stdout on --reveal alone; ' +
       'and every relay sender, discovered from the source, answering an accepted dispatch with no run, or none completed, UNCONFIRMED (6) with ZERO direct writes, under auto as under dispatch (the no-run conformance).',
