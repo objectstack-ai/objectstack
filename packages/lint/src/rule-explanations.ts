@@ -2479,7 +2479,7 @@ const SORT_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
 
 const SORT_FIELD_UNSORTABLE_EXPLANATION: RuleExplanation = {
   rule: 'sort-field-unsortable',
-  covers: 'why a formula field cannot be sorted by',
+  covers: 'why a formula or `sortable: false` field cannot sort',
   paragraphs: [
     VIRTUAL_FIELD_STORAGE,
     'Measured before the runtime refused it: an ORDER BY over a formula returned \'asc\' and \'desc\' ' +
@@ -2487,6 +2487,13 @@ const SORT_FIELD_UNSORTABLE_EXPLANATION: RuleExplanation = {
       'under a success. Both runtime doors now refuse it with `400 INVALID_SORT` — the REST ingress ' +
       '(`assertSortFieldsExist`) and the engine (`assertOrderByIsMaterializable`) — so the declaration ' +
       'breaks the view\'s first fetch, and every fetch after it.',
+    'A stored field whose author declared `sortable: false` is refused the same way at the REST ingress ' +
+      '(`400 INVALID_SORT`, "a field that declares `sortable: false`"), though a column stands behind it: ' +
+      'the key says what the platform offers, so the list header and the Sort picker do not offer it and ' +
+      'the Data API does not perform it. Both verdicts are the served sortability projection\'s ' +
+      '`sortable: false`, which this rule reads, so it and the door agree. A list view\'s sort and every ' +
+      'stored page sort (a block\'s `sort` or `dataSource.sort`, a list page\'s `interfaceConfig.sort`, an ' +
+      'app page\'s `record.sort`) are judged. Sort by another field, or remove `sortable: false`.',
     LIST_VIEW_FIELD_SKIPS,
   ],
 };
