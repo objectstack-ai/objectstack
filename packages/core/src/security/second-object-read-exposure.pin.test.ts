@@ -133,7 +133,8 @@ const CALLERS: Record<string, Classification> = {
     wiring: { file: 'packages/metadata-protocol/src/protocol.ts', call: 'this.servedExpand(' },
     pin: 'packages/metadata-protocol/src/protocol.expand-target-exposure.test.ts',
   },
-  'packages/objectql/src/engine.ts': {
+  // [#29986] The codemod split moved the body of `ObjectQL.expandRelatedRecords` out of engine.ts.
+  'packages/objectql/src/engine-summaries-and-expansion.ts': {
     kind: 'executes',
     read: "the expansion sub-read (`ObjectQL.expandRelatedRecords`), for the data door's `$expand`",
     decidedIn: 'packages/metadata-protocol/src/protocol-query-validation.ts',

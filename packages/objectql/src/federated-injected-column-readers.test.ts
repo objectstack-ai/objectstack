@@ -117,18 +117,21 @@ const ENGINE_SPLIT_FILES: ReadonlySet<string> = new Set([
   'engine.ts',
   'engine-actions.ts',
   'engine-cascade-planning.ts',
+  'engine-compatibility-section.ts',
   'engine-defaults-and-autonumbers.ts',
   'engine-delete-and-aggregate.ts',
   'engine-find.ts',
   'engine-hooks-and-functions.ts',
   'engine-insert.ts',
   'engine-middleware-and-context.ts',
+  'engine-migration-state.ts',
   'engine-references-and-master-detail.ts',
   'engine-registration.ts',
   'engine-secrets-and-routing.ts',
   'engine-security-resolvers.ts',
   'engine-summaries-and-expansion.ts',
   'engine-top-level.ts',
+  'engine-transactions-section.ts',
 ]);
 
 /** The calls that are seams by name. */
@@ -155,7 +158,7 @@ const READERS: Record<string, Row> = {
     disposition: 'skips',
     why: 'the dependents probe never filters a federated object on a column it does not provision (both phases of the cascade read relations here)',
   },
-  'engine.ts#planCascadeAtomicity :: isFederatedUnprovisionedInjectedColumn()': {
+  'engine-cascade-planning.ts#planCascadeAtomicity :: isFederatedUnprovisionedInjectedColumn()': {
     disposition: 'skips',
     why: "the participant test is the scan's own, so the plan and the scan agree",
   },
@@ -172,16 +175,16 @@ const READERS: Record<string, Row> = {
   },
   // [#24948] The organization-delete refusal reads the tenant column of every
   // relation the cascade follows into `sys_organization`.
-  'engine.ts#organizationOwnedRowCounts :: resolveTenantFieldName()': {
+  'engine-cascade-planning.ts#organizationOwnedRowCounts :: resolveTenantFieldName()': {
     disposition: 'skips',
     via: 'cascadeRelationBehavior',
     why: "counts a tenant column only once the cascade's own relation reading admits it, so a federated object's unprovisioned injected column is never counted",
   },
-  'engine.ts#keepsOrganizationReference :: organization_id': {
+  'engine-cascade-planning.ts#keepsOrganizationReference :: organization_id': {
     disposition: 'not-a-read',
     why: "names the attribution column a tenancy-disabled object keeps through an organization delete; the walk reads its relation through cascadeRelationBehavior; it reads no row",
   },
-  'engine.ts#keepsOrganizationReference :: resolveTenantFieldName()': {
+  'engine-cascade-planning.ts#keepsOrganizationReference :: resolveTenantFieldName()': {
     disposition: 'not-a-read',
     why: 'asks whether the object has a tenant column at all, on a relation the walk already read; it reads no row',
   },
@@ -286,7 +289,7 @@ const READERS: Record<string, Row> = {
     disposition: 'target-by-id',
     why: "the id a caller wrote into a reference field is looked up on the TARGET object",
   },
-  'engine.ts#expandRelatedRecords :: referenceTargetOf()': {
+  'engine-summaries-and-expansion.ts#expandRelatedRecords :: referenceTargetOf()': {
     disposition: 'target-by-id',
     why: 'the ids read off the rows in hand load the TARGET rows; a federated row carries none',
   },
@@ -362,8 +365,8 @@ const READERS: Record<string, Row> = {
   'engine-compatibility-api.ts#syncObjectSchema :: isFederatedObject()': { disposition: 'not-a-read', why: SYNC_ROUTE },
   'engine-compatibility-api.ts#syncSchemas :: isFederatedObject()': { disposition: 'not-a-read', why: SYNC_ROUTE },
   'engine-secret-internal-fields.ts#encryptSecretFields :: created_at': { disposition: 'not-a-read', why: PLATFORM_ROW },
-  'engine.ts#recordObservedDeviation :: updated_at': { disposition: 'not-a-read', why: PLATFORM_ROW },
-  'engine.ts#retractCreationAttestation :: updated_at': { disposition: 'not-a-read', why: PLATFORM_ROW },
+  'engine-migration-state.ts#recordObservedDeviation :: updated_at': { disposition: 'not-a-read', why: PLATFORM_ROW },
+  'engine-migration-state.ts#retractCreationAttestation :: updated_at': { disposition: 'not-a-read', why: PLATFORM_ROW },
   'plugin.ts#reconcileFederatedBindings :: isFederatedObject()': { disposition: 'not-a-read', why: SYNC_ROUTE },
   'plugin.ts#registerSchemasWithoutDdl :: isFederatedObject()': { disposition: 'not-a-read', why: SYNC_ROUTE },
   'plugin.ts#syncRegisteredSchemas :: isFederatedObject()': { disposition: 'not-a-read', why: SYNC_ROUTE },
@@ -696,8 +699,8 @@ describe('[#21918] every engine reader of an injected column has a disposition t
     );
     expect([...skipping].sort()).toEqual([
       'engine-cascade-planning.ts#cascadeRelationBehavior',
-      'engine.ts#organizationOwnedRowCounts',
-      'engine.ts#planCascadeAtomicity',
+      'engine-cascade-planning.ts#organizationOwnedRowCounts',
+      'engine-cascade-planning.ts#planCascadeAtomicity',
       'lifecycle/lifecycle-service.ts#tenantWindowsFor',
     ]);
   });
