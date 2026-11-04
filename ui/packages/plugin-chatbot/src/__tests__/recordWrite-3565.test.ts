@@ -133,10 +133,11 @@ describe('detectSampleDataCleanup — 「清理示例数据」 lists tables and 
       ],
       total: 42,
       absent: 0,
+      edited: 0,
     },
   };
 
-  it('lifts the tables, the total and the absent count, from the bare and the wrapped shape', () => {
+  it('lifts the tables, the total, the absent and the edited counts, from the bare and the wrapped shape', () => {
     expect(detectSampleDataCleanup(CLEANUP)).toEqual(CLEANUP.sampleDataCleanup);
     expect(detectSampleDataCleanup({ type: 'text', value: JSON.stringify(CLEANUP) })?.total).toBe(42);
   });
@@ -144,7 +145,7 @@ describe('detectSampleDataCleanup — 「清理示例数据」 lists tables and 
   it('is not a card without the pending id or without a table', () => {
     const { pendingActionId: _omit, ...noId } = CLEANUP;
     expect(detectSampleDataCleanup(noId)).toBeUndefined();
-    expect(detectSampleDataCleanup({ ...CLEANUP, sampleDataCleanup: { tables: [], total: 0, absent: 0 } })).toBeUndefined();
+    expect(detectSampleDataCleanup({ ...CLEANUP, sampleDataCleanup: { tables: [], total: 0, absent: 0, edited: 0 } })).toBeUndefined();
     expect(detectSampleDataCleanup(CREATE)).toBeUndefined();
   });
 
