@@ -684,6 +684,50 @@ describe('both hide-fields lists offer the fields a reader may add, and only fie
     expect(onAddedFieldsChange).toHaveBeenLastCalledWith(['priority']);
   });
 
+  it('an added lookup column is fetched and expanded as a declared column is, and listed under its definition label', async () => {
+    // A host that stores the added names and appends them to the view's columns, as the console does.
+    const fields = {
+      title: { type: 'text', label: 'Title' },
+      status: { type: 'select', label: 'Status', options: [{ label: 'Open', value: 'open' }] },
+      account: { type: 'lookup', label: 'Account', reference: 'account' },
+    };
+    const dataSource = makeDataSource();
+    dataSource.getObjectSchema = vi.fn().mockResolvedValue({ name: OBJECT, fields });
+    function Host() {
+      const [added, setAdded] = React.useState<string[]>([]);
+      const schema = {
+        type: 'list-view',
+        objectName: OBJECT,
+        viewType: 'grid',
+        columns: [...TITLE_ONLY, ...added.map((field) => ({ field }))],
+        userActions: { hideFields: true },
+        userFilters: { element: 'dropdown' },
+        compactToolbar: false,
+      } as unknown as ListViewSchema;
+      return <ListView schema={schema} dataSource={dataSource} addedFields={added} onAddedFieldsChange={setAdded} />;
+    }
+    render(
+      <SchemaRendererProvider dataSource={dataSource as unknown as DataSource}>
+        <MePermissionsProvider initialPermissions={FULL_READ}>
+          <Host />
+        </MePermissionsProvider>
+      </SchemaRendererProvider>,
+    );
+    await definitionLoaded();
+    const lastQuery = () => dataSource.find.mock.calls.at(-1)?.[1] ?? {};
+    await waitFor(() => expect(lastQuery().$select).toEqual(expect.arrayContaining(['title'])));
+    expect(lastQuery().$select).not.toContain('account');
+
+    const content = await openPopover(toolbarButton(/^hide fields/i));
+    await waitFor(() => expect(within(content).getByRole('checkbox', { name: 'Account' })).not.toBeChecked());
+    fireEvent.click(within(content).getByRole('checkbox', { name: 'Account' }));
+    await waitFor(() => expect(lastQuery().$select).toEqual(expect.arrayContaining(['title', 'account'])));
+    expect(lastQuery().$expand).toEqual(['account']);
+    // Now a column of the reader's list, ticked, under the definition's label.
+    expect(within(content).getByRole('checkbox', { name: 'Account' })).toBeChecked();
+    expect(checkboxLabels(content)).toEqual(['Title', 'Account', 'Status']);
+  });
+
   it('a field the definition marks hidden is not offered; system fields follow the business fields', async () => {
     mountWithFields(
       FULL_READ,
