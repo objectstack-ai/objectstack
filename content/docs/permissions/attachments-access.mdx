@@ -179,10 +179,14 @@ rendering these files. Only a file marked `acl: 'public_read'` is served to a
 caller with no session: mark a file that way when it must render before sign-in.
 
 The upload entry points (presigned / chunked) likewise require a session when
-an auth service is wired, and stamp `owner_id` on the new `sys_file`. The
-file's uploader is read-only after creation, as an attachment's is: an update
-drops a non-system caller's `owner_id` (a holder of the ownership-transfer
-grant included) and reports it in `droppedFields`.
+an auth service is wired, and stamp `owner_id` on the new `sys_file`. A stored
+file's uploader is the user who created it, as an attachment's is: a
+`sys_file` created through the data API records the signed-in user as
+`owner_id`, whatever the request carries, and a create whose session names no
+signed-in user is refused (`RECORD_NOT_ACCESSIBLE`, 403). The file's uploader
+is read-only after creation: an update drops a non-system caller's `owner_id`
+(a holder of the ownership-transfer grant included) and reports it in
+`droppedFields`. Only a system-context write records a different uploader.
 
 ## Storage-byte lifecycle
 
