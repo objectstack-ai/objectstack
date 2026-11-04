@@ -27,6 +27,7 @@ import { collectFlowGraphs, parseFlowNodeRegions } from './control-flow.zod';
 import { predicateSlotRefusal, resolveFlowNodeExpressions, type FlowNodeSiblingBlocks } from './flow-node-expression-paths';
 import { flowNodeConfigRefusals } from './flow-node-config-refusals';
 import { apiTriggerSecretRefRefusals } from './api-trigger-secret-ref.zod';
+import { apiTriggerSignatureRefusals } from './api-trigger-signature.zod';
 import { saveNoticePlacementRefusals } from './save-notice-placement';
 // [#23543 F3] The loose `config` keys of the two sibling-block node types — one
 // table, shared with the two D2 lifts that still run at rehydration.
@@ -1698,6 +1699,14 @@ export const FlowSchema = lazySchema(() => strictObject(
   // flow's own `nodes` is the whole walk; the three refusals and why each
   // exists are `api-trigger-secret-ref.zod.ts`'s header.
   for (const refusal of apiTriggerSecretRefRefusals(flow)) {
+    ctx.addIssue({ code: 'custom', path: [...refusal.path], message: refusal.message });
+  }
+
+  // A third-party sender's signature scheme (`config.signature`), declared
+  // beside `config.secretRef`, which names its key. Declared, it replaces the
+  // `x-objectstack-signature` check for that hook; the five refusals and why
+  // each exists are `api-trigger-signature.zod.ts`'s header.
+  for (const refusal of apiTriggerSignatureRefusals(flow)) {
     ctx.addIssue({ code: 'custom', path: [...refusal.path], message: refusal.message });
   }
 

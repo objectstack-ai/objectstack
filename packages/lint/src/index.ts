@@ -721,6 +721,14 @@ export {
 } from './validate-report-date-range.js';
 export type { ReportDateRangeFinding } from './validate-report-date-range.js';
 
+// [#29900] A report's `runtimeFilter` keys resolved on its dataset's object
+// graph, by the dashboard twin's own judgement (`widget-filter-field-unknown`).
+export {
+  validateReportRuntimeFilters,
+  REPORT_FILTER_FIELD_UNKNOWN,
+} from './validate-report-runtime-filter.js';
+export type { ReportRuntimeFilterFinding } from './validate-report-runtime-filter.js';
+
 // [#28473] ADR-0146 D3: a package namespace too long to have a paired
 // customization namespace, judged with `customizationNamespace` itself.
 export {

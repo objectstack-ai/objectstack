@@ -806,6 +806,67 @@ describe('validateExpression (ADR-0032)', () => {
       }
     });
 
+    // [#29959] A flow condition reads the field bare AND as `record.<field>`
+    // (`seedRunVariables` binds both to the trigger record), so the record
+    // read gets the bare name's verdict: here the run-fails error.
+    it('judges a flattened condition\'s record.<field> and previous.<field> reads as its bare name (#29959)', () => {
+      const flat = { ...schema, scope: 'flattened' as const, faultOutcome: 'run-fails' as const };
+      for (const [source, reference] of [
+        ['record.name > 5', 'record.name'],
+        ['previous.name * 2 > 1', 'previous.name'],
+        ['record.is_active > 0', 'record.is_active'],
+      ] as const) {
+        const r = validateExpression('predicate', source, flat);
+        expect(r.warnings, source).toHaveLength(0);
+        expect(r.errors.map((e) => [e.code, (e.params as { reference?: string }).reference]), source).toEqual([['type-mismatch-run-fails', reference]]);
+        expect(r.errors[0].message, source).toContain(`\`${reference}\``);
+      }
+      // Controls: a well-typed record read, a number field, and the
+      // conversions the message names stay clean.
+      for (const fixed of ['size(record.name) > 5', 'double(record.name) > 5', 'record.amount > 5', "record.name == 'x'", 'record.is_active == true']) {
+        const ok = validateExpression('predicate', fixed, flat);
+        expect([ok.errors, ok.warnings], fixed).toEqual([[], []]);
+      }
+    });
+
+    // [#29959] A bare name the run binds as a flow variable (`flowVariables`)
+    // holds the variable — `seedRunVariables` seeds it before the flattening,
+    // which skips a bound name — so it is not typed as the field it shadows.
+    // `record.<name>` still reads the field and keeps its verdict.
+    it('does not type a bare name a flow variable holds, and keeps its record.<name> read typed (#29959)', () => {
+      const flat = { ...schema, scope: 'flattened' as const, faultOutcome: 'run-fails' as const, flowVariables: ['name', 'is_active'] };
+      for (const source of ['name > 5', 'is_active > 0', 'name * 2 > 1']) {
+        const r = validateExpression('predicate', source, flat);
+        expect([r.errors, r.warnings], source).toEqual([[], []]);
+      }
+      for (const [source, reference] of [['record.name > 5', 'record.name'], ['previous.is_active > 0', 'previous.is_active']] as const) {
+        const r = validateExpression('predicate', source, flat);
+        expect(r.errors.map((e) => [e.code, (e.params as { reference?: string }).reference]), source).toEqual([['type-mismatch-run-fails', reference]]);
+      }
+      // A field the hint does not name is judged as before, in the same source.
+      const other = validateExpression('predicate', 'name > 5 && title > 5', { ...flat, flowVariables: ['name'] });
+      expect(other.errors.map((e) => (e.params as { reference?: string }).reference)).toEqual(['title']);
+      // The hint is the flattened scope's: a `record`-scoped site ignores it.
+      expect(validateExpression('predicate', 'record.name > 5', { ...schema, flowVariables: ['name'] }).warnings.map((w) => w.code))
+        .toEqual(['type-mismatch']);
+    });
+
+    // [#29959] With no declared outcome a flattened condition is a flow's
+    // that is not proven to bind the field: a warning, but one saying the run
+    // fails on the fault, since a flow condition never reads null.
+    it('warns with the run-may-fail wording on a flattened condition with no declared outcome (#29959)', () => {
+      const flat = { ...schema, scope: 'flattened' as const };
+      for (const source of ['name > 5', 'record.name > 5']) {
+        const r = validateExpression('predicate', source, flat);
+        expect(r.errors, source).toHaveLength(0);
+        expect(r.warnings.map((w) => w.code), source).toEqual(['type-mismatch-run-may-fail']);
+        expect(r.warnings[0].message, source).toContain('fails the run');
+        expect(r.warnings[0].message, source).not.toMatch(/evaluates to null|still lands|is refused/);
+      }
+      // The record scope's warning keeps its own code and its true text there.
+      expect(validateExpression('predicate', 'record.name > 5', schema).warnings.map((w) => w.code)).toEqual(['type-mismatch']);
+    });
+
     it('errors with the skipped-advisory wording where the caller declares fail-open (#29926)', () => {
       const r = validateExpression('predicate', 'record.name > 5', { ...schema, faultOutcome: 'fail-open' });
       expect(r.warnings).toHaveLength(0);

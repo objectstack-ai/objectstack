@@ -101,17 +101,17 @@ const { createRestApiPlugin } = await import('./rest-api-plugin.js');
  * annotation makes, restated in a form the runtime can check.
  */
 const PROVIDERS = [
-  { index: 6, label: 'authServiceProvider', slot: 'auth' },
-  { index: 7, label: 'objectQLProvider', slot: 'objectql' },
-  { index: 8, label: 'emailServiceProvider', slot: 'email' },
-  { index: 9, label: 'sharingServiceProvider', slot: 'sharing' },
-  { index: 11, label: 'approvalsServiceProvider', slot: 'approvals' },
-  { index: 12, label: 'sharingRulesServiceProvider', slot: 'sharingRules' },
-  { index: 13, label: 'i18nServiceProvider', slot: 'i18n' },
-  { index: 14, label: 'analyticsServiceProvider', slot: 'analytics' },
-  { index: 15, label: 'settingsServiceProvider', slot: 'settings' },
-  { index: 17, label: 'securityServiceProvider', slot: 'security' },
-  { index: 19, label: 'metadataServiceProvider', slot: 'metadata' },
+  { index: 6, label: 'authServiceProvider', slot: 'auth', scope: 'host' },
+  { index: 7, label: 'objectQLProvider', slot: 'objectql', scope: 'host' },
+  { index: 8, label: 'emailServiceProvider', slot: 'email', scope: 'environment' },
+  { index: 9, label: 'sharingServiceProvider', slot: 'sharing', scope: 'environment' },
+  { index: 11, label: 'approvalsServiceProvider', slot: 'approvals', scope: 'environment' },
+  { index: 12, label: 'sharingRulesServiceProvider', slot: 'sharingRules', scope: 'environment' },
+  { index: 13, label: 'i18nServiceProvider', slot: 'i18n', scope: 'host' },
+  { index: 14, label: 'analyticsServiceProvider', slot: 'analytics', scope: 'environment' },
+  { index: 15, label: 'settingsServiceProvider', slot: 'settings', scope: 'host' },
+  { index: 17, label: 'securityServiceProvider', slot: 'security', scope: 'host' },
+  { index: 19, label: 'metadataServiceProvider', slot: 'metadata', scope: 'host' },
   // [#17716] The appended parameter #15256's own docblock warns about. Its
   // provider is kernel-first (`ctx.getKernel()?.getServiceAsync('tenancy')`)
   // and falls back to `ctx.getService('tenancy')` for a host with no async
@@ -122,8 +122,45 @@ const PROVIDERS = [
   // absent from this table, so nothing ever drove it, the slot was never asked
   // for, the set the last case compares could not contain it, and the guard
   // read green against ANY binding at this position.
-  { index: 20, label: 'tenancyServiceProvider', slot: 'tenancy' },
+  { index: 20, label: 'tenancyServiceProvider', slot: 'tenancy', scope: 'host' },
 ] as const;
+
+/**
+ * [#30011] `scope: 'environment'` marks the providers that, given an
+ * environment id AND a `kernel-manager`, read the slot on THAT environment's
+ * kernel instead of this plugin's own — the five whose occupants a hosted
+ * environment's kernel mounts. `host` rows read this plugin's kernel whatever
+ * id they are handed. The hosted behaviour itself is pinned end to end in
+ * `rest-environment-scoped-providers.test.ts`; this table only says which
+ * kernel each provider asks, so the slot-identity cases below can ask the
+ * right one.
+ */
+const ENVIRONMENT_SCOPED = PROVIDERS.filter((p) => p.scope === 'environment');
+
+/**
+ * The `kernel-manager` double: every environment's kernel answers one
+ * distinguishable occupant per slot, and records each slot it was asked for.
+ */
+function envKernelManager() {
+  const envAsked: Array<{ env: string; slot: string }> = [];
+  const occupant = (env: string, slot: string) => ({ __env: env, __slot: slot });
+  const cache = new Map<string, Record<string, unknown>>();
+  const occupantOf = (env: string, slot: string) => {
+    let byEnv = cache.get(env);
+    if (!byEnv) { byEnv = {}; cache.set(env, byEnv); }
+    return (byEnv[slot] ??= occupant(env, slot));
+  };
+  return {
+    envAsked,
+    occupantOf,
+    getOrCreate: vi.fn(async (env: string) => ({
+      getServiceAsync: async (slot: string) => {
+        envAsked.push({ env, slot });
+        return occupantOf(env, slot);
+      },
+    })),
+  };
+}
 
 /**
  * The positional arguments inside the provider span that are deliberately NOT
@@ -197,7 +234,7 @@ function allServices(): Record<string, unknown> {
     'http.server': mockServer(),
     protocol: { getDiscovery: vi.fn() },
     manifest: { register: vi.fn() },
-    'kernel-manager': { getOrCreate: vi.fn() },
+    'kernel-manager': envKernelManager(),
     'env-registry': { resolveByHostname: vi.fn() },
     'kernel-resolver': { resolveKernel: vi.fn() },
     'default-project': { environmentId: 'env_only' },
@@ -243,12 +280,22 @@ describe('[#4251 B4] rest-api-plugin slot lookups', () => {
     const services = allServices();
     const { args } = await boot(services);
 
-    for (const { index, label, slot } of PROVIDERS) {
+    const km = services['kernel-manager'] as ReturnType<typeof envKernelManager>;
+    for (const { index, label, slot, scope } of PROVIDERS) {
       const provider = args[index] as (environmentId?: string) => Promise<unknown>;
       expect(typeof provider, `${label} must be wired at argument ${index}`).toBe('function');
       // The provider must hand back the instance registered in ITS slot — not
       // a sibling's. Same shape for all of them, so only identity proves it.
+      // [#30011] An environment-scoped provider asked for an environment reads
+      // that environment's kernel; asked for none, or for the control plane,
+      // it reads this plugin's own.
       await expect(provider('env_1'), `${label} must resolve '${slot}'`).resolves.toBe(
+        scope === 'environment' ? km.occupantOf('env_1', slot) : services[slot],
+      );
+      await expect(provider(), `${label} must resolve '${slot}' on its own kernel for no environment`).resolves.toBe(
+        services[slot],
+      );
+      await expect(provider('platform'), `${label} must resolve '${slot}' on its own kernel for the control plane`).resolves.toBe(
         services[slot],
       );
     }
@@ -320,9 +367,12 @@ describe('[#4251 B4] rest-api-plugin slot lookups', () => {
     const services = allServices();
     const { args, asked } = await boot(services);
 
-    // Providers are lazy, so drive every one to make its lookup observable.
+    // Providers are lazy, so drive every one to make its lookup observable —
+    // once for an environment and once for none, so every slot is asked of
+    // the kernel each provider reads it on.
     for (const { index } of PROVIDERS) {
       await (args[index] as (environmentId?: string) => Promise<unknown>)('env_1');
+      await (args[index] as (environmentId?: string) => Promise<unknown>)();
     }
     (args[5] as () => string | undefined)();
 
@@ -332,6 +382,10 @@ describe('[#4251 B4] rest-api-plugin slot lookups', () => {
       ...PROVIDERS.map((p) => p.slot),
     ]);
     expect(new Set(asked)).toEqual(expected);
+    // [#30011] …and the environment's kernel was asked for exactly the
+    // environment-scoped slots, each for the environment named.
+    const km = services['kernel-manager'] as ReturnType<typeof envKernelManager>;
+    expect(km.envAsked).toEqual(ENVIRONMENT_SCOPED.map((p) => ({ env: 'env_1', slot: p.slot })));
   });
 
   it('degrades without optional slots — every provider answers undefined, no throw', async () => {
@@ -349,5 +403,30 @@ describe('[#4251 B4] rest-api-plugin slot lookups', () => {
     expect(args[4]).toBeUndefined();
     expect((args[5] as () => string | undefined)()).toBeUndefined();
     expect((args[16] as (name: string) => boolean)('analytics')).toBe(false);
+  });
+});
+
+describe('[#30011] a single-kernel deployment reads the environment-scoped slots exactly as before', () => {
+  it('with no kernel-manager, each of the five reads its slot on the plugin\'s own kernel, whatever environment it is asked for', async () => {
+    // Today's single-kernel composition: no `kernel-manager`, no resolver.
+    // Before the fix every one of the five read `ctx.getService(slot)`
+    // unconditionally; with no manager to hand out an environment's kernel
+    // that is still the only answer, for every id a route can pass.
+    const services = allServices();
+    delete services['kernel-manager'];
+    delete services['kernel-resolver'];
+    delete services['env-registry'];
+    const { args, ctx } = await boot(services);
+
+    expect(ENVIRONMENT_SCOPED.map((p) => p.slot)).toEqual(['email', 'sharing', 'approvals', 'sharingRules', 'analytics']);
+    for (const { index, label, slot } of ENVIRONMENT_SCOPED) {
+      const provider = args[index] as (environmentId?: string) => Promise<unknown>;
+      for (const environmentId of ['env_1', undefined, 'platform']) {
+        ctx.getService.mockClear();
+        await expect(provider(environmentId), `${label}(${String(environmentId)})`).resolves.toBe(services[slot]);
+        // One lookup, of this slot, on this plugin's context.
+        expect(ctx.getService.mock.calls).toEqual([[slot]]);
+      }
+    }
   });
 });

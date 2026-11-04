@@ -125,6 +125,72 @@ Examples:
 - `zh-CN` — Chinese (Simplified, China)
 - `zh-TW` — Chinese (Traditional, Taiwan)
 
+### Platform Locale Table
+
+The platform supports **one** list of languages, exported from
+`@objectstack/spec/system` as `PLATFORM_LOCALES` (rows `{ tag, label, rtl }`,
+in menu order) with its tags as `PLATFORM_LOCALE_TAGS`. There are no tiers.
+The table is the rule every surface is held to: the Console UI, platform
+metadata and the built-in emails each carry every language on it.
+
+<Callout type="warn">
+**The target, not yet the state.** Today the Console ships ten packs (`en`,
+`zh`, `es`, `ar`, `fr`, `pt`, `ru`, `de`, `ja`, `ko`; no `zh-Hant`), platform
+metadata ships four locales (`en`, `zh-CN`, `ja-JP`, `es-ES`) and the built-in
+emails four (`en-US`, `zh-CN`, `ja-JP`, `es-ES`, with `en-US` as the floor).
+The surfaces are backfilled to the table in later phases.
+</Callout>
+
+| Language | Tag | Right to left |
+|:--|:--|:--|
+| English | `en` | |
+| 简体中文 | `zh-Hans` | |
+| 繁體中文 | `zh-Hant` | |
+| Español | `es` | |
+| العربية | `ar` | yes |
+| Français | `fr` | |
+| Português (Brasil) | `pt-BR` | |
+| Русский | `ru` | |
+| Deutsch | `de` | |
+| 日本語 | `ja` | |
+| 한국어 | `ko` | |
+
+The rule:
+
+- **Same-PR follow.** A change that adds a translatable string adds it for every
+  language its surface carries, in the same pull request; once a surface is
+  backfilled, that is every language on the table.
+- **Adding or removing a language** is a change to the table, followed by one
+  backfill of every surface. Nothing else declares the list.
+
+**Read aliases.** Codes that stored values already carry keep resolving:
+`PLATFORM_LOCALE_READ_ALIASES` maps each to a table tag, and
+`platformLocaleTagOf(code)` answers the table tag a stored code means.
+
+| Stored code | Reads as |
+|:--|:--|
+| `zh`, `zh-CN`, `zh-SG` | `zh-Hans` |
+| `zh-TW`, `zh-HK`, `zh-MO` | `zh-Hant` |
+| `ja-JP` | `ja` |
+| `es-ES` | `es` |
+| `pt` | `pt-BR` |
+| `en-US` | `en` |
+
+A table tag answers itself, the match ignores case (`zh-cn` reads as
+`zh-Hans`), and any other code answers `undefined`: no region fallback is
+guessed, so `pt-PT` is not `pt-BR`. New writes use the table's tags. The
+examples on this page that spell `zh-CN` stay valid, because `zh-CN` is a read
+alias of `zh-Hans`.
+
+`platformLocaleTagOf` answers which table language a code *means*; the
+fallback ladder below answers which key of a bundle *serves* a request. A
+reader that uses both maps the code first and then resolves the table tag
+against the bundle, so they do not contradict each other: `pt` means `pt-BR`,
+and a request for `pt-BR` may still be served by a bundle's `pt` key. The
+ladder alone cannot tell the two Chinese scripts apart: once a bundle holds
+both `zh-Hans` and `zh-Hant`, a request for `zh` or `zh-CN` is answered by key
+order (`zh-Hant` when that key comes first), where the table says `zh-Hans`.
+
 ### Locale Fallback
 
 If exact locale not found, ObjectStack falls back to **language-only** locale:

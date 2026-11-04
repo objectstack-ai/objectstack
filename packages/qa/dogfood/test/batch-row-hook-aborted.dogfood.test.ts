@@ -11,6 +11,12 @@
 // refusal. This file is the card's four-door reproduction over the real HTTP
 // stack of one boot, plus the batch row's other modes and verbs, and the
 // control that a code the hook DID declare still wins on every door.
+//
+// [#29978] §4 drives the same fixture through both import doors
+// (`POST /data/:object/import` and its async job): the import row's `code`
+// was `IMPORT_ROW_FAILED` for the abort, from the core import runner's
+// `toFailedResult`, and is now `HOOK_ABORTED` with the hook's sentence. A
+// declared code, a crashed body and a malformed row keep their own codes.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
@@ -39,7 +45,7 @@ const stack29894 = defineStack({
     name: 'Batch Row Hook Aborted Fixture',
     description: 'Hooks that abort a write in their own words, with and without a declared code.',
   },
-  objects: [obj('bra_ins'), obj('bra_upd'), obj('bra_del'), obj('bra_declared')],
+  objects: [obj('bra_ins'), obj('bra_upd'), obj('bra_del'), obj('bra_declared'), obj('bra_crash'), obj('bra_plain')],
   hooks: [
     { name: 'bra_ins_refuse', object: 'bra_ins', events: ['beforeInsert'], body: throwUndeclared },
     { name: 'bra_upd_refuse', object: 'bra_upd', events: ['beforeUpdate'], body: throwUndeclared },
@@ -50,6 +56,8 @@ const stack29894 = defineStack({
       events: ['beforeInsert'],
       body: { language: 'js', source: `throw Object.assign(new Error(${JSON.stringify(DECLARED)}), { code: 'RECORD_LOCKED' });` },
     },
+    // [#29978] A body that CRASHED rather than refused: a fault, not an abort.
+    { name: 'bra_crash_fault', object: 'bra_crash', events: ['beforeInsert'], body: { language: 'js', source: 'const v = null; v.missing();' } },
   ],
 } as any);
 
@@ -148,6 +156,57 @@ describe('[#29894] an undeclared hook abort is HOOK_ABORTED on every data door, 
       const row = causalRowError(body);
       expect(row?.message, JSON.stringify(body)).toBe(DECLARED);
       expect(row?.code, JSON.stringify(body)).toBe('RECORD_LOCKED');
+    });
+  });
+  describe('§4 [#29978] the import row answers the same code, on the sync door and the async job', () => {
+    type Row = { row: number; ok: boolean; action: string; code?: string; error?: string; field?: string };
+    const doors = {
+      sync: async (object: string, rows: object[]): Promise<Row[]> => {
+        const res = await stack.apiAs(admin, 'POST', `/data/${object}/import`, { format: 'json', rows });
+        expect(res.status, await res.clone().text()).toBe(200);
+        return ((await res.json()) as { results: Row[] }).results;
+      },
+      jobs: async (object: string, rows: object[]): Promise<Row[]> => {
+        const res = await stack.apiAs(admin, 'POST', `/data/${object}/import/jobs`, { format: 'json', rows });
+        expect(res.status, await res.clone().text()).toBe(201);
+        const { jobId } = (await res.json()) as { jobId: string };
+        for (let i = 0; i < 400; i++) {
+          const body: any = await (await stack.apiAs(admin, 'GET', `/data/import/jobs/${jobId}/results`)).json();
+          if (body.status === 'succeeded' || body.status === 'failed') return body.results;
+          expect(['pending', 'running'], JSON.stringify(body)).toContain(body.status);
+          await new Promise((r) => setTimeout(r, 25));
+        }
+        throw new Error(`import job ${jobId} did not finish`);
+      },
+    };
+
+    for (const door of ['sync', 'jobs'] as const) {
+      it(`${door}: an undeclared abort is HOOK_ABORTED with the hook's sentence`, async () => {
+        const [row] = await doors[door]('bra_ins', [{ name: 'x' }]);
+        expect(row, JSON.stringify(row)).toMatchObject({ ok: false, action: 'failed', error: SENTENCE });
+        expect(row!.code, `#29978: the import row answers the code every other write door gives the same abort: ${JSON.stringify(row)}`).toBe('HOOK_ABORTED');
+      });
+
+      it(`${door}: CONTROL a code the hook declared still wins`, async () => {
+        const [row] = await doors[door]('bra_declared', [{ name: 'x' }]);
+        expect(row, JSON.stringify(row)).toMatchObject({ ok: false, error: DECLARED, code: 'RECORD_LOCKED' });
+      });
+
+      it(`${door}: CONTROL a body that crashed keeps IMPORT_ROW_FAILED`, async () => {
+        const [row] = await doors[door]('bra_crash', [{ name: 'x' }]);
+        expect(row, JSON.stringify(row)).toMatchObject({ ok: false, action: 'failed', code: 'IMPORT_ROW_FAILED' });
+      });
+
+      it(`${door}: CONTROL a malformed row keeps its own cell code`, async () => {
+        const [row] = await doors[door]('bra_plain', [{ name: '' }]);
+        expect(row, JSON.stringify(row)).toMatchObject({ ok: false, action: 'failed', code: 'required', field: 'name' });
+      });
+    }
+
+    it('nothing was written by the refused imports', async () => {
+      expect(await ql.find('bra_ins', { where: {}, ...SYS })).toHaveLength(0);
+      expect(await ql.find('bra_declared', { where: {}, ...SYS })).toHaveLength(0);
+      expect(await ql.find('bra_crash', { where: {}, ...SYS })).toHaveLength(0);
     });
   });
 });

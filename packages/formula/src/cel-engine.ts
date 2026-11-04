@@ -966,6 +966,14 @@ function buildTypedEnv(
   fieldCelTypes: Readonly<Record<string, FieldCelType>>,
   scope: 'record' | 'flattened',
   temporalAsText = false,
+  /**
+   * [#29959] Flattened scope only: the field types to type `record.<field>` /
+   * `previous.<field>` with. Absent, those roots stay `map` (dyn members). It
+   * is a map of its own, not `fieldCelTypes`, because a bare name a flow
+   * variable holds is left out of the bare typing while `record.<name>` still
+   * reads the field.
+   */
+  recordRootTypes?: Readonly<Record<string, FieldCelType>>,
 ): Environment {
   // `temporalAsText` declares a `date`/`datetime` field as the text the runtime
   // holds ({@link DATE_TEXT_CEL_TYPE}) instead of a Timestamp — see
@@ -981,6 +989,18 @@ function buildTypedEnv(
     registerStdLib(env, () => new Date(0));
     registerNullComparisons(env);
     if (temporalAsText) registerDateTextOverloads(env);
+    if (recordRootTypes) {
+      // [#29959] A flow run binds the record it was handed as `record` too
+      // (`seedRunVariables`), beside the flattened bare names, so
+      // `record.<field>` is the same value as the bare `<field>` and is typed
+      // the same: the `record`-scope struct, on `record` and `previous`.
+      const fields: Record<string, string> = {};
+      for (const [name, t] of Object.entries(recordRootTypes)) fields[name] = typeName(t);
+      try { env.registerType('OsRecordScope', { fields }); } catch { /* invalid field name — ignore */ }
+      for (const root of ['record', 'previous']) {
+        try { env.registerVariable(root, 'OsRecordScope'); } catch { /* duplicate — ignore */ }
+      }
+    }
     for (const root of SCOPE_ROOTS) {
       try { env.registerVariable(root, 'map'); } catch { /* duplicate — ignore */ }
     }
@@ -1039,6 +1059,39 @@ function offendingField(
 }
 
 /**
+ * [#29959] `fieldCelTypes` without `names` — the bare typing of a flattened
+ * condition whose run binds those names as variables, which win over the
+ * field (see {@link firstTypeMismatch}'s `bareShadowed`).
+ */
+function withoutNames(
+  fieldCelTypes: Readonly<Record<string, FieldCelType>>,
+  names: ReadonlySet<string>,
+): Record<string, FieldCelType> {
+  const out: Record<string, FieldCelType> = {};
+  for (const [name, t] of Object.entries(fieldCelTypes)) if (!names.has(name)) out[name] = t;
+  return out;
+}
+
+/**
+ * [#29959] The `record.<field>` / `previous.<field>` read of a field of
+ * `celType` in a flattened condition, as written — what
+ * {@link firstTypeMismatch}'s record-root pass names. `null` when no such read
+ * is spelled member-wise (an index read, say), so the message names no field.
+ */
+function offendingRecordRead(
+  source: string,
+  fieldCelTypes: Readonly<Record<string, FieldCelType>>,
+  celType: FieldCelType,
+): { field: string; root: 'record' | 'previous' } | null {
+  for (const [name, t] of Object.entries(fieldCelTypes)) {
+    if (t !== celType) continue;
+    const m = new RegExp(`(?<![\\w$.])(record|previous)\\.${name}(?![\\w$])`).exec(source);
+    if (m) return { field: name, root: m[1] as 'record' | 'previous' };
+  }
+  return null;
+}
+
+/**
  * Tier-4 type-soundness (#1928): detect a `record`-scoped expression that
  * type-checks structurally but faults a runtime operator overload because a
  * text (`string`) or boolean (`bool`) field is used with an arithmetic or
@@ -1074,46 +1127,85 @@ function offendingField(
  * `scope` selects how fields are bound: `'record'` (default) for
  * `record.<field>` sites; `'flattened'` for bare-field flow/automation
  * conditions.
+ *
+ * `bareShadowed` (flattened scope only, #29959): names the run binds BEFORE it
+ * flattens the record's fields — a flow's declared variables and node ids.
+ * `seedRunVariables` seeds those first and the flattening skips a bound name,
+ * so a bare read of one holds the variable, not the field: it stays `dyn`
+ * here. `record.<name>` still reads the field and stays typed.
  */
 export function firstTypeMismatch(
   source: string,
   fieldCelTypes: Readonly<Record<string, FieldCelType>>,
   scope: 'record' | 'flattened' = 'record',
-): { operator: string; operands: string; celType: FieldCelType; field: string | null; category: 'date-arith' | 'type-mismatch' } | null {
+  bareShadowed?: ReadonlySet<string>,
+): {
+  operator: string;
+  operands: string;
+  celType: FieldCelType;
+  field: string | null;
+  /** [#29959] Set when a flattened condition's mismatch is a `record.<field>` / `previous.<field>` read. */
+  root?: 'record' | 'previous';
+  category: 'date-arith' | 'type-mismatch';
+} | null {
   if (typeof source !== 'string' || !source.trim()) return null;
   // An all-`dyn` record can never fault an overload — skip the parse entirely.
   if (!Object.values(fieldCelTypes).some((t) => t === 'string' || t === 'bool' || t === 'timestamp')) return null;
-  try {
+  /** The faulting overload `source` meets in `env`'s typing, or `null`. */
+  const unsoundOverload = (env: Environment): RegExpExecArray | null => {
     // A null-guarded numeric branch (`cond ? n : null`) faults cel-js's ternary
     // unifier *before* the check reaches an inner date-arith overload; rewrite it
     // first (same pass the runtime uses) so the real fault surfaces (#3306).
-    const env = buildTypedEnv(fieldCelTypes, scope);
     const result = env.parse(rewriteNullableTernary(rewriteIndexedHas(source))).check?.() as
       | { valid?: boolean; error?: { message?: string } }
       | undefined;
     if (!result || result.valid !== false) return null;
-    const m = UNSOUND_OVERLOAD_RE.exec(result.error?.message ?? '');
-    if (!m) return null;
-    const operator = m[2];
-    const operands = `${m[1]} ${operator} ${m[3]}`;
-    // #3306 — date/duration ARITHMETIC against a number: always nulls, hard error.
-    if (ARITH_OPS.has(operator)
-      && ((DATE_CEL_TYPES.has(m[1]) && NUMERIC_CEL_TYPES.has(m[3]))
-        || (NUMERIC_CEL_TYPES.has(m[1]) && DATE_CEL_TYPES.has(m[3])))) {
+    return UNSOUND_OVERLOAD_RE.exec(result.error?.message ?? '');
+  };
+  /** The text/boolean operand type of a faulting overload, or `null`. */
+  const textOrBool = (m: RegExpExecArray): FieldCelType | null =>
+    m[1] === 'string' || m[1] === 'bool' ? (m[1] as FieldCelType)
+    : m[3] === 'string' || m[3] === 'bool' ? (m[3] as FieldCelType)
+    : null;
+  const bareTypes = scope === 'flattened' && bareShadowed && bareShadowed.size > 0
+    ? withoutNames(fieldCelTypes, bareShadowed)
+    : fieldCelTypes;
+  try {
+    const m = unsoundOverload(buildTypedEnv(bareTypes, scope));
+    if (m) {
+      const operator = m[2];
+      const operands = `${m[1]} ${operator} ${m[3]}`;
+      // #3306 — date/duration ARITHMETIC against a number: always nulls, hard error.
+      if (ARITH_OPS.has(operator)
+        && ((DATE_CEL_TYPES.has(m[1]) && NUMERIC_CEL_TYPES.has(m[3]))
+          || (NUMERIC_CEL_TYPES.has(m[1]) && DATE_CEL_TYPES.has(m[3])))) {
+        return {
+          operator, operands, celType: 'timestamp', category: 'date-arith',
+          field: offendingField(source, bareTypes, 'timestamp', scope),
+        };
+      }
+      // #1928 — text/boolean field in arithmetic/ordering against a number: warning.
+      const celType = textOrBool(m);
+      if (!celType) return null;
       return {
-        operator, operands, celType: 'timestamp', category: 'date-arith',
-        field: offendingField(source, fieldCelTypes, 'timestamp', scope),
+        operator, operands, celType, category: 'type-mismatch',
+        field: offendingField(source, bareTypes, celType, scope),
       };
     }
-    // #1928 — text/boolean field in arithmetic/ordering against a number: warning.
-    const celType: FieldCelType | null =
-      m[1] === 'string' || m[1] === 'bool' ? (m[1] as FieldCelType)
-      : m[3] === 'string' || m[3] === 'bool' ? (m[3] as FieldCelType)
-      : null;
-    if (!celType) return null;
+    // [#29959] A flattened condition reads the same field as `record.<field>`
+    // (and `previous.<field>`), which the bare typing above leaves `dyn`. A
+    // second pass types those roots too, for the text/boolean mismatch only:
+    // the same verdict the bare name gets. The date verdicts stay the bare
+    // name's alone, as before.
+    if (scope !== 'flattened' || !/(?<![\w$.])(?:record|previous)\s*\./.test(source)) return null;
+    const r = unsoundOverload(buildTypedEnv(bareTypes, 'flattened', false, fieldCelTypes));
+    const celType = r ? textOrBool(r) : null;
+    if (!r || !celType) return null;
+    const read = offendingRecordRead(source, fieldCelTypes, celType);
     return {
-      operator, operands, celType, category: 'type-mismatch',
-      field: offendingField(source, fieldCelTypes, celType, scope),
+      operator: r[2], operands: `${r[1]} ${r[2]} ${r[3]}`, celType, category: 'type-mismatch',
+      field: read?.field ?? null,
+      ...(read ? { root: read.root } : {}),
     };
   } catch {
     // A parse/other fault is the syntax checker's job (celEngine.compile); this
