@@ -431,7 +431,9 @@ describe('[#20083] parity: can() over the member\'s map answers what checkObject
       authored('export_no_read', { '*': { viewAllRecords: true }, crm_account: { allowExport: true } }),
     ],
     '[#20136 row f] a super-read wildcard over its own narrower entry': [
-      authored('view_all_own', { '*': { viewAllRecords: true }, crm_account: { allowEdit: true } }),
+      // Built raw: the authoring schema refuses an explicit entry granting edit
+      // without read; a row stored before that refusal still carries it.
+      { name: 'view_all_own', label: 'view_all_own', objects: { '*': { viewAllRecords: true }, crm_account: { allowEdit: true } } } as unknown as PermissionSet,
     ],
     '[#20136 row g] a modify-all-only wildcard beside a set naming the object narrower': [
       authored('named_narrow', {
