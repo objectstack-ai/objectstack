@@ -170,8 +170,10 @@ beforeEach(() => {
 /** The address the pillar writes, as a reload or a shared link reads it. */
 let address = new URLSearchParams();
 function AddressProbe() {
-  const location = useLocation();
-  address = new URLSearchParams(location.search);
+  const { search } = useLocation();
+  React.useEffect(() => {
+    address = new URLSearchParams(search);
+  }, [search]);
   return null;
 }
 
