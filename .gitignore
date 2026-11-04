@@ -68,6 +68,11 @@ packages/spec/json-schema/
 packages/spec/src/migrations/registry.ts
 packages/spec/src/migrations/registry.ts.*.tmp
 
+# Scratch dir of `codemod-split-conversions-registry.mjs --arrays`: its mkdtemp
+# sits inside packages/spec so the copied src resolves the package's own
+# node_modules; removed in a finally, ignored here in case a run is killed.
+packages/spec/.codemod-arrays-*/
+
 # Generated bundle size reports
 packages/spec/bundle-size-report.json
 
