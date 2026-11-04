@@ -98,7 +98,7 @@ its own (`page:section` spaces its children with `space-y-4`; `page:footer`
 draws a separator above a justified, muted row; `page:sidebar` is a
 `w-full md:w-80 shrink-0` column, fixed at 20rem from `md` up), and
 `page:header` renders the page's `header`, a title row (`title`, `subtitle`,
-`breadcrumb`, `actions`) that takes no `children`. The bare HTML sectioning
+`actions`) that takes no `children`. The bare HTML sectioning
 tags (`section`, `header`, `nav`, …) are not curated blocks; they belong to
 `kind:'html'` pages.
 
