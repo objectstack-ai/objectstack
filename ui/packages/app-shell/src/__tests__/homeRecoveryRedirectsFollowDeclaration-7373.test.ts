@@ -136,7 +136,10 @@ const RECOVERY_SITES: ReadonlyArray<{
   },
   {
     file: 'packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx',
-    alsoReads: ['packages/app-shell/src/views/studio-design/StudioNavItemInspector.tsx'],
+    alsoReads: [
+      'packages/app-shell/src/views/studio-design/StudioNavItemInspector.tsx',
+      'packages/app-shell/src/views/studio-design/PackageSwitcher.tsx',
+    ],
     site: 'Studio: deleted-package eviction + header Home',
     expression: /const homePath = useHomePath\(\)/,
   },
