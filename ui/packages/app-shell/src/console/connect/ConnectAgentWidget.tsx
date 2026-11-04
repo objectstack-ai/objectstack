@@ -11,8 +11,8 @@
  *
  *   1. the environment's MCP URL (from `/discovery` → `routes.mcp`) + copy,
  *   2. per-client connect cards with copy-paste-ready content — one Claude
- *      card (claude.ai / Claude Desktop and Claude Code), Cursor deeplink and
- *      the Codex app first, then the Chinese clients WorkBuddy, Doubao Work
+ *      card (claude.ai / Claude Desktop and Claude Code), the Codex app and
+ *      Cursor deeplink first, then the Chinese clients WorkBuddy, Doubao Work
  *      and QwenWork.
  *      OAuth is the default story on every card (the deployment is its own
  *      authorization server; you sign in as yourself); the Chinese clients'
@@ -285,6 +285,23 @@ export function ConnectAgent() {
 
         <Card>
           <CardHeader className="pb-2">
+            <CardTitle className="text-base">Codex</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <p className="text-muted-foreground">{t('connectAgent.codex.body')}</p>
+            <FieldRows
+              rows={[
+                { label: t('connectAgent.fields.name'), value: 'objectstack' },
+                { label: t('connectAgent.fields.transport'), value: 'Streamable HTTP' },
+                { label: t('connectAgent.fields.url'), value: mcpUrl },
+              ]}
+            />
+            <p className="text-xs text-muted-foreground">{t('connectAgent.codex.hint')}</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
             <CardTitle className="flex items-center justify-between text-base">
               Cursor
               {cursorDeeplink && (
@@ -300,23 +317,6 @@ export function ConnectAgent() {
           <CardContent className="space-y-2 text-sm">
             <p className="text-muted-foreground">{t('connectAgent.cursor.body')}</p>
             <Snippet text={mcpServersJson(null, mcpUrl)} />
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Codex</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <p className="text-muted-foreground">{t('connectAgent.codex.body')}</p>
-            <FieldRows
-              rows={[
-                { label: t('connectAgent.fields.name'), value: 'objectstack' },
-                { label: t('connectAgent.fields.transport'), value: 'Streamable HTTP' },
-                { label: t('connectAgent.fields.url'), value: mcpUrl },
-              ]}
-            />
-            <p className="text-xs text-muted-foreground">{t('connectAgent.codex.hint')}</p>
           </CardContent>
         </Card>
 

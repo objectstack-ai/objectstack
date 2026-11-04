@@ -9,7 +9,7 @@ feat(app-shell): Connect an Agent adds connect cards for WorkBuddy, Doubao Work 
 Clause-②: no
 Metadata-protocol: none
 
-The Connect an Agent page (Account → Developer, and Setup) now carries three more client cards, each filled in with the deployment's MCP URL, listed after the Claude, Cursor and Codex cards:
+The Connect an Agent page (Account → Developer, and Setup) now carries three more client cards, each filled in with the deployment's MCP URL, listed after the Claude, Codex and Cursor cards:
 
 - **WorkBuddy** — the `mcpServers` entry for Connectors → Custom connector → Configure MCP, with the `streamableHttp` transport spelling WorkBuddy reads, and the reminder that the connector stays inactive until it is trusted.
 - **Doubao Work** — the name, transport and server URL to type into Skills · Connectors → New → New custom connector.
