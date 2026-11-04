@@ -450,7 +450,7 @@ describe('objectstack#30034 — a personal view opened by its address never carr
       if (replaced === 1 && landPersonalOn === 'firstReplace') landPersonal();
     };
     const dataSource = {
-      find: vi.fn(async (resource: string) => (resource === 'sys_personal_view' ? personalRead.promise : { data: ROWS, total: ROWS.length })),
+      find: vi.fn(async (resource: string, _params?: unknown) => (resource === 'sys_personal_view' ? personalRead.promise : { data: ROWS, total: ROWS.length })),
       findOne: vi.fn(async () => null),
       getObjectSchema: vi.fn(async (name: string) => objects.find((o) => o.name === name) ?? null),
       create: vi.fn(async () => ({})),
@@ -487,6 +487,12 @@ describe('objectstack#30034 — a personal view opened by its address never carr
 
   const settle = () => new Promise((r) => setTimeout(r, 300));
 
+  /** The `crm_lead` reads the list sent, in order (the footer's `$top: 0` count read is not one). */
+  const listReads = (dataSource: { find: { mock: { calls: unknown[][] } } }) =>
+    dataSource.find.mock.calls
+      .filter(([resource, params]) => resource === 'crm_lead' && (params as { $top?: number } | undefined)?.$top !== 0)
+      .map(([, params]) => params as Record<string, unknown>);
+
   it('the personal views read landing AFTER the preferences read: the address bar ends clean, holding only the personal view\'s own state', async () => {
     const page = mountPersonal('/apps/crm/crm_lead/view/pv_mine', { landPersonalOn: 'firstReplace' });
     // The preferences land first; the personal views read is still out.
@@ -501,7 +507,7 @@ describe('objectstack#30034 — a personal view opened by its address never carr
     await settle();
     expect(page.ufParams()).toEqual({});
     // The list's query carries the personal view's own filter, and none of the default view's.
-    const last = JSON.stringify(leadReads(page.dataSource).at(-1));
+    const last = JSON.stringify(listReads(page.dataSource).at(-1));
     expect(last).toContain('Paris');
     expect(last).not.toContain('Rome');
   });
@@ -516,13 +522,13 @@ describe('objectstack#30034 — a personal view opened by its address never carr
     expect(switcher()).toHaveTextContent('Paris leads');
     await settle();
     expect(page.ufParams()).toEqual({});
-    const last = JSON.stringify(leadReads(page.dataSource).at(-1));
+    const last = JSON.stringify(listReads(page.dataSource).at(-1));
     expect(last).toContain('Paris');
     expect(last).not.toContain('Rome');
   });
 
   it('CONTROL: a link carrying `uf_*` params the reader sent opens the personal view with those params applied', async () => {
-    const sort = [{ field: 'name', order: 'asc' }];
+    const sort = [{ field: 'name', order: 'asc' as const }];
     const query = applyListStateParams(new URLSearchParams(), { sort }).toString();
     const page = mountPersonal(`/apps/crm/crm_lead/view/pv_mine?${query}`, { landPersonalOn: 'firstReplace' });
     await waitFor(() => expect(page.dataSource.find.mock.calls.some(([r]) => r === 'sys_personal_view')).toBe(true));
@@ -533,7 +539,7 @@ describe('objectstack#30034 — a personal view opened by its address never carr
     expect(switcher()).toHaveTextContent('Paris leads');
     await settle();
     expect(page.ufParams()).toEqual(Object.fromEntries(new URLSearchParams(query)));
-    await waitFor(() => expect(leadReads(page.dataSource).at(-1).$orderby).toEqual(sort));
-    expect(JSON.stringify(leadReads(page.dataSource).at(-1))).not.toContain('Rome');
+    await waitFor(() => expect(listReads(page.dataSource).at(-1)?.$orderby).toEqual(sort));
+    expect(JSON.stringify(listReads(page.dataSource).at(-1))).not.toContain('Rome');
   });
 });
