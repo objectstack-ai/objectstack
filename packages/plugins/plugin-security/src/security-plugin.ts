@@ -826,12 +826,12 @@ export async function unreadableUnderCallerRead(read: () => Promise<unknown>): P
  */
 export async function readUnlessRefused<T>(
   read: () => Promise<T>,
-): Promise<{ refused: true } | { refused: false; value: T }> {
+): Promise<{ refused: true; error: unknown } | { refused: false; value: T }> {
   try {
     return { refused: false, value: await read() };
   } catch (e) {
     const status = declaredHttpStatus(e);
-    if (status !== undefined && status < 500) return { refused: true };
+    if (status !== undefined && status < 500) return { refused: true, error: e };
     throw e;
   }
 }
@@ -3974,12 +3974,17 @@ export class SecurityPlugin implements Plugin {
    * visibility included — and never a second visibility evaluator.
    *
    * Only ABSENCE is "cannot read". A read-time policy refusal (a declared 4xx
-   * envelope: the object's read grant withheld, a predicate the driver will not
-   * compile) is not a hidden row, so it answers `false` and the write keeps
-   * today's answer; a store fault is neither and propagates as raised (#7505).
+   * envelope: the object's read grant withheld, a capability the object
+   * requires for a read and not for a write) is not a hidden row: it is the
+   * read door's answer to this caller for ANY id, so it is THROWN, and the
+   * addressed by-id write is answered that refusal whether its id names a row
+   * or none — a caller the read door refuses gets one answer from the write
+   * door too. A store fault is neither and propagates as raised (#7505).
    */
   private async callerCannotReadAddressedRow(opCtx: any, id: unknown): Promise<boolean> {
-    return absentUnderCallerRead(() => this.getCallerPreImage(opCtx, id));
+    const answer = await readUnlessRefused(() => this.getCallerPreImage(opCtx, id));
+    if (answer.refused) throw answer.error;
+    return answer.value == null;
   }
 
   /**

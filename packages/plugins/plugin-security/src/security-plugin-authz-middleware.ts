@@ -284,6 +284,41 @@ async function readDoorAnswerForGateRefusal(
 }
 
 /**
+ * Step 2.7's answer to a caller the read door REFUSES, when the write-class
+ * re-read threw: that read refusal, for every by-id id the caller addressed.
+ *
+ * The re-read is a caller-context read, so a caller whose read of the object
+ * is refused (a declared 4xx: the read grant withheld, a capability the object
+ * requires for a read and not for a write) makes it throw before any row is
+ * looked at. Answering the record-level 403 there, while the branch with no
+ * write-class filter answers the read refusal or the not-found, would give
+ * that caller different answers for the same question. So the read door's own
+ * question is asked of the addressed id
+ * ({@link SecurityPlugin.getCallerPreImage}, the caller's by-id read through
+ * the engine), and:
+ *
+ *  - the read is REFUSED (a declared 4xx): that refusal is returned, to be
+ *    thrown as the write's answer — the same answer for a row and for an id
+ *    naming none;
+ *  - the read ANSWERS, or FAULTS: `undefined`, and the record-level 403 below
+ *    stands, exactly as it did (#7505: a store fault keeps today's 403 here,
+ *    the refusal the re-read's fault already earned).
+ */
+async function readRefusalForAddressedRowWrite(
+  this: Pick<AuthzMiddlewareHost, 'getCallerPreImage'>,
+  opCtx: any,
+  addressedId: unknown,
+): Promise<unknown> {
+  try {
+    await this.getCallerPreImage(opCtx, addressedId);
+  } catch (readRefusal) {
+    const status = declaredHttpStatus(readRefusal);
+    if (status !== undefined && status < 500) return readRefusal;
+  }
+  return undefined;
+}
+
+/**
  * The `SecurityPlugin` members the function below reads — every one of them,
  * and no other; the function's `this` is the `Pick` of the members it reads.
  * Each is typed AS the class member (an indexed access on the class), so a
@@ -1168,6 +1203,12 @@ export function registerAuthzMiddleware(
             (await this.callerCannotReadAddressedRow(opCtx, addressedId))
           ) {
             throw recordNotFoundError(opCtx.object, addressedId as string | number);
+          }
+          // A caller the read door REFUSES is answered that refusal for every
+          // addressed id, a row or none ({@link readRefusalForAddressedRowWrite}).
+          if (!visible && reReadThrew && addressedId !== undefined) {
+            const readRefusal = await readRefusalForAddressedRowWrite.call(this, opCtx, addressedId);
+            if (readRefusal !== undefined) throw readRefusal;
           }
           if (!visible) {
             // [#7451] The refusal an ordinary business user is most likely to
