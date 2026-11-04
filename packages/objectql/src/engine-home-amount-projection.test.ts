@@ -627,7 +627,8 @@ describe('recompute: the write\'s own rules, per organization', () => {
       expect.objectContaining({ organizationId: 'org_b', homeCurrency: 'JPY', amounts: 1, unchanged: 0, changed: 1, written: 1 }),
     ]);
     expect(t.storeFor('fx_invoice').get(a.id)).toMatchObject({ amount_home: 10000, amount_rate: 0.1389 });
-    // 721 ÷ 0.048 = 15020.83…, whole yen: JPY has no fraction digits.
+    // 721 ÷ 0.048 = 15020.83…, whole yen: JPY has no fraction digits — in the report and in the row.
+    expect(report.changes.map((c) => c.to)).toEqual([{ home: 15021, rate: 0.048 }]);
     expect(t.storeFor('fx_invoice').get(b.id)).toMatchObject({ amount_home: 15021, amount_rate: 0.048 });
   });
 });
