@@ -2694,7 +2694,7 @@
           "evidence": "the run reads"
         },
         {
-          "clause": "on the boot that enables scheduled work, the same schedule flow reads 'Switched on', _status reports bound: true, and it runs",
+          "clause": "on the boot that enables scheduled work, a schedule flow authored the same way reads 'Switched on', _status reports bound: true, and it runs",
           "oracle": "api",
           "verify": "Studio's words and _status agree on the second boot; a run with trigger type schedule completes within the schedule window",
           "evidence": "the second-boot pairing + the run"
@@ -2746,7 +2746,7 @@
         {
           "revision": 5,
           "date": "2026-11-04",
-          "change": "fixtures.requires[2] and steps[4] name the .claude/launch.json entry showcase-scheduled-work-3778 as the schedule leg's second boot. QA run #29672 could not reboot with the switch, because a runner that starts servers only from launch.json had no such entry. That entry has its own port and DB, so it runs beside the default boot, the step authors the schedule flow again there, and steps[5] stays on the default boot. No clause changed",
+          "change": "fixtures.requires[2] and steps[4] name the .claude/launch.json entry showcase-scheduled-work-3778 as the schedule leg's second boot. QA run #29672 could not reboot with the switch, because a runner that starts servers only from launch.json had no such entry. That entry has its own port and DB, so it runs beside the default boot, the step authors the schedule flow again there, and steps[5] stays on the default boot. acceptance[3].clause now reads 'a schedule flow authored the same way' instead of 'the same schedule flow', since that boot holds a re-authored copy; what it asserts is unchanged",
           "ref": "#29819"
         }
       ]
