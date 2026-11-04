@@ -311,12 +311,17 @@ function isForwardingDeclaration(s) {
 
 // `ts.SyntaxKind[k]` answers the LAST name an enum value carries, and some
 // carry range markers (`VariableStatement` reads back as `FirstStatement`).
-const KIND_NAMES = new Map();
-for (const [name, value] of Object.entries(ts.SyntaxKind)) {
-  if (typeof value !== 'number' || /^(First|Last)/.test(name) || KIND_NAMES.has(value)) continue;
-  KIND_NAMES.set(value, name);
+let kindNames = null;
+function kindName(n) {
+  if (!kindNames) {
+    kindNames = new Map();
+    for (const [name, value] of Object.entries(ts.SyntaxKind)) {
+      if (typeof value !== 'number' || /^(First|Last)/.test(name) || kindNames.has(value)) continue;
+      kindNames.set(value, name);
+    }
+  }
+  return kindNames.get(n.kind) ?? String(n.kind);
 }
-const kindName = (n) => KIND_NAMES.get(n.kind) ?? String(n.kind);
 
 /**
  * A method or accessor body → `{ shape }` when it is a delegation, or
