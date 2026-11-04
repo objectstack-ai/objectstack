@@ -34,7 +34,9 @@
  *     the browser here, its redirect says when it refused
  *     ({@link HANDOFF_REFUSED_AT_PARAM}), and the page holds the form for any
  *     session not created after that, whatever the device's clock says
- *     ({@link isHandoffSessionFresh}).
+ *     ({@link isHandoffSessionFresh}). The links between `/login` and `/register`
+ *     carry it beside a hand-off `redirect` ({@link handoffMarkQuery}), so following
+ *     "Sign up" does not put the device's clock back in charge.
  */
 
 import { useLayoutEffect, useState } from 'react';
@@ -119,12 +121,28 @@ export function handoffRefusedAt(search: string): number | null {
 }
 
 /**
+ * The route's mark as a query suffix, for a link between the sign-in pages: empty
+ * unless `redirect` names the hand-off and this page carries a mark, so every other
+ * link stays exactly what it was.
+ */
+export function handoffMarkQuery(
+  redirect: string | null,
+  search: string = typeof window === 'undefined' ? '' : window.location.search,
+): string {
+  if (handoffNavigationTarget(redirect) === null) return '';
+  const refusedAt = handoffRefusedAt(search);
+  return refusedAt === null ? '' : `&${HANDOFF_REFUSED_AT_PARAM}=${refusedAt}`;
+}
+
+/**
  * Whether the hand-off will carry `session`.
  *
  * With a `createdAt` and the route's `refusedAt`, the session is fresh only if it
  * was created after the refusal: two readings of the server's clock, so the
  * device's is not read, and a provider's sign-in that returns to this same URL
- * counts as new. With a `createdAt` alone, its age decides. Without one, the
+ * counts as new. On several nodes behind one host those are two clocks, so skew can
+ * hold the form until a sign-in makes a later `createdAt`, which clears it. With a
+ * `createdAt` alone, its age decides. Without one, the
  * session is fresh only when it is not the one the page found on arrival: it came
  * from a sign-in on this page, which the server has just made. A session found on
  * arrival with no `createdAt` is treated as too old, so the visitor signs in again

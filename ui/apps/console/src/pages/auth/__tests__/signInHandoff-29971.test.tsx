@@ -26,7 +26,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { AuthProvider } from '@object-ui/auth';
 import type { AuthClient } from '@object-ui/auth';
 import { LoginPage } from '../LoginPage';
@@ -91,6 +91,12 @@ function createMockClient({ arrival = null, config = {}, organizations }: Client
   return client as typeof client & AuthClient;
 }
 
+/** Where the router is, for the navigations a page makes without leaving the document. */
+function RouterLocation() {
+  const location = useLocation();
+  return <span data-testid="router-location">{`${location.pathname}${location.search}`}</span>;
+}
+
 function renderPage(page: 'login' | 'register', client: AuthClient, redirect?: string, extraQuery = '') {
   const search = (redirect ? `?redirect=${encodeURIComponent(redirect)}` : '') + extraQuery;
   window.history.replaceState({}, '', `/_console/${page}${search}`);
@@ -98,6 +104,7 @@ function renderPage(page: 'login' | 'register', client: AuthClient, redirect?: s
     <AuthProvider authUrl="/api/v1/auth" client={client}>
       <MemoryRouter initialEntries={[`/${page}${search}`]}>
         {page === 'login' ? <LoginPage /> : <RegisterPage />}
+        <RouterLocation />
       </MemoryRouter>
     </AuthProvider>,
   );
@@ -264,6 +271,100 @@ describe('LoginPage — rule 5: the route said when it refused', () => {
   it('CONTROL: signed out on arrival, a sign-in forwards as it always did', async () => {
     renderPage('login', createMockClient(), HANDOFF, refusedAt(0));
     await signInOnTheForm();
+    expect(await exitTarget()).toBe(HANDOFF);
+  });
+});
+
+describe('the mark on the links between /login and /register', () => {
+  const MARK = '&handoff_refused_at=1793620800000';
+  const withRedirect = (page: string, redirect: string) => `/${page}?redirect=${encodeURIComponent(redirect)}`;
+  const hrefOf = async (name: string) => (await screen.findByRole('link', { name })).getAttribute('href');
+
+  it('/login carries it on "Sign up", beside a hand-off redirect', async () => {
+    renderPage('login', createMockClient(), HANDOFF, MARK);
+    expect(await hrefOf('Sign up')).toBe(`${withRedirect('register', HANDOFF)}${MARK}`);
+  });
+
+  it('/register carries it on "Sign in", beside a hand-off redirect', async () => {
+    renderPage('register', createMockClient(), HANDOFF, MARK);
+    expect(await hrefOf('Sign in')).toBe(`${withRedirect('login', HANDOFF)}${MARK}`);
+  });
+
+  it('/register carries it when a closed sign-up bounces to /login', async () => {
+    renderPage(
+      'register',
+      createMockClient({ config: { emailPassword: { enabled: true, disableSignUp: true } } }),
+      HANDOFF,
+      MARK,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('router-location').textContent).toBe(`${withRedirect('login', HANDOFF)}${MARK}`),
+    );
+  });
+
+  it('CONTROL: beside any other redirect the links are what they were, mark or no mark', async () => {
+    renderPage('login', createMockClient(), '/settings', MARK);
+    expect(await hrefOf('Sign up')).toBe(withRedirect('register', '/settings'));
+    cleanup();
+    renderPage('register', createMockClient(), '/settings', MARK);
+    expect(await hrefOf('Sign in')).toBe(withRedirect('login', '/settings'));
+    cleanup();
+    renderPage(
+      'register',
+      createMockClient({ config: { emailPassword: { enabled: true, disableSignUp: true } } }),
+      '/settings',
+      MARK,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('router-location').textContent).toBe(withRedirect('login', '/settings')),
+    );
+  });
+
+  it('CONTROL: beside a hand-off redirect with no mark on the page, the links are what they were', async () => {
+    renderPage('login', createMockClient(), HANDOFF);
+    expect(await hrefOf('Sign up')).toBe(withRedirect('register', HANDOFF));
+    cleanup();
+    renderPage('register', createMockClient(), HANDOFF);
+    expect(await hrefOf('Sign in')).toBe(withRedirect('login', HANDOFF));
+  });
+
+  it('CONTROL: with no redirect the links are the bare pages', async () => {
+    renderPage('login', createMockClient());
+    expect(await hrefOf('Sign up')).toBe('/register');
+    cleanup();
+    renderPage('register', createMockClient());
+    expect(await hrefOf('Sign in')).toBe('/login');
+  });
+});
+
+describe('RegisterPage — rule 5: the mark it was linked with', () => {
+  const refusedAt = (msFromNow: number) => `&handoff_refused_at=${Date.now() + msFromNow}`;
+
+  async function signUpOnTheForm() {
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText('Name'), USER.name);
+    await user.type(screen.getByLabelText('Email'), USER.email);
+    await user.type(screen.getByLabelText('Password'), 'hunter2hunter2');
+    await user.type(screen.getByLabelText('Confirm Password'), 'hunter2hunter2');
+    await user.click(screen.getByRole('button', { name: 'Create Account' }));
+  }
+
+  it('holds the form for a session not created after the refusal, though this device reads it as young', async () => {
+    renderPage('register', createMockClient({ arrival: { createdAt: minutesAgo(1) } }), HANDOFF, refusedAt(0));
+    expect(await screen.findByLabelText('Name')).toBeTruthy();
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it('a sign-up on that form forwards to the hand-off', async () => {
+    const client = createMockClient({ arrival: { createdAt: minutesAgo(1) } });
+    renderPage('register', client, HANDOFF, refusedAt(0));
+    await signUpOnTheForm();
+    await waitFor(() => expect(client.signUp).toHaveBeenCalledTimes(1));
+    expect(await exitTarget()).toBe(HANDOFF);
+  });
+
+  it('a session created after it forwards, though this device reads it as too old: a provider returned to this URL', async () => {
+    renderPage('register', createMockClient({ arrival: { createdAt: minutesAgo(10) } }), HANDOFF, refusedAt(-20 * 60_000));
     expect(await exitTarget()).toBe(HANDOFF);
   });
 });

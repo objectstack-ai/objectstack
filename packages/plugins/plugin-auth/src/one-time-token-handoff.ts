@@ -102,7 +102,8 @@
  *    the sign-in page's same-origin match of `redirect` both depend on it, so
  *    `Location` is root-relative. `AuthManager.getConsoleUrl` composes from the
  *    canonical origin; {@link resolveHandoffSignInEntry} takes only the PATH of
- *    its answer, which keeps `uiBasePath` and any base path in `baseUrl`.
+ *    its answer, which keeps `uiBasePath` and any base path in `baseUrl`. A path
+ *    starting with `//` would name another host, so it counts as no sign-in page.
  *  - **No Console, no redirect.** The browser is sent to a sign-in page only when
  *    this process answers that page with an HTML document, asked the way the
  *    browser would be about to ask. `--no-ui`, a Console that was not built, a
@@ -118,7 +119,9 @@
  *       of the refusal, and the sign-in page holds its form for any session not
  *       created after it, whatever the device's clock says
  *       (`handoffRedirect.ts` in the Console). This reads no request header, so
- *       it holds with or without Fetch Metadata.
+ *       it holds with or without Fetch Metadata. On several nodes behind one host
+ *       the time and `createdAt` come from two clocks, so skew can hold the form
+ *       until a sign-in makes a later `createdAt`, which clears it.
  *    2. A navigation reporting `Sec-Fetch-Site: same-origin` that this route still
  *       refuses is one the sign-in page forwarded, so it gets the `401`, never
  *       another redirect.
@@ -189,8 +192,10 @@ export const ONE_TIME_TOKEN_HANDOFF_SESSION_MAX_AGE_SECONDS = 5 * 60;
  * A session whose `createdAt` is not later than this is one the route has
  * already refused, whatever the device's clock says, so the page holds its form
  * for it; a session made after it (a sign-in on the page, or a provider's
- * sign-in that returned to the same URL) is forwarded. The comparison is between
- * two readings of one clock. The page's verdict is never a security question:
+ * sign-in that returned to the same URL) is forwarded. On one process the
+ * comparison is between two readings of one clock. On several nodes behind one
+ * host it is two clocks, so skew can hold the form until a sign-in makes a later
+ * `createdAt`, which clears it. The page's verdict is never a security question:
  * this route refuses on its own.
  */
 export const HANDOFF_REFUSED_AT_PARAM = 'handoff_refused_at';
@@ -440,6 +445,13 @@ export async function resolveHandoffSignInEntry(source: {
   const localPath = deploymentBase && signInPage.startsWith(`${deploymentBase}/`)
     ? signInPage.slice(deploymentBase.length)
     : signInPage;
+  const handoff = `${authBase}${ONE_TIME_TOKEN_HANDOFF_PATH}`;
+  // Config alone reaches this: a `baseUrl` ending in `//` composes a path starting
+  // with `//`, which as a root-relative `Location` names another host.
+  if (signInPage.startsWith('//') || handoff.startsWith('//')) {
+    source.onUnserved(signInPage, 'it would be a protocol-relative Location: check baseUrl and uiBasePath');
+    return null;
+  }
 
   const headers = new Headers({ accept: 'text/html' });
   if (source.requestHost) headers.set('host', source.requestHost);
@@ -460,7 +472,7 @@ export async function resolveHandoffSignInEntry(source: {
     source.onUnserved(localPath, `it answers ${answer.status}`);
     return null;
   }
-  return { signInPage, handoff: `${authBase}${ONE_TIME_TOKEN_HANDOFF_PATH}` };
+  return { signInPage, handoff };
 }
 
 /**

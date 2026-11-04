@@ -555,6 +555,21 @@ describe('one-time-token hand-off — a page navigation without a fresh session 
       expect(said[0][0]).toContain('it answers 500');
     });
 
+    it.each([
+      ['a baseUrl ending in //', { baseUrl: 'https://canonical.example.com//' }],
+      ['a uiBasePath starting with //', { uiBasePath: '//elsewhere.example' }],
+    ])('%s would make Location protocol-relative: JSON 401, no redirect, said once', async (_label, managerConfig) => {
+      const { ctx, handoff } = await arrange(undefined, { managerConfig, mountConsole: servedConsole });
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const res = await handoff(undefined, query, NAVIGATION);
+        expect(res.status).toBe(401);
+        expect(res.headers.get('location')).toBeNull();
+      }
+      const said = (ctx.logger.warn as any).mock.calls.filter(([line]: [string]) => line.includes('one-time-token/handoff'));
+      expect(said).toHaveLength(1);
+      expect(said[0][0]).toContain('protocol-relative');
+    });
+
     it('a uiBasePath that composes no URL refuses the same way instead of failing the request', async () => {
       const { handoff } = await arrange(undefined, { managerConfig: { uiBasePath: '_console' } });
       const res = await handoff(undefined, query, NAVIGATION);
@@ -641,6 +656,18 @@ describe('resolveHandoffSignInEntry', () => {
     const inputs = source(() => new Response('gone', { status: 404 }));
     expect(await resolveHandoffSignInEntry(inputs)).toBeNull();
     expect(inputs.onUnserved).toHaveBeenCalledWith('/_console/login', 'it answers 404');
+  });
+
+  it.each([
+    ['the sign-in page', { signInPageUrl: 'https://canonical.example.com//_console/login' }],
+    ['the hand-off', { authBaseUrl: 'https://canonical.example.com//api/v1/auth' }],
+  ])('a path starting with // on %s is no entry, and the server is not asked', async (_label, overrides) => {
+    const fetch = vi.fn(documentAnswer);
+    const inputs = source(fetch, overrides);
+    expect(await resolveHandoffSignInEntry(inputs)).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(inputs.onUnserved).toHaveBeenCalledTimes(1);
+    expect((inputs.onUnserved as any).mock.calls[0][1]).toContain('protocol-relative');
   });
 
   it('a server that throws when asked is a page it does not serve, not a failed hand-off', async () => {

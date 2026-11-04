@@ -9,6 +9,7 @@ import { AuthEndpointPaths } from '@objectstack/spec/api';
 import {
   HANDOFF_REFUSED_AT_PARAM,
   HANDOFF_SESSION_MAX_AGE_MS,
+  handoffMarkQuery,
   handoffNavigationTarget,
   handoffRefusedAt,
   isHandoffSessionFresh,
@@ -181,6 +182,26 @@ describe('isHandoffSessionFresh — the route said when it refused', () => {
     expect(isHandoffSessionFresh({ token: 't1' }, { arrival: { session: found }, now: refusedAt, refusedAt })).toBe(true);
     const unreadable = { createdAt: 'not a date' };
     expect(isHandoffSessionFresh(unreadable, { arrival: { session: unreadable }, now: refusedAt, refusedAt })).toBe(false);
+  });
+});
+
+describe('handoffMarkQuery — the mark on a link between the sign-in pages', () => {
+  const marked = `?redirect=x&${HANDOFF_REFUSED_AT_PARAM}=1793620800000`;
+
+  it('is the mark, beside a redirect naming the hand-off', () => {
+    expect(handoffMarkQuery(`${HANDOFF_PATH}${QUERY}`, marked)).toBe(`&${HANDOFF_REFUSED_AT_PARAM}=1793620800000`);
+  });
+
+  it('is empty beside any other redirect, or none, so those links stay what they were', () => {
+    for (const other of ['/settings', '/api/v1/data/x', `${HANDOFF_PATH}X`, 'https://evil.example/x', '', null]) {
+      expect(handoffMarkQuery(other, marked), String(other)).toBe('');
+    }
+  });
+
+  it('is empty when the page carries no mark, or one that is not a number of milliseconds', () => {
+    expect(handoffMarkQuery(`${HANDOFF_PATH}${QUERY}`, '?redirect=x')).toBe('');
+    expect(handoffMarkQuery(`${HANDOFF_PATH}${QUERY}`, '')).toBe('');
+    expect(handoffMarkQuery(`${HANDOFF_PATH}${QUERY}`, `?${HANDOFF_REFUSED_AT_PARAM}=soon`)).toBe('');
   });
 });
 
