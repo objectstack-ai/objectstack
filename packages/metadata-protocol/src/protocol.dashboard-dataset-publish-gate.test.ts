@@ -370,6 +370,124 @@ describe('dashboard dataset bindings at the publish door (#7529)', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// #29900 — a report's `runtimeFilter` keys, at the same publish door
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The card's reproduction through the same harness: a report whose
+// `runtimeFilter` names a field its dataset's object lacks is refused at the
+// PUBLISH of its draft, at the key's path, by `report-filter-field-unknown` —
+// the report half of `widget-filter-field-unknown`, whose dashboard control on
+// the same dataset is pinned unchanged beside it. The registry universe gains
+// one dataset over `orders` whose dimension is named APART from the field it
+// reads, so "a dimension key is accepted" is a different fact from "a field key
+// is accepted".
+
+/** The harness, with `orders_states` (dimension `state` over field `status`) added. */
+function makeReportProtocol() {
+    const { engine, rows } = makeStubEngine();
+    const realListItems = engine.registry.listItems;
+    engine.registry.listItems = (type: string) =>
+        type === 'dataset'
+            ? [
+                ...realListItems('dataset'),
+                {
+                    name: 'orders_states',
+                    object: 'orders',
+                    dimensions: [{ name: 'state', field: 'status' }],
+                    measures: [{ name: 'amount_sum', aggregate: 'sum', field: 'amount' }],
+                },
+            ]
+            : realListItems(type);
+    const protocol: any = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test');
+    return { protocol, rows };
+}
+
+/** The card's report body, step 2 of its reproduction. */
+const filteredReport = (runtimeFilter: Record<string, unknown>) => ({
+    name: 'orders_report',
+    label: 'Bad',
+    type: 'summary',
+    dataset: 'orders_states',
+    values: ['amount_sum'],
+    rows: ['state'],
+    runtimeFilter,
+});
+
+/** Draft PUT, then POST publish: the two calls the card's reproduction makes. */
+async function draftThenPublish(type: 'report' | 'dashboard', name: string, item: unknown) {
+    const { protocol, rows } = makeReportProtocol();
+    const draft = await protocol.saveMetaItem({ type, name, item, mode: 'draft' });
+    const published = await protocol.publishMetaItem({ type, name }).catch((e: any) => e);
+    return { draft, published, rows };
+}
+
+describe('#29900 — a report `runtimeFilter` key resolves at the publish door', () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+
+    it('the card\'s repro: the draft saves, the publish is REFUSED 422 naming the key\'s path', async () => {
+        const { draft, published, rows } = await draftThenPublish('report', 'orders_report', filteredReport({ no_such_field: 'x' }));
+
+        expect(draft.success, 'a draft makes no claim to work (#4463 D1)').toBe(true);
+        expect(published).toBeInstanceOf(Error);
+        expect(published.status).toBe(422);
+        expect(published.code).toBe('INVALID_METADATA');
+        const issue = published.issues.find((i: any) => i.rule === 'report-filter-field-unknown');
+        expect(issue, `issues: ${JSON.stringify(published.issues)}`).toBeDefined();
+        expect(issue.path).toBe('reports[0].runtimeFilter.no_such_field');
+        expect(published.rulesRun).toContain('validateReferenceIntegrity');
+        expect(Array.from(rows.values()).filter((r) => r.type === 'report').map((r) => r.state)).not.toContain('active');
+    });
+
+    it('an ACTIVE save of the same body is refused the same way', async () => {
+        const { protocol, rows } = makeReportProtocol();
+        const err = await protocol
+            .saveMetaItem({ type: 'report', name: 'orders_report', item: filteredReport({ no_such_field: 'x' }) })
+            .catch((e: any) => e);
+        expect(err.status).toBe(422);
+        expect(err.code).toBe('INVALID_METADATA');
+        expect(err.issues.map((i: any) => [i.rule, i.path])).toContainEqual([
+            'report-filter-field-unknown',
+            'reports[0].runtimeFilter.no_such_field',
+        ]);
+        expect(Array.from(rows.values()).filter((r) => r.type === 'report')).toEqual([]);
+    });
+
+    it.each([
+        ['a field of the object', { status: 'open' }],
+        ['a dimension of the dataset', { state: 'open' }],
+        ['a system column under `$` operators', { $and: [{ created_at: { $gte: '{today}' } }, { amount: { $gt: 1 } }] }],
+    ])('CONTROL — %s publishes', async (_label, filter) => {
+        const { draft, published } = await draftThenPublish('report', 'orders_report', filteredReport(filter));
+        expect(draft.success).toBe(true);
+        expect(published.success, JSON.stringify(published?.issues ?? published)).toBe(true);
+    });
+
+    it('CONTROL — the dashboard twin on the same dataset is unchanged: refused 422 at its path', async () => {
+        const board = {
+            name: 'orders_board',
+            label: 'Bad',
+            widgets: [{ id: 'w1', type: 'metric', title: 'T', dataset: 'orders_states', values: ['amount_sum'], filter: { no_such_field: 'x' } }],
+        };
+        const { draft, published } = await draftThenPublish('dashboard', 'orders_board', board);
+        expect(draft.success).toBe(true);
+        expect(published.status).toBe(422);
+        expect(published.code).toBe('INVALID_METADATA');
+        expect(published.issues.map((i: any) => [i.rule, i.path])).toContainEqual([
+            'widget-filter-field-unknown',
+            'dashboards[0].widgets[0].filter.no_such_field',
+        ]);
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // #16225 — the stub answers the table it was asked about, and only that one
 // ─────────────────────────────────────────────────────────────────────────────
 //

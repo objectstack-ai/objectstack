@@ -375,7 +375,7 @@
     "system/EmailAndPasswordConfig:minPasswordLength",
     "system/EmailAndPasswordConfig:requireEmailVerification",
     "system/EmailAndPasswordConfig:resetPasswordTokenExpiresIn",
-    "system/EmailAndPasswordConfig:revokeSessionsOnPasswordReset",
+    "system/EmailAndPasswordConfig:revokeSessionsOnPasswordReset [RETIRED]",
     "system/EmailServiceConfig:apiKey",
     "system/EmailServiceConfig:appName",
     "system/EmailServiceConfig:defaultFrom",

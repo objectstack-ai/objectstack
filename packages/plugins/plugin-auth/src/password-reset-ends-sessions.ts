@@ -38,36 +38,43 @@
  * `/sign-out` alone. And the account's API keys are untouched; the forced
  * reset's key revocation is its own switch.
  *
- * ## The declared key
+ * ## The retired key
  *
- * `emailAndPassword.revokeSessionsOnPasswordReset` is still declared by the
+ * `emailAndPassword.revokeSessionsOnPasswordReset` is RETIRED from the
  * published configuration schema (`@objectstack/spec`,
- * `EmailAndPasswordConfigSchema`). `true` is what the platform does anyway and
- * is accepted. An explicit `false` asks for something the platform no longer
- * does, so {@link assertPasswordResetEndsSessions} REFUSES it where the
- * configuration enters the manager — at construction, which stops the boot, and
- * on a configuration patch, where the standing configuration keeps ruling —
- * rather than overriding it silently: a declaration that reads as in force and
- * is not is the ADR-0049 hazard, and refusing is how this plugin treats every
- * other declaration it will not honour (`assertAudienceConfig`,
- * `assertScimAdminCoherence`).
+ * `EmailAndPasswordConfigSchema`): it could hold only one value, so it is a
+ * `retiredKey()` tombstone, and a typed or parsed configuration that writes it
+ * fails `tsc` or the parse with the prescription. The manager never parses its
+ * configuration through that schema, so {@link assertPasswordResetEndsSessions}
+ * holds the same line where the configuration enters the manager — at
+ * construction, which stops the boot, and on a configuration patch, where the
+ * standing configuration keeps ruling — and REFUSES the key at any value, with
+ * the tombstone's own prescription. `true` asked for what the platform does
+ * anyway and `false` for what it no longer does; either way the key is to be
+ * deleted, and a declaration that reads as a setting when there is none is the
+ * ADR-0049 hazard. Refusing is how this plugin treats every other declaration
+ * it will not honour (`assertAudienceConfig`, `assertScimAdminCoherence`).
+ * better-auth's own option of the same name is set by the auth instance, never
+ * read from the host configuration.
  */
 
-import type { EmailAndPasswordConfig } from '@objectstack/spec/system';
+import { REVOKE_SESSIONS_ON_PASSWORD_RESET_RETIRED } from '@objectstack/spec/system';
+
+/** The retired configuration key this guard refuses. */
+const RETIRED_KEY = 'revokeSessionsOnPasswordReset';
 
 /**
- * Refuse an `emailAndPassword` block that asks a completed password reset to
- * keep the account's other sessions. Absent and `true` pass; see the header.
+ * Refuse an `emailAndPassword` block that still writes the retired
+ * `revokeSessionsOnPasswordReset`, whatever it holds. An absent key (or one
+ * holding `undefined`, which the schema's tombstone accepts too) passes; see
+ * the header.
  */
-export function assertPasswordResetEndsSessions(
-  emailAndPassword: Pick<NonNullable<EmailAndPasswordConfig>, 'revokeSessionsOnPasswordReset'> | undefined,
-): void {
-  if (emailAndPassword?.revokeSessionsOnPasswordReset === false) {
-    throw new Error(
-      '[auth] emailAndPassword.revokeSessionsOnPasswordReset: false is not supported: a completed ' +
-        "password reset always ends the account's other sessions, on every reset door, the same as " +
-        "an administrator's forced reset. Remove the key (true is accepted and changes nothing). " +
-        'Refused rather than ignored, so the configuration never reads as keeping sessions it does not keep.',
-    );
+export function assertPasswordResetEndsSessions(emailAndPassword: unknown): void {
+  if (
+    emailAndPassword !== null
+    && typeof emailAndPassword === 'object'
+    && (emailAndPassword as Record<string, unknown>)[RETIRED_KEY] !== undefined
+  ) {
+    throw new Error(`[auth] ${REVOKE_SESSIONS_ON_PASSWORD_RESET_RETIRED}`);
   }
 }

@@ -10,6 +10,7 @@ import { z } from 'zod';
  */
 
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const AuthProviderConfigSchema = lazySchema(() => z.object({
   id: z.string().describe('Provider ID (github, google)'),
   clientId: z.string().describe('OAuth Client ID'),
@@ -297,6 +298,18 @@ export type OidcProviderConfig = z.input<typeof OidcProviderConfigSchema>;
 export type OidcProvidersConfig = z.input<typeof OidcProvidersConfigSchema>;
 
 
+/**
+ * The prescription `EmailAndPasswordConfig.revokeSessionsOnPasswordReset`'s
+ * tombstone carries. plugin-auth's entry guard (`password-reset-ends-sessions.ts`)
+ * answers a host configuration that never passed this schema with the same
+ * text, so both doors say the same thing.
+ */
+export const REVOKE_SESSIONS_ON_PASSWORD_RESET_RETIRED =
+  '`emailAndPassword.revokeSessionsOnPasswordReset` was removed in @objectstack/spec 18 '
+  + '(ADR-0049 enforce-or-remove) — it could hold only one value: a completed password reset '
+  + 'always ends every session the account holds, on every reset door, and no setting turns '
+  + 'that off. Delete the key; nothing replaces it.';
+
 export const EmailAndPasswordConfigSchema = lazySchema(() => z.object({
   enabled: z.boolean().default(true).describe('Enable email/password auth'),
   disableSignUp: z.boolean().optional().describe('Disable new user registration via email/password'),
@@ -306,18 +319,27 @@ export const EmailAndPasswordConfigSchema = lazySchema(() => z.object({
   minPasswordLength: z.number().optional().describe('Minimum password length (default 8)'),
   maxPasswordLength: z.number().optional().describe('Maximum password length (default 128)'),
   // `externalVocabulary` mirror (#14478 ruling B): this object's own describe
-  // says its options are "forwarded to better-auth", and every sibling here is
-  // a better-auth option name verbatim (`disableSignUp`,
-  // `requireEmailVerification`, `minPasswordLength`, `autoSignIn`,
-  // `revokeSessionsOnPasswordReset`). A key that is forwarded by name cannot be
-  // renamed without breaking the forwarding.
+  // says its options are "forwarded to better-auth", and every live sibling
+  // here is a better-auth option name verbatim, forwarded under that name by
+  // plugin-auth's auth instance (`disableSignUp`, `requireEmailVerification`,
+  // `minPasswordLength`, `maxPasswordLength`, `autoSignIn`). A key that is
+  // forwarded by name cannot be renamed without breaking the forwarding.
   resetPasswordTokenExpiresIn: z.number().optional().describe(
     'Reset-password token TTL in seconds (default 3600)'
   ).meta({ externalVocabulary: 'better-auth `emailAndPassword.resetPasswordTokenExpiresIn`' }),
   autoSignIn: z.boolean().optional().describe('Auto sign-in after sign-up (default true)'),
-  revokeSessionsOnPasswordReset: z.boolean().optional().describe(
-    'Revoke all other sessions on password reset'
-  ),
+  // RETIRED (#29909, ADR-0049 enforce-or-remove): a completed self-service
+  // password reset always ends every session the account holds, on every reset
+  // door, and no setting turns that off (maintainer ruling on #29909). After
+  // plugin-auth made the behaviour unconditional the key could hold one value
+  // only, so it is a tombstone: authoring it is a `tsc` error and a parse
+  // error carrying the prescription. plugin-auth still sets better-auth's own
+  // option of this name itself (`auth-manager-auth-instance.ts`), and refuses
+  // this key at any value where a host configuration enters the manager
+  // unparsed (`password-reset-ends-sessions.ts`). No ADR-0087 D2 conversion:
+  // this is host plugin configuration, not a stack collection member or a
+  // stored row. D3 record: `email-and-password-revoke-sessions-on-reset-retired`.
+  revokeSessionsOnPasswordReset: retiredKey(REVOKE_SESSIONS_ON_PASSWORD_RESET_RETIRED),
 }).optional().describe('Email and password authentication options forwarded to better-auth'));
 
 /**

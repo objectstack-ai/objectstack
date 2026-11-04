@@ -1,7 +1,7 @@
 ---
 title: Protocol reference — every schema by module
 navTitle: Protocol Reference
-description: Every schema published by @objectstack/spec — 1620 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1623 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -22,7 +22,7 @@ counts are sums of the rows they head. Regenerate with
 | :--- | ---: | ---: | :--- |
 | [AI Protocol](/docs/references/ai) | 12 | 68 | Agents, tools, skills, RAG and knowledge sources, model registry, conversations. |
 | [API Protocol](/docs/references/api) | 36 | 486 | REST contracts, endpoints, routing, realtime, batch, discovery. |
-| [Automation Protocol](/docs/references/automation) | 15 | 78 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
+| [Automation Protocol](/docs/references/automation) | 16 | 81 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
 | [Data Protocol](/docs/references/data) | 31 | 175 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
 | [Identity Protocol](/docs/references/identity) | 5 | 27 | Users and accounts, organizations, positions, SCIM provisioning. |
 | [Integration Protocol](/docs/references/integration) | 1 | 23 | The single connector protocol (ADR-0097) — catalog descriptors and provider-bound instances. |
@@ -34,7 +34,7 @@ counts are sums of the rows they head. Regenerate with
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
 | [System Protocol](/docs/references/system) | 39 | 295 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
 | [UI Protocol](/docs/references/ui) | 16 | 175 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **209** | **1620** | 14 protocol modules |
+| **Total** | **210** | **1623** | 14 protocol modules |
 
 ---
 
@@ -110,13 +110,14 @@ REST contracts, endpoints, routing, realtime, batch, discovery.
 
 ## Automation Protocol
 
-**Source:** `packages/spec/src/automation/` · **Import:** `@objectstack/spec/automation` · **15 pages, 78 schemas**
+**Source:** `packages/spec/src/automation/` · **Import:** `@objectstack/spec/automation` · **16 pages, 81 schemas**
 
 Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records.
 
 | File | Schemas |
 | :--- | :--- |
 | [`api-trigger-secret-ref.zod.ts`](/docs/references/automation/api-trigger-secret-ref) | `ApiTriggerSecretRef` |
+| [`api-trigger-signature.zod.ts`](/docs/references/automation/api-trigger-signature) | `ApiTriggerBodySignature`, `ApiTriggerSignature`, `ApiTriggerTimestampedSignature` |
 | [`approval.zod.ts`](/docs/references/automation/approval) | `ApprovalDecision`, `ApprovalEscalation`, `ApprovalNodeApprover`, `ApprovalNodeConfig`, `ApproverType`, `DecisionOutputDef` |
 | [`assignment-rule.zod.ts`](/docs/references/automation/assignment-rule) | `AssignmentRule`, `AssignmentRuleEntry`, `AssignmentStrategy`, `AssignmentTarget` |
 | [`bpmn-interop.zod.ts`](/docs/references/automation/bpmn-interop) | `BpmnDiagnostic`, `BpmnElementMapping`, `BpmnExportOptions`, `BpmnImportOptions`, `BpmnInteropResult`, `BpmnUnmappedStrategy`, `BpmnVersion` |
