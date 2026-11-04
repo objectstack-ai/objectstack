@@ -392,7 +392,7 @@ describe('PackageDetailSheet — no native dialog on these three paths (objectui
 describe('Console Packages page — a delete there stays on the page (objectui#11784)', () => {
   /**
    * Studio's return to its landing after a delete is the Studio HOST's
-   * (`PackageSwitcher`'s eviction in `StudioDesignSurface.tsx`), not the
+   * (`PackageSwitcher`'s eviction in `PackageSwitcher.tsx`), not the
    * sheet's. The same sheet serves this console page, whose `onChanged` only
    * reloads the list; `/studio` is not a destination here.
    */
