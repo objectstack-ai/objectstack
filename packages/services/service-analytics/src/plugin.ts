@@ -1440,7 +1440,12 @@ export class AnalyticsServicePlugin implements Plugin {
               type?: string;
               multiple?: boolean;
               max?: number;
-              currencyConfig?: { currencyMode?: string; defaultCurrency?: string; currencyField?: string };
+              currencyConfig?: {
+                currencyMode?: string;
+                defaultCurrency?: string;
+                currencyField?: string;
+                homeAmount?: { field?: string };
+              };
             }
           | undefined;
         if (!f) return undefined;
@@ -1453,12 +1458,18 @@ export class AnalyticsServicePlugin implements Plugin {
         const recordCurrencyField = f.currencyConfig?.currencyMode === 'record'
           ? f.currencyConfig.currencyField
           : undefined;
+        // [ADR-0144 D6, #27195] …and the home field beside it, which the cube
+        // door's refusal names as the consolidated-total remedy.
+        const homeAmountField = recordCurrencyField !== undefined
+          ? f.currencyConfig?.homeAmount?.field
+          : undefined;
         return {
           type: f.type,
           multiple: f.multiple === true,
           max: f.max,
           defaultCurrency: fixedCurrency,
           currencyField: recordCurrencyField,
+          homeAmountField,
         };
       },
       // #5033 — the datasource an object is bound to, used ONLY to name the

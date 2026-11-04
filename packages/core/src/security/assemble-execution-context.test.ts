@@ -591,3 +591,41 @@ describe('ruling 6355206139 — the resolver’s audience stamp rides the envelo
     expect(Object.keys(assemble({ ...ANONYMOUS, audience: 'external' }))).not.toContain('audience');
   });
 });
+
+// The guest envelope is the ONLY thing that tells a downstream create hook an
+// anonymous request is a caller at all. Create hooks such as `sys_attachment`'s
+// and `sys_comment`'s keep a bare-kernel carve-out — no hook session means an
+// internal, context-less engine call, skipped before any user check — and the
+// engine builds that session from the envelope's caller fields
+// (`buildSession`, objectql `engine-execution-plumbing.ts`), which does not
+// read `principalKind`. So the anonymous principal must stay identified by a
+// field that survives that hop, whatever else the face resolved or withheld.
+// objectql's own suite pins the hop itself; this pin holds the envelope end.
+describe('a guest request is a named caller, never an empty context', () => {
+  const GUEST_SHAPES: Array<[string, ResolvedAuthzContext]> = [
+    // The minimum: no session, no key, no guest anchor grants — nothing but
+    // the fact that someone asked.
+    ['no tenant, no grants, no token', ANONYMOUS],
+    // A face that serves the guest resolves the anchor's grants in the
+    // organization ADR-0138 D4 derives; the identification must not depend on it.
+    ['guest anchor grants in an organization', baseAuthz({ tenantId: 'org1', permissions: ['task.read'] })],
+  ];
+
+  for (const [name, authz] of GUEST_SHAPES) {
+    it(`an anonymous request keeps the guest position on its envelope (${name}), so create hooks see a caller`, () => {
+      const ctx = assembleExecutionContextOrGuest({
+        authz,
+        oauth: undefined,
+        // Everything a face could pass for an anonymous request, so a later
+        // change that strips more of it cannot strip the identification too.
+        localization: { timezone: 'Asia/Shanghai', locale: 'zh-CN', currency: 'CNY' },
+        requestLocale: 'en-US',
+        accessToken: undefined,
+        authGate: undefined,
+      });
+      expect(ctx.userId).toBeUndefined();
+      expect(ctx.isSystem).toBe(false);
+      expect(ctx.positions).toEqual(['guest']);
+    });
+  }
+});
