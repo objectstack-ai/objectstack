@@ -702,7 +702,7 @@ describe('[ADR-0090 D12; ruling of record 5985885287] an administrator\'s refuse
       // A value the caller wrote is its own, so its refusal names it.
       const rewrote = await answerOf(() => h.engine.update('sys_user_position', { business_unit_id: 'bu_a_other' },
         { where: { id: 'out_by_unit' }, context: structuredClone(HIDING.unit) } as any));
-      expect([rewrote.status, rewrote.code], rewrote.message).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
+      expect([rewrote.status, rewrote.code], String(rewrote.message)).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
       expect(rewrote.message).toContain("'bu_a_other'");
 
       // The organization branch holds the same rule: an organization
