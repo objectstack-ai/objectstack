@@ -3964,7 +3964,8 @@ _context: HttpProtocolContext,
     const parsedRequest = SeedLoaderRequestSchema.safeParse({
         seeds: datasets,
         config: {
-            defaultMode: 'upsert',
+            // [#30081] No mode of its own: each seed's `mode` is the spec
+            // default (`ignore`, create-only) unless the seed declares one.
             multiPass: true,
         },
     });

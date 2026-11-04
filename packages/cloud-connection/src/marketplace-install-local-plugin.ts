@@ -4618,7 +4618,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     };
 
     /**
-     * One SeedLoaderService run over `datasets` (upsert, multi-pass) — the
+     * One SeedLoaderService run over `datasets` (multi-pass, each dataset in
+     * its own `mode`, the spec default `ignore` when it declares none) — the
      * shared engine behind install-time seeding, the reseed endpoint and the
      * rehydrate-time healer. Throws when objectql/metadata are unavailable;
      * per-row write failures are counted into `errors`, not thrown.
@@ -4642,7 +4643,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             // ADR-0036 / seed rename: the field is `seeds` (was `datasets`).
             seeds: datasets,
             config: {
-                defaultMode: 'upsert',
+                // [#30081] No mode of its own: an install, an upgrade or a
+                // reseed inserts the rows a dataset is missing and leaves the
+                // customer's existing rows alone, unless the dataset declares
+                // `mode: 'upsert'` (the spec default, ruling 6631016988).
                 multiPass: true,
                 ...(organizationId ? { organizationId } : {}),
             },

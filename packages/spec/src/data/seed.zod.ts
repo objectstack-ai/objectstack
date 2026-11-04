@@ -23,9 +23,9 @@ import {
 export const SeedMode = z.enum([
   'insert',    // Try to insert, fail on duplicate
   'update',    // Only update found records, ignore new
-  'upsert',    // Create new or Update existing (Standard)
+  'upsert',    // Create new or update existing: every replay writes the declared columns back
   'replace',   // Delete ALL records in object then insert (Dangerous - use for cache tables)
-  'ignore'     // Try to insert, silently skip duplicates
+  'ignore'     // Create-only (the default): insert missing rows, leave existing rows alone
 ]);
 
 /**
@@ -165,9 +165,37 @@ export const SeedSchema = lazySchema(() => strictObject({
     .describe('Field (or composite list of fields) matched for the uniqueness check'),
 
   /**
-   * Import Strategy
+   * Import Strategy — what a load does with a record whose `externalId`
+   * matches a row that already exists.
+   *
+   * The default, `ignore`, makes a seed create-only: a load inserts the
+   * records whose row is missing and leaves every existing row exactly as it
+   * is. A seed is replayed — on every single-tenant boot, on every package
+   * install or upgrade, on every publish of a `seed` item — and once a seeded
+   * row reaches a customer the row is the customer's: a replay must not write
+   * the shipped value back over their edit, silently, on the next restart
+   * (ruling 6631016988 on objectstack#30081, which measured exactly that on a
+   * production boot and on both upgrade paths while the default was `upsert`).
+   *
+   * An author who wants a replay to refresh the rows — reference data the
+   * package keeps current — declares `mode: 'upsert'`, and can still exempt
+   * the columns the customer or a job owns after the first load with
+   * `columns.<field>.applyOn: 'create'` ({@link SeedColumnSchema}).
+   *
+   * A package built before this default moved carries a written
+   * `mode: 'upsert'` in its compiled artifact (`os build` stores the parsed
+   * seed), and the loader cannot tell that value from an authored one, so such
+   * a package keeps replaying with upsert until it is rebuilt.
    */
-  mode: SeedMode.default('upsert').describe('Conflict resolution strategy'),
+  mode: SeedMode.default('ignore')
+    .describe(
+      'What a load does with a record whose `externalId` matches an existing row. `ignore` (default) ' +
+      'is create-only: a missing row is inserted and an existing row is left as it is, so a replay ' +
+      '(every boot, a package install or upgrade, a publish) never writes a seeded value back over a ' +
+      'later edit. `upsert` also writes every declared column back onto the matched row on each replay; ' +
+      'declare it for reference data the package keeps current. `update` writes matched rows only, ' +
+      '`insert` inserts every record with no match, and `replace` inserts into a table the caller cleared.',
+    ),
 
   /**
    * Column Policies

@@ -1814,7 +1814,9 @@ export class AppPlugin implements Plugin {
                      const request = SeedLoaderRequestSchema.parse({
                          seeds: datasetsNow,
                          config: {
-                             defaultMode: 'upsert',
+                             // [#30081] No mode of its own: each dataset's
+                             // `mode` is the spec default (`ignore`,
+                             // create-only) unless the dataset declares one.
                              multiPass: true,
                              organizationId,
                              // `os.org` is derived from organizationId inside
@@ -1916,7 +1918,11 @@ export class AppPlugin implements Plugin {
                       const request = SeedLoaderRequestSchema.parse({
                           seeds: normalizedDatasets,
                           config: {
-                              defaultMode: 'upsert',
+                              // [#30081] No mode of its own: a replay on a
+                              // later boot inserts a missing row and leaves an
+                              // existing one as the customer left it, unless the
+                              // dataset declares `mode: 'upsert'` (the spec
+                              // default, `SeedSchema.mode`, ruling 6631016988).
                               multiPass: true,
                               identity: seedIdentity,
                               ...(seedLocale ? { locale: seedLocale } : {}),
@@ -2340,7 +2346,7 @@ export class AppPlugin implements Plugin {
                 const request = SeedLoaderRequestSchema.parse({
                     seeds,
                     config: {
-                        defaultMode: 'upsert',
+                        // [#30081] No mode of its own — the spec default applies.
                         multiPass: true,
                         ...(seedLocale ? { locale: seedLocale } : {}),
                     },
