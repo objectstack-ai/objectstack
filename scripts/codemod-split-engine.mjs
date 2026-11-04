@@ -35,7 +35,10 @@
  *    access type names it, and the stub, inside the class, reads it.
  *  - The stub hands the body that host: a method as a closure that calls it on
  *    the engine at call time, a field or accessor as a GETTER that reads it
- *    when the body reads it.
+ *    when the body reads it. Since #30051 the host is ONE object per facet and
+ *    engine (`HOSTS_MODULE`, built on first use by a factory the class's static
+ *    block installs), so a stub is one line, `Facet.x.call(xHost.of(this), …)`,
+ *    instead of a host literal built on every call.
  *
  * Ruling `6591753301` (option A) widened the pattern two ways, and this script
  * applies both, as the pilot does:
@@ -1259,14 +1262,13 @@ function moduleText(moduleFile, title, movers, scope, leafNames, routed = false)
   out.push(' * with its body. The state stays on `ObjectQL`.');
   out.push(' *');
   if (needsHost) {
-    out.push(` * The bodies reach the class through {@link ${hostName}}: exactly the`);
-    out.push(' * `ObjectQL` members they read, private ones included. Every stub hands its');
-    out.push(` * body, by a \`.call\`, the same host: \`${hostVarOf(moduleFile)}\` in \`${HOSTS_MODULE}\`, built`);
-    out.push(' * once per engine by the class\'s static block. Methods go as closures that');
-    out.push(' * call them on the engine at call time, so a subclass override or an instance');
-    out.push(' * spy is still the one reached; fields and accessors go as GETTERS, read when');
-    out.push(' * the body reads them, as they were on the class, and a field a body assigns');
-    out.push(' * goes with a SETTER that assigns it on the engine.');
+    out.push(...wrapComment((`The bodies reach the class through {@link ${hostName}}: exactly the \`ObjectQL\` ` +
+      'members they read, private ones included. Every stub hands its body, by a `.call`, the same host: ' +
+      `\`${hostVarOf(moduleFile)}\` in \`${HOSTS_MODULE}\`, built once per engine by the class's static block. ` +
+      'Methods go as closures that call them on the engine at call time, so a subclass override or an ' +
+      'instance spy is still the one reached; fields and accessors go as GETTERS, read when the body reads ' +
+      'them, as they were on the class, and a field a body assigns goes with a SETTER that assigns it on ' +
+      'the engine.').split(' ')));
   } else {
     out.push(' * No body reads an `ObjectQL` member, so each stub calls its body directly.');
   }

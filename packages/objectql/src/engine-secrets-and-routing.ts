@@ -21,12 +21,13 @@
  *
  * The bodies reach the class through {@link SecretsAndRoutingHost}: exactly the
  * `ObjectQL` members they read, private ones included. Every stub hands its
- * body, by a `.call`, the same host: `secretsAndRoutingHost` in `engine-facet-hosts.ts`, built
- * once per engine by the class's static block. Methods go as closures that
- * call them on the engine at call time, so a subclass override or an instance
- * spy is still the one reached; fields and accessors go as GETTERS, read when
- * the body reads them, as they were on the class, and a field a body assigns
- * goes with a SETTER that assigns it on the engine.
+ * body, by a `.call`, the same host: `secretsAndRoutingHost` in
+ * `engine-facet-hosts.ts`, built once per engine by the class's static block.
+ * Methods go as closures that call them on the engine at call time, so a
+ * subclass override or an instance spy is still the one reached; fields and
+ * accessors go as GETTERS, read when the body reads them, as they were on the
+ * class, and a field a body assigns goes with a SETTER that assigns it on the
+ * engine.
  *
  * Values that stayed in `engine.ts` are imported from it (lever (a) of
  * ruling 6591753301); every use is inside a function body, so the import
