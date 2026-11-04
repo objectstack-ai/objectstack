@@ -84,9 +84,17 @@
  *
  *   same-file target  a forwarding call or `new` may not reach a function,
  *                     class, enum or variable declared at the top level of the
- *                     facade file itself (the facade class aside): a
- *                     delegation must reach another module, or the body has
- *                     only moved one level down the same file.
+ *                     facade file itself (the facade class aside, destructured
+ *                     names included): a delegation must reach another module,
+ *                     or the body has only moved one level down the same file.
+ *                     Nor may a member take a value reference to a same-file
+ *                     function, class, enum or function-initialised variable
+ *                     (`const h = helper`, `this.h = helper`, a field
+ *                     `h = helper`), which would alias it for a later call. A
+ *                     data variable stays legal as an argument
+ *                     (`Object.defineProperties(ObjectQLStatics, …)`); a type
+ *                     position and a parameter or local that shadows the name
+ *                     are not references.
  *
  * Anything else is a body: a branch, a loop, a `try`, a local `let`, an
  * operator, a template with substitutions, an object literal built inline as an
@@ -452,28 +460,91 @@ function bodyInInitializer(init) {
   return found;
 }
 
+/** Every name a binding (an identifier or a destructuring pattern) declares. */
+function bindingNames(name, out = []) {
+  if (ts.isIdentifier(name)) out.push(name.text);
+  else if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
+    for (const el of name.elements) if (ts.isBindingElement(el)) bindingNames(el.name, out);
+  }
+  return out;
+}
+
+/** A value that is code: a function, an arrow or a class expression. */
+function isFunctionLike(e) {
+  e = unwrap(e);
+  return !!e && (ts.isArrowFunction(e) || ts.isFunctionExpression(e) || ts.isClassExpression(e));
+}
+
 /**
- * The names a facade file declares at its own top level (functions, classes,
- * variables, enums), the facade class itself excepted. A delegation that
- * forwards to one of them keeps the body in the facade file, just one level
- * down, so the file grows through that door: a forwarding target must live in
- * another module. Imports are not declarations here, so a facet imported from
- * its own module is never in this set.
+ * The top-level declarations of the facade file (the facade class aside), each
+ * marked `code` (a function, class or enum, or a variable initialised with a
+ * function, arrow or class expression) or `data` (any other variable,
+ * destructured names included).
+ * @returns {Map<string, 'code'|'data'>}
  */
 function sameFileTargets(sf, facadeClass) {
-  const names = new Set();
+  const names = new Map();
   for (const st of sf.statements) {
     if ((ts.isFunctionDeclaration(st) || ts.isClassDeclaration(st) || ts.isEnumDeclaration(st)) && st.name) {
-      names.add(st.name.text);
+      names.set(st.name.text, 'code');
     } else if (ts.isVariableStatement(st)) {
-      for (const d of st.declarationList.declarations) if (ts.isIdentifier(d.name)) names.add(d.name.text);
+      for (const d of st.declarationList.declarations) {
+        const kind = ts.isIdentifier(d.name) && d.initializer && isFunctionLike(d.initializer) ? 'code' : 'data';
+        for (const n of bindingNames(d.name)) names.set(n, kind);
+      }
     }
   }
   names.delete(facadeClass);
   return names;
 }
 
-/** The first call or `new` in a member whose target hangs off a same-file declaration, or null. */
+/** Whether an identifier sits where it is a name, not a value: a property name, a declared name, a label. */
+function isNamePosition(id) {
+  const p = id.parent;
+  if (!p) return true;
+  if ((ts.isPropertyAccessExpression(p) || ts.isQualifiedName(p)) && p.name === id) return true;
+  if ((ts.isPropertyAssignment(p) || ts.isMethodDeclaration(p) || ts.isPropertyDeclaration(p) ||
+       ts.isGetAccessorDeclaration(p) || ts.isSetAccessorDeclaration(p) || ts.isPropertySignature(p) ||
+       ts.isMethodSignature(p) || ts.isEnumMember(p)) && p.name === id) return true;
+  if ((ts.isVariableDeclaration(p) || ts.isParameter(p) || ts.isFunctionDeclaration(p) || ts.isFunctionExpression(p) ||
+       ts.isClassDeclaration(p) || ts.isClassExpression(p) || ts.isTypeParameterDeclaration(p)) && p.name === id) return true;
+  if (ts.isBindingElement(p) && (p.name === id || p.propertyName === id)) return true;
+  if ((ts.isLabeledStatement(p) || ts.isBreakStatement(p) || ts.isContinueStatement(p)) && p.label === id) return true;
+  return false;
+}
+
+/** Whether an identifier sits inside a type (an annotation, `typeof x` in a type, a type argument). */
+function isInType(id, stop) {
+  for (let n = id.parent; n && n !== stop; n = n.parent) {
+    if (ts.isTypeNode(n) && !ts.isExpressionWithTypeArguments(n)) return true;
+  }
+  return false;
+}
+
+/** Whether a name is declared again between an identifier and its member (a parameter or a local shadows it). */
+function isShadowed(id, stop) {
+  const declares = (statements) => statements.some((st) =>
+    (ts.isVariableStatement(st) && st.declarationList.declarations.some((d) => bindingNames(d.name).includes(id.text))) ||
+    ((ts.isFunctionDeclaration(st) || ts.isClassDeclaration(st) || ts.isEnumDeclaration(st)) && st.name?.text === id.text));
+  for (let n = id.parent; n; n = n.parent) {
+    if (ts.isFunctionLike(n) && n.parameters?.some((p) => bindingNames(p.name).includes(id.text))) return true;
+    if ((ts.isBlock(n) || ts.isCaseClause(n) || ts.isDefaultClause(n)) && declares(n.statements)) return true;
+    if ((ts.isForStatement(n) || ts.isForInStatement(n) || ts.isForOfStatement(n)) && n.initializer &&
+        ts.isVariableDeclarationList(n.initializer) &&
+        n.initializer.declarations.some((d) => bindingNames(d.name).includes(id.text))) return true;
+    if (ts.isCatchClause(n) && n.variableDeclaration && bindingNames(n.variableDeclaration.name).includes(id.text)) return true;
+    if (n === stop) return false;
+  }
+  return false;
+}
+
+/**
+ * The first reach into the facade file's own top-level declarations, or null:
+ * a call or `new` whose target hangs off any of them, or a value-position
+ * reference to a `code` one (`const h = helper`, `this.h = helper`, a field
+ * `h = helper`, `{ helper }`), which aliases it for a later call. A `data`
+ * variable stays legal as an argument (`Object.defineProperties(ObjectQLStatics, …)`).
+ */
 function sameFileForward(m, targets) {
   if (targets.size === 0) return null;
   let found = null;
@@ -481,10 +552,14 @@ function sameFileForward(m, targets) {
     if (found) return;
     if (ts.isCallExpression(n) || ts.isNewExpression(n)) {
       const root = chainRoot(n.expression);
-      if (root && ts.isIdentifier(root) && targets.has(root.text)) {
-        found = { node: n, name: root.text };
+      if (root && ts.isIdentifier(root) && targets.has(root.text) && !isShadowed(root, m)) {
+        found = { node: n, name: root.text, how: 'forwards to' };
         return;
       }
+    }
+    if (ts.isIdentifier(n) && targets.get(n.text) === 'code' && !isNamePosition(n) && !isInType(n, m) && !isShadowed(n, m)) {
+      found = { node: n, name: n.text, how: 'takes a reference to' };
+      return;
     }
     ts.forEachChild(n, visit);
   };
@@ -520,7 +595,7 @@ export function judgeClass(cls, sf) {
     if (local) {
       members.push({
         key, line: at, verdict: 'body',
-        why: `it forwards to \`${local.name}\` (line ${line(local.node)}), which is declared in the facade file itself — a delegation must reach another module, or the body has only moved one level down the same file`,
+        why: `it ${local.how} \`${local.name}\` (line ${line(local.node)}), which is declared in the facade file itself — a delegation must reach another module, or the body has only moved one level down the same file`,
       });
       continue;
     }
@@ -699,6 +774,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'H11 a host literal whose slot computes → RED': 1,
   'H12 one bad member among delegations → RED naming only that member': 1,
   'H13 a one-line forward to a function or class declared in the facade file → RED': 1,
+  'H15 a same-file function aliased (local, this-slot, field, destructured name) → RED; data, shadowed and type-only uses → GREEN': 1,
   'H14 a state write to a module binding or a caller\'s object, not to this → RED': 1,
   'A1 facet delegation `return F.m(host(this), ...args)` → GREEN': 1,
   'A2 host-literal `.call` stub (reader closures, forwarders, getters) → GREEN': 1,
@@ -722,7 +798,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'N5 an empty registry → GREEN with nothing guarded, never a crash': 1,
   'N6 the committed registry is well-formed against this checkout': 1,
 });
-const SELF_TEST_BATTERY_FLOOR = 35;
+const SELF_TEST_BATTERY_FLOOR = 36;
 
 function selfTest() {
   const FILE = 'pkg/src/facade.ts';
@@ -778,6 +854,30 @@ function selfTest() {
       return all(
         red(r, /Facade\.m holds a body, not a delegation: it forwards to `helper` \(line \d+\), which is declared in the facade file itself/),
         red(r, /Facade\.n holds a body, not a delegation: it forwards to `Local`/),
+      );
+    } },
+    { label: 'H15 a same-file function aliased (local, this-slot, field, destructured name) → RED; data, shadowed and type-only uses → GREEN', run: () => {
+      const top = [
+        'function helper(self: unknown, a: string) {\n  if (a) { return a; }\n  return self;\n}',
+        'const { picked } = makeHelpers();',
+        'const TABLE = { a: 1 };',
+        '',
+      ].join('\n');
+      const r = run(facadeOf([
+        '  private readonly viaField = helper;',
+        '  constructor() { this.h = helper; }',
+        '  m(a: string) { const h = helper; return h(this, a); }',
+        '  d(a: string) { return picked(a); }',
+        '  t() { return Object.freeze(TABLE); }',
+        '  s(helper: string) { return Facet.s(helper); }',
+        '  y(x: typeof helper) { return Facet.y(x); }',
+      ].join('\n'), top));
+      if (r.problems.length !== 4) return `expected exactly 4 problems (viaField, constructor, m, d), got ${JSON.stringify(r.problems.map((p) => `${p.where} ${p.message}`))}`;
+      return all(
+        red(r, /Facade\.viaField holds a body, not a delegation: it takes a reference to `helper`/),
+        red(r, /Facade\.constructor holds a body, not a delegation: it takes a reference to `helper`/),
+        red(r, /Facade\.m holds a body, not a delegation: it takes a reference to `helper`/),
+        red(r, /Facade\.d holds a body, not a delegation: it forwards to `picked`/),
       );
     } },
     { label: 'H14 a state write to a module binding or a caller\'s object, not to this → RED', run: () => {
