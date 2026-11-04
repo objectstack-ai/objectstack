@@ -12,6 +12,7 @@
 // shape leaks the credentials the DSN carries.
 
 import { describe, it, expect } from 'vitest';
+import { urlUserinfoPassword } from '@objectstack/spec/data';
 import { redactConnectionUrl, describeDriverConnection, describeDriverSqliteFile } from './connection-display.js';
 
 describe('redactConnectionUrl', () => {
@@ -53,6 +54,83 @@ describe('redactConnectionUrl', () => {
 
   it('still strips userinfo from something the URL parser rejects', () => {
     expect(redactConnectionUrl('weird scheme://u:p@host/db')).toBe('weird scheme://host/db');
+  });
+});
+
+// The label is a print-time reader of the same question the datasource doors
+// answer: where does a URL carry a password? It asks the platform's ONE
+// userinfo grammar (`@objectstack/spec/data`) rather than keeping its own, so
+// the oracle below is that grammar's own password accessor.
+describe('redactConnectionUrl — the password rule is the shared URL grammar', () => {
+  const PASSWORD = 'S3CRET-PW';
+
+  it('removes the password wherever the shared grammar reads one, with or without a literal `://`', () => {
+    // A scheme-relative authority.
+    expect(redactConnectionUrl(`//admin:${PASSWORD}@db.example.com:5432/app`))
+      .toBe('//admin@db.example.com:5432/app');
+    // A tab inside the `//`, which a URL parser deletes before it reads.
+    expect(redactConnectionUrl(`postgres:/\t/admin:${PASSWORD}@db.example.com/app`))
+      .toBe('postgres:/\t/admin@db.example.com/app');
+  });
+
+  it('removes the whole password up to the last `@` of the authority, as the shared grammar bounds it', () => {
+    expect(redactConnectionUrl('postgres://admin:S3C@RET-PW@h1:5432,h2:5432/app'))
+      .toBe('postgres://h1:5432,h2:5432/app');
+  });
+
+  it('never prints a password the shared grammar reads, in any URL shape', () => {
+    const shapes = [
+      `postgres://admin:${PASSWORD}@db.example.com:5432/app`,
+      `postgres://:${PASSWORD}@db.example.com/app`,
+      `mysql://admin:${PASSWORD}@db.example.com:3306/app`,
+      `libsql://admin:${PASSWORD}@app-org.turso.io?authToken=jwt`,
+      `postgres://admin:${PASSWORD}@h1:5432,h2:5432/app`,
+      `//admin:${PASSWORD}@db.example.com:5432/app`,
+      `postgres:/\t/admin:${PASSWORD}@db.example.com/app`,
+      ` \npostgres://admin:${PASSWORD}@db.example.com/app`,
+      // Special schemes without the `//`: the label prints exactly what the
+      // shared grammar reads here, so it follows that grammar's reading of
+      // these shapes without an edit of its own.
+      `https:admin:${PASSWORD}@db.example.com/app`,
+      `http:/admin:${PASSWORD}@db.example.com/app`,
+      `wss:\\admin:${PASSWORD}@db.example.com/app`,
+    ];
+    const judged = shapes.filter((value) => urlUserinfoPassword(value) !== undefined);
+    // Non-vacuity floor: the first eight shapes carry a password on every
+    // reading of the grammar, so the property below is never checked over nothing.
+    expect(judged.length).toBeGreaterThanOrEqual(8);
+    for (const value of judged) {
+      expect(urlUserinfoPassword(value)).toBe(PASSWORD);
+      expect(redactConnectionUrl(value), value).not.toContain(PASSWORD);
+    }
+  });
+
+  it('keeps its output byte for byte for every value the shared grammar reads no password in', () => {
+    const controls: ReadonlyArray<readonly [string, string]> = [
+      ['postgres://admin@db.example.com:5432/app', 'postgres://db.example.com:5432/app'],
+      ['postgres://admin:@db.example.com/app', 'postgres://db.example.com/app'],
+      ['postgres://db.example.com:5432/app?sslmode=require', 'postgres://db.example.com:5432/app'],
+      ['postgres://admin@h1:5432,h2:5432/app', 'postgres://h1:5432,h2:5432/app'],
+      ['libsql://app-org.turso.io?authToken=secret-jwt', 'libsql://app-org.turso.io'],
+      ['https://db.example.com/app', 'https://db.example.com/app'],
+      ['file:./data/app.db', 'file:./data/app.db'],
+      ['file:///var/lib/app.db', 'file:///var/lib/app.db'],
+      ['sqlite:/var/lib/app.db', 'sqlite:/var/lib/app.db'],
+      ['//admin@db.example.com/app', '//admin@db.example.com/app'],
+      [':memory:', ':memory:'],
+      ['(in-memory)', '(in-memory)'],
+    ];
+    for (const [value, printed] of controls) {
+      expect(urlUserinfoPassword(value), value).toBeUndefined();
+      expect(redactConnectionUrl(value), value).toBe(printed);
+    }
+  });
+
+  it('keeps its output byte for byte for a password the URL parser already removed', () => {
+    expect(redactConnectionUrl(`postgres://admin:${PASSWORD}@db.example.com:5432/app`))
+      .toBe('postgres://db.example.com:5432/app');
+    expect(redactConnectionUrl(`libsql://admin:${PASSWORD}@app-org.turso.io?authToken=jwt`))
+      .toBe('libsql://app-org.turso.io');
   });
 });
 

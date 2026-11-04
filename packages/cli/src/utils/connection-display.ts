@@ -24,18 +24,31 @@
  *    that the driver label and the host don't already say.
  */
 
+import { redactUrlPassword } from '@objectstack/spec/data';
+
 /**
  * Strip credentials from a connection string.
  *
- * Values that aren't URLs — a sqlite path, `:memory:`, the `(in-memory)`
- * marker — pass through untouched, as does anything the URL parser rejects
- * (minus its userinfo segment). Idempotent, so a call site that can't tell
- * whether its input was already redacted may apply it defensively.
+ * The password goes first, and by the platform's ONE userinfo grammar
+ * (`redactUrlPassword` from `@objectstack/spec/data`, the datasource read
+ * door's redactor): wherever that grammar reads a password — the string judged
+ * as a URL parser cleans it — the label drops it, so the label
+ * cannot print a password the doors would refuse or redact. No second
+ * userinfo grammar lives here; when the shared one reads a userinfo in more
+ * shapes, this label follows without an edit.
+ *
+ * Then the display shaping, unchanged: a value carrying `://` loses its
+ * username and query string through the URL parser, or its userinfo segment
+ * by hand when the parser rejects it. Values that aren't URLs — a sqlite path,
+ * `:memory:`, the `(in-memory)` marker — pass through untouched unless the
+ * shared grammar read a password in them. Idempotent, so a call site that
+ * can't tell whether its input was already redacted may apply it defensively.
  */
 export function redactConnectionUrl(value: string): string {
-  if (!value.includes('://')) return value;
+  const withoutPassword = redactUrlPassword(value);
+  if (!withoutPassword.includes('://')) return withoutPassword;
   try {
-    const url = new URL(value);
+    const url = new URL(withoutPassword);
     url.username = '';
     url.password = '';
     // Query params are where tokens hide (`libsql://….turso.io?authToken=…`),
@@ -45,7 +58,7 @@ export function redactConnectionUrl(value: string): string {
   } catch {
     // Not parseable (a driver-specific dialect, a malformed URL). Drop the
     // userinfo segment by hand rather than printing the whole thing.
-    return value.replace(/:\/\/[^@/]*@/, '://');
+    return withoutPassword.replace(/:\/\/[^@/]*@/, '://');
   }
 }
 
