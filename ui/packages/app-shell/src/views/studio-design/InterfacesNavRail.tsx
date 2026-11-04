@@ -9,7 +9,7 @@
 
 import * as React from 'react';
 import { StudioRailGroup, StudioRailRow } from './StudioRail.js';
-import { Badge, Separator } from '@object-ui/components';
+import { Badge, Popover, PopoverContent, PopoverTrigger, Separator, cn } from '@object-ui/components';
 import {
   FileText,
   Database,
@@ -23,6 +23,7 @@ import {
   BookOpen,
   MousePointer2,
   Minus,
+  RotateCcw,
   type LucideIcon,
 } from 'lucide-react';
 import { listViewTargetOf } from './ObjectListViewInspector.js';
@@ -42,6 +43,7 @@ import {
   useOpenContributor,
   type RailCustomizations,
 } from './StudioRailCustomizations.js';
+import { CustomizationMark } from './CustomizationMark.js';
 import type { NavContributionPlacement, TopLevelContributedNav } from './contributionRows.js';
 
 const KIND_ICON: Record<string, LucideIcon> = {
@@ -485,5 +487,80 @@ function OffNavSection({
         );
       })}
     </StudioRailGroup>
+  );
+}
+
+/**
+ * objectstack#30059 (ADR-0146 D2, D3) — the Interfaces rail's mark for an app
+ * whose navigation a read-only base's pair overrides. The override is the
+ * app's, a whole copy, never one entry's, so the mark sits beside the rail's
+ * heading rather than on a row: the compact "customized" glyph every rail row
+ * carries ({@link CustomizationMark}), never a text label.
+ *
+ * Pressing it opens a small popover that says what the app overrides and the
+ * version it was taken from and, for an override the pair holds
+ * (`onRestore`), offers "Restore package original". That button only asks:
+ * the host opens its confirmation (`StudioRestoreOriginalDialog`), as the item
+ * header's override mark does (`StudioOverrideChip`).
+ *
+ * Drawn from a served declaration (`useServedOverride`), ⛔ never a
+ * computation: no diff against the base's navigation.
+ */
+export function InterfacesNavOverrideMark({
+  baseLabel,
+  pairId,
+  basedOn,
+  locale,
+  onRestore,
+  restoreDisabled = false,
+}: {
+  baseLabel: string;
+  /** The pair, named in the mark's tooltip; empty while it is not known. */
+  pairId: string;
+  basedOn: string;
+  locale: string;
+  /** Opens the host's Restore confirmation; omitted, the popover states the facts alone. */
+  onRestore?: () => void;
+  restoreDisabled?: boolean;
+}): React.ReactElement {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          data-testid="if-nav-override-mark"
+          className="inline-flex shrink-0 items-center rounded-[5px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <CustomizationMark kind="customized" baseName={baseLabel} pairId={pairId || undefined} locale={locale} compact />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-72 p-3 text-xs" data-testid="if-nav-override-popover">
+        <p className="text-sm font-medium text-foreground">
+          {tFormat('engine.studio.customize.overrides', locale, { package: baseLabel })}
+        </p>
+        <p className="mt-1.5 text-muted-foreground" data-testid="if-nav-override-facts">
+          {tFormat('engine.studio.customize.overridesTitle', locale, { package: baseLabel, basedOn })}
+        </p>
+        {onRestore && (
+          <button
+            type="button"
+            data-testid="if-nav-override-restore"
+            disabled={restoreDisabled}
+            onClick={() => {
+              setOpen(false);
+              onRestore();
+            }}
+            className={cn(
+              'mt-3 inline-flex h-7 items-center gap-1.5 rounded-md border bg-background px-2.5 text-xs font-medium text-foreground hover:bg-muted',
+              'disabled:pointer-events-none disabled:opacity-50',
+            )}
+          >
+            <RotateCcw className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+            {t('engine.studio.customize.restore', locale)}
+          </button>
+        )}
+      </PopoverContent>
+    </Popover>
   );
 }

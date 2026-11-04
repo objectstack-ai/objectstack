@@ -25,6 +25,11 @@
  *  - the read-only mark does not link these types to Setup's overlay page;
  *  - CONTROL: a writable package edits and saves in place, with no door and
  *    no declaration.
+ *
+ * objectstack#30059 — and the app's navigation, through the rail's own nav
+ * editor: the first saved edit copies the whole app into the pair, declaring
+ * the override; the pickers offer the pair's items; the rail marks the
+ * override and counts it under "only customizations"; Restore deletes it.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -59,6 +64,7 @@ const APP = { name: 'crm_app', label: 'CRM', navigation: NAV };
 
 /** The base's rows as its read serves them: the protection envelope rides along. */
 const BASE_ROWS: Record<string, Record<string, unknown>> = {
+  'app/crm_app': { ...APP, _packageId: BASE },
   'dashboard/pipeline': { name: 'pipeline', label: 'Pipeline', widgets: [], _packageId: BASE },
   'dashboard/forecast': { name: 'forecast', label: 'Forecast', widgets: [], _packageId: BASE },
   'view/opportunity.default': {
@@ -80,6 +86,8 @@ const srv = vi.hoisted(() => ({
   base: new Map<string, Record<string, unknown>>(),
   pairActive: new Map<string, Record<string, unknown>>(),
   pairDrafts: new Map<string, Record<string, unknown>>(),
+  /** objectstack#30059 — what the pair's list read serves, by type. */
+  pairListed: new Map<string, Array<Record<string, unknown>>>(),
   pairExists: false,
   ensure: [] as number[],
   ensureRefusal: null as null | { status: number; message: string },
@@ -92,7 +100,8 @@ const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 const k = (type: string, name: string) => `${type}/${name}`;
 
 const mockClient = vi.hoisted(() => ({
-  list: vi.fn(async (type: string) => {
+  list: vi.fn(async (type: string, opts: { packageId?: string } = {}) => {
+    if (opts.packageId === PAIR) return clone(srv.pairListed.get(type) ?? []);
     if (type === 'app') return [{ name: 'crm_app', label: 'CRM' }];
     if (type === 'object') return [{ name: 'opportunity', label: 'Opportunity' }];
     return [];
@@ -101,7 +110,6 @@ const mockClient = vi.hoisted(() => ({
   get: vi.fn(async (type: string) => (type === 'object' ? OBJECT_DEF : undefined)),
   references: vi.fn(async () => []),
   layered: vi.fn(async (type: string, name: string) => {
-    if (type === 'app') return { effective: APP };
     if (type === 'object') return { effective: OBJECT_DEF, code: OBJECT_DEF };
     // N-10: the pair's row is served over the base's item.
     const overlay = srv.pairActive.get(k(type, name)) ?? null;
@@ -165,6 +173,8 @@ import { InterfacesPillar, type StudioBaseCustomization } from './StudioDesignSu
 import { ensureCustomizationPackage } from './packages-io';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { t, tFormat } from '../metadata-admin/i18n';
+import type { PackageCustomizationsState } from './CustomizationMark';
+import { indexCustomizations } from './customizationMarks';
 
 /** The dashboard canvas, reduced to its label and one in-place edit. */
 function BoardCanvas({ draft, onPatch }: { draft: Record<string, unknown>; onPatch?: (patch: Record<string, unknown>) => void }) {
@@ -212,6 +222,7 @@ beforeEach(() => {
   for (const [key, row] of Object.entries(BASE_ROWS)) srv.base.set(key, clone(row));
   srv.pairActive.clear();
   srv.pairDrafts.clear();
+  srv.pairListed.clear();
   srv.pairExists = false;
   srv.ensure.length = 0;
   srv.ensureRefusal = null;
@@ -249,17 +260,21 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const MARKS_OFF: PackageCustomizationsState = { status: 'off' };
+
 /** What the Studio surface hands the pillar on a read-only base: the pair's id comes from the door's answer. */
 function Host({
   readOnly = true,
   walled = false,
   basedOn = '4.0.0',
   listedPair = null,
+  marks = MARKS_OFF,
 }: {
   readOnly?: boolean;
   walled?: boolean;
   basedOn?: string | null;
   listedPair?: string | null;
+  marks?: PackageCustomizationsState;
 }) {
   const [pairId, setPairId] = React.useState<string | null>(listedPair);
   const ensurePackage = React.useCallback(async () => {
@@ -271,9 +286,9 @@ function Host({
   const customization = React.useMemo<StudioBaseCustomization | null>(
     () =>
       readOnly
-        ? { base: BASE, baseLabel: 'HotCRM', basedOn, walled, pairId, ensure, ensurePackage, marks: { status: 'off' } }
+        ? { base: BASE, baseLabel: 'HotCRM', basedOn, walled, pairId, ensure, ensurePackage, marks }
         : null,
-    [readOnly, basedOn, walled, pairId, ensure, ensurePackage],
+    [readOnly, basedOn, walled, pairId, ensure, ensurePackage, marks],
   );
   return <InterfacesPillar packageId={BASE} readOnly={readOnly} customization={customization} />;
 }
@@ -622,5 +637,188 @@ describe('CONTROL: a writable package is edited in place (objectstack#28562)', (
     expect(srv.saves[0]!.body).toStrictEqual({ name: 'pipeline', label: 'Pipeline (ours)', widgets: [] });
     expect(srv.ensure).toEqual([]);
     expect(within(header()).queryByTestId('studio-override-chip')).toBeNull();
+  });
+});
+
+/* ───────────── objectstack#30059 — the app's navigation ───────────── */
+
+/** The served app override of the base's app: the pair's whole copy, one entry added. */
+const CONTRACTS_ENTRY = { id: 'nav_contracts', type: 'object', label: 'Contracts', objectName: 'contract' };
+const APP_OVERRIDE = { ...APP, navigation: [...NAV, CONTRACTS_ENTRY], overrides: { package: BASE, basedOn: '4.0.0' } };
+
+/** The base's customization read listing the app's override (what the server serves once it is published). */
+function marksListingTheApp(): PackageCustomizationsState {
+  const read = {
+    packageId: BASE,
+    overrides: [{ type: 'app', name: 'crm_app', basedOn: '4.0.0' }],
+    extensions: [],
+    switchedOff: [],
+    contributions: [],
+    counts: { overrides: 1, extensions: 0, switchedOff: 0 },
+  } as never;
+  return { status: 'read', read, index: indexCustomizations(BASE, read)!, baseName: 'HotCRM', contributorNames: new Map() };
+}
+
+const rail = () => screen.getByTestId('studio-rail-interfaces');
+
+/** The "+" menu's item `testId`, the menu opened first. */
+async function addFromMenu(testId: string): Promise<void> {
+  fireEvent.pointerDown(await within(rail()).findByTestId('if-create-menu', undefined, { timeout: 8000 }), {
+    button: 0,
+    ctrlKey: false,
+  });
+  fireEvent.click(await screen.findByTestId(testId));
+}
+
+/** Open the picker named `name` and return its listbox. */
+async function openPicker(name: string): Promise<HTMLElement> {
+  fireEvent.keyDown(screen.getByRole('combobox', { name }), { key: 'ArrowDown' });
+  return screen.findByRole('listbox');
+}
+
+async function openNavRestoreDialog(): Promise<HTMLElement> {
+  fireEvent.click(await within(rail()).findByTestId('if-nav-override-mark', undefined, { timeout: 8000 }));
+  const popover = await screen.findByTestId('if-nav-override-popover');
+  await waitFor(() => expect(within(popover).getByTestId('if-nav-override-restore')).toBeEnabled(), { timeout: 8000 });
+  fireEvent.click(within(popover).getByTestId('if-nav-override-restore'));
+  return screen.findByTestId('studio-restore-original-dialog');
+}
+
+describe('Customize a read-only base’s navigation into its pair (objectstack#30059)', () => {
+  it('Edit is offered and writes nothing; the first saved edit copies the whole app into the pair, declaring the override; the base is untouched', async () => {
+    mount();
+    await openPipeline();
+    fireEvent.click(await within(rail()).findByTestId('if-edit-nav', undefined, { timeout: 8000 }));
+    expect(await within(rail()).findByTestId('if-nav-saved-to')).toBeInTheDocument();
+    await sleep(1500);
+    expect(srv.ensure).toEqual([]);
+    expect(srv.saves).toEqual([]);
+    fireEvent.click(within(rail()).getByTestId('if-edit-nav'));
+    await waitFor(() => expect(within(rail()).queryByTestId('if-nav-saved-to')).toBeNull());
+
+    // The "+" adds a navigation entry on the read-only base, as on a writable one.
+    await addFromMenu('if-add-nav-separator');
+    await waitFor(() => expect(srv.saves).toHaveLength(1), { timeout: 8000 });
+    expect(srv.ensure).toEqual([201]);
+    const [saved] = srv.saves;
+    // Read at the base before the pair was there: pinned to "no draft in the pair".
+    expect(saved).toMatchObject({ type: 'app', name: 'crm_app', opts: { mode: 'draft', packageId: PAIR, ifNoneMatch: '*' } });
+    // The whole app, without the base's `_` keys, declaring the override at the base's version.
+    expect(saved!.body).toStrictEqual({
+      name: 'crm_app',
+      label: 'CRM',
+      navigation: [...NAV, { id: 'nav_item_4', type: 'separator' }],
+      overrides: { package: BASE, basedOn: '4.0.0' },
+    });
+    expect(srv.base.get('app/crm_app')).toStrictEqual(BASE_ROWS['app/crm_app']);
+
+    // The rail marks the override the pair's draft now serves.
+    fireEvent.click(await within(rail()).findByTestId('if-nav-override-mark', undefined, { timeout: 8000 }));
+    expect(await screen.findByTestId('if-nav-override-facts')).toHaveTextContent(
+      tFormat('engine.studio.customize.overridesTitle', 'en', { package: 'HotCRM', basedOn: '4.0.0' }),
+    );
+  });
+
+  it('the pickers offer the pair’s items after the base’s, and the entry bound to one is saved into the pair', async () => {
+    srv.pairExists = true;
+    srv.pairListed.set('object', [{ name: 'contract', label: 'Contract' }]);
+    srv.pairListed.set('dashboard', [{ name: 'renewals', label: 'Renewals' }]);
+    mount({ listedPair: PAIR });
+    await openPipeline();
+    await addFromMenu('if-add-nav-object');
+
+    let listbox = await openPicker(t('engine.studio.nav.linkObject', 'en'));
+    await within(listbox).findByRole('option', { name: 'Contract (contract)' }, { timeout: 8000 });
+    expect(within(listbox).getByRole('option', { name: 'Opportunity (opportunity)' })).toBeInTheDocument();
+    fireEvent.click(within(listbox).getByRole('option', { name: 'Contract (contract)' }));
+    await waitFor(() => expect(srv.saves.length).toBeGreaterThan(0), { timeout: 8000 });
+    await waitFor(
+      () =>
+        expect((srv.saves.at(-1)!.body.navigation as unknown[]).at(-1)).toEqual({
+          id: 'nav_item_4',
+          type: 'object',
+          objectName: 'contract',
+        }),
+      { timeout: 8000 },
+    );
+    expect(srv.saves.every((save) => save.opts.packageId === PAIR)).toBe(true);
+    expect(srv.saves.at(-1)!.body.overrides).toEqual({ package: BASE, basedOn: '4.0.0' });
+
+    // A dashboard entry's picker offers the pair's dashboard.
+    const dashboardChoice = screen.getAllByRole('radio').find((r) => (r as HTMLInputElement).value === 'dashboard')!;
+    fireEvent.click(dashboardChoice);
+    listbox = await openPicker(t('engine.inspector.appNav.type.dashboard', 'en'));
+    expect(await within(listbox).findByRole('option', { name: /renewals/ }, { timeout: 8000 })).toBeInTheDocument();
+  });
+
+  it('the rail marks a served override and counts it under "only customizations", which keeps the navigation', async () => {
+    srv.pairExists = true;
+    srv.pairActive.set('app/crm_app', clone(APP_OVERRIDE));
+    mount({ listedPair: PAIR, marks: marksListingTheApp() });
+    await openPipeline();
+    const mark = await within(rail()).findByTestId('if-nav-override-mark', undefined, { timeout: 8000 });
+    expect(within(mark).getByTestId('customization-mark')).toHaveAttribute('data-kind', 'customized');
+    const only = await within(rail()).findByTestId('studio-rail-customizations-only', undefined, { timeout: 8000 });
+    expect(only).toHaveTextContent(tFormat('engine.list.customizations.only', 'en', { marked: 1 }));
+
+    fireEvent.click(only);
+    expect(only).toHaveAttribute('aria-pressed', 'true');
+    expect(within(rail()).getByRole('button', { name: /Contracts/ })).toBeInTheDocument();
+    expect(within(rail()).getByRole('button', { name: /Pipeline/ })).toBeInTheDocument();
+  });
+
+  it('Restore deletes the pair’s draft and row of the app after a confirmation, and the base’s navigation reads back', async () => {
+    srv.pairExists = true;
+    srv.pairActive.set('app/crm_app', clone(APP_OVERRIDE));
+    mount({ listedPair: PAIR });
+    await openPipeline();
+    await within(rail()).findByRole('button', { name: /Contracts/ }, { timeout: 8000 });
+
+    // Cancel deletes nothing.
+    fireEvent.click(within(await openNavRestoreDialog()).getByTestId('studio-restore-original-cancel'));
+    await sleep(300);
+    expect(srv.resets).toEqual([]);
+
+    const dialog = await openNavRestoreDialog();
+    expect(within(dialog).getByRole('heading')).toHaveTextContent(
+      tFormat('engine.studio.customize.restoreConfirm', 'en', { package: 'HotCRM', item: 'CRM' }),
+    );
+    fireEvent.click(within(dialog).getByTestId('studio-restore-original-confirm'));
+    await waitFor(() => expect(srv.resets).toHaveLength(2), { timeout: 8000 });
+    expect(srv.resets).toEqual([
+      { type: 'app', name: 'crm_app', opts: { state: 'draft', packageId: PAIR } },
+      { type: 'app', name: 'crm_app', opts: { packageId: PAIR } },
+    ]);
+    await waitFor(() => expect(within(rail()).queryByRole('button', { name: /Contracts/ })).toBeNull(), { timeout: 8000 });
+    await waitFor(() => expect(within(rail()).queryByTestId('if-nav-override-mark')).toBeNull());
+    expect(within(rail()).getByTestId('if-edit-nav')).toBeInTheDocument();
+    expect(srv.base.get('app/crm_app')).toStrictEqual(BASE_ROWS['app/crm_app']);
+    expect(srv.saves).toEqual([]);
+  });
+
+  it('a walled caller is offered no navigation edit, and the "+" only the kinds it creates', async () => {
+    mount({ walled: true });
+    await openPipeline();
+    await sleep(500);
+    expect(within(rail()).queryByTestId('if-edit-nav')).toBeNull();
+    expect(within(rail()).queryByTestId('if-create-menu')).toBeNull();
+    expect(srv.ensure).toEqual([]);
+  });
+
+  it('CONTROL: on a writable package the navigation saves at the package, with no door and no declaration', async () => {
+    srv.base.set('app/crm_app', clone(APP));
+    mockClient.save.mockImplementationOnce(async (type: string, name: string, item: unknown, opts: Record<string, unknown> = {}) => {
+      srv.saves.push({ type, name, body: clone(item) as Record<string, unknown>, opts: clone(opts) });
+      return { success: true, version: 'v1', state: 'draft' };
+    });
+    mount({ readOnly: false });
+    await openPipeline();
+    await addFromMenu('if-add-nav-separator');
+    await waitFor(() => expect(srv.saves).toHaveLength(1), { timeout: 8000 });
+    expect(srv.saves[0]).toMatchObject({ type: 'app', name: 'crm_app', opts: { packageId: BASE } });
+    expect(srv.saves[0]!.body).toStrictEqual({ ...APP, navigation: [...NAV, { id: 'nav_item_4', type: 'separator' }] });
+    expect(srv.ensure).toEqual([]);
+    expect(within(rail()).queryByTestId('if-nav-override-mark')).toBeNull();
+    expect(within(rail()).queryByTestId('if-nav-saved-to')).toBeNull();
   });
 });
