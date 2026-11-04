@@ -66,6 +66,7 @@ const SITES = [
   'packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx',
   'packages/app-shell/src/views/studio-design/StudioNavItemInspector.tsx',
   'packages/app-shell/src/views/studio-design/PackageSwitcher.tsx',
+  'packages/app-shell/src/views/studio-design/InterfacesNavRail.tsx',
   'packages/app-shell/src/hooks/useTrackRouteAsRecent.ts',
   'packages/app-shell/src/utils/deriveRelatedLists.ts',
   'packages/app-shell/src/views/metadata-admin/datasource/DatasourceResourcePage.tsx',
