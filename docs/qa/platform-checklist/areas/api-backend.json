@@ -3295,7 +3295,7 @@
       "title": "Error answers made honest on v18: a hook refusal on a hand-built write route answers 400 with the hook's own sentence, a crash answers a generic 500 that withholds the caught message, and a unique-constraint refusal is 409 UNIQUE_VIOLATION with details at the action door, MCP and sandboxed bodies too",
       "since": "v18",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -3310,7 +3310,7 @@
         ]
       },
       "steps": [
-        "POST a /data write route on the object whose hook refuses (POST /api/v1/data/OBJECT, or its /batch or /createMany door); read the body",
+        "POST a /data write route on the object whose hook refuses (POST /api/v1/data/OBJECT, or its /createMany door; not /batch: POST /api/v1/data/OBJECT/batch answers 200 with a per-row report, each refusal in results[i].errors[0] with its code and httpStatus, so it never answers the 400 this item reads, packages/rest/src/batch-routes.ts); read the body",
         "invoke the script action that inserts a duplicate value: POST /api/v1/actions/OBJECT/ACTION",
         "force a server fault on a storage route (e.g. a malformed adapter config on the scratch boot — QA run #24558 set storage.local_root under /dev/null through PUT /api/settings/storage) and read error.message"
       ],
@@ -3387,6 +3387,12 @@
           "date": "2026-11-02",
           "change": "acceptance[1] (clause, verify) and the automated.ref prose re-pointed to HOOK_ABORTED — stale spec from QA run #28929 (release-18.3.0-w4-c2a, at 7fa9873f), api-backend.error-sentences-and-unique-violation-wire-code acceptance[1], re-point card #28936. r5 asserted the pre-ruling shape: no `code` on the /data doors and 400 VALIDATION_ERROR (REFUSED_400) on the nested-envelope rows. #27597 gave an undeclared hook abort the ledgered ADR-0112 code HOOK_ABORTED (UNDECLARED_HOOK_REFUSAL_CODE in packages/types/src/thrown-http-error.ts, stamped by mapDataError) and #27672 carried it to the doors that resolve through resolveThrownHttpError (package publish). Re-read at base 135054ebaa: error-sentences-live.dogfood.test.ts asserts code HOOK_ABORTED on both /data doors, rest-hook-script-fault-envelope.test.ts asserts HOOK_ABORTED and no declaredCode through mapDataError, and rest-write-route-hook-refusal-sentence.ledger.test.ts answers HOOK_ABORTED_400 on every sharing-rule, suggested-binding, approval and package-publish row (no REFUSED_400 remains). Status and sentence unchanged; the clause now names the code instead of its absence, so it is narrower, not weaker. No other clause changed",
           "ref": "#28936"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-04",
+          "change": "steps[0] corrected from QA run #29890 (W5-FAIL, at 589049b0): the /batch door is dropped from the doors that answer the clause's 400. It answers 200 with a per-row report (results[i].errors[0]). Read at base f68b47ca",
+          "ref": "#29906"
         }
       ]
     }
