@@ -76,6 +76,7 @@ import MigrateMultiValueColumns from '../commands/migrate/multi-value-columns.js
 import MigrateOrganizationOwnership from '../commands/migrate/organization-ownership.js';
 import MigratePackagelessOverlays from '../commands/migrate/packageless-overlays.js';
 import MigratePlan from '../commands/migrate/plan.js';
+import MigrateRecomputeHomeAmounts from '../commands/migrate/recompute-home-amounts.js';
 import MigrateRecordCurrencyCodes from '../commands/migrate/record-currency-codes.js';
 import MigrateRecordedBy from '../commands/migrate/recorded-by.js';
 import MigrateResume from '../commands/migrate/resume.js';
@@ -300,6 +301,17 @@ const CALLERS: Record<string, Caller> = {
     run: invoke(MigrateRecordedBy),
     noWrite: [{ label: 'migrate recorded-by', argv: ['--database-url', '@DB@', '--json'] }],
     write: [{ label: 'migrate recorded-by --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
+  },
+  'commands/migrate/recompute-home-amounts.ts': {
+    run: invoke(MigrateRecomputeHomeAmounts),
+    // The fixture's app declares no home amount, so the recompute refuses
+    // `osf_lead` (INVALID_FIELD) after the boot and writes nothing. The boot
+    // is what these cases are about.
+    noWrite: [{ label: 'migrate recompute-home-amounts', argv: ['--object', 'osf_lead', '--database-url', '@DB@', '--json'] }],
+    write: [{
+      label: 'migrate recompute-home-amounts --apply',
+      argv: ['--apply', '--yes', '--object', 'osf_lead', '--database-url', '@DB@', '--json'],
+    }],
   },
   'commands/migrate/record-currency-codes.ts': {
     run: invoke(MigrateRecordCurrencyCodes),
