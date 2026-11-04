@@ -109,6 +109,17 @@ describe('DeclaredActionsBar — the declared reason is the one a greyed action 
     expect(screen.queryByText(DECLARED_EN)).toBeNull();
   });
 
+  it('the tooltip is width-bounded so a long reason wraps inside a phone viewport', async () => {
+    const user = userEvent.setup();
+    mount({ done: false });
+    await user.hover(archive().parentElement as HTMLElement);
+    // The role=tooltip node is Radix's visually-hidden copy; the styled
+    // content box that paints on screen is its parent.
+    const box = (await screen.findByRole('tooltip')).parentElement as HTMLElement;
+    expect(box).toHaveTextContent(DECLARED_EN);
+    expect(box).toHaveClass('max-w-xs');
+  });
+
   it('no declared reason: the default stays', () => {
     mount({ done: false }, ARCHIVE_UNDECLARED);
     expect(describedBy(archive())).toHaveTextContent(DEFAULT_EN);
