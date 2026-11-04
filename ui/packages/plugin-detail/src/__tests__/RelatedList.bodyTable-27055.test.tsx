@@ -17,7 +17,7 @@
  * column in one known currency, and a `number` column only when the record's
  * own object rolls it up with `sum`; an ordinal (`version_no`, `seq`) never.
  */
-import { describe, it, expect, vi, beforeAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
@@ -97,6 +97,9 @@ describe('RelatedList — the body-table face (objectstack#27055)', () => {
     expect(document.querySelector('[data-body-table-totals]')).toBeNull();
     expect(document.querySelector('[data-related-card-enlarge]')).toBeNull();
     expect(screen.getByText(/View all/i)).toBeInTheDocument();
+    // objectstack#29945 — every data-table header, not only a body table's,
+    // carries its whole label for a hover the ellipsis would cut.
+    expect(document.querySelector('thead th span[title="Quantity"]')?.textContent).toBe('Quantity');
   });
 });
 
@@ -245,5 +248,123 @@ describe('RelatedList — which body-table columns are totalled (objectstack#299
     renderPlan({ columns: ['name', 'dynamic_fee'], parent: contract({}) });
     await waitFor(() => expect(screen.getByText('First')).toBeInTheDocument());
     expect(totalsLine()).toBeNull();
+  });
+});
+
+/**
+ * objectstack#29945 — a body table wider than the details column it sits in
+ * (ADR-0085 keeps it there) says so: the table's right-edge shadow while
+ * columns remain to the right, its first column pinned as the row's identity,
+ * and ⤢ offered in words. A table that fits shows none of it.
+ *
+ * jsdom lays nothing out, so the scroll box's widths are stubbed: each column
+ * header is 120 px wide inside a 680 px details column.
+ */
+describe('RelatedList — a body table wider than its column (objectstack#29945)', () => {
+  const COLUMN_PX = 120;
+  const DETAILS_PX = 680;
+  const proto = HTMLElement.prototype;
+  const saved = {
+    scrollWidth: Object.getOwnPropertyDescriptor(proto, 'scrollWidth'),
+    clientWidth: Object.getOwnPropertyDescriptor(proto, 'clientWidth'),
+  };
+  beforeAll(() => {
+    Object.defineProperty(proto, 'scrollWidth', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.hasAttribute('data-table-scroll-box') ? this.querySelectorAll('thead th').length * COLUMN_PX : 0;
+      },
+    });
+    Object.defineProperty(proto, 'clientWidth', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.hasAttribute('data-table-scroll-box') ? DETAILS_PX : 0;
+      },
+    });
+  });
+  afterAll(() => {
+    for (const [key, descriptor] of Object.entries(saved)) {
+      if (descriptor) Object.defineProperty(proto, key, descriptor);
+      else delete (proto as any)[key];
+    }
+  });
+
+  const wideFields: Record<string, { type: string; label: string }> = {
+    name: { type: 'text', label: 'Version' },
+    file: { type: 'text', label: 'File' },
+    submitter: { type: 'text', label: 'Submitter' },
+    owner: { type: 'text', label: 'Business owner' },
+    status: { type: 'text', label: 'Status' },
+    signed_copy: { type: 'text', label: 'Signed copy' },
+    completed: { type: 'text', label: 'Completed' },
+    created: { type: 'text', label: 'Created' },
+  };
+  const wideRows = [
+    { id: 'v1', name: 'V1', file: 'a.pdf', submitter: 'Ada', owner: 'Business Lead', status: 'Open', signed_copy: 'yes', completed: '2026-01-02', created: '2026-01-01' },
+    { id: 'v2', name: 'V2', file: 'b.pdf', submitter: 'Bo', owner: 'Business Lead', status: 'Done', signed_copy: 'no', completed: '2026-02-02', created: '2026-02-01' },
+  ];
+
+  function renderVersions(keys: string[], onEnlarge = vi.fn()) {
+    render(
+      <RecordBodyTablesContext.Provider value={new Set(['clm_version.contract'])}>
+        <RelatedEnlargeContext.Provider value={onEnlarge}>
+          <RelatedList
+            title="Versions"
+            type="table"
+            api="clm_version"
+            objectName="clm_version"
+            referenceField="contract"
+            columns={keys.map((field) => ({ field, label: wideFields[field].label }))}
+            data={wideRows}
+            dataSource={{ find: vi.fn(async () => wideRows), getObjectSchema: vi.fn(async () => ({ name: 'clm_version', fields: wideFields })) } as any}
+          />
+        </RelatedEnlargeContext.Provider>
+      </RecordBodyTablesContext.Provider>,
+    );
+    return onEnlarge;
+  }
+  const host = () => document.querySelector('[data-body-table-overflow]') as HTMLElement | null;
+  const headerCells = () => Array.from(document.querySelectorAll('thead th')) as HTMLElement[];
+  const shadow = () => document.querySelector('[data-testid="data-table-scroll-shadow-right"]');
+  const enlarge = () => document.querySelector('[data-related-card-enlarge]') as HTMLElement | null;
+
+  it('eight columns in the details column: shadow, a pinned first column, ⤢ offered in words', async () => {
+    const onEnlarge = renderVersions(Object.keys(wideFields));
+    await waitFor(() => expect(screen.getByText('V1')).toBeInTheDocument());
+    await waitFor(() => expect(host()?.getAttribute('data-body-table-overflow')).toBe('true'));
+    expect(shadow()).not.toBeNull();
+    const [first, second] = headerCells();
+    expect(first.className).toMatch(/\bsticky\b/);
+    expect(second.className).not.toMatch(/\bsticky\b/);
+    expect(enlarge()?.getAttribute('data-overflow')).toBe('true');
+    // Named by its visible label, not an icon-only aria-label.
+    expect(enlarge()?.textContent?.trim()).not.toBe('');
+    expect(enlarge()?.hasAttribute('aria-label')).toBe(false);
+    fireEvent.click(enlarge()!);
+    expect(onEnlarge).toHaveBeenCalledWith('clm_version.contract');
+    // A header the ellipsis could cut carries its whole label.
+    expect(screen.getByTitle('Business owner')).toBeInTheDocument();
+  });
+
+  it('scrolled to the end, the trailing shadow clears and the pinned column stays', async () => {
+    renderVersions(Object.keys(wideFields));
+    await waitFor(() => expect(shadow()).not.toBeNull());
+    const box = document.querySelector('[data-table-scroll-box]') as HTMLElement;
+    Object.defineProperty(box, 'scrollLeft', { configurable: true, value: 8 * COLUMN_PX - DETAILS_PX });
+    fireEvent.scroll(box);
+    await waitFor(() => expect(shadow()).toBeNull());
+    expect(headerCells()[0].className).toMatch(/\bsticky\b/);
+    expect(host()?.getAttribute('data-body-table-overflow')).toBe('true');
+  });
+
+  it('CONTROL — three columns that fit: no shadow, no pinned column, the icon-only ⤢', async () => {
+    renderVersions(['name', 'file', 'status']);
+    await waitFor(() => expect(screen.getByText('V1')).toBeInTheDocument());
+    expect(host()?.getAttribute('data-body-table-overflow')).toBe('false');
+    expect(shadow()).toBeNull();
+    expect(headerCells().some((th) => /\bsticky\b/.test(th.className))).toBe(false);
+    expect(enlarge()?.hasAttribute('data-overflow')).toBe(false);
+    expect(enlarge()?.textContent?.trim()).toBe('');
+    expect(enlarge()?.hasAttribute('aria-label')).toBe(true);
   });
 });

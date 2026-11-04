@@ -120,7 +120,7 @@ export function translatedEchoNotices(name: string, restored: readonly RestoredT
 }
 
 /** The field slots the object translator writes. */
-const FIELD_TEXT_SLOTS = ['label', 'description', 'inlineHelpText', 'inlineTitle'] as const;
+const FIELD_TEXT_SLOTS = ['label', 'description', 'inlineHelpText', 'inlineTitle', 'relatedListTitle'] as const;
 /** The object scalars the object translator writes. */
 const OBJECT_TEXT_SLOTS = ['label', 'pluralLabel', 'description'] as const;
 

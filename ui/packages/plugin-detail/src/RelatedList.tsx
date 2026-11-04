@@ -2801,6 +2801,13 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   const ownRelationshipId = objectName && referenceField ? relatedCardId(objectName, referenceField) : null;
   const bodyTable = !compact && !!ownRelationshipId && bodyTableIds.has(ownRelationshipId);
   const isCollapsible = collapsible || bodyTable;
+  // objectstack#29945 — whether the body table is wider than the details
+  // column it sits in (ADR-0085 keeps it there). While it is, the first
+  // column stays pinned as the row's identity and ⤢ is offered with a label;
+  // the right-edge shadow is the table's own (objectui#12708). Read off the
+  // table's scroll box by the effect below the empty answer.
+  const bodyTableHostRef = React.useRef<HTMLDivElement | null>(null);
+  const [bodyTableOverflows, setBodyTableOverflows] = React.useState(false);
 
   // The row click hands the host the rows on show beside the clicked one
   // (objectstack#26679), so its drawer can step through them.
@@ -2889,6 +2896,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           type: 'data-table',
           data: paginatedData,
           columns: compact ? tableColumns.slice(0, 1) : tableColumns,
+          // A body table wider than its column keeps its first column, the
+          // row's identity, in view while it scrolls (objectstack#29945).
+          ...(bodyTable && bodyTableOverflows ? { frozenColumns: 1 } : {}),
           pagination: false, // We handle pagination ourselves
           pageSize: effectivePageSize || 10,
           searchable: false,
@@ -2926,7 +2936,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       default:
         return { type: 'div', children: 'No view configured' };
     }
-  }, [type, paginatedData, tableColumns, effectiveColumns, schema, effectivePageSize, hasRowActions, hasCustomRowActions, rowActions, onRowAction, onRowEdit, onRowDelete, handleDeleteRow, handleRowClick, isMobile, compact, enlargedFace, api, objectSchema, activeSort, handleTableSort]);
+  }, [type, paginatedData, tableColumns, effectiveColumns, schema, effectivePageSize, hasRowActions, hasCustomRowActions, rowActions, onRowAction, onRowEdit, onRowDelete, handleDeleteRow, handleRowClick, isMobile, compact, enlargedFace, api, objectSchema, activeSort, handleTableSort, bodyTable, bodyTableOverflows]);
 
   const enlargedGrid = enlargedFace && !schema && (type === 'grid' || type === 'table');
 
@@ -3030,6 +3040,51 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   React.useEffect(() => {
     if (enlargedFace && enlargedChip === 'all' && !filterActive && !loading && !loadFailure) setAllCount(recordCount);
   }, [enlargedFace, enlargedChip, filterActive, loading, loadFailure, recordCount]);
+  // objectstack#29945 — `bodyTableOverflows`, read where the table scrolls:
+  // its scroll box is wider inside than out. Re-read when the box or the
+  // table resizes (rows arrive, columns size themselves), and whenever the
+  // table is drawn afresh (opened, loaded). A body table that fits reads
+  // `false` and shows none of the overflow cues.
+  const bodyTableDrawn = bodyTable && !enlargedFace && !collapsed && !isEmpty && !loadFailure
+    && !(loading && relatedData.length === 0);
+  React.useLayoutEffect(() => {
+    const host = bodyTableDrawn ? bodyTableHostRef.current : null;
+    if (!host) {
+      setBodyTableOverflows(false);
+      return;
+    }
+    let resizes: ResizeObserver | null = null;
+    let mounts: MutationObserver | null = null;
+    const findBox = () => host.querySelector<HTMLElement>('[data-table-scroll-box]');
+    const watch = (box: HTMLElement) => {
+      const read = () => setBodyTableOverflows(box.scrollWidth - box.clientWidth > 1);
+      read();
+      if (typeof ResizeObserver === 'undefined') return;
+      resizes = new ResizeObserver(read);
+      resizes.observe(box);
+      const table = box.querySelector('table');
+      if (table) resizes.observe(table);
+    };
+    const box = findBox();
+    if (box) {
+      watch(box);
+    } else if (typeof MutationObserver !== 'undefined') {
+      // The table can mount after this list does (a deferred renderer): wait
+      // for its scroll box, then read it.
+      mounts = new MutationObserver(() => {
+        const found = findBox();
+        if (!found) return;
+        mounts?.disconnect();
+        mounts = null;
+        watch(found);
+      });
+      mounts.observe(host, { childList: true, subtree: true });
+    }
+    return () => {
+      mounts?.disconnect();
+      resizes?.disconnect();
+    };
+  }, [bodyTableDrawn, isMobile]);
   // When the consumer explicitly enables `filterable`, always render the
   // filter input — they're opting in. (data-table's own auto-search is
   // suppressed via the viewSchema below to avoid a duplicate input.)
@@ -3619,7 +3674,21 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 {add.label || t('detail.add', { defaultValue: 'Add' })}
               </Button>
             )}
-            {bodyTable && enlargeRelated && ownRelationshipId && (
+            {bodyTable && enlargeRelated && ownRelationshipId && (bodyTableOverflows ? (
+              // A table wider than its column offers ⤢ in words: the enlarged
+              // tab is where every column fits (objectstack#29945).
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1 h-11 sm:h-7 text-xs shadow-none"
+                data-related-card-enlarge=""
+                data-overflow="true"
+                onClick={(e) => { e.stopPropagation(); enlargeRelated(ownRelationshipId); }}
+              >
+                <Maximize2 className="h-3.5 w-3.5" aria-hidden />
+                {t('detail.relatedCardAllColumns', { defaultValue: 'All columns' })}
+              </Button>
+            ) : (
               <Button
                 variant="ghost"
                 size="sm"
@@ -3630,7 +3699,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
               >
                 <Maximize2 className="h-3.5 w-3.5" />
               </Button>
-            )}
+            ))}
             {onNew && (
               <Button
                 variant={isEmpty ? 'ghost' : 'outline'}
@@ -3729,7 +3798,11 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             {t('detail.loading')}
           </div>
         ) : (
-          <div className={cn(loading && 'opacity-60 pointer-events-none transition-opacity')}>
+          <div
+            ref={bodyTableHostRef}
+            className={cn(loading && 'opacity-60 pointer-events-none transition-opacity')}
+            data-body-table-overflow={bodyTable ? (bodyTableOverflows ? 'true' : 'false') : undefined}
+          >
             <SchemaRenderer schema={viewSchema} />
           </div>
         )}

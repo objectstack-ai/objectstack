@@ -382,7 +382,8 @@ export const ShowcaseTranslationBundle = {
         // hence 任务数; `total_estimate` reuses showcase_task's 预计工时.
         fields: {
           name: { label: '项目名称' },
-          account: { label: '客户' },
+          // The account page's Projects list, titled by this lookup.
+          account: { label: '客户', relatedListTitle: '项目' },
           owner: { label: '负责人邮箱' },
           status: {
             label: '状态',
@@ -449,7 +450,8 @@ export const ShowcaseTranslationBundle = {
         pluralLabel: '任务',
         fields: {
           title: { label: '标题' },
-          project: { label: '项目' },
+          // The project page's Tasks list, titled by this master-detail.
+          project: { label: '项目', relatedListTitle: '任务' },
           assignee: { label: '负责人' },
           status: {
             label: '状态',
@@ -730,7 +732,8 @@ export const ShowcaseTranslationBundle = {
         pluralLabel: '发票',
         fields: {
           name: { label: '发票号' },
-          account: { label: '客户' },
+          // The account page's Invoices table, titled by this lookup.
+          account: { label: '客户', relatedListTitle: '发票' },
           contact: { label: '联系人' },
           owner: { label: '负责人邮箱' },
           status: { label: '状态' },
@@ -876,7 +879,9 @@ export const ShowcaseTranslationBundle = {
         description: '组织架构层级——在自引用对象上演示树形 / 树形表格视图。',
         fields: {
           name: { label: '名称' },
-          parent: { label: '上级单元' },
+          // The self-lookup's related-list title on a unit's record page,
+          // translated at birth like the label beside it.
+          parent: { label: '上级单元', relatedListTitle: '下级单元' },
           kind: {
             label: '类型',
             options: { company: '公司', division: '事业部', department: '部门', team: '团队' },

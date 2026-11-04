@@ -1433,6 +1433,7 @@ const es = {
     owner: "Propietario",
     relatedCardMenu: "Más opciones de {{title}}",
     relatedCardEnlarge: "Ampliar",
+    relatedCardAllColumns: "Todas las columnas",
     relatedCardExpand: "Desplegar",
     relatedCardHide: "Ocultar",
     relatedCardNew: "Nuevo",

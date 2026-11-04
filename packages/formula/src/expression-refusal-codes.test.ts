@@ -371,6 +371,62 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         'field, or drop the arithmetic/comparison.',
     },
   ],
+  // [#29926] One code per fault outcome the caller declares (`faultOutcome`):
+  // the three sentences differ in what the runtime does, so they are three
+  // codes. `type-mismatch-fail-closed` is the sentence #29904 served as
+  // `type-mismatch` with `outcome: 'fail-closed'`, byte for byte.
+  'type-mismatch-fail-closed': [
+    {
+      produce: () =>
+        onlyError('predicate', 'record.name > 5', { scope: 'record', fieldTypes: { name: 'text' }, faultOutcome: 'fail-closed' }),
+      params: { operands: 'string > int', operator: '>', held: 'text', reference: 'record.name' },
+      message:
+        'type mismatch `string > int` — `record.name` holds text but is used with `>` against a number. CEL has no such operation, so ' +
+        'wherever the value is not numeric text (an empty value included) the expression faults, and here ' +
+        'an expression that cannot be evaluated fails closed: the write (or the operation a hook guards) is refused, not ' +
+        'skipped. ' +
+        'Compare like with like: use a number field, compare text with text, or convert explicitly — `size(record.name)` for its ' +
+        'length, `double(record.name)` for its value (which itself faults on text that is not a number).',
+    },
+    {
+      produce: () =>
+        onlyError('predicate', 'record.active > 0', { scope: 'record', fieldTypes: { active: 'boolean' }, faultOutcome: 'fail-closed' }),
+      params: { operands: 'bool > int', operator: '>', held: 'boolean', reference: 'record.active' },
+      message:
+        'type mismatch `bool > int` — `record.active` holds a boolean but is used with `>` against a number. CEL has no such operation, so ' +
+        'wherever the value is not numeric text (an empty value included) the expression faults, and here ' +
+        'an expression that cannot be evaluated fails closed: the write (or the operation a hook guards) is refused, not ' +
+        'skipped. Compare a boolean with `true` / `false`, or use a number field.',
+    },
+  ],
+  'type-mismatch-run-fails': [
+    {
+      produce: () =>
+        onlyError('predicate', 'name > 5', { scope: 'flattened', fields: ['name'], fieldTypes: { name: 'text' }, faultOutcome: 'run-fails' }),
+      params: { operands: 'string > int', operator: '>', held: 'text', reference: 'name' },
+      message:
+        'type mismatch `string > int` — `name` holds text but is used with `>` against a number. CEL has no such operation, so ' +
+        'wherever the value is not numeric text (an empty value included) the expression faults, and here ' +
+        'a flow condition that cannot be evaluated fails the run: the flow stops at this condition, the write that fired ' +
+        'it still lands, and the work the flow exists to do is not done. ' +
+        'Compare like with like: use a number field, compare text with text, or convert explicitly — `size(name)` for its ' +
+        'length, `double(name)` for its value (which itself faults on text that is not a number).',
+    },
+  ],
+  'type-mismatch-fail-open': [
+    {
+      produce: () =>
+        onlyError('predicate', 'record.name > 5', { scope: 'record', fieldTypes: { name: 'text' }, faultOutcome: 'fail-open' }),
+      params: { operands: 'string > int', operator: '>', held: 'text', reference: 'record.name' },
+      message:
+        'type mismatch `string > int` — `record.name` holds text but is used with `>` against a number. CEL has no such operation, so ' +
+        'wherever the value is not numeric text (an empty value included) the expression faults, and here ' +
+        'the rule is advisory, so a rule that cannot be evaluated is skipped, not refused: the write proceeds, the rule is ' +
+        'never applied (its advisory never fires), and the only trace is a log line saying it could not be evaluated. ' +
+        'Compare like with like: use a number field, compare text with text, or convert explicitly — `size(record.name)` for its ' +
+        'length, `double(record.name)` for its value (which itself faults on text that is not a number).',
+    },
+  ],
   'field-near-miss': [
     {
       produce: () => onlyWarning('predicate', "stauts == 'x'", { fields: ['status'], objectName: 'deal' }),
@@ -546,6 +602,15 @@ const SWEEP_SCHEMAS: readonly (ExprSchemaHint | undefined)[] = [
     optionFields: ['status'],
   },
   { fields: ['status', 'close_date'], objectName: 'deal', fieldTypes: { close_date: 'date' } },
+  // [#29926] The deal schema once per declared fault outcome, so the sweep
+  // reaches each `type-mismatch-*` code and holds its params to its message.
+  ...(['fail-closed', 'run-fails', 'fail-open'] as const).map((faultOutcome): ExprSchemaHint => ({
+    scope: 'record',
+    objectName: 'deal',
+    fields: ['amount', 'name', 'active'],
+    fieldTypes: { name: 'text', active: 'boolean' },
+    faultOutcome,
+  })),
   { fields: ['status'] },
   { fieldTypes: { account: 'lookup' }, traversalHydration: true },
 ];

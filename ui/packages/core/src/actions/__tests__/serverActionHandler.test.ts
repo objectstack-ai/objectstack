@@ -340,6 +340,37 @@ describe('createServerActionHandler — refresh semantics', () => {
     expect(onRefresh).toHaveBeenCalledTimes(1);
     expect(res).toMatchObject({ success: true, reload: false });
   });
+
+  // objectstack#29935 — the spec materializes `refreshAfter: false` on an
+  // action authored without it, so the parsed shape is what reaches here.
+  it('a successful `operation: \'update\'` refreshes even with the parsed `refreshAfter: false`', async () => {
+    const onRefresh = vi.fn();
+    const handler = createServerActionHandler({ fetch: okFetch(), onRefresh });
+
+    const res = await handler({
+      type: 'script', name: 'resolve_ticket', operation: 'update', refreshAfter: false,
+      params: { recordId: 't1' },
+    } as ActionDef);
+    expect(res).toMatchObject({ success: true, reload: true });
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('a refused `operation: \'update\'` sends no refresh', async () => {
+    const onRefresh = vi.fn();
+    const fetch = vi.fn(async () => ({
+      ok: false,
+      status: 403,
+      json: async () => ({ success: false, error: { code: 'PERMISSION_DENIED', message: 'Denied' } }),
+    })) as unknown as ServerActionFetch;
+    const handler = createServerActionHandler({ fetch, onRefresh });
+
+    const res = await handler({
+      type: 'script', name: 'resolve_ticket', operation: 'update', refreshAfter: false,
+      params: { recordId: 't1' },
+    } as ActionDef);
+    expect(res.success).toBe(false);
+    expect(onRefresh).not.toHaveBeenCalled();
+  });
 });
 
 describe('createServerActionHandler — re-entrancy guard', () => {

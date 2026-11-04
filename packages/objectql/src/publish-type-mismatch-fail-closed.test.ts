@@ -205,4 +205,62 @@ describe('publish refuses a type mismatch in a fail-closed role (#29904)', () =>
         expect(issues[0].severity).toBe('error');
         expect(issues[0].message).toMatch(/declares as nullable/);
     });
+
+    // [#29926] An advisory rule is skipped on a fault, not refused: the publish
+    // still refuses it (the nullable twin does too), but the served message
+    // says the write proceeds and the rule never applies.
+    it('refuses the comparison in an advisory rule with a message that does not claim a refused write (#29926)', async () => {
+        const raw = await publishObject(leadObject(
+            { name: { type: 'text', label: 'Name', required: true } },
+            { validations: [{ name: 'name_gt', type: 'script', condition: 'record.name > 5', message: 'bad', severity: 'warning' }] },
+        ));
+
+        expect(raw.outcome).toBe('refused');
+        const causal = raw.failed.find((f: any) => f.code === 'INVALID_METADATA');
+        const issue = causal.issues.find((i: any) => i.rule === 'expression-invalid');
+        expect(issue, `issues: ${JSON.stringify(causal.issues)}`).toBeDefined();
+        expect(issue.severity).toBe('error');
+        expect(issue.path).toMatch(/validations\[0\]\.condition$/);
+        expect(issue.message).toMatch(/the rule is advisory, so a rule that cannot be evaluated is skipped, not refused: the write proceeds/);
+        expect(issue.message).not.toMatch(/is refused, not skipped/);
+    });
+
+    // [#29926] A record-triggered flow's condition fails the RUN on a fault;
+    // the publish refuses it with that wording, as the nullable twin does.
+    it('refuses the comparison in a record-triggered flow condition with the run-fails wording (#29926)', async () => {
+        const p = await makeProtocol();
+        await (p as any).saveMetaItem({
+            type: 'object',
+            name: 'edu_lead',
+            item: leadObject({ name: { type: 'text', label: 'Name', required: true } }),
+            mode: 'draft',
+            packageId: PKG,
+        });
+        await (p as any).saveMetaItem({
+            type: 'flow',
+            name: 'edu_lead_flow',
+            item: {
+                name: 'edu_lead_flow',
+                label: 'Lead flow',
+                type: 'autolaunched',
+                nodes: [
+                    { id: 'start', type: 'start', label: 'Start', config: { objectName: 'edu_lead', triggerType: 'record-after-update', condition: 'name > 5' } },
+                    { id: 'end', type: 'end', label: 'End' },
+                ],
+                edges: [{ id: 'e1', source: 'start', target: 'end' }],
+            },
+            mode: 'draft',
+            packageId: PKG,
+        });
+        const raw: any = await p.publishPackageDrafts({ packageId: PKG });
+
+        expect(raw.outcome, JSON.stringify(raw)).toBe('refused');
+        const causal = raw.failed.find((f: any) => f.code === 'INVALID_METADATA' && f.type === 'flow');
+        expect(causal, `failed: ${JSON.stringify(raw.failed)}`).toBeDefined();
+        const issue = causal.issues.find((i: any) => i.rule === 'expression-invalid' && /type mismatch/.test(i.message));
+        expect(issue, `issues: ${JSON.stringify(causal.issues)}`).toBeDefined();
+        expect(issue.severity).toBe('error');
+        expect(issue.message).toMatch(/fails the run: the flow stops at this condition, the write that fired it still lands/);
+        expect(issue.message).not.toMatch(/evaluates to null/);
+    });
 });

@@ -1390,6 +1390,7 @@ const de = {
     owner: "Inhaber",
     relatedCardMenu: "Mehr für {{title}}",
     relatedCardEnlarge: "Vergrößern",
+    relatedCardAllColumns: "Alle Spalten",
     relatedCardExpand: "Aufklappen",
     relatedCardHide: "Ausblenden",
     relatedCardNew: "Neu",
