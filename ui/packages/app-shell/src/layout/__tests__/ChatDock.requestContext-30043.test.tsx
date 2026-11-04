@@ -21,7 +21,7 @@
  */
 
 import '@testing-library/jest-dom/vitest';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import React from 'react';
@@ -179,6 +179,12 @@ async function send(text: string): Promise<Record<string, unknown>> {
   await waitFor(() => expect(state.sent.length).toBe(before + 1), { timeout: 4000 });
   return state.sent[before].context ?? {};
 }
+
+// The dock body is a `lazy()` chunk carrying the whole chat UI. Load it once up
+// front, so no test's send-wait spends its budget on the first cold import.
+beforeAll(async () => {
+  await import('../ChatDockConversation');
+}, 60_000);
 
 beforeEach(() => {
   state.isMobile = false;
