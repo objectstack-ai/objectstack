@@ -81,7 +81,7 @@ export function formLayoutChoiceOf(
 export interface FormViewDraft {
   /** The view the buffer is for; `''` with none. */
   viewId: string;
-  /** The autosave's `target` / `loadedFor` (`view:ID`). */
+  /** The autosave's `target` / `loadedFor` (`form-view:ID`): a local buffer tag, never an adapter cache key (the `view:` cache-key spelling is guarded by `viewCacheInvalidation.guard`). */
   targetKey: string;
   loadedFor: string;
   /** The view item as the server holds it (draft, else published), with edits; `null` until loaded. */
@@ -123,7 +123,7 @@ export function useFormViewDraft({
   onDraftSaved?: () => void;
   locale: string;
 }): FormViewDraft {
-  const targetKey = viewId ? `view:${viewId}` : '';
+  const targetKey = viewId ? `form-view:${viewId}` : '';
   const [buffer, setBuffer] = React.useState<{ for: string; row: Row | null; dirty: boolean; hasDraft: boolean }>({
     for: '',
     row: null,
@@ -176,7 +176,7 @@ export function useFormViewDraft({
         const row = draft ?? (isRow(published) ? (stripReadDecorations(published) as Row) : null);
         recordRead('view', viewId, readAt, draftRead.pin);
         readAtRef.current = { viewId, at: readAt };
-        setBuffer({ for: `view:${viewId}`, row, dirty: false, hasDraft: !!draft });
+        setBuffer({ for: `form-view:${viewId}`, row, dirty: false, hasDraft: !!draft });
       } catch (e) {
         if (!cancelled) setFailure({ during: 'load', error: e });
       }
@@ -229,7 +229,7 @@ export function useFormViewDraft({
         if (outcome === 'reloaded') return;
         // objectui#11204 — clean only if nothing was edited while it was in flight.
         const clean = sent.unmoved();
-        setBuffer((b) => (b.for === `view:${viewId}` ? { ...b, hasDraft: true, dirty: clean ? false : b.dirty } : b));
+        setBuffer((b) => (b.for === `form-view:${viewId}` ? { ...b, hasDraft: true, dirty: clean ? false : b.dirty } : b));
         setFailure(null);
         onDraftSaved?.();
       } catch (e) {
