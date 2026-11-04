@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { strictObject } from '../shared/strict-object';
 import { resolveFlowTriggerKind } from './flow-trigger-kind';
 import { API_TRIGGER_SECRET_REF_KEY, apiTriggerSecretRefOf } from './api-trigger-secret-ref.zod';
 
@@ -71,6 +72,15 @@ const DIGEST_PREFIX = /^[\x21-\x2B\x2D-\x7E]+$/;
 /** The name of one `NAME=value` element of a signature header. */
 const ELEMENT_NAME = /^[A-Za-z0-9_-]+$/;
 
+const BORN_CLOSED =
+  'Declared closed from its first day: a key a verifier does not read is refused, never dropped, because an ' +
+  'ignored setting on an auth boundary reads as a check that is not made.';
+
+const NO_TIMESTAMP_ON_BODY =
+  'A body-only scheme (`signs: \'body\'`) signs no time, so it has no timestamp to bound a replay with and no ' +
+  'element list to read: `timestampElement` and `digestElement` belong to `signs: \'timestamp.body\'`. Declare ' +
+  '`signs: \'timestamp.body\'` when the sender signs `<t>.<raw body>`, or remove them.';
+
 const header = z
   .string({
     error: () =>
@@ -129,7 +139,14 @@ const element = (key: 'timestampElement' | 'digestElement', what: string) =>
  * Exported as its own def so the published surface records its keys (a union's
  * arms are otherwise invisible to the authorable-surface ledger).
  */
-export const ApiTriggerBodySignatureSchema = z.strictObject(
+export const ApiTriggerBodySignatureSchema = strictObject(
+  {
+    surface: '`config.signature` (`signs: \'body\'`)',
+    history: BORN_CLOSED,
+    guidanceSets: [
+      { name: 'TIMESTAMPED_SIGNATURE_ELEMENT_KEYS', keys: ['timestampElement', 'digestElement'], prescription: NO_TIMESTAMP_ON_BODY },
+    ],
+  },
   {
     signs: z.literal('body').describe('The sender signs the raw body alone. No replay window applies.'),
     header,
@@ -147,15 +164,6 @@ export const ApiTriggerBodySignatureSchema = z.strictObject(
           'sender), checked and removed before decoding. Absent: the whole value is the digest.',
       ),
   },
-  {
-    error: (issue) =>
-      issue.code === 'unrecognized_keys' &&
-      (issue.keys.includes('timestampElement') || issue.keys.includes('digestElement'))
-        ? 'A body-only scheme (`signs: \'body\'`) signs no time, so it has no timestamp to bound a replay with and no ' +
-          'element list to read: `timestampElement` and `digestElement` belong to `signs: \'timestamp.body\'`. ' +
-          'Declare `signs: \'timestamp.body\'` when the sender signs `<t>.<raw body>`, or remove them.'
-        : undefined,
-  },
 ).describe(
   'A sender that signs the raw body alone (DocuSign Connect, a GitHub-style `sha256=` sender): the header value, ' +
     'after `prefix`, is the one digest. No replay window applies.',
@@ -169,7 +177,16 @@ export const ApiTriggerBodySignatureSchema = z.strictObject(
  * `x-objectstack-signature` check applies. Exported as its own def for the
  * same reason as {@link ApiTriggerBodySignatureSchema}.
  */
-export const ApiTriggerTimestampedSignatureSchema = z.strictObject(
+export const ApiTriggerTimestampedSignatureSchema = strictObject(
+  {
+    surface: '`config.signature` (`signs: \'timestamp.body\'`)',
+    history: BORN_CLOSED,
+    guidance: {
+      prefix:
+        'A `timestamp.body` scheme locates its digest by `digestElement` (`v1` for `t=…,v1=…`), not by a `prefix`. ' +
+        'Remove `prefix`.',
+    },
+  },
   {
     signs: z
       .literal('timestamp.body')
@@ -185,13 +202,6 @@ export const ApiTriggerTimestampedSignatureSchema = z.strictObject(
       'The NAME of the header element that carries the digest (`v1`). A sender may send it more than once while it ' +
         'rolls its key; the post verifies when one of them matches.',
     ),
-  },
-  {
-    error: (issue) =>
-      issue.code === 'unrecognized_keys' && issue.keys.includes('prefix')
-        ? 'A `timestamp.body` scheme locates its digest by `digestElement` (`v1` for `t=…,v1=…`), not by a `prefix`. ' +
-          'Remove `prefix`.'
-        : undefined,
   },
 ).describe(
   'A sender that signs `<t>.<raw body>` and writes `t` beside the digest as `NAME=value` elements of one header ' +
