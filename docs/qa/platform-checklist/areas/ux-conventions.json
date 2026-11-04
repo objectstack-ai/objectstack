@@ -9,7 +9,7 @@
       "title": "Every user-initiated write answers visibly — success names what changed, a refusal says why, and a no-op claims nothing",
       "since": "v17.7",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -24,7 +24,7 @@
           "an independent read of server truth for every row — a second browser context or the REST API — so a write is never judged by what the UI says about it"
         ],
         "knownGaps": [
-          "FIXED, regression row, expected PASS (objectui#11817): Setup → Users → Invite User toasts 'Invitation sent to EMAIL' — the declared successMessage `Invitation sent to {{ result.email }}` (packages/platform-objects/src/identity/sys-user.object.ts#invite_user) interpolating the invitee from the action result — while the sys_invitation and sys_email rows are written (QA run #23163 at objectui 1fb1ced36243; pin ObjectView.inviteFeedback-11817.test.tsx)",
+          "FIXED, regression row, expected PASS (objectui#11817): Setup → Users → Invite User toasts the copy of the delivery outcome the server answers (#27843): on a deployment that does not deliver mail the declared outcomeMessages.link_only, 'Invitation created for EMAIL. Mail is not configured on this server, so no email went out. Use Copy Invite Link on the invitation to share it.' (QA run #29890 read it verbatim), and 'Invitation sent to EMAIL' (outcomeMessages.sent) only where mail is delivered (packages/platform-objects/src/identity/invite-outcome-messages.ts#INVITE_USER_OUTCOME_MESSAGES on packages/platform-objects/src/identity/sys-user.object.ts#invite_user, whose successMessage `Invitation sent to {{ result.email }}` is the fallback for an answer without an outcome), interpolating the invitee from the action result — while the sys_invitation and sys_email rows are written (QA run #23163 at objectui 1fb1ced36243; pin ObjectView.inviteFeedback-11817.test.tsx)",
           "FIXED, regression rows, expected PASS (QA run #23953 at objectui daeb77fc84dd): Studio Publish gives a success confirmation (objectui#11807); the task grid's 'Save All' toasts '1 row saved' (objectui#12303 fixed for this row); the approval decision's Approve toasted the framework-declared successMessage, read in the approvals drawer that route no longer has (variants[6]) `Approved \"{{ result.request.record_title }}\"` (packages/plugins/plugin-approvals/src/sys-approval-request.object.ts), e.g. Approved \"EXP-2001\" (#23157, closed). Studio's 'Discard draft' toast and its confirm now name the item by its LABEL — QA run #24570 at objectui 4016370a read 'Draft discarded: QA Widget' — a regression row, expected PASS (objectstack-ai/objectui#12690, closed by objectui PR #12830, 0f42aaf8, in the console pin 4016370a and on objectui main; ResourceEditPage.tsx falls back to type/name only for an item with no label)",
           "FIXED, regression row, expected PASS (objectui#11816): leaving an inline editor with no value change no longer reads '1 row modified · Save All (1)' (QA run #23163 at objectui 1fb1ced36243; pin data-table-noop-edit-11816.test.tsx) — negative[1]",
           "Undo is scored only where a surface offers it, and on stock ONE surface does: the import. An import run as a job (the wizard's 'runs as an undoable job' option) is listed in the import history with 'Undo import', which deletes the records it created and restores the records it updated to their previous values; QA run #25817 at 6679644a read it working in both create and update modes. Elsewhere no stock surface offers Undo: only an action declaring `undoable` pushes an Undo op (inline and form edits push none), and the showcase declares no undoable action (records-forms.record-edit-undo, blocked(fixture)). So acceptance[5] is scored on the import variant. Undo's absence elsewhere is recorded in the evidence and is never a FAIL of this item: which writes should offer Undo is a product decision, not this item's oracle"
@@ -36,8 +36,8 @@
         "bulk delete — select two rows → Delete in the selection bar → confirm",
         "kanban move — drag a card Backlog → To Do (direct manipulation: the card in its new column IS the success feedback; a move the transition rule blocks never leaves the client — its lane is dimmed, data-kanban-drop-blocked, and the drop sends nothing, #25933)",
         "declared record action — Mark Done on a task record (declared successMessage `{{ record.title | default:'Task' }} marked done.`, which names the task, examples/app-showcase/src/ui/actions/index.ts#MarkDoneAction)",
-        "param action dialog — Setup → Users → Invite User → Confirm (declared successMessage `Invitation sent to {{ result.email }}`)",
-        "approval decision — open the request from the approvals page, /_console/apps/com.example.showcase/system/approvals (the 'Approvals inbox' link opens the review-queue page, which is not where the decision is taken). The route has no drawer: opening a request navigates to its record page (sys_approval_request_detail), where the decision is taken → Approve with a comment",
+        "param action dialog — Setup → Users → Invite User → Confirm (declared outcomeMessages: link_only on a deployment that sends no mail, sent where it does; successMessage `Invitation sent to {{ result.email }}` is the fallback, knownGaps[0])",
+        "approval decision — open the request from the approvals page, /_console/apps/com.example.showcase/system/approvals (the 'Approvals inbox' link opens the review-queue page, which is not where the decision is taken). The route has no drawer: opening a request navigates to its record page (sys_approval_request_detail), where the decision is taken → Approve with a comment. On a per_group request (e.g. showcase_expense_signoff's 会签: a manager AND a finance approver must each approve, examples/app-showcase/src/automation/flows/index.ts#ExpenseSignoffFlow) one approval leaves the request pending, so read the decision from sys_approval_action, not from the request's status",
         "import — Tasks → Import a two-row CSV → the result screen",
         "Studio autosave — rename a field label in the scratch package",
         "Studio publish — Publish the scratch package",
@@ -66,9 +66,9 @@
           "evidence": "the verbatim feedback strings"
         },
         {
-          "clause": "a declared successMessage is the text the user sees",
+          "clause": "a declared successMessage, or the declared outcomeMessages entry the server's answer names, is the text the user sees",
           "oracle": "dom",
-          "verify": "for Mark Done and Invite User compare the toast text with the action's declared successMessage (examples/app-showcase/src/ui/actions/index.ts#MarkDoneAction, packages/platform-objects/src/identity/sys-user.object.ts#invite_user)",
+          "verify": "for Mark Done compare the toast text with the action's declared successMessage (examples/app-showcase/src/ui/actions/index.ts#MarkDoneAction); for Invite User compare it with the declared outcomeMessages entry the server's answer names, link_only on a deployment that sends no mail and sent where mail is delivered, and with successMessage only for an answer without an outcome (packages/platform-objects/src/identity/sys-user.object.ts#invite_user, invite-outcome-messages.ts)",
           "evidence": "declared string vs shown string, per action"
         },
         {
@@ -165,6 +165,12 @@
           "date": "2026-11-02",
           "change": "variants[10] re-pointed to the Studio door: the Setup designer URL it named, /_console/apps/setup/metadata/object/OBJ, now redirects to /_console/studio/~all/metadata/object/OBJ (ADR-0146 D1, #28818), the All metadata area's item page, where 'Discard draft' lives (ResourceEditPage.tsx), so the row is driven there directly; the per-package /_console/studio/PKG/metadata/object/OBJ opens the Data pillar, which has no discard (areaItemPillarPath, metadataArea.ts). Measured input: QA run #28981 (18.3.0 wave 4, 7fa9873f; card note 6571282495). Re-read at base dfbe34d887. The 'Studio pillars offer no discard' half is narrowed to the Data pillar, since the Access pillar offers one (access-discard-draft). No clause changed",
           "ref": "#28579"
+        },
+        {
+          "revision": 11,
+          "date": "2026-11-04",
+          "change": "fixtures.knownGaps[0], variants[5] and [6] and acceptance[2] corrected from QA run #29890 (W5-FAIL, at 589049b0): Invite User shows the declared outcomeMessages copy the answer names (link_only on a deployment without mail, which the run read verbatim; successMessage is the fallback since #27843), and a per_group approval stays pending after one approval, so the decision is read from sys_approval_action. Read at base f68b47ca",
+          "ref": "#29906"
         }
       ]
     },
@@ -173,7 +179,7 @@
       "title": "Every disabled control explains itself — the reason shows on hover and on keyboard focus, and is exposed as an accessible description",
       "since": "v17.7",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -187,17 +193,17 @@
           "the read-only showcase package in Studio (stock)"
         ],
         "knownGaps": [
-          "FIXED, now the calibration reference (objectui#11811): the task record's Archive button (examples/app-showcase/src/ui/actions/index.ts#ArchiveTaskAction, disabled while has(record.done) && record.done != true) carries its reason as a tooltip AND an aria-describedby on a focusable wrapper, in both its record_header and record_section placements (objectui DeclaredActionsBar.tsx; pin DeclaredActionsBar.disabledReason-11811.test.tsx). The action spec has no author-facing reason next to `disabled`, so the reason is the generic platform fallback — record it as generic under clause 3. Check this control first to calibrate both the hover and the keyboard oracle",
-          "Studio's Publish button on the read-only showcase package and the import wizard's disabled Next are FIXED for the keyboard (QA run #23953 at objectui daeb77fc84dd): each carries its reason on a focusable wrapper with an aria-describedby, so both now calibrate hover AND keyboard, expected PASS; Studio's automation Enabled toggle and the field inspector's Remove pass the same way. Regression rows, expected PASS since QA run #24570 (objectui 4016370a, two fresh loads each): the field inspector's read-only Label / API name / Type / Required / Move up-down sit in a focusable panel wrapper described by the read-only reason, with the tooltip on focus (objectstack-ai/objectui#12303, closed by objectui PR #12324, b64fda3f — the rail body described by fieldRailReasonId, StudioDesignSurface.tsx); and the Studio validation editor's body on a read-only package is a role=group tab stop described by the reason, with the tooltip on hover and focus (objectstack-ai/objectui#12691, closed by objectui PR #12833, d0a00d79, ObjectValidationsPanel.tsx). Both fixes are in the console pin 4016370a and on objectui main"
+          "FIXED, now the calibration reference (objectui#11811): the task record's Archive button (examples/app-showcase/src/ui/actions/index.ts#ArchiveTaskAction, disabled while has(record.done) && record.done != true) carries its reason as a tooltip AND an aria-describedby on a focusable wrapper, in its one placement, record_header (it declares locations: ['record_header'] only; objectui DeclaredActionsBar.tsx; pin DeclaredActionsBar.disabledReason-11811.test.tsx). It declares its own reason, disabledReason: 'Mark the task done first.' (the action spec's disabledReason, #26619), so the text is the author's, not the generic platform fallback — record it as specific under clause 3. Check this control first to calibrate both the hover and the keyboard oracle",
+          "Studio's Publish button on the read-only showcase package and the import wizard's disabled Next are FIXED for the keyboard (QA run #23953 at objectui daeb77fc84dd): each carries its reason on a focusable wrapper with an aria-describedby, so both now calibrate hover AND keyboard, expected PASS; the field inspector's Remove passes the same way (the automation Enabled switch is not a row: it stays enabled on a read-only package, variants[2]). Regression rows, expected PASS since QA run #24570 (objectui 4016370a, two fresh loads each): the field inspector's read-only Label / API name / Type / Required / Move up-down sit in a focusable panel wrapper described by the read-only reason, with the tooltip on focus (objectstack-ai/objectui#12303, closed by objectui PR #12324, b64fda3f — the rail body described by fieldRailReasonId, StudioDesignSurface.tsx); and the Studio validation editor's body on a read-only package is a role=group tab stop described by the reason, with the tooltip on hover and focus (objectstack-ai/objectui#12691, closed by objectui PR #12833, d0a00d79, ObjectValidationsPanel.tsx). Both fixes are in the console pin 4016370a and on objectui main"
         ]
       },
       "variants": [
-        "declared action disabled by its `disabled` predicate — Archive on a not-done task, record header AND record section placement",
+        "declared action disabled by its `disabled` predicate — Archive on a not-done task, in its record header placement (its only declared location)",
         "Studio Publish on a read-only package",
-        "Studio controls on a read-only package — the automation enable toggle, field inspector inputs, validation editor selects",
+        "Studio controls on a read-only package — field inspector inputs, validation editor selects, and the default inspector of the All metadata item page (/_console/studio/~all/metadata/TYPE/NAME, #29897). Not the automation Enabled switch: it is the deployment's ledger switch and stays enabled on a read-only package (FlowLedgerSwitch.tsx draws it disabled only on a walled boot)",
         "import wizard — the step's continue/import button while a required field is unmapped",
-        "a form submit button, where the surface disables it instead of validating on submit",
-        "toolbar or bulk buttons rendered disabled for the member persona"
+        "a form submit button, where the surface disables it instead of validating on submit (QA run #29890 found no stock instance: record it not offered unless the run finds one)",
+        "toolbar or bulk buttons rendered disabled for the member persona (QA run #29890 found no stock instance: record it not offered unless the run finds one)"
       ],
       "steps": [
         "sign in as admin; on each variant locate every control rendered disabled (the disabled attribute, aria-disabled=true, or data-disabled)",
@@ -261,6 +267,12 @@
           "date": "2026-10-19",
           "change": "knownGaps[1]'s two expected FAILs re-pointed to regression rows — checklist-accuracy finding of the 18.0 QA sweep (QA run #24570, ux-conventions.disabled-control-reason knownGaps[1]; wave anchor #24579 §3): objectstack-ai/objectui#12303 and #12691 no longer reproduce at 4016370a. Read on objectui: both issues are closed completed, by PR #12324 (merge b64fda3f) and PR #12833 (merge d0a00d79); each merge is an ancestor of the console pin 4016370a and of objectui main (merge-base --is-ancestor exit 0), and the wrapper code is present on main. No clause changed",
           "ref": "#24649"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-04",
+          "change": "fixtures.knownGaps[0] and [1] and variants[0], [2], [4] and [5] corrected from QA run #29890 (W5-FAIL, at 589049b0): Archive declares its own disabledReason and only the record_header placement; the automation Enabled switch is the ledger switch and stays enabled on a read-only package; variants[2] names the All metadata item page's default inspector (#29897, fixed); variants[4] and [5] had no stock instance. Read at base f68b47ca",
+          "ref": "#29906"
         }
       ]
     },

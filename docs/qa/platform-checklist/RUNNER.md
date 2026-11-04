@@ -181,19 +181,40 @@ Standing facts about the stock showcase environment that have each cost a run a
 detour. They are briefing material, not verdicts — re-confirm one only when a run
 contradicts it, and correct it here when it does.
 
-- **`view` is in the overlay-allowed set, so authoring a view on the stock read-only
-  showcase package is NOT blocked and needs no escape hatch.** The org-overridable
-  types are derived from the metadata-type registry, not a hand-written list, and are
-  exactly **`view`, `dashboard`, `report`, `translation`, `email_template`**
-  (`packages/spec/src/kernel/metadata-plugin.zod.ts` — the `allowEnvironmentOverlay: true`
-  entries; pinned by `protocol.org-scoped-write-refused.test.ts` G5). So
-  `PUT /api/v1/meta/view/<name>` answers 2xx on stock showcase with no
-  `OS_METADATA_WRITABLE` and no `?package=` trick, while the same shape on `object`,
-  `field`, `hook`, `seed`, `mapping` or `flow` is refused. ⛔ Do not record a view
-  step as `blocked(environment)` on a "the showcase package is read-only" assumption:
-  read-only-ness is per metadata TYPE here, not per package, and the read-only-package
-  lock the console renders is a *different* gate (see
-  `access-security.readonly-package-locks-studio`).
+- **Customizing a view, dashboard, report, translation or email template the stock
+  showcase ships goes into its pair, `com.example.showcase.custom`; a package-less
+  write onto a shipped name is refused.** The five overlay types are derived from the
+  metadata-type registry, not a hand-written list: **`view`, `dashboard`, `report`,
+  `translation`, `email_template`** (`packages/spec/src/kernel/metadata-plugin.zod.ts`,
+  the `allowEnvironmentOverlay: true` entries; pinned by
+  `protocol.org-scoped-write-refused.test.ts` G5). Since ADR-0146 D11 a write naming no
+  package onto an item of one of them that the read-only showcase ships, such as
+  `PUT /api/v1/meta/view/showcase_task.done` with no `?package=`, answers **403
+  `NOT_OVERRIDABLE`**, whose sentence names the pair to save into
+  (`packagelessOverlayWriteRefusal`,
+  `packages/metadata-protocol/src/protocol-packaged-base-refusal.ts`; QA run #29890
+  met it on a view and on an email template). The working recipe:
+  `POST /api/v1/packages/com.example.showcase/ensure-customization` (201 the first
+  time, 200 after), then `PUT /api/v1/meta/<type>/<name>?package=com.example.showcase.custom`
+  with the item's body plus `overrides: { package: 'com.example.showcase', basedOn: '0.1.0' }`;
+  revert with `DELETE /api/v1/meta/<type>/<name>?package=com.example.showcase.custom`.
+  A fresh name no package ships still writes package-less (200). The same shape on
+  `object`, `field`, `hook`, `seed`, `mapping` or `flow` stays refused as before.
+  ⛔ Do not record such a step as `blocked(environment)` on a "the showcase package is
+  read-only" assumption: the pair is the door, and the read-only-package lock the
+  console renders is a *different* gate (see `access-security.readonly-package-locks-studio`).
+
+- **A fresh organization's first page opens under a one-time prompt: "Set the default
+  currency", or the system timezone, or both in one dialog.** An administrator is asked
+  once while `localization.timezone` is still the manifest default or the organization
+  has no default currency (`ui/apps/console/src/pages/settings/WorkspaceTimezonePrompt.tsx`,
+  `workspaceTimezonePromptLogic.ts`), so on a fresh DB the dialog
+  (`data-testid="workspace-timezone-prompt"`) sits over the first page the admin opens,
+  Studio and app pages included (QA runs #29890 and #29893). Dismiss it with **Not now**
+  (Keep the default when only the timezone is asked), `data-testid="workspace-timezone-prompt-decline"`,
+  before any screenshot or DOM read. The answer is remembered per organization and user in
+  that browser's `localStorage` (`os:workspace-timezone-prompt:<org>:<user>`), so a new
+  browser context asks again. ⛔ Do not score a clause FAIL for chrome hidden under it.
 
 - **`objectstack verify --rls` is a separate invocation — bare `verify` prints no RLS
   section at all.** `runRlsProofs` runs only behind the flag
@@ -460,16 +481,22 @@ contradicts it, and correct it here when it does.
      bearer seam. So a session driven with the localStorage token alone gets **401
      `AUTH_REQUIRED`** from `POST /api/v1/storage/upload/presigned` while
      `GET /auth/get-session` on the same page returns 200 — a convincing fake "avatar
-     upload is broken". The Setup app's **Packaged Automation** page (component ref
-     `automation:packaged`) needs it too: every request it makes, its
-     `GET /api/v1/automation/_status` and `GET /api/v1/meta/flow` loads and its toggle
-     and clone writes, is a bare `fetch` with `credentials: 'include'` and no
-     `Authorization` header (`ui/packages/app-shell/src/views/setup/PackagedAutomationPage.tsx`),
-     so a token-only session renders a load failure ending `HTTP 401` (`automation
-     status HTTP 401` or `flow metadata HTTP 401`, whichever load is refused first) in
-     the page's `role="alert"` box instead of the flow list (QA run #27409). ⛔ Do not
-     drive any storage/upload surface or the Packaged Automation page from an injected
-     token: **sign in through the form** so both halves exist.
+     upload is broken". The Setup app's **Packaged Actions** page (component ref
+     `automation:packaged-actions`) is built the same way: its `GET /api/v1/meta/object`
+     and `GET /api/v1/data/sys_metadata_activation` loads and its
+     `POST /api/v1/actions/_activation/<object>/<action>` toggle are bare `fetch`es with
+     `credentials: 'include'` and no `Authorization` header
+     (`ui/packages/app-shell/src/views/setup/PackagedActionsSection.tsx`), so a token-only
+     session should expect a load failure ending `HTTP 401` (`object metadata HTTP 401` or
+     `activation ledger HTTP 401`) in the page's `role="alert"` box instead of the action
+     list. That is read from source; QA run #27409 measured the shape on the Packaged
+     Automation page (`automation:packaged`), which retired with ADR-0146 D11: a bookmark of
+     `/apps/<app>/component/automation/packaged` now opens Studio's Automations pillar
+     (`packagedAutomationStudioPath`,
+     `ui/packages/app-shell/src/views/studio-design/setupMetadataRedirect.ts`), where a
+     packaged flow's switch and its New similar are. ⛔ Do not drive any storage/upload
+     surface or the Packaged Actions page from an injected token: **sign in through the
+     form** so both halves exist.
 
 - **A stock showcase boot refuses self-registration — no item can mint a member by
   "fresh sign-up".** The showcase declares no `auth.audience`, so its posture is the
