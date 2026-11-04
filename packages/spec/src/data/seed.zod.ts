@@ -180,7 +180,7 @@ export const SeedSchema = lazySchema(() => strictObject({
    * An author who wants a replay to refresh the rows — reference data the
    * package keeps current — declares `mode: 'upsert'`, and can still exempt
    * the columns the customer or a job owns after the first load with
-   * `columns.<field>.applyOn: 'create'` ({@link SeedColumnSchema}).
+   * `columns: { FIELD: { applyOn: 'create' } }` ({@link SeedColumnSchema}).
    *
    * A package built before this default moved carries a written
    * `mode: 'upsert'` in its compiled artifact (`os build` stores the parsed
