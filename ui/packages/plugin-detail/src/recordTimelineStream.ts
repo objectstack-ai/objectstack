@@ -148,6 +148,24 @@ export type TimelineStreamFilter = 'all' | 'activity' | 'discussion' | 'changes'
 
 export const TIMELINE_STREAM_FILTERS: readonly TimelineStreamFilter[] = ['all', 'activity', 'discussion', 'changes'];
 
+/** The chips while the record's field history is not shown: no 变更. */
+const TIMELINE_STREAM_FILTERS_WITHOUT_HISTORY: readonly TimelineStreamFilter[] = TIMELINE_STREAM_FILTERS.filter(
+  (filter) => filter !== 'changes',
+);
+
+/**
+ * Whether the record page shows the record's field history (objectstack#30074):
+ * the host's `enable.trackHistory` gate, the one that decides whether it reads
+ * the audit log for {@link RecordFieldChangesContext}. While it is `false` the
+ * stream offers no 变更 chip. No host saying: `true`, every chip draws.
+ */
+export const RecordFieldHistoryContext = React.createContext<boolean>(true);
+
+/** The stream's chips, given whether the record's field history is shown. */
+export function timelineStreamFilters(fieldHistory: boolean): readonly TimelineStreamFilter[] {
+  return fieldHistory ? TIMELINE_STREAM_FILTERS : TIMELINE_STREAM_FILTERS_WITHOUT_HISTORY;
+}
+
 /** Whether an item is a system entry — drawn as one compact muted line. */
 export function isSystemStreamEntry(item: FeedItem): boolean {
   return item.type === 'field_change' || item.type === 'system';

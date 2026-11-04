@@ -25,6 +25,7 @@ import {
   filterTimelineStream,
   mergeTimelineStream,
   RecordFieldChangesContext,
+  RecordFieldHistoryContext,
 } from '../recordTimelineStream';
 import { RecordActivityTimeline } from '../RecordActivityTimeline';
 import { RecordActivityRenderer } from '../renderers/record-activity';
@@ -137,5 +138,51 @@ describe('record:activity on the default record page is the stream', () => {
     const { container } = mount(false);
     expect(container.querySelector('[data-stream-filters]')).toBeNull();
     expect(container.querySelector('[data-stream-system-row]')).toBeNull();
+  });
+});
+
+describe('the 变更 chip is offered only while the record shows its field history (objectstack#30074)', () => {
+  const chips = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll('[data-stream-filter]')).map((chip) => chip.getAttribute('data-stream-filter'));
+  const page = (fieldHistory: boolean | undefined) => {
+    const block = (
+      <DiscussionContextProvider items={[call, comment, created] as any[]} loading={false}>
+        <RecordFieldChangesContext.Provider value={fieldHistory === false ? null : audit}>
+          <RecordActivityRenderer schema={{ type: 'record:activity', showCompleted: true } as any} />
+        </RecordFieldChangesContext.Provider>
+      </DiscussionContextProvider>
+    );
+    return (
+      <DefaultRecordPageContext.Provider value>
+        {fieldHistory === undefined ? block : <RecordFieldHistoryContext.Provider value={fieldHistory}>{block}</RecordFieldHistoryContext.Provider>}
+      </DefaultRecordPageContext.Provider>
+    );
+  };
+
+  it('history shown: the four chips', () => {
+    const { container } = render(page(true));
+    expect(chips(container)).toEqual(['all', 'activity', 'discussion', 'changes']);
+  });
+
+  it('history not shown: no 变更 chip, and 全部 still draws every entry', () => {
+    const { container } = render(page(false));
+    expect(chips(container)).toEqual(['all', 'activity', 'discussion']);
+    expect(container.querySelector('[data-stream-filter="all"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByText('Logged a call')).toBeTruthy();
+    expect(screen.getByText('Budget is set')).toBeTruthy();
+  });
+
+  it('CONTROL: no host saying, every chip draws, as before', () => {
+    const { container } = render(page(undefined));
+    expect(chips(container)).toEqual(['all', 'activity', 'discussion', 'changes']);
+  });
+
+  it('a 变更 chip taken away while chosen leaves the stream on 全部', () => {
+    const { container, rerender } = render(page(true));
+    fireEvent.click(container.querySelector('[data-stream-filter="changes"]')!);
+    expect(screen.queryByText('Logged a call')).toBeNull();
+    rerender(page(false));
+    expect(container.querySelector('[data-stream-filter="all"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByText('Logged a call')).toBeTruthy();
   });
 });
