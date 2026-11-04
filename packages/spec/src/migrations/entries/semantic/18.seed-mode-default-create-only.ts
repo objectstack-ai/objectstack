@@ -35,13 +35,22 @@ export const entry: SemanticMigration = {
     + 'overwrite the ruling removed. A package built before this change carries a written '
     + '`mode: "upsert"` in its compiled artifact (`os build` stores the parsed seed); the loader cannot '
     + 'tell that value from an authored one, so such a package keeps replaying with upsert until it is '
-    + 'rebuilt, and nothing converts it. The accept set is unchanged — the same five modes — and every '
-    + 'authored `mode` parses exactly as before.',
+    + 'rebuilt, and nothing converts it. A package installed with `os package install` keeps the body it '
+    + 'was installed with in its install ledger, and its sample-data reseed replays that body in its '
+    + 'stored mode, so an entry installed from such an artifact keeps writing the shipped values back on '
+    + 'every reseed until the rebuilt artifact is re-installed: a rebuild alone changes nothing for it. '
+    + 'The ledger\'s other replays never overwrite: the boot rehydrate seeds nothing, the heal seeds only '
+    + 'when every seeded object is empty, and the per-organization replay runs only for a new '
+    + 'organization. A stored `seed` metadata item with no `mode` is not rewritten either: its next '
+    + 'publish parses it to `ignore`, so that publish inserts only the rows it is missing where it used '
+    + 'to write its values back over existing rows, with no signal. The accept set is unchanged — the '
+    + 'same five modes — and every authored `mode` parses exactly as before.',
   acceptanceCriteria:
     'A seed dataset that omits `mode` parses to `mode: \'ignore\'`, and `SeedLoaderConfig.defaultMode` '
     + 'parses to `ignore`. Loaded twice with a customer edit in between, such a dataset keeps the edit, '
     + 'inserts a record whose row is missing, and leaves an untouched row\'s `updated_at` as it was. A '
     + 'dataset that declares `mode: \'upsert\'` still writes its declared columns back onto the matched '
     + 'row on every replay. Every dataset that must stay current on replay declares `mode: \'upsert\'`, '
-    + 'and every package is rebuilt so its compiled artifact carries the mode its source declares.',
+    + 'and every package is rebuilt so its compiled artifact carries the mode its source declares, and '
+    + 're-installed wherever it was installed with `os package install`, so its install ledger does too.',
 };

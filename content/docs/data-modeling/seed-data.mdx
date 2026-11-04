@@ -119,9 +119,11 @@ customer or a job owns, mark those columns create-only — see
 <Callout type="info">
   The default used to be `upsert`. A package **built** before the change carries a
   written `mode: "upsert"` on every dataset in its compiled artifact (the build stores
-  the parsed seed), so it keeps replaying with `upsert` until it is rebuilt. Rebuild
-  to take the create-only default; declare `mode: 'upsert'` on the datasets that must
-  stay current.
+  the parsed seed), so it keeps replaying with `upsert` until it is rebuilt. A package
+  installed with `os package install` keeps the body it was installed with, and its
+  sample-data reseed replays that body, so it also has to be **re-installed** from the
+  rebuilt artifact. Rebuild (and re-install) to take the create-only default; declare
+  `mode: 'upsert'` on the datasets that must stay current.
 </Callout>
 
 ### `replace` — Insert Into an Already-Cleared Table

@@ -76,8 +76,16 @@ const SEED_MODE_CREATE_ONLY_REASON =
   + '`mode: \'upsert\'`, and exempt the columns the customer or a job owns with '
   + '`columns: { FIELD: { applyOn: \'create\' } }`. A package BUILT before this change carries a written `mode: "upsert"` in its compiled '
   + 'artifact (`os build` stores the parsed seed), which the loader cannot tell from an authored one, '
-  + 'so it keeps replaying with upsert until it is rebuilt; nothing converts it. D3 entry: '
-  + '`seed-mode-default-create-only`.';
+  + 'so it keeps replaying with upsert until it is rebuilt; nothing converts it. An install-local '
+  + 'package (`os package install`) keeps the body it was installed with in its install ledger, and its '
+  + 'sample-data reseed replays that body in its stored mode, so an entry installed from such an '
+  + 'artifact keeps writing the shipped values back on every reseed until the rebuilt artifact is '
+  + 're-installed: a rebuild alone changes nothing for it. The ledger\'s other replays never overwrite: '
+  + 'the boot rehydrate seeds nothing, the heal seeds only when every seeded object is empty, and the '
+  + 'per-organization replay runs only for a new organization. A stored `seed` metadata item with no '
+  + '`mode` is not rewritten either: its next publish parses it to `ignore`, so that publish inserts '
+  + 'only the rows it is missing where it used to write its values back over existing rows, with no '
+  + 'signal. D3 entry: `seed-mode-default-create-only`.';
 
 /**
  * Declared default changes, keyed by the protocol major that shipped them.

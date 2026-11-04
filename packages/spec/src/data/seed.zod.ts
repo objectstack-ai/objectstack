@@ -185,7 +185,10 @@ export const SeedSchema = lazySchema(() => strictObject({
    * A package built before this default moved carries a written
    * `mode: 'upsert'` in its compiled artifact (`os build` stores the parsed
    * seed), and the loader cannot tell that value from an authored one, so such
-   * a package keeps replaying with upsert until it is rebuilt.
+   * a package keeps replaying with upsert until it is rebuilt — and, where it
+   * was installed with `os package install`, until the rebuilt artifact is
+   * re-installed, because the install ledger keeps the body as installed and
+   * its sample-data reseed replays that body.
    */
   mode: SeedMode.default('ignore')
     .describe(
