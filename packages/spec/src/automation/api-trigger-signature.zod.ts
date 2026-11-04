@@ -113,12 +113,13 @@ function reservedHeaderMessage(header: string): string | undefined {
   const name = header.toLowerCase();
   if (!RESERVED_HEADERS.has(name)) return undefined;
   if (name === 'x-objectstack-signature') {
+    // The body-only `sha256=` form on this header is refused inbound by ruling B on #22805.
     return (
       `\`config.signature.header\` names \`${header}\`, the platform's own signature header. A hook that declares ` +
       'its sender\'s scheme never reads that header, and the hook\'s own check accepts it only in its timestamped ' +
-      'form (`t=…,v1=…`): a declared scheme on it would re-admit the body-only `sha256=` form ruling B on #22805 ' +
-      'refuses inbound, with no replay bound. Remove `signature` to verify `x-objectstack-signature`, or name the ' +
-      'header the sender writes its own signature in.'
+      'form (`t=…,v1=…`) because the body-only `sha256=` form signs no time: a declared scheme on it would ' +
+      're-admit that refused form, with no replay bound. Remove `signature` to verify `x-objectstack-signature`, ' +
+      'or name the header the sender writes its own signature in.'
     );
   }
   return (

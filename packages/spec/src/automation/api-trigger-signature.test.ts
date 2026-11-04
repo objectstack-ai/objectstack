@@ -211,7 +211,9 @@ describe('refused at parse, at the start node config.signature', () => {
       const declared = { ...KEYED, signature: { ...GITHUB_STYLE, header } };
       const issues = refusalsUnderSignature(FlowSchema.safeParse(flow('api', declared)));
       expect(pathsOf(issues)).toEqual(['nodes.0.config.signature.header']);
-      expect(issues[0]!.message).toMatch(/ruling B on #22805/);
+      expect(issues[0]!.message).toMatch(/re-admit that refused form, with no replay bound/);
+      // Customer-facing text names no internal issue id (the doc authoring guard).
+      expect(issues[0]!.message).not.toMatch(/#\d/);
       expect(apiTriggerVerifierOf(declared)).toEqual({ kind: 'unusable' });
       const timestamped = refusalsUnderSignature(FlowSchema.safeParse(flow('api', { ...KEYED, signature: { ...STRIPE_STYLE, header } })));
       expect(pathsOf(timestamped)).toEqual(['nodes.0.config.signature.header']);
@@ -236,6 +238,7 @@ describe('refused at parse, at the start node config.signature', () => {
         const issues = refusalsUnderSignature(FlowSchema.safeParse(flow('api', declared)));
         expect(pathsOf(issues)).toEqual(['nodes.0.config.signature.header']);
         expect(issues[0]!.message).toMatch(/never a sender's signature/);
+        expect(issues[0]!.message).not.toMatch(/#\d/);
         expect(apiTriggerVerifierOf(declared)).toEqual({ kind: 'unusable' });
       }
     }
