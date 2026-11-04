@@ -28,6 +28,7 @@ import { getDisplayTimeZone } from './date-display.js';
  *   - last_quarter_start / last_quarter_end
  *   - last_year_start / last_year_end
  *   - next_week_start / next_month_start / next_quarter_start / next_year_start
+ *   - next_month_end / next_quarter_end
  *
  * Parameterised tokens (match `N` as any positive integer):
  *   - {N_minutes_ago} / {N_minutes_from_now}       (returns full ISO timestamp)
@@ -128,7 +129,9 @@ export function resolveDateMacros<T = any>(filter: T, now: Date = new Date()): T
 
     next_week_start: () => isoDate(addDays(startOfWeek(today), 7)),
     next_month_start: () => isoDate(addMonths(startOfMonth(today), 1)),
+    next_month_end: () => isoDate(endOfMonth(addMonths(startOfMonth(today), 1))),
     next_quarter_start: () => isoDate(addMonths(startOfQuarter(today), 3)),
+    next_quarter_end: () => isoDate(endOfQuarter(addMonths(startOfQuarter(today), 3))),
     next_year_start: () => isoDate(new Date(today.getFullYear() + 1, 0, 1)),
   };
 
