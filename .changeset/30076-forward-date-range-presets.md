@@ -2,6 +2,7 @@
 '@objectstack/spec': minor
 '@objectstack/core': minor
 '@objectstack/lint': patch
+'@objectstack/verify': patch
 '@object-ui/core': minor
 '@object-ui/components': minor
 '@object-ui/i18n': minor
@@ -18,4 +19,4 @@ The relative dates a dashboard date filter and the filter builder offer looked o
 
 `@objectstack/core`'s `resolveAnalyticsDateRangePreset` resolves the three in its half-open form. `next_30_days` stops before `{31_days_from_now}`. `next_month` and `next_quarter` stop before the month and the quarter after next, which no macro token names: the resolver reads `next_month_start` (or `next_quarter_start`) again from the start of the day it named, so the end is still a day the one token resolver computed. No macro token is added.
 
-In the console, the three presets have labels in all ten locale packs, and the client date-macro resolver now answers `{next_month_end}` and `{next_quarter_end}`, two spec tokens it did not resolve before. `@objectstack/lint` changes documentation only.
+In the console, the three presets have labels in all ten locale packs, and the client date-macro resolver now answers `{next_month_end}` and `{next_quarter_end}`, two spec tokens it did not resolve before. `@objectstack/verify`'s dashboard-window proof also writes fixture rows on a forward preset's future edges, so it judges the three new windows; the days it writes for the other presets are unchanged. `@objectstack/lint` changes documentation only.
