@@ -208,6 +208,12 @@
         "content/docs/api/metadata-api.mdx"
       ],
       "note": "The per-kind entry of GET /packages/:id/customizations `contributions` (#27928, ruling 6566915346 letter E). Not authored (the server answers it), but GOVERNED rather than exempt, as the flow registration verdict is: Studio draws each kind differently, and api/metadata-api.mdx names the list and its `nav` kind. The `field` / `flow` arm discriminates by a `z.enum`; the walker reads its members into the key, so adding or dropping a kind there moves the key and sends the author back to that doc."
+    },
+    {
+      "key": "signs:body|timestamp.body",
+      "label": "api trigger declared signature scheme",
+      "exempt": "generated-reference-only",
+      "reason": "An api flow start node's `config.signature` (#29983, the contract half): content/docs/references/automation/api-trigger-signature.mdx is generated from ApiTriggerSignatureSchema. No hand-written guide teaches it yet on purpose: the api trigger does not verify the key until the domain:server slice lands, so a guide written now would teach a hook that refuses every post. That slice writes the automation/flows.mdx section naming `body` and `timestamp.body` beside the `secretRef` paragraph and binds it here, replacing this exemption."
     }
   ]
 }
