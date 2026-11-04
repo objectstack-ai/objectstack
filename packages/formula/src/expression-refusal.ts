@@ -182,8 +182,9 @@ export interface ExpressionRefusalParams {
   'date-duration-value': { readonly reference?: string };
   /**
    * WARNING, never an error: a text or boolean field used with an arithmetic
-   * or ordering `operator` against a number, at a site where a fault reads
-   * null (a formula field) or whose fault outcome the caller did not declare.
+   * or ordering `operator` against a number, at a `record`-scoped site where a
+   * fault reads null (a formula field) or whose fault outcome the caller did
+   * not declare. A flattened (flow) condition is `type-mismatch-run-may-fail`.
    */
   'type-mismatch': TypeMismatchParams;
   /**
@@ -205,6 +206,14 @@ export interface ExpressionRefusalParams {
    * advisory never fires.
    */
   'type-mismatch-fail-open': TypeMismatchParams;
+  /**
+   * [#29959] WARNING, never an error: the same mismatch in a flow condition
+   * whose caller declared no fault outcome — a flow that is not
+   * record-triggered, or a node condition nothing evaluates. A flow condition
+   * that faults fails the run (it never reads null), but what the run binds
+   * under the name is not proven to be the field's value there.
+   */
+  'type-mismatch-run-may-fail': TypeMismatchParams;
   /**
    * WARNING, never an error: a bare identifier in a flattened condition that
    * is one typo away from a field. Absent `objectName` reads "the trigger object".
@@ -270,6 +279,7 @@ const CODE_TABLE = {
   'type-mismatch-fail-closed': true,
   'type-mismatch-run-fails': true,
   'type-mismatch-fail-open': true,
+  'type-mismatch-run-may-fail': true,
   'field-near-miss': true,
   'traversal-bare-and-traversed': true,
   'traversal-multi-hop': true,
