@@ -174,7 +174,7 @@ conversion 已不再覆盖的那位。
 conversion 是消费者跟的;D3 条目是升级方的 agent 读的。三个都要写。
 
 - [ ] **一条 `MetadataConversion`**,单独一个模块 `packages/spec/src/conversions/entries/<toMajor>/<id>.ts`
-      (文件名即 `id`,按名 `export`);手写提交、无生成器的 `conversions/registry.ts` 只加 import。
+      (文件名即 `id`,按名 `export`);手写、无生成器的 `conversions/registry.ts` 加 import 与列表项。
       kebab-case 的 `id` 以 `-removed` 结尾、`toMajor`、每键一条 `emit({ from, to: '(removed)', path })`
       (共享的 `stripKeys` 住 `entries/shared.ts`),以及一个 `fixture`,其 `expectedNotices` 等于**键**数,
       不是条目数。walker(`mapCollection`、`mapFlowNodes`、`renameKey`)住在 `conversions/walk.ts`,
