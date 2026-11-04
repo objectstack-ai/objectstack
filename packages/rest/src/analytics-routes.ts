@@ -28,10 +28,11 @@
  *   `register` call, which runs while registration runs, and the class's one
  *   `routeManager` reassignment wraps `registerMetadataEndpointsInner`, never
  *   this registrar.
- * - `kernelManager` and `analyticsServiceProvider` go as GETTERS. The body's
- *   `resolveService` reads both at REQUEST time, and neither field is
- *   `readonly`, so a value copied at registration could part from it. The
- *   getter reads the field the handler read, when it read it.
+ * - `analyticsServiceProvider` goes as a GETTER. The body's `resolveService`
+ *   reads it at REQUEST time, and the field is not `readonly`, so a value
+ *   copied at registration could part from it. The getter reads the field the
+ *   handler read, when it read it. (`kernelManager` went the same way until
+ *   #30011 moved the environment-kernel lookup into the provider itself.)
  *
  * Module-level helpers stay where they were and are imported from the modules
  * `rest-server.ts` imports them from. The one helper declared in
@@ -66,12 +67,11 @@ import { mayReadPendingDrafts, type RestServer } from './rest-server.js';
  * one of them, and no other. Each is typed AS the class member (an indexed
  * access on the class), so a change to a member's signature on the class is a
  * change here too, and naming a member the class does not have is a compile
- * error. See the module header for why `kernelManager` and
- * `analyticsServiceProvider` are getters.
+ * error. See the module header for why `analyticsServiceProvider` is a
+ * getter.
  */
 export interface AnalyticsRouteHost {
     readonly routeManager: RestServer['routeManager'];
-    readonly kernelManager: RestServer['kernelManager'];
     readonly analyticsServiceProvider: RestServer['analyticsServiceProvider'];
     resolveRequestEnvironmentId: RestServer['resolveRequestEnvironmentId'];
     resolveExecCtx: RestServer['resolveExecCtx'];
@@ -88,23 +88,24 @@ export interface AnalyticsRouteHost {
  */
 export function registerAnalyticsEndpoints(this: AnalyticsRouteHost, basePath: string): void {
     const isScoped = basePath.includes('/environments/:environmentId');
-    // Resolve the ENVIRONMENT's analytics service first — its strategy
-    // bridges are bound to the env kernel's own data engine. The host
-    // provider (whose 'data' is the host kernel's engine) is only a
-    // fallback: serving a tenant's dataset query from the host engine
-    // reads the WRONG database and silently aggregates over nothing
-    // (the staging "Total Spend: 0 on a populated table" incident).
-    const resolveService = async (environmentId?: string, req?: any) => {
+    // The ENVIRONMENT's analytics service — its strategy bridges are bound to
+    // the env kernel's own data engine. Serving a tenant's dataset query from
+    // the host engine reads the WRONG database and silently aggregates over
+    // nothing (the staging "Total Spend: 0 on a populated table" incident).
+    //
+    // [#30011] The provider resolves the environment's kernel itself now, as
+    // its four siblings do, so this asks it for the REQUEST's environment
+    // (the shared resolver's answer) and nothing else. The host provider is
+    // no longer a fallback: when the environment's kernel carries no
+    // analytics service, or could not be acquired, the host's occupant would
+    // aggregate the HOST's tables for this environment's caller. Either way
+    // the answer is the 501 below.
+    const resolveService = async (environmentId: string | undefined, req: any) => {
+        if (!this.analyticsServiceProvider) return undefined;
         try {
             const envId = await this.resolveRequestEnvironmentId(environmentId, req);
-            if (envId && envId !== 'platform' && this.kernelManager) {
-                const kernel = await this.kernelManager.getOrCreate(envId);
-                const svc = await kernel.getServiceAsync<any>('analytics').catch(() => undefined);
-                if (svc) return svc;
-            }
-        } catch { /* fall back to the host service */ }
-        if (!this.analyticsServiceProvider) return undefined;
-        try { return await this.analyticsServiceProvider(environmentId); }
+            return await this.analyticsServiceProvider(envId);
+        }
         catch { return undefined; }
     };
 

@@ -400,35 +400,69 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
                 } catch { return undefined; }
             };
 
-            // Email service resolver — used by POST /email/send. Single-
-            // kernel deployments resolve from the local kernel; multi-
-            // tenant paths would resolve via kernelManager.getOrCreate.
-            const emailServiceProvider = async (_environmentId?: string): Promise<IEmailService | undefined> => {
-                try {
-                    return ctx.getService<IEmailService>('email');
-                } catch { return undefined; }
-            };
+            // [#30011] The ENVIRONMENT-SCOPED provider seams: email, sharing,
+            // approvals, sharing rules and analytics. Each slot is filled by a
+            // plugin the ENVIRONMENT's kernel mounts. A host that fronts many
+            // environment kernels with this one plugin (cloud's hosted runtime)
+            // therefore holds the occupant a request needs on that request's
+            // kernel, never on this plugin's own. These five used to read
+            // `ctx.getService` here whatever environment they were asked for,
+            // so a hosted request was answered by the HOST kernel's occupant —
+            // absent there: the approvals list answered `[]` and a single
+            // request 501 (#29999).
+            //
+            // The legs, in order:
+            //  - an environment id AND a kernel manager → that environment's
+            //    kernel, acquired through `kernelManager.getOrCreate`, the same
+            //    acquisition the data path's `resolveProtocol` makes. The id is
+            //    the one `RestServer.resolveRequestEnvironmentId` answered —
+            //    the route passes it: the scoped param, else the host's resolver
+            //    for a hostname-routed request. This seam resolves no
+            //    environment itself; there is one resolver, and it is that one.
+            //    ⛔ No fall back to this plugin's occupant when the environment's
+            //    kernel carries none, nor when acquiring it fails: the host's
+            //    service reads the HOST's store, so a fallback answers
+            //    environment A's request from data that is not A's. Absent →
+            //    `undefined` → the route's own "not configured" answer; an
+            //    acquisition that fails rejects, and the route decides.
+            //  - `'platform'` — Studio's reserved control-plane id, never a
+            //    kernel (`resolveProtocol` says why) → this plugin's own kernel.
+            //  - no id (a control-plane request), or no kernel manager (a
+            //    single-kernel deployment) → `ctx.getService` on this plugin's
+            //    own kernel, exactly as before.
+            //
+            // On the environment's kernel the classification is the registry's,
+            // as in `objectQLProvider` above: "never registered" (branded) is
+            // `undefined`, and any other fault — a factory that threw — is
+            // re-raised rather than folded into "not configured".
+            const environmentScopedProvider = <T>(slot: string) =>
+                async (environmentId?: string): Promise<T | undefined> => {
+                    if (kernelManager && environmentId && environmentId !== 'platform') {
+                        const kernel = await kernelManager.getOrCreate(environmentId);
+                        try {
+                            return await kernel.getServiceAsync<T>(slot);
+                        } catch (err) {
+                            if (isServiceNotRegisteredError(err)) return undefined;
+                            throw err;
+                        }
+                    }
+                    try {
+                        return ctx.getService<T>(slot);
+                    } catch { return undefined; }
+                };
+
+            // Email service resolver — used by POST /email/send.
+            const emailServiceProvider = environmentScopedProvider<IEmailService>('email');
 
             // Sharing service resolver — used by /data/:object/:id/shares.
-            const sharingServiceProvider = async (_environmentId?: string): Promise<ISharingService | undefined> => {
-                try {
-                    return ctx.getService<ISharingService>('sharing');
-                } catch { return undefined; }
-            };
+            const sharingServiceProvider = environmentScopedProvider<ISharingService>('sharing');
 
-            // Approvals service resolver — used by /approvals/* routes.
-            const approvalsServiceProvider = async (_environmentId?: string): Promise<IApprovalService | undefined> => {
-                try {
-                    return ctx.getService<IApprovalService>('approvals');
-                } catch { return undefined; }
-            };
+            // Approvals service resolver — used by /approvals/* routes and the
+            // approvals part of the record page.
+            const approvalsServiceProvider = environmentScopedProvider<IApprovalService>('approvals');
 
             // Sharing-rule service resolver — used by /sharing/rules/* routes.
-            const sharingRulesServiceProvider = async (_environmentId?: string): Promise<ISharingRuleService | undefined> => {
-                try {
-                    return ctx.getService<ISharingRuleService>('sharingRules');
-                } catch { return undefined; }
-            };
+            const sharingRulesServiceProvider = environmentScopedProvider<ISharingRuleService>('sharingRules');
 
             // i18n service resolver — used to localize view / action / object
             // metadata. Single-kernel fallback so labels and select options
@@ -440,13 +474,12 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             };
 
             // Analytics service resolver — used by /analytics/dataset/query
-            // (ADR-0021 dataset preview/query). Returns undefined when no
-            // analytics service is registered so the route fails cleanly (501).
-            const analyticsServiceProvider = async (_environmentId?: string): Promise<IAnalyticsService | undefined> => {
-                try {
-                    return ctx.getService<IAnalyticsService>('analytics');
-                } catch { return undefined; }
-            };
+            // (ADR-0021 dataset preview/query). Environment-scoped like the four
+            // above: the service's strategy bridges are bound to its OWN
+            // kernel's data engine, so the host's occupant would aggregate over
+            // the host's tables. Returns undefined when no analytics service is
+            // registered so the route fails cleanly (501).
+            const analyticsServiceProvider = environmentScopedProvider<IAnalyticsService>('analytics');
 
             // Settings service resolver — used by resolveExecCtx to resolve the
             // reference timezone/locale (localization manifest) through the 4-tier
