@@ -171,14 +171,17 @@ export function pickDeclaredDriverOptions(bag: unknown): Record<string, unknown>
  * only the hooks': the driver is handed `driverOptions` itself.
  *
  * Answers the caller's own bag, the same object, when the driver options add
- * nothing to it, and `driverOptions` when there is no caller bag.
+ * nothing to it, and a COPY of `driverOptions` when there is no caller bag —
+ * never `driverOptions` itself, so the hooks' view and the driver's bag are
+ * never one object, whatever order a later edit puts a hook and a driver
+ * call in.
  */
 export function mergeDriverOptionsIntoHookView(
   callerBag: unknown,
   driverOptions: Record<string, unknown> | undefined,
 ): unknown {
   if (driverOptions === undefined) return callerBag;
-  if (callerBag === null || typeof callerBag !== 'object') return driverOptions;
+  if (callerBag === null || typeof callerBag !== 'object') return { ...driverOptions };
   const bag = callerBag as Record<string, unknown>;
   const addsNothing = Object.keys(driverOptions).every(
     (key) => Object.prototype.propertyIsEnumerable.call(bag, key) && bag[key] === driverOptions[key],

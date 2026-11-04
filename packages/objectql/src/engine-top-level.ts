@@ -275,10 +275,11 @@ const WIRE_ONLY_CANONICAL_SHAPES: Record<string, string> = {
 
 /**
  * [#4371 option 2] The driver-option keys the engine forwards verbatim: on
- * `find`/`findOne`/`update`/`delete` the option bag IS the base of the driver
- * options (`buildDriverOptions(object, ctx, bag)`), which is how a caller's
- * explicit `tenantId` / `bypassTenantAudit` reaches the driver (pinned in
- * engine.test.ts). `count`/`aggregate` never forward the bag, so these keys
+ * `find`/`findOne`/`update`/`delete` the bag's DECLARED driver-option keys
+ * are the base of the driver options (`buildDriverOptions(object, ctx, bag)`
+ * keeps those and nothing else of the bag — `pickDeclaredDriverOptions`),
+ * which is how a caller's explicit `tenantId` / `bypassTenantAudit` reaches
+ * the driver (pinned in engine.test.ts). `count`/`aggregate` never forward the bag, so these keys
  * are deliberately NOT legal there — accepting them would be the exact
  * silently-ignored contract this gate exists to close.
  */

@@ -239,11 +239,14 @@ describe('the after* hook view of input.options stays additive', () => {
     expect(seenCallback).toBe(callback);
   });
 
-  it('merging adds the driver options and answers the caller\'s own bag when nothing is added', () => {
+  it('merging adds the driver options, answers the caller\'s own bag when nothing is added, and never answers the driver\'s bag itself', () => {
     const bag = { where: { a: 1 }, tenantId: ORG };
     expect(mergeDriverOptionsIntoHookView(bag, pickDeclaredDriverOptions(bag))).toBe(bag);
     expect(mergeDriverOptionsIntoHookView(bag, { tenantId: ORG, timezone: TZ })).toEqual({ where: { a: 1 }, tenantId: ORG, timezone: TZ });
-    expect(mergeDriverOptionsIntoHookView(undefined, { tenantId: ORG })).toEqual({ tenantId: ORG });
+    const driverBag = { tenantId: ORG };
+    const view = mergeDriverOptionsIntoHookView(undefined, driverBag);
+    expect(view).toEqual(driverBag);
+    expect(view).not.toBe(driverBag);
     expect(mergeDriverOptionsIntoHookView(bag, undefined)).toBe(bag);
   });
 });

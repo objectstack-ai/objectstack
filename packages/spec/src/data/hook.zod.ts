@@ -881,7 +881,9 @@ export const HookContextSchema = lazySchema(() => z.object({
    * own options bag (`EngineQueryOptions` / `DataEngineInsertOptions` /
    * `EngineUpdateOptions` / `EngineDeleteOptions`) and only AFTER the `before*`
    * handlers return — before the driver call — merges the driver-facing keys
-   * onto it (`buildDriverOptions`: transaction, tenantId, timezone, …). So a
+   * onto it (`buildDriverOptions` produces the driver's set — transaction,
+   * tenantId, timezone, … — and `mergeDriverOptionsIntoHookView` merges that
+   * set into this view). So a
    * `before*` handler reads the CALLER's bag, `where` and `multi` included; an
    * `after*` handler reads the merged view. The merge is
    * ADDITIVE — it spreads the caller's bag and adds keys, never strips one — so
