@@ -35,7 +35,13 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import type { EngineUpdateOptions } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 import { applyDriverQueryInMemory } from './driver-query-in-memory.js';
-import { recomputeHomeAmounts, homeAmountRecomputeComplete, formatHomeAmountRecomputeReport, type HomeAmountRecomputeOptions } from './home-amount-recompute.js';
+import {
+  recomputeHomeAmounts,
+  assertHomeAmountRecomputeSince,
+  homeAmountRecomputeComplete,
+  formatHomeAmountRecomputeReport,
+  type HomeAmountRecomputeOptions,
+} from './home-amount-recompute.js';
 
 function makeDriver() {
   const stores = new Map<string, Map<string, Record<string, unknown>>>();
@@ -507,6 +513,40 @@ describe('recompute: a corrected rate reaches stored rows through an explicit, r
     const report = await recompute(bare, { apply: true });
     expect(report).toMatchObject({ written: 1, audit: { written: false, reason: 'ledger_not_mounted' } });
   });
+
+  it('a run an unclassified error stops partway still writes its run entry, marked aborted, then throws', async () => {
+    t.rate('EUR', '2026-01-01', 0.128);
+    const second = await t.engine.insert('fx_invoice', { title: 'i2', currency_code: 'EUR', invoice_date: '2026-03-15', amount: 128 });
+    t.rate('EUR', '2026-01-01', 0.125); // both rows now differ from what a write stores
+    // The EUR rate read fails outright: no class names it, so it must end the walk.
+    const find = t.driver.find;
+    t.driver.find = async (object: string, ast: any) => {
+      if (object === 'sys_exchange_rate' && JSON.stringify(ast).includes('EUR')) throw new Error('rate store unreachable');
+      return find.call(t.driver, object, ast);
+    };
+    const thrown = await refusalOf(recompute(t, { apply: true, source: 'test' }));
+    expect(thrown?.message).toBe('rate store unreachable');
+    // The row before the failure landed, the one at it did not…
+    expect(stored()).toMatchObject({ amount_home: 80000, amount_rate: 0.125 });
+    expect(t.storeFor('fx_invoice').get(second.id)).toMatchObject({ amount_home: 1000, amount_rate: 0.128 });
+    // …and the ledger says so: one run entry, aborted, with the counts it reached.
+    const rows = auditRows(t);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.metadata).toMatchObject({
+      event: 'home_amount.recompute', source: 'test', written: 1, aborted: 'rate store unreachable',
+      organizations: [{ organizationId: null, written: 1 }],
+    });
+  });
+
+  it('a dry run an unclassified error stops writes nothing, the ledger included', async () => {
+    const find = t.driver.find;
+    t.driver.find = async (object: string, ast: any) => {
+      if (object === 'sys_exchange_rate') throw new Error('rate store unreachable');
+      return find.call(t.driver, object, ast);
+    };
+    expect((await refusalOf(recompute(t)))?.message).toBe('rate store unreachable');
+    expect(t.storeFor('sys_audit_log').size).toBe(0);
+  });
 });
 
 describe('recompute: rows that cannot be converted are listed, skipped and never written (parameter 1, Open item 8)', () => {
@@ -650,5 +690,14 @@ describe('recompute: refused before any row is read', () => {
     ]);
     expect(codes[2]?.message).toContain("'amount'");
     expect(t.finds.fx_invoice ?? 0).toBe(before);
+  });
+  it('the since check is one pure function the doors call before they open a database, with the run\'s own envelope', async () => {
+    expect(() => assertHomeAmountRecomputeSince(undefined)).not.toThrow();
+    expect(() => assertHomeAmountRecomputeSince('2026-01-01')).not.toThrow();
+    const pure = (() => { try { assertHomeAmountRecomputeSince('2026-02-30'); return null; } catch (e) { return e as Thrown; } })();
+    expect([pure?.code, pure?.status, (pure as { httpStatus?: number } | null)?.httpStatus]).toEqual(['VALIDATION_FAILED', 400, 400]);
+    const t = await boot();
+    const run = await refusalOf(recompute(t, { since: '2026-02-30' }));
+    expect(run?.message).toBe(pure?.message);
   });
 });

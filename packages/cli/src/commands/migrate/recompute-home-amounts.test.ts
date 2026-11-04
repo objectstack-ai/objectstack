@@ -6,7 +6,7 @@
  *
  * The recompute itself is proven in `@objectstack/objectql`'s
  * `engine-home-amount-projection.test.ts` (in memory) and in
- * `packages/qa/dogfood/test/home-amount-recompute.test.ts` (SQLite and
+ * `packages/qa/dogfood/test/home-amount-projection.test.ts` (SQLite and
  * PostgreSQL). What is pinned here is what those cannot see: the command is a
  * dry run by default, its flags reach `recomputeHomeAmounts` as given, a
  * malformed `--since` is refused before the probe, the prompt and the boot,
@@ -38,6 +38,8 @@ vi.mock('@objectstack/objectql', async (importOriginal) => {
   const real = await importOriginal<typeof import('@objectstack/objectql')>();
   return {
     recomputeHomeAmounts: vi.fn(),
+    // The `--since` check is the recompute's own, called by the command before its probe.
+    assertHomeAmountRecomputeSince: real.assertHomeAmountRecomputeSince,
     formatHomeAmountRecomputeReport: real.formatHomeAmountRecomputeReport,
   };
 });
@@ -154,7 +156,7 @@ describe('os migrate recompute-home-amounts', () => {
     const err = await MigrateRecomputeHomeAmounts.run(['--json', '--object', 'nope'], { root: CLI_ROOT }).catch((e: unknown) => e);
     expect(exitOf(err)).toBe(1);
     expect(vi.mocked(recomputeHomeAmounts)).not.toHaveBeenCalled();
-    expect(json()).toMatchObject({ code: 'OBJECT_NOT_FOUND' });
+    expect(json()).toMatchObject({ code: 'OBJECT_NOT_FOUND', httpStatus: 404 });
   }, RUN_TIMEOUT);
 
   it('a listed and skipped row keeps the exit code at 1, on a dry run and on an apply run (Open item 8)', async () => {
@@ -168,6 +170,20 @@ describe('os migrate recompute-home-amounts', () => {
       .catch((e: unknown) => e);
     expect(exitOf(applied)).toBe(1);
     expect(json()).toMatchObject({ report: { skippedTotal: 1 } });
+  }, RUN_TIMEOUT);
+
+  it('a walk --max-records cut short exits 1: rows past the bound were not looked at', async () => {
+    vi.mocked(recomputeHomeAmounts).mockResolvedValue(report({ truncated: true }) as any);
+    const dry = await MigrateRecomputeHomeAmounts.run(['--object', 'invoice', '--max-records', '2'], { root: CLI_ROOT })
+      .catch((e: unknown) => e);
+    expect(exitOf(dry)).toBe(1);
+    expect(printed()).toContain('--max-records');
+    expect(vi.mocked(recomputeHomeAmounts).mock.calls[0]![2]).toMatchObject({ maxRecords: 2 });
+    vi.mocked(recomputeHomeAmounts).mockResolvedValue(report({ truncated: true, applied: true, written: 1 }) as any);
+    const applied = await MigrateRecomputeHomeAmounts.run(['--json', '--apply', '--yes', '--object', 'invoice'], { root: CLI_ROOT })
+      .catch((e: unknown) => e);
+    expect(exitOf(applied)).toBe(1);
+    expect(json()).toMatchObject({ report: { truncated: true } });
   }, RUN_TIMEOUT);
 
   it('a run with nothing skipped exits 0', async () => {

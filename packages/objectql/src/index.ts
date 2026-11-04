@@ -551,6 +551,7 @@ export type {
 // projection over stored rows. Same split as the two backfills above.
 export {
     recomputeHomeAmounts,
+    assertHomeAmountRecomputeSince,
     formatHomeAmountRecomputeReport,
     homeAmountRecomputeComplete,
     HOME_AMOUNT_SKIP_REASONS,

@@ -1647,7 +1647,13 @@ row would store. Each organization converts into its own home currency at its ow
 and the report counts each organization apart.
 
 **What is written.** Only rows whose stored home amount or rate differs, and in them only
-the home and rate fields: `updated_at` keeps its stored value. `--field` limits the run to
+the home and rate fields: `updated_at` keeps its stored value. Because each one is an
+ordinary write of the home field, whatever reads that field moves with it, as it would for
+a fresh write: stored formulas, parent summaries, and, where audit capture is installed
+(it is in the command's own boot), one per-row `sys_audit_log` `update` row for each row
+rewritten. ⚠️ Since `updated_at` does not move, a consumer that syncs incrementally by
+`updated_at` does not see a recomputed row; resync the object, or the rows the report
+lists. (`os migrate record-currency-codes` does move `updated_at`.) `--field` limits the run to
 one amount; without it, every amount of the object that declares a home amount is
 recomputed. `--since YYYY-MM-DD` keeps the rows whose **document date** (the field
 `homeAmount.rateDate` names, the date that picks the rate) is on or after that day, a
@@ -1662,7 +1668,7 @@ is refused after the boot and before any row is read.
 | Reason | The row | Fix, then re-run |
 |:---|:---|:---|
 | `rate_missing` | No rate for its currency is in force on its document date (the report names both). | Add the rate. |
-| `code_blank` | An amount with no currency code: stored before the field switched to record mode. | [`os migrate record-currency-codes`](#os-migrate-record-currency-codes). |
+| `code_blank` | An amount with no currency code: stored before the field switched to record mode. | [`os migrate record-currency-codes`](#os-migrate-record-currency-codes). It writes its one code into the codeless rows of **every** organization, so check the report's `code_blank` count per organization first. |
 | `document_date_blank` | A foreign-currency amount with no document date. | Fill the document date. |
 | `home_currency_unset` | Its organization has no `localization.currency`. | Set **Localization → Default currency**. |
 | `unconvertible` | A code, amount or document date the write itself refuses. | Correct the value. |
@@ -1670,12 +1676,14 @@ is refused after the boot and before any row is read.
 A skipped row keeps whatever it stored, so a total over the home field leaves it out (a
 `sum` skips an empty home amount silently). That gap stays visible: the command exits 1,
 on a dry run and on an apply, for as long as any row is listed, and an applied run's
-`sys_audit_log` entry (one per run, `action: update`, `metadata.event:
-home_amount.recompute`) records the counts per organization and reason and every skipped
-row. Idempotent: re-running until it lists nothing and changes nothing *is* the
+run-level `sys_audit_log` entry (one per run beside the per-row rows, no record,
+`action: update`, `metadata.event: home_amount.recompute`) records the counts per
+organization and reason and every skipped row. A run that an unexpected error stops
+partway still writes that entry, marked `aborted` with the counts it reached, before the
+command fails. A walk cut short by `--max-records` also exits 1: rows past the bound were
+not looked at. Idempotent: re-running until it lists nothing and changes nothing *is* the
 verification, which is why it records no flag.
 
-#### `os migrate comment-reactions`
 #### `os migrate comment-reactions`
 
 v18 retired `sys_comment.reactions`, the JSON column that held every emoji

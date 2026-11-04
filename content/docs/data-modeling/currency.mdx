@@ -351,7 +351,9 @@ os migrate recompute-home-amounts --object invoice --apply                  # Wr
 
 Each row is converted exactly as a write converts it, in its own organization's home
 currency at that organization's rates, and an applied row holds what a fresh write of it
-would store. `--since` compares the **document date** (the field `homeAmount.rateDate`
+would store, so what reads the home field (formulas, roll-ups, the audit trail) follows as
+it does for a fresh write. The row's `updated_at` is kept: an integration that syncs by
+`updated_at` does not see the recomputed value until it resyncs the object. `--since` compares the **document date** (the field `homeAmount.rateDate`
 names), read as the day the write reads it. The report counts each organization apart and
 lists every row that changes, with its stored and new values.
 
@@ -359,7 +361,8 @@ lists every row that changes, with its stored and new values.
 of 1, a later rate or a zero. The report names each one and why: no rate in force on its
 document date (add the rate), an amount with no currency code (run
 [`os migrate record-currency-codes`](#switching-a-field-that-already-holds-rows) first: no
-rate can help a row that names no currency), no document date, or no home currency. Until
+rate can help a row that names no currency; it writes its one code into every
+organization's codeless rows, so check the per-organization count first), no document date, or no home currency. Until
 a re-run converts them, a total over the home field leaves those rows out, so the command
 keeps exiting 1 while any is listed, and the applied run's audit entry records them. The
 full reference is [`os migrate recompute-home-amounts`](/docs/deployment/cli#os-migrate-recompute-home-amounts).

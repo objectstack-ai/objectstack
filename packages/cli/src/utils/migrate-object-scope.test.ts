@@ -20,6 +20,8 @@ describe('[#21644] refuseUndeclaredObjects: an unknown --object is refused, neve
     expect(error).not.toBeNull();
     expect(error?.code).toBe('OBJECT_NOT_FOUND');
     expect(error?.status).toBe(404);
+    // …and under ADR-0112 D5's spelling, the field a `--json` envelope carries.
+    expect((error as { httpStatus?: number } | null)?.httpStatus).toBe(404);
     expect(error?.object).toBe('os_sitee');
     expect(error?.message).toContain("'os_sitee'");
     // Every declared object, sorted, so the operator can correct the spelling.

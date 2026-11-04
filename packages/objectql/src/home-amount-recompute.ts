@@ -45,7 +45,10 @@
  * - `code_blank` — the amount holds a value beside a blank currency code (rows
  *   stored before the amount was switched to `record` mode; ruling 6492000994,
  *   letter B). There is no currency to convert from, so no rate can help.
- *   Remedy: `os migrate record-currency-codes`, then re-run.
+ *   Remedy: `os migrate record-currency-codes`, then re-run. That command
+ *   writes its one code into every organization's codeless rows (Open item
+ *   13), so the report's per-organization `code_blank` count is the check
+ *   before it is given one.
  * - `document_date_blank` — a foreign amount with no document date.
  * - `home_currency_unset` — the organization has no `localization.currency`.
  * - `unconvertible` — the code is not ISO 4217, or the amount or document
@@ -57,9 +60,10 @@
  * row would make a consolidated total low with no sign of it once the report
  * scrolled away. This run keeps the gap visible three ways:
  *
- * 1. **The run is not complete while any row is skipped.**
- *    {@link homeAmountRecomputeComplete} answers false, and the command exits
- *    non-zero, on a dry run as on an apply run, until a re-run skips nothing.
+ * 1. **The run is not complete while any row is skipped** (or the walk was
+ *    truncated). {@link homeAmountRecomputeComplete} answers false, and the
+ *    command exits non-zero, on a dry run as on an apply run, until a re-run
+ *    skips nothing.
  * 2. **The applied run's audit entry carries the skipped rows**: their count
  *    per organization and reason, and each skipped row (record, field,
  *    reason, currency and date), so the gap outlives the terminal.
@@ -77,11 +81,22 @@
  * ## Writes
  *
  * Dry run unless `apply`. An apply writes only the rows whose stored home
- * amount or rate differs from the projection, and only the home and rate
- * fields: under `preserveAudit` with the row's stored `updated_at`, as the
- * other `os migrate` data runs that rewrite a column do. One `sys_audit_log`
- * entry records each applied run. Idempotent: a second run finds nothing to
- * change.
+ * amount or rate differs from the projection, and its payload carries only the
+ * home field (the write sets the rate beside it): under `preserveAudit` with
+ * the row's stored `updated_at`, as the other `os migrate` data runs that
+ * rewrite a column do. Because it IS a write, what reads the home field moves
+ * with it exactly as for a fresh write: stored formulas, parent summaries and,
+ * where the audit writers are installed, one per-row `sys_audit_log` `update`
+ * row for each row rewritten. ⚠️ `updated_at` does not move, so a consumer that
+ * syncs incrementally by `updated_at` does not see a recomputed row
+ * (`os migrate record-currency-codes` does move it).
+ *
+ * One run-level `sys_audit_log` entry records each applied run, beside those
+ * per-row rows. A run an unclassified error ends (a page read or a rate read
+ * that fails) still writes it, marked `aborted` with the counts it reached,
+ * before the error is thrown on. A walk cut short by `maxRecords` is
+ * `truncated`, and a truncated run is not complete. Idempotent: a second run
+ * finds nothing to change.
  */
 
 import { keysetWalk, type KeysetPageQuery } from '@objectstack/types';
@@ -275,6 +290,23 @@ function isCalendarDate(text: string): boolean {
 }
 
 /**
+ * The `since` refusal on its own: a value that is not a real `YYYY-MM-DD`
+ * date throws `VALIDATION_FAILED` / 400. Pure — it reads no engine and no
+ * row — so a door can judge `since` before it opens a database (the CLI does,
+ * before its occupancy probe, its `--apply` prompt and its boot), and
+ * {@link recomputeHomeAmounts} judges it again for every other caller. One
+ * check, one envelope, owned here.
+ */
+export function assertHomeAmountRecomputeSince(since: string | undefined): void {
+  if (since === undefined || isCalendarDate(since)) return;
+  throw refusal(
+    VALIDATION_FAILED_CODE,
+    `[home-amount-recompute] since '${since}' is not a calendar date: give it as YYYY-MM-DD (for example 2026-01-01). `
+      + 'It is compared with each row\'s document date. Refused before any row was read or written.',
+  );
+}
+
+/**
  * The declarations to recompute, judged before any row is read: an unknown
  * object, an object declaring no home amount, a `field` that declares none,
  * and a malformed `since` are refused as a whole, on a dry run as on an apply.
@@ -283,13 +315,7 @@ function resolvePlan(engine: HomeAmountRecomputeEngine, options: HomeAmountRecom
   const { object, field, since } = options;
   const schema = engine.getObject(object);
   if (!schema) throw objectNotFoundError(object);
-  if (since !== undefined && !isCalendarDate(since)) {
-    throw refusal(
-      VALIDATION_FAILED_CODE,
-      `[home-amount-recompute] since '${since}' is not a calendar date: give it as YYYY-MM-DD (for example 2026-01-01). `
-        + 'It is compared with each row\'s document date. Refused before the walk read or wrote any row.',
-    );
-  }
+  assertHomeAmountRecomputeSince(since);
   const plan = planHomeAmounts(schema);
   if (plan.length === 0) {
     throw refusal(
@@ -393,129 +419,151 @@ export async function recomputeHomeAmounts(
     { pageSize: SCAN_PAGE_SIZE, max: options.maxRecords ?? 100_000 },
   );
 
-  for await (const page of walk.pages()) {
-    // The write's own reads, memoized across this page as one write memoizes across its batch.
-    const reads = engine.homeAmountReadsFor({ ...SYSTEM_CTX });
-    const serving = reads.serving;
-    for (const row of page) {
-      report.scannedRecords++;
-      const id = row.id;
-      if (id == null || id === '') continue;
-      const recordId = String(id);
-      // The organization the write converts this row under: the write's own reading.
-      const organizationId = reads.organizationOf(row) ?? null;
-      const org = await organizationEntry(organizations, serving, organizationId);
-      const patch: Record<string, unknown> = {};
+  // An error no class above names (a page read or a rate read that fails) ends the walk. Rows an
+  // apply already wrote stay written, so the run is still recorded — as aborted, with the
+  // counts it reached — before the error goes on to the caller.
+  try {
+    for await (const page of walk.pages()) {
+      // The write's own reads, memoized across this page as one write memoizes across its batch.
+      const reads = engine.homeAmountReadsFor({ ...SYSTEM_CTX });
+      const serving = reads.serving;
+      for (const row of page) {
+        report.scannedRecords++;
+        const id = row.id;
+        if (id == null || id === '') continue;
+        const recordId = String(id);
+        // The organization the write converts this row under: the write's own reading.
+        const organizationId = reads.organizationOf(row) ?? null;
+        const org = await organizationEntry(organizations, serving, organizationId);
+        const patch: Record<string, unknown> = {};
 
-      for (const entry of plan) {
-        if (since !== null) {
-          const day = isRecordCurrencyBlank(row[entry.rateDateField])
-            ? undefined
-            : documentDateOf(row[entry.rateDateField], entry.rateDateIsInstant ? await serving.timezone(organizationId ?? undefined) : undefined);
-          if (day === undefined || day < since) {
-            report.outsideSince++;
-            org.outsideSince++;
-            continue;
-          }
-        }
-        report.amounts++;
-        org.amounts++;
-        const skip = (reason: HomeAmountSkipReason, extra: { currency?: string; date?: string } = {}) => {
-          report.skippedTotal++;
-          report.skippedByReason[reason]++;
-          org.skipped[reason]++;
-          const item: HomeAmountRecomputeSkip = { recordId, organizationId, field: entry.amountField, reason, ...extra };
-          if (report.skipped.length < maxListed) report.skipped.push(item);
-          else report.skippedTruncated = true;
-          if (auditSkips.length < AUDIT_MAX_LISTED) auditSkips.push(item);
-        };
-
-        // A blank code beside an amount is its own class: there is no currency to convert from
-        // (the projection leaves such an entry out, so the code-blank refusal can answer instead).
-        if (!isRecordCurrencyBlank(row[entry.amountField]) && isRecordCurrencyBlank(row[entry.codeField])) {
-          skip('code_blank');
-          continue;
-        }
-
-        let projected: Record<string, unknown>;
-        try {
-          projected = await projectHomeAmounts([entry], row, serving, {
-            object,
-            operation: 'update',
-            organizationId: organizationId ?? undefined,
-            recordId,
-          });
-        } catch (err) {
-          const code = (err as { code?: unknown })?.code;
-          const currency = typeof row[entry.codeField] === 'string' ? (row[entry.codeField] as string).trim() : undefined;
-          if (isHomeAmountRefusal(err)) {
-            if (code === EXCHANGE_RATE_MISSING_CODE) {
-              skip('rate_missing', { currency, date: (err as { date: string }).date });
-            } else {
-              skip('home_currency_unset', { currency });
+        for (const entry of plan) {
+          if (since !== null) {
+            const day = isRecordCurrencyBlank(row[entry.rateDateField])
+              ? undefined
+              : documentDateOf(row[entry.rateDateField], entry.rateDateIsInstant ? await serving.timezone(organizationId ?? undefined) : undefined);
+            if (day === undefined || day < since) {
+              report.outsideSince++;
+              org.outsideSince++;
+              continue;
             }
+          }
+          report.amounts++;
+          org.amounts++;
+          const skip = (reason: HomeAmountSkipReason, extra: { currency?: string; date?: string } = {}) => {
+            report.skippedTotal++;
+            report.skippedByReason[reason]++;
+            org.skipped[reason]++;
+            const item: HomeAmountRecomputeSkip = { recordId, organizationId, field: entry.amountField, reason, ...extra };
+            if (report.skipped.length < maxListed) report.skipped.push(item);
+            else report.skippedTruncated = true;
+            if (auditSkips.length < AUDIT_MAX_LISTED) auditSkips.push(item);
+          };
+
+          // A blank code beside an amount is its own class: there is no currency to convert from
+          // (the projection leaves such an entry out, so the code-blank refusal can answer instead).
+          if (!isRecordCurrencyBlank(row[entry.amountField]) && isRecordCurrencyBlank(row[entry.codeField])) {
+            skip('code_blank');
             continue;
           }
-          if (code === VALIDATION_FAILED_CODE) {
-            skip('document_date_blank', { currency });
+
+          let projected: Record<string, unknown>;
+          try {
+            projected = await projectHomeAmounts([entry], row, serving, {
+              object,
+              operation: 'update',
+              organizationId: organizationId ?? undefined,
+              recordId,
+            });
+          } catch (err) {
+            const code = (err as { code?: unknown })?.code;
+            const currency = typeof row[entry.codeField] === 'string' ? (row[entry.codeField] as string).trim() : undefined;
+            if (isHomeAmountRefusal(err)) {
+              if (code === EXCHANGE_RATE_MISSING_CODE) {
+                skip('rate_missing', { currency, date: (err as { date: string }).date });
+              } else {
+                skip('home_currency_unset', { currency });
+              }
+              continue;
+            }
+            if (code === VALIDATION_FAILED_CODE) {
+              skip('document_date_blank', { currency });
+              continue;
+            }
+            throw err;
+          }
+          // The projection leaves out an entry whose inputs the write's validator refuses.
+          if (!(entry.homeField in projected)) {
+            skip('unconvertible', typeof row[entry.codeField] === 'string' ? { currency: String(row[entry.codeField]) } : {});
             continue;
           }
-          throw err;
-        }
-        // The projection leaves out an entry whose inputs the write's validator refuses.
-        if (!(entry.homeField in projected)) {
-          skip('unconvertible', typeof row[entry.codeField] === 'string' ? { currency: String(row[entry.codeField]) } : {});
-          continue;
+
+          const to = { home: projected[entry.homeField], rate: projected[entry.rateField] };
+          const from = { home: row[entry.homeField] ?? null, rate: row[entry.rateField] ?? null };
+          if (sameStoredNumber(from.home, to.home) && sameStoredNumber(from.rate, to.rate)) {
+            report.unchanged++;
+            org.unchanged++;
+            continue;
+          }
+          report.changed++;
+          org.changed++;
+          if (report.changes.length < maxListed) report.changes.push({ recordId, organizationId, field: entry.amountField, from, to });
+          else report.changesTruncated = true;
+          // The write recomputes over whatever the payload holds for the home field: the
+          // projection the write runs is the value stored, never this preview's.
+          patch[entry.homeField] = to.home;
         }
 
-        const to = { home: projected[entry.homeField], rate: projected[entry.rateField] };
-        const from = { home: row[entry.homeField] ?? null, rate: row[entry.rateField] ?? null };
-        if (sameStoredNumber(from.home, to.home) && sameStoredNumber(from.rate, to.rate)) {
-          report.unchanged++;
-          org.unchanged++;
-          continue;
+        if (!apply || Object.keys(patch).length === 0) continue;
+        try {
+          await withTransientRetry(
+            () => engine.update(
+              object,
+              {
+                id,
+                ...patch,
+                ...(row.updated_at !== undefined && row.updated_at !== null ? { updated_at: row.updated_at } : {}),
+              },
+              { context: { ...SYSTEM_PRESERVING_CTX } },
+            ),
+            options.retry ?? {},
+          );
+          // Bumped AFTER the retry settles, never inside the retried closure.
+          report.written++;
+          org.written++;
+        } catch (err) {
+          // One row's failure must not abort the rest; a re-run revisits it, because it still differs.
+          const message = (err as Error)?.message ?? String(err);
+          logger.warn(`[home-amount-recompute] ${object} record ${recordId}: ${message}`);
+          report.failures.push({ recordId, error: message });
         }
-        report.changed++;
-        org.changed++;
-        if (report.changes.length < maxListed) report.changes.push({ recordId, organizationId, field: entry.amountField, from, to });
-        else report.changesTruncated = true;
-        // The write recomputes over whatever the payload holds for the home field: the
-        // projection the write runs is the value stored, never this preview's.
-        patch[entry.homeField] = to.home;
-      }
-
-      if (!apply || Object.keys(patch).length === 0) continue;
-      try {
-        await withTransientRetry(
-          () => engine.update(
-            object,
-            {
-              id,
-              ...patch,
-              ...(row.updated_at !== undefined && row.updated_at !== null ? { updated_at: row.updated_at } : {}),
-            },
-            { context: { ...SYSTEM_PRESERVING_CTX } },
-          ),
-          options.retry ?? {},
-        );
-        // Bumped AFTER the retry settles, never inside the retried closure.
-        report.written++;
-        org.written++;
-      } catch (err) {
-        // One row's failure must not abort the rest; a re-run revisits it, because it still differs.
-        const message = (err as Error)?.message ?? String(err);
-        logger.warn(`[home-amount-recompute] ${object} record ${recordId}: ${message}`);
-        report.failures.push({ recordId, error: message });
       }
     }
+  } catch (err) {
+    if (apply) {
+      finishOrganizations(report, organizations);
+      const message = (err as Error)?.message ?? String(err);
+      logger.warn(
+        `[home-amount-recompute] the run over ${object} stopped after ${report.written} row(s) were rewritten: ${message}`,
+      );
+      report.audit = await writeAuditEntry(engine, logger, report, auditSkips, options.source, message);
+    }
+    throw err;
   }
   if (walk.truncated) report.truncated = true;
-  report.organizations = [...organizations.values()].sort((a, b) =>
-    a.organizationId === b.organizationId ? 0 : a.organizationId === null ? 1 : b.organizationId === null ? -1 : a.organizationId < b.organizationId ? -1 : 1,
-  );
+  finishOrganizations(report, organizations);
 
   if (apply) report.audit = await writeAuditEntry(engine, logger, report, auditSkips, options.source);
   return report;
+}
+
+function finishOrganizations(
+  report: HomeAmountRecomputeReport,
+  organizations: Map<string, HomeAmountRecomputeOrganization>,
+): void {
+  report.organizations = [...organizations.values()].sort((a, b) =>
+    a.organizationId === b.organizationId ? 0 : a.organizationId === null ? 1 : b.organizationId === null ? -1 : a.organizationId < b.organizationId ? -1 : 1,
+  );
 }
 
 async function organizationEntry(
@@ -557,6 +605,7 @@ async function writeAuditEntry(
   report: HomeAmountRecomputeReport,
   skips: HomeAmountRecomputeSkip[],
   source: string | undefined,
+  aborted?: string,
 ): Promise<HomeAmountRecomputeAudit> {
   if (!engine.getObject(AUDIT_OBJECT)) return { written: false, reason: 'ledger_not_mounted' };
   const metadata = {
@@ -577,6 +626,8 @@ async function writeAuditEntry(
     skippedListed: skips.length < report.skippedTotal ? `${skips.length} of ${report.skippedTotal}` : undefined,
     failures: report.failures.slice(0, AUDIT_MAX_LISTED),
     truncated: report.truncated,
+    // Set only when an error ended the walk: the counts above are as far as it got.
+    ...(aborted !== undefined ? { aborted } : {}),
   };
   try {
     await engine.insert(
@@ -633,7 +684,11 @@ export function formatHomeAmountRecomputeReport(report: HomeAmountRecomputeRepor
     const remedies: string[] = [];
     if (report.skippedByReason.rate_missing > 0) remedies.push('rate_missing: add the exchange rate (Setup → Exchange Rates) and re-run');
     if (report.skippedByReason.code_blank > 0) {
-      remedies.push(`code_blank: write the codes with \`os migrate record-currency-codes --object ${report.object} --field <amount> --code <ISO 4217>\`, then re-run`);
+      remedies.push(
+        `code_blank: write the codes with \`os migrate record-currency-codes --object ${report.object} --field <amount> --code <ISO 4217>\`, then re-run`
+          + ' — that command writes its one code into the codeless rows of EVERY organization (ADR-0144 Open item 13), so check the'
+          + ' code_blank count per organization above before you give it one',
+      );
     }
     if (report.skippedByReason.document_date_blank > 0) remedies.push('document_date_blank: fill the document date, then re-run');
     if (report.skippedByReason.home_currency_unset > 0) remedies.push('home_currency_unset: set Localization → Default currency for the organization, then re-run');

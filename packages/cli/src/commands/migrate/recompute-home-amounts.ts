@@ -24,28 +24,6 @@ import { refuseUndeclaredObjects } from '../../utils/migrate-object-scope.js';
 // Type-only, so the heavy engine package is still loaded lazily below.
 import type { HomeAmountRecomputeEngine } from '@objectstack/objectql';
 
-const CALENDAR_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-/**
- * The `--since` refusal, judged before the occupancy probe, the `--apply`
- * prompt and the boot: a date that is not one is not one on every database.
- * The envelope and the leading wording are `recomputeHomeAmounts`'s own
- * (`VALIDATION_FAILED` / 400), which keeps the check for every other caller.
- */
-function refuseMalformedSince(since: string | undefined): void {
-  if (since === undefined) return;
-  const ms = Date.parse(`${since}T00:00:00Z`);
-  if (CALENDAR_DATE.test(since) && !Number.isNaN(ms) && new Date(ms).toISOString().slice(0, 10) === since) return;
-  const err = new Error(
-    `[home-amount-recompute] since '${since}' is not a calendar date: give it as YYYY-MM-DD (for example 2026-01-01). `
-      + 'It is compared with each row\'s document date. Refused before the database was opened or any row was read.',
-  ) as Error & { code: string; status: number; httpStatus: number };
-  err.code = 'VALIDATION_FAILED';
-  err.status = 400;
-  err.httpStatus = 400;
-  throw err;
-}
-
 async function confirm(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false; // non-interactive → require --yes
   const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -71,7 +49,7 @@ async function confirm(question: string): Promise<boolean> {
  * The numbers are the write's: the run projects each stored row through the
  * write's own projection, and an applied row is written through the engine,
  * which projects it again. The boot carries the settings service (each
- * organization's home currency and timezone) and the audit ledger (one entry
+ * organization's home currency and timezone) and the audit ledger (one run-level entry
  * per applied run).
  *
  * Dry run by default (writes no row), `--apply` to write. Rows that cannot be
@@ -131,9 +109,11 @@ export default class MigrateRecomputeHomeAmounts extends Command {
 
     if (!flags.json) printHeader('Migrate · recompute-home-amounts');
 
-    // `--since` first: before the occupancy probe, the `--apply` prompt and the boot.
+    // `--since` first: before the occupancy probe, the `--apply` prompt and the boot. The check
+    // and its envelope are the recompute's own, so the command keeps no copy of either.
     try {
-      refuseMalformedSince(flags.since);
+      const { assertHomeAmountRecomputeSince } = await import('@objectstack/objectql');
+      assertHomeAmountRecomputeSince(flags.since);
     } catch (error: any) {
       if (flags.json) {
         await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true });
@@ -252,8 +232,9 @@ export default class MigrateRecomputeHomeAmounts extends Command {
       });
       // [ADR-0144 Open item 8] A listed-and-skipped row is a gap a total over
       // the home field silently leaves out, so the run is not done while one
-      // remains: exit 1, on a dry run as on an apply run.
-      const gap = report.failures.length > 0 || report.skippedTotal > 0;
+      // remains: exit 1, on a dry run as on an apply run. A walk `--max-records`
+      // cut short has not looked at every row, so it is not done either.
+      const gap = report.failures.length > 0 || report.skippedTotal > 0 || report.truncated;
 
       if (flags.json) {
         await emitJson({ database: stack.dbLabel, apply, report, duration: timer.elapsed() });
@@ -279,6 +260,11 @@ export default class MigrateRecomputeHomeAmounts extends Command {
         printError(
           `${report.skippedTotal} amount(s) could not be converted and were left as stored — totals over the home ` +
             'field leave them out. Fix each reason listed above, then re-run.',
+        );
+      } else if (report.truncated) {
+        printError(
+          `The walk stopped at --max-records (${report.scannedRecords} row(s) read): rows past it were not looked at. ` +
+            'Re-run with a higher --max-records to cover every row.',
         );
       } else if (apply && report.written > 0) {
         printSuccess(`Recomputed ${report.written} row(s). Re-run any time — it only rewrites rows that still differ.`);
