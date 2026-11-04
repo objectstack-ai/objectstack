@@ -70,10 +70,13 @@
  * from `protocol.ts` by path) and `PATH_READER_NEEDLES` (literal text a reader
  * requires to find there) are the tables rather than rules.
  *
- * One rule of the pilot is not carried: a non-private method whose return type
- * is inferred moves. The hand series already moved `getMetaItems`,
- * `validateData` and `createData` that way under the same declaration bar, so
- * it is this file's cut pattern; the bar on the built `.d.ts` judges it.
+ * The pilot's rule on inferred return types is carried: a non-private method
+ * whose return type is inferred stays (`inferred-return-type`). The published
+ * `.d.ts` prints that type, and once the body moves the compiler infers it
+ * through the moved function instead: measured on this file, `getDiscovery`'s
+ * printed type lost the `@deprecated` docblock on one of its keys (the bar
+ * on the built `.d.ts` refused the split until the rule was back). A private
+ * method's type is not printed (`private name;`), so it moves.
  *
  * ## The proof (`--write` runs it on its own output; `--verify` re-runs it)
  *
@@ -185,6 +188,7 @@ const STAY_REASONS = Object.freeze({
   'closed-set': 'its body does something outside E1\'s closed rewrite set (host-split.mjs refuses it)',
   'constructor-rewrite': 'it reads `this.constructor.<static>` (that rewrite and the private-static one both print `host.<static>`, so undoing it would be ambiguous)',
   'parameter-shape': 'a destructured or `this` parameter (the stub forwards parameters by name)',
+  'inferred-return-type': 'a non-private method with an inferred return type (the published `.d.ts` prints the type, which the move would re-infer through the moved function)',
   'parameter-shadows': 'a parameter is named `host`, `protocolHost` or the method itself (the stub or the moved function would read it)',
   'path-reader': 'a reader takes its text out of protocol.ts by path (PATH_READER_PINS / PATH_READER_NEEDLES)',
   'non-public-static': 'it reads a protected static of the class through its name (unreachable from a module function)',
@@ -595,6 +599,8 @@ function plan(T, text, hostText, { anchors = SECTION_ANCHORS, pins = PATH_READER
     if (cls.members.some((o) => o !== m && ts.isMethodDeclaration(o) && !o.body && o.name && ts.isIdentifier(o.name) && o.name.text === name)) add('overloaded');
     if (ts.canHaveDecorators?.(m) && ts.getDecorators?.(m)?.length) add('decorated');
     if (m.asteriskToken) add('generator');
+    const isPrivate = (m.modifiers ?? []).some((x) => x.kind === ts.SyntaxKind.PrivateKeyword) || ts.isPrivateIdentifier(m.name);
+    if (!isPrivate && !m.type) add('inferred-return-type');
     for (const p of m.parameters) {
       if (!ts.isIdentifier(p.name) || p.name.text === 'this') add(`parameter-shape: ${p.name.getText(sf)}`);
       else if (['host', 'protocolHost', name].includes(p.name.text)) add(`parameter-shadows: ${p.name.text}`);
@@ -1263,7 +1269,7 @@ async function main(argv) {
 let selfTestReachedVerdict = false;
 
 const SELF_TEST_BATTERIES = Object.freeze({
-  'stay rules': 15,
+  'stay rules': 16,
   'host entries': 4,
   'byte-identity proof': 9,
   'determinism': 2,
@@ -1342,6 +1348,11 @@ ${pad}
     }
 
     public inferred() {
+${pad}
+        return this.count;
+    }
+
+    private inferredPrivate() {
 ${pad}
         return this.count;
     }
@@ -1449,7 +1460,8 @@ async function selfTest() {
     stays('tiny', 'no-yield');
     stays('bareThis', 'closed-set');
     stays('viaConstructor', 'constructor-rewrite');
-    moves('inferred', 'an inferred return type moves, as the hand series moved getMetaItems and validateData');
+    stays('inferred', 'inferred-return-type');
+    moves('inferredPrivate', 'a private method\'s inferred return type is not printed in the `.d.ts`');
     stays('readsNoMember', 'no-host-read');
     stays('destructured', 'parameter-shape');
     stays('shadows', 'parameter-shadows');

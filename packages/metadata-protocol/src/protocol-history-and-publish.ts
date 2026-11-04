@@ -3,7 +3,7 @@
 /**
  * [#29985 codemod] The "History, publish, drafts, publish backfill" section of
  * `ObjectStackProtocolImplementation`: the bodies of `historyMetaItem`,
- * `publishMetaItem`, `publishMetaItemUnaudited`, `promoteDraftForPublish`,
+ * `publishMetaItemUnaudited`, `promoteDraftForPublish`,
  * `runPublishSideEffects`, `discardPackageDrafts` moved out of `protocol.ts`
  * whole by `scripts/codemod-split-protocol.mjs`.
  *
@@ -33,7 +33,6 @@ import type { OverrideWriteVerdict } from './protocol-packaged-base-refusal.js';
 import { objectBodyExtensionFieldSuffixRefusal } from './protocol-extension-field-suffix.js';
 import { storedFlowVerdictBody } from './protocol-flow-save-replay.js';
 import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-credentials-ref.js';
-import { withRefusalAudit } from './protocol-refusal-audit.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import { packagelessPublishNoDraftRefusal, permissionSetOwnerBindingRefusal } from './protocol-authoring-refusals.js';
 import { memberOption, mutationEventMemberOfBody, resolveBundleMemberSelector } from './protocol-bundle-members.js';
@@ -139,15 +138,6 @@ export async function historyMetaItem(host: Pick<ProtocolHost, 'getOverlayRepo' 
         });
     }
     return { events };
-}
-
-/** The body of `ObjectStackProtocolImplementation#publishMetaItem`; the method's docblock there is its contract. */
-export async function publishMetaItem(host: Pick<ProtocolHost, 'publishMetaItemUnaudited' | 'recordMetadataAudit'>, request: PublishMetaItemRequest) {
-    // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
-    return withRefusalAudit((entry) => host.recordMetadataAudit(entry), {
-        operation: 'publish', type: request.type, name: request.name, actor: request.actor,
-        source: 'protocol.publishMetaItem',
-    }, () => host.publishMetaItemUnaudited(request));
 }
 
 /** The body of `ObjectStackProtocolImplementation#publishMetaItemUnaudited`; the method's docblock there is its contract. */

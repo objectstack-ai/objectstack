@@ -42,6 +42,9 @@
  * is keyed by its module and the function it sits in. Comments are blanked
  * before the scan in every file, so a docblock that names the callee (two
  * modules' do) is not a site.
+ *
+ * [#29985] The codemod split moved ten sites' bodies with their sections
+ * (`file` on each row names the module); their dispositions are unchanged.
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -134,15 +137,15 @@ const SITES: ReadonlyArray<Site & { readonly noPackage: boolean; readonly dispos
         why: '[#22877] a bundled type\'s addressed member (the selector\'s, else the canonical one) when no stored row of it exists: the served body IS this artifact, and the envelope is looked up at its own package' },
     { file: LAYERED_READS_FILE, member: 'getMetaItemLayered', args: 'request.type, request.name, request.packageId, wantedMember', noPackage: true, disposition: 'no',
         why: 'the layered read\'s code LAYER: body and envelope are one artifact, and its provenance fields are read off that layer; [#26699] at the addressed member (the selector\'s, else the canonical one)' },
-    { member: 'packagedArtifactBase', args: 'type, name', noPackage: true, disposition: 'no',
+    { file: 'protocol-discovery-and-bases.ts', member: 'packagedArtifactBase', args: 'type, name', noPackage: true, disposition: 'no',
         why: 'the packaged base the translators compare a served body against: nothing of it is grafted onto the body' },
-    { member: 'readCodeLayerForCarryForward', args: 'type, name, pkg', noPackage: true, disposition: 'no',
+    { file: 'protocol-discovery-and-bases.ts', member: 'readCodeLayerForCarryForward', args: 'type, name, pkg', noPackage: true, disposition: 'no',
         why: 'a save\'s credential carry-forward: a write, whose door strips the derived provenance keys before it persists' },
-    { member: 'isArtifactBacked', args: 'type, name', noPackage: true, disposition: 'no',
+    { file: 'protocol-write-gates.ts', member: 'isArtifactBacked', args: 'type, name', noPackage: true, disposition: 'no',
         why: 'a boolean predicate' },
-    { member: 'isNestedArtifactField', args: '\'object\', name.slice(0, sep)', noPackage: true, disposition: 'no',
+    { file: 'protocol-write-gates.ts', member: 'isNestedArtifactField', args: '\'object\', name.slice(0, sep)', noPackage: true, disposition: 'no',
         why: 'a boolean containment test over the one owner of an object' },
-    { member: 'packagedArtifactOwner', args: 'folded.type, folded.name', noPackage: true, disposition: 'no',
+    { file: 'protocol-write-gates.ts', member: 'packagedArtifactOwner', args: 'folded.type, folded.name', noPackage: true, disposition: 'no',
         why: 'a shipped-package check by name: it returns a package id, never an envelope on a served body' },
     { file: SEAM_FILE, member: 'shippedArtifactsOf', args: 'type, name, undefined, member', noPackage: true, disposition: 'no',
         why: 'the lock\'s artifact layer (the one item-lock resolution), never an envelope on a served body; [#28746] at the override write gate\'s bundle member when it names one' },
@@ -152,17 +155,17 @@ const SITES: ReadonlyArray<Site & { readonly noPackage: boolean; readonly dispos
         why: '[#25467 E2] the host factory\'s closure in the class\'s static block: it forwards the moved bodies\' calls (their rows above, in their modules) unchanged, so its disposition is theirs' },
     { member: 'shippedArtifactsOf', args: '...a', noPackage: true, disposition: 'no',
         why: '[#25467 cut 15] the class member\'s host closure: it forwards the moved body\'s two calls (the rows above) unchanged, so its disposition is theirs' },
-    { member: 'hydrateOverlayIntoRegistry', args: 'type, (data as any).name, options.packageId ?? undefined, bundleMemberOf(type, data)', noPackage: true, disposition: 'no',
+    { file: 'protocol-registry-hydration.ts', member: 'hydrateOverlayIntoRegistry', args: 'type, (data as any).name, options.packageId ?? undefined, bundleMemberOf(type, data)', noPackage: true, disposition: 'no',
         why: 'scoped to the row\'s own package; undefined only for a package-less row, whose body names no package; [#23074] at the row\'s own bundle member' },
-    { member: 'expandRuntimeViewContainer', args: 'type, String(item.name), ownPackageId', noPackage: false, disposition: 'no',
+    { file: 'protocol-registry-hydration.ts', member: 'expandRuntimeViewContainer', args: 'type, String(item.name), ownPackageId', noPackage: false, disposition: 'no',
         why: 'not called without a package, and kept only when it is the container\'s own package\'s' },
-    { member: 'shippedViewContainerOf', args: 'type, name, packageId', noPackage: false, disposition: 'no',
+    { file: 'protocol-registry-hydration.ts', member: 'shippedViewContainerOf', args: 'type, name, packageId', noPackage: false, disposition: 'no',
         why: 'returns before the lookup without a package, and keeps only that package\'s own container' },
-    { member: 'runtimeViewContainerPackage', args: 'type, container.name', noPackage: true, disposition: 'no',
+    { file: 'protocol-registry-hydration.ts', member: 'runtimeViewContainerPackage', args: 'type, container.name', noPackage: true, disposition: 'no',
         why: 'the package a package-less container row overlays: it becomes the expansion\'s own package, whose own artifact lends the envelope' },
     { member: 'isShippedByAnotherPackage', args: 'type, name', noPackage: true, disposition: 'no',
         why: 'a boolean predicate' },
-    { member: 'viewContainerNameCollisionRefusal', args: 'type, name', noPackage: true, disposition: 'no',
+    { file: 'protocol-save.ts', member: 'viewContainerNameCollisionRefusal', args: 'type, name', noPackage: true, disposition: 'no',
         why: 'the save door\'s collision check: the package id names a shipper in a refusal, never an envelope on a served body' },
 ];
 

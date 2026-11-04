@@ -61,19 +61,10 @@ export interface ProtocolHost {
     readonly applyRemoteMetadataMutation: ObjectStackProtocolImplementation['applyRemoteMetadataMutation'];
     readonly applySeedBodies: ObjectStackProtocolImplementation['applySeedBodies'];
     readonly artifactLockLayerAt: ObjectStackProtocolImplementation['artifactLockLayerAt'];
-    readonly assertAggregationFieldsExist: ObjectStackProtocolImplementation['assertAggregationFieldsExist'];
-    readonly assertExpandTargetsExist: ObjectStackProtocolImplementation['assertExpandTargetsExist'];
-    readonly assertFilterFieldsExist: ObjectStackProtocolImplementation['assertFilterFieldsExist'];
-    readonly assertGroupByFieldsExist: ObjectStackProtocolImplementation['assertGroupByFieldsExist'];
     readonly assertLockAllowsDelete: ObjectStackProtocolImplementation['assertLockAllowsDelete'];
     readonly assertLockAllowsWrite: ObjectStackProtocolImplementation['assertLockAllowsWrite'];
-    readonly assertNoInternalFieldEvaluated: ObjectStackProtocolImplementation['assertNoInternalFieldEvaluated'];
     readonly assertObjectRegistered: ObjectStackProtocolImplementation['assertObjectRegistered'];
-    readonly assertProjectionFieldsExist: ObjectStackProtocolImplementation['assertProjectionFieldsExist'];
-    readonly assertQueryParamsAreFields: ObjectStackProtocolImplementation['assertQueryParamsAreFields'];
     readonly assertRuntimeAuthoringRules: ObjectStackProtocolImplementation['assertRuntimeAuthoringRules'];
-    readonly assertSearchFieldsAreSearchable: ObjectStackProtocolImplementation['assertSearchFieldsAreSearchable'];
-    readonly assertSortFieldsExist: ObjectStackProtocolImplementation['assertSortFieldsExist'];
     readonly assertVersionMatch: ObjectStackProtocolImplementation['assertVersionMatch'];
     readonly authoredLockFamily: ObjectStackProtocolImplementation['authoredLockFamily'];
     readonly authoringChannel: ObjectStackProtocolImplementation['authoringChannel'];
@@ -91,7 +82,6 @@ export interface ProtocolHost {
     readonly credentialChannelFor: ObjectStackProtocolImplementation['credentialChannelFor'];
     readonly declinesStoredRow: ObjectStackProtocolImplementation['declinesStoredRow'];
     readonly defaultRecordPageSaveRefusal: ObjectStackProtocolImplementation['defaultRecordPageSaveRefusal'];
-    readonly deleteMetaItemUnaudited: ObjectStackProtocolImplementation['deleteMetaItemUnaudited'];
     readonly detachMetadataMutationPubSub: ObjectStackProtocolImplementation['detachMetadataMutationPubSub'];
     readonly diffMetaItem: ObjectStackProtocolImplementation['diffMetaItem'];
     readonly disabledActionsOf: ObjectStackProtocolImplementation['disabledActionsOf'];
@@ -176,7 +166,6 @@ export interface ProtocolHost {
     readonly probeRecord: ObjectStackProtocolImplementation['probeRecord'];
     readonly promoteDraftForPublish: ObjectStackProtocolImplementation['promoteDraftForPublish'];
     readonly publishMaterializers: ObjectStackProtocolImplementation['publishMaterializers'];
-    readonly publishMetaItemUnaudited: ObjectStackProtocolImplementation['publishMetaItemUnaudited'];
     readonly readActiveOverlayRows: ObjectStackProtocolImplementation['readActiveOverlayRows'];
     readonly readFlattenedMetaItems: ObjectStackProtocolImplementation['readFlattenedMetaItems'];
     readonly readItemActiveRows: ObjectStackProtocolImplementation['readItemActiveRows'];
@@ -223,7 +212,6 @@ export interface ProtocolHost {
     readonly rethrowUnlessMetadataStoreUnprovisioned: ObjectStackProtocolImplementation['rethrowUnlessMetadataStoreUnprovisioned'];
     readonly revertCommit: ObjectStackProtocolImplementation['revertCommit'];
     readonly rollBackUnmanagedImport: ObjectStackProtocolImplementation['rollBackUnmanagedImport'];
-    readonly rollbackMetaItemUnaudited: ObjectStackProtocolImplementation['rollbackMetaItemUnaudited'];
     readonly runAuthoringGate: ObjectStackProtocolImplementation['runAuthoringGate'];
     readonly runMutationProjector: ObjectStackProtocolImplementation['runMutationProjector'];
     readonly runPublishSideEffects: ObjectStackProtocolImplementation['runPublishSideEffects'];
@@ -231,11 +219,8 @@ export interface ProtocolHost {
     readonly runtimeViewContainerPackage: ObjectStackProtocolImplementation['runtimeViewContainerPackage'];
     readonly saveConflict: ObjectStackProtocolImplementation['saveConflict'];
     readonly saveMetaItem: ObjectStackProtocolImplementation['saveMetaItem'];
-    readonly saveMetaItemUnaudited: ObjectStackProtocolImplementation['saveMetaItemUnaudited'];
     readonly saveWriteBinding: ObjectStackProtocolImplementation['saveWriteBinding'];
-    readonly searchAll: ObjectStackProtocolImplementation['searchAll'];
     readonly seedExternalIdSaveRefusal: ObjectStackProtocolImplementation['seedExternalIdSaveRefusal'];
-    readonly servedExpand: ObjectStackProtocolImplementation['servedExpand'];
     readonly servedLockState: ObjectStackProtocolImplementation['servedLockState'];
     readonly shippedArtifactsOf: ObjectStackProtocolImplementation['shippedArtifactsOf'];
     readonly shippingPackagesOf: ObjectStackProtocolImplementation['shippingPackagesOf'];

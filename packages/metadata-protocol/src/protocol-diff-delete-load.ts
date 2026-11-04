@@ -3,8 +3,8 @@
 /**
  * [#29985 codemod] The "Diff, deleteMetaItem, loadMetaFromDb, load reports,
  * findReferencesToMeta" section of `ObjectStackProtocolImplementation`: the
- * bodies of `diffMetaItem`, `deleteMetaItem`, `deleteMetaItemUnaudited`,
- * `loadMetaFromDb`, `findReferencesToMeta` moved out of `protocol.ts` whole by
+ * bodies of `diffMetaItem`, `deleteMetaItemUnaudited`, `loadMetaFromDb`,
+ * `findReferencesToMeta` moved out of `protocol.ts` whole by
  * `scripts/codemod-split-protocol.mjs`.
  *
  * A MOVE, not a redesign. Each function below is the body of the class method
@@ -40,7 +40,6 @@ import { REFERENCE_SITES } from './reference-sites.js';
 import { computeMetadataDiagnostics } from './metadata-diagnostics.js';
 import { hasMetadataRedactor, redactMetadataItem } from './metadata-redaction.js';
 import { isPairRowRemoval } from './protocol-packaged-base-refusal.js';
-import { withRefusalAudit } from './protocol-refusal-audit.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import { remainingRowsPhrase } from './protocol-authoring-refusals.js';
 import { memberOption, mutationEventMember, resolveBundleMemberSelector } from './protocol-bundle-members.js';
@@ -365,15 +364,6 @@ export async function diffMetaItem(host: Pick<ProtocolHost, 'diffMetaItem' | 'fi
         toVersion,
         ...served,
     };
-}
-
-/** The body of `ObjectStackProtocolImplementation#deleteMetaItem`; the method's docblock there is its contract. */
-export async function deleteMetaItem(host: Pick<ProtocolHost, 'deleteMetaItemUnaudited' | 'recordMetadataAudit'>, request: DeleteMetaItemRequest) {
-    // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
-    return withRefusalAudit((entry) => host.recordMetadataAudit(entry), {
-        operation: 'delete', type: request.type, name: request.name, actor: request.actor,
-        source: 'protocol.deleteMetaItem',
-    }, () => host.deleteMetaItemUnaudited(request));
 }
 
 /** The body of `ObjectStackProtocolImplementation#deleteMetaItemUnaudited`; the method's docblock there is its contract. */
