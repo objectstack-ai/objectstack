@@ -8885,9 +8885,12 @@ export function AutomationsPillar({
                   </label>
                   {newChoice === p && startTrigger.object?.showWhen?.equals.includes(p.triggerType) && (
                     <div className="ml-6 mt-1.5">
+                      {/* objectstack#30038 — no expression is legal here: a typed
+                          prefix is never saved as the trigger object. */}
                       <ObjectPicker
                         label={startTrigger.object.label}
                         value={newTriggerObject}
+                        objectsOnly
                         onCommit={(v) => {
                           setNewTriggerObject(v);
                           setNewNeeds(null);
@@ -8942,6 +8945,7 @@ export function AutomationsPillar({
                       <ObjectPicker
                         label={startTrigger.object.label}
                         value={newTriggerObject}
+                        objectsOnly
                         onCommit={setNewTriggerObject}
                         locale={locale}
                       />
