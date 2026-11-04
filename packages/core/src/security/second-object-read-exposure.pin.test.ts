@@ -228,6 +228,19 @@ const CALLERS: Record<string, Classification> = {
       '`beforeRelationTarget` hook (the data door hands it `refuseUnservedRelationTarget`). Pinned by ' +
       '`packages/objectql/src/internal-field-evaluation-guard.test.ts` (the refusals assert the driver was never asked)',
   },
+  // [#29986] The codemod split of engine.ts moved two arbiter callers out of it.
+  'packages/objectql/src/engine-security-resolvers.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "a formula field's relation hop (`resolveFormulaRelated`): it judges the formula's own path against the " +
+      "target's DECLARED field map and loads through `resolveOneHopRelated` (its row), serving nothing of the target here",
+  },
+  'packages/objectql/src/engine-top-level.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      'the delete walk names the object a relation points at (`deleteWalkTargetOf`: a `user` field answers `sys_user`) ' +
+      'to plan a cascade or a restrict; it reads no record and serves nothing of the target',
+  },
   // [#25522 cut 10] The write-path reference check, moved out of engine.ts.
   'packages/objectql/src/engine-referential-integrity.ts': {
     kind: 'not-a-served-read',
