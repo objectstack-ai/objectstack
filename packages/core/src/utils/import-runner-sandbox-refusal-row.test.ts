@@ -32,10 +32,16 @@
  * §5 (#22718) holds the two sandboxed failures the door answers as a fault, a
  * crashed body and a refusal that declared a 5xx: their row reads the door's
  * sentence.
+ *
+ * [#29978] The row's `code` for a refusal that declared none is
+ * `HOOK_ABORTED` (`UNDECLARED_HOOK_REFUSAL_CODE`), the code the create door
+ * answers for it, where it was `IMPORT_ROW_FAILED`; §1 pins it on each write
+ * path and §6 pins door-to-row agreement and the failures that keep
+ * `IMPORT_ROW_FAILED`.
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { mapDataError, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
+import { mapDataError, INTERNAL_ERROR_MESSAGE, UNDECLARED_HOOK_REFUSAL_CODE } from '@objectstack/types';
 import { runImport, sanitizeRowError, type ImportProtocolLike } from './import-runner';
 import type { ExportFieldMeta } from './import-field-meta.js';
 
@@ -98,7 +104,7 @@ describe('[#22694] §1 — each write path reports the hook\'s sentence', () => 
     const summary = await runImport({ ...baseOpts, p, rows: [{ name: 'r0' }, { name: 'r1' }, { name: 'r2' }] });
 
     expect(summary.created).toBe(2);
-    expect(summary.results[1]).toEqual({ row: 2, ok: false, action: 'failed', error: SENTENCE, code: 'IMPORT_ROW_FAILED' });
+    expect(summary.results[1]).toEqual({ row: 2, ok: false, action: 'failed', error: SENTENCE, code: UNDECLARED_HOOK_REFUSAL_CODE });
     expect(JSON.stringify(summary)).not.toMatch(WRAPPER_RE);
   });
 
@@ -110,7 +116,7 @@ describe('[#22694] §1 — each write path reports the hook\'s sentence', () => 
     // Anti-vacuity: the batch really ran and really degraded.
     expect(createManyData).toHaveBeenCalledTimes(1);
     expect(p.createData).toHaveBeenCalledTimes(3);
-    expect(summary.results[1]).toMatchObject({ ok: false, action: 'failed', error: SENTENCE, code: 'IMPORT_ROW_FAILED' });
+    expect(summary.results[1]).toMatchObject({ ok: false, action: 'failed', error: SENTENCE, code: UNDECLARED_HOOK_REFUSAL_CODE });
     expect(JSON.stringify(summary)).not.toMatch(WRAPPER_RE);
   });
 
@@ -126,7 +132,7 @@ describe('[#22694] §1 — each write path reports the hook\'s sentence', () => 
 
     expect(insertManyData).toHaveBeenCalledTimes(1);
     expect(createManyData).not.toHaveBeenCalled();
-    expect(summary.results[1]).toMatchObject({ ok: false, action: 'failed', error: SENTENCE, code: 'IMPORT_ROW_FAILED' });
+    expect(summary.results[1]).toMatchObject({ ok: false, action: 'failed', error: SENTENCE, code: UNDECLARED_HOOK_REFUSAL_CODE });
     expect(JSON.stringify(summary)).not.toMatch(WRAPPER_RE);
   });
 
@@ -140,7 +146,7 @@ describe('[#22694] §1 — each write path reports the hook\'s sentence', () => 
     const summary = await runImport({ ...baseOpts, writeMode: 'upsert', matchFields: ['name'], p, rows: [{ name: 'r1' }] });
 
     expect(updateData).toHaveBeenCalledTimes(1);
-    expect(summary.results[0]).toMatchObject({ ok: false, action: 'failed', error: SENTENCE, code: 'IMPORT_ROW_FAILED' });
+    expect(summary.results[0]).toMatchObject({ ok: false, action: 'failed', error: SENTENCE, code: UNDECLARED_HOOK_REFUSAL_CODE });
   });
 });
 
@@ -221,5 +227,34 @@ describe('[#22718] §5 — a sandboxed body the door answers as a fault reads as
     // The door's sentence, never the native text or the prose; the code still reads as a fault.
     expect(row).toEqual({ row: 1, ok: false, action: 'failed', error: door.body.error, code });
     expect(JSON.stringify(row)).not.toMatch(leak);
+  });
+});
+
+describe('[#29978] §6 — an undeclared abort answers the create door\'s code', () => {
+  it('the row\'s code is the code `mapDataError` answers for the same refusal', async () => {
+    const err = () => sandboxRefusal(SENTENCE);
+    const door = mapDataError(err(), OBJECT);
+    // Anti-vacuity: the door really answers the abort with that code.
+    expect(door.body.code).toBe('HOOK_ABORTED');
+
+    const row = await rowFor(err);
+    expect(row).toEqual({ row: 1, ok: false, action: 'failed', error: SENTENCE, code: door.body.code });
+  });
+
+  it('a refusal that declared a 4xx status but no code is still an abort', async () => {
+    const row = await rowFor(() => sandboxRefusal(SENTENCE, { status: 422 }));
+    expect(row).toMatchObject({ error: SENTENCE, code: UNDECLARED_HOOK_REFUSAL_CODE });
+  });
+
+  it.each([
+    ['a declared registered code', () => sandboxRefusal(SENTENCE, { code: 'RECORD_LOCKED' }), 'RECORD_LOCKED'],
+    ['a declared unregistered code', () => sandboxRefusal(SENTENCE, { code: 'MZ_PERIOD_CLOSED' }), 'MZ_PERIOD_CLOSED'],
+    ['a body that CRASHED', sandboxCrash, 'IMPORT_ROW_FAILED'],
+    ['a refusal that declared a 5xx and no code', () => sandboxRefusal(SENTENCE, { status: 503 }), 'IMPORT_ROW_FAILED'],
+    ['a plain error carrying the wrapper text but no `innerMessage`', () => new Error(`hook 'g' threw: Error: ${SENTENCE}`), 'IMPORT_ROW_FAILED'],
+    ['a driver fault', () => new Error('SQLITE_BUSY: database is locked'), 'IMPORT_ROW_FAILED'],
+  ] as const)('CONTROL — %s keeps its own code', async (_label, err, code) => {
+    const row = await rowFor(err);
+    expect(row.code).toBe(code);
   });
 });
