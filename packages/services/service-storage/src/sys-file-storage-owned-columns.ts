@@ -55,10 +55,11 @@ import { SYS_FILE_REFERENCE_COLUMNS, SYS_FILE_STORAGE_OWNED_COLUMNS } from './ob
  * context-less create, because their strip judges every write that is not
  * `isSystem`, as the update strip does, and this rule does not loosen it.
  *
- * The stamp is silent, as the attachment hook's is. The engine reports a
- * dropped field (`droppedFields`, `onFieldsDropped`) only for the strips it
- * runs itself, and it runs none on a `sys_` object's create; the hook contract
- * declares no member through which a hook reports one.
+ * The stamp is silent, as the attachment and comment stamps are. The engine
+ * reports a dropped field (`droppedFields`, `onFieldsDropped`) only for the
+ * strips it runs itself, and it runs none on a `sys_` object's create. The hook
+ * contract carries no dropped-field report: its one caller-facing member,
+ * `ctx.notice`, is a free-text save notice, and neither sibling stamp uses it.
  */
 
 /** The slice of the data engine the guard installs on. */
