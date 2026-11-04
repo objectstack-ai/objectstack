@@ -609,7 +609,7 @@
       "title": "The built-in apps a stock boot REGISTERS (Setup / Account) render every merged-nav destination; app-level and entry-level gates are enforced, not errored — and Studio's deliberate absence is asserted, never hunted",
       "since": "v15",
       "status": "active",
-      "revision": 12,
+      "revision": 13,
       "priority": "P0",
       "surface": "browser",
       "personas": [
@@ -631,10 +631,10 @@
       "steps": [
         "as admin, GET /api/v1/meta/app?id=setup and extract every merged nav destination — Setup is a SHELL of empty group anchors (packages/platform-objects/src/apps/setup.app.ts: group_overview/apps/people_org/access_control/approvals/configuration/diagnostics/integrations/advanced) filled by SETUP_NAV_CONTRIBUTIONS (setup-nav.contributions.ts) plus capability-plugin contributions (plugin-security Positions/Permission Sets, plugin-sharing Sharing Rules/Record Shares, plugin-approvals, plugin-webhooks)",
         "GET /api/v1/meta/app with NO query first and record the names actually served — a stock boot answers exactly showcase_app, setup, account. Then GET /api/v1/meta/app?id=account (account.app.ts — Profile + Inbox/Security/Developer groups). ⚠️ GET /api/v1/meta/app?id=studio answers 200 {\"items\":[]} on every stock boot and that is the expected result (knownGap): record the absence as an assertion and move on — do NOT install @objectstack/studio to make the step runnable",
-        "as admin, hand-walk each destination in each app. EXPAND every nav group first: some render collapsed by default — Setup's Advanced group and Account's Developer group declare `expanded: false` (packages/platform-objects/src/apps/setup.app.ts, account.app.ts), and QA run #24557 found Setup's Configuration group collapsed as well — so a walk that never expands them never reaches their entries. Then navigate, wait for render, SCREENSHOT FIRST, then read the DOM — assert no pageerror, no 'failed to load', no blank <main>, no 'no actions configured' placeholder",
+        "as admin, hand-walk each destination in each app. At a window narrower than 1416 px (1280 px included) the console folds the sidebar to its icon rail, and Setup and Account open that way (ui/packages/app-shell/src/layout/consoleSidebarRail.ts CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH, objectstack#27593; QA run #29877 met it at 1280 px): press the sidebar toggle at the app bar's left edge (Ctrl/⌘+B) to unfold it before expanding any group. EXPAND every nav group first: some render collapsed by default — Setup's Advanced group and Account's Developer group declare `expanded: false` (packages/platform-objects/src/apps/setup.app.ts, account.app.ts), and QA run #24557 found Setup's Configuration group collapsed as well — so a walk that never expands them never reaches their entries. Then navigate, wait for render, SCREENSHOT FIRST, then read the DOM — assert no pageerror, no 'failed to load', no blank <main>, no 'no actions configured' placeholder",
         "Setup detail: confirm each settings URL entry (nav_settings_* → /apps/setup/system/settings/<namespace>) opens the settings namespace form — the 11 namespaces of a stock single-posture boot, localization/company/branding/auth/mail/sms/storage/ai/knowledge/lifecycle/feature_flags: the nav_settings_* entries of packages/platform-objects/src/apps/setup-nav.contributions.ts, plus nav_settings_branding, which packages/services/service-settings/src/settings-service-plugin.ts contributes only where no organization wall stands, and Users / Organization / Business Units / Teams / Sessions / OAuth Applications render. User preferences and identity links are not Setup destinations: open a user from Users and confirm the user page's Preferences and Linked Accounts tabs render that user's rows",
         "Studio detail is NOT walked from here — the app is not registered on a stock boot (knownGap), so there is no merged nav to render. Its metadata:resource lists and component surfaces (App Builder, All Metadata Types, Packages, API Console, Flow Runs, Public Forms) are reached through the console surface at /_console/studio/<pkg>/<pillar> and are covered by area studio-authoring. What THIS item asserts about Studio is the absence itself, per clause 6",
-        "Account detail: confirm Profile (account:profile_card), Notifications (sys_inbox_message/mine), Approvals (nav_account_approvals, the approvals:inbox component, served as …/component/approvals/inbox — the Approvals Inbox, not the sys_approval_request grid; account.app.ts), Linked Accounts (sys_account), Active Sessions (sys_session/mine), API Keys (sys_api_key/mine), OAuth Applications (sys_oauth_application/mine) and Connect an Agent (nav_connect_agent) each render — 8 Account destinations and 50 Setup destinations for the admin on a stock single-org showcase boot, as QA run #28545 read them at eeec88d1 (GET /api/v1/meta/app leaves, which match the nav source minus its gates; 48 re-measured at 3fd80337 for #28338, QA run #27481 read 44 and 8, QA run #24557 read 42 at 5b14b7f3, 45 on 2026-10-01, and #9453 recorded 43 and 7). Recount from the payload each run",
+        "Account detail: confirm Profile (account:profile_card), Notifications (sys_inbox_message/mine), Approvals (nav_account_approvals, the approvals:inbox component, served as …/component/approvals/inbox — the Approvals Inbox, not the sys_approval_request grid; account.app.ts), Linked Accounts (sys_account), Active Sessions (sys_session/mine), API Keys (sys_api_key/mine), OAuth Applications (sys_oauth_application/mine) and Connect an Agent (nav_connect_agent) each render — 8 Account destinations and 46 Setup destinations for the admin on a stock single-org showcase boot, as QA run #29877 read them at 589049b0 and a fresh showcase boot re-read them at 232d3bb5ef (GET /api/v1/meta/app leaves, which match the nav source minus its gates). Since QA run #28545's reading Setup's Packaged automation page retired under ADR-0146 D11, leaving Packaged Actions (nav_packaged_actions, automation:packaged-actions; #28785), and its unfiltered Packages entry moved to Studio (#29547) (47 for #28927, 50 at eeec88d1 for QA run #28545, 48 re-measured at 3fd80337 for #28338, QA run #27481 read 44 and 8, QA run #24557 read 42 at 5b14b7f3, 45 on 2026-10-01, and #9453 recorded 43 and 7). Recount from the payload each run",
         "confirm the gated entries resolve to ABSENT-not-erroring for the admin: nav_organizations (requiresService org-scoping) is absent in single-org mode; nav_jwks Signing Keys is ABSENT for EVERY persona, admin included — the entry was removed in #7544 because sys_jwks declares apiEnabled:false, so its list answers OBJECT_API_DISABLED (404) for all callers and no permission gate could prune it; SSO Providers is absent unless OS_SSO_ENABLED (knownGap)",
         "sign in as the plain member: attempt to open Setup (app name setup) — capture the app-level refusal (App.requiredPermissions setup.access); open Account (declares no requiredPermissions) — capture it opening. Studio is not part of this comparison: it is absent for EVERY persona including the admin, so a member failing to reach it proves nothing about the gate (the same reasoning #7544 applied to nav_jwks)",
         "as the member, GET /api/v1/meta/app for a reachable app and confirm every manage_platform_settings-gated entry (API Keys, the manage_platform_settings settings URLs) is ABSENT from the member's payload — the server prunes, the client does not merely hide. JWKS is deliberately NOT in this list any more: it is absent for admins too, so finding it absent for a member proves nothing about the gate (#7544)",
@@ -761,6 +761,12 @@
           "date": "2026-11-01",
           "change": "Two QA run #28545 (W3-C1R) findings. negative[3], stale since #27507: the member's settings route no longer renders inside the app shell it was opened from. AppContent.tsx holds a Setup pseudo-route until Setup's access verdict, then draws the 'You don't have access to this app' screen above the layout, with no shell; the page never mounts, so the wire half is driven directly (GET /api/settings/NAMESPACE, 403 SETTINGS_FORBIDDEN, kept as the scored part). Counts: steps[4] lists the 11 namespaces a stock boot serves (sms and lifecycle added; setup-nav.contributions.ts plus the unwalled-only branding entry), and steps[5] carries #28545's 50 Setup and 8 Account destinations, which stay 'recount from the payload each run'. The namespace list is read from source; the 50 is #28545's live reading. No clause weakened. Read from source at base 6b9c1ca991. Wave anchor #27377, wave-3 accuracy slice S9 (#28641); finding parked in anchor comment 6554042054",
           "ref": "#28545"
+        },
+        {
+          "revision": 13,
+          "date": "2026-11-04",
+          "change": "steps[2] and steps[5] corrected, two QA run #29877 (W5-P0, at 589049b0) findings parked in comment 6600018008 on #27377 that #29906 did not carry; revision 7's steps[2]/[5] row is an older, different fix. steps[5]: Setup serves 46 destinations (Account 8), not 50; Packaged automation retired under ADR-0146 D11 (#28785) and the unfiltered Packages entry left Setup (#29547). steps[2]: below 1416 px, 1280 px included, Setup and Account open on the icon rail (consoleSidebarRail.ts CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH), so the walk unfolds the sidebar before it expands groups. The 46 / 8 re-read on a fresh showcase boot at base 232d3bb5ef (GET /api/v1/meta/app?id=setup / ?id=account, groups excluded); the rail threshold read from source, not driven live. No clause changed",
+          "ref": "#30129"
         }
       ]
     },
@@ -1573,7 +1579,7 @@
       "title": "The package manifest is enforced at the install boundary: an incompatible `engines` range is refused before the registry write, the namespace gate holds ownership, and a namespace-less runtime package has one derived",
       "since": "v15",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1657,7 +1663,7 @@
       ],
       "source": [
         "packages/metadata-core/src/protocol-handshake.ts#resolveDeclaredRange — resolveDeclaredRange (protocol → platform → legacy engine.objectstack); rangeAdmitsMajor (null = unrecognized, admit-with-warning); checkProtocolCompat (the OS_PROTOCOL_INCOMPATIBLE diagnostic and its migrateCommand); assertProtocolCompat (the four arms: ok silent, no-range warn, unparsed-range warn, incompatible throw)",
-        "packages/metadata-protocol/src/protocol.ts#assertProtocolCompat — namespace derivation for namespace-less runtime packages, then assertProtocolCompat(manifest) BEFORE registry.installPackage",
+        "packages/metadata-protocol/src/protocol-package-install.ts#installPackage — namespace derivation for namespace-less runtime packages, then assertProtocolCompat(manifest) (declared in packages/metadata-core/src/protocol-handshake.ts) BEFORE registry.installPackage",
         "packages/objectql/src/registry.ts#NamespaceConflictError — the ADR-0048 install-time namespace gate (shareable exemption, same-package exclusion, OS_METADATA_COLLISION=warn downgrade); NamespaceConflictError",
         "ADR-0087 (metadata protocol upgrade contract) D1 · ADR-0048 (cross-package metadata collision) · ADR-0025 §3.10 #3 (protocol-first precedence)",
         "content/docs/releases/v15.mdx — 'ADR-0087 completed (#2972)': the handshake on boot-time durable rehydration and on code-defined AppPlugin loads, plus the objectstack lint nudge",
@@ -1711,6 +1717,12 @@
           "date": "2026-10-31",
           "change": "steps[2] gains the AHEAD probe and acceptance[1] scopes migrateCommand to its direction. Checklist-accuracy finding of QA run #27392 (18.3.0 wave 3, parked on anchor #27377; slice S4, #28338): acceptance[1] said the refusal always carries a `migrate meta --from` command, but since #26480 checkProtocolCompat (packages/metadata-core/src/protocol-handshake.ts) leaves migrateCommand out when the declared target major is above the runtime's and names the upgrade remedy instead. The run drove that leg off-clause (^19, >18, engines.platform ^19 and legacy ^19.0.0 on an 18 runtime: 422 OS_PROTOCOL_INCOMPATIBLE, no migrateCommand). The older-direction clause is unchanged. Re-read at 3fd80337",
           "ref": "#27392"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-04",
+          "change": "source[1] re-pointed: its anchor, assertProtocolCompat on packages/metadata-protocol/src/protocol.ts, no longer resolves (the install path moved to protocol-package-install.ts#installPackage, which calls assertProtocolCompat from metadata-core), and scripts/check-platform-checklist.mjs refused the area file at base f68b47ca. Carried by #29906 because that PR edits this file. No clause changed",
+          "ref": "#29906"
         }
       ]
     },
@@ -2779,7 +2791,7 @@
       "title": "Shell-hard-coded Administration targets + the retired System hub: every Administration target URL resolves to a real page (no RouteNotFound, no RecordDetailView for an object named 'system'), /apps/:app/system lands on the settings hub in one hop and every hub entry resolves, the five legacy system/* URLs redirect (users and organizations to their object routes, roles, positions and permissions to Studio's All metadata catalog in its environment scope), and a member's shell offers no Administration entry",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2799,7 +2811,7 @@
       "steps": [
         "as admin, enumerate the Administration target list from source — UnifiedSidebar's adminItems: sys-settings → /apps/setup/system, sys-apps → …/system/apps, sys-marketplace → …/system/marketplace, sys-datasources → /apps/setup/metadata/datasource, sys-users → …/system/users, sys-orgs → …/system/organizations, sys-roles → …/system/roles, sys-config → …/system/settings (8 entries: sys-objects left with #28818, ADR-0146 D1 — Setup carries no metadata editor or catalog; sys-datasources keeps the canonical /metadata/datasource route, #3660, and stays in Setup, the one metadata type D1 keeps there). No sidebar renders this list at the pin (see knownGaps), so it is walked as URLs",
         "navigate to EVERY target URL directly: each lands on a real page — screenshot first, then assert no RouteNotFound, no 'No Apps Configured' empty state, and above all no RecordDetailView rendering for an object literally named 'system' (the historical failure: short words fell through to the record-id tail — objectui#3655's two measured landings)",
-        "open /apps/setup/system: it redirects in ONE hop to /apps/setup/system/settings (SystemLandingRedirect — the SystemHubPage card wall, its cards and count badges, was retired by objectui#3743, carried out in objectui#10507), where SettingsHub lists the settings manifests the server returns for this user; click every hub entry the same way. The ungated bare system/ai-approvals route is ai.console-ai-surface-gating's subject, not this walk's",
+        "open /apps/setup/system: besides the console's app-id canonicalisation hop, which rewrites the alias /apps/setup/… to the package-id address /apps/com.objectstack.setup/… (canonicalAppPathname, ui/packages/app-shell/src/utils/appRoute.ts, #26183), it redirects in ONE hop to …/system/settings (SystemLandingRedirect — the SystemHubPage card wall, its cards and count badges, was retired by objectui#3743, carried out in objectui#10507), where SettingsHub lists the settings manifests the server returns for this user; click every hub entry the same way. The ungated bare system/ai-approvals route is ai.console-ai-surface-gating's subject, not this walk's",
         "legacy redirects: navigate directly to /apps/setup/system/users, …/organizations, …/roles, …/positions, …/permissions. users and organizations redirect to their object routes per the #3655 map (users→sys_user, organizations→sys_organization list). roles, positions and permissions redirect in ONE hop to Studio's All metadata catalog in its environment scope (SystemCatalogRedirect → setupMetadataStudioPath, ADR-0146 D1, #28818; positions and permission sets are registry items, ADR-0131 D3): roles→/studio/~all/metadata/position?scope=environment [ADR-0090 D3 rename — 'Roles' and 'Positions' are one surface], positions→the same, permissions→/studio/~all/metadata/permission?scope=environment [#3655 decision A: the permission-set surface]. Each landing page renders",
         "as the plain member, open /home and one app: the shell offers no Administration entry anywhere — /home has no sidebar (HomeLayout omits it) and the top-bar Help menu offers documentation only; the server-side half (Setup app refusal for the member) is platform-core.builtin-apps-nav-render clause 2/3 — cross-reference, do not re-score here"
       ],
@@ -2813,19 +2825,19 @@
         {
           "clause": "every Settings-hub entry reached from /apps/:app/system (which redirects in one hop to /system/settings) resolves to a live page.",
           "oracle": "screenshot",
-          "verify": "the navigation trace for /apps/setup/system shows the single redirect to …/system/settings; then a per-entry walk of SettingsHub's entries, screenshot before DOM",
+          "verify": "the navigation trace for /apps/setup/system shows the single redirect to …/system/settings, beside the app-id canonicalisation hop to /apps/com.objectstack.setup/… (canonicalAppPathname: a change of address, not a stop on another page); then a per-entry walk of SettingsHub's entries, screenshot before DOM",
           "evidence": "the redirect trace + the per-entry verdict table"
         },
         {
           "clause": "the five legacy system/* URLs redirect and land on rendering pages — bookmarks and the URLs the retired hub once emitted keep working. users and organizations land on their object routes (sys_user, the sys_organization list — the #3655 map). roles and positions land in ONE hop on Studio's All metadata catalog at /studio/~all/metadata/position?scope=environment (the ADR-0090 rename, one surface under two vocabularies), and permissions at /studio/~all/metadata/permission?scope=environment (decision A: rules-and-assignments is layer 2) — Studio's catalog since #28818 (ADR-0146 D1: Setup carries no metadata catalog), never the sys_position / sys_permission_set object routes (ADR-0131 D3: positions and permission sets are registry items)",
           "oracle": "network",
-          "verify": "the navigation trace per legacy URL shows the redirect target: the object route for users and organizations, /studio/~all/metadata/TYPE?scope=environment for roles, positions and permissions, reached without a stop on any /apps/setup/metadata/… URL; the landing renders. QA run #28981 measured exactly these landings at 7fa9873f. A roles, positions or permissions URL landing on the Setup catalog (/apps/setup/metadata/TYPE) or on the sys_position / sys_permission_set object route is a pre-#28818 shape, so suspect the stale-console-bundle trap before scoring it",
+          "verify": "the navigation trace per legacy URL shows the redirect target: the object route for users and organizations, /studio/~all/metadata/TYPE?scope=environment for roles, positions and permissions, reached without a stop on any /apps/setup/metadata/… URL (the app-id canonicalisation hop to /apps/com.objectstack.setup/… may come first, canonicalAppPathname); the landing renders. QA run #28981 measured exactly these landings at 7fa9873f. A roles, positions or permissions URL landing on the Setup catalog (/apps/setup/metadata/TYPE) or on the sys_position / sys_permission_set object route is a pre-#28818 shape, so suspect the stale-console-bundle trap before scoring it",
           "evidence": "the five redirect traces + landings"
         },
         {
-          "clause": "a member's shell offers no Administration entry anywhere (no /home sidebar — HomeLayout omits it; the Help menu offers documentation entries, Keyboard shortcuts and About — nothing that administers); the server refusal is proven by the builtin-apps item.",
+          "clause": "a member's shell offers no Administration entry anywhere (no /home sidebar — HomeLayout omits it; the Help menu offers documentation entries and About, plus Keyboard shortcuts inside an app — nothing that administers); the server refusal is proven by the builtin-apps item.",
           "oracle": "dom",
-          "verify": "the member's /home and one app shell, in the member's own session (wrong-persona): screenshot, then DOM — no Administration entry in any chrome region, and the Help menu lists documentation entries, Keyboard shortcuts and About and no administration entry (objectui packages/app-shell/src/layout/AppHeader.tsx at the console pin)",
+          "verify": "the member's /home and one app shell, in the member's own session (wrong-persona): screenshot, then DOM — no Administration entry in any chrome region, and the Help menu lists documentation entries and About — on /home exactly All documentation, Online documentation, About, and inside an app also the app's own docs entry and Keyboard shortcuts, which AppHeader.tsx draws only in an app — and no administration entry (objectui packages/app-shell/src/layout/AppHeader.tsx at the console pin)",
           "evidence": "the member screenshots + DOM excerpt"
         }
       ],
@@ -2878,6 +2890,12 @@
           "date": "2026-11-02",
           "change": "Re-pointed to main after N-28 (#28818, ADR-0146 D1). Measured input: QA run #28981 (18.3.0 wave 4, 7fa9873f; card note 6571282495), which failed acceptance[2] as stale spec: /apps/setup/system/roles, /positions and /permissions land in one hop on /_console/studio/~all/metadata/position?scope=environment and …/permission?scope=environment, and the routing pins (AppContent.systemHubRoutes, legacyRedirects) assert the Studio landing. Re-read at base dfbe34d887: acceptance[2] and steps[3] name the Studio landing; the Administration count is read from source, per the seat's ruling — UnifiedSidebar adminItems has 8 entries (sys-objects removed by #28818), so steps[0], acceptance[0] and fixtures.knownGaps[1] say 8, and the title names Studio's catalog; source[0]–[2] re-point to ui/ paths and SystemCatalogRedirect's Studio target. No clause weakened",
           "ref": "#28579"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-04",
+          "change": "steps[2], acceptance[1].verify, acceptance[2].verify and acceptance[3] corrected from QA run #29890 (W5-FAIL, at 589049b0): the console rewrites the alias /apps/setup to /apps/com.objectstack.setup (canonicalAppPathname, #26183), a hop the traces show beside the one redirect, and the Help menu offers Keyboard shortcuts only inside an app (on /home: All documentation, Online documentation, About). Read at base f68b47ca",
+          "ref": "#29906"
         }
       ]
     },
@@ -4035,6 +4053,114 @@
           "date": "2026-11-02",
           "change": "steps[0], acceptance[0], [1] and [2] corrected, assertion defects measured in the slice 3 run (base 128681f4): the console first rewrites /apps/setup and /apps/showcase_app to their canonical app segments, a hop of its own that the routing pin's stubbed app list does not make (typed with the canonical segment, each metadata URL reaches Studio in one hop); a package leg's object item opens its Data pillar (areaItemPillarPath, ADR-0146 D1), so the ?package landing is followed by that pillar; ?review=1 is carried by the redirect and dropped by the item page once it opens the draft review; and acceptance[2] named the jsdom stub test ids, now Setup's real Datasources page and metadata-edit-datasource. The run scored acceptance[1] FAIL against revision 1 for the pillar hop. acceptance[0] and [3]'s cross-package landing (/studio/~all/metadata/TYPE) is unchanged: the run found the area's list rewriting it to one package's leg, a product finding in FOLLOW-UPS §15",
           "ref": "#28579"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.package-export-round-trip",
+      "title": "A deployment's whole ontology exports in one read and installs again on a fresh boot: GET /api/v1/packages/export answers every package the deployment's code does not register, once each and dependencies first, each entry equal to that package's own export, and os package export writes them as installable directories",
+      "since": "v18.3",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "admin (the seeded admin, holding studio.access): the reader of the export and the installer on the target boot",
+        "a member holding neither studio.access nor setup.access (the refusal leg, in its own context)",
+        "anonymous (no session): the 401 leg"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "TWO boots, each from its own scratch copy of the showcase on its own port and DB (dogfood §0): install-local writes .objectstack/installed-packages/ under the server's working directory, so two boots on one tree would share the installed set (RUNNER environment facts on install isolation). The source boot holds the fixture below; the target boot starts stock and receives the export",
+          "the source's ontology, the table of QA run #29870: (a) an authored package with an object, a flow and a connector whose auth carries a header or env map, written with POST /api/v1/packages, ?package= drafts and POST …/publish-drafts; (b) the showcase's pair, from POST /api/v1/packages/com.example.showcase/ensure-customization, holding an object_extension that adds a __c field; (c) one package installed through POST /api/v1/marketplace/install-local; (d) a second authored package that depends on (a), published and then disabled",
+          "the CLI on PATH (os) for the export and install legs, pointed at each boot with --url"
+        ]
+      },
+      "steps": [
+        "on the source boot, as the admin: GET /api/v1/packages and note each package's registry source and dependencies; then GET /api/v1/packages/export and record the order of data.packages and each entry's manifest id",
+        "for each entry, GET /api/v1/packages/ID/export and compare it with the entry byte for byte; then call client.packages.exportAll() (packages/client) and compare its bundle with the read",
+        "read (a)'s entry: find the connector's header / env map absent and named in withheldMaps, and search the whole bundle text for the header's name and value",
+        "read (d)'s entry (the disabled package): its objects and fields are present",
+        "os package export --out DIR against the source; list DIR and compare each NN-ID/objectstack.json with its entry; then run it again into the same DIR and record the exit code and that nothing changed",
+        "on the target boot, install each directory in the numbered order with os package install DIR/NN-ID/objectstack.json (or POST /api/v1/marketplace/install-local with the file): record each answer, the server log lines it writes, and then read every object, field, flow, connector and pair extension the source served",
+        "GET /api/v1/packages/export on the target and compare it with the source's read",
+        "negative pass: GET /api/v1/packages/export?x=1 as the admin; the read as the member; the read with no session; and on a third fresh boot install (d)'s directory before (a)'s"
+      ],
+      "acceptance": [
+        {
+          "clause": "as a holder of studio.access or setup.access, GET /api/v1/packages/export answers every package whose registry row is not source: 'code' exactly once, a disabled one included, dependencies first: a pair after its base when both are listed, and the pair of a code base (com.example.showcase.custom) exported alone",
+          "oracle": "api",
+          "verify": "data.packages holds one entry per non-code package of GET /api/v1/packages, no code package and no duplicate; each package comes after every package it declares as a dependency (assemblePackageExportBundle orders them with orderHydrationBatch)",
+          "evidence": "the package list beside the bundle order"
+        },
+        {
+          "clause": "each entry equals GET /api/v1/packages/:id/export for that package, byte for byte, and client.packages.exportAll() returns the same bundle",
+          "oracle": "api",
+          "verify": "per entry, the serialized entry equals the per-package read; the client call's bundle equals the HTTP read",
+          "evidence": "one line per package: equal or the first difference"
+        },
+        {
+          "clause": "a connector's header or env map is absent from its entry and named in that entry's withheldMaps, by position only: no header name or value appears anywhere in the bundle text",
+          "oracle": "api",
+          "verify": "(a)'s entry carries withheldMaps naming the map's position and the connector keeps no copy of the map; a text search of the whole bundle for the header's name and its value finds neither (withheldConnectorMaps, packages/runtime/src/domains/packages.ts)",
+          "evidence": "the withheldMaps list and the two search results"
+        },
+        {
+          "clause": "a disabled package's entry carries its own items. Fixed: #29871 (closed), where a disabled package exported as an empty shell",
+          "oracle": "api",
+          "verify": "(d)'s entry lists the objects and fields the package held before it was disabled (the registry read keeps a disabled package's items, includeDisabledPackages, packages/objectql/src/registry.ts); an entry with no items is a regression of #29871",
+          "evidence": "(d)'s entry beside its pre-disable read"
+        },
+        {
+          "clause": "os package export --out DIR writes one NN-ID/objectstack.json per entry, numbered in the read's order, each equal to its entry",
+          "oracle": "build",
+          "verify": "DIR holds exactly one directory per entry, named NN-ID with NN its zero-padded place in data.packages, and each objectstack.json equals that entry (packages/cli/src/commands/package/export.ts)",
+          "evidence": "the DIR listing and one equality line per file"
+        },
+        {
+          "clause": "on a fresh boot, installing each directory in order (os package install or POST /api/v1/marketplace/install-local) answers 200, serves every object, field, flow, connector and pair extension the source served, names each withheld map in its answer, and logs one WARN per package that has them",
+          "oracle": "api",
+          "verify": "each install answers 200; the target serves every item the source served; each answer for a package with withheld maps names them (judgeWithheldMaps, packages/cloud-connection/src/marketplace-install-local-plugin.ts) and the log holds one WARN line for that package; the CLI install prints them too (#29873)",
+          "evidence": "the install answers, the WARN lines and the target reads"
+        },
+        {
+          "clause": "the target's GET /api/v1/packages/export equals the source's apart from withheldMaps. Fixed: #29872 (closed), where an exported pair lost the extension fields of a package installed through install-local on the second hop",
+          "oracle": "api",
+          "verify": "the two bundles are equal once withheldMaps is set aside, the pair's object_extension and its __c field included (assemblePackageManifest reads a package's extensions from the registry, registeredExtensionsOf, packages/runtime/src/domains/packages.ts); a pair entry without its extension is a regression of #29872",
+          "evidence": "the diff of the two bundles"
+        }
+      ],
+      "negative": [
+        "any query parameter on GET /api/v1/packages/export answers 400 VALIDATION_ERROR naming it",
+        "a member holding neither studio.access nor setup.access is refused 403 PERMISSION_DENIED",
+        "an anonymous read answers 401",
+        "os package export --out DIR into a directory that already holds files exits 1 and writes nothing",
+        "installing an entry before the package it depends on answers 422 DEPENDENCY_MISSING"
+      ],
+      "traps": [
+        "dispatcher-vs-hono-route",
+        "wrong-persona",
+        "destructive-in-place"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "Partial pins, none of which drives two booted deployments: packages/runtime/src/domains/packages-export-bundle.test.ts (the bundle through the dispatcher over a stub protocol: acceptance[0] and [1] in-process), packages/runtime/src/domains/packages-export-disabled-package.integration.test.ts (acceptance[3], #29871), packages/objectql/src/registry-extension-field-patches.test.ts and packages/runtime/src/domains/packages-export-base-showcase-boot.integration.test.ts (acceptance[6], #29872), packages/cli/test/package-export.test.ts (acceptance[4] and the --out refusal), and the dogfood set packages/qa/dogfood/test/package-export-bundle-round-trip.dogfood.test.ts, export-withheld-connector-maps.dogfood.test.ts and package-export-reinstall-custom-pair.dogfood.test.ts (acceptance[2], [5] and [6] on one deployment). The two-boot round trip is the run's leg"
+      },
+      "source": [
+        "packages/runtime/src/domains/packages.ts#assemblePackageExportBundle (GET /packages/export: every non-code package, dependencies first), packages/runtime/src/domains/packages.ts#assemblePackageManifest (each entry, as GET /packages/:id/export answers it), packages/runtime/src/domains/packages.ts#withheldConnectorMaps",
+        "packages/spec/src/api/package-lifecycle.zod.ts#PackageExportBundleSchema, packages/spec/src/api/package-lifecycle.zod.ts#PackageExportManifestSchema",
+        "packages/cli/src/commands/package/export.ts (os package export --out DIR: NN-ID/objectstack.json, refuses a non-empty DIR)",
+        "packages/cloud-connection/src/marketplace-install-local-plugin.ts#judgeWithheldMaps (the install answer and its WARN line)",
+        "packages/client/src/index.ts (packages.exportAll)",
+        "#29755 (GET /packages/export), #29746 (withheldMaps), #29871 and #29872 (fixed), #29873 (the CLI install names withheld maps); QA run #29870 (W5-EXPORT, at 589049b0)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-04",
+          "change": "new item from QA run #29870 (W5-EXPORT, at 589049b0), proposed by #29906 part D: no item covered GET /api/v1/packages/export (#29755), withheldMaps (#29746) or os package export. Acceptance[3] and [6] were proposed as failing (#29871, #29872); both cards are closed fixed at base f68b47ca, so the clauses state the fixed behaviour and name the card each regression would reopen. Read from source at base f68b47ca",
+          "ref": "#29906"
         }
       ]
     }

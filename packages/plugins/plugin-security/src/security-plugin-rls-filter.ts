@@ -510,7 +510,29 @@ export async function computeLayeredRlsFilter(
   // ONLY the read-side Layer 0 is lifted. Layer 1 (business RLS, object/field
   // permissions, the write `check` path) is untouched by construction — this
   // branch rewrites the `layer0` half of the split and nothing else.
-  if (!isWrite && layer0 !== null && (await this.isVerifiedPlatformOwnerSession(context))) {
+  //
+  // [ADR-0015 §10] ONE Layer 0 answer is not the wall's to lift: the `deny` an
+  // EXTERNAL object earns by stating no organization scope (security-channel
+  // ruling 2026-11-04, option A). That deny is not a filter on the reader's
+  // organization — it is the verdict on a configuration defect: whose rows the
+  // object serves is a fact only its author can state, and an unstated scope
+  // reads as empty for every caller, the verified platform owner included,
+  // until the object declares one of the three (`external-organization-scope.ts`).
+  // So the owner's read crossing stands down on exactly that verdict, and the
+  // probe is not even consulted there. Every other answer is crossed as
+  // before: the `isolated` equality, the `group` union, and the deny sentinel
+  // an org-less session hits — on a local object and on an external object
+  // that declares its own `organization_id` alike. The recorded verdict stays
+  // `deny` (the return below): a reader must not learn `none` from a wall
+  // that still stands.
+  const deniedForUndeclaredExternalScope =
+    tenantLayer0Verdict.kind === 'deny' && tenantLayer0Input.externalOrganizationScopeUndeclared === true;
+  if (
+    !isWrite &&
+    layer0 !== null &&
+    !deniedForUndeclaredExternalScope &&
+    (await this.isVerifiedPlatformOwnerSession(context))
+  ) {
     // The audit floor (hard piece 3 of the ruling): a structured warn-level
     // log with the stable event name, per wall-bypassing READ computation —
     // the only bypass kind left. plugin-audit is not wired into

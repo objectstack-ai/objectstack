@@ -168,7 +168,7 @@ async function driveAllFive(locale: string | undefined, extra: Record<string, un
     path: '/change-email',
     body: { newEmail: 'new@example.com' },
     context: {
-      __osChangeEmailFrom: { email: 'ada@example.com', name: 'Ada', id: 'u1' },
+      session: { user: { email: 'ada@example.com', name: 'Ada', id: 'u1' } },
       returned: { status: true },
     },
   });
@@ -353,7 +353,7 @@ async function driveWithHeader(
     body: { newEmail: 'new@example.com' },
     request,
     context: {
-      __osChangeEmailFrom: { email: 'ada@example.com', name: 'Ada', id: 'u1' },
+      session: { user: { email: 'ada@example.com', name: 'Ada', id: 'u1' } },
       returned: { status: true },
     },
   });

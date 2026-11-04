@@ -597,7 +597,7 @@
       "title": "List-view capability matrix: filter, search, sort, pagination, saved views, inline edit, export, visualization switcher, bulk/row actions, conditional formatting",
       "since": "v15",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -634,7 +634,7 @@
         "in the grid saved view (inlineEdit: true), edit one cell in place; save; capture the PATCH; re-read the row via API",
         "on in_progress, with the export grant from fixtures.requires[3] bound, open the toolbar's Display popover — Export sits in its footer ('Export as CSV / XLSX / JSON'), not as a separate toolbar button — and export each declared format (csv, xlsx, json); capture the requests and files. Without the grant the Export entries are absent and the route answers 403 EXPORT_NOT_PERMITTED — the opt-in working as designed, not a fail of the export variant",
         "open the visualization switcher on All Tasks; enumerate the offered types; switch through each",
-        "on bulk_actions, select rows that are NOT done and run showcase_mark_done (per-record) — its visible gate, has(record.done) && record.done != true, judges each selected row, so a done row in the selection drops Mark Done from the bulk bar, or, over a mixed selection, the confirm reports the done rows not eligible and skipped (QA run #27438); either way the dispatch count stops matching the selection — and showcase_recalc_selection (aggregate — ONE dispatch: an api-type action, it POSTs to its own endpoint /api/v1/apps/showcase/recalc with `_selectedIds` at the body's top level); on legacy_row_actions confirm both named row actions resolve to live menu entries",
+        "on bulk_actions, select rows that are NOT done and run showcase_mark_done (per-record) — its visible gate, has(record.done) && record.done != true, judges each selected row, so a done row in the selection drops Mark Done from the bulk bar, or, over a mixed selection, the confirm reports the done rows not eligible and skipped (QA run #27438); either way the dispatch count stops matching the selection — and showcase_recalc_selection (aggregate — ONE dispatch: an api-type action, which the console sends through the action door, POST /api/v1/actions/showcase_task/showcase_recalc_selection with body {params:{_selectedIds:[…]}}; the server forwards those params flat to the action's own target /api/v1/apps/showcase/recalc in-process, buildApiActionRequest in packages/runtime/src/action-execution.ts, so the browser's network log shows the door request and no /recalc request); on legacy_row_actions confirm both named row actions resolve to live menu entries",
         "on Field Zoo, confirm the conditionalFormatting row highlight applies to Specimen — Full (f_lookup set) and not Specimen — Minimal"
       ],
       "acceptance": [
@@ -687,9 +687,9 @@
           "evidence": "dropdown screenshot + one screenshot per visualization"
         },
         {
-          "clause": "bulk actions dispatch correctly by mode: per-record actions issue one dispatch per selected record; the aggregate def (showcase_recalc_selection, execution: 'aggregate', an api-type action) issues ONE request — POST /api/v1/apps/showcase/recalc — carrying every selected id in `_selectedIds` at the body's top level",
+          "clause": "bulk actions dispatch correctly by mode: per-record actions issue one dispatch per selected record; the aggregate def (showcase_recalc_selection, execution: 'aggregate', an api-type action) issues ONE request — POST /api/v1/actions/showcase_task/showcase_recalc_selection, the action door — carrying every selected id in `params._selectedIds`, which the server forwards flat to the action's target /api/v1/apps/showcase/recalc",
           "oracle": "network",
-          "verify": "count the captured POSTs against the selection size for each mode (the per-record selection holds not-done rows only, steps[8])",
+          "verify": "count the captured POSTs against the selection size for each mode (the per-record selection holds not-done rows only, steps[8]); for the aggregate mode the one POST is POST /api/v1/actions/showcase_task/showcase_recalc_selection with {params:{_selectedIds}} (QA run #29890 measured exactly one, answered 200)",
           "evidence": "network trace of both runs"
         },
         {
@@ -700,8 +700,8 @@
         }
       ],
       "negative": [
-        "a saved view whose filter is refused (400 INVALID_FILTER) while the grid silently shows ALL rows unfiltered is a FAIL — the objectui#3431 regression shape; zero rows with a captured refusal is the honest symptom, unfiltered rows is the lie. No stock view carries a refused filter, so stage one (QA run #24616): overlay PUT /api/v1/meta/view/showcase_task.done with filter [{field:'done', operator:'equals', value:'maybe'}] — authoring accepts it, every query refuses it (a non-boolean string against a boolean answers 400 INVALID_FILTER naming the field, packages/objectql/src/boolean-comparand-declared-type-door.ts) — and revert with DELETE /api/v1/meta/view/showcase_task.done. A filter on a missing field is refused at authoring (list-view-field-unknown), so it cannot stage this",
-        "tabs-element userFilters (or quickFilters) rendering on an OBJECT list view is a FAIL — ADR-0053 suppresses them there by design, as amended by ADR-0047: on an object list view only `element: 'tabs'` userFilters (and quickFilters) are ignored — objectui app-shell warnSuppressedListNav.ts, which logs the suppression — while `element: 'dropdown'` value chips ARE allowed there (examples/app-showcase/src/ui/views/project.view.ts ships them on All Projects, QA run #24616), so dropdown chips on an object list are not this FAIL",
+        "a saved view whose filter is refused (400 INVALID_FILTER) while the grid silently shows ALL rows unfiltered is a FAIL — the objectui#3431 regression shape; zero rows with a captured refusal is the honest symptom, unfiltered rows is the lie. No stock view carries a refused filter, so stage one in the showcase's customization pair. QA run #24616 staged it package-less; since ADR-0146 D11 a package-less PUT onto a name the showcase ships answers 403 NOT_OVERRIDABLE (packagelessOverlayWriteRefusal, packages/metadata-protocol/src/protocol-packaged-base-refusal.ts). So: POST /api/v1/packages/com.example.showcase/ensure-customization, then PUT /api/v1/meta/view/showcase_task.done?package=com.example.showcase.custom with the view's body, overrides: {package:'com.example.showcase', basedOn:'0.1.0'} and filter [{field:'done', operator:'equals', value:'maybe'}] — authoring accepts it, every query refuses it (a non-boolean string against a boolean answers 400 INVALID_FILTER naming the field, packages/objectql/src/boolean-comparand-declared-type-door.ts) — and revert with DELETE /api/v1/meta/view/showcase_task.done?package=com.example.showcase.custom. A filter on a missing field is refused at authoring (list-view-field-unknown), so it cannot stage this",
+        "tabs-element userFilters (or quickFilters) rendering on an OBJECT list view is a FAIL — ADR-0053 suppresses them there by design, as amended by ADR-0047: on an object list view only `element: 'tabs'` userFilters (and quickFilters) are ignored — objectui app-shell warnSuppressedListNav.ts, which logs the suppression — while `element: 'dropdown'` value chips ARE allowed there (examples/app-showcase/src/ui/views/project.view.ts ships them on All Projects, QA run #24616), so dropdown chips on an object list are not this FAIL. No stock object list view declares tabs userFilters; to stage one, write a view under a fresh name (a package-less write of a name no package ships still lands, ADR-0146 D11) or over a shipped view through the pair, as negative[0] does",
         "an export that returns the unfiltered table for a filtered view is a FAIL even though a file downloaded"
       ],
       "traps": [
@@ -768,6 +768,12 @@
           "date": "2026-10-31",
           "change": "steps[3], acceptance[4] (clause and verify), steps[8], acceptance[8].verify, fixtures.requires[0] and source[0] corrected. From QA run #27438 (W3-C2b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1). The tabular view's sort has been the array [{field:'estimate_hours', order:'desc'}] since #17053 retired the bare string clause platform-wide, so the objectui#2601 string-crash fixture no longer exists on stock. The clause now scores the array sort reaching the request as sort=-estimate_hours (the adapter's `-field` spelling, ui/packages/data-objectstack/src/index.ts). steps[8] says to select rows that are not done: Mark Done's per-row visible gate either drops the button or skips done rows as not eligible, and either breaks the one-dispatch-per-selected-row count. Read at base a0f865491d: task.view.ts (tabular, bulk_actions), ui/packages/plugin-grid/src/components/BulkActionDialog.tsx. The sort clause's contract (renders, server-ordered) is unchanged; a prior verdict scored on the string form does not carry",
           "ref": "#27438"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-04",
+          "change": "steps[8], acceptance[8] (clause and verify), negative[0] and negative[1] corrected from QA run #29890 (W5-FAIL, at 589049b0; the re-point wave 4 parked until #29173 landed). The aggregate showcase_recalc_selection is sent through the action door, POST /api/v1/actions/showcase_task/showcase_recalc_selection with {params:{_selectedIds}}, since #27611, and the server forwards the params flat to /api/v1/apps/showcase/recalc in-process (buildApiActionRequest). negative[0]'s package-less overlay of showcase_task.done is refused 403 NOT_OVERRIDABLE since ADR-0146 D11, so the stage goes into com.example.showcase.custom through the ensure door; negative[1] says how to stage a tabs userFilter view. Read at base f68b47ca",
+          "ref": "#29906"
         }
       ]
     },
@@ -2768,7 +2774,7 @@
       "title": "User-built FilterBuilder/SortBuilder toolbar merges with the view filter, restores across nav, and reproduces rows from the URL",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2787,11 +2793,11 @@
       },
       "steps": [
         "sign in as admin; open showcase_task and switch to the in_progress saved view (stored filter status=in_progress); screenshot",
-        "open the FilterBuilder toolbar; add 2 conditions that leave at least TWO rows, so the sort clause has an order to read — on the stock seed priority = high AND estimate_hours > 4 leaves ONE row on in_progress, a single-datapoint for acceptance[1] (QA run #24616): check the count first and pick a pair that keeps ≥ 2; open the SortBuilder and add a sort (due_date desc); capture the data request",
+        "open the FilterBuilder toolbar; add 2 conditions that leave at least TWO rows, so the sort clause has an order to read — on the stock seed priority = high AND estimate_hours > 4 leaves ONE row on in_progress, a single-datapoint for acceptance[1] (QA run #24616): check the count first and pick a pair that keeps ≥ 2; open the SortBuilder and add a sort (due_date desc); type a term into the list's quick search that keeps rows (acceptance[2] reads it back; QA run #29890 used 'pipeline'); capture the data request",
         "assert the request's `filter` param is the MERGE of the view's stored rule AND the two toolbar conditions (buildEffectiveFilter/mergeFilterNodes), and `sort` carries the toolbar sort (e.g. sort=-due_date) — the console spells its list params without a `$`; the returned rows satisfy view-filter AND toolbar conditions",
         "navigate away via an in-app nav link to another object (the link carries no query string, so the URL state is dropped), then navigate back to showcase_task in_progress; screenshot; confirm the toolbar filter + sort restored",
         "read where the toolbar filter and sort are kept: the signed-in user's own sys_user_preference row keyed ui.list.showcase_task (GET /api/v1/data/sys_user_preference filtered to that key; its value's perView.<view> carries the filters and the sort — objectui ListPreferencesProvider.tsx, objectui#12418), and its localStorage write-through cache list-state:<userId>:showcase_task. Confirm both are the signed-in user's: the row's user_id, and the cache key's user segment. (Only the search term stays under the older list-filters:<userId>:showcase_task:<viewId> key)",
-        "sign out; sign in as the SECOND account; open the same object+view; confirm the first account's cached toolbar filter does NOT appear",
+        "sign out through the account menu (the avatar menu's Log out, user.logout in ui/packages/app-shell/src/layout/AppHeader.tsx; never by clearing storage, which would also wipe the cache this step tests); sign in as the SECOND account; open the same object+view; confirm the first account's cached toolbar filter does NOT appear",
         "userFilters/URL: where UserFilters are hosted (an interface page or the userFilters surface — NOT a bare object list, ADR-0053), apply a quick-filter; copy the URL; open it in a fresh tab; confirm the uf_<field> params (comma-joined, URI-encoded) reproduce the same rows and uf__tab carries the active preset (ADR-0047)",
         "negative sweep: confirm tabs-element userFilters (preset chips, uf__tab) do NOT leak onto the bare object list view — dropdown chips the object view itself declares are allowed there (ADR-0047 amendment) and their uf_<field> params are not a leak"
       ],
@@ -2811,13 +2817,13 @@
         {
           "clause": "the toolbar filter + search survive a FULL in-app navigation away and back — restored from the user's own list preference (sys_user_preference ui.list.<object>, cached in localStorage list-state:<user>:<object>; URL params alone are lost on an in-app nav link that carries no query string, which is what the preference bridges)",
           "oracle": "dom",
-          "verify": "after a screenshot confirms the list rendered, the FilterBuilder shows the two conditions and the SortBuilder the sort; the request re-issued on return carries the same merged `filter` param (the console spells it without a `$`; objectui app-shell/src/context/ListPreferencesProvider.tsx)",
+          "verify": "after a screenshot confirms the list rendered, the FilterBuilder shows the two conditions, the SortBuilder the sort and the quick search box the term (kept under list-filters:<userId>:showcase_task:<viewId>, steps[4]); the request re-issued on return carries the same merged `filter` param (the console spells it without a `$`; objectui app-shell/src/context/ListPreferencesProvider.tsx)",
           "evidence": "before/after screenshots + the re-issued request"
         },
         {
           "clause": "the list state is USER-SCOPED — it is the user's own sys_user_preference row (user_id = the signed-in user), and its localStorage cache key embeds the user id (list-state:<userId>:<object>), so a second account on the same browser never reads the first account's filters (a filter value can be sensitive)",
           "oracle": "dom",
-          "verify": "read account A's ui.list.showcase_task preference row and its list-state cache key, then sign in as account B on the same browser and confirm B's view opens with no A-authored toolbar filter (B reads its own row, or none)",
+          "verify": "read account A's ui.list.showcase_task preference row and its list-state cache key, then sign A out through the account menu's Log out and sign in as account B on the same browser and confirm B's view opens with no A-authored toolbar filter (B reads its own row, or none)",
           "evidence": "the two accounts' storage keys + B's clean toolbar"
         },
         {
@@ -2830,7 +2836,7 @@
       "negative": [
         "a toolbar filter that REPLACES the view's stored filter (rows appear that the view filter should exclude) is a FAIL — buildEffectiveFilter merges, it does not overwrite the base",
         "tabs-element userFilters (preset chips, the uf__tab preset) leaking onto a bare OBJECT list view is a FAIL — ADR-0053 suppresses them there by design, as amended by ADR-0047: on an object list view only `element: 'tabs'` userFilters (and quickFilters) are ignored — objectui app-shell warnSuppressedListNav.ts, which logs the suppression — while `element: 'dropdown'` value chips ARE allowed there (examples/app-showcase/src/ui/views/project.view.ts ships them on All Projects, QA run #24616) (the list-view-capabilities item flags the same regression). The reserved list-state params an object list writes for ITSELF — uf__filter, uf__search, uf__sort, uf__group (objectui#11860, userFilterUrlState.ts), e.g. uf__sort after a toolbar sort — are the list's own state mirrored into the URL, not userFilters, and do not count",
-        "a cached toolbar filter from account A visible to account B on the same browser is a FAIL — the key embeds the user id precisely to prevent that leak",
+        "a cached toolbar filter from account A visible to account B on the same browser (A signed out through the account menu's Log out, never by clearing storage) is a FAIL — the key embeds the user id precisely to prevent that leak",
         "an incomplete FilterBuilder row emitted as [field, op, ''] (which matches only empty and silently excludes everything) instead of being dropped is a FAIL — convertFilterGroupToAST skips valueless rows (#1964)"
       ],
       "traps": [
@@ -2897,6 +2903,12 @@
           "date": "2026-10-27",
           "change": "automated.ref says why the unpinned clauses stay live legs: every one is browser-only, and the card adds no Playwright lane (#26573 Done-when). No clause changed",
           "ref": "#26573"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-04",
+          "change": "steps[1], steps[5], acceptance[2].verify, acceptance[3].verify and negative[2] corrected from QA run #29890 (W5-FAIL, at 589049b0): the clause restores filter AND search, so the steps add a quick search and the verify reads it back; the sign-out between accounts is the account menu's Log out, which keeps the cache under test. Read at base f68b47ca",
+          "ref": "#29906"
         }
       ]
     },
@@ -3578,7 +3590,7 @@
       "title": "Select-all-matching covers every matching id across pages (server total, not the rendered page); clear resets both selection sources",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3601,7 +3613,7 @@
         "click select-all-matching; the banner reads 'All M matching records are selected'",
         "dispatch a bulk action; capture the requests — resolveBulkRows fans out a paged find (dropping $top/$skip, paging 500) collecting every matching id ACROSS pages",
         "cross-check the collected id count against a direct API count for the same search: GET /api/v1/data/showcase_task?$search=…&$top=0 (or the response total)",
-        "confirm the AGGREGATE action (showcase_recalc_selection) carries every matching id in `_selectedIds` — it is an api-type action, so the ONE request is POST /api/v1/apps/showcase/recalc with `_selectedIds` at the body's top level (the grid hands them to the action runner as params._selectedIds, objectui plugin-grid ObjectGrid.tsx); the run dialog then reads 'N / 55 processed' for ~15 s (QA run #24616); a per-record action (showcase_mark_done) fans out one dispatch per matching id",
+        "confirm the AGGREGATE action (showcase_recalc_selection) carries every matching id in `_selectedIds` — it is an api-type action, so the ONE request is the action door, POST /api/v1/actions/showcase_task/showcase_recalc_selection with body {params:{_selectedIds:[…]}} (the grid hands them to the action runner as params._selectedIds, ui/packages/plugin-grid/src/ObjectGrid.tsx; since #27611 the console sends a declared same-origin api action through the door, and the server forwards the params flat to /api/v1/apps/showcase/recalc in-process, buildApiActionRequest in packages/runtime/src/action-execution.ts); the run dialog then reads 'N / 55 processed' for ~15 s (QA run #24616); a per-record action (showcase_mark_done) fans out one dispatch per matching id",
         "click clear; confirm both selection sources reset (the toolbar empties AND the row checkboxes clear)",
         "cap leg (acceptance[5]): provision more than 5000 matching scratch tasks — POST /api/v1/data/showcase_task/createMany with a bare JSON array of at most 200 records per call (the batch doors' default maxBatchSize; a 201-record call answers 400 BATCH_TOO_LARGE), e.g. 26 calls of 200 sharing one prefix — then repeat steps[1] and steps[2] and screenshot the banner and the selected count before and after Select all; delete the rows afterwards (deleteMany, at most 200 ids per call)"
       ],
@@ -3619,7 +3631,7 @@
           "evidence": "the collected-id count + the filtered API count"
         },
         {
-          "clause": "an AGGREGATE bulk action issues ONE dispatch carrying the full matching id set in `_selectedIds` (top level of the api action's request body); a per-record action fans out one dispatch per matching id",
+          "clause": "an AGGREGATE bulk action issues ONE dispatch carrying the full matching id set in `params._selectedIds` of the action door's body (POST /api/v1/actions/showcase_task/showcase_recalc_selection; the server forwards it flat to the api action's target); a per-record action fans out one dispatch per matching id",
           "oracle": "network",
           "verify": "count captured POSTs against the match-set size per mode (ObjectGrid dispatchBulkAction → resolveBulkRows → params._selectedIds)",
           "evidence": "the dispatch trace(s)"
@@ -3697,6 +3709,12 @@
           "date": "2026-11-01",
           "change": "acceptance[5] added with steps[7] and fixtures.knownGaps[1]: past HARD_CAP 5000 the cross-page banner must name the cap (e.g. 「将处理前 5000 条」), never present the uncapped server total as the set the action processes. Today the banner counts totalMatching uncapped (BulkActionBar.tsx) while resolveBulkRows stops at 5000 (ObjectGrid.tsx), so the clause is an expected FAIL until the product defect #28552 is fixed. Read at base 37184244. No existing clause changed. Ruling 6545938831 item ④ on #28345. Wave anchor #27377",
           "ref": "#28345"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-04",
+          "change": "steps[5] and acceptance[2].clause corrected from QA run #29890 (W5-FAIL, at 589049b0): the aggregate action's one request is the action door, POST /api/v1/actions/showcase_task/showcase_recalc_selection with {params:{_selectedIds}} (since #27611), not a top-level _selectedIds POST to /api/v1/apps/showcase/recalc, which the server reaches in-process (buildApiActionRequest). Read at base f68b47ca",
+          "ref": "#29906"
         }
       ]
     },

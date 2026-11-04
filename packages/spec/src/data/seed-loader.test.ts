@@ -9,6 +9,7 @@ import {
   SeedLoaderResultSchema,
   SeedLoaderRequestSchema,
 } from './seed-loader.zod';
+import { SeedSchema } from './seed.zod';
 
 // ==========================================================================
 // ReferenceResolutionSchema
@@ -216,10 +217,15 @@ describe('SeedLoaderConfigSchema', () => {
     expect(config.dryRun).toBe(false);
     expect(config.haltOnError).toBe(false);
     expect(config.multiPass).toBe(true);
-    expect(config.defaultMode).toBe('upsert');
+    expect(config.defaultMode).toBe('ignore');
     expect(config.batchSize).toBe(1000);
     expect(config.transaction).toBe(false);
     expect(config.env).toBeUndefined();
+  });
+
+  it('takes its defaultMode from the seed mode default — one default, stated once (#30081)', () => {
+    const seedDefault = SeedSchema.parse({ object: 'product', records: [] }).mode;
+    expect(SeedLoaderConfigSchema.parse({}).defaultMode).toBe(seedDefault);
   });
 
   it('should accept dry-run configuration', () => {
@@ -582,7 +588,10 @@ describe('SeedLoaderRequestSchema', () => {
     });
     expect(request.seeds).toHaveLength(1);
     expect(request.config.dryRun).toBe(false);
-    expect(request.config.defaultMode).toBe('upsert');
+    expect(request.config.defaultMode).toBe('ignore');
+    // Each dataset is parsed through SeedSchema, so a mode-less dataset
+    // reaches the loader already carrying the create-only default.
+    expect(request.seeds[0].mode).toBe('ignore');
   });
 
   it('should accept a request with full configuration', () => {

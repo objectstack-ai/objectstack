@@ -73,6 +73,21 @@ export interface AfterHookHost {
   stampPasswordChangedAt: AuthManager['stampPasswordChangedAt'];
 }
 
+/**
+ * #8019 — who the change-email notice goes to: the user of the session the
+ * endpoint acted on. `undefined` when that user carries no address, and then
+ * no notice is sent.
+ */
+function changeEmailFrom(user: unknown): { email: string; name?: string; id?: string } | undefined {
+  const u = (user ?? {}) as { email?: unknown; name?: unknown; id?: unknown };
+  if (typeof u.email !== 'string' || !u.email) return undefined;
+  return {
+    email: u.email,
+    ...(typeof u.name === 'string' && u.name ? { name: u.name } : {}),
+    ...(typeof u.id === 'string' && u.id ? { id: u.id } : {}),
+  };
+}
+
 /** The body of `createAuthInstance`'s `hooks.after` arrow; the comments there and in it are its contract. */
 export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // ── #8243: impersonation must actually take effect for a bearer ──
@@ -204,9 +219,17 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // does not carry the old address, and better-auth mints a fresh
   // session there when the link is opened without one, so an
   // apply-time notice would silently miss that path.
+  //
+  // The address the notice goes to is the one the account holds as the
+  // request arrives, read from the session the endpoint itself acted on:
+  // better-auth's `sensitiveSessionMiddleware` resolves the caller before
+  // the handler runs and records that session on `ctx.context.session`,
+  // whatever credential carried it, and the handler never writes that object.
+  // So it names the account the request changes, with the address as it
+  // stood. No before-hook can read it: the endpoint resolves its caller only
+  // after every before-hook has run.
   if (ctx?.path === '/change-email') {
-    const from = ctx?.context?.__osChangeEmailFrom;
-    delete ctx.context.__osChangeEmailFrom;
+    const from = changeEmailFrom(ctx?.context?.session?.user);
     let succeeded: boolean;
     try {
       const { isAPIError } = await import('better-auth/api');

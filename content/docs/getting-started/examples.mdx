@@ -106,7 +106,7 @@ examples/app-todo/
 | Concept | File | What You'll Learn |
 |:--------|:-----|:------------------|
 | Object & Fields | `task.object.ts` | `Field.text()`, `Field.select()`, field options, indexes |
-| Seed Data | `src/data/index.ts` | `defineSeed()` with upsert mode, 8 sample records |
+| Seed Data | `src/data/index.ts` | `defineSeed()` with the create-only default, 8 sample records |
 | Actions | `task.actions.ts` | Script actions, modal actions with params |
 | App Navigation | `todo.app.ts` | Navigation groups, object links, dashboard links |
 | Automation | `task.flow.ts` | Autolaunched flow with record-triggered logic |
@@ -211,7 +211,7 @@ import { defineSeed } from '@objectstack/spec/data';
 import { Task } from '../objects/task.object';
 
 const tasks = defineSeed(Task, {
-  mode: 'upsert',
+  // no mode: create-only, so a restart never overwrites a task the user edited
   externalId: 'subject',
   records: [
     { subject: 'Learn ObjectStack', status: 'completed', priority: 'high' },

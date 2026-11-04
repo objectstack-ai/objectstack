@@ -10,9 +10,10 @@ view / page / dashboard / report metadata.
   must escalate to a stored field or app code, and when an ad-hoc
   in-page `<ObjectChart>` needs no dataset at all.
 - `record-page.json` — the record page as the object declares it: a child
-  table placed first by `relatedList: 'primary'` (no page file), and
+  table placed first by `relatedList: 'primary'` (no page file),
   `navigation: { mode: 'page' }` on the list view with the reader's own
-  open choice left out of metadata.
+  open choice left out of metadata, and `placedActions: true` on a full
+  page's `page:header` so packaged header actions draw without an id list.
 - `report-period-export.json` — a non-`joined` report's `dateRange` (one
   `type: 'date'` dataset dimension) and `exportOptions` (csv / xlsx under the
   base object's `allowExport` permission).
