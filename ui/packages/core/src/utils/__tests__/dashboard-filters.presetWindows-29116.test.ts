@@ -66,6 +66,9 @@ const RETIRED_PRESET_RANGES: Record<string, { from: string; to: string }> = {
 
 /** The presets the spec added after the retired table, which never held them. */
 const FORWARD_PRESETS: readonly string[] = ['next_month', 'next_quarter', 'next_30_days'];
+// The compareTo case below runs on these only. A forward preset has no retired
+// spelling to compare against, and compareTo on a forward window compares the
+// window with itself, which #30140 tracks.
 const RETIRED_PRESETS = [...DATE_RANGE_PRESETS].filter((p) => !FORWARD_PRESETS.includes(p));
 
 /**

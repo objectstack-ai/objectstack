@@ -239,6 +239,13 @@ describe('#30076 — the forward presets: next_month, next_quarter, next_30_days
         { preset: 'next_30_days', now: '2026-10-20T12:00:00.000Z', tz: 'America/New_York', start: '2026-10-20T04:00:00.000Z', end: '2026-11-20T05:00:00.000Z', why: 'New York, window crosses DST end' },
         // A non-whole-hour zone on both sides of its DST end (Apr 5 2026).
         { preset: 'next_month', now: '2026-03-15T00:00:00.000Z', tz: 'Pacific/Chatham', start: '2026-03-31T10:15:00.000Z', end: '2026-04-30T11:15:00.000Z', why: 'Chatham +13:45 then +12:45' },
+        // A zone that springs forward AT 00:00 on the period's first day:
+        // 2023-10-01 has no midnight in Asuncion, so its first instant is
+        // 01:00 -03 (04:00Z) and the zone helper settles on 03:00Z, which
+        // reads as Sep 30. Re-anchoring there gave an EMPTY window
+        // (end === start); the noon anchor keeps the resolver inside Oct 1.
+        { preset: 'next_month', now: '2023-09-15T12:00:00.000Z', tz: 'America/Asuncion', start: '2023-10-01T03:00:00.000Z', end: '2023-11-01T03:00:00.000Z', why: 'Asuncion springs forward at 00:00 on Oct 1' },
+        { preset: 'next_quarter', now: '2023-08-15T12:00:00.000Z', tz: 'America/Asuncion', start: '2023-10-01T03:00:00.000Z', end: '2024-01-01T03:00:00.000Z', why: 'Asuncion, quarter opens on the gap day' },
     ];
 
     it.each(ROWS)('$preset @ $now ($why)', ({ preset, now, tz, start, end }) => {

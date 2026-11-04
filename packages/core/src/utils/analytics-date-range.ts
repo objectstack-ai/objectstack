@@ -141,7 +141,8 @@ export interface ResolvedAnalyticsDateRange {
  * period grammar stops at `next_`. The re-anchored form names that day without
  * calendar arithmetic here and without widening the token vocabulary: resolve
  * {@link from} as usual, then resolve {@link token} AGAIN with the reference
- * day moved to the start of that day in the same zone. `{ token:
+ * day moved into that day in the same zone (to its noon; see
+ * {@link boundDayStart}). `{ token:
  * 'next_month_start', from: 'next_month_start' }` is "next month's start, as
  * seen from next month's start", which is the month after next. Every day in
  * the answer is still one the one resolver computed, so its month and quarter
@@ -196,14 +197,25 @@ function tokenDayStartMs(token: string, now: Date, timezone?: string): number {
   return zonedDateStartToUtcMs(String(day), timezone);
 }
 
+/** Twelve hours: from a day's first instant, always inside that same local day (a day is 23 to 25 hours). */
+const HALF_DAY_MS = 12 * 60 * 60 * 1000;
+
 /**
  * One bound's instant. A re-anchored bound resolves its `from` token first and
- * then its `token` with the reference instant moved to the start of that day
+ * then its `token` with the reference instant moved to about noon of that day
  * in `timezone`, so the resolver reads the anchor day as "today".
+ *
+ * ⛔ Not the day's first instant. Where a zone springs forward at 00:00 on a
+ * period's first day (America/Asuncion on 2023-10-01), that day has no
+ * midnight, and the instant the zone helper settles on reads as the day
+ * BEFORE: "next month seen from there" is the same month again, and the
+ * window comes out empty. Twelve hours later is inside the anchor day in any
+ * zone. This is only where the resolver stands, never a bound: both bounds are
+ * still days the resolver named, rendered at their own day start.
  */
 function boundDayStart(bound: PresetWindowBound, now: Date, timezone?: string): string {
   if (typeof bound === 'string') return tokenDayStart(bound, now, timezone);
-  const anchor = new Date(tokenDayStartMs(bound.from, now, timezone));
+  const anchor = new Date(tokenDayStartMs(bound.from, now, timezone) + HALF_DAY_MS);
   return tokenDayStart(bound.token, anchor, timezone);
 }
 

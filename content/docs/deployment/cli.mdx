@@ -2592,12 +2592,12 @@ os verify --dashboard-windows                  # Also prove each dashboard date 
    measure of a bound widget that is a count, a sum, or a derived measure over
    those, fixture rows are written through the seed door
    on every preset's first and last day and the day either side (never after
-   today), stamped at UTC noon, owned by the caller and holding every column
+   today, except a forward preset's own edges, which are future days), stamped at UTC noon, owned by the caller and holding every column
    the widget's own filter, the dataset's filter and the measure's filter
    compare (the smallest record first, every synthesized field if the seed
    door refuses it), and read back. The widget is then asked through
    `POST /analytics/dataset/query` as the signed-in admin with no window and
-   under each of the 13 presets, before and after the fixtures. A preset is
+   under each preset, before and after the fixtures. A preset is
    handed as the spec's `{date-macro}` window for it
    (`{ $gte: '{7_days_ago}', $lte: '{today}' }` for `last_7_days`, `{ $gte: '{month_start}', $lte: '{month_end}' }` for
    `this_month`), ANDed with the widget's filter, and the server resolves the
