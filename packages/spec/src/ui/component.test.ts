@@ -208,11 +208,14 @@ describe('PageHeaderProps placedActions — every placed header action, or the a
   });
 
   // The one part of the prose a consumer parses: `check-liveness.mts`
-  // `MARKER_RE.planned` reads it as the key's liveness status, and the
-  // `liveness/page.json` `_note` PLANNED RECORD names the reader that removes it.
-  it('opens its describe with the PLANNED marker until the header renderer reads it', () => {
+  // `MARKER_RE.planned` reads a `[PLANNED — not yet rendered]` opener as the
+  // key's liveness status. The header renderer reads the key since #29951 (the
+  // `liveness/page.json` `_note` LIVE RECORD names the reader), so the marker
+  // is gone and must not come back.
+  it('carries no PLANNED marker: the header renderer reads it (#29951)', () => {
     const member = (PageHeaderProps as unknown as { shape: Record<string, { description?: string }> }).shape.placedActions;
-    expect(member.description?.startsWith('[PLANNED — not yet rendered] ')).toBe(true);
+    expect(member.description).toBeTruthy();
+    expect(member.description).not.toContain('[PLANNED');
   });
 });
 

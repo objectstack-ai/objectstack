@@ -760,17 +760,18 @@ export const PageHeaderProps = strictObject({
    * the key on every parsed header, turning an unset key into an authored one
    * (the `maxVisible` docblock below records the same rule for its own 3).
    *
-   * PLANNED, not yet read: no renderer reads this key. Its reader is the
-   * objectui header half of #29951 (the header renderer, then the three
-   * platform record pages that froze their header id lists switching to it),
-   * dispatched once this spec lands. The liveness record is the
-   * `liveness/page.json` `_note` (a component-level key carries no ledger row:
-   * the walk stops at the undrilled `page/regions` container) and the
-   * `[PLANNED — not yet rendered]` marker this describe opens with; when the
-   * reader lands, the marker leaves and the `_note` sentence is rewritten.
+   * LIVE (#29951, the objectui header half): the header renderer
+   * (`PageHeaderActions` in
+   * ui/packages/components/src/renderers/layout/containers.tsx) reads it and
+   * draws `placedHeaderActions` (`@object-ui/types`), the one placed-header
+   * reader the synthesized default record page reads too; `sys_user_detail`,
+   * `sys_organization_detail` and `sys_approval_request_detail` set it. The
+   * liveness record is the `liveness/page.json` `_note` (a component-level key
+   * carries no ledger row: the walk stops at the undrilled `page/regions`
+   * container).
    */
   placedActions: z.boolean().optional().describe(
-    '[PLANNED — not yet rendered] Draw every action of the page\'s object whose `locations` include `record_header` or `record_more`, read live from the object\'s metadata, in place of an authored `actions` list: an action added to the object later, by any package, is drawn without editing the page. Omit it, or set false, to keep the `actions` list as the whole set. Refused as `true` beside an authored `actions` list: keep one.',
+    'Draw every action of the page\'s object whose `locations` include `record_header` or `record_more`, read live from the object\'s metadata, in place of an authored `actions` list: an action added to the object later, by any package, is drawn without editing the page. Omit it, or set false, to keep the `actions` list as the whole set. Refused as `true` beside an authored `actions` list: keep one.',
   ),
   /**
    * Which of the two page-header layouts the renderer builds (#6776).

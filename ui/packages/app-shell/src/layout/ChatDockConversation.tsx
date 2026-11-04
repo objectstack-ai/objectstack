@@ -22,6 +22,7 @@ import { chatConversationScope, chatProductOfAgent } from '../hooks/chatScope.js
 import { resolveSurfaceAgent } from '../hooks/surfaceAgent.js';
 import { useCanAuthorMetadata } from '../hooks/useCanAuthorMetadata.js';
 import { isAiStudioEnabled } from '../runtime-config.js';
+import type { ChatSurfaceContext } from './chatSurfaceContext.js';
 
 export interface ChatDockConversationProps {
   userId: string | undefined;
@@ -38,6 +39,15 @@ export interface ChatDockConversationProps {
    * authorable (see {@link ChatDockConversation}). Absent → app-less.
    */
   appPackageId?: string;
+  /**
+   * objectstack#30043 — the page in view, as `context.surface` (cloud#1610's
+   * shape; the layout reads it off the URL, see `consoleChatSurface`).
+   * Re-read on every render and so on every send: navigating with the dock
+   * open moves the next turn's surface. Absent → no `surface` key.
+   */
+  surfaceContext?: ChatSurfaceContext;
+  /** objectui#8219 — the display label of `surfaceContext.artifact`, for the chip only. */
+  surfaceArtifactLabel?: string;
   /** ADR-0037/P3c — the Live Canvas open/close seam, forwarded to ChatPane. */
   onCanvasOpenChange?: (open: boolean) => void;
   /**
@@ -74,6 +84,8 @@ export function ChatDockConversation({
   apiBase,
   defaultAgent,
   appPackageId,
+  surfaceContext,
+  surfaceArtifactLabel,
   onCanvasOpenChange,
   onBoundPackageChange,
 }: ChatDockConversationProps) {
@@ -143,6 +155,11 @@ export function ChatDockConversation({
       apiBase={apiBase}
       conversationId={paneConversationId}
       editPackageId={editPackageId}
+      // objectstack#30043 — the app the dock sits in is the selected app,
+      // whichever agent runs and whether or not a build thread binds to it.
+      activeAppPackageId={appPackageId}
+      surfaceContext={surfaceContext}
+      surfaceArtifactLabel={surfaceArtifactLabel}
       initialMessages={paneInitialMessages}
       pendingFirstMessageRef={pendingFirstMessageRef}
       onSent={() => {}}
