@@ -30,8 +30,9 @@
  *
  * `bin/run.js` with `NODE_ENV` unset, the shipped entry resolving commands from
  * `dist/` (`requireBuiltCli`), each boot in its own process group (`dev` and
- * `start` both supervise a `serve` grandchild), on a port drawn with
- * `reservePort()`.
+ * `start` both supervise a `serve` grandchild), on a kernel-assigned port read
+ * back out of the child's own banner (#24295): nothing here needs a number of
+ * its own, and a drawn-then-released port can be taken before the child binds.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -42,11 +43,11 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   childEnv,
+  KERNEL_ASSIGNED_PORT,
   portContentionError,
-  portDriftError,
   probeThroughChild,
+  readKernelAssignedPort,
   requireBuiltCli,
-  reservePort,
   RUN_JS_RESOLVES_FROM_DIST,
 } from './helpers/serve-process.js';
 import { linkSpec } from './helpers/define-stack-fixture.js';
@@ -102,7 +103,7 @@ let dir: string;
 let home: string;
 let reading: Reading = {};
 
-function boot(what: string, args: string[], port: number): Promise<Live> {
+function boot(what: string, args: string[]): Promise<Live> {
   return new Promise((resolveBoot, rejectBoot) => {
     const child = spawn(process.execPath, [CLI, ...args], {
       cwd: dir,
@@ -115,6 +116,10 @@ function boot(what: string, args: string[], port: number): Promise<Live> {
         OS_CLOUD_URL: 'off',
         OS_DISABLE_CONSOLE: '1',
         OS_LOG_LEVEL: 'warn',
+        // A production boot on a kernel-assigned port derives its own trusted
+        // origin from the port it was ASKED for (0), so the origin it bound is
+        // named here; `os dev` trusts `http://localhost:*` on its own.
+        OS_TRUSTED_ORIGINS: 'http://localhost:*',
         OS_SECRET_KEY: undefined,
         OS_DEV_CRYPTO_KEY: undefined,
         OBJECTSTACK_DEV_CRYPTO_KEY: undefined,
@@ -150,13 +155,13 @@ function boot(what: string, args: string[], port: number): Promise<Live> {
     );
     const onData = (d: unknown) => {
       out += String(d);
-      if (READY.test(out)) settle(portDriftError(out, what, port) ?? port);
+      if (READY.test(out)) settle(readKernelAssignedPort(out, what));
     };
     child.stdout?.on('data', onData);
     child.stderr?.on('data', onData);
     child.on('exit', (code) =>
       settle(
-        portContentionError(out, what, port)
+        portContentionError(out, what, KERNEL_ASSIGNED_PORT)
           ?? new Error(`${what} exited ${String(code)} before ${READY}\n--- output ---\n${out.slice(-4000)}`),
       ),
     );
@@ -224,8 +229,7 @@ beforeAll(async () => {
   let transcript = '';
   try {
     // `npm run dev`: the dev admin is seeded, the secret is sealed.
-    const devPort = reservePort();
-    live = await boot('os dev', ['dev', '--no-watch', '--no-restart', '-p', String(devPort)], devPort);
+    live = await boot('os dev', ['dev', '--no-watch', '--no-restart', '-p', KERNEL_ASSIGNED_PORT]);
     const devToken = await signIn(live);
     const put = await http(live, 'PUT', '/api/settings/ai', devToken, { openai_api_key: SECRET });
     transcript += `--- os dev ---\n${live.output().slice(-3000)}\n`;
@@ -233,12 +237,7 @@ beforeAll(async () => {
     live = undefined;
 
     // `npx os start --artifact ./dist/objectstack.json` in the same project.
-    const startPort = reservePort();
-    live = await boot(
-      'os start',
-      ['start', '--artifact', './dist/objectstack.json', '--port', String(startPort)],
-      startPort,
-    );
+    live = await boot('os start', ['start', '--artifact', './dist/objectstack.json', '--port', KERNEL_ASSIGNED_PORT]);
     const startToken = await signIn(live);
     const get = await http(live, 'GET', '/api/settings/ai', startToken);
     transcript += `--- os start ---\n${live.output().slice(-3000)}\n`;
