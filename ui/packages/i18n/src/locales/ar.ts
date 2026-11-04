@@ -5032,6 +5032,13 @@ const ar = {
         object_extension_few: 'امتدادات كائنات {{count}}',
         object_extension_many: 'امتدادات كائنات {{count}}',
         object_extension_other: 'امتدادات كائنات {{count}}',
+        dataset: 'مجموعات بيانات {{count}}',
+        dataset_zero: 'مجموعات بيانات {{count}}',
+        dataset_one: 'مجموعة بيانات {{count}}',
+        dataset_two: 'مجموعات بيانات {{count}}',
+        dataset_few: 'مجموعات بيانات {{count}}',
+        dataset_many: 'مجموعات بيانات {{count}}',
+        dataset_other: 'مجموعات بيانات {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

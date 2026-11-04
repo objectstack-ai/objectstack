@@ -4577,6 +4577,9 @@ const ja = {
         object_extension: 'オブジェクト拡張 {{count}}',
         object_extension_one: 'オブジェクト拡張 {{count}}',
         object_extension_other: 'オブジェクト拡張 {{count}}',
+        dataset: 'データセット {{count}}',
+        dataset_one: 'データセット {{count}}',
+        dataset_other: 'データセット {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

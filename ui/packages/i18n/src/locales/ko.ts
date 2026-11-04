@@ -4574,6 +4574,9 @@ const ko = {
         object_extension: '객체 확장 {{count}}',
         object_extension_one: '객체 확장 {{count}}',
         object_extension_other: '객체 확장 {{count}}',
+        dataset: '데이터 세트 {{count}}',
+        dataset_one: '데이터 세트 {{count}}',
+        dataset_other: '데이터 세트 {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

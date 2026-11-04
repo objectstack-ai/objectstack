@@ -2536,6 +2536,20 @@ const STUDIO_EN: Record<string, string> = {
   // the platform's sentence is shown instead).
   'engine.studio.auto.notRunning': 'Not running here',
   'engine.studio.auto.notRunningTitle': 'Enabled, but its trigger is not armed on this deployment',
+  // The run note's line for each of the contract's FLOW_UNBOUND_CAUSES: what
+  // this deployment does not do, and who can change it.
+  'engine.studio.auto.unboundCause.deployment_policy':
+    'This deployment keeps scheduled work that comes with a package switched off. Whoever operates this deployment can switch it on.',
+  'engine.studio.auto.unboundCause.disabled_subflow':
+    'A packaged subflow this flow calls is switched off, so this flow does not start. An admin can switch that subflow on.',
+  'engine.studio.auto.unboundCause.notice_after_suspending_subflow':
+    'A save notice in this flow comes after a subflow that can pause, so this flow does not start. Move the save notice ahead of that step, or use a notify step.',
+  'engine.studio.auto.unboundCause.suspending_subflow_in_region':
+    'A subflow inside a loop, parallel branch or error handler calls a flow that can pause, so this flow does not start. Move that call onto the main path of the flow.',
+  'engine.studio.auto.unboundCause.missing_trigger':
+    'This deployment does not run flows started by this kind of trigger. A developer can add the trigger package to the app, and the flow will start running.',
+  'engine.studio.auto.unboundCause.binding_failure':
+    'The trigger is installed, but connecting this flow to it failed. A developer can find the error in the server startup warnings.',
   'engine.studio.auto.unpublishedTitle': 'Not deployed yet — publish to deploy it',
   // objectui#12349 — the engine's registration verdict on a flow. A refused
   // flow is titled with the engine's own message, as sent; an unregistered one
@@ -4200,6 +4214,9 @@ const STUDIO_EN: Record<string, string> = {
   // Problems panel (ProblemsPanel).
   'engine.flowProblems.title': 'Problems',
   'engine.flowProblems.empty': 'No problems — this flow is structurally valid.',
+  // Shown instead of `empty` when the run note above says the flow does not run
+  // here: "no problems" beneath that note read as a contradiction.
+  'engine.flowProblems.emptyNotRunning': 'The structure checks found nothing to fix. The note above is why this flow does not run here.',
   'engine.flowProblems.sourceSchema': 'schema',
   'engine.flowProblems.sourceExpression': 'expression',
   // objectui#11772 — one extra copy of a connection (`edgeRouteKey`): the
