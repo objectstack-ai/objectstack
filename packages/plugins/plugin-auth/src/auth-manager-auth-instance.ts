@@ -70,36 +70,44 @@ import { vendorClientAddressOptions } from './client-address-vendor.js';
 import { PLATFORM_IDP_PROVIDER_ID, refuseImplicitAccountLink } from './implicit-account-linking.js';
 import { isPlaceholderEmail } from './placeholder-email.js';
 import { logAfterResponseSendFailure, sendAfterResponseOnPublicDoor } from './run-after-response.js';
+import { isVisitorResendInEndpointContext } from './visitor-verification-resend.js';
 
 /** The path better-auth declares for the email sign-up endpoint. */
 const SIGN_UP_EMAIL_PATH = '/sign-up/email';
 
 /**
- * `send`, with the one call the sign-up endpoint makes handed to
- * {@link sendAfterResponseOnPublicDoor}: a sign-up answers without waiting for
- * any mail send, whether or not the address already has an account. Every
- * other call is `send` itself, awaited exactly as before — the
- * `/send-verification-email` resend among them, which reports a send that
- * failed to its caller.
+ * `send`, with two of its calls handed to {@link sendAfterResponseOnPublicDoor}:
+ *
+ *  - the one the sign-up endpoint makes: a sign-up answers without waiting for
+ *    any mail send, whether or not the address already has an account;
+ *  - the one the `/send-verification-email` resend makes for a visitor who is
+ *    not signed in: that resend answers the same whatever the send does
+ *    (`visitor-verification-resend.ts` states the rule).
+ *
+ * Their failure is logged on the server, never handed to the caller. Every
+ * other call is `send` itself, awaited exactly as before — a signed-in
+ * caller's resend among them, which reports a send that failed to its caller.
  *
  * The endpoint is the one better-auth runs the call inside, read by its
  * declared path from the endpoint context (as the hooks read `ctx.path`),
- * never from the request's URL. Outside any endpoint context the call is
- * awaited.
+ * never from the request's URL; whether the caller is signed in is the session
+ * that endpoint resolved before it called. Outside any endpoint context the
+ * call is awaited.
  */
-function sendAfterResponseOnSignUp<D>(
+function sendAfterResponseOnSignUpAndVisitorResend<D>(
   send: (data: D, request?: unknown) => Promise<unknown>,
   onFailure: (error: unknown) => void,
 ): (data: D, request?: unknown) => Promise<void> {
   const afterResponse = sendAfterResponseOnPublicDoor(send, onFailure);
   return (data, request) => {
-    let path: unknown;
+    let answersFirst = false;
     try {
-      path = tryGetCurrentAuthEndpointContext()?.path;
+      const endpoint = tryGetCurrentAuthEndpointContext();
+      answersFirst = endpoint?.path === SIGN_UP_EMAIL_PATH || isVisitorResendInEndpointContext(endpoint);
     } catch {
-      path = undefined;
+      answersFirst = false;
     }
-    return path === SIGN_UP_EMAIL_PATH ? afterResponse(data, request) : (send(data, request) as Promise<void>);
+    return answersFirst ? afterResponse(data, request) : (send(data, request) as Promise<void>);
   };
 }
 
@@ -583,16 +591,22 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
         // makes, carrying its request, resolves at once and the mail is built
         // and sent after the response, as the notice to an address that
         // already has an account is (`onExistingUserSignUp` above); its
-        // failure is logged on the server. Every other call is awaited as
-        // before (`sendAfterResponseOnSignUp`) — the resend below among them.
-        sendVerificationEmail: sendAfterResponseOnSignUp(async ({ user, url, token }: { user: { id: string; email: string; name?: string }; url: string; token: string }, request?: unknown) => {
+        // failure is logged on the server. The `/send-verification-email`
+        // resend of a visitor who is not signed in is sent the same way, so
+        // it answers the same whatever the send does
+        // (`visitor-verification-resend.ts`). Every other call is awaited as
+        // before (`sendAfterResponseOnSignUpAndVisitorResend`) — a signed-in
+        // caller's resend among them.
+        sendVerificationEmail: sendAfterResponseOnSignUpAndVisitorResend(async ({ user, url, token }: { user: { id: string; email: string; name?: string }; url: string; token: string }, request?: unknown) => {
           const email = this.getEmailService();
           if (!email) {
             // Verification is enabled (this callback only exists when it is)
             // but no email transport is wired — a misconfiguration, not a
-            // transient blip. THROW so the explicit `/send-verification-email`
-            // resend endpoint (which awaits this) surfaces a real error
-            // instead of a false "email sent" success. Sign-up stays
+            // transient blip. THROW so a signed-in caller's
+            // `/send-verification-email` resend (which awaits this) surfaces a
+            // real error instead of a false "email sent" success; a visitor's
+            // resend is refused before it gets here while no transport is
+            // live (`EMAIL_SERVICE_REQUIRED`, the before-hook). Sign-up stays
             // resilient regardless: better-auth runs the sendOnSignUp call
             // through `runInBackgroundOrAwait`, which logs (never rethrows)
             // a failure, so the account is still created and the user lands
@@ -606,7 +620,8 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
           const ttlSec = this.config.emailVerification?.expiresIn ?? 60 * 60;
           // Let send failures propagate (see above): sendTemplate THROWS on
           // template/loader errors, and returns status:'failed' on transport
-          // errors — surface both so resend is honest and signup stays
+          // errors — surface both so a signed-in caller's resend is honest
+          // (a visitor's is logged on the server instead) and signup stays
           // resilient via better-auth's background-task error handling.
           // commit 35e94c96b — the stored rung, same ladder as the reset above. An
           // admin re-triggering verification for a user is the same
@@ -770,6 +785,7 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
           hasExistingUserFor: (...a) => this.hasExistingUserFor(...a),
           isAuthGateActive: (...a) => this.isAuthGateActive(...a),
           isBootstrapCreation: (...a) => this.isBootstrapCreation(...a),
+          isEmailDeliveryLive: (...a) => this.isEmailDeliveryLive(...a),
           isOperatorProvisioning: (...a) => this.isOperatorProvisioning(...a),
           isPlatformAdminUserId: (...a) => this.isPlatformAdminUserId(...a),
           resolveActor: (...a) => this.resolveActor(...a),
