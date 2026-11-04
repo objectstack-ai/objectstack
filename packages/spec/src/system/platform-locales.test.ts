@@ -10,6 +10,8 @@ import {
   PLATFORM_LOCALE_TAGS,
   PLATFORM_LOCALE_READ_ALIASES,
   platformLocaleTagOf,
+  type PlatformLocaleReadAlias,
+  type PlatformLocaleTag,
 } from './platform-locales';
 import * as SystemBarrel from './index';
 
@@ -52,7 +54,7 @@ describe('PLATFORM_LOCALES: the table, pinned whole', () => {
 });
 
 describe('PLATFORM_LOCALE_READ_ALIASES: stored codes keep resolving', () => {
-  const ALIASES: ReadonlyArray<readonly [string, string]> = [
+  const ALIASES: ReadonlyArray<readonly [PlatformLocaleReadAlias, PlatformLocaleTag]> = [
     ['zh', 'zh-Hans'],
     ['zh-CN', 'zh-Hans'],
     ['zh-SG', 'zh-Hans'],
@@ -72,6 +74,13 @@ describe('PLATFORM_LOCALE_READ_ALIASES: stored codes keep resolving', () => {
 
   it('the map is exactly those ten aliases', () => {
     expect(PLATFORM_LOCALE_READ_ALIASES).toEqual(Object.fromEntries(ALIASES));
+  });
+
+  it('the map is typed on its ten literal keys: an unlisted code does not index it as defined', () => {
+    const zhCN: 'zh-Hans' = PLATFORM_LOCALE_READ_ALIASES['zh-CN'];
+    expect(zhCN).toBe('zh-Hans');
+    // @ts-expect-error `pt-PT` is not a read alias, so the index is not typed as a table tag.
+    expect(PLATFORM_LOCALE_READ_ALIASES['pt-PT']).toBeUndefined();
   });
 
   it('every alias target is a table tag', () => {

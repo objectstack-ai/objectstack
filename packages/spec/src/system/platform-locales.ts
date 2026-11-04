@@ -4,12 +4,16 @@
 
 /**
  * The platform locale table: the one list of languages the platform
- * supports. Every language on it is complete on every surface (the Console
- * UI, platform metadata, the built-in emails), and there are no tiers.
+ * supports, with no tiers. It is the rule every surface (the Console UI,
+ * platform metadata, the built-in emails) is held to: each surface carries
+ * every language on it. That is the target, not yet the state: the Console
+ * ships ten packs without `zh-Hant`, and platform metadata and the built-in
+ * emails ship four locales (`en` or `en-US`, `zh-CN`, `ja-JP`, `es-ES`). The
+ * surfaces are backfilled to the table in later phases.
  *
  * Adding or removing a language is a change to this table followed by one
  * backfill of every surface. A change that adds a translatable string adds it
- * for every language here in the same pull request.
+ * for every language the surface already carries, in the same pull request.
  *
  * Order is authored: it is the order a language menu lists them in.
  *
@@ -62,7 +66,7 @@ export const PLATFORM_LOCALE_TAGS: readonly PlatformLocaleTag[] = Object.freeze(
  * no region fallback here (`pt-PT` is not `pt-BR`, `zh-Hans-CN` is not listed).
  * Frozen.
  */
-export const PLATFORM_LOCALE_READ_ALIASES: Readonly<Record<string, PlatformLocaleTag>> = Object.freeze({
+export const PLATFORM_LOCALE_READ_ALIASES = Object.freeze({
   zh: 'zh-Hans',
   'zh-CN': 'zh-Hans',
   'zh-SG': 'zh-Hans',
@@ -73,13 +77,16 @@ export const PLATFORM_LOCALE_READ_ALIASES: Readonly<Record<string, PlatformLocal
   'es-ES': 'es',
   pt: 'pt-BR',
   'en-US': 'en',
-});
+} as const satisfies Record<string, PlatformLocaleTag>);
+
+/** A stored code {@link PLATFORM_LOCALE_READ_ALIASES} maps (`zh-CN`, `en-US`, …). */
+export type PlatformLocaleReadAlias = keyof typeof PLATFORM_LOCALE_READ_ALIASES;
 
 // Case-folded index over the table tags and the aliases. A Map, so a code
 // such as `constructor` never reads an Object.prototype member.
 const TAG_BY_FOLDED_CODE: ReadonlyMap<string, PlatformLocaleTag> = new Map<string, PlatformLocaleTag>([
   ...PLATFORM_LOCALE_TAGS.map((tag): [string, PlatformLocaleTag] => [tag.toLowerCase(), tag]),
-  ...Object.entries(PLATFORM_LOCALE_READ_ALIASES).map(
+  ...(Object.entries(PLATFORM_LOCALE_READ_ALIASES) as Array<[string, PlatformLocaleTag]>).map(
     ([code, tag]): [string, PlatformLocaleTag] => [code.toLowerCase(), tag],
   ),
 ]);
@@ -95,6 +102,17 @@ const TAG_BY_FOLDED_CODE: ReadonlyMap<string, PlatformLocaleTag> = new Map<strin
  * locale saved as `zh-cn` means `zh-CN`. The same rule the bundle resolver
  * (`resolveBundleLocale`) applies. Nothing else is corrected: an underscore
  * (`zh_CN`), surrounding whitespace or a language name answers `undefined`.
+ *
+ * It answers which table language a code MEANS, which is a different
+ * question from which key of a bundle SERVES a requested locale; that is
+ * `resolveBundleLocale`'s ladder (exact, case, base language, first variant).
+ * A reader that uses both maps the code here first and then resolves the
+ * table tag against the bundle, so the two never contradict: `pt` means
+ * `pt-BR`, and a request for `pt-BR` may still be served by a bundle's `pt`
+ * key. Run the other way round, the ladder alone answers a bare or regional
+ * Chinese code by key order once a bundle holds both scripts:
+ * `resolveBundleLocale({ 'zh-Hant': …, 'zh-Hans': … }, 'zh')`, and the same
+ * call with `zh-CN`, answers `zh-Hant`.
  */
 export function platformLocaleTagOf(code: unknown): PlatformLocaleTag | undefined {
   if (typeof code !== 'string') return undefined;
