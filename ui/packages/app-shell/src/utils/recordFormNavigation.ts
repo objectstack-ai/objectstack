@@ -147,6 +147,12 @@ export function resolveRecordFormTarget(opts: {
  */
 export interface FormViewDefinition {
   /**
+   * The served view item's id (`OBJECT.KEY`), which `MetadataProvider`
+   * stamps on every form view it merges: the name its draft is read and saved
+   * under (objectstack#30057).
+   */
+  name?: string;
+  /**
    * Layout family declared by the form view (`simple` | `tabbed` | `wizard`
    * | `split`). Only `tabbed` changes the *modal's* internal layout; the
    * others still render their curated sections, just stacked.
