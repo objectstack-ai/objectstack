@@ -150,7 +150,7 @@
 // Pays the lint root's first load at collection, never inside a clocked case.
 import './lint-root-preload.testkit.js';
 import { describe, expect, it, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { PLURAL_TO_SINGULAR, canonicalMetaUrlType } from '@objectstack/spec/shared';
 // [#5619] The producer's OWN write-verb dispatch decisions, imported from
@@ -159,6 +159,14 @@ import { PLURAL_TO_SINGULAR, canonicalMetaUrlType } from '@objectstack/spec/shar
 // rejects outright.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+
+/**
+ * [#29985] Every module of the protocol.ts split: `protocol-*.ts` beside
+ * `protocol.ts`, tests excluded (the census's own module pattern).
+ */
+const SPLIT_MODULES = readdirSync(fileURLToPath(new URL('.', import.meta.url)))
+    .filter((file) => /^protocol-[a-z0-9-]+\.ts$/.test(file))
+    .sort();
 
 /**
  * [#26708] The packages this file's saves name, installed: a save naming a
@@ -591,14 +599,20 @@ describe('[#8862] the `applyRegistryWriteThrough` caller set stays closed', () =
         fileURLToPath(new URL('./protocol.ts', import.meta.url)),
         'utf8',
     );
+    // [#29985] The codemod split moved callers' bodies into `protocol-*.ts`
+    // modules (ruling E's host split), where the class is spelled `host.`; the
+    // caller set is the union over protocol.ts and every split module, tests
+    // excluded (`HOST_SPLIT.module` in check-durability-degradation-log-level).
+    const sources = [source, ...SPLIT_MODULES.map((file) => readFileSync(fileURLToPath(new URL(`./${file}`, import.meta.url)), 'utf8'))];
+    const sitesOf = (pattern: RegExp) => sources.flatMap((text) => text.match(pattern) ?? []);
 
     it('has exactly seven call sites, all traced in this file’s header', () => {
-        const callSites = source.match(/this\.applyRegistryWriteThrough\(/g) ?? [];
+        const callSites = sitesOf(/\b(?:this|host)\.applyRegistryWriteThrough\(/g);
         expect(callSites).toHaveLength(7);
     });
 
     it('`applyObjectRegistryMutation` is reached only through the write-through', () => {
-        const callSites = source.match(/this\.applyObjectRegistryMutation\(/g) ?? [];
+        const callSites = sitesOf(/\b(?:this|host)\.applyObjectRegistryMutation\(/g);
         expect(callSites).toHaveLength(1);
     });
 });
@@ -680,7 +694,9 @@ describe('[#8862] the `objects` tolerance stays removed', () => {
     // [#25467 cut 8] `assertRuntimeAuthoringRules`, which holds the collection
     // pair, moved whole into `protocol-authoring-gate.ts`; the scan reads both
     // files as one, so the population it counts is the one it always counted.
-    const code = executableTextOf(['./protocol.ts', './protocol-authoring-gate.ts'].map((path) => readFileSync(
+    // [#29985] …and the codemod split moved the four seams' bodies into
+    // further `protocol-*.ts` modules, so the scan reads every split module.
+    const code = executableTextOf(['./protocol.ts', ...SPLIT_MODULES.map((file) => `./${file}`)].map((path) => readFileSync(
         fileURLToPath(new URL(path, import.meta.url)),
         'utf8',
     )).join('\n'));
