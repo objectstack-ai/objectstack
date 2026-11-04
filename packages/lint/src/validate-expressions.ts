@@ -1300,10 +1300,9 @@ function isFlattenedNearMissFor(diagnostic: string, roots: readonly string[]): b
  * | field `requiredWhen`, `readonlyWhen`   | `rule-validator.ts`: refuses the write (ADR-0137 D2)         | `fail-closed` |
  * | option `visibleWhen`                   | `evaluateOptionVisibility`: refuses a write picking it (ADR-0137 D2, #22402) | `fail-closed` |
  * | hook `condition`                       | `hook-wrappers.ts`: aborts the operation (#4775)             | `fail-closed` |
- * | flow start / edge condition — record-triggered flow | `evaluateCondition` throws (ADR-0032 §1c); the trigger isolates the write: the run fails, the write lands | `run-fails` |
- * | flow `decision` branch — record-triggered flow | the same; the null-guard verdict only (the branch is validated without the object's field types, so no `type-mismatch` reaches it) | `run-fails` |
- * | flow condition, any other flow         | no total trigger record is bound (see `validate-null-guards.ts`'s ledger) | — not declared |
- * | a flow node's `condition` other than the top-level start node's | inert (`flow-inert-node-condition`) | — |
+ * | flow start / edge condition, `decision` branch — record-triggered flow | `evaluateCondition` throws (ADR-0032 §1c); the trigger isolates the write: the run fails, the write lands. A bare name and its `record.<name>` read are the same total trigger record (#29959) | `run-fails` |
+ * | flow condition, any other flow         | `evaluateCondition` throws there too, but no total trigger record is bound (see `validate-null-guards.ts`'s ledger): the run holds what its entrance handed it — an API request body, an action's partial record, a parent's record, or nothing — so the field's type is not proven to be what the name holds | — not declared: the `type-mismatch-run-may-fail` WARNING, worded for the run (#29959) |
+ * | a flow node's `condition` other than the top-level start node's | inert (`flow-inert-node-condition`) | — the same warning |
  * | field `expression` (formula)           | reads null                                                   | — the warning's text is true |
  * | field `visibleWhen` / `settledWhen`, `conditionalFormatting`, field group `visibleWhen`, action `visible` / `disabled` / `pressed`, app landing `visible` | evaluated by the renderer: shows, hides or styles, never refuses a write | — |
  * | sharing rule `condition`               | compiled to a query filter, not evaluated as CEL per row     | — |
@@ -2553,8 +2552,18 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
    * A declared bare-CEL slot (#4027). No object schema is passed: these slots
    * bind the *screen's own* collected values, not the trigger record's fields, so
    * a field-existence pass would report every field name as unknown.
+   *
+   * [#29959] `flowCondition` — set for a slot the engine evaluates like an
+   * edge (a `decision` branch's `expression`, `builtin/logic-nodes.ts`, over
+   * the same run variables): there the trigger record IS flattened in, so the
+   * slot is judged by {@link check} exactly as an edge condition is — the
+   * object's fields and types, and the flow's declared fault outcome.
    */
-  const checkDeclaredPredicate = (where: string, raw: unknown): { refused: boolean } => {
+  const checkDeclaredPredicate = (
+    where: string,
+    raw: unknown,
+    flowCondition?: { readonly objectName: string | undefined; readonly faultOutcome: ExprFaultOutcome | undefined },
+  ): { refused: boolean } => {
     // [#19961] No `raw == null` early return: whether an absent value is a
     // finding is the resolver's call, not this pass's. It emits absent / `null`
     // only for a `required` ledger slot (a `decision` branch's `expression`),
@@ -2577,6 +2586,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     if (shapeRefusal) {
       issues.push({ where, message: shapeRefusal.message, source: shapeRefusal.source, severity: 'error' });
       return { refused: true };
+    }
+    if (flowCondition) {
+      check(where, raw, flowCondition.objectName, undefined, undefined, undefined, undefined, undefined, flowCondition.faultOutcome);
+      return { refused: false };
     }
     const res = validateExpression('predicate', raw as string | { dialect?: string; source?: string });
     for (const e of res.errors) issues.push({ where, message: e.message, source: e.source, severity: 'error' });
@@ -2972,7 +2985,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           // [#15572] A slot refused on SHAPE gets no second diagnostic: the
           // shadowing warning is about which scope a CEL source resolves in,
           // and a value that is not CEL text has no source to resolve.
-          if (checkDeclaredPredicate(slotWhere, found.value).refused) continue;
+          // [#29959] A `decision` branch is evaluated like an edge, so it is
+          // judged like one: the object's field types and the flow's outcome.
+          const branchCondition = nodeType === 'decision' ? { objectName, faultOutcome: flowFaultOutcome } : undefined;
+          if (checkDeclaredPredicate(slotWhere, found.value, branchCondition).refused) continue;
           // [#14288] The shadowing warning is about the SCOPE an expression is
           // evaluated in, not about which key it was authored under — so it
           // belongs on every `predicate` slot the ledger declares, not just the

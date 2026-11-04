@@ -235,7 +235,7 @@ export interface ExprSchemaHint {
    * `readonlyWhen`, an option `visibleWhen` on the write path, a hook
    * `condition`.
    *
-   * `'run-fails'`: a record-triggered flow's start or edge condition — the
+   * `'run-fails'`: a record-triggered flow's start, edge or `decision` branch condition — the
    * engine's `evaluateCondition` throws on the fault (ADR-0032 §1c), so the
    * run fails there, while the record-change trigger isolates the write that
    * fired it: the write lands, the flow's work is not done.
@@ -247,9 +247,11 @@ export interface ExprSchemaHint {
    * With any of the three, a `type-mismatch` (text or a boolean ordered /
    * arithmetic'd against a number) is an ERROR under that outcome's own code
    * and wording — the severity the nullable-comparison verdict already has at
-   * the same sites. Absent: a fault reads as null (a formula field), and
-   * `type-mismatch` stays the advisory warning whose "evaluates to null" text
-   * is true there.
+   * the same sites. Absent at a `record`-scoped site: a fault reads as null (a
+   * formula field), and `type-mismatch` stays the advisory warning whose
+   * "evaluates to null" text is true there. Absent at a `'flattened'` (flow)
+   * site: `type-mismatch-run-may-fail`, a warning saying the run fails where
+   * the condition faults (#29959) — a flow condition never reads null.
    */
   faultOutcome?: ExprFaultOutcome;
 }
@@ -382,7 +384,11 @@ const TYPE_MISMATCH_FAULT_ARMS: {
  *    declares the site's fault outcome (`faultOutcome`, #29904 / #29926):
  *    there the fault is not a null but a refused write, a failed flow run or a
  *    rule that never applies, each under its own code
- *    ({@link TYPE_MISMATCH_FAULT_ARMS}).
+ *    ({@link TYPE_MISMATCH_FAULT_ARMS}). In a flattened (flow) condition with
+ *    no declared outcome it is `type-mismatch-run-may-fail`, still a warning,
+ *    worded for the failed run a fault there is (#29959); a flattened
+ *    condition's `record.<field>` / `previous.<field>` read is judged as its
+ *    bare name is.
  *  - `date-text-arithmetic` / `date-duration-value` (**error**, #28944): what
  *    the Timestamp typing passes, re-checked with a date field declared as the
  *    text the runtime holds — see {@link dateTextIssue}.
@@ -399,7 +405,9 @@ function typeSoundnessIssue(
   const mismatch = firstTypeMismatch(source, celFieldTypes, scope);
   if (!mismatch) return dateTextIssue(source, celFieldTypes, scope, role);
   const reference = mismatch.field
-    ? (scope === 'record' ? `record.${mismatch.field}` : mismatch.field)
+    ? (mismatch.root !== undefined
+      ? `${mismatch.root}.${mismatch.field}`
+      : scope === 'record' ? `record.${mismatch.field}` : mismatch.field)
     : undefined;
   const ref = reference !== undefined ? `\`${reference}\`` : null;
   if (mismatch.category === 'date-arith') {
@@ -420,35 +428,53 @@ function typeSoundnessIssue(
   const heldKind = mismatch.celType === 'bool' ? 'boolean' : 'text';
   const held = heldKind === 'boolean' ? 'a boolean' : 'text';
   const subject = ref ? `${ref} holds ${held}` : `${held === 'a boolean' ? 'a boolean' : 'a text'} field`;
+  const params = {
+    operands: mismatch.operands,
+    operator: mismatch.operator,
+    held: heldKind,
+    ...(reference !== undefined ? { reference } : {}),
+  };
+  // [#29904] Measured on the evaluator: `record.name > 5` faults on `"abc"`
+  // and on null, and the ADR-0032 §1c rescue answers only numeric text
+  // (`"7"`). `size()` answers text; `double()` / `int()` validate clean but
+  // fault on text that is not a number — so the hint says so.
+  const operand = reference ?? (heldKind === 'boolean' ? 'the field' : 'the text');
+  const convert = heldKind === 'boolean'
+    ? 'Compare a boolean with `true` / `false`, or use a number field.'
+    : `Compare like with like: use a number field, compare text with text, or convert ` +
+      `explicitly — \`size(${operand})\` for its length, \`double(${operand})\` for its value ` +
+      `(which itself faults on text that is not a number).`;
+  const faults =
+    `type mismatch \`${mismatch.operands}\` — ${subject} but is used with \`${mismatch.operator}\` ` +
+    `against a number. CEL has no such operation, so wherever the value is not numeric text ` +
+    `(an empty value included) the expression faults`;
   if (faultOutcome !== undefined) {
-    // [#29904] Measured on the evaluator: `record.name > 5` faults on `"abc"`
-    // and on null, and the ADR-0032 §1c rescue answers only numeric text
-    // (`"7"`). `size()` answers text; `double()` / `int()` validate clean but
-    // fault on text that is not a number — so the hint says so.
-    const operand = reference ?? (heldKind === 'boolean' ? 'the field' : 'the text');
-    const convert = heldKind === 'boolean'
-      ? 'Compare a boolean with `true` / `false`, or use a number field.'
-      : `Compare like with like: use a number field, compare text with text, or convert ` +
-        `explicitly — \`size(${operand})\` for its length, \`double(${operand})\` for its value ` +
-        `(which itself faults on text that is not a number).`;
     // [#29926] One code per outcome: a code names ONE message template
     // (`expression-refusal.ts`), and the three outcomes are three sentences.
     const arm = TYPE_MISMATCH_FAULT_ARMS[faultOutcome];
     return {
       severity: 'error',
+      issue: refusal(arm.code, params, source, `${faults}, and here ${arm.clause} ${convert}`),
+    };
+  }
+  if (scope === 'flattened') {
+    // [#29959] A flattened condition is a flow's, and the engine's
+    // `evaluateCondition` throws on a fault (ADR-0032 §1c) on every flow: it
+    // never reads null. The caller declared no outcome because what the run
+    // binds under the name is not proven to be the field's value — a flow
+    // that is not record-triggered is handed whatever its entrance carries
+    // (an API request body, an action's partial record, a parent's record,
+    // or nothing), so the mismatch stays a warning, worded for the run.
+    return {
+      severity: 'warning',
       issue: refusal(
-        arm.code,
-        {
-          operands: mismatch.operands,
-          operator: mismatch.operator,
-          held: heldKind,
-          ...(reference !== undefined ? { reference } : {}),
-        },
+        'type-mismatch-run-may-fail',
+        params,
         source,
-        `type mismatch \`${mismatch.operands}\` — ${subject} but is used with \`${mismatch.operator}\` ` +
-          `against a number. CEL has no such operation, so wherever the value is not numeric text ` +
-          `(an empty value included) the expression faults, and here ${arm.clause} ` +
-          convert,
+        `${faults}, and a flow condition that faults when it is evaluated fails the run: the flow stops ` +
+          `at this condition and the work it exists to do is not done (it does not read null). Whether ` +
+          `${ref ?? 'the field'} holds ${held} there depends on what the run binds — on a flow that is not ` +
+          `record-triggered, whatever started it — so this is a warning, not a refusal. ${convert}`,
       ),
     };
   }
