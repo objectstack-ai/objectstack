@@ -40,11 +40,13 @@ const TWO_FACTOR_OFFERED = P`has(features.twoFactor) && features.twoFactor == tr
  *    so it is drawn as authored at every width. It was a `kind: 'slotted'`
  *    page overriding `alerts`, `highlights`, `tabs` and `discussion` until the
  *    `tabs` slot retired (#27053); the rebuild renders the same nodes in the
- *    same order. The header the synthesizer used to supply is spelled out as
- *    a `page:header` carrying the object's declared header actions
- *    (`ban_user / impersonate_user / … / update_my_profile /
- *    change_my_password / resend_verification_email / …`), so they still
- *    appear in the header and its overflow menu.
+ *    same order. The header the synthesizer used to supply is a `page:header`
+ *    with `placedActions: true` (#29951): it draws every `sys_user` action
+ *    placed at `record_header` / `record_more`, read live, so the platform's
+ *    own (`ban_user / impersonate_user / … / update_my_profile /
+ *    change_my_password / …`) and any an installed package places on
+ *    `sys_user` appear in the header and its overflow menu, as they did on
+ *    the synthesized header.
  *  - `record:highlights` promotes the signals worth scanning at the top:
  *    email, phone, verification state. Highlight fields are auto-dropped
  *    from the details grid below. 2FA state is not one of them: it is
@@ -84,27 +86,15 @@ export const SysUserDetailPage: Page = {
       width: 'full',
       components: [
         // ── The record header ─────────────────────────────────────────
-        // The synthesized header's action list, spelled out because a full
-        // page renders exactly the nodes it declares: every `sys_user` action
-        // declaring `record_header` or `record_more`, in declaration order
-        // (admin actions, then the self-service ones). The host appends its
-        // own system actions after these.
+        // The synthesized header's action set, read live: every action placed
+        // on `sys_user` at `record_header` or `record_more`, in declaration
+        // order (admin actions, then the self-service ones), then any action
+        // another package places there. A frozen id list dropped those
+        // (#29951). The host appends its own system actions after these.
         {
           type: 'page:header',
           properties: {
-            actions: [
-              'ban_user',
-              'unban_user',
-              'unlock_user',
-              'set_user_password',
-              'impersonate_user',
-              'set_user_manager',
-              'update_my_profile',
-              'change_my_password',
-              'change_my_email',
-              'resend_verification_email',
-              'delete_my_account',
-            ],
+            placedActions: true,
           },
         },
         // ── Alert banners ─────────────────────────────────────────────
