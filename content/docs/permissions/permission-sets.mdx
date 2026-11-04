@@ -62,7 +62,9 @@ refused, one issue at the bit's own path. The evaluator grants edit and delete
 as `read ∧ grant`, merged across the caller's sets like the other bits, so the
 read half may come from another set. A set stored before this rule existed
 keeps loading, and its unread edit or delete grant grants nothing. In Setup,
-ticking Edit or Delete ticks Read, and unticking Read unticks Edit and Delete.
+ticking Edit or Delete ticks Read, and unticking any bit that reads (Read,
+View All or Modify All) unticks Edit and Delete once no bit that reads remains
+on the entry.
 
 ### `allowExport` — the export axis
 
