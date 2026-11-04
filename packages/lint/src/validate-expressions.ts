@@ -141,7 +141,7 @@ import { isStoredMetadataBodyObject, STORED_METADATA_BODY_PRESCRIPTION } from '@
 // off the schema at first use, never restated here.
 import { EvalUserSchema } from '@objectstack/spec/identity';
 
-import { collectFlowVariableNames, shadowedFieldReads, shadowedFieldMessage } from './flow-variable-scope.js';
+import { collectFlowVariableNames, collectScreenFieldNames, shadowedFieldReads, shadowedFieldMessage } from './flow-variable-scope.js';
 import {
   flowCelEntrances,
   flowCelRootScope,
@@ -529,6 +529,18 @@ function isAlwaysValuedSummary(def: AnyRec): boolean {
  * `celScope`. Subtracted from the null-guard gate's bare-name set.
  */
 const FLOW_ENGINE_BOUND_NAMES: ReadonlySet<string> = new Set(['record', 'previous', 'vars', 'current_user']);
+
+/**
+ * [#29959, #30025] What one flow's bare condition names can hold instead of
+ * the trigger record's field, read once per flow and handed to every flow
+ * condition site's type verdict (see `check()`'s `flowBare`).
+ */
+interface FlowBareNames {
+  /** The names the run binds over the flattening: never typed as the field. */
+  readonly variables: readonly string[];
+  /** The run can bind a name no reader sees: a bare-name mismatch is the warning. */
+  readonly unproven: boolean;
+}
 
 function buildNullableFieldIndex(objects: AnyRec[]): Map<string, Set<string>> {
   const idx = new Map<string, Set<string>>();
@@ -1303,7 +1315,8 @@ function isFlattenedNearMissFor(diagnostic: string, roots: readonly string[]): b
  * | flow start / edge condition, `decision` branch — record-triggered flow | `evaluateCondition` throws (ADR-0032 §1c); the trigger isolates the write: the run fails, the write lands. A bare name and its `record.<name>` read are the same total trigger record (#29959) | `run-fails` |
  * | the same, time-relative flow sweeping the flow's own object | `evaluateCondition` throws; `time-relative-trigger.ts` launches each run with the swept row of that object as `record` (`{ record: row }`, the stored row a find returns), so the field's type is what the name holds there too (#29959) | `run-fails` |
  * | flow condition, any other flow (API, schedule, no trigger, or a sweep of another object than the one the conditions are typed against) | `evaluateCondition` throws there too, but no row of the typed object is bound (see `validate-null-guards.ts`'s ledger): the run holds what its entrance handed it — an API request body, an action's partial record, a parent's record, or nothing — so the field's type is not proven to be what the name holds | — not declared: the `type-mismatch-run-may-fail` WARNING, worded for the run (#29959) |
- * | a bare name the flow's run binds as a variable (a declared variable, a node id) | the run seeds it before the flattening, which skips a bound name: it holds the variable, not the field | — not typed as the field at all (`ExprSchemaHint.flowVariables`); `record.<name>` still is (#29959) |
+ * | a bare name the flow's run binds as a variable (a declared variable, a node id, a `screen` field's `name`) | the run seeds it before the flattening, which skips a bound name, or a screen's resume lands it over the flattened field: it holds the variable, not the field | — not typed as the field at all (`ExprSchemaHint.flowVariables`); `record.<name>` still is (#29959, #30025) |
+ | a bare name in a flow a node of which can bind names no reader sees (`flowCelRootScope` read with no entrance: an open binder — `script`, `connector_action`, `wait`, `subflow`, `map` —, a screen with no input contract) | the run can bind the name to a value no reader sees | — no declared outcome for a bare-name mismatch: the `type-mismatch-run-may-fail` WARNING (`ExprSchemaHint.bareNamesUnproven`); `record.<name>` keeps the row's outcome (#30025) |
  * | a flow node's `condition` other than the top-level start node's | inert (`flow-inert-node-condition`) | — the same warning |
  * | field `expression` (formula)           | reads null                                                   | — the warning's text is true |
  * | field `visibleWhen` / `settledWhen`, `conditionalFormatting`, field group `visibleWhen`, action `visible` / `disabled` / `pressed`, app landing `visible` | evaluated by the renderer: shows, hides or styles, never refuses a write | — |
@@ -2478,12 +2491,17 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
      */
     faultOutcome?: ExprFaultOutcome,
     /**
-     * [#29959] A flow site's names its run binds as variables (declared
-     * variables, node ids, the engine's own), handed to the shared validator
-     * as `ExprSchemaHint.flowVariables`, so a bare read of one is not typed as
-     * the field it shadows. Absent, the call is byte for byte what it was.
+     * [#29959, #30025] What a flow site's bare names can hold instead of the
+     * field: `variables`, the names its run binds as variables (declared
+     * variables, node ids, screen fields, the engine's own), handed to the
+     * shared validator as `ExprSchemaHint.flowVariables`, so a bare read of one
+     * is not typed as the field it shadows; `unproven`, a node of the flow can
+     * bind a name no reader sees (`flowCelRootScope` with no entrance), handed on as
+     * `ExprSchemaHint.bareNamesUnproven`, so a bare-name mismatch is the
+     * run-may-fail warning, not the declared outcome. Absent, the call is byte
+     * for byte what it was.
      */
-    flowVariables?: readonly string[],
+    flowBare?: FlowBareNames,
   ): void => {
     if (raw == null) return;
     // Absent unless this is a served-row site on an object that declares a
@@ -2501,7 +2519,8 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         ? {
           objectName, fields, attachedOnRead, fieldTypes, scope, traversalHydration, ...roots,
           ...(faultOutcome ? { faultOutcome } : {}),
-          ...(flowVariables ? { flowVariables } : {}),
+          ...(flowBare ? { flowVariables: flowBare.variables } : {}),
+          ...(flowBare?.unproven ? { bareNamesUnproven: true } : {}),
         }
         : { scope, ...roots });
     for (const e of res.errors) {
@@ -2586,7 +2605,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     flowCondition?: {
       readonly objectName: string | undefined;
       readonly faultOutcome: ExprFaultOutcome | undefined;
-      readonly flowVariables: readonly string[];
+      readonly flowBare: FlowBareNames;
     },
   ): { refused: boolean } => {
     // [#19961] No `raw == null` early return: whether an absent value is a
@@ -2615,7 +2634,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     if (flowCondition) {
       check(
         where, raw, flowCondition.objectName, undefined, undefined, undefined, undefined, undefined,
-        flowCondition.faultOutcome, flowCondition.flowVariables,
+        flowCondition.faultOutcome, flowCondition.flowBare,
       );
       return { refused: false };
     }
@@ -2816,11 +2835,29 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // [#29959] The names the run binds over the flattening — its declared
     // variables and node ids, and the engine's own — which a bare read holds
     // instead of the field: the type check never types them as the field.
-    const flowVariables = [...new Set([...declaredVariables, ...FLOW_ENGINE_BOUND_NAMES])];
+    // [#30025] A screen's declared field names too: a resume lands the
+    // collected values under their plain names, over the flattened field. And
+    // where a NODE of the flow can bind a name no reader sees (an open binder
+    // such as `script` / `connector_action` / `wait` / `subflow` / `map`, or a
+    // screen with no input contract), a bare name is not proven to be the field
+    // at all: the type verdict stands down to the run-may-fail warning on it.
+    // The judge is `flowCelRootScope`'s own, read with no entrance: an entrance
+    // whose record is not in hand (and the runtime publish gate's per-write
+    // snapshot, which sees none) changes which record `record.<name>` and the
+    // bare name both read, not whether a node rebinds the bare name, so it
+    // moves neither verdict here — while the null-guard twin keeps standing
+    // its bare names down on the whole `rootScope`, as before.
+    const screenFields = collectScreenFieldNames(graphs);
+    const flowBare: FlowBareNames = {
+      variables: [...new Set([...declaredVariables, ...screenFields, ...FLOW_ENGINE_BOUND_NAMES])],
+      unproven: !flowCelRootScope(flow, graphs, objectName, fieldIndex).provable,
+    };
     const nullGuardBare = new Set<string>();
     if (nullGuardObject && rootScope.provable) {
       for (const name of nullableIndex.get(nullGuardObject) ?? []) {
-        if (!declaredVariables.has(name) && !FLOW_ENGINE_BOUND_NAMES.has(name)) nullGuardBare.add(name);
+        if (!declaredVariables.has(name) && !screenFields.has(name) && !FLOW_ENGINE_BOUND_NAMES.has(name)) {
+          nullGuardBare.add(name);
+        }
       }
     }
     const startConditionSource = nullGuardObject ? celSourceOf(startCfg.condition) : undefined;
@@ -2955,7 +2992,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           const isTriggerGate = node.type === 'start' && graph.path.length === 0;
           check(
             nodeCondWhere, cfg.condition, objectName, undefined, undefined, undefined, undefined, undefined,
-            isTriggerGate ? flowFaultOutcome : undefined, flowVariables,
+            isTriggerGate ? flowFaultOutcome : undefined, flowBare,
           );
           warnShadowedFieldReads(nodeCondWhere, cfg.condition);
           refuseUnboundRoots(nodeCondWhere, cfg.condition, from, 'predicate');
@@ -3031,7 +3068,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           // and a value that is not CEL text has no source to resolve.
           // [#29959] A `decision` branch is evaluated like an edge, so it is
           // judged like one: the object's field types and the flow's outcome.
-          const branchCondition = nodeType === 'decision' ? { objectName, faultOutcome: flowFaultOutcome, flowVariables } : undefined;
+          const branchCondition = nodeType === 'decision' ? { objectName, faultOutcome: flowFaultOutcome, flowBare } : undefined;
           if (checkDeclaredPredicate(slotWhere, found.value, branchCondition).refused) continue;
           // [#14288] The shadowing warning is about the SCOPE an expression is
           // evaluated in, not about which key it was authored under — so it
@@ -3193,7 +3230,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           const from = issues.length;
           check(
             edgeCondWhere, edge.condition, objectName, undefined, undefined, undefined, undefined, undefined,
-            flowFaultOutcome, flowVariables,
+            flowFaultOutcome, flowBare,
           );
           warnShadowedFieldReads(edgeCondWhere, edge.condition);
           refuseUnboundRoots(edgeCondWhere, edge.condition, from, 'predicate');
