@@ -46,6 +46,33 @@ import { Args, Command, Flags } from '@oclif/core';
 import { INSTALL_MODES, type InstallMode } from '@objectstack/spec/kernel';
 import { printHeader, printKV, printSuccess, printWarning, printError, printStep, isExitSignal } from '../../utils/format.js';
 
+/**
+ * [#28640 ruling ③A] The connector maps the package export withheld whole,
+ * as the install-local answer names them (`withheldMaps`, either install
+ * mode): one warning, one line per map — `connector 'NAME' PATH`, the
+ * answer's own position spelling — and the remedy. The connector is installed
+ * and runs, but sends none of those headers or environment variables until
+ * each map is supplied again, so an operator who installs an export from the
+ * command line is told here; the runtime's `warn` line lands in a log the
+ * operator may never read.
+ *
+ * Printed from the answer only: an answer without the list (nothing was
+ * withheld, or a runtime that predates the key) prints nothing, and nothing
+ * is guessed from the artifact the command sent.
+ */
+function printWithheldMaps(withheldMaps: unknown): void {
+  const maps: Array<{ type?: unknown; name?: unknown; path?: unknown }> =
+    Array.isArray(withheldMaps) ? withheldMaps : [];
+  if (maps.length === 0) return;
+  console.log('');
+  printWarning(
+    `${maps.length} connector map(s) arrived empty — the package export withheld each one whole, so the connector `
+    + 'sends none of those headers or environment variables:',
+  );
+  for (const map of maps) console.log(`    ${String(map.type)} '${String(map.name)}' ${String(map.path)}`);
+  console.log('  Re-enter each map where the connector is authored.');
+}
+
 export default class PackageInstall extends Command {
   static override description =
     'Install a package into a running ObjectStack runtime (catalog id or local artifact file)';
@@ -313,6 +340,7 @@ export default class PackageInstall extends Command {
         if (data.seeded?.mode === 'skipped' && typeof data.seeded.reason === 'string') {
           printKV('  Sample data', `not loaded — ${data.seeded.reason}`);
         }
+        printWithheldMaps(data.withheldMaps);
         console.log('');
         return;
       }
@@ -356,6 +384,7 @@ export default class PackageInstall extends Command {
       printKV('  Runtime',   runtime);
       if (data.installedAt) printKV('  Installed', String(data.installedAt));
       if (notHotLoaded && hotLoadError) printKV('  Hot-load error', hotLoadError);
+      printWithheldMaps(data.withheldMaps);
       console.log('');
       // #6721: the cache directory is quoted from the RESPONSE, never from a
       // literal or a locally-resolved constant. The directory lives on the
