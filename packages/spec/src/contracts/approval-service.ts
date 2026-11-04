@@ -1038,6 +1038,12 @@ export interface IApprovalService {
    *   the run resumes down `reject` the same way. Neither the override nor the
    *   system arm reaches a `returned` request (#12775); an override actor is
    *   refused there exactly as any other non-submitter.
+   *
+   * A request with no submitter (its run's trigger resolved no user) has no
+   * one on the `returned` arm. Its way out of `returned` is a system-context
+   * {@link resubmit}, which opens the next round `pending`, again with no
+   * submitter, where the `pending` arm's system context or override actor may
+   * recall it.
    */
   recall(requestId: string, input: ApprovalRecallInput, context: ExecutionContext): Promise<ApprovalRecallResult>;
 
@@ -1048,6 +1054,11 @@ export interface IApprovalService {
    * {@link resubmit}s). Requires the approval node to declare a `revise`
    * out-edge; past the node's `maxRevisions` budget the request auto-rejects
    * instead. Audited as `revise`.
+   *
+   * A request with no submitter is sent back the same way, but only a
+   * system-context {@link resubmit} moves it on from `returned` (see
+   * {@link recall}): a flow whose trigger resolves no user declares the
+   * `revise` edge only when server-side code will make that call.
    */
   sendBack(
     requestId: string,
@@ -1057,7 +1068,8 @@ export interface IApprovalService {
 
   /**
    * ADR-0044 resubmit after rework. Valid on the LATEST `returned` request of
-   * its (run, node), submitter-only. Resumes the suspended run from the wait
+   * its (run, node), by the submitter or a system context (the system context
+   * alone on a request with no submitter). Resumes the suspended run from the wait
    * point; traversal re-enters the approval node via the declared back-edge
    * and opens the next round's request (fresh approver slate, record
    * re-locks). Audited as `resubmit` on the returned request.

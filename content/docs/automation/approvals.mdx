@@ -773,6 +773,20 @@ over approval items), the recall also wakes the batch, which records the item's
 slot as the cancelled marker `{ $status: 'cancelled', $itemRunId }` and moves on
 to its next item or its end.
 
+**A request with no submitter.** A run whose trigger resolved no user (a
+schedule, time-relative or api trigger, or a record-change fired by a system
+write) opens its request with no submitter. An approver can still send it back,
+but once it is `returned` nobody can recall it: `recall` reaches a `returned`
+request for its submitter alone, never the system or the admin override, and no
+viewer sees Resubmit or Recall. Its one way out is a `resubmit` made by
+server-side code in a system context (`IApprovalService.resubmit` with
+`isSystem: true`). That opens the next round `pending`, again with no submitter,
+where the system or the admin override can recall it. On a flow with such a
+trigger, keep the `revise` edge into its `approval_revise` node only when
+server-side code will make that resubmit: the window is the only shape send-back
+accepts, and nothing in the run can end it. Otherwise leave the `revise` edge
+off, so send-back is refused and approvers reject instead.
+
 The window is deliberately **not** an ordinary `wait`: `resubmit` is what
 authorizes (submitter-only), orders (latest round) and records (an audit row) the
 continuation, and refuses when another request is already pending on the record —
