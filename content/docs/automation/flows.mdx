@@ -575,6 +575,57 @@ would send.
 A flow definition, including an `http` node's `url` and `headers`, is served to every member who can read flows. A token, API key or signed webhook url written there is readable by all of them. Route an outbound credential by where it sits, and call the connector with a `connector_action` node instead — see [Connectors](/docs/automation/connectors#authentication). A credential in a header goes to a declarative connector with `bearer`, `basic` or `api-key` auth, whose `auth.credentialRef` names the secret. A key in the query string goes to `api-key` auth with `paramName`. No `credentialRef` variant carries a secret in the url path, so an incoming-webhook url (whose path is the secret) cannot be routed that way: call the service through a token-authenticated connector instead, such as the `slack` connector, whose bot token is supplied to the plugin by host code rather than written in the flow (it is registered by that plugin, not declared as a `connectors:` instance). Otherwise such a url is served with the definition. Only `signingSecret` and a start node's `secret` are kept out of a flow saved through the metadata API: the metadata save door stores each in a write-only, encrypted flow credential store, a read never returns it, and the engine reads it only to verify an inbound post or sign an outbound request. A flow that ships in a package names its inbound hook secret instead of carrying it: the start node's `config.secretRef` holds the name the deployment fills (an environment variable of that name in the open tier, resolved through the same credential resolver as a connector's `auth.credentialRef`), and the engine reads it at every post, so no credential is published with the package. A post that arrives while the name has no value is answered `503`, never verified. The reference is a name, not a credential: it is served as written, it may not sit beside a literal `secret`, and it may not name a variable in the platform's `OS_` namespace. A packaged flow that carries a literal keeps it in its package source; the literal is withheld when the definition is served, and a credential store row for that flow, where one exists, wins when the engine verifies or signs. `url` and `headers` are stored and served as written.
 </Callout>
 
+#### An inbound hook that verifies its sender's own signature — `config.signature`
+
+By default an `api` flow's hook admits a post only by ObjectStack's own
+`x-objectstack-signature`. A vendor that signs its callbacks its own way
+(DocuSign Connect's `X-DocuSign-Signature-1`, a Stripe-style `t=…,v1=…`
+header, a GitHub-style `sha256=` header) is admitted by declaring how it signs
+on the start node, as `config.signature`, beside the `config.secretRef` that
+names the key:
+
+```ts
+export const EnvelopeStatus = defineFlow({
+  name: 'envelope_status', label: 'Envelope status', type: 'api', runAs: 'system',
+  nodes: [
+    { id: 'start', type: 'start', label: 'DocuSign Connect', config: {
+      hookId: 'docusign',
+      secretRef: 'DOCUSIGN_CONNECT_KEY',
+      signature: { signs: 'body', header: 'X-DocuSign-Signature-1', algorithm: 'hmac-sha256', encoding: 'base64' },
+    } },
+    { id: 'end', type: 'end', label: 'End' },
+  ],
+  edges: [{ id: 'e1', source: 'start', target: 'end' }],
+});
+```
+
+`signs` says what the sender signs, and picks the form:
+
+| `signs` | The sender signs | The header carries | Replay window |
+|:--|:--|:--|:--|
+| `body` | the raw body alone (DocuSign Connect; GitHub-style with `prefix: 'sha256='`) | the one digest, after `prefix` when one is declared | none: the sender signs no time, so a captured post verifies again while the key is unchanged |
+| `timestamp.body` | `<t>.<raw body>` (Stripe-style) | `NAME=value` elements: one `timestampElement` (`t`) and one or more `digestElement`s (`v1`, one per key while the sender rolls its key) | the same 300 seconds as `x-objectstack-signature` |
+
+`header` is matched without regard to case; a field the sender repeats is
+read as its one value, the copies joined with `, `, so a body-only header sent
+twice does not verify. `algorithm` is `hmac-sha256`, `encoding` is `hex` or
+`base64`, and the digest must decode to the 32 bytes of the HMAC, compared in
+constant time over the body exactly as received. The key is only ever the one
+`config.secretRef` names, read at every post like any hook secret (`503` while
+it has no value); a literal `secret` beside `signature` is refused.
+
+A declared scheme **replaces** the `x-objectstack-signature` check for its hook:
+the hook has that one verifier, so a post that carries only a valid
+`x-objectstack-signature` is refused, and so is one without the declared
+header. Every refusal is the same `401 INVALID_SIGNATURE` an unsigned post
+gets, with its cause in the server log only. A declaration the flow parse
+refuses (an unknown algorithm, a reserved header such as `authorization` or
+`x-objectstack-signature`, a timestamped scheme without its elements) never
+falls back to the platform check: `os validate` reports it as
+`flow-api-trigger-signature-unusable`, and a hook armed with it admits no post.
+The declared keys are listed in
+[api-trigger-signature](/docs/references/automation/api-trigger-signature).
+
 **Script:**
 
 The built-in `script` executor never evaluates an arbitrary JavaScript string —

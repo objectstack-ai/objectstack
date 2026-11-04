@@ -130,9 +130,9 @@ export const CarrierCallback = defineFlow({
 ```
 
 `requires: ['automation', 'triggers', 'queue']`. The sender signs each post
-under `CARRIER_HOOK_SECRET` (SKILL.md *Signature* bullet). The door verifies no
-other scheme: a vendor whose webhook signs its own header cannot post here
-today — poll its status (recipe 1's shape) until vendor schemes verify.
+under `CARRIER_HOOK_SECRET` (SKILL.md *Signature* bullet). A vendor signing
+its own header adds, keyed by that ref, `signature: { signs: 'body', header:
+'X-DocuSign-Signature-1', algorithm: 'hmac-sha256', encoding: 'base64' }`.
 
 ## 5 · Vendor with no machine-readable spec — write the document by hand
 
