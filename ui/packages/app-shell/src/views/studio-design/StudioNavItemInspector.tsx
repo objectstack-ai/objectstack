@@ -176,7 +176,11 @@ export function StudioNavItemInspector({
 }: {
   navId: string;
   appDraft: Record<string, unknown>;
-  objects: Array<{ name: string; label: string }>;
+  /**
+   * The object picker's choices. objectstack#30059 — `pair` marks an object
+   * only the base's paired customization package holds.
+   */
+  objects: Array<{ name: string; label: string; pair?: true }>;
   /** The package whose items the non-object pickers offer (objectui#11790). */
   packageId: string;
   /**
@@ -309,7 +313,22 @@ export function StudioNavItemInspector({
       objectName: objName,
       object: undefined,
       path: undefined,
+      ...gatePatch(objName),
     });
+  };
+  /**
+   * objectstack#30059 — the `requiresObject` an entry bound to `objName`
+   * carries. An object only the pair holds can be removed while the copied
+   * navigation still names it, so the entry gates on it and the runtime hides
+   * it then instead of linking to a missing object. A gate this binding wrote
+   * (it names the object bound before) is removed when the entry binds to an
+   * object the base ships or is unbound; an author's own gate is kept.
+   */
+  const gatePatch = (objName: string): { requiresObject?: unknown } => {
+    if (objName && objects.some((o) => o.name === objName && o.pair === true)) return { requiresObject: objName };
+    // No key at all unless a gate this binding wrote is to be removed: an entry
+    // with no gate, or the author's own, is left as it was.
+    return boundObject !== '' && node.requiresObject === boundObject ? { requiresObject: undefined } : {};
   };
   const optionsOf = (rows: ReadonlyArray<NavTargetRow>) =>
     rows.map((row) => {
@@ -445,7 +464,7 @@ export function StudioNavItemInspector({
             onPick={(objName) => {
               if (!objName) {
                 // Unbind → back to an (invalid, dropped-on-save) placeholder.
-                patch({ type: undefined, objectName: undefined, object: undefined });
+                patch({ type: undefined, objectName: undefined, object: undefined, ...gatePatch('') });
                 return;
               }
               bindObject(objName);

@@ -2073,11 +2073,14 @@ export function InterfacesPillar({
   // customized as the app's override in the base's pair: the nav editor edits
   // the app document as on a writable package, and its first saved edit
   // copies the whole app into the pair, declaring the override, as a view's
-  // Customize does. Unless the ensure door refuses this caller (`walled`).
+  // Customize does. Unless the ensure door refuses this caller (`walled`), or
+  // the base's manifest declares no version: no override can be declared then
+  // (`basedOn`), so every save of the copy would be refused and the editor is
+  // not offered, as before.
   // ⛔ The pair a write names is the door's answer (`pairFor`); the pair a
   // read names is the surface's (`navPairAt`).
   const navOverridable = readOnly && customization !== null && isStudioCustomizeType('app');
-  const navCustomizable = navOverridable && customization?.walled !== true;
+  const navCustomizable = navOverridable && customization?.walled !== true && !!customization?.basedOn;
   const navPairAt = navOverridable ? (customization?.pairId ?? null) : null;
 
   // objectui#11167 — a read-only answer closes nav editing. The Studio surface
@@ -2366,7 +2369,9 @@ export function InterfacesPillar({
   const [error, setError] = React.useState<StudioRefusal | null>(null);
   // Objects in THIS package (published ∪ draft) — the nav item inspector's
   // object picker, so nav can be wired to sibling objects before publishing.
-  const [pkgObjects, setPkgObjects] = React.useState<Array<{ name: string; label: string; icon?: string }>>([]);
+  const [pkgObjects, setPkgObjects] = React.useState<Array<{ name: string; label: string; icon?: string; pair?: true }>>(
+    [],
+  );
   const objectIconMap = React.useMemo(
     () => Object.fromEntries(pkgObjects.map((o) => [o.name, o.icon])),
     [pkgObjects],
@@ -2403,12 +2408,15 @@ export function InterfacesPillar({
           railPairId ? client.listDrafts({ packageId: railPairId, type: 'object' }).catch(noRows) : noRows(),
         ]);
         if (cancelled) return;
-        const byName = new Map<string, { name: string; label: string; icon?: string }>();
-        for (const raw of [...(pub || []), ...(drafts || []), ...(pairPub || []), ...(pairDrafts || [])]) {
+        const byName = new Map<string, { name: string; label: string; icon?: string; pair?: true }>();
+        const baseRows = [...(pub || []), ...(drafts || [])];
+        for (const raw of [...baseRows, ...(pairPub || []), ...(pairDrafts || [])]) {
           const o = raw as Record<string, unknown>;
           const name = String(o.name ?? '');
           if (!name || byName.has(name)) continue;
-          byName.set(name, { name, label: String(o.label ?? o.name ?? name), icon: o.icon ? String(o.icon) : undefined });
+          const row = { name, label: String(o.label ?? o.name ?? name), icon: o.icon ? String(o.icon) : undefined };
+          // Held by the pair only: the entry bound to it gates on it (`requiresObject`).
+          byName.set(name, baseRows.includes(raw) ? row : { ...row, pair: true });
         }
         setPkgObjects([...byName.values()]);
         const publishedNames = new Set(

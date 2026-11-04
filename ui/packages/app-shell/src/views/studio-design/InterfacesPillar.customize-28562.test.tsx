@@ -719,7 +719,7 @@ describe('Customize a read-only base’s navigation into its pair (objectstack#3
     );
   });
 
-  it('the pickers offer the pair’s items after the base’s, and the entry bound to one is saved into the pair', async () => {
+  it('the pickers offer the pair’s items after the base’s; an entry bound to the pair’s object is saved into the pair gated on it', async () => {
     srv.pairExists = true;
     srv.pairListed.set('object', [{ name: 'contract', label: 'Contract' }]);
     srv.pairListed.set('dashboard', [{ name: 'renewals', label: 'Renewals' }]);
@@ -734,15 +734,32 @@ describe('Customize a read-only base’s navigation into its pair (objectstack#3
     await waitFor(() => expect(srv.saves.length).toBeGreaterThan(0), { timeout: 8000 });
     await waitFor(
       () =>
-        expect((srv.saves.at(-1)!.body.navigation as unknown[]).at(-1)).toEqual({
+        expect(JSON.parse(JSON.stringify((srv.saves.at(-1)!.body.navigation as unknown[]).at(-1)))).toStrictEqual({
           id: 'nav_item_4',
           type: 'object',
           objectName: 'contract',
+          // The pair's object can be removed while the copy still names it: the entry gates on it.
+          requiresObject: 'contract',
         }),
       { timeout: 8000 },
     );
     expect(srv.saves.every((save) => save.opts.packageId === PAIR)).toBe(true);
     expect(srv.saves.at(-1)!.body.overrides).toEqual({ package: BASE, basedOn: '4.0.0' });
+
+    // Rebound to an object the base ships, the entry carries no gate.
+    const saved = srv.saves.length;
+    listbox = await openPicker(t('engine.studio.nav.linkObject', 'en'));
+    fireEvent.click(within(listbox).getByRole('option', { name: 'Opportunity (opportunity)' }));
+    await waitFor(() => expect(srv.saves.length).toBeGreaterThan(saved), { timeout: 8000 });
+    await waitFor(
+      () =>
+        expect(JSON.parse(JSON.stringify((srv.saves.at(-1)!.body.navigation as unknown[]).at(-1)))).toStrictEqual({
+          id: 'nav_item_4',
+          type: 'object',
+          objectName: 'opportunity',
+        }),
+      { timeout: 8000 },
+    );
 
     // A dashboard entry's picker offers the pair's dashboard.
     const dashboardChoice = screen.getAllByRole('radio').find((r) => (r as HTMLInputElement).value === 'dashboard')!;
@@ -796,7 +813,7 @@ describe('Customize a read-only base’s navigation into its pair (objectstack#3
     expect(srv.saves).toEqual([]);
   });
 
-  it('a walled caller is offered no navigation edit, and the "+" only the kinds it creates', async () => {
+  it('a walled caller is offered neither the navigation edit nor the "+"', async () => {
     mount({ walled: true });
     await openPipeline();
     await sleep(500);
