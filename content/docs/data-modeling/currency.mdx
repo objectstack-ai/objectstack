@@ -317,7 +317,8 @@ same path as a single write.
 
 A rate row corrected later does not rewrite the amounts already converted with it: an
 update that does not touch the amount, its code or its document date leaves the stored
-home amount and rate as they are.
+home amount and rate as they are. To bring stored rows up to the rates in force now, run
+the [recompute](#recomputing-stored-home-amounts).
 
 An update by filter (`multi: true`) writes one patch to every matched row, so it is
 refused, with `VALIDATION_FAILED`, when the patch would convert the rows to different home
@@ -335,6 +336,33 @@ Each refusal is answered before anything is written, and the row is not stored:
 
 The `validate()` preview, and an import's dry run, answer the same refusals for the same
 rows.
+
+### Recomputing stored home amounts
+
+`os migrate recompute-home-amounts` brings the stored home amounts of an object up to the
+rates in force now: after a rate row is corrected or added, or after a home amount is
+declared on an object that already holds rows.
+
+```bash
+os migrate recompute-home-amounts --object invoice                          # Report: what would change, what cannot be converted
+os migrate recompute-home-amounts --object invoice --since 2026-01-01       # Only documents dated on or after January 1
+os migrate recompute-home-amounts --object invoice --apply                  # Write the changes (prompts)
+```
+
+Each row is converted exactly as a write converts it, in its own organization's home
+currency at that organization's rates, and an applied row holds what a fresh write of it
+would store. `--since` compares the **document date** (the field `homeAmount.rateDate`
+names), read as the day the write reads it. The report counts each organization apart and
+lists every row that changes, with its stored and new values.
+
+**A row that cannot be converted is listed and left as stored**, never filled with a rate
+of 1, a later rate or a zero. The report names each one and why: no rate in force on its
+document date (add the rate), an amount with no currency code (run
+[`os migrate record-currency-codes`](#switching-a-field-that-already-holds-rows) first: no
+rate can help a row that names no currency), no document date, or no home currency. Until
+a re-run converts them, a total over the home field leaves those rows out, so the command
+keeps exiting 1 while any is listed, and the applied run's audit entry records them. The
+full reference is [`os migrate recompute-home-amounts`](/docs/deployment/cli#os-migrate-recompute-home-amounts).
 
 ### Totals in the home currency
 
