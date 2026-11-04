@@ -191,6 +191,14 @@ const LEAF_MODULE = 'engine-top-level.ts';
  * into names nobody reads.
  */
 const PATH_READER_PINS = Object.freeze({
+  // The #4918 query-options erasure guard grandfathers its pre-existing sites
+  // BY FILE: an `ignores` entry in eslint.config.mjs (QUERY_OPTIONS_UNSWEPT)
+  // plus a per-file count in scripts/query-options-erasure-baseline.json, a list
+  // that may only shrink. A moved body takes its `opts as any` site to a file
+  // the list does not name, so `pnpm lint` and `check:query-options-erasure`
+  // red (measured: both methods below, one site each).
+  seedAutonumber: 'eslint query-options/no-any-erasure grandfathering and scripts/check-query-options-erasure-ratchet.mjs (baseline keyed by path, never grows)',
+  inspectDanglingReferences: 'eslint query-options/no-any-erasure grandfathering and scripts/check-query-options-erasure-ratchet.mjs (baseline keyed by path, never grows)',
 });
 
 /**
