@@ -228,14 +228,13 @@ import { findMisplacedReadableIds, refuseReadableIdsOnce } from '@objectstack/co
 import { isComposedReadableIds, type ComposedReadableIds } from '@objectstack/spec/data';
 // [#29520 codemod] The top-level declarations that moved whole to `sql-driver-top-level.ts`, as this file still reads them.
 import {
-  AUDIT_TIMESTAMP_COLUMNS, AUTONUMBER_COLLISION_RETRIES, CROSS_FIELD_COMPARISON_OPERATORS, LIKE_ESCAPE_CHARACTER,
-  MYSQL_DATETIME_PRECISION, PRE_DDL_QUESTION_SCOPE, SEQUENCES_TABLE, TEXT_OPERATORS, WITHHELD_FILTER_AUTHOR_TEXT,
-  WITHHELD_FILTER_SUBTREE, assertCompilableComparand, bareFieldReferenceError, betweenArityError, canonicalTimeOfDay,
-  canonicalUtcDatetime, declaresColumnNotNull, fieldReferenceOf, isDeclaredFieldType, isDeferredDdlLockWaitRefusal,
-  isFilterNode, isMultiValuedColumn, isNowDefaultValue, isUnresolvableColumnError, jsonColumnOperatorError,
-  mysqlDatetimeLiteral, nowAnchorOf, nowAnchorPositionError, reduceFilterKey, reduceFilterNode, refusalSubtree,
-  refuseRejectedReferenceAlias, refuseUndeclaredFieldType, resolveSqliteAbsentFileTarget, retiredFilterOperatorError,
-  unsupportedFilterError, unsupportedFilterOperatorError, withheldFilterDiagnosticOf,
+  AUDIT_TIMESTAMP_COLUMNS, AUTONUMBER_COLLISION_RETRIES, CROSS_FIELD_COMPARISON_OPERATORS, MYSQL_DATETIME_PRECISION,
+  SEQUENCES_TABLE, TEXT_OPERATORS, WITHHELD_FILTER_AUTHOR_TEXT, WITHHELD_FILTER_SUBTREE, assertCompilableComparand,
+  bareFieldReferenceError, betweenArityError, declaresColumnNotNull, fieldReferenceOf, isDeclaredFieldType,
+  isDeferredDdlLockWaitRefusal, isFilterNode, isMultiValuedColumn, isNowDefaultValue, jsonColumnOperatorError,
+  nowAnchorOf, nowAnchorPositionError, reduceFilterKey, reduceFilterNode, refusalSubtree,
+  refuseRejectedReferenceAlias, refuseUndeclaredFieldType, retiredFilterOperatorError, unsupportedFilterError,
+  unsupportedFilterOperatorError, withheldFilterDiagnosticOf,
 } from './sql-driver-top-level.js';
 import type {
   AutoNumberReservation, ConflictTargetVerdict, IntrospectedColumn, IntrospectedForeignKey, IntrospectedSchema,
@@ -256,42 +255,55 @@ export {
   refuseUpsertConflictOutsideWrittenOrganization, resolveSqliteAbsentFileTarget, unquoteSqlIdentifier,
   unsupportedFilterError, withheldFilterDiagnosticOf, withheldFilterError,
 } from './sql-driver-top-level.js';
+// [#29520 codemod] Class head: dialect probes, logger, configuration: the methods of the same names below hand the bodies what they read (`ClassHeadHost`).
+import { ClassHeadFacet } from './sql-driver-class-head.js';
 // [#29520 codemod] Lifecycle: the methods of the same names below hand the bodies what they read (`LifecycleHost`).
-import { connect } from './sql-driver-lifecycle.js';
+import { LifecycleFacet } from './sql-driver-lifecycle.js';
 // [#29520 codemod] CRUD — IDataDriver core: the methods of the same names below hand the bodies what they read (`CrudHost`).
-import { create, readBackInsertedRows, sequenceKeyHash } from './sql-driver-crud.js';
+import { CrudFacet } from './sql-driver-crud.js';
 // [#29520 codemod] The sequence semantics a second face shares, stated once: the methods of the same names below hand the bodies what they read (`SequenceSemanticsHost`).
-import { assertMergeLandedInWrittenOrganization, assertMergeLandedOnSuppliedIdentity, autoNumberCounterKey, autoNumberValueExists, defineSequencesTable, update, upsert } from './sql-driver-sequence-semantics.js';
+import { SequenceSemanticsFacet } from './sql-driver-sequence-semantics.js';
 // [#29520 codemod] Bulk & Batch Operations: the methods of the same names below hand the bodies what they read (`BulkOperationsHost`).
-import { bulkCreate, bulkUpdate, count, rotatedUpdateById, updateMany } from './sql-driver-bulk-operations.js';
+import { BulkOperationsFacet } from './sql-driver-bulk-operations.js';
+// [#29520 codemod] Transactions: the methods of the same names below hand the bodies what they read (`TransactionsSectionHost`).
+import { TransactionsSectionFacet } from './sql-driver-transactions-section.js';
 // [#29520 codemod] Aggregation: the methods of the same names below hand the bodies what they read (`AggregationHost`).
-import { aggregate, foldEmptyAggregateAnswers } from './sql-driver-aggregation.js';
+import { AggregationFacet } from './sql-driver-aggregation.js';
 // [#29520 codemod] Distinct: the methods of the same names below hand the bodies what they read (`DistinctHost`).
-import { distinct } from './sql-driver-distinct.js';
+import { DistinctFacet } from './sql-driver-distinct.js';
 // [#29520 codemod] Window Functions: the methods of the same names below hand the bodies what they read (`WindowFunctionsHost`).
-import { findWithWindowFunctions } from './sql-driver-window-functions.js';
+import { WindowFunctionsFacet } from './sql-driver-window-functions.js';
 // [#29520 codemod] Query Plan Analysis: the methods of the same names below hand the bodies what they read (`QueryPlanHost`).
-import { analyzeQuery } from './sql-driver-query-plan.js';
+import { QueryPlanFacet } from './sql-driver-query-plan.js';
 // [#29520 codemod] Schema Sync (syncSchema / init): the methods of the same names below hand the bodies what they read (`SchemaSyncSectionHost`).
-import { reclaimSpace } from './sql-driver-schema-sync-section.js';
+import { SchemaSyncSectionFacet } from './sql-driver-schema-sync-section.js';
 // [#29520 codemod] Data-lifecycle rotation (ADR-0057 P2): the methods of the same names below hand the bodies what they read (`RotationHost`).
-import { computeTenantField, registerManagedObjectMetadata } from './sql-driver-rotation.js';
+import { RotationFacet } from './sql-driver-rotation.js';
+// [#29520 codemod] Deferred schema DDL (#3917): the methods of the same names below hand the bodies what they read (`DeferredDdlHost`).
+import { DeferredDdlFacet } from './sql-driver-deferred-ddl.js';
 // [#29520 codemod] Managed-schema drift & reconcile (#2186): the methods of the same names below hand the bodies what they read (`ManagedDriftHost`).
-import { buildRebuiltColumn, dropIndexIfExists, isProductionEnv, probeNullSafeUniqueDuplicates, syncTableIndexes } from './sql-driver-managed-drift.js';
+import { ManagedDriftFacet } from './sql-driver-managed-drift.js';
 // [#29520 codemod] Internal helpers: the methods of the same names below hand the bodies what they read (`InternalHelpersHost`).
-import { applyTenantScope, auditMissingTenant, injectTenantOnInsert } from './sql-driver-internal-helpers.js';
+import { InternalHelpersFacet } from './sql-driver-internal-helpers.js';
 // [#29520 codemod] Filter helpers: the methods of the same names below hand the bodies what they read (`FilterHelpersHost`).
-import { coerceFilterValue, compileFilters, filterColumnExpr, logWithheldFilterDiagnostic, presentReadColumns, presentReadValue, readPresentationKind, sqliteCanonicalDatetimeSql, sqliteCanonicalTimeSql, sqliteNonTemporalTextSql, tableNameForBuilder, toDateOnly } from './sql-driver-filter-helpers.js';
+import { FilterHelpersFacet } from './sql-driver-filter-helpers.js';
 // [#29520 codemod] Field mapping: the methods of the same names below hand the bodies what they read (`FieldMappingHost`).
-import { mapAggregateFunc, mapSortField, orderKeysFor } from './sql-driver-field-mapping.js';
+import { FieldMappingFacet } from './sql-driver-field-mapping.js';
 // [#29520 codemod] Window function builder: the methods of the same names below hand the bodies what they read (`WindowFunctionBuilderHost`).
-import { buildWindowFunction } from './sql-driver-window-function-builder.js';
+import { WindowFunctionBuilderFacet } from './sql-driver-window-function-builder.js';
 // [#29520 codemod] Column creation helper: the methods of the same names below hand the bodies what they read (`ColumnCreationHost`).
-import { decorateHashShadowDuplicate, rethrowWithRowSizeExplanation, schemaBytesPerChar } from './sql-driver-column-creation.js';
+import { ColumnCreationFacet } from './sql-driver-column-creation.js';
 // [#29520 codemod] Database helpers: the methods of the same names below hand the bodies what they read (`DatabaseHelpersHost`).
-import { sqliteFilename } from './sql-driver-database-helpers.js';
+import { DatabaseHelpersFacet } from './sql-driver-database-helpers.js';
 // [#29520 codemod] SQLite serialisation: the methods of the same names below hand the bodies what they read (`SqliteSerialisationHost`).
-import { formatInput, formatOutput } from './sql-driver-sqlite-serialisation.js';
+import { SqliteSerialisationFacet } from './sql-driver-sqlite-serialisation.js';
+// [#29520 codemod] The facets' hosts, one per driver, which the static block at the end of the class builds.
+import {
+  aggregationHost, bulkOperationsHost, classHeadHost, columnCreationHost, crudHost, databaseHelpersHost,
+  deferredDdlHost, distinctHost, fieldMappingHost, filterHelpersHost, internalHelpersHost, lifecycleHost,
+  managedDriftHost, queryPlanHost, rotationHost, schemaSyncSectionHost, sequenceSemanticsHost,
+  sqliteSerialisationHost, transactionsSectionHost, windowFunctionBuilderHost, windowFunctionsHost,
+} from './sql-driver-facet-hosts.js';
 
 // GLOBAL_TENANT ('__global__') — the sentinel for the NULL-organization
 // ("platform") bucket — is defined ONCE in schema-drift.ts and imported here:
@@ -353,6 +365,46 @@ export const JSON_COLUMN_TYPES = new Set<string>([
  * `sql-driver-11565-row-byte-budget.test.ts` for every declared `FieldType`.
  */
 const MEDIA_ID_VARCHAR_CHARS = 2048;
+
+// [#29520 codemod] The statics of `SqlDriver` its facet modules read, private ones included, as
+// the class declares them (an indexed access on the class). The static block at the end of
+// the class fills `SqlDriverStatics` with forwarders: a method is called on the class at
+// call time, a field or accessor is read when the body reads it. A facet module imports
+// `SqlDriverStatics` AS `SqlDriver`, so each moved body reads `SqlDriver.x` unedited;
+// `index.ts` re-exports neither, so neither reaches the package.
+export interface SqlDriverStaticsHost {
+  readonly ASSUMED_BYTES_PER_CHAR: (typeof SqlDriver)['ASSUMED_BYTES_PER_CHAR'];
+  readonly DEFAULT_CONNECT_TIMEOUT_MS: (typeof SqlDriver)['DEFAULT_CONNECT_TIMEOUT_MS'];
+  readonly DEFAULT_CREATE_TIMEOUT_MS: (typeof SqlDriver)['DEFAULT_CREATE_TIMEOUT_MS'];
+  readonly DEFAULT_STRING_VARCHAR_CHARS: (typeof SqlDriver)['DEFAULT_STRING_VARCHAR_CHARS'];
+  readonly DIALECT_CONNECT_TIMEOUT: (typeof SqlDriver)['DIALECT_CONNECT_TIMEOUT'];
+  readonly MAX_KEYABLE_VARCHAR_CHARS: (typeof SqlDriver)['MAX_KEYABLE_VARCHAR_CHARS'];
+  readonly MAX_VARCHAR_CHARS: (typeof SqlDriver)['MAX_VARCHAR_CHARS'];
+  readonly MYSQL_EMIT_CLIENTS: (typeof SqlDriver)['MYSQL_EMIT_CLIENTS'];
+  readonly MYSQL_ROW_BYTE_BUDGET: (typeof SqlDriver)['MYSQL_ROW_BYTE_BUDGET'];
+  readonly MYSQL_TEXT_TEMPORAL_TYPES: (typeof SqlDriver)['MYSQL_TEXT_TEMPORAL_TYPES'];
+  readonly PG_OID_DATE: (typeof SqlDriver)['PG_OID_DATE'];
+  readonly PG_OID_DATE_ARRAY: (typeof SqlDriver)['PG_OID_DATE_ARRAY'];
+  readonly PG_OID_TEXT_ARRAY: (typeof SqlDriver)['PG_OID_TEXT_ARRAY'];
+  readonly POSTGRES_EMIT_CLIENTS: (typeof SqlDriver)['POSTGRES_EMIT_CLIENTS'];
+  readonly POSTGRES_WIRE_CLIENTS: (typeof SqlDriver)['POSTGRES_WIRE_CLIENTS'];
+  readonly POSTGRES_WIRE_ONLY_CLIENTS: (typeof SqlDriver)['POSTGRES_WIRE_ONLY_CLIENTS'];
+  readonly SQLITE_AUTO_VACUUM_INCREMENTAL: (typeof SqlDriver)['SQLITE_AUTO_VACUUM_INCREMENTAL'];
+  readonly SQLITE_EMIT_CLIENTS: (typeof SqlDriver)['SQLITE_EMIT_CLIENTS'];
+  readonly SQLITE_FILE_REFUSALS: (typeof SqlDriver)['SQLITE_FILE_REFUSALS'];
+  readonly SQLITE_JOURNAL_MODE_ENV: (typeof SqlDriver)['SQLITE_JOURNAL_MODE_ENV'];
+  readonly autoVacuumOf: (typeof SqlDriver)['autoVacuumOf'];
+  readonly clientSpelling: (typeof SqlDriver)['clientSpelling'];
+  readonly emissionClients: (typeof SqlDriver)['emissionClients'];
+  readonly hashShadowColumnFor: (typeof SqlDriver)['hashShadowColumnFor'];
+  readonly isSqliteBusyError: (typeof SqlDriver)['isSqliteBusyError'];
+  readonly journalModeOf: (typeof SqlDriver)['journalModeOf'];
+  readonly varcharPackLength: (typeof SqlDriver)['varcharPackLength'];
+  readonly withMysqlCalendarDayAsText: (typeof SqlDriver)['withMysqlCalendarDayAsText'];
+  readonly withPostgresCalendarDayAsText: (typeof SqlDriver)['withPostgresCalendarDayAsText'];
+  readonly withUtcSession: (typeof SqlDriver)['withUtcSession'];
+}
+export const SqlDriverStatics = {} as SqlDriverStaticsHost;
 
 export class SqlDriver implements IDataDriver {
   // IDataDriver metadata
@@ -825,8 +877,8 @@ export class SqlDriver implements IDataDriver {
    * Reason ② is why this method exists; it is not what this conversion bought.
    */
   protected logDurabilityFailure(msg: string, meta?: any): void {
-    if (this.logger.error) this.logger.error(msg, meta);
-    else this.logger.warn(msg, meta);
+    // [#29520 codemod] The body moved to `sql-driver-class-head.ts` (see `ClassHeadHost`).
+    return ClassHeadFacet.logDurabilityFailure.call(classHeadHost.of(this), msg, meta);
   }
 
   /**
@@ -968,24 +1020,13 @@ export class SqlDriver implements IDataDriver {
    * way).
    */
   protected static emissionClients(): string[] {
-    return [
-      ...SqlDriver.SQLITE_EMIT_CLIENTS,
-      ...SqlDriver.POSTGRES_EMIT_CLIENTS,
-      ...SqlDriver.MYSQL_EMIT_CLIENTS,
-    ].sort();
+    // [#29520 codemod] The body moved to `sql-driver-class-head.ts`.
+    return ClassHeadFacet.emissionClients();
   }
 
-  /**
-   * The configured client as a STRING, or `''`.
-   *
-   * `Knex.Config['client']` also admits a Client CONSTRUCTOR (knex's documented
-   * bring-your-own-dialect hatch). Such a value names no spelling in any table
-   * here, and `''` is how it says so — the same answer the literal comparisons
-   * this replaces gave, without stringifying a class to get there.
-   */
   private static clientSpelling(config: unknown): string {
-    const c = (config as { client?: unknown } | null | undefined)?.client;
-    return typeof c === 'string' ? c : '';
+    // [#29520 codemod] The body moved to `sql-driver-class-head.ts`, its docblock with it.
+    return ClassHeadFacet.clientSpelling(config);
   }
 
   /**
@@ -1121,7 +1162,8 @@ export class SqlDriver implements IDataDriver {
    * through `??`; only the name after `as` is one identifier by definition.
    */
   protected aliasIdentifierSql(alias: string): string {
-    return (this.knex.client as { wrapIdentifier(value: string): string }).wrapIdentifier(String(alias));
+    // [#29520 codemod] The body moved to `sql-driver-class-head.ts` (see `ClassHeadHost`).
+    return ClassHeadFacet.aliasIdentifierSql.call(classHeadHost.of(this), alias);
   }
 
   protected get dateGranularityCapabilities(): Record<string, boolean> {
@@ -1227,8 +1269,8 @@ export class SqlDriver implements IDataDriver {
    * member of the `IDataDriver` contract.
    */
   public dateBucketSql(objectName: string, field: string, granularity: DateGranularityValue): string | null {
-    const bucket = this.buildDateBucketExpr(field, granularity, objectName);
-    return bucket ? this.knex.raw(bucket.sql, bucket.bindings).toQuery() : null;
+    // [#29520 codemod] The body moved to `sql-driver-class-head.ts` (see `ClassHeadHost`).
+    return ClassHeadFacet.dateBucketSql.call(classHeadHost.of(this), objectName, field, granularity);
   }
 
   /**
@@ -1354,42 +1396,12 @@ export class SqlDriver implements IDataDriver {
     return this.openedEmptyInMemory;
   }
 
-  /**
-   * Apply {@link SqliteAbsentFileMode} to the Knex config, redirecting a
-   * missing SQLite file to `:memory:` before Knex ever opens it.
-   *
-   * Has to happen HERE rather than in `connect()`: the filename is baked into
-   * the Knex instance at construction, and better-sqlite3 opens (and therefore
-   * creates) the file on the first statement — which for this driver is the
-   * `PRAGMA auto_vacuum` in {@link connect}.
-   *
-   * A file the judgement refuses — one that can be neither opened nor created
-   * (#24961) — throws its `SqliteDatabaseFileError` out of the constructor, so
-   * no Knex instance is ever built over it.
-   *
-   * Only a SQLite client is asked (#24961). A server dialect's `connection`
-   * string is a URL, never a filename: handed to the judgement it read as an
-   * absent file, and a `pg` driver given this option had its connection string
-   * rewritten to `:memory:` — against {@link SqlDriverConfig.sqliteAbsentFile}'s
-   * "ignored for non-SQLite dialects".
-   */
   private knexConfigFor(
     knexConfig: Knex.Config,
     mode: SqliteAbsentFileMode | undefined,
   ): Knex.Config {
-    if (mode !== 'empty-in-memory' || !this.isSqlite) return knexConfig;
-    const conn = (knexConfig as { connection?: unknown }).connection;
-    const declared = typeof conn === 'string' ? conn : (conn as { filename?: unknown })?.filename;
-    if (typeof declared !== 'string') return knexConfig;
-    const resolved = resolveSqliteAbsentFileTarget(declared, mode);
-    if (!resolved.openedEmptyInMemory) return knexConfig;
-    this.openedEmptyInMemory = true;
-    return {
-      ...knexConfig,
-      connection: typeof conn === 'string'
-        ? resolved.filename
-        : { ...(conn as object), filename: resolved.filename },
-    } as Knex.Config;
+    // [#29520 codemod] The body moved to `sql-driver-class-head.ts`, its docblock with it (see `ClassHeadHost`).
+    return ClassHeadFacet.knexConfigFor.call(classHeadHost.of(this), knexConfig, mode);
   }
 
   /**
@@ -1472,109 +1484,13 @@ export class SqlDriver implements IDataDriver {
     ]);
 
   private static withConnectBound(knexConfig: Record<string, any>): Record<string, any> {
-    const pool = knexConfig.pool as Record<string, any> | undefined;
-    const bounded: Record<string, any> =
-      pool?.createTimeoutMillis === undefined
-        ? {
-          ...knexConfig,
-          pool: { ...(pool ?? {}), createTimeoutMillis: SqlDriver.DEFAULT_CREATE_TIMEOUT_MS },
-        }
-        : { ...knexConfig }; // host chose its own bound — respect it
-
-    // `!dialect` — sqlite, or a client with no connect-timeout knob — means
-    // there is no TIMEOUT to inject. It deliberately does not skip the session
-    // pins below: those answer a different question (what does a value MEAN on
-    // this connection), and the two lists are not the same list.
-    //
-    // ⚠️ The worked example that used to stand here was RETIRED by #11784,
-    // which gave `redshift` the connect-timeout row it was missing. Until then
-    // `redshift` was in {@link POSTGRES_WIRE_CLIENTS} (so it needed #11389's
-    // calendar-day pin) yet absent from {@link DIALECT_CONNECT_TIMEOUT} — so a
-    // `return` placed at this point silently opted it out of a fix it needed.
-    // That was measured, not hypothetical, which is why the example is recorded
-    // here rather than dropped.
-    //
-    // The hazard outlives the example. Every client needing a session pin
-    // happens to have a timeout row TODAY; that is current membership, not a
-    // property either table promises. The next pg-wire client added without a
-    // connect-timeout knob restores the exact bug — and it would fail the way
-    // this one did, in silence, with every test green. So: no `return` here,
-    // and the two tables stay separate. The tripwire that goes red the moment
-    // those memberships diverge again lives in
-    // `sql-driver-11389-date-tz-skew.test.ts`.
-    const dialect = SqlDriver.DIALECT_CONNECT_TIMEOUT[String(knexConfig.client ?? '')];
-    if (dialect) {
-      const conn = knexConfig.connection;
-      if (typeof conn === 'string') {
-        // The URL must move into the dialect's own URL slot so the timeout can
-        // ride alongside it. Verified for both dialects: the connection attempt
-        // still goes to the URL's host/port, `?sslmode=` is still honoured.
-        bounded.connection = {
-          [dialect.urlKey]: conn,
-          [dialect.key]: SqlDriver.DEFAULT_CONNECT_TIMEOUT_MS,
-        };
-      } else if (conn && typeof conn === 'object' && (conn as any)[dialect.key] === undefined) {
-        bounded.connection = { ...(conn as object), [dialect.key]: SqlDriver.DEFAULT_CONNECT_TIMEOUT_MS };
-      }
-      // A function-valued `connection` (knex's per-acquire provider) is left
-      // alone: the host is building each connection itself and owns its timeouts.
-    }
-    return SqlDriver.withPostgresCalendarDayAsText(
-      SqlDriver.withMysqlCalendarDayAsText(SqlDriver.withUtcSession(bounded)),
-    );
+    // [#29520 codemod] The body moved to `sql-driver-class-head.ts`.
+    return ClassHeadFacet.withConnectBound(knexConfig);
   }
 
-  /**
-   * Pin a MySQL connection to UTC, in both directions (#3942).
-   *
-   * MySQL is the one supported dialect where the SESSION timezone participates
-   * in what a datetime means, on two independent layers, and both default to
-   * something machine-dependent:
-   *
-   *   - **mysql2** (`connection.timezone`, default `'local'`) decides how a bound
-   *     JS `Date` is rendered and how a returned `DATETIME` string is parsed back.
-   *     Left at `'local'`, two app servers in different zones write the same
-   *     instant as different values, and read the same row as different instants.
-   *   - **The server** (`@@session.time_zone`, default `SYSTEM`) decides how a
-   *     zone-naive literal is interpreted for a `TIMESTAMP` column, and what
-   *     `CURRENT_TIMESTAMP` renders. Measured at 8 hours off on a server
-   *     configured `+08:00`.
-   *
-   * Setting both to UTC makes the wall clock the driver writes *be* the instant,
-   * which is what {@link mysqlDatetimeLiteral} relies on — and it keeps legacy
-   * `TIMESTAMP` columns correct too, so a deployment stays right whether or not
-   * the `DATETIME(3)` migration has run.
-   *
-   * A host that set either one explicitly is left alone; an existing
-   * `pool.afterCreate` is chained rather than replaced, since it is a documented
-   * knex extension point the host may already be using.
-   */
   private static withUtcSession(knexConfig: Record<string, any>): Record<string, any> {
-    // The MySQL identity question again, asked from a static: the same set
-    // `isMysql` reads, not a fourth hand-written copy of it (#11550).
-    if (!SqlDriver.MYSQL_EMIT_CLIENTS.has(SqlDriver.clientSpelling(knexConfig))) return knexConfig;
-
-    const out: Record<string, any> = { ...knexConfig };
-    const conn = out.connection;
-    if (conn && typeof conn === 'object' && (conn as any).timezone === undefined) {
-      out.connection = { ...(conn as object), timezone: 'Z' };
-    }
-
-    const pool = (out.pool ?? {}) as Record<string, any>;
-    const hostAfterCreate = pool.afterCreate as
-      | ((conn: unknown, done: (err?: unknown) => void) => void)
-      | undefined;
-    out.pool = {
-      ...pool,
-      afterCreate(connection: any, done: (err?: unknown, conn?: unknown) => void) {
-        connection.query(`SET time_zone = '+00:00'`, (err: unknown) => {
-          if (err) return done(err);
-          if (!hostAfterCreate) return done(undefined, connection);
-          hostAfterCreate(connection, (hostErr?: unknown) => done(hostErr, connection));
-        });
-      },
-    };
-    return out;
+    // [#29520 codemod] The body moved to `sql-driver-class-head.ts`, its docblock with it.
+    return ClassHeadFacet.withUtcSession(knexConfig);
   }
 
   /**
@@ -1585,64 +1501,9 @@ export class SqlDriver implements IDataDriver {
    */
   private static readonly MYSQL_TEXT_TEMPORAL_TYPES: readonly string[] = ['DATE'];
 
-  /**
-   * Keep a MySQL `DATE` a calendar-day STRING, never a JS `Date` (#20280).
-   *
-   * The MySQL counterpart of {@link withPostgresCalendarDayAsText}: the wire
-   * form of a `DATE` IS `YYYY-MM-DD`, so the driver asks mysql2 for that text
-   * (`dateStrings: ['DATE']`) and presents it through {@link toDateOnly} —
-   * `@objectstack/core`'s `temporalStorageForm`, the rule the write and
-   * `where` paths already apply. A `date` column then reaches the read doors
-   * as TEXT on every dialect.
-   *
-   * ## The measurement
-   *
-   * mysql2 3.23's `Packet#parseDate` rebuilds a `DATE` from its three numbers:
-   * `new Date(Date.UTC(y, m - 1, d))` under the `timezone: 'Z'` pin of
-   * {@link withUtcSession}, `new Date(y, m - 1, d)` under the default
-   * `'local'`. Both constructors read a year from 0 to 99 as 1900 + year.
-   * Measured on MySQL 8.0.46 (server `time_zone='+08:00'`) through `find()`:
-   *
-   * | stored (`CAST(d AS CHAR)`) | mysql2 materialised | presented before | presented now |
-   * |---|---|---|---|
-   * | `0009-03-04` | `1909-03-04T00:00:00.000Z` | `1909-03-04` | `0009-03-04` |
-   * | `0099-03-04` | `1999-03-04T00:00:00.000Z` | `1999-03-04` | `0099-03-04` |
-   * | `0999-06-15` | `0999-06-15T00:00:00.000Z` | `0999-06-15` | `0999-06-15` |
-   * | `2026-03-04` | `2026-03-04T00:00:00.000Z` | `2026-03-04` | `2026-03-04` |
-   *
-   * The write was right and the read was wrong: `where d $eq '0009-03-04'`
-   * found the row and presented `1909-03-04`. A year from 1000 to 9999 presents
-   * exactly what it did. A zero day (`0000-00-00`, storable only with
-   * `NO_ZERO_DATE` off) presents as that text, where mysql2 invented
-   * `1899-11-30`.
-   *
-   * ## Why `DATE` and not `DATETIME`
-   *
-   * `dateStrings` also takes `'DATETIME'`, and a `DATETIME` in years 0..99 is
-   * misread too: `parseDateTime` hands `'0009-03-04 10:00:00.000Z'` to V8's
-   * non-ISO `Date` parser, which answers 2004-09-03. But a `DATETIME` is an
-   * instant, and ADR-0053 D-F2 keeps the client parser's `Date` for an instant,
-   * folded to text only at the driver's own read doors — text at the client
-   * parser is the option that ADR did not take. That half is not decided here.
-   *
-   * The other measured remedy, a `'+00:00'` zone, takes mysql2's padded
-   * string-constructor arm for a `DATE` but keeps the `Date`, and moves the
-   * zone every bound `Date` and every `DATETIME` is rendered in. The text is
-   * the narrower change, and it is how PostgreSQL already reads a day.
-   *
-   * A host that set `dateStrings` itself is left alone, as
-   * {@link withUtcSession} leaves an explicit `timezone`; so is a
-   * function-valued `connection`, which the host builds per acquire.
-   */
   private static withMysqlCalendarDayAsText(knexConfig: Record<string, any>): Record<string, any> {
-    if (!SqlDriver.MYSQL_EMIT_CLIENTS.has(SqlDriver.clientSpelling(knexConfig))) return knexConfig;
-
-    const conn = knexConfig.connection;
-    if (!conn || typeof conn !== 'object' || (conn as any).dateStrings !== undefined) return knexConfig;
-    return {
-      ...knexConfig,
-      connection: { ...(conn as object), dateStrings: [...SqlDriver.MYSQL_TEXT_TEMPORAL_TYPES] },
-    };
+    // [#29520 codemod] The body moved to `sql-driver-class-head.ts`, its docblock with it.
+    return ClassHeadFacet.withMysqlCalendarDayAsText(knexConfig);
   }
 
   /**
@@ -1686,161 +1547,16 @@ export class SqlDriver implements IDataDriver {
    */
   private static readonly PG_OID_TEXT_ARRAY = 1009;
 
-  /**
-   * Keep a Postgres `date` a calendar-day STRING, never a JS `Date` (#11389).
-   *
-   * This is the Postgres counterpart of {@link withUtcSession}, and it exists
-   * for the same reason: the value a driver materialises must not depend on
-   * which machine's clock the Node process happens to be running.
-   *
-   * ## The measurement
-   *
-   * `node-postgres` parses OID 1082 with `new Date(y, m - 1, d)` — **local**
-   * midnight. `SqlDriver#toDateOnly` reads a `Date` with UTC components (its
-   * documented contract, see there), so on a process east of UTC the two
-   * disagree by a calendar day. Measured on PostgreSQL 16, one stored row
-   * `d = '2026-08-24'`, only the process `TZ` changed:
-   *
-   * | process TZ | pg materialises | `toDateOnly` returned |
-   * |---|---|---|
-   * | `UTC` | `2026-08-24T00:00:00.000Z` | `2026-08-24` |
-   * | `America/New_York` | `2026-08-24T04:00:00.000Z` | `2026-08-24` |
-   * | `Asia/Shanghai` | `2026-08-23T16:00:00.000Z` | **`2026-08-23`** |
-   *
-   * West of UTC the UTC components happen to name the right day, which is why
-   * the `Temporal Conformance (live PG + MySQL)` job — pinned at
-   * `TZ=America/New_York` — was green throughout. Only an east-of-UTC process
-   * zone can fail it, so the pin that guards this sweeps the process zone.
-   *
-   * ## Why the parser and not the reader
-   *
-   * The alternative — read local components in `toDateOnly` — was measured and
-   * rejected: that helper is shared by the READ path (`formatOutput`,
-   * `presentReadValue`), the WRITE path (`formatInput`) and the FILTER path
-   * (`coerceFilterValue`), and the `Date`s they receive are on different
-   * clocks. A caller's `new Date('2026-08-24')` is UTC midnight, so under
-   * `TZ=America/New_York` local components read it as `2026-08-23` — the same
-   * one-day error in the mirror direction, moved onto the write and filter
-   * paths. Fixing it at the parser leaves exactly one clock in play, because
-   * the driver then never produces a `Date` for a `date` column at all — which
-   * is already how SQLite behaves (TEXT round-trip) and, via
-   * {@link withMysqlCalendarDayAsText}, how mysql2 behaves. (Before that,
-   * {@link withUtcSession}'s `timezone: 'Z'` kept mysql2's `Date` on the one
-   * UTC clock, but read a year below 100 a century late.)
-   *
-   * `pool.afterCreate` is the hook rather than a `pg.types.setTypeParser`
-   * call because `setTypeParser` mutates the pg-types registry **process
-   * wide**, which would reach every other pg client in the host application.
-   * A parser registered on the connection is scoped to the pools this driver
-   * opened; a host's own `pg` clients keep the stock behaviour. `pg` is an
-   * optional peer dependency and is never imported here — `setTypeParser` /
-   * `getTypeParser` are read off the `pg.Client` knex hands the hook.
-   *
-   * `timestamptz` / `timestamp` are deliberately untouched here: those are
-   * instants, and a `Date` is the right materialisation for them at the
-   * CLIENT layer, where the wire text is parsed. It is not, however, what the
-   * driver hands out of its read doors: [ADR-0053 D-F1/D-F2] (#13973) fold that
-   * `Date` to the canonical `YYYY-MM-DDTHH:MM:SS.sssZ` text in `formatOutput`
-   * / `presentReadValue`, so every dialect presents the instant the way
-   * SQLite always has. This comment used to add that "`Field.datetime`
-   * depends on" the `Date` materialisation; #13973 checked that on the tree
-   * and it did not hold — nothing on the read path consumed the `Date` (the
-   * SQLite-gated `formatOutput` never touched a datetime column on Postgres),
-   * and every in-repo reader of the value already accepted the text form.
-   * Canonicalising at the driver's own read boundary rather than at this
-   * parser is the ruled shape: one clock stays in play here for `date`, the
-   * instant types keep their stock parser, and no host `pg` client is touched.
-   *
-   * A host's existing `pool.afterCreate` is chained rather than replaced,
-   * exactly as in {@link withUtcSession}.
-   */
   private static withPostgresCalendarDayAsText(
     knexConfig: Record<string, any>,
   ): Record<string, any> {
-    if (!SqlDriver.POSTGRES_WIRE_CLIENTS.has(String(knexConfig.client ?? ''))) return knexConfig;
-
-    const out: Record<string, any> = { ...knexConfig };
-    const pool = (out.pool ?? {}) as Record<string, any>;
-    const hostAfterCreate = pool.afterCreate as
-      | ((conn: unknown, done: (err?: unknown) => void) => void)
-      | undefined;
-    out.pool = {
-      ...pool,
-      afterCreate(connection: any, done: (err?: unknown, conn?: unknown) => void) {
-        const chain = (): void => {
-          if (!hostAfterCreate) return done(undefined, connection);
-          hostAfterCreate(connection, (hostErr?: unknown) => done(hostErr, connection));
-        };
-        // Not a `pg.Client` after all (a stub, a future knex shape): leave the
-        // connection exactly as it was rather than failing the acquire.
-        if (
-          typeof connection?.setTypeParser !== 'function' ||
-          typeof connection?.getTypeParser !== 'function'
-        ) {
-          return chain();
-        }
-        const parseTextArray = connection.getTypeParser(SqlDriver.PG_OID_TEXT_ARRAY, 'text');
-        // The wire form of `date` IS `YYYY-MM-DD`; handing it back verbatim is
-        // both the fix and the whole parser.
-        connection.setTypeParser(SqlDriver.PG_OID_DATE, (text: string) => text);
-        connection.setTypeParser(SqlDriver.PG_OID_DATE_ARRAY, parseTextArray);
-        chain();
-      },
-    };
-    return out;
+    // [#29520 codemod] The body moved to `sql-driver-class-head.ts`, its docblock with it.
+    return ClassHeadFacet.withPostgresCalendarDayAsText(knexConfig);
   }
 
-  /**
-   * Per-request SQL query timing (perf-tuning mode). Correlates knex's
-   * `query` → `query-response` / `query-error` events by `__knexQueryUid` and
-   * folds each query's wall time into the ambient request collector's `db`
-   * aggregate — one `Server-Timing` member carrying total DB time **and** a
-   * query count, the number most useful for spotting N sequential round-trips
-   * in DevTools → Network → Timing.
-   *
-   * Attribution is captured at `query` time, which runs inside the initiating
-   * request's `AsyncLocalStorage` scope (knex emits it synchronously from the
-   * runner after connection acquisition, still on the awaited call chain), so
-   * concurrent requests never cross-attribute. When perf-tuning is off,
-   * {@link currentPerfTiming} is `undefined` and the listener returns at once —
-   * nothing is tracked and the map stays empty, so the cost is a single ALS
-   * lookup per query.
-   *
-   * The aggregate records only durations and a count — never SQL text — so the
-   * `Server-Timing` header can be surfaced without leaking query shapes to
-   * non-admins. When an admin opts into DETAIL mode (`X-OS-Debug-Timing: json`,
-   * admin-gated), each query's PARAMETRIZED statement (knex's `q.sql`, which
-   * carries `?` placeholders — the bindings live separately and are NEVER
-   * recorded) is additionally captured so the admin-only detail payload can list
-   * the slowest queries by shape. Literal row values never enter the collector.
-   */
   private installQueryTiming(): void {
-    // uid → { start, collector }, populated only while a collector is active,
-    // and always removed when the query settles (bounded by in-flight queries).
-    const inflight = new Map<string, { t0: number; timing: PerfTiming }>();
-    this.knex.on('query', (q: any) => {
-      const timing = currentPerfTiming();
-      if (!timing) return;
-      const uid = q?.__knexQueryUid;
-      if (typeof uid === 'string') inflight.set(uid, { t0: perfNow(), timing });
-    });
-    const settle = (q: any): void => {
-      const uid = q?.__knexQueryUid;
-      if (typeof uid !== 'string') return;
-      const rec = inflight.get(uid);
-      if (!rec) return;
-      inflight.delete(uid);
-      const dur = perfNow() - rec.t0;
-      rec.timing.count('db', dur, 'queries');
-      // Admin-gated detail mode: keep the query SHAPE (parametrized SQL, no
-      // bindings) so the slowest queries can be surfaced. `recordDetail` is a
-      // no-op unless detail capture is on, so this is free on the normal path.
-      if (rec.timing.detailEnabled && typeof q?.sql === 'string') {
-        rec.timing.recordDetail('db', q.sql, dur);
-      }
-    };
-    this.knex.on('query-response', (_response: any, q: any) => settle(q));
-    this.knex.on('query-error', (_error: any, q: any) => settle(q));
+    // [#29520 codemod] The body moved to `sql-driver-class-head.ts`, its docblock with it (see `ClassHeadHost`).
+    return ClassHeadFacet.installQueryTiming.call(classHeadHost.of(this));
   }
 
   /**
@@ -1856,13 +1572,8 @@ export class SqlDriver implements IDataDriver {
    * refusal fires only where DDL would otherwise have PROCEEDED.
    */
   protected assertSchemaMutable(operation: string): void {
-    if (this.schemaMode !== 'managed') {
-      throw new ExternalSchemaModeViolationError(
-        `DDL operation '${operation}' is forbidden: datasource schemaMode='${this.schemaMode}'. ` +
-          `ObjectStack never mutates the schema of an external database.`,
-      );
-    }
-    this.assertDialectEmits(operation);
+    // [#29520 codemod] The body moved to `sql-driver-class-head.ts` (see `ClassHeadHost`).
+    return ClassHeadFacet.assertSchemaMutable.call(classHeadHost.of(this), operation);
   }
 
   /**
@@ -1899,9 +1610,8 @@ export class SqlDriver implements IDataDriver {
    * writes and connection handling on these databases are untouched.
    */
   protected assertDialectEmits(operation: string): void {
-    const client = SqlDriver.clientSpelling(this.config);
-    if (!SqlDriver.POSTGRES_WIRE_ONLY_CLIENTS.has(client)) return;
-    throw new UnsupportedDialectEmissionError(client, operation, SqlDriver.emissionClients());
+    // [#29520 codemod] The body moved to `sql-driver-class-head.ts` (see `ClassHeadHost`).
+    return ClassHeadFacet.assertDialectEmits.call(classHeadHost.of(this), operation);
   }
 
   // ===================================
@@ -1910,160 +1620,17 @@ export class SqlDriver implements IDataDriver {
 
   connect(): Promise<void> {
     // [#29520 codemod] The body moved to `sql-driver-lifecycle.ts` (see `LifecycleHost`).
-    const readIsSqlite = () => this.isSqlite;
-    const host: ThisParameterType<typeof connect> = {
-      applyAutoVacuumIncremental: (...a) => this.applyAutoVacuumIncremental(...a),
-      applySqliteJournalMode: (...a) => this.applySqliteJournalMode(...a),
-      ensureDatabaseExists: (...a) => this.ensureDatabaseExists(...a),
-      get isSqlite() { return readIsSqlite(); },
-      releaseRefusedSqliteConnection: (...a) => this.releaseRefusedSqliteConnection(...a),
-    };
-    return connect.call(host);
+    return LifecycleFacet.connect.call(lifecycleHost.of(this));
   }
 
-  /**
-   * Close what a refused SQLite `connect()` opened, before the refusal leaves
-   * it (#25084).
-   *
-   * A file refused by its first statement ({@link SQLITE_FILE_REFUSALS}) was
-   * opened to answer it: the pool keeps that better-sqlite3 connection, and for
-   * a file whose header says WAL, SQLite keeps its `-shm` and an empty `-wal`
-   * beside it for as long as the connection is open. No caller is owed that
-   * handle — the connect failed — and a caller that does not `disconnect()` a
-   * handle whose `connect()` rejected (the datasource connection service's
-   * degraded path) used to keep it for the life of the process.
-   *
-   * The pool is destroyed and a fresh, empty one put in its place, so the
-   * instance is left as it was constructed: nothing open, and a later
-   * `connect()` opens the file again and gives its own answer. Destroying
-   * alone would not: every later statement would answer "Unable to acquire a
-   * connection", which carries no code, so a second `connect()` would log it
-   * and resolve over a datasource that cannot run one query. A host-adopted
-   * instance is connected again on the same object (`createPrebuiltDriverFactory`
-   * in `@objectstack/service-datasource`), so that second `connect()` is real.
-   *
-   * SQLite only: it is the one dialect whose `connect()` can reject holding a
-   * connection. A server dialect rejects there only when the connection itself
-   * could not be made, so its pool holds nothing to release.
-   *
-   * Never throws: the refusal the caller is owed is the error `connect()`
-   * raised, so a release that fails is logged and that error goes on unchanged.
-   */
-  private async releaseRefusedSqliteConnection(): Promise<void> {
-    try {
-      await this.knex.destroy();
-      this.knex.initialize();
-    } catch (e) {
-      this.logger.warn('Failed to close the SQLite connection a refused connect() opened', e);
-    }
+  private releaseRefusedSqliteConnection(): Promise<void> {
+    // [#29520 codemod] The body moved to `sql-driver-lifecycle.ts`, its docblock with it (see `LifecycleHost`).
+    return LifecycleFacet.releaseRefusedSqliteConnection.call(lifecycleHost.of(this));
   }
 
-  /**
-   * SQLite space hygiene (ADR-0057). With the default `auto_vacuum=NONE`,
-   * freed pages are never returned to the OS — a database that briefly grew
-   * (e.g. high-frequency telemetry before retention sweeps run) stays at its
-   * high-water mark forever. INCREMENTAL lets a later `PRAGMA incremental_vacuum`
-   * (run by the lifecycle Reaper, or manually) reclaim that space without a
-   * full blocking VACUUM. NOTE: auto_vacuum only changes layout on a *fresh*
-   * database or after a one-time full VACUUM, so this benefits new dev DBs;
-   * existing files need a single `VACUUM` to adopt it (`os db clean`).
-   * Unaffected by the journal mode: an INCREMENTAL database keeps reclaiming
-   * under WAL.
-   *
-   * ## Read first, set only when different (#21734)
-   *
-   * The setter is not free on a file that already answers INCREMENTAL: it
-   * runs a write transaction that stamps the header — the file change counter
-   * (bytes 24–27) and the version-valid-for number (bytes 92–95) — although
-   * the mode does not change. So every connect used to leave an
-   * already-incremental file different from how it found it, a read-only
-   * `os migrate duplicates` included. Reading `PRAGMA auto_vacuum` is
-   * byte-neutral (measured on an INCREMENTAL WAL file: md5 unchanged), so the
-   * setter is issued only when the file does not answer INCREMENTAL:
-   *
-   *   - an already-incremental file: the read only — nothing is written;
-   *   - a fresh file and `:memory:`: they answer NONE, get the setter, and come
-   *     out INCREMENTAL exactly as before;
-   *   - a legacy NONE file that holds tables: it gets the same setter it always
-   *     got, which leaves it NONE until a `VACUUM` (this method runs none);
-   *   - a FULL file: it gets the setter and moves to INCREMENTAL, as before.
-   *
-   * A reply this method cannot read counts as "not INCREMENTAL": an unreadable
-   * answer costs the old write, never the mode.
-   *
-   * @returns whether the connection answered. The read is the first statement
-   * any connection runs, so `false` says the connection itself is not answering —
-   * not merely that space hygiene is unavailable.
-   * @throws {SqliteDatabaseFileError} when that first statement's answer is a
-   * verdict on the file itself ({@link SQLITE_FILE_REFUSALS}): it cannot be
-   * opened, it is not a SQLite database, or its header or schema is damaged.
-   */
-  private async applyAutoVacuumIncremental(): Promise<boolean> {
-    try {
-      const current = SqlDriver.autoVacuumOf(await this.knex.raw('PRAGMA auto_vacuum'));
-      if (current !== SqlDriver.SQLITE_AUTO_VACUUM_INCREMENTAL) {
-        await this.knex.raw('PRAGMA auto_vacuum = INCREMENTAL');
-      }
-      return true;
-    } catch (e) {
-      // A native better-sqlite3 load failure surfaces HERE first — this PRAGMA
-      // is the first query that forces the lazy `.node` addon to load. Two
-      // real-world variants, both handled by `resolveSqliteDriver`'s probe,
-      // which catches the failure and steps down to wasm SQLite with a clean
-      // one-line notice (#2229):
-      //   • ABI mismatch  — `ERR_DLOPEN_FAILED` / "…NODE_MODULE_VERSION 127…"
-      //                      (a stale prebuilt binary after a Node upgrade)
-      //   • not built     — "Could not locate the bindings file" (native addon
-      //                      never compiled, e.g. a fresh clone / blocked build)
-      // Dumping the full multi-line stack for either looks like a fatal crash
-      // to the reader (it isn't), so log a concise, actionable one-liner and
-      // let the step-down message that follows explain the outcome. Any OTHER
-      // PRAGMA failure keeps the full warning (with stack) as before.
-      const code = (e as { code?: string } | null | undefined)?.code;
-      // The file itself is refused, and every later statement would answer the
-      // same, so the connect fails here, naming the file. Before, each of these
-      // logged and resolved, and the datasource counted as connected while it
-      // could not answer one query:
-      //   • SQLITE_CANTOPEN (#23696) — a directory that exists but refuses the
-      //     file, a path SQLite cannot open;
-      //   • SQLITE_NOTADB (#24960) — the file exists and opens, but its bytes
-      //     are not a SQLite database (plain text, a foreign format, a file
-      //     encrypted by another engine). On a development boot the step-down
-      //     used to answer it with wasm SQLite, whose open moved the
-      //     operator's file aside and wrote an empty database in its place.
-      //     The refusal is issued before anything is written: the file is left
-      //     exactly as it was found;
-      //   • SQLITE_CORRUPT (#25019) — the file is a SQLite database SQLite
-      //     cannot read: its header or its schema is damaged (a file truncated
-      //     inside its 100-byte header, or short of the pages its schema
-      //     names). At the FIRST statement this is a verdict on the whole
-      //     file, measured: `SELECT 1` answers the same code. A database
-      //     damaged deeper inside answers this read and connects; its damage
-      //     surfaces on the read that reaches it, as before. A development
-      //     boot used to take the same step-down to wasm SQLite as for
-      //     SQLITE_NOTADB, and the same rename; it is refused the same way,
-      //     before anything is written.
-      const refusal = code === undefined ? undefined : SqlDriver.SQLITE_FILE_REFUSALS.get(code);
-      if (refusal !== undefined) {
-        const declared = (this.config as any).connection;
-        const filename = this.sqliteFilename() ?? String(typeof declared === 'string' ? declared : declared?.filename);
-        throw new SqliteDatabaseFileError(filename, refusal, e);
-      }
-      const msg = e instanceof Error ? e.message : String(e);
-      const isNativeLoadFailure =
-        code === 'ERR_DLOPEN_FAILED' ||
-        code === 'MODULE_NOT_FOUND' ||
-        code === 'ERR_MODULE_NOT_FOUND' ||
-        /NODE_MODULE_VERSION|could not locate the bindings|was compiled against a different/i.test(msg);
-      if (isNativeLoadFailure) {
-        this.logger.warn(
-          'native better-sqlite3 unavailable (ABI mismatch or not built) — will step down to wasm SQLite; run `pnpm rebuild better-sqlite3` for native speed',
-        );
-      } else {
-        this.logger.warn('Failed to set PRAGMA auto_vacuum=INCREMENTAL', e);
-      }
-      return false;
-    }
+  private applyAutoVacuumIncremental(): Promise<boolean> {
+    // [#29520 codemod] The body moved to `sql-driver-lifecycle.ts`, its docblock with it (see `LifecycleHost`).
+    return LifecycleFacet.applyAutoVacuumIncremental.call(lifecycleHost.of(this));
   }
 
   /**
@@ -2083,21 +1650,9 @@ export class SqlDriver implements IDataDriver {
   /** What `PRAGMA auto_vacuum` answers for INCREMENTAL (0 is NONE, 1 is FULL). */
   private static readonly SQLITE_AUTO_VACUUM_INCREMENTAL = 2;
 
-  /**
-   * The `auto_vacuum` mode a PRAGMA reply carries, as a number.
-   *
-   * Both SQLite dialects answer with rows (`[{ auto_vacuum: 2 }]`) — a reply
-   * shaped any other way yields `null`, which {@link applyAutoVacuumIncremental}
-   * treats as "not INCREMENTAL" and answers with the setter.
-   */
   private static autoVacuumOf(result: unknown): number | null {
-    const rows: unknown = Array.isArray(result) ? result : (result as { rows?: unknown })?.rows;
-    const row = Array.isArray(rows) ? rows[0] : undefined;
-    const value =
-      row && typeof row === 'object' ? (row as { auto_vacuum?: unknown }).auto_vacuum : row;
-    if (typeof value === 'number') return value;
-    if (typeof value === 'bigint') return Number(value);
-    return null;
+    // [#29520 codemod] The body moved to `sql-driver-lifecycle.ts`, its docblock with it.
+    return LifecycleFacet.autoVacuumOf(result);
   }
 
   /**
@@ -2116,14 +1671,8 @@ export class SqlDriver implements IDataDriver {
    * must not quietly leave a database serialized.
    */
   protected resolveSqliteJournalMode(): SqliteJournalMode {
-    const fromEnv = (process.env[SqlDriver.SQLITE_JOURNAL_MODE_ENV] ?? '').trim().toLowerCase();
-    const requested = this.declaredJournalMode ?? (fromEnv || undefined);
-    if (requested === undefined) return 'wal';
-    if (requested === 'wal' || requested === 'delete') return requested;
-    this.logger.warn(
-      `Ignoring SQLite journal mode '${requested}' (expected 'wal' or 'delete') — using 'wal'`,
-    );
-    return 'wal';
+    // [#29520 codemod] The body moved to `sql-driver-lifecycle.ts` (see `LifecycleHost`).
+    return LifecycleFacet.resolveSqliteJournalMode.call(lifecycleHost.of(this));
   }
 
   /**
@@ -2183,145 +1732,34 @@ export class SqlDriver implements IDataDriver {
    * journal is slower under concurrency, not broken, and refusing to start over
    * a pragma would be worse than the problem this solves.
    */
-  protected async applySqliteJournalMode(): Promise<void> {
-    if (!this.supportsWalJournal) return;
-
-    // No file means nobody to share it with: `:memory:` (and every other
-    // `:`-prefixed pseudo-filename) is private to this process.
-    const filename = this.sqliteFilename();
-    if (!filename) return;
-
-    const target = this.resolveSqliteJournalMode();
-
-    let current: string | null;
-    try {
-      current = SqlDriver.journalModeOf(await this.knex.raw('PRAGMA journal_mode'));
-    } catch (e) {
-      this.logger.warn(`Failed to read SQLite journal_mode on ${filename}`, e);
-      return;
-    }
-
-    // `memory` / `off` is a deliberate no-journal transport, not a rollback
-    // journal worth migrating — leave whatever the host chose in place.
-    if (current === null || current === 'memory' || current === 'off') return;
-
-    if (current === target) {
-      // Nothing to change — but when the mode is already WAL, still prove it is
-      // usable. A database an earlier boot left in WAL on a filesystem that
-      // cannot serve it (failure mode 2) would otherwise fail every query with
-      // nothing pointing at the cause, and the revert that would fix it only
-      // ever gets one attempt.
-      if (target === 'wal') await this.verifyWalReadable(filename);
-      return;
-    }
-
-    let applied: string | null;
-    try {
-      applied = SqlDriver.journalModeOf(
-        await this.knex.raw(`PRAGMA journal_mode = ${target.toUpperCase()}`),
-      );
-    } catch (e) {
-      // SQLITE_BUSY is the benign case: a mode change needs the file to itself,
-      // and another process has it open. Whoever wins the race sets the mode
-      // and everyone else reads it back on their next boot.
-      this.logger.warn(
-        `Failed to set SQLite journal_mode=${target} on ${filename} (it stays '${current}')`,
-        e,
-      );
-      return;
-    }
-
-    if (applied !== target) {
-      this.logger.warn(
-        `SQLite kept journal_mode='${applied ?? 'unknown'}' on ${filename} instead of '${target}' — ` +
-          (target === 'wal'
-            ? `WAL needs a local filesystem (it does not work on NFS/SMB), so this database stays serialized between processes. ` +
-              `Set ${SqlDriver.SQLITE_JOURNAL_MODE_ENV}=delete to stop asking.`
-            : `close every other connection and retry, or run \`sqlite3 ${filename} "PRAGMA journal_mode=delete"\` with nothing attached.`),
-      );
-      return;
-    }
-
-    if (target === 'wal') await this.verifyWalReadable(filename);
+  protected applySqliteJournalMode(): Promise<void> {
+    // [#29520 codemod] The body moved to `sql-driver-lifecycle.ts` (see `LifecycleHost`).
+    return LifecycleFacet.applySqliteJournalMode.call(lifecycleHost.of(this));
   }
 
-  /**
-   * Prove a WAL database can actually be read through, and undo the mode if
-   * not — see failure mode 2 in {@link applySqliteJournalMode}. Runs on every
-   * connect to a WAL database, not only right after a switch, so a database
-   * some earlier boot stranded still gets recovered.
-   *
-   * Any read on a WAL database opens the shared-memory index, which is the part
-   * a network filesystem cannot provide; `sqlite_master` is the cheapest such
-   * read and needs no schema to exist.
-   */
-  private async verifyWalReadable(filename: string): Promise<void> {
-    try {
-      await this.knex.raw('SELECT count(*) FROM sqlite_master');
-      return;
-    } catch (e) {
-      // Busy is not unusable. Another connection in EXCLUSIVE locking mode — the
-      // `os migrate` occupancy probe takes exactly that, briefly — makes this
-      // read fail for a reason that passes on its own, and changing the journal
-      // mode underneath it would be both wrong and impossible.
-      if (SqlDriver.isSqliteBusyError(e)) return;
-
-      const detail = e instanceof Error ? e.message : String(e);
-      let reverted: string | null = null;
-      try {
-        reverted = SqlDriver.journalModeOf(await this.knex.raw('PRAGMA journal_mode = DELETE'));
-      } catch {
-        // Leaving `reverted` null — reported as "did not take" below, which is
-        // the honest outcome either way.
-      }
-      this.logger.warn(
-        `SQLite accepted WAL on ${filename} but cannot read through it (${detail}) — ` +
-          (reverted === 'delete'
-            ? `reverted to journal_mode=delete. Set ${SqlDriver.SQLITE_JOURNAL_MODE_ENV}=delete to skip this on every boot.`
-            : `and the revert did not take (journal_mode='${reverted ?? 'unknown'}'). Run ` +
-              `\`sqlite3 ${filename} "PRAGMA journal_mode=delete"\` with nothing attached, then set ` +
-              `${SqlDriver.SQLITE_JOURNAL_MODE_ENV}=delete.`),
-      );
-    }
+  private verifyWalReadable(filename: string): Promise<void> {
+    // [#29520 codemod] The body moved to `sql-driver-lifecycle.ts`, its docblock with it (see `LifecycleHost`).
+    return LifecycleFacet.verifyWalReadable.call(lifecycleHost.of(this), filename);
   }
 
-  /**
-   * Whether an error is SQLite reporting contention rather than a broken
-   * database. Mirrors `isBusyError` in the CLI's occupancy probe, which asks the
-   * same question of the same engine from the other side of the package graph.
-   */
   private static isSqliteBusyError(e: unknown): boolean {
-    const code = (e as { code?: string } | null | undefined)?.code ?? '';
-    const message = e instanceof Error ? e.message : String(e ?? '');
-    return code.startsWith('SQLITE_BUSY') || /database is locked|SQLITE_BUSY/i.test(message);
+    // [#29520 codemod] The body moved to `sql-driver-lifecycle.ts`, its docblock with it.
+    return LifecycleFacet.isSqliteBusyError(e);
   }
 
-  /**
-   * The `journal_mode` a PRAGMA reply carries, lower-cased.
-   *
-   * Both SQLite dialects answer a PRAGMA with rows (`[{ journal_mode: 'wal' }]`)
-   * — a reply shaped any other way yields `null`, which every caller treats as
-   * "leave the database alone" rather than guessing.
-   */
   private static journalModeOf(result: unknown): string | null {
-    const rows: unknown = Array.isArray(result) ? result : (result as { rows?: unknown })?.rows;
-    const row = Array.isArray(rows) ? rows[0] : undefined;
-    const value =
-      row && typeof row === 'object' ? (row as { journal_mode?: unknown }).journal_mode : row;
-    return typeof value === 'string' ? value.toLowerCase() : null;
+    // [#29520 codemod] The body moved to `sql-driver-lifecycle.ts`, its docblock with it.
+    return LifecycleFacet.journalModeOf(result);
   }
 
-  async checkHealth(): Promise<boolean> {
-    try {
-      await this.knex.raw('SELECT 1');
-      return true;
-    } catch {
-      return false;
-    }
+  checkHealth(): Promise<boolean> {
+    // [#29520 codemod] The body moved to `sql-driver-lifecycle.ts` (see `LifecycleHost`).
+    return LifecycleFacet.checkHealth.call(lifecycleHost.of(this));
   }
 
-  async disconnect(): Promise<void> {
-    await this.knex.destroy();
+  disconnect(): Promise<void> {
+    // [#29520 codemod] The body moved to `sql-driver-lifecycle.ts` (see `LifecycleHost`).
+    return LifecycleFacet.disconnect.call(lifecycleHost.of(this));
   }
 
   // ===================================
@@ -2335,167 +1773,19 @@ export class SqlDriver implements IDataDriver {
   // appeared in neither its repaired set nor its excluded set — it was never
   // seen. Pinned at the type level, both halves, in
   // `sql-driver-doors-declared-types.test.ts`.
-  async find(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
-    return this.findRows(object, query, options);
+  find(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
+    // [#29520 codemod] The body moved to `sql-driver-crud.ts` (see `CrudHost`).
+    return CrudFacet.find.call(crudHost.of(this), object, query, options);
   }
 
-  /**
-   * The body of {@link find}, shared with {@link findOne}.
-   *
-   * `singleRowLookup` marks the caller as `findOne` rather than a page, and the
-   * only thing it changes is that no ordering is imposed on an unsorted read
-   * (objectstack#4363). `findOne` reaches here as `limit: 1`, which is
-   * indistinguishable from "page one of a walk with page size 1" — and the two
-   * want opposite things:
-   *
-   * - The paged read needs a total order, or its pages are not a partition.
-   * - `findOne` needs the plan its predicate earned. `ORDER BY id LIMIT 1` is
-   *   the shape that makes a planner abandon the predicate's own index and walk
-   *   the primary key applying a filter instead, because at `LIMIT 1` that
-   *   looks like it will stop early. Measured on Postgres 16 over 2M rows,
-   *   `WHERE owner_id = ? LIMIT 1` went 0.08 ms → 7.8 ms (~100×) and swapped
-   *   `ticket_owner_idx` for `ticket_pkey`; at `LIMIT 5` and up the planner
-   *   keeps the right index and pays only a top-N sort (~2 ms). Nothing is
-   *   bought for that: `findOne` promises *a* matching record, never a position
-   *   in a sequence, so there is no partition to preserve.
-   *
-   * `MongoDBDriver.findOne` carries the same flag into its own `buildSortSpec`,
-   * so both drivers now read a `findOne` the same way: honour the caller's
-   * `orderBy`, impose nothing when there is none. (Mongo used to translate
-   * `where` and drop `orderBy` outright — an earlier version of this comment
-   * cited that as agreement, which it was not; objectstack#4419.) The
-   * obligation the contract states is on `find`, and this keeps it there.
-   */
-  private async findRows(
+  private findRows(
     object: string,
     query: DriverQuery,
     options?: DriverOptions,
     singleRowLookup = false,
   ): Promise<any[]> {
-    // The whole ORDER BY, decided once: the caller's keys plus whatever this
-    // driver has to add to make a paged read deterministic. Derived out here
-    // rather than inside `buildBase` so the recovery ladder below can ask
-    // whether the statement HAS a sort to drop, instead of asking whether the
-    // caller supplied one — since #4363 those are different questions.
-    const orderKeys = this.orderKeysFor(object, query, { singleRowLookup });
-
-    // Build everything EXCEPT the SELECT list, so the unknown-column retry
-    // below can rebuild without re-deriving where/order/pagination.
-    const buildBase = (opts?: { withOrderBy?: boolean }) => {
-      const withOrderBy = opts?.withOrderBy !== false;
-      const b = this.getBuilder(object, options);
-      this.applyTenantScope(b, object, options);
-
-      // WHERE
-      if (query.where) {
-        this.applyFilters(b, query.where, options);
-      }
-
-      // ORDER BY
-      if (withOrderBy) {
-        for (const key of orderKeys) {
-          b.orderBy(this.remoteColumn(object, key.field, this.mapSortField(key.field)), key.direction);
-        }
-      }
-
-      // PAGINATION
-      if (query.offset !== undefined) b.offset(query.offset);
-      if (query.limit !== undefined) b.limit(query.limit);
-
-      return b;
-    };
-
-    const builder = buildBase();
-
-    // SELECT
-    if (Array.isArray(query.fields) && query.fields.length > 0) {
-      builder.select(query.fields.map((f) => this.mapSortField(f)));
-    } else {
-      builder.select('*');
-    }
-
-    let results: any[];
-    try {
-      results = await builder;
-    } catch (error: any) {
-      if (isUnresolvableColumnError(error)) {
-        // A `$select` projection naming a column the table lacks (e.g. a
-        // generic list view auto-requesting `status`/`due_date`/`image` on an
-        // object without them) makes the WHOLE query fail. Swallowing that
-        // into an empty result — the old behavior — reads to the UI as "no
-        // records exist" even though rows are there: a silent data-loss
-        // footgun. When the failure came from the projection, retry once
-        // selecting all columns so the real rows still come back; the unknown
-        // field is simply absent from each row (it never existed). The
-        // engine's unknown-field filter is the first line of defense, but it
-        // only fires when the object's schema is populated in the registry —
-        // this driver backstop holds even when it isn't (notably the cloud
-        // multi-tenant runtime, where the projection otherwise zeroes the list).
-        //
-        // An unknown ORDER BY column is the same footgun one clause over
-        // (objectstack#3821): a client that sorts by a field the table lacks
-        // used to get an empty page with a non-zero `total` — "the rows are
-        // there but none are shown". Rows matter more than their order, so
-        // drop the sort and return them unordered rather than nothing. Ladder:
-        // projection first (it is the likelier culprit and the cheaper thing
-        // to lose), then the sort, then give up.
-        //
-        // [#8790, maintainer ruling 2026-08-15] Where the ladder STOPS is the
-        // other half of the same argument. Every rung is built from
-        // `buildBase()`, which always re-applies `query.where` — so the ladder
-        // can drop a projection and can drop a sort, but it can never drop the
-        // clause that failed when the unresolvable column is in the WHERE.
-        // Both rungs then raise the same error and the method used to fall to
-        // `return []`. That terminal is now a refusal: rows matter more than
-        // their order, but nothing matters more than the predicate, because
-        // answering without it returns records the caller excluded. See
-        // {@link unresolvableFilterColumnError}. The two recoveries above are
-        // deliberately untouched — the ruling narrows the terminal only.
-        const retries: Array<() => any> = [];
-        if (query.fields) retries.push(() => buildBase().select('*'));
-        if (orderKeys.length > 0) {
-          retries.push(() => buildBase({ withOrderBy: false }).select('*'));
-        }
-        results = [];
-        let recovered = false;
-        // The error to NAME the column from. The last rung is the one that has
-        // dropped everything droppable, so a column still unresolved there is
-        // the caller's WHERE — naming it from the ORIGINAL error would name the
-        // projection column on a query whose projection the ladder just fixed.
-        let lastError: unknown = error;
-        for (const retry of retries) {
-          try {
-            results = await retry();
-            recovered = true;
-            break;
-          } catch (retryError) {
-            // Try the next, broader fallback.
-            lastError = retryError;
-          }
-        }
-        if (!recovered) throw this.unresolvableFilterColumnRefusal(object, lastError, query.where);
-      } else {
-        // [#8931] The terminal catch-all — see
-        // {@link SqlDriver.backendStatementFault}. This is the `find` half of
-        // the exit `count` spells below; both halves must answer one condition
-        // one way, which is the invariant #8790 established on this path and
-        // this ruling extends to every condition the ladder does not recover.
-        throw this.backendStatementFault(object, error);
-      }
-    }
-
-    if (!Array.isArray(results)) {
-      return [];
-    }
-
-    // formatOutput is dialect-agnostic for `Field.date` (ADR-0053 Phase 1);
-    // its json/boolean deserialisation stays SQLite-gated internally. Run it
-    // for every dialect so reads match `findOne` and date columns come back
-    // as `YYYY-MM-DD`.
-    for (const row of results) {
-      this.formatOutput(object, row);
-    }
-    return results;
+    // [#29520 codemod] The body moved to `sql-driver-crud.ts`, its docblock with it (see `CrudHost`).
+    return CrudFacet.findRows.call(crudHost.of(this), object, query, options, singleRowLookup);
   }
 
   /**
@@ -2521,10 +1811,9 @@ export class SqlDriver implements IDataDriver {
    * complaint; it is the contract's type now, pinned by
    * `sql-driver-doors-declared-types.test.ts`.
    */
-  async findOne(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown> | null> {
-    if (!query || typeof query !== 'object') return null;
-    const results = await this.findRows(object, { ...query, limit: 1 }, options, true);
-    return results[0] || null;
+  findOne(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown> | null> {
+    // [#29520 codemod] The body moved to `sql-driver-crud.ts` (see `CrudHost`).
+    return CrudFacet.findOne.call(crudHost.of(this), object, query, options);
   }
 
   // `findStream` was removed with the contract method in 17.0.0 (#4484). This driver's
@@ -2547,94 +1836,17 @@ export class SqlDriver implements IDataDriver {
    */
   create(object: string, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown>> {
     // [#29520 codemod] The body moved to `sql-driver-crud.ts` (see `CrudHost`).
-    const readInsertReturnsStoredRows = () => this.insertReturnsStoredRows;
-    const host: ThisParameterType<typeof create> = {
-      applyWriteColumnMap: (...a) => this.applyWriteColumnMap(...a),
-      auditMissingTenant: (...a) => this.auditMissingTenant(...a),
-      collidingAutoNumberReservations: (...a) => this.collidingAutoNumberReservations(...a),
-      decorateHashShadowDuplicate: (...a) => this.decorateHashShadowDuplicate(...a),
-      fillAutoNumberFields: (...a) => this.fillAutoNumberFields(...a),
-      formatInput: (...a) => this.formatInput(...a),
-      formatOutput: (...a) => this.formatOutput(...a),
-      getBuilder: this.getBuilder.bind(this),
-      injectTenantOnInsert: (...a) => this.injectTenantOnInsert(...a),
-      get insertReturnsStoredRows() { return readInsertReturnsStoredRows(); },
-      readBackInsertedRows: (...a) => this.readBackInsertedRows(...a),
-      resyncSequenceToDataMax: (...a) => this.resyncSequenceToDataMax(...a),
-      rotationWriteTarget: (...a) => this.rotationWriteTarget(...a),
-      stampInsertTimestamps: (...a) => this.stampInsertTimestamps(...a),
-    };
-    return create.call(host, object, data, options);
+    return CrudFacet.create.call(crudHost.of(this), object, data, options);
   }
 
-  /**
-   * [#21227] Read back the rows an INSERT on this call just wrote, by the ids
-   * it wrote: what `create` and `bulkCreate` answer on a dialect whose INSERT
-   * answers no rows ({@link insertReturnsStoredRows}).
-   *
-   * One row per written row, in the written order (`IN (…)` promises no
-   * order), each through `formatOutput()`, the same presentation
-   * `returning('*')` gets on the other dialects and `update`'s own read-back
-   * gets on every dialect.
-   *
-   * # The read key: the written id, which this driver always holds
-   *
-   * Every row reaches the INSERT carrying the id this driver gave it: the
-   * caller's `id`, else its `_id`, else a nanoid minted in `create` /
-   * `bulkCreate` before the statement is built. The id is never asked of the
-   * database, so no insert id is read: the managed `id` column is a
-   * `varchar(255)` PRIMARY KEY with no AUTO_INCREMENT, and the insert id
-   * MySQL reports for it is `0`. The column is resolved through
-   * {@link remoteColumn}, so an external object whose `columnMap` renames
-   * `id` is read by its physical column, as its INSERT was written.
-   *
-   * # The table: the write target
-   *
-   * The table the statement wrote, a rotation shard included, so the read
-   * looks where the row landed rather than at the base name.
-   *
-   * # Tenant scope: the tenants the rows were WRITTEN under
-   *
-   * Routed through {@link applyTenantScope} like every read door in this class
-   * (`check:tenant-chokepoint`), scoped as `upsert`'s identity probe
-   * (`assertMergeLandedOnSuppliedIdentity`) scopes its own read: to the tenant
-   * each row was written under. On an ordinary tenanted call that is the
-   * caller's org, which `injectTenantOnInsert` stamped. On an admin write that
-   * names a tenant in the row data (a documented authority: explicit values
-   * are never overwritten), a read scoped to the caller's ACTIVE org would miss
-   * a row that really landed. A batch may name several tenants, so the scope is
-   * their union through `tenantIds`, which `applyTenantScope` already compiles
-   * as `IN (…)`; the caller's own `tenantIds` membership set is replaced, not
-   * widened. A row written with no tenant is no tenant's, and no tenant scope
-   * reaches it (ADR-0131 D1), so the rows' union scopes the read only when
-   * every row carries one. Otherwise the call's own options decide, and a call
-   * with no tenant leaves a row unstamped only because it carries none:
-   * `injectTenantOnInsert` fills every absent column on a call that does. With
-   * no tenant field, or no tenant on the call, `applyTenantScope` leaves the
-   * read unscoped by its own contract. The ids are this call's own and `id` is
-   * the PRIMARY KEY, so the read cannot answer a row this call did not write,
-   * in any organization.
-   *
-   * # A row that is not there
-   *
-   * Refused with {@link insertedRowsNotReadBackError}, never answered with the
-   * payload: see that function for why.
-   */
   private readBackInsertedRows(
     object: string,
     writeTable: string,
     written: Record<string, any>[],
     options?: DriverOptions,
   ): Promise<Record<string, unknown>[]> {
-    // [#29520 codemod] The body moved to `sql-driver-crud.ts` (see `CrudHost`).
-    const host: ThisParameterType<typeof readBackInsertedRows> = {
-      applyTenantScope: (...a) => this.applyTenantScope(...a),
-      formatOutput: (...a) => this.formatOutput(...a),
-      getBuilder: this.getBuilder.bind(this),
-      remoteColumn: (...a) => this.remoteColumn(...a),
-      resolveTenantField: (...a) => this.resolveTenantField(...a),
-    };
-    return readBackInsertedRows.call(host, object, writeTable, written, options);
+    // [#29520 codemod] The body moved to `sql-driver-crud.ts`, its docblock with it (see `CrudHost`).
+    return CrudFacet.readBackInsertedRows.call(crudHost.of(this), object, writeTable, written, options);
   }
 
   /**
@@ -2650,71 +1862,15 @@ export class SqlDriver implements IDataDriver {
    * generous non-indexed column. Fixed-prefix formats use the empty scope and
    * keep their single global counter (backward compatible).
    */
-  protected async ensureSequencesTable(parentTrx?: Knex.Transaction): Promise<void> {
-    if (this.sequencesTableReady) return;
-    if (this.sequencesTableEnsurePromise) {
-      await this.sequencesTableEnsurePromise;
-      return;
-    }
-    // Which connection runs the DDL below. Normally a fresh pooled connection
-    // (`this.knex`), because `initObjects` pre-creates the table outside any data
-    // transaction. This lazy path is the fallback (e.g. an external object, or a
-    // consumer that writes without `initObjects`). If we are already inside the
-    // caller's transaction AND the pool can only ever hand out one connection
-    // (SQLite, pool max=1), that connection is busy with the open transaction —
-    // a bare `this.knex` here would block forever acquiring a second one and then
-    // fail with a Knex acquire-timeout (the reported batch/autonumber deadlock).
-    // Run the DDL on the caller's own transaction instead; SQLite permits DDL
-    // inside a transaction. We deliberately do NOT route DDL through `parentTrx`
-    // on MySQL, where DDL implicitly commits the caller's transaction; there the
-    // pool has room (max=5) for a fresh connection to create the table safely.
-    // The 5 is `buildSqlPool`'s — service-datasource's
-    // `default-datasource-driver-factory.ts` gives every datasource it composes
-    // `{min:0,max:5}` unless one declares its own `pool` — not knex's roomier
-    // `poolDefaults()` of `{min:2,max:10}`, which the factory never reaches.
-    const runner: Knex | Knex.Transaction = parentTrx && this.isSqlite ? parentTrx : this.knex;
-    // If we are about to run DDL on a fresh pooled connection while a SQLite
-    // transaction holds the only one, fail fast with a clear message instead of
-    // dead-locking. This catches the "caller opened a transaction but did not
-    // thread it through as parentTrx" regression at the call site (dev/test only).
-    if (runner === this.knex) this.assertBareKnexSafe('ensureSequencesTable');
-    this.sequencesTableEnsurePromise = (async () => {
-      const exists = await runner.schema.hasTable(SEQUENCES_TABLE);
-      if (!exists) {
-        try {
-          await this.createSequencesTable(SEQUENCES_TABLE, runner);
-          this.sequencesHasKeyHash = true;
-        } catch (err: any) {
-          // Race or cross-process create — re-check existence; ignore
-          // "already exists" errors from any dialect.
-          const stillMissing = !(await runner.schema.hasTable(SEQUENCES_TABLE));
-          if (stillMissing) throw err;
-          // A racing creator may have used an older schema. Migrate in place.
-          await this.ensureSequencesKeyHashShape(runner);
-        }
-      } else {
-        // Pre-existing table may predate the `key_hash`/`scope` shape. Migrate.
-        await this.ensureSequencesKeyHashShape(runner);
-      }
-      // Cache "ready" only when the DDL ran on a durable connection. If it rode
-      // the caller's transaction (the SQLite in-tx fallback above), the table is
-      // commit-conditional — a rollback would drop it — so leave the flag unset
-      // and re-verify (a cheap `hasTable`) on the next write rather than trusting
-      // a stale process-level flag. `initObjects` sets it durably up front, so
-      // the hot path is unaffected.
-      if (runner === this.knex) this.sequencesTableReady = true;
-    })();
-    try {
-      await this.sequencesTableEnsurePromise;
-    } finally {
-      this.sequencesTableEnsurePromise = null;
-    }
+  protected ensureSequencesTable(parentTrx?: Knex.Transaction): Promise<void> {
+    // [#29520 codemod] The body moved to `sql-driver-crud.ts` (see `CrudHost`).
+    return CrudFacet.ensureSequencesTable.call(crudHost.of(this), parentTrx);
   }
 
   /** SHA-256 of the composite counter key — the table's single-column PK. */
   protected sequenceKeyHash(object: string, tenantId: string, field: string, scope: string): string {
     // [#29520 codemod] The body moved to `sql-driver-crud.ts`.
-    return sequenceKeyHash(object, tenantId, field, scope);
+    return CrudFacet.sequenceKeyHash(object, tenantId, field, scope);
   }
 
   // ── The sequence semantics a second face shares, stated once ──────────────
@@ -2758,10 +1914,8 @@ export class SqlDriver implements IDataDriver {
     table: string,
     field: string,
   ): string {
-    if (!tenantField) return GLOBAL_TENANT;
-    if (tenantId) return String(tenantId);
-    if (this.organizationObjectRegistered) throw new OrganizationlessCounterRefusal(table, field, tenantField);
-    return GLOBAL_TENANT;
+    // [#29520 codemod] The body moved to `sql-driver-sequence-semantics.ts` (see `SequenceSemanticsHost`).
+    return SequenceSemanticsFacet.resolveSequenceTenantId.call(sequenceSemanticsHost.of(this), tenantField, tenantId, table, field);
   }
 
   /**
@@ -2773,11 +1927,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected defineSequencesTable(t: Knex.CreateTableBuilder): void {
     // [#29520 codemod] The body moved to `sql-driver-sequence-semantics.ts` (see `SequenceSemanticsHost`).
-    const readKnex = () => this.knex;
-    const host: ThisParameterType<typeof defineSequencesTable> = {
-      get knex() { return readKnex(); },
-    };
-    return defineSequencesTable.call(host, t);
+    return SequenceSemanticsFacet.defineSequencesTable.call(sequenceSemanticsHost.of(this), t);
   }
 
   /**
@@ -2785,11 +1935,12 @@ export class SqlDriver implements IDataDriver {
    * connection the DDL runs on (a fresh pooled connection by default, or the
    * caller's transaction on SQLite — see {@link ensureSequencesTable}).
    */
-  protected async createSequencesTable(
+  protected createSequencesTable(
     table: string,
     runner: Knex | Knex.Transaction = this.knex,
   ): Promise<void> {
-    await runner.schema.createTable(table, (t) => this.defineSequencesTable(t));
+    // [#29520 codemod] The body moved to `sql-driver-sequence-semantics.ts` (see `SequenceSemanticsHost`).
+    return SequenceSemanticsFacet.createSequencesTable.call(sequenceSemanticsHost.of(this), table, runner);
   }
 
   /**
@@ -2804,47 +1955,11 @@ export class SqlDriver implements IDataDriver {
    * sequences keep working via the legacy key and per-scope writes error
    * actionably (see getNextSequenceValue), rather than corrupting data.
    */
-  protected async ensureSequencesKeyHashShape(
+  protected ensureSequencesKeyHashShape(
     runner: Knex | Knex.Transaction = this.knex,
   ): Promise<void> {
-    if (await runner.schema.hasColumn(SEQUENCES_TABLE, 'key_hash')) {
-      this.sequencesHasKeyHash = true;
-      return;
-    }
-    const hasScope = await runner.schema.hasColumn(SEQUENCES_TABLE, 'scope');
-    const TMP = `${SEQUENCES_TABLE}__rebuild`;
-    try {
-      const rows: any[] = await runner(SEQUENCES_TABLE).select('*');
-      await runner.schema.dropTableIfExists(TMP);
-      await this.createSequencesTable(TMP, runner);
-      const migrated = rows.map((r) => {
-        const scope = hasScope && r.scope != null ? String(r.scope) : '';
-        return {
-          key_hash: this.sequenceKeyHash(String(r.object), String(r.tenant_id), String(r.field), scope),
-          object: r.object,
-          tenant_id: r.tenant_id,
-          field: r.field,
-          scope,
-          last_value: r.last_value ?? 0,
-          updated_at: r.updated_at ?? this.knex.fn.now(),
-        };
-      });
-      if (migrated.length > 0) await runner(TMP).insert(migrated);
-      await runner.schema.dropTable(SEQUENCES_TABLE);
-      await runner.schema.renameTable(TMP, SEQUENCES_TABLE);
-      this.sequencesHasKeyHash = true;
-    } catch (err) {
-      // Leave the original table intact; fall back to legacy keying for
-      // fixed-prefix sequences and refuse per-scope writes until migrated.
-      this.sequencesHasKeyHash = false;
-      await runner.schema.dropTableIfExists(TMP).catch(() => {});
-      this.logger.warn(
-        `[autonumber] Failed to migrate ${SEQUENCES_TABLE} to the key_hash shape. ` +
-          `Fixed-prefix autonumbers keep working; date/{field}/per-parent formats will ` +
-          `error until the table is migrated.`,
-        { error: String(err) },
-      );
-    }
+    // [#29520 codemod] The body moved to `sql-driver-sequence-semantics.ts` (see `SequenceSemanticsHost`).
+    return SequenceSemanticsFacet.ensureSequencesKeyHashShape.call(sequenceSemanticsHost.of(this), runner);
   }
 
   /**
@@ -2933,7 +2048,7 @@ export class SqlDriver implements IDataDriver {
    * has one spelling everywhere. Turso's remote face sends its own statement
    * to a SQLite engine only, and declares the same backslash there.
    */
-  protected async scanMaxNumericTail(
+  protected scanMaxNumericTail(
     queryRunner: Knex | Knex.Transaction,
     tableName: string,
     field: string,
@@ -2942,15 +2057,8 @@ export class SqlDriver implements IDataDriver {
     tenantId: string | null,
     suffix = '',
   ): Promise<number> {
-    let builder = queryRunner(tableName)
-      .select(field)
-      .whereRaw('?? like ? escape ?', [field, `${this.escapeLikePrefix(prefix)}%`, LIKE_ESCAPE_CHARACTER])
-      .whereNotNull(field);
-    if (tenantField && tenantId !== null) {
-      builder = builder.where(tenantField, tenantId);
-    }
-    const rows = await builder;
-    return this.maxAutonumberCounter((rows as any[]).map((r) => (r as any)[field]), prefix, suffix);
+    // [#29520 codemod] The body moved to `sql-driver-sequence-semantics.ts` (see `SequenceSemanticsHost`).
+    return SequenceSemanticsFacet.scanMaxNumericTail.call(sequenceSemanticsHost.of(this), queryRunner, tableName, field, prefix, tenantField, tenantId, suffix);
   }
 
   /**
@@ -2962,7 +2070,8 @@ export class SqlDriver implements IDataDriver {
    * re-checks the prefix per row.
    */
   protected escapeLikePrefix(prefix: string): string {
-    return prefix.replace(/([\\%_])/g, '\\$1');
+    // [#29520 codemod] The body moved to `sql-driver-sequence-semantics.ts`.
+    return SequenceSemanticsFacet.escapeLikePrefix(prefix);
   }
 
   /**
@@ -3025,16 +2134,12 @@ export class SqlDriver implements IDataDriver {
    * silently affects zero rows cannot tell "another writer raced me" apart from
    * "the row was rejected for some other reason".
    */
-  protected async attemptWithoutPoisoning<T>(
+  protected attemptWithoutPoisoning<T>(
     trx: Knex.Transaction,
     attempt: (scoped: Knex.Transaction) => Promise<T> | Knex.QueryBuilder<any, T>,
   ): Promise<{ ok: true; value: T } | { ok: false; error: unknown }> {
-    try {
-      const value = await trx.transaction(async (scoped) => attempt(scoped));
-      return { ok: true, value: value as T };
-    } catch (error) {
-      return { ok: false, error };
-    }
+    // [#29520 codemod] The body moved to `sql-driver-sequence-semantics.ts`.
+    return (SequenceSemanticsFacet.attemptWithoutPoisoning<T>)(trx, attempt);
   }
 
   /**
@@ -3228,7 +2333,7 @@ export class SqlDriver implements IDataDriver {
     reservation: AutoNumberReservation,
   ): Promise<boolean> {
     // [#29520 codemod] The body moved to `sql-driver-sequence-semantics.ts`.
-    return autoNumberValueExists(queryRunner, reservation);
+    return SequenceSemanticsFacet.autoNumberValueExists(queryRunner, reservation);
   }
 
   /**
@@ -3312,11 +2417,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected autoNumberCounterKey(reservation: AutoNumberReservation): string {
     // [#29520 codemod] The body moved to `sql-driver-sequence-semantics.ts` (see `SequenceSemanticsHost`).
-    const host: ThisParameterType<typeof autoNumberCounterKey> = {
-      resolveSequenceTenantId: (...a) => this.resolveSequenceTenantId(...a),
-      sequenceKeyHash: (...a) => this.sequenceKeyHash(...a),
-    };
-    return autoNumberCounterKey.call(host, reservation);
+    return SequenceSemanticsFacet.autoNumberCounterKey.call(sequenceSemanticsHost.of(this), reservation);
   }
 
   /**
@@ -3339,11 +2440,8 @@ export class SqlDriver implements IDataDriver {
    * default already stores a zone-aware TIMESTAMP.
    */
   protected stampInsertTimestamps(object: string, formatted: Record<string, any>): void {
-    if (!this.isSqlite || !this.tablesWithTimestamps.has(object)) return;
-    const iso = new Date().toISOString();
-    for (const col of AUDIT_TIMESTAMP_COLUMNS) {
-      if (formatted[col] === undefined || formatted[col] === null) formatted[col] = iso;
-    }
+    // [#29520 codemod] The body moved to `sql-driver-sequence-semantics.ts` (see `SequenceSemanticsHost`).
+    return SequenceSemanticsFacet.stampInsertTimestamps.call(sequenceSemanticsHost.of(this), object, formatted);
   }
 
   /**
@@ -3359,7 +2457,8 @@ export class SqlDriver implements IDataDriver {
    * today into a hard failure. See {@link stampUpsertUpdatedAt}.
    */
   protected observedUpdatedAtColumn(object: string): boolean {
-    return this.tablesWithTimestamps.has(object) || this.updatedAtColumnState.get(object) === 'present';
+    // [#29520 codemod] The body moved to `sql-driver-sequence-semantics.ts` (see `SequenceSemanticsHost`).
+    return SequenceSemanticsFacet.observedUpdatedAtColumn.call(sequenceSemanticsHost.of(this), object);
   }
 
   /**
@@ -3394,9 +2493,8 @@ export class SqlDriver implements IDataDriver {
    * why the commit 479fba50d presumption stops at the UPDATE door.
    */
   protected stampUpsertUpdatedAt(object: string, formatted: Record<string, any>): void {
-    if (formatted.updated_at !== undefined && formatted.updated_at !== null) return;
-    if (!this.observedUpdatedAtColumn(object)) return;
-    formatted.updated_at = this.updatedAtStamp();
+    // [#29520 codemod] The body moved to `sql-driver-sequence-semantics.ts` (see `SequenceSemanticsHost`).
+    return SequenceSemanticsFacet.stampUpsertUpdatedAt.call(sequenceSemanticsHost.of(this), object, formatted);
   }
 
   /**
@@ -3408,7 +2506,8 @@ export class SqlDriver implements IDataDriver {
    * A normal update leaves the flag unset, so `updated_at` always advances.
    */
   protected keepSuppliedUpdatedAt(formatted: Record<string, any>, options?: DriverOptions): boolean {
-    return options?.preserveAudit === true && formatted.updated_at != null;
+    // [#29520 codemod] The body moved to `sql-driver-sequence-semantics.ts`.
+    return SequenceSemanticsFacet.keepSuppliedUpdatedAt(formatted, options);
   }
 
   /**
@@ -3459,8 +2558,8 @@ export class SqlDriver implements IDataDriver {
    * is no longer a second place for the two doors to drift apart.
    */
   protected updatedAtStamp(): string | Knex.Raw {
-    if (this.isSqlite) return new Date().toISOString();
-    return this.isMysql ? this.knex.fn.now(MYSQL_DATETIME_PRECISION) : this.knex.fn.now();
+    // [#29520 codemod] The body moved to `sql-driver-sequence-semantics.ts` (see `SequenceSemanticsHost`).
+    return SequenceSemanticsFacet.updatedAtStamp.call(sequenceSemanticsHost.of(this));
   }
 
   /**
@@ -3473,9 +2572,8 @@ export class SqlDriver implements IDataDriver {
    * of this object" both stay `false`.
    */
   protected stampsUpdatedAt(object: string): boolean {
-    if (this.tablesWithTimestamps.has(object)) return true;
-    const state = this.updatedAtColumnState.get(object);
-    return state === 'presumed' || state === 'present';
+    // [#29520 codemod] The body moved to `sql-driver-sequence-semantics.ts` (see `SequenceSemanticsHost`).
+    return SequenceSemanticsFacet.stampsUpdatedAt.call(sequenceSemanticsHost.of(this), object);
   }
 
   /**
@@ -3487,7 +2585,8 @@ export class SqlDriver implements IDataDriver {
    * `false` forever after, which is what keeps the steady state free.
    */
   protected updatedAtStampIsPresumed(object: string): boolean {
-    return !this.tablesWithTimestamps.has(object) && this.updatedAtColumnState.get(object) === 'presumed';
+    // [#29520 codemod] The body moved to `sql-driver-sequence-semantics.ts` (see `SequenceSemanticsHost`).
+    return SequenceSemanticsFacet.updatedAtStampIsPresumed.call(sequenceSemanticsHost.of(this), object);
   }
 
   /**
@@ -3609,22 +2708,7 @@ export class SqlDriver implements IDataDriver {
    */
   update(object: string, id: string | number, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown> | null> {
     // [#29520 codemod] The body moved to `sql-driver-sequence-semantics.ts` (see `SequenceSemanticsHost`).
-    const host: ThisParameterType<typeof update> = {
-      applyTenantScope: (...a) => this.applyTenantScope(...a),
-      applyWriteColumnMap: (...a) => this.applyWriteColumnMap(...a),
-      auditMissingTenant: (...a) => this.auditMissingTenant(...a),
-      formatInput: (...a) => this.formatInput(...a),
-      formatOutput: (...a) => this.formatOutput(...a),
-      getBuilder: this.getBuilder.bind(this),
-      keepSuppliedUpdatedAt: (...a) => this.keepSuppliedUpdatedAt(...a),
-      rotatedUpdateById: (...a) => this.rotatedUpdateById(...a),
-      rotationShardsOf: (...a) => this.rotationShardsOf(...a),
-      stampsUpdatedAt: (...a) => this.stampsUpdatedAt(...a),
-      updateWithPresumedTimestamp: (...a) => this.updateWithPresumedTimestamp(...a),
-      updatedAtStamp: (...a) => this.updatedAtStamp(...a),
-      updatedAtStampIsPresumed: (...a) => this.updatedAtStampIsPresumed(...a),
-    };
-    return update.call(host, object, id, data, options);
+    return SequenceSemanticsFacet.update.call(sequenceSemanticsHost.of(this), object, id, data, options);
   }
 
   /**
@@ -3717,15 +2801,8 @@ export class SqlDriver implements IDataDriver {
    * holds on both faces from one place.
    */
   protected insertOnlyUpsertColumns(object: string): Set<string> {
-    // Same config resolution as `fillAutoNumberFields`: object name first,
-    // then the storage-mapped table name.
-    const tableName = this.physicalTableByObject[object] ?? StorageNameMapping.resolveTableName({ name: object } as any);
-    const cfgs = this.autoNumberFields[object] || this.autoNumberFields[tableName] || [];
-    const columns = new Set<string>(['created_at', this.remoteColumn(object, 'id', 'id')]);
-    for (const cfg of cfgs) columns.add(this.remoteColumn(object, cfg.name, cfg.name));
-    const tenantField = this.resolveTenantField(object);
-    if (tenantField) columns.add(this.remoteColumn(object, tenantField, tenantField));
-    return columns;
+    // [#29520 codemod] The body moved to `sql-driver-sequence-semantics.ts` (see `SequenceSemanticsHost`).
+    return SequenceSemanticsFacet.insertOnlyUpsertColumns.call(sequenceSemanticsHost.of(this), object);
   }
 
   /**
@@ -3765,22 +2842,9 @@ export class SqlDriver implements IDataDriver {
     return upsertTenantGuard.call(host, object, row, options);
   }
 
-  /**
-   * [#21185] The merge leg's organization predicate on the dialects whose
-   * `ON CONFLICT … DO UPDATE` takes a `WHERE`: the stored row's tenant column
-   * is NOT DISTINCT from the one the statement would have inserted
-   * (`excluded`). SQLite spells NULL-safe equality `IS`, PostgreSQL
-   * `IS NOT DISTINCT FROM` — the two dialects this is reached on (MySQL fences
-   * after the statement instead; see {@link upsert}).
-   *
-   * The target table is the write target's bare PHYSICAL name — the rotation
-   * shard when one is current, the federated remote table otherwise — because
-   * that is how both dialects name the INSERT target inside this clause.
-   */
   private mergeLandsInWrittenOrganization(writeTable: string, column: string): Knex.Raw {
-    const table = this.physicalTableByObject[writeTable] ?? writeTable;
-    const notDistinct = this.isPostgres ? 'IS NOT DISTINCT FROM' : 'IS';
-    return this.knex.raw(`?? ${notDistinct} ??`, [`${table}.${column}`, `excluded.${column}`]);
+    // [#29520 codemod] The body moved to `sql-driver-sequence-semantics.ts`, its docblock with it (see `SequenceSemanticsHost`).
+    return SequenceSemanticsFacet.mergeLandsInWrittenOrganization.call(sequenceSemanticsHost.of(this), writeTable, column);
   }
 
   /**
@@ -3974,90 +3038,6 @@ export class SqlDriver implements IDataDriver {
     return assertConflictTargetBackedWithoutClause.call(host, object, writeTable, mergeKeys);
   }
 
-  /**
-   * [#8807] After a primary-key-targeted merge on a table that carries a rival
-   * UNIQUE key: did the statement land on the identity this call supplied?
-   *
-   * # Why the absence of the row is an exact verdict, not a heuristic
-   *
-   * The statement returned without error, so it either INSERTED (the row now
-   * carries this id) or MERGED into an existing row. `id` is insert-only on the
-   * merge path since #8622 — it is stripped from the merge set — so a merge
-   * never writes this id onto the row it lands on. Therefore:
-   *
-   *   row with this id exists  ⟺  the merge landed on the primary key
-   *   row with this id absent  ⟺  it landed on some other UNIQUE key
-   *
-   * That is a biconditional, not an inference from a symptom, which is what
-   * makes this check free of false refusals — the property the ruling's
-   * excluded blanket option could not have.
-   *
-   * # Why the PRIMARY KEY row wins a multi-key collision — measured, not assumed
-   *
-   * The biconditional needs one more fact than #8622 to be exact: when the
-   * incoming row collides on the primary key AND on a rival UNIQUE key at the
-   * same time, the row carrying our id exists — so "row present" must still mean
-   * "the statement landed on it", or a pre-existing row with our id would mask a
-   * merge that went elsewhere. MySQL updates only the FIRST matched index, and
-   * *which* one that is decides the question. Measured on live MySQL 8.0.46,
-   * `PRIMARY KEY (id)` + `UNIQUE (email)` + `UNIQUE (tax_id)`, rows
-   * `R1(id=R1, tax_id=T-1)` and `R2(id=R2, tax_id=T-2)`, inserting
-   * `(id=R1, tax_id=T-2)` — which collides with R1 on the primary key and with
-   * R2 on `uniq_tax`:
-   *
-   * ```
-   * ROW_COUNT() = 2 (an update)
-   * R1 -> title='MERGED'   ← the PRIMARY KEY row won
-   * R2 -> untouched
-   * ```
-   *
-   * So the primary key is matched first and the masking case does not arise.
-   *
-   * # Tenant scope — applied, and scoped to the tenant the row was WRITTEN under
-   *
-   * The read routes through {@link applyTenantScope} like every other read door
-   * in this class (`check:tenant-chokepoint` asserts exactly that, on a bound
-   * builder). The subtlety is *which* tenant to scope to, and using the caller's
-   * active org would be wrong in one real case:
-   *
-   *  - **Ordinary tenanted call** — nothing supplied a tenant on the row, so
-   *    `injectTenantOnInsert` stamped `options.tenantId` on it. Scoping to the
-   *    written tenant IS scoping to the caller's org: identical to the wall
-   *    every sibling door applies.
-   *  - **Admin writing to a specific tenant via raw row data** — a documented
-   *    authority ({@link injectTenantOnInsert}: "explicit values are never
-   *    overwritten"). The row lands under the tenant the caller named, so a read
-   *    scoped to the caller's *active* org would miss a row that really was
-   *    written and refuse a correct write. Scoping to the written tenant does
-   *    not.
-   *  - **No tenancy field, or no tenant context at all** — `applyTenantScope`
-   *    returns the builder untouched when `tenantId` is empty, by its own
-   *    contract. That is what keeps the lifecycle archiver working: it calls
-   *    `cold.upsert(object, row, ['id'])` with NO options, so this read is
-   *    unscoped there, exactly as before.
-   *
-   * The verdict itself is tenant-independent regardless: `id` is the PRIMARY
-   * KEY, so at most one row in the table can carry it.
-   *
-   * ⚠️ [#21185] The first two bullets no longer reach this method: a
-   * tenant-scoped call on a tenanted object is fenced to its organization, and
-   * on MySQL {@link assertMergeLandedInWrittenOrganization} runs in this
-   * check's place, reading under the written tenant and carrying #8807's
-   * verdict with it. What still arrives here is the third bullet — and there
-   * the written tenant must NOT become a scope: the tenant column is now
-   * insert-only, so a payload naming another organization than the stored
-   * row's is a merge that keeps the row's organization (measured on MariaDB
-   * 10.11 before this guard: the read scoped to the payload's tenant missed the
-   * merged row and answered this method's cross-row refusal for a merge that
-   * landed on the supplied id). So the written tenant is used only under a
-   * tenant context, and a call without one reads unscoped.
-   *
-   * # The write target, not the object
-   *
-   * A rotation-sharded write lands in the current shard, so that is where the
-   * row must be looked for. Reading the unsharded name would report every
-   * rotated write as a cross-row merge.
-   */
   private assertMergeLandedOnSuppliedIdentity(
     object: string,
     writeTable: string,
@@ -4066,71 +3046,10 @@ export class SqlDriver implements IDataDriver {
     writtenTenant: unknown,
     options?: DriverOptions,
   ): Promise<void> {
-    // [#29520 codemod] The body moved to `sql-driver-sequence-semantics.ts` (see `SequenceSemanticsHost`).
-    const readPhysicalTableByObject = () => this.physicalTableByObject;
-    const host: ThisParameterType<typeof assertMergeLandedOnSuppliedIdentity> = {
-      applyTenantScope: (...a) => this.applyTenantScope(...a),
-      getBuilder: this.getBuilder.bind(this),
-      get physicalTableByObject() { return readPhysicalTableByObject(); },
-    };
-    return assertMergeLandedOnSuppliedIdentity.call(host, object, writeTable, id, rivals, writtenTenant, options);
+    // [#29520 codemod] The body moved to `sql-driver-sequence-semantics.ts`, its docblock with it (see `SequenceSemanticsHost`).
+    return SequenceSemanticsFacet.assertMergeLandedOnSuppliedIdentity.call(sequenceSemanticsHost.of(this), object, writeTable, id, rivals, writtenTenant, options);
   }
 
-  /**
-   * [#21185] MySQL: after a tenant-scoped upsert's statement, did it land on a
-   * row of the organization the row is WRITTEN under? Runs inside the same
-   * transaction as the statement, so its throw rolls the write back.
-   *
-   * # Why MySQL needs a check where the other dialects need none
-   *
-   * SQLite and PostgreSQL fence the merge leg inside the statement
-   * (`ON CONFLICT … DO UPDATE SET … WHERE` the stored tenant column equals the
-   * written one — see {@link upsert}), so a row of another organization is
-   * never written at all. MySQL's `ON DUPLICATE KEY UPDATE` takes no `WHERE`
-   * (knex refuses to compile one: `.onConflict().merge().where() is not
-   * supported for mysql`). This is #8807's mechanism, reused as ruled: the
-   * statement and a read of the landed row run as one unit of work, and the
-   * read's failure undoes the write.
-   *
-   * # The read, and why its absence is exact
-   *
-   * The landed row is looked up by the values it matched on (`matchOn`, the
-   * conflict-key values the statement sent — or `id` when one of them is
-   * empty, the same choice the read-back makes), under the written tenant
-   * EXACTLY: {@link applyTenantScope} for the chokepoint, plus equality on the
-   * tenant column, which closes that scope's NULL-organization arm. The tenant
-   * column is insert-only ({@link insertOnlyUpsertColumns}), so a merge never
-   * writes the written tenant onto the row it lands on. Therefore a row
-   * matching those values under the written tenant exists exactly when the
-   * statement inserted there or merged into a row that was already there; its
-   * absence means the merge landed on a row of another organization, or on a
-   * row with none.
-   *
-   * # When #8807's check is owed too (`rivals` given)
-   *
-   * A primary-key target on a table carrying a rival UNIQUE key. `matchOn` is
-   * then the supplied `id`, so a found row is also #8807's verdict — the merge
-   * landed on the supplied identity — and that check is subsumed. A MISSING row
-   * has two causes the caller must be told apart, because they are two
-   * different refusals:
-   *
-   *  - the merge landed through a rival key on a row of the WRITTEN
-   *    organization — #8807's condition, answered with its own sentence
-   *    ({@link refuseCrossRowIdentityMerge}), exactly as before this card;
-   *  - it landed on a row of another organization — on the primary key (that
-   *    row wins a multi-key collision, measured for #8807) or through a rival
-   *    key — answered `UNIQUE_VIOLATION`.
-   *
-   * They are told apart by reading each rival key's sent values under the
-   * written tenant: a merge through that key left the row carrying them, in
-   * the written organization. Only a rival whose every column is in the
-   * payload can be read this way (a hash-shadow carrier's generated column is
-   * not); when none can, the answer is `UNIQUE_VIOLATION` — a refusal either
-   * way, and the write is rolled back either way.
-   *
-   * ⛔ Nothing read here reaches the caller: the refusal names no organization
-   * and no value of the row it landed on.
-   */
   private assertMergeLandedInWrittenOrganization(
     object: string,
     writeTable: string,
@@ -4141,14 +3060,8 @@ export class SqlDriver implements IDataDriver {
     identity: { id: string | number; rivals: PhysicalIndex[] } | null,
     options?: DriverOptions,
   ): Promise<void> {
-    // [#29520 codemod] The body moved to `sql-driver-sequence-semantics.ts` (see `SequenceSemanticsHost`).
-    const readPhysicalTableByObject = () => this.physicalTableByObject;
-    const host: ThisParameterType<typeof assertMergeLandedInWrittenOrganization> = {
-      applyTenantScope: (...a) => this.applyTenantScope(...a),
-      getBuilder: this.getBuilder.bind(this),
-      get physicalTableByObject() { return readPhysicalTableByObject(); },
-    };
-    return assertMergeLandedInWrittenOrganization.call(host, object, writeTable, mergeKeys, matchOn, sent, guard, identity, options);
+    // [#29520 codemod] The body moved to `sql-driver-sequence-semantics.ts`, its docblock with it (see `SequenceSemanticsHost`).
+    return SequenceSemanticsFacet.assertMergeLandedInWrittenOrganization.call(sequenceSemanticsHost.of(this), object, writeTable, mergeKeys, matchOn, sent, guard, identity, options);
   }
 
   // [commit be5c60291] The return is the contract's own type. It was `Promise<Record<string, any>>`, and the
@@ -4160,53 +3073,12 @@ export class SqlDriver implements IDataDriver {
   // `sql-driver-doors-declared-types.test.ts`.
   upsert(object: string, data: Record<string, any>, conflictKeys?: string[], options?: DriverOptions): Promise<Record<string, unknown>> {
     // [#29520 codemod] The body moved to `sql-driver-sequence-semantics.ts` (see `SequenceSemanticsHost`).
-    const readIsMysql = () => this.isMysql;
-    const readKnex = () => this.knex;
-    const host: ThisParameterType<typeof upsert> = {
-      applyTenantScope: (...a) => this.applyTenantScope(...a),
-      applyWriteColumnMap: (...a) => this.applyWriteColumnMap(...a),
-      assertConflictTargetBackedWithoutClause: (...a) => this.assertConflictTargetBackedWithoutClause(...a),
-      assertConflictTargetHonoured: (...a) => this.assertConflictTargetHonoured(...a),
-      assertMergeLandedInWrittenOrganization: (...a) => this.assertMergeLandedInWrittenOrganization(...a),
-      assertMergeLandedOnSuppliedIdentity: (...a) => this.assertMergeLandedOnSuppliedIdentity(...a),
-      auditMissingTenant: (...a) => this.auditMissingTenant(...a),
-      collidingAutoNumberReservations: (...a) => this.collidingAutoNumberReservations(...a),
-      fillAutoNumberFields: (...a) => this.fillAutoNumberFields(...a),
-      formatInput: (...a) => this.formatInput(...a),
-      formatOutput: (...a) => this.formatOutput(...a),
-      getBuilder: this.getBuilder.bind(this),
-      injectTenantOnInsert: (...a) => this.injectTenantOnInsert(...a),
-      insertOnlyUpsertColumns: (...a) => this.insertOnlyUpsertColumns(...a),
-      get isMysql() { return readIsMysql(); },
-      get knex() { return readKnex(); },
-      mergeLandsInWrittenOrganization: (...a) => this.mergeLandsInWrittenOrganization(...a),
-      resolveTenantField: (...a) => this.resolveTenantField(...a),
-      resyncSequenceToDataMax: (...a) => this.resyncSequenceToDataMax(...a),
-      rotationWriteTarget: (...a) => this.rotationWriteTarget(...a),
-      stampInsertTimestamps: (...a) => this.stampInsertTimestamps(...a),
-      stampUpsertUpdatedAt: (...a) => this.stampUpsertUpdatedAt(...a),
-      upsertTenantGuard: (...a) => this.upsertTenantGuard(...a),
-    };
-    return upsert.call(host, object, data, conflictKeys, options);
+    return SequenceSemanticsFacet.upsert.call(sequenceSemanticsHost.of(this), object, data, conflictKeys, options);
   }
 
-  async delete(object: string, id: string | number, options?: DriverOptions): Promise<boolean> {
-    this.auditMissingTenant(object, 'delete', options);
-    const rotationShards = this.rotationShardsOf(object);
-    if (rotationShards) {
-      // The row lives in exactly one shard — probe newest-first.
-      for (const shard of rotationShards) {
-        const builder = this.getBuilder(shard, options).where('id', id);
-        this.applyTenantScope(builder, object, options);
-        const count = await builder.delete();
-        if (count > 0) return true;
-      }
-      return false;
-    }
-    const builder = this.getBuilder(object, options).where('id', id);
-    this.applyTenantScope(builder, object, options);
-    const count = await builder.delete();
-    return count > 0;
+  delete(object: string, id: string | number, options?: DriverOptions): Promise<boolean> {
+    // [#29520 codemod] The body moved to `sql-driver-sequence-semantics.ts` (see `SequenceSemanticsHost`).
+    return SequenceSemanticsFacet.delete.call(sequenceSemanticsHost.of(this), object, id, options);
   }
 
   // ===================================
@@ -4222,24 +3094,7 @@ export class SqlDriver implements IDataDriver {
    */
   bulkCreate(object: string, data: any[], options?: DriverOptions): Promise<Record<string, unknown>[]> {
     // [#29520 codemod] The body moved to `sql-driver-bulk-operations.ts` (see `BulkOperationsHost`).
-    const readInsertReturnsStoredRows = () => this.insertReturnsStoredRows;
-    const host: ThisParameterType<typeof bulkCreate> = {
-      applyWriteColumnMap: (...a) => this.applyWriteColumnMap(...a),
-      auditMissingTenant: (...a) => this.auditMissingTenant(...a),
-      autoNumberCounterKey: (...a) => this.autoNumberCounterKey(...a),
-      collidingAutoNumberReservations: (...a) => this.collidingAutoNumberReservations(...a),
-      fillAutoNumberFields: (...a) => this.fillAutoNumberFields(...a),
-      formatInput: (...a) => this.formatInput(...a),
-      formatOutput: (...a) => this.formatOutput(...a),
-      getBuilder: this.getBuilder.bind(this),
-      injectTenantOnInsert: (...a) => this.injectTenantOnInsert(...a),
-      get insertReturnsStoredRows() { return readInsertReturnsStoredRows(); },
-      readBackInsertedRows: (...a) => this.readBackInsertedRows(...a),
-      resyncSequenceToDataMax: (...a) => this.resyncSequenceToDataMax(...a),
-      rotationWriteTarget: (...a) => this.rotationWriteTarget(...a),
-      stampInsertTimestamps: (...a) => this.stampInsertTimestamps(...a),
-    };
-    return bulkCreate.call(host, object, data, options);
+    return BulkOperationsFacet.bulkCreate.call(bulkOperationsHost.of(this), object, data, options);
   }
 
   /**
@@ -4305,21 +3160,12 @@ export class SqlDriver implements IDataDriver {
   // `sql-driver-doors-declared-types.test.ts`.
   bulkUpdate(object: string, updates: Array<{ id: string | number; data: Record<string, any> }>, options?: DriverOptions): Promise<Record<string, unknown>[]> {
     // [#29520 codemod] The body moved to `sql-driver-bulk-operations.ts` (see `BulkOperationsHost`).
-    const readKnex = () => this.knex;
-    const host: ThisParameterType<typeof bulkUpdate> = {
-      get knex() { return readKnex(); },
-      update: (...a) => this.update(...a),
-    };
-    return bulkUpdate.call(host, object, updates, options);
+    return BulkOperationsFacet.bulkUpdate.call(bulkOperationsHost.of(this), object, updates, options);
   }
 
-  async bulkDelete(object: string, ids: Array<string | number>, options?: DriverOptions): Promise<void> {
-    this.auditMissingTenant(object, 'bulkDelete', options);
-    for (const target of this.rotationShardsOf(object) ?? [object]) {
-      const builder = this.getBuilder(target, options).whereIn('id', ids);
-      this.applyTenantScope(builder, object, options);
-      await builder.delete();
-    }
+  bulkDelete(object: string, ids: Array<string | number>, options?: DriverOptions): Promise<void> {
+    // [#29520 codemod] The body moved to `sql-driver-bulk-operations.ts` (see `BulkOperationsHost`).
+    return BulkOperationsFacet.bulkDelete.call(bulkOperationsHost.of(this), object, ids, options);
   }
 
   /**
@@ -4374,33 +3220,12 @@ export class SqlDriver implements IDataDriver {
    */
   updateMany(object: string, query: DriverQuery, data: any, options?: DriverOptions): Promise<number> {
     // [#29520 codemod] The body moved to `sql-driver-bulk-operations.ts` (see `BulkOperationsHost`).
-    const host: ThisParameterType<typeof updateMany> = {
-      applyFilters: (...a) => this.applyFilters(...a),
-      applyTenantScope: (...a) => this.applyTenantScope(...a),
-      applyWriteColumnMap: (...a) => this.applyWriteColumnMap(...a),
-      auditMissingTenant: (...a) => this.auditMissingTenant(...a),
-      formatInput: (...a) => this.formatInput(...a),
-      getBuilder: this.getBuilder.bind(this),
-      keepSuppliedUpdatedAt: (...a) => this.keepSuppliedUpdatedAt(...a),
-      rotationShardsOf: (...a) => this.rotationShardsOf(...a),
-      stampsUpdatedAt: (...a) => this.stampsUpdatedAt(...a),
-      updateWithPresumedTimestamp: (...a) => this.updateWithPresumedTimestamp(...a),
-      updatedAtStamp: (...a) => this.updatedAtStamp(...a),
-      updatedAtStampIsPresumed: (...a) => this.updatedAtStampIsPresumed(...a),
-    };
-    return updateMany.call(host, object, query, data, options);
+    return BulkOperationsFacet.updateMany.call(bulkOperationsHost.of(this), object, query, data, options);
   }
 
-  async deleteMany(object: string, query: DriverQuery, options?: DriverOptions): Promise<number> {
-    this.auditMissingTenant(object, 'deleteMany', options);
-    let total = 0;
-    for (const target of this.rotationShardsOf(object) ?? [object]) {
-      const builder = this.getBuilder(target, options);
-      this.applyTenantScope(builder, object, options);
-      if (query.where) this.applyFilters(builder, query.where, options);
-      total += (await builder.delete()) || 0;
-    }
-    return total;
+  deleteMany(object: string, query: DriverQuery, options?: DriverOptions): Promise<number> {
+    // [#29520 codemod] The body moved to `sql-driver-bulk-operations.ts` (see `BulkOperationsHost`).
+    return BulkOperationsFacet.deleteMany.call(bulkOperationsHost.of(this), object, query, options);
   }
 
   /** By-id update for a rotation-managed object: the row lives in exactly one
@@ -4413,17 +3238,7 @@ export class SqlDriver implements IDataDriver {
     options?: DriverOptions,
   ): Promise<Record<string, unknown> | null> {
     // [#29520 codemod] The body moved to `sql-driver-bulk-operations.ts` (see `BulkOperationsHost`).
-    const host: ThisParameterType<typeof rotatedUpdateById> = {
-      applyTenantScope: (...a) => this.applyTenantScope(...a),
-      applyWriteColumnMap: (...a) => this.applyWriteColumnMap(...a),
-      formatInput: (...a) => this.formatInput(...a),
-      formatOutput: (...a) => this.formatOutput(...a),
-      getBuilder: this.getBuilder.bind(this),
-      keepSuppliedUpdatedAt: (...a) => this.keepSuppliedUpdatedAt(...a),
-      stampsUpdatedAt: (...a) => this.stampsUpdatedAt(...a),
-      updatedAtStamp: (...a) => this.updatedAtStamp(...a),
-    };
-    return rotatedUpdateById.call(host, object, shards, id, data, options);
+    return BulkOperationsFacet.rotatedUpdateById.call(bulkOperationsHost.of(this), object, shards, id, data, options);
   }
 
   /**
@@ -4526,14 +3341,7 @@ export class SqlDriver implements IDataDriver {
 
   count(object: string, query?: DriverQuery, options?: DriverOptions): Promise<number> {
     // [#29520 codemod] The body moved to `sql-driver-bulk-operations.ts` (see `BulkOperationsHost`).
-    const host: ThisParameterType<typeof count> = {
-      applyFilters: (...a) => this.applyFilters(...a),
-      applyTenantScope: (...a) => this.applyTenantScope(...a),
-      backendStatementFault: (...a) => this.backendStatementFault(...a),
-      getBuilder: this.getBuilder.bind(this),
-      unresolvableFilterColumnRefusal: (...a) => this.unresolvableFilterColumnRefusal(...a),
-    };
-    return count.call(host, object, query, options);
+    return BulkOperationsFacet.count.call(bulkOperationsHost.of(this), object, query, options);
   }
 
   // ===================================
@@ -4654,11 +3462,8 @@ export class SqlDriver implements IDataDriver {
 
   /** Idempotently drop a transaction from the open-count (safe on double close). */
   protected releaseTransaction(transaction: unknown): void {
-    const key = transaction as object;
-    if (key && this.openTransactions.has(key)) {
-      this.openTransactions.delete(key);
-      this.activeTransactions = Math.max(0, this.activeTransactions - 1);
-    }
+    // [#29520 codemod] The body moved to `sql-driver-transactions-section.ts` (see `TransactionsSectionHost`).
+    return TransactionsSectionFacet.releaseTransaction.call(transactionsSectionHost.of(this), transaction);
   }
 
   /**
@@ -4754,29 +3559,7 @@ export class SqlDriver implements IDataDriver {
    */
   aggregate(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
     // [#29520 codemod] The body moved to `sql-driver-aggregation.ts` (see `AggregationHost`).
-    const readConfig = () => this.config;
-    const readDateGranularityCapabilities = () => this.dateGranularityCapabilities;
-    const readDialectName = () => this.dialectName;
-    const readKnex = () => this.knex;
-    const host: ThisParameterType<typeof aggregate> = {
-      aggregandColumnClassOf: (...a) => this.aggregandColumnClassOf(...a),
-      aggregateBackendFault: (...a) => this.aggregateBackendFault(...a),
-      aliasIdentifierSql: (...a) => this.aliasIdentifierSql(...a),
-      applyFilters: (...a) => this.applyFilters(...a),
-      applyTenantScope: (...a) => this.applyTenantScope(...a),
-      buildDateBucketExpr: (...a) => this.buildDateBucketExpr(...a),
-      coercionKey: (...a) => this.coercionKey(...a),
-      get config() { return readConfig(); },
-      get dateGranularityCapabilities() { return readDateGranularityCapabilities(); },
-      get dialectName() { return readDialectName(); },
-      foldEmptyAggregateAnswers: (...a) => this.foldEmptyAggregateAnswers(...a),
-      getBuilder: this.getBuilder.bind(this),
-      get knex() { return readKnex(); },
-      mapAggregateFunc: (...a) => this.mapAggregateFunc(...a),
-      presentReadColumns: (...a) => this.presentReadColumns(...a),
-      readPresentationKind: (...a) => this.readPresentationKind(...a),
-    };
-    return aggregate.call(host, object, query, options);
+    return AggregationFacet.aggregate.call(aggregationHost.of(this), object, query, options);
   }
 
   /**
@@ -4795,11 +3578,8 @@ export class SqlDriver implements IDataDriver {
    * `avg` already add doubles.
    */
   protected aggregandColumnClassOf(table: string | null, field: string): AggregandColumnClass | undefined {
-    if (table === null) return undefined;
-    if (this.booleanFields[table]?.includes(field)) return 'boolean';
-    if (this.fractionalNumericFields[table]?.includes(field)) return 'fractional';
-    if (this.numericFields[table]?.includes(field)) return 'integral';
-    return undefined;
+    // [#29520 codemod] The body moved to `sql-driver-aggregation.ts` (see `AggregationHost`).
+    return AggregationFacet.aggregandColumnClassOf.call(aggregationHost.of(this), table, field);
   }
 
   /**
@@ -4846,7 +3626,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected foldEmptyAggregateAnswers(rows: any, identities: Map<string, number>): any {
     // [#29520 codemod] The body moved to `sql-driver-aggregation.ts`.
-    return foldEmptyAggregateAnswers(rows, identities);
+    return AggregationFacet.foldEmptyAggregateAnswers(rows, identities);
   }
 
   /**
@@ -5008,16 +3788,7 @@ export class SqlDriver implements IDataDriver {
    */
   distinct(object: string, field: string, filters?: FilterCondition, options?: DriverOptions): Promise<any[]> {
     // [#29520 codemod] The body moved to `sql-driver-distinct.ts` (see `DistinctHost`).
-    const host: ThisParameterType<typeof distinct> = {
-      applyFilters: (...a) => this.applyFilters(...a),
-      applyTenantScope: (...a) => this.applyTenantScope(...a),
-      coercionKey: (...a) => this.coercionKey(...a),
-      distinctBackendFault: (...a) => this.distinctBackendFault(...a),
-      getBuilder: this.getBuilder.bind(this),
-      presentReadValue: (...a) => this.presentReadValue(...a),
-      readPresentationKind: (...a) => this.readPresentationKind(...a),
-    };
-    return distinct.call(host, object, field, filters, options);
+    return DistinctFacet.distinct.call(distinctHost.of(this), object, field, filters, options);
   }
 
   /**
@@ -5177,18 +3948,7 @@ export class SqlDriver implements IDataDriver {
    */
   findWithWindowFunctions(object: string, query: SqlWindowFunctionQuery, options?: DriverOptions): Promise<any[]> {
     // [#29520 codemod] The body moved to `sql-driver-window-functions.ts` (see `WindowFunctionsHost`).
-    const readKnex = () => this.knex;
-    const host: ThisParameterType<typeof findWithWindowFunctions> = {
-      aliasIdentifierSql: (...a) => this.aliasIdentifierSql(...a),
-      applyFilters: (...a) => this.applyFilters(...a),
-      applyTenantScope: (...a) => this.applyTenantScope(...a),
-      buildWindowFunction: (...a) => this.buildWindowFunction(...a),
-      formatOutput: (...a) => this.formatOutput(...a),
-      getBuilder: this.getBuilder.bind(this),
-      get knex() { return readKnex(); },
-      mapSortField: (...a) => this.mapSortField(...a),
-    };
-    return findWithWindowFunctions.call(host, object, query, options);
+    return WindowFunctionsFacet.findWithWindowFunctions.call(windowFunctionsHost.of(this), object, query, options);
   }
 
   // ===================================
@@ -5206,8 +3966,9 @@ export class SqlDriver implements IDataDriver {
    * off-contract helper it forwards to, keeps its own annotation — it is not an
    * `IDataDriver` door and is out of that card's scope.
    */
-  async explain(object: string, query: DriverQuery, options?: DriverOptions): Promise<unknown> {
-    return this.analyzeQuery(object, query, options);
+  explain(object: string, query: DriverQuery, options?: DriverOptions): Promise<unknown> {
+    // [#29520 codemod] The body moved to `sql-driver-query-plan.ts` (see `QueryPlanHost`).
+    return QueryPlanFacet.explain.call(queryPlanHost.of(this), object, query, options);
   }
 
   /**
@@ -5218,40 +3979,21 @@ export class SqlDriver implements IDataDriver {
    */
   analyzeQuery(object: string, query: DriverQuery, options?: DriverOptions): Promise<any> {
     // [#29520 codemod] The body moved to `sql-driver-query-plan.ts` (see `QueryPlanHost`).
-    const readConfig = () => this.config;
-    const readIsMysql = () => this.isMysql;
-    const readIsPostgres = () => this.isPostgres;
-    const readIsSqlite = () => this.isSqlite;
-    const readKnex = () => this.knex;
-    const host: ThisParameterType<typeof analyzeQuery> = {
-      applyFilters: (...a) => this.applyFilters(...a),
-      applyTenantScope: (...a) => this.applyTenantScope(...a),
-      get config() { return readConfig(); },
-      getBuilder: this.getBuilder.bind(this),
-      get isMysql() { return readIsMysql(); },
-      get isPostgres() { return readIsPostgres(); },
-      get isSqlite() { return readIsSqlite(); },
-      get knex() { return readKnex(); },
-      mapSortField: (...a) => this.mapSortField(...a),
-    };
-    return analyzeQuery.call(host, object, query, options);
+    return QueryPlanFacet.analyzeQuery.call(queryPlanHost.of(this), object, query, options);
   }
 
   // ===================================
   // Schema Sync (syncSchema / init)
   // ===================================
 
-  async syncSchema(object: string, schema: unknown, _options?: DriverOptions): Promise<void> {
-    const objectDef = schema as { name: string; fields?: Record<string, any> };
-    // The caller passes the resolved physical table name as `object`. Override
-    // the def's `name` to ensure DDL targets the physical table even if the
-    // schema's `name` is the canonical object name (e.g. 'account').
-    await this.initObjects([{ ...objectDef, name: object }]);
+  syncSchema(object: string, schema: unknown, _options?: DriverOptions): Promise<void> {
+    // [#29520 codemod] The body moved to `sql-driver-schema-sync-section.ts` (see `SchemaSyncSectionHost`).
+    return SchemaSyncSectionFacet.syncSchema.call(schemaSyncSectionHost.of(this), object, schema, _options);
   }
 
-  async dropTable(object: string, _options?: DriverOptions): Promise<void> {
-    this.assertSchemaMutable('dropTable');
-    await this.knex.schema.dropTableIfExists(object);
+  dropTable(object: string, _options?: DriverOptions): Promise<void> {
+    // [#29520 codemod] The body moved to `sql-driver-schema-sync-section.ts` (see `SchemaSyncSectionHost`).
+    return SchemaSyncSectionFacet.dropTable.call(schemaSyncSectionHost.of(this), object, _options);
   }
 
   /**
@@ -5283,13 +4025,7 @@ export class SqlDriver implements IDataDriver {
    */
   reclaimSpace(_options?: DriverOptions): Promise<void> {
     // [#29520 codemod] The body moved to `sql-driver-schema-sync-section.ts` (see `SchemaSyncSectionHost`).
-    const readIsSqlite = () => this.isSqlite;
-    const readKnex = () => this.knex;
-    const host: ThisParameterType<typeof reclaimSpace> = {
-      get isSqlite() { return readIsSqlite(); },
-      get knex() { return readKnex(); },
-    };
-    return reclaimSpace.call(host, _options);
+    return SchemaSyncSectionFacet.reclaimSpace.call(schemaSyncSectionHost.of(this), _options);
   }
 
   // ── Data-lifecycle rotation (ADR-0057 P2) ─────────────────────────────────
@@ -5318,12 +4054,14 @@ export class SqlDriver implements IDataDriver {
 
   /** Live shard set (newest first) when `object` is rotation-managed. */
   protected rotationShardsOf(object: string): string[] | undefined {
-    return this.rotationStateByTable.get(object)?.shards;
+    // [#29520 codemod] The body moved to `sql-driver-rotation.ts` (see `RotationHost`).
+    return RotationFacet.rotationShardsOf.call(rotationHost.of(this), object);
   }
 
   /** The shard new rows land in when `object` is rotation-managed. */
   protected rotationWriteTarget(object: string): string | undefined {
-    return this.rotationStateByTable.get(object)?.current;
+    // [#29520 codemod] The body moved to `sql-driver-rotation.ts` (see `RotationHost`).
+    return RotationFacet.rotationWriteTarget.call(rotationHost.of(this), object);
   }
 
   /**
@@ -5343,20 +4081,12 @@ export class SqlDriver implements IDataDriver {
    * shard, column-syncs every retained shard so the UNION stays uniform, and
    * drops shards past the `shards × unit` window.
    */
-  async rotateShards(
+  rotateShards(
     objectDef: { name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[]; lifecycle?: any },
     nowMs: number = Date.now(),
   ): Promise<{ object: string; current: string; shards: string[]; dropped: string[] }> {
-    this.assertSchemaMutable('rotateShards');
-    const policy = objectDef.lifecycle?.storage;
-    if (!policy || policy.strategy !== 'rotation') {
-      throw new Error(`[sql-driver] rotateShards: '${objectDef.name}' declares no lifecycle.storage rotation policy`);
-    }
-    if (!this.supportsRotation) {
-      throw new Error(`[sql-driver] rotateShards: rotation is not supported on dialect '${this.dialectName}'`);
-    }
-    const tableName = StorageNameMapping.resolveTableName(objectDef as any);
-    return this.ensureRotation(tableName, objectDef, policy, nowMs);
+    // [#29520 codemod] The body moved to `sql-driver-rotation.ts` (see `RotationHost`).
+    return RotationFacet.rotateShards.call(rotationHost.of(this), objectDef, nowMs);
   }
 
   protected ensureRotation(
@@ -5551,20 +4281,8 @@ export class SqlDriver implements IDataDriver {
    * targeting the view.
    */
   protected aliasShardBookkeeping(base: string, shard: string): void {
-    this.jsonFields[shard] = this.jsonFields[base] ?? [];
-    this.valueShapeFields[shard] = this.valueShapeFields[base] ?? {};
-    this.mediaFields[shard] = this.mediaFields[base] ?? [];
-    this.booleanFields[shard] = this.booleanFields[base] ?? [];
-    this.numericFields[shard] = this.numericFields[base] ?? [];
-    this.numericValueFields[shard] = this.numericValueFields[base] ?? [];
-    this.fractionalNumericFields[shard] = this.fractionalNumericFields[base] ?? [];
-    this.autoNumberFields[shard] = this.autoNumberFields[base] ?? [];
-    if (this.dateFields[base]) this.dateFields[shard] = this.dateFields[base];
-    if (this.datetimeFields[base]) this.datetimeFields[shard] = this.datetimeFields[base];
-    if (this.timeFields[base]) this.timeFields[shard] = this.timeFields[base];
-    this.tenantFieldByTable[shard] = this.tenantFieldByTable[base] ?? null;
-    if (this.tenantOptOutByTable.has(base)) this.tenantOptOutByTable.add(shard);
-    this.tablesWithTimestamps.add(shard);
+    // [#29520 codemod] The body moved to `sql-driver-rotation.ts` (see `RotationHost`).
+    return RotationFacet.aliasShardBookkeeping.call(rotationHost.of(this), base, shard);
   }
 
   /**
@@ -5589,7 +4307,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected computeTenantField(schema: { fields?: Record<string, any>; tenancy?: any }): string | null {
     // [#29520 codemod] The body moved to `sql-driver-rotation.ts`.
-    return computeTenantField(schema);
+    return RotationFacet.computeTenantField(schema);
   }
 
   /**
@@ -5609,14 +4327,8 @@ export class SqlDriver implements IDataDriver {
     key: string,
     schema: { fields?: Record<string, any>; tenancy?: any },
   ): string | null {
-    if (key === SystemObjectName.ORGANIZATION) this.organizationObjectRegistered = true;
-    if (schema?.tenancy != null) {
-      if (isTenancyDisabled(schema)) this.tenantOptOutByTable.add(key);
-      else this.tenantOptOutByTable.delete(key);
-      return this.computeTenantField(schema);
-    }
-    if (this.tenantOptOutByTable.has(key)) return null;
-    return this.computeTenantField(schema);
+    // [#29520 codemod] The body moved to `sql-driver-rotation.ts` (see `RotationHost`).
+    return RotationFacet.computeAndRecordTenantField.call(rotationHost.of(this), key, schema);
   }
 
   /**
@@ -5707,45 +4419,7 @@ export class SqlDriver implements IDataDriver {
     obj: { name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[] },
   ): { tableName: string; tenantField: string | null } {
     // [#29520 codemod] The body moved to `sql-driver-rotation.ts` (see `RotationHost`).
-    const readAutoNumberFields = () => this.autoNumberFields;
-    const readBooleanFields = () => this.booleanFields;
-    const readDateFields = () => this.dateFields;
-    const readDatetimeFields = () => this.datetimeFields;
-    const readFractionalNumericFields = () => this.fractionalNumericFields;
-    const readJsonFields = () => this.jsonFields;
-    const readManagedObjectFields = () => this.managedObjectFields;
-    const readManagedObjectIndexes = () => this.managedObjectIndexes;
-    const readMediaFields = () => this.mediaFields;
-    const readNumericFields = () => this.numericFields;
-    const readNumericValueFields = () => this.numericValueFields;
-    const readPhysicalKeyIndexes = () => this.physicalKeyIndexes;
-    const readTenantFieldByTable = () => this.tenantFieldByTable;
-    const readTimeFields = () => this.timeFields;
-    const readUndeclaredAuditTimestampFields = () => this.undeclaredAuditTimestampFields;
-    const readUpdatedAtColumnState = () => this.updatedAtColumnState;
-    const readValueShapeFields = () => this.valueShapeFields;
-    const host: ThisParameterType<typeof registerManagedObjectMetadata> = {
-      get autoNumberFields() { return readAutoNumberFields(); },
-      get booleanFields() { return readBooleanFields(); },
-      computeAndRecordTenantField: (...a) => this.computeAndRecordTenantField(...a),
-      get dateFields() { return readDateFields(); },
-      get datetimeFields() { return readDatetimeFields(); },
-      get fractionalNumericFields() { return readFractionalNumericFields(); },
-      isJsonField: (...a) => this.isJsonField(...a),
-      get jsonFields() { return readJsonFields(); },
-      get managedObjectFields() { return readManagedObjectFields(); },
-      get managedObjectIndexes() { return readManagedObjectIndexes(); },
-      get mediaFields() { return readMediaFields(); },
-      get numericFields() { return readNumericFields(); },
-      get numericValueFields() { return readNumericValueFields(); },
-      get physicalKeyIndexes() { return readPhysicalKeyIndexes(); },
-      get tenantFieldByTable() { return readTenantFieldByTable(); },
-      get timeFields() { return readTimeFields(); },
-      get undeclaredAuditTimestampFields() { return readUndeclaredAuditTimestampFields(); },
-      get updatedAtColumnState() { return readUpdatedAtColumnState(); },
-      get valueShapeFields() { return readValueShapeFields(); },
-    };
-    return registerManagedObjectMetadata.call(host, obj);
+    return RotationFacet.registerManagedObjectMetadata.call(rotationHost.of(this), obj);
   }
 
   /**
@@ -5794,7 +4468,8 @@ export class SqlDriver implements IDataDriver {
   registerObjectMetadata(
     objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[] }>,
   ): void {
-    for (const obj of objects) this.registerManagedObjectMetadata(obj);
+    // [#29520 codemod] The body moved to `sql-driver-rotation.ts` (see `RotationHost`).
+    return RotationFacet.registerObjectMetadata.call(rotationHost.of(this), objects);
   }
 
   // `tenancy` is part of what this method READS — each object flows into
@@ -6476,11 +5151,11 @@ export class SqlDriver implements IDataDriver {
    * without stubbing any of the bounding, recognition or refusal logic above —
    * the parts that must be exercised for real.
    */
-  protected async withPinnedSession<T>(
+  protected withPinnedSession<T>(
     fn: (run: (sql: string, bindings?: unknown[]) => Promise<unknown>) => Promise<T>,
   ): Promise<T> {
-    return await this.knex.transaction(async (trx) =>
-      fn((sql, bindings) => trx.raw(sql, (bindings ?? []) as any)));
+    // [#29520 codemod] The body moved to `sql-driver-rotation.ts` (see `RotationHost`).
+    return (RotationFacet.withPinnedSession<T>).call(rotationHost.of(this), fn);
   }
 
   protected async migrateMysqlDatetimeColumns(
@@ -6654,7 +5329,8 @@ export class SqlDriver implements IDataDriver {
    * to run exactly as before.
    */
   setDeferredDdl(deferred: boolean): void {
-    this.deferredDdl = deferred;
+    // [#29520 codemod] The body moved to `sql-driver-deferred-ddl.ts` (see `DeferredDdlHost`).
+    return DeferredDdlFacet.setDeferredDdl.call(deferredDdlHost.of(this), deferred);
   }
 
   /** How many objects are waiting for {@link flushDeferredSchemaDdl}. */
@@ -6669,7 +5345,8 @@ export class SqlDriver implements IDataDriver {
    * empty when this process reached it (#3438 / ADR-0104).
    */
   getSchemaSyncStats(): { created: number; existing: number } {
-    return { created: this.tablesCreatedHere.size, existing: this.tablesFoundExisting.size };
+    // [#29520 codemod] The body moved to `sql-driver-deferred-ddl.ts` (see `DeferredDdlHost`).
+    return DeferredDdlFacet.getSchemaSyncStats.call(deferredDdlHost.of(this));
   }
 
   /**
@@ -6790,30 +5467,9 @@ export class SqlDriver implements IDataDriver {
    * outstanding (captured before the DDL ran, so the caller can report what it
    * just did). A no-op when nothing was deferred.
    */
-  async flushDeferredSchemaDdl(): Promise<PendingSchemaWork[]> {
-    const pending = [...this.deferredSchemaObjects.values()];
-    if (pending.length === 0) {
-      this.deferredDdl = false;
-      return [];
-    }
-    const performed = await this.previewDeferredSchemaWork();
-    this.deferredSchemaObjects.clear();
-    this.deferredDdl = false;
-    // Re-entering initObjects re-registers the same metadata (idempotent) and
-    // this time takes the DDL path, so create/alter/index/rotation handling
-    // stays in exactly one place.
-    //
-    // #9354: armed across that re-entry, and cleared in a `finally` so a refusal
-    // thrown out of the widening cannot leave the flag set on a driver the
-    // caller goes on using (`os migrate apply` keeps the stack alive to shut it
-    // down). It is the only thing distinguishing this path from boot sync.
-    this.flushingDeferredDdl = true;
-    try {
-      await this.initObjects(pending);
-    } finally {
-      this.flushingDeferredDdl = false;
-    }
-    return performed;
+  flushDeferredSchemaDdl(): Promise<PendingSchemaWork[]> {
+    // [#29520 codemod] The body moved to `sql-driver-deferred-ddl.ts` (see `DeferredDdlHost`).
+    return DeferredDdlFacet.flushDeferredSchemaDdl.call(deferredDdlHost.of(this));
   }
 
   // ── Managed-schema drift & reconcile (#2186) ───────────────────────────────
@@ -6848,7 +5504,7 @@ export class SqlDriver implements IDataDriver {
   /** True only when running under `NODE_ENV=production` — auto-DDL is force-disabled there. */
   protected isProductionEnv(): boolean {
     // [#29520 codemod] The body moved to `sql-driver-managed-drift.ts`.
-    return isProductionEnv();
+    return ManagedDriftFacet.isProductionEnv();
   }
 
   /**
@@ -6979,11 +5635,7 @@ export class SqlDriver implements IDataDriver {
     nullSafeColumns: string[],
   ): Promise<Array<{ key: string; rows: number }>> {
     // [#29520 codemod] The body moved to `sql-driver-managed-drift.ts` (see `ManagedDriftHost`).
-    const readKnex = () => this.knex;
-    const host: ThisParameterType<typeof probeNullSafeUniqueDuplicates> = {
-      get knex() { return readKnex(); },
-    };
-    return probeNullSafeUniqueDuplicates.call(host, table, columns, nullSafeColumns);
+    return ManagedDriftFacet.probeNullSafeUniqueDuplicates.call(managedDriftHost.of(this), table, columns, nullSafeColumns);
   }
 
   /**
@@ -7265,7 +5917,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected buildRebuiltColumn(t: Knex.CreateTableBuilder, c: IntrospectedColumn): any {
     // [#29520 codemod] The body moved to `sql-driver-managed-drift.ts`.
-    return buildRebuiltColumn(t, c);
+    return ManagedDriftFacet.buildRebuiltColumn(t, c);
   }
 
   /**
@@ -7277,7 +5929,8 @@ export class SqlDriver implements IDataDriver {
    * *creates* and the names the drift differ *looks for* can never diverge.
    */
   protected buildIndexName(tableName: string, fields: string[], unique: boolean): string {
-    return buildIndexName(tableName, fields, unique);
+    // [#29520 codemod] The body moved to `sql-driver-managed-drift.ts`.
+    return ManagedDriftFacet.buildIndexName(tableName, fields, unique);
   }
 
   /**
@@ -7404,8 +6057,9 @@ export class SqlDriver implements IDataDriver {
    * a false absence keeps the legacy index in place and under-reports what was
    * applied, never the reverse.
    */
-  protected async getExistingIndexNames(tableName: string): Promise<Set<string>> {
-    return new Set((await this.introspectIndexes(tableName, { onFailure: 'partial' })).map((i) => i.name));
+  protected getExistingIndexNames(tableName: string): Promise<Set<string>> {
+    // [#29520 codemod] The body moved to `sql-driver-managed-drift.ts` (see `ManagedDriftHost`).
+    return ManagedDriftFacet.getExistingIndexNames.call(managedDriftHost.of(this), tableName);
   }
 
   /**
@@ -7418,12 +6072,8 @@ export class SqlDriver implements IDataDriver {
     fields: Record<string, any>,
     tenantField: string | null,
   ): Array<{ name: string; fields: string[]; unique: true; nullSafeColumns?: string[] }> {
-    return uniqueIndexesFromFields(tableName, fields, tenantField).map((i) => ({
-      name: i.name,
-      fields: i.columns,
-      unique: true as const,
-      ...(i.nullSafeColumns ? { nullSafeColumns: i.nullSafeColumns } : {}),
-    }));
+    // [#29520 codemod] The body moved to `sql-driver-managed-drift.ts`.
+    return ManagedDriftFacet.uniqueIndexesFromFields(tableName, fields, tenantField);
   }
 
   /**
@@ -7439,15 +6089,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected dropIndexIfExists(tableName: string, indexName: string): Promise<boolean> {
     // [#29520 codemod] The body moved to `sql-driver-managed-drift.ts` (see `ManagedDriftHost`).
-    const readIsMysql = () => this.isMysql;
-    const readIsPostgres = () => this.isPostgres;
-    const readKnex = () => this.knex;
-    const host: ThisParameterType<typeof dropIndexIfExists> = {
-      get isMysql() { return readIsMysql(); },
-      get isPostgres() { return readIsPostgres(); },
-      get knex() { return readKnex(); },
-    };
-    return dropIndexIfExists.call(host, tableName, indexName);
+    return ManagedDriftFacet.dropIndexIfExists.call(managedDriftHost.of(this), tableName, indexName);
   }
 
   /**
@@ -7475,11 +6117,7 @@ export class SqlDriver implements IDataDriver {
     physicalColumns: Set<string>,
   ): Promise<void> {
     // [#29520 codemod] The body moved to `sql-driver-managed-drift.ts` (see `ManagedDriftHost`).
-    const host: ThisParameterType<typeof syncTableIndexes> = {
-      syncDeclaredIndexes: (...a) => this.syncDeclaredIndexes(...a),
-      uniqueIndexesFromFields: (...a) => this.uniqueIndexesFromFields(...a),
-    };
-    return syncTableIndexes.call(host, tableName, fields, declaredIndexes, tenantField, physicalColumns);
+    return ManagedDriftFacet.syncTableIndexes.call(managedDriftHost.of(this), tableName, fields, declaredIndexes, tenantField, physicalColumns);
   }
 
   /**
@@ -7650,7 +6288,8 @@ export class SqlDriver implements IDataDriver {
 
   /** Expose the underlying Knex instance for advanced usage. */
   getKnex(): Knex {
-    return this.knex;
+    // [#29520 codemod] The body moved to `sql-driver-internal-helpers.ts` (see `InternalHelpersHost`).
+    return InternalHelpersFacet.getKnex.call(internalHelpersHost.of(this));
   }
 
   protected getBuilder(object: string, options?: DriverOptions) {
@@ -7679,10 +6318,8 @@ export class SqlDriver implements IDataDriver {
    * Returns `null` when the object has no tenant-isolation field.
    */
   protected resolveTenantField(object: string): string | null {
-    const tableName = StorageNameMapping.resolveTableName({ name: object } as any);
-    const cached =
-      this.tenantFieldByTable[tableName] ?? this.tenantFieldByTable[object];
-    return cached ?? null;
+    // [#29520 codemod] The body moved to `sql-driver-internal-helpers.ts` (see `InternalHelpersHost`).
+    return InternalHelpersFacet.resolveTenantField.call(internalHelpersHost.of(this), object);
   }
 
   /**
@@ -7715,7 +6352,8 @@ export class SqlDriver implements IDataDriver {
    * early-out, so a normal tenant-scoped write never reaches this at all.
    */
   protected isMultiTenantMode(): boolean {
-    return postureEnforcesWall(resolveTenancyPosture());
+    // [#29520 codemod] The body moved to `sql-driver-internal-helpers.ts`.
+    return InternalHelpersFacet.isMultiTenantMode();
   }
 
   /**
@@ -7760,10 +6398,7 @@ export class SqlDriver implements IDataDriver {
     options?: DriverOptions,
   ): Knex.QueryBuilder {
     // [#29520 codemod] The body moved to `sql-driver-internal-helpers.ts` (see `InternalHelpersHost`).
-    const host: ThisParameterType<typeof applyTenantScope> = {
-      resolveTenantField: (...a) => this.resolveTenantField(...a),
-    };
-    return applyTenantScope.call(host, builder, object, options);
+    return InternalHelpersFacet.applyTenantScope.call(internalHelpersHost.of(this), builder, object, options);
   }
 
   /**
@@ -7785,11 +6420,8 @@ export class SqlDriver implements IDataDriver {
    * transaction of its own: it is part of the outer statement, which does.
    */
   protected readableIdsSubquery(leaf: ComposedReadableIds, options?: DriverOptions): Knex.QueryBuilder {
-    const parent = leaf.object;
-    const sub = this.getBuilder(parent).select(this.remoteColumn(parent, 'id', 'id'));
-    this.applyTenantScope(sub, parent, options);
-    if (leaf.scope !== undefined) this.applyFilters(sub, leaf.scope, options);
-    return sub;
+    // [#29520 codemod] The body moved to `sql-driver-internal-helpers.ts` (see `InternalHelpersHost`).
+    return InternalHelpersFacet.readableIdsSubquery.call(internalHelpersHost.of(this), leaf, options);
   }
 
   /**
@@ -7807,10 +6439,7 @@ export class SqlDriver implements IDataDriver {
     options?: DriverOptions,
   ): void {
     // [#29520 codemod] The body moved to `sql-driver-internal-helpers.ts` (see `InternalHelpersHost`).
-    const host: ThisParameterType<typeof injectTenantOnInsert> = {
-      resolveTenantField: (...a) => this.resolveTenantField(...a),
-    };
-    return injectTenantOnInsert.call(host, object, row, options);
+    return InternalHelpersFacet.injectTenantOnInsert.call(internalHelpersHost.of(this), object, row, options);
   }
 
   /**
@@ -7851,15 +6480,7 @@ export class SqlDriver implements IDataDriver {
     insertRows?: readonly unknown[],
   ): void {
     // [#29520 codemod] The body moved to `sql-driver-internal-helpers.ts` (see `InternalHelpersHost`).
-    const readLogger = () => this.logger;
-    const readTenantAuditWarned = () => this.tenantAuditWarned;
-    const host: ThisParameterType<typeof auditMissingTenant> = {
-      isMultiTenantMode: (...a) => this.isMultiTenantMode(...a),
-      get logger() { return readLogger(); },
-      resolveTenantField: (...a) => this.resolveTenantField(...a),
-      get tenantAuditWarned() { return readTenantAuditWarned(); },
-    };
-    return auditMissingTenant.call(host, object, op, options, insertRows);
+    return InternalHelpersFacet.auditMissingTenant.call(internalHelpersHost.of(this), object, op, options, insertRows);
   }
 
   // ── Filter helpers ──────────────────────────────────────────────────────────
@@ -7871,7 +6492,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected tableNameForBuilder(builder: any): string | null {
     // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts`.
-    return tableNameForBuilder(builder);
+    return FilterHelpersFacet.tableNameForBuilder(builder);
   }
 
   /**
@@ -7884,9 +6505,8 @@ export class SqlDriver implements IDataDriver {
    * exact where it matters.
    */
   protected coercionKey(builder: any): string | null {
-    const physical = this.tableNameForBuilder(builder);
-    if (physical == null) return null;
-    return this.objectByPhysicalTable[physical] ?? physical;
+    // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts` (see `FilterHelpersHost`).
+    return FilterHelpersFacet.coercionKey.call(filterHelpersHost.of(this), builder);
   }
 
   /**
@@ -7932,7 +6552,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected toDateOnly(value: any): any {
     // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts`.
-    return toDateOnly(value);
+    return FilterHelpersFacet.toDateOnly(value);
   }
 
   /**
@@ -7947,7 +6567,8 @@ export class SqlDriver implements IDataDriver {
    * `.5` for the stored `.500`).
    */
   protected toTimeOnly(value: any): any {
-    return canonicalTimeOfDay(value);
+    // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts`.
+    return FilterHelpersFacet.toTimeOnly(value);
   }
 
   /**
@@ -7973,13 +6594,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected coerceFilterValue(table: string | null, field: string, value: any): any {
     // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts` (see `FilterHelpersHost`).
-    const host: ThisParameterType<typeof coerceFilterValue> = {
-      coerceFilterValue: (...a) => this.coerceFilterValue(...a),
-      storageDatetimeValue: (...a) => this.storageDatetimeValue(...a),
-      temporalFieldKind: (...a) => this.temporalFieldKind(...a),
-      toDateOnly: (...a) => this.toDateOnly(...a),
-    };
-    return coerceFilterValue.call(host, table, field, value);
+    return FilterHelpersFacet.coerceFilterValue.call(filterHelpersHost.of(this), table, field, value);
   }
 
   /**
@@ -8016,14 +6631,13 @@ export class SqlDriver implements IDataDriver {
    * the canonical string as-is and Postgres parses it straight into `timestamptz`.
    */
   protected storageDatetimeValue(value: unknown): unknown {
-    const canonical = canonicalUtcDatetime(value);
-    return this.isMysql ? mysqlDatetimeLiteral(canonical) : canonical;
+    // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts` (see `FilterHelpersHost`).
+    return FilterHelpersFacet.storageDatetimeValue.call(filterHelpersHost.of(this), value);
   }
 
   protected needsLegacyDatetimeRepair(table: string | null | undefined, field: string): boolean {
-    if (!table || !this.isSqlite) return false;
-    if (this.datetimeFields[table]?.has(field) !== true) return false;
-    return this.canonicalDatetimeFields[table]?.has(field) !== true;
+    // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts` (see `FilterHelpersHost`).
+    return FilterHelpersFacet.needsLegacyDatetimeRepair.call(filterHelpersHost.of(this), table, field);
   }
 
   /**
@@ -8045,7 +6659,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected sqliteCanonicalDatetimeSql(columnSql: string): string {
     // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts`.
-    return sqliteCanonicalDatetimeSql(columnSql);
+    return FilterHelpersFacet.sqliteCanonicalDatetimeSql(columnSql);
   }
 
   /**
@@ -8102,7 +6716,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected sqliteNonTemporalTextSql(columnSql: string): string {
     // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts`.
-    return sqliteNonTemporalTextSql(columnSql);
+    return FilterHelpersFacet.sqliteNonTemporalTextSql(columnSql);
   }
 
   /**
@@ -8111,9 +6725,8 @@ export class SqlDriver implements IDataDriver {
    * therefore need {@link sqliteCanonicalTimeSql} wrapped around it?
    */
   protected needsLegacyTimeRepair(table: string | null | undefined, field: string): boolean {
-    if (!table || !this.isSqlite) return false;
-    if (this.timeFields[table]?.has(field) !== true) return false;
-    return this.canonicalTimeFields[table]?.has(field) !== true;
+    // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts` (see `FilterHelpersHost`).
+    return FilterHelpersFacet.needsLegacyTimeRepair.call(filterHelpersHost.of(this), table, field);
   }
 
   /**
@@ -8135,7 +6748,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected sqliteCanonicalTimeSql(columnSql: string): string {
     // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts`.
-    return sqliteCanonicalTimeSql(columnSql);
+    return FilterHelpersFacet.sqliteCanonicalTimeSql(columnSql);
   }
 
   /**
@@ -8147,11 +6760,8 @@ export class SqlDriver implements IDataDriver {
     table: string | null | undefined,
     field: string,
   ): 'datetime' | 'date' | 'time' | null {
-    if (!table) return null;
-    if (this.datetimeFields[table]?.has(field)) return 'datetime';
-    if (this.dateFields[table]?.has(field)) return 'date';
-    if (this.timeFields[table]?.has(field)) return 'time';
-    return null;
+    // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts` (see `FilterHelpersHost`).
+    return FilterHelpersFacet.temporalFieldKind.call(filterHelpersHost.of(this), table, field);
   }
 
   /**
@@ -8198,18 +6808,7 @@ export class SqlDriver implements IDataDriver {
     field: string,
   ): ReadPresentationKind | null {
     // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts` (see `FilterHelpersHost`).
-    const readBooleanFields = () => this.booleanFields;
-    const readIsMysql = () => this.isMysql;
-    const readIsSqlite = () => this.isSqlite;
-    const readNumericFields = () => this.numericFields;
-    const host: ThisParameterType<typeof readPresentationKind> = {
-      get booleanFields() { return readBooleanFields(); },
-      get isMysql() { return readIsMysql(); },
-      get isSqlite() { return readIsSqlite(); },
-      get numericFields() { return readNumericFields(); },
-      temporalFieldKind: (...a) => this.temporalFieldKind(...a),
-    };
-    return readPresentationKind.call(host, table, field);
+    return FilterHelpersFacet.readPresentationKind.call(filterHelpersHost.of(this), table, field);
   }
 
   /**
@@ -8250,11 +6849,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected presentReadValue(kind: ReadPresentationKind, value: any): any {
     // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts` (see `FilterHelpersHost`).
-    const host: ThisParameterType<typeof presentReadValue> = {
-      toDateOnly: (...a) => this.toDateOnly(...a),
-      toTimeOnly: (...a) => this.toTimeOnly(...a),
-    };
-    return presentReadValue.call(host, kind, value);
+    return FilterHelpersFacet.presentReadValue.call(filterHelpersHost.of(this), kind, value);
   }
 
   /**
@@ -8271,10 +6866,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected presentReadColumns(rows: any, columns: Map<string, ReadPresentationKind>): any {
     // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts` (see `FilterHelpersHost`).
-    const host: ThisParameterType<typeof presentReadColumns> = {
-      presentReadValue: (...a) => this.presentReadValue(...a),
-    };
-    return presentReadColumns.call(host, rows, columns);
+    return FilterHelpersFacet.presentReadColumns.call(filterHelpersHost.of(this), rows, columns);
   }
 
   /**
@@ -8298,8 +6890,8 @@ export class SqlDriver implements IDataDriver {
     field: string,
     table: string | null | undefined,
   ): { sql: string; bindings: any[] } {
-    if (!this.needsLegacyDatetimeRepair(table, field)) return { sql: '??', bindings: [field] };
-    return { sql: this.sqliteCanonicalDatetimeSql('??'), bindings: [field, field, field, field] };
+    // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts` (see `FilterHelpersHost`).
+    return FilterHelpersFacet.sqliteTemporalArg.call(filterHelpersHost.of(this), field, table);
   }
 
   /**
@@ -8318,13 +6910,7 @@ export class SqlDriver implements IDataDriver {
     column: string,
   ): { sql: string; bindings: any[] } | null {
     // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts` (see `FilterHelpersHost`).
-    const host: ThisParameterType<typeof filterColumnExpr> = {
-      needsLegacyDatetimeRepair: (...a) => this.needsLegacyDatetimeRepair(...a),
-      needsLegacyTimeRepair: (...a) => this.needsLegacyTimeRepair(...a),
-      sqliteCanonicalDatetimeSql: (...a) => this.sqliteCanonicalDatetimeSql(...a),
-      sqliteCanonicalTimeSql: (...a) => this.sqliteCanonicalTimeSql(...a),
-    };
-    return filterColumnExpr.call(host, table, field, column);
+    return FilterHelpersFacet.filterColumnExpr.call(filterHelpersHost.of(this), table, field, column);
   }
 
   /**
@@ -8386,7 +6972,8 @@ export class SqlDriver implements IDataDriver {
   // `ReturnType` rather than `Resolved` in
   // `sql-driver-doors-declared-types.test.ts`.
   public temporalFilterValue(objectName: string, field: string, value: any): unknown {
-    return this.coerceFilterValue(objectName, field, value);
+    // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts` (see `FilterHelpersHost`).
+    return FilterHelpersFacet.temporalFilterValue.call(filterHelpersHost.of(this), objectName, field, value);
   }
 
   /**
@@ -8404,13 +6991,8 @@ export class SqlDriver implements IDataDriver {
    * must wrap its column with this too, or it keeps half the bug.
    */
   public temporalFilterColumnSql(objectName: string, field: string, columnSql: string): string {
-    if (this.needsLegacyDatetimeRepair(objectName, field)) {
-      return this.sqliteCanonicalDatetimeSql(columnSql);
-    }
-    if (this.needsLegacyTimeRepair(objectName, field)) {
-      return this.sqliteCanonicalTimeSql(columnSql);
-    }
-    return columnSql;
+    // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts` (see `FilterHelpersHost`).
+    return FilterHelpersFacet.temporalFilterColumnSql.call(filterHelpersHost.of(this), objectName, field, columnSql);
   }
 
   /**
@@ -8436,8 +7018,8 @@ export class SqlDriver implements IDataDriver {
    * The gate fires only where the column type is KNOWN to be JSON.
    */
   protected isJsonColumn(table: string | null | undefined, localField: string): boolean {
-    if (!table) return false;
-    return this.jsonFields[table]?.includes(localField) === true;
+    // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts` (see `FilterHelpersHost`).
+    return FilterHelpersFacet.isJsonColumn.call(filterHelpersHost.of(this), table, localField);
   }
 
   /**
@@ -8460,8 +7042,8 @@ export class SqlDriver implements IDataDriver {
    * method, so both faces of one `TursoDriver` word one refusal.
    */
   protected jsonColumnFieldClass(table: string | null | undefined, localField: string): JsonColumnFieldClass | undefined {
-    if (!table || !this.isJsonColumn(table, localField)) return undefined;
-    return this.mediaFields[table]?.includes(localField) === true ? 'single-value-media' : 'multi-value-or-json';
+    // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts` (see `FilterHelpersHost`).
+    return FilterHelpersFacet.jsonColumnFieldClass.call(filterHelpersHost.of(this), table, localField);
   }
 
   /**
@@ -8546,63 +7128,13 @@ export class SqlDriver implements IDataDriver {
    *   rather than moving this answer.
    */
   protected isNonTextColumn(table: string | null | undefined, localField: string): boolean {
-    if (!table) return false;
-    return (
-      this.numericFields[table]?.includes(localField) === true ||
-      (this.booleanFields[table]?.includes(localField) === true && !this.isJsonColumn(table, localField)) ||
-      (this.temporalFieldKind(table, localField) !== null && !this.isJsonColumn(table, localField))
-    );
+    // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts` (see `FilterHelpersHost`).
+    return FilterHelpersFacet.isNonTextColumn.call(filterHelpersHost.of(this), table, localField);
   }
 
-  /**
-   * [#14079] Emit the DECLARED answer for a text operator aimed at a column
-   * whose stored value is never text ({@link isNonTextColumn}): the positive
-   * operators (`$contains` / `$startsWith` / `$endsWith` / `$icontains` /
-   * `$like` / `$ilike`) compile to the FALSE constant — no row's number
-   * contains a substring — and `$notContains` to the TRUE constant, its exact
-   * complement. `FILTER_TEXT_CASES`' `score` rows are the pin, on every face.
-   *
-   * # What compiled before, per dialect — three answers to one filter
-   *
-   * Measured on `origin/main` over a `Field.number` column holding `5`
-   * (#14079): the SQLite dialects compiled `col GLOB '*5*'` and COERCED the
-   * REAL to text in the storage class's own spelling (`'5.0'`, so
-   * `$contains: '.0'` matched and `$endsWith: '5'` did not); live Postgres
-   * compiled `col LIKE $1 ESCAPE $2` and REFUSED at query time with SQLSTATE
-   * 42883 (`operator does not exist: real ~~ text`) — a 500 for a filter the
-   * spec accepts; MySQL's `CAST(col AS BINARY) LIKE ?` reads as coercion (not
-   * executed — no server was provisionable). The maintainer ruled the cell on
-   * 2026-09-05 (option A, type-gate; coercion refused on the measurement) and
-   * the constants are that ruling compiled: the same row set on every dialect,
-   * decided by the DECLARED type at compile time because the stored value is
-   * not visible until run time.
-   *
-   * # Why constants compose with the NULL rules rather than fight them
-   *
-   * A row with no value already satisfies `$notContains` (#5298,
-   * {@link SqlDriver.applyNullSafeNegative}) and fails every positive
-   * operator, so `1 = 1` / `1 = 0` agree with the null polarity on every row —
-   * there is no cell where the two rules disagree. Under `$not` the leaf is
-   * totalised first (the shared lowering's rule 3, at the seams): `NOT (col IS NOT NULL
-   * AND 1 = 0)` is TRUE for every row, which is what the JS faces answer for
-   * `!contains` on a number, and `NOT (col IS NULL OR 1 = 1)` is FALSE for
-   * every row, what they answer for `!notContains`. Complementarity holds
-   * through the negation too.
-   *
-   * Every refusal stays AHEAD of this: the comparand gates on the validating
-   * walk (`reduceFilterKey`: an empty or non-string `$icontains` comparand, a
-   * non-string or dangling `$like` pattern) and {@link assertCompilableComparand}
-   * all run before the caller reaches here, so a filter the contract refuses
-   * is still refused — the constant answers only a filter the contract
-   * accepts. `1 = 0` is {@link applyFalseConstant}'s spelling; `1 = 1` is its
-   * mirror, valid on every dialect this driver targets and free of bindings.
-   */
   private applyTextOperatorOverNonTextColumn(builder: any, logicalOp: 'and' | 'or', op: string): void {
-    if (op === '$notContains') {
-      builder[logicalOp === 'or' ? 'orWhereRaw' : 'whereRaw']('1 = 1');
-      return;
-    }
-    this.applyFalseConstant(builder, logicalOp);
+    // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts`, its docblock with it (see `FilterHelpersHost`).
+    return FilterHelpersFacet.applyTextOperatorOverNonTextColumn.call(filterHelpersHost.of(this), builder, logicalOp, op);
   }
 
   /**
@@ -8613,9 +7145,8 @@ export class SqlDriver implements IDataDriver {
    * question through this method, so its two faces read one registry.
    */
   protected declaredValueShape(table: string | null | undefined, localField: string): ValueShapeFieldDef | undefined {
-    if (!table) return undefined;
-    const shapes = this.valueShapeFields[table];
-    return shapes && Object.prototype.hasOwnProperty.call(shapes, localField) ? shapes[localField] : undefined;
+    // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts` (see `FilterHelpersHost`).
+    return FilterHelpersFacet.declaredValueShape.call(filterHelpersHost.of(this), table, localField);
   }
 
   /**
@@ -8821,11 +7352,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected logWithheldFilterDiagnostic(err: unknown): void {
     // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts` (see `FilterHelpersHost`).
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof logWithheldFilterDiagnostic> = {
-      get logger() { return readLogger(); },
-    };
-    return logWithheldFilterDiagnostic.call(host, err);
+    return FilterHelpersFacet.logWithheldFilterDiagnostic.call(filterHelpersHost.of(this), err);
   }
 
   /**
@@ -8843,43 +7370,18 @@ export class SqlDriver implements IDataDriver {
    * that passes two of these frames is still logged once.
    */
   protected withWithheldFilterLog<T>(rootFilter: unknown, fn: () => T): T {
-    try {
-      return fn();
-    } catch (err) {
-      // [#8220] The same provenance resolution `applyFilters` applies, against
-      // the same `where` ROOT — threaded into this frame because a lazily
-      // invoked group callback is past that entry point's catch. Resolving
-      // against the local branch instead would lose every mark set on an
-      // ANCESTOR (the merge boundaries mark the arms of their own `$and`), so
-      // an author's nested `$or` refusal would stay redacted for no reason.
-      throw this.resolveWithheldFilterRefusal(err, rootFilter);
-    }
+    // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts` (see `FilterHelpersHost`).
+    return (FilterHelpersFacet.withWithheldFilterLog<T>).call(filterHelpersHost.of(this), rootFilter, fn);
   }
 
   private compileFilters(builder: Knex.QueryBuilder, filters: any, options?: DriverOptions) {
     // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts` (see `FilterHelpersHost`).
-    const host: ThisParameterType<typeof compileFilters> = {
-      applyFilterCondition: (...a) => this.applyFilterCondition(...a),
-      applyNormalizedComparison: (...a) => this.applyNormalizedComparison(...a),
-      assertOperatorAppliesToColumn: (...a) => this.assertOperatorAppliesToColumn(...a),
-      coerceFilterValue: (...a) => this.coerceFilterValue(...a),
-      coercionKey: (...a) => this.coercionKey(...a),
-      filterColumnExpr: (...a) => this.filterColumnExpr(...a),
-      remoteColumn: (...a) => this.remoteColumn(...a),
-    };
-    return compileFilters.call(host, builder, filters, options);
+    return FilterHelpersFacet.compileFilters.call(filterHelpersHost.of(this), builder, filters, options);
   }
 
-  /**
-   * Apply a `contains` substring match as a parameterized `LIKE '%…%'`, escaping
-   * the LIKE metacharacters `%` / `_` (and the escape char `\`) in the user value
-   * so they match literally instead of acting as wildcards — otherwise a value of
-   * `%` matches every row (a filter-bypass, P0). Binds an explicit `ESCAPE '\'`
-   * because SQLite does not honour a default escape character (MySQL/Postgres do,
-   * but the explicit clause is correct for all three).
-   */
   private applyContainsLike(builder: any, method: string, field: string, value: unknown): void {
-    this.applyLike(builder, method, field, value, 'contains');
+    // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts`, its docblock with it (see `FilterHelpersHost`).
+    return FilterHelpersFacet.applyContainsLike.call(filterHelpersHost.of(this), builder, method, field, value);
   }
 
   /**
@@ -9540,8 +8042,8 @@ export class SqlDriver implements IDataDriver {
    * refuses rather than guessing at columns it cannot enumerate.
    */
   protected declaredFieldsFor(object: string): Record<string, any> | undefined {
-    const tableName = StorageNameMapping.resolveTableName({ name: object } as any);
-    return this.managedObjectFields.get(tableName) ?? this.managedObjectFields.get(object);
+    // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts` (see `FilterHelpersHost`).
+    return FilterHelpersFacet.declaredFieldsFor.call(filterHelpersHost.of(this), object);
   }
 
   /**
@@ -9760,25 +8262,16 @@ export class SqlDriver implements IDataDriver {
     return crossFieldOffsetExpr.call(host, base, offset, cls);
   }
 
-  /**
-   * [#5134] Emit the dialect FALSE constant — a predicate that matches no row.
-   *
-   * `1 = 0` is the spelling already used for this condition on both sides of the
-   * repo: `read-scope-sql.ts` compiles an empty `$in` to it, and Knex itself
-   * renders an empty `whereIn` as `1 = 0`. It is valid on every dialect this
-   * driver targets (unlike a bare `FALSE`, which MySQL accepts but older SQL
-   * Server does not), needs no bindings, and keeps the query a normal SELECT so
-   * `LIMIT`/`ORDER BY`/aggregates all still behave.
-   */
   private applyFalseConstant(builder: any, logicalOp: 'and' | 'or'): void {
-    builder[logicalOp === 'or' ? 'orWhereRaw' : 'whereRaw']('1 = 0');
+    // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts`, its docblock with it.
+    return FilterHelpersFacet.applyFalseConstant(builder, logicalOp);
   }
 
   // ── Field mapping ───────────────────────────────────────────────────────────
 
   protected mapSortField(field: string): string {
     // [#29520 codemod] The body moved to `sql-driver-field-mapping.ts`.
-    return mapSortField(field);
+    return FieldMappingFacet.mapSortField(field);
   }
 
   /**
@@ -9814,10 +8307,8 @@ export class SqlDriver implements IDataDriver {
    * like any other sort key.
    */
   protected paginationTieBreaker(object: string): string | null {
-    const tableName = StorageNameMapping.resolveTableName({ name: object } as any);
-    const managed =
-      this.managedObjectFields.has(tableName) || this.managedObjectFields.has(object);
-    return managed ? 'id' : null;
+    // [#29520 codemod] The body moved to `sql-driver-field-mapping.ts` (see `FieldMappingHost`).
+    return FieldMappingFacet.paginationTieBreaker.call(fieldMappingHost.of(this), object);
   }
 
   /**
@@ -9864,14 +8355,7 @@ export class SqlDriver implements IDataDriver {
     opts?: { singleRowLookup?: boolean },
   ): Array<{ field: string; direction: 'asc' | 'desc' }> {
     // [#29520 codemod] The body moved to `sql-driver-field-mapping.ts` (see `FieldMappingHost`).
-    const readLogger = () => this.logger;
-    const readNondeterministicPagingWarned = () => this.nondeterministicPagingWarned;
-    const host: ThisParameterType<typeof orderKeysFor> = {
-      get logger() { return readLogger(); },
-      get nondeterministicPagingWarned() { return readNondeterministicPagingWarned(); },
-      paginationTieBreaker: (...a) => this.paginationTieBreaker(...a),
-    };
-    return orderKeysFor.call(host, object, query, opts);
+    return FieldMappingFacet.orderKeysFor.call(fieldMappingHost.of(this), object, query, opts);
   }
 
   /**
@@ -9881,8 +8365,8 @@ export class SqlDriver implements IDataDriver {
    * and external objects without a columnMap are byte-for-byte unchanged.
    */
   protected remoteColumn(object: string | null | undefined, field: string, fallback: string): string {
-    const m = object ? this.fieldColumnByObject[object] : undefined;
-    return (m && m[field]) || fallback;
+    // [#29520 codemod] The body moved to `sql-driver-field-mapping.ts` (see `FieldMappingHost`).
+    return FieldMappingFacet.remoteColumn.call(fieldMappingHost.of(this), object, field, fallback);
   }
 
   /**
@@ -9891,11 +8375,8 @@ export class SqlDriver implements IDataDriver {
    * (whose value coercion is keyed by logical field name).
    */
   protected applyWriteColumnMap(object: string, data: any): any {
-    const m = this.fieldColumnByObject[object];
-    if (!m || !data || typeof data !== 'object') return data;
-    const out: any = {};
-    for (const [k, v] of Object.entries(data)) out[m[k] ?? k] = v;
-    return out;
+    // [#29520 codemod] The body moved to `sql-driver-field-mapping.ts` (see `FieldMappingHost`).
+    return FieldMappingFacet.applyWriteColumnMap.call(fieldMappingHost.of(this), object, data);
   }
 
   /**
@@ -9918,7 +8399,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected mapAggregateFunc(func: string): SqlAggregateLowering {
     // [#29520 codemod] The body moved to `sql-driver-field-mapping.ts`.
-    return mapAggregateFunc(func);
+    return FieldMappingFacet.mapAggregateFunc(func);
   }
 
   // ── Window function builder ─────────────────────────────────────────────────
@@ -9933,12 +8414,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected buildWindowFunction(spec: SqlWindowFunctionSpec): string {
     // [#29520 codemod] The body moved to `sql-driver-window-function-builder.ts` (see `WindowFunctionBuilderHost`).
-    const readKnex = () => this.knex;
-    const host: ThisParameterType<typeof buildWindowFunction> = {
-      get knex() { return readKnex(); },
-      mapSortField: (...a) => this.mapSortField(...a),
-    };
-    return buildWindowFunction.call(host, spec);
+    return WindowFunctionBuilderFacet.buildWindowFunction.call(windowFunctionBuilderHost.of(this), spec);
   }
 
   // ── Column creation helper ──────────────────────────────────────────────────
@@ -10165,20 +8641,13 @@ export class SqlDriver implements IDataDriver {
    * decision to an unsettled one.
    */
   protected declaredVarcharLength(field: any): number | null {
-    const declared = (field as { maxLength?: unknown }).maxLength;
-    const n = typeof declared === 'string' ? Number(declared) : declared;
-    if (typeof n !== 'number' || !Number.isInteger(n) || n <= 0) {
-      return SqlDriver.DEFAULT_STRING_VARCHAR_CHARS;
-    }
-    return n > SqlDriver.MAX_VARCHAR_CHARS ? null : n;
+    // [#29520 codemod] The body moved to `sql-driver-column-creation.ts`.
+    return ColumnCreationFacet.declaredVarcharLength(field);
   }
 
   protected keyableTextLength(field: any): number | null {
-    const declared = (field as { maxLength?: unknown }).maxLength;
-    const n = typeof declared === 'string' ? Number(declared) : declared;
-    if (typeof n !== 'number' || !Number.isInteger(n) || n <= 0) return null;
-    if (n > SqlDriver.MAX_KEYABLE_VARCHAR_CHARS) return null;
-    return n;
+    // [#29520 codemod] The body moved to `sql-driver-column-creation.ts`.
+    return ColumnCreationFacet.keyableTextLength(field);
   }
 
   /**
@@ -10346,12 +8815,8 @@ export class SqlDriver implements IDataDriver {
    * get different shadows.
    */
   protected static hashShadowColumnFor(indexName: string): string {
-    // Commit cd1348802: DELEGATES rather than re-deriving. The differ has to look for
-    // exactly the column the sync creates, and the two halves of that question
-    // lived in different modules — which is how a healthy shadow-carried
-    // UNIQUE came to be reported as destructive drift while the shadow column
-    // itself was protected as driver-owned. One derivation, both readers.
-    return hashShadowColumnFor(indexName);
+    // [#29520 codemod] The body moved to `sql-driver-column-creation.ts`.
+    return ColumnCreationFacet.hashShadowColumnFor(indexName);
   }
 
   /**
@@ -10447,86 +8912,14 @@ export class SqlDriver implements IDataDriver {
    *
    * Returns `true` when the shadow index now exists.
    */
-  protected async createHashShadowUniqueIndex(
+  protected createHashShadowUniqueIndex(
     tableName: string,
     indexName: string,
     columns: string[],
     nullSafeColumns?: ReadonlySet<string>,
   ): Promise<boolean> {
-    if (!this.isMysql) return false;
-    const shadow = SqlDriver.hashShadowColumnFor(indexName);
-    const ref = (c: string) => `\`${c.replace(/`/g, '``')}\``;
-    // The DECLARED key part: NULL-safe parts in their COALESCE form (commit df1c75c4b),
-    // plain parts as the bare column.
-    const part = (c: string) =>
-      nullSafeColumns?.has(c) ? `COALESCE(${ref(c)}, '${GLOBAL_TENANT}')` : ref(c);
-    // ONE argument needs no separator, and CONCAT of one value would only add
-    // a chance to get the encoding wrong.
-    const expr =
-      columns.length === 1
-        ? part(columns[0]!)
-        : `CONCAT(${columns.map(part).join(', 0x1f, ')})`;
-    const addColumn =
-      `ADD COLUMN ${ref(shadow)} VARBINARY(32) GENERATED ALWAYS AS (UNHEX(SHA2(${expr}, 256))) STORED`;
-    const addKey = `ADD UNIQUE KEY ${ref(indexName)} (${ref(shadow)})`;
-    // Commit cd1348802: the shadow column OUTLIVES the index it carries. Dropping a
-    // UNIQUE key by name does not drop the generated column keyed by it, so
-    // every path that drops and re-syncs — `recreate_index` above all — arrives
-    // back here with the survivor still on the table. The unconditional
-    // `ADD COLUMN` then failed with a duplicate-COLUMN error, which is matched
-    // by NEITHER the "already exists" absorb (that spells index names) nor the
-    // unique-violation branch, so the apply ended with the constraint DROPPED
-    // and not re-created: an operator following the differ's own advice removed
-    // a live uniqueness guarantee. The survivor is therefore inspected, never
-    // assumed absent.
-    const state = await this.hashShadowColumnState(tableName, indexName, columns, nullSafeColumns);
-    if (state === 'foreign') {
-      // A real, non-generated column already owns the name. It is not ours to
-      // drop — it may hold data — so this route is refused and the caller falls
-      // through to the refusal commit d0e3a885b named, which is the honest outcome.
-      this.logDurabilityFailure(
-        `[sql-driver] cannot carry UNIQUE index '${indexName}' on "${tableName}" on a hash shadow — the ` +
-          `column "${shadow}" already exists and is NOT a generated column, so it is not the driver's to ` +
-          `replace: it may hold data. The declared constraint is NOT enforced; rename or drop that column.`,
-      );
-      return false;
-    }
-    if (state === 'reusable') {
-      // The survivor already hashes exactly the declared key — re-key it rather
-      // than rebuild the table for a column that is byte-for-byte what we want.
-      await this.knex.raw(`ALTER TABLE ${ref(tableName)} ${addKey}`);
-    } else if (state === 'stale') {
-      // The survivor hashes a DIFFERENT key than metadata now declares — the
-      // raw-column shadow from before commit df1c75c4b is exactly this case. Reusing it would
-      // re-enforce the old constraint under the new name, which is the silent
-      // wrong answer; the column carries no user data (it is derived), so it is
-      // dropped and re-generated. Two statements rather than one ALTER: the
-      // index it carried is already gone by the time we are here, and a single
-      // `DROP COLUMN c, ADD COLUMN c` is a shape not worth relying on.
-      await this.knex.raw(`ALTER TABLE ${ref(tableName)} DROP COLUMN ${ref(shadow)}`);
-      await this.knex.raw(`ALTER TABLE ${ref(tableName)} ${addColumn}, ${addKey}`);
-    } else {
-      await this.knex.raw(`ALTER TABLE ${ref(tableName)} ${addColumn}, ${addKey}`);
-    }
-    // The boot log describes the key the shadow actually enforces — the
-    // NULL-safe parts in their COALESCE spelling — so "carried" can be read
-    // literally (commit df1c75c4b).
-    const described = columns
-      .map((c) => (nullSafeColumns?.has(c) ? `COALESCE(${c}, '${GLOBAL_TENANT}')` : c))
-      .join(', ');
-    this.logger.warn(
-      `[sql-driver] UNIQUE index '${indexName}' on "${tableName}" is carried by the hash-shadow column ` +
-        `"${shadow}" (SHA-256 of ${described}), because MySQL cannot key ${columns.length > 1 ? 'this column set' : 'a column'} ` +
-        `longer than ${SqlDriver.MAX_KEYABLE_VARCHAR_CHARS} characters directly. The declared ` +
-        `constraint is enforced over the full value; only the physical key differs.` +
-        (state === 'reusable'
-          ? ` The shadow column already existed and hashes this exact key — re-keyed in place.`
-          : state === 'stale'
-            ? ` A surviving shadow column hashed a DIFFERENT key and was re-generated.`
-            : ''),
-      { tableName, indexName, columns, shadow, shadowColumnState: state },
-    );
-    return true;
+    // [#29520 codemod] The body moved to `sql-driver-column-creation.ts` (see `ColumnCreationHost`).
+    return ColumnCreationFacet.createHashShadowUniqueIndex.call(columnCreationHost.of(this), tableName, indexName, columns, nullSafeColumns);
   }
 
   /**
@@ -10551,37 +8944,14 @@ export class SqlDriver implements IDataDriver {
    * shipped before this probe existed — rather than converting a transient
    * read failure into a refused constraint.
    */
-  protected async hashShadowColumnState(
+  protected hashShadowColumnState(
     tableName: string,
     indexName: string,
     columns: string[],
     nullSafeColumns?: ReadonlySet<string>,
   ): Promise<'absent' | 'reusable' | 'stale' | 'foreign'> {
-    let rows: Array<Record<string, unknown>>;
-    try {
-      rows = await this.knex
-        .select('GENERATION_EXPRESSION')
-        .from('information_schema.COLUMNS')
-        .where({
-          TABLE_SCHEMA: this.knex.client.database(),
-          TABLE_NAME: tableName,
-          COLUMN_NAME: SqlDriver.hashShadowColumnFor(indexName),
-        });
-    } catch {
-      return 'absent';
-    }
-    if (rows.length === 0) return 'absent';
-    const expr = String(rows[0]?.GENERATION_EXPRESSION ?? rows[0]?.generation_expression ?? '');
-    if (expr.trim() === '') return 'foreign';
-    const parts = parseHashShadowKeyParts(expr);
-    if (parts.length === 0) return 'stale';
-    const carried = canonicalIndexKey(
-      parts.map((k) => k.column),
-      parts.filter((k) => k.nullSafe).map((k) => k.column),
-    );
-    return carried === canonicalIndexKey(columns, [...(nullSafeColumns ?? [])])
-      ? 'reusable'
-      : 'stale';
+    // [#29520 codemod] The body moved to `sql-driver-column-creation.ts` (see `ColumnCreationHost`).
+    return ColumnCreationFacet.hashShadowColumnState.call(columnCreationHost.of(this), tableName, indexName, columns, nullSafeColumns);
   }
 
   /**
@@ -10623,77 +8993,12 @@ export class SqlDriver implements IDataDriver {
    *
    * Returns `true` only when a column was actually dropped.
    */
-  protected async dropOrphanedHashShadowColumn(
+  protected dropOrphanedHashShadowColumn(
     tableName: string,
     indexName: string,
   ): Promise<boolean> {
-    // Shadows are a MySQL-only construct: `createHashShadowUniqueIndex` refuses
-    // every other dialect, so there is nothing to collect and no catalog read
-    // worth paying for.
-    if (!this.isMysql) return false;
-    const shadow = SqlDriver.hashShadowColumnFor(indexName);
-
-    let generationExpression: string;
-    try {
-      const rows = await this.knex
-        .select('GENERATION_EXPRESSION')
-        .from('information_schema.COLUMNS')
-        .where({
-          TABLE_SCHEMA: this.knex.client.database(),
-          TABLE_NAME: tableName,
-          COLUMN_NAME: shadow,
-        });
-      if (rows.length === 0) return false; // nothing survived; the ordinary case
-      generationExpression = String(
-        rows[0]?.GENERATION_EXPRESSION ?? rows[0]?.generation_expression ?? '',
-      );
-    } catch {
-      return false;
-    }
-    if (generationExpression.trim() === '') {
-      this.logger.warn(
-        `[sql-driver] NOT dropping "${tableName}"."${shadow}" while collecting the retired index ` +
-          `'${indexName}' — a column of that name exists and is NOT a generated column, so it is not ` +
-          `the driver's to drop and may hold data. Remove it by hand if it is unwanted.`,
-        { tableName, indexName, shadow },
-      );
-      return false;
-    }
-
-    let stillKeyedBy: string[];
-    try {
-      const rows = await this.knex
-        .select('INDEX_NAME')
-        .from('information_schema.STATISTICS')
-        .where({
-          TABLE_SCHEMA: this.knex.client.database(),
-          TABLE_NAME: tableName,
-          COLUMN_NAME: shadow,
-        });
-      stillKeyedBy = [
-        ...new Set(rows.map((r: any) => String(r.INDEX_NAME ?? r.index_name ?? ''))),
-      ].filter((n) => n !== '');
-    } catch {
-      return false;
-    }
-    if (stillKeyedBy.length > 0) {
-      this.logger.warn(
-        `[sql-driver] NOT dropping "${tableName}"."${shadow}" while collecting the retired index ` +
-          `'${indexName}' — ${stillKeyedBy.length} index(es) still key that column ` +
-          `(${stillKeyedBy.join(', ')}), so dropping it would remove them too.`,
-        { tableName, indexName, shadow, stillKeyedBy },
-      );
-      return false;
-    }
-
-    await this.knex.raw('ALTER TABLE ?? DROP COLUMN ??', [tableName, shadow]);
-    this.logger.warn(
-      `[sql-driver] dropped the hash-shadow column "${shadow}" from "${tableName}" — the UNIQUE index ` +
-        `'${indexName}' it carried is retired, so the STORED generated column was recomputed on every ` +
-        `write for a constraint that no longer exists.`,
-      { tableName, indexName, shadow },
-    );
-    return true;
+    // [#29520 codemod] The body moved to `sql-driver-column-creation.ts` (see `ColumnCreationHost`).
+    return ColumnCreationFacet.dropOrphanedHashShadowColumn.call(columnCreationHost.of(this), tableName, indexName);
   }
 
   /**
@@ -10818,11 +9123,7 @@ export class SqlDriver implements IDataDriver {
     error: unknown,
   ): Promise<unknown> {
     // [#29520 codemod] The body moved to `sql-driver-column-creation.ts` (see `ColumnCreationHost`).
-    const host: ThisParameterType<typeof decorateHashShadowDuplicate> = {
-      explainHashShadowDuplicate: (...a) => this.explainHashShadowDuplicate(...a),
-      logDurabilityFailure: (...a) => this.logDurabilityFailure(...a),
-    };
-    return decorateHashShadowDuplicate.call(host, tableName, values, error);
+    return ColumnCreationFacet.decorateHashShadowDuplicate.call(columnCreationHost.of(this), tableName, values, error);
   }
 
   /**
@@ -10833,31 +9134,12 @@ export class SqlDriver implements IDataDriver {
    * `COALESCE(col, …)` form (ADR-0120 D3 via commit df1c75c4b) — the read side must
    * compare through the same fold the enforced key applies.
    */
-  protected async hashShadowSourceColumns(
+  protected hashShadowSourceColumns(
     tableName: string,
     indexName: string,
   ): Promise<HashShadowKeyPart[]> {
-    try {
-      const rows: Array<{ GENERATION_EXPRESSION?: string; generation_expression?: string }> =
-        await this.knex
-          .select('GENERATION_EXPRESSION')
-          .from('information_schema.COLUMNS')
-          .where({
-            TABLE_SCHEMA: this.knex.client.database(),
-            TABLE_NAME: tableName,
-            COLUMN_NAME: SqlDriver.hashShadowColumnFor(indexName),
-          });
-      const expr = String(rows[0]?.GENERATION_EXPRESSION ?? rows[0]?.generation_expression ?? '');
-      // `unhex(sha2(`a`,256))`, `unhex(sha2(concat(`a`,0x1f,`b`),256))`, or with
-      // a NULL-safe part: `…concat(coalesce(`org`,_utf8mb4'__global__'),0x1f,`b`)…`
-      // (commit df1c75c4b). Commit cd1348802 moved the parse itself next to the shadow vocabulary
-      // in `schema-drift.ts`: the differ reads the same expression to decide
-      // whether a shadow-carried index enforces what metadata declares, and two
-      // copies of this regex would be two answers to one question.
-      return parseHashShadowKeyParts(expr);
-    } catch {
-      return [];
-    }
+    // [#29520 codemod] The body moved to `sql-driver-column-creation.ts` (see `ColumnCreationHost`).
+    return ColumnCreationFacet.hashShadowSourceColumns.call(columnCreationHost.of(this), tableName, indexName);
   }
 
   /**
@@ -10908,8 +9190,8 @@ export class SqlDriver implements IDataDriver {
    * Off by one byte there would move a number in a message, never a verdict.
    */
   protected static varcharPackLength(chars: number, bytesPerChar: number): number {
-    const payload = chars * bytesPerChar;
-    return payload + (payload < 256 ? 1 : 2);
+    // [#29520 codemod] The body moved to `sql-driver-column-creation.ts`.
+    return ColumnCreationFacet.varcharPackLength(chars, bytesPerChar);
   }
 
   /**
@@ -11018,16 +9300,8 @@ export class SqlDriver implements IDataDriver {
     keyedColumns: ReadonlyMap<string, { unique: boolean }>,
     bytesPerChar: number,
   ): { columns: RowWidthContribution[]; totalBytes: number } {
-    const builtin = new Set<string>(['id', ...AUDIT_TIMESTAMP_COLUMNS]);
-    const columns: RowWidthContribution[] = [];
-    for (const [name, field] of Object.entries(fields ?? {})) {
-      if (builtin.has(name)) continue;
-      const chars = this.varcharColumnChars(field, keyedColumns.get(name));
-      if (chars === null) continue;
-      columns.push({ name, chars, bytes: SqlDriver.varcharPackLength(chars, bytesPerChar) });
-    }
-    columns.sort((a, b) => b.bytes - a.bytes || a.name.localeCompare(b.name));
-    return { columns, totalBytes: columns.reduce((sum, c) => sum + c.bytes, 0) };
+    // [#29520 codemod] The body moved to `sql-driver-column-creation.ts` (see `ColumnCreationHost`).
+    return ColumnCreationFacet.rowWidthProfile.call(columnCreationHost.of(this), fields, keyedColumns, bytesPerChar);
   }
 
   /**
@@ -11048,11 +9322,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected schemaBytesPerChar(): Promise<{ bytesPerChar: number; charset: string } | null> {
     // [#29520 codemod] The body moved to `sql-driver-column-creation.ts` (see `ColumnCreationHost`).
-    const readKnex = () => this.knex;
-    const host: ThisParameterType<typeof schemaBytesPerChar> = {
-      get knex() { return readKnex(); },
-    };
-    return schemaBytesPerChar.call(host);
+    return ColumnCreationFacet.schemaBytesPerChar.call(columnCreationHost.of(this));
   }
 
   /**
@@ -11113,76 +9383,17 @@ export class SqlDriver implements IDataDriver {
    *   years later is refused by the width of columns nobody is touching — so
    *   the offender list is the same and only the opening clause differs.
    */
-  protected async explainRowSizeOverflow(
+  protected explainRowSizeOverflow(
     tableName: string,
     fields: Record<string, any> | undefined,
     keyedColumns: ReadonlyMap<string, { unique: boolean }>,
     addedColumns: string[] | null,
     cause: unknown,
   ): Promise<string | null> {
-    if ((cause as { code?: string } | undefined)?.code !== 'ER_TOO_BIG_ROWSIZE') return null;
-
-    const server = await this.schemaBytesPerChar();
-    const bytesPerChar = server?.bytesPerChar ?? SqlDriver.ASSUMED_BYTES_PER_CHAR;
-    const charsetNote = server
-      ? `${bytesPerChar} bytes/character (${server.charset}, this schema's charset)`
-      : `${bytesPerChar} bytes/character (utf8mb4 assumed — the server's charset could not be read)`;
-    const { columns, totalBytes } = this.rowWidthProfile(fields, keyedColumns, bytesPerChar);
-
-    // Two DIFFERENT limits answer with this one code, and they quote different
-    // numbers. Reading the server's own text keeps the message from asserting
-    // the 65535 one over a refusal that was really InnoDB's page limit.
-    const serverText = String((cause as { sqlMessage?: string; message?: string }).sqlMessage ?? '');
-    const pageLimit = /row size too large \(>\s*(\d+)\)/i.exec(serverText)?.[1] ?? null;
-    const limitClause = pageLimit
-      ? `InnoDB's per-PAGE limit of ${pageLimit} bytes — which many NARROW bounded columns reach far below the ` +
-        `${SqlDriver.MYSQL_ROW_BYTE_BUDGET}-byte one, because a column narrower than about 256 bytes is never ` +
-        `stored off-page (measured on 8.0.46: 40 fields at \`maxLength: 63\` are refused)`
-      : `the server's ${SqlDriver.MYSQL_ROW_BYTE_BUDGET}-byte budget for one ROW`;
-
-    const SHOWN = 8;
-    const listed = columns
-      .slice(0, SHOWN)
-      .map((c) => `"${c.name}" varchar(${c.chars}) = ${c.bytes} bytes`)
-      .join(', ');
-    const rest = columns.length > SHOWN ? `, and ${columns.length - SHOWN} more` : '';
-    const inventory =
-      columns.length === 0
-        ? `This object produces no varchar column at all, so the width is in the built-in columns or in a ` +
-          `type this diagnostic does not size — report it, because that is not a shape it was measured on.`
-        : `Its ${columns.length} varchar column(s) take ${totalBytes} bytes at ${charsetNote}, on top of the ` +
-          `built-in \`id\` (a varchar(${SqlDriver.DEFAULT_STRING_VARCHAR_CHARS})), \`created_at\` and ` +
-          `\`updated_at\` columns. Widest first: ${listed}${rest}.`;
-
-    const opening =
-      addedColumns && addedColumns.length > 0
-        ? `[sql-driver] cannot add column(s) ${addedColumns.map((c) => `"${c}"`).join(', ')} to "${tableName}"`
-        : `[sql-driver] cannot create table "${tableName}"`;
-
-    return (
-      `${opening} — MySQL refuses the whole row: every bounded column's DECLARED width is charged against ` +
-      `${limitClause}, whether or not a row ever holds that much. ${inventory} ` +
-      `Fix it on the declarations: lower \`maxLength\` on the widest field(s), or drop the bound from a ` +
-      `text-family field no index keys on so it is emitted as TEXT — an off-page TEXT column costs this ` +
-      `budget a small pointer rather than its full declared width. Note that a field declaring NO ` +
-      `\`maxLength\` still takes varchar(${SqlDriver.DEFAULT_STRING_VARCHAR_CHARS}) ` +
-      `(${SqlDriver.varcharPackLength(SqlDriver.DEFAULT_STRING_VARCHAR_CHARS, bytesPerChar)} bytes here), and ` +
-      `so do \`lookup\`, \`user\`, \`auto_number\` and the option types — an object can reach this limit ` +
-      `without declaring a bound anywhere. The server's own error names no column, which is the whole reason ` +
-      `this one does.`
-    );
+    // [#29520 codemod] The body moved to `sql-driver-column-creation.ts` (see `ColumnCreationHost`).
+    return ColumnCreationFacet.explainRowSizeOverflow.call(columnCreationHost.of(this), tableName, fields, keyedColumns, addedColumns, cause);
   }
 
-  /**
-   * Re-throw a schema-mutation failure carrying {@link explainRowSizeOverflow}'s
-   * explanation, or the original untouched when it is not a row-size refusal.
-   *
-   * The SAME failure, re-worded — the boot still fails, loudly, and no object is
-   * registered that MySQL declined to build. `sqlMessage` rather than `message`
-   * for the quoted server text: knex prefixes `message` with the entire DDL
-   * statement, which for the object that trips this is thousands of characters
-   * of `varchar(...)` and buries the one sentence the server actually said.
-   */
   private rethrowWithRowSizeExplanation(
     tableName: string,
     fields: Record<string, any> | undefined,
@@ -11190,12 +9401,8 @@ export class SqlDriver implements IDataDriver {
     addedColumns: string[] | null,
     e: any,
   ): Promise<never> {
-    // [#29520 codemod] The body moved to `sql-driver-column-creation.ts` (see `ColumnCreationHost`).
-    const host: ThisParameterType<typeof rethrowWithRowSizeExplanation> = {
-      explainRowSizeOverflow: (...a) => this.explainRowSizeOverflow(...a),
-      logDurabilityFailure: (...a) => this.logDurabilityFailure(...a),
-    };
-    return rethrowWithRowSizeExplanation.call(host, tableName, fields, keyedColumns, addedColumns, e);
+    // [#29520 codemod] The body moved to `sql-driver-column-creation.ts`, its docblock with it (see `ColumnCreationHost`).
+    return ColumnCreationFacet.rethrowWithRowSizeExplanation.call(columnCreationHost.of(this), tableName, fields, keyedColumns, addedColumns, e);
   }
 
   /**
@@ -11266,7 +9473,8 @@ export class SqlDriver implements IDataDriver {
    *   this change per its own header (it now pins the convergence).
    */
   protected jsonColumn(table: Knex.CreateTableBuilder, name: string): any {
-    return this.isSqlite ? table.text(name) : table.json(name);
+    // [#29520 codemod] The body moved to `sql-driver-column-creation.ts` (see `ColumnCreationHost`).
+    return ColumnCreationFacet.jsonColumn.call(columnCreationHost.of(this), table, name);
   }
 
   protected createColumn(
@@ -11836,15 +10044,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected sqliteFilename(): string | null {
     // [#29520 codemod] The body moved to `sql-driver-database-helpers.ts` (see `DatabaseHelpersHost`).
-    const readConfig = () => this.config;
-    const readIsSqlite = () => this.isSqlite;
-    const readOpenedEmptyInMemory = () => this.openedEmptyInMemory;
-    const host: ThisParameterType<typeof sqliteFilename> = {
-      get config() { return readConfig(); },
-      get isSqlite() { return readIsSqlite(); },
-      get openedEmptyInMemory() { return readOpenedEmptyInMemory(); },
-    };
-    return sqliteFilename.call(host);
+    return DatabaseHelpersFacet.sqliteFilename.call(databaseHelpersHost.of(this));
   }
 
   protected async ensureDatabaseExists() {
@@ -11988,10 +10188,8 @@ export class SqlDriver implements IDataDriver {
    *          installation from a refusal instead of inferring it.
    */
   setFileColumnsMovedResolver(resolve: () => boolean | Promise<boolean>): boolean {
-    if (this.fileColumnsMovedDeclared) return false;
-    if (this.fileColumnsMovedAsked) return false;
-    this.fileColumnsMovedResolver = resolve;
-    return true;
+    // [#29520 codemod] The body moved to `sql-driver-database-helpers.ts` (see `DatabaseHelpersHost`).
+    return DatabaseHelpersFacet.setFileColumnsMovedResolver.call(databaseHelpersHost.of(this), resolve);
   }
 
   /** Has {@link resolveFileColumnsMoved} already run to completion? */
@@ -12017,8 +10215,8 @@ export class SqlDriver implements IDataDriver {
    * ownership ceremony as the remedy.
    */
   setTenantKeyCertifiedResolver(resolve: () => boolean | Promise<boolean>): void {
-    this.tenantKeyCertifiedResolver = resolve;
-    this.tenantKeyCertified = undefined;
+    // [#29520 codemod] The body moved to `sql-driver-database-helpers.ts` (see `DatabaseHelpersHost`).
+    return DatabaseHelpersFacet.setTenantKeyCertifiedResolver.call(databaseHelpersHost.of(this), resolve);
   }
 
   private tenantKeyCertifiedResolver?: () => boolean | Promise<boolean>;
@@ -12032,55 +10230,14 @@ export class SqlDriver implements IDataDriver {
    * it. A yes is kept; a no is asked again next time, so an answer taken
    * before the ledger could be read never outlives that moment.
    */
-  protected async isTenantKeyCertified(): Promise<boolean> {
-    if (this.tenantKeyCertified) return true;
-    const resolver = this.tenantKeyCertifiedResolver;
-    if (!resolver) return false;
-    try {
-      // Asked inside the pre-DDL scope: a store whose ledger does not exist
-      // yet answers with a refused read, which is not a fault (see
-      // {@link PRE_DDL_QUESTION_SCOPE}).
-      if ((await PRE_DDL_QUESTION_SCOPE.run(true, resolver)) !== true) return false;
-    } catch (e: any) {
-      // Not knowing reads as "not certified": the forms stay distinct and an
-      // 18.0 index is reported as a destructive recreate_index, which nothing
-      // applies unattended (safe-only boot reconcile, the artifact gate,
-      // `--allow-destructive`). Said once, so that report is not taken for a
-      // verdict on a certified store.
-      if (!this.tenantKeyCertifiedReadFailureReported) {
-        this.tenantKeyCertifiedReadFailureReported = true;
-        this.logger.warn(
-          `[schema-drift] could not read whether this database is certified for the organization-ownership shape ` +
-            `(${e?.message ?? e}); an index keyed COALESCE(<tenant>, …) on a nullable tenant column is compared ` +
-            `as a different constraint from the plain key until it can be read.`,
-        );
-      }
-      return false;
-    }
-    this.tenantKeyCertified = true;
-    return true;
+  protected isTenantKeyCertified(): Promise<boolean> {
+    // [#29520 codemod] The body moved to `sql-driver-database-helpers.ts` (see `DatabaseHelpersHost`).
+    return DatabaseHelpersFacet.isTenantKeyCertified.call(databaseHelpersHost.of(this));
   }
 
-  protected async resolveFileColumnsMoved(): Promise<void> {
-    const resolver = this.fileColumnsMovedResolver;
-    if (!resolver) {
-      // A driver with nothing to ask has still settled its arm: `false`, the
-      // JSON encoding, which is what it will keep for the rest of its life.
-      // Recorded so a resolver supplied AFTER the first `initObjects` is
-      // refused rather than silently changing an already-frozen answer.
-      this.fileColumnsMovedAsked = true;
-      return;
-    }
-    this.fileColumnsMovedAsked = true;
-    this.fileColumnsMovedResolver = undefined;
-    try {
-      // [#20768] Asked inside the pre-DDL scope. On a new database the ledger
-      // the resolver reads does not exist yet, and that refusal is not a
-      // fault. The answer is unchanged — see {@link PRE_DDL_QUESTION_SCOPE}.
-      this.fileColumnsMoved = (await PRE_DDL_QUESTION_SCOPE.run(true, resolver)) === true;
-    } catch {
-      this.fileColumnsMoved = false;
-    }
+  protected resolveFileColumnsMoved(): Promise<void> {
+    // [#29520 codemod] The body moved to `sql-driver-database-helpers.ts` (see `DatabaseHelpersHost`).
+    return DatabaseHelpersFacet.resolveFileColumnsMoved.call(databaseHelpersHost.of(this));
   }
 
   /**
@@ -12092,7 +10249,8 @@ export class SqlDriver implements IDataDriver {
    * this question — it is a list of ids and a JSON column on every deployment.
    */
   protected mediaColumnIsJson(): boolean {
-    return !this.fileColumnsMoved;
+    // [#29520 codemod] The body moved to `sql-driver-database-helpers.ts` (see `DatabaseHelpersHost`).
+    return DatabaseHelpersFacet.mediaColumnIsJson.call(databaseHelpersHost.of(this));
   }
 
   /**
@@ -12117,66 +10275,20 @@ export class SqlDriver implements IDataDriver {
    * and keep their column unchanged.
    */
   protected isJsonField(type: string, field: any): boolean {
-    if (!isMultiValuedColumn(type, field) && FILE_REFERENCE_TYPES.has(type)) return this.mediaColumnIsJson();
-    return JSON_COLUMN_TYPES.has(type) || isMultiValuedColumn(type, field);
+    // [#29520 codemod] The body moved to `sql-driver-database-helpers.ts` (see `DatabaseHelpersHost`).
+    return DatabaseHelpersFacet.isJsonField.call(databaseHelpersHost.of(this), type, field);
   }
 
   // ── SQLite serialisation ────────────────────────────────────────────────────
 
   protected formatInput(object: string, data: any): any {
     // [#29520 codemod] The body moved to `sql-driver-sqlite-serialisation.ts` (see `SqliteSerialisationHost`).
-    const readDateFields = () => this.dateFields;
-    const readDatetimeFields = () => this.datetimeFields;
-    const readFileColumnsMoved = () => this.fileColumnsMoved;
-    const readIsSqlite = () => this.isSqlite;
-    const readJsonFields = () => this.jsonFields;
-    const readMediaFields = () => this.mediaFields;
-    const readTimeFields = () => this.timeFields;
-    const readUndeclaredAuditTimestampFields = () => this.undeclaredAuditTimestampFields;
-    const host: ThisParameterType<typeof formatInput> = {
-      get dateFields() { return readDateFields(); },
-      get datetimeFields() { return readDatetimeFields(); },
-      get fileColumnsMoved() { return readFileColumnsMoved(); },
-      get isSqlite() { return readIsSqlite(); },
-      get jsonFields() { return readJsonFields(); },
-      get mediaFields() { return readMediaFields(); },
-      storageDatetimeValue: (...a) => this.storageDatetimeValue(...a),
-      get timeFields() { return readTimeFields(); },
-      toDateOnly: (...a) => this.toDateOnly(...a),
-      get undeclaredAuditTimestampFields() { return readUndeclaredAuditTimestampFields(); },
-    };
-    return formatInput.call(host, object, data);
+    return SqliteSerialisationFacet.formatInput.call(sqliteSerialisationHost.of(this), object, data);
   }
 
   protected formatOutput(object: string, data: any): any {
     // [#29520 codemod] The body moved to `sql-driver-sqlite-serialisation.ts` (see `SqliteSerialisationHost`).
-    const readBooleanFields = () => this.booleanFields;
-    const readColumnFieldByObject = () => this.columnFieldByObject;
-    const readDateFields = () => this.dateFields;
-    const readDatetimeFields = () => this.datetimeFields;
-    const readIsMysql = () => this.isMysql;
-    const readIsSqlite = () => this.isSqlite;
-    const readJsonFields = () => this.jsonFields;
-    const readMediaFields = () => this.mediaFields;
-    const readNumericFields = () => this.numericFields;
-    const readNumericValueFields = () => this.numericValueFields;
-    const readTimeFields = () => this.timeFields;
-    const host: ThisParameterType<typeof formatOutput> = {
-      get booleanFields() { return readBooleanFields(); },
-      get columnFieldByObject() { return readColumnFieldByObject(); },
-      get dateFields() { return readDateFields(); },
-      get datetimeFields() { return readDatetimeFields(); },
-      get isMysql() { return readIsMysql(); },
-      get isSqlite() { return readIsSqlite(); },
-      get jsonFields() { return readJsonFields(); },
-      get mediaFields() { return readMediaFields(); },
-      get numericFields() { return readNumericFields(); },
-      get numericValueFields() { return readNumericValueFields(); },
-      get timeFields() { return readTimeFields(); },
-      toDateOnly: (...a) => this.toDateOnly(...a),
-      toTimeOnly: (...a) => this.toTimeOnly(...a),
-    };
-    return formatOutput.call(host, object, data);
+    return SqliteSerialisationFacet.formatOutput.call(sqliteSerialisationHost.of(this), object, data);
   }
 
   // ── Introspection internals ─────────────────────────────────────────────────
@@ -12381,6 +10493,414 @@ export class SqlDriver implements IDataDriver {
       get knex() { return readKnex(); },
     };
     return introspectUniqueConstraints.call(host, tableName, opts);
+  }
+
+  // [#29520 codemod] Fills `SqlDriverStatics` (declared above the class) for the facet modules.
+  static {
+    Object.defineProperties(SqlDriverStatics, {
+      ASSUMED_BYTES_PER_CHAR: { get: () => SqlDriver.ASSUMED_BYTES_PER_CHAR },
+      DEFAULT_CONNECT_TIMEOUT_MS: { get: () => SqlDriver.DEFAULT_CONNECT_TIMEOUT_MS },
+      DEFAULT_CREATE_TIMEOUT_MS: { get: () => SqlDriver.DEFAULT_CREATE_TIMEOUT_MS },
+      DEFAULT_STRING_VARCHAR_CHARS: { get: () => SqlDriver.DEFAULT_STRING_VARCHAR_CHARS },
+      DIALECT_CONNECT_TIMEOUT: { get: () => SqlDriver.DIALECT_CONNECT_TIMEOUT },
+      MAX_KEYABLE_VARCHAR_CHARS: { get: () => SqlDriver.MAX_KEYABLE_VARCHAR_CHARS },
+      MAX_VARCHAR_CHARS: { get: () => SqlDriver.MAX_VARCHAR_CHARS },
+      MYSQL_EMIT_CLIENTS: { get: () => SqlDriver.MYSQL_EMIT_CLIENTS },
+      MYSQL_ROW_BYTE_BUDGET: { get: () => SqlDriver.MYSQL_ROW_BYTE_BUDGET },
+      MYSQL_TEXT_TEMPORAL_TYPES: { get: () => SqlDriver.MYSQL_TEXT_TEMPORAL_TYPES },
+      PG_OID_DATE: { get: () => SqlDriver.PG_OID_DATE },
+      PG_OID_DATE_ARRAY: { get: () => SqlDriver.PG_OID_DATE_ARRAY },
+      PG_OID_TEXT_ARRAY: { get: () => SqlDriver.PG_OID_TEXT_ARRAY },
+      POSTGRES_EMIT_CLIENTS: { get: () => SqlDriver.POSTGRES_EMIT_CLIENTS },
+      POSTGRES_WIRE_CLIENTS: { get: () => SqlDriver.POSTGRES_WIRE_CLIENTS },
+      POSTGRES_WIRE_ONLY_CLIENTS: { get: () => SqlDriver.POSTGRES_WIRE_ONLY_CLIENTS },
+      SQLITE_AUTO_VACUUM_INCREMENTAL: { get: () => SqlDriver.SQLITE_AUTO_VACUUM_INCREMENTAL },
+      SQLITE_EMIT_CLIENTS: { get: () => SqlDriver.SQLITE_EMIT_CLIENTS },
+      SQLITE_FILE_REFUSALS: { get: () => SqlDriver.SQLITE_FILE_REFUSALS },
+      SQLITE_JOURNAL_MODE_ENV: { get: () => SqlDriver.SQLITE_JOURNAL_MODE_ENV },
+      autoVacuumOf: { value: (...args: Parameters<typeof SqlDriver.autoVacuumOf>) => SqlDriver.autoVacuumOf(...args) },
+      clientSpelling: { value: (...args: Parameters<typeof SqlDriver.clientSpelling>) => SqlDriver.clientSpelling(...args) },
+      emissionClients: { value: (...args: Parameters<typeof SqlDriver.emissionClients>) => SqlDriver.emissionClients(...args) },
+      hashShadowColumnFor: { value: (...args: Parameters<typeof SqlDriver.hashShadowColumnFor>) => SqlDriver.hashShadowColumnFor(...args) },
+      isSqliteBusyError: { value: (...args: Parameters<typeof SqlDriver.isSqliteBusyError>) => SqlDriver.isSqliteBusyError(...args) },
+      journalModeOf: { value: (...args: Parameters<typeof SqlDriver.journalModeOf>) => SqlDriver.journalModeOf(...args) },
+      varcharPackLength: { value: (...args: Parameters<typeof SqlDriver.varcharPackLength>) => SqlDriver.varcharPackLength(...args) },
+      withMysqlCalendarDayAsText: { value: (...args: Parameters<typeof SqlDriver.withMysqlCalendarDayAsText>) => SqlDriver.withMysqlCalendarDayAsText(...args) },
+      withPostgresCalendarDayAsText: { value: (...args: Parameters<typeof SqlDriver.withPostgresCalendarDayAsText>) => SqlDriver.withPostgresCalendarDayAsText(...args) },
+      withUtcSession: { value: (...args: Parameters<typeof SqlDriver.withUtcSession>) => SqlDriver.withUtcSession(...args) },
+    });
+  }
+
+  // [#29520 codemod] Installs each facet's host factory (`sql-driver-facet-hosts.ts`): a static block adds
+  // no member to the class, so the published `.d.ts` does not move.
+  static {
+    aggregationHost.install((driver) => ({
+      aggregandColumnClassOf: (...a) => driver.aggregandColumnClassOf(...a),
+      aggregateBackendFault: (...a) => driver.aggregateBackendFault(...a),
+      aliasIdentifierSql: (...a) => driver.aliasIdentifierSql(...a),
+      applyFilters: (...a) => driver.applyFilters(...a),
+      applyTenantScope: (...a) => driver.applyTenantScope(...a),
+      get booleanFields() { return driver.booleanFields; },
+      buildDateBucketExpr: (...a) => driver.buildDateBucketExpr(...a),
+      coercionKey: (...a) => driver.coercionKey(...a),
+      get config() { return driver.config; },
+      get dateGranularityCapabilities() { return driver.dateGranularityCapabilities; },
+      get dialectName() { return driver.dialectName; },
+      foldEmptyAggregateAnswers: (...a) => driver.foldEmptyAggregateAnswers(...a),
+      get fractionalNumericFields() { return driver.fractionalNumericFields; },
+      get getBuilder() { return driver.getBuilder.bind(driver); },
+      get knex() { return driver.knex; },
+      mapAggregateFunc: (...a) => driver.mapAggregateFunc(...a),
+      get numericFields() { return driver.numericFields; },
+      presentReadColumns: (...a) => driver.presentReadColumns(...a),
+      readPresentationKind: (...a) => driver.readPresentationKind(...a),
+    }));
+    bulkOperationsHost.install((driver) => ({
+      applyFilters: (...a) => driver.applyFilters(...a),
+      applyTenantScope: (...a) => driver.applyTenantScope(...a),
+      applyWriteColumnMap: (...a) => driver.applyWriteColumnMap(...a),
+      auditMissingTenant: (...a) => driver.auditMissingTenant(...a),
+      autoNumberCounterKey: (...a) => driver.autoNumberCounterKey(...a),
+      backendStatementFault: (...a) => driver.backendStatementFault(...a),
+      collidingAutoNumberReservations: (...a) => driver.collidingAutoNumberReservations(...a),
+      fillAutoNumberFields: (...a) => driver.fillAutoNumberFields(...a),
+      formatInput: (...a) => driver.formatInput(...a),
+      formatOutput: (...a) => driver.formatOutput(...a),
+      get getBuilder() { return driver.getBuilder.bind(driver); },
+      injectTenantOnInsert: (...a) => driver.injectTenantOnInsert(...a),
+      get insertReturnsStoredRows() { return driver.insertReturnsStoredRows; },
+      keepSuppliedUpdatedAt: (...a) => driver.keepSuppliedUpdatedAt(...a),
+      get knex() { return driver.knex; },
+      readBackInsertedRows: (...a) => driver.readBackInsertedRows(...a),
+      resyncSequenceToDataMax: (...a) => driver.resyncSequenceToDataMax(...a),
+      rotationShardsOf: (...a) => driver.rotationShardsOf(...a),
+      rotationWriteTarget: (...a) => driver.rotationWriteTarget(...a),
+      stampInsertTimestamps: (...a) => driver.stampInsertTimestamps(...a),
+      stampsUpdatedAt: (...a) => driver.stampsUpdatedAt(...a),
+      unresolvableFilterColumnRefusal: (...a) => driver.unresolvableFilterColumnRefusal(...a),
+      update: (...a) => driver.update(...a),
+      updateWithPresumedTimestamp: (...a) => driver.updateWithPresumedTimestamp(...a),
+      updatedAtStamp: (...a) => driver.updatedAtStamp(...a),
+      updatedAtStampIsPresumed: (...a) => driver.updatedAtStampIsPresumed(...a),
+    }));
+    classHeadHost.install((driver) => ({
+      assertDialectEmits: (...a) => driver.assertDialectEmits(...a),
+      buildDateBucketExpr: (...a) => driver.buildDateBucketExpr(...a),
+      get config() { return driver.config; },
+      get isSqlite() { return driver.isSqlite; },
+      get knex() { return driver.knex; },
+      get logger() { return driver.logger; },
+      get openedEmptyInMemory() { return driver.openedEmptyInMemory; },
+      set openedEmptyInMemory(v) { driver.openedEmptyInMemory = v; },
+      get schemaMode() { return driver.schemaMode; },
+    }));
+    columnCreationHost.install((driver) => ({
+      explainHashShadowDuplicate: (...a) => driver.explainHashShadowDuplicate(...a),
+      explainRowSizeOverflow: (...a) => driver.explainRowSizeOverflow(...a),
+      hashShadowColumnState: (...a) => driver.hashShadowColumnState(...a),
+      get isMysql() { return driver.isMysql; },
+      get isSqlite() { return driver.isSqlite; },
+      get knex() { return driver.knex; },
+      logDurabilityFailure: (...a) => driver.logDurabilityFailure(...a),
+      get logger() { return driver.logger; },
+      rowWidthProfile: (...a) => driver.rowWidthProfile(...a),
+      schemaBytesPerChar: (...a) => driver.schemaBytesPerChar(...a),
+      varcharColumnChars: (...a) => driver.varcharColumnChars(...a),
+    }));
+    crudHost.install((driver) => ({
+      applyFilters: (...a) => driver.applyFilters(...a),
+      applyTenantScope: (...a) => driver.applyTenantScope(...a),
+      applyWriteColumnMap: (...a) => driver.applyWriteColumnMap(...a),
+      assertBareKnexSafe: (...a) => driver.assertBareKnexSafe(...a),
+      auditMissingTenant: (...a) => driver.auditMissingTenant(...a),
+      backendStatementFault: (...a) => driver.backendStatementFault(...a),
+      collidingAutoNumberReservations: (...a) => driver.collidingAutoNumberReservations(...a),
+      createSequencesTable: (...a) => driver.createSequencesTable(...a),
+      decorateHashShadowDuplicate: (...a) => driver.decorateHashShadowDuplicate(...a),
+      ensureSequencesKeyHashShape: (...a) => driver.ensureSequencesKeyHashShape(...a),
+      fillAutoNumberFields: (...a) => driver.fillAutoNumberFields(...a),
+      findRows: (...a) => driver.findRows(...a),
+      formatInput: (...a) => driver.formatInput(...a),
+      formatOutput: (...a) => driver.formatOutput(...a),
+      get getBuilder() { return driver.getBuilder.bind(driver); },
+      injectTenantOnInsert: (...a) => driver.injectTenantOnInsert(...a),
+      get insertReturnsStoredRows() { return driver.insertReturnsStoredRows; },
+      get isSqlite() { return driver.isSqlite; },
+      get knex() { return driver.knex; },
+      mapSortField: (...a) => driver.mapSortField(...a),
+      orderKeysFor: (...a) => driver.orderKeysFor(...a),
+      readBackInsertedRows: (...a) => driver.readBackInsertedRows(...a),
+      remoteColumn: (...a) => driver.remoteColumn(...a),
+      resolveTenantField: (...a) => driver.resolveTenantField(...a),
+      resyncSequenceToDataMax: (...a) => driver.resyncSequenceToDataMax(...a),
+      rotationWriteTarget: (...a) => driver.rotationWriteTarget(...a),
+      get sequencesHasKeyHash() { return driver.sequencesHasKeyHash; },
+      set sequencesHasKeyHash(v) { driver.sequencesHasKeyHash = v; },
+      get sequencesTableEnsurePromise() { return driver.sequencesTableEnsurePromise; },
+      set sequencesTableEnsurePromise(v) { driver.sequencesTableEnsurePromise = v; },
+      get sequencesTableReady() { return driver.sequencesTableReady; },
+      set sequencesTableReady(v) { driver.sequencesTableReady = v; },
+      stampInsertTimestamps: (...a) => driver.stampInsertTimestamps(...a),
+      unresolvableFilterColumnRefusal: (...a) => driver.unresolvableFilterColumnRefusal(...a),
+    }));
+    databaseHelpersHost.install((driver) => ({
+      get config() { return driver.config; },
+      get fileColumnsMoved() { return driver.fileColumnsMoved; },
+      set fileColumnsMoved(v) { driver.fileColumnsMoved = v; },
+      get fileColumnsMovedAsked() { return driver.fileColumnsMovedAsked; },
+      set fileColumnsMovedAsked(v) { driver.fileColumnsMovedAsked = v; },
+      get fileColumnsMovedDeclared() { return driver.fileColumnsMovedDeclared; },
+      get fileColumnsMovedResolver() { return driver.fileColumnsMovedResolver; },
+      set fileColumnsMovedResolver(v) { driver.fileColumnsMovedResolver = v; },
+      get isSqlite() { return driver.isSqlite; },
+      get logger() { return driver.logger; },
+      mediaColumnIsJson: (...a) => driver.mediaColumnIsJson(...a),
+      get openedEmptyInMemory() { return driver.openedEmptyInMemory; },
+      get tenantKeyCertified() { return driver.tenantKeyCertified; },
+      set tenantKeyCertified(v) { driver.tenantKeyCertified = v; },
+      get tenantKeyCertifiedReadFailureReported() { return driver.tenantKeyCertifiedReadFailureReported; },
+      set tenantKeyCertifiedReadFailureReported(v) { driver.tenantKeyCertifiedReadFailureReported = v; },
+      get tenantKeyCertifiedResolver() { return driver.tenantKeyCertifiedResolver; },
+      set tenantKeyCertifiedResolver(v) { driver.tenantKeyCertifiedResolver = v; },
+    }));
+    deferredDdlHost.install((driver) => ({
+      get deferredDdl() { return driver.deferredDdl; },
+      set deferredDdl(v) { driver.deferredDdl = v; },
+      get deferredSchemaObjects() { return driver.deferredSchemaObjects; },
+      get flushingDeferredDdl() { return driver.flushingDeferredDdl; },
+      set flushingDeferredDdl(v) { driver.flushingDeferredDdl = v; },
+      initObjects: (...a) => driver.initObjects(...a),
+      previewDeferredSchemaWork: (...a) => driver.previewDeferredSchemaWork(...a),
+      get tablesCreatedHere() { return driver.tablesCreatedHere; },
+      get tablesFoundExisting() { return driver.tablesFoundExisting; },
+    }));
+    distinctHost.install((driver) => ({
+      applyFilters: (...a) => driver.applyFilters(...a),
+      applyTenantScope: (...a) => driver.applyTenantScope(...a),
+      coercionKey: (...a) => driver.coercionKey(...a),
+      distinctBackendFault: (...a) => driver.distinctBackendFault(...a),
+      get getBuilder() { return driver.getBuilder.bind(driver); },
+      presentReadValue: (...a) => driver.presentReadValue(...a),
+      readPresentationKind: (...a) => driver.readPresentationKind(...a),
+    }));
+    fieldMappingHost.install((driver) => ({
+      get fieldColumnByObject() { return driver.fieldColumnByObject; },
+      get logger() { return driver.logger; },
+      get managedObjectFields() { return driver.managedObjectFields; },
+      get nondeterministicPagingWarned() { return driver.nondeterministicPagingWarned; },
+      paginationTieBreaker: (...a) => driver.paginationTieBreaker(...a),
+    }));
+    filterHelpersHost.install((driver) => ({
+      applyFalseConstant: (...a) => driver.applyFalseConstant(...a),
+      applyFilterCondition: (...a) => driver.applyFilterCondition(...a),
+      applyLike: (...a) => driver.applyLike(...a),
+      applyNormalizedComparison: (...a) => driver.applyNormalizedComparison(...a),
+      assertOperatorAppliesToColumn: (...a) => driver.assertOperatorAppliesToColumn(...a),
+      get booleanFields() { return driver.booleanFields; },
+      get canonicalDatetimeFields() { return driver.canonicalDatetimeFields; },
+      get canonicalTimeFields() { return driver.canonicalTimeFields; },
+      coerceFilterValue: (...a) => driver.coerceFilterValue(...a),
+      coercionKey: (...a) => driver.coercionKey(...a),
+      get dateFields() { return driver.dateFields; },
+      get datetimeFields() { return driver.datetimeFields; },
+      filterColumnExpr: (...a) => driver.filterColumnExpr(...a),
+      isJsonColumn: (...a) => driver.isJsonColumn(...a),
+      get isMysql() { return driver.isMysql; },
+      get isSqlite() { return driver.isSqlite; },
+      get jsonFields() { return driver.jsonFields; },
+      get logger() { return driver.logger; },
+      get managedObjectFields() { return driver.managedObjectFields; },
+      get mediaFields() { return driver.mediaFields; },
+      needsLegacyDatetimeRepair: (...a) => driver.needsLegacyDatetimeRepair(...a),
+      needsLegacyTimeRepair: (...a) => driver.needsLegacyTimeRepair(...a),
+      get numericFields() { return driver.numericFields; },
+      get objectByPhysicalTable() { return driver.objectByPhysicalTable; },
+      presentReadValue: (...a) => driver.presentReadValue(...a),
+      remoteColumn: (...a) => driver.remoteColumn(...a),
+      resolveWithheldFilterRefusal: (...a) => driver.resolveWithheldFilterRefusal(...a),
+      sqliteCanonicalDatetimeSql: (...a) => driver.sqliteCanonicalDatetimeSql(...a),
+      sqliteCanonicalTimeSql: (...a) => driver.sqliteCanonicalTimeSql(...a),
+      storageDatetimeValue: (...a) => driver.storageDatetimeValue(...a),
+      tableNameForBuilder: (...a) => driver.tableNameForBuilder(...a),
+      temporalFieldKind: (...a) => driver.temporalFieldKind(...a),
+      get timeFields() { return driver.timeFields; },
+      toDateOnly: (...a) => driver.toDateOnly(...a),
+      toTimeOnly: (...a) => driver.toTimeOnly(...a),
+      get valueShapeFields() { return driver.valueShapeFields; },
+    }));
+    internalHelpersHost.install((driver) => ({
+      applyFilters: (...a) => driver.applyFilters(...a),
+      applyTenantScope: (...a) => driver.applyTenantScope(...a),
+      get getBuilder() { return driver.getBuilder.bind(driver); },
+      isMultiTenantMode: (...a) => driver.isMultiTenantMode(...a),
+      get knex() { return driver.knex; },
+      get logger() { return driver.logger; },
+      remoteColumn: (...a) => driver.remoteColumn(...a),
+      resolveTenantField: (...a) => driver.resolveTenantField(...a),
+      get tenantAuditWarned() { return driver.tenantAuditWarned; },
+      get tenantFieldByTable() { return driver.tenantFieldByTable; },
+    }));
+    lifecycleHost.install((driver) => ({
+      applyAutoVacuumIncremental: (...a) => driver.applyAutoVacuumIncremental(...a),
+      applySqliteJournalMode: (...a) => driver.applySqliteJournalMode(...a),
+      get config() { return driver.config; },
+      get declaredJournalMode() { return driver.declaredJournalMode; },
+      ensureDatabaseExists: (...a) => driver.ensureDatabaseExists(...a),
+      get isSqlite() { return driver.isSqlite; },
+      get knex() { return driver.knex; },
+      get logger() { return driver.logger; },
+      releaseRefusedSqliteConnection: (...a) => driver.releaseRefusedSqliteConnection(...a),
+      resolveSqliteJournalMode: (...a) => driver.resolveSqliteJournalMode(...a),
+      sqliteFilename: (...a) => driver.sqliteFilename(...a),
+      get supportsWalJournal() { return driver.supportsWalJournal; },
+      verifyWalReadable: (...a) => driver.verifyWalReadable(...a),
+    }));
+    managedDriftHost.install((driver) => ({
+      introspectIndexes: (...a) => driver.introspectIndexes(...a),
+      get isMysql() { return driver.isMysql; },
+      get isPostgres() { return driver.isPostgres; },
+      get knex() { return driver.knex; },
+      syncDeclaredIndexes: (...a) => driver.syncDeclaredIndexes(...a),
+      uniqueIndexesFromFields: (...a) => driver.uniqueIndexesFromFields(...a),
+    }));
+    queryPlanHost.install((driver) => ({
+      analyzeQuery: (...a) => driver.analyzeQuery(...a),
+      applyFilters: (...a) => driver.applyFilters(...a),
+      applyTenantScope: (...a) => driver.applyTenantScope(...a),
+      get config() { return driver.config; },
+      get getBuilder() { return driver.getBuilder.bind(driver); },
+      get isMysql() { return driver.isMysql; },
+      get isPostgres() { return driver.isPostgres; },
+      get isSqlite() { return driver.isSqlite; },
+      get knex() { return driver.knex; },
+      mapSortField: (...a) => driver.mapSortField(...a),
+    }));
+    rotationHost.install((driver) => ({
+      assertSchemaMutable: (...a) => driver.assertSchemaMutable(...a),
+      get autoNumberFields() { return driver.autoNumberFields; },
+      get booleanFields() { return driver.booleanFields; },
+      computeAndRecordTenantField: (...a) => driver.computeAndRecordTenantField(...a),
+      computeTenantField: (...a) => driver.computeTenantField(...a),
+      get dateFields() { return driver.dateFields; },
+      get datetimeFields() { return driver.datetimeFields; },
+      get dialectName() { return driver.dialectName; },
+      ensureRotation: (...a) => driver.ensureRotation(...a),
+      get fractionalNumericFields() { return driver.fractionalNumericFields; },
+      isJsonField: (...a) => driver.isJsonField(...a),
+      get jsonFields() { return driver.jsonFields; },
+      get knex() { return driver.knex; },
+      get managedObjectFields() { return driver.managedObjectFields; },
+      get managedObjectIndexes() { return driver.managedObjectIndexes; },
+      get mediaFields() { return driver.mediaFields; },
+      get numericFields() { return driver.numericFields; },
+      get numericValueFields() { return driver.numericValueFields; },
+      get organizationObjectRegistered() { return driver.organizationObjectRegistered; },
+      set organizationObjectRegistered(v) { driver.organizationObjectRegistered = v; },
+      get physicalKeyIndexes() { return driver.physicalKeyIndexes; },
+      registerManagedObjectMetadata: (...a) => driver.registerManagedObjectMetadata(...a),
+      get rotationStateByTable() { return driver.rotationStateByTable; },
+      get supportsRotation() { return driver.supportsRotation; },
+      get tablesWithTimestamps() { return driver.tablesWithTimestamps; },
+      get tenantFieldByTable() { return driver.tenantFieldByTable; },
+      get tenantOptOutByTable() { return driver.tenantOptOutByTable; },
+      get timeFields() { return driver.timeFields; },
+      get undeclaredAuditTimestampFields() { return driver.undeclaredAuditTimestampFields; },
+      get updatedAtColumnState() { return driver.updatedAtColumnState; },
+      get valueShapeFields() { return driver.valueShapeFields; },
+    }));
+    schemaSyncSectionHost.install((driver) => ({
+      assertSchemaMutable: (...a) => driver.assertSchemaMutable(...a),
+      initObjects: (...a) => driver.initObjects(...a),
+      get isSqlite() { return driver.isSqlite; },
+      get knex() { return driver.knex; },
+    }));
+    sequenceSemanticsHost.install((driver) => ({
+      applyTenantScope: (...a) => driver.applyTenantScope(...a),
+      applyWriteColumnMap: (...a) => driver.applyWriteColumnMap(...a),
+      assertConflictTargetBackedWithoutClause: (...a) => driver.assertConflictTargetBackedWithoutClause(...a),
+      assertConflictTargetHonoured: (...a) => driver.assertConflictTargetHonoured(...a),
+      assertMergeLandedInWrittenOrganization: (...a) => driver.assertMergeLandedInWrittenOrganization(...a),
+      assertMergeLandedOnSuppliedIdentity: (...a) => driver.assertMergeLandedOnSuppliedIdentity(...a),
+      auditMissingTenant: (...a) => driver.auditMissingTenant(...a),
+      get autoNumberFields() { return driver.autoNumberFields; },
+      collidingAutoNumberReservations: (...a) => driver.collidingAutoNumberReservations(...a),
+      createSequencesTable: (...a) => driver.createSequencesTable(...a),
+      defineSequencesTable: (...a) => driver.defineSequencesTable(...a),
+      escapeLikePrefix: (...a) => driver.escapeLikePrefix(...a),
+      fillAutoNumberFields: (...a) => driver.fillAutoNumberFields(...a),
+      formatInput: (...a) => driver.formatInput(...a),
+      formatOutput: (...a) => driver.formatOutput(...a),
+      get getBuilder() { return driver.getBuilder.bind(driver); },
+      injectTenantOnInsert: (...a) => driver.injectTenantOnInsert(...a),
+      insertOnlyUpsertColumns: (...a) => driver.insertOnlyUpsertColumns(...a),
+      get isMysql() { return driver.isMysql; },
+      get isPostgres() { return driver.isPostgres; },
+      get isSqlite() { return driver.isSqlite; },
+      keepSuppliedUpdatedAt: (...a) => driver.keepSuppliedUpdatedAt(...a),
+      get knex() { return driver.knex; },
+      get logger() { return driver.logger; },
+      maxAutonumberCounter: (...a) => driver.maxAutonumberCounter(...a),
+      mergeLandsInWrittenOrganization: (...a) => driver.mergeLandsInWrittenOrganization(...a),
+      observedUpdatedAtColumn: (...a) => driver.observedUpdatedAtColumn(...a),
+      get organizationObjectRegistered() { return driver.organizationObjectRegistered; },
+      get physicalTableByObject() { return driver.physicalTableByObject; },
+      remoteColumn: (...a) => driver.remoteColumn(...a),
+      resolveSequenceTenantId: (...a) => driver.resolveSequenceTenantId(...a),
+      resolveTenantField: (...a) => driver.resolveTenantField(...a),
+      resyncSequenceToDataMax: (...a) => driver.resyncSequenceToDataMax(...a),
+      rotatedUpdateById: (...a) => driver.rotatedUpdateById(...a),
+      rotationShardsOf: (...a) => driver.rotationShardsOf(...a),
+      rotationWriteTarget: (...a) => driver.rotationWriteTarget(...a),
+      sequenceKeyHash: (...a) => driver.sequenceKeyHash(...a),
+      get sequencesHasKeyHash() { return driver.sequencesHasKeyHash; },
+      set sequencesHasKeyHash(v) { driver.sequencesHasKeyHash = v; },
+      stampInsertTimestamps: (...a) => driver.stampInsertTimestamps(...a),
+      stampUpsertUpdatedAt: (...a) => driver.stampUpsertUpdatedAt(...a),
+      stampsUpdatedAt: (...a) => driver.stampsUpdatedAt(...a),
+      get tablesWithTimestamps() { return driver.tablesWithTimestamps; },
+      updateWithPresumedTimestamp: (...a) => driver.updateWithPresumedTimestamp(...a),
+      get updatedAtColumnState() { return driver.updatedAtColumnState; },
+      updatedAtStamp: (...a) => driver.updatedAtStamp(...a),
+      updatedAtStampIsPresumed: (...a) => driver.updatedAtStampIsPresumed(...a),
+      upsertTenantGuard: (...a) => driver.upsertTenantGuard(...a),
+    }));
+    sqliteSerialisationHost.install((driver) => ({
+      get booleanFields() { return driver.booleanFields; },
+      get columnFieldByObject() { return driver.columnFieldByObject; },
+      get dateFields() { return driver.dateFields; },
+      get datetimeFields() { return driver.datetimeFields; },
+      get fileColumnsMoved() { return driver.fileColumnsMoved; },
+      get isMysql() { return driver.isMysql; },
+      get isSqlite() { return driver.isSqlite; },
+      get jsonFields() { return driver.jsonFields; },
+      get mediaFields() { return driver.mediaFields; },
+      get numericFields() { return driver.numericFields; },
+      get numericValueFields() { return driver.numericValueFields; },
+      storageDatetimeValue: (...a) => driver.storageDatetimeValue(...a),
+      get timeFields() { return driver.timeFields; },
+      toDateOnly: (...a) => driver.toDateOnly(...a),
+      toTimeOnly: (...a) => driver.toTimeOnly(...a),
+      get undeclaredAuditTimestampFields() { return driver.undeclaredAuditTimestampFields; },
+    }));
+    transactionsSectionHost.install((driver) => ({
+      get activeTransactions() { return driver.activeTransactions; },
+      set activeTransactions(v) { driver.activeTransactions = v; },
+      get openTransactions() { return driver.openTransactions; },
+    }));
+    windowFunctionBuilderHost.install((driver) => ({
+      get knex() { return driver.knex; },
+      mapSortField: (...a) => driver.mapSortField(...a),
+    }));
+    windowFunctionsHost.install((driver) => ({
+      aliasIdentifierSql: (...a) => driver.aliasIdentifierSql(...a),
+      applyFilters: (...a) => driver.applyFilters(...a),
+      applyTenantScope: (...a) => driver.applyTenantScope(...a),
+      buildWindowFunction: (...a) => driver.buildWindowFunction(...a),
+      formatOutput: (...a) => driver.formatOutput(...a),
+      get getBuilder() { return driver.getBuilder.bind(driver); },
+      get knex() { return driver.knex; },
+      mapSortField: (...a) => driver.mapSortField(...a),
+    }));
   }
 }
 

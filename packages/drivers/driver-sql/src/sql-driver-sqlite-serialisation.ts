@@ -5,22 +5,27 @@
  * bodies of `formatInput`, `formatOutput` moved out of `sql-driver.ts` whole by
  * `scripts/codemod-split-sql-driver.mjs`.
  *
- * A MOVE, not a redesign. Each function below is the body of the `SqlDriver`
+ * A MOVE, not a redesign. {@link SqliteSerialisationFacet} is a stateless facet of `SqlDriver`
+ * (ruling 6624345766): each static method of it is the body of the `SqlDriver`
  * method of the same name exactly as it stood: not re-indented, not
- * formatted, not edited. The method stays on the class with its docblock and
- * signature, so the published `dist/*.d.ts`, an instance spy and a subclass
- * override are what they were; the docblock there is the contract.
+ * formatted, not edited. The method stays on the class as a one-call stub with
+ * its signature, so the published surface, an instance spy and a subclass
+ * override are what they were. A public or protected method keeps its
+ * docblock on the class, the contract; a private method's docblock moved here
+ * with its body. The state stays on `SqlDriver`.
  *
- * The bodies reach the class through {@link SqliteSerialisationHost}: exactly the
- * `SqlDriver` members they read. Each method hands its body one literal of the
- * members that body reads, plus a `.call`: methods go as closures that call
- * them on the driver at call time (the builder factory as a bound reference),
- * so a subclass override or an instance spy is still the one reached; fields
- * and accessors go as GETTERS, read when the body reads them, as they were on
- * the class.
+ * The bodies reach the class through {@link SqliteSerialisationHost}: exactly
+ * the `SqlDriver` members they read, private ones included. Every stub hands
+ * its body, by a `.call`, the same host: `sqliteSerialisationHost` in
+ * `sql-driver-facet-hosts.ts`, built once per driver by the class's static
+ * block. Methods go as closures that call them on the driver at call time, so a
+ * subclass override or an instance spy is still the one reached; fields and
+ * accessors go as GETTERS, read when the body reads them, as they were on the
+ * class, and a field a body assigns goes with a SETTER that assigns it on the
+ * driver.
  *
- * The module imports `sql-driver.ts` for types only, so the two modules form
- * no evaluation cycle. `index.ts` re-exports nothing from this module.
+ * The module imports `sql-driver.ts` for types only, so the two modules form no
+ * evaluation cycle. `index.ts` re-exports nothing from this module.
  */
 
 import {
@@ -29,10 +34,11 @@ import {
 import type { SqlDriver } from './sql-driver.js';
 
 /**
- * The `SqlDriver` members the functions below read — every one of them, and
- * no other. Each is typed AS the class member (an indexed access on the
- * class), so a change to a member's signature on the class is a change here
- * too. `readonly` members are the getters.
+ * The `SqlDriver` members the bodies of {@link SqliteSerialisationFacet} read — every one of
+ * them, and no other. Each is typed AS the class member (an indexed access on
+ * the class), so a change to a member's signature on the class is a change
+ * here too. `readonly` members are the getters; the others are fields a body
+ * assigns.
  */
 export interface SqliteSerialisationHost {
   readonly booleanFields: SqlDriver['booleanFields'];
@@ -53,8 +59,10 @@ export interface SqliteSerialisationHost {
   readonly undeclaredAuditTimestampFields: SqlDriver['undeclaredAuditTimestampFields'];
 }
 
-/** The body of `SqlDriver#formatInput`; the method's docblock there is its contract. */
-export function formatInput(this: Pick<SqliteSerialisationHost, 'dateFields' | 'datetimeFields' | 'fileColumnsMoved' | 'isSqlite' | 'jsonFields' | 'mediaFields' | 'storageDatetimeValue' | 'timeFields' | 'toDateOnly' | 'undeclaredAuditTimestampFields'>, object: string, data: any): any {
+/** The bodies of the "SQLite serialisation" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
+export class SqliteSerialisationFacet {
+  /** The body of `SqlDriver#formatInput`; the method's docblock there is its contract. */
+  static formatInput(this: Pick<SqliteSerialisationHost, 'dateFields' | 'datetimeFields' | 'fileColumnsMoved' | 'isSqlite' | 'jsonFields' | 'mediaFields' | 'storageDatetimeValue' | 'timeFields' | 'toDateOnly' | 'undeclaredAuditTimestampFields'>, object: string, data: any): any {
     let copy: any = data;
     let copied = false;
 
@@ -262,8 +270,8 @@ export function formatInput(this: Pick<SqliteSerialisationHost, 'dateFields' | '
     return copy;
   }
 
-/** The body of `SqlDriver#formatOutput`; the method's docblock there is its contract. */
-export function formatOutput(this: Pick<SqliteSerialisationHost, 'booleanFields' | 'columnFieldByObject' | 'dateFields' | 'datetimeFields' | 'isMysql' | 'isSqlite' | 'jsonFields' | 'mediaFields' | 'numericFields' | 'numericValueFields' | 'timeFields' | 'toDateOnly' | 'toTimeOnly'>, object: string, data: any): any {
+  /** The body of `SqlDriver#formatOutput`; the method's docblock there is its contract. */
+  static formatOutput(this: Pick<SqliteSerialisationHost, 'booleanFields' | 'columnFieldByObject' | 'dateFields' | 'datetimeFields' | 'isMysql' | 'isSqlite' | 'jsonFields' | 'mediaFields' | 'numericFields' | 'numericValueFields' | 'timeFields' | 'toDateOnly' | 'toTimeOnly'>, object: string, data: any): any {
     if (!data) return data;
 
     // External columnMap (ADR-0015): rename physical remote-column keys to local
@@ -529,3 +537,4 @@ export function formatOutput(this: Pick<SqliteSerialisationHost, 'booleanFields'
 
     return data;
   }
+}

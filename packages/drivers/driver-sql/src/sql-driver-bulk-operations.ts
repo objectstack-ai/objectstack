@@ -2,26 +2,31 @@
 
 /**
  * [#29520 codemod] The "Bulk & Batch Operations" section of `SqlDriver`: the
- * bodies of `bulkCreate`, `bulkUpdate`, `updateMany`, `rotatedUpdateById`,
- * `count` moved out of `sql-driver.ts` whole by
- * `scripts/codemod-split-sql-driver.mjs`.
+ * bodies of `bulkCreate`, `bulkUpdate`, `bulkDelete`, `updateMany`,
+ * `deleteMany`, `rotatedUpdateById`, `count` moved out of `sql-driver.ts` whole
+ * by `scripts/codemod-split-sql-driver.mjs`.
  *
- * A MOVE, not a redesign. Each function below is the body of the `SqlDriver`
+ * A MOVE, not a redesign. {@link BulkOperationsFacet} is a stateless facet of `SqlDriver`
+ * (ruling 6624345766): each static method of it is the body of the `SqlDriver`
  * method of the same name exactly as it stood: not re-indented, not
- * formatted, not edited. The method stays on the class with its docblock and
- * signature, so the published `dist/*.d.ts`, an instance spy and a subclass
- * override are what they were; the docblock there is the contract.
+ * formatted, not edited. The method stays on the class as a one-call stub with
+ * its signature, so the published surface, an instance spy and a subclass
+ * override are what they were. A public or protected method keeps its
+ * docblock on the class, the contract; a private method's docblock moved here
+ * with its body. The state stays on `SqlDriver`.
  *
  * The bodies reach the class through {@link BulkOperationsHost}: exactly the
- * `SqlDriver` members they read. Each method hands its body one literal of the
- * members that body reads, plus a `.call`: methods go as closures that call
- * them on the driver at call time (the builder factory as a bound reference),
- * so a subclass override or an instance spy is still the one reached; fields
- * and accessors go as GETTERS, read when the body reads them, as they were on
- * the class.
+ * `SqlDriver` members they read, private ones included. Every stub hands its
+ * body, by a `.call`, the same host: `bulkOperationsHost` in
+ * `sql-driver-facet-hosts.ts`, built once per driver by the class's static
+ * block. Methods go as closures that call them on the driver at call time, so a
+ * subclass override or an instance spy is still the one reached; fields and
+ * accessors go as GETTERS, read when the body reads them, as they were on the
+ * class, and a field a body assigns goes with a SETTER that assigns it on the
+ * driver.
  *
- * The module imports `sql-driver.ts` for types only, so the two modules form
- * no evaluation cycle. `index.ts` re-exports nothing from this module.
+ * The module imports `sql-driver.ts` for types only, so the two modules form no
+ * evaluation cycle. `index.ts` re-exports nothing from this module.
  */
 
 import type { DriverOptions } from '@objectstack/spec/data';
@@ -33,10 +38,11 @@ import type { AutoNumberReservation } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
 
 /**
- * The `SqlDriver` members the functions below read — every one of them, and
- * no other. Each is typed AS the class member (an indexed access on the
- * class), so a change to a member's signature on the class is a change here
- * too. `readonly` members are the getters.
+ * The `SqlDriver` members the bodies of {@link BulkOperationsFacet} read — every one of
+ * them, and no other. Each is typed AS the class member (an indexed access on
+ * the class), so a change to a member's signature on the class is a change
+ * here too. `readonly` members are the getters; the others are fields a body
+ * assigns.
  */
 export interface BulkOperationsHost {
   applyFilters: SqlDriver['applyFilters'];
@@ -67,8 +73,10 @@ export interface BulkOperationsHost {
   updatedAtStampIsPresumed: SqlDriver['updatedAtStampIsPresumed'];
 }
 
-/** The body of `SqlDriver#bulkCreate`; the method's docblock there is its contract. */
-export async function bulkCreate(this: Pick<BulkOperationsHost, 'applyWriteColumnMap' | 'auditMissingTenant' | 'autoNumberCounterKey' | 'collidingAutoNumberReservations' | 'fillAutoNumberFields' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'injectTenantOnInsert' | 'insertReturnsStoredRows' | 'readBackInsertedRows' | 'resyncSequenceToDataMax' | 'rotationWriteTarget' | 'stampInsertTimestamps'>, object: string, data: any[], options?: DriverOptions): Promise<Record<string, unknown>[]> {
+/** The bodies of the "Bulk & Batch Operations" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
+export class BulkOperationsFacet {
+  /** The body of `SqlDriver#bulkCreate`; the method's docblock there is its contract. */
+  static async bulkCreate(this: Pick<BulkOperationsHost, 'applyWriteColumnMap' | 'auditMissingTenant' | 'autoNumberCounterKey' | 'collidingAutoNumberReservations' | 'fillAutoNumberFields' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'injectTenantOnInsert' | 'insertReturnsStoredRows' | 'readBackInsertedRows' | 'resyncSequenceToDataMax' | 'rotationWriteTarget' | 'stampInsertTimestamps'>, object: string, data: any[], options?: DriverOptions): Promise<Record<string, unknown>[]> {
     // Same client-side id assignment as create() (id/_id normalization,
     // nanoid fallback when neither is supplied) — a row missing an id must
     // not be silently inserted with a NULL primary key just because the
@@ -225,8 +233,8 @@ export async function bulkCreate(this: Pick<BulkOperationsHost, 'applyWriteColum
     }
   }
 
-/** The body of `SqlDriver#bulkUpdate`; the method's docblock there is its contract. */
-export async function bulkUpdate(this: Pick<BulkOperationsHost, 'knex' | 'update'>, object: string, updates: Array<{ id: string | number; data: Record<string, any> }>, options?: DriverOptions): Promise<Record<string, unknown>[]> {
+  /** The body of `SqlDriver#bulkUpdate`; the method's docblock there is its contract. */
+  static async bulkUpdate(this: Pick<BulkOperationsHost, 'knex' | 'update'>, object: string, updates: Array<{ id: string | number; data: Record<string, any> }>, options?: DriverOptions): Promise<Record<string, unknown>[]> {
     // An empty batch issues no statement, exactly as before: a BEGIN/COMMIT
     // pair — and the pool checkout behind it — buys nothing for zero rows.
     if (updates.length === 0) return [];
@@ -247,8 +255,18 @@ export async function bulkUpdate(this: Pick<BulkOperationsHost, 'knex' | 'update
     return runner.transaction(async (trx) => applyAll({ ...options, transaction: trx }));
   }
 
-/** The body of `SqlDriver#updateMany`; the method's docblock there is its contract. */
-export async function updateMany(this: Pick<BulkOperationsHost, 'applyFilters' | 'applyTenantScope' | 'applyWriteColumnMap' | 'auditMissingTenant' | 'formatInput' | 'getBuilder' | 'keepSuppliedUpdatedAt' | 'rotationShardsOf' | 'stampsUpdatedAt' | 'updateWithPresumedTimestamp' | 'updatedAtStamp' | 'updatedAtStampIsPresumed'>, object: string, query: DriverQuery, data: any, options?: DriverOptions): Promise<number> {
+  /** The body of `SqlDriver#bulkDelete`; the method's docblock there is its contract. */
+  static async bulkDelete(this: Pick<BulkOperationsHost, 'applyTenantScope' | 'auditMissingTenant' | 'getBuilder' | 'rotationShardsOf'>, object: string, ids: Array<string | number>, options?: DriverOptions): Promise<void> {
+    this.auditMissingTenant(object, 'bulkDelete', options);
+    for (const target of this.rotationShardsOf(object) ?? [object]) {
+      const builder = this.getBuilder(target, options).whereIn('id', ids);
+      this.applyTenantScope(builder, object, options);
+      await builder.delete();
+    }
+  }
+
+  /** The body of `SqlDriver#updateMany`; the method's docblock there is its contract. */
+  static async updateMany(this: Pick<BulkOperationsHost, 'applyFilters' | 'applyTenantScope' | 'applyWriteColumnMap' | 'auditMissingTenant' | 'formatInput' | 'getBuilder' | 'keepSuppliedUpdatedAt' | 'rotationShardsOf' | 'stampsUpdatedAt' | 'updateWithPresumedTimestamp' | 'updatedAtStamp' | 'updatedAtStampIsPresumed'>, object: string, query: DriverQuery, data: any, options?: DriverOptions): Promise<number> {
     this.auditMissingTenant(object, 'updateMany', options);
 
     // `data ?? {}` keeps the nullish tolerance this door already had on the
@@ -289,8 +307,21 @@ export async function updateMany(this: Pick<BulkOperationsHost, 'applyFilters' |
     return total;
   }
 
-/** The body of `SqlDriver#rotatedUpdateById`; the method's docblock there is its contract. */
-export async function rotatedUpdateById(this: Pick<BulkOperationsHost, 'applyTenantScope' | 'applyWriteColumnMap' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'keepSuppliedUpdatedAt' | 'stampsUpdatedAt' | 'updatedAtStamp'>, object: string, shards: string[], id: string | number, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown> | null> {
+  /** The body of `SqlDriver#deleteMany`; the method's docblock there is its contract. */
+  static async deleteMany(this: Pick<BulkOperationsHost, 'applyFilters' | 'applyTenantScope' | 'auditMissingTenant' | 'getBuilder' | 'rotationShardsOf'>, object: string, query: DriverQuery, options?: DriverOptions): Promise<number> {
+    this.auditMissingTenant(object, 'deleteMany', options);
+    let total = 0;
+    for (const target of this.rotationShardsOf(object) ?? [object]) {
+      const builder = this.getBuilder(target, options);
+      this.applyTenantScope(builder, object, options);
+      if (query.where) this.applyFilters(builder, query.where, options);
+      total += (await builder.delete()) || 0;
+    }
+    return total;
+  }
+
+  /** The body of `SqlDriver#rotatedUpdateById`; the method's docblock there is its contract. */
+  static async rotatedUpdateById(this: Pick<BulkOperationsHost, 'applyTenantScope' | 'applyWriteColumnMap' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'keepSuppliedUpdatedAt' | 'stampsUpdatedAt' | 'updatedAtStamp'>, object: string, shards: string[], id: string | number, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown> | null> {
     const formatted = this.applyWriteColumnMap(object, this.formatInput(object, data));
     // [commit 479fba50d] One definition of the decision, shared with {@link update}. No
     // fallback is threaded here, and that is a property of the path rather than
@@ -319,8 +350,8 @@ export async function rotatedUpdateById(this: Pick<BulkOperationsHost, 'applyTen
     return null;
   }
 
-/** The body of `SqlDriver#count`; the method's docblock there is its contract. */
-export async function count(this: Pick<BulkOperationsHost, 'applyFilters' | 'applyTenantScope' | 'backendStatementFault' | 'getBuilder' | 'unresolvableFilterColumnRefusal'>, object: string, query?: DriverQuery, options?: DriverOptions): Promise<number> {
+  /** The body of `SqlDriver#count`; the method's docblock there is its contract. */
+  static async count(this: Pick<BulkOperationsHost, 'applyFilters' | 'applyTenantScope' | 'backendStatementFault' | 'getBuilder' | 'unresolvableFilterColumnRefusal'>, object: string, query?: DriverQuery, options?: DriverOptions): Promise<number> {
     const builder = this.getBuilder(object, options);
     this.applyTenantScope(builder, object, options);
 
@@ -352,3 +383,4 @@ export async function count(this: Pick<BulkOperationsHost, 'applyFilters' | 'app
     }
     return 0;
   }
+}

@@ -3,47 +3,63 @@
 /**
  * [#29520 codemod] The
  * "The sequence semantics a second face shares, stated once" section of
- * `SqlDriver`: the bodies of `defineSequencesTable`, `autoNumberValueExists`,
- * `autoNumberCounterKey`, `update`, `assertMergeLandedOnSuppliedIdentity`,
- * `assertMergeLandedInWrittenOrganization`, `upsert` moved out of
+ * `SqlDriver`: the bodies of `resolveSequenceTenantId`, `defineSequencesTable`,
+ * `createSequencesTable`, `ensureSequencesKeyHashShape`, `scanMaxNumericTail`,
+ * `escapeLikePrefix`, `attemptWithoutPoisoning`, `autoNumberValueExists`,
+ * `autoNumberCounterKey`, `stampInsertTimestamps`, `observedUpdatedAtColumn`,
+ * `stampUpsertUpdatedAt`, `keepSuppliedUpdatedAt`, `updatedAtStamp`,
+ * `stampsUpdatedAt`, `updatedAtStampIsPresumed`, `update`,
+ * `insertOnlyUpsertColumns`, `mergeLandsInWrittenOrganization`,
+ * `assertMergeLandedOnSuppliedIdentity`,
+ * `assertMergeLandedInWrittenOrganization`, `upsert`, `delete` moved out of
  * `sql-driver.ts` whole by `scripts/codemod-split-sql-driver.mjs`.
  *
- * A MOVE, not a redesign. Each function below is the body of the `SqlDriver`
+ * A MOVE, not a redesign. {@link SequenceSemanticsFacet} is a stateless facet of `SqlDriver`
+ * (ruling 6624345766): each static method of it is the body of the `SqlDriver`
  * method of the same name exactly as it stood: not re-indented, not
- * formatted, not edited. The method stays on the class with its docblock and
- * signature, so the published `dist/*.d.ts`, an instance spy and a subclass
- * override are what they were; the docblock there is the contract.
+ * formatted, not edited. The method stays on the class as a one-call stub with
+ * its signature, so the published surface, an instance spy and a subclass
+ * override are what they were. A public or protected method keeps its
+ * docblock on the class, the contract; a private method's docblock moved here
+ * with its body. The state stays on `SqlDriver`.
  *
  * The bodies reach the class through {@link SequenceSemanticsHost}: exactly the
- * `SqlDriver` members they read. Each method hands its body one literal of the
- * members that body reads, plus a `.call`: methods go as closures that call
- * them on the driver at call time (the builder factory as a bound reference),
- * so a subclass override or an instance spy is still the one reached; fields
- * and accessors go as GETTERS, read when the body reads them, as they were on
- * the class.
+ * `SqlDriver` members they read, private ones included. Every stub hands its
+ * body, by a `.call`, the same host: `sequenceSemanticsHost` in
+ * `sql-driver-facet-hosts.ts`, built once per driver by the class's static
+ * block. Methods go as closures that call them on the driver at call time, so a
+ * subclass override or an instance spy is still the one reached; fields and
+ * accessors go as GETTERS, read when the body reads them, as they were on the
+ * class, and a field a body assigns goes with a SETTER that assigns it on the
+ * driver.
  *
- * The module imports `sql-driver.ts` for types only, so the two modules form
- * no evaluation cycle. `index.ts` re-exports nothing from this module.
+ * The module imports `sql-driver.ts` for types only, so the two modules form no
+ * evaluation cycle. `index.ts` re-exports nothing from this module.
  */
 
 import type { DriverOptions } from '@objectstack/spec/data';
+import { StorageNameMapping } from '@objectstack/spec/system';
+import { OrganizationlessCounterRefusal } from './organizationless-counter-refusal.js';
 import { isUnbackedConflictTargetError } from '@objectstack/types';
+import { GLOBAL_TENANT } from './schema-drift.js';
 import type { PhysicalIndex } from './schema-drift.js';
 import { withUpsertConflictClause } from './upsert-conflict-clause.js';
 import type { Knex } from 'knex';
 import { nanoid } from 'nanoid';
 import {
-  AUTONUMBER_COLLISION_RETRIES, DEFAULT_ID_LENGTH, isUpsertFenceRefusal, refuseCrossRowIdentityMerge,
+  AUDIT_TIMESTAMP_COLUMNS, AUTONUMBER_COLLISION_RETRIES, DEFAULT_ID_LENGTH, LIKE_ESCAPE_CHARACTER,
+  MYSQL_DATETIME_PRECISION, SEQUENCES_TABLE, isUpsertFenceRefusal, refuseCrossRowIdentityMerge,
   refuseUnbackedConflictTarget, refuseUpsertConflictOutsideWrittenOrganization,
 } from './sql-driver-top-level.js';
 import type { AutoNumberReservation } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
 
 /**
- * The `SqlDriver` members the functions below read — every one of them, and
- * no other. Each is typed AS the class member (an indexed access on the
- * class), so a change to a member's signature on the class is a change here
- * too. `readonly` members are the getters.
+ * The `SqlDriver` members the bodies of {@link SequenceSemanticsFacet} read — every one of
+ * them, and no other. Each is typed AS the class member (an indexed access on
+ * the class), so a change to a member's signature on the class is a change
+ * here too. `readonly` members are the getters; the others are fields a body
+ * assigns.
  */
 export interface SequenceSemanticsHost {
   applyTenantScope: SqlDriver['applyTenantScope'];
@@ -53,7 +69,11 @@ export interface SequenceSemanticsHost {
   assertMergeLandedInWrittenOrganization: SqlDriver['assertMergeLandedInWrittenOrganization'];
   assertMergeLandedOnSuppliedIdentity: SqlDriver['assertMergeLandedOnSuppliedIdentity'];
   auditMissingTenant: SqlDriver['auditMissingTenant'];
+  readonly autoNumberFields: SqlDriver['autoNumberFields'];
   collidingAutoNumberReservations: SqlDriver['collidingAutoNumberReservations'];
+  createSequencesTable: SqlDriver['createSequencesTable'];
+  defineSequencesTable: SqlDriver['defineSequencesTable'];
+  escapeLikePrefix: SqlDriver['escapeLikePrefix'];
   fillAutoNumberFields: SqlDriver['fillAutoNumberFields'];
   formatInput: SqlDriver['formatInput'];
   formatOutput: SqlDriver['formatOutput'];
@@ -61,10 +81,17 @@ export interface SequenceSemanticsHost {
   injectTenantOnInsert: SqlDriver['injectTenantOnInsert'];
   insertOnlyUpsertColumns: SqlDriver['insertOnlyUpsertColumns'];
   readonly isMysql: SqlDriver['isMysql'];
+  readonly isPostgres: SqlDriver['isPostgres'];
+  readonly isSqlite: SqlDriver['isSqlite'];
   keepSuppliedUpdatedAt: SqlDriver['keepSuppliedUpdatedAt'];
   readonly knex: SqlDriver['knex'];
+  readonly logger: SqlDriver['logger'];
+  maxAutonumberCounter: SqlDriver['maxAutonumberCounter'];
   mergeLandsInWrittenOrganization: SqlDriver['mergeLandsInWrittenOrganization'];
+  observedUpdatedAtColumn: SqlDriver['observedUpdatedAtColumn'];
+  readonly organizationObjectRegistered: SqlDriver['organizationObjectRegistered'];
   readonly physicalTableByObject: SqlDriver['physicalTableByObject'];
+  remoteColumn: SqlDriver['remoteColumn'];
   resolveSequenceTenantId: SqlDriver['resolveSequenceTenantId'];
   resolveTenantField: SqlDriver['resolveTenantField'];
   resyncSequenceToDataMax: SqlDriver['resyncSequenceToDataMax'];
@@ -72,17 +99,30 @@ export interface SequenceSemanticsHost {
   rotationShardsOf: SqlDriver['rotationShardsOf'];
   rotationWriteTarget: SqlDriver['rotationWriteTarget'];
   sequenceKeyHash: SqlDriver['sequenceKeyHash'];
+  sequencesHasKeyHash: SqlDriver['sequencesHasKeyHash'];
   stampInsertTimestamps: SqlDriver['stampInsertTimestamps'];
   stampUpsertUpdatedAt: SqlDriver['stampUpsertUpdatedAt'];
   stampsUpdatedAt: SqlDriver['stampsUpdatedAt'];
+  readonly tablesWithTimestamps: SqlDriver['tablesWithTimestamps'];
   updateWithPresumedTimestamp: SqlDriver['updateWithPresumedTimestamp'];
+  readonly updatedAtColumnState: SqlDriver['updatedAtColumnState'];
   updatedAtStamp: SqlDriver['updatedAtStamp'];
   updatedAtStampIsPresumed: SqlDriver['updatedAtStampIsPresumed'];
   upsertTenantGuard: SqlDriver['upsertTenantGuard'];
 }
 
-/** The body of `SqlDriver#defineSequencesTable`; the method's docblock there is its contract. */
-export function defineSequencesTable(this: Pick<SequenceSemanticsHost, 'knex'>, t: Knex.CreateTableBuilder): void {
+/** The bodies of the "The sequence semantics a second face shares, stated once" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
+export class SequenceSemanticsFacet {
+  /** The body of `SqlDriver#resolveSequenceTenantId`; the method's docblock there is its contract. */
+  static resolveSequenceTenantId(this: Pick<SequenceSemanticsHost, 'organizationObjectRegistered'>, tenantField: string | null, tenantId: string | null, table: string, field: string): string {
+    if (!tenantField) return GLOBAL_TENANT;
+    if (tenantId) return String(tenantId);
+    if (this.organizationObjectRegistered) throw new OrganizationlessCounterRefusal(table, field, tenantField);
+    return GLOBAL_TENANT;
+  }
+
+  /** The body of `SqlDriver#defineSequencesTable`; the method's docblock there is its contract. */
+  static defineSequencesTable(this: Pick<SequenceSemanticsHost, 'knex'>, t: Knex.CreateTableBuilder): void {
     t.string('key_hash', 64).notNullable().primary();
     t.string('object').notNullable();
     t.string('tenant_id').notNullable();
@@ -94,8 +134,83 @@ export function defineSequencesTable(this: Pick<SequenceSemanticsHost, 'knex'>, 
     t.timestamp('updated_at').defaultTo(this.knex.fn.now());
   }
 
-/** The body of `SqlDriver#autoNumberValueExists`; the method's docblock there is its contract. */
-export async function autoNumberValueExists(queryRunner: Knex | Knex.Transaction, reservation: AutoNumberReservation): Promise<boolean> {
+  /** The body of `SqlDriver#createSequencesTable`; the method's docblock there is its contract. */
+  static async createSequencesTable(this: Pick<SequenceSemanticsHost, 'defineSequencesTable' | 'knex'>, table: string, runner: Knex | Knex.Transaction = this.knex): Promise<void> {
+    await runner.schema.createTable(table, (t) => this.defineSequencesTable(t));
+  }
+
+  /** The body of `SqlDriver#ensureSequencesKeyHashShape`; the method's docblock there is its contract. */
+  static async ensureSequencesKeyHashShape(this: Pick<SequenceSemanticsHost, 'createSequencesTable' | 'knex' | 'logger' | 'sequenceKeyHash' | 'sequencesHasKeyHash'>, runner: Knex | Knex.Transaction = this.knex): Promise<void> {
+    if (await runner.schema.hasColumn(SEQUENCES_TABLE, 'key_hash')) {
+      this.sequencesHasKeyHash = true;
+      return;
+    }
+    const hasScope = await runner.schema.hasColumn(SEQUENCES_TABLE, 'scope');
+    const TMP = `${SEQUENCES_TABLE}__rebuild`;
+    try {
+      const rows: any[] = await runner(SEQUENCES_TABLE).select('*');
+      await runner.schema.dropTableIfExists(TMP);
+      await this.createSequencesTable(TMP, runner);
+      const migrated = rows.map((r) => {
+        const scope = hasScope && r.scope != null ? String(r.scope) : '';
+        return {
+          key_hash: this.sequenceKeyHash(String(r.object), String(r.tenant_id), String(r.field), scope),
+          object: r.object,
+          tenant_id: r.tenant_id,
+          field: r.field,
+          scope,
+          last_value: r.last_value ?? 0,
+          updated_at: r.updated_at ?? this.knex.fn.now(),
+        };
+      });
+      if (migrated.length > 0) await runner(TMP).insert(migrated);
+      await runner.schema.dropTable(SEQUENCES_TABLE);
+      await runner.schema.renameTable(TMP, SEQUENCES_TABLE);
+      this.sequencesHasKeyHash = true;
+    } catch (err) {
+      // Leave the original table intact; fall back to legacy keying for
+      // fixed-prefix sequences and refuse per-scope writes until migrated.
+      this.sequencesHasKeyHash = false;
+      await runner.schema.dropTableIfExists(TMP).catch(() => {});
+      this.logger.warn(
+        `[autonumber] Failed to migrate ${SEQUENCES_TABLE} to the key_hash shape. ` +
+          `Fixed-prefix autonumbers keep working; date/{field}/per-parent formats will ` +
+          `error until the table is migrated.`,
+        { error: String(err) },
+      );
+    }
+  }
+
+  /** The body of `SqlDriver#scanMaxNumericTail`; the method's docblock there is its contract. */
+  static async scanMaxNumericTail(this: Pick<SequenceSemanticsHost, 'escapeLikePrefix' | 'maxAutonumberCounter'>, queryRunner: Knex | Knex.Transaction, tableName: string, field: string, prefix: string, tenantField: string | null, tenantId: string | null, suffix = ''): Promise<number> {
+    let builder = queryRunner(tableName)
+      .select(field)
+      .whereRaw('?? like ? escape ?', [field, `${this.escapeLikePrefix(prefix)}%`, LIKE_ESCAPE_CHARACTER])
+      .whereNotNull(field);
+    if (tenantField && tenantId !== null) {
+      builder = builder.where(tenantField, tenantId);
+    }
+    const rows = await builder;
+    return this.maxAutonumberCounter((rows as any[]).map((r) => (r as any)[field]), prefix, suffix);
+  }
+
+  /** The body of `SqlDriver#escapeLikePrefix`; the method's docblock there is its contract. */
+  static escapeLikePrefix(prefix: string): string {
+    return prefix.replace(/([\\%_])/g, '\\$1');
+  }
+
+  /** The body of `SqlDriver#attemptWithoutPoisoning`; the method's docblock there is its contract. */
+  static async attemptWithoutPoisoning<T>(trx: Knex.Transaction, attempt: (scoped: Knex.Transaction) => Promise<T> | Knex.QueryBuilder<any, T>): Promise<{ ok: true; value: T } | { ok: false; error: unknown }> {
+    try {
+      const value = await trx.transaction(async (scoped) => attempt(scoped));
+      return { ok: true, value: value as T };
+    } catch (error) {
+      return { ok: false, error };
+    }
+  }
+
+  /** The body of `SqlDriver#autoNumberValueExists`; the method's docblock there is its contract. */
+  static async autoNumberValueExists(queryRunner: Knex | Knex.Transaction, reservation: AutoNumberReservation): Promise<boolean> {
     let builder = queryRunner(reservation.tableName).select(reservation.field).where(reservation.field, reservation.value);
     if (reservation.tenantField && reservation.tenantId !== null) {
       builder = builder.where(reservation.tenantField, reservation.tenantId);
@@ -104,8 +219,8 @@ export async function autoNumberValueExists(queryRunner: Knex | Knex.Transaction
     return hit !== undefined && hit !== null;
   }
 
-/** The body of `SqlDriver#autoNumberCounterKey`; the method's docblock there is its contract. */
-export function autoNumberCounterKey(this: Pick<SequenceSemanticsHost, 'resolveSequenceTenantId' | 'sequenceKeyHash'>, reservation: AutoNumberReservation): string {
+  /** The body of `SqlDriver#autoNumberCounterKey`; the method's docblock there is its contract. */
+  static autoNumberCounterKey(this: Pick<SequenceSemanticsHost, 'resolveSequenceTenantId' | 'sequenceKeyHash'>, reservation: AutoNumberReservation): string {
     const resolvedTenantId = this.resolveSequenceTenantId(
       reservation.tenantField,
       reservation.tenantId,
@@ -115,8 +230,52 @@ export function autoNumberCounterKey(this: Pick<SequenceSemanticsHost, 'resolveS
     return this.sequenceKeyHash(reservation.tableName, resolvedTenantId, reservation.field, reservation.scope);
   }
 
-/** The body of `SqlDriver#update`; the method's docblock there is its contract. */
-export async function update(this: Pick<SequenceSemanticsHost, 'applyTenantScope' | 'applyWriteColumnMap' | 'auditMissingTenant' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'keepSuppliedUpdatedAt' | 'rotatedUpdateById' | 'rotationShardsOf' | 'stampsUpdatedAt' | 'updateWithPresumedTimestamp' | 'updatedAtStamp' | 'updatedAtStampIsPresumed'>, object: string, id: string | number, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown> | null> {
+  /** The body of `SqlDriver#stampInsertTimestamps`; the method's docblock there is its contract. */
+  static stampInsertTimestamps(this: Pick<SequenceSemanticsHost, 'isSqlite' | 'tablesWithTimestamps'>, object: string, formatted: Record<string, any>): void {
+    if (!this.isSqlite || !this.tablesWithTimestamps.has(object)) return;
+    const iso = new Date().toISOString();
+    for (const col of AUDIT_TIMESTAMP_COLUMNS) {
+      if (formatted[col] === undefined || formatted[col] === null) formatted[col] = iso;
+    }
+  }
+
+  /** The body of `SqlDriver#observedUpdatedAtColumn`; the method's docblock there is its contract. */
+  static observedUpdatedAtColumn(this: Pick<SequenceSemanticsHost, 'tablesWithTimestamps' | 'updatedAtColumnState'>, object: string): boolean {
+    return this.tablesWithTimestamps.has(object) || this.updatedAtColumnState.get(object) === 'present';
+  }
+
+  /** The body of `SqlDriver#stampUpsertUpdatedAt`; the method's docblock there is its contract. */
+  static stampUpsertUpdatedAt(this: Pick<SequenceSemanticsHost, 'observedUpdatedAtColumn' | 'updatedAtStamp'>, object: string, formatted: Record<string, any>): void {
+    if (formatted.updated_at !== undefined && formatted.updated_at !== null) return;
+    if (!this.observedUpdatedAtColumn(object)) return;
+    formatted.updated_at = this.updatedAtStamp();
+  }
+
+  /** The body of `SqlDriver#keepSuppliedUpdatedAt`; the method's docblock there is its contract. */
+  static keepSuppliedUpdatedAt(formatted: Record<string, any>, options?: DriverOptions): boolean {
+    return options?.preserveAudit === true && formatted.updated_at != null;
+  }
+
+  /** The body of `SqlDriver#updatedAtStamp`; the method's docblock there is its contract. */
+  static updatedAtStamp(this: Pick<SequenceSemanticsHost, 'isMysql' | 'isSqlite' | 'knex'>): string | Knex.Raw {
+    if (this.isSqlite) return new Date().toISOString();
+    return this.isMysql ? this.knex.fn.now(MYSQL_DATETIME_PRECISION) : this.knex.fn.now();
+  }
+
+  /** The body of `SqlDriver#stampsUpdatedAt`; the method's docblock there is its contract. */
+  static stampsUpdatedAt(this: Pick<SequenceSemanticsHost, 'tablesWithTimestamps' | 'updatedAtColumnState'>, object: string): boolean {
+    if (this.tablesWithTimestamps.has(object)) return true;
+    const state = this.updatedAtColumnState.get(object);
+    return state === 'presumed' || state === 'present';
+  }
+
+  /** The body of `SqlDriver#updatedAtStampIsPresumed`; the method's docblock there is its contract. */
+  static updatedAtStampIsPresumed(this: Pick<SequenceSemanticsHost, 'tablesWithTimestamps' | 'updatedAtColumnState'>, object: string): boolean {
+    return !this.tablesWithTimestamps.has(object) && this.updatedAtColumnState.get(object) === 'presumed';
+  }
+
+  /** The body of `SqlDriver#update`; the method's docblock there is its contract. */
+  static async update(this: Pick<SequenceSemanticsHost, 'applyTenantScope' | 'applyWriteColumnMap' | 'auditMissingTenant' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'keepSuppliedUpdatedAt' | 'rotatedUpdateById' | 'rotationShardsOf' | 'stampsUpdatedAt' | 'updateWithPresumedTimestamp' | 'updatedAtStamp' | 'updatedAtStampIsPresumed'>, object: string, id: string | number, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown> | null> {
     this.auditMissingTenant(object, 'update', options);
     const rotationShards = this.rotationShardsOf(object);
     if (rotationShards) return this.rotatedUpdateById(object, rotationShards, id, data, options);
@@ -155,8 +314,122 @@ export async function update(this: Pick<SequenceSemanticsHost, 'applyTenantScope
     return this.formatOutput(object, updated) || null;
   }
 
-/** The body of `SqlDriver#assertMergeLandedOnSuppliedIdentity`; the method's docblock there is its contract. */
-export async function assertMergeLandedOnSuppliedIdentity(this: Pick<SequenceSemanticsHost, 'applyTenantScope' | 'getBuilder' | 'physicalTableByObject'>, object: string, writeTable: string, id: string | number, rivals: PhysicalIndex[], writtenTenant: unknown, options?: DriverOptions): Promise<void> {
+  /** The body of `SqlDriver#insertOnlyUpsertColumns`; the method's docblock there is its contract. */
+  static insertOnlyUpsertColumns(this: Pick<SequenceSemanticsHost, 'autoNumberFields' | 'physicalTableByObject' | 'remoteColumn' | 'resolveTenantField'>, object: string): Set<string> {
+    // Same config resolution as `fillAutoNumberFields`: object name first,
+    // then the storage-mapped table name.
+    const tableName = this.physicalTableByObject[object] ?? StorageNameMapping.resolveTableName({ name: object } as any);
+    const cfgs = this.autoNumberFields[object] || this.autoNumberFields[tableName] || [];
+    const columns = new Set<string>(['created_at', this.remoteColumn(object, 'id', 'id')]);
+    for (const cfg of cfgs) columns.add(this.remoteColumn(object, cfg.name, cfg.name));
+    const tenantField = this.resolveTenantField(object);
+    if (tenantField) columns.add(this.remoteColumn(object, tenantField, tenantField));
+    return columns;
+  }
+
+  /**
+   * [#21185] The merge leg's organization predicate on the dialects whose
+   * `ON CONFLICT … DO UPDATE` takes a `WHERE`: the stored row's tenant column
+   * is NOT DISTINCT from the one the statement would have inserted
+   * (`excluded`). SQLite spells NULL-safe equality `IS`, PostgreSQL
+   * `IS NOT DISTINCT FROM` — the two dialects this is reached on (MySQL fences
+   * after the statement instead; see {@link upsert}).
+   *
+   * The target table is the write target's bare PHYSICAL name — the rotation
+   * shard when one is current, the federated remote table otherwise — because
+   * that is how both dialects name the INSERT target inside this clause.
+   */
+  static mergeLandsInWrittenOrganization(this: Pick<SequenceSemanticsHost, 'isPostgres' | 'knex' | 'physicalTableByObject'>, writeTable: string, column: string): Knex.Raw {
+    const table = this.physicalTableByObject[writeTable] ?? writeTable;
+    const notDistinct = this.isPostgres ? 'IS NOT DISTINCT FROM' : 'IS';
+    return this.knex.raw(`?? ${notDistinct} ??`, [`${table}.${column}`, `excluded.${column}`]);
+  }
+
+  /**
+   * [#8807] After a primary-key-targeted merge on a table that carries a rival
+   * UNIQUE key: did the statement land on the identity this call supplied?
+   *
+   * # Why the absence of the row is an exact verdict, not a heuristic
+   *
+   * The statement returned without error, so it either INSERTED (the row now
+   * carries this id) or MERGED into an existing row. `id` is insert-only on the
+   * merge path since #8622 — it is stripped from the merge set — so a merge
+   * never writes this id onto the row it lands on. Therefore:
+   *
+   *   row with this id exists  ⟺  the merge landed on the primary key
+   *   row with this id absent  ⟺  it landed on some other UNIQUE key
+   *
+   * That is a biconditional, not an inference from a symptom, which is what
+   * makes this check free of false refusals — the property the ruling's
+   * excluded blanket option could not have.
+   *
+   * # Why the PRIMARY KEY row wins a multi-key collision — measured, not assumed
+   *
+   * The biconditional needs one more fact than #8622 to be exact: when the
+   * incoming row collides on the primary key AND on a rival UNIQUE key at the
+   * same time, the row carrying our id exists — so "row present" must still mean
+   * "the statement landed on it", or a pre-existing row with our id would mask a
+   * merge that went elsewhere. MySQL updates only the FIRST matched index, and
+   * *which* one that is decides the question. Measured on live MySQL 8.0.46,
+   * `PRIMARY KEY (id)` + `UNIQUE (email)` + `UNIQUE (tax_id)`, rows
+   * `R1(id=R1, tax_id=T-1)` and `R2(id=R2, tax_id=T-2)`, inserting
+   * `(id=R1, tax_id=T-2)` — which collides with R1 on the primary key and with
+   * R2 on `uniq_tax`:
+   *
+   * ```
+   * ROW_COUNT() = 2 (an update)
+   * R1 -> title='MERGED'   ← the PRIMARY KEY row won
+   * R2 -> untouched
+   * ```
+   *
+   * So the primary key is matched first and the masking case does not arise.
+   *
+   * # Tenant scope — applied, and scoped to the tenant the row was WRITTEN under
+   *
+   * The read routes through {@link applyTenantScope} like every other read door
+   * in this class (`check:tenant-chokepoint` asserts exactly that, on a bound
+   * builder). The subtlety is *which* tenant to scope to, and using the caller's
+   * active org would be wrong in one real case:
+   *
+   *  - **Ordinary tenanted call** — nothing supplied a tenant on the row, so
+   *    `injectTenantOnInsert` stamped `options.tenantId` on it. Scoping to the
+   *    written tenant IS scoping to the caller's org: identical to the wall
+   *    every sibling door applies.
+   *  - **Admin writing to a specific tenant via raw row data** — a documented
+   *    authority ({@link injectTenantOnInsert}: "explicit values are never
+   *    overwritten"). The row lands under the tenant the caller named, so a read
+   *    scoped to the caller's *active* org would miss a row that really was
+   *    written and refuse a correct write. Scoping to the written tenant does
+   *    not.
+   *  - **No tenancy field, or no tenant context at all** — `applyTenantScope`
+   *    returns the builder untouched when `tenantId` is empty, by its own
+   *    contract. That is what keeps the lifecycle archiver working: it calls
+   *    `cold.upsert(object, row, ['id'])` with NO options, so this read is
+   *    unscoped there, exactly as before.
+   *
+   * The verdict itself is tenant-independent regardless: `id` is the PRIMARY
+   * KEY, so at most one row in the table can carry it.
+   *
+   * ⚠️ [#21185] The first two bullets no longer reach this method: a
+   * tenant-scoped call on a tenanted object is fenced to its organization, and
+   * on MySQL {@link assertMergeLandedInWrittenOrganization} runs in this
+   * check's place, reading under the written tenant and carrying #8807's
+   * verdict with it. What still arrives here is the third bullet — and there
+   * the written tenant must NOT become a scope: the tenant column is now
+   * insert-only, so a payload naming another organization than the stored
+   * row's is a merge that keeps the row's organization (measured on MariaDB
+   * 10.11 before this guard: the read scoped to the payload's tenant missed the
+   * merged row and answered this method's cross-row refusal for a merge that
+   * landed on the supplied id). So the written tenant is used only under a
+   * tenant context, and a call without one reads unscoped.
+   *
+   * # The write target, not the object
+   *
+   * A rotation-sharded write lands in the current shard, so that is where the
+   * row must be looked for. Reading the unsharded name would report every
+   * rotated write as a cross-row merge.
+   */
+  static async assertMergeLandedOnSuppliedIdentity(this: Pick<SequenceSemanticsHost, 'applyTenantScope' | 'getBuilder' | 'physicalTableByObject'>, object: string, writeTable: string, id: string | number, rivals: PhysicalIndex[], writtenTenant: unknown, options?: DriverOptions): Promise<void> {
     const builder = this.getBuilder(writeTable, options);
     // Scoped to the tenant this row was written under (see the docblock): the
     // caller's org on an ordinary call, the explicitly named one on an admin
@@ -177,8 +450,62 @@ export async function assertMergeLandedOnSuppliedIdentity(this: Pick<SequenceSem
     throw refuseCrossRowIdentityMerge(object, tableName, id, rivals);
   }
 
-/** The body of `SqlDriver#assertMergeLandedInWrittenOrganization`; the method's docblock there is its contract. */
-export async function assertMergeLandedInWrittenOrganization(this: Pick<SequenceSemanticsHost, 'applyTenantScope' | 'getBuilder' | 'physicalTableByObject'>, object: string, writeTable: string, mergeKeys: string[], matchOn: Record<string, unknown>, sent: Record<string, unknown>, guard: { column: string; value: unknown }, identity: { id: string | number; rivals: PhysicalIndex[] } | null, options?: DriverOptions): Promise<void> {
+  /**
+   * [#21185] MySQL: after a tenant-scoped upsert's statement, did it land on a
+   * row of the organization the row is WRITTEN under? Runs inside the same
+   * transaction as the statement, so its throw rolls the write back.
+   *
+   * # Why MySQL needs a check where the other dialects need none
+   *
+   * SQLite and PostgreSQL fence the merge leg inside the statement
+   * (`ON CONFLICT … DO UPDATE SET … WHERE` the stored tenant column equals the
+   * written one — see {@link upsert}), so a row of another organization is
+   * never written at all. MySQL's `ON DUPLICATE KEY UPDATE` takes no `WHERE`
+   * (knex refuses to compile one: `.onConflict().merge().where() is not
+   * supported for mysql`). This is #8807's mechanism, reused as ruled: the
+   * statement and a read of the landed row run as one unit of work, and the
+   * read's failure undoes the write.
+   *
+   * # The read, and why its absence is exact
+   *
+   * The landed row is looked up by the values it matched on (`matchOn`, the
+   * conflict-key values the statement sent — or `id` when one of them is
+   * empty, the same choice the read-back makes), under the written tenant
+   * EXACTLY: {@link applyTenantScope} for the chokepoint, plus equality on the
+   * tenant column, which closes that scope's NULL-organization arm. The tenant
+   * column is insert-only ({@link insertOnlyUpsertColumns}), so a merge never
+   * writes the written tenant onto the row it lands on. Therefore a row
+   * matching those values under the written tenant exists exactly when the
+   * statement inserted there or merged into a row that was already there; its
+   * absence means the merge landed on a row of another organization, or on a
+   * row with none.
+   *
+   * # When #8807's check is owed too (`rivals` given)
+   *
+   * A primary-key target on a table carrying a rival UNIQUE key. `matchOn` is
+   * then the supplied `id`, so a found row is also #8807's verdict — the merge
+   * landed on the supplied identity — and that check is subsumed. A MISSING row
+   * has two causes the caller must be told apart, because they are two
+   * different refusals:
+   *
+   *  - the merge landed through a rival key on a row of the WRITTEN
+   *    organization — #8807's condition, answered with its own sentence
+   *    ({@link refuseCrossRowIdentityMerge}), exactly as before this card;
+   *  - it landed on a row of another organization — on the primary key (that
+   *    row wins a multi-key collision, measured for #8807) or through a rival
+   *    key — answered `UNIQUE_VIOLATION`.
+   *
+   * They are told apart by reading each rival key's sent values under the
+   * written tenant: a merge through that key left the row carrying them, in
+   * the written organization. Only a rival whose every column is in the
+   * payload can be read this way (a hash-shadow carrier's generated column is
+   * not); when none can, the answer is `UNIQUE_VIOLATION` — a refusal either
+   * way, and the write is rolled back either way.
+   *
+   * ⛔ Nothing read here reaches the caller: the refusal names no organization
+   * and no value of the row it landed on.
+   */
+  static async assertMergeLandedInWrittenOrganization(this: Pick<SequenceSemanticsHost, 'applyTenantScope' | 'getBuilder' | 'physicalTableByObject'>, object: string, writeTable: string, mergeKeys: string[], matchOn: Record<string, unknown>, sent: Record<string, unknown>, guard: { column: string; value: unknown }, identity: { id: string | number; rivals: PhysicalIndex[] } | null, options?: DriverOptions): Promise<void> {
     // The tenant scope of a ONE-row probe: the written tenant, with
     // `tenantIds` dropped for #8807's reason (the group-union posture widens a
     // READ to a membership set; this asks about one organization).
@@ -207,8 +534,8 @@ export async function assertMergeLandedInWrittenOrganization(this: Pick<Sequence
     throw refuseUpsertConflictOutsideWrittenOrganization(object, mergeKeys);
   }
 
-/** The body of `SqlDriver#upsert`; the method's docblock there is its contract. */
-export async function upsert(this: Pick<SequenceSemanticsHost, 'applyTenantScope' | 'applyWriteColumnMap' | 'assertConflictTargetBackedWithoutClause' | 'assertConflictTargetHonoured' | 'assertMergeLandedInWrittenOrganization' | 'assertMergeLandedOnSuppliedIdentity' | 'auditMissingTenant' | 'collidingAutoNumberReservations' | 'fillAutoNumberFields' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'injectTenantOnInsert' | 'insertOnlyUpsertColumns' | 'isMysql' | 'knex' | 'mergeLandsInWrittenOrganization' | 'resolveTenantField' | 'resyncSequenceToDataMax' | 'rotationWriteTarget' | 'stampInsertTimestamps' | 'stampUpsertUpdatedAt' | 'upsertTenantGuard'>, object: string, data: Record<string, any>, conflictKeys?: string[], options?: DriverOptions): Promise<Record<string, unknown>> {
+  /** The body of `SqlDriver#upsert`; the method's docblock there is its contract. */
+  static async upsert(this: Pick<SequenceSemanticsHost, 'applyTenantScope' | 'applyWriteColumnMap' | 'assertConflictTargetBackedWithoutClause' | 'assertConflictTargetHonoured' | 'assertMergeLandedInWrittenOrganization' | 'assertMergeLandedOnSuppliedIdentity' | 'auditMissingTenant' | 'collidingAutoNumberReservations' | 'fillAutoNumberFields' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'injectTenantOnInsert' | 'insertOnlyUpsertColumns' | 'isMysql' | 'knex' | 'mergeLandsInWrittenOrganization' | 'resolveTenantField' | 'resyncSequenceToDataMax' | 'rotationWriteTarget' | 'stampInsertTimestamps' | 'stampUpsertUpdatedAt' | 'upsertTenantGuard'>, object: string, data: Record<string, any>, conflictKeys?: string[], options?: DriverOptions): Promise<Record<string, unknown>> {
     const { _id, ...rest } = data;
     const toUpsert = { ...rest };
 
@@ -584,3 +911,24 @@ export async function upsert(this: Pick<SequenceSemanticsHost, 'applyTenantScope
     const result = await readback.first();
     return this.formatOutput(object, result) || toUpsert;
   }
+
+  /** The body of `SqlDriver#delete`; the method's docblock there is its contract. */
+  static async delete(this: Pick<SequenceSemanticsHost, 'applyTenantScope' | 'auditMissingTenant' | 'getBuilder' | 'rotationShardsOf'>, object: string, id: string | number, options?: DriverOptions): Promise<boolean> {
+    this.auditMissingTenant(object, 'delete', options);
+    const rotationShards = this.rotationShardsOf(object);
+    if (rotationShards) {
+      // The row lives in exactly one shard — probe newest-first.
+      for (const shard of rotationShards) {
+        const builder = this.getBuilder(shard, options).where('id', id);
+        this.applyTenantScope(builder, object, options);
+        const count = await builder.delete();
+        if (count > 0) return true;
+      }
+      return false;
+    }
+    const builder = this.getBuilder(object, options).where('id', id);
+    this.applyTenantScope(builder, object, options);
+    const count = await builder.delete();
+    return count > 0;
+  }
+}
