@@ -218,7 +218,7 @@
     "sortable": {
       "status": "live",
       "evidence": "packages/spec/src/api/sortability.zod.ts#resolveObjectSortability; packages/metadata-protocol/src/protocol-query-validation.ts#assertSortFieldsAreOffered",
-      "note": "[#29896] `sortable: false` makes the served sortability projection answer `{ sortable: false, reason: 'author-declared' }` (resolveObjectSortability), which the grid header and the ListView Sort picker read, and the Data API ingress door refuses a sort on the field with 400 INVALID_SORT by that same projection (assertSortFieldsAreOffered). A field with no `sortable` key keeps its storage verdict. The engine door does not judge it: in-process callers keep sorting by a stored column. Proven in packages/rest/src/data-sort-field-sortable-flag-door.test.ts (real SqlDriver + ObjectQL + protocol + RestServer) and packages/spec/src/api/sortability.test.ts."
+      "note": "[#29896] `sortable: false` makes the served sortability projection answer `{ sortable: false, reason: 'author-declared' }` (resolveObjectSortability), which the grid header and the ListView Sort picker read, and the Data API ingress door refuses a sort on the field with 400 INVALID_SORT by that same projection (assertSortFieldsAreOffered), as does the stdio MCP query_records (unofferedSortRefusal). A field with no `sortable` key keeps its storage verdict. The engine door does not judge it: in-process callers keep sorting by a stored column. Proven in packages/rest/src/data-sort-field-sortable-flag-door.test.ts (real SqlDriver + ObjectQL + protocol + RestServer) and packages/spec/src/api/sortability.test.ts and packages/mcp/src/stdio-data-bridge.sortable-false.test.ts."
     },
     "inlineEdit": {
       "status": "live",

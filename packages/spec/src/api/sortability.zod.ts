@@ -72,8 +72,10 @@
  * 6. **Declared unsortable by its author** (`field.sortable: false`, #29896)
  *    — a stored column the author chose not to offer as a sort (a long text,
  *    an unindexed column on a large table). Refused at the INGRESS door
- *    (`assertSortFieldsExist`: `400 INVALID_SORT`), which judges it by THIS
- *    projection rather than by a second reading of the key. Encoded as
+ *    (`assertSortFieldsExist`: `400 INVALID_SORT`) and on the stdio MCP
+ *    `query_records` (`unofferedSortRefusal`, the same envelope), both of
+ *    which judge it by THIS projection rather than by a second reading of the
+ *    key. Encoded as
  *    `sortable: false` with `reason: 'author-declared'`. Only the literal
  *    `false` counts: a field with no `sortable` key (or `sortable: true`)
  *    keeps its storage verdict. A virtual field marked `sortable: false`
@@ -82,7 +84,8 @@
  *    door answers "can a driver order by this column", and a stored column
  *    can be ordered by, so an in-process caller (a hook, a flow) keeps sorting
  *    by it. The key governs what the platform OFFERS — the list header, the
- *    Sort picker and the Data API — not what the storage can do.
+ *    Sort picker, the Data API and the MCP tools — not what the storage can
+ *    do.
  *
  * ## Considered and deliberately NOT members
  *
