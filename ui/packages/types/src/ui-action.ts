@@ -100,6 +100,34 @@ export function actionRendersAt(
   return Array.isArray(declared) && declared.includes(location);
 }
 
+/**
+ * THE record header's placed actions: every action of an object whose
+ * `locations` include `record_header` or `record_more`, in declaration order,
+ * the first of each name (an unnamed entry passes through).
+ *
+ * ONE reader for the two headers that draw "the object's header actions"
+ * (objectstack#29951): the synthesized default record page
+ * (`RecordDetailView`'s header list) and an authored `page:header` that sets
+ * `placedActions: true` (objectstack#30018, ruling record 6624172200, letter A).
+ * Both read it off the object's actions as served at render time, so an action
+ * another package places on the object is in the set. Placement is
+ * {@link actionRendersAt}'s; this adds only the header's two locations and the
+ * first-of-a-name rule.
+ */
+export function placedHeaderActions<T extends { name?: unknown; locations?: readonly string[] }>(
+  actions: readonly T[] | null | undefined,
+): T[] {
+  const seen = new Set<string>();
+  return (actions ?? []).filter((action) => {
+    if (!actionRendersAt(action, 'record_header') && !actionRendersAt(action, 'record_more')) return false;
+    const name = typeof action?.name === 'string' ? action.name : '';
+    if (name === '') return true;
+    if (seen.has(name)) return false;
+    seen.add(name);
+    return true;
+  });
+}
+
 // ============================================================================
 // Declared action arrays — ONE rule for every surface that authors a list of
 // actions by id (objectui#7182)
