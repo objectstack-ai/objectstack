@@ -22,7 +22,7 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import { ComponentRegistry, ExpressionEvaluator, declaredNameField, evalRowPredicate, formatTitleTemplate, hasDeclaredPredicate, getRecordDisplayName, isActionSwitchedOff, recordDisplayValueAt, resolveNameField, toPredicateRecord } from '@object-ui/core';
 import type { ComponentInput } from '@object-ui/core';
-import { actionRendersAt, resolveDeclaredActionIds } from '@object-ui/types';
+import { actionRendersAt, placedHeaderActions, resolveDeclaredActionIds } from '@object-ui/types';
 import type { DeclaredActionsRefusal } from '@object-ui/types';
 import { useRecordContext, useAction, useCapabilityGate, usePredicateScope, usePageVariables, useInlineEdit, useActionTextLocalizer, useMetadataItem, reportUnresolvableVisibilityPredicate, resolveInlineAriaProps, buildNodeEvaluationScope } from '@object-ui/react';
 import { renderChildren, renderNodeSlot, cn } from '../../lib/utils';
@@ -1692,6 +1692,31 @@ function reportRefusedHeaderActions(
 }
 
 /**
+ * Warn-once ledger for a refused `placedActions: true` + `actions` pair
+ * (objectstack#30018), keyed by object.
+ */
+const _refusedPlacedActionPairs = new Set<string>();
+
+/**
+ * Report a `page:header` that sets `placedActions: true` beside an authored
+ * `actions` list. `@objectstack/spec` refuses the pair at parse (the list says
+ * "only these", the switch says "every placed one"), so it reaches here only
+ * from metadata that skipped validation; the header then draws none of the
+ * object's actions, as it does for a refused id array above.
+ */
+function reportRefusedPlacedActions(objectName: string | undefined): void {
+  const key = objectName ?? '';
+  if (_refusedPlacedActionPairs.has(key)) return;
+  _refusedPlacedActionPairs.add(key);
+  console.error(
+    `[page:header] \`placedActions: true\` refused beside an authored \`actions\` list` +
+    `${objectName ? ` (object "${objectName}")` : ''}. None of the object's actions is rendered. ` +
+    'Keep one: `actions` for a curated list that is the whole set, or `placedActions: true` ' +
+    'for every action placed at record_header / record_more.',
+  );
+}
+
+/**
  * The download path a bare `sys_file` id resolves to. A private copy of
  * `@object-ui/fields`' `fileUrlFromId` rule; `recordPictureUrl` below says why
  * it is a copy.
@@ -1758,6 +1783,12 @@ const PHONE_ACTION_BAR_BUTTONS = 2;
 export interface PageHeaderActionsProps {
   /** The authored `actions` array: action ids (the contract) or, during the transition, inline action objects. */
   actions?: unknown;
+  /**
+   * `page:header`'s `placedActions` (objectstack#30018): `true` draws every
+   * action of the bound object placed at `record_header` / `record_more`, read
+   * live, in place of an `actions` list. Only the boolean `true` opts in.
+   */
+  placedActions?: unknown;
   /** The inline-button budget on desktop, as `page:header`'s `maxVisible`; an out-of-contract value falls back to 3. */
   maxVisible?: unknown;
   /** The inline-button budget on mobile, as `page:header`'s `mobileMaxVisible`; an out-of-contract value falls back to 1. */
@@ -1812,6 +1843,7 @@ export interface PageHeaderRefreshItem {
  */
 export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
   actions: rawHeaderActions,
+  placedActions: rawPlacedActions,
   maxVisible: rawMaxVisible,
   mobileMaxVisible: rawMobileMaxVisible,
   emptySlot = null,
@@ -1907,11 +1939,35 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     () => resolveDeclaredActionIds<any>(authoredHeaderActions, undefined),
     [authoredHeaderActions],
   );
+  // ── `placedActions: true` — every placed action, read live (objectstack#30018) ──
+  //
+  // The other way `@objectstack/spec` lets a header say which of the object's
+  // actions it draws (ruling record 6624172200 on objectstack#29951, letter A):
+  // every action of the bound object whose `locations` include `record_header`
+  // or `record_more`, in declaration order, read from the object's metadata at
+  // render time. An action another package places on the object is therefore
+  // drawn without editing the page, which a frozen id list cannot do: the
+  // platform's own record pages froze one and dropped exactly those actions
+  // (objectstack#29951). It is the set the synthesized default record page
+  // draws, read by the same `placedHeaderActions` (`@object-ui/types`) that
+  // `RecordDetailView`'s header list reads, and it runs through the same one
+  // filter chain below as an id list does.
+  //
+  // Only the boolean `true` opts in. The spec refuses `true` beside an authored
+  // `actions` list, an empty one included ("keep one"); a pair that still
+  // reaches this renderer draws NONE of the object's actions and says so once —
+  // the same fail-closed answer a refused id array gets above, never a silent
+  // pick of one of the two meanings.
+  const placedOptIn = rawPlacedActions === true;
+  const placedRefused = placedOptIn && rawHeaderActions !== undefined;
+  const drawsPlacedActions = placedOptIn && !placedRefused;
   // `useMetadataItem` is the SAME entry `record:quick_actions` resolves through
   // — not a second lookup path. Passing `null` for the name is its documented
-  // no-op, so a header with no ids (or no object bound) does not fetch.
+  // no-op, so a header with no ids and no `placedActions` (or no object bound)
+  // does not fetch.
   const needsActionLookup =
-    headerActionsShape.kind === 'ids' && headerActionsShape.ids.length > 0 && !!headerObjectName;
+    (drawsPlacedActions || (headerActionsShape.kind === 'ids' && headerActionsShape.ids.length > 0))
+    && !!headerObjectName;
   const { item: headerActionsObjectMeta, loading: headerActionsMetaLoading } = useMetadataItem(
     'object',
     needsActionLookup ? headerObjectName : null,
@@ -1920,6 +1976,12 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     const registered: any[] = Array.isArray(headerActionsObjectMeta?.actions)
       ? (headerActionsObjectMeta as any).actions
       : [];
+    if (placedRefused) {
+      reportRefusedPlacedActions(headerObjectName);
+      return [];
+    }
+    // The ONE placed-header reader the synthesized header reads too.
+    if (drawsPlacedActions) return placedHeaderActions<any>(registered);
     const declared = resolveDeclaredActionIds<any>(authoredHeaderActions, registered);
     if (declared.kind === 'refused') {
       reportRefusedHeaderActions(headerObjectName, declared);
@@ -1955,6 +2017,8 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     headerActionsMetaLoading,
     needsActionLookup,
     headerObjectName,
+    placedRefused,
+    drawsPlacedActions,
   ]);
 
   // ── Action predicates: ONE dialect, ONE entry (objectui#3521) ──────────────
@@ -2763,6 +2827,9 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
   // detail pages (lead → Convert Lead, opportunity → Mark Won/Lost, …)
   // rely on this slot. Without this rendering they would silently disappear.
   const rawHeaderActions = schema?.actions ?? schema?.properties?.actions;
+  // `placedActions: true` (objectstack#30018) — every placed action, read live;
+  // resolved in `PageHeaderActions` beside the ids.
+  const rawPlacedActions = schema?.placedActions ?? schema?.properties?.placedActions;
 
   /**
    * The header's trailing slot: the action row (or the empty layout slot that
@@ -2781,6 +2848,7 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
     const row = (
       <PageHeaderActions
         actions={rawHeaderActions}
+        placedActions={rawPlacedActions}
         maxVisible={schema?.maxVisible ?? schema?.properties?.maxVisible}
         mobileMaxVisible={schema?.mobileMaxVisible ?? schema?.properties?.mobileMaxVisible}
         emptySlot={phoneFace ? null : emptySlot}
@@ -3164,6 +3232,10 @@ ComponentRegistry.register('header', PageHeaderRenderer, {
     { name: 'title', type: ['string', 'object'], description: 'Supports {field} interpolation and inline translation maps; falls back to the record title' },
     { name: 'subtitle', type: ['string', 'object'], description: 'Same interpolation as Title' },
     { name: 'actions', type: 'array', of: 'string', description: "Action IDS — the names of actions declared on the object's own metadata — rendered in the header before any host-injected system actions. An id whose action declares neither record_header nor record_more in its locations renders nowhere." },
+    // objectstack#30018 (ruling letter A on objectstack#29951): the other way to
+    // say which of the object's actions the header draws. Read by
+    // `PageHeaderActions` (`drawsPlacedActions`).
+    { name: 'placedActions', type: 'boolean', description: "Set true to draw every action of the object placed at record_header or record_more, read live from the object's metadata, in place of an Actions list: an action another package adds to the object is drawn without editing the page. Refused beside an authored Actions list: keep one." },
     // No `breadcrumb`: it was declared but NOT read (objectui#11166), and stayed
     // here only while the spec accepted the key. `@objectstack/spec` 17.6.0
     // carries the retirement (objectstack#20758, a tombstone refused by name),

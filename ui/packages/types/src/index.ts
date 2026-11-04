@@ -1260,6 +1260,7 @@ export {
   OBJECTUI_LOCAL_PARAM_FIELD_TYPES,
   ACTION_PARAM_FIELD_TYPES,
   actionRendersAt,
+  placedHeaderActions,
   resolveDeclaredActionIds,
 } from './ui-action.js';
 
