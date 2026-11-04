@@ -371,6 +371,7 @@
     "ExportRequestParsed": "src/api/contract.zod.ts#ExportRequestParsed (type)",
     "ExportRequestSchema": "src/api/contract.zod.ts#ExportRequestSchema (const)",
     "FIELD_SORTABLE_UNPROVISIONED_ANCHOR": "src/api/sortability.zod.ts#FIELD_SORTABLE_UNPROVISIONED_ANCHOR (const)",
+    "FIELD_UNSORTABLE_AUTHOR_DECLARED": "src/api/sortability.zod.ts#FIELD_UNSORTABLE_AUTHOR_DECLARED (const)",
     "FIELD_UNSORTABLE_VIRTUAL_TYPE": "src/api/sortability.zod.ts#FIELD_UNSORTABLE_VIRTUAL_TYPE (const)",
     "FieldError": "src/api/errors.zod.ts#FieldError (type)",
     "FieldErrorCode": "src/api/errors.zod.ts#FieldErrorCode (type)",

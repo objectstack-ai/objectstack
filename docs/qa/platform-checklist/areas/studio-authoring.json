@@ -2118,7 +2118,7 @@
       "title": "Studio asks before an unsent edit is left behind: a held (incomplete) or dirty edit in any pillar survives a pillar switch, a rail switch, the package switcher, Home and a reload — or is discarded only after the author confirms",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2177,7 +2177,7 @@
         "stale-console-bundle"
       ],
       "source": [
-        "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (unsavedPillarWork — pillarDirty or a held edit — feeding confirmLeavePillar, the beforeunload effect and useRegisterUnsavedEdits; confirmDropUnsavedWork, which the Data, Automations and Interfaces rails also ask before opening another item; onDirtyChange from the Access pillar and the Interfaces navigation editor, onHeldEditChange / useHeldEditReport from the Data, Automations and Interfaces leaf editors)",
+        "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (unsavedPillarWork — pillarDirty or a held edit — feeding confirmLeavePillar, the beforeunload effect and useRegisterUnsavedEdits; onDirtyChange from the Access pillar and the Interfaces navigation editor, onHeldEditChange from the Data, Automations and Interfaces leaf editors) + ui/packages/app-shell/src/views/studio-design/StudioPillarKit.tsx (confirmDropUnsavedWork, which the Data, Automations and Interfaces rails also ask before opening another item; useHeldEditReport, through which those leaf editors report a held edit)",
         "ui/packages/i18n/src/namespaces/studio/en.ts (engine.edit.unsavedLeaveConfirm; engine.studio.held.needsOptions / needsTarget / needsInput / widgetNeedsInput / line)",
         "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.pillarNavGuard.test.tsx (jsdom pin of the dirty half on the Access stack — corroboration only, it scores no browser clause here)",
         "#26705 (family card: held edits discarded silently on departure in Data, Automations and Interfaces; fixed by PR #26839 and PR #26927 — jsdom pins StudioDesignSurface.heldDataLeave-26705 / heldFlowLeave-26705 / heldWidgetLeave-26705 .test.tsx, corroboration only)",
@@ -2213,6 +2213,12 @@
           "date": "2026-11-01",
           "change": "QA run #28656 (W3-RT) finding: steps[7] says the item draft read GET /api/v1/meta/TYPE/NAME?state=draft&package=PKG answers 404 NO_DRAFT when no draft exists (metadata-protocol protocol.ts noPendingDraftError; its wire answer is pinned in packages/rest/src/meta-item-absent-404.test.ts), so a 404 before and after Leave is the 'unchanged' reading acceptance[3] asks for, as #28656 read it live at 6e11a929. No clause changed. Re-verified against source at base 1c5b1773ec. Wave anchor #27377, wave-3 accuracy slice S10 (#28701); finding parked in anchor comment 6557904764",
           "ref": "#28656"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-04",
+          "change": "source[0] re-pointed: confirmDropUnsavedWork and useHeldEditReport moved unchanged from ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx to StudioPillarKit.tsx beside it (#29988 slice 4, a move-only split); the rest of the citation stays on StudioDesignSurface.tsx. Re-read at base 9d1a465f0. No clause changed",
+          "ref": "#29988"
         }
       ]
     },
@@ -2305,7 +2311,7 @@
       "title": "The Automations rail groups flows by the object they watch, searches by label and name, says when nothing matches, and explains its glyphs and dots in a legend; New automation's presets refuse until the watched object is chosen, and a new flow starts Off",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -2365,7 +2371,7 @@
         "ref": "ui/packages/app-shell/src/views/studio-design/AutomationsPillar.railSearch-11794.test.tsx (label / name / no-match search) + StudioDesignSurface.flowPresets-11861.test.tsx + StudioDesignSurface.flowStatusTruth-11779.test.tsx ('\"New\" saves status: obsolete … Off by default'): jsdom evidence for acceptance[2] and [3]; the live rail, legend and draft read stay the run's"
       },
       "source": [
-        "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (the rail legend auto-rail-legend, FLOW_GLYPH_ICON / FLOW_GLYPH_LABEL_KEY, flowDotClass, FlowStatusDot; the New automation presets; objectui#12454, #11794, #11861, #11779)",
+        "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (the rail legend auto-rail-legend; the New automation presets; objectui#12454, #11794, #11861, #11779) + ui/packages/app-shell/src/views/studio-design/AutomationsFlowRail.tsx (FLOW_GLYPH_ICON / FLOW_GLYPH_LABEL_KEY, flowDotClass, FlowStatusDot)",
         "QA run #26715 (Automations card E1 / E2 pass; the rail search, legend and preset refusal were listed as uncovered)"
       ],
       "history": [
@@ -2380,6 +2386,12 @@
           "date": "2026-10-31",
           "change": "fixtures.requires[1] says what makes a schedule flow. The rail's clock glyph comes from resolveFlowTriggerKind (packages/spec/src/automation/flow-trigger-kind.ts), which answers schedule only for a Start node carrying config.schedule or a flow of type schedule. New automation's Advanced → Schedule writes only config.triggerType, so QA run #27438 saw such a flow listed as Autolaunched until a cron or interval was set on its Start node. Accuracy finding of QA run #27438. No clause changed. Wave anchor #27377, wave-3 accuracy slice S2; read at base a0f865491d",
           "ref": "#27438"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-04",
+          "change": "source[0] re-pointed: FLOW_GLYPH_ICON / FLOW_GLYPH_LABEL_KEY, flowDotClass and FlowStatusDot moved unchanged from ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx to AutomationsFlowRail.tsx beside it (#29988 slice 4, a move-only split); the rail legend and the New automation presets stay. Re-read at base 9d1a465f0. No clause changed",
+          "ref": "#29988"
         }
       ]
     },
@@ -2567,7 +2579,7 @@
       "title": "The flow state Studio shows is the state the deployment runs: the rail dot and the header read what GET /api/v1/automation/_status reports — On, Off, Not running here with the platform's reason — and an enabled record-triggered flow actually runs",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2628,7 +2640,7 @@
         "ref": "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.flowStatusTruth-11779.test.tsx + FlowStatusDot.test.tsx + StudioDesignSurface.railUnboundReason-11281.test.tsx: jsdom pins of the reading against a _status double — evidence for acceptance[0] and [1] at the component layer; the live pairing and the runs stay the run's"
       },
       "source": [
-        "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (FlowStatusDot and flowRailStatus: green On, grey Not running here titled with the reason, amber Refused, hollow Off; objectui#11779, #11281, #12454)",
+        "ui/packages/app-shell/src/views/studio-design/AutomationsFlowRail.tsx (FlowStatusDot and flowRailStatus: green On, grey Not running here titled with the reason, amber Refused, hollow Off; objectui#11779, #11281, #12454)",
         "packages/services/service-automation/src/engine.ts (getFlowRuntimeStates — the rows GET /automation/_status passes through)",
         "RUNNER.md environment facts (package-authored scheduled work is OFF unless OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1)",
         "cross-ref: the API kill switch ({enabled} at the automation door) is automation.flow-toggle-kill-switch; scheduled-work policy itself is the RUNNER.md fact, not a defect"
@@ -2645,6 +2657,12 @@
           "date": "2026-11-01",
           "change": "negative[1] moved to source[3]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
           "ref": "#28345"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-04",
+          "change": "source[0] re-pointed: FlowStatusDot and flowRailStatus moved unchanged from ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx to AutomationsFlowRail.tsx beside it (#29988 slice 4, a move-only split). Re-read at base 9d1a465f0. No clause changed",
+          "ref": "#29988"
         }
       ]
     },
@@ -3720,7 +3738,7 @@
       "title": "Permission sets are created, found and locked honestly in Studio's Access pillar: the New dialog derives the identifier and refuses one already taken — published or draft — the rail searches and shows its empty states, and on a read-only package New lands in its .custom pair while the packaged set offers no edit and the server refuses the forged write, and New similar on a packaged set copies it under a new name into that pair",
       "since": "v18",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3793,7 +3811,7 @@
         "ref": "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.accessNewSimilar-28573.test.tsx (jsdom, the real Access pillar against a mocked server: acceptance[5]'s console half — New similar posts exactly { name, label }, opens the copy where the answer says it landed, shows a 409 in the server's words, and draws no override gesture on a base set) + packages/runtime/src/domains/permission-set-clone.test.ts (the clone door through the HttpDispatcher in-process over a test security catalog: acceptance[5]'s server half — a packaged source with no target is copied whole into <X>.custom through the ensure door). Neither drives a booted deployment, so they score acceptance[5] partial at most (RUNNER rule 6) and its live leg is the run's. Acceptance[0]–[4] have no pin: they are the run's live leg. The live spec of #28579 slice 3 (ui/e2e/live/studio-customize-journey.spec.ts) does not open the Access pillar"
       },
       "source": [
-        "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (the Access pillar: the New set dialog, the taken-identifier check findTakenIdentifier and CreateTakenNotice before the create's If-None-Match: *, discardDraft, the rail search and empty states, openCreateSet offered on a read-only base when newInPair — ADR-0146 D3, #28572) + ui/packages/app-shell/src/views/studio-design/packages-io.ts#ensureCustomizationPackage (the ensure door the New save calls first on a read-only base)",
+        "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (the Access pillar: the New set dialog, the taken-identifier check before the create's If-None-Match: *, discardDraft, the rail search and empty states, openCreateSet offered on a read-only base when newInPair — ADR-0146 D3, #28572) + ui/packages/app-shell/src/views/studio-design/StudioPillarKit.tsx (findTakenIdentifier and CreateTakenNotice, the check and the notice the pillar draws) + ui/packages/app-shell/src/views/studio-design/packages-io.ts#ensureCustomizationPackage (the ensure door the New save calls first on a read-only base)",
         "ui/packages/app-shell/src/views/metadata-admin/permission-set-clone.ts#clonePermissionSet (POST /api/v1/security/permission-sets/:name/clone with { name, label }; where the copy lands is read off the answer) + packages/runtime/src/domains/permission-set-clone.ts#clonePermissionSetDefinition (the whole copy, saved in the source package's pair) — #28573 (N-20b) landed by PR #28669; the door's pair placement #28563 (N-20a)",
         "ui/packages/i18n/src/namespaces/studio/en.ts (engine.studio.access.created / createTaken / createTakenElsewhere / emptyMain / search / bannerTitleReadOnly)",
         "access-security.readonly-package-locks-studio (the sibling read-only surfaces — cross-referenced)",
@@ -3841,6 +3859,12 @@
           "date": "2026-11-02",
           "change": "an automated block is added (#28579 slice 3): New similar's two pins, StudioDesignSurface.accessNewSimilar-28573.test.tsx (jsdom) and permission-set-clone.test.ts (the door in-process), scoped to acceptance[5] and its layers; acceptance[0]–[4] keep no pin, and the slice 3 live spec does not open the Access pillar. kind unit. No clause or step changed",
           "ref": "#28579"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-04",
+          "change": "source[0] re-pointed: findTakenIdentifier and CreateTakenNotice moved unchanged from ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx to StudioPillarKit.tsx beside it (#29988 slice 4, a move-only split); the Access pillar's use of them stays. Re-read at base 9d1a465f0. No clause changed",
+          "ref": "#29988"
         }
       ]
     },
