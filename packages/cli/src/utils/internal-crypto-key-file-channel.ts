@@ -22,8 +22,12 @@ import { resolveStartHome } from './start-home.js';
  * `resolvePersistedKeyFile` over the env the child sees, with `OS_HOME` as dev
  * reads it (`--home` counts as `OS_HOME`, being start's spelling of it). The
  * file `os start` used before — `<start home>/dev-crypto-key` — is the legacy
- * file: read when it alone holds a key, named in a warning when it and the
- * canonical file both hold different keys, never chosen silently.
+ * file: read when it alone holds a key, and never chosen silently. When it and
+ * the canonical file hold different keys, the parent cannot rule between them:
+ * it names the canonical file on the channel and the legacy file on the
+ * second channel `OS_INTERNAL_CRYPTO_KEY_FILE_CANDIDATE`, and the child, which
+ * opens the database, takes the file whose key opens a stored secret (or
+ * refuses in production when neither does; `settleKeyFileChannel`).
  *
  * An env key (`OS_SECRET_KEY`, a usable `OS_DEV_CRYPTO_KEY`) still answers
  * first, unchanged: no file is named and the channel is removed. The parent
@@ -46,7 +50,9 @@ export async function applyCryptoKeyFileChannel(
     homeFlag?: string;
   },
 ): Promise<string | undefined> {
-  const { resolvePersistedKeyFile, KEY_FILE_CHANNEL_ENV } = await import('@objectstack/service-settings');
+  const { resolvePersistedKeyFile, KEY_FILE_CHANNEL_ENV, KEY_FILE_CANDIDATE_CHANNEL_ENV } = await import(
+    '@objectstack/service-settings'
+  );
   const startHome = resolveStartHome(opts.homeFlag, {
     hasProjectConfig: opts.hasProjectConfig,
     cwd: opts.cwd,
@@ -57,6 +63,9 @@ export async function applyCryptoKeyFileChannel(
     env: keyEnv,
     legacyKeyFile: path.join(startHome, 'dev-crypto-key'),
   });
+  // Both channels are the parent's: an inherited copy never speaks for a file
+  // this run did not choose.
+  delete childEnv[KEY_FILE_CANDIDATE_CHANNEL_ENV];
   if (!answer) {
     delete childEnv[KEY_FILE_CHANNEL_ENV];
     return undefined;
@@ -68,11 +77,15 @@ export async function applyCryptoKeyFileChannel(
       `\`os dev\` and \`os start\` now share ${answer.canonical}; move the file there to converge.`
     );
   }
-  if (answer.kind === 'both-differ') {
+  if (answer.kind === 'both-differ' && answer.legacy) {
+    // Only the child opens the database, so only the child can tell which key
+    // opens its stored secrets: it rules between the two files at boot
+    // (`settleKeyFileChannel` in the settings service), names the one it
+    // took, and refuses in production when neither opens them.
+    childEnv[KEY_FILE_CANDIDATE_CHANNEL_ENV] = answer.legacy;
     return (
-      `Data key: two different key files exist, ${answer.canonical} (used) and ${answer.legacy} (NOT used). ` +
-      `Secrets saved under the unused key will not decrypt. If this project's secrets were saved under ` +
-      `\`os start\`, keep a copy of both files and move ${answer.legacy} over ${answer.canonical}.`
+      `Data key: two different key files exist, ${answer.canonical} and ${answer.legacy}. ` +
+      `The server uses the one that opens this project's stored secrets, and says which.`
     );
   }
   return undefined;

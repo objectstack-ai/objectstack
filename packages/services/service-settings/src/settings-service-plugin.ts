@@ -32,7 +32,11 @@ import { SettingsService } from './settings-service.js';
 import type { ICryptoProvider } from '@objectstack/spec/contracts';
 import type { SettingsAuditWriter, SettingsEngine, SettingsSecretStore } from './settings-service.types.js';
 import type { CryptoAdapter } from './crypto-adapter.js';
-import { LocalCryptoProvider } from './local-crypto-provider.js';
+import {
+  LocalCryptoProvider,
+  settleKeyFileChannel,
+  storedSecretReaderOverEngine,
+} from './local-crypto-provider.js';
 import { buildConfigChangeAuditSink } from './config-change-audit.js';
 import { registerLocalizationCurrencyLock, type CurrencyUsageEngine } from './localization-currency-lock.js';
 import { USER_OBJECT, assertUserReferenceResolves, registeredLabel } from './actor-reference.js';
@@ -258,6 +262,26 @@ export class SettingsServicePlugin implements Plugin {
 
   async start(ctx: PluginContext): Promise<void> {
     if (!this.service) return;
+
+    // The data key's file, where two candidates exist: ruled here, in Phase 2,
+    // because the database is open (this plugin starts after objectql) and no
+    // consumer has decrypted yet (they all read at `kernel:ready` or later, so
+    // every provider they build reads the chosen file). A no-op unless the CLI
+    // parent named a second candidate (`settleKeyFileChannel`). A production
+    // boot where neither key opens the stored secrets throws here, which stops
+    // the boot: the provider's fail-loud contract, at the one place that can
+    // judge it.
+    let settleEngine: IDataEngine | null = null;
+    try {
+      settleEngine = ctx.getService<IDataEngine>('objectql');
+    } catch {
+      // No engine: no stored secret can be read, so the canonical file stands.
+    }
+    await settleKeyFileChannel({
+      readStoredSecret: settleEngine
+        ? storedSecretReaderOverEngine(settleEngine as unknown as Parameters<typeof storedSecretReaderOverEngine>[0])
+        : async () => undefined,
+    });
 
     ctx.hook('kernel:ready', async () => {
       // First, before the engine binds (its change event names every

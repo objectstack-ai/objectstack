@@ -1,6 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import type { ICryptoProvider } from '@objectstack/spec/contracts';
+import { resolveStartHome } from './start-home.js';
 
 /**
  * [#21471] The settings service a ONE-SHOT command composes, and the one place
@@ -57,16 +60,49 @@ export interface ExistingDataKey {
  * Resolve the data key this host already has, never minting one. A key that
  * is missing, or set but unusable, is an answer here, not a throw.
  */
-export async function resolveExistingDataKey(): Promise<ExistingDataKey> {
+export async function resolveExistingDataKey(
+  opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+): Promise<ExistingDataKey> {
   // Loaded at the point of use, never at module load: oclif imports every
   // command module on every invocation while building its table.
-  const { LocalCryptoProvider } = await import('@objectstack/service-settings');
+  const {
+    LocalCryptoProvider,
+    deferredLocalCryptoProvider,
+    resolvePersistedKeyFile,
+    KEY_FILE_CHANNEL_ENV,
+    KEY_FILE_CANDIDATE_CHANNEL_ENV,
+  } = await import('@objectstack/service-settings');
+  const env = opts.env ?? process.env;
+  const cwd = opts.cwd ?? process.cwd();
+  // [#30042] The SAME file a `serve` child of `os dev` / `os start` reads for
+  // this project, chosen by the same resolution: the canonical file, the
+  // project's legacy file when it alone holds a key, and — when the two hold
+  // different keys — whichever opens a stored secret, ruled by the settings
+  // service in this run's own boot (`settleKeyFileChannel`). This process
+  // opens the database itself, so it is its own parent: it sets both channels
+  // on its own env, exactly as `applyCryptoKeyFileChannel` sets them on a
+  // child's.
+  const startHome = resolveStartHome(undefined, {
+    hasProjectConfig: existsSync(path.resolve(cwd, 'objectstack.config.ts')),
+    cwd,
+    env,
+  });
+  const answer = resolvePersistedKeyFile({ env, legacyKeyFile: path.join(startHome, 'dev-crypto-key') });
+  // The canonical file is the one the provider reads with no channel at all.
+  delete env[KEY_FILE_CANDIDATE_CHANNEL_ENV];
+  if (answer && answer.kind !== 'canonical') env[KEY_FILE_CHANNEL_ENV] = answer.path;
+  else delete env[KEY_FILE_CHANNEL_ENV];
+  const strict = () => ({ mode: 'production' as const, env: { ...env, OS_CRYPTO_AUTOKEY: undefined } });
   try {
-    const provider = new LocalCryptoProvider({
-      mode: 'production',
-      env: { ...process.env, OS_CRYPTO_AUTOKEY: undefined },
-    });
-    return { provider, unavailable: null };
+    // Built now, over the file this answer names: it proves a key exists
+    // before the boot, and is the provider itself whenever one file is named.
+    const provider = new LocalCryptoProvider(strict());
+    if (answer?.kind !== 'both-differ' || !answer.legacy) return { provider, unavailable: null };
+    // Two candidate keys: the provider this run uses is built at its first
+    // use, after the boot's settings service ruled between them (every reader
+    // of a stored secret in a one-shot runs at `kernel:ready` or after it).
+    env[KEY_FILE_CANDIDATE_CHANNEL_ENV] = answer.legacy;
+    return { provider: deferredLocalCryptoProvider(strict), unavailable: null };
   } catch (error) {
     return { provider: null, unavailable: error instanceof Error ? error.message : String(error) };
   }
