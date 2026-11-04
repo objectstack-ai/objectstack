@@ -3780,6 +3780,37 @@ const fr = {
     codex: {
       body: 'À ajouter dans ~/.codex/config.toml. Si votre version de Codex ne gère pas le flux OAuth, utilisez un en-tête de clé API (voir ci-dessous) :',
     },
+    sections: {
+      assistants: {
+        title: 'Assistants de travail',
+        body: 'Clients de bureau et de chat : ajoutez ce système comme connecteur personnalisé, puis connectez-vous dans le navigateur lorsque c’est demandé.',
+      },
+      coding: {
+        title: 'Agents de code',
+        body: 'Agents d’IDE et de terminal : une commande ou un fichier de configuration suffit.',
+      },
+    },
+    fields: {
+      name: 'Nom',
+      transport: 'Type de transport',
+      url: 'URL du serveur',
+    },
+    workbuddy: {
+      body: 'Connecteurs → Connecteur personnalisé → Configurer MCP, puis fusionnez cette entrée dans mcpServers (enregistrée dans ~/.workbuddy/mcp.json) :',
+      hint: 'Enregistrez, puis cliquez sur Faire confiance sur le connecteur objectstack — il reste inactif tant qu’il n’est pas approuvé. Si aucune connexion n’est proposée, ajoutez l’en-tête Authorization: Bearer <clé API> (créez une clé ci-dessous).',
+    },
+    doubao: {
+      body: 'Compétences · Connecteurs → Nouveau → Nouveau connecteur personnalisé, puis renseignez :',
+      hint: 'Connectez-vous dans le navigateur lorsque c’est demandé. Si aucune connexion n’apparaît, ajoutez l’en-tête personnalisé Authorization: Bearer <clé API> (créez une clé ci-dessous). Les tâches exécutées dans le cloud exigent un déploiement joignable en HTTPS public.',
+    },
+    dumate: {
+      body: 'Applications connectées → ajouter une application MCP personnalisée (administrateurs : Gestion des extensions → Gestion des applications connectées), puis renseignez :',
+      hint: 'Choisissez OAuth, terminez la connexion dans le navigateur, puis confirmez dans DuMate. Avec une authentification par jeton, saisissez Bearer <clé API> dans le champ Authorization (créez une clé ci-dessous).',
+    },
+    qwenwork: {
+      body: 'Extensions → Connecteurs → + Ajouter → Coller la configuration JSON :',
+      hint: 'Ou ajoutez-le à la main en Streamable HTTP avec cette URL. Si votre version ne propose pas de connexion par navigateur, ajoutez l’en-tête Authorization: Bearer <clé API> (créez une clé ci-dessous).',
+    },
     apiKey: {
       title: 'Clés API',
       badge: 'headless',

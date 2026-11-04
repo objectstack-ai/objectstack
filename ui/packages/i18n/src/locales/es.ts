@@ -3784,6 +3784,37 @@ const es = {
     codex: {
       body: 'Añadir a ~/.codex/config.toml. Si su versión de Codex no admite el flujo OAuth, use una cabecera de clave API (ver abajo):',
     },
+    sections: {
+      assistants: {
+        title: 'Asistentes de trabajo',
+        body: 'Clientes de escritorio y de chat: añade este sistema como conector personalizado e inicia sesión en el navegador cuando se te pida.',
+      },
+      coding: {
+        title: 'Agentes de código',
+        body: 'Agentes de IDE y de terminal: un comando o un archivo de configuración.',
+      },
+    },
+    fields: {
+      name: 'Nombre',
+      transport: 'Tipo de transporte',
+      url: 'URL del servidor',
+    },
+    workbuddy: {
+      body: 'Conectores → Conector personalizado → Configurar MCP y fusiona esta entrada en mcpServers (se guarda en ~/.workbuddy/mcp.json):',
+      hint: 'Guarda y haz clic en Confiar en el conector objectstack; no se activa hasta que confíes en él. Si tu versión no muestra el inicio de sesión, añade la cabecera Authorization: Bearer <clave API> (crea una clave abajo).',
+    },
+    doubao: {
+      body: 'Habilidades · Conectores → Nuevo → Nuevo conector personalizado y rellena:',
+      hint: 'Inicia sesión en el navegador cuando se te pida. Si no aparece el inicio de sesión, añade la cabecera personalizada Authorization: Bearer <clave API> (crea una clave abajo). Las tareas que se ejecutan en la nube requieren un despliegue accesible por HTTPS público.',
+    },
+    dumate: {
+      body: 'Aplicaciones conectadas → añadir una aplicación MCP personalizada (administradores: Gestión de extensiones → Gestión de aplicaciones conectadas) y rellena:',
+      hint: 'Elige OAuth, completa el inicio de sesión en el navegador y confirma de vuelta en DuMate. Con autenticación por token, escribe Bearer <clave API> en el campo Authorization (crea una clave abajo).',
+    },
+    qwenwork: {
+      body: 'Extensiones → Conectores → + Añadir → Pegar configuración JSON:',
+      hint: 'O añádelo a mano como Streamable HTTP con esta URL. Si tu versión no ofrece inicio de sesión en el navegador, añade la cabecera Authorization: Bearer <clave API> (crea una clave abajo).',
+    },
     apiKey: {
       title: 'Claves API',
       badge: 'headless',

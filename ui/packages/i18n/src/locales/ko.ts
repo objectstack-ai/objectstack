@@ -3708,6 +3708,37 @@ const ko = {
     codex: {
       body: '~/.codex/config.toml에 추가하세요. Codex 버전이 OAuth 흐름을 지원하지 않으면 API 키 헤더를 사용하세요(아래 참조):',
     },
+    sections: {
+      assistants: {
+        title: '업무 어시스턴트',
+        body: '데스크톱 및 채팅 클라이언트: 이 시스템을 사용자 지정 커넥터로 추가한 뒤 안내에 따라 브라우저에서 로그인하세요.',
+      },
+      coding: {
+        title: '코딩 에이전트',
+        body: 'IDE 및 터미널 에이전트: 명령 하나 또는 설정 파일 하나면 됩니다.',
+      },
+    },
+    fields: {
+      name: '이름',
+      transport: '전송 방식',
+      url: '서버 URL',
+    },
+    workbuddy: {
+      body: '커넥터 → 사용자 지정 커넥터 → MCP 구성에서 이 항목을 mcpServers에 병합하세요(~/.workbuddy/mcp.json에 저장됨):',
+      hint: '저장한 뒤 objectstack 커넥터에서 신뢰를 클릭하세요. 신뢰하기 전에는 활성화되지 않습니다. 로그인 창이 뜨지 않으면 요청 헤더 Authorization: Bearer <API 키>를 추가하세요(키는 아래에서 생성).',
+    },
+    doubao: {
+      body: '스킬 · 커넥터 → 새로 만들기 → 사용자 지정 커넥터 만들기에서 다음과 같이 입력하세요:',
+      hint: '안내에 따라 브라우저에서 로그인하세요. 로그인 창이 뜨지 않으면 사용자 지정 헤더 Authorization: Bearer <API 키>를 추가하세요(키는 아래에서 생성). 클라우드에서 실행되는 작업은 공용 HTTPS로 접근 가능한 배포가 필요합니다.',
+    },
+    dumate: {
+      body: '연결 앱 → 사용자 지정 MCP 앱 추가(관리자: 기능 확장 관리 → 연결 앱 관리)에서 다음과 같이 입력하세요:',
+      hint: '인증 방식으로 OAuth를 선택하고 브라우저에서 로그인을 마친 뒤 DuMate로 돌아와 확인하세요. 토큰 인증이라면 Authorization 필드에 Bearer <API 키>를 입력하세요(키는 아래에서 생성).',
+    },
+    qwenwork: {
+      body: '확장 → 커넥터 → + 추가 → JSON 구성 붙여넣기:',
+      hint: '직접 추가하려면 Streamable HTTP를 선택하고 이 URL을 입력하세요. 브라우저 로그인을 지원하지 않는 버전이라면 요청 헤더 Authorization: Bearer <API 키>를 추가하세요(키는 아래에서 생성).',
+    },
     apiKey: {
       title: 'API 키',
       badge: '헤드리스',
