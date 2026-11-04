@@ -199,8 +199,9 @@ describe('validate_expression MCP tool (#1928)', () => {
         { triggerKind: 'record_change' },
       ]) {
         const { json } = await call(runtime, toolsCall(1, 'validate_expression', { objectName: 'crm_opportunity', expression: 'record.title > 5', ...args }), bridge);
-        expect(json.result.isError, JSON.stringify(args)).toBe(true);
-        expect(json.result.content[0].text, JSON.stringify(args)).toMatch(/applies only with site/);
+        const { result } = json as { result: { isError?: boolean; content: { text: string }[] } };
+        expect(result.isError, JSON.stringify(args)).toBe(true);
+        expect(result.content[0]!.text, JSON.stringify(args)).toMatch(/applies only with site/);
       }
     });
 

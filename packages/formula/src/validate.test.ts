@@ -818,7 +818,7 @@ describe('validateExpression (ADR-0032)', () => {
       ] as const) {
         const r = validateExpression('predicate', source, flat);
         expect(r.warnings, source).toHaveLength(0);
-        expect(r.errors.map((e) => [e.code, e.params.reference]), source).toEqual([['type-mismatch-run-fails', reference]]);
+        expect(r.errors.map((e) => [e.code, (e.params as { reference?: string }).reference]), source).toEqual([['type-mismatch-run-fails', reference]]);
         expect(r.errors[0].message, source).toContain(`\`${reference}\``);
       }
       // Controls: a well-typed record read, a number field, and the
