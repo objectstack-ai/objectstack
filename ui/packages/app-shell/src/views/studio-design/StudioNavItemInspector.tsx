@@ -170,14 +170,25 @@ export function StudioNavItemInspector({
   appDraft,
   objects,
   packageId,
+  pairId = null,
   onNavPatch,
   onClear,
 }: {
   navId: string;
   appDraft: Record<string, unknown>;
-  objects: Array<{ name: string; label: string }>;
+  /**
+   * The object picker's choices. objectstack#30059 — `pair` marks an object
+   * only the base's paired customization package holds.
+   */
+  objects: Array<{ name: string; label: string; pair?: true }>;
   /** The package whose items the non-object pickers offer (objectui#11790). */
   packageId: string;
+  /**
+   * objectstack#30059 — on a read-only base, its paired customization package:
+   * the non-object pickers offer its items too, after the base's, as the
+   * pillar's object list offers its objects (`withPairItems`).
+   */
+  pairId?: string | null;
   onNavPatch: (patch: Record<string, unknown>) => void;
   onClear: () => void;
 }): React.ReactElement {
@@ -208,8 +219,8 @@ export function StudioNavItemInspector({
   // unbind leaves) or a spelling no member declares.
   const kind: NavigationItemType | null = node && isNavEntryType(node.type) ? node.type : null;
   // Hooks run before the not-found return below; `undefined` fetches nothing.
-  const targets = usePackageNavTargets(packageId, kind ? NAV_TARGET_METADATA[kind] : undefined);
-  const books = usePackageNavTargets(packageId, kind === 'doc' ? 'book' : undefined);
+  const targets = usePackageNavTargets(packageId, kind ? NAV_TARGET_METADATA[kind] : undefined, pairId);
+  const books = usePackageNavTargets(packageId, kind === 'doc' ? 'book' : undefined, pairId);
   // objectstack#26740 — an `object` entry's landing, read off the keys it
   // holds; a landing chosen but not yet given its value is kept here, for this
   // entry and this object only.
@@ -218,7 +229,7 @@ export function StudioNavItemInspector({
   const heldLanding: ObjectTargetMode = node && kind === 'object' ? deriveObjectTargetMode(node) : 'default';
   const landing: ObjectTargetMode =
     heldLanding !== 'default' ? heldLanding : landingChoice?.key === landingKey ? landingChoice.mode : 'default';
-  const views = usePackageNavTargets(packageId, kind === 'object' && landing === 'view' ? 'view' : undefined);
+  const views = usePackageNavTargets(packageId, kind === 'object' && landing === 'view' ? 'view' : undefined, pairId);
   // The `visible` condition as editable CEL text: the bare string, or an
   // envelope's CEL `source`; `null` for an envelope this field cannot edit.
   const heldVisible: string | null = node ? navVisibleText(node.visible) : '';
@@ -302,7 +313,22 @@ export function StudioNavItemInspector({
       objectName: objName,
       object: undefined,
       path: undefined,
+      ...gatePatch(objName),
     });
+  };
+  /**
+   * objectstack#30059 — the `requiresObject` an entry bound to `objName`
+   * carries. An object only the pair holds can be removed while the copied
+   * navigation still names it, so the entry gates on it and the runtime hides
+   * it then instead of linking to a missing object. A gate this binding wrote
+   * (it names the object bound before) is removed when the entry binds to an
+   * object the base ships or is unbound; an author's own gate is kept.
+   */
+  const gatePatch = (objName: string): { requiresObject?: unknown } => {
+    if (objName && objects.some((o) => o.name === objName && o.pair === true)) return { requiresObject: objName };
+    // No key at all unless a gate this binding wrote is to be removed: an entry
+    // with no gate, or the author's own, is left as it was.
+    return boundObject !== '' && node.requiresObject === boundObject ? { requiresObject: undefined } : {};
   };
   const optionsOf = (rows: ReadonlyArray<NavTargetRow>) =>
     rows.map((row) => {
@@ -438,7 +464,7 @@ export function StudioNavItemInspector({
             onPick={(objName) => {
               if (!objName) {
                 // Unbind → back to an (invalid, dropped-on-save) placeholder.
-                patch({ type: undefined, objectName: undefined, object: undefined });
+                patch({ type: undefined, objectName: undefined, object: undefined, ...gatePatch('') });
                 return;
               }
               bindObject(objName);
@@ -804,57 +830,70 @@ async function isDraftNavTarget(
  * The package's items of `metaType`, published ∪ draft by name (the published
  * row wins, for its label), as the pillar's object list is read
  * (objectui#11790). `undefined` reads nothing. A failed read leaves the
- * picker empty, as the object picker's does.
+ * picker empty, as the object picker's does. objectstack#30059 — with a
+ * `pairId`, that package's items follow, each one whose name the package's
+ * own list does not hold; a failed read of the pair leaves the package's.
  */
 function usePackageNavTargets(
   packageId: string,
   metaType: string | undefined,
+  pairId: string | null = null,
 ): { rows: ReadonlyArray<NavTargetRow>; loading: boolean } {
   const client = useMetadataClient();
-  const key = metaType ? `${metaType}:${packageId}` : '';
+  const key = metaType ? JSON.stringify([metaType, packageId, pairId]) : '';
   const [state, setState] = React.useState<{ key: string; rows: NavTargetRow[] } | null>(null);
   React.useEffect(() => {
     if (!metaType) return;
     let cancelled = false;
     (async () => {
-      const byName = new Map<string, NavTargetRow>();
-      try {
-        const [published, drafts] = await Promise.all([
-          client.list(metaType, { packageId }) as Promise<Array<Record<string, unknown>> | null | undefined>,
-          client.listDrafts({ packageId, type: metaType }).catch(() => [] as Array<{ name?: string | null }>),
-        ]);
-        for (const row of published ?? []) {
-          const name = typeof row?.name === 'string' ? row.name : '';
-          if (!name || byName.has(name) || !isNavTargetRow(metaType, row)) continue;
-          byName.set(name, { name, label: row.label as I18nLabel | undefined });
-        }
-        // objectui#11862 — a draft-only target carries the label its `_drafts`
-        // row serves (objectstack-ai/objectstack#22200), so the picker offers
-        // it by that label, as it offers a published one.
-        const draftOnly: NavTargetRow[] = [];
-        for (const draft of (drafts ?? []) as Array<{ name?: string | null; label?: I18nLabel | null }>) {
-          const name = typeof draft?.name === 'string' ? draft.name : '';
-          if (name && !byName.has(name) && !draftOnly.some((row) => row.name === name)) {
-            draftOnly.push({ name, label: draft.label ?? undefined });
-          }
-        }
-        const verdicts = await Promise.all(
-          draftOnly.map((row) => isDraftNavTarget(client, metaType, row.name, packageId)),
-        );
-        draftOnly.forEach((row, i) => {
-          if (verdicts[i]) byName.set(row.name, row);
-        });
-      } catch {
-        /* non-fatal — the picker just stays empty */
-      }
-      if (!cancelled) setState({ key, rows: [...byName.values()] });
+      const [own, pair] = await Promise.all([
+        readNavTargets(client, metaType, packageId),
+        pairId ? readNavTargets(client, metaType, pairId) : Promise.resolve([] as NavTargetRow[]),
+      ]);
+      const held = new Set(own.map((row) => row.name));
+      if (!cancelled) setState({ key, rows: [...own, ...pair.filter((row) => !held.has(row.name))] });
     })();
     return () => {
       cancelled = true;
     };
-  }, [client, packageId, metaType, key]);
+  }, [client, packageId, pairId, metaType, key]);
   if (!metaType) return { rows: [], loading: false };
   return state?.key === key ? { rows: state.rows, loading: false } : { rows: [], loading: true };
+}
+
+/** One package's nav targets of `metaType` ({@link usePackageNavTargets}); a failed read is none. */
+async function readNavTargets(client: MetadataClient, metaType: string, packageId: string): Promise<NavTargetRow[]> {
+  const byName = new Map<string, NavTargetRow>();
+  try {
+    const [published, drafts] = await Promise.all([
+      client.list(metaType, { packageId }) as Promise<Array<Record<string, unknown>> | null | undefined>,
+      client.listDrafts({ packageId, type: metaType }).catch(() => [] as Array<{ name?: string | null }>),
+    ]);
+    for (const row of published ?? []) {
+      const name = typeof row?.name === 'string' ? row.name : '';
+      if (!name || byName.has(name) || !isNavTargetRow(metaType, row)) continue;
+      byName.set(name, { name, label: row.label as I18nLabel | undefined });
+    }
+    // objectui#11862 — a draft-only target carries the label its `_drafts`
+    // row serves (objectstack-ai/objectstack#22200), so the picker offers
+    // it by that label, as it offers a published one.
+    const draftOnly: NavTargetRow[] = [];
+    for (const draft of (drafts ?? []) as Array<{ name?: string | null; label?: I18nLabel | null }>) {
+      const name = typeof draft?.name === 'string' ? draft.name : '';
+      if (name && !byName.has(name) && !draftOnly.some((row) => row.name === name)) {
+        draftOnly.push({ name, label: draft.label ?? undefined });
+      }
+    }
+    const verdicts = await Promise.all(
+      draftOnly.map((row) => isDraftNavTarget(client, metaType, row.name, packageId)),
+    );
+    draftOnly.forEach((row, i) => {
+      if (verdicts[i]) byName.set(row.name, row);
+    });
+  } catch {
+    /* non-fatal — the picker just stays empty */
+  }
+  return [...byName.values()];
 }
 
 /** The item a value none of a picker's options carries is shown by. */
