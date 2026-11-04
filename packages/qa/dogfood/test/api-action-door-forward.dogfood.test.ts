@@ -38,7 +38,10 @@
 //     signed-in session, so a key caller of `ban_user` is refused BY NAME at
 //     the door (the target's anonymous "Sign in first" was the defect) and
 //     nobody is banned, while a key caller of an api action whose target is
-//     the data door is still forwarded and served.
+//     the data door is still forwarded and served;
+//   - a per-record api action (#29881): `showcase_recalc_estimate` with no
+//     `recordId` is refused 400 naming it, an unknown id 404s at the door,
+//     and neither answer names the recalc flow's internal node.
 //
 // `OS_SCIM_ENABLED=true` precedes the boot because `/admin/*` 501s without
 // better-auth's admin plugin, and that env knob is the one that reaches it
@@ -296,6 +299,37 @@ describe('[#27506] a same-origin api action is dispatched through the action doo
     const message = String(refused.payload?.error?.message ?? refused.payload?.message ?? JSON.stringify(refused.payload));
     expect(message).not.toContain('cannot be invoked via MCP');
     expect(message).toContain('not exposed to AI');
+  }, 120_000);
+
+  it('[#29881] the per-record recalc action names the missing `recordId` and 404s an unknown id at the door; its aggregate twin still runs', async () => {
+    // Before: both calls ran the recalc flow and answered `400 FLOW_FAILED`
+    // naming its internal node (`load_task`).
+    for (const body of [{}, { recordId: '' }]) {
+      const missing = await call({ token: admin }, 'POST', '/actions/showcase_task/showcase_recalc_estimate', body);
+      expect(missing.status, missing.text).toBe(400);
+      expect(missing.json?.error?.code, missing.text).toBe('VALIDATION_ERROR');
+      expect(String(missing.json?.error?.message)).toContain('`recordId`');
+      expect(missing.text).not.toContain('load_task');
+      expect(missing.text).not.toContain('FLOW_FAILED');
+    }
+
+    const unknown = await call({ token: admin }, 'POST', '/actions/showcase_task/showcase_recalc_estimate', { recordId: 'task-does-not-exist-29881' });
+    expect(unknown.status, unknown.text).toBe(404);
+    expect(unknown.json?.error?.code, unknown.text).toBe('RECORD_NOT_FOUND');
+    expect(unknown.text).not.toContain('load_task');
+
+    // The control: a real task is recalculated through the same door.
+    const [task] = rowsOf(await ql.find('showcase_task', { limit: 1 }, { context: SYS }));
+    expect(task?.id, 'the showcase seeds no task').toBeTruthy();
+    const ran = await call({ token: admin }, 'POST', '/actions/showcase_task/showcase_recalc_estimate', { recordId: String(task.id) });
+    expect(ran.status, ran.text).toBe(200);
+
+    // Not per-record: `showcase_recalc_selection` is `execution: 'aggregate'`,
+    // so a call with no id is not refused at the door and still reaches its
+    // target (#29173); what the target makes of an empty selection is its own.
+    const bulk = await call({ token: admin }, 'POST', '/actions/showcase_task/showcase_recalc_selection', {});
+    expect(bulk.json?.error?.code, bulk.text).not.toBe('VALIDATION_ERROR');
+    expect(bulk.text).not.toContain("`execution: 'perRecord'`");
   }, 120_000);
 
   it('impersonate_user, cookie lane: every Set-Cookie line the target mints comes back through the door', async () => {

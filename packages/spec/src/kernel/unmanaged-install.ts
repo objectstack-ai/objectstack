@@ -135,6 +135,7 @@ export const UNMANAGED_INSTALL_KEY_DISPOSITIONS: Readonly<Record<string, Unmanag
   appName: 'deployment',
   email: 'deployment',
   sms: 'deployment',
+  push: 'deployment',
   requires: 'deployment',
   tiers: 'deployment',
   devHint: 'deployment',

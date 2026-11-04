@@ -1671,6 +1671,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.edit.autoSaveOn': 'Auto-save is on — click to disable',
   'engine.edit.autoSaveOff': 'Auto-save is off — click to enable',
   'engine.edit.autoSavingShortly': 'Auto-saving…',
+  'engine.edit.notSavedHeld': 'Not saved — fix the errors to save',
   'engine.edit.destructive': 'Destructive change',
   'engine.edit.destructiveHint':
     'The change would break existing references. Review the issues and confirm to force-save.',

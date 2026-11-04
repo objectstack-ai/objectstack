@@ -121,7 +121,10 @@ Three notes for reading the 18.3.0 CHANGELOGs:
   password reset ends leaves a revocation trail (`7b2bb66`, #29921); and an
   organization administrator's refused assignment removal answers the same
   for a row it cannot read as for a missing one (`72d7db0`, #29932). Each is
-  in the [upgrade checklist](#upgrade-checklist) where it applies.
+  in the [upgrade checklist](#upgrade-checklist) where it applies, and the
+  breaking one is also listed under
+  [需手动处理](#metadata-the-build-lint-and-save-doors-now-refuse) with the
+  refusal it serves.
 - **Each entry names the commit that added its changeset**, and this page
   cites the same commits. A commit that added several changesets is named by
   each of them: the 1,379 entries name 1,300 commits.
@@ -280,7 +283,26 @@ to meet.
 
 #### Metadata the build, lint and save doors now refuse
 
-8 entries.
+8 entries, and one more that 18.3.0 ships with no entry in its CHANGELOGs
+(see [the release facts](#release-facts-as-measured)):
+
+- **Not in the 18.3.0 CHANGELOGs.** A text or boolean field ordered against
+  a number in a predicate that fails closed is refused. The sites are a
+  validation rule's `condition` and `when` (nested rules included), a
+  field's `requiredWhen` and `readonlyWhen`, an option's `visibleWhen`, and
+  a hook's `condition`. 18.2.0 published `record.name > 5` on a text field
+  with an `expression-invalid` warning, then refused every write whose `name`
+  was not numeric text. 18.3.0 refuses it at `os validate`, `os build`, the
+  object save door and publish, as `expression-invalid` at `severity:
+  error`. The refusal it carries is `type-mismatch` with
+  `params.outcome: 'fail-closed'`, and the MCP `validate_expression` tool
+  answers the same for `site: 'validation'`. Write `size(...)` for a length,
+  compare a number field for a value, or cast with `double(...)` only when
+  every value is numeric text. The upgrade guide entry is
+  `validation-type-mismatch-refused`. After 18.3.0, `main` serves this
+  refusal under its own code, `type-mismatch-fail-closed`, with no `outcome`
+  param (#29953); the next release's notes list that rename (`4c2cd29`,
+  #29923)
 
 - `os validate` and `os build` refuse a seed record value the seed load would refuse, with the load's own code and sentence, located at the record's field (for #27259) (`99aeee6`, #27600)
 - A scaffold into the current directory refuses, writing nothing, when a template file would overwrite one already there (for #29134) (`ad224b7`, #29267)

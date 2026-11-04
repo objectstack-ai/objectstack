@@ -3025,6 +3025,11 @@ export default class Serve extends Command {
       const tiers: Set<string> = resolveStackTiers({ declaredTiers, requires, preset: presetName });
       const tierEnabled = (t: string) => tiers.has(t);
       const requiresCapability = (c: string) => requires.includes(c);
+      // [#29820] A stack `push` key with no `push` in `requires` mounts nothing
+      // and is read by nothing: push is requested, never on the always-on
+      // slate. Say so once instead of booting as if the key took effect.
+      const unrequestedPushKey = formatUnrequestedPushKeyWarning(config, requires);
+      if (unrequestedPushKey) console.warn(chalk.yellow(`  ⚠ ${unrequestedPushKey}`));
 
       // Import ObjectStack runtime
       const { Runtime } = await import('@objectstack/runtime');
@@ -4358,6 +4363,12 @@ export default class Serve extends Command {
               appName: resolveDeploymentAppName((config as any).email ?? {}, process.env, (config as any).appName),
               socialProviders: Object.keys(socialProviders).length > 0 ? socialProviders : undefined,
               trustedOrigins: trustedOrigins.length ? trustedOrigins : undefined,
+              // The native app schemes the mobile sign-in hand-off may redirect a
+              // token to, from `OS_TRUSTED_APP_SCHEMES` (#29972). Unset stays
+              // unset: no scheme registered, the `one-time-token` plugin is not
+              // mounted and the hand-off refuses every target. A bad entry is
+              // refused by AuthPlugin at construction, never dropped.
+              trustedAppSchemes: resolveTrustedAppSchemes(process.env),
               // The stack's `server.trustProxy`, the same authored value the
               // dispatcher's inbound rate limiter receives below: whether the
               // ADR-0069 D5 IP allow-list and the D7 login audit may believe
@@ -6487,6 +6498,22 @@ export function resolveTenancyPostureOrRefusal(): TenancyPostureGateVerdict {
 
 
 /**
+ * The boot warning for a stack whose `push` key is set while its served
+ * capabilities do not include `push` (#29820), or `null` when there is nothing
+ * to say. Push is a requested capability, never on the always-on slate, so
+ * without the token `PushServicePlugin` is not mounted and the key is read by
+ * nothing; the operator who wrote the key is told how to turn it on.
+ *
+ * Returns PLAIN text; the caller owns the channel (`console.warn`, stderr).
+ */
+export function formatUnrequestedPushKeyWarning(stack: unknown, requires: readonly string[]): string | null {
+  const push = stack && typeof stack === 'object' ? (stack as { push?: unknown }).push : undefined;
+  if (push === undefined || push === null || requires.includes('push')) return null;
+  return "The stack definition sets a push key, but requires does not name 'push', so the push service is not "
+    + "started and the key is not read. Add 'push' to requires to turn mobile push on.";
+}
+
+/**
  * The diagnosis the optional i18n service load prints when it fails — a
  * DIAGNOSIS ahead of behaviour that does not change (#14042's rule, applied at
  * the one site its repair did not reach).
@@ -6874,6 +6901,35 @@ export function formatUnusableAuthBaseUrlDiagnostic(
     + '    Fix: set OS_AUTH_URL to this deployment\'s public origin (e.g.\n'
     + '    https://app.example.com), or remove the variable entirely to fall back to\n'
     + '    OS_BASE_URL / http://localhost:<port>.';
+}
+
+/** The variable `serve` reads the deployment's registered app schemes from (#29972). */
+export const TRUSTED_APP_SCHEMES_ENV_NAME = 'OS_TRUSTED_APP_SCHEMES';
+
+/**
+ * The app schemes this deployment registers for the mobile sign-in hand-off
+ * (`AuthConfig.trustedAppSchemes`), read from `OS_TRUSTED_APP_SCHEMES` in the
+ * shape `OS_TRUSTED_ORIGINS` is read: comma-separated, each entry trimmed,
+ * empty entries dropped, repeats folded (#29972).
+ *
+ * Unset (or nothing but separators and spaces) answers `undefined`: no scheme
+ * is registered, so plugin-auth mounts no `one-time-token` plugin and the
+ * hand-off route refuses every target. There is no default scheme — the
+ * hand-off is opt-in per deployment.
+ *
+ * ⛔ An entry is never validated, lower-cased or dropped here. A bad one goes
+ * through to `new AuthPlugin(...)` as typed, where `assertTrustedAppSchemes`
+ * refuses it at construction naming the entry, so a misspelt scheme fails the
+ * boot instead of booting a hand-off that refuses the deployment's own app.
+ */
+export function resolveTrustedAppSchemes(env: NodeJS.ProcessEnv): string[] | undefined {
+  const raw = env[TRUSTED_APP_SCHEMES_ENV_NAME];
+  if (raw === undefined) return undefined;
+  const schemes: string[] = [];
+  for (const entry of raw.split(',').map((s) => s.trim()).filter(Boolean)) {
+    if (!schemes.includes(entry)) schemes.push(entry);
+  }
+  return schemes.length ? schemes : undefined;
 }
 
 // [#22301] The constructor arguments a served boot hands the `storage`, `email`

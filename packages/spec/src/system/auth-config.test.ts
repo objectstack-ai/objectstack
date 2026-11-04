@@ -296,13 +296,14 @@ describe('EmailAndPasswordConfigSchema', () => {
       minPasswordLength: 10,
       maxPasswordLength: 64,
       autoSignIn: false,
-      revokeSessionsOnPasswordReset: true,
       resetPasswordTokenExpiresIn: 7200,
     });
 
     expect(config?.enabled).toBe(true);
     expect(config?.minPasswordLength).toBe(10);
-    expect(config?.revokeSessionsOnPasswordReset).toBe(true);
+    // `revokeSessionsOnPasswordReset` is retired: its refusal is pinned in
+    // `auth-revoke-sessions-on-password-reset-retirement.test.ts`.
+    expect(config).not.toHaveProperty('revokeSessionsOnPasswordReset');
   });
 
   it('should default enabled to true', () => {

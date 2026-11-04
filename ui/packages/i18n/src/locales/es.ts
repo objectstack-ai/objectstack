@@ -1433,6 +1433,7 @@ const es = {
     owner: "Propietario",
     relatedCardMenu: "Más opciones de {{title}}",
     relatedCardEnlarge: "Ampliar",
+    relatedCardAllColumns: "Todas las columnas",
     relatedCardExpand: "Desplegar",
     relatedCardHide: "Ocultar",
     relatedCardNew: "Nuevo",
@@ -3777,11 +3778,28 @@ const es = {
       addButton: 'Añadir a Cursor',
       body: 'Use el botón de un clic o añada esto a .cursor/mcp.json:',
     },
-    vscode: {
-      body: 'Añadir a .vscode/mcp.json (o mediante el comando MCP: Add Server):',
+    fields: {
+      name: 'Nombre',
+      transport: 'Tipo de transporte',
+      url: 'URL del servidor',
     },
     codex: {
-      body: 'Añadir a ~/.codex/config.toml. Si su versión de Codex no admite el flujo OAuth, use una cabecera de clave API (ver abajo):',
+      body: 'En la app de Codex: Ajustes → Servidores MCP → Añadir servidor y rellena:',
+      hint: 'Guarda, reinicia cuando se te pida y haz clic en Authenticate junto a objectstack para iniciar sesión en el navegador. Escribe /mcp en el cuadro de mensaje para comprobar la conexión. Si tu versión no ofrece inicio de sesión en el navegador, añade la cabecera Authorization: Bearer <clave API> (crea una clave abajo).',
+    },
+    workbuddy: {
+      body: 'Conectores → Conector personalizado → Configurar MCP y fusiona esta entrada en mcpServers (se guarda en ~/.workbuddy/mcp.json):',
+      hint: 'Guarda y haz clic en Confiar en el conector objectstack; no se activa hasta que confíes en él. Si tu versión no muestra el inicio de sesión, añade la cabecera Authorization: Bearer <clave API> (crea una clave abajo).',
+    },
+    doubao: {
+      title: 'Doubao Work',
+      body: 'Habilidades · Conectores → Nuevo → Nuevo conector personalizado y rellena:',
+      hint: 'Inicia sesión en el navegador cuando se te pida. Si no aparece el inicio de sesión, añade la cabecera personalizada Authorization: Bearer <clave API> (crea una clave abajo). Las tareas que se ejecutan en la nube requieren un despliegue accesible por HTTPS público.',
+    },
+    qwenwork: {
+      title: 'QwenWork',
+      body: 'Extensiones → Conectores → + Añadir → Pegar configuración JSON:',
+      hint: 'O añádelo a mano como Streamable HTTP con esta URL. Si tu versión no ofrece inicio de sesión en el navegador, añade la cabecera Authorization: Bearer <clave API> (crea una clave abajo).',
     },
     apiKey: {
       title: 'Claves API',

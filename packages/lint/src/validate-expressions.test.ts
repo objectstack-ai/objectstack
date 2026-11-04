@@ -18,6 +18,7 @@ import {
   PREDICATE_SLOT_STRING_REFUSAL,
   STRUCTURAL_CONDITION_SHAPE_REFUSAL,
   TEXT_SLOT_TEMPLATE_REFUSAL,
+  TimeRelativeTriggerSchema,
   VALUE_SLOT_TEMPLATE_REFUSAL,
   flowNodeConfigRefusals,
   predicateSlotRefusal,
@@ -974,6 +975,295 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       expect(issues[0].severity).toBe('error');
       expect(issues[0].message).toMatch(/declares as nullable/);
       expect(typeMismatches(issues)).toEqual([]);
+    });
+
+    // [#29926] A record-triggered flow's start and edge conditions: the engine
+    // throws on the fault, so the RUN fails there while the write that fired
+    // it lands. The null-guard twin refuses there with that outcome
+    // (`run-fails`, #29026); the type mismatch now does the same, worded so.
+    it('refuses a type mismatch in a record-triggered flow condition with the run-fails wording (#29926)', () => {
+      const issues = validateStackExpressions({
+        objects: [{ name: 'crm_opportunity', fields: { title: { type: 'text', required: true } } }],
+        flows: [{
+          name: 'opp_flow',
+          nodes: [
+            { id: 'start', type: 'start', config: { objectName: 'crm_opportunity', triggerType: 'record-after-update', condition: 'title * 2 > 10' } },
+            { id: 'end', type: 'end' },
+          ],
+          edges: [{ id: 'e1', source: 'start', target: 'end', condition: 'title > 5' }],
+        }],
+      });
+      const found = typeMismatches(issues);
+      expect(found.map(i => [i.where, i.severity, i.path])).toEqual([
+        ["flow 'opp_flow' · node 'start' (start) condition", 'error', 'flows[0].nodes[0].config.condition'],
+        ["flow 'opp_flow' · edge 'e1' (start→end) condition", 'error', 'flows[0].edges[0].condition'],
+      ]);
+      for (const i of found) {
+        expect(i.message).toContain('fails the run: the flow stops at this condition, the write that fired it still lands');
+        expect(i.message).not.toMatch(/evaluates to null|is refused/);
+      }
+      expect(found[0].message).toMatch(/`size\(title\)`/);
+    });
+
+    it('keeps the warning on a flow that is not record-triggered, worded for the run it fails (#29926, #29959)', () => {
+      // No `triggerType` (the shape the pre-existing flattened-flow pin uses),
+      // a `schedule` start and an `api` flow: none is `record_change`, so the
+      // ledger declares no outcome there and the verdict stays the warning.
+      // [#29959] Its text is the run's: `evaluateCondition` throws on a fault
+      // on every flow, so "silently evaluates to null" was false here too. The
+      // `record.<field>` read and the `decision` branch get the same verdict.
+      for (const [name, startConfig, flowType] of [
+        ['plain_flow', {}, 'autolaunched'],
+        ['sched_flow', { schedule: '0 * * * *' }, 'autolaunched'],
+        ['api_flow', {}, 'api'],
+      ] as const) {
+        const issues = validateStackExpressions({
+          objects: [{ name: 'crm_opportunity', fields: { title: { type: 'text', required: true } } }],
+          flows: [{
+            name,
+            type: flowType,
+            nodes: [
+              { id: 'start', type: 'start', config: { objectName: 'crm_opportunity', condition: 'title * 2 > 10', ...startConfig } },
+              { id: 'route', type: 'decision', config: { conditions: [{ label: 'Long', expression: 'title > 5' }] } },
+              { id: 'end', type: 'end' },
+            ],
+            edges: [
+              { id: 'e1', source: 'start', target: 'route', condition: 'record.title > 5' },
+              { id: 'e2', source: 'route', target: 'end', label: 'Long' },
+            ],
+          }],
+        });
+        const found = typeMismatches(issues);
+        expect(found.map(i => [i.where, i.severity]), name).toEqual([
+          [`flow '${name}' · node 'start' (start) condition`, 'warning'],
+          [`flow '${name}' · node 'route' (decision) decision branch expression at config.conditions[0].expression`, 'warning'],
+          [`flow '${name}' · edge 'e1' (start→route) condition`, 'warning'],
+        ]);
+        for (const i of found) {
+          expect(i.message, `${name} ${i.where}`).toContain('a flow condition that faults when it is evaluated fails the run');
+          expect(i.message, `${name} ${i.where}`).not.toMatch(/evaluates to null|still lands/);
+        }
+        expect(found[2]!.message).toContain('`record.title` holds text');
+      }
+    });
+
+    // [#29959] The two sites #29926 left without the run-fails verdict on a
+    // record-triggered flow: a `record.<field>` read (the same trigger record
+    // as the bare name) and a `decision` branch (evaluated like an edge).
+    it('refuses a type mismatch in a record.x read and a decision branch of a record-triggered flow (#29959)', () => {
+      const issues = validateStackExpressions({
+        objects: [{ name: 'crm_opportunity', fields: { title: { type: 'text', required: true }, won: { type: 'boolean' } } }],
+        flows: [{
+          name: 'rt_flow',
+          nodes: [
+            { id: 'start', type: 'start', config: { objectName: 'crm_opportunity', triggerType: 'record-after-update', condition: 'record.title > 5' } },
+            { id: 'route', type: 'decision', config: { conditions: [{ label: 'Long', expression: 'title * 2 > 10' }, { label: 'Won', expression: 'record.won > 0' }] } },
+            { id: 'end', type: 'end' },
+          ],
+          edges: [
+            { id: 'e1', source: 'start', target: 'route', condition: 'previous.title > 5' },
+            { id: 'e2', source: 'route', target: 'end', label: 'Long' },
+            { id: 'e3', source: 'route', target: 'end', label: 'Won' },
+          ],
+        }],
+      });
+      const found = typeMismatches(issues);
+      expect(found.map(i => [i.where, i.severity, i.path])).toEqual([
+        ["flow 'rt_flow' · node 'start' (start) condition", 'error', 'flows[0].nodes[0].config.condition'],
+        ["flow 'rt_flow' · node 'route' (decision) decision branch expression at config.conditions[0].expression", 'error', 'flows[0].nodes[1].config.conditions[0].expression'],
+        ["flow 'rt_flow' · node 'route' (decision) decision branch expression at config.conditions[1].expression", 'error', 'flows[0].nodes[1].config.conditions[1].expression'],
+        ["flow 'rt_flow' · edge 'e1' (start→route) condition", 'error', 'flows[0].edges[0].condition'],
+      ]);
+      for (const i of found) {
+        expect(i.message, i.where).toContain('fails the run: the flow stops at this condition, the write that fired it still lands');
+        expect(i.message, i.where).not.toMatch(/evaluates to null|is refused/);
+      }
+      expect(found.map(i => /`([\w.]+)` holds/.exec(i.message)?.[1])).toEqual(['record.title', 'title', 'record.won', 'previous.title']);
+    });
+
+    it('leaves a well-typed record.x read and decision branch of a record-triggered flow clean (#29959)', () => {
+      const issues = validateStackExpressions({
+        objects: [{ name: 'crm_opportunity', fields: { title: { type: 'text', required: true }, amount: { type: 'number', required: true }, won: { type: 'boolean' } } }],
+        flows: [{
+          name: 'rt_flow',
+          nodes: [
+            { id: 'start', type: 'start', config: { objectName: 'crm_opportunity', triggerType: 'record-after-update', condition: 'size(record.title) > 5' } },
+            { id: 'route', type: 'decision', config: { conditions: [{ label: 'Big', expression: 'record.amount > 10' }, { label: 'Won', expression: 'won == true' }] } },
+            { id: 'end', type: 'end' },
+          ],
+          edges: [
+            { id: 'e1', source: 'start', target: 'route', condition: "record.title != 'x'" },
+            { id: 'e2', source: 'route', target: 'end', label: 'Big' },
+            { id: 'e3', source: 'route', target: 'end', label: 'Won' },
+          ],
+        }],
+      });
+      expect(typeMismatches(issues)).toEqual([]);
+      expect(issues.filter(i => i.severity === 'error')).toEqual([]);
+    });
+
+    // [#29959] `time-relative-trigger.ts` launches each run with the swept row
+    // as `{ record: row }` — a stored row of the swept object, flattened like a
+    // record-change trigger's — so a sweep of the object the conditions are
+    // typed against gets the run-fails verdict, bare name included. A sweep of
+    // another object binds a row of THAT object: the warning stays.
+    it('refuses a type mismatch on a time-relative sweep of the flow object, and warns on a sweep of another (#29959)', () => {
+      const flowOf = (name: string, sweepObject: string | undefined) => ({
+        name,
+        nodes: [
+          {
+            id: 'start', type: 'start',
+            config: {
+              objectName: 'crm_opportunity', condition: 'title > 5', schedule: '0 * * * *',
+              timeRelative: { ...(sweepObject ? { object: sweepObject } : {}), dateField: 'close_date', offsetDays: 3 },
+            },
+          },
+          { id: 'route', type: 'decision', config: { conditions: [{ label: 'Long', expression: 'record.title > 5' }] } },
+          { id: 'end', type: 'end' },
+        ],
+        edges: [
+          { id: 'e1', source: 'start', target: 'route', condition: 'title * 2 > 10' },
+          { id: 'e2', source: 'route', target: 'end', label: 'Long' },
+        ],
+      });
+      const objects = [
+        { name: 'crm_opportunity', fields: { title: { type: 'text', required: true }, close_date: { type: 'date' } } },
+        { name: 'crm_task', fields: { close_date: { type: 'date' } } },
+      ];
+      for (const [name, sweepObject, severity] of [
+        ['tr_default', undefined, 'error'],
+        ['tr_same', 'crm_opportunity', 'error'],
+        ['tr_other', 'crm_task', 'warning'],
+      ] as const) {
+        const found = typeMismatches(validateStackExpressions({ objects, flows: [flowOf(name, sweepObject)] }));
+        expect(found.map(i => [i.where, i.severity]), name).toEqual([
+          [`flow '${name}' · node 'start' (start) condition`, severity],
+          [`flow '${name}' · node 'route' (decision) decision branch expression at config.conditions[0].expression`, severity],
+          [`flow '${name}' · edge 'e1' (start→route) condition`, severity],
+        ]);
+        for (const i of found) {
+          expect(i.message, `${name} ${i.where}`).toContain(
+            severity === 'error' ? 'the write that fired it still lands' : 'so this is a warning, not a refusal',
+          );
+        }
+      }
+    });
+
+    // [#29959] `seedRunVariables` seeds the flow's declared variables before it
+    // flattens the record, and the flattening skips a name already bound: a
+    // bare `title` here reads the NUMBER variable and `title > 5` runs. Only
+    // the shadowing warning may name it; `record.title` still reads the field.
+    it('does not type a bare name a declared flow variable holds as the field it shadows (#29959)', () => {
+      const issues = validateStackExpressions({
+        objects: [{ name: 'crm_opportunity', fields: { title: { type: 'text', required: true } } }],
+        flows: [{
+          name: 'rt_vars',
+          variables: [{ name: 'title', type: 'number', defaultValue: 3 }],
+          nodes: [
+            { id: 'start', type: 'start', config: { objectName: 'crm_opportunity', triggerType: 'record-after-update', condition: 'title > 5' } },
+            { id: 'route', type: 'decision', config: { conditions: [{ label: 'Big', expression: 'title > 5' }, { label: 'Long', expression: 'record.title > 5' }] } },
+            { id: 'end', type: 'end' },
+          ],
+          edges: [
+            { id: 'e1', source: 'start', target: 'route', condition: 'title > 5' },
+            { id: 'e2', source: 'route', target: 'end', label: 'Big' },
+            { id: 'e3', source: 'route', target: 'end', label: 'Long' },
+          ],
+        }],
+      });
+      const found = typeMismatches(issues);
+      expect(found.map(i => [i.where, i.severity])).toEqual([
+        ["flow 'rt_vars' · node 'route' (decision) decision branch expression at config.conditions[1].expression", 'error'],
+      ]);
+      expect(found[0]!.message).toContain('`record.title` holds text');
+      // The shadowing itself is still said, at the start and edge sites that read it.
+      const shadowSites = issues.filter(i => /declared flow variable/i.test(i.message) || /shadow/i.test(i.message)).map(i => i.where);
+      expect(shadowSites).toEqual(expect.arrayContaining([
+        "flow 'rt_vars' · node 'start' (start) condition",
+        "flow 'rt_vars' · edge 'e1' (start→route) condition",
+      ]));
+      expect(issues.filter(i => i.severity === 'error').map(i => i.where)).toEqual([
+        "flow 'rt_vars' · node 'route' (decision) decision branch expression at config.conditions[1].expression",
+      ]);
+    });
+
+    it('keeps the warning on an inert node condition of a record-triggered flow (#29926)', () => {
+      const issues = validateStackExpressions({
+        objects: [{ name: 'crm_opportunity', fields: { title: { type: 'text', required: true } } }],
+        flows: [{
+          name: 'rt_flow',
+          nodes: [
+            { id: 'start', type: 'start', config: { objectName: 'crm_opportunity', triggerType: 'record-after-update' } },
+            { id: 'mid', type: 'assignment', config: { condition: 'title > 5' } },
+            { id: 'end', type: 'end' },
+          ],
+          edges: [{ id: 'e1', source: 'start', target: 'mid' }, { id: 'e2', source: 'mid', target: 'end' }],
+        }],
+      });
+      const found = typeMismatches(issues);
+      expect(found.map(i => [i.where, i.severity])).toEqual([
+        ["flow 'rt_flow' · node 'mid' (assignment) condition", 'warning'],
+      ]);
+    });
+
+    // [#29926] An advisory rule (`severity: 'warning' | 'info'`) that cannot be
+    // evaluated is logged and skipped — the write proceeds (#24782). The
+    // nullable twin refuses it at publish; so does the type mismatch, and
+    // both now say what really happens instead of "the write is refused".
+    it('refuses a type mismatch in an advisory validation rule without claiming the write is refused (#29926)', () => {
+      for (const severity of ['warning', 'info'] as const) {
+        const issues = validateStackExpressions({
+          objects: [{
+            name: 'crm_lead',
+            fields: { title: { type: 'text', required: true } },
+            validations: [
+              { name: 'adv', severity, condition: 'record.title > 5' },
+              {
+                name: 'c',
+                severity,
+                type: 'conditional',
+                when: 'record.title == "y"',
+                then: { name: 'c_then', type: 'script', condition: 'record.title * 2 > 1', message: 'm' },
+                message: 'm',
+              },
+            ],
+          }],
+        });
+        const found = typeMismatches(issues);
+        expect(found.map(i => [i.where, i.severity]), severity).toEqual([
+          ["object 'crm_lead' · validation 'adv'", 'error'],
+          ["object 'crm_lead' · validation rule 'c' then → 'c_then'", 'error'],
+        ]);
+        for (const i of found) {
+          expect(i.message).toContain('the rule is advisory, so a rule that cannot be evaluated is skipped, not refused');
+          expect(i.message).not.toMatch(/is refused|evaluates to null/);
+        }
+      }
+    });
+
+    it('gives the nullable twin the same outcome on one advisory rule, and keeps fail-closed on an error rule (#29926)', () => {
+      const issues = validateStackExpressions({
+        objects: [{
+          name: 'crm_lead',
+          fields: { qty: { type: 'number' }, title: { type: 'text', required: true } },
+          validations: [
+            { name: 'adv', severity: 'warning', condition: 'record.qty > 1000 && record.title > 5' },
+            { name: 'hard', condition: 'record.qty > 1000 && record.title > 5' },
+          ],
+        }],
+      });
+      const adv = issues.filter(i => i.path === 'objects[0].validations[0].condition');
+      const hard = issues.filter(i => i.path === 'objects[0].validations[1].condition');
+      expect(adv.map(i => i.severity)).toEqual(['error', 'error']);
+      expect(hard.map(i => i.severity)).toEqual(['error', 'error']);
+      // Neither verdict on the advisory rule claims a refused write …
+      for (const i of adv) {
+        expect(i.message).toMatch(/advisory/);
+        expect(i.message).not.toMatch(/rejected|is refused/);
+      }
+      // … and on the `error` rule both do.
+      expect(hard.find(i => /declares as nullable/.test(i.message))!.message).toMatch(/write is rejected fail-closed/);
+      expect(typeMismatches(hard)[0].message).toMatch(/the write \(or the operation a hook guards\) is refused/);
     });
 
     it('warns on a flattened flow condition doing arithmetic on a bare text field', () => {
@@ -3517,6 +3807,15 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     keys: () => Object.keys(AppLandingEntrySchema.shape),
   },
   {
+    // [#29959] A start node's `config.timeRelative` sweep descriptor: its
+    // `object` decides whether the sweep binds a row of the object the flow's
+    // conditions are typed against (the fault-outcome ledger's time-relative row).
+    receiver: 'sweep',
+    expected: ['object'],
+    declaredBy: 'TimeRelativeTriggerSchema',
+    keys: () => shapeKeysOf(TimeRelativeTriggerSchema),
+  },
+  {
     receiver: 'obj',
     // `validationRules` is absent — one of the five #5017 removed.
     // `attachedOnRead` joined with #22386 (#22211 ruling A): the declared read
@@ -3557,8 +3856,9 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
   {
     receiver: 'rule',
     // `expression` / `predicate` / `formula` are absent — the chain that put
-    // the canonical `condition` in third place (#5017).
-    expected: ['condition', 'name', 'when'],
+    // the canonical `condition` in third place (#5017). [#29926] `severity`
+    // picks the rule's fault outcome (an advisory rule is skipped, not refused).
+    expected: ['condition', 'name', 'severity', 'when'],
     declaredBy: 'the ObjectSchema.validations[] union',
     keys: () => shapeKeysOf(ObjectSchema.shape.validations),
   },
@@ -3823,6 +4123,15 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // bare-name set. Their keys are that module's result key and Set
       // methods, never metadata keys.
       'rootScope', 'declaredVariables', 'nullGuardBare',
+      // [#29926] The fault-outcome ledger's own site descriptor (`kind`,
+      // `severity`, `triggerKind`, `sweepsTypedObject`), built at each call site from the
+      // tabled receivers (`rule.severity`) — never read off metadata itself.
+      'site',
+      // [#29959] A `decision` branch's flow-condition hint (`objectName`,
+      // `faultOutcome`, `flowVariables`), built at the call site from the
+      // walk's own `objectName`, the ledger's answer and the flow's bound
+      // names — never read off metadata itself.
+      'flowCondition',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });

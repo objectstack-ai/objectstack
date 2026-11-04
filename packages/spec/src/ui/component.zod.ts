@@ -601,6 +601,34 @@ export type PageContainerProps = z.input<typeof PageContainerProps>;
  * ----------------------------------------------------------------------
  */
 
+/**
+ * `placedActions: true` beside an authored `actions` list: two answers to the
+ * one question of which of the bound object's actions a `page:header` draws.
+ * The list is the whole set (#11592's meaning, kept by ruling record
+ * 6624172200, letter A); the switch is every action placed at `record_header` /
+ * `record_more`, read live. Neither can be read as narrowing the other without
+ * inventing a rule nobody authored, so the pair is refused at authoring and the
+ * author keeps one. `placedActions: false` beside a list says nothing new and
+ * is not the pair.
+ *
+ * Reported at `placedActions`, the key that contradicts the list. The door an
+ * author meets is `@objectstack/lint`'s `validateComponentProps` (rule
+ * `component-props-invalid`, at every CLI command and the runtime page save
+ * door): `defineStack` never parses a component's `properties` bag.
+ *
+ * A value-conditional rule (`true` arms it, `false` does not), which no arm of
+ * `shared/refinement-projection.ts` publishes, so the published JSON Schema
+ * stays wider here and `dropped-refinements.baseline.json` carries the row.
+ */
+const PAGE_HEADER_PLACED_ACTIONS_BESIDE_LIST = {
+  message:
+    'A `page:header` that sets `placedActions: true` draws every action of the bound object placed at '
+    + '`record_header` or `record_more`, read live, so an `actions` list beside it is a second, different '
+    + 'answer to which actions the header draws. Keep one: `actions` for a curated list that is the whole '
+    + 'set the header draws, or `placedActions: true` for every placed action, and delete the other key.',
+  path: ['placedActions'],
+};
+
 export const PageHeaderProps = strictObject({
   surface: 'this `page:header`',
   history: PROPS_HISTORY,
@@ -692,16 +720,57 @@ export const PageHeaderProps = strictObject({
    *   list is the author's curation of the header, and a new header action is
    *   added to the list as well as to the object;
    * - with the key omitted, an authored `page:header` draws none of the
-   *   object's own actions (the list resolves to empty). Only the platform's
-   *   synthesized default record page, used when no page is assigned, builds
-   *   its header from every `record_header` / `record_more` action of the
-   *   object;
+   *   object's own actions (the list resolves to empty), unless it sets
+   *   `placedActions: true` below: the other, explicit way to say which
+   *   actions, namely every `record_header` / `record_more` action of the
+   *   object, read live. That is the set the platform's synthesized default
+   *   record page, used when no page is assigned, builds its header from;
    * - a named id whose action declares neither location renders nowhere;
    * - the host's own system actions (Edit / Share / Delete) reach the header
    *   through the record context, not through this list, whatever it names.
+   *
+   * The list and the switch are two answers to one question ("only these" and
+   * "every placed one"), so an authored list beside `placedActions: true` is
+   * refused at authoring ({@link PAGE_HEADER_PLACED_ACTIONS_BESIDE_LIST}).
+   * Ruling record 6624172200 (letter A) kept this list's meaning as it reads
+   * here and added the switch beside it.
    */
   actions: z.array(z.string()).optional().describe(
-    'Action IDs the header draws, resolved against the actions declared on the page\'s object. An authored list is the whole set: an action that declares `record_header` (or `record_more`) in its `locations` but is not named here is not drawn, and omitting the key draws none of the object\'s actions. A named action that declares neither location renders nowhere. The host\'s own Edit / Share / Delete chrome is separate from this list.',
+    'Action IDs the header draws, resolved against the actions declared on the page\'s object. An authored list is the whole set: an action that declares `record_header` (or `record_more`) in its `locations` but is not named here is not drawn, and a header with neither this key nor `placedActions: true` draws none of the object\'s actions. `placedActions: true` is the other way to say which actions the header draws (every one placed at `record_header` / `record_more`, read live), and the two are refused together. A named action that declares neither location renders nowhere. The host\'s own Edit / Share / Delete chrome is separate from this list.',
+  ),
+  /**
+   * The explicit opt-in to draw EVERY action of the bound object whose
+   * `locations` include `record_header` or `record_more`, read live from the
+   * object's metadata, in place of an authored `actions` id list (ruling
+   * record 6624172200, letter A). An action another package places on the
+   * object is drawn without editing this page, which is what a platform record
+   * page that wants "the object's header actions" needs and what a frozen id
+   * list cannot say.
+   *
+   * - `true`: the header draws the object's placed header actions, the set the
+   *   synthesized default record page draws.
+   * - omitted or `false`: the `actions` list rules exactly as its docblock
+   *   above reads (an authored list is the whole set; no list draws none).
+   *   `false` beside a list says nothing new and is accepted.
+   * - `true` beside an authored `actions` list (an empty one included) is
+   *   refused, at this key: the list says "only these" and the switch says
+   *   "every placed one".
+   *
+   * Optional with NO schema default, deliberately: a default would materialize
+   * the key on every parsed header, turning an unset key into an authored one
+   * (the `maxVisible` docblock below records the same rule for its own 3).
+   *
+   * PLANNED, not yet read: no renderer reads this key. Its reader is the
+   * objectui header half of #29951 (the header renderer, then the three
+   * platform record pages that froze their header id lists switching to it),
+   * dispatched once this spec lands. The liveness record is the
+   * `liveness/page.json` `_note` (a component-level key carries no ledger row:
+   * the walk stops at the undrilled `page/regions` container) and the
+   * `[PLANNED — not yet rendered]` marker this describe opens with; when the
+   * reader lands, the marker leaves and the `_note` sentence is rewritten.
+   */
+  placedActions: z.boolean().optional().describe(
+    '[PLANNED — not yet rendered] Draw every action of the page\'s object whose `locations` include `record_header` or `record_more`, read live from the object\'s metadata, in place of an authored `actions` list: an action added to the object later, by any package, is drawn without editing the page. Omit it, or set false, to keep the `actions` list as the whole set. Refused as `true` beside an authored `actions` list: keep one.',
   ),
   /**
    * Which of the two page-header layouts the renderer builds (#6776).
@@ -787,7 +856,10 @@ export const PageHeaderProps = strictObject({
   ),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
-});
+}).refine(
+  (header) => !(header.placedActions === true && header.actions !== undefined),
+  PAGE_HEADER_PLACED_ACTIONS_BESIDE_LIST,
+);
 
 export const PageTabsProps = strictObject({
   surface: 'this `page:tabs`',

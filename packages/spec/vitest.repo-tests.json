@@ -61,6 +61,7 @@
   "src/security/permission-set-managed-by-retirement.test.ts",
   "src/security/rls-tags-retirement.test.ts",
   "src/shared/retired-key-migrate-sentence.test.ts",
+  "src/system/auth-revoke-sessions-on-password-reset-retirement.test.ts",
   "src/system/compliance-families-retirement.test.ts",
   "src/system/constants/platform-object-names.test.ts",
   "src/system/email-template-category-is-system-retirement.test.ts",

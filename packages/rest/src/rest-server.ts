@@ -5743,6 +5743,7 @@ export class RestServer {
             routeManager: this.routeManager,
             get approvalsServiceProvider() { return readApprovalsServiceProvider(); },
             resolveProtocol: (...a) => this.resolveProtocol(...a),
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
             enforceAuth: (...a) => this.enforceAuth(...a),
             enforceApiAccess: (...a) => this.enforceApiAccess(...a),
@@ -5954,6 +5955,7 @@ export class RestServer {
         const host: EmailRouteHost = {
             routeManager: this.routeManager,
             get emailServiceProvider() { return readEmailServiceProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
             enforceAuth: (...a) => this.enforceAuth(...a),
         };
@@ -6124,12 +6126,10 @@ export class RestServer {
         // [#23050 slice 5] The body moved to `analytics-routes.ts`. This literal
         // hands it every member it reads — the list IS its dependency on this
         // class (see `AnalyticsRouteHost`, and that module's header for why
-        // `kernelManager` and `analyticsServiceProvider` are getters).
-        const readKernelManager = () => this.kernelManager;
+        // `analyticsServiceProvider` is a getter).
         const readAnalyticsServiceProvider = () => this.analyticsServiceProvider;
         const host: AnalyticsRouteHost = {
             routeManager: this.routeManager,
-            get kernelManager() { return readKernelManager(); },
             get analyticsServiceProvider() { return readAnalyticsServiceProvider(); },
             resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
@@ -6210,6 +6210,7 @@ export class RestServer {
             config: this.config,
             routeManager: this.routeManager,
             get sharingServiceProvider() { return readSharingServiceProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
             enforceAuth: (...a) => this.enforceAuth(...a),
         };
@@ -6237,6 +6238,7 @@ export class RestServer {
         const host: SharingRuleRouteHost = {
             routeManager: this.routeManager,
             get sharingRulesServiceProvider() { return readSharingRulesServiceProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
             enforceAuth: (...a) => this.enforceAuth(...a),
         };
@@ -6316,6 +6318,7 @@ export class RestServer {
         const host: ApprovalsRouteHost = {
             routeManager: this.routeManager,
             get approvalsServiceProvider() { return readApprovalsServiceProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
             enforceAuth: (...a) => this.enforceAuth(...a),
         };

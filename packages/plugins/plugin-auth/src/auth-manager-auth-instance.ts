@@ -52,6 +52,7 @@
  */
 
 import type { Auth, BetterAuthOptions } from 'better-auth';
+import { tryGetCurrentAuthEndpointContext } from '@better-auth/core/context';
 import { audiencePermitsSelfRegistration } from '@objectstack/spec/system';
 import { readEnvWithDeprecation } from '@objectstack/types';
 import { readAccountInvitation, settleImportResetDelivery } from './account-invitation-marker.js';
@@ -69,6 +70,38 @@ import { vendorClientAddressOptions } from './client-address-vendor.js';
 import { PLATFORM_IDP_PROVIDER_ID, refuseImplicitAccountLink } from './implicit-account-linking.js';
 import { isPlaceholderEmail } from './placeholder-email.js';
 import { logAfterResponseSendFailure, sendAfterResponseOnPublicDoor } from './run-after-response.js';
+
+/** The path better-auth declares for the email sign-up endpoint. */
+const SIGN_UP_EMAIL_PATH = '/sign-up/email';
+
+/**
+ * `send`, with the one call the sign-up endpoint makes handed to
+ * {@link sendAfterResponseOnPublicDoor}: a sign-up answers without waiting for
+ * any mail send, whether or not the address already has an account. Every
+ * other call is `send` itself, awaited exactly as before — the
+ * `/send-verification-email` resend among them, which reports a send that
+ * failed to its caller.
+ *
+ * The endpoint is the one better-auth runs the call inside, read by its
+ * declared path from the endpoint context (as the hooks read `ctx.path`),
+ * never from the request's URL. Outside any endpoint context the call is
+ * awaited.
+ */
+function sendAfterResponseOnSignUp<D>(
+  send: (data: D, request?: unknown) => Promise<unknown>,
+  onFailure: (error: unknown) => void,
+): (data: D, request?: unknown) => Promise<void> {
+  const afterResponse = sendAfterResponseOnPublicDoor(send, onFailure);
+  return (data, request) => {
+    let path: unknown;
+    try {
+      path = tryGetCurrentAuthEndpointContext()?.path;
+    } catch {
+      path = undefined;
+    }
+    return path === SIGN_UP_EMAIL_PATH ? afterResponse(data, request) : (send(data, request) as Promise<void>);
+  };
+}
 
 /**
  * The `AuthManager` members the function below reads — every one of them, and
@@ -384,8 +417,10 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
         ...(this.config.emailAndPassword?.autoSignIn != null
           ? { autoSignIn: this.config.emailAndPassword.autoSignIn } : {}),
         // A completed password reset ends the account's other sessions, on
-        // every reset door, always — not a deployment option. An explicit
-        // `false` never reaches here: the manager refuses it at entry.
+        // every reset door, always — not a deployment option. This is
+        // better-auth's own option, set here and never read from the host
+        // configuration: the spec key of the same name is retired, and the
+        // manager refuses it at entry at any value.
         // `password-reset-ends-sessions.ts` holds the rule and the wiring.
         revokeSessionsOnPasswordReset: true,
       // #14319 — better-auth calls this as `sendResetPassword(data, ctx.request)`.
@@ -500,21 +535,33 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
             `${invitation ? 'Account-invitation' : 'Password-reset'} email could not be sent to ${user.email}: ${result.error ?? 'delivery failed'}`,
           );
         }
-      }), (error) => logAfterResponseSendFailure(this.config.logger, 'password-reset', error)),
+      }), (error) => logAfterResponseSendFailure(this.config.logger, 'password-reset email', error)),
       // [#25060, ruling 1B on #25040] The mail half of "a sign-up for an
       // address that already has an account answers like a success". The
       // vendor calls this only when the address already has a row AND its
       // anti-enumeration shield is on, after its timing-equalizing password
-      // hash, and awaits it inline (no background-task handler is set);
-      // what it throws is caught and logged by the vendor, and the answer is
-      // its generic success either way (better-auth 1.7.12
+      // hash; what it throws is caught and logged by the vendor, and the
+      // answer is its generic success either way (better-auth 1.7.12
       // `routes/sign-up.mjs`, re-read for #25060). So the DECISION cannot
       // live here: it is made first, in the `/sign-up/email` before-hook,
       // which keeps the explicit refusal wherever this mail could not be
       // promised. This hands over the existing row, which is what the
       // recipient's stored-locale rung needs.
-      onExistingUserSignUp: async ({ user }: { user: { id: string; email: string; name?: string | null } }) =>
-        this.sendExistingAccountSignUpNotice(user),
+      //
+      // A sign-up answers without waiting for any mail send, whether or not
+      // the address already has an account: the vendor hands this callback
+      // the request (`onExistingUserSignUp(data, request)`, the same
+      // routes/sign-up.mjs), so a call that carries one — the public door —
+      // resolves at once and the notice is built and sent after the response
+      // (`sendAfterResponseOnPublicDoor`), as the verification mail of a new
+      // address's sign-up is (`sendVerificationEmail` below). A server-side
+      // call (no request) still awaits it. The notice reports its own failed
+      // send at error level and never throws; `onFailure` logs anything else.
+      onExistingUserSignUp: sendAfterResponseOnPublicDoor(
+        async ({ user }: { user: { id: string; email: string; name?: string | null } }) =>
+          this.sendExistingAccountSignUpNotice(user),
+        (error) => logAfterResponseSendFailure(this.config.logger, 'sign-up notice email', error),
+      ),
       };
     })(),
 
@@ -530,7 +577,15 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
         ...(this.config.emailVerification?.expiresIn != null
           ? { expiresIn: this.config.emailVerification.expiresIn } : {}),
         // #14319 — better-auth calls this as `sendVerificationEmail(data, ctx.request)`.
-        sendVerificationEmail: async ({ user, url, token }: { user: { id: string; email: string; name?: string }; url: string; token: string }, request?: unknown) => {
+        //
+        // A sign-up answers without waiting for any mail send, whether or not
+        // the address already has an account: the call the sign-up endpoint
+        // makes, carrying its request, resolves at once and the mail is built
+        // and sent after the response, as the notice to an address that
+        // already has an account is (`onExistingUserSignUp` above); its
+        // failure is logged on the server. Every other call is awaited as
+        // before (`sendAfterResponseOnSignUp`) — the resend below among them.
+        sendVerificationEmail: sendAfterResponseOnSignUp(async ({ user, url, token }: { user: { id: string; email: string; name?: string }; url: string; token: string }, request?: unknown) => {
           const email = this.getEmailService();
           if (!email) {
             // Verification is enabled (this callback only exists when it is)
@@ -579,7 +634,7 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
               `Verification email could not be sent to ${user.email}: ${result.error ?? 'delivery failed'}`,
             );
           }
-        },
+        }, (error) => logAfterResponseSendFailure(this.config.logger, 'verification email', error)),
       },
     } : {}),
 

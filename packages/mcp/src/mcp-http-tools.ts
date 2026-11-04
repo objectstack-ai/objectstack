@@ -71,6 +71,7 @@ import {
   validateExpression,
   introspectScope,
   inferExpressionType,
+  type ExprFaultOutcome,
   type FieldRole,
 } from '@objectstack/formula';
 // [#16913] The unknown-key error map every `strictToolInput` shape below is
@@ -85,6 +86,7 @@ import { strictUnknownKeyError } from '@objectstack/spec/shared';
 // formula checks, so a blank source gets the gate's verdict and its published
 // sentence, never a second blank rule written here.
 import { EvaluatedExpressionInputSchema, TemplateExpressionInputSchema } from '@objectstack/spec/shared';
+import { FLOW_TRIGGER_KINDS, type FlowTriggerKind } from '@objectstack/spec/automation';
 import {
   METADATA_UNAVAILABLE_CODE,
   metadataPartialListingSentence,
@@ -633,16 +635,56 @@ function jsonText(value: unknown): string {
  */
 const VALIDATE_SITE_MAP: Record<
   string,
-  { role: FieldRole; scope: 'record' | 'flattened'; slot: z.ZodType; optionLabels?: true; faultOutcome?: 'fail-closed' }
+  {
+    role: FieldRole;
+    scope: 'record' | 'flattened';
+    slot: z.ZodType;
+    optionLabels?: true;
+    /**
+     * [#29904, #29926, #29959] What the gate's runtime does on a fault at this
+     * site, from the caller's optional `severity` / `triggerKind` — the two
+     * facts `@objectstack/lint`'s `faultOutcomeOf` ledger reads off the rule
+     * and the flow. Absent: the site declares none.
+     */
+    faultOutcome?: (inputs: { severity: ValidationSeverity; triggerKind: FlowTriggerOrNone }) => ExprFaultOutcome | undefined;
+  }
 > = {
   formula: { role: 'value', scope: 'record', slot: EvaluatedExpressionInputSchema, optionLabels: true },
-  // [#29904] A validation rule fails closed (a fault refuses the write), so the
-  // publish gate grades a text-vs-number comparison there an error; the tool
-  // answers what the gate will.
-  validation: { role: 'predicate', scope: 'record', slot: EvaluatedExpressionInputSchema, faultOutcome: 'fail-closed' },
-  flow_condition: { role: 'predicate', scope: 'flattened', slot: EvaluatedExpressionInputSchema },
+  // [#29904, #29926] A `severity: 'error'` rule (the default) fails closed: a
+  // fault refuses the write. An advisory rule (`warning` / `info`) fails open:
+  // the rule is skipped and the write proceeds. The gate grades a
+  // text-vs-number comparison an error worded for each; the tool answers what
+  // the gate will for the severity it is told.
+  validation: {
+    role: 'predicate', scope: 'record', slot: EvaluatedExpressionInputSchema,
+    faultOutcome: ({ severity }) => (severity === 'warning' || severity === 'info' ? 'fail-open' : 'fail-closed'),
+  },
+  // [#29926, #29959] A record-triggered flow's start, edge or `decision`
+  // branch condition (the default `triggerKind`): the trigger record is
+  // flattened into the run's variables, a fault fails the run while the write
+  // that fired it lands, and the gate grades a text-vs-number comparison an
+  // error worded so. A time-relative sweep launches each run with the swept
+  // row of `objectName` as its record, so it is graded the same. Any other
+  // trigger kind declares no outcome: the gate's `type-mismatch-run-may-fail`
+  // warning.
+  flow_condition: {
+    role: 'predicate', scope: 'flattened', slot: EvaluatedExpressionInputSchema,
+    faultOutcome: ({ triggerKind }) =>
+      (triggerKind === 'record_change' || triggerKind === 'time_relative' ? 'run-fails' : undefined),
+  },
   template: { role: 'template', scope: 'record', slot: TemplateExpressionInputSchema },
 };
+
+/** [#29959] A validation rule's `severity`, as `ValidationRuleSchema` spells it. */
+type ValidationSeverity = 'error' | 'warning' | 'info';
+const VALIDATION_SEVERITIES = ['error', 'warning', 'info'] as const satisfies readonly ValidationSeverity[];
+/**
+ * [#29959] A flow's trigger kind, as `resolveFlowTriggerKind` answers it, or
+ * `none` for a flow with no auto-launch trigger (a screen flow, an
+ * autolaunched flow started by hand, an action or a parent flow).
+ */
+type FlowTriggerOrNone = FlowTriggerKind | 'none';
+const FLOW_TRIGGER_INPUTS: [FlowTriggerOrNone, ...FlowTriggerOrNone[]] = ['none', ...FLOW_TRIGGER_KINDS];
 
 // ── Tool arguments: an undeclared key is REFUSED, not stripped (#16913) ──────
 
@@ -1048,10 +1090,13 @@ export function registerObjectTools(
         description:
           'Validate a CEL expression against an object\'s schema before authoring it into metadata. Returns ' +
           'build-time errors (bare field refs, unknown fields, unknown functions) and advisory warnings ' +
-          '(text/boolean fields misused in arithmetic, an error at a `validation` site, where it refuses ' +
-          'the write; date-equality pitfalls), plus the fields and stdlib ' +
+          '(text/boolean fields misused in arithmetic, an error at a `validation` site, worded for the rule\'s ' +
+          '`severity`, and at a `flow_condition` of a record-triggered or time-relative flow, where it fails the run; ' +
+          'a warning on any other flow; date-equality pitfalls), plus the fields and stdlib ' +
           'functions in scope so you can self-correct. `site` says where the expression will live: a `formula` ' +
-          'field, a `validation`/predicate, or a `flow_condition` (fields are bound bare in flow conditions).',
+          'field, a `validation`/predicate, or a `flow_condition` (fields are bound bare in flow conditions). ' +
+          'Pass the rule\'s `severity` (validation) or the flow\'s `triggerKind` (flow_condition) so the verdict ' +
+          'is the one the publish gate gives that rule or flow.',
         inputSchema: strictToolInput(
           {
             surface: 'this validate_expression call',
@@ -1072,13 +1117,37 @@ export function registerObjectTools(
               .describe(
                 'Where the expression will live. formula/validation bind `record.<field>`; flow_condition binds fields bare. Default: formula.',
               ),
+            severity: z
+              .enum(VALIDATION_SEVERITIES)
+              .optional()
+              .describe(
+                'site validation only: the rule\'s `severity`. A `warning` / `info` rule is advisory, so a fault skips it ' +
+                'instead of refusing the write, and the verdict says so. Default: error, the rule default.',
+              ),
+            triggerKind: z
+              .enum(FLOW_TRIGGER_INPUTS)
+              .optional()
+              .describe(
+                'site flow_condition only: how the flow is started — record_change (start triggerType record-*), ' +
+                'time_relative, schedule, api, or none (started by hand, an action or a parent flow). A type mismatch ' +
+                'is an error on a record_change or time_relative flow (its record is a row of objectName) and a warning ' +
+                'on any other. Default: record_change.',
+              ),
           },
         ),
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
-      async ({ objectName, expression, site }) => {
+      async ({ objectName, expression, site, severity, triggerKind }) => {
         const bad = guard(objectName);
         if (bad) return errorResult(bad);
+        // [#29959] Each input describes one site; on another it would be
+        // silently meaningless, so it is refused instead.
+        if (severity !== undefined && site !== 'validation') {
+          return errorResult(`\`severity\` describes a validation rule; it applies only with site "validation", not "${site ?? 'formula'}".`);
+        }
+        if (triggerKind !== undefined && site !== 'flow_condition') {
+          return errorResult(`\`triggerKind\` describes a flow; it applies only with site "flow_condition", not "${site ?? 'formula'}".`);
+        }
         try {
           const def = (await bridge.describeObject(objectName)) as { fields?: unknown } | null;
           if (!def) return errorResult(`Object "${objectName}" not found`);
@@ -1090,7 +1159,8 @@ export function registerObjectTools(
             fields.push(f.name);
             if (typeof f?.type === 'string') fieldTypes[f.name] = f.type;
           }
-          const { role, scope, slot, optionLabels, faultOutcome } = VALIDATE_SITE_MAP[site ?? 'formula'];
+          const { role, scope, slot, optionLabels, faultOutcome: outcomeOf } = VALIDATE_SITE_MAP[site ?? 'formula'];
+          const faultOutcome = outcomeOf?.({ severity: severity ?? 'error', triggerKind: triggerKind ?? 'record_change' });
           // [#28715] The object's option-bearing fields, where the gate reads
           // them: `label(record.<field>)` on a declared field outside this list
           // is refused as `label-field-no-options` by the one validator.

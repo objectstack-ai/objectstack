@@ -73,6 +73,7 @@ import { registerUserPreferenceHooks } from './user-preference-hooks.js';
 import { personalViewCallerResolver, registerPersonalViewRoutes, PERSONAL_VIEW_REMOVE_ROUTE, type PersonalViewEngine } from './personal-view-routes.js';
 import { registerMembershipEndedSessionTrigger } from './membership-ended-session.js';
 import { registerMemberRoleCanonicalization } from './member-role-canonical.js';
+import { registerUserLocaleCaseFold } from './sys-user-locale-case.js';
 import { registerSessionFirstActivity } from './session-first-activity.js';
 import { registerExternalMembershipGuard } from './external-membership.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
@@ -1845,6 +1846,15 @@ export class AuthPlugin implements Plugin {
         // it runs first so both guards judge the value's normal form.
         registerMemberRoleCanonicalization(engine, {
           packageId: 'com.objectstack.plugin-auth.member-role-canonical',
+          logger: ctx.logger,
+        });
+        // `sys_user.locale` is stored in its BCP-47 case (`zh-cn` → `zh-CN`) on
+        // every ObjectQL write, at priority 5 like the role fold above: the
+        // console picks a UI language by exact match, so a mis-cased stored
+        // tag rendered English. The fold is `LocaleSchema`'s, the one #29833
+        // gave translation locales. See sys-user-locale-case.ts.
+        registerUserLocaleCaseFold(engine, {
+          packageId: 'com.objectstack.plugin-auth.user-locale-case',
           logger: ctx.logger,
         });
         // [Ruling 6355206139 E5/E6] The `external` role is held alone, and its

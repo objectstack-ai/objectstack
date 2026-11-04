@@ -1491,6 +1491,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.edit.autoSaveOn': '自动保存已开启，点击关闭',
   'engine.edit.autoSaveOff': '自动保存已关闭，点击开启',
   'engine.edit.autoSavingShortly': '即将自动保存…',
+  'engine.edit.notSavedHeld': '未保存 — 修正错误后才能保存',
   'engine.edit.destructive': '破坏性变更',
   'engine.edit.destructiveHint': '该修改会破坏现有引用关系。请检查问题清单后确认强制保存。',
   'engine.edit.forceSave': '强制保存',

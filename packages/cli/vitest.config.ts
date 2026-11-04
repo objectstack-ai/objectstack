@@ -987,6 +987,17 @@ export default defineConfig({
         find: /^@objectstack\/service-package$/,
         replacement: path.resolve(__dirname, '../services/service-package/src/index.ts'),
       },
+      // `serve-stack-email-sms-door.contract.test.ts` reads the push reader
+      // (`resolvePushCapabilityArg`) and constructs `PushServicePlugin` from a
+      // stack's `push` key, and `serve-capability-identity.test.ts` imports the
+      // package as the `push` provider. Resolved to source for the reason its
+      // neighbours give; its own value imports (`@objectstack/spec`,
+      // `@objectstack/core`) are already in this package's ledger entry.
+      // `check:test-source-alias` names this import and fails without it.
+      {
+        find: /^@objectstack\/service-push$/,
+        replacement: path.resolve(__dirname, '../services/service-push/src/index.ts'),
+      },
     ],
   },
   test: {

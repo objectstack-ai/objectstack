@@ -10,10 +10,14 @@
  * for people who don't know what MCP is:
  *
  *   1. the environment's MCP URL (from `/discovery` → `routes.mcp`) + copy,
- *   2. per-client connect cards (claude.ai / Claude Desktop / Claude Code /
- *      Cursor deeplink / VS Code / Codex CLI) with copy-paste-ready content —
+ *   2. per-client connect cards with copy-paste-ready content — one Claude
+ *      card (claude.ai / Claude Desktop and Claude Code), the Codex app and
+ *      Cursor deeplink first, then the Chinese clients WorkBuddy, Doubao Work
+ *      and QwenWork.
  *      OAuth is the default story on every card (the deployment is its own
- *      authorization server; you sign in as yourself),
+ *      authorization server; you sign in as yourself); the Chinese clients'
+ *      cards name the API-key header as the fallback for a client version
+ *      without the OAuth flow,
  *   3. the portable SKILL.md download (`GET /api/v1/mcp/skill`),
  *   4. API-key minting for headless callers (CI, machine accounts) via the
  *      existing `POST /api/v1/keys` — shown once, copy-once. As on Setup →
@@ -101,12 +105,38 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
 function Snippet({ text }: { text: string }) {
   return (
     <div className="flex items-start gap-2">
-      <pre className="flex-1 overflow-x-auto rounded-md bg-muted px-3 py-2 text-xs leading-relaxed">
+      <pre className="min-w-0 flex-1 whitespace-pre-wrap break-all rounded-md bg-muted px-3 py-2 text-xs leading-relaxed">
         <code>{text}</code>
       </pre>
       <CopyButton text={text} />
     </div>
   );
+}
+
+/**
+ * Form-based clients (a "new connector" dialog rather than a config file):
+ * the values to type into each field, each one copyable on its own.
+ */
+function FieldRows({ rows }: { rows: Array<{ label: string; value: string }> }) {
+  return (
+    <dl className="space-y-1.5">
+      {rows.map((row) => (
+        <div key={row.label} className="flex items-center gap-2">
+          <dt className="w-24 shrink-0 text-xs text-muted-foreground">{row.label}</dt>
+          <dd className="min-w-0 flex-1 break-all rounded-md bg-muted px-3 py-1.5 font-mono text-xs">
+            {row.value}
+          </dd>
+          <CopyButton text={row.value} />
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/** The `mcpServers` JSON shape most clients import, with the client's own transport spelling. */
+function mcpServersJson(type: string | null, url: string): string {
+  const server = type ? { type, url } : { url };
+  return JSON.stringify({ mcpServers: { objectstack: server } }, null, 2);
 }
 
 export function ConnectAgent() {
@@ -228,28 +258,45 @@ export function ConnectAgent() {
         </CardContent>
       </Card>
 
-      {/* ── Per-client cards ─────────────────────────────────────────── */}
+      {/* ── Per-client cards: international clients first, then the Chinese ones ── */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
+        {/* Claude: one card, two ways in — the claude.ai / Desktop connector and
+            the Claude Code CLI. A full row, so the six cards below pair up. */}
+        <Card className="lg:col-span-2">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Claude (claude.ai / Desktop)</CardTitle>
+            <CardTitle className="text-base">Claude</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <p className="text-muted-foreground">{t('connectAgent.claude.body')}</p>
-            <Snippet text={mcpUrl} />
-            <p className="text-xs text-muted-foreground">{t('connectAgent.claude.reachability')}</p>
+          <CardContent className="grid gap-4 text-sm lg:grid-cols-2">
+            <div className="min-w-0 space-y-2">
+              <h4 className="font-medium">claude.ai / Claude Desktop</h4>
+              <p className="text-muted-foreground">{t('connectAgent.claude.body')}</p>
+              <Snippet text={mcpUrl} />
+              <p className="text-xs text-muted-foreground">{t('connectAgent.claude.reachability')}</p>
+            </div>
+            <div className="min-w-0 space-y-2">
+              <h4 className="font-medium">Claude Code</h4>
+              <p className="text-muted-foreground">{t('connectAgent.claudeCode.body')}</p>
+              <Snippet text={`claude mcp add --transport http objectstack ${mcpUrl}`} />
+              <p className="text-muted-foreground">{t('connectAgent.claudeCode.plugin')}</p>
+              <Snippet text={'claude plugin marketplace add objectstack-ai/claude-plugin'} />
+            </div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Claude Code</CardTitle>
+            <CardTitle className="text-base">Codex</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
-            <p className="text-muted-foreground">{t('connectAgent.claudeCode.body')}</p>
-            <Snippet text={`claude mcp add --transport http objectstack ${mcpUrl}`} />
-            <p className="text-muted-foreground">{t('connectAgent.claudeCode.plugin')}</p>
-            <Snippet text={'claude plugin marketplace add objectstack-ai/claude-plugin'} />
+            <p className="text-muted-foreground">{t('connectAgent.codex.body')}</p>
+            <FieldRows
+              rows={[
+                { label: t('connectAgent.fields.name'), value: 'objectstack' },
+                { label: t('connectAgent.fields.transport'), value: 'Streamable HTTP' },
+                { label: t('connectAgent.fields.url'), value: mcpUrl },
+              ]}
+            />
+            <p className="text-xs text-muted-foreground">{t('connectAgent.codex.hint')}</p>
           </CardContent>
         </Card>
 
@@ -269,35 +316,46 @@ export function ConnectAgent() {
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             <p className="text-muted-foreground">{t('connectAgent.cursor.body')}</p>
-            <Snippet
-              text={JSON.stringify({ mcpServers: { objectstack: { url: mcpUrl } } }, null, 2)}
-            />
+            <Snippet text={mcpServersJson(null, mcpUrl)} />
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">VS Code / Copilot</CardTitle>
+            <CardTitle className="text-base">WorkBuddy</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
-            <p className="text-muted-foreground">{t('connectAgent.vscode.body')}</p>
-            <Snippet
-              text={JSON.stringify(
-                { servers: { objectstack: { type: 'http', url: mcpUrl } } },
-                null,
-                2,
-              )}
-            />
+            <p className="text-muted-foreground">{t('connectAgent.workbuddy.body')}</p>
+            <Snippet text={mcpServersJson('streamableHttp', mcpUrl)} />
+            <p className="text-xs text-muted-foreground">{t('connectAgent.workbuddy.hint')}</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Codex CLI</CardTitle>
+            <CardTitle className="text-base">{t('connectAgent.doubao.title')}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
-            <p className="text-muted-foreground">{t('connectAgent.codex.body')}</p>
-            <Snippet text={`[mcp_servers.objectstack]\nurl = "${mcpUrl}"`} />
+            <p className="text-muted-foreground">{t('connectAgent.doubao.body')}</p>
+            <FieldRows
+              rows={[
+                { label: t('connectAgent.fields.name'), value: 'objectstack' },
+                { label: t('connectAgent.fields.transport'), value: 'HTTP' },
+                { label: t('connectAgent.fields.url'), value: mcpUrl },
+              ]}
+            />
+            <p className="text-xs text-muted-foreground">{t('connectAgent.doubao.hint')}</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">{t('connectAgent.qwenwork.title')}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <p className="text-muted-foreground">{t('connectAgent.qwenwork.body')}</p>
+            <Snippet text={mcpServersJson('streamable-http', mcpUrl)} />
+            <p className="text-xs text-muted-foreground">{t('connectAgent.qwenwork.hint')}</p>
           </CardContent>
         </Card>
 
@@ -319,6 +377,7 @@ export function ConnectAgent() {
                 </p>
                 <Snippet text={minted.key} />
                 <Snippet text={`x-api-key: ${minted.key}`} />
+                <Snippet text={`Authorization: Bearer ${minted.key}`} />
                 <Button variant="outline" size="sm" onClick={() => setMinted(null)}>
                   {t('connectAgent.apiKey.done')}
                 </Button>

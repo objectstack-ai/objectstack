@@ -5490,6 +5490,30 @@ const REPORT_DATE_RANGE_DIMENSION_NONE_EXPLANATION: RuleExplanation = {
   paragraphs: REPORT_DATE_RANGE_SHARED_PARAGRAPHS,
 };
 
+// ── Report runtime filter (`validate-report-runtime-filter.ts`) ─────────────
+
+const REPORT_FILTER_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'report-filter-field-unknown',
+  covers: 'what an unresolved report filter key does',
+  paragraphs: [
+    'A report\'s `runtimeFilter` is ANDed into its dataset query, exactly as a dashboard widget\'s own ' +
+      '`filter` is. The dataset query refuses a key it cannot bind, so a report whose filter names a ' +
+      'field its dataset\'s object lacks shows every reader a "Dataset query failed" panel instead of ' +
+      'numbers. On a `joined` report the report-level `runtimeFilter` is merged into every block\'s ' +
+      'query, so it is judged against each block\'s dataset, and each block\'s own filter against its ' +
+      'own.',
+    'Each key is judged as `widget-filter-field-unknown` judges a widget filter key — a dotted ' +
+      '`relationship.field` path hop by hop, a bare name against the authored and registry-injected ' +
+      'columns — and one more name is accepted: a bare key naming a dimension of the bound dataset, ' +
+      'which the dataset query binds through that dimension. Not reported: a `dataset` that resolves to ' +
+      'nothing (`chart-dataset-unknown` reports that once), an object this stack does not define, or ' +
+      'one with no readable field map.',
+    'To fix it, filter on a field of the dataset\'s object, on a dimension of the dataset, or on a ' +
+      '`relationship[.relationship].field` path whose prefix the dataset\'s `include` declares. The ' +
+      'verdict\'s "Did you mean" names the nearest field of the object the miss landed on.',
+  ],
+};
+
 // The pairing rule lives in `@objectstack/spec/kernel`'s `customization-package.ts`
 // (`customizationNamespace`, `MAX_CUSTOMIZATION_BASE_NAMESPACE_LENGTH`,
 // `CUSTOMIZATION_NAMESPACE_SUFFIX`); `rule-explanations.test.ts` holds the
@@ -5762,6 +5786,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [REPORT_DATE_RANGE_DIMENSION_NOT_DATE_EXPLANATION.rule]: REPORT_DATE_RANGE_DIMENSION_NOT_DATE_EXPLANATION,
   [REPORT_DATE_RANGE_DIMENSION_AMBIGUOUS_EXPLANATION.rule]: REPORT_DATE_RANGE_DIMENSION_AMBIGUOUS_EXPLANATION,
   [REPORT_DATE_RANGE_DIMENSION_NONE_EXPLANATION.rule]: REPORT_DATE_RANGE_DIMENSION_NONE_EXPLANATION,
+  [REPORT_FILTER_FIELD_UNKNOWN_EXPLANATION.rule]: REPORT_FILTER_FIELD_UNKNOWN_EXPLANATION,
   [NAMESPACE_NO_CUSTOMIZATION_PAIR_EXPLANATION.rule]: NAMESPACE_NO_CUSTOMIZATION_PAIR_EXPLANATION,
   [FLOW_REGION_SHAPE_INVALID_EXPLANATION.rule]: FLOW_REGION_SHAPE_INVALID_EXPLANATION,
 });

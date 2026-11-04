@@ -39,7 +39,7 @@ are `manifest`, `packages`, `objects`, `objectExtensions`, `picklists`,
 `agents`, `tools`, `skills`, `hooks`, `functions`, `mappings`,
 `analyticsCubes`, `connectors`, `data` (seed), `datasources`,
 `datasourceMapping`, `translations`, `i18n`, `plugins`, `devPlugins`,
-`devHint`, `devLogins`, `demoStaff`, `requires`, `tiers`, `onEnable`, `appName`, `email`, `sms`.
+`devHint`, `devLogins`, `demoStaff`, `requires`, `tiers`, `onEnable`, `appName`, `email`, `sms`, `push`.
 
 There is deliberately **no** top-level `workflows` or `approvals` collection:
 an approval is a flow with Approval nodes, and record
@@ -304,12 +304,12 @@ production fails loudly): [Ports & networking](./references/operations.md#ports-
 Step 4's list is the fixed core. Every other service plugin is opt-in, and
 `requires: [...]` on the stack root is what turns it on. The CLI expands each
 token through the `CAPABILITY_PROVIDERS` registry in
-`packages/cli/src/commands/serve.ts` — its 19 opt-in entries:
+`@objectstack/core`:
 
 | Token | Provider package |
 |:--|:--|
 | `automation` | `@objectstack/service-automation` — flows, and any declarative `connectors:` entry |
-| `analytics` `cache` `storage` `queue` `job` `messaging` `realtime` `settings` `sms` | `@objectstack/service-` + the token |
+| `analytics` `cache` `storage` `queue` `job` `messaging` `realtime` `settings` `sms` `push` | `@objectstack/service-` + the token |
 | `marketplace` | `@objectstack/service-package` |
 | `audit` `email` `sharing` `approvals` `webhooks` | `@objectstack/plugin-` + the token |
 | `pinyin-search` | `@objectstack/plugin-pinyin-search` |

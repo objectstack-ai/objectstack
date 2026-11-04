@@ -1221,6 +1221,7 @@ const ja = {
     owner: "所有者",
     relatedCardMenu: "{{title}} のその他の操作",
     relatedCardEnlarge: "拡大",
+    relatedCardAllColumns: "すべての列",
     relatedCardExpand: "展開",
     relatedCardHide: "非表示",
     relatedCardNew: "新規",
@@ -3704,11 +3705,28 @@ const ja = {
       addButton: 'Cursor に追加',
       body: 'ワンクリックボタンを使うか、以下を .cursor/mcp.json に追加してください:',
     },
-    vscode: {
-      body: '.vscode/mcp.json に追加(または MCP: Add Server コマンドで):',
+    fields: {
+      name: '名前',
+      transport: 'トランスポート',
+      url: 'サーバー URL',
     },
     codex: {
-      body: '~/.codex/config.toml に追加してください。Codex が OAuth フロー未対応の場合は API キーのヘッダーをご利用ください(下記参照):',
+      body: 'Codex アプリで 設定 → MCP サーバー → サーバーを追加 を開き、次のとおり入力します:',
+      hint: '保存し、案内に従って再起動したら、objectstack の横の Authenticate をクリックしてブラウザでサインインします。入力欄に /mcp と入力すると接続状況を確認できます。ブラウザでのサインインに対応していないバージョンでは、ヘッダー Authorization: Bearer <API キー> を追加してください(キーは下で作成)。',
+    },
+    workbuddy: {
+      body: 'コネクタ → カスタムコネクタ → MCP を設定 を開き、このエントリを mcpServers にマージします(保存先は ~/.workbuddy/mcp.json):',
+      hint: '保存後、objectstack コネクタで「信頼」をクリックします。信頼するまで有効になりません。サインインが表示されない場合は、リクエストヘッダー Authorization: Bearer <API キー> を追加してください(キーは下で作成)。',
+    },
+    doubao: {
+      title: 'Doubao Work',
+      body: 'スキル · コネクタ → 新規 → カスタムコネクタを新規作成 を開き、次のとおり入力します:',
+      hint: '案内に従ってブラウザでサインインします。サインインが表示されない場合は、カスタムヘッダー Authorization: Bearer <API キー> を追加してください(キーは下で作成)。クラウドで実行するタスクには、公開 HTTPS で到達できるデプロイが必要です。',
+    },
+    qwenwork: {
+      title: 'QwenWork',
+      body: '拡張 → コネクタ → + 追加 → JSON 設定を貼り付け:',
+      hint: '手動で追加する場合は Streamable HTTP を選び、この URL を入力します。ブラウザでのサインインに対応していないバージョンでは、リクエストヘッダー Authorization: Bearer <API キー> を追加してください(キーは下で作成)。',
     },
     apiKey: {
       title: 'API キー',
