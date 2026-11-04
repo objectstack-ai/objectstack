@@ -420,11 +420,11 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             //    for a hostname-routed request. This seam resolves no
             //    environment itself; there is one resolver, and it is that one.
             //    ⛔ No fall back to this plugin's occupant when the environment's
-            //    kernel carries none, nor when acquiring it fails: the host's
-            //    service reads the HOST's store, so a fallback answers
-            //    environment A's request from data that is not A's. Absent →
-            //    `undefined` → the route's own "not configured" answer; an
-            //    acquisition that fails rejects, and the route decides.
+            //    kernel carries none, nor when acquiring it fails: a request
+            //    for environment A is answered by A's service or by nothing.
+            //    Absent → `undefined` → the route's own "not configured"
+            //    answer; an acquisition that fails rejects, and the route
+            //    decides.
             //  - `'platform'` — Studio's reserved control-plane id, never a
             //    kernel (`resolveProtocol` says why) → this plugin's own kernel.
             //  - no id (a control-plane request), or no kernel manager (a
@@ -476,8 +476,8 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             // Analytics service resolver — used by /analytics/dataset/query
             // (ADR-0021 dataset preview/query). Environment-scoped like the four
             // above: the service's strategy bridges are bound to its OWN
-            // kernel's data engine, so the host's occupant would aggregate over
-            // the host's tables. Returns undefined when no analytics service is
+            // kernel's data engine, so only the request's environment's
+            // occupant answers. Returns undefined when no analytics service is
             // registered so the route fails cleanly (501).
             const analyticsServiceProvider = environmentScopedProvider<IAnalyticsService>('analytics');
 

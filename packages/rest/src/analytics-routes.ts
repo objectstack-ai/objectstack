@@ -96,10 +96,9 @@ export function registerAnalyticsEndpoints(this: AnalyticsRouteHost, basePath: s
     // [#30011] The provider resolves the environment's kernel itself now, as
     // its four siblings do, so this asks it for the REQUEST's environment
     // (the shared resolver's answer) and nothing else. The host provider is
-    // no longer a fallback: when the environment's kernel carries no
-    // analytics service, or could not be acquired, the host's occupant would
-    // aggregate the HOST's tables for this environment's caller. Either way
-    // the answer is the 501 below.
+    // no longer a fallback: the door answers from the request's environment
+    // alone. When the environment's kernel carries no analytics service, or
+    // could not be acquired, the answer is the 501 below.
     const resolveService = async (environmentId: string | undefined, req: any) => {
         if (!this.analyticsServiceProvider) return undefined;
         try {
