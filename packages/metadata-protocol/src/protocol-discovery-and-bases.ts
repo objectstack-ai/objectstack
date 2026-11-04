@@ -3,8 +3,7 @@
 /**
  * [#29985 codemod] The "Discovery, types, diagnostics, packaged bases,
  * credential carry-forward" section of `ObjectStackProtocolImplementation`: the
- * bodies of `getDiscovery`, `getMetaTypes`,
- * `rethrowUnlessMetadataStoreUnprovisioned`, `getPackagedObjectBase`,
+ * bodies of `getDiscovery`, `getMetaTypes`, `getPackagedObjectBase`,
  * `packagedArtifactBase`, `objectRegistrationRefusal`,
  * `restoreTranslatedObjectEchoes`, `restoreInjectedColumnEchoes`,
  * `registeredTranslationBundle`, `readCodeLayerForCarryForward` moved out of
@@ -35,7 +34,6 @@ import type { ApiRoutes, CapabilityDescriptor, ServiceInfo, WellKnownCapabilitie
 import { engineCanRollBack } from '@objectstack/core';
 import { resolveDiscoveryVersion } from './discovery-version.js';
 import type { SysMetadataRepository } from './sys-metadata-repository.js';
-import { isMissingTableError } from '@objectstack/metadata/errors';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
 import { CORE_SERVICE_PROVIDER, serviceUnavailableMessage } from '@objectstack/spec/system';
 import type { TranslationBundle } from '@objectstack/spec/system';
@@ -55,7 +53,6 @@ import {
     canonicalMetaType,
     toJsonSchemaSafe,
 } from './protocol-meta-type-schema.js';
-import { metadataReadFailureError } from './protocol-client-failures.js';
 import { SERVICE_CONFIG } from './protocol-discovery-services.js';
 import type { SaveMetaItemRequest } from './protocol-door-requests.js';
 import type { ProtocolHost } from './protocol-host.js';
@@ -682,23 +679,6 @@ export async function getMetaTypes(host: Pick<ProtocolHost, 'envWritableTypes' |
     const exact: Equal<typeof listing, MetaTypesListing> = true;
     void exact;
     return listing;
-}
-
-/** The body of `ObjectStackProtocolImplementation#rethrowUnlessMetadataStoreUnprovisioned`; the method's docblock there is its contract. */
-export function rethrowUnlessMetadataStoreUnprovisioned(host: ProtocolHost, error: unknown, readObject: string): void {
-    // [commit 4cda78c9b] `readObject` is REQUIRED, deliberately. This helper serves
-    // callers that read four different tables (`sys_metadata`,
-    // `sys_metadata_audit`, `sys_metadata_commit`, `sys_metadata_history`),
-    // so a default would silently answer about the wrong one for three of
-    // them — measured, not hypothetical: the first draft of this repair
-    // hardcoded `sys_metadata` and turned `diffMetaItem`'s genuinely
-    // unprovisioned `sys_metadata_history` into a loud failure. A required
-    // parameter makes the compiler ask the question at every new call site.
-    if (isMissingTableError(error, readObject)) return;
-    // [#12536] CLASSIFY, do not assume. A read can fail because the store
-    // is unreachable OR because a metadata app's hook refused it in its
-    // own words — see {@link metadataReadFailureError}.
-    throw metadataReadFailureError(error);
 }
 
 /** The body of `ObjectStackProtocolImplementation#getPackagedObjectBase`; the method's docblock there is its contract. */

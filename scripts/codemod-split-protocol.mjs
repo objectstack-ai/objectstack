@@ -194,6 +194,7 @@ const STAY_REASONS = Object.freeze({
   'host-entry-conflict': 'it needs a host entry that differs from the one protocol-host.ts already carries for that member',
   'host-entry-predicate': 'it reaches a type-predicate method through a host entry not yet written (the forwarding closure would drop the predicate)',
   'indent-irreversible': 'its body\'s re-indentation cannot be undone byte for byte (a whitespace-only or under-indented line)',
+  'no-host-read': 'its body reads no member of the class, so the moved function would never read its `host` parameter (`noUnusedParameters`)',
   'no-yield': 'its stub would be no shorter than its body (moving it would grow protocol.ts)',
 });
 
@@ -621,6 +622,7 @@ function plan(T, text, hostText, { anchors = SECTION_ANCHORS, pins = PATH_READER
       if (have !== undefined && have !== entry.iface) add(`host-entry-conflict: ${member}`);
       if (have === undefined && predicateMembers.has(member)) add(`host-entry-predicate: ${member}`);
     }
+    if (moved.sites.length === 0) add('no-host-read');
     const movedBody = functionBodyOf(ts, moved.fnText);
     const baseBody = text.slice(m.body.getStart(sf), m.body.getEnd());
     if (movedBody === null || undoBody(ts, movedBody, privateStatics) !== baseBody) add('indent-irreversible');
@@ -1261,7 +1263,7 @@ async function main(argv) {
 let selfTestReachedVerdict = false;
 
 const SELF_TEST_BATTERIES = Object.freeze({
-  'stay rules': 14,
+  'stay rules': 15,
   'host entries': 4,
   'byte-identity proof': 9,
   'determinism': 2,
@@ -1341,7 +1343,12 @@ ${pad}
 
     public inferred() {
 ${pad}
-        return 1;
+        return this.count;
+    }
+
+    private readsNoMember(n: number): number {
+${pad}
+        return n;
     }
 
     private destructured({ a }: { a: number }): number {
@@ -1443,6 +1450,7 @@ async function selfTest() {
     stays('bareThis', 'closed-set');
     stays('viaConstructor', 'constructor-rewrite');
     moves('inferred', 'an inferred return type moves, as the hand series moved getMetaItems and validateData');
+    stays('readsNoMember', 'no-host-read');
     stays('destructured', 'parameter-shape');
     stays('shadows', 'parameter-shadows');
     stays('alreadyMoved', 'already-moved');

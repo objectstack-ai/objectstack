@@ -638,7 +638,6 @@ import {
     registeredTranslationBundle,
     restoreInjectedColumnEchoes,
     restoreTranslatedObjectEchoes,
-    rethrowUnlessMetadataStoreUnprovisioned,
 } from './protocol-discovery-and-bases.js';
 // [#29985 codemod] Data CRUD: the methods of the same names below hand the bodies the host (`protocol-host.ts`).
 import { cloneData, findData, getData } from './protocol-data-crud.js';
@@ -2829,8 +2828,19 @@ export class ObjectStackProtocolImplementation implements
      *          the overlay as absent.
      */
     private rethrowUnlessMetadataStoreUnprovisioned(error: unknown, readObject: string): void {
-        // [#29985 codemod] The body moved to `protocol-discovery-and-bases.ts`; it reaches this class through `protocol-host.ts`.
-        return rethrowUnlessMetadataStoreUnprovisioned(protocolHost(this), error, readObject);
+        // [commit 4cda78c9b] `readObject` is REQUIRED, deliberately. This helper serves
+        // callers that read four different tables (`sys_metadata`,
+        // `sys_metadata_audit`, `sys_metadata_commit`, `sys_metadata_history`),
+        // so a default would silently answer about the wrong one for three of
+        // them — measured, not hypothetical: the first draft of this repair
+        // hardcoded `sys_metadata` and turned `diffMetaItem`'s genuinely
+        // unprovisioned `sys_metadata_history` into a loud failure. A required
+        // parameter makes the compiler ask the question at every new call site.
+        if (isMissingTableError(error, readObject)) return;
+        // [#12536] CLASSIFY, do not assume. A read can fail because the store
+        // is unreachable OR because a metadata app's hook refused it in its
+        // own words — see {@link metadataReadFailureError}.
+        throw metadataReadFailureError(error);
     }
 
     /**
