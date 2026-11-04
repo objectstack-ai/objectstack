@@ -263,6 +263,7 @@ import {
   projectHomeAmounts,
   settleBulkHomeAmounts,
   type HomeAmountPlanEntry,
+  type HomeAmountReads,
   type HomeAmountServing,
   type HomeLocalization,
   type HomeLocalizationResolver,
@@ -3538,6 +3539,21 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   private homeLocalizationResolver?: HomeLocalizationResolver;
+
+  /**
+   * [ADR-0144 D5, D7 parameter 1] What the write-time home projection reads,
+   * for a caller that projects a STORED row as a write would: the serving a
+   * write under `context` reads each organization's home currency and
+   * timezone and the rate rows through (memoized for the serving's life), and
+   * the organization a write converts a row under. The explicit recompute
+   * (`recomputeHomeAmounts`, `os migrate recompute-home-amounts`) projects
+   * stored rows with these and `projectHomeAmounts`, so its preview is the
+   * write's own computation, never a copy of it.
+   */
+  homeAmountReadsFor(context?: ExecutionContext): HomeAmountReads {
+    // [ADR-0144] The body lives in `engine-references-and-master-detail.ts` (see `ReferencesAndMasterDetailHost`).
+    return ReferencesAndMasterDetailFacet.homeAmountReadsFor.call(referencesAndMasterDetailHost.of(this), context);
+  }
 
   /**
    * [ADR-0144 D5, Open item 2] What one write's home projection reads, memoized

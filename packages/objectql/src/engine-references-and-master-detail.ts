@@ -42,7 +42,7 @@
 import type { IRealtimeService } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { homeAmountsTouched, planHomeAmounts, projectHomeAmounts } from './home-amount-projection.js';
-import type { HomeAmountPlanEntry, HomeAmountServing, HomeLocalizationResolver } from './home-amount-projection.js';
+import type { HomeAmountPlanEntry, HomeAmountReads, HomeAmountServing, HomeLocalizationResolver } from './home-amount-projection.js';
 import { materializeDeclaredFields } from './declared-fields.js';
 import { collectCascadeDeleteObjects } from './engine-delete-cascade.js';
 import { ObjectQLStatics as ObjectQL } from './engine.js';
@@ -107,6 +107,14 @@ export class ReferencesAndMasterDetailFacet {
     if (own !== undefined && own !== null && own !== '') return String(own);
     if (context?.tenantId) return String(context.tenantId);
     return derived ?? undefined;
+  }
+
+  /** The body of `ObjectQL#homeAmountReadsFor`; the method's docblock there is its contract. */
+  static homeAmountReadsFor(this: Pick<ReferencesAndMasterDetailHost, 'homeAmountServing'>, context: ExecutionContext | undefined): HomeAmountReads {
+    return {
+      serving: this.homeAmountServing(context),
+      organizationOf: (row) => ObjectQL.homeAmountOrganizationOf(row, context),
+    };
   }
 
   /**
