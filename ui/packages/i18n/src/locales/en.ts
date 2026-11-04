@@ -4479,11 +4479,28 @@ const en = {
       addButton: 'Add to Cursor',
       body: 'Use the one-click button, or add this to .cursor/mcp.json:',
     },
-    vscode: {
-      body: 'Add to .vscode/mcp.json (or via the MCP: Add Server command):',
+    fields: {
+      name: 'Name',
+      transport: 'Transport',
+      url: 'Server URL',
     },
     codex: {
-      body: 'Add to ~/.codex/config.toml. If your Codex version lacks the OAuth flow, use an API key header instead (see below):',
+      body: 'In the Codex app: Settings → MCP servers → Add server, then fill in:',
+      hint: 'Save, restart when prompted, then click Authenticate next to objectstack and sign in through the browser. Type /mcp in the composer to check it is connected. If your version offers no browser sign-in, add the header Authorization: Bearer <API key> (create a key below).',
+    },
+    workbuddy: {
+      body: 'Connectors → Custom connector → Configure MCP, then merge this entry into mcpServers (WorkBuddy keeps it in ~/.workbuddy/mcp.json):',
+      hint: 'Save, then click Trust on the objectstack connector — it stays inactive until trusted. If your version shows no sign-in prompt, add the request header Authorization: Bearer <API key> (create a key below).',
+    },
+    doubao: {
+      title: 'Doubao Work',
+      body: 'Skills · Connectors → New → New custom connector, then fill in:',
+      hint: 'Sign in through the browser when prompted. If no sign-in appears, add the custom header Authorization: Bearer <API key> (create a key below). Tasks that run in the cloud need a deployment reachable over public HTTPS.',
+    },
+    qwenwork: {
+      title: 'QwenWork',
+      body: 'Extensions → Connectors → + Add → Paste JSON config:',
+      hint: 'Or add it by hand as Streamable HTTP with this URL. If your version offers no browser sign-in, add the request header Authorization: Bearer <API key> (create a key below).',
     },
     apiKey: {
       title: 'API keys',

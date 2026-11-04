@@ -1101,6 +1101,7 @@
     "ui/PageHeaderProps:breadcrumb [RETIRED]",
     "ui/PageHeaderProps:maxVisible",
     "ui/PageHeaderProps:mobileMaxVisible",
+    "ui/PageHeaderProps:placedActions",
     "ui/PageHeaderProps:recordChrome",
     "ui/PageHeaderProps:showCopyId",
     "ui/PageHeaderProps:showStar [RETIRED]",

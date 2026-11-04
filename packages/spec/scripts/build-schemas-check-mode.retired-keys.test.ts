@@ -246,6 +246,7 @@ describe('build-schemas.ts — check (b) matches the exact retired key, not its 
       expect(remedy).not.toContain('copy these lines');
       // The D2 conversion is still asked for — the table did not replace it.
       expect(remedy).toContain('src/conversions/registry.ts');
+      expect(remedy).toContain('src/conversions/entries/');
     },
   );
 

@@ -1228,8 +1228,10 @@ if (surfaceDoc) {
         `      so the edit is lost. Nothing is inferred here: a leaf name matched against unrelated\n` +
         `      conversion surfaces is what let tombstones register themselves by coincidence\n` +
         `      (#4659).\n\n` +
-        `   2. Add a D2 conversion in src/conversions/registry.ts naming the surface (and a D3\n` +
-        `      chain step referencing it) so \`os migrate meta\` rewrites their source.`,
+        `   2. Add a D2 conversion naming the surface, as one module under\n` +
+        `      src/conversions/entries/<toMajor>/ plus its import and array line in\n` +
+        `      src/conversions/registry.ts (and a D3 chain step referencing it) so\n` +
+        `      \`os migrate meta\` rewrites their source.`,
       );
       process.exit(1);
     }
@@ -2798,8 +2800,10 @@ function checkManifestRemovals(git: GitRun, baseRev: string | null): void {
       `\n      — then run \`${MIGRATION_REGISTRY_COMMAND}\`. ⛔ Never type an\n` +
       `      entry into the generated table by hand: the registry is generated whole and\n` +
       `      never committed, so the edit is lost.\n\n` +
-      `   2. Add a D2 conversion in src/conversions/registry.ts naming the surface (and a D3\n` +
-      `      chain step referencing it) plus a \`major\` changeset, so the removal reaches\n` +
+      `   2. Add a D2 conversion naming the surface, as one module under\n` +
+      `      src/conversions/entries/<toMajor>/ plus its import and array line in\n` +
+      `      src/conversions/registry.ts (and a D3 chain step referencing it), plus a\n` +
+      `      \`major\` changeset, so the removal reaches\n` +
       `      spec-changes.json, the upgrade guide and \`os migrate meta\` — the table is the\n` +
       `      proof it was declared, the conversion is the prescription a consumer follows.\n\n` +
       `   If the schema was not meant to disappear at all, this is not the fix: an added\n` +
@@ -3009,7 +3013,8 @@ let gitResolvedAnchor: { rev: string; keys: string[] } | null = null;
             `        (#5898) — as one entry file under ${entryDirOf('retired-key')}, named for\n` +
             `        that major per ${MIGRATION_ENTRIES_README}, then\n` +
             `        \`${MIGRATION_REGISTRY_COMMAND}\`; the table is generated, ⛔ never typed. The\n` +
-            `        D2 conversion (src/conversions/registry.ts) naming the surface stays\n` +
+            `        D2 conversion naming the surface (a module under src/conversions/entries/,\n` +
+            `        imported and listed in src/conversions/registry.ts) stays\n` +
             `        required — it is the prescription consumers follow — but it is no longer\n` +
             `        what dates the clock; or\n` +
             `     2. its def is not reachable from the metadata-type roots — this gate computes\n` +

@@ -104,6 +104,8 @@ const LEGITIMATE_IDENTITIES: Record<string, string> = {
   'auth.shell.poweredBy': 'Powered by ObjectStack — the Community Console sign-in page attribution; ja keeps the English wordmark line, as publicForm.poweredBy does.',
   'console.studio.title': 'Studio — the product name, which every pack writes in Latin script in its own Studio strings (objectui#11863).',
   'connectAgent.apiKey.badge': 'headless — the literal mode name the CLI and API use.',
+  'connectAgent.doubao.title': 'Doubao Work — the product name; zh writes the vendor\'s own Chinese name, the other packs keep the Latin one.',
+  'connectAgent.qwenwork.title': 'QwenWork — the product name; zh writes the vendor\'s own Chinese name, the other packs keep the Latin one.',
   // `marketplace.pricing.freemium` sat here until objectui#8754 retired the
   // whole `marketplace.pricing.*` family as dead. Its entry went with it, on
   // the same reasoning the `workflow.*` note above records: an entry is a fact

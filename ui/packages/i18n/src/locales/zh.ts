@@ -3899,11 +3899,28 @@ const zh = {
       addButton: '添加到 Cursor',
       body: '点击一键按钮,或将以下内容加入 .cursor/mcp.json:',
     },
-    vscode: {
-      body: '加入 .vscode/mcp.json(或使用 MCP: Add Server 命令):',
+    fields: {
+      name: '名称',
+      transport: '传输类型',
+      url: '服务器 URL',
     },
     codex: {
-      body: '加入 ~/.codex/config.toml。如果你的 Codex 版本不支持 OAuth 流程,请改用 API 密钥请求头(见下):',
+      body: '在 Codex 客户端中:设置 → MCP 服务器 → 添加服务器,按下表填写:',
+      hint: '保存后按提示重启,在 objectstack 旁点击「Authenticate」并在浏览器登录。在输入框中输入 /mcp 可查看是否已连接。如果你的版本不支持浏览器登录,请添加请求头 Authorization: Bearer <API 密钥>(在下方创建)。',
+    },
+    workbuddy: {
+      body: '腾讯 WorkBuddy:连接器 → 自定义连接器 → 配置 MCP,把以下条目合并进 mcpServers(配置保存在 ~/.workbuddy/mcp.json):',
+      hint: '保存后在 objectstack 连接器上点击「信任」——未信任前不会生效。如果你的版本没有弹出登录,请添加请求头 Authorization: Bearer <API 密钥>(在下方创建)。',
+    },
+    doubao: {
+      title: '豆包工作',
+      body: '技能 · 连接器 → 新建 → 新建自定义连接器,按下表填写:',
+      hint: '按提示在浏览器登录。若未出现登录,在自定义 Headers 中添加 Authorization: Bearer <API 密钥>(在下方创建)。云端运行的任务要求部署可通过公网 HTTPS 访问。',
+    },
+    qwenwork: {
+      title: '千问办公',
+      body: '扩展 → 连接器 → + 添加 → 粘贴 JSON 配置:',
+      hint: '也可手动添加:传输类型选 Streamable HTTP 并填写此 URL。如果你的版本不支持浏览器登录,请添加请求头 Authorization: Bearer <API 密钥>(在下方创建)。',
     },
     apiKey: {
       title: 'API 密钥',
