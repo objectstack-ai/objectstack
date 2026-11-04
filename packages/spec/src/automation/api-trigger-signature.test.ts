@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   API_TRIGGER_SIGNATURE_KEY,
+  API_TRIGGER_SIGNATURE_RESERVED_HEADERS,
   ApiTriggerSignatureSchema,
   apiTriggerSignatureRefusals,
   apiTriggerVerifierOf,
@@ -201,6 +202,48 @@ describe('refused at parse, at the start node config.signature', () => {
     for (const header of ['', 'X DocuSign Signature', 'X-Signature:', 'X-Sigé', 42, undefined]) {
       const issues = refusalsUnderSignature(FlowSchema.safeParse(flow('api', { ...KEYED, signature: { ...DOCUSIGN, header } })));
       expect(pathsOf(issues)).toEqual(['nodes.0.config.signature.header']);
+    }
+  });
+
+  it('a header naming x-objectstack-signature, in any case: the body-only sha256= form stays refused on it (ruling B on #22805)', () => {
+    for (const header of ['x-objectstack-signature', 'X-Objectstack-Signature', 'X-OBJECTSTACK-SIGNATURE']) {
+      // The platform's own header in its body-only `sha256=` form, declared: what the hook's own check refuses.
+      const declared = { ...KEYED, signature: { ...GITHUB_STYLE, header } };
+      const issues = refusalsUnderSignature(FlowSchema.safeParse(flow('api', declared)));
+      expect(pathsOf(issues)).toEqual(['nodes.0.config.signature.header']);
+      expect(issues[0]!.message).toMatch(/ruling B on #22805/);
+      expect(apiTriggerVerifierOf(declared)).toEqual({ kind: 'unusable' });
+      const timestamped = refusalsUnderSignature(FlowSchema.safeParse(flow('api', { ...KEYED, signature: { ...STRIPE_STYLE, header } })));
+      expect(pathsOf(timestamped)).toEqual(['nodes.0.config.signature.header']);
+    }
+  });
+
+  it('a header that carries the request credentials, routing or framing, or the idempotency key: a closed list, in any case', () => {
+    expect([...API_TRIGGER_SIGNATURE_RESERVED_HEADERS]).toEqual([
+      'x-objectstack-signature',
+      'authorization',
+      'proxy-authorization',
+      'cookie',
+      'host',
+      'content-length',
+      'transfer-encoding',
+      'x-idempotency-key',
+    ]);
+    expect(Object.isFrozen(API_TRIGGER_SIGNATURE_RESERVED_HEADERS)).toBe(true);
+    for (const name of API_TRIGGER_SIGNATURE_RESERVED_HEADERS.slice(1)) {
+      for (const header of [name, name.toUpperCase(), name.replace(/(^|-)([a-z])/g, (_, dash, c) => dash + c.toUpperCase())]) {
+        const declared = { ...KEYED, signature: { ...DOCUSIGN, header } };
+        const issues = refusalsUnderSignature(FlowSchema.safeParse(flow('api', declared)));
+        expect(pathsOf(issues)).toEqual(['nodes.0.config.signature.header']);
+        expect(issues[0]!.message).toMatch(/never a sender's signature/);
+        expect(apiTriggerVerifierOf(declared)).toEqual({ kind: 'unusable' });
+      }
+    }
+  });
+
+  it('a header whose name only contains a reserved one is a sender header, not reserved', () => {
+    for (const header of ['X-Objectstack-Signature-1', 'X-Authorization-Signature', 'Signature', 'X-Cookie-Sig']) {
+      expect(FlowSchema.safeParse(flow('api', { ...KEYED, signature: { ...DOCUSIGN, header } })).success).toBe(true);
     }
   });
 

@@ -49,6 +49,12 @@ import { API_TRIGGER_SECRET_REF_KEY, apiTriggerSecretRefOf } from './api-trigger
  *    scheme that names one, an undeclared key;
  *  - a `timestamp.body` scheme whose timestamp and digest are the same
  *    element of the header;
+ *  - a `header` that names `x-objectstack-signature`, in any case: the
+ *    platform's own header, whose body-only `sha256=` form ruling B on #22805
+ *    refuses inbound, so no declaration may re-admit it there without a
+ *    replay bound; or another reserved header
+ *    ({@link API_TRIGGER_SIGNATURE_RESERVED_HEADERS}: the request's
+ *    credentials, routing or framing, or the hook's idempotency key);
  *  - a verifier with no key reference (`config.secretRef` absent);
  *  - a verifier beside a literal `config.secret`: an inline key, and a second
  *    source for the one key the hook has;
@@ -72,6 +78,57 @@ const DIGEST_PREFIX = /^[\x21-\x2B\x2D-\x7E]+$/;
 /** The name of one `NAME=value` element of a signature header. */
 const ELEMENT_NAME = /^[A-Za-z0-9_-]+$/;
 
+/**
+ * The header names a declared scheme may not read its signature from,
+ * lower-case, compared without regard to case. A closed list:
+ *
+ *  - `x-objectstack-signature`: the platform's own header. The hook's own
+ *    check accepts it only in its timestamped form; a declared body-only
+ *    scheme on it would re-admit the `sha256=` form ruling B on #22805
+ *    refuses inbound, with no replay bound, and a hook that declares a scheme
+ *    never reads it.
+ *  - `authorization`, `proxy-authorization`, `cookie`: the request's
+ *    credentials. The hook reads no session, cookie or `Authorization` header
+ *    (`contracts/trigger-api-service.ts`), and a declaration cannot make it.
+ *  - `host`, `content-length`, `transfer-encoding`: the request's routing and
+ *    framing, which a proxy may rewrite, never a sender's digest.
+ *  - `x-idempotency-key`: the hook's delivery id, which it reads for its own
+ *    purpose.
+ */
+export const API_TRIGGER_SIGNATURE_RESERVED_HEADERS = Object.freeze([
+  'x-objectstack-signature',
+  'authorization',
+  'proxy-authorization',
+  'cookie',
+  'host',
+  'content-length',
+  'transfer-encoding',
+  'x-idempotency-key',
+] as const);
+
+const RESERVED_HEADERS: ReadonlySet<string> = new Set(API_TRIGGER_SIGNATURE_RESERVED_HEADERS);
+
+/** The refusal a reserved `header` raises, or `undefined` for a header a sender may sign in. */
+function reservedHeaderMessage(header: string): string | undefined {
+  const name = header.toLowerCase();
+  if (!RESERVED_HEADERS.has(name)) return undefined;
+  if (name === 'x-objectstack-signature') {
+    return (
+      `\`config.signature.header\` names \`${header}\`, the platform's own signature header. A hook that declares ` +
+      'its sender\'s scheme never reads that header, and the hook\'s own check accepts it only in its timestamped ' +
+      'form (`t=…,v1=…`): a declared scheme on it would re-admit the body-only `sha256=` form ruling B on #22805 ' +
+      'refuses inbound, with no replay bound. Remove `signature` to verify `x-objectstack-signature`, or name the ' +
+      'header the sender writes its own signature in.'
+    );
+  }
+  return (
+    `\`config.signature.header\` names \`${header}\`, which carries the request's credentials, routing or framing ` +
+    '(or, for `x-idempotency-key`, the hook\'s delivery id), never a sender\'s signature: the hook reads no ' +
+    'session, cookie or `Authorization` header. Name the header the sender writes its signature in ' +
+    '(`X-DocuSign-Signature-1`).'
+  );
+}
+
 const BORN_CLOSED =
   'Declared closed from its first day: a key a verifier does not read is refused, never dropped, because an ' +
   'ignored setting on an auth boundary reads as a check that is not made.';
@@ -94,7 +151,9 @@ const header = z
   )
   .describe(
     'The HTTP header the sender puts its signature in (`X-DocuSign-Signature-1`, `Stripe-Signature`), matched without ' +
-      'regard to case. The hook reads this header and never `x-objectstack-signature`.',
+      'regard to case. The hook reads this header and never `x-objectstack-signature`. A reserved name is refused, ' +
+      'in any case: `x-objectstack-signature`, `authorization`, `proxy-authorization`, `cookie`, `host`, ' +
+      '`content-length`, `transfer-encoding` and `x-idempotency-key`.',
   );
 
 const algorithm = z
@@ -253,11 +312,13 @@ export type ApiTriggerTimestampedSignature = z.input<typeof ApiTriggerTimestampe
  *    write-only flow credential store, or `secretRef`), as before this key.
  *  - `declared`: a usable `signature` and the `secretRef` naming its key. The
  *    hook verifies this scheme and nothing else.
- *  - `unusable`: a `signature` the flow parse refuses (an unparsable shape, no
- *    usable key reference, a literal `secret` beside it). A hook in this state
- *    admits no post: it is ⛔ never read as `objectstack-signature`, so a broken
- *    declaration cannot fall back to the platform's check, and never admitted
- *    unsigned.
+ *  - `unusable`: a `signature` the flow parse refuses (an unparsable shape, a
+ *    reserved `header`, no usable key reference, a literal `secret` beside
+ *    it). A hook in this state admits no post: every post to it gets the one
+ *    `401 INVALID_SIGNATURE`, whether the trigger declines to arm the
+ *    declaration or refuses each post. It is ⛔ never read as
+ *    `objectstack-signature`, so a broken declaration cannot fall back to the
+ *    platform's check, and never admitted unsigned.
  */
 export type ApiTriggerVerifier =
   | { readonly kind: 'objectstack-signature' }
@@ -293,13 +354,17 @@ function signatureConfigRefusals(config: Record<string, unknown>): ApiTriggerSig
     for (const issue of parsed.error.issues) {
       out.push({ path: [API_TRIGGER_SIGNATURE_KEY, ...(issue.path as Array<string | number>)], message: issue.message });
     }
-  } else if (parsed.data.signs === 'timestamp.body' && parsed.data.timestampElement === parsed.data.digestElement) {
-    out.push({
-      path: [API_TRIGGER_SIGNATURE_KEY, 'digestElement'],
-      message:
-        `\`config.signature\` names the element \`${parsed.data.digestElement}\` for both the timestamp and the digest. ` +
-        'They are two elements of the header (`t` and `v1` in `t=…,v1=…`); name each one.',
-    });
+  } else {
+    const reserved = reservedHeaderMessage(parsed.data.header);
+    if (reserved !== undefined) out.push({ path: [API_TRIGGER_SIGNATURE_KEY, 'header'], message: reserved });
+    if (parsed.data.signs === 'timestamp.body' && parsed.data.timestampElement === parsed.data.digestElement) {
+      out.push({
+        path: [API_TRIGGER_SIGNATURE_KEY, 'digestElement'],
+        message:
+          `\`config.signature\` names the element \`${parsed.data.digestElement}\` for both the timestamp and the digest. ` +
+          'They are two elements of the header (`t` and `v1` in `t=…,v1=…`); name each one.',
+      });
+    }
   }
   if (has(config, 'secret')) {
     out.push({
@@ -343,7 +408,7 @@ export function apiTriggerVerifierOf(config: unknown): ApiTriggerVerifier {
 
 /**
  * Every refusal the start nodes of `flow` raise for `config.signature` — the
- * five in this module's header. Structural, like
+ * six in this module's header. Structural, like
  * {@link resolveFlowTriggerKind}: a value that is not a flow yields none.
  */
 export function apiTriggerSignatureRefusals(flow: unknown): ApiTriggerSignatureRefusal[] {

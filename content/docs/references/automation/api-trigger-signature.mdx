@@ -49,6 +49,12 @@ Refusals, each anchored on the start node's `config.signature`:
    scheme that names one, an undeclared key;
  - a `timestamp.body` scheme whose timestamp and digest are the same
    element of the header;
+ - a `header` that names `x-objectstack-signature`, in any case: the
+   platform's own header, whose body-only `sha256=` form ruling B on #22805
+   refuses inbound, so no declaration may re-admit it there without a
+   replay bound; or another reserved header
+   (`API_TRIGGER_SIGNATURE_RESERVED_HEADERS`: the request's
+   credentials, routing or framing, or the hook's idempotency key);
  - a verifier with no key reference (`config.secretRef` absent);
  - a verifier beside a literal `config.secret`: an inline key, and a second
    source for the one key the hook has;
@@ -84,7 +90,7 @@ A sender that signs the raw body alone (DocuSign Connect, a GitHub-style `sha256
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **signs** | `'body'` | ✅ | The sender signs the raw body alone. No replay window applies. |
-| **header** | `string` | ✅ | The HTTP header the sender puts its signature in (`X-DocuSign-Signature-1`, `Stripe-Signature`), matched without regard to case. The hook reads this header and never `x-objectstack-signature`. |
+| **header** | `string` | ✅ | The HTTP header the sender puts its signature in (`X-DocuSign-Signature-1`, `Stripe-Signature`), matched without regard to case. The hook reads this header and never `x-objectstack-signature`. A reserved name is refused, in any case: `x-objectstack-signature`, `authorization`, `proxy-authorization`, `cookie`, `host`, `content-length`, `transfer-encoding` and `x-idempotency-key`. |
 | **algorithm** | `Enum<'hmac-sha256'>` | ✅ | The MAC the sender computes under the key `config.secretRef` names. `hmac-sha256` is the only one. |
 | **encoding** | `Enum<'hex' \| 'base64'>` | ✅ | How the sender writes the digest in the header: `hex` or `base64` (the RFC 4648 standard alphabet). The digest is decoded and compared as the 32 bytes of the HMAC. |
 | **prefix** | `string` | optional | Literal text the sender writes before the digest in the header value (`sha256=` for a GitHub-style sender), checked and removed before decoding. Absent: the whole value is the digest. |
@@ -109,7 +115,7 @@ A sender that signs the raw body alone (DocuSign Connect, a GitHub-style `sha256
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **signs** | `'body'` | ✅ | The sender signs the raw body alone. No replay window applies. |
-| **header** | `string` | ✅ | The HTTP header the sender puts its signature in (`X-DocuSign-Signature-1`, `Stripe-Signature`), matched without regard to case. The hook reads this header and never `x-objectstack-signature`. |
+| **header** | `string` | ✅ | The HTTP header the sender puts its signature in (`X-DocuSign-Signature-1`, `Stripe-Signature`), matched without regard to case. The hook reads this header and never `x-objectstack-signature`. A reserved name is refused, in any case: `x-objectstack-signature`, `authorization`, `proxy-authorization`, `cookie`, `host`, `content-length`, `transfer-encoding` and `x-idempotency-key`. |
 | **algorithm** | `Enum<'hmac-sha256'>` | ✅ | The MAC the sender computes under the key `config.secretRef` names. `hmac-sha256` is the only one. |
 | **encoding** | `Enum<'hex' \| 'base64'>` | ✅ | How the sender writes the digest in the header: `hex` or `base64` (the RFC 4648 standard alphabet). The digest is decoded and compared as the 32 bytes of the HMAC. |
 | **prefix** | `string` | optional | Literal text the sender writes before the digest in the header value (`sha256=` for a GitHub-style sender), checked and removed before decoding. Absent: the whole value is the digest. |
@@ -125,7 +131,7 @@ A sender that signs `<t>.<raw body>` and writes `t` beside the digest as `NAME=v
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **signs** | `'timestamp.body'` | ✅ | The sender signs `<t>.<raw body>`, `t` read from `timestampElement`. The replay window applies. |
-| **header** | `string` | ✅ | The HTTP header the sender puts its signature in (`X-DocuSign-Signature-1`, `Stripe-Signature`), matched without regard to case. The hook reads this header and never `x-objectstack-signature`. |
+| **header** | `string` | ✅ | The HTTP header the sender puts its signature in (`X-DocuSign-Signature-1`, `Stripe-Signature`), matched without regard to case. The hook reads this header and never `x-objectstack-signature`. A reserved name is refused, in any case: `x-objectstack-signature`, `authorization`, `proxy-authorization`, `cookie`, `host`, `content-length`, `transfer-encoding` and `x-idempotency-key`. |
 | **algorithm** | `Enum<'hmac-sha256'>` | ✅ | The MAC the sender computes under the key `config.secretRef` names. `hmac-sha256` is the only one. |
 | **encoding** | `Enum<'hex' \| 'base64'>` | ✅ | How the sender writes the digest in the header: `hex` or `base64` (the RFC 4648 standard alphabet). The digest is decoded and compared as the 32 bytes of the HMAC. |
 | **timestampElement** | `string` | ✅ | Where the timestamp comes from: the NAME of the header element `NAME=<unix seconds>` (`t`). Its value, exactly as received, is the `<t>` of the signed `<t>.<raw body>`. |
@@ -145,7 +151,7 @@ A sender that signs `<t>.<raw body>` and writes `t` beside the digest as `NAME=v
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **signs** | `'timestamp.body'` | ✅ | The sender signs `<t>.<raw body>`, `t` read from `timestampElement`. The replay window applies. |
-| **header** | `string` | ✅ | The HTTP header the sender puts its signature in (`X-DocuSign-Signature-1`, `Stripe-Signature`), matched without regard to case. The hook reads this header and never `x-objectstack-signature`. |
+| **header** | `string` | ✅ | The HTTP header the sender puts its signature in (`X-DocuSign-Signature-1`, `Stripe-Signature`), matched without regard to case. The hook reads this header and never `x-objectstack-signature`. A reserved name is refused, in any case: `x-objectstack-signature`, `authorization`, `proxy-authorization`, `cookie`, `host`, `content-length`, `transfer-encoding` and `x-idempotency-key`. |
 | **algorithm** | `Enum<'hmac-sha256'>` | ✅ | The MAC the sender computes under the key `config.secretRef` names. `hmac-sha256` is the only one. |
 | **encoding** | `Enum<'hex' \| 'base64'>` | ✅ | How the sender writes the digest in the header: `hex` or `base64` (the RFC 4648 standard alphabet). The digest is decoded and compared as the 32 bytes of the HMAC. |
 | **timestampElement** | `string` | ✅ | Where the timestamp comes from: the NAME of the header element `NAME=<unix seconds>` (`t`). Its value, exactly as received, is the `<t>` of the signed `<t>.<raw body>`. |

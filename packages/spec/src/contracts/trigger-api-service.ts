@@ -72,12 +72,22 @@ export interface ITriggerApiService {
    *    names, read at this moment like any hook secret (the `503` above when
    *    it cannot be read), and nothing else: ⛔ it never reads
    *    `x-objectstack-signature`, so a valid one admits nothing, and ⛔ it
-   *    never admits a post that lacks the declared header. A hook whose
-   *    declaration the reader answers `unusable` admits no post at all. The
+   *    never admits a post that lacks the declared header. The flow parse
+   *    refuses a declared `header` that names `x-objectstack-signature` or
+   *    another reserved header (`API_TRIGGER_SIGNATURE_RESERVED_HEADERS`: the
+   *    request's credentials, routing or framing, or the idempotency key), in
+   *    any case, so a declared scheme never reads one. A hook whose
+   *    declaration the reader answers `unusable` admits no post at all: every
+   *    post to it gets the one `401 INVALID_SIGNATURE` below, whether the
+   *    trigger declines to arm the declaration or refuses each post. The
    *    implementer:
    *     - reads the declared `header`, its name matched without regard to
-   *       case. For `signs: 'body'` the whole trimmed value, after `prefix`
-   *       when one is declared (a value without it fails), is the one digest.
+   *       case. A field the sender repeats is ONE value: the field values
+   *       joined with `, ` in the order received (what `Headers.get`
+   *       answers), and that joined value is the one verified, ⛔ never the
+   *       first or the last field alone. For `signs: 'body'` the whole
+   *       trimmed value, after `prefix` when one is declared (a value without
+   *       it fails), is the one digest, so a repeated body-only header fails.
    *       For `signs: 'timestamp.body'` the value is `NAME=value` elements
    *       separated by `,`, each trimmed and split at its first `=`: exactly
    *       one element named `timestampElement`, whose value is whole unix

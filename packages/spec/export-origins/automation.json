@@ -5,6 +5,7 @@
     "API_TRIGGER_SECRET_REF_KEY": "src/automation/api-trigger-secret-ref.zod.ts#API_TRIGGER_SECRET_REF_KEY (const)",
     "API_TRIGGER_SECRET_REF_RESERVED_PREFIX": "src/automation/api-trigger-secret-ref.zod.ts#API_TRIGGER_SECRET_REF_RESERVED_PREFIX (const)",
     "API_TRIGGER_SIGNATURE_KEY": "src/automation/api-trigger-signature.zod.ts#API_TRIGGER_SIGNATURE_KEY (const)",
+    "API_TRIGGER_SIGNATURE_RESERVED_HEADERS": "src/automation/api-trigger-signature.zod.ts#API_TRIGGER_SIGNATURE_RESERVED_HEADERS (const)",
     "APPROVAL_BRANCH_LABELS": "src/automation/approval.zod.ts#APPROVAL_BRANCH_LABELS (const)",
     "APPROVAL_NODE_TYPE": "src/automation/approval.zod.ts#APPROVAL_NODE_TYPE (const)",
     "APPROVAL_REVISE_NODE_TYPE": "src/automation/approval.zod.ts#APPROVAL_REVISE_NODE_TYPE (const)",
