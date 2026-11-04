@@ -7,8 +7,10 @@
 import { describe, it, expect } from 'vitest';
 import { AuthEndpointPaths } from '@objectstack/spec/api';
 import {
+  HANDOFF_REFUSED_AT_PARAM,
   HANDOFF_SESSION_MAX_AGE_MS,
   handoffNavigationTarget,
+  handoffRefusedAt,
   isHandoffSessionFresh,
   sessionCreatedAtMs,
 } from '../handoffRedirect';
@@ -134,4 +136,71 @@ describe('isHandoffSessionFresh — the five-minute window', () => {
     const found = { createdAt: 'not a date' };
     expect(isHandoffSessionFresh(found, { arrival: { session: found }, now })).toBe(false);
   });
+});
+
+describe('isHandoffSessionFresh — the route said when it refused', () => {
+  const refusedAt = Date.parse('2026-11-03T12:00:00Z');
+  const at = (offsetMs: number) => new Date(refusedAt + offsetMs);
+  const arrival = { session: null };
+  // Where the device's clock might read, against the server's.
+  const deviceClocks = [
+    ['agrees with the server', refusedAt],
+    ['is an hour behind', refusedAt - 3_600_000],
+    ['is an hour ahead', refusedAt + 3_600_000],
+  ] as const;
+
+  it.each(deviceClocks)('a session created after the refusal is fresh when the device clock %s', (_label, now) => {
+    const session = { createdAt: at(1) };
+    expect(isHandoffSessionFresh(session, { arrival: { session }, now, refusedAt })).toBe(true);
+  });
+
+  it.each(deviceClocks)('a session not created after it is held when the device clock %s', (_label, now) => {
+    for (const session of [{ createdAt: at(0) }, { createdAt: at(-1) }, { createdAt: at(-7 * 24 * 3_600_000) }]) {
+      expect(isHandoffSessionFresh(session, { arrival: { session }, now, refusedAt })).toBe(false);
+    }
+  });
+
+  it('CONTROL: a device behind the server reads that same old session as young when the route said nothing', () => {
+    const session = { createdAt: at(-6 * 60_000) };
+    expect(isHandoffSessionFresh(session, { arrival, now: refusedAt - 3_600_000 })).toBe(true);
+    expect(isHandoffSessionFresh(session, { arrival, now: refusedAt - 3_600_000, refusedAt })).toBe(false);
+  });
+
+  it('reads createdAt as an ISO string too', () => {
+    const later = { createdAt: at(1).toISOString() };
+    const earlier = { createdAt: at(-1).toISOString() };
+    expect(isHandoffSessionFresh(later, { arrival, now: refusedAt, refusedAt })).toBe(true);
+    expect(isHandoffSessionFresh(earlier, { arrival, now: refusedAt, refusedAt })).toBe(false);
+  });
+
+  it('a session with no createdAt keeps its own branch: found on arrival is held, made on this page is fresh', () => {
+    const found = { token: 't0' };
+    expect(isHandoffSessionFresh(found, { arrival: { session: found }, now: refusedAt, refusedAt })).toBe(false);
+    expect(isHandoffSessionFresh(found, { arrival: null, now: refusedAt, refusedAt })).toBe(false);
+    expect(isHandoffSessionFresh(undefined, { arrival: { session: null }, now: refusedAt, refusedAt })).toBe(true);
+    expect(isHandoffSessionFresh({ token: 't1' }, { arrival: { session: found }, now: refusedAt, refusedAt })).toBe(true);
+    const unreadable = { createdAt: 'not a date' };
+    expect(isHandoffSessionFresh(unreadable, { arrival: { session: unreadable }, now: refusedAt, refusedAt })).toBe(false);
+  });
+});
+
+describe('handoffRefusedAt — what the route wrote, or nothing', () => {
+  const query = (value: string) => `?redirect=%2Fx&${HANDOFF_REFUSED_AT_PARAM}=${value}`;
+
+  it('reads a whole number of milliseconds', () => {
+    expect(handoffRefusedAt(query('1793620800000'))).toBe(1793620800000);
+    expect(handoffRefusedAt(`?${HANDOFF_REFUSED_AT_PARAM}=0`)).toBe(0);
+  });
+
+  it('is null when the page was not sent here by the route', () => {
+    expect(handoffRefusedAt('')).toBeNull();
+    expect(handoffRefusedAt('?redirect=%2Fx')).toBeNull();
+  });
+
+  it.each(['', 'abc', '12a', '-1', '1.5', '1e3', '%201', '0x10', 'NaN', 'Infinity', '9'.repeat(400)])(
+    'ignores %j, so the five-minute check decides',
+    (value) => {
+      expect(handoffRefusedAt(query(value))).toBeNull();
+    },
+  );
 });

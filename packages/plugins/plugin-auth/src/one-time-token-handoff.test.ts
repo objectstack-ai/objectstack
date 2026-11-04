@@ -135,7 +135,7 @@ const arrange = async (
 
   const redeem = (token: string) => postJson(manager, ONE_TIME_TOKEN_VERIFY_PATH, { token });
 
-  return { engine, manager, ctx, signIn, handoff, handOff, redeem };
+  return { engine, manager, app, ctx, signIn, handoff, handOff, redeem };
 };
 
 /** What a browser's address bar or a `location.assign` sends: Fetch Metadata and an HTML `Accept`. */
@@ -530,6 +530,29 @@ describe('one-time-token hand-off — a page navigation without a fresh session 
       const said = (ctx.logger.warn as any).mock.calls.filter(([line]: [string]) => line.includes('one-time-token/handoff'));
       expect(said).toHaveLength(1);
       expect(said[0][0]).toContain('/_console/login');
+    });
+
+    it('a middleware that reads an execution context the probe does not carry keeps the 401 and says why', async () => {
+      const { ctx, app } = await arrange(undefined, {
+        mountConsole: (composed) => {
+          composed.use('*', async (c, next) => {
+            void c.executionCtx; // Hono's getter throws when the request has none.
+            await next();
+          });
+          servedConsole(composed);
+        },
+      });
+      const executionCtx = { waitUntil: () => {}, passThroughOnException: () => {} } as any;
+      const res = await app.fetch(
+        new Request(`${ORIGIN}${BASE}${ONE_TIME_TOKEN_HANDOFF_PATH}?${new URLSearchParams(query)}`, { headers: NAVIGATION }),
+        undefined,
+        executionCtx,
+      );
+      expect(res.status).toBe(401);
+      expect(res.headers.get('location')).toBeNull();
+      const said = (ctx.logger.warn as any).mock.calls.filter(([line]: [string]) => line.includes('one-time-token/handoff'));
+      expect(said).toHaveLength(1);
+      expect(said[0][0]).toContain('it answers 500');
     });
 
     it('a uiBasePath that composes no URL refuses the same way instead of failing the request', async () => {

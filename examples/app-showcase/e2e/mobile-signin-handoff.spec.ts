@@ -83,3 +83,31 @@ test('a signed-out browser opens the hand-off, signs in on the sign-in page, and
   const redeemed = await request.post('/api/v1/auth/one-time-token/verify', { data: { token: `${token}.${VERIFIER}` } });
   expect(redeemed.status(), await redeemed.text()).toBe(200);
 });
+
+test('a sign-in made elsewhere that returns to the sign-in page forwards, on a device whose clock is ahead', async ({ page }) => {
+  // What a provider's sign-in does: the page hands the provider its own URL, so the
+  // browser comes back to that URL with a new session. This device reads that
+  // session as too old, so the page forwards only because it believes the route's
+  // `handoff_refused_at` over its own clock. A route and a page that stop agreeing
+  // on that name end here.
+  await page.clock.setFixedTime(new Date(Date.now() + 15 * 60_000));
+
+  await page.goto(HANDOFF, { waitUntil: 'domcontentloaded' });
+  await page.locator('#login-email').waitFor({ state: 'visible', timeout: 25_000 });
+  const signInPage = page.url();
+
+  const signIn = await page.context().request.post('/api/v1/auth/sign-in/email', {
+    data: { email: EMAIL, password: PASSWORD },
+    headers: { Origin: new URL(API).origin },
+  });
+  expect(signIn.status(), await signIn.text()).toBe(200);
+
+  const toApp = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === HANDOFF_PATH &&
+      response.status() === 302 &&
+      (response.headers().location ?? '').startsWith(`${HANDOFF_APP_SCHEME}:`),
+  );
+  await page.goto(signInPage, { waitUntil: 'commit' });
+  await toApp;
+});

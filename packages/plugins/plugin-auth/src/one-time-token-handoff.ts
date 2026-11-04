@@ -109,15 +109,26 @@
  *    host that redirects the Console elsewhere and a Console served by something
  *    in front of this process all keep the `401`; the first refused navigation
  *    logs why at `warn`, once.
- *  - **It cannot bounce.** The sign-in page judges a session's age on the
- *    device's clock and this route judges it on the server's, so on a device
- *    whose clock is behind, the page forwards a session this route refuses.
- *    Two things stop that: the redirect carries {@link HANDOFF_REFUSED_AT_PARAM},
- *    the server's time of the refusal, which lets the page hold its form for
- *    any session created by then without reading the device's clock; and a
- *    navigation reporting `Sec-Fetch-Site: same-origin` that this route still
- *    refuses is one the sign-in page forwarded, so it gets the `401`, never
- *    another redirect. The second holds even for a page that ignores the first.
+ *  - **It does not bounce.** The sign-in page's own age check reads the device's
+ *    clock and this route reads the server's, so on a device whose clock is
+ *    behind, that check alone would forward a session this route refuses, and a
+ *    redirect back would repeat. Two things stop that:
+ *
+ *    1. The redirect carries {@link HANDOFF_REFUSED_AT_PARAM}, the server's time
+ *       of the refusal, and the sign-in page holds its form for any session not
+ *       created after it, whatever the device's clock says
+ *       (`handoffRedirect.ts` in the Console). This reads no request header, so
+ *       it holds with or without Fetch Metadata.
+ *    2. A navigation reporting `Sec-Fetch-Site: same-origin` that this route still
+ *       refuses is one the sign-in page forwarded, so it gets the `401`, never
+ *       another redirect.
+ *
+ *    The page can still forward a session this route refuses when that session
+ *    was created after the mark: a URL reopened more than five minutes later, or a
+ *    session the page can read and this route cannot (a bearer token with no
+ *    cookie). A browser with Fetch Metadata stops at the `401`. A browser without
+ *    it gets one more redirect, whose newer mark holds the form, so what follows
+ *    waits for a person to sign in.
  *
  * ## The registered app-scheme list
  *
@@ -172,7 +183,8 @@ export const ONE_TIME_TOKEN_HANDOFF_SESSION_MAX_AGE_SECONDS = 5 * 60;
 
 /**
  * On the redirect to the sign-in page, beside `redirect`: when this route
- * refused the browser's session, in epoch milliseconds on the SERVER's clock.
+ * refused the browser's session, in epoch milliseconds on the SERVER's clock. The
+ * Console's `handoffRedirect.ts` restates the name.
  *
  * A session whose `createdAt` is not later than this is one the route has
  * already refused, whatever the device's clock says, so the page holds its form
@@ -391,7 +403,10 @@ export function isPageNavigation(headers: Headers): boolean {
  * Whether the page exists is asked of the composed server, per request, the way
  * the Console's own document asks for its branding: a route being registered
  * would not tell a Console from the `503` a server answers on the same paths when
- * its build is missing.
+ * its build is missing. No execution context goes with it, and none is lost:
+ * `@hono/node-server` hands the real request `env` alone, and no code on this
+ * server reads `c.executionCtx`, whose getter throws when absent. A middleware
+ * that did would answer `500` here, which keeps the `401` and says why.
  */
 export async function resolveHandoffSignInEntry(source: {
   /** `AuthManager.getConsoleUrl` for the sign-in page. */
@@ -461,8 +476,8 @@ async function refusedSessionAnswer(
   refused: HandoffAnswer,
 ): Promise<HandoffAnswer> {
   if (!isPageNavigation(request.headers)) return refused;
-  // The sign-in page forwarded a session this route refuses. Sending it back
-  // would bounce forever; the shell's own entry reports `none`.
+  // The sign-in page forwarded a session this route refuses, so sending it back
+  // could only repeat; the shell's own entry reports `none`.
   if (fetchSite(request.headers) === 'same-origin') return refused;
   const entry = await deps.signInEntry(request.headers);
   if (entry === null) return refused;

@@ -91,8 +91,8 @@ function createMockClient({ arrival = null, config = {}, organizations }: Client
   return client as typeof client & AuthClient;
 }
 
-function renderPage(page: 'login' | 'register', client: AuthClient, redirect?: string) {
-  const search = redirect ? `?redirect=${encodeURIComponent(redirect)}` : '';
+function renderPage(page: 'login' | 'register', client: AuthClient, redirect?: string, extraQuery = '') {
+  const search = (redirect ? `?redirect=${encodeURIComponent(redirect)}` : '') + extraQuery;
   window.history.replaceState({}, '', `/_console/${page}${search}`);
   return render(
     <AuthProvider authUrl="/api/v1/auth" client={client}>
@@ -233,6 +233,38 @@ describe('LoginPage — rule 4: a session older than five minutes', () => {
   it('CONTROL: the window applies only to the hand-off; an old session on an ordinary redirect forwards', async () => {
     renderPage('login', createMockClient({ arrival: { createdAt: minutesAgo(60) } }), '/settings');
     expect(lands(await exitTarget())).toBe('/_console/settings');
+  });
+});
+
+describe('LoginPage — rule 5: the route said when it refused', () => {
+  const refusedAt = (msFromNow: number) => `&handoff_refused_at=${Date.now() + msFromNow}`;
+
+  it('holds the form for a session not created after the refusal, though this device reads it as young', async () => {
+    renderPage('login', createMockClient({ arrival: { createdAt: minutesAgo(1) } }), HANDOFF, refusedAt(0));
+    expect(await screen.findByLabelText('Email')).toBeTruthy();
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it('a sign-in on that form forwards to the hand-off', async () => {
+    renderPage('login', createMockClient({ arrival: { createdAt: minutesAgo(1) } }), HANDOFF, refusedAt(0));
+    await signInOnTheForm();
+    expect(await exitTarget()).toBe(HANDOFF);
+  });
+
+  it('a session created after it forwards, though this device reads it as too old: a provider returned to this URL', async () => {
+    renderPage('login', createMockClient({ arrival: { createdAt: minutesAgo(10) } }), HANDOFF, refusedAt(-20 * 60_000));
+    expect(await exitTarget()).toBe(HANDOFF);
+  });
+
+  it('CONTROL: a value that is not digits is ignored, and the five-minute check decides', async () => {
+    renderPage('login', createMockClient({ arrival: { createdAt: minutesAgo(1) } }), HANDOFF, '&handoff_refused_at=soon');
+    expect(await exitTarget()).toBe(HANDOFF);
+  });
+
+  it('CONTROL: signed out on arrival, a sign-in forwards as it always did', async () => {
+    renderPage('login', createMockClient(), HANDOFF, refusedAt(0));
+    await signInOnTheForm();
+    expect(await exitTarget()).toBe(HANDOFF);
   });
 });
 
