@@ -920,16 +920,16 @@ export function sliceCountProblems(
       let enough = n + 1;
       while (!meets(enough)) enough++;
       problems.push(
-        `${name}: sliced ${n} ways at ${weight}s, one slice is ${(weight / n).toFixed(0)}s -- past ${bound}x ` +
-          `the heaviest other serial task (${floor.toFixed(0)}s, so ${limit.toFixed(0)}s) by more than its ${band} ` +
-          `band (${raiseAbove.toFixed(0)}s), so the package is still the list's serial floor on its own. ` +
+        `${name}: sliced ${n} ways at ${weight}s, one slice is ${(weight / n).toFixed(2)}s -- past ${bound}x ` +
+          `the heaviest other serial task (${floor.toFixed(0)}s, so ${limit.toFixed(2)}s) by more than its ${band} ` +
+          `band (${raiseAbove.toFixed(2)}s), so the package is still the list's serial floor on its own. ` +
           `Raise it to ${enough}.`
       );
     } else if (weight / (n - 1) <= lowerAtOrBelow) {
       problems.push(
-        `${name}: sliced ${n} ways at ${weight}s, but at ${n - 1} one slice (${(weight / (n - 1)).toFixed(0)}s) ` +
+        `${name}: sliced ${n} ways at ${weight}s, but at ${n - 1} one slice (${(weight / (n - 1)).toFixed(2)}s) ` +
           `already sits within ${bound}x the heaviest other serial task (${floor.toFixed(0)}s, so ` +
-          `${limit.toFixed(0)}s) with more than its ${band} band to spare (${lowerAtOrBelow.toFixed(0)}s). ` +
+          `${limit.toFixed(2)}s) with more than its ${band} band to spare (${lowerAtOrBelow.toFixed(2)}s). ` +
           `${n - 1 === 1 ? 'Retire the entry' : `Lower it to ${n - 1}`}: ` +
           'a slice count a smaller one could replace is one no pin can hold.'
       );
@@ -2318,14 +2318,14 @@ function selfTest() {
   check(() => {
     // RAISE side, past the band: 138s in two is 69s, past 68.25s.
     const r = sliceCountProblems(fixture(138), { big: 2 });
-    if (!r.problems.some((m) => m.includes('Raise it to 3') && m.includes('one slice is 69s'))) {
+    if (!r.problems.some((m) => m.includes('Raise it to 3') && m.includes('one slice is 69.00s'))) {
       throw new Error(`slice derivation: a count of 2 past the RAISE band was accepted (${r.problems.join(' | ') || 'no problem named'})`);
     }
   });
   check(() => {
     // LOWER side, past the band: 122s in two is 61s, at or under 61.75s.
     const r = sliceCountProblems(fixture(122), { big: 3 });
-    if (!r.problems.some((m) => m.includes('Lower it to 2') && m.includes('one slice (61s)'))) {
+    if (!r.problems.some((m) => m.includes('Lower it to 2') && m.includes('one slice (61.00s)'))) {
       throw new Error(`slice derivation: a count of 3 past the LOWER band was accepted (${r.problems.join(' | ') || 'no problem named'})`);
     }
   });
