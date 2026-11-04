@@ -47,14 +47,15 @@ Refusals, each anchored on the start node's `config.signature`:
    unknown algorithm or encoding, a `signs` that is neither form, a
    `timestamp.body` scheme that names no timestamp source, a body-only
    scheme that names one, an undeclared key;
+ - a `header` that names a reserved header, in any case, also refused by
+   the schema (`API_TRIGGER_SIGNATURE_RESERVED_HEADERS`):
+   `x-objectstack-signature`, the platform's own header, which stays the
+   platform's (one verifier per hook; and a body-only scheme on it would
+   re-admit the `sha256=` form the hook's own check refuses, with no replay
+   bound), or the request's credentials, routing or framing, or the hook's
+   idempotency key;
  - a `timestamp.body` scheme whose timestamp and digest are the same
    element of the header;
- - a `header` that names `x-objectstack-signature`, in any case: the
-   platform's own header, whose body-only `sha256=` form ruling B on #22805
-   refuses inbound, so no declaration may re-admit it there without a
-   replay bound; or another reserved header
-   (`API_TRIGGER_SIGNATURE_RESERVED_HEADERS`: the request's
-   credentials, routing or framing, or the hook's idempotency key);
  - a verifier with no key reference (`config.secretRef` absent);
  - a verifier beside a literal `config.secret`: an inline key, and a second
    source for the one key the hook has;

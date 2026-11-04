@@ -4,7 +4,9 @@ import { describe, expect, it } from 'vitest';
 import {
   API_TRIGGER_SIGNATURE_KEY,
   API_TRIGGER_SIGNATURE_RESERVED_HEADERS,
+  ApiTriggerBodySignatureSchema,
   ApiTriggerSignatureSchema,
+  ApiTriggerTimestampedSignatureSchema,
   apiTriggerSignatureRefusals,
   apiTriggerVerifierOf,
 } from './api-trigger-signature.zod';
@@ -211,12 +213,15 @@ describe('refused at parse, at the start node config.signature', () => {
       const declared = { ...KEYED, signature: { ...GITHUB_STYLE, header } };
       const issues = refusalsUnderSignature(FlowSchema.safeParse(flow('api', declared)));
       expect(pathsOf(issues)).toEqual(['nodes.0.config.signature.header']);
-      expect(issues[0]!.message).toMatch(/re-admit that refused form, with no replay bound/);
+      // The reason that holds on both arms leads; the body-only consequence is stated as such.
+      expect(issues[0]!.message).toMatch(/which stays the platform's: a hook has one verifier/);
+      expect(issues[0]!.message).toMatch(/Declared `signs: 'body'`, it would also re-admit the body-only `sha256=` form/);
       // Customer-facing text names no internal issue id (the doc authoring guard).
       expect(issues[0]!.message).not.toMatch(/#\d/);
       expect(apiTriggerVerifierOf(declared)).toEqual({ kind: 'unusable' });
       const timestamped = refusalsUnderSignature(FlowSchema.safeParse(flow('api', { ...KEYED, signature: { ...STRIPE_STYLE, header } })));
       expect(pathsOf(timestamped)).toEqual(['nodes.0.config.signature.header']);
+      expect(timestamped[0]!.message).toBe(issues[0]!.message);
     }
   });
 
@@ -234,14 +239,35 @@ describe('refused at parse, at the start node config.signature', () => {
     expect(Object.isFrozen(API_TRIGGER_SIGNATURE_RESERVED_HEADERS)).toBe(true);
     for (const name of API_TRIGGER_SIGNATURE_RESERVED_HEADERS.slice(1)) {
       for (const header of [name, name.toUpperCase(), name.replace(/(^|-)([a-z])/g, (_, dash, c) => dash + c.toUpperCase())]) {
-        const declared = { ...KEYED, signature: { ...DOCUSIGN, header } };
-        const issues = refusalsUnderSignature(FlowSchema.safeParse(flow('api', declared)));
-        expect(pathsOf(issues)).toEqual(['nodes.0.config.signature.header']);
-        expect(issues[0]!.message).toMatch(/never a sender's signature/);
-        expect(issues[0]!.message).not.toMatch(/#\d/);
-        expect(apiTriggerVerifierOf(declared)).toEqual({ kind: 'unusable' });
+        for (const arm of [DOCUSIGN, STRIPE_STYLE]) {
+          const declared = { ...KEYED, signature: { ...arm, header } };
+          const issues = refusalsUnderSignature(FlowSchema.safeParse(flow('api', declared)));
+          expect(pathsOf(issues)).toEqual(['nodes.0.config.signature.header']);
+          expect(issues[0]!.message).toMatch(/never a sender's signature/);
+          expect(issues[0]!.message).not.toMatch(/#\d/);
+          expect(apiTriggerVerifierOf(declared)).toEqual({ kind: 'unusable' });
+        }
       }
     }
+  });
+
+  it('the shape itself refuses a reserved header: each arm schema alone, and the union, so its JSON Schema does too', () => {
+    for (const name of API_TRIGGER_SIGNATURE_RESERVED_HEADERS) {
+      for (const header of [name, name.toUpperCase()]) {
+        for (const [schema, arm] of [
+          [ApiTriggerBodySignatureSchema, DOCUSIGN],
+          [ApiTriggerTimestampedSignatureSchema, STRIPE_STYLE],
+          [ApiTriggerSignatureSchema, DOCUSIGN],
+          [ApiTriggerSignatureSchema, STRIPE_STYLE],
+        ] as const) {
+          const result = schema.safeParse({ ...arm, header });
+          expect(result.success).toBe(false);
+          expect(result.error!.issues.map((i) => i.path.join('.'))).toEqual(['header']);
+        }
+      }
+    }
+    expect(ApiTriggerBodySignatureSchema.safeParse(DOCUSIGN).success).toBe(true);
+    expect(ApiTriggerTimestampedSignatureSchema.safeParse(STRIPE_STYLE).success).toBe(true);
   });
 
   it('a header whose name only contains a reserved one is a sender header, not reserved', () => {

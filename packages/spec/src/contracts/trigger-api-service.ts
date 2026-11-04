@@ -72,8 +72,8 @@ export interface ITriggerApiService {
    *    names, read at this moment like any hook secret (the `503` above when
    *    it cannot be read), and nothing else: ⛔ it never reads
    *    `x-objectstack-signature`, so a valid one admits nothing, and ⛔ it
-   *    never admits a post that lacks the declared header. The flow parse
-   *    refuses a declared `header` that names `x-objectstack-signature` or
+   *    never admits a post that lacks the declared header. The declared shape
+   *    itself refuses a `header` that names `x-objectstack-signature` or
    *    another reserved header (`API_TRIGGER_SIGNATURE_RESERVED_HEADERS`: the
    *    request's credentials, routing or framing, or the idempotency key), in
    *    any case, so a declared scheme never reads one. A hook whose

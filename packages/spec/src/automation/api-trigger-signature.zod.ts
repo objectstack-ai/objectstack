@@ -47,14 +47,15 @@ import { API_TRIGGER_SECRET_REF_KEY, apiTriggerSecretRefOf } from './api-trigger
  *    unknown algorithm or encoding, a `signs` that is neither form, a
  *    `timestamp.body` scheme that names no timestamp source, a body-only
  *    scheme that names one, an undeclared key;
+ *  - a `header` that names a reserved header, in any case, also refused by
+ *    the schema ({@link API_TRIGGER_SIGNATURE_RESERVED_HEADERS}):
+ *    `x-objectstack-signature`, the platform's own header, which stays the
+ *    platform's (one verifier per hook; and a body-only scheme on it would
+ *    re-admit the `sha256=` form the hook's own check refuses, with no replay
+ *    bound), or the request's credentials, routing or framing, or the hook's
+ *    idempotency key;
  *  - a `timestamp.body` scheme whose timestamp and digest are the same
  *    element of the header;
- *  - a `header` that names `x-objectstack-signature`, in any case: the
- *    platform's own header, whose body-only `sha256=` form ruling B on #22805
- *    refuses inbound, so no declaration may re-admit it there without a
- *    replay bound; or another reserved header
- *    ({@link API_TRIGGER_SIGNATURE_RESERVED_HEADERS}: the request's
- *    credentials, routing or framing, or the hook's idempotency key);
  *  - a verifier with no key reference (`config.secretRef` absent);
  *  - a verifier beside a literal `config.secret`: an inline key, and a second
  *    source for the one key the hook has;
@@ -82,11 +83,11 @@ const ELEMENT_NAME = /^[A-Za-z0-9_-]+$/;
  * The header names a declared scheme may not read its signature from,
  * lower-case, compared without regard to case. A closed list:
  *
- *  - `x-objectstack-signature`: the platform's own header. The hook's own
- *    check accepts it only in its timestamped form; a declared body-only
- *    scheme on it would re-admit the `sha256=` form ruling B on #22805
- *    refuses inbound, with no replay bound, and a hook that declares a scheme
- *    never reads it.
+ *  - `x-objectstack-signature`: the platform's own header, which stays the
+ *    platform's. A hook that declares a scheme never reads it (one verifier
+ *    per hook), and the hook's own check accepts it only in its timestamped
+ *    form; a declared body-only scheme on it would re-admit the `sha256=`
+ *    form that check refuses, with no replay bound.
  *  - `authorization`, `proxy-authorization`, `cookie`: the request's
  *    credentials. The hook reads no session, cookie or `Authorization` header
  *    (`contracts/trigger-api-service.ts`), and a declaration cannot make it.
@@ -108,6 +109,18 @@ export const API_TRIGGER_SIGNATURE_RESERVED_HEADERS = Object.freeze([
 
 const RESERVED_HEADERS: ReadonlySet<string> = new Set(API_TRIGGER_SIGNATURE_RESERVED_HEADERS);
 
+/**
+ * Matches every header name EXCEPT a reserved one, in any case: a negative
+ * lookahead over the list, each ASCII letter spelled `[xX]`. Built from the
+ * list, so the two cannot drift, and without a flag, so the published JSON
+ * Schema `pattern` refuses exactly what the runtime refuses.
+ */
+const NOT_A_RESERVED_HEADER = new RegExp(
+  `^(?!(?:${API_TRIGGER_SIGNATURE_RESERVED_HEADERS.map((name) =>
+    name.replace(/[a-z]/g, (c) => `[${c}${c.toUpperCase()}]`),
+  ).join('|')})$)`,
+);
+
 /** The refusal a reserved `header` raises, or `undefined` for a header a sender may sign in. */
 function reservedHeaderMessage(header: string): string | undefined {
   const name = header.toLowerCase();
@@ -115,11 +128,11 @@ function reservedHeaderMessage(header: string): string | undefined {
   if (name === 'x-objectstack-signature') {
     // The body-only `sha256=` form on this header is refused inbound by ruling B on #22805.
     return (
-      `\`config.signature.header\` names \`${header}\`, the platform's own signature header. A hook that declares ` +
-      'its sender\'s scheme never reads that header, and the hook\'s own check accepts it only in its timestamped ' +
-      'form (`t=…,v1=…`) because the body-only `sha256=` form signs no time: a declared scheme on it would ' +
-      're-admit that refused form, with no replay bound. Remove `signature` to verify `x-objectstack-signature`, ' +
-      'or name the header the sender writes its own signature in.'
+      `\`config.signature.header\` names \`${header}\`, the platform's own signature header, which stays the ` +
+      'platform\'s: a hook has one verifier, and a hook that declares its sender\'s scheme never reads ' +
+      '`x-objectstack-signature`. (Declared `signs: \'body\'`, it would also re-admit the body-only `sha256=` form ' +
+      'the hook\'s own check refuses, with no replay bound.) Remove `signature` to have the hook verify ' +
+      '`x-objectstack-signature`, or name the header the sender writes its own signature in.'
     );
   }
   return (
@@ -150,6 +163,7 @@ const header = z
     '`config.signature.header` must be an HTTP header name: letters, digits and `!#$%&\'*+-.^_`|~`, nothing else ' +
       '(`X-DocuSign-Signature-1`). It is matched without regard to case, as HTTP matches header names.',
   )
+  .regex(NOT_A_RESERVED_HEADER, { error: (issue) => reservedHeaderMessage(String(issue.input)) })
   .describe(
     'The HTTP header the sender puts its signature in (`X-DocuSign-Signature-1`, `Stripe-Signature`), matched without ' +
       'regard to case. The hook reads this header and never `x-objectstack-signature`. A reserved name is refused, ' +
@@ -314,7 +328,7 @@ export type ApiTriggerTimestampedSignature = z.input<typeof ApiTriggerTimestampe
  *  - `declared`: a usable `signature` and the `secretRef` naming its key. The
  *    hook verifies this scheme and nothing else.
  *  - `unusable`: a `signature` the flow parse refuses (an unparsable shape, a
- *    reserved `header`, no usable key reference, a literal `secret` beside
+ *    reserved `header` among them, no usable key reference, a literal `secret` beside
  *    it). A hook in this state admits no post: every post to it gets the one
  *    `401 INVALID_SIGNATURE`, whether the trigger declines to arm the
  *    declaration or refuses each post. It is ⛔ never read as
@@ -355,17 +369,13 @@ function signatureConfigRefusals(config: Record<string, unknown>): ApiTriggerSig
     for (const issue of parsed.error.issues) {
       out.push({ path: [API_TRIGGER_SIGNATURE_KEY, ...(issue.path as Array<string | number>)], message: issue.message });
     }
-  } else {
-    const reserved = reservedHeaderMessage(parsed.data.header);
-    if (reserved !== undefined) out.push({ path: [API_TRIGGER_SIGNATURE_KEY, 'header'], message: reserved });
-    if (parsed.data.signs === 'timestamp.body' && parsed.data.timestampElement === parsed.data.digestElement) {
-      out.push({
-        path: [API_TRIGGER_SIGNATURE_KEY, 'digestElement'],
-        message:
-          `\`config.signature\` names the element \`${parsed.data.digestElement}\` for both the timestamp and the digest. ` +
-          'They are two elements of the header (`t` and `v1` in `t=…,v1=…`); name each one.',
-      });
-    }
+  } else if (parsed.data.signs === 'timestamp.body' && parsed.data.timestampElement === parsed.data.digestElement) {
+    out.push({
+      path: [API_TRIGGER_SIGNATURE_KEY, 'digestElement'],
+      message:
+        `\`config.signature\` names the element \`${parsed.data.digestElement}\` for both the timestamp and the digest. ` +
+        'They are two elements of the header (`t` and `v1` in `t=…,v1=…`); name each one.',
+    });
   }
   if (has(config, 'secret')) {
     out.push({
