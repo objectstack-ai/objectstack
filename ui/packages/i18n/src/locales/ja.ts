@@ -3710,6 +3710,9 @@ const ja = {
       transport: 'トランスポート',
       url: 'サーバー URL',
     },
+    codex: {
+      body: '~/.codex/config.toml に追加してください。Codex が OAuth フロー未対応の場合は API キーのヘッダーをご利用ください(下記参照):',
+    },
     workbuddy: {
       body: 'コネクタ → カスタムコネクタ → MCP を設定 を開き、このエントリを mcpServers にマージします(保存先は ~/.workbuddy/mcp.json):',
       hint: '保存後、objectstack コネクタで「信頼」をクリックします。信頼するまで有効になりません。サインインが表示されない場合は、リクエストヘッダー Authorization: Bearer <API キー> を追加してください(キーは下で作成)。',

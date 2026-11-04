@@ -149,6 +149,7 @@ describe('Connect an Agent offers the Chinese clients after the international on
       'Claude (claude.ai / Desktop)',
       'Claude Code',
       'Cursor',
+      'Codex CLI',
       'WorkBuddy',
       // Product names a pack may write in its own script (zh: 豆包工作 / 千问办公).
       '«connectAgent.doubao.title»',
@@ -160,7 +161,7 @@ describe('Connect an Agent offers the Chinese clients after the international on
     }
     // One list: no group headings split the cards.
     expect(document.querySelectorAll('h3')).toHaveLength(0);
-    for (const dropped of ['DuMate', 'VS Code / Copilot', 'Codex CLI']) {
+    for (const dropped of ['DuMate', 'VS Code / Copilot']) {
       expect(screen.queryByText(dropped)).not.toBeInTheDocument();
     }
     for (const key of ['workbuddy', 'doubao', 'qwenwork']) {

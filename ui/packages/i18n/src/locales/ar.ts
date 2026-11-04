@@ -4005,6 +4005,9 @@ const ar = {
       transport: 'نوع النقل',
       url: 'عنوان URL للخادم',
     },
+    codex: {
+      body: 'أضِف إلى ‎~/.codex/config.toml. إذا كانت نسخة Codex لديك لا تدعم تدفق OAuth، فاستخدم ترويسة مفتاح API (انظر أدناه):',
+    },
     workbuddy: {
       body: 'الموصلات ← موصل مخصص ← إعداد MCP، ثم ادمج هذا الإدخال في mcpServers (يُحفظ في ~/.workbuddy/mcp.json):',
       hint: 'احفظ ثم انقر على «ثقة» في الموصل objectstack — لا يعمل قبل منحه الثقة. إذا لم يظهر تسجيل الدخول في إصدارك، أضف ترويسة الطلب Authorization: Bearer <مفتاح API> (أنشئ مفتاحًا أدناه).',

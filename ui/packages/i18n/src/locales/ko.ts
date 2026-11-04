@@ -3707,6 +3707,9 @@ const ko = {
       transport: '전송 방식',
       url: '서버 URL',
     },
+    codex: {
+      body: '~/.codex/config.toml에 추가하세요. Codex 버전이 OAuth 흐름을 지원하지 않으면 API 키 헤더를 사용하세요(아래 참조):',
+    },
     workbuddy: {
       body: '커넥터 → 사용자 지정 커넥터 → MCP 구성에서 이 항목을 mcpServers에 병합하세요(~/.workbuddy/mcp.json에 저장됨):',
       hint: '저장한 뒤 objectstack 커넥터에서 신뢰를 클릭하세요. 신뢰하기 전에는 활성화되지 않습니다. 로그인 창이 뜨지 않으면 요청 헤더 Authorization: Bearer <API 키>를 추가하세요(키는 아래에서 생성).',

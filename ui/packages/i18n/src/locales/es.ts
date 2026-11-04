@@ -3783,6 +3783,9 @@ const es = {
       transport: 'Tipo de transporte',
       url: 'URL del servidor',
     },
+    codex: {
+      body: 'Añadir a ~/.codex/config.toml. Si su versión de Codex no admite el flujo OAuth, use una cabecera de clave API (ver abajo):',
+    },
     workbuddy: {
       body: 'Conectores → Conector personalizado → Configurar MCP y fusiona esta entrada en mcpServers (se guarda en ~/.workbuddy/mcp.json):',
       hint: 'Guarda y haz clic en Confiar en el conector objectstack; no se activa hasta que confíes en él. Si tu versión no muestra el inicio de sesión, añade la cabecera Authorization: Bearer <clave API> (crea una clave abajo).',

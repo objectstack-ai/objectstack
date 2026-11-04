@@ -3904,6 +3904,9 @@ const zh = {
       transport: '传输类型',
       url: '服务器 URL',
     },
+    codex: {
+      body: '加入 ~/.codex/config.toml。如果你的 Codex 版本不支持 OAuth 流程,请改用 API 密钥请求头(见下):',
+    },
     workbuddy: {
       body: '腾讯 WorkBuddy:连接器 → 自定义连接器 → 配置 MCP,把以下条目合并进 mcpServers(配置保存在 ~/.workbuddy/mcp.json):',
       hint: '保存后在 objectstack 连接器上点击「信任」——未信任前不会生效。如果你的版本没有弹出登录,请添加请求头 Authorization: Bearer <API 密钥>(在下方创建)。',

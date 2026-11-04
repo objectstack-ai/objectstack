@@ -4484,6 +4484,9 @@ const en = {
       transport: 'Transport',
       url: 'Server URL',
     },
+    codex: {
+      body: 'Add to ~/.codex/config.toml. If your Codex version lacks the OAuth flow, use an API key header instead (see below):',
+    },
     workbuddy: {
       body: 'Connectors → Custom connector → Configure MCP, then merge this entry into mcpServers (WorkBuddy keeps it in ~/.workbuddy/mcp.json):',
       hint: 'Save, then click Trust on the objectstack connector — it stays inactive until trusted. If your version shows no sign-in prompt, add the request header Authorization: Bearer <API key> (create a key below).',

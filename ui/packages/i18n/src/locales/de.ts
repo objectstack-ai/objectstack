@@ -3708,6 +3708,9 @@ const de = {
       transport: 'Transportart',
       url: 'Server-URL',
     },
+    codex: {
+      body: 'In ~/.codex/config.toml eintragen. Falls Ihre Codex-Version den OAuth-Flow nicht unterstützt, stattdessen einen API-Schlüssel-Header verwenden (siehe unten):',
+    },
     workbuddy: {
       body: 'Connectors → Benutzerdefinierter Connector → MCP konfigurieren, dann diesen Eintrag in mcpServers übernehmen (gespeichert in ~/.workbuddy/mcp.json):',
       hint: 'Speichern und anschließend beim Connector objectstack auf Vertrauen klicken – erst danach ist er aktiv. Erscheint keine Anmeldung, fügen Sie den Request-Header Authorization: Bearer <API-Schlüssel> hinzu (Schlüssel unten erstellen).',

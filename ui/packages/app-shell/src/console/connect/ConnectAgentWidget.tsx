@@ -11,8 +11,8 @@
  *
  *   1. the environment's MCP URL (from `/discovery` → `routes.mcp`) + copy,
  *   2. per-client connect cards with copy-paste-ready content — claude.ai /
- *      Claude Desktop, Claude Code and Cursor deeplink first, then the
- *      Chinese clients WorkBuddy, Doubao Work and QwenWork.
+ *      Claude Desktop, Claude Code, Cursor deeplink and Codex CLI first, then
+ *      the Chinese clients WorkBuddy, Doubao Work and QwenWork.
  *      OAuth is the default story on every card (the deployment is its own
  *      authorization server; you sign in as yourself); the Chinese clients'
  *      cards name the API-key header as the fallback for a client version
@@ -304,6 +304,16 @@ export function ConnectAgent() {
 
         <Card>
           <CardHeader className="pb-2">
+            <CardTitle className="text-base">Codex CLI</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <p className="text-muted-foreground">{t('connectAgent.codex.body')}</p>
+            <Snippet text={`[mcp_servers.objectstack]\nurl = "${mcpUrl}"`} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
             <CardTitle className="text-base">WorkBuddy</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
@@ -340,82 +350,82 @@ export function ConnectAgent() {
             <p className="text-xs text-muted-foreground">{t('connectAgent.qwenwork.hint')}</p>
           </CardContent>
         </Card>
-      </div>
 
-      {/* ── API keys (headless) ─────────────────────────────────────── */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <KeyRound className="h-4 w-4" />
-            {t('connectAgent.apiKey.title')}
-            <Badge variant="secondary">{t('connectAgent.apiKey.badge')}</Badge>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2 text-sm">
-          <p className="text-muted-foreground">{t('connectAgent.apiKey.body')}</p>
-          {minted ? (
-            <div className="space-y-2">
-              <p className="text-xs font-medium text-amber-600 dark:text-amber-400">
-                {t('connectAgent.apiKey.showOnce', { name: minted.name })}
-              </p>
-              <Snippet text={minted.key} />
-              <Snippet text={`x-api-key: ${minted.key}`} />
-              <Snippet text={`Authorization: Bearer ${minted.key}`} />
-              <Button variant="outline" size="sm" onClick={() => setMinted(null)}>
-                {t('connectAgent.apiKey.done')}
-              </Button>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <Input
-                value={keyName}
-                onChange={(e: any) => setKeyName(e.target.value)}
-                placeholder={t('connectAgent.apiKey.namePlaceholder')}
-                className="h-8 max-w-56"
-              />
-              <Button
-                size="sm"
-                onClick={() => setConfirmName(trimmedKeyName)}
-                disabled={minting || !trimmedKeyName}
-              >
-                {minting ? t('connectAgent.apiKey.minting') : t('connectAgent.apiKey.mint')}
-              </Button>
-            </div>
-          )}
-          <AlertDialog
-            open={confirmName !== null}
-            onOpenChange={(open) => {
-              if (!open) setConfirmName(null);
-            }}
-          >
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>
-                  {t('connectAgent.apiKey.confirmTitle', { name: confirmName ?? '' })}
-                </AlertDialogTitle>
-                <AlertDialogDescription>{t('connectAgent.apiKey.body')}</AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={() => {
-                    const name = confirmName ?? '';
-                    setConfirmName(null);
-                    void mintKey(name);
-                  }}
+        {/* ── API keys (headless) ──────────────────────────────────── */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <KeyRound className="h-4 w-4" />
+              {t('connectAgent.apiKey.title')}
+              <Badge variant="secondary">{t('connectAgent.apiKey.badge')}</Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <p className="text-muted-foreground">{t('connectAgent.apiKey.body')}</p>
+            {minted ? (
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-amber-600 dark:text-amber-400">
+                  {t('connectAgent.apiKey.showOnce', { name: minted.name })}
+                </p>
+                <Snippet text={minted.key} />
+                <Snippet text={`x-api-key: ${minted.key}`} />
+                <Snippet text={`Authorization: Bearer ${minted.key}`} />
+                <Button variant="outline" size="sm" onClick={() => setMinted(null)}>
+                  {t('connectAgent.apiKey.done')}
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Input
+                  value={keyName}
+                  onChange={(e: any) => setKeyName(e.target.value)}
+                  placeholder={t('connectAgent.apiKey.namePlaceholder')}
+                  className="h-8 max-w-56"
+                />
+                <Button
+                  size="sm"
+                  onClick={() => setConfirmName(trimmedKeyName)}
+                  disabled={minting || !trimmedKeyName}
                 >
-                  {t('connectAgent.apiKey.mint')}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-          {mintError && (
-            <p className="flex items-center gap-1 text-xs text-destructive">
-              <AlertCircle className="h-3.5 w-3.5" /> {mintError}
-            </p>
-          )}
-        </CardContent>
-      </Card>
+                  {minting ? t('connectAgent.apiKey.minting') : t('connectAgent.apiKey.mint')}
+                </Button>
+              </div>
+            )}
+            <AlertDialog
+              open={confirmName !== null}
+              onOpenChange={(open) => {
+                if (!open) setConfirmName(null);
+              }}
+            >
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>
+                    {t('connectAgent.apiKey.confirmTitle', { name: confirmName ?? '' })}
+                  </AlertDialogTitle>
+                  <AlertDialogDescription>{t('connectAgent.apiKey.body')}</AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => {
+                      const name = confirmName ?? '';
+                      setConfirmName(null);
+                      void mintKey(name);
+                    }}
+                  >
+                    {t('connectAgent.apiKey.mint')}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+            {mintError && (
+              <p className="flex items-center gap-1 text-xs text-destructive">
+                <AlertCircle className="h-3.5 w-3.5" /> {mintError}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

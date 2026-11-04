@@ -3779,6 +3779,9 @@ const fr = {
       transport: 'Type de transport',
       url: 'URL du serveur',
     },
+    codex: {
+      body: 'À ajouter dans ~/.codex/config.toml. Si votre version de Codex ne gère pas le flux OAuth, utilisez un en-tête de clé API (voir ci-dessous) :',
+    },
     workbuddy: {
       body: 'Connecteurs → Connecteur personnalisé → Configurer MCP, puis fusionnez cette entrée dans mcpServers (enregistrée dans ~/.workbuddy/mcp.json) :',
       hint: 'Enregistrez, puis cliquez sur Faire confiance sur le connecteur objectstack — il reste inactif tant qu’il n’est pas approuvé. Si aucune connexion n’est proposée, ajoutez l’en-tête Authorization: Bearer <clé API> (créez une clé ci-dessous).',
