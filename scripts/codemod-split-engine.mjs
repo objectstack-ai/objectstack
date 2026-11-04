@@ -11,8 +11,6 @@
  *   node scripts/codemod-split-engine.mjs --write         # apply the split, then verify it
  *   node scripts/codemod-split-engine.mjs --verify --base <ref>
  *                                                         # re-prove a split on disk against engine.ts at <ref>
- *   node scripts/codemod-split-engine.mjs --dts <beforeDist> <afterDist>
- *                                                         # the declaration-file bar on two built dists
  *   node scripts/codemod-split-engine.mjs --self-test
  *   node scripts/codemod-split-engine.mjs --help          # this usage, on any tree (split or not)
  *
@@ -100,11 +98,13 @@
  *     (the prune above), so nothing else in it moved. The leaf's relative
  *     VALUE imports are followed on disk: none may reach `engine.ts` or an
  *     `engine-*` module.
- *  2. The declaration-file bar of ruling `6348891160` item 1, on the built
- *     `dist/index.d.ts` and `dist/index.d.mts` (`--dts`), as the pilot runs it.
- *     A `.d.ts` order-only difference is judged by ruling `6441032442` B's
- *     second normalisation (ruling `6597555122` item 2), a report reading on
- *     the two dists, never a `scripts/` file.
+ *  2. The declaration-file bar of ruling `6348891160`, judged by ruling
+ *     `6441032442` B's second normalisation (ruling `6597555122` item 2), is a
+ *     report reading on two built dists, never a `scripts/` file (that
+ *     ruling's item 3); the PR reports it. The pilot's `--dts` reads only
+ *     `index.d.ts`, which here re-exports a hashed shared chunk
+ *     (`util-<hash>.d.ts`) that holds the declarations, so this script does
+ *     not carry it.
  *
  * ## Determinism
  *
@@ -1526,125 +1526,6 @@ function lineCount(text) {
   return text.split('\n').length - 1;
 }
 
-// ── Proof 2: the declaration-file bar (ruling 6348891160 item 1) ─────────────
-
-/**
- * The ruling's one normalisation, verbatim: sort the members of each run of
- * string-literal union members in place. Nothing else is normalised.
- */
-const NORMALISER_ONE_LINER =
-  'node -e \'const s=require("fs").readFileSync(process.argv[1],"utf8");process.stdout.write(s.replace(/"[^"\\n]*"(?:\\s*\\|\\s*"[^"\\n]*")+/g,r=>r.split(/\\s*\\|\\s*/).sort().join(" | ")))\' FILE | sha256sum';
-
-function normaliseUnionOrder(text) {
-  return text.replace(/"[^"\n]*"(?:\s*\|\s*"[^"\n]*")+/g, (r) => r.split(/\s*\|\s*/).sort().join(' | '));
-}
-
-/** Export names of a bundled `.d.ts`: every `export { … }` list, plus `export <decl> Name`. */
-function dtsExportNames(text) {
-  const names = new Set();
-  for (const m of text.matchAll(/^export\s*(?:type\s*)?\{([^}]*)\}/gm)) {
-    for (const part of m[1].split(',')) {
-      const t = part.trim().replace(/^type\s+/, '');
-      if (!t) continue;
-      const as = /\bas\s+([\w$]+)$/.exec(t);
-      names.add(as ? as[1] : t);
-    }
-  }
-  for (const m of text.matchAll(/^export\s+(?:declare\s+)?(?:abstract\s+)?(?:class|interface|type|function|const|let|var|enum|namespace)\s+([\w$]+)/gm)) names.add(m[1]);
-  return [...names].sort();
-}
-
-/** One positive control: the first `private` member made public. */
-function injectVisibilityChange(text) {
-  const at = text.search(/^ {4}private /m);
-  return at < 0 ? null : text.slice(0, at) + '    ' + text.slice(at + '    private '.length);
-}
-
-/**
- * The number of lines deleted plus lines inserted between two line arrays —
- * what `diff` prints as `<` and `>` lines (Myers' O((N+M)D) edit distance, so
- * a handful of changed lines in a 9,000-line file costs nothing).
- */
-function lineEditDistance(a, b) {
-  const n = a.length;
-  const m = b.length;
-  const max = n + m;
-  const off = max + 1;
-  const v = new Int32Array(2 * max + 3);
-  for (let d = 0; d <= max; d += 1) {
-    for (let k = -d; k <= d; k += 2) {
-      let x = (k === -d || (k !== d && v[off + k - 1] < v[off + k + 1])) ? v[off + k + 1] : v[off + k - 1] + 1;
-      let y = x - k;
-      while (x < n && y < m && a[x] === b[y]) { x += 1; y += 1; }
-      v[off + k] = x;
-      if (x >= n && y >= m) return d;
-    }
-  }
-  return max;
-}
-
-/**
- * The bar on one declaration file pair. Returns `{ failures, reading }`.
- *
- * `rawDiffLines` counts the lines that differ IN PLACE when both files have the
- * same line count (one per swapped union, as the ruling reads it), and the
- * lines `diff` would print (deleted plus inserted) when the counts differ;
- * `rawDiffMethod` names which. Before, a differing line count read as 0.
- */
-function dtsBarFor(file, before, after) {
-  const failures = [];
-  const nb = normaliseUnionOrder(before);
-  const na = normaliseUnionOrder(after);
-  const bl = before.split('\n');
-  const al = after.split('\n');
-  let rawDiffLines = 0;
-  const rawDiffMethod = bl.length === al.length ? 'in-place' : 'diff';
-  if (bl.length !== al.length) {
-    rawDiffLines = lineEditDistance(bl, al);
-    failures.push(`${file}: ${bl.length} lines at base, ${al.length} at head — a line added or removed is a declaration change, outside the ruling`);
-  } else {
-    for (let i = 0; i < bl.length; i += 1) {
-      if (bl[i] === al[i]) continue;
-      rawDiffLines += 1;
-      if (normaliseUnionOrder(bl[i]) !== normaliseUnionOrder(al[i])) {
-        failures.push(`${file}:${i + 1} differs other than by union member order:\n    base: ${bl[i].trim()}\n    head: ${al[i].trim()}`);
-      }
-    }
-  }
-  if (nb !== na) failures.push(`${file}: normalised base and head differ`);
-  const eb = dtsExportNames(before);
-  const ea = dtsExportNames(after);
-  if (JSON.stringify(eb) !== JSON.stringify(ea)) failures.push(`${file}: the export list differs (${eb.length} at base, ${ea.length} at head)`);
-  const control = injectVisibilityChange(after);
-  const controlSha = control === null ? null : sha256(normaliseUnionOrder(control));
-  if (control === null) failures.push(`${file}: no private member to make public — the positive control could not run (INCONCLUSIVE)`);
-  else if (controlSha === sha256(nb)) failures.push(`${file}: the positive control normalises to the base hash — the normaliser hides a visibility change (INCONCLUSIVE)`);
-  return {
-    failures,
-    reading: {
-      file,
-      rawBase: sha256(before), rawHead: sha256(after), rawDiffLines, rawDiffMethod,
-      normalisedBase: sha256(nb), normalisedHead: sha256(na),
-      exportsBase: eb.length, exportsHead: ea.length,
-      positiveControl: controlSha,
-    },
-  };
-}
-
-function dtsBar(beforeDir, afterDir) {
-  const failures = [];
-  const readings = [];
-  for (const file of ['index.d.ts', 'index.d.mts']) {
-    const b = join(beforeDir, file);
-    const a = join(afterDir, file);
-    if (!existsSync(b) || !existsSync(a)) refuse(`--dts: ${file} missing under ${existsSync(b) ? afterDir : beforeDir}`);
-    const r = dtsBarFor(file, readFileSync(b, 'utf8'), readFileSync(a, 'utf8'));
-    failures.push(...r.failures);
-    readings.push(r.reading);
-  }
-  return { failures, readings };
-}
-
 // ── Reports ──────────────────────────────────────────────────────────────────
 
 function planReport(planned) {
@@ -1743,7 +1624,6 @@ function generatedModulesOnDisk() {
 const USAGE = [
   'usage: node scripts/codemod-split-engine.mjs [--write]   plan (or apply) the split of an UNSPLIT engine.ts',
   '       node scripts/codemod-split-engine.mjs --verify --base REF   re-prove a split on disk against engine.ts at REF',
-  '       node scripts/codemod-split-engine.mjs --dts BEFORE_DIST AFTER_DIST   the declaration-file bar on two built dists',
   '       node scripts/codemod-split-engine.mjs --self-test',
   '       node scripts/codemod-split-engine.mjs --help',
 ].join('\n');
@@ -1765,17 +1645,6 @@ async function main(argv) {
       return 1;
     }
     return 0;
-  }
-  if (argv.includes('--dts')) {
-    const i = argv.indexOf('--dts');
-    const [before, after] = [argv[i + 1], argv[i + 2]];
-    if (!before || !after) refuse('--dts needs <beforeDist> <afterDist>');
-    const { failures, readings } = dtsBar(before, after);
-    console.log(`normaliser (ruling 6348891160 item 2, verbatim): ${NORMALISER_ONE_LINER}`);
-    for (const r of readings) console.log(JSON.stringify(r));
-    for (const f of failures) console.error(`  ✗ ${f}`);
-    console.log(failures.length === 0 ? '✓ declaration-file bar: PASS' : `✗ declaration-file bar: FAIL (${failures.length})`);
-    return failures.length === 0 ? 0 : 1;
   }
   const tm = await loadTsMorph();
   if (argv.includes('--verify')) {
@@ -1843,14 +1712,13 @@ function valueSpecifiers(src) {
 let selfTestReachedVerdict = false;
 
 const SELF_TEST_BATTERIES = Object.freeze({
-  'declaration bar': 7,
   'stay rules': 12,
   'top-level moves': 11,
   'byte-identity proof': 10,
   'import prune': 4,
   'refusals': 6,
 });
-const SELF_TEST_BATTERY_FLOOR = 6;
+const SELF_TEST_BATTERY_FLOOR = 5;
 
 const FIXTURE_ANCHORS = Object.freeze([
   ['count', 'Lifecycle', 'engine-lifecycle.ts'],
@@ -1997,23 +1865,6 @@ async function selfTest() {
     else { failed += 1; console.error(`  ✗ [${battery}] ${label}${detail ? ` — ${detail}` : ''}`); }
   };
   const refused = (fn) => { try { fn(); return false; } catch (e) { return e instanceof CodemodRefusal; } };
-
-  open('declaration bar');
-  {
-    const base = 'export declare class A {\n    private x;\n    t: "b" | "a";\n}\nexport { A };\n';
-    const swapped = base.replace('"b" | "a"', '"a" | "b"');
-    check('a union-member swap passes, and is counted as one raw diff line',
-      (() => { const r = dtsBarFor('f', base, swapped); return r.failures.length === 0 && r.reading.rawDiffLines === 1; })());
-    check('the normaliser sorts union members and nothing else', normaliseUnionOrder('x: "b" | "a"; y: B | A') === 'x: "a" | "b"; y: B | A');
-    check('a retyped member fails', dtsBarFor('f', base, base.replace('"b" | "a"', '"b" | "c"')).failures.length > 0);
-    check('a private member made public fails (the positive control the bar runs)',
-      dtsBarFor('f', base, base.replace('    private x;', '    x;')).failures.length > 0);
-    check('an added line fails', dtsBarFor('f', base, base.replace('}\n', '    y: number;\n}\n')).failures.length > 0);
-    check('a line-count change is counted as diff counts it, never as 0',
-      (() => { const r = dtsBarFor('f', base, base.replace('}\n', '    y: number;\n}\n')).reading; return r.rawDiffLines === 1 && r.rawDiffMethod === 'diff'; })()
-      && lineEditDistance(['a', 'b', 'c'], ['a', 'x', 'c', 'd']) === 3);
-    check('a changed export list fails', dtsBarFor('f', base, base.replace('export { A };', 'export { A as B };')).failures.length > 0);
-  }
 
   open('stay rules');
   {
