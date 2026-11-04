@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 30 — spawns the real producer once per single-cause fixture: two real-kernel boots, one per posture (ObjectQL, the sqlite-wasm default datasource, Hono on port 0, auth, datasource admin, security, sharing, REST, the dispatcher and the spike's plugin driver) with real sign-ups, the `single` boot shared by the 12 cases (a) to (g) and itself the subject of (a) and (b), the `isolated` boot shared by the 6 cases of (h), plus the refused boot that is case (h6)'s subject; 4.6 s of cases in a local run against 2.9 s before the third boot; the single-boot file's slowest CI reading was 12.4 s (scheduled full-battery run 41255489006, Test Core shard log), scaled by the local ratio and x 1.25, rounded up — re-measure on the first scheduled run that carries (h)
+// test-budget: 30 — spawns the real producer once per single-cause fixture: two real-kernel boots, one per posture (ObjectQL, the sqlite-wasm default datasource, Hono on port 0, auth, datasource admin, security, sharing, REST, the dispatcher and the spike's plugin driver) with real sign-ups, the `single` boot shared by the 12 cases (a) to (g) and itself the subject of (a) and (b), the `isolated` boot shared by the 7 cases of (h), plus the refused boot that is case (h6)'s subject; 4.6 s of cases in a local run against 2.9 s before the third boot; the single-boot file's slowest CI reading was 12.4 s (scheduled full-battery run 41255489006, Test Core shard log), scaled by the local ratio and x 1.25, rounded up — re-measure on the first scheduled run that carries (h)
 
 /**
  * Spike: a virtual object on a plugin driver, end to end in a booted kernel
@@ -989,6 +989,28 @@ describe('(h) under the `isolated` posture every external object states its orga
     const shared = await wAs(adminTokenW, 'POST', `/data/${SHARED}`, { name: 'Shared 3' });
     expect(shared.status, await shared.clone().text()).toBeLessThan(300);
     expect(walledCalls.slice(mark).some((c) => c.object === SHARED && c.method === 'create')).toBe(true);
+  });
+
+  it('(h5c) …and reads as empty for every caller, the platform owner included: the owner\'s GET answers no row and no unwalled read reaches the remote, while the owner still crosses the wall on a declared-walled object', async () => {
+    // The declared platform owner seated in A — the one caller whose reads
+    // cross the organization wall elsewhere. The object (h5) registered states
+    // no organization scope, so its deny judges the object, not the reader.
+    const mark = walledCalls.length;
+    const res = await wAs(adminTokenW, 'GET', `/data/${LATE}`);
+    const body = await readJson(res);
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(idsOf(body)).toEqual([]);
+    // Every read that reached the remote carried the deny sentinel.
+    const unwalled = walledCalls
+      .slice(mark)
+      .filter((c) => c.object === LATE && c.method === 'find' && !/__rls_deny__|__deny_all__/.test(JSON.stringify(c.query)));
+    expect(unwalled).toEqual([]);
+    // CONTROL: the same owner on the declared-walled object crosses the wall —
+    // every row the remote holds, every organization's.
+    const walled = await wAs(adminTokenW, 'GET', `/data/${WALLED}`);
+    const walledBody = await readJson(walled);
+    expect(walled.status, JSON.stringify(walledBody)).toBe(200);
+    expect(idsOf(walledBody)).toEqual((walledTables[WALLED] ?? []).map((r) => String(r.id)).sort());
   });
 
   it('(h6) an external object that states no scope at boot is refused BY NAME, with the three ways out; so is a `tenancy.tenantField` the wall cannot read', async () => {
