@@ -68,7 +68,11 @@ function makeRecordingDriver(received: ReceivedCall[]) {
     async connect() {}, async disconnect() {}, async checkHealth() { return true; },
     async syncSchema() {},
     async execute(_command: unknown, _params: unknown, options: unknown) { record('execute', options); return []; },
-    async find(_o: string, ast: any, options: unknown) { record('find', options); return matching(ast?.where); },
+    async find(_o: string, ast: any, options: unknown) {
+      record('find', options);
+      const hit = matching(ast?.where);
+      return typeof ast?.limit === 'number' ? hit.slice(0, ast.limit) : hit;
+    },
     async findOne(_o: string, ast: any, options: unknown) { record('findOne', options); return matching(ast?.where)[0] ?? null; },
     async count(_o: string, ast: any, options: unknown) { record('count', options); return matching(ast?.where).length; },
     async create(_o: string, data: any, options: unknown) {
