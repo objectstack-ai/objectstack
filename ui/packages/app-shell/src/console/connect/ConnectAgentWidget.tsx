@@ -272,7 +272,8 @@ export function ConnectAgent() {
         body={t('connectAgent.sections.assistants.body')}
       />
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
+        {/* Full row: a one-URL card, so the four connector cards pair up below it. */}
+        <Card className="lg:col-span-2">
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Claude (claude.ai / Desktop)</CardTitle>
           </CardHeader>
