@@ -315,7 +315,7 @@ const DOORS: Door[] = [
         // The record page's approvals part reads the same provider.
         provider: 'approvals (record page)', method: 'POST', path: '/data/:object/:id/page',
         params: () => ({ object: 'account', id: 'r1' }), body: { approvals: true },
-        op: 'approvals.listRequests', answeredBy: (b) => b?.data?.approvals?.requests?.[0]?.id ?? b?.approvals?.requests?.[0]?.id,
+        op: 'approvals.listRequests', answeredBy: (b) => b?.data?.approvals?.requests?.[0]?.id,
         absent: { status: 200 },
     },
 ];
@@ -404,7 +404,8 @@ describe('[#30011] hosted shape: two environment kernels behind one host REST pl
                     expect(out.status, JSON.stringify(out.body)).toBe(door.absent.status);
                     if (door.absent.body !== undefined) expect(out.body).toEqual(door.absent.body);
                     if (door.provider === 'approvals (record page)') {
-                        expect(out.body?.data?.approvals ?? out.body?.approvals).toEqual({ requests: [], lock: null });
+                        // The part's documented absent answer: no requests, no lock.
+                        expect(out.body?.data?.approvals).toEqual({ requests: [], lock: null });
                     }
                     expect(h.reached).toEqual([]);
                 } finally { restore(); }
@@ -433,7 +434,7 @@ describe('[#30011] hosted shape: two environment kernels behind one host REST pl
         ]);
     }, 60_000);
 
-    it('one environment resolution, through the environment-only member: no kernel is bought to learn an id', async () => {
+    it('no kernel is bought to learn an environment id, and a cold environment is built once per request', async () => {
         h.resolver.resolveKernel.mockClear();
         h.resolver.resolveEnvironment.mockClear();
         h.km.reset();
@@ -450,4 +451,51 @@ describe('[#30011] hosted shape: two environment kernels behind one host REST pl
         expect(h.km.builds).toEqual([ENV_A]);
         expect(new Set(h.km.acquisitions)).toEqual(new Set([ENV_A]));
     }, 60_000);
+});
+
+describe('[#30011] single kernel: the same doors read the plugin\'s own kernel, exactly as before', () => {
+    // The self-hosted composition: no `kernel-manager`, no `kernel-resolver`,
+    // every service on the one kernel the REST plugin is mounted on. Scoping
+    // is switched on so the scoped mount is driven too — an id on that mount
+    // names no other kernel here, and the answer must not move.
+    let h: Hosted;
+    beforeAll(async () => {
+        const reached: Reached[] = [];
+        const http = recordingHttp();
+        captured.servers.length = 0;
+        const kernel = await bootKernel('test.single.wiring', {
+            'http.server': http,
+            protocol: envProtocol('host'),
+            auth: authServiceFor('u_host'),
+            objectql: emptyQl(),
+            ...occupants('host', reached),
+        }, [createRestApiPlugin({ api: { api: { enableProjectScoping: true, projectResolution: 'auto' } } } as any)]);
+        expect(captured.servers).toHaveLength(1);
+        h = {
+            table: http.table,
+            reached,
+            km: hostKernelManager({}),
+            resolver: hostKernelResolver(),
+            server: captured.servers[0],
+            kernels: [kernel],
+        };
+    }, 60_000);
+    afterAll(async () => { for (const k of h?.kernels ?? []) await k.shutdown(); });
+
+    for (const door of DOORS) {
+        for (const mount of ['scoped', 'hostname'] as const) {
+            it(`${door.provider} (${door.method} ${door.path}, ${mount}) is answered by the one kernel's service`, async () => {
+                h.reached.length = 0;
+                const restore = door.needsEmailCapability ? withEmailCapability(h) : () => {};
+                try {
+                    // `host` is the tag of the one kernel's occupants; the ids
+                    // the doors read are the same rows the hosted cases name.
+                    const out = await drive(h, { ...door, params: () => door.params('host') }, mount, 'host');
+                    expect(out.status, JSON.stringify(out.body)).toBe(200);
+                    expect(door.answeredBy(out.body)).toBe(EXPECTED_ANSWER[door.op]!('host'));
+                    expect(h.reached.filter((r) => r.op === door.op)).toEqual([{ env: 'host', op: door.op }]);
+                } finally { restore(); }
+            }, 60_000);
+        }
+    }
 });
