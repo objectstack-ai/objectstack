@@ -337,7 +337,7 @@ re-translation: an up-to-date bundle re-extracts byte-identically. Requires
 
 ### Diff & Coverage Schemas
 
-The spec models coverage results for tooling: `TranslationCoverageResult`
+The spec models coverage results for tooling — the return shapes of the optional `getCoverage()` / `suggestTranslations()` (see *Service Contract* below): `TranslationCoverageResult`
 (totals, `coveragePercent`, per-group `breakdown`) and `TranslationDiffItem` —
 `key` (dot path), `status` (`missing | redundant | stale`), `locale`, optional
 `objectName`, optional `sourceHash` for stale detection, and AI-enrichment
