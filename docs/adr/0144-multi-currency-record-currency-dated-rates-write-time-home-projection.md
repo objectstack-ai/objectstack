@@ -66,12 +66,15 @@ Three kinds of text feed this record. Each section says which kind it carries.
 
 1. **Ruled.** Ruling `6465431966` fixes shape C′, sub-questions Q0–Q4, parameters 1–4, the five design rules, the
    release pairing and the commitment. Ruling `6469382727` on #27185 fixes parameter 4's unit. [Decision](#decision)
-   carries only these two. It quotes them wherever the wording matters.
+   carries only these two. It quotes them wherever the wording matters. Ruling `6539345871` on #8345 (2026-10-31)
+   amends D9's release gate (letter A′) and settles [Open item](#open-items) 2's `datetime` day (letter B); D9 and
+   Open item 2 carry it as dated notes, and nothing else in [Decision](#decision) rests on it.
 2. **Analysis the ruling read.** This is the design record `6464438764`, the workload rows `6464936321`, the
    measurement round `6041378776` and the shape verdict `6041482631`. They supply the context, the shapes considered
    and the per-card plan. A detail that appears only there is not ruled. This record lists such details under
    [Open items](#open-items) or as a card's draft, never as a decision.
-3. **Readings.** Current behaviour, measured at `cdec7473` and cited by file or symbol.
+3. **Readings.** Current behaviour, measured at `cdec7473` and cited by file or symbol. The dated notes of
+   2026-11-04 read `origin/main` at `f68b47ca` the same way.
 
 **Two numberings meet here.** #27119 is a decision batch, and two of its items are also called Q1 and Q2. #27119 Q1
 asks when multi-currency starts, and the answer was 乙-现在. #27119 Q2 asks for one rule for an unknown currency, and
@@ -371,9 +374,10 @@ Where a source leans one way, the lean is quoted here, not adopted. This record 
    *Note (2026-11-04):* settled, as workload row M2-2 read it: the row is the organization's `sys_exchange_rate` row
    for the record's currency with the latest `effective_date` on or before the document date; a later row never
    applies, and no row in force refuses `ERR_EXCHANGE_RATE_MISSING` (D5, item 9). Landed in PR #28302 (`6762dd91`):
-   the engine reads `where: { currency, effective_date: { $lte: day } }`, ordered by `effective_date` descending,
-   `limit: 1`, as a system read in the row's own organization, so one organization's rate never converts another's
-   amount (`packages/objectql/src/engine.ts#homeAmountServing`); a row whose `rate` is not a positive decimal counts
+   the engine reads `where: { currency, effective_date: { $lte: onOrBefore } }` with `onOrBefore` the document day,
+   `orderBy: [{ field: 'effective_date', order: 'desc' }]`, `limit: 1`, as a system read in the row's own
+   organization, so one organization's rate never converts another's amount
+   (`packages/objectql/src/engine.ts#homeAmountServing`); a row whose `rate` is not a positive decimal counts
    as missing, and a batch asks the table once per organization, currency and day
    (`packages/objectql/src/home-amount-projection.ts#projectHomeAmounts`, `#memoizeHomeAmountServing`). The document
    date is the day of the field `homeAmount.rateDate` names: a `date` value is its own day; a `datetime` value is its
