@@ -197,6 +197,24 @@
           "PUT /api/v1/meta/permission/crm_sales_rep"
         ]
       }
+    },
+    {
+      "id": 12,
+      "prompt": "Turn on push notifications for our `os serve` deployment: our own iOS and Android apps, signed with our APNs key and our Firebase project.",
+      "expected_output": "`requires: ['push']` on the stack root (the token mounts `@objectstack/service-push`) plus a top-level `push:` key on the stack definition for the transport; no host code, no `PushServicePlugin` in `plugins:`. The APNs signing key and the Firebase service-account JSON stay in the secrets layer (an environment variable in the open tier) and the config names them by reference (`credentialRef`): no `.p8` key, `privateKey` or service-account JSON written inline.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "requires",
+          "'push'",
+          "push:"
+        ],
+        "must_not_contain": [
+          "BEGIN PRIVATE KEY",
+          "privateKey:",
+          "\"private_key\""
+        ]
+      }
     }
   ]
 }

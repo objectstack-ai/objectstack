@@ -43,7 +43,7 @@ A `slotted` record page has no `tabs` slot — see [Record Page](./record-page.m
 
 | `type`               | Use |
 |:---------------------|:----|
-| `page:header`        | `title` / `subtitle` templates + `actions` (ids of the bound object's actions, never action nodes) or `placedActions: true` (all placed; not drawn yet) |
+| `page:header`        | `title` / `subtitle` templates + `actions` (ids of the bound object's actions, never action nodes) or `placedActions: true` (all placed, read live) |
 | `page:card`          | Bordered/un-bordered card with `children: Component[]` (plus an optional `footer: Component[]` slot) |
 | `flex`               | Generic styleable box (`properties.children`) — the workhorse for custom layout; style via `responsiveStyles` (see Styling below) |
 | `element:text`       | Text node — `properties.content`; style via `responsiveStyles` |
