@@ -45,7 +45,8 @@ const CALLEE = 'registerItem(';
 /** A class member's header in `protocol.ts`: four spaces, optional modifiers, its name, its parameter list. */
 const MEMBER_HEADER = /^ {4}(?:(?:private|public|protected|static|async|override|readonly)\s+)*([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\(/;
 /** [#29985] A module function's header in a split module: optional `export` and `async`, `function`, its name, its parameter list. */
-const FUNCTION_HEADER = /^(?:export )?(?:async )?function ([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\(/;
+// [#29985 facade] ...or, in a codemod module, a facet's static method at the class's depth.
+const FUNCTION_HEADER = /^(?:(?:export )?(?:async )?function | {4}static (?:async )?)([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\(/;
 /** A line of a comment: a block comment's body or opener, or a line comment. */
 const COMMENT_LINE = /^\s*(?:\*|\/\*|\/\/)/;
 
@@ -205,8 +206,14 @@ describe('[#22057] every registerItem( in protocol.ts has a recorded disposition
     });
 
     it('the question is the one predicate, over every package that can ship the name', () => {
+        // [#29985 facade] The class keeps the signature and a one-line delegation;
+        // the body is its facet's static method, reading the class as `host`.
         expect(SOURCE).toMatch(
-            /\n {4}private anotherPackageShips\(type: string, name: string, own: unknown, shipping\?: ShippingPackages\): boolean \{\n {8}return this\.shippedArtifactsOf\(type, name, shipping\)\n/,
+            /\n {4}private anotherPackageShips\(type: string, name: string, own: unknown, shipping\?: ShippingPackages\): boolean \{\n[^\n]*\n {8}return ProtocolRegistryHydrationFacet\.anotherPackageShips\(protocolHost\(this\), type, name, own, shipping\);\n {4}\}\n/,
+        );
+        const hydration = readFileSync(fileURLToPath(new URL('./protocol-registry-hydration.ts', import.meta.url)), 'utf8');
+        expect(hydration).toMatch(
+            /\n {4}static anotherPackageShips\(host: Pick<ProtocolHost, 'shippedArtifactsOf'>, type: string, name: string, own: unknown, shipping\?: ShippingPackages\): boolean \{\n {8}return host\.shippedArtifactsOf\(type, name, shipping\)\n/,
         );
     });
 });

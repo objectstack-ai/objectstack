@@ -45,6 +45,37 @@
  * `export { … }` list, and `index.ts` re-exports by name, so none reaches the
  * package), and `protocol.ts`'s imports of the moved functions.
  *
+ * Private statics (private-static-through-host, ruling `6624174693`, kept by
+ * `6624345766`): a private static whose body reads nothing of the class (no
+ * `this`, `super`, `arguments` or class name) moves to its section's module the
+ * same way, with no host parameter. The class keeps the delegation, so a moved
+ * instance body still reaches it as `host.<static>`, through the host entry
+ * that forwards to the class.
+ *
+ * ## The facade layer (ruling `6624345766`)
+ *
+ * The output above is (a)'s module form. The script then lifts it, text for
+ * text, into the facade form, and only the facade form is written:
+ *
+ *  - Each section module's functions become the static methods of ONE
+ *    stateless facet class, `<Module>Facet` (`protocol-save.ts` ->
+ *    `ProtocolSaveFacet`). A method still takes the host as its first
+ *    parameter, so its body is (a)'s body re-indented back to the class's own
+ *    depth. A facet holds no state: the fields stay on the class (the facade),
+ *    and a body reaches them through the host.
+ *  - Each stub on the class calls `<Facet>.<member>(…)`.
+ *  - Docblock ownership: a PRIVATE member's docblock moves, verbatim, onto its
+ *    facet method, and the class keeps one line that links to it. A public or
+ *    protected member's docblock stays on the facade: the published `.d.ts`
+ *    prints it, and the ruling keeps consumers' hover docs unchanged.
+ *
+ * The proof of the layer is its inverse: `--verify` unlifts the head (from the
+ * head texts alone) back to (a)'s form, refusing anything the lift would not
+ * have written, then proves (a) against the base exactly as below. The plan
+ * prints the facade reading: every class member with a body, as a delegation
+ * (to a facet, or in one of the hand series' forms) or a named exception with
+ * the reason it stayed (the #30019 gate's starting allow-list).
+ *
  * Lever (b) of the same ruling (top-level declarations ahead of the class move
  * whole to a leaf) has nothing to move here: ruling E's step E0 already moved
  * the preamble out of `protocol.ts`, and what stands ahead of the class is
@@ -69,6 +100,10 @@
  * stayed and why. `PATH_READER_PINS` (a member whose text a reader extracts
  * from `protocol.ts` by path) and `PATH_READER_NEEDLES` (literal text a reader
  * requires to find there) are the tables rather than rules.
+ *
+ * The pilot's rule that a body no longer than its stub stays is NOT carried:
+ * under the facade rule of `6624258595` the class keeps delegations only, so
+ * the length of a body is no reason to keep it.
  *
  * The pilot's rule on inferred return types is carried: a non-private method
  * whose return type is inferred stays (`inferred-return-type`). The published
@@ -199,7 +234,8 @@ const STAY_REASONS = Object.freeze({
   'host-entry-predicate': 'it reaches a type-predicate method through a host entry not yet written (the forwarding closure would drop the predicate)',
   'indent-irreversible': 'its body\'s re-indentation cannot be undone byte for byte (a whitespace-only or under-indented line)',
   'no-host-read': 'its body reads no member of the class, so the moved function would never read its `host` parameter (`noUnusedParameters`)',
-  'no-yield': 'its stub would be no shorter than its body (moving it would grow protocol.ts)',
+  'static-reads-class': 'a private static whose body reads the class itself (`this`, `super`, `arguments` or the class name), which a module function cannot reach',
+  'static-shape': 'a static that is public or protected, overloaded, decorated or a generator (only a private static\'s body moves)',
 });
 
 // ── Loading the tools ────────────────────────────────────────────────────────
@@ -491,6 +527,22 @@ function undoBody(ts, movedBodyText, privateStatics) {
   return text.split('\n').map((line, i) => (i === 0 || literal.has(i) || line === '' ? line : `    ${line}`)).join('\n');
 }
 
+/**
+ * One level of indentation off every line of a static's body but the first,
+ * except a line that starts inside a literal and an empty line: the inverse of
+ * `undoBody`'s re-indentation (a static's body has no host rewrite to undo).
+ */
+function dedentBody(ts, bodyText) {
+  const literal = literalLineIndices(ts, bodyText);
+  return bodyText.split('\n').map((line, i) => (i === 0 || literal.has(i) || !line.startsWith('    ') ? line : line.slice(4))).join('\n');
+}
+
+/** The one-line docblock a moved private static's function carries in (a)'s module form. */
+const staticOneLiner = (name) => `/** The body of \`${CLASS_NAME}.${name}\` (a private static); the method's docblock there is its contract. */`;
+
+/** The one-line docblock `host-split.mjs`'s `planMove` writes on a moved instance body. */
+const instanceOneLiner = (name) => `/** The body of \`${CLASS_NAME}#${name}\`; the method's docblock there is its contract. */`;
+
 /** The body text of the one exported function in `fnText` (what `planMove` writes). */
 function functionBodyOf(ts, fnText) {
   const sf = parseSourceFile('x.ts', fnText);
@@ -631,9 +683,68 @@ function plan(T, text, hostText, { anchors = SECTION_ANCHORS, pins = PATH_READER
     const movedBody = functionBodyOf(ts, moved.fnText);
     const baseBody = text.slice(m.body.getStart(sf), m.body.getEnd());
     if (movedBody === null || undoBody(ts, movedBody, privateStatics) !== baseBody) add('indent-irreversible');
-    const stubLines = stubBody(name, section.module, m).split('\n').length;
-    record.stubLines = stubLines;
-    if (stubLines >= bodyLines) add('no-yield');
+    record.stubLines = stubBody(name, section.module, m).split('\n').length;
+  }
+
+  // Private statics (private-static-through-host, ruling 6624174693, kept by
+  // 6624345766): a private static whose body reads nothing of the class moves
+  // to its section's module like an instance body, with no host parameter; the
+  // class keeps the delegation, so the moved instance bodies keep reaching it
+  // through the host entry that forwards to the class.
+  for (const m of cls.members) {
+    if (!ts.isMethodDeclaration(m) || !m.body || !hasModifier(ts, m, ts.SyntaxKind.StaticKeyword)) continue;
+    if (!m.name || !ts.isIdentifier(m.name)) continue;
+    const name = m.name.text;
+    const section = sectionOf(m);
+    const reasons = [];
+    const add = (tag) => { if (!reasons.includes(tag)) reasons.push(tag); };
+    const startLine = sf.getLineAndCharacterOfPosition(m.getStart(sf)).line + 1;
+    const endLine = sf.getLineAndCharacterOfPosition(m.getEnd()).line + 1;
+    const bodyLines = sf.getLineAndCharacterOfPosition(m.body.getEnd()).line - sf.getLineAndCharacterOfPosition(m.body.getStart(sf)).line + 1;
+    const record = { name, node: m, isStatic: true, section: section.title, module: section.module, startLine, lineCount: endLine - startLine + 1, bodyLines, reasons };
+    records.push(record);
+    if (!section.module) add('section-kept');
+    const isPrivate = hasModifier(ts, m, ts.SyntaxKind.PrivateKeyword);
+    const overloaded = cls.members.some((o) => o !== m && ts.isMethodDeclaration(o) && !o.body && o.name && ts.isIdentifier(o.name) && o.name.text === name);
+    if (!isPrivate || overloaded || m.asteriskToken || (ts.canHaveDecorators?.(m) && ts.getDecorators?.(m)?.length)) { add('static-shape'); continue; }
+    if (hs.stubKindOf(m)) { add('already-moved: static'); continue; }
+    for (const p of m.parameters) {
+      if (!ts.isIdentifier(p.name) || p.name.text === 'this') add(`parameter-shape: ${p.name.getText(sf)}`);
+      else if (['host', 'protocolHost', name].includes(p.name.text)) add(`parameter-shadows: ${p.name.text}`);
+    }
+    const classReads = new Set();
+    const scanClass = (node) => {
+      if (node.kind === ts.SyntaxKind.ThisKeyword) classReads.add('this');
+      else if (node.kind === ts.SyntaxKind.SuperKeyword) classReads.add('super');
+      else if (ts.isIdentifier(node) && !inJsDoc(ts, node) && ['arguments', CLASS_NAME, 'host', 'protocolHost'].includes(node.text)
+        && !(ts.isPropertyAccessExpression(node.parent) && node.parent.name === node)) classReads.add(node.text);
+      ts.forEachChild(node, scanClass);
+    };
+    for (const p of m.parameters) scanClass(p);
+    if (m.type) scanClass(m.type);
+    if (m.typeParameters) for (const tp of m.typeParameters) scanClass(tp);
+    scanClass(m.body);
+    for (const c of [...classReads].sort()) add(`static-reads-class: ${c}`);
+    const methodText = m.getText(sf);
+    for (const needle of Object.keys(needles)) if (methodText.includes(needle)) add(`path-reader: ${JSON.stringify(needle)}`);
+    if (Object.prototype.hasOwnProperty.call(pins, name)) add(`path-reader: ${name}`);
+    const names = readNames(ts, ctx, m, new Set());
+    for (const r of names.reasons) add(r);
+    if (scope.bindings.has(name) || freeInHost.has(name)) add('name-taken');
+    Object.assign(record, { imports: names.imports, moduleRefs: names.moduleRefs, free: names.free });
+    if (reasons.length > 0) continue;
+    const baseBody = text.slice(m.body.getStart(sf), m.body.getEnd());
+    const movedBody = dedentBody(ts, baseBody);
+    if (undoBody(ts, movedBody, privateStatics) !== baseBody) { add('indent-irreversible'); continue; }
+    const paramsText = m.parameters.length ? text.slice(m.parameters[0].getStart(sf), m.parameters.end).trim() : '';
+    const typeParams = m.typeParameters ? `<${text.slice(m.typeParameters.pos, m.typeParameters.end).trim()}>` : '';
+    const async = hasModifier(ts, m, ts.SyntaxKind.AsyncKeyword);
+    record.fnText = `${staticOneLiner(name)}\n`
+      + `export ${async ? 'async ' : ''}function ${name}${typeParams}(${paramsText})${m.type ? `: ${m.type.getText(sf)}` : ''} ${movedBody}\n`;
+    record.stub = { start: m.body.getStart(sf), end: m.body.getEnd() };
+    record.hostEntries = new Map();
+    record.hostNames = [];
+    record.stubLines = stubBody(name, section.module, m, true).split('\n').length;
   }
 
   // Two moved bodies that need different entries for one member (a field one
@@ -643,6 +754,16 @@ function plan(T, text, hostText, { anchors = SECTION_ANCHORS, pins = PATH_READER
   for (let changed = true; changed;) {
     changed = false;
     const byModule = groupMovers(records);
+    // protocol.ts imports every mover by its name: two movers of one name (an
+    // instance method and a static) would import one binding twice.
+    const seen = new Set();
+    for (const [, movers] of byModule) {
+      for (const r of movers) {
+        if (seen.has(r.name)) { r.reasons.push('name-collision'); changed = true; }
+        seen.add(r.name);
+      }
+    }
+    if (changed) continue;
     for (const [, movers] of byModule) {
       const taken = new Set(['ProtocolHost', 'Pick', 'host', CLASS_NAME]);
       for (const r of movers) {
@@ -729,7 +850,7 @@ function importLines(scope, movers) {
       note(b.specifier, local, { ...b, value: use.value && !b.typeOnly });
     }
   }
-  note('./protocol-host.js', 'ProtocolHost', { form: 'named', imported: 'ProtocolHost', value: false });
+  if (movers.some((r) => !r.isStatic)) note('./protocol-host.js', 'ProtocolHost', { form: 'named', imported: 'ProtocolHost', value: false });
   const order = (s) => (scope.importOrder.has(s) ? scope.importOrder.get(s) : Number.MAX_SAFE_INTEGER);
   const out = [];
   const specifiers = [...bySpecifier.keys()].sort((a, b) => order(a) - order(b) || (a < b ? -1 : a > b ? 1 : 0));
@@ -812,12 +933,17 @@ function moduleText(moduleFile, title, movers, scope) {
   return out.join('\n');
 }
 
-/** The E1 stub body, carrying this script's marker; `closeIndent` is the method's own indent. */
-function stubBody(name, moduleFile, m) {
+/**
+ * The E1 stub body, carrying this script's marker. A private static's stub
+ * hands its body no host: the body reads nothing of the class.
+ */
+function stubBody(name, moduleFile, m, isStatic = false) {
   const args = m.parameters.map((p) => (p.dotDotDotToken ? '...' : '') + p.name.getText());
   return '{\n'
-    + `        // ${MARK} The body moved to \`${moduleFile}\`; it reaches this class through \`${HOST_MODULE_BASENAME}\`.\n`
-    + `        return ${name}(${['protocolHost(this)', ...args].join(', ')});\n`
+    + (isStatic
+      ? `        // ${MARK} The body moved to \`${moduleFile}\`; it reads nothing of this class.\n`
+      : `        // ${MARK} The body moved to \`${moduleFile}\`; it reaches this class through \`${HOST_MODULE_BASENAME}\`.\n`)
+    + `        return ${name}(${[...(isStatic ? [] : ['protocolHost(this)']), ...args].join(', ')});\n`
     + '    }';
 }
 
@@ -837,7 +963,7 @@ function generate(T, text, hostText, planned) {
     importBlock.push(`\n// ${MARK} ${title}: the methods of the same names below hand the bodies the host (\`${HOST_MODULE_BASENAME}\`).`);
     importBlock.push(`\n${namedStatement('import', movers.map((r) => r.name).sort(), ` from './${moduleFile.replace(/\.ts$/, '.js')}';`)}`);
     for (const r of movers) {
-      edits.push({ start: r.stub.start, end: r.stub.end, text: stubBody(r.name, moduleFile, r.node) });
+      edits.push({ start: r.stub.start, end: r.stub.end, text: stubBody(r.name, moduleFile, r.node, r.isStatic === true) });
       for (const [member, entry] of r.hostEntries) {
         const prev = entries.get(member);
         // A writable entry (a getter and a setter) wins over a readonly one.
@@ -870,6 +996,310 @@ function generate(T, text, hostText, planned) {
   const moduleTexts = new Map();
   for (const [moduleFile, movers] of modules) moduleTexts.set(moduleFile, moduleText(moduleFile, movers[0].section, movers, ctx.scope));
   return { host: pruned.text, hostModule: inserted.host, modules: moduleTexts, pruned: pruned.removed };
+}
+
+// ── The facade layer (ruling 6624345766) ────────────────────────────────────
+//
+// (a)'s module form is lifted, text for text, into the facade form: each
+// section module's functions become the static methods of one stateless facet
+// class over the host (`export class <Facet>`; a method still takes the host
+// as its first parameter, so the body is (a)'s body, re-indented back to the
+// class's own depth); each stub on the class calls `<Facet>.<name>(…)`; and a
+// PRIVATE member's docblock moves with its body (docblock ownership), the
+// class keeping one line that links to it. A public member's docblock stays on
+// the facade: consumers read it in the published `.d.ts`. State stays on the
+// facade: a facet holds nothing, and reads the class's fields through the host.
+//
+// `unlift` is the exact inverse, read off the head alone: `verify` unlifts the
+// head to (a)'s form, then proves (a) against the base as before, so the
+// facade layer adds a proof of its own (the unlift must parse and match) and
+// keeps every proof of (a), `host-split.mjs`'s `checkMove` included.
+
+/** The facet class a section module declares, named by its file: `protocol-save.ts` -> `ProtocolSaveFacet`. */
+function facetNameOf(moduleFile) {
+  return `${moduleFile.replace(/\.ts$/, '').split('-').map((w) => w[0].toUpperCase() + w.slice(1)).join('')}Facet`;
+}
+
+/** The one line a private member keeps on the class once its docblock moved to its facet. */
+const docStubOf = (facet, name, moduleFile) => `/** Docblock and body: {@link ${facet}.${name}} in \`${moduleFile}\` ${MARK}. */`;
+
+/** Is this class member private (a `private` modifier or a `#name`)? */
+const isPrivateMember = (ts, m) => hasModifier(ts, m, ts.SyntaxKind.PrivateKeyword) || Boolean(m.name && ts.isPrivateIdentifier(m.name));
+
+/**
+ * The docblock span `[start, end)` of a class member that docblock ownership
+ * may move verbatim: its JSDoc blocks, contiguous (only whitespace between
+ * them), starting at the member's own four-space depth, which is the depth a
+ * facet's member has too. `null` when there is none, or it is not that shape.
+ */
+function movableDocSpan(ts, sf, m) {
+  const docs = m.jsDoc ?? [];
+  if (docs.length === 0) return null;
+  const start = docs[0].getStart(sf);
+  const end = docs[docs.length - 1].getEnd();
+  const lineStart = sf.text.lastIndexOf('\n', start - 1) + 1;
+  if (sf.text.slice(lineStart, start) !== '    ') return null;
+  for (let i = 1; i < docs.length; i += 1) {
+    if (sf.text.slice(docs[i - 1].getEnd(), docs[i].getStart(sf)).trim() !== '') return null;
+  }
+  return { start, end, text: sf.text.slice(start, end) };
+}
+
+/** The 0-based line indices of `text` (parsed as `prefix + text + suffix`) that start inside a string or template literal. */
+function literalLinesOf(ts, text, prefix, suffix) {
+  const whole = prefix + text + suffix;
+  const sf = parseSourceFile('x.ts', whole);
+  const starts = new Set();
+  const visit = (node) => {
+    if (ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node) || ts.isStringLiteral(node)) {
+      for (let i = whole.indexOf('\n', node.getStart(sf)); i !== -1 && i < node.getEnd() - 1; i = whole.indexOf('\n', i + 1)) starts.add(i + 1 - prefix.length);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  const out = new Set();
+  let at = 0;
+  text.split('\n').forEach((line, i) => {
+    if (starts.has(at)) out.add(i);
+    at += line.length + 1;
+  });
+  return out;
+}
+
+/** (a)'s exported function text (`export [async] function …`) as a facet's static method, at the class's depth. */
+function liftFunction(ts, fnText) {
+  if (!/^export (async )?function /.test(fnText)) refuse(`not a moved function: ${fnText.slice(0, 60)}`);
+  const literal = literalLinesOf(ts, fnText, '', '');
+  return fnText.split('\n').map((line, i) => {
+    if (i === 0) return line.replace(/^export (async )?function /, (_, a) => `    static ${a ?? ''}`);
+    return literal.has(i) || line === '' ? line : `    ${line}`;
+  }).join('\n');
+}
+
+/** The inverse of `liftFunction`: a facet's static method text (from `static`) back to (a)'s function, or `null`. */
+function unliftMethod(ts, methodText) {
+  if (!/^static (async )?/.test(methodText)) return null;
+  const literal = literalLinesOf(ts, methodText, 'class F {\n    ', '\n}');
+  const lines = methodText.split('\n');
+  const out = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (i === 0) out.push(line.replace(/^static (async )?/, (_, a) => `export ${a ?? ''}function `));
+    else if (literal.has(i) || line === '') out.push(line);
+    else if (line.startsWith('    ')) out.push(line.slice(4));
+    else return null;
+  }
+  return out.join('\n');
+}
+
+/** A facet module's text: the header, (a)'s imports, and one class whose static methods are (a)'s functions. */
+function facetModuleText(moduleFile, title, movers, scope, ownedDocs) {
+  const facet = facetNameOf(moduleFile);
+  const names = movers.map((r, i) => `\`${r.name}\`${i === movers.length - 1 ? '' : ','}`);
+  const readsHostValues = movers.some((r) => [...r.moduleRefs.values()].some((u) => u.value));
+  const out = [];
+  out.push('// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.');
+  out.push('');
+  out.push('/**');
+  out.push(...wrapComment([MARK, 'The', ...`"${title}"`.split(' '), 'facet', 'of', `\`${CLASS_NAME}\`:`, 'the', 'bodies', 'of',
+    ...names, 'moved', 'out', 'of', '`protocol.ts`', 'whole', 'by', '`scripts/codemod-split-protocol.mjs`.']));
+  out.push(' *');
+  out.push(` * A MOVE, not a redesign. \`${facet}\` is a stateless facet over the host`);
+  out.push(' * (ruling 6624345766): each static method below is the body of the class');
+  out.push(' * member of the same name as `packages/metadata-protocol/scripts/host-split.mjs`');
+  out.push(' * moves one (ruling E, item E1), with `this.<member>` read as `host.<member>`');
+  out.push(' * and nothing else changed. The facet holds no state: the fields stay on the');
+  out.push(' * class, and a body reaches them through the host (`protocol-host.ts`).');
+  out.push(' *');
+  out.push(' * The class keeps every member as a one-line delegation. A public member');
+  out.push(' * keeps its docblock there, which the published `.d.ts` prints; a private');
+  out.push(' * member\'s docblock moved here with its body (docblock ownership).');
+  out.push(' *');
+  if (readsHostValues) {
+    out.push(' * Values that stayed in `protocol.ts` are imported from it (lever (a) of');
+    out.push(' * ruling 6591753301); every use is inside a method body, so the import');
+    out.push(' * cycle is never read at evaluation time. Nothing re-exports this module,');
+    out.push(' * so the published surface does not move.');
+  } else {
+    out.push(' * What a body reads from elsewhere, it imports from where `protocol.ts`');
+    out.push(' * imports it. Nothing re-exports this module, so the published surface does');
+    out.push(' * not move.');
+  }
+  out.push(' */');
+  out.push('');
+  out.push(...importLines(scope, movers));
+  out.push('');
+  out.push(`export class ${facet} {`);
+  movers.forEach((r, i) => {
+    if (i > 0) out.push('');
+    const nl = r.fnText.indexOf('\n');
+    const fn = r.fnText.slice(nl + 1).replace(/\n$/, '');
+    const owned = ownedDocs.get(r.name);
+    out.push(`    ${owned ?? r.fnText.slice(0, nl)}`);
+    out.push(liftFunction(globalTs, fn));
+  });
+  out.push('}');
+  out.push('');
+  return out.join('\n');
+}
+
+let globalTs = null;
+
+/**
+ * Lift (a)'s output (`generate`'s) to the facade form. Pure. Returns the same
+ * shape as `generate`, plus `owned` (module -> member -> docblock moved) and the
+ * further import bindings the class dropped once docblocks left it.
+ */
+function lift(T, a, planned) {
+  const { ts } = T;
+  globalTs = ts;
+  const sf = parseSourceFile(HOST_PATH, a.host);
+  const cls = T.hs.classOf(sf, CLASS_NAME);
+  const marker = new RegExp(`^\\{\\s*// ${MARK.replace(/[[\]]/g, '\\$&')} The body moved to \`(protocol-[a-z0-9-]+\\.ts)\``);
+  const edits = [];
+  const owned = new Map();
+  for (const m of cls.members) {
+    if (!ts.isMethodDeclaration(m) || !m.body || !m.name || !ts.isIdentifier(m.name)) continue;
+    const hit = marker.exec(m.body.getText(sf));
+    if (!hit) continue;
+    const file = hit[1];
+    const facet = facetNameOf(file);
+    const name = m.name.text;
+    const ret = m.body.statements[m.body.statements.length - 1];
+    if (!ret || !ts.isReturnStatement(ret) || !ret.expression || !ts.isCallExpression(ret.expression) || !ts.isIdentifier(ret.expression.expression) || ret.expression.expression.text !== name) {
+      refuse(`${name}: its stub does not end in \`return ${name}(…)\``);
+    }
+    edits.push({ start: ret.expression.expression.getStart(sf), end: ret.expression.expression.getStart(sf), text: `${facet}.` });
+    if (!isPrivateMember(ts, m)) continue;
+    const span = movableDocSpan(ts, sf, m);
+    if (!span) continue;
+    if (!owned.has(file)) owned.set(file, new Map());
+    owned.get(file).set(name, span.text);
+    edits.push({ start: span.start, end: span.end, text: docStubOf(facet, name, file) });
+  }
+  // The generated import of each module's functions becomes the import of its facet.
+  for (const st of sf.statements) {
+    if (!ts.isImportDeclaration(st)) continue;
+    const hit = /^\.\/(protocol-[a-z0-9-]+)\.js$/.exec(st.moduleSpecifier.text);
+    if (!hit || !a.modules.has(`${hit[1]}.ts`)) continue;
+    const file = `${hit[1]}.ts`;
+    const lead = sf.text.slice(st.getFullStart(), st.getStart(sf));
+    const title = new RegExp(`// ${MARK.replace(/[[\]]/g, '\\$&')} (.*): the methods of the same names below`).exec(lead)?.[1];
+    if (!title) refuse(`the generated import of ${file} carries no section comment`);
+    edits.push({
+      start: st.getFullStart(), end: st.getEnd(),
+      text: `\n// ${MARK} ${title}: the members below delegate to its facet, \`${facetNameOf(file)}\`.\nimport { ${facetNameOf(file)} } from './${hit[1]}.js';`,
+    });
+  }
+  edits.sort((x, y) => y.start - x.start || y.end - x.end);
+  let host = a.host;
+  for (const e of edits) host = host.slice(0, e.start) + e.text + host.slice(e.end);
+  const pruned = pruneImports(ts, host, usedImportNames(ts, host));
+  const modules = new Map();
+  for (const [moduleFile, movers] of planned.modules) {
+    modules.set(moduleFile, facetModuleText(moduleFile, movers[0].section, movers, planned.ctx.scope, owned.get(moduleFile) ?? new Map()));
+  }
+  return { host: pruned.text, hostModule: a.hostModule, modules, owned, prunedByLift: pruned.removed };
+}
+
+/**
+ * The inverse of `lift`, from the head texts alone: (a)'s `protocol.ts` and
+ * modules, the docblocks to put back, and the failures met on the way.
+ */
+function unlift(T, headText, moduleTexts) {
+  const { ts } = T;
+  const failures = [];
+  const modulesA = new Map();
+  const facetDocs = new Map(); // file -> name -> { doc, owned }
+  for (const [file, text] of moduleTexts) {
+    if (!text.includes(MARK)) continue;
+    const sf = parseSourceFile(join(SRC_DIR, file), text);
+    const facet = facetNameOf(file);
+    const imports = [];
+    let cls = null;
+    for (const st of sf.statements) {
+      if (ts.isImportDeclaration(st)) imports.push(text.slice(st.getStart(sf), st.getEnd()));
+      else if (ts.isClassDeclaration(st) && st.name?.text === facet && hasModifier(ts, st, ts.SyntaxKind.ExportKeyword) && !cls) cls = st;
+      else failures.push(`${file}: a top-level statement that is neither an import nor the facet class ${facet}: ${st.getText(sf).slice(0, 60)}`);
+    }
+    if (!cls) { failures.push(`${file}: no exported class ${facet}`); continue; }
+    if (cls.heritageClauses?.length || cls.typeParameters?.length || (ts.getModifiers(cls) ?? []).length !== 1) failures.push(`${file}: ${facet} is not a plain exported class`);
+    const docs = new Map();
+    const fns = [];
+    for (const m of cls.members) {
+      const name = m.name && ts.isIdentifier(m.name) ? m.name.text : '?';
+      if (!ts.isMethodDeclaration(m) || !m.body || !hasModifier(ts, m, ts.SyntaxKind.StaticKeyword) || name === '?') {
+        failures.push(`${file}: ${facet} has a member that is not a static method with a body (${name})`);
+        continue;
+      }
+      const span = movableDocSpan(ts, sf, m);
+      if (!span) { failures.push(`${file}: ${facet}.${name} carries no docblock at the class's depth`); continue; }
+      const methodText = text.slice(m.getStart(sf), m.getEnd());
+      const fnText = unliftMethod(ts, methodText);
+      if (fnText === null) { failures.push(`${file}: ${facet}.${name} does not unlift (its indentation is not the lift's)`); continue; }
+      const oneLiner = [instanceOneLiner(name), staticOneLiner(name)].find((l) => l === span.text);
+      docs.set(name, { doc: span.text, owned: !oneLiner });
+      fns.push({ name, fnText, oneLiner });
+    }
+    facetDocs.set(file, docs);
+    modulesA.set(file, { imports, fns });
+  }
+
+  const sf = parseSourceFile(HOST_PATH, headText);
+  const cls = T.hs.classOf(sf, CLASS_NAME);
+  const edits = [];
+  const restoredDocs = [];
+  const marker = new RegExp(`^\\{\\s*// ${MARK.replace(/[[\]]/g, '\\$&')} The body moved to \`(protocol-[a-z0-9-]+\\.ts)\``);
+  const staticNames = new Set();
+  for (const m of cls?.members ?? []) {
+    if (!ts.isMethodDeclaration(m) || !m.body || !m.name || !ts.isIdentifier(m.name)) continue;
+    const hit = marker.exec(m.body.getText(sf));
+    if (!hit) continue;
+    const file = hit[1];
+    const facet = facetNameOf(file);
+    const name = m.name.text;
+    if (hasModifier(ts, m, ts.SyntaxKind.StaticKeyword)) staticNames.add(`${file}:${name}`);
+    const ret = m.body.statements[m.body.statements.length - 1];
+    const callee = ret && ts.isReturnStatement(ret) && ret.expression && ts.isCallExpression(ret.expression) ? ret.expression.expression : null;
+    if (!callee || !ts.isPropertyAccessExpression(callee) || !ts.isIdentifier(callee.expression) || callee.expression.text !== facet || callee.name.text !== name) {
+      failures.push(`${name}: its stub does not call \`${facet}.${name}(…)\``);
+      continue;
+    }
+    edits.push({ start: callee.getStart(sf), end: callee.name.getStart(sf), text: '' });
+    const fd = facetDocs.get(file)?.get(name);
+    const span = movableDocSpan(ts, sf, m);
+    const carriesStub = Boolean(span && span.text === docStubOf(facet, name, file));
+    if (!fd) continue; // `verify` names the stub whose function is missing
+    if (fd.owned && !carriesStub) failures.push(`${name}: ${facet}.${name} carries a docblock, but the class does not keep the one-line link in its place`);
+    if (!fd.owned && carriesStub) failures.push(`${name}: the class links to a docblock ${facet}.${name} does not carry`);
+    if (fd.owned && !isPrivateMember(ts, m)) failures.push(`${name}: a public member's docblock moved off the class (it must stay on the facade)`);
+    if (fd.owned && carriesStub) {
+      edits.push({ start: span.start, end: span.end, text: fd.doc });
+      restoredDocs.push(fd.doc);
+    }
+  }
+  edits.sort((x, y) => y.start - x.start || y.end - x.end);
+  let headA = headText;
+  for (const e of edits) headA = headA.slice(0, e.start) + e.text + headA.slice(e.end);
+
+  const out = new Map();
+  for (const [file, { imports, fns }] of modulesA) {
+    const parts = [`// ${MARK} (unlifted)`, ...imports];
+    for (const f of fns) {
+      const oneLiner = staticNames.has(`${file}:${f.name}`) ? staticOneLiner(f.name) : instanceOneLiner(f.name);
+      if (f.oneLiner && f.oneLiner !== oneLiner) failures.push(`${file}: ${f.name}'s one-line docblock does not match its member's kind`);
+      parts.push('', `${oneLiner}\n${f.fnText}`);
+    }
+    out.set(file, `${parts.join('\n')}\n`);
+  }
+  return { headA, modulesA: out, restoredDocs, failures };
+}
+
+/** The facade proof: unlift the head, then prove (a) against the base as before. */
+function verifyFacade(T, baseText, headText, baseHostText, headHostText, moduleTexts) {
+  const u = unlift(T, headText, moduleTexts);
+  const v = verify(T, baseText, u.headA, baseHostText, headHostText, u.modulesA, { usedFrom: headText, alsoRead: u.restoredDocs.join('\n') });
+  return { ...v, failures: [...u.failures, ...v.failures], linesAfter: lineCount(headText), docsMoved: u.restoredDocs.length };
 }
 
 /**
@@ -997,7 +1427,7 @@ function dropHostGroups(text, openMarker, closeMarker, keyOf, keep, isContinuati
  * `generate`). Returns `{ failures, moved, checks, linesBefore, linesAfter }`;
  * no failure = proved.
  */
-function verify(T, baseText, headText, baseHostText, headHostText, moduleTexts) {
+function verify(T, baseText, headText, baseHostText, headHostText, moduleTexts, { usedFrom = headText, alsoRead = '' } = {}) {
   const { ts, hs } = T;
   const failures = [];
   const moved = [];
@@ -1033,14 +1463,25 @@ function verify(T, baseText, headText, baseHostText, headHostText, moduleTexts) 
     const fn = mod && mod.fns.get(name);
     if (!fn) { failures.push(`${name}: its stub names ${hit[1]}, which has no exported function ${name}`); continue; }
     mod.claimed.add(name);
-    const base = hs.methodOf(baseCls, name);
-    if (!base) { failures.push(`${name}: no method of that name with a body at base`); continue; }
+    const isStatic = hasModifier(ts, m, ts.SyntaxKind.StaticKeyword);
+    const base = isStatic
+      ? baseCls.members.find((b) => ts.isMethodDeclaration(b) && b.body && hasModifier(ts, b, ts.SyntaxKind.StaticKeyword) && b.name && ts.isIdentifier(b.name) && b.name.text === name)
+      : hs.methodOf(baseCls, name);
+    if (!base) { failures.push(`${name}: no ${isStatic ? 'static ' : ''}method of that name with a body at base`); continue; }
+    if (isStatic) {
+      // `host-split.mjs`'s check reads instance methods only; a static's
+      // docblock, modifiers, signature and stub are compared here.
+      const sig = (sf, x) => sf.text.slice(x.getFullStart(), x.body.getStart(sf));
+      if (sig(baseSf, base) !== sig(headSf, m)) failures.push(`${name}: the static's docblock, modifiers or signature changed`);
+      if (m.body.getText(headSf) !== stubBody(name, hit[1], base, true)) failures.push(`${name}: the static's body is not its stub`);
+      if (fn.parameters.map((p) => p.getText(mod.sf)).join(', ') !== base.parameters.map((p) => p.getText(baseSf)).join(', ')) failures.push(`${name}: the moved static's parameters are not the method's own`);
+    }
     const movedBody = mod.text.slice(fn.body.getStart(mod.sf), fn.body.getEnd());
     const restored = undoBody(ts, movedBody, privateStatics);
     const baseBody = baseText.slice(base.body.getStart(baseSf), base.body.getEnd());
     const identical = restored === baseBody;
     if (!identical) failures.push(`${name}: its moved body, rewrites and re-indentation undone, is not the base body`);
-    moved.push({ name, module: hit[1], bodySha: sha256(restored), baseBodySha: sha256(baseBody), lines: baseBody.split('\n').length, identical, restored });
+    moved.push({ name, module: hit[1], isStatic, bodySha: sha256(restored), baseBodySha: sha256(baseBody), lines: baseBody.split('\n').length, identical, restored });
     edits.push({ start: m.body.getStart(headSf), end: m.body.getEnd(), text: restored });
   }
   for (const [file, mod] of modules) {
@@ -1078,8 +1519,8 @@ function verify(T, baseText, headText, baseHostText, headHostText, moduleTexts) 
   // The one edit the undo does not reverse by reading the head: the imports
   // only the moved bodies read. It is recomputed from the head (what does the
   // head still read?) and applied to the base; the rest must then be equal.
-  const prune = pruneImports(ts, baseText, usedImportNames(ts, headText));
-  const restoredBodies = moved.map((r) => r.restored).join('\n');
+  const prune = pruneImports(ts, baseText, usedImportNames(ts, usedFrom));
+  const restoredBodies = `${moved.map((r) => r.restored).join('\n')}\n${alsoRead}`;
   for (const n of prune.removed) {
     if (!new RegExp(`\\b${n.replace(/\$/g, '\\$')}\\b`).test(restoredBodies)) failures.push(`the head dropped the import \`${n}\`, which no moved body reads`);
   }
@@ -1091,6 +1532,7 @@ function verify(T, baseText, headText, baseHostText, headHostText, moduleTexts) 
 
   // The hand series' own check, member by member.
   for (const r of moved) {
+    if (r.isStatic) continue;
     const c = hs.checkMove({ baseSource: baseText, headSource: headText, moduleSource: modules.get(r.module).text, moduleFile: r.module, member: r.name, className: CLASS_NAME });
     checks.push({ name: r.name, ok: c.ok, counts: c.counts, textIdentical: c.textIdentical });
     for (const p of c.problems) failures.push(`host-split check ${r.name}: ${p}`);
@@ -1113,6 +1555,41 @@ function lineCount(text) {
 }
 
 // ── Reports ──────────────────────────────────────────────────────────────────
+
+/**
+ * The facade reading the #30019 gate starts from: every member of the class
+ * with a body, as a delegation (to a facet, or the hand series' own form) or a
+ * named exception with the reason it stayed.
+ */
+function facadeReport(T, out, planned) {
+  const { ts, hs } = T;
+  const sf = parseSourceFile(HOST_PATH, out.host);
+  const cls = hs.classOf(sf, CLASS_NAME);
+  const why = new Map(planned.records.map((r) => [`${r.isStatic ? 'static ' : ''}${r.name}`, r.reasons]));
+  const counts = { facet: 0, hand: new Map(), exceptions: [] };
+  for (const m of cls.members) {
+    const isStatic = hasModifier(ts, m, ts.SyntaxKind.StaticKeyword);
+    const label = m.name ? `${isStatic ? 'static ' : ''}${m.name.getText(sf)}` : ts.isConstructorDeclaration(m) ? 'constructor' : ts.isClassStaticBlockDeclaration(m) ? 'static block' : ts.SyntaxKind[m.kind];
+    const lines = sf.getLineAndCharacterOfPosition(m.getEnd()).line - sf.getLineAndCharacterOfPosition(m.getStart(sf)).line + 1;
+    if (ts.isMethodDeclaration(m) && m.body) {
+      if (m.body.getText(sf).includes(MARK)) { counts.facet += 1; continue; }
+      const kind = hs.stubKindOf(m);
+      if (kind) { counts.hand.set(kind, (counts.hand.get(kind) ?? 0) + 1); continue; }
+      counts.exceptions.push(`${label} (${lines} lines): ${(why.get(label) ?? ['?']).map((r) => r.split(':')[0]).filter((r, i, a) => a.indexOf(r) === i).join(', ')}`);
+    } else if (ts.isConstructorDeclaration(m) || ts.isClassStaticBlockDeclaration(m) || ts.isGetAccessorDeclaration(m) || ts.isSetAccessorDeclaration(m)) {
+      counts.exceptions.push(`${label} (${lines} lines): ${ts.isClassStaticBlockDeclaration(m) ? 'the host factory (protocol-host.ts reads it)' : 'not a method'}`);
+    }
+  }
+  const facets = [...out.modules.keys()].map((f) => `${facetNameOf(f)} (${f}, ${planned.modules.get(f).length} members, ${[...(out.owned.get(f)?.keys() ?? [])].length} docblocks moved)`);
+  return [
+    `facade: ${lineCount(out.host)} lines; ${counts.facet} member(s) delegate to ${facets.length} facet(s); ` +
+      `${[...counts.hand.values()].reduce((a, b) => a + b, 0)} hand-series delegation(s) (${[...counts.hand].map(([k, n]) => `${k} ${n}`).join(', ')}); ` +
+      `${counts.exceptions.length} member(s) with a body stay as named exceptions`,
+    ...facets.map((f) => `  facet  ${f}`),
+    ...counts.exceptions.map((e) => `  stays  ${e}`),
+    `further import binding(s) the class dropped once docblocks left it: ${out.prunedByLift.length} (${out.prunedByLift.join(', ') || 'none'})`,
+  ].join('\n');
+}
 
 function planReport(planned) {
   const out = [];
@@ -1222,7 +1699,7 @@ async function main(argv) {
     const i = argv.indexOf('--base');
     const ref = i >= 0 ? argv[i + 1] : null;
     if (!ref) refuse('--verify needs --base <ref>');
-    const v = verify(T, gitShow(ref, `${SRC_REL}/${HOST_BASENAME}`), readFileSync(HOST_PATH, 'utf8'),
+    const v = verifyFacade(T, gitShow(ref, `${SRC_REL}/${HOST_BASENAME}`), readFileSync(HOST_PATH, 'utf8'),
       gitShow(ref, `${SRC_REL}/${HOST_MODULE_BASENAME}`), readFileSync(HOST_MODULE_PATH, 'utf8'), generatedModulesOnDisk());
     printVerify(v);
     return v.failures.length === 0 ? 0 : 1;
@@ -1232,10 +1709,11 @@ async function main(argv) {
   if (input.includes(MARK)) refuse(`${HOST_BASENAME} already carries ${MARK} stubs: run the script on an unsplit file (re-run on the latest main, never on its own output)`);
   const planned = plan(T, input, hostInput);
   console.log(planReport(planned));
-  const out = generate(T, input, hostInput, planned);
+  const out = lift(T, generate(T, input, hostInput, planned), planned);
+  console.log(facadeReport(T, out, planned));
   const files = new Map([[HOST_BASENAME, out.host], [HOST_MODULE_BASENAME, out.hostModule], ...out.modules]);
   console.log(`output tree sha256: ${treeHash(files)} (input sha256 ${sha256(input)} + ${HOST_MODULE_BASENAME} ${sha256(hostInput)})`);
-  const v = verify(T, input, out.host, hostInput, out.hostModule, out.modules);
+  const v = verifyFacade(T, input, out.host, hostInput, out.hostModule, out.modules);
   printVerify(v);
   if (v.failures.length > 0) {
     console.error('✗ the generated split fails its proof: nothing written. Report the fork; never hand-edit the split.');
@@ -1274,6 +1752,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'determinism': 2,
   'refusals': 6,
   'import prune': 4,
+  'facade layer': 10,
 });
 const SELF_TEST_BATTERY_FLOOR = 5;
 
@@ -1416,6 +1895,19 @@ ${pad}
         return typeof x === 'string';
     }
 
+    /**
+     * A private member's docblock: it moves with the body.
+     */
+    private ownedDoc(): number {
+${pad}
+        return this.count;
+    }
+
+    private static readsClass(): number {
+${pad}
+        return ObjectStackProtocolImplementation.secret(1);
+    }
+
     /** Stays, and its {@link docLinked} keeps that import in protocol.ts. */
     private readsPredicate(x: unknown): boolean {
 ${pad}
@@ -1456,7 +1948,10 @@ async function selfTest() {
     const moves = (name, because) => check(`${name} moves (${because})`, why(name) === '', why(name));
     moves('movable', 'the canonical body: a member, a private static, an import, a module-scope helper, a template literal');
     moves('writesCount', 'a field it writes gains a writable host entry');
-    stays('tiny', 'no-yield');
+    moves('tiny', 'a body shorter than its stub: the facade keeps delegations only');
+    moves('secret', 'a private static that reads nothing of the class');
+    stays('readsClass', 'static-reads-class');
+    stays('guarded', 'static-shape');
     stays('bareThis', 'closed-set');
     stays('viaConstructor', 'constructor-rewrite');
     stays('inferred', 'inferred-return-type');
@@ -1490,7 +1985,7 @@ async function selfTest() {
   open('byte-identity proof');
   {
     const v = verify(T, input, out.host, FIXTURE_HOST, out.hostModule, out.modules);
-    check('the generated split proves against its base', v.failures.length === 0 && v.moved.length === 3 && v.checks.every((c) => c.ok),
+    check('the generated split proves against its base', v.failures.length === 0 && v.moved.length === 6 && v.checks.length === 5 && v.checks.every((c) => c.ok),
       [...v.failures, `moved: ${v.moved.map((m) => m.name).join()}`].join(' | '));
     const mod = out.modules.get('protocol-first.ts');
     const withModule = (text) => new Map([...out.modules, ['protocol-first.ts', text]]);
@@ -1505,6 +2000,33 @@ async function selfTest() {
       verify(T, input, out.host.replace('get flag() { return protocol.flag; }', 'get flag() { return !protocol.flag; }'), FIXTURE_HOST, out.hostModule, out.modules).failures.length > 0);
     check('an edit elsewhere in protocol.ts fails', verify(T, input, out.host.replace('const LOCAL = 1;', 'const LOCAL = 2;'), FIXTURE_HOST, out.hostModule, out.modules).failures.length > 0);
     check('a proof over no moved method fails', verify(T, input, input, FIXTURE_HOST, FIXTURE_HOST, new Map()).failures.length > 0);
+  }
+
+  open('facade layer');
+  {
+    const lifted = lift(T, out, planned);
+    const facet = lifted.modules.get('protocol-first.ts') ?? '';
+    const vf = (host, modules = lifted.modules) => verifyFacade(T, input, host, FIXTURE_HOST, lifted.hostModule, modules);
+    const withFacet = (text) => new Map([...lifted.modules, ['protocol-first.ts', text]]);
+    const v = vf(lifted.host);
+    check('the facade proves against its base through the unlift', v.failures.length === 0 && v.moved.length === 6 && v.docsMoved === 1, [...v.failures, `moved ${v.moved.length} docs ${v.docsMoved}`].join(' | '));
+    check('each section module is one stateless facet class of static methods',
+      /\nexport class ProtocolFirstFacet \{\n/.test(facet) && !/\nexport (async )?function /.test(facet) && /\n {4}static async movable\(host: /.test(facet), facet.slice(0, 300));
+    check('a private member\'s docblock moves; a public member\'s stays on the facade',
+      facet.includes('    /**\n     * A private member\'s docblock: it moves with the body.\n     */\n    static ownedDoc(')
+      && lifted.host.includes('    /** Docblock and body: {@link ProtocolFirstFacet.ownedDoc} in `protocol-first.ts` [#29985 codemod]. */\n    private ownedDoc(')
+      && lifted.host.includes('    /** Docblock that stays. */\n    async movable('));
+    check('a stub delegates to its facet', lifted.host.includes('return ProtocolFirstFacet.movable(protocolHost(this), a, b);') && lifted.host.includes('return ProtocolFirstFacet.secret(x);'));
+    check('one edited character in a moved docblock fails', vf(lifted.host, withFacet(facet.replace('it moves with the body.', 'it moves with the body!'))).failures.length > 0);
+    check('a public docblock moved off the facade fails',
+      vf(lifted.host.replace('    /** Docblock that stays. */\n    async movable(', '    /** Docblock and body: {@link ProtocolFirstFacet.movable} in `protocol-first.ts` [#29985 codemod]. */\n    async movable('),
+        withFacet(facet.replace(/ {4}\/\*\* The body of `ObjectStackProtocolImplementation#movable`[^\n]*/, '    /** Docblock that stays. */'))).failures.length > 0);
+    check('a stub calling another facet fails', vf(lifted.host.replace('return ProtocolFirstFacet.movable(', 'return OtherFacet.movable(')).failures.length > 0);
+    check('a member of the facet that is not a static method fails', vf(lifted.host, withFacet(facet.replace('export class ProtocolFirstFacet {\n', 'export class ProtocolFirstFacet {\n    extra = 1;\n'))).failures.length > 0);
+    check('a body line the lift did not indent fails', vf(lifted.host, withFacet(facet.replace('        const p3 = 3;', '    const p3 = 3;'))).failures.length > 0);
+    const again = lift(T, generate(T, input, FIXTURE_HOST, fixturePlan(T, input)), fixturePlan(T, input));
+    check('two lifts of one input write byte-identical trees',
+      treeHash(new Map([['h', again.host], ...again.modules])) === treeHash(new Map([['h', lifted.host], ...lifted.modules])));
   }
 
   open('determinism');

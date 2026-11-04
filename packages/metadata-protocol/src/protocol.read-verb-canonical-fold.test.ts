@@ -283,19 +283,24 @@ describe('#9157 — the population, re-derived from the code rather than from th
         }
         // The stub's last statement, right before the member's own closing brace
         // (a member slice runs on to the next scanned member's header).
-        const STUB = /\n {8}return (?:await )?([A-Za-z_$][\w$]*)(?:\(protocolHost\(this\)|\.call\([A-Za-z_$][\w$]*)[,)][^\n]*\n {4}\}\n/;
+        // [#29985] A codemod stub calls its facet: `return <X>Facet.<fn>(protocolHost(this), …)`.
+        const STUB = /\n {8}return (?:await )?(?:([A-Za-z_$][\w$]*Facet)\.)?([A-Za-z_$][\w$]*)(?:\(protocolHost\(this\)|\.call\([A-Za-z_$][\w$]*)[,)][^\n]*\n {4}\}\n/;
         const throughSplit: string[] = [];
         const movedBody = (body: string): string => {
             const own = body.slice(0, body.indexOf('\n    }\n') + 7);
-            const fn = STUB.exec(own)?.[1];
-            if (fn === undefined || !moduleImports.has(fn)) return body;
-            const file = moduleImports.get(fn)!;
+            const hit = STUB.exec(own);
+            const facet = hit?.[1];
+            const fn = hit?.[2];
+            if (fn === undefined || !moduleImports.has(facet ?? fn)) return body;
+            const file = moduleImports.get(facet ?? fn)!;
             throughSplit.push(fn);
             const text = readFileSync(fileURLToPath(new URL(`./${file}`, import.meta.url)), 'utf8');
-            const at = text.search(new RegExp(`\\nexport (?:async )?function ${fn}\\b`));
-            expect(at, `the stub hands its body to '${fn}', which ${file} does not export`).toBeGreaterThanOrEqual(0);
-            const end = text.indexOf('\n}\n', at + 1);
-            return text.slice(at, end < 0 ? text.length : end + 2);
+            // A module function at column 0, or (#29985) a facet's static method at the class's depth.
+            const at = text.search(new RegExp(facet === undefined ? `\\nexport (?:async )?function ${fn}\\b` : `\\n {4}static (?:async )?${fn}\\(`));
+            expect(at, `the stub hands its body to '${facet === undefined ? '' : `${facet}.`}${fn}', which ${file} does not declare`).toBeGreaterThanOrEqual(0);
+            const close = facet === undefined ? '\n}\n' : '\n    }\n';
+            const end = text.indexOf(close, at + 1);
+            return text.slice(at, end < 0 ? text.length : end + close.length);
         };
         // [#29985] A wrapper's own body can move too (the codemod split), so the
         // delegation is read from the wrapper's body wherever it is: `this.` in

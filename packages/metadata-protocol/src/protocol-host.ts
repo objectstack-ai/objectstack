@@ -68,6 +68,7 @@ export interface ProtocolHost {
     readonly assertVersionMatch: ObjectStackProtocolImplementation['assertVersionMatch'];
     readonly authoredLockFamily: ObjectStackProtocolImplementation['authoredLockFamily'];
     readonly authoringChannel: ObjectStackProtocolImplementation['authoringChannel'];
+    readonly authoringGates: ObjectStackProtocolImplementation['authoringGates'];
     readonly baseServesBundleMember: ObjectStackProtocolImplementation['baseServesBundleMember'];
     readonly carryForwardRedactedCredentials: ObjectStackProtocolImplementation['carryForwardRedactedCredentials'];
     readonly classifyObjectContribution: ObjectStackProtocolImplementation['classifyObjectContribution'];
@@ -80,6 +81,7 @@ export interface ProtocolHost {
     readonly convertStoredItemDetailed: ObjectStackProtocolImplementation['convertStoredItemDetailed'];
     readonly copiesOwnShippedViewContainer: ObjectStackProtocolImplementation['copiesOwnShippedViewContainer'];
     readonly credentialChannelFor: ObjectStackProtocolImplementation['credentialChannelFor'];
+    readonly credentialChannels: ObjectStackProtocolImplementation['credentialChannels'];
     readonly declinesStoredRow: ObjectStackProtocolImplementation['declinesStoredRow'];
     readonly defaultRecordPageSaveRefusal: ObjectStackProtocolImplementation['defaultRecordPageSaveRefusal'];
     readonly detachMetadataMutationPubSub: ObjectStackProtocolImplementation['detachMetadataMutationPubSub'];
@@ -140,6 +142,7 @@ export interface ProtocolHost {
     readonly metaItemPublishedListeners: ObjectStackProtocolImplementation['metaItemPublishedListeners'];
     readonly metadataConflictRefusal: ObjectStackProtocolImplementation['metadataConflictRefusal'];
     readonly metadataMutationListeners: ObjectStackProtocolImplementation['metadataMutationListeners'];
+    readonly mutationProjectors: ObjectStackProtocolImplementation['mutationProjectors'];
     readonly namedBaseOverlayWriteRefusal: ObjectStackProtocolImplementation['namedBaseOverlayWriteRefusal'];
     readonly namesWithOwnStoredRow: ObjectStackProtocolImplementation['namesWithOwnStoredRow'];
     readonly notifyMutationListenersLocal: ObjectStackProtocolImplementation['notifyMutationListenersLocal'];
@@ -154,6 +157,7 @@ export interface ProtocolHost {
     readonly overlayPackageMismatchError: (typeof ObjectStackProtocolImplementation)['overlayPackageMismatchError'];
     readonly overlayRepos: ObjectStackProtocolImplementation['overlayRepos'];
     readonly overrideWriteVerdict: ObjectStackProtocolImplementation['overrideWriteVerdict'];
+    readonly packagedArtifactBase: ObjectStackProtocolImplementation['packagedArtifactBase'];
     readonly packagedArtifactOwner: ObjectStackProtocolImplementation['packagedArtifactOwner'];
     readonly packagedBaseRefusal: ObjectStackProtocolImplementation['packagedBaseRefusal'];
     readonly packagelessAddress: ObjectStackProtocolImplementation['packagelessAddress'];
@@ -166,6 +170,7 @@ export interface ProtocolHost {
     readonly probeRecord: ObjectStackProtocolImplementation['probeRecord'];
     readonly promoteDraftForPublish: ObjectStackProtocolImplementation['promoteDraftForPublish'];
     readonly publishMaterializers: ObjectStackProtocolImplementation['publishMaterializers'];
+    readonly publishMetadataMutation: ObjectStackProtocolImplementation['publishMetadataMutation'];
     readonly readActiveOverlayRows: ObjectStackProtocolImplementation['readActiveOverlayRows'];
     readonly readFlattenedMetaItems: ObjectStackProtocolImplementation['readFlattenedMetaItems'];
     readonly readItemActiveRows: ObjectStackProtocolImplementation['readItemActiveRows'];

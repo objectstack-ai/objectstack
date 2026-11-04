@@ -3130,6 +3130,8 @@ const HOST_SPLIT = Object.freeze({
     // class through, and the function a stub builds it with.
     hostParam: 'host',
     hostOf: 'protocolHost',
+    // [#29985] The facade form (ruling 6624345766): a section module's facet class.
+    facet: /^[A-Z][A-Za-z0-9]*Facet$/,
 });
 
 /**
@@ -3311,34 +3313,54 @@ function createHostSplit(load) {
         if (bodies.relPath !== hostRel || !ts.isBlock(body)) return undefined;
         const method = body.parent;
         if (!ts.isMethodDeclaration(method) || !ts.isIdentifier(method.name)) return undefined;
-        if (hostMethods()?.get(method.name.text) !== body) return undefined;
+        // [#29985] A private static's stub hands its body no host (it reads nothing of the class).
+        const isStatic = !!method.modifiers?.some((x) => x.kind === ts.SyntaxKind.StaticKeyword);
+        if (hostMethods({ static: isStatic })?.get(method.name.text) !== body) return undefined;
         const last = body.statements[body.statements.length - 1];
         if (!last || !ts.isReturnStatement(last) || !last.expression) return undefined;
         let call = last.expression;
         if (ts.isAwaitExpression(call)) call = call.expression;
         if (!ts.isCallExpression(call)) return undefined;
         let fnName;
+        let facet;
         const callee = call.expression;
         const first = call.arguments[0];
-        if (ts.isPropertyAccessExpression(callee)) {
+        const hostOfThis = (arg) => !!arg && ts.isCallExpression(arg) && ts.isIdentifier(arg.expression) &&
+            arg.expression.text === HOST_SPLIT.hostOf && arg.arguments.length === 1 &&
+            arg.arguments[0].kind === ts.SyntaxKind.ThisKeyword;
+        if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) && ts.isIdentifier(callee.name) &&
+            callee.name.text !== 'call' && HOST_SPLIT.facet.test(callee.expression.text)) {
+            // [#29985] `<X>Facet.fn(protocolHost(this), …)` — the facade form of
+            // ruling 6624345766: a facet class's static method takes the host
+            // first; a private static's stub, `<X>Facet.fn(…)`, passes none.
+            if (isStatic ? hostOfThis(first) : !hostOfThis(first)) return undefined;
+            facet = callee.expression.text;
+            fnName = callee.name.text;
+        } else if (ts.isPropertyAccessExpression(callee)) {
             // `fn.call(host, …)` — the per-member series.
             if (!ts.isIdentifier(callee.name) || callee.name.text !== 'call' || !ts.isIdentifier(callee.expression)) return undefined;
             if (!first || !ts.isIdentifier(first)) return undefined;
             fnName = callee.expression.text;
         } else if (ts.isIdentifier(callee)) {
             // #25467 E1: `fn(protocolHost(this), …)` — ruling E's host split.
-            if (!first || !ts.isCallExpression(first) || !ts.isIdentifier(first.expression) ||
-                first.expression.text !== HOST_SPLIT.hostOf || first.arguments.length !== 1 ||
-                first.arguments[0].kind !== ts.SyntaxKind.ThisKeyword) return undefined;
+            if (isStatic || !hostOfThis(first)) return undefined;
             fnName = callee.text;
         } else return undefined;
-        const imported = hostImports()?.get(fnName);
+        const imported = hostImports()?.get(facet ?? fnName);
         if (!imported || !isModule(imported.rel)) return undefined;
         const mod = entry(imported.rel);
         if (!mod) return undefined;
+        const exported = (s) => s.modifiers?.some((x) => x.kind === ts.SyntaxKind.ExportKeyword);
+        if (facet !== undefined) {
+            const cls = mod.sf.statements.find((s) => ts.isClassDeclaration(s) && s.name?.text === imported.exported && exported(s));
+            const m = cls?.members.filter(
+                (x) => ts.isMethodDeclaration(x) && x.body && ts.isIdentifier(x.name) && x.name.text === fnName &&
+                    x.modifiers?.some((y) => y.kind === ts.SyntaxKind.StaticKeyword),
+            );
+            return m?.length === 1 ? { body: m[0].body, bodies: mod.bodies } : undefined;
+        }
         const decl = mod.sf.statements.find(
-            (s) => ts.isFunctionDeclaration(s) && s.name?.text === imported.exported && s.body &&
-                s.modifiers?.some((x) => x.kind === ts.SyntaxKind.ExportKeyword),
+            (s) => ts.isFunctionDeclaration(s) && s.name?.text === imported.exported && s.body && exported(s),
         );
         return decl ? { body: decl.body, bodies: mod.bodies } : undefined;
     };
@@ -5056,6 +5078,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
         'passes: #29985 — a moved body\'s catch that delegates to a `protocol.ts` guard as `host.guard(error)` answers on the discriminated branch': 1,
         'flags: #29985 — negative control: the same delegation to a host guard that asks no error type still invents the answer': 1,
         'flags: #29985 — `host.x()` in a module that declares x itself (x\'s own moved body) is the class member x, through its stub': 1,
+        'flags: #29985 — a protocol.ts try around a `<X>Facet.fn(protocolHost(this), …)` stub follows the facet\'s static method, and the stub costs no hop': 1,
+        'flags: #29985 — a try around a private static whose stub calls `<X>Facet.fn(…)` follows the facet\'s static method': 1,
+        'passes: #29985 — negative control: a stub calling a static of a class the facet pattern does not name is not followed': 1,
         'ledger (read seams): a stale entry PASSES and is reported; an unledgered seam still FAILS (#26444)': 1,
         'ledger (read seams): a ledgered file on disk the scan never READ is refused; a deleted one passes (#26444)': 1,
     }),
@@ -5069,7 +5094,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // `undefined` and the comparison fails loudly.
 const SELF_TEST_BATTERY_FLOOR = Object.freeze({
     selfTest: 70,
-    selfTestReadSeams: 70,
+    selfTestReadSeams: 73,
 });
 
 // The roster's TOTAL, checked from BOTH verdict sites. Each entry checks only
@@ -6409,6 +6434,24 @@ function selfTestReadSeams() {
         import type { ProtocolHost } from './protocol-host.js';
         export async function listRowsMoved(host: Pick<ProtocolHost, 'findRows'>, id: string) {
             return await host.findRows(id);
+        }`;
+    // [#29985] The facade form of the same split (ruling 6624345766).
+    const FACADE_HOST = E1_HOST
+        .replace("import { listRowsMoved } from './protocol-uninstall.js';", "import { ProtocolUninstallFacet } from './protocol-uninstall.js';")
+        .replace('return listRowsMoved(protocolHost(this), id);', 'return ProtocolUninstallFacet.listRowsMoved(protocolHost(this), id);')
+        .replace('/*ROLLBACK*/', `private static async readStaticMoved(engine: any, t: string) {
+                return ProtocolUninstallFacet.readStaticMoved(engine, t);
+            }
+            /*ROLLBACK*/`);
+    const FACET_MODULE = `
+        import type { ProtocolHost } from './protocol-host.js';
+        export class ProtocolUninstallFacet {
+            static async listRowsMoved(host: Pick<ProtocolHost, 'findRows'>, id: string) {
+                return await host.findRows(id);
+            }
+            static async readStaticMoved(engine: any, t: string) {
+                return await engine.find(t, {});
+            }
         }`;
     const SPLIT_MODULE_HEAD = `
         export interface UninstallHost {
@@ -7798,6 +7841,51 @@ function selfTestReadSeams() {
                     }`),
                 [`${HOST_SPLIT.dir}/protocol-host.ts`]: E1_HOST_MODULE,
                 [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: E1_MODULE_HEAD,
+            },
+            expectViolation: false,
+            expectSeams: 0,
+        },
+        // [#29985] The facade form (ruling 6624345766): the module's bodies are
+        // the static methods of one facet class, and a stub calls
+        // \`<X>Facet.fn(protocolHost(this), …)\` (a private static's, \`<X>Facet.fn(…)\`).
+        {
+            name: 'flags: #29985 — a protocol.ts try around a `<X>Facet.fn(protocolHost(this), …)` stub follows the facet\'s static method, and the stub costs no hop',
+            files: {
+                [`${HOST_SPLIT.dir}/protocol.ts`]: FACADE_HOST.replace('/*ROLLBACK*/', `
+                    async rollBack(id: string) {
+                        try { return await this.listRowsMoved(id); }
+                        catch { return []; }
+                    }`),
+                [`${HOST_SPLIT.dir}/protocol-host.ts`]: E1_HOST_MODULE,
+                [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: FACET_MODULE,
+            },
+            expectViolation: true,
+            expectSeams: 1,
+        },
+        {
+            name: 'flags: #29985 — a try around a private static whose stub calls `<X>Facet.fn(…)` follows the facet\'s static method',
+            files: {
+                [`${HOST_SPLIT.dir}/protocol.ts`]: FACADE_HOST.replace('/*ROLLBACK*/', `
+                    async rollBack(id: string) {
+                        try { return await ObjectStackProtocolImplementation.readStaticMoved(this.engine, id); }
+                        catch { return []; }
+                    }`),
+                [`${HOST_SPLIT.dir}/protocol-host.ts`]: E1_HOST_MODULE,
+                [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: FACET_MODULE,
+            },
+            expectViolation: true,
+            expectSeams: 1,
+        },
+        {
+            name: 'passes: #29985 — negative control: a stub calling a static of a class the facet pattern does not name is not followed',
+            files: {
+                [`${HOST_SPLIT.dir}/protocol.ts`]: FACADE_HOST.replace(/ProtocolUninstallFacet/g, 'ProtocolUninstallHelpers').replace('/*ROLLBACK*/', `
+                    async rollBack(id: string) {
+                        try { return await this.listRowsMoved(id); }
+                        catch { return []; }
+                    }`),
+                [`${HOST_SPLIT.dir}/protocol-host.ts`]: E1_HOST_MODULE,
+                [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: FACET_MODULE.replace(/ProtocolUninstallFacet/g, 'ProtocolUninstallHelpers'),
             },
             expectViolation: false,
             expectSeams: 0,

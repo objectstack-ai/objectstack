@@ -51,7 +51,8 @@ const SOURCE = readFileSync(fileURLToPath(new URL('./protocol.ts', import.meta.u
 /** A class member's header in `protocol.ts`: four spaces, optional modifiers, its name, its parameter list. */
 const MEMBER_HEADER = /^ {4}(?:(?:private|public|protected|static|async|override|readonly)\s+)*([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\(/;
 /** [#29985] A module function's header in a split module: optional `export` and `async`, `function`, its name, its parameter list. */
-const FUNCTION_HEADER = /^(?:export )?(?:async )?function ([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\(/;
+// [#29985 facade] ...or, in a codemod module, a facet's static method at the class's depth.
+const FUNCTION_HEADER = /^(?:(?:export )?(?:async )?function | {4}static (?:async )?)([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\(/;
 /** A line of a comment: a block comment's body or opener, or a line comment. */
 const COMMENT_LINE = /^\s*(?:\*|\/\*|\/\/)/;
 /** [#29985] The class as a body reads it: `this` in `protocol.ts`, `host` in a moved body (ruling E's rewrite set). */

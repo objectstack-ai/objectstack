@@ -698,17 +698,18 @@ describe('[#14179] every announcing door goes through the choke point', () => {
         // Scoped to `applyRemoteMetadataMutation`'s body: an emit here would
         // re-broadcast every received event and ping-pong across replicas,
         // which the loopback guard (own-messages only) cannot stop.
-        // [#29985] The body moved to `protocol-class-head.ts`, where it reads
-        // the class as `host`; the class member keeps a one-line stub.
+        // [#29985] The body moved to `protocol-class-head.ts`, a static method of
+        // its facet, where it reads the class as `host`; the class member keeps
+        // a one-line delegation.
         const headModule = readFileSync(fileURLToPath(new URL('./protocol-class-head.ts', import.meta.url)), 'utf8');
-        const start = headModule.indexOf('export async function applyRemoteMetadataMutation(');
+        const start = headModule.indexOf('\n    static async applyRemoteMetadataMutation(');
         expect(start).toBeGreaterThan(-1);
-        const body = headModule.slice(start, headModule.indexOf('\n}\n', start));
+        const body = headModule.slice(start, headModule.indexOf('\n    }\n', start));
         expect(body).toContain('host.notifyMutationListenersLocal(');
         expect(body).not.toContain('host.emitMetadataMutation(');
         expect(body).not.toContain('this.emitMetadataMutation(');
         const stubAt = source.indexOf('private async applyRemoteMetadataMutation(');
         expect(stubAt).toBeGreaterThan(-1);
-        expect(source.slice(stubAt, source.indexOf('\n    }\n', stubAt))).toContain('return applyRemoteMetadataMutation(protocolHost(this), evt);');
+        expect(source.slice(stubAt, source.indexOf('\n    }\n', stubAt))).toContain('return ProtocolClassHeadFacet.applyRemoteMetadataMutation(protocolHost(this), evt);');
     });
 });

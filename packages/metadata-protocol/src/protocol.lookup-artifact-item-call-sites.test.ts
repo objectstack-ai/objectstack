@@ -81,7 +81,8 @@ const LAYERED_READS_FILE = 'protocol-meta-layered-reads.ts';
 /** A class member's header in `protocol.ts`: four spaces, optional modifiers, its name, its parameter list. */
 const MEMBER_HEADER = /^ {4}(?:(?:private|public|protected|static|async|override|readonly)\s+)*([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\(|^ {4}(static) \{$/;
 /** A module function's header in a split module: optional `export` and `async`, `function`, its name, its parameter list. */
-const FUNCTION_HEADER = /^(?:export )?(?:async )?function ([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\(/;
+// [#29985 facade] ...or, in a codemod module, a facet's static method at the class's depth.
+const FUNCTION_HEADER = /^(?:(?:export )?(?:async )?function | {4}static (?:async )?)([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\(/;
 
 interface Site { readonly file?: string; readonly member: string; readonly args: string }
 
@@ -163,7 +164,7 @@ const SITES: ReadonlyArray<Site & { readonly noPackage: boolean; readonly dispos
         why: 'returns before the lookup without a package, and keeps only that package\'s own container' },
     { file: 'protocol-registry-hydration.ts', member: 'runtimeViewContainerPackage', args: 'type, container.name', noPackage: true, disposition: 'no',
         why: 'the package a package-less container row overlays: it becomes the expansion\'s own package, whose own artifact lends the envelope' },
-    { member: 'isShippedByAnotherPackage', args: 'type, name', noPackage: true, disposition: 'no',
+    { file: 'protocol-registry-hydration.ts', member: 'isShippedByAnotherPackage', args: 'type, name', noPackage: true, disposition: 'no',
         why: 'a boolean predicate' },
     { file: 'protocol-save.ts', member: 'viewContainerNameCollisionRefusal', args: 'type, name', noPackage: true, disposition: 'no',
         why: 'the save door\'s collision check: the package id names a shipper in a refusal, never an envelope on a served body' },
