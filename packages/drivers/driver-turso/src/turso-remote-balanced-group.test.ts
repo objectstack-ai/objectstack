@@ -200,8 +200,14 @@ describe('[cloud#3485] TursoDriver remote face — large $or / $and groups compi
       const { sql } = await compiled({ $or: members });
       const span = topLevelWhere(sql)!;
       expect(sql.slice(span.start, span.end)).toBe(`(${members.map(() => '("tag" = ?)').join(' OR ')})`);
-      const and = await compiled({ $and: members.map((m) => ({ tag: { $ne: m.tag } })) });
-      expect(and.sql).not.toContain(') AND ((');
+      // An `$and` member's own text, read off a one-member group `((member))`.
+      const conjunct = { tag: { $ne: tagOf(0) } };
+      const one = await compiled({ $and: [conjunct] });
+      const oneSpan = topLevelWhere(one.sql)!;
+      const member = one.sql.slice(oneSpan.start + 1, oneSpan.end - 1);
+      const and = await compiled({ $and: Array(FLAT_GROUP_MAX_MEMBERS).fill(conjunct) });
+      const andSpan = topLevelWhere(and.sql)!;
+      expect(and.sql.slice(andSpan.start, andSpan.end)).toBe(`(${Array(FLAT_GROUP_MAX_MEMBERS).fill(member).join(' AND ')})`);
       expect(await find({ $or: members })).toEqual(members.map((_, i) => idOf(i)).sort());
     });
 
