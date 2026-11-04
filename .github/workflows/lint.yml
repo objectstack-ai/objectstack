@@ -991,6 +991,16 @@ jobs:
         continue-on-error: true
         run: pnpm check:stack-collection-maps
 
+      # A class split into facade form stays a facade (#30019, ruling
+      # 6624258595 on #29465 item 3): every member of a class registered in
+      # `scripts/facade-delegation-registry.json` is a delegation to its facet,
+      # bar the named exceptions, each carrying the card that will move it.
+      # Rationale and the delegation grammar: the script's own header.
+      - name: Registered facade classes hold delegations only
+        id: facade-delegation-only
+        continue-on-error: true
+        run: pnpm check:facade-delegation-only
+
       # The dashboard widget `options` census vs the spec (#12926). The parser's
       # `CONSUMED_WIDGET_OPTION_KEYS` decides which `options` keys get a
       # `unconsumed-widget-option` warning, and five of its six members are the
