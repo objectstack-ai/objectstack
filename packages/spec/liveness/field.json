@@ -324,7 +324,7 @@
     "autonumberFormat": {
       "status": "live",
       "verifiedAt": "2026-08-28",
-      "evidence": "packages/objectql/src/engine.ts#applyAutonumbers (`const fmt = resolveAutonumberFormat(def as never)` — canonical `autonumberFormat`, then the `format` shorthand (#1603), then the declared default `{0000}`; one resolver shared with the SQL driver so a format-less field cannot render two shapes, #6555)",
+      "evidence": "packages/objectql/src/engine-defaults-and-autonumbers.ts#applyAutonumbers (`const fmt = resolveAutonumberFormat(def as never)` — canonical `autonumberFormat`, then the `format` shorthand (#1603), then the declared default `{0000}`; one resolver shared with the SQL driver so a format-less field cannot render two shapes, #6555)",
       "note": "CAVEAT — runtime sequence formatting live; UI AutoNumberField ignores it. 2026-08-28: RE-ANCHORED (commit 8f10a79f7) and REPOINTED — `:765` had rotted onto a `// [#8690]` comment about temporal-filter materializability, ~3,495 lines above the autonumber path. Re-closed by hand against 8cb96ec41."
     },
     "maxLength": {
