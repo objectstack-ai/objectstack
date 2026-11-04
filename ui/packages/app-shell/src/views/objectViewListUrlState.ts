@@ -101,6 +101,7 @@ export function useObjectViewListUrlState({
     objectName,
     objectDef,
     activeView,
+    viewResolving,
     listPrefs,
     perms,
     user,
@@ -110,6 +111,12 @@ export function useObjectViewListUrlState({
     objectName: string | undefined;
     objectDef: ConsoleObjectViewProps['objects'][number];
     activeView: ReturnType<typeof buildViewTabs>[number];
+    /**
+     * objectstack#30034 — the view the address (or the reader's pin) names is
+     * still being resolved (`ObjectView`'s `awaitingPersonalViews`), so
+     * `activeView` is only the view the page falls back to meanwhile.
+     */
+    viewResolving: boolean;
     listPrefs: ReturnType<typeof useObjectListPreferences>;
     perms: ReturnType<typeof usePermissions>;
     user: ReturnType<typeof useAuth>['user'];
@@ -137,6 +144,15 @@ export function useObjectViewListUrlState({
      *    view's own sort when they stored none, and its own grouping. The
      *    seed waits until that state has been read (`listPrefs.ready`), so a
      *    second browser opens on it rather than on an empty cache.
+     *
+     * Neither seed is taken, and nothing is written, while the view the
+     * address names is still being resolved (`viewResolving`, objectstack#30034):
+     * the view on hand then is the fall-back, not the one asked for, and its
+     * stored state written into the address would outlive it. The location
+     * the router hands this page moves in a transition, so a read that lands
+     * between that write and its commit renders against the old address,
+     * finds nothing to change for the resolved view, and the fall-back's
+     * filter and sort stay in a link that a reload or a colleague then opens.
      *
      * Both seeds pass the same field gate (`acceptField`, objectstack#28949):
      * a field stored before it was deleted, or before this user lost read on
@@ -171,7 +187,7 @@ export function useObjectViewListUrlState({
     // that list opens from the (just cleared) stored state, never from the
     // `uf_*` params, whoever wrote them, and its write-back strips them all.
     const resetPendingRef = useRef(false);
-    if (listIdentityKey && listPrefs.ready && listSeedRef.current?.key !== listIdentityKey) {
+    if (listIdentityKey && listPrefs.ready && !viewResolving && listSeedRef.current?.key !== listIdentityKey) {
         // A field the object does not declare (a stale link, or a stored state
         // older than the field's deletion) or one this user cannot read is
         // dropped. Field-level permissions gate only once loaded — the same
@@ -218,10 +234,12 @@ export function useObjectViewListUrlState({
         if (seed.source === 'storage') ownListParamsRef.current = userFilterParamsKey(next);
         if (next.toString() !== searchParams.toString()) setSearchParams(next, { replace: true });
         // Once per list identity, by design: later URL writes are the list's
-        // own changes, already on screen. (`listPrefs.ready` because the seed
-        // is taken only once the user's own state has been read.)
+        // own changes, already on screen. (`listPrefs.ready` and
+        // `viewResolving` because the seed is taken only once the user's own
+        // state has been read and the view the address names is resolved; a
+        // resolution that ends on the fall-back keeps the identity unchanged.)
         // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
-    }, [listIdentityKey, listPrefs.ready]);
+    }, [listIdentityKey, listPrefs.ready, viewResolving]);
     /** Write the list's own change into the URL — replace, never a history entry per keystroke. */
     const writeListUrlState = useCallback(
         (patch: ListStatePatch) => {
