@@ -913,16 +913,8 @@ export function settleKeyFileChannel(opts: {
     });
     env[KEY_FILE_CHANNEL_ENV] = choice.path;
     delete env[KEY_FILE_CANDIDATE_CHANNEL_ENV];
-    if (choice.notice) {
-      const print = (globalThis as { console?: Record<string, ((m: string) => void) | undefined> }).console?.[
-        choice.notice.level
-      ];
-      try {
-        print?.(choice.notice.message);
-      } catch {
-        /* exotic runtime without console — ignore */
-      }
-    }
+    if (choice.notice?.level === 'warn') warn(choice.notice.message);
+    else if (choice.notice) bootError(choice.notice.message);
     return choice;
   })();
   settlements.set(env, settlement);
@@ -957,6 +949,15 @@ interface ResolvedKey {
 const warn = (msg: string): void => {
   try {
     (globalThis as { console?: { warn?: (m: string) => void } }).console?.warn?.(msg);
+  } catch {
+    /* exotic runtime without console — ignore */
+  }
+};
+
+/** A boot error the operator must see: `console.error`, never a debug line. */
+const bootError = (msg: string): void => {
+  try {
+    (globalThis as { console?: { error?: (m: string) => void } }).console?.error?.(msg);
   } catch {
     /* exotic runtime without console — ignore */
   }
