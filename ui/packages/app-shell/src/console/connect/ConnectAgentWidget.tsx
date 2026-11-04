@@ -11,8 +11,8 @@
  *
  *   1. the environment's MCP URL (from `/discovery` → `routes.mcp`) + copy,
  *   2. per-client connect cards with copy-paste-ready content — claude.ai /
- *      Claude Desktop, Claude Code, Cursor deeplink, VS Code and Codex CLI
- *      first, then the Chinese clients WorkBuddy, Doubao Work and QwenWork.
+ *      Claude Desktop, Claude Code and Cursor deeplink first, then the
+ *      Chinese clients WorkBuddy, Doubao Work and QwenWork.
  *      OAuth is the default story on every card (the deployment is its own
  *      authorization server; you sign in as yourself); the Chinese clients'
  *      cards name the API-key header as the fallback for a client version
@@ -299,32 +299,6 @@ export function ConnectAgent() {
           <CardContent className="space-y-2 text-sm">
             <p className="text-muted-foreground">{t('connectAgent.cursor.body')}</p>
             <Snippet text={mcpServersJson(null, mcpUrl)} />
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">VS Code / Copilot</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <p className="text-muted-foreground">{t('connectAgent.vscode.body')}</p>
-            <Snippet
-              text={JSON.stringify(
-                { servers: { objectstack: { type: 'http', url: mcpUrl } } },
-                null,
-                2,
-              )}
-            />
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Codex CLI</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <p className="text-muted-foreground">{t('connectAgent.codex.body')}</p>
-            <Snippet text={`[mcp_servers.objectstack]\nurl = "${mcpUrl}"`} />
           </CardContent>
         </Card>
 

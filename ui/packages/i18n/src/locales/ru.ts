@@ -3862,12 +3862,6 @@ const ru = {
       addButton: 'Добавить в Cursor',
       body: 'Используйте кнопку в один клик или добавьте это в .cursor/mcp.json:',
     },
-    vscode: {
-      body: 'Добавьте в .vscode/mcp.json (или командой MCP: Add Server):',
-    },
-    codex: {
-      body: 'Добавьте в ~/.codex/config.toml. Если ваша версия Codex не поддерживает поток OAuth, используйте заголовок с API-ключом (см. ниже):',
-    },
     fields: {
       name: 'Имя',
       transport: 'Транспорт',

@@ -3773,12 +3773,6 @@ const pt = {
       addButton: 'Adicionar ao Cursor',
       body: 'Use o botão de um clique ou adicione isto ao .cursor/mcp.json:',
     },
-    vscode: {
-      body: 'Adicionar ao .vscode/mcp.json (ou pelo comando MCP: Add Server):',
-    },
-    codex: {
-      body: 'Adicionar ao ~/.codex/config.toml. Se sua versão do Codex não suportar o fluxo OAuth, use um cabeçalho de chave de API (veja abaixo):',
-    },
     fields: {
       name: 'Nome',
       transport: 'Tipo de transporte',

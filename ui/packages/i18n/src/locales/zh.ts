@@ -3899,12 +3899,6 @@ const zh = {
       addButton: '添加到 Cursor',
       body: '点击一键按钮,或将以下内容加入 .cursor/mcp.json:',
     },
-    vscode: {
-      body: '加入 .vscode/mcp.json(或使用 MCP: Add Server 命令):',
-    },
-    codex: {
-      body: '加入 ~/.codex/config.toml。如果你的 Codex 版本不支持 OAuth 流程,请改用 API 密钥请求头(见下):',
-    },
     fields: {
       name: '名称',
       transport: '传输类型',

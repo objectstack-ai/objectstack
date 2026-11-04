@@ -149,8 +149,6 @@ describe('Connect an Agent offers the Chinese clients after the international on
       'Claude (claude.ai / Desktop)',
       'Claude Code',
       'Cursor',
-      'VS Code / Copilot',
-      'Codex CLI',
       'WorkBuddy',
       'Doubao Work',
       'QwenWork',
@@ -161,7 +159,9 @@ describe('Connect an Agent offers the Chinese clients after the international on
     }
     // One list: no group headings split the cards.
     expect(document.querySelectorAll('h3')).toHaveLength(0);
-    expect(screen.queryByText('DuMate')).not.toBeInTheDocument();
+    for (const dropped of ['DuMate', 'VS Code / Copilot', 'Codex CLI']) {
+      expect(screen.queryByText(dropped)).not.toBeInTheDocument();
+    }
     for (const key of ['workbuddy', 'doubao', 'qwenwork']) {
       expect(screen.getByText(`«connectAgent.${key}.body»`)).toBeInTheDocument();
       expect(screen.getByText(`«connectAgent.${key}.hint»`)).toBeInTheDocument();

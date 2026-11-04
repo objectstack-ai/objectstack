@@ -4000,12 +4000,6 @@ const ar = {
       addButton: 'أضِف إلى Cursor',
       body: 'استخدم زر النقرة الواحدة، أو أضف ما يلي إلى ‎.cursor/mcp.json:',
     },
-    vscode: {
-      body: 'أضِف إلى ‎.vscode/mcp.json (أو عبر أمر MCP: Add Server):',
-    },
-    codex: {
-      body: 'أضِف إلى ‎~/.codex/config.toml. إذا كانت نسخة Codex لديك لا تدعم تدفق OAuth، فاستخدم ترويسة مفتاح API (انظر أدناه):',
-    },
     fields: {
       name: 'الاسم',
       transport: 'نوع النقل',

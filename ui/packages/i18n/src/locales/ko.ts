@@ -3702,12 +3702,6 @@ const ko = {
       addButton: 'Cursor에 추가',
       body: '원클릭 버튼을 사용하거나 아래 내용을 .cursor/mcp.json에 추가하세요:',
     },
-    vscode: {
-      body: '.vscode/mcp.json에 추가(또는 MCP: Add Server 명령 사용):',
-    },
-    codex: {
-      body: '~/.codex/config.toml에 추가하세요. Codex 버전이 OAuth 흐름을 지원하지 않으면 API 키 헤더를 사용하세요(아래 참조):',
-    },
     fields: {
       name: '이름',
       transport: '전송 방식',

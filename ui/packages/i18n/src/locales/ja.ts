@@ -3705,12 +3705,6 @@ const ja = {
       addButton: 'Cursor に追加',
       body: 'ワンクリックボタンを使うか、以下を .cursor/mcp.json に追加してください:',
     },
-    vscode: {
-      body: '.vscode/mcp.json に追加(または MCP: Add Server コマンドで):',
-    },
-    codex: {
-      body: '~/.codex/config.toml に追加してください。Codex が OAuth フロー未対応の場合は API キーのヘッダーをご利用ください(下記参照):',
-    },
     fields: {
       name: '名前',
       transport: 'トランスポート',
