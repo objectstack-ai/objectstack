@@ -12,7 +12,11 @@
 // shape leaks the credentials the DSN carries.
 
 import { describe, it, expect } from 'vitest';
-import { urlUserinfoPassword } from '@objectstack/spec/data';
+import {
+  CREDENTIAL_URL_QUERY_PARAM_NAMES,
+  urlCredentialQueryParams,
+  urlUserinfoPassword,
+} from '@objectstack/spec/data';
 import { redactConnectionUrl, describeDriverConnection, describeDriverSqliteFile } from './connection-display.js';
 
 describe('redactConnectionUrl', () => {
@@ -73,6 +77,15 @@ describe('redactConnectionUrl — the password rule is the shared URL grammar', 
       .toBe('postgres:/\t/admin@db.example.com/app');
   });
 
+  it('removes the password where the shared grammar reads a special scheme\'s authority without a `//`', () => {
+    expect(redactConnectionUrl(`https:admin:${PASSWORD}@db.example.com/app`))
+      .toBe('https:admin@db.example.com/app');
+    expect(redactConnectionUrl(`http:/admin:${PASSWORD}@db.example.com/app`))
+      .toBe('http:/admin@db.example.com/app');
+    expect(redactConnectionUrl(`wss:\\admin:${PASSWORD}@db.example.com/app`))
+      .toBe('wss:\\admin@db.example.com/app');
+  });
+
   it('removes the whole password up to the last `@` of the authority, as the shared grammar bounds it', () => {
     expect(redactConnectionUrl('postgres://admin:S3C@RET-PW@h1:5432,h2:5432/app'))
       .toBe('postgres://h1:5432,h2:5432/app');
@@ -88,17 +101,15 @@ describe('redactConnectionUrl — the password rule is the shared URL grammar', 
       `//admin:${PASSWORD}@db.example.com:5432/app`,
       `postgres:/\t/admin:${PASSWORD}@db.example.com/app`,
       ` \npostgres://admin:${PASSWORD}@db.example.com/app`,
-      // Special schemes without the `//`: the label prints exactly what the
-      // shared grammar reads here, so it follows that grammar's reading of
-      // these shapes without an edit of its own.
+      // Special schemes without the `//`, read as a URL parser reads them.
       `https:admin:${PASSWORD}@db.example.com/app`,
       `http:/admin:${PASSWORD}@db.example.com/app`,
       `wss:\\admin:${PASSWORD}@db.example.com/app`,
     ];
     const judged = shapes.filter((value) => urlUserinfoPassword(value) !== undefined);
-    // Non-vacuity floor: the first eight shapes carry a password on every
-    // reading of the grammar, so the property below is never checked over nothing.
-    expect(judged.length).toBeGreaterThanOrEqual(8);
+    // Non-vacuity floor: the shared grammar reads a password in every shape
+    // listed, so the property below is never checked over nothing.
+    expect(judged.length).toBe(shapes.length);
     for (const value of judged) {
       expect(urlUserinfoPassword(value)).toBe(PASSWORD);
       expect(redactConnectionUrl(value), value).not.toContain(PASSWORD);
@@ -131,6 +142,61 @@ describe('redactConnectionUrl — the password rule is the shared URL grammar', 
       .toBe('postgres://db.example.com:5432/app');
     expect(redactConnectionUrl(`libsql://admin:${PASSWORD}@app-org.turso.io?authToken=jwt`))
       .toBe('libsql://app-org.turso.io');
+  });
+});
+
+// The query half of the same rule: a credential query pair is judged by the
+// shared query-pair judge and its one list of names, on every path the label
+// takes — a value with no `://`, the URL parser's, and the hand fallback for a
+// value the parser rejects.
+describe('redactConnectionUrl — the credential query rule is the shared query-pair judge', () => {
+  const TOKEN = 'T0KEN-VALUE';
+
+  it('removes a credential query pair from a value with no `://`', () => {
+    expect(redactConnectionUrl(`libsql:app-org.turso.io?authToken=${TOKEN}`))
+      .toBe('libsql:app-org.turso.io');
+    expect(redactConnectionUrl(`file:local.db?authToken=${TOKEN}&mode=ro`))
+      .toBe('file:local.db?mode=ro');
+  });
+
+  it('removes a credential query pair on the hand fallback for a value the URL parser rejects', () => {
+    expect(redactConnectionUrl(`postgres://admin@h1:5432,h2:5432/app?password=${TOKEN}&sslmode=require`))
+      .toBe('postgres://h1:5432,h2:5432/app?sslmode=require');
+  });
+
+  it('removes a credential query pair on the URL parser path', () => {
+    expect(redactConnectionUrl(`postgres://db.example.com/app?PASSWORD=${TOKEN}`))
+      .toBe('postgres://db.example.com/app');
+    expect(redactConnectionUrl(`libsql://app-org.turso.io?authToken=${TOKEN}`))
+      .toBe('libsql://app-org.turso.io');
+  });
+
+  it('never prints a credential query value the shared judge reads, on any path', () => {
+    const shapes = [
+      `libsql:app-org.turso.io?authToken=${TOKEN}`,
+      `file:local.db?mode=ro&AUTHTOKEN=${TOKEN}`,
+      `file:local.db?auth%54oken=${TOKEN}`,
+      `postgres://admin@h1:5432,h2:5432/app?password=${TOKEN}`,
+      `postgres://db.example.com/app?password=${TOKEN}`,
+      `libsql://app-org.turso.io?authToken=${TOKEN}#frag`,
+    ];
+    for (const value of shapes) {
+      expect(urlCredentialQueryParams(value, CREDENTIAL_URL_QUERY_PARAM_NAMES), value).not.toEqual([]);
+      expect(redactConnectionUrl(value), value).not.toContain(TOKEN);
+    }
+  });
+
+  it('keeps its output byte for byte for every value with no credential query pair', () => {
+    const controls: ReadonlyArray<readonly [string, string]> = [
+      ['postgres://admin@h1:5432,h2:5432/app?sslmode=require', 'postgres://h1:5432,h2:5432/app?sslmode=require'],
+      ['file:local.db?mode=ro', 'file:local.db?mode=ro'],
+      ['libsql:app-org.turso.io?authToken=', 'libsql:app-org.turso.io?authToken='],
+      ['postgres://db.example.com:5432/app?sslmode=require', 'postgres://db.example.com:5432/app'],
+    ];
+    for (const [value, printed] of controls) {
+      expect(urlCredentialQueryParams(value, CREDENTIAL_URL_QUERY_PARAM_NAMES), value).toEqual([]);
+      expect(redactConnectionUrl(value), value).toBe(printed);
+    }
   });
 });
 
