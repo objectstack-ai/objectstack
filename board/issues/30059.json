@@ -1,0 +1,31 @@
+{
+  "number": 30059,
+  "kind": "issue",
+  "title": "Studio: customize an installed app's navigation through the existing app override, so a new object can get a menu entry",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T11:53:16Z",
+  "updated_at": "2026-11-04T13:12:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30059",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nThe maintainer: 「按「覆盖」立卡」 (2026-11-04), after 「其他元数据是怎么处理的。很多是叠加覆盖对吧。」 The governing ruling is ADR-0146 D2: 「方向定为包级覆盖：代码和 Studio 用同一机制，定制都进 .custom。」 Measured by the seat on `main` `63b86b385d`, on the example CRM. Code re-read on `c23501b2b9`. No `domain:*` label is set: triage routes this card.\n\n## Business reason\n\nAn operations person adds a contract object to an installed CRM and publishes it. The object works, but users can reach it only by a typed URL, because Studio offers no way to put it on the app's menu. This is the normal case: real apps are installed, so they are read-only. The customization is finished in every way except the one step that makes it usable.\n\n## What already works, with no code change\n\nAn override of the app in the paired customization package, written through the existing metadata door:\n\n- Item: `app` named `crm_app`, in `com.example.crm.custom`, with `overrides: { package: 'com.example.crm', basedOn: '4.0.0' }`, a whole copy of the app, and one extra entry under `group_sales`: `{ id: 'nav_eval_hetong', type: 'object', objectName: 'crm_custom_eval_1104_hetong', label: '合同' }`.\n\n| Step | Measured result |\n|:--|:--|\n| Save as draft, then `POST /api/v1/packages/com.example.crm.custom/publish-drafts` | `published`, 1 item |\n| `GET /api/v1/meta/app/crm_app` | The entry is served under `group_sales`, with `_packageId` still `com.example.crm` |\n| Running app | The sidebar shows the entry and opens the list |\n| Studio Interfaces rail | 合同 appears under 销售管理 |\n| Restart the backend | Still there |\n| `DELETE /api/v1/meta/app/crm_app?package=com.example.crm.custom` | The entry leaves, and the app reads as shipped |\n\n`GET /api/v1/packages/com.example.crm/customizations` lists the override.\n\n## What is missing: the Studio door\n\n- `ui/packages/app-shell/src/views/studio-design/StudioCustomizeControls.tsx:73`: `STUDIO_CUSTOMIZE_TYPES` is view, dashboard and report. `app` is overridable (`packages/spec/src/kernel/customization-package.ts:325`) but Studio does not offer it.\n- `ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx:4651` on `c23501b2b9`: on a read-only base the rail's 「+」 offers only what it can create (page, dashboard, report), and the 编辑 navigation button draws only when the package is writable.\n- On the measured override: the 合同 row carries no mark, 仅看定制 did not count the app override, and there is no way back from the rail.\n\n## Scope\n\n1. On a read-only base with a pair, the navigation can be customized. The first save takes a whole copy of the app into the pair with the `overrides` declaration, as a view's 定制 already does. `basedOn` is the base's `manifest.version`.\n2. It reuses the writable package's navigation editor (`addNavEntry`, `StudioNavItemInspector`): add object, page, dashboard, report and the other entry kinds, plus rename, reorder, group and remove, including entries the base shipped.\n3. The target pickers offer the pair's own items as well as the base's. A person can add the object they just made in the pair, and an already existing page, dashboard or report listed under 不在导航中.\n4. A navigation change is a draft in 待发布的变更 and publishes in one batch with the object it opens.\n5. The rail shows that the navigation is customized, 仅看定制 counts it, and 恢复原版 removes the override after a confirmation.\n\n## Acceptance\n\n1. The job end to end in a browser: new object in the pair, add it to the menu, publish both together, see it as a user. Publishing the object and the app in the same batch was not measured here, so measure it.\n2. 恢复原版 returns the shipped navigation. The base package is unchanged throughout.\n3. A member who cannot read the object does not get a working entry. This was not measured. Say on the PR what the member sees.\n4. An entry whose object is later removed does not leave a broken link. Use the existing `requiresObject` if that is what the measurement calls for.\n5. No new metadata type and no spec change. If the server turns out to need a change, report it on the card with the reason.\n6. Tests pin the first-save copy, the pair target pickers and the rail mark and count. Screenshots on the PR, from latest `main`.\n\n## The accepted cost\n\nAn override is a whole copy. A navigation entry the vendor adds in a later version does not appear in a customized app until the override is restored and redone. ADR-0146 D2 records `basedOn` and does not compare it, and upgrade comparison is out of that epic. This cost follows from the rule and was not measured with a real upgrade. The maintainer chose this over an additive new metadata type, which would have kept vendor entries but added a second rule and server work. Do not add a comparison or a merge in this card.\n\n## Not in this card\n\n- A new `app_extension` type: considered by the seat and dropped.\n- The separate gap that `navigationContributions` on a runtime-created package is accepted and never applied.\n- Text labels for the rail's customization marks.\n- #30046, the view dropdown in the same header. Coordinate the file surface if both are in flight.\n\n## Re-check\n\n`git grep -n \"STUDIO_CUSTOMIZE_TYPES: readonly\" origin/main -- ui/packages/app-shell/src/views/studio-design/StudioCustomizeControls.tsx`"
+}

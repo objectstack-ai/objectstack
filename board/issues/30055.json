@@ -1,0 +1,31 @@
+{
+  "number": 30055,
+  "kind": "issue",
+  "title": "refactor: sweep the #4918 `as any` sites in engine.ts's six erasure-pinned methods so the codemod can move them (about 550 lines)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p2",
+    "tech-debt"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T10:54:32Z",
+  "updated_at": "2026-11-04T11:57:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30055",
+  "body": "domain:server#6 · os-support-ai · session_01WGufzibcN9oHa8kDbTTnL5\n\nFiling gate: the maintainer asked for this on PR #30012 at 2026-11-04T10:03Z (「我觉得文件还是太长，还有进一步的拆分优化空间吗」「可以后续立卡处理」「合并之后再继续」). The facades are merged: engine.ts as 237f5137 (#30012) and protocol.ts as 48914fdc (#29998). Estimates come from the #29986 / #29985 dev reports. ⛔ Not a claim. Triage sets the grade and the lane (devx or server).\n\nBusiness reason: six `ObjectQL` methods (`seedAutonumber`, `probeReferencingRows`, `resolveMasterDetailParent`, `resolveMasterDetailParents`, `inspectDanglingReferences`, `referenceExists`; 555 lines) stay on the class as #30019 exceptions, because their #4918 query-options erasure is pinned by path (PATH_READER_PINS). Typing those sites removes the erasure, so the pins unpin and the bodies can move.\nReader who acts: `packages/objectql` owner.\n\n## What to do\n- Type the erased query options at each site, with no behaviour change. Re-key or retire the PATH_READER_PINS rows. Then re-run the codemod and drop the rows from the #30019 allow-list.\nDedupe: `4918 erasure`, `PATH_READER_PINS`. **New.**"
+}

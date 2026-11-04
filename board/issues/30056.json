@@ -1,0 +1,38 @@
+{
+  "number": 30056,
+  "kind": "pull_request",
+  "title": "feat(app-shell): Connect an Agent adds WorkBuddy, Doubao Work and QwenWork, merges the Claude cards",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:ui",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T11:23:07Z",
+  "updated_at": "2026-11-04T12:07:29Z",
+  "closed_at": "2026-11-04T12:07:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-04T12:07:26Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30056",
+  "body": "Fixes #30029\n\n## What changes\n\nThe **Connect an Agent** page (the `mcp:connect-agent` widget in `@object-ui/app-shell`, reached from Account → Developer and from Setup) now lists, in one grid:\n\n- **Claude**: one full-width card with two halves, the claude.ai / Claude Desktop connector and the Claude Code CLI with its plugin. These were two cards before.\n- **Codex**: the Codex app's MCP form (Settings → MCP servers → Add server). It shows the name, transport and URL to enter, then where to sign in and how to check the connection. It replaces the Codex CLI `config.toml` snippet.\n- **Cursor**: unchanged.\n- **WorkBuddy** (new): the `mcpServers` entry with WorkBuddy's `streamableHttp` spelling, plus the Trust step.\n- **Doubao Work** (new): the name / transport / URL its custom-connector form asks for.\n- **QwenWork** (new): the `mcpServers` JSON with QwenWork's `streamable-http` spelling.\n- **API keys**: unchanged, except that a minted key is now also revealed as `Authorization: Bearer <key>` beside `x-api-key`. The new cards name that header as their fallback.\n\nAlso in this PR:\n\n- The VS Code / Copilot card is dropped, with `connectAgent.vscode.body`.\n- The Doubao Work and QwenWork titles are strings, so zh shows 豆包工作 and 千问办公.\n- Form-style clients render their values as copyable rows (a new `FieldRows` helper).\n- Long one-line snippets now wrap instead of clipping.\n- Every new or changed string is in all ten built-in packs.\n- `content/docs/ai/connect-mcp.mdx` gains a Codex / WorkBuddy / Doubao Work / QwenWork section.\n- `packages/mcp/src/connect-ui.ts` updates only its doc comment.\n\nNothing on the server changes. The MCP endpoint, OAuth and API-key handling stay as they are; `Authorization: Bearer <key>` was already accepted.\n\n## Why\n\n#30029. People here use WorkBuddy, Doubao Work, QwenWork and the Codex app as their agents, and the page told them nothing about where each takes a custom MCP server or how each spells the transport. The maintainer also chose the order (international clients first, Chinese ones after, Codex ahead of Cursor), the single-list layout, the merged Claude card and the dropped VS Code card.\n\n## Verification\n\n- `pnpm exec vitest run packages/i18n/ packages/app-shell/src/console/connect/` (from `ui/`): green. The widget pin file gains a top-level `describe` for card order, the transport spelling each client gets, the form rows and the Bearer reveal.\n- `@object-ui/app-shell` `type-check` (both tsconfigs): clean. `ui/scripts/check-i18n-call-site-keys.mjs`: every key resolves.\n- Two existing pins were re-measured, not loosened:\n  - `de-quote-pairing-3876`'s census moves 103 → 102, because the retired `connectAgent.vscode.body` quoted „MCP: Add Server“.\n  - `untranslated-identity-4376` gains two proper-noun entries, `connectAgent.doubao.title` and `connectAgent.qwenwork.title`.\n- Dogfooded on a real boot: showcase backend with `--fresh --seed-admin` on its own port, the Console dev server on current `ui/` source pointed at it, signed in as the seeded admin. The zh page renders the cards above, with the deployment's real MCP URL in every snippet.\n- After merging `origin/main`: `pnpm install --frozen-lockfile && pnpm build` (119/119 tasks), then `pnpm lint` (clean), then a full `pnpm test`. That test run had printed no failure after more than two hours but had not finished when this PR was opened: the UI suite runs unsharded in one process locally. CI's sharded required jobs are the record for it.\n- Not verified: the client-side menu paths and transport spellings against a live install of each client. They come from vendor docs and third-party guides, and the card says where to look if a version differs.\n\nClause-②: no\nMetadata-protocol: none\n\n_Keep one value on each of the two lines above, each line starting with its key.\n[Human Minimum](https://github.com/objectstack-ai/objectstack/blob/main/CONTRIBUTING.md#human-minimum)\nitem 5 says what they mean._\n\n## Human Minimum\n\nEach item is one rule from\n[CONTRIBUTING.md › Human Minimum](https://github.com/objectstack-ai/objectstack/blob/main/CONTRIBUTING.md#human-minimum),\nwhich links the AGENTS.md text that states it.\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (`packages/spec` untouched.)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [ ] 4. One issue, one branch off an up-to-date `main`, one pull request. The branch is the session's assigned `claude/zen-davinci-tfxqme`, not `claude/issue-30029-*`, and `origin/main` is merged in. One issue, one PR.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (Not touched.)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [ ] The *Before Submitting* list in CONTRIBUTING.md is done. All of it except the full local `pnpm test`, which had not finished (see Verification).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RKKVnjTUZ5msaYZGKf3wVv)_\n"
+}

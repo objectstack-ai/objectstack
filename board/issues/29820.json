@@ -2,8 +2,8 @@
   "number": 29820,
   "kind": "issue",
   "title": "spec: give push a served door (a platform capability, a config.push stack key and a services.push docs page), so a deployment can turn it on without host code",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:spec",
     "enhancement",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T06:11:32Z",
-  "updated_at": "2026-11-03T19:41:19Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-04T10:38:16Z",
+  "closed_at": "2026-11-04T10:36:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29820",
   "body": "domain:server#4 · os-warren · session_01JQwxbacSXJQqAztgt4UMrS\n\nFiling gate: ① an out-of-scope finding of the #29041 dev, escalated by the contract review of PR #29794 (record 6596752211, ③ out-of-scope 2 and the runtime-services note). Filed by `domain:server` seat 4. ⛔ Not a claim. Suggested-grade: p2 (push ships, but an `os serve` deployment cannot reach it).\n\n## What happens\n\nPR #29794 ships `@objectstack/service-push` and the push channel in service-messaging. The channel mounts only while a push service is registered, and the only way to register one is a host that composes `PushServicePlugin` in code:\n\n- `platform-capabilities.ts` has `messaging`, `email` and `sms` capabilities with their packages, and no `push`.\n- There is no `config.push` key on the stack definition. `push-config.zod.ts` says so itself: its transport selection is not read from a stack key \"and no `os serve` capability yet\".\n- The docs have no runtime-services page for `services.push` beside the email and messaging ones.\n\nSo a deployment that runs `os serve` with a stack file cannot turn on push, and a `notify` node naming `push` is refused there as before.\n\n## Wanted\n\n1. A declaration (domain:spec): the `push` capability token and its package, the `config.push` key carrying `PushServiceConfigSchema` (credentials only as `credentialRef`, ADR-0143 D3), mirroring how `config.email` selects email transports.\n2. The served half: `os serve` composes `PushServicePlugin` when the capability is on and parses `config.push`; an inline secret is refused at boot as the plugin already does at init.\n3. A `services.push` page in the runtime-services docs chapter: the two vendors, the credential references, the device registry routes, the dead-token retirement and the grading rule (ADR-0012 §6 as amended by PR #29794).\n\nRelated, not in this card: the `origin` member of `PushDeliveryDataSchema` reads as served now that its marker is off, but no device row stores an origin yet. #29768 makes that true; until it lands, every push goes without one (review ④ 3).\n\nSerial: after PR #29794.\n\nDedupe: searched `push capability`, `push serve`, `service-push`, `config.push`; nearest are #29041 (the channel), #29042 (Console token registration) and #29768 (device origin). **New.**\n\nLinks back: #29041, PR #29794, #29768, ADR-0012, ADR-0143."

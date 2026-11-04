@@ -1,0 +1,37 @@
+{
+  "number": 30029,
+  "kind": "issue",
+  "title": "Connect an Agent: add WorkBuddy, Doubao Work and QwenWork cards, and tidy the client list",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T08:48:22Z",
+  "updated_at": "2026-11-04T12:07:28Z",
+  "closed_at": "2026-11-04T12:07:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30029",
+  "body": "domain:ui#1 · baozhoutao · session_01RKKVnjTUZ5msaYZGKf3wVv\n\n## What\n\nThe **Connect an Agent** page (Account → Developer → Connect an Agent, and Setup → Connect an Agent; the `mcp:connect-agent` widget in `@object-ui/app-shell`) has no connect instructions for the Chinese desktop work assistants that teams here use: **WorkBuddy** (Tencent), **Doubao Work** (豆包工作) and **QwenWork** (千问办公). A user of those clients has to work out the menu path and the client's own spelling of the Streamable HTTP transport by hand.\n\nEvidence: a product gap the maintainer requested directly. Today the page offers cards for claude.ai / Claude Desktop, Claude Code, Cursor, VS Code / Copilot and Codex CLI only, so no card names where WorkBuddy, Doubao Work or QwenWork take a custom MCP server or how each spells the transport.\n\n## Scope (as agreed with the maintainer)\n\n- Add cards for WorkBuddy (the `mcpServers` entry with `type: \"streamableHttp\"`, and the Trust step), Doubao Work (the name / transport / URL its custom-connector form asks for) and QwenWork (the `mcpServers` JSON with `type: \"streamable-http\"`). Each names the `Authorization: Bearer <API key>` fallback for a client version without the browser sign-in.\n- Order: international clients first, then the Chinese ones. One list, no group headings.\n- Merge the claude.ai / Claude Desktop and Claude Code cards into one full-width Claude card.\n- Turn the Codex CLI card into a Codex card for the Codex app's MCP form (Settings → MCP servers → Add server), and list it ahead of Cursor.\n- Drop the VS Code / Copilot card.\n- Title the Doubao Work and QwenWork cards from the locale pack, so zh shows 豆包工作 and 千问办公.\n- Reveal a minted key in the `Authorization: Bearer` form as well as `x-api-key`; wrap long one-line snippets instead of clipping them.\n- All strings in the ten built-in packs; update `content/docs/ai/connect-mcp.mdx`.\n\n## Not in scope\n\n- Nothing on the server: the MCP endpoint, OAuth and API-key handling are unchanged (`Authorization: Bearer <key>` is already accepted).\n- DuMate was considered and dropped by the maintainer.\n\n## Open question for verification\n\nThe menu paths and transport spellings come from the vendors' docs and third-party guides read through search; they were not checked against a live install of each client."
+}

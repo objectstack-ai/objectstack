@@ -1,0 +1,36 @@
+{
+  "number": 30033,
+  "kind": "issue",
+  "title": "Record page related tab: the enlarged table has no record name — a rep sees five amounts and cannot tell which deal is which",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T09:53:58Z",
+  "updated_at": "2026-11-04T13:44:59Z",
+  "closed_at": "2026-11-04T13:44:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30033",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nThe maintainer: 「1 同意立卡」 (2026-11-04), after asking for a demonstration of this defect.\n\nFiled by the record-page epic seat from a browser evaluation of the Console on `main` `63b86b385d` (example CRM, zh-CN, dev admin). An independent reviewer ran the pass and the seat re-checked the evidence named below. No `domain:*` label is set: triage routes this card.\n\n## Business reason\n\nA rep opens a customer and clicks the 商机 tab to see that customer's deals. The table lists amounts, dates and probabilities with no deal name. Five rows read ¥120,000, ¥75,000, ¥12,400, ¥60,000, ¥90,000, and nothing says which deal each one is. The only link in the row is the amount, so a person has to click amounts to find a deal. This is the default record page, so it reaches every object with a related list and every record visit that uses the tab.\n\n## Reproduce\n\n1. Run `examples/app-crm` and open a customer with deals, for example Acme Corp: `/apps/com.example.crm/crm_account/record/{id}?related=crm_opportunity.account`.\n2. Read the table.\n\nMeasured in the browser by the seat:\n\n| Tab | Headers on screen |\n|:--|:--|\n| 商机 on a customer | #, 金额, 预计成交日期, 赢单概率 (%), 操作 |\n| 活动 on an opportunity | #, 活动类型, 截止日期, 联系人, 客户, 操作 |\n\nThe reviewer also read 联系人 on a customer as #, 邮箱, 操作. The first row's link text is `¥120,000.00` and its target is the opportunity record. The server returns `name` for these rows (`Acme — Q3 Platform Renewal → 120000`), and the compact panel on 概览 draws the same names.\n\n## Code readings on `63b86b385d`\n\n- `ui/packages/plugin-detail/src/RelatedList.tsx:2374-2383`: with no declared columns, the columns come from the child object's `highlightFields`, then pass the FK, field-security and empty pruning. Nothing adds the name.\n- `:2838-2843`: the enlarged face hands the grid `effectiveColumns` only.\n- `examples/app-crm/src/objects/opportunity.object.ts:19`: `highlightFields: ['account', 'amount', 'close_date', 'probability']`, which is right for the highlight strip (#28868).\n\n`highlightFields` means \"what to feature beside the title\", so it never lists the title. Two landings met here on 2026-11-02: `9a9823d921` declared the strips and `a36409337b` (#28902) moved the enlarged tab to the list grid. Whether the columns held a name before those two is not measured.\n\nThis misses #28865's acceptance line \"The name is a link to the record\", on a card closed as completed.\n\n## Acceptance\n\n1. With no columns declared for the relation, the enlarged table's first data column is the child record's name, resolved the way the platform names a record (`nameField` / `titleFormat`, ADR-0079), and it links to the record.\n2. The highlight fields still follow it, without repeating the name.\n3. Columns an author declared on the relation are honoured as declared.\n4. A test pins this on a child object whose `highlightFields` omit the name.\n5. A browser check of 商机, 活动 and 联系人 on the example CRM, with a screenshot on the PR.\n\n## Not in this card\n\nThe highlight strip, the compact panels, and any change to what `highlightFields` means.\n\n## Re-check\n\n`git grep -n \"declaredHighlights\" origin/main -- ui/packages/plugin-detail/src/RelatedList.tsx`"
+}

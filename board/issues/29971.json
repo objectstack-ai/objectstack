@@ -2,8 +2,8 @@
   "number": 29971,
   "kind": "issue",
   "title": "Console sign-in page cannot reach the mobile hand-off: a redirect to the auth API lands on 页面不存在",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "hotlong",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T19:44:16Z",
-  "updated_at": "2026-11-03T22:55:40Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-04T13:13:10Z",
+  "closed_at": "2026-11-04T13:11:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29971",
   "body": "Category: ① product defect with a named location and a reproduction.\n\nBusiness reason: a user whose provider refuses embedded WebViews (Google among them) cannot sign in to the mobile app. objectstack-ai/mobile#148 opens the Console's sign-in page in the system auth session, and the Console has to finish by navigating to the hand-off #29766 shipped. Today it lands on 页面不存在, so the server half in 18.3.0 has no way to be reached.\n\nReader: `domain:ui`, one PR on `ui/apps/console/src/pages/auth/LoginPage.tsx`. objectstack-ai/mobile#148 waits on it.\n\nDuplicate search: `repo:objectstack-ai/objectstack trustedAppSchemes` (5 hits, all closed, the spec and server halves) and `\"one-time-token\" OR \"handoff\" login redirect` (47 hits, none about this).\n\nreach: measured on the released Console, `@objectstack/cli@18.3.0` with the scheme registered, 2026-11-03.\n\n## Reproduction\n\n1. Boot 18.3.0 with `trustedAppSchemes: [\"ai.objectos.mobile\"]` and open, signed out:\n   `/_console/login?redirect=%2Fapi%2Fv1%2Fauth%2Fone-time-token%2Fhandoff%3Fredirect_uri%3Dai.objectos.mobile%253A%252F%252Fauth%252Fcallback%26code_challenge%3D<43 chars>%26code_challenge_method%3DS256`\n2. Sign in.\n\n**Expected:** the browser navigates to `/api/v1/auth/one-time-token/handoff?...`, which answers `302 ai.objectos.mobile://auth/callback?token=T`.\n\n**Actual:** the address becomes `/_console/apps/com.objectstack.setup/api/v1/auth/one-time-token/handoff?...` and the page says 页面不存在.\n\n## Cause\n\n`LoginPage.tsx:266` and `:276` send every safe redirect through `withConsoleBase`, which treats it as a Console route: `window.location.assign(withConsoleBase(isSafeRedirect(redirect) ? redirect : '/'))`. The hand-off is an API route, outside the Console mount. Only a path starting with `/_` passes through unprefixed.\n\n## What the page has to do\n\nThe hand-off's own rules (`packages/plugins/plugin-auth/src/one-time-token-handoff.ts`, ruling A on #29714) set these:\n\n1. **Reach the route, and nothing wider.** A `redirect` whose path is exactly the hand-off under the deployment's base path navigates there unprefixed. Every other redirect keeps today's behaviour. This must not become a general way out of the Console mount. Match on `AuthEndpointPaths.oneTimeTokenHandoff` rather than a copied string.\n2. **Navigate by script from this page.** The route refuses `Sec-Fetch-Site: cross-site`, and a redirect chain through the provider reports cross-site. So the provider's callback has to land on this page first (the social buttons' default `callbackURL` already does), and the page then calls `location.assign`, which reports `same-origin`. Passing the hand-off as `callbackURL` would be refused.\n3. **Before the organization steps.** Today a user with several organizations goes to `/organizations` and the redirect is dropped; one with no active organization waits on `switchOrganization`. The hand-off carries the session and nothing else, and the app's WebView runs those steps after it. So this branch comes first.\n4. **A session older than five minutes.** The route answers `401` as raw JSON to a session created more than five minutes ago. iOS uses an ephemeral auth session, so it arrives signed out. Android's Custom Tabs share Chrome's cookies and have no ephemeral mode through `expo-web-browser`, so a user who signed in to this server in Chrome last week arrives signed in, the page forwards at once, and they are stranded on JSON. On a hand-off redirect the page should show the sign-in form for such a session instead of forwarding, which needs the session's `createdAt`. How to get there (sign that browser session out first, or re-authenticate on top of it) is the card's design question, and it belongs in the PR body.\n\n## Acceptance notes\n\n- A unit test per rule above, including a redirect such as `/api/v1/data/x` staying a Console route as it is today.\n- Browser check: the reproduction above ends in the `302`, for a password sign-in and for a provider sign-in.\n- `RegisterPage.tsx:189` and `:197` have the same shape. A user who registers from the auth session has the same problem, if sign-up is reachable there; handle it or say why not.\n- This is a session-transfer flow: the maintainer reviews and merges.\n\nBlocks: objectstack-ai/mobile#148\n"

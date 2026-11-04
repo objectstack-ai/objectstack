@@ -2,8 +2,8 @@
   "number": 29972,
   "kind": "issue",
   "title": "os serve has no way to register trustedAppSchemes, so the mobile hand-off refuses every app",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "hotlong",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T19:44:18Z",
-  "updated_at": "2026-11-03T23:45:32Z",
-  "closed_at": null,
+  "updated_at": "2026-11-04T10:51:52Z",
+  "closed_at": "2026-11-04T10:40:04Z",
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29972",
   "body": "Category: ① product defect with a named location and a reproduction.\n\nBusiness reason: a deployment that wants Google sign-in in the mobile app has to register the app's scheme, and `os serve`, the documented way to run a server, has no setting for it. #29766 says the plugin \"only mounts when `trustedAppSchemes` is configured\", and nothing a deployment can set reaches that key, so the hand-off in 18.3.0 refuses every app.\n\nReader: `domain:server`, one PR on `packages/cli/src/commands/serve.ts`. objectstack-ai/mobile#148 waits on it.\n\nDuplicate search: `repo:objectstack-ai/objectstack trustedAppSchemes` (5 hits, all closed, the spec and server halves; none wires the CLI) and `OS_TRUSTED_APP_SCHEMES` (0 hits).\n\nreach: measured on `@objectstack/cli@18.3.0`, 2026-11-03.\n\n## Reproduction\n\n```bash\ngrep -c trustedAppSchemes node_modules/@objectstack/cli/dist/commands/serve.js\n```\n\nAnswers `0`. `serve.ts:4351` builds `new AuthPlugin({...})` and passes `trustedOrigins` but no `trustedAppSchemes`, and no environment variable reads into it. On that build, `GET /api/v1/auth/one-time-token/handoff?redirect_uri=ai.objectos.mobile%3A%2F%2Fauth%2Fcallback&code_challenge=<43 chars>` answers `400 ... is not a registered app scheme`, whatever the operator sets. The same request answers `401` once the key is patched in by hand, which is what proves the key is the only thing missing. A stack can supply its own `AuthPlugin`, but it then gives up everything `serve.ts` wires.\n\n## Ask\n\nGive `os serve` a way to set the list, in the shape `OS_TRUSTED_ORIGINS` already has: an `OS_TRUSTED_APP_SCHEMES` comma-separated variable passed as `trustedAppSchemes`, listed in `content/docs/deployment/environment-variables.mdx`. A bad entry keeps failing loudly at construction (`assertTrustedAppSchemes`).\n\nUnset stays unset: the hand-off is opt-in per deployment, and this card does not change that.\n\n## Acceptance notes\n\n- A contract test in the style of `serve-auth-*.contract.test.ts` that the value reaches `new AuthPlugin(`.\n- Boot check: with the variable set the request above answers `401`, and with it unset `400`.\n\nOut of scope, and the cloud lane's: the hosted runtime builds its own `AuthPlugin` (`cloud: packages/objectos-runtime/src/artifact-kernel-factory.ts:1097`), so hosted environments need their own wiring. That is tracked from objectstack-ai/mobile#148, not here.\n\nBlocks: objectstack-ai/mobile#148\n"

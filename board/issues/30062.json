@@ -1,0 +1,31 @@
+{
+  "number": 30062,
+  "kind": "issue",
+  "title": "Declared overrides: a mapping override publishes but is never served, doc and mapping overrides cannot be restored, and an override's label can be hidden by translation",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T12:14:18Z",
+  "updated_at": "2026-11-04T13:12:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30062",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nThe maintainer: 「全部立，继续测试验证」 (2026-11-04), on the seat's evaluation of which metadata types should support override.\n\nMeasured by the seat through the metadata API and in a browser on `main` `63b86b385d`, on `examples/app-crm` and `examples/app-showcase`, each overriding through its paired customization package. No `domain:*` label is set: triage routes this card.\n\n## Business reason\n\nADR-0146 D2 promises one mechanism: an item in the customization package replaces the base's item, and removing it brings the base's back. These gaps break that promise in ways a customer cannot see or undo. A published change that does nothing looks like success. A customization that cannot be removed leaves the customer stuck with it. A renamed page that keeps its old name looks like the rename failed.\n\n## Defects\n\n**1. A mapping override publishes and is not served.** `showcase_inquiry_feed`, with `overrides`: save 200, publish `published`, then `GET /api/v1/meta/mapping/showcase_inquiry_feed` returns the base's body, with no `overrides`. `SEALED_ROW_SERVED_OVERRIDE_TYPES` in `packages/metadata-protocol/src/protocol-package-bindings.ts:350` holds page, app, dataset, doc and book. Its note says mapping \"is overridable and sealed too, and is not here: no card has measured its reads.\"\n\n**2. Doc and mapping overrides cannot be removed.** `DELETE /api/v1/meta/doc/showcase_docs_guide?package=com.example.showcase.custom` answers 403, \"provided by a managed package and is sealed against removal\", and the override stays served. Mapping answers the same. The same call succeeded for view, dashboard, report, email_template, page, app, dataset, book and flow.\n\n- `packages/spec/src/kernel/metadata-plugin.zod.ts:933` and `:1191`: mapping and doc are `supportsOverlay: false`, which `refusePackagedBaseRemoval` (`packages/metadata-protocol/src/protocol.ts:9286`) treats as sealed.\n- `packages/metadata-protocol/src/protocol-packaged-base-refusal.ts:510` and `:540`: the pair-row admission is `flow` only.\n\n**3. An override's own label can be hidden by the base's translation.** On the zh-CN CRM:\n\n| Item | Override's value | Served |\n|:--|:--|:--|\n| Page `crm_welcome` label | OVpage | 欢迎页 |\n| Dataset `opportunity_metrics` label and description, and a measure label | Changed | The base's zh-CN text |\n| View `crm_lead.all` and dashboard `pipeline_dashboard` label | Changed | The override's text |\n| Report `showcase_hours_by_status` label | OV-报表-1104 | Runtime shows the override; the Studio header shows 工时按状态分布 |\n\nA page's content did change, so this is about labels and descriptions, not the override itself. A new `translation` item in the pair does take effect (`showcase_task` read 任务 and then the new text), so a customer has a workaround, but nothing points to it.\n\n**4. The All metadata tile disagrees with the door.** 全部元数据 marks 流程 只读, while a read-only flow's header offers 定制.\n\n**5. A refusal offers a way out that does not exist.** A `sharing_rule` override is told to \"create your own sharing_rule under a new name\", and that create answers 403 `NOT_CREATABLE`. The same sentence cites ADR-0146 D6 for types that are outside D6's security catalog, and reads \"a api\" (`protocol-packaged-base-refusal.ts:713`).\n\n## Acceptance\n\n1. A mapping override is served by the reads and used at import, or the save refuses it loudly. Do not leave a published override that does nothing. Add it to the measured list, with a test.\n2. Removing a pair's override succeeds for every type `isOverridableMetadataType` admits that a pair can hold, and the base's item is served again. Pin this per type. A removal of a base's own item stays refused.\n3. Label precedence is one rule across types and across runtime and Studio. The seat's proposal: a translation in the pair, then the override's own label, then the base's translation. The maintainer may overrule this on the card.\n4. The tile and the door agree for every type.\n5. Each refusal names a remedy that works for that type: for example a Setup record for sharing rules and queues, and a new package version for a code-only type.\n\n## Not measured\n\nAn import through an overridden mapping, because the override is not served today. Report and email template behaviour beyond the label: the report did render; no email was sent.\n\n## Re-check\n\n`git grep -n \"SEALED_ROW_SERVED_OVERRIDE_TYPES: ReadonlySet\" origin/main -- packages/metadata-protocol/src/protocol-package-bindings.ts`"
+}

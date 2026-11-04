@@ -1,0 +1,33 @@
+{
+  "number": 30100,
+  "kind": "pull_request",
+  "title": "fix(repo): ignore the conversions-registry codemod's in-tree scratch dir",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T13:44:27Z",
+  "updated_at": "2026-11-04T14:10:32Z",
+  "closed_at": "2026-11-04T14:10:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-04T14:10:30Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30100",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBPMzGRiRL8auFeiVJGtznMw)_\n\nRefs #30078\n\n## 维护者速读\n\n- **改了什么:** 根 `.gitignore` 加一条跟踪规则 `packages/spec/.codemod-arrays-*/`（含三行注释），放在 `packages/spec/src/migrations/registry.ts.*.tmp` 旁边。只有这 5 行。\n- **为什么改:** #29993（`d79eecfe`）给 `scripts/codemod-split-conversions-registry.mjs` 加了 `arraysProof()`，它在 `packages/spec/` 里 `mkdtempSync('.codemod-arrays-')`。PM dispatch-gates self-test 的 `exposedScratchDirs` 用例要求树内每个临时目录都被跟踪的 ignore 规则覆盖，于是 main 的 `Lint · PM dispatch-gates` 红了（1 of 2234）。\n- **风险与回滚:** 只加一条 ignore 规则，不碰门禁、self-test、用例列表和 codemod。没有选「搬到 `os.tmpdir()`」：探针把 spec 的 `src` 复制进临时目录再用 tsx 加载，复制出来的源码有 391 处 `from 'zod'`，靠从 `packages/spec/` 往上找 `node_modules` 解析，搬出树外就解析不到。回滚 = revert。\n- **先看:** `.gitignore` 第 71–74 行。\n- **两分钟验证:** `node -e \"import('./scripts/pm/dispatch-gates.mjs').then(m=>console.log(m.exposedScratchDirs({}).exposed))\"`：main 上列出两个 `.codemod-arrays-0osprobe` 目录，本分支为 `[]`。\n- **需要你做的:** 无，席位审阅落地（仅根配置，`skip-changeset`）。\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\n- **`.gitignore`.** Adds `packages/spec/.codemod-arrays-*/` with a three-line comment, next to the existing `registry.ts.*.tmp` staging rule. `git check-ignore -v --no-index` now answers `.gitignore:74:packages/spec/.codemod-arrays-*/` for both probe paths the gate asks about (`packages/spec/.codemod-arrays-0osprobe/leftover-probe` and `…/unpack/leftover-probe`).\n\n## Why this fix and not moving the scratch dir\n\nThe order offered two remedies: (a) a tracked ignore rule, or (b) moving `arraysProof()`'s `mkdtempSync` to `os.tmpdir()`. (b) does not work. The probe copies `packages/spec/src` into the scratch dir and loads it with `tsx` (cwd `packages/spec`). The copied sources import `zod` at 391 sites, plus `typescript` and `@objectstack/spec/*` self-references, and Node resolves those bare specifiers by walking up from the importing file to `packages/spec/node_modules`. Under `os.tmpdir()` that walk finds nothing. So the scratch dir has to stay inside `packages/spec/`, and (a) is the smaller sufficient fix. The codemod already removes the dir in a `finally`; the rule covers a leftover from a killed run.\n\nThe gate (`exposedScratchDirs` in `scripts/pm/dispatch-gates.mjs`), its self-test and its case list are untouched.\n\n## Readings\n\n| Reading | `origin/main` `d79eecfe` | this branch |\n| :--- | :--- | :--- |\n| `exposedScratchDirs({}).exposed` | `packages/spec/.codemod-arrays-0osprobe (scripts/codemod-split-conversions-registry.mjs:843)`, `packages/spec/.codemod-arrays-0osprobe/unpack (…:858)` | `[]`; both now `covered` by `.gitignore:74` |\n| `node scripts/pm/dispatch-gates.mjs --self-test` (both tiers, as the push run) | exit 1, `✗ dispatch-gates self-test: 1 of 2234 case(s) failed.`, the one ✗ being the EXPOSED line above (33 min) | exit 0, `✓ dispatch-gates self-test: 2234 cases pass.` (fast 1945 in 509 s, slow 289 in 1465 s), the case reads ✓ |\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --commands` derives 8 commands for this change set; each ran on the branch:\n\n```\nnode scripts/check-closing-keyword-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-corpus.mjs :: exit 0\npnpm check:driver-memory-census :: exit 0\npnpm check:gitlink-declared :: exit 0\npnpm check:nul-bytes :: exit 0\npnpm check:refd-timer-probe :: exit 0\npnpm check:watch-hint-literal :: exit 0\n```\n\n`dispatch-gates --ran`: 8 derived, 8 run, 0 NOT-MEASURED, 0 UNRUN.\n\n## Changeset\n\nRoot config only, no published package moves: `skip-changeset`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WGufziUhP2qtBGrqtbPFTj\n"
+}

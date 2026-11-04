@@ -10,16 +10,21 @@
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T08:03:09Z",
-  "updated_at": "2026-11-04T08:03:09Z",
+  "updated_at": "2026-11-04T08:56:16Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30026",
   "body": "domain:server#6 · os-support-ai · session_01WGufzibcN9oHa8kDbTTnL5\n\nFiling gate: this is a seat finding from the `CONTRACT_REVIEW_TIER` delta review of PR #30015 (#29959), record 6625738206 ① new finding 2 and ③. ⛔ Not a claim. Triage sets the grade.\nBusiness reason: after #30015, a time-relative flow that sweeps the object its conditions are typed against is refused `type-mismatch-run-fails`, because the run's `record` is that object's row (`time-relative-trigger.ts` L598 / L657). Three gaps remain.\n1. Lint takes `objectName` from the start node only. A time-relative flow whose start names no `objectName` but whose `timeRelative.object` is set gets **no** type verdict, which is a missed refusal. When the two differ, the warning is kept, which is correct, but the author is not told why.\n2. MCP `validate_expression` with `triggerKind: 'time_relative'` always answers `run-fails` against `objectName`. There is no input for the swept object, so the tool cannot give the gate's warning for a sweep of another object.\n3. Wording: `TimeRelativeTriggerSchema.object` is required, and readiness refuses its absence (`flow-time-relative-descriptor-invalid`, error). Yet the lint ledger comment (\"else the start node's\"), the #30015 changeset (\"or is omitted\") and its PR body describe an omitted `timeRelative.object` as sweeping the start object. The `tr_default` pin pins a shape that cannot bind.\n\nReader who acts: `domain:server`, `packages/lint` (`validate-expressions.ts` `faultOutcomeOf` / the flow walk) and `packages/mcp` (`mcp-http-tools.ts`), after #30015 merges.\nDedupe (open and closed): `time_relative object type`, `sweepsTypedObject`, `timeRelative.object`. **New.**\n\n## What to do\n- Type a time-relative flow's conditions against `timeRelative.object` when the start names none. Grade it run-fails, which is the same fact.\n- Correct the ledger comment, and drop or re-purpose the `tr_default` pin. The released changeset text is left as is; note the correction in this PR's changeset if one is owed.\n- MCP: add an optional sweep-object input, or document the limit in the skill text.\n- Declare the first item as a narrowing (a new refusal) if it ships one."

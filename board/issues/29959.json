@@ -2,8 +2,8 @@
   "number": 29959,
   "kind": "issue",
   "title": "expression gate: flow-condition type-mismatch verdicts still miss or misdescribe three sites after #29926 (non-record-triggered flows, record.x, decision branches) and MCP validate_expression cannot carry severity or trigger kind",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T17:44:15Z",
-  "updated_at": "2026-11-04T06:10:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-04T08:35:21Z",
+  "closed_at": "2026-11-04T08:28:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29959",
   "body": "domain:server#6 · os-support-ai · session_01WGufzibcN9oHa8kDbTTnL5\n\nFiling gate: ① a product defect with named landing points. These are the open readings of the #29926 dev and the `CONTRACT_REVIEW_TIER` review of PR #29953 (comment 6610931370 ③, re-review 6611149064), measured at head `06abf5ac`.\nBusiness reason: an author is told something untrue about runtime, or nothing at all, for a condition that fails every flow run.\nReader who acts: `domain:server`. Landing points are `packages/lint/src/validate-expressions.ts` (`faultOutcomeOf`, the flow node, edge and decision sites, and `checkDeclaredPredicate`) and `packages/mcp/src/mcp-http-tools.ts` (the `validate_expression` site map).\nDedupe (open and closed): `decision branch type-mismatch` and `\"evaluates to null\" flow condition`. Nearest are #29926 (open, landing in PR #29953: record-triggered start and edge only) and #29904 (closed). Neither covers these sites.\n\n## Sites\n\n1. **Non-record-triggered flows** (no `triggerType`, `schedule`, API-started): a type mismatch in a start or edge condition keeps the warning \"silently evaluates to null\". That text is false here too: `dag-traversal.ts` `evaluateCondition` throws on a non-`ok` evaluation for every flow. Decide the grading (the null-guard twin has no grading here) and at least make the text true. PR #29953 pins the current warning as the intended behaviour, so update that pin.\n2. **`record.x` in a flow condition** is never type-judged. The flattened-scope soundness check types bare names only.\n3. **`decision` branches get no type verdict**: `checkDeclaredPredicate` calls `validateExpression('predicate', raw)` with no schema hint, so no `fieldTypes` and no `faultOutcome` reach it, and `name > 5` on a text field fails the run with no verdict. The null-guard twin alone refuses there.\n4. **MCP `validate_expression`**: the site map has no input for a validation rule's `severity` or a flow's trigger kind, so `validation` always answers fail-closed (the gate serves fail-open for an advisory rule) and `flow_condition` always answers `run-fails` (the gate warns for a non-record-triggered flow). The tool text says it \"answers what the gate will\". Either add the inputs or say where it differs.\n\nMeasured on PR #29953's head `06abf5ac`. Re-measure once it lands."

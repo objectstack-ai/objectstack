@@ -1,0 +1,36 @@
+{
+  "number": 30035,
+  "kind": "issue",
+  "title": "Record 动态 stays stale after a save: the toast says updated and the feed still shows the old count until a reload",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T09:54:58Z",
+  "updated_at": "2026-11-04T13:13:38Z",
+  "closed_at": "2026-11-04T13:11:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30035",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nThe maintainer: 「缺陷 2-7 立卡」 (2026-11-04).\n\nFiled by the record-page epic seat from a browser evaluation of the Console on `main` `63b86b385d` (example CRM, zh-CN, dev admin). An independent reviewer ran the pass and the seat re-checked the evidence named below. No `domain:*` label is set: triage routes this card.\n\n## Business reason\n\nA rep changes a deal's amount and looks at 动态 to confirm it, or a manager is reading the record while it is edited. The toast and the footer both say the record just changed, yet the feed does not list the change. The person concludes the change was not recorded, or reloads the page to find out.\n\n## Reproduce\n\n1. Open an opportunity's record page and note the number beside 动态.\n2. 编辑 → change 金额 → 更新.\n3. Read 动态 without reloading, then reload.\n\nMeasured by the seat on record `ZSq0owqcxYgBkgy2`: after the save the toast showed 已更新 and the footer read 更新人 … 刚刚, while the screen read 动态 1. `sys_activity` on the server already held 2 rows (`更新了 商机 …：金额`, `创建了 商机 …`). After a reload the screen read 动态 2. The reviewer saw the same on two more records, and opening the 动态 tab did not refresh it.\n\n## Code readings on `63b86b385d`\n\n- `ui/packages/app-shell/src/views/RecordDetailView.tsx:917`: the feed items are held per record.\n- `:923` and `:969-971`: the feed effect runs on a bumped invalidation nonce for this record.\n\nWhether the edit dialog's save does not bump that nonce, or bumps it before the server's `sys_activity` row exists, is not measured. The fix has to tell these apart.\n\n## Acceptance\n\n1. After a save through the edit dialog, 动态's count and rows include the new entry without a reload, on the record page and in the drawer.\n2. A test pins the refresh, including the case where the activity row lands after the save's response if the server writes it that way.\n3. No polling is added for this.\n\n## Re-check\n\n`git grep -n \"recordInvalidationNonce\" origin/main -- ui/packages/app-shell/src/views/RecordDetailView.tsx`"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 30042,
+  "kind": "issue",
+  "title": "cli: a boot whose data key cannot open the database's sys_secret rows still serves every secret as unset — os start / os dev should pick the key that opens them, or refuse loudly; one-shot commands read only the canonical key file",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T10:10:18Z",
+  "updated_at": "2026-11-04T14:04:10Z",
+  "closed_at": "2026-11-04T13:43:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30042",
+  "body": "domain:server#6 · os-support-ai · session_01WGufzibcN9oHa8kDbTTnL5\n\nFiling gate: this is out of scope by ruling in the #29934 order and reported by the dev of PR #30040. The seat's ACCEPT 6628086274 records it as an accepted deviation. ⛔ Not a claim. Triage sets the grade.\nBusiness reason: after PR #30040, `os dev` and `os start` share one data-key file, so a project that moves from dev to start keeps its secrets. Three cases remain where the key the boot picks cannot open the project database's `sys_secret` rows, and every secret then reads back as unset with only a log line:\n1. **A project that only ever ran `os start`, on a machine whose `$HOME/.objectstack/dev-crypto-key` exists from `os dev` in another project.** PR #30040 resolves this as `both-differ`. It uses the shared file and prints a warning that names both files and the remedy, so the start-sealed secrets read as unset until the operator moves the file. This is the one case #30040 makes newly visible on upgrade.\n2. One-shot commands (`os migrate`, `os secret rewrap`, `os secret orphans`) read only the canonical file. They never read the legacy project-local file that `os dev` / `os start` now still honour. This predates #30040.\n3. `keyFilePath` does not expand a leading `~` in `OS_HOME`, while `os start`'s home resolution does. This predates #30040.\n\nReader who acts: `domain:server`, in `packages/cli` (`internal-crypto-key-file-channel.ts`, the one-shot commands) and `packages/services/service-settings` (`resolvePersistedKeyFile`, `keyFilePath`).\nDedupe (open and closed): `sys_secret decrypt boot`, `dev-crypto-key both`, `failed to decrypt`. The nearest is #29934, which closes with PR #30040. **New.**\n\n## What to do\n- At boot, when `resolvePersistedKeyFile` answers `both-differ` (or `legacy-only`), trial-open one `sys_secret` row under each candidate. Pick the key that opens it, or refuse to boot with both paths named when neither opens it. Do not pick silently. Grade the refusal against the fail-loud contract of `LocalCryptoProvider`.\n- Route the one-shot commands through the same `resolvePersistedKeyFile`.\n- Expand `~` in `keyFilePath` the same way the CLI home resolution does, or document that it is not expanded.\n- Pins: the case-1 shape (start-only project plus a foreign home key) reads its secrets back, and a key that opens nothing refuses with both paths. Ablate once."
+}

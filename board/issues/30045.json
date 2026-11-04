@@ -1,0 +1,36 @@
+{
+  "number": 30045,
+  "kind": "pull_request",
+  "title": "pm-dispatch(review): the seat requests the approvers in the same round as its ACCEPT, large-diff PRs included, and never reports \"awaiting approval\" before the request is sent",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T10:23:37Z",
+  "updated_at": "2026-11-04T10:44:45Z",
+  "closed_at": "2026-11-04T10:44:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-04T10:44:35Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30045",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwB1HYv38UREmspmKSByfEg1B)_\n\nNo card: maintainer-directed in the project thread (「修改 pm-dispatch/os-dev 技能」, after 「为什么等我批的现在没有推送給 os-zhuang，是技能的问题吗」).\n\n## 维护者速读\n\n- 改了什么:`SKILL.md`〈路径分叉〉三行就地改写(行数不变):③ 请审在席位 ACCEPT + 现 head PASS 落案的**同一轮**发出;>3000 行 PR 明写也走 ③ 请审;④ 轮报现读请审人,**没请审就不许在聊天里说「等你批」**。\n- 为什么改:规则(10-29 的 #27385)本来就要求席位交棒时请审 os-zhuang/hotlong,但席位没执行:#30028 已有 ACCEPT + 同 head PASS 却无人被请;#29993、#29998 这类 >3000 行拆分 PR 被「Tier S 不交人」误读成不请;聊天里却报了「等你批」。\n- 风险与回滚:只改技能文本 3 行,不动脚本、门禁、workflow;回滚 = revert 本 PR。\n- 先看:`.claude/skills/pm-dispatch/SKILL.md` L187、L197、L201。\n- 两分钟验证:`pnpm check:pm-skill-ratchet && pnpm check:pm-skill-id-lint && pnpm check:skill-frame-sync`,三条皆绿(行数 319/319,每行 ≤120 字节)。\n- 需要你做的:审阅并批准本 PR(`.claude/**` 属 Tier S,但这是 PM 自身规则 PR,按〈路径分叉〉末行留给维护者)。\n\n## What changes\n\n`.claude/skills/pm-dispatch/SKILL.md`, three lines rewritten in place (319 lines before and after, each ≤120 bytes):\n\n- **L197, step ③:** the approver request (`pr_request_reviewers`) goes out in the **same round** that the seat's ACCEPT and a same-head contract PASS are both on record, not \"after\" at some later point.\n- **L187, the >3000-line rule:** it already swaps ACCEPT for the four end-of-review steps with no Tier S exception; it now names step ③ explicitly, so L198's \"Tier S hands off to nobody\" no longer reads as covering a large diff on ungoverned paths (the split PRs).\n- **L201, step ④:** the round report reads the requested reviewers live, and a seat never reports a PR to the maintainer in chat as awaiting approval before the request is on the PR; it sends the request first.\n\n`os-dev.md` is unchanged: a dev's `pr_create` still carries no assignees and requests nobody. That is the rule the maintainer asked for on 2026-10-29 (「这个是技能的bug，应该是开发完了你审核通过才会推送给我审核」, 「审核人是 os-zhuang 和 hotlong」), landed in #27385, and this PR keeps it. Only the seat-side hand-off is tightened.\n\n## Why\n\nMeasured on 2026-11-04 ~10:10Z, the six PRs reported in chat as waiting for the maintainer:\n\n| PR | Seat ACCEPT on current head | PASS on current head | Requested reviewers before | os-zhuang review |\n|:--|:--|:--|:--|:--|\n| #29968 | yes | yes | none | APPROVED |\n| #30004 | yes | yes | none | APPROVED |\n| #30028 | yes (09:11Z) | yes | **none** | none |\n| #29993 (35,227 lines) | no | no (PASS names an older head) | **none** | none |\n| #29998 (24,422 lines) | no | no | **none** | none |\n| #30030 | no | yes | **none** | none |\n\n#30028 was a due hand-off with no request. The two splits are over 3000 lines and owe the same end-of-review steps, but L198's \"Tier S hands off to nobody\" plus a patrol (H43) that reads only register paths left them with no request and no warning. As a one-off, `os-zhuang` was requested on #30028, #29993, #29998 and #30030 from the project thread; #29968 and #30004 already carry an `os-zhuang` approval, so they wait on the seat's landing, not on a review.\n\nOut of scope, follow-up if wanted: H43 in `scripts/pm/check-half-states.mjs` reads governed-register PRs only, so it cannot flag a >3000-line PR whose request is missing.\n\n## Verification\n\nThe 20 commands `node scripts/pm/dispatch-gates.mjs --commands` derives for this diff, run on head `262327bc`, all exit 0 (`pnpm --filter @objectstack/lint run check:doc-formula-expressions` after `turbo run build --filter=@objectstack/formula --filter=@objectstack/lint`). Key lines:\n\n- `check-skill-line-ratchet`: green, SKILL.md at its 319 ceiling.\n- `check-skill-id-lint`: 110 files clean.\n- `check-skill-frame-sync` and `check-governed-prose`: green.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (none added)\n- [ ] 3. No formatter ran; `pnpm lint` passes. (no formatter ran; `pnpm lint` not run for a three-line skill text edit)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (nothing publishes; `skip-changeset`)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English. (the 维护者速读 block is Chinese by the skill's own rule)\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WGufzgFA14BKgQ96yvMZbA)_"
+}

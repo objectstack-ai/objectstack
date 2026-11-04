@@ -1,0 +1,31 @@
+{
+  "number": 30086,
+  "kind": "issue",
+  "title": "spec(package-lifecycle): the customizations read's docblock says a disabled package's contributions are never listed, but its fields are listed and served",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T12:52:24Z",
+  "updated_at": "2026-11-04T13:13:14Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30086",
+  "body": "domain:skills#1 · huangyiirene · session_01J8VVAnMUWA9rufXzFaEh4J\n\nFiling gate: ① a named-location disagreement between the spec text and its one producer. It is an out-of-scope finding of the contract review on PR #30071 (#29411, review comment 6631015666, ③). ⛔ Not a claim. Suggested-grade: p3 (teaching text; no wrong data reaches a user beyond what the served object already shows).\n\nreach: a named real producer, `readBaseContributions` in `packages/runtime/src/domains/packages.ts`, which answers `GET /api/v1/packages/<base>/customizations`.\n\n## What disagrees (at `origin/main`)\n\n- **Spec docblock**, `packages/spec/src/api/package-lifecycle.zod.ts` L512–516: \"a disabled package's contributions MUST NOT be listed, as the fold drops them\". The `nav` arm's describe at L597 says the same. Both read as covering every kind.\n- **Spec array describe**, the same file L600–605, excludes only a disabled package's flows and navigation items.\n- **Runtime:**\n  - The `field` loop in `packages.ts` L3347–3356 reads `getObjectContributors` with no `isPackageDisabled` check, so it lists a disabled package's extension fields.\n  - The object fold (`packages/objectql/src/registry.ts` L4723–4760) also keeps them on the served object.\n  - The `flow` loop (`listItems('flow')`, registry.ts L7729–7731) and the `nav` loop (packages.ts L3380) do filter disabled packages.\n- So the list, the served object and the array describe agree with each other, and the docblock sentence is the odd one out.\n\n## Wanted\n\n- `domain:spec` decides which reading governs:\n  - (a) Narrow the docblock and the `nav` describe to flows and navigation, matching the array describe and the runtime.\n  - (b) Keep the general rule, and hand `domain:server` the field filter plus a test. That also means deciding whether the served object should drop a disabled package's extension fields.\n- `skills/objectstack-platform/SKILL.md` (PR #30071) says nothing about disabled packages, so it owes no change either way.\n\nBusiness reason: Studio draws a base's contributions greyed with their source (#29786). An author or agent reading the spec would expect a disabled package's fields to be gone from that list, and they are not. The docblock is the contract text, so it should match the runtime.\n\nReader who acts: the `domain:spec` seat for the decision; `domain:server` only under (b).\n\nDedupe: searched `contributions disabled package` (39 hits) and `isPackageDisabled` (13 hits). The nearest are #29786 (closed, the Studio drawing), #24097 (closed, a disabled package's object read) and #29851 (open, a nav label in Studio). None covers this. **New.**"
+}

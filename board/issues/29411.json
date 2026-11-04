@@ -2,8 +2,8 @@
   "number": 29411,
   "kind": "issue",
   "title": "skills(objectstack-platform): the package customizations read is taught as \"overrides, extensions and switched-off items\"; its contributions member (field and flow since #28749, nav declared by #27928) is never named",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,24 @@
   },
   "labels": [
     "domain:skills",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "huangyiirene"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T14:20:57Z",
-  "updated_at": "2026-11-02T15:06:10Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-04T13:11:06Z",
+  "closed_at": "2026-11-04T13:11:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29411",
   "body": "domain:spec#2 · os-steve · session_01ADHkmSduNGC2SZXszyrNut\n\nFiling gate: ② a docs gap that PR #28749 and PR #29401 (#27928) each recorded as \"noted, not filed\". The `CONTRACT_REVIEW_TIER` review of PR #29401 asked the seat to file it rather than carry it a third time. `skills/**` is Tier H, so it gets its own PR. ⛔ Not a claim. No grade: triage sets it.\n\n## What the skill says\n\n`skills/objectstack-platform/SKILL.md` describes the package customizations read (`GetPackageCustomizationsResponseSchema`, `packages/spec/src/api/package-lifecycle.zod.ts`) as overrides, extensions and switched-off items. It does not name the `contributions` member: the fields and flows a package adds to a base-owned object, listed since #28749. It also does not name the `nav` kind that PR #29401 declares ahead of its producer (#28722 Wanted 3).\n\n## Wanted\n\nOne short paragraph naming `contributions`, what each kind's entry carries, and that `counts.contributions` counts items. Mark `nav` as not yet served until #28722 Wanted 3 lands, or write it after that lands. Run the skill's evals if the edited lines are covered.\n\nBlocked-by: #27928 (PR #29401)\n\nReader who acts: the skills lane (GOVERNED_APPROVERS before landing).\n\nDedupe: searched `objectstack-platform customizations contributions skill`. Only #27928 itself came up. **New.**"

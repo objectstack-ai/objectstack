@@ -1,0 +1,36 @@
+{
+  "number": 30043,
+  "kind": "issue",
+  "title": "console AI dock: the chat request names the selected app (activeApp, not the constant 'AI') and the page/record in view (surface) on every surface, the floating dock included (objectstack half of cloud#3564)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T10:13:02Z",
+  "updated_at": "2026-11-04T14:14:22Z",
+  "closed_at": "2026-11-04T14:14:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30043",
+  "body": "repo:cloud#2 · os-zhuang · session_0123kRqqdpAJWYMgsgdAJX4G\n\nFiling gate ①, the objectstack half of objectstack-ai/cloud#3564. That card is a defect measured on staging and production: the AI chat loses the user's app and record context. Its card asked triage to split this half out \"with these facts\". ⛔ Not a claim.\n\n## 维护者速读\n\n聊天框发给 AI 的请求里，`activeApp` 写死成 `'AI'`，而且悬浮聊天框（dock）不带当前页面和记录（`surface`）。所以助手不知道用户正在哪个应用、哪条记录上：问「这条记录的负责人是谁」会被反问「哪条记录」，问「这个应用怎么用」会答成别的应用。本卡只改控制台发出的请求体；agent 怎么用这些上下文是 cloud 那一半（cloud#3564）的事。\n\n## Where (objectstack `main`)\n\n- `ui/packages/app-shell/src/console/ai/AiChatPage.tsx` ~1895: `context: { activeApp: 'AI', … }`, a constant.\n- The same block adds `surface` only when `surfaceContext` exists (cloud#1610). The floating dock's captured request body had no `surface` on an object list page. Measured on staging cloud `419ee51b` / objectstack 18.3.0, by scripting the dock's own body: `{activeApp:\"AI\", agentName:\"build\", autoPublishAiBuilds:true, packageId:\"app.jpph\"}`.\n\n## Do\n\n1. `activeApp` carries the app the person has selected in the dock's app picker (the same value as `packageId` when one is selected), never the literal `'AI'`. With no app selected, omit it. Do not send a placeholder.\n2. Every chat surface, the floating dock included, sends `surface` for the page in view: an object list (the object), a record page (object + record id + record name), or a dashboard or report. Use the existing cloud#1610 shape; do not add a second one.\n3. The value is read per send, so navigating while the dock is open updates it on the next turn.\n\n## Done when\n\n- A unit/component test pins the request body: on a record page, the dock's body carries `surface` with the object and record id and `activeApp` = the selected app. With nothing selected, there is no `activeApp: 'AI'`.\n- `useObjectChat.transportIdentity.test.tsx`'s fixture no longer models `activeApp: 'AI'` as the expected shape.\n- cloud then measures the scenarios on cloud#3564 (10/10 per ask) after a pin round.\n\n## Business reason\n\nThe chat is the trial owner's first surface. It asks 「哪个应用 / 哪条记录」 when the screen already shows both. The maintainer hit this in production (cloud#3564, conversation `conv_582a4d64…`).\n\n## Reader who acts\n\nThe lane owning `ui/packages/app-shell` (console AI).\n\n## Dedupe\n\n- `chat dock activeApp surface context`: 2 hits. #21968 (closed, App.defaultAgent docs) and #6015 (a triage seat thread). Neither is this.\n- `dock request surface record context`: 9 hits, none about the dock's request body."
+}

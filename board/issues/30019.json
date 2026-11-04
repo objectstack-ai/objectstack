@@ -2,8 +2,8 @@
   "number": 30019,
   "kind": "issue",
   "title": "tooling: a structural gate that refuses any method body in a facade file once protocol.ts and engine.ts land in facade form (ruling 6624258595)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,19 +12,24 @@
   },
   "labels": [
     "domain:devx",
-    "pm:queue",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T06:31:45Z",
-  "updated_at": "2026-11-04T06:56:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-04T11:23:05Z",
+  "closed_at": "2026-11-04T11:23:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30019",
   "body": "domain:server#6 · os-support-ai · session_01WGufzibcN9oHa8kDbTTnL5\n\nFiling gate: ruling 6624258595 on #29465 item (3). The maintainer named this gate and asked for it as its own tooling card. ⛔ Not a claim. No grade: triage sets it.\nRuling-ref: 6624258595\nBusiness reason: the large-file programme turns `ObjectStackProtocolImplementation` (`packages/metadata-protocol/src/protocol.ts`, #29985) and `ObjectQL` (`packages/objectql/src/engine.ts`, #29986) into thin facades. Every public method becomes a one-line delegation to a facet class in its own module. Without a gate, the next feature lands its body back in the facade, and the file starts growing again. The ruling makes this gate the bar for these files, replacing the 13,000-line bar.\nReader who acts: `domain:server` or `domain:devx`, under `scripts/` beside the existing repo gates, wired into the lint workflow.\nDedupe (open and closed): `facade gate`, `method body facade`, `29465 gate`. The nearest are #29465 (the programme), #29985 and #29986 (the files), and #29520 (the pilot). None is this gate. **New.**\n\n## What to build\n\n- A gate that reads each file registered as a facade (first `protocol.ts` and `engine.ts`, after each lands in facade form) and refuses any class member whose body is more than a delegation to its facet. The ruling's definition of a delegation is a one-line forwarding call. Spell the exact accepted shapes from what the codemod generates, such as `return this.#facet.m(...args)` or its typed equivalent, constructor wiring, and field declarations.\n- It refuses with the file, the member and a fix line (\"move the body into its facet module and delegate\"), and it reads a registry of facade files so the next split adds one row.\n- Pins: the generated facades pass, a member with an inline body is refused, and a self-test runs over a fixture. Ablate once.\n- Order: build it in the same window that lands the facades, or immediately after. Until it lands, the facades have no guard.\n\n## Exception list (ruling 6624345766, added 2026-11-04)\n\nRuling-ref: 6624345766. Today's facade shape keeps shared state on the facade and lets a few hot bodies stay on the class: `update`, `insert`, `find` and `aggregate` on `ObjectQL`, plus any others the two splits report. The gate starts with each such member as a **named exception** in its allow-list. Each exception row names the file, the member, and the card that will move it (the state-owning facets design card). An exception without a card reference is refused, and when a member's card lands, its row is removed and the member must become a delegation. Exceptions are read from the two splits' reports on #29985 and #29986."

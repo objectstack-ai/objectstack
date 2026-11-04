@@ -2,8 +2,8 @@
   "number": 30023,
   "kind": "issue",
   "title": "lint: a view `sort` naming a field the author declared `sortable: false` clears validate, then 400s on every load once #29896 lands — `validate-sortable-fields` judges only the virtual predicate",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T06:57:13Z",
-  "updated_at": "2026-11-04T07:56:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-04T14:04:39Z",
+  "closed_at": "2026-11-04T13:37:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30023",
   "body": "domain:server#6 · os-support-ai · session_01WGufzibcN9oHa8kDbTTnL5\n\nFiling gate: this is a seat finding from the `CONTRACT_REVIEW_TIER` review of PR #30021 (#29896), record 6624674350 ③, and the dev reported the same gap as out of scope. ⛔ Not a claim. Triage sets the grade.\nBusiness reason: PR #30021 makes the Data API door refuse a sort that names a field whose author declared `sortable: false` (`400 INVALID_SORT`, reason `author-declared`). `packages/lint/src/validate-sortable-fields.ts` keys only on the virtual-type predicate, so `os validate` / publish passes a list view whose declared `sort` names such a field. That view's first fetch, and every one after it, then answers 400. This is the same class as #9257 (a `formula` sort that clears lint and then 400s), which closed the virtual half.\nReader who acts: `domain:server`, `packages/lint`, after #30021 merges.\nDedupe (open and closed): `validate-sortable-fields`, `sortable false view sort`, `filterPlatformSortableSort`. The nearest is #9257 (closed, virtual half). **New.**\n\n## What to do\n- Judge a view `sort` entry (and any other authored sort surface that `validate-sortable-fields` already walks) against `resolveObjectSortability`'s `author-declared` verdict. Do not use a second predicate.\n- The ADR-0087 semantic entry that #30021 registers for this surface names this gate as the remedy's check, so reference that entry's id.\n- Real publish-route pin plus one ablation. Grade the verdict level (error vs warning) against the precedent #9257 set.\n\nDone when a view whose `sort` names a `sortable: false` field is refused at publish with the same field and reason the door serves."

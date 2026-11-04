@@ -1,0 +1,31 @@
+{
+  "number": 30110,
+  "kind": "issue",
+  "title": "pm/fleet-write: the relay publishes a security advisory on the maintainer's list: reopen, set the affected and patched versions, publish",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T14:09:08Z",
+  "updated_at": "2026-11-04T14:10:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30110",
+  "body": "security#1 · os-justin · session_01QSeKYn5CmmdShCJifm6WYj\n\n## What\n\nThe fleet-write relay (`scripts/pm/fleet-write/ops.mjs`, `execute.mjs`, `validate.mjs`) refuses `published` by name. `ADVISORY_REFUSED_STATES` says \"publishing stays with the maintainer, by hand, and no relay row reaches it\", and `ADVISORY_TRANSITIONS` allows only `triage → draft` and `triage|draft → closed`.\n\nThe maintainer has ruled that the relay must be able to publish.\n\n## The ruling\n\nThe maintainer, in session `session_01QSeKYn5CmmdShCJifm6WYj` on 2026-11-04, was told that the relay does not allow an advisory to be set to published, so the seat had handed the maintainer a list to publish by hand. The answer:\n\n> 中继不允许把公告设为已发布 ，立卡解决\n\nThis supersedes the \"发布留给我\" clause of the #29160 scope that the `ops.mjs` header quotes. Record both verbatim, the old clause as superseded.\n\nThe standing rule that decides WHAT is published is unchanged: 「哪些高危要发布应该在我版本发布前决策吧」. The maintainer decides the list before each release. The relay only carries out a list the maintainer has approved.\n\n## What a publish needs on the platform (to be measured, not assumed)\n\nA fixed advisory in this repository is `closed` once its fix merges, by standing order. Publishing one needs three steps:\n\n1. **Reopen.** `closed → draft`. Measure whether the REST `PATCH …/security-advisories/{id}` accepts it.\n2. **Set the versions.** Each `vulnerabilities` entry carries `vulnerable_version_range` (e.g. `<= 18.2.0`) and `patched_versions` (e.g. `18.3.0`). Today a draft names its packages and nothing else (`advisory_create`).\n3. **Publish.** `draft → published`.\n\nMeasure which of these the App token's `repository-advisories: write` grant can do, and whether the platform needs the versions before it publishes.\n\n## Acceptance\n\n- `advisory_state` gains `closed → draft` and `draft → published`. Every other transition stays refused: from `published`, and from `withdrawn`. Each transition is judged on the executor's own GET, as today.\n- One new row sets ONLY the `vulnerabilities` entries' `package`, `vulnerable_version_range` and `patched_versions`.\n  - These are closed, shape-checked keys: an npm package name, and a semver range or version list.\n  - The row carries no prose and travels alone, like the other advisory rows.\n  - ⛔ Editing an advisory's summary or description stays out of reach of every row.\n- A publish stroke carries one advisory alone.\n  - The run annotation names the id. That is public once published, which is the point.\n  - The executor reads the advisory back as `published`, with the versions it was sent.\n- `ADVISORY_REFUSED_STATES` loses `published`. The header prose, the row comments, the self-tests in `validate.mjs` and `execute.mjs`, and the \"⛔ published is reachable by NO row\" pins all move with the ruling.\n  - An unknown state or transition still fails closed.\n- `.claude/skills/pm-dispatch/references/lanes/security.md` and `security-findings.md` say:\n  - the seat publishes through the relay only advisories on the maintainer's approved list for that release;\n  - the seat sets the versions first, then publishes;\n  - the seat records the run ids on the seat post (ids only, no text).\n- After merge, one live publish of an advisory the maintainer has approved, with the run id recorded here.\n\n## Out of bounds\n\n- ⛔ No advisory text, mechanism or unpublished advisory id in the PR, the commits or the changeset.\n- ⛔ No CVE request, no temporary private fork, and no collaborator removal: they stay out of reach, as today.\n- ⛔ The sender gate stays `target-write`, the gate every advisory row keeps.\n- If the App token cannot reopen or publish, that is a fork for the maintainer, never a widened grant."
+}
