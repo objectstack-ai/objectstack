@@ -20,6 +20,18 @@
  *
  * Nothing stays behind in this section: every member of it moved.
  *
+ * ## A driver is handed the declared driver options and nothing else
+ *
+ * Since the move, this module also owns the engine → driver hop's key set:
+ * `declaredDriverOptionKeys` (the keys `DriverOptionsSchema` declares),
+ * `pickDeclaredDriverOptions` (a bag cut to those keys — what
+ * `buildDriverOptions` now returns, and what the engine's raw `execute` hands
+ * its driver) and `mergeDriverOptionsIntoHookView` (the `after*` hook view of
+ * `input.options`, which stays the caller's bag with the driver options merged
+ * on). The engine builds the driver's options with `buildDriverOptions` and
+ * hands a driver that object; the merged view goes to hooks, never to a
+ * driver.
+ *
  * ## The transaction seam's same-origin half (ADR-0119, ADR-0067)
  *
  * `buildDriverOptions` threads the open transaction handle only to the driver
@@ -46,7 +58,7 @@
  * move.
  */
 
-import { isTenancyDisabled } from '@objectstack/spec/data';
+import { DriverOptionsSchema, isTenancyDisabled } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import {
   // [ADR-0131 D8] The ONE tenant read predicate, shared with plugin-security's
@@ -93,6 +105,85 @@ export interface DriverOptionsHost {
 function accessibleOrganizationsOf(execCtx: ExecutionContext | undefined): string[] | undefined {
   const set = (execCtx as { accessible_org_ids?: unknown } | undefined)?.accessible_org_ids;
   return Array.isArray(set) && set.length > 0 ? set.map(String) : undefined;
+}
+
+/**
+ * Does this shape member admit only absence? That is a `retiredKey()`
+ * tombstone (`z.never()` under its `.optional()`): declared so the removal is
+ * audible, never a key a driver is handed. Structural, as the spec's own
+ * `acceptsNothing` walker reads it, so it holds however the tombstone helper is
+ * spelled.
+ */
+function admitsOnlyAbsence(member: unknown, depth = 0): boolean {
+  if (depth > 6) return false;
+  const def = (member as { _zod?: { def?: { type?: string; innerType?: unknown } } } | undefined)?._zod?.def;
+  if (!def?.type) return false;
+  if (def.type === 'never') return true;
+  return def.type === 'optional' || def.type === 'nullable' || def.type === 'default' || def.type === 'readonly'
+    ? admitsOnlyAbsence(def.innerType, depth + 1)
+    : false;
+}
+
+let declaredDriverOptionKeysMemo: ReadonlySet<string> | undefined;
+
+/**
+ * The option keys a driver is handed: the ones `DriverOptionsSchema` declares,
+ * minus its tombstones. Read off the schema on first use (it is lazy) and never
+ * restated here, so a key the spec declares reaches every driver with no edit
+ * in this file, and a key it does not declare reaches none.
+ */
+export function declaredDriverOptionKeys(): ReadonlySet<string> {
+  if (declaredDriverOptionKeysMemo === undefined) {
+    const shape = DriverOptionsSchema.shape as Record<string, unknown>;
+    declaredDriverOptionKeysMemo = new Set(Object.keys(shape).filter((key) => !admitsOnlyAbsence(shape[key])));
+  }
+  return declaredDriverOptionKeysMemo;
+}
+
+/**
+ * The engine → driver hop: a copy of `bag` holding its declared driver-option
+ * keys ({@link declaredDriverOptionKeys}) and nothing else, or `undefined` when
+ * there is no bag. Copied as a spread copies (own enumerable keys), so a
+ * declared key keeps exactly the value it had.
+ *
+ * A caller's option bag is not a driver option bag: it carries the query, the
+ * write-observability callbacks and the other engine-level keys of its
+ * `Engine*Options` contract, which the engine reads and the driver contract
+ * never declared. They are dropped here without a sound — the caller's bag was
+ * already judged at the engine's own door, so nothing dropped here is the
+ * caller's mistake.
+ */
+export function pickDeclaredDriverOptions(bag: unknown): Record<string, unknown> | undefined {
+  if (bag === null || typeof bag !== 'object') return undefined;
+  const source = bag as Record<string, unknown>;
+  const picked: Record<string, unknown> = {};
+  for (const key of declaredDriverOptionKeys()) {
+    if (Object.prototype.propertyIsEnumerable.call(source, key)) picked[key] = source[key];
+  }
+  return picked;
+}
+
+/**
+ * `input.options` once the driver options are built — the `after*` phase of
+ * the HookContext PHASE contract (`hook.zod.ts`): the caller's bag with the
+ * driver options merged on. ADDITIVE, as that contract states: every key the
+ * caller's bag carried stays readable to a hook. This view is the hooks', and
+ * only the hooks': the driver is handed `driverOptions` itself.
+ *
+ * Answers the caller's own bag, the same object, when the driver options add
+ * nothing to it, and `driverOptions` when there is no caller bag.
+ */
+export function mergeDriverOptionsIntoHookView(
+  callerBag: unknown,
+  driverOptions: Record<string, unknown> | undefined,
+): unknown {
+  if (driverOptions === undefined) return callerBag;
+  if (callerBag === null || typeof callerBag !== 'object') return driverOptions;
+  const bag = callerBag as Record<string, unknown>;
+  const addsNothing = Object.keys(driverOptions).every(
+    (key) => Object.prototype.propertyIsEnumerable.call(bag, key) && bag[key] === driverOptions[key],
+  );
+  return addsNothing ? callerBag : { ...bag, ...driverOptions };
 }
 
 /** The body of `ObjectQL#buildDriverOptions`; the method's docblock there is its contract. */
@@ -161,8 +252,13 @@ export function buildDriverOptions(
     tenantObject && isTenantAuditInScope && !scope.writeTarget &&
     this.wallExemptedOperation(execCtx, scope.recordedVerdict);
   const preserveAudit = (execCtx as any)?.preserveAudit === true;
-  if (!hasTx && !hasTenant && !isSystem && !hasTz && !preserveAudit && !wallExempt) return base;
-  const opts: any = base && typeof base === 'object' ? { ...base } : {};
+  // A driver is handed the keys `DriverOptionsSchema` declares and nothing
+  // else: the declared keys of `base` (a caller's explicit `tenantId` /
+  // `bypassTenantAudit` / `transaction` still win below), never the rest of
+  // the bag it rode in on. See {@link pickDeclaredDriverOptions}.
+  const declared = pickDeclaredDriverOptions(base);
+  if (!hasTx && !hasTenant && !isSystem && !hasTz && !preserveAudit && !wallExempt) return declared;
+  const opts: any = declared ?? {};
   if (hasTx && opts.transaction === undefined) {
     opts.transaction = tx;
   }

@@ -883,9 +883,11 @@ export const HookContextSchema = lazySchema(() => z.object({
    * handlers return — before the driver call — merges the driver-facing keys
    * onto it (`buildDriverOptions`: transaction, tenantId, timezone, …). So a
    * `before*` handler reads the CALLER's bag, `where` and `multi` included; an
-   * `after*` handler and the driver read the `DriverOptions` view. The merge is
+   * `after*` handler reads the merged view. The merge is
    * ADDITIVE — it spreads the caller's bag and adds keys, never strips one — so
    * the widening is one-way and nothing a `before*` handler saw disappears.
+   * The merged view is the hooks', not the driver's: a driver is handed the
+   * keys `DriverOptionsSchema` declares and nothing else.
    * #5997 corrected the two `before` envelope rows above, which had said `DriverOptions`
    * (a type that declares no `where` and no `multi`): that is not what the
    * engine builds there, and not what the two consumers named below read.
