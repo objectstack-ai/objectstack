@@ -217,12 +217,14 @@ describe('AppPlugin per-org replayer replays the live union (#3453 seam)', () =>
             'crm_contact',
             'hot_lead',
         ]);
-        // Tenant-scoped, upsert, multi-pass — as the org replay requires.
+        // Tenant-scoped, multi-pass — as the org replay requires. No mode of
+        // its own: each dataset replays in the mode it declares, the spec
+        // default (create-only) when it declares none (#30081).
         expect(loadCalls[0].config).toMatchObject({
-            defaultMode: 'upsert',
             multiPass: true,
             organizationId: 'org_fresh',
         });
+        expect(loadCalls[0].config).not.toHaveProperty('defaultMode');
         expect(result).toMatchObject({ inserted: 3 });
     });
 
