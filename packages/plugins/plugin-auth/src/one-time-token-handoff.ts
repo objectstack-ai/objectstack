@@ -427,16 +427,21 @@ export async function resolveHandoffSignInEntry(source: {
 
   const headers = new Headers({ accept: 'text/html' });
   if (source.requestHost) headers.set('host', source.requestHost);
-  const answer = await source.dispatch(new Request(new URL(localPath, source.requestUrl), { headers }));
+  let answer: Response;
+  try {
+    answer = await source.dispatch(new Request(new URL(localPath, source.requestUrl), { headers }));
+  } catch (error) {
+    source.onUnserved(localPath, `asking for it threw: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
   const served = answer.status === 200 && (answer.headers.get('content-type') ?? '').toLowerCase().startsWith('text/html');
-  const reason = `it answers ${answer.status}`;
   try {
     await answer.body?.cancel();
   } catch {
     // The body is never read; a stream that cannot be cancelled changes nothing.
   }
   if (!served) {
-    source.onUnserved(localPath, reason);
+    source.onUnserved(localPath, `it answers ${answer.status}`);
     return null;
   }
   return { signInPage, handoff: `${authBase}${ONE_TIME_TOKEN_HANDOFF_PATH}` };

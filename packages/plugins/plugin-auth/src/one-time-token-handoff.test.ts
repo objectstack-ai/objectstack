@@ -619,6 +619,14 @@ describe('resolveHandoffSignInEntry', () => {
     expect(await resolveHandoffSignInEntry(inputs)).toBeNull();
     expect(inputs.onUnserved).toHaveBeenCalledWith('/_console/login', 'it answers 404');
   });
+
+  it('a server that throws when asked is a page it does not serve, not a failed hand-off', async () => {
+    const inputs = source(() => {
+      throw new Error('boom');
+    });
+    expect(await resolveHandoffSignInEntry(inputs)).toBeNull();
+    expect(inputs.onUnserved).toHaveBeenCalledWith('/_console/login', 'asking for it threw: boom');
+  });
 });
 
 describe('one-time-token hand-off — the request is validated before anything is minted', () => {
