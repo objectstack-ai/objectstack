@@ -67,7 +67,7 @@ export function narrowedFlagNote(command: string, objects: readonly string[], ap
  * Refuse every `--object` name the booted registry does not declare, before
  * anything is scanned or written.
  *
- * Throws the `OBJECT_NOT_FOUND` envelope (`code`, `status` and `httpStatus` 404, `object`
+ * Throws the `OBJECT_NOT_FOUND` envelope (`code`, `status: 404`, `object`
  * naming the first unknown name). Its message names every unknown name and the
  * declared objects, sorted.
  */
@@ -80,10 +80,7 @@ export function refuseUndeclaredObjects(
   const unknown = [...new Set(requested.filter((name) => !known.has(name)))];
   if (unknown.length === 0) return;
 
-  const error = objectNotFoundError(unknown[0]) as Error & { httpStatus?: number };
-  // ADR-0112 D5's spelling of the same 404, the one a command's `--json` envelope reads
-  // (`errorCodeFields`): without it the envelope carried the code and dropped the status.
-  error.httpStatus = 404;
+  const error = objectNotFoundError(unknown[0]);
   const names = unknown.map((name) => `'${name}'`).join(', ');
   const declaredList = [...known].sort();
   error.message =

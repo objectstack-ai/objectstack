@@ -156,7 +156,9 @@ describe('os migrate recompute-home-amounts', () => {
     const err = await MigrateRecomputeHomeAmounts.run(['--json', '--object', 'nope'], { root: CLI_ROOT }).catch((e: unknown) => e);
     expect(exitOf(err)).toBe(1);
     expect(vi.mocked(recomputeHomeAmounts)).not.toHaveBeenCalled();
-    expect(json()).toMatchObject({ code: 'OBJECT_NOT_FOUND', httpStatus: 404 });
+    // The shared refusal's envelope carries the code alone (its key set is pinned in
+    // object-scope.integration.test.ts); the exit code is asserted above.
+    expect(json()).toMatchObject({ code: 'OBJECT_NOT_FOUND' });
   }, RUN_TIMEOUT);
 
   it('a listed and skipped row keeps the exit code at 1, on a dry run and on an apply run (Open item 8)', async () => {

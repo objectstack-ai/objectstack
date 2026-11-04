@@ -21,7 +21,9 @@ import { describeOccupancy, JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-
 import { describeDriverSqliteFile } from '../../utils/connection-display.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
 import { refuseUndeclaredObjects } from '../../utils/migrate-object-scope.js';
-// Type-only, so the heavy engine package is still loaded lazily below.
+// Type-only: the engine package is imported dynamically inside run(), first for the `--since`
+// check (before the probe, the prompt and the boot), never at module load, so `os --help` and
+// every other command pay nothing for it.
 import type { HomeAmountRecomputeEngine } from '@objectstack/objectql';
 
 async function confirm(question: string): Promise<boolean> {
