@@ -83,7 +83,17 @@ const DELEGATE_SETS = [
   delegateHiding('qa_delegate_holder_hidden', { 'sys_user_permission_set.user_id': HIDDEN }),
   delegateHiding('qa_delegate_set_hidden', { 'sys_user_permission_set.permission_set': HIDDEN }),
 ];
-const PERMISSIONS = [...defaultPermissionSets, QA_IN_SET, ...DELEGATE_SETS];
+/**
+ * Field rules alone, held beside `organization_admin` by an organization
+ * administrator: the two columns its removals are judged on, hidden from its reads.
+ */
+const ORG_ADMIN_FIELDS_HIDDEN = {
+  name: 'qa_org_admin_fields_hidden',
+  label: 'QA organization administrator, columns hidden',
+  objects: {},
+  fields: { 'sys_user_position.position': HIDDEN, 'sys_user_permission_set.permission_set': HIDDEN },
+};
+const PERMISSIONS = [...defaultPermissionSets, QA_IN_SET, ...DELEGATE_SETS, ORG_ADMIN_FIELDS_HIDDEN];
 
 type Posture = 'single' | 'group' | 'isolated';
 const POSTURES: Posture[] = ['single', 'group', 'isolated'];
@@ -649,7 +659,7 @@ describe("[ADR-0090 D12; ruling of record 5985885287] a delegated administrator'
   });
 });
 
-describe('[ADR-0090 D12; ruling of record 5985885287] a delegated administrator\'s refusal names a value only when the caller reads it, or wrote it; the verdict is still the stored row\'s', () => {
+describe('[ADR-0090 D12; ruling of record 5985885287] an administrator\'s refused assignment write names a value only when the caller reads it, or wrote it', () => {
   /**
    * One row of organization A per hidden column, each outside the `a_ops`
    * scope on the axis that column decides — the hidden values it carries, and
@@ -667,7 +677,7 @@ describe('[ADR-0090 D12; ruling of record 5985885287] a delegated administrator\
   ] as const;
 
   for (const posture of POSTURES) {
-    it(`posture '${posture}': a column the caller's field rules hide is judged on its stored value and never named in the refusal; the delegate who reads it is told the value`, async () => {
+    it(`posture '${posture}': a column the caller's field rules hide is never named in the refusal, and a delegate is still judged on its stored value; an administrator who reads it is told the value`, async () => {
       const h = await boot(posture);
       await seedDelegation(h);
       for (const c of CASES) {
@@ -694,6 +704,25 @@ describe('[ADR-0090 D12; ruling of record 5985885287] a delegated administrator\
         { where: { id: 'out_by_unit' }, context: structuredClone(HIDING.unit) } as any));
       expect([rewrote.status, rewrote.code], rewrote.message).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
       expect(rewrote.message).toContain("'bu_a_other'");
+
+      // The organization branch holds the same rule: an organization
+      // administrator whose field rules hide the column a removal is judged
+      // on is refused without its value; one who reads it is told it.
+      const orgAdminHiding = { userId: 'u_org_admin_hiding', positions: [] as string[], permissions: ['organization_admin', ORG_ADMIN_FIELDS_HIDDEN.name], tenantId: ORG_A, accessible_org_ids: [ORG_A] };
+      await h.engine.insert('sys_member', { id: 'm_u_org_admin_hiding', user_id: orgAdminHiding.userId, organization_id: ORG_A, role: 'admin' },
+        { context: { isSystem: true, tenantId: ORG_A } } as any);
+      for (const table of Object.keys(TABLES) as Table[]) {
+        const id = `org_out_${table}`;
+        await h.engine.insert(table, { id, user_id: 'u_seeded', ...TABLES[table].out, organization_id: ORG_A },
+          { context: { isSystem: true, tenantId: ORG_A } } as any);
+        const hiddenTo = await write(h, table, 'delete', id, orgAdminHiding);
+        expect([hiddenTo.status, hiddenTo.code], `${table}: ${hiddenTo.message}`).toEqual([403, 'PERMISSION_DENIED']);
+        expect(JSON.stringify(hiddenTo), `${table}: no hidden value in the refusal`).not.toMatch(/qa_out_pos|admin_full_access/);
+        const readTo = await write(h, table, 'delete', id, CALLERS.orgAdmin);
+        expect([readTo.status, readTo.code], `${table}, read: ${readTo.message}`).toEqual([403, 'PERMISSION_DENIED']);
+        expect(readTo.message, `${table}, read`).toContain("'admin_full_access'");
+        expect(await stored(h, table, { id }), `${table}: refused means untouched`).toHaveLength(1);
+      }
     });
   }
 });
