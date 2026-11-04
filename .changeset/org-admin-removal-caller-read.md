@@ -11,4 +11,4 @@ An organization administrator (`organization_admin` or `organization_admin_no_by
 
 - **A row the administrator cannot read** is answered exactly as an id that names no row is: the read door's `404 RECORD_NOT_FOUND` for that object and id.
 - **A row the administrator can read** keeps the answer it had, including the guidance that names the organization boundary.
-- **Unchanged.** An edit in place is refused as before, every removal that was admitted is still admitted, and a tenant-level administrator is judged as before.
+- **Unchanged.** An edit in place of a row it reads is refused as before, every removal that was admitted is still admitted, and a tenant-level administrator is judged as before.

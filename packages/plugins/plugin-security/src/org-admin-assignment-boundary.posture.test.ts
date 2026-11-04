@@ -26,7 +26,8 @@
  * and a delegate whose read of the two tables is refused outright is answered
  * that read refusal; rows it reads keep their verdict and their guidance, in
  * every posture. Last, a refusal names a stored value only when the caller
- * reads it or wrote it, in every posture.
+ * reads it or wrote it, in every posture — a column a field rule hides and a
+ * column a masking rule partially masks alike.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -40,6 +41,7 @@ import { SecurityPlugin } from './security-plugin.js';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { defaultPermissionSets } from './objects/index.js';
+import { maskFieldValue } from './field-masker.js';
 
 const SYS = { isSystem: true } as const;
 const ORG_A = 'org_a';
@@ -124,7 +126,14 @@ afterEach(async () => {
   }
 });
 
-async function boot(posture: Posture) {
+/**
+ * `boot`'s one variation: a partial masking rule declared on
+ * `sys_user_position.position` (a rule, not a field rule's `readable: false`),
+ * which serves every non-system reader the masked value in place of the stored one.
+ */
+type BootOptions = { positionMaskingRule?: { keepHead: number; keepTail: number } };
+
+async function boot(posture: Posture, options: BootOptions = {}) {
   const engine = new ObjectQL();
   engine.registerDriver(
     new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }),
@@ -137,7 +146,12 @@ async function boot(posture: Posture) {
     version: '1.0.0',
     type: 'plugin',
     scope: 'system',
-    objects: [SysUserPosition, SysUserPermissionSet, SysMember, SysBusinessUnit, SysBusinessUnitMember],
+    objects: [
+      options.positionMaskingRule
+        ? { ...SysUserPosition, fields: { ...SysUserPosition.fields, position: { ...SysUserPosition.fields.position, maskingRule: options.positionMaskingRule } } }
+        : SysUserPosition,
+      SysUserPermissionSet, SysMember, SysBusinessUnit, SysBusinessUnitMember,
+    ],
   } as any);
   await engine.syncSchemas();
   // `sys_user` registered and unprovisioned, as in the sibling suites: the
@@ -725,4 +739,39 @@ describe('[ADR-0090 D12; ruling of record 5985885287] an administrator\'s refuse
       }
     });
   }
+
+  it("a partially masked column is never named either — neither its masked nor its stored value — and the delegate is still judged on the stored value", async () => {
+    const rule = { keepHead: 3, keepTail: 0 };
+    const h = await boot('isolated', { positionMaskingRule: rule });
+    await seedDelegation(h);
+    const inA = { context: { isSystem: true, tenantId: ORG_A } } as any;
+    // Outside the scope only by its position, whose stored value distributes a set off the allowlist.
+    await h.engine.insert('sys_user_position',
+      { id: 'masked_out', user_id: 'u_in_0', position: 'qa_out_pos', business_unit_id: 'bu_a_ops', organization_id: ORG_A }, inA);
+    // Inside the scope by its stored position, which the caller reads masked too.
+    await h.engine.insert('sys_user_position',
+      { id: 'masked_in', user_id: 'u_in_1', position: 'qa_in_pos', business_unit_id: 'bu_a_ops', organization_id: ORG_A }, inA);
+
+    const masked = String(maskFieldValue('qa_out_pos', rule));
+    const seen = await h.engine.findOne('sys_user_position', { where: { id: 'masked_out' }, context: structuredClone(DELEGATES.delegate) });
+    expect(seen?.position, 'the delegate reads the position masked, not deleted').toBe(masked);
+    expect(masked, 'and the masked value is not the stored one').not.toBe('qa_out_pos');
+
+    for (const op of ['update', 'delete'] as const) {
+      const r = await write(h, 'sys_user_position', op, 'masked_out', DELEGATES.delegate);
+      // The stored position is what is judged: its sets are off the allowlist, so it is refused.
+      expect([r.status, r.code], `${op}: ${r.message}`).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
+      for (const value of [masked, 'qa_out_pos', 'admin_full_access']) {
+        expect(JSON.stringify(r), `${op}: '${value}' is not in the refusal`).not.toContain(value);
+      }
+    }
+    expect(await stored(h, 'sys_user_position', { id: 'masked_out' }), 'refused means untouched').toHaveLength(1);
+
+    // ...and a stored position inside the scope is admitted, whatever the read showed.
+    for (const op of ['update', 'delete'] as const) {
+      const r = await write(h, 'sys_user_position', op, 'masked_in', DELEGATES.delegate);
+      expect(r, `${op}: ${r.message}`).toEqual({ status: 200 });
+    }
+    expect(await stored(h, 'sys_user_position', { id: 'masked_in' }), 'the delete landed').toHaveLength(0);
+  });
 });
