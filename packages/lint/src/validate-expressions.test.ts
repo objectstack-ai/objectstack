@@ -1187,6 +1187,83 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       ]);
     });
 
+    // [#30025] A screen's resume lands its collected values under their plain
+    // names (`applyResumeSignal`), over the flattened field: a bare `title`
+    // downstream reads the NUMBER the screen collected, and `title > 5` runs.
+    // Where a node can bind a name no reader sees (`script` here, a screen with
+    // no input contract), a bare name is not proven to be the field: the verdict
+    // is the run-may-fail warning. `record.title` is the field either way.
+    describe('a bare name a screen or an open binder can hold (#30025)', () => {
+      const rtFlow = (name: string, mid: Record<string, unknown>): Record<string, unknown> => ({
+        name,
+        nodes: [
+          { id: 'start', type: 'start', config: { objectName: 'crm_opportunity', triggerType: 'record-after-update' } },
+          mid,
+          { id: 'route', type: 'decision', config: { conditions: [{ label: 'Big', expression: 'title > 5' }, { label: 'Long', expression: 'record.title > 5' }] } },
+          { id: 'end', type: 'end' },
+        ],
+        edges: [
+          { id: 'e1', source: 'start', target: 'mid' },
+          { id: 'e2', source: 'mid', target: 'route', condition: 'title > 5' },
+          { id: 'e3', source: 'route', target: 'end', label: 'Big' },
+          { id: 'e4', source: 'route', target: 'end', label: 'Long' },
+        ],
+      });
+      const objects = [{ name: 'crm_opportunity', fields: { title: { type: 'text', required: true } } }];
+      const longBranch = (flow: string): string =>
+        `flow '${flow}' · node 'route' (decision) decision branch expression at config.conditions[1].expression`;
+
+      it('does not type a bare name a screen field holds as the field it shadows', () => {
+        const issues = validateStackExpressions({
+          objects,
+          flows: [rtFlow('rt_screen', { id: 'mid', type: 'screen', config: { fields: [{ name: 'title', type: 'number', label: 'Title' }] } })],
+        });
+        const found = typeMismatches(issues);
+        expect(found.map(i => [i.where, i.severity])).toEqual([[longBranch('rt_screen'), 'error']]);
+        expect(found[0]!.message).toContain('`record.title` holds text');
+      });
+
+      it('warns, does not refuse, a bare-name mismatch after a node that can bind any name', () => {
+        for (const [flow, mid] of [
+          ['rt_script', { id: 'mid', type: 'script', config: { function: 'calc' } }],
+          ['rt_formscreen', { id: 'mid', type: 'screen', config: { kind: 'object-form', objectName: 'crm_opportunity' } }],
+        ] as const) {
+          const issues = validateStackExpressions({ objects, flows: [rtFlow(flow, mid)] });
+          const found = typeMismatches(issues);
+          expect(found.map(i => [i.where, i.severity]), flow).toEqual([
+            [`flow '${flow}' · node 'route' (decision) decision branch expression at config.conditions[0].expression`, 'warning'],
+            [longBranch(flow), 'error'],
+            [`flow '${flow}' · edge 'e2' (mid→route) condition`, 'warning'],
+          ]);
+          for (const i of found.filter(f => f.severity === 'warning')) {
+            expect(i.message, `${flow} ${i.where}`).toContain('which this check cannot prove here, so this is a warning, not a refusal');
+          }
+        }
+      });
+
+      it('leaves the null-guard twin silent on a bare name a screen field holds', () => {
+        const flow = (name: string, fields: unknown[]) => ({
+          name,
+          nodes: [
+            { id: 'start', type: 'start', config: { objectName: 'crm_opportunity', triggerType: 'record-after-update' } },
+            { id: 'mid', type: 'screen', config: { fields } },
+            { id: 'end', type: 'end' },
+          ],
+          edges: [{ id: 'e1', source: 'start', target: 'mid' }, { id: 'e2', source: 'mid', target: 'end', condition: 'budget > 100' }],
+        });
+        const nullable = (issues: ReturnType<typeof validateStackExpressions>) =>
+          issues.filter(i => /declares as nullable/.test(i.message)).map(i => [i.where, i.severity]);
+        const budgetObjects = [{ name: 'crm_opportunity', fields: { budget: { type: 'number' } } }];
+        expect(nullable(validateStackExpressions({
+          objects: budgetObjects, flows: [flow('ng_screen', [{ name: 'budget', type: 'number', label: 'Budget' }])],
+        }))).toEqual([]);
+        // Control: a screen collecting another name leaves `budget` the field, refused.
+        expect(nullable(validateStackExpressions({
+          objects: budgetObjects, flows: [flow('ng_other', [{ name: 'note', type: 'text', label: 'Note' }])],
+        }))).toEqual([["flow 'ng_other' · edge 'e2' (mid→end) condition", 'error']]);
+      });
+    });
+
     it('keeps the warning on an inert node condition of a record-triggered flow (#29926)', () => {
       const issues = validateStackExpressions({
         objects: [{ name: 'crm_opportunity', fields: { title: { type: 'text', required: true } } }],
@@ -4128,10 +4205,14 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // tabled receivers (`rule.severity`) — never read off metadata itself.
       'site',
       // [#29959] A `decision` branch's flow-condition hint (`objectName`,
-      // `faultOutcome`, `flowVariables`), built at the call site from the
+      // `faultOutcome`, `flowBare`), built at the call site from the
       // walk's own `objectName`, the ledger's answer and the flow's bound
       // names — never read off metadata itself.
       'flowCondition',
+      // [#30025] One flow's bare-name facts (`variables`, `unproven`), built
+      // from the flow's collected names and the root judge's `provable`, and
+      // its screen-field name set (Set methods) — never read off metadata.
+      'flowBare', 'screenFields',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });

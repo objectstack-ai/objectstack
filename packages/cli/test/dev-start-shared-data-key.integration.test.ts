@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 20 — spawns the real producer once per single-cause fixture: two boots in one beforeAll, `os dev` then `os start` over one project; first reading 11.6 s on a shared local box (no CI reading yet) x 1.25, rounded up
+// test-budget: 40 — spawns the real producer once per single-cause fixture: `os dev` then `os start` over one project, then two `os start` boots over that project's two key files (one reads back, one refuses); reading 24.3 s for the four boots on a shared local box (no CI reading yet) x 1.25, rounded up to the next 10 s
 
 /**
  * #29934 — a secret saved under `os dev` reads back under `os start` over the
@@ -37,7 +37,8 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -124,6 +125,7 @@ function boot(what: string, args: string[]): Promise<Live> {
         OS_DEV_CRYPTO_KEY: undefined,
         OBJECTSTACK_DEV_CRYPTO_KEY: undefined,
         OS_INTERNAL_CRYPTO_KEY_FILE: undefined,
+        OS_INTERNAL_CRYPTO_KEY_FILE_CANDIDATE: undefined,
         OS_HOME: undefined,
         OBJECTSTACK_HOME: undefined,
         OS_DATABASE_URL: undefined,
@@ -286,5 +288,98 @@ describe('#29934 — `os dev` and `os start` share one data key for one project'
     recorded();
     expect(existsSync(join(home, '.objectstack', 'dev-crypto-key'))).toBe(true);
     expect(existsSync(join(dir, '.objectstack', 'dev-crypto-key'))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #30042 — two key files: `os start` reads with the one that opens the secrets
+// ---------------------------------------------------------------------------
+
+/**
+ * The card's case 1, at the public door, on the project the boots above left:
+ * its database holds the secret sealed under `$HOME/.objectstack/dev-crypto-key`.
+ * Moving that file to `<project>/.objectstack/dev-crypto-key` and writing a
+ * DIFFERENT key at the home path is exactly a project that only ever ran
+ * `os start` before #29934 (its key in the project), on a machine whose home
+ * holds a key from `os dev` in another project. `os start` must read the secret
+ * back with the project's key. Then a third key in the project's place, so
+ * neither file opens anything: `os start` (a production boot) must refuse,
+ * naming both files.
+ */
+interface TwoKeyReading {
+  get?: { status: number; body: any };
+  chosen?: string;
+  refusal?: string;
+  transcript?: string;
+  error?: Error;
+}
+let twoKeys: TwoKeyReading = {};
+
+const writeForeignKey = (file: string) => {
+  mkdirSync(join(file, '..'), { recursive: true });
+  writeFileSync(file, randomBytes(32).toString('base64'), { mode: 0o600 });
+};
+
+describe('#30042 — two key files: the boot takes the one that opens the stored secrets', () => {
+  const homeKey = () => join(home, '.objectstack', 'dev-crypto-key');
+  const projectKey = () => join(dir, '.objectstack', 'dev-crypto-key');
+
+  beforeAll(async () => {
+    let live: Live | undefined;
+    try {
+      recorded();
+      renameSync(homeKey(), projectKey());
+      writeForeignKey(homeKey());
+      live = await boot('os start (two keys)', ['start', '--artifact', './dist/objectstack.json', '--port', KERNEL_ASSIGNED_PORT]);
+      const token = await signIn(live);
+      const get = await http(live, 'GET', '/api/settings/ai', token);
+      const transcript = live.output().slice(-4000);
+      await stopGroup(live.child);
+      live = undefined;
+
+      // Neither file opens the stored secret now.
+      writeForeignKey(projectKey());
+      const refusal = await boot('os start (no key opens)', [
+        'start', '--artifact', './dist/objectstack.json', '--port', KERNEL_ASSIGNED_PORT,
+      ]).then(
+        async (l) => {
+          live = l;
+          return `booted: ${l.output().slice(-2000)}`;
+        },
+        (e: unknown) => (e instanceof Error ? e.message : String(e)),
+      );
+      twoKeys = { get, chosen: transcript, refusal, transcript };
+    } catch (error) {
+      twoKeys = { error: error instanceof Error ? error : new Error(String(error)) };
+    } finally {
+      if (live) await stopGroup(live.child);
+    }
+  }, 2 * BOOT_TIMEOUT_MS + 60_000);
+
+  function read(): Required<Omit<TwoKeyReading, 'error'>> {
+    if (twoKeys.error) throw twoKeys.error;
+    return twoKeys as Required<Omit<TwoKeyReading, 'error'>>;
+  }
+
+  it('a start-sealed project beside a foreign home key reads its secret back', () => {
+    const { get, transcript } = read();
+    expect(get.status, `${JSON.stringify(get.body).slice(0, 2000)}\n${transcript}`).toBe(200);
+    const entry = aiKey(get.body);
+    const why = `openai_api_key = ${JSON.stringify(entry)}\n${transcript}`;
+    expect(entry?.source, why).toBe('global');
+    expect(entry?.value, why).not.toBeNull();
+  });
+
+  it('the boot says which file it took and why', () => {
+    const { chosen } = read();
+    expect(chosen).toContain(`using ${projectKey()}`);
+  });
+
+  it('a production boot whose two keys open nothing refuses, naming both files', () => {
+    const { refusal } = read();
+    expect(refusal).not.toMatch(/^booted:/);
+    expect(refusal).toContain('Refusing to start in production');
+    expect(refusal).toContain(homeKey());
+    expect(refusal).toContain(projectKey());
   });
 });

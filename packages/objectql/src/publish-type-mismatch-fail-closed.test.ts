@@ -365,3 +365,54 @@ describe('publish gives every flow condition a type-mismatch verdict that says w
         expect((el.advisories ?? []).filter((a: any) => /type mismatch/.test(a.message))).toEqual([]);
     });
 });
+
+/**
+ * [#30025] Through the same real door: a bare name a screen collects is the
+ * collected value downstream of the screen (a resume lands it under its plain
+ * name), so it is not typed as the field; a bare name after a node that can
+ * bind any name (`script`) is not proven to be the field, so its mismatch is
+ * the run-may-fail warning. `record.name` is the field in both, and refused.
+ */
+describe('publish stands a bare flow-condition name down where a screen or an open binder can hold it (#30025)', () => {
+    const RECORD_TRIGGERED = { triggerType: 'record-after-update' };
+    const through = (mid: Record<string, unknown>, edgeCondition: string) => ({
+        nodes: [mid, { id: 'end', type: 'end', label: 'End' }],
+        edges: [
+            { id: 'e1', source: 'start', target: 'mid' },
+            { id: 'e2', source: 'mid', target: 'end', condition: edgeCondition },
+        ],
+    });
+    const SCREEN = { id: 'mid', type: 'screen', label: 'Ask', config: { fields: [{ name: 'name', type: 'number', label: 'Count' }] } };
+    const SCRIPT = { id: 'mid', type: 'script', label: 'Calc', config: { function: 'calc' } };
+
+    it('publishes a bare `name > 5` a screen field holds, with no type verdict', async () => {
+        const { nodes, edges } = through(SCREEN, 'name > 5');
+        const raw = await publishLeadFlow(RECORD_TRIGGERED, nodes, edges);
+        expect(raw.outcome, JSON.stringify(raw)).toBe('published');
+        const el = raw.published.find((e: any) => e.name === 'edu_lead_flow');
+        expect((el.advisories ?? []).filter((a: any) => /type mismatch/.test(a.message))).toEqual([]);
+    });
+
+    it('publishes a bare `name > 5` after a script node with the run-may-fail warning', async () => {
+        const { nodes, edges } = through(SCRIPT, 'name > 5');
+        const raw = await publishLeadFlow(RECORD_TRIGGERED, nodes, edges);
+        expect(raw.outcome, JSON.stringify(raw)).toBe('published');
+        const el = raw.published.find((e: any) => e.name === 'edu_lead_flow');
+        const advisories = (el.advisories ?? []).filter((a: any) => a.rule === 'expression-invalid' && /type mismatch/.test(a.message));
+        expect(advisories, `advisories: ${JSON.stringify(el.advisories)}`).toHaveLength(1);
+        expect(advisories[0].severity).toBe('warning');
+        expect(advisories[0].message).toMatch(/which this check cannot prove here, so this is a warning, not a refusal/);
+    });
+
+    it('still refuses `record.name > 5` after either node', async () => {
+        for (const mid of [SCREEN, SCRIPT]) {
+            const { nodes, edges } = through(mid, 'record.name > 5');
+            const raw = await publishLeadFlow(RECORD_TRIGGERED, nodes, edges);
+            expect(raw.outcome, `${mid.type}: ${JSON.stringify(raw)}`).toBe('refused');
+            const issue = flowTypeIssue(raw);
+            expect(issue, `${mid.type} failed: ${JSON.stringify(raw.failed)}`).toBeDefined();
+            expect(issue.severity).toBe('error');
+            expect(issue.message).toMatch(/`record\.name` holds text/);
+        }
+    });
+});

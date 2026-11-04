@@ -25,12 +25,22 @@
  *    view it does not hold yet.
  *  - A refused read (no grant on the object) draws neither the section nor
  *    Save as my view, and the list is unaffected.
+ *  - objectstack#30034 — a personal view opened by its address is not seeded
+ *    from, and its address bar never carries, the default view's stored list
+ *    state, whichever of the two reads (the reader's own views, the list
+ *    preferences) lands first; a link's own `uf_*` params still open it.
  */
 
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, cleanup, screen, waitFor, within, fireEvent } from '@testing-library/react';
-import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import {
+  MemoryRouter,
+  Routes,
+  Route,
+  unstable_HistoryRouter as HistoryRouter,
+  UNSAFE_createMemoryHistory as createMemoryHistory,
+} from 'react-router-dom';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
 import { ListViewSchema } from '@objectstack/spec/ui';
 
@@ -80,6 +90,9 @@ vi.mock('./RecordDetailView', () => ({ RecordDetailView: () => null }));
 
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
+import { UserStateAdaptersProvider, useAttachListStateFamily } from '../context/UserStateAdapters';
+import { ListPreferencesProvider, listPreferenceKey } from '../context/ListPreferencesProvider';
+import { applyListStateParams } from './userFilterUrlState';
 
 /** Every request the page sends through `fetch`: the owner's door among them. */
 const fetchCalls: Array<{ url: string; method: string }> = [];
@@ -376,5 +389,157 @@ describe('objectstack#29635 — My views in the list view switcher', () => {
     const menu = openSwitcher();
     await waitFor(() => expect(within(menu).getByTestId('list-view-switcher-mine')).toBeInTheDocument());
     expect(within(menu).getByTestId('list-view-switcher-save-mine')).toBeInTheDocument();
+  });
+});
+
+/**
+ * objectstack#30034 — the two reads a personal view opened by its address
+ * waits on: the reader's own views (`sys_personal_view`) and the list
+ * preferences (the attached family's first load). Each lands when the case
+ * says, and the address bar is the page's history, read where the router
+ * wrote it.
+ *
+ * The race the card measured: the location the router hands the page moves in
+ * a transition, so a read landing between the page's URL write and its commit
+ * renders against the address as it was before that write. `landPersonalOn`
+ * `'firstReplace'` lands the personal views read exactly there.
+ */
+describe('objectstack#30034 — a personal view opened by its address never carries the default view\'s list state', () => {
+  /** The reader's stored list state for the DEFAULT view, `v1`: a filter and a sort. */
+  const DEFAULT_VIEW_STATE = {
+    perView: {
+      v1: {
+        sort: [{ field: 'status', order: 'desc' }],
+        filters: { id: 'root', logic: 'and', conditions: [{ id: 'c1', field: 'city', operator: 'equals', value: 'Rome' }] },
+      },
+    },
+  };
+
+  function deferred<T>() {
+    let resolve: (value: T) => void = () => {};
+    const promise = new Promise<T>((r) => { resolve = r; });
+    return { promise, resolve };
+  }
+
+  function AttachFamily({ family }: { family: unknown }) {
+    const attach = useAttachListStateFamily();
+    React.useEffect(() => {
+      attach(family as never);
+      return () => attach(null);
+    }, [attach, family]);
+    return null;
+  }
+
+  function mountPersonal(
+    entry: string,
+    { landPersonalOn }: { landPersonalOn: 'firstReplace' | 'beforePreferences' },
+  ) {
+    const objects = [LEAD];
+    const i18n = createI18n({ defaultLanguage: 'en', detectBrowserLanguage: false });
+    const personalRead = deferred<{ data: unknown[]; total: number }>();
+    const preferencesRead = deferred<Record<string, unknown>>();
+    const landPersonal = () => personalRead.resolve({ data: [OWN], total: 1 });
+    const landPreferences = () => preferencesRead.resolve({ [listPreferenceKey('crm_lead')]: structuredClone(DEFAULT_VIEW_STATE) });
+    const family = { prefix: 'ui.list.', load: vi.fn(() => preferencesRead.promise), save: vi.fn(async () => {}) };
+    const history = createMemoryHistory({ initialEntries: [entry], v5Compat: true });
+    const replace = history.replace.bind(history);
+    let replaced = 0;
+    history.replace = (...args: Parameters<typeof history.replace>) => {
+      replace(...args);
+      replaced += 1;
+      if (replaced === 1 && landPersonalOn === 'firstReplace') landPersonal();
+    };
+    const dataSource = {
+      find: vi.fn(async (resource: string, _params?: unknown) => (resource === 'sys_personal_view' ? personalRead.promise : { data: ROWS, total: ROWS.length })),
+      findOne: vi.fn(async () => null),
+      getObjectSchema: vi.fn(async (name: string) => objects.find((o) => o.name === name) ?? null),
+      create: vi.fn(async () => ({})),
+      update: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+    };
+    render(
+      <UserStateAdaptersProvider>
+        <AttachFamily family={family} />
+        <ListPreferencesProvider>
+          <I18nProvider instance={i18n}>
+            <ExpressionProvider user={{ id: 'u1', name: 'Sales Rep' }}>
+              <HistoryRouter history={history as never}>
+                <Routes>
+                  <Route
+                    path="/apps/:appName/:objectName/view/:viewId"
+                    element={<ObjectView dataSource={dataSource as never} objects={objects} onEdit={() => {}} />}
+                  />
+                </Routes>
+              </HistoryRouter>
+            </ExpressionProvider>
+          </I18nProvider>
+        </ListPreferencesProvider>
+      </UserStateAdaptersProvider>,
+    );
+    return {
+      dataSource,
+      landPersonal,
+      landPreferences,
+      /** The `uf_*` params of the address bar, by name. */
+      ufParams: () => Object.fromEntries([...new URLSearchParams(history.location.search)].filter(([key]) => key.startsWith('uf_'))),
+    };
+  }
+
+  const settle = () => new Promise((r) => setTimeout(r, 300));
+
+  /** The `crm_lead` reads the list sent, in order (the footer's `$top: 0` count read is not one). */
+  const listReads = (dataSource: { find: { mock: { calls: unknown[][] } } }) =>
+    dataSource.find.mock.calls
+      .filter(([resource, params]) => resource === 'crm_lead' && (params as { $top?: number } | undefined)?.$top !== 0)
+      .map(([, params]) => params as Record<string, unknown>);
+
+  it('the personal views read landing AFTER the preferences read: the address bar ends clean, holding only the personal view\'s own state', async () => {
+    const page = mountPersonal('/apps/crm/crm_lead/view/pv_mine', { landPersonalOn: 'firstReplace' });
+    // The preferences land first; the personal views read is still out.
+    await waitFor(() => expect(page.dataSource.find.mock.calls.some(([r]) => r === 'sys_personal_view')).toBe(true));
+    page.landPreferences();
+    await settle();
+    // Nothing wrote the address while the requested view was unresolved, so
+    // the personal views read is still out: land it now.
+    page.landPersonal();
+    await listToolbar();
+    expect(switcher()).toHaveTextContent('Paris leads');
+    await settle();
+    expect(page.ufParams()).toEqual({});
+    // The list's query carries the personal view's own filter, and none of the default view's.
+    const last = JSON.stringify(listReads(page.dataSource).at(-1));
+    expect(last).toContain('Paris');
+    expect(last).not.toContain('Rome');
+  });
+
+  it('the reverse order — the personal views read landing BEFORE the preferences read: the address bar ends clean too', async () => {
+    const page = mountPersonal('/apps/crm/crm_lead/view/pv_mine', { landPersonalOn: 'beforePreferences' });
+    await waitFor(() => expect(page.dataSource.find.mock.calls.some(([r]) => r === 'sys_personal_view')).toBe(true));
+    page.landPersonal();
+    await settle();
+    page.landPreferences();
+    await listToolbar();
+    expect(switcher()).toHaveTextContent('Paris leads');
+    await settle();
+    expect(page.ufParams()).toEqual({});
+    const last = JSON.stringify(listReads(page.dataSource).at(-1));
+    expect(last).toContain('Paris');
+    expect(last).not.toContain('Rome');
+  });
+
+  it('CONTROL: a link carrying `uf_*` params the reader sent opens the personal view with those params applied', async () => {
+    const sort = [{ field: 'name', order: 'asc' as const }];
+    const query = applyListStateParams(new URLSearchParams(), { sort }).toString();
+    const page = mountPersonal(`/apps/crm/crm_lead/view/pv_mine?${query}`, { landPersonalOn: 'firstReplace' });
+    await waitFor(() => expect(page.dataSource.find.mock.calls.some(([r]) => r === 'sys_personal_view')).toBe(true));
+    page.landPreferences();
+    await settle();
+    page.landPersonal();
+    await listToolbar();
+    expect(switcher()).toHaveTextContent('Paris leads');
+    await settle();
+    expect(page.ufParams()).toEqual(Object.fromEntries(new URLSearchParams(query)));
+    await waitFor(() => expect(listReads(page.dataSource).at(-1)?.$orderby).toEqual(sort));
+    expect(JSON.stringify(listReads(page.dataSource).at(-1))).not.toContain('Rome');
   });
 });

@@ -34,12 +34,13 @@
  * `schema-migrate.one-shot-family.integration.test.ts`.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LocalCryptoProvider } from '@objectstack/service-settings';
+import { LocalCryptoProvider, settleKeyFileChannel } from '@objectstack/service-settings';
 // The one code/prose separator, typed by the hand-written `.d.mts` beside it.
 import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
 import { oneShotSettingsPlugin, refusingCryptoProvider, resolveExistingDataKey } from './one-shot-settings.js';
@@ -104,6 +105,7 @@ describe('[#21471] the settings service is composed in one place in this package
 const KEY_ENV = [
   'NODE_ENV', 'OS_SECRET_KEY', 'OS_DEV_CRYPTO_KEY', 'OBJECTSTACK_DEV_CRYPTO_KEY',
   'OS_HOME', 'OBJECTSTACK_HOME', 'OS_CRYPTO_AUTOKEY',
+  'OS_INTERNAL_CRYPTO_KEY_FILE', 'OS_INTERNAL_CRYPTO_KEY_FILE_CANDIDATE',
 ] as const;
 const KEY_HEX = '606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f';
 const savedEnv: Record<string, string | undefined> = {};
@@ -200,5 +202,72 @@ describe('[#21471] the one-shot helper never mints a data key', () => {
     await expect(provider.rotateKey(handle, ctx)).rejects.toThrow(/the reason/);
     expect(() => provider.digest('x')).toThrow(/the reason/);
     await expect(provider.keyedDigest('x')).rejects.toThrow(/the reason/);
+  });
+});
+
+// ── [#30042] The file a one-shot reads is the one `os dev` / `os start` read ──
+
+describe('[#30042] one-shot commands take the same key file, by the same resolution and trial', () => {
+  let project: string;
+  let userHome: string;
+  beforeEach(() => {
+    project = mkdtempSync(join(tmpdir(), 'os-30042-project-'));
+    userHome = mkdtempSync(join(tmpdir(), 'os-30042-user-'));
+    writeFileSync(join(project, 'objectstack.config.ts'), 'export default {};\n');
+  });
+  afterEach(() => {
+    rmSync(project, { recursive: true, force: true });
+    rmSync(userHome, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  const canonicalFile = () => join(userHome, '.objectstack', 'dev-crypto-key');
+  const legacyFile = () => join(project, '.objectstack', 'dev-crypto-key');
+  const writeKey = (file: string): Buffer => {
+    const key = randomBytes(32);
+    mkdirSync(join(file, '..'), { recursive: true });
+    writeFileSync(file, key.toString('base64'), { mode: 0o600 });
+    return key;
+  };
+  const ctx = { scope: 'settings', namespace: 'ai', key: 'openai_api_key' } as const;
+  /** A one-shot's own environment: no key and no home pin, `HOME` is this test's. */
+  const oneShotEnv = (): NodeJS.ProcessEnv => ({ HOME: userHome, NODE_ENV: 'production' });
+
+  it('only the project file an earlier `os start` kept holds a key: the one-shot reads it', async () => {
+    const legacy = writeKey(legacyFile());
+    const handle = await new LocalCryptoProvider({ key: legacy }).encrypt('sk-legacy', ctx);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const env = oneShotEnv();
+    const key = await resolveExistingDataKey({ cwd: project, env });
+    expect(await key.provider!.decrypt(handle, ctx)).toBe('sk-legacy');
+    expect(existsSync(canonicalFile())).toBe(false);
+  });
+
+  it('two different keys: the provider is the one the boot\'s trial chose', async () => {
+    writeKey(canonicalFile());
+    const legacy = writeKey(legacyFile());
+    const handle = await new LocalCryptoProvider({ key: legacy }).encrypt('sk-start', ctx);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const env = oneShotEnv();
+    const key = await resolveExistingDataKey({ cwd: project, env });
+    expect(key.unavailable).toBeNull();
+    expect(env.OS_INTERNAL_CRYPTO_KEY_FILE_CANDIDATE).toBe(legacyFile());
+    // What the boot's settings service does at start(), the database open.
+    await settleKeyFileChannel({
+      env,
+      readStoredSecret: async () => ({ namespace: ctx.namespace, key: ctx.key, ciphertext: handle.ciphertext }),
+    });
+    expect(await key.provider!.decrypt(handle, ctx)).toBe('sk-start');
+    expect(key.provider!.keySource).toBe('file');
+  });
+
+  it('two different keys with no trial yet: nothing has been read, and nothing is minted', async () => {
+    writeKey(canonicalFile());
+    writeKey(legacyFile());
+    const env = oneShotEnv();
+    const before = readdirSync(join(userHome, '.objectstack'));
+    const key = await resolveExistingDataKey({ cwd: project, env });
+    expect(key.provider).not.toBeNull();
+    expect(readdirSync(join(userHome, '.objectstack'))).toEqual(before);
   });
 });

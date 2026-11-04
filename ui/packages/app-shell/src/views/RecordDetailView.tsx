@@ -45,8 +45,10 @@ import {
   recordPageComments,
   recordPageRelatedLists,
   recordPageRequestOf,
+  recordPageStreamsRequestOf,
   recordPageTimeline,
   seedRecordPageReaders,
+  type RecordPageStreamsAsk,
 } from './recordPagePayload.js';
 import { withPageTabsUrlSync } from '../utils/pageTabsUrlSync.js';
 import { RECORD_DETAIL_TAB_PARAM, RECORD_DRAWER_PARAM, RECORD_RELATED_ENLARGE_PARAM, RECORD_RELATED_ENLARGE_PUSHED_STATE as RELATED_ENLARGE_PUSHED, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
@@ -1221,7 +1223,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
      */
     activityRows: number;
     timeline: boolean;
+    /**
+     * objectstack#30035 — the stream parts the open asked, as asked: the
+     * feed's re-read after a change to this record asks these again.
+     */
+    streams: RecordPageStreamsAsk;
   } | null>(null);
+  // objectstack#30035 — the feed's re-read of the streams the open asked, once
+  // this record changed after the open: one ask per record and invalidation
+  // count, joined by every later run of the feed effect at that count.
+  const feedStreamsReread = useRef<{ feedKey: string; generation: number; payload: Promise<RecordPagePayload | null> } | null>(null);
   // objectstack#26589 — the record this viewer just decided an approval on,
   // as `objectName` + `recordId`. A pending approver with no standing access
   // reads the record only while their step waits (objectstack#26180): the
@@ -2470,6 +2481,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       activity: plan.activity !== undefined,
       activityRows: plan.activity ?? 0,
       timeline: plan.timeline !== undefined,
+      streams: { discussion: plan.discussion, activity: plan.activity, timeline: plan.timeline },
     };
     seedRecordPageReaders({ payload, objectName, recordId: pureRecordId, principal: recordPagePrincipal, ...plan });
   }, [recordPagePlan, objectName, pureRecordId, dataSource, recordPagePrincipal]);
@@ -2885,8 +2897,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // `t` is identity-stable per language; `language` refires the effect on a
     // language switch so the translated values re-localize, and
     // `displayLocale` on a display-locale switch so the dates do.
+    // `recordInvalidationNonce` (objectstack#30035): a change to this record
+    // reads its field changes again, the 动态 stream's other source.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dataSource, pureRecordId, objectDef, historyEnabled, historyWanted, objects, language, displayLocale, tenantCurrency]);
+  }, [dataSource, pureRecordId, objectDef, historyEnabled, historyWanted, objects, language, displayLocale, tenantCurrency, recordInvalidationNonce]);
 
   // Fetch a directory of active users once per dataSource mount and expose
   // them as @-mention suggestions to the DiscussionContext. Capped at 50 to
@@ -3085,7 +3099,31 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     const retrying = feedRetryRef.current.get(threadId) ?? null;
     if (retrying) feedRetryRef.current.delete(threadId);
     const opened = recordPageRead.current;
-    const fromPage = !retrying && opened && opened.feedKey === threadId ? opened : null;
+    const openedHere = !retrying && opened && opened.feedKey === threadId ? opened : null;
+    // objectstack#30035 — a change to THIS record since the open (a save
+    // through the edit dialog, an action, an undo: `recordInvalidationNonce`
+    // re-runs this effect) leaves the open's payload stale, and the rows the
+    // change wrote are not in it. The streams the open asked are asked again,
+    // as asked, so the new rows AND the stream's count both come back from the
+    // server, read the way the open read them. The activity row a save writes
+    // exists before the save answers (the audit writer runs in the update's
+    // awaited `afterUpdate` hook), so this one ask after the change sees it:
+    // nothing polls. Every run at one invalidation count joins one ask.
+    const generation = recordPageGenerationRef.current;
+    let fromPage = openedHere;
+    if (openedHere && openedHere.generation !== generation) {
+      if (typeof dataSource.getRecordPage === 'function') {
+        const held = feedStreamsReread.current;
+        const payload = held && held.feedKey === threadId && held.generation === generation
+          ? held.payload
+          : dataSource.getRecordPage(objectName, pureRecordId, recordPageStreamsRequestOf(openedHere.streams));
+        feedStreamsReread.current = { feedKey: threadId, generation, payload };
+        fromPage = { ...openedHere, payload };
+      } else {
+        fromPage = null;
+      }
+    }
+    const rereading = fromPage !== null && fromPage !== openedHere;
     // The two reads below run in PARALLEL and are collected here so the
     // loading flag can close over BOTH of them — see the `allSettled` at the
     // end of this effect.
@@ -3290,11 +3328,18 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         recordVerdict('activity', 'answered');
         // objectstack#28737 — the payload asked only the 动态 panel's rows and
         // the record holds more: the 动态 tab reads the window when it opens.
-        const peek = !!fromPage?.activity
+        const answeredPeek = !!fromPage?.activity
           && fromPage.activityRows < RECORD_PAGE_ACTIVITY_ROWS
           && typeof res?.total === 'number'
           && res.total > (res?.data?.length ?? 0);
-        setActivityPeekByRecord(prev => ((prev[threadId] ?? false) === peek ? prev : { ...prev, [threadId]: peek }));
+        setActivityPeekByRecord(prev => {
+          const held = prev[threadId] ?? false;
+          // objectstack#30035 — a re-read after a change merges the newest
+          // rows into what the feed already holds: a feed that holds the
+          // window (the 动态 tab read it) still does, so it never asks it again.
+          const peek = rereading ? held && answeredPeek : answeredPeek;
+          return held === peek ? prev : { ...prev, [threadId]: peek };
+        });
         if (!res?.data?.length) return;
         const mapped = activityRowsToFeedItems(res.data, t('detail.systemActor', { defaultValue: 'System' }));
         if (!mapped.length) return;
@@ -3322,7 +3367,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     });
 
     return () => { cancelled = true; };
-  }, [dataSource, objectName, pureRecordId, currentUser, feedsEnabled, activitiesEnabled, feedFetchKey, reactionStore, feedWanted, feedPlanReady, feedRetryNonce]);
+    // objectstack#30035 — `recordInvalidationNonce`: a change to this record
+    // reads its feed again (#2269, refresh data in place), as it reads the
+    // record again in the record-load effect above.
+  }, [dataSource, objectName, pureRecordId, currentUser, feedsEnabled, activitiesEnabled, feedFetchKey, reactionStore, feedWanted, feedPlanReady, feedRetryNonce, recordInvalidationNonce]);
 
   // objectstack#29188 — the load-failure notice's Retry: read this record's
   // FAILED feed reads again, and only those. The feed shows its loading state

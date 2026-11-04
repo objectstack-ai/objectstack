@@ -23,6 +23,8 @@
  *    verification mail's link so it survives the inbox (objectui#10893).
  *  - Replays an `/oauth2/authorize` query string when the user landed
  *    here mid-SSO so the IdP can continue the flow post-signup.
+ *  - Forwards to the mobile sign-in hand-off when `?redirect=` names it,
+ *    exactly as `/login` does (#29971, `./handoffRedirect`).
  *  - Draws `/login`'s footer under the form — the locale switch and the
  *    privacy / terms links the server's auth config serves, from the same
  *    reader (#25885): sign-up is where a visitor accepts the terms.
@@ -52,6 +54,7 @@ import {
 } from '@object-ui/app-shell';
 import { AuthLayout } from './AuthLayout';
 import { followOauthAuthorize } from './followAuthorize';
+import { useHandoffRedirect } from './handoffRedirect';
 // Was a second module-private copy of LoginPage's helper; both now share one
 // implementation — objectui#4181. Behaviour here is unchanged.
 import { withConsoleBase, withConsoleBaseRootRelative } from '../../utils/consoleBase';
@@ -77,6 +80,7 @@ export function RegisterPage() {
   const redirect = params.get('redirect');
   const {
     user,
+    session,
     isLoading,
     organizations,
     isOrganizationsLoading,
@@ -84,6 +88,11 @@ export function RegisterPage() {
     switchOrganization,
     getAuthConfig,
   } = useAuth();
+  // #29971 — the mobile sign-in hand-off, as on `/login`: a sign-up from the
+  // system auth session ends there too, and a session too old for it keeps
+  // the form up (see `./handoffRedirect`).
+  const handoff = useHandoffRedirect(redirect, { user, session, isLoading });
+  const signUpNeeded = !user || handoff.holdForSignIn;
 
   // The public auth config and where its read stands (objectui#11806), as on
   // `/login`: `loading` until `getAuthConfig()` settles, `failed` once it
@@ -105,6 +114,8 @@ export function RegisterPage() {
   const [autoSelectingOrg, setAutoSelectingOrg] = useState(false);
   // Fire the OAuth hand-off fetch at most once (see LoginPage).
   const ssoHandoffStartedRef = useRef(false);
+  // And the mobile sign-in hand-off navigation.
+  const mobileHandoffStartedRef = useRef(false);
 
   // See LoginPage: `isLoading` is overloaded (initial session check + every
   // in-flight signUp). Latch once the first check resolves so a failed
@@ -143,7 +154,7 @@ export function RegisterPage() {
   const bootstrap = useBootstrapStatus(
     configRead === 'known' &&
       hasBootstrapped &&
-      !user &&
+      signUpNeeded &&
       needsBootstrapProbe(authConfig, invitationRedirect),
   );
   const signUpOffer = decideSignUpOffer(authConfig, { invitationRedirect, bootstrap });
@@ -176,6 +187,17 @@ export function RegisterPage() {
       }
     }
 
+    // #29971 — the mobile sign-in hand-off, before the organization steps,
+    // by script from this page (see LoginPage).
+    if (handoff.target) {
+      if (handoff.holdForSignIn) return;
+      if (!mobileHandoffStartedRef.current) {
+        mobileHandoffStartedRef.current = true;
+        window.location.assign(handoff.target);
+      }
+      return;
+    }
+
     if (!activeOrganization) {
       if (isOrganizationsLoading || autoSelectingOrg) return;
       if (organizations.length === 1) {
@@ -203,11 +225,13 @@ export function RegisterPage() {
     autoSelectingOrg,
     redirect,
     switchOrganization,
+    handoff.target,
+    handoff.holdForSignIn,
   ]);
 
   // The first session check has answered and nobody is signed in: the page is
   // talking to a visitor, so a failed config read is theirs to see.
-  const awaitingSession = (isLoading && !hasBootstrapped) || !!user;
+  const awaitingSession = (isLoading && !hasBootstrapped) || !signUpNeeded;
   if (!awaitingSession && serverUnreachable) {
     return (
       <AuthLayout formWidth="md">

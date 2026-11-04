@@ -449,6 +449,13 @@ import { DeleteAndAggregateFacet } from './engine-delete-and-aggregate.js';
 import { TransactionsSectionFacet } from './engine-transactions-section.js';
 // [#29986 codemod] Compatibility / convenience API: the methods of the same names below hand the bodies what they read (`CompatibilitySectionHost`).
 import { CompatibilitySectionFacet } from './engine-compatibility-section.js';
+// [#29986 codemod] The facets' hosts, one per engine, which the static block at the end of the class builds.
+import {
+  actionsHost, cascadePlanningHost, compatibilitySectionHost, defaultsAndAutonumbersHost, deleteAndAggregateHost,
+  findHost, hooksAndFunctionsHost, insertHost, middlewareAndContextHost, migrationStateHost,
+  referencesAndMasterDetailHost, registrationHost, secretsAndRoutingHost, securityResolversHost,
+  summariesAndExpansionHost, transactionsSectionHost,
+} from './engine-facet-hosts.js';
 
 // [#29986 codemod] The statics of `ObjectQL` its facet modules read, private ones included, as
 // the class declares them (an indexed access on the class). The static block at the end of
@@ -604,11 +611,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   recordResidualOwner(ownerId: string, source: 'code' | 'marketplace'): void {
     // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
-    const readResidualOwnerSources = () => this.residualOwnerSources;
-    const host: ThisParameterType<typeof HooksAndFunctionsFacet.recordResidualOwner> = {
-      get residualOwnerSources() { return readResidualOwnerSources(); },
-    };
-    return HooksAndFunctionsFacet.recordResidualOwner.call(host, ownerId, source);
+    return HooksAndFunctionsFacet.recordResidualOwner.call(hooksAndFunctionsHost.of(this), ownerId, source);
   }
 
   /**
@@ -618,11 +621,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   residualOwnerSource(ownerId: string): 'code' | 'marketplace' | undefined {
     // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
-    const readResidualOwnerSources = () => this.residualOwnerSources;
-    const host: ThisParameterType<typeof HooksAndFunctionsFacet.residualOwnerSource> = {
-      get residualOwnerSources() { return readResidualOwnerSources(); },
-    };
-    return HooksAndFunctionsFacet.residualOwnerSource.call(host, ownerId);
+    return HooksAndFunctionsFacet.residualOwnerSource.call(hooksAndFunctionsHost.of(this), ownerId);
   }
 
   // Datasource definitions by name (ADR-0015): carries schemaMode +
@@ -875,13 +874,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   unregisterHooksByPackage(packageId: string): number {
     // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
-    const readHooks = () => this.hooks;
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof HooksAndFunctionsFacet.unregisterHooksByPackage> = {
-      get hooks() { return readHooks(); },
-      get logger() { return readLogger(); },
-    };
-    return HooksAndFunctionsFacet.unregisterHooksByPackage.call(host, packageId);
+    return HooksAndFunctionsFacet.unregisterHooksByPackage.call(hooksAndFunctionsHost.of(this), packageId);
   }
 
   /**
@@ -903,23 +896,13 @@ export class ObjectQL implements IObjectQLEngine {
     packageIdOrOptions?: string | FunctionRegistrationOptions,
   ): void {
     // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
-    const readFunctions = () => this.functions;
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof HooksAndFunctionsFacet.registerFunction> = {
-      get functions() { return readFunctions(); },
-      get logger() { return readLogger(); },
-    };
-    return HooksAndFunctionsFacet.registerFunction.call(host, name, handler, packageIdOrOptions);
+    return HooksAndFunctionsFacet.registerFunction.call(hooksAndFunctionsHost.of(this), name, handler, packageIdOrOptions);
   }
 
   /** Look up a registered function by name. */
   resolveFunction(name: string): HookHandler | undefined {
     // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
-    const readFunctions = () => this.functions;
-    const host: ThisParameterType<typeof HooksAndFunctionsFacet.resolveFunction> = {
-      get functions() { return readFunctions(); },
-    };
-    return HooksAndFunctionsFacet.resolveFunction.call(host, name);
+    return HooksAndFunctionsFacet.resolveFunction.call(hooksAndFunctionsHost.of(this), name);
   }
 
   /**
@@ -932,23 +915,13 @@ export class ObjectQL implements IObjectQLEngine {
    */
   resolveFunctionEntry(name: string): Readonly<FunctionEntry> | undefined {
     // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
-    const readFunctions = () => this.functions;
-    const host: ThisParameterType<typeof HooksAndFunctionsFacet.resolveFunctionEntry> = {
-      get functions() { return readFunctions(); },
-    };
-    return HooksAndFunctionsFacet.resolveFunctionEntry.call(host, name);
+    return HooksAndFunctionsFacet.resolveFunctionEntry.call(hooksAndFunctionsHost.of(this), name);
   }
 
   /** Remove all functions registered under a given `packageId`. */
   unregisterFunctionsByPackage(packageId: string): number {
     // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
-    const readFunctions = () => this.functions;
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof HooksAndFunctionsFacet.unregisterFunctionsByPackage> = {
-      get functions() { return readFunctions(); },
-      get logger() { return readLogger(); },
-    };
-    return HooksAndFunctionsFacet.unregisterFunctionsByPackage.call(host, packageId);
+    return HooksAndFunctionsFacet.unregisterFunctionsByPackage.call(hooksAndFunctionsHost.of(this), packageId);
   }
 
   /**
@@ -1009,25 +982,13 @@ export class ObjectQL implements IObjectQLEngine {
    */
   setDefaultBodyRunner(runner: any): boolean {
     // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
-    const read_defaultBodyRunner = () => this._defaultBodyRunner;
-    const write_defaultBodyRunner = (v: ObjectQL['_defaultBodyRunner']) => { this._defaultBodyRunner = v; };
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof HooksAndFunctionsFacet.setDefaultBodyRunner> = {
-      get _defaultBodyRunner() { return read_defaultBodyRunner(); },
-      set _defaultBodyRunner(v) { write_defaultBodyRunner(v); },
-      get logger() { return readLogger(); },
-    };
-    return HooksAndFunctionsFacet.setDefaultBodyRunner.call(host, runner);
+    return HooksAndFunctionsFacet.setDefaultBodyRunner.call(hooksAndFunctionsHost.of(this), runner);
   }
 
   /** The installed default body-runner, if any — the public read the first-wins guard implies. */
   getDefaultBodyRunner(): any {
     // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
-    const read_defaultBodyRunner = () => this._defaultBodyRunner;
-    const host: ThisParameterType<typeof HooksAndFunctionsFacet.getDefaultBodyRunner> = {
-      get _defaultBodyRunner() { return read_defaultBodyRunner(); },
-    };
-    return HooksAndFunctionsFacet.getDefaultBodyRunner.call(host);
+    return HooksAndFunctionsFacet.getDefaultBodyRunner.call(hooksAndFunctionsHost.of(this));
   }
 
   /**
@@ -1048,25 +1009,13 @@ export class ObjectQL implements IObjectQLEngine {
    */
   setDefaultActionRunner(runner: (actionDef: any) => ((ctx: any) => Promise<unknown>) | undefined): boolean {
     // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
-    const read_defaultActionRunner = () => this._defaultActionRunner;
-    const write_defaultActionRunner = (v: ObjectQL['_defaultActionRunner']) => { this._defaultActionRunner = v; };
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof HooksAndFunctionsFacet.setDefaultActionRunner> = {
-      get _defaultActionRunner() { return read_defaultActionRunner(); },
-      set _defaultActionRunner(v) { write_defaultActionRunner(v); },
-      get logger() { return readLogger(); },
-    };
-    return HooksAndFunctionsFacet.setDefaultActionRunner.call(host, runner);
+    return HooksAndFunctionsFacet.setDefaultActionRunner.call(hooksAndFunctionsHost.of(this), runner);
   }
 
   /** The installed default action-runner factory, if any. */
   getDefaultActionRunner(): ((actionDef: any) => ((ctx: any) => Promise<unknown>) | undefined) | undefined {
     // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
-    const read_defaultActionRunner = () => this._defaultActionRunner;
-    const host: ThisParameterType<typeof HooksAndFunctionsFacet.getDefaultActionRunner> = {
-      get _defaultActionRunner() { return read_defaultActionRunner(); },
-    };
-    return HooksAndFunctionsFacet.getDefaultActionRunner.call(host);
+    return HooksAndFunctionsFacet.getDefaultActionRunner.call(hooksAndFunctionsHost.of(this));
   }
 
   /**
@@ -1153,28 +1102,12 @@ export class ObjectQL implements IObjectQLEngine {
 
   private hasHooksFor(event: string, object: string): boolean {
     // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts`, its docblock with it (see `HooksAndFunctionsHost`).
-    const readHooks = () => this.hooks;
-    const host: ThisParameterType<typeof HooksAndFunctionsFacet.hasHooksFor> = {
-      get hooks() { return readHooks(); },
-    };
-    return HooksAndFunctionsFacet.hasHooksFor.call(host, event, object);
+    return HooksAndFunctionsFacet.hasHooksFor.call(hooksAndFunctionsHost.of(this), event, object);
   }
 
   private opensAfterAbortUnit(event: 'afterInsert' | 'afterUpdate' | 'afterDelete', object: string, context: ExecutionContext | undefined): boolean {
     // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts`, its docblock with it (see `HooksAndFunctionsHost`).
-    const readDefaultDriver = () => this.defaultDriver;
-    const readDrivers = () => this.drivers;
-    const readHooks = () => this.hooks;
-    const readTxStore = () => this.txStore;
-    const host: ThisParameterType<typeof HooksAndFunctionsFacet.opensAfterAbortUnit> = {
-      get defaultDriver() { return readDefaultDriver(); },
-      get drivers() { return readDrivers(); },
-      getDriver: (...a) => this.getDriver(...a),
-      get hooks() { return readHooks(); },
-      isClosedUnitHandle: (...a) => this.isClosedUnitHandle(...a),
-      get txStore() { return readTxStore(); },
-    };
-    return HooksAndFunctionsFacet.opensAfterAbortUnit.call(host, event, object, context);
+    return HooksAndFunctionsFacet.opensAfterAbortUnit.call(hooksAndFunctionsHost.of(this), event, object, context);
   }
 
   /** [#22782] The unit {@link opensAfterAbortUnit} asked for; `write` re-enters the door, which joins it. */
@@ -1343,11 +1276,7 @@ export class ObjectQL implements IObjectQLEngine {
     batchCtx: HookContext,
   ): Promise<void> {
     // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts`, its docblock with it (see `HooksAndFunctionsHost`).
-    const readHooks = () => this.hooks;
-    const host: ThisParameterType<typeof HooksAndFunctionsFacet.dispatchUnscopedMultiWriteHooks> = {
-      get hooks() { return readHooks(); },
-    };
-    return HooksAndFunctionsFacet.dispatchUnscopedMultiWriteHooks.call(host, event, object, batchCtx);
+    return HooksAndFunctionsFacet.dispatchUnscopedMultiWriteHooks.call(hooksAndFunctionsHost.of(this), event, object, batchCtx);
   }
 
   /**
@@ -1406,13 +1335,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   registerAction(objectName: string, actionName: string, handler: (ctx: any) => Promise<any> | any, packageName?: string): void {
     // [#29986 codemod] The body moved to `engine-actions.ts` (see `ActionsHost`).
-    const readActions = () => this.actions;
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof ActionsFacet.registerAction> = {
-      get actions() { return readActions(); },
-      get logger() { return readLogger(); },
-    };
-    return ActionsFacet.registerAction.call(host, objectName, actionName, handler, packageName);
+    return ActionsFacet.registerAction.call(actionsHost.of(this), objectName, actionName, handler, packageName);
   }
 
   /**
@@ -1420,11 +1343,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   executeAction(objectName: string, actionName: string, ctx: any): Promise<any> {
     // [#29986 codemod] The body moved to `engine-actions.ts` (see `ActionsHost`).
-    const readActions = () => this.actions;
-    const host: ThisParameterType<typeof ActionsFacet.executeAction> = {
-      get actions() { return readActions(); },
-    };
-    return ActionsFacet.executeAction.call(host, objectName, actionName, ctx);
+    return ActionsFacet.executeAction.call(actionsHost.of(this), objectName, actionName, ctx);
   }
 
   /**
@@ -1440,11 +1359,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   listRegisteredActions(): Array<{ objectName: string; actionName: string; package?: string }> {
     // [#29986 codemod] The body moved to `engine-actions.ts` (see `ActionsHost`).
-    const readActions = () => this.actions;
-    const host: ThisParameterType<typeof ActionsFacet.listRegisteredActions> = {
-      get actions() { return readActions(); },
-    };
-    return ActionsFacet.listRegisteredActions.call(host);
+    return ActionsFacet.listRegisteredActions.call(actionsHost.of(this));
   }
 
   /**
@@ -1452,11 +1367,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   removeActionsByPackage(packageName: string): void {
     // [#29986 codemod] The body moved to `engine-actions.ts` (see `ActionsHost`).
-    const readActions = () => this.actions;
-    const host: ThisParameterType<typeof ActionsFacet.removeActionsByPackage> = {
-      get actions() { return readActions(); },
-    };
-    return ActionsFacet.removeActionsByPackage.call(host, packageName);
+    return ActionsFacet.removeActionsByPackage.call(actionsHost.of(this), packageName);
   }
 
   // ========================================
@@ -1484,11 +1395,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   setActionActivationStore(store: ActionActivationStore): void {
     // [#29986 codemod] The body moved to `engine-actions.ts` (see `ActionsHost`).
-    const readActionActivation = () => this.actionActivation;
-    const host: ThisParameterType<typeof ActionsFacet.setActionActivationStore> = {
-      get actionActivation() { return readActionActivation(); },
-    };
-    return ActionsFacet.setActionActivationStore.call(host, store);
+    return ActionsFacet.setActionActivationStore.call(actionsHost.of(this), store);
   }
 
   /**
@@ -1501,11 +1408,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   hydrateActionActivations(): Promise<string[]> {
     // [#29986 codemod] The body moved to `engine-actions.ts` (see `ActionsHost`).
-    const readActionActivation = () => this.actionActivation;
-    const host: ThisParameterType<typeof ActionsFacet.hydrateActionActivations> = {
-      get actionActivation() { return readActionActivation(); },
-    };
-    return ActionsFacet.hydrateActionActivations.call(host);
+    return ActionsFacet.hydrateActionActivations.call(actionsHost.of(this));
   }
 
   /**
@@ -1515,21 +1418,13 @@ export class ObjectQL implements IObjectQLEngine {
    */
   isActionEnabled(actionName: string): boolean {
     // [#29986 codemod] The body moved to `engine-actions.ts` (see `ActionsHost`).
-    const readActionActivation = () => this.actionActivation;
-    const host: ThisParameterType<typeof ActionsFacet.isActionEnabled> = {
-      get actionActivation() { return readActionActivation(); },
-    };
-    return ActionsFacet.isActionEnabled.call(host, actionName);
+    return ActionsFacet.isActionEnabled.call(actionsHost.of(this), actionName);
   }
 
   /** Every action name the ledger currently switches off (operability reads). */
   listDisabledActions(): string[] {
     // [#29986 codemod] The body moved to `engine-actions.ts` (see `ActionsHost`).
-    const readActionActivation = () => this.actionActivation;
-    const host: ThisParameterType<typeof ActionsFacet.listDisabledActions> = {
-      get actionActivation() { return readActionActivation(); },
-    };
-    return ActionsFacet.listDisabledActions.call(host);
+    return ActionsFacet.listDisabledActions.call(actionsHost.of(this));
   }
 
   /**
@@ -1542,11 +1437,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   getDisabledActions(): string[] | undefined {
     // [#29986 codemod] The body moved to `engine-actions.ts` (see `ActionsHost`).
-    const readActionActivation = () => this.actionActivation;
-    const host: ThisParameterType<typeof ActionsFacet.getDisabledActions> = {
-      get actionActivation() { return readActionActivation(); },
-    };
-    return ActionsFacet.getDisabledActions.call(host);
+    return ActionsFacet.getDisabledActions.call(actionsHost.of(this));
   }
 
   /**
@@ -1563,13 +1454,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   describeDisabledAction(actionName: string): string {
     // [#29986 codemod] The body moved to `engine-actions.ts` (see `ActionsHost`).
-    const readActionActivation = () => this.actionActivation;
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof ActionsFacet.describeDisabledAction> = {
-      get actionActivation() { return readActionActivation(); },
-      get logger() { return readLogger(); },
-    };
-    return ActionsFacet.describeDisabledAction.call(host, actionName);
+    return ActionsFacet.describeDisabledAction.call(actionsHost.of(this), actionName);
   }
 
   /**
@@ -1583,11 +1468,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   setActionActive(row: ActionActivationRow, options?: ActionActivationWriteOptions): Promise<void> {
     // [#29986 codemod] The body moved to `engine-actions.ts` (see `ActionsHost`).
-    const readActionActivation = () => this.actionActivation;
-    const host: ThisParameterType<typeof ActionsFacet.setActionActive> = {
-      get actionActivation() { return readActionActivation(); },
-    };
-    return ActionsFacet.setActionActive.call(host, row, options);
+    return ActionsFacet.setActionActive.call(actionsHost.of(this), row, options);
   }
 
   /**
@@ -1614,15 +1495,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   registerHeldFileResolver(fn: HeldFileResolver): void {
     // [#29986 codemod] The body moved to `engine-security-resolvers.ts` (see `SecurityResolversHost`).
-    const read_heldFileResolver = () => this._heldFileResolver;
-    const write_heldFileResolver = (v: ObjectQL['_heldFileResolver']) => { this._heldFileResolver = v; };
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof SecurityResolversFacet.registerHeldFileResolver> = {
-      get _heldFileResolver() { return read_heldFileResolver(); },
-      set _heldFileResolver(v) { write_heldFileResolver(v); },
-      get logger() { return readLogger(); },
-    };
-    return SecurityResolversFacet.registerHeldFileResolver.call(host, fn);
+    return SecurityResolversFacet.registerHeldFileResolver.call(securityResolversHost.of(this), fn);
   }
 
   /**
@@ -1650,15 +1523,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   registerFieldOwnedFileReadAuthorizer(fn: FieldOwnedFileReadAuthorizer): void {
     // [#29986 codemod] The body moved to `engine-security-resolvers.ts` (see `SecurityResolversHost`).
-    const read_fieldOwnedFileReadAuthorizer = () => this._fieldOwnedFileReadAuthorizer;
-    const write_fieldOwnedFileReadAuthorizer = (v: ObjectQL['_fieldOwnedFileReadAuthorizer']) => { this._fieldOwnedFileReadAuthorizer = v; };
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof SecurityResolversFacet.registerFieldOwnedFileReadAuthorizer> = {
-      get _fieldOwnedFileReadAuthorizer() { return read_fieldOwnedFileReadAuthorizer(); },
-      set _fieldOwnedFileReadAuthorizer(v) { write_fieldOwnedFileReadAuthorizer(v); },
-      get logger() { return readLogger(); },
-    };
-    return SecurityResolversFacet.registerFieldOwnedFileReadAuthorizer.call(host, fn);
+    return SecurityResolversFacet.registerFieldOwnedFileReadAuthorizer.call(securityResolversHost.of(this), fn);
   }
 
   /**
@@ -1793,15 +1658,7 @@ export class ObjectQL implements IObjectQLEngine {
     ) => Promise<boolean>,
   ): void {
     // [#29986 codemod] The body moved to `engine-security-resolvers.ts` (see `SecurityResolversHost`).
-    const read_writeGateProbe = () => this._writeGateProbe;
-    const write_writeGateProbe = (v: ObjectQL['_writeGateProbe']) => { this._writeGateProbe = v; };
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof SecurityResolversFacet.registerWriteGateProbe> = {
-      get _writeGateProbe() { return read_writeGateProbe(); },
-      set _writeGateProbe(v) { write_writeGateProbe(v); },
-      get logger() { return readLogger(); },
-    };
-    return SecurityResolversFacet.registerWriteGateProbe.call(host, fn);
+    return SecurityResolversFacet.registerWriteGateProbe.call(securityResolversHost.of(this), fn);
   }
 
   /**
@@ -1836,15 +1693,7 @@ export class ObjectQL implements IObjectQLEngine {
   /** Wire the write wall's per-row verdict for `validate()` (#25062). Last registration wins. */
   registerWriteWallVerdict(fn: WriteWallVerdict): void {
     // [#29986 codemod] The body moved to `engine-security-resolvers.ts` (see `SecurityResolversHost`).
-    const read_writeWallVerdict = () => this._writeWallVerdict;
-    const write_writeWallVerdict = (v: ObjectQL['_writeWallVerdict']) => { this._writeWallVerdict = v; };
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof SecurityResolversFacet.registerWriteWallVerdict> = {
-      get _writeWallVerdict() { return read_writeWallVerdict(); },
-      set _writeWallVerdict(v) { write_writeWallVerdict(v); },
-      get logger() { return readLogger(); },
-    };
-    return SecurityResolversFacet.registerWriteWallVerdict.call(host, fn);
+    return SecurityResolversFacet.registerWriteWallVerdict.call(securityResolversHost.of(this), fn);
   }
 
   /**
@@ -1868,15 +1717,7 @@ export class ObjectQL implements IObjectQLEngine {
   /** Wire the effective object-permission source (#18783). Last registration wins. */
   registerEffectiveObjectPermissionsResolver(fn: (context: unknown) => Promise<unknown>): void {
     // [#29986 codemod] The body moved to `engine-security-resolvers.ts` (see `SecurityResolversHost`).
-    const read_effectiveObjectPermissionsResolver = () => this._effectiveObjectPermissionsResolver;
-    const write_effectiveObjectPermissionsResolver = (v: ObjectQL['_effectiveObjectPermissionsResolver']) => { this._effectiveObjectPermissionsResolver = v; };
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof SecurityResolversFacet.registerEffectiveObjectPermissionsResolver> = {
-      get _effectiveObjectPermissionsResolver() { return read_effectiveObjectPermissionsResolver(); },
-      set _effectiveObjectPermissionsResolver(v) { write_effectiveObjectPermissionsResolver(v); },
-      get logger() { return readLogger(); },
-    };
-    return SecurityResolversFacet.registerEffectiveObjectPermissionsResolver.call(host, fn);
+    return SecurityResolversFacet.registerEffectiveObjectPermissionsResolver.call(securityResolversHost.of(this), fn);
   }
 
   /** [#25073] {@link registerInsertRecomputeListener}'s listeners, by registrant id. */
@@ -1909,13 +1750,7 @@ export class ObjectQL implements IObjectQLEngine {
     fn: (event: { object: string; row: Record<string, unknown>; fields: string[] }) => void | Promise<void>,
   ): void {
     // [#29986 codemod] The body moved to `engine-security-resolvers.ts` (see `SecurityResolversHost`).
-    const readInsertRecomputeListeners = () => this.insertRecomputeListeners;
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof SecurityResolversFacet.registerInsertRecomputeListener> = {
-      get insertRecomputeListeners() { return readInsertRecomputeListeners(); },
-      get logger() { return readLogger(); },
-    };
-    return SecurityResolversFacet.registerInsertRecomputeListener.call(host, id, fn);
+    return SecurityResolversFacet.registerInsertRecomputeListener.call(securityResolversHost.of(this), id, fn);
   }
 
   /**
@@ -1968,15 +1803,7 @@ export class ObjectQL implements IObjectQLEngine {
     context: ExecutionContext | undefined,
   ): Promise<A> {
     // [#29986 codemod] The body moved to `engine-security-resolvers.ts`, its docblock with it (see `SecurityResolversHost`).
-    const readLogger = () => this.logger;
-    const readReadableIdsSecurityReported = () => this.readableIdsSecurityReported;
-    const host: ThisParameterType<typeof SecurityResolversFacet.composeReadableIdsAtBoundary> = {
-      composeReadableIdsChain: (...a) => this.composeReadableIdsChain(...a),
-      get logger() { return readLogger(); },
-      get readableIdsSecurityReported() { return readReadableIdsSecurityReported(); },
-      resolveReadableIdsSecurity: (...a) => this.resolveReadableIdsSecurity(...a),
-    };
-    return (SecurityResolversFacet.composeReadableIdsAtBoundary<A>).call(host, object, operation, ast, context);
+    return (SecurityResolversFacet.composeReadableIdsAtBoundary<A>).call(securityResolversHost.of(this), object, operation, ast, context);
   }
 
   /**
@@ -2037,12 +1864,7 @@ export class ObjectQL implements IObjectQLEngine {
     sites: readonly ComposableReadableIdsSite[],
   ): string[] {
     // [#29986 codemod] The body moved to `engine-security-resolvers.ts`, its docblock with it (see `SecurityResolversHost`).
-    const read_registry = () => this._registry;
-    const host: ThisParameterType<typeof SecurityResolversFacet.refuseUncomposableReadableIdsClasses> = {
-      get _registry() { return read_registry(); },
-      uncomposableReadableIdsParent: (...a) => this.uncomposableReadableIdsParent(...a),
-    };
-    return SecurityResolversFacet.refuseUncomposableReadableIdsClasses.call(host, object, operation, sites);
+    return SecurityResolversFacet.refuseUncomposableReadableIdsClasses.call(securityResolversHost.of(this), object, operation, sites);
   }
 
   private uncomposableReadableIdsParent(object: string, parent: string):
@@ -2050,11 +1872,7 @@ export class ObjectQL implements IObjectQLEngine {
     | { class: 'other-datasource'; objectDatasource: string | undefined; parentDatasource: string | undefined }
     | undefined {
     // [#29986 codemod] The body moved to `engine-security-resolvers.ts`, its docblock with it (see `SecurityResolversHost`).
-    const host: ThisParameterType<typeof SecurityResolversFacet.uncomposableReadableIdsParent> = {
-      hasObjectMiddleware: (...a) => this.hasObjectMiddleware(...a),
-      resolveDatasourceBinding: (...a) => this.resolveDatasourceBinding(...a),
-    };
-    return SecurityResolversFacet.uncomposableReadableIdsParent.call(host, object, parent);
+    return SecurityResolversFacet.uncomposableReadableIdsParent.call(securityResolversHost.of(this), object, parent);
   }
 
   /**
@@ -2234,14 +2052,7 @@ export class ObjectQL implements IObjectQLEngine {
     query?: EngineQueryOptions,
   ): Promise<FormulaRelated | undefined> {
     // [#29986 codemod] The body moved to `engine-security-resolvers.ts`, its docblock with it (see `SecurityResolversHost`).
-    const read_registry = () => this._registry;
-    const readFormulaHopReads = () => this.formulaHopReads;
-    const host: ThisParameterType<typeof SecurityResolversFacet.resolveFormulaRelated> = {
-      get _registry() { return read_registry(); },
-      get formulaHopReads() { return readFormulaHopReads(); },
-      resolveOneHopRelated: (...a) => this.resolveOneHopRelated(...a),
-    };
-    return SecurityResolversFacet.resolveFormulaRelated.call(host, schema, plan, rows, context, query);
+    return SecurityResolversFacet.resolveFormulaRelated.call(securityResolversHost.of(this), schema, plan, rows, context, query);
   }
 
   /**
@@ -2286,16 +2097,7 @@ export class ObjectQL implements IObjectQLEngine {
     context?: ExecutionContext,
   ): Promise<unknown> {
     // [#29986 codemod] The body moved to `engine-security-resolvers.ts` (see `SecurityResolversHost`).
-    const read_registry = () => this._registry;
-    const host: ThisParameterType<typeof SecurityResolversFacet.serveFormulaField> = {
-      get _registry() { return read_registry(); },
-      formulaFaultSink: (...a) => this.formulaFaultSink(...a),
-      formulaOptionLabels: (...a) => this.formulaOptionLabels(...a),
-      permissionResolution: (...a) => this.permissionResolution(...a),
-      resolveFormulaPermissions: (...a) => this.resolveFormulaPermissions(...a),
-      resolveFormulaRelated: (...a) => this.resolveFormulaRelated(...a),
-    };
-    return SecurityResolversFacet.serveFormulaField.call(host, objectName, record, field, context);
+    return SecurityResolversFacet.serveFormulaField.call(securityResolversHost.of(this), objectName, record, field, context);
   }
 
   private formulaOptionLabels(
@@ -2304,11 +2106,7 @@ export class ObjectQL implements IObjectQLEngine {
     context: { locale?: string } | undefined,
   ): EvalOptionLabels | undefined {
     // [#29986 codemod] The body moved to `engine-security-resolvers.ts`, its docblock with it (see `SecurityResolversHost`).
-    const readI18nService = () => this.i18nService;
-    const host: ThisParameterType<typeof SecurityResolversFacet.formulaOptionLabels> = {
-      get i18nService() { return readI18nService(); },
-    };
-    return SecurityResolversFacet.formulaOptionLabels.call(host, schema, plan, context);
+    return SecurityResolversFacet.formulaOptionLabels.call(securityResolversHost.of(this), schema, plan, context);
   }
 
   /**
@@ -2319,10 +2117,7 @@ export class ObjectQL implements IObjectQLEngine {
 
   private formulaFaultSink(object: string): FormulaFaultSink {
     // [#29986 codemod] The body moved to `engine-security-resolvers.ts`, its docblock with it (see `SecurityResolversHost`).
-    const host: ThisParameterType<typeof SecurityResolversFacet.formulaFaultSink> = {
-      reportFormulaFault: (...a) => this.reportFormulaFault(...a),
-    };
-    return SecurityResolversFacet.formulaFaultSink.call(host, object);
+    return SecurityResolversFacet.formulaFaultSink.call(securityResolversHost.of(this), object);
   }
 
   /**
@@ -2452,38 +2247,13 @@ export class ObjectQL implements IObjectQLEngine {
    */
   attachAuthzInvalidationPubSub(pubsub: IPubSub, nodeId: string): () => void {
     // [#29986 codemod] The body moved to `engine-middleware-and-context.ts` (see `MiddlewareAndContextHost`).
-    const readAuthzInvalidationBinding = () => this.authzInvalidationBinding;
-    const writeAuthzInvalidationBinding = (v: ObjectQL['authzInvalidationBinding']) => { this.authzInvalidationBinding = v; };
-    const readAuthzInvalidationDetach = () => this.authzInvalidationDetach;
-    const writeAuthzInvalidationDetach = (v: ObjectQL['authzInvalidationDetach']) => { this.authzInvalidationDetach = v; };
-    const readLogger = () => this.logger;
-    const readWriteEpoch = () => this.writeEpoch;
-    const host: ThisParameterType<typeof MiddlewareAndContextFacet.attachAuthzInvalidationPubSub> = {
-      get authzInvalidationBinding() { return readAuthzInvalidationBinding(); },
-      set authzInvalidationBinding(v) { writeAuthzInvalidationBinding(v); },
-      get authzInvalidationDetach() { return readAuthzInvalidationDetach(); },
-      set authzInvalidationDetach(v) { writeAuthzInvalidationDetach(v); },
-      detachAuthzInvalidationPubSub: (...a) => this.detachAuthzInvalidationPubSub(...a),
-      get logger() { return readLogger(); },
-      get writeEpoch() { return readWriteEpoch(); },
-    };
-    return MiddlewareAndContextFacet.attachAuthzInvalidationPubSub.call(host, pubsub, nodeId);
+    return MiddlewareAndContextFacet.attachAuthzInvalidationPubSub.call(middlewareAndContextHost.of(this), pubsub, nodeId);
   }
 
   /** Tear down the `authz.invalidated` bridge. Safe to call multiple times. */
   detachAuthzInvalidationPubSub(): void {
     // [#29986 codemod] The body moved to `engine-middleware-and-context.ts` (see `MiddlewareAndContextHost`).
-    const readAuthzInvalidationBinding = () => this.authzInvalidationBinding;
-    const writeAuthzInvalidationBinding = (v: ObjectQL['authzInvalidationBinding']) => { this.authzInvalidationBinding = v; };
-    const readAuthzInvalidationDetach = () => this.authzInvalidationDetach;
-    const writeAuthzInvalidationDetach = (v: ObjectQL['authzInvalidationDetach']) => { this.authzInvalidationDetach = v; };
-    const host: ThisParameterType<typeof MiddlewareAndContextFacet.detachAuthzInvalidationPubSub> = {
-      get authzInvalidationBinding() { return readAuthzInvalidationBinding(); },
-      set authzInvalidationBinding(v) { writeAuthzInvalidationBinding(v); },
-      get authzInvalidationDetach() { return readAuthzInvalidationDetach(); },
-      set authzInvalidationDetach(v) { writeAuthzInvalidationDetach(v); },
-    };
-    return MiddlewareAndContextFacet.detachAuthzInvalidationPubSub.call(host);
+    return MiddlewareAndContextFacet.detachAuthzInvalidationPubSub.call(middlewareAndContextHost.of(this));
   }
 
   /**
@@ -2494,13 +2264,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   registerMiddleware(fn: EngineMiddleware, options?: { object?: string }): void {
     // [#29986 codemod] The body moved to `engine-middleware-and-context.ts` (see `MiddlewareAndContextHost`).
-    const readLogger = () => this.logger;
-    const readMiddlewares = () => this.middlewares;
-    const host: ThisParameterType<typeof MiddlewareAndContextFacet.registerMiddleware> = {
-      get logger() { return readLogger(); },
-      get middlewares() { return readMiddlewares(); },
-    };
-    return MiddlewareAndContextFacet.registerMiddleware.call(host, fn, options);
+    return MiddlewareAndContextFacet.registerMiddleware.call(middlewareAndContextHost.of(this), fn, options);
   }
 
   /**
@@ -2519,22 +2283,12 @@ export class ObjectQL implements IObjectQLEngine {
    */
   hasObjectMiddleware(objectName: string): boolean {
     // [#29986 codemod] The body moved to `engine-middleware-and-context.ts` (see `MiddlewareAndContextHost`).
-    const readMiddlewares = () => this.middlewares;
-    const host: ThisParameterType<typeof MiddlewareAndContextFacet.hasObjectMiddleware> = {
-      get middlewares() { return readMiddlewares(); },
-    };
-    return MiddlewareAndContextFacet.hasObjectMiddleware.call(host, objectName);
+    return MiddlewareAndContextFacet.hasObjectMiddleware.call(middlewareAndContextHost.of(this), objectName);
   }
 
   private executeWithMiddleware(ctx: OperationContext, executor: () => Promise<any>): Promise<any> {
     // [#29986 codemod] The body moved to `engine-middleware-and-context.ts`, its docblock with it (see `MiddlewareAndContextHost`).
-    const readMiddlewares = () => this.middlewares;
-    const readWriteEpoch = () => this.writeEpoch;
-    const host: ThisParameterType<typeof MiddlewareAndContextFacet.executeWithMiddleware> = {
-      get middlewares() { return readMiddlewares(); },
-      get writeEpoch() { return readWriteEpoch(); },
-    };
-    return MiddlewareAndContextFacet.executeWithMiddleware.call(host, ctx, executor);
+    return MiddlewareAndContextFacet.executeWithMiddleware.call(middlewareAndContextHost.of(this), ctx, executor);
   }
 
   /**
@@ -2593,11 +2347,7 @@ export class ObjectQL implements IObjectQLEngine {
 
   private claimReferentialCascadeDelete(object: string, id: unknown): true | undefined {
     // [#29986 codemod] The body moved to `engine-middleware-and-context.ts`, its docblock with it (see `MiddlewareAndContextHost`).
-    const readCascadeIssuedDeletes = () => this.cascadeIssuedDeletes;
-    const host: ThisParameterType<typeof MiddlewareAndContextFacet.claimReferentialCascadeDelete> = {
-      get cascadeIssuedDeletes() { return readCascadeIssuedDeletes(); },
-    };
-    return MiddlewareAndContextFacet.claimReferentialCascadeDelete.call(host, object, id);
+    return MiddlewareAndContextFacet.claimReferentialCascadeDelete.call(middlewareAndContextHost.of(this), object, id);
   }
 
   /**
@@ -2840,27 +2590,12 @@ export class ObjectQL implements IObjectQLEngine {
 
   private probeInstallOrganizations(): Promise<readonly string[]> {
     // [#29986 codemod] The body moved to `engine-middleware-and-context.ts`, its docblock with it (see `MiddlewareAndContextHost`).
-    const read_registry = () => this._registry;
-    const readOrganizationProbeMemo = () => this.organizationProbeMemo;
-    const writeOrganizationProbeMemo = (v: ObjectQL['organizationProbeMemo']) => { this.organizationProbeMemo = v; };
-    const host: ThisParameterType<typeof MiddlewareAndContextFacet.probeInstallOrganizations> = {
-      get _registry() { return read_registry(); },
-      find: (...a) => this.find(...a),
-      get organizationProbeMemo() { return readOrganizationProbeMemo(); },
-      set organizationProbeMemo(v) { writeOrganizationProbeMemo(v); },
-    };
-    return MiddlewareAndContextFacet.probeInstallOrganizations.call(host);
+    return MiddlewareAndContextFacet.probeInstallOrganizations.call(middlewareAndContextHost.of(this));
   }
 
   private invalidateOrganizationProbe(): void {
     // [#29986 codemod] The body moved to `engine-middleware-and-context.ts`, its docblock with it (see `MiddlewareAndContextHost`).
-    const readOrganizationProbeMemo = () => this.organizationProbeMemo;
-    const writeOrganizationProbeMemo = (v: ObjectQL['organizationProbeMemo']) => { this.organizationProbeMemo = v; };
-    const host: ThisParameterType<typeof MiddlewareAndContextFacet.invalidateOrganizationProbe> = {
-      get organizationProbeMemo() { return readOrganizationProbeMemo(); },
-      set organizationProbeMemo(v) { writeOrganizationProbeMemo(v); },
-    };
-    return MiddlewareAndContextFacet.invalidateOrganizationProbe.call(host);
+    return MiddlewareAndContextFacet.invalidateOrganizationProbe.call(middlewareAndContextHost.of(this));
   }
 
   private resolveSystemInsertOrganization(
@@ -2869,23 +2604,12 @@ export class ObjectQL implements IObjectQLEngine {
     rows: readonly Record<string, unknown>[],
   ): Promise<string | undefined> {
     // [#29986 codemod] The body moved to `engine-middleware-and-context.ts`, its docblock with it (see `MiddlewareAndContextHost`).
-    const read_registry = () => this._registry;
-    const host: ThisParameterType<typeof MiddlewareAndContextFacet.resolveSystemInsertOrganization> = {
-      get _registry() { return read_registry(); },
-      probeInstallOrganizations: (...a) => this.probeInstallOrganizations(...a),
-      resolveEnginePosture: (...a) => this.resolveEnginePosture(...a),
-    };
-    return MiddlewareAndContextFacet.resolveSystemInsertOrganization.call(host, object, execCtx, rows);
+    return MiddlewareAndContextFacet.resolveSystemInsertOrganization.call(middlewareAndContextHost.of(this), object, execCtx, rows);
   }
 
   private transactionCoversDriverFor(object: string, tx: unknown): boolean {
     // [#29986 codemod] The body moved to `engine-middleware-and-context.ts`, its docblock with it (see `MiddlewareAndContextHost`).
-    const readTxStore = () => this.txStore;
-    const host: ThisParameterType<typeof MiddlewareAndContextFacet.transactionCoversDriverFor> = {
-      getDriver: (...a) => this.getDriver(...a),
-      get txStore() { return readTxStore(); },
-    };
-    return MiddlewareAndContextFacet.transactionCoversDriverFor.call(host, object, tx);
+    return MiddlewareAndContextFacet.transactionCoversDriverFor.call(middlewareAndContextHost.of(this), object, tx);
   }
 
   private resolveNowDefault(fieldType: unknown, instant: Date): string {
@@ -2895,10 +2619,7 @@ export class ObjectQL implements IObjectQLEngine {
 
   private normalizeExpressionDefault(fieldType: unknown, value: unknown): unknown {
     // [#29986 codemod] The body moved to `engine-defaults-and-autonumbers.ts`, its docblock with it (see `DefaultsAndAutonumbersHost`).
-    const host: ThisParameterType<typeof DefaultsAndAutonumbersFacet.normalizeExpressionDefault> = {
-      resolveNowDefault: (...a) => this.resolveNowDefault(...a),
-    };
-    return DefaultsAndAutonumbersFacet.normalizeExpressionDefault.call(host, fieldType, value);
+    return DefaultsAndAutonumbersFacet.normalizeExpressionDefault.call(defaultsAndAutonumbersHost.of(this), fieldType, value);
   }
 
   /**
@@ -2925,25 +2646,14 @@ export class ObjectQL implements IObjectQLEngine {
     permissions?: EvalPermissions,
   ): Record<string, unknown> {
     // [#29986 codemod] The body moved to `engine-defaults-and-autonumbers.ts`, its docblock with it (see `DefaultsAndAutonumbersHost`).
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof DefaultsAndAutonumbersFacet.applyFieldDefaults> = {
-      defaultFieldEntries: (...a) => this.defaultFieldEntries(...a),
-      get logger() { return readLogger(); },
-      normalizeExpressionDefault: (...a) => this.normalizeExpressionDefault(...a),
-      resolveNowDefault: (...a) => this.resolveNowDefault(...a),
-      resolveOptionDefault: (...a) => this.resolveOptionDefault(...a),
-    };
-    return DefaultsAndAutonumbersFacet.applyFieldDefaults.call(host, object, record, execCtx, nowSnapshot, permissions);
+    return DefaultsAndAutonumbersFacet.applyFieldDefaults.call(defaultsAndAutonumbersHost.of(this), object, record, execCtx, nowSnapshot, permissions);
   }
 
   private defaultFieldEntries(object: string): Array<{
     name: string; type?: unknown; defaultValue?: unknown; options?: unknown; multiple?: unknown;
   }> | undefined {
     // [#29986 codemod] The body moved to `engine-defaults-and-autonumbers.ts`, its docblock with it (see `DefaultsAndAutonumbersHost`).
-    const host: ThisParameterType<typeof DefaultsAndAutonumbersFacet.defaultFieldEntries> = {
-      getSchema: (...a) => this.getSchema(...a),
-    };
-    return DefaultsAndAutonumbersFacet.defaultFieldEntries.call(host, object);
+    return DefaultsAndAutonumbersFacet.defaultFieldEntries.call(defaultsAndAutonumbersHost.of(this), object);
   }
 
   private applyAutonumbers(
@@ -2953,14 +2663,7 @@ export class ObjectQL implements IObjectQLEngine {
     driverOwnsAutonumber?: boolean,
   ): Promise<IssuedAutonumber[]> {
     // [#29986 codemod] The body moved to `engine-defaults-and-autonumbers.ts`, its docblock with it (see `DefaultsAndAutonumbersHost`).
-    const readAutonumberCounters = () => this.autonumberCounters;
-    const host: ThisParameterType<typeof DefaultsAndAutonumbersFacet.applyAutonumbers> = {
-      adoptExplicitAutonumber: (...a) => this.adoptExplicitAutonumber(...a),
-      get autonumberCounters() { return readAutonumberCounters(); },
-      getSchema: (...a) => this.getSchema(...a),
-      seedAutonumber: (...a) => this.seedAutonumber(...a),
-    };
-    return DefaultsAndAutonumbersFacet.applyAutonumbers.call(host, object, record, execCtx, driverOwnsAutonumber);
+    return DefaultsAndAutonumbersFacet.applyAutonumbers.call(defaultsAndAutonumbersHost.of(this), object, record, execCtx, driverOwnsAutonumber);
   }
 
   private adoptExplicitAutonumber(
@@ -2973,13 +2676,7 @@ export class ObjectQL implements IObjectQLEngine {
     timezone?: string,
   ): void {
     // [#29986 codemod] The body moved to `engine-defaults-and-autonumbers.ts`, its docblock with it (see `DefaultsAndAutonumbersHost`).
-    const readAutonumberCounters = () => this.autonumberCounters;
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof DefaultsAndAutonumbersFacet.adoptExplicitAutonumber> = {
-      get autonumberCounters() { return readAutonumberCounters(); },
-      get logger() { return readLogger(); },
-    };
-    return DefaultsAndAutonumbersFacet.adoptExplicitAutonumber.call(host, object, field, tokens, record, value, now, timezone);
+    return DefaultsAndAutonumbersFacet.adoptExplicitAutonumber.call(defaultsAndAutonumbersHost.of(this), object, field, tokens, record, value, now, timezone);
   }
 
   private createWithAutonumberResync(
@@ -2994,17 +2691,7 @@ export class ObjectQL implements IObjectQLEngine {
     readers?: AutonumberReaders,
   ): Promise<any> {
     // [#29986 codemod] The body moved to `engine-defaults-and-autonumbers.ts`, its docblock with it (see `DefaultsAndAutonumbersHost`).
-    const readAutonumberCounters = () => this.autonumberCounters;
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof DefaultsAndAutonumbersFacet.createWithAutonumberResync> = {
-      applyAutonumbers: (...a) => this.applyAutonumbers(...a),
-      get autonumberCounters() { return readAutonumberCounters(); },
-      getSchema: (...a) => this.getSchema(...a),
-      isIssuedAutonumberCollision: (...a) => this.isIssuedAutonumberCollision(...a),
-      get logger() { return readLogger(); },
-      validationMessageContext: (...a) => this.validationMessageContext(...a),
-    };
-    return DefaultsAndAutonumbersFacet.createWithAutonumberResync.call(host, driver, object, row, driverOptions, issued, execCtx, driverOwnsAutonumber, driverIssued, readers);
+    return DefaultsAndAutonumbersFacet.createWithAutonumberResync.call(defaultsAndAutonumbersHost.of(this), driver, object, row, driverOptions, issued, execCtx, driverOwnsAutonumber, driverIssued, readers);
   }
 
   private isIssuedAutonumberCollision(error: unknown, issued: IssuedAutonumber[]): boolean {
@@ -3014,13 +2701,7 @@ export class ObjectQL implements IObjectQLEngine {
 
   private warnAutonumberReadersUnserved(object: string, plan: readonly FormulaPlanEntry[], driver: unknown): void {
     // [#29986 codemod] The body moved to `engine-defaults-and-autonumbers.ts`, its docblock with it (see `DefaultsAndAutonumbersHost`).
-    const readAutonumberReadersUnservedReported = () => this.autonumberReadersUnservedReported;
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof DefaultsAndAutonumbersFacet.warnAutonumberReadersUnserved> = {
-      get autonumberReadersUnservedReported() { return readAutonumberReadersUnservedReported(); },
-      get logger() { return readLogger(); },
-    };
-    return DefaultsAndAutonumbersFacet.warnAutonumberReadersUnserved.call(host, object, plan, driver);
+    return DefaultsAndAutonumbersFacet.warnAutonumberReadersUnserved.call(defaultsAndAutonumbersHost.of(this), object, plan, driver);
   }
 
   /**
@@ -3397,16 +3078,7 @@ export class ObjectQL implements IObjectQLEngine {
       scope: ArtifactInstallScope | undefined,
   ): void {
     // [#29986 codemod] The body moved to `engine-registration.ts`, its docblock with it (see `RegistrationHost`).
-    const read_registry = () => this._registry;
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof RegistrationFacet.registerPackageBody> = {
-      get _registry() { return read_registry(); },
-      get logger() { return readLogger(); },
-      registerMetadataCollections: (...a) => this.registerMetadataCollections(...a),
-      registerPlugin: (...a) => this.registerPlugin(...a),
-      resolveNavObjectNames: (...a) => this.resolveNavObjectNames(...a),
-    };
-    return RegistrationFacet.registerPackageBody.call(host, manifest, id, namespace, version, source, scope);
+    return RegistrationFacet.registerPackageBody.call(registrationHost.of(this), manifest, id, namespace, version, source, scope);
   }
 
   /**
@@ -3445,13 +3117,7 @@ export class ObjectQL implements IObjectQLEngine {
 
   private registerMetadataCollections(source: any, ownerId: string, sourceLabel: string, ownerVersion?: string) {
     // [#29986 codemod] The body moved to `engine-registration.ts`, its docblock with it (see `RegistrationHost`).
-    const read_registry = () => this._registry;
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof RegistrationFacet.registerMetadataCollections> = {
-      get _registry() { return read_registry(); },
-      get logger() { return readLogger(); },
-    };
-    return RegistrationFacet.registerMetadataCollections.call(host, source, ownerId, sourceLabel, ownerVersion);
+    return RegistrationFacet.registerMetadataCollections.call(registrationHost.of(this), source, ownerId, sourceLabel, ownerVersion);
   }
 
   /**
@@ -3539,12 +3205,7 @@ export class ObjectQL implements IObjectQLEngine {
 
   private supplyFileColumnsMovedResolver(driver: IDataDriver): void {
     // [#29986 codemod] The body moved to `engine-registration.ts`, its docblock with it (see `RegistrationHost`).
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof RegistrationFacet.supplyFileColumnsMovedResolver> = {
-      haveFileColumnsMoved: (...a) => this.haveFileColumnsMoved(...a),
-      get logger() { return readLogger(); },
-    };
-    return RegistrationFacet.supplyFileColumnsMovedResolver.call(host, driver);
+    return RegistrationFacet.supplyFileColumnsMovedResolver.call(registrationHost.of(this), driver);
   }
 
   /**
@@ -3598,19 +3259,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   unregisterDriver(name: string): boolean {
     // [#29986 codemod] The body moved to `engine-registration.ts` (see `RegistrationHost`).
-    const readDatasourceDefs = () => this.datasourceDefs;
-    const readDefaultDriver = () => this.defaultDriver;
-    const writeDefaultDriver = (v: ObjectQL['defaultDriver']) => { this.defaultDriver = v; };
-    const readDrivers = () => this.drivers;
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof RegistrationFacet.unregisterDriver> = {
-      get datasourceDefs() { return readDatasourceDefs(); },
-      get defaultDriver() { return readDefaultDriver(); },
-      set defaultDriver(v) { writeDefaultDriver(v); },
-      get drivers() { return readDrivers(); },
-      get logger() { return readLogger(); },
-    };
-    return RegistrationFacet.unregisterDriver.call(host, name);
+    return RegistrationFacet.unregisterDriver.call(registrationHost.of(this), name);
   }
 
   /**
@@ -3626,27 +3275,12 @@ export class ObjectQL implements IObjectQLEngine {
    */
   registerDatasourceDef(def: DatasourceDef): void {
     // [#29986 codemod] The body moved to `engine-registration.ts` (see `RegistrationHost`).
-    const readDatasourceDefs = () => this.datasourceDefs;
-    const host: ThisParameterType<typeof RegistrationFacet.registerDatasourceDef> = {
-      applyExternalDriverFloor: (...a) => this.applyExternalDriverFloor(...a),
-      get datasourceDefs() { return readDatasourceDefs(); },
-    };
-    return RegistrationFacet.registerDatasourceDef.call(host, def);
+    return RegistrationFacet.registerDatasourceDef.call(registrationHost.of(this), def);
   }
 
   private applyExternalDriverFloor(name: string): void {
     // [#29986 codemod] The body moved to `engine-registration.ts`, its docblock with it (see `RegistrationHost`).
-    const read_registry = () => this._registry;
-    const readDatasourceDefs = () => this.datasourceDefs;
-    const readDrivers = () => this.drivers;
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof RegistrationFacet.applyExternalDriverFloor> = {
-      get _registry() { return read_registry(); },
-      get datasourceDefs() { return readDatasourceDefs(); },
-      get drivers() { return readDrivers(); },
-      get logger() { return readLogger(); },
-    };
-    return RegistrationFacet.applyExternalDriverFloor.call(host, name);
+    return RegistrationFacet.applyExternalDriverFloor.call(registrationHost.of(this), name);
   }
 
   /**
@@ -3677,11 +3311,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   listDatasourceDefs(): DatasourceDef[] {
     // [#29986 codemod] The body moved to `engine-registration.ts` (see `RegistrationHost`).
-    const readDatasourceDefs = () => this.datasourceDefs;
-    const host: ThisParameterType<typeof RegistrationFacet.listDatasourceDefs> = {
-      get datasourceDefs() { return readDatasourceDefs(); },
-    };
-    return RegistrationFacet.listDatasourceDefs.call(host);
+    return RegistrationFacet.listDatasourceDefs.call(registrationHost.of(this));
   }
 
   /**
@@ -3697,21 +3327,13 @@ export class ObjectQL implements IObjectQLEngine {
    */
   markDatasourceUnavailable(info: { name: string; kind: DatasourceUnavailableKind; publicDetail?: string }): void {
     // [#29986 codemod] The body moved to `engine-registration.ts` (see `RegistrationHost`).
-    const readUnavailableDatasources = () => this.unavailableDatasources;
-    const host: ThisParameterType<typeof RegistrationFacet.markDatasourceUnavailable> = {
-      get unavailableDatasources() { return readUnavailableDatasources(); },
-    };
-    return RegistrationFacet.markDatasourceUnavailable.call(host, info);
+    return RegistrationFacet.markDatasourceUnavailable.call(registrationHost.of(this), info);
   }
 
   /** Drop a {@link markDatasourceUnavailable} record (successful (re)connect / pool removal). */
   clearDatasourceUnavailable(name: string): void {
     // [#29986 codemod] The body moved to `engine-registration.ts` (see `RegistrationHost`).
-    const readUnavailableDatasources = () => this.unavailableDatasources;
-    const host: ThisParameterType<typeof RegistrationFacet.clearDatasourceUnavailable> = {
-      get unavailableDatasources() { return readUnavailableDatasources(); },
-    };
-    return RegistrationFacet.clearDatasourceUnavailable.call(host, name);
+    return RegistrationFacet.clearDatasourceUnavailable.call(registrationHost.of(this), name);
   }
 
   /**
@@ -3722,11 +3344,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   getDefaultDriverName(): string | undefined {
     // [#29986 codemod] The body moved to `engine-registration.ts` (see `RegistrationHost`).
-    const readDefaultDriver = () => this.defaultDriver;
-    const host: ThisParameterType<typeof RegistrationFacet.getDefaultDriverName> = {
-      get defaultDriver() { return readDefaultDriver(); },
-    };
-    return RegistrationFacet.getDefaultDriverName.call(host);
+    return RegistrationFacet.getDefaultDriverName.call(registrationHost.of(this));
   }
 
   /**
@@ -3738,22 +3356,12 @@ export class ObjectQL implements IObjectQLEngine {
    */
   listUnavailableDatasources(): Array<{ name: string } & DatasourceUnavailableInfo> {
     // [#29986 codemod] The body moved to `engine-registration.ts` (see `RegistrationHost`).
-    const readUnavailableDatasources = () => this.unavailableDatasources;
-    const host: ThisParameterType<typeof RegistrationFacet.listUnavailableDatasources> = {
-      get unavailableDatasources() { return readUnavailableDatasources(); },
-    };
-    return RegistrationFacet.listUnavailableDatasources.call(host);
+    return RegistrationFacet.listUnavailableDatasources.call(registrationHost.of(this));
   }
 
   private assertWriteAllowed(objectName: string, operation: 'insert' | 'update' | 'delete'): void {
     // [#29986 codemod] The body moved to `engine-registration.ts`, its docblock with it (see `RegistrationHost`).
-    const read_registry = () => this._registry;
-    const readDatasourceDefs = () => this.datasourceDefs;
-    const host: ThisParameterType<typeof RegistrationFacet.assertWriteAllowed> = {
-      get _registry() { return read_registry(); },
-      get datasourceDefs() { return readDatasourceDefs(); },
-    };
-    return RegistrationFacet.assertWriteAllowed.call(host, objectName, operation);
+    return RegistrationFacet.assertWriteAllowed.call(registrationHost.of(this), objectName, operation);
   }
 
   /**
@@ -3764,15 +3372,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   setRealtimeService(service: IRealtimeService): void {
     // [#29986 codemod] The body moved to `engine-references-and-master-detail.ts` (see `ReferencesAndMasterDetailHost`).
-    const readLogger = () => this.logger;
-    const readRealtimeService = () => this.realtimeService;
-    const writeRealtimeService = (v: ObjectQL['realtimeService']) => { this.realtimeService = v; };
-    const host: ThisParameterType<typeof ReferencesAndMasterDetailFacet.setRealtimeService> = {
-      get logger() { return readLogger(); },
-      get realtimeService() { return readRealtimeService(); },
-      set realtimeService(v) { writeRealtimeService(v); },
-    };
-    return ReferencesAndMasterDetailFacet.setRealtimeService.call(host, service);
+    return ReferencesAndMasterDetailFacet.setRealtimeService.call(referencesAndMasterDetailHost.of(this), service);
   }
 
   /**
@@ -3909,15 +3509,7 @@ export class ObjectQL implements IObjectQLEngine {
     getDefaultLocale?: () => string | undefined;
   }): void {
     // [#29986 codemod] The body moved to `engine-references-and-master-detail.ts` (see `ReferencesAndMasterDetailHost`).
-    const readI18nService = () => this.i18nService;
-    const writeI18nService = (v: ObjectQL['i18nService']) => { this.i18nService = v; };
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof ReferencesAndMasterDetailFacet.setI18nService> = {
-      get i18nService() { return readI18nService(); },
-      set i18nService(v) { writeI18nService(v); },
-      get logger() { return readLogger(); },
-    };
-    return ReferencesAndMasterDetailFacet.setI18nService.call(host, service);
+    return ReferencesAndMasterDetailFacet.setI18nService.call(referencesAndMasterDetailHost.of(this), service);
   }
 
   /**
@@ -3933,13 +3525,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   setHomeLocalizationResolver(resolver: HomeLocalizationResolver | undefined): void {
     // [#29986 codemod] The body moved to `engine-references-and-master-detail.ts` (see `ReferencesAndMasterDetailHost`).
-    const readHomeLocalizationResolver = () => this.homeLocalizationResolver;
-    const writeHomeLocalizationResolver = (v: ObjectQL['homeLocalizationResolver']) => { this.homeLocalizationResolver = v; };
-    const host: ThisParameterType<typeof ReferencesAndMasterDetailFacet.setHomeLocalizationResolver> = {
-      get homeLocalizationResolver() { return readHomeLocalizationResolver(); },
-      set homeLocalizationResolver(v) { writeHomeLocalizationResolver(v); },
-    };
-    return ReferencesAndMasterDetailFacet.setHomeLocalizationResolver.call(host, resolver);
+    return ReferencesAndMasterDetailFacet.setHomeLocalizationResolver.call(referencesAndMasterDetailHost.of(this), resolver);
   }
 
   private homeLocalizationResolver?: HomeLocalizationResolver;
@@ -4018,10 +3604,7 @@ export class ObjectQL implements IObjectQLEngine {
     recordId: unknown,
   ): Promise<void> {
     // [#29986 codemod] The body moved to `engine-references-and-master-detail.ts`, its docblock with it (see `ReferencesAndMasterDetailHost`).
-    const host: ThisParameterType<typeof ReferencesAndMasterDetailFacet.previewHomeAmounts> = {
-      homeAmountServing: (...a) => this.homeAmountServing(...a),
-    };
-    return ReferencesAndMasterDetailFacet.previewHomeAmounts.call(host, object, schema, mode, row, image, context, recordId);
+    return ReferencesAndMasterDetailFacet.previewHomeAmounts.call(referencesAndMasterDetailHost.of(this), object, schema, mode, row, image, context, recordId);
   }
 
   private projectHomeAmountsOntoPatch(
@@ -4034,10 +3617,7 @@ export class ObjectQL implements IObjectQLEngine {
     serving: HomeAmountServing = this.homeAmountServing(context),
   ): Promise<void> {
     // [#29986 codemod] The body moved to `engine-references-and-master-detail.ts`, its docblock with it (see `ReferencesAndMasterDetailHost`).
-    const host: ThisParameterType<typeof ReferencesAndMasterDetailFacet.projectHomeAmountsOntoPatch> = {
-      homeAmountServing: (...a) => this.homeAmountServing(...a),
-    };
-    return ReferencesAndMasterDetailFacet.projectHomeAmountsOntoPatch.call(host, object, plan, prior, patch, context, recordId, serving);
+    return ReferencesAndMasterDetailFacet.projectHomeAmountsOntoPatch.call(referencesAndMasterDetailHost.of(this), object, plan, prior, patch, context, recordId, serving);
   }
 
   /**
@@ -4286,14 +3866,7 @@ export class ObjectQL implements IObjectQLEngine {
     context: ExecutionContext | undefined,
   ): Promise<boolean | null> {
     // [#29986 codemod] The body moved to `engine-references-and-master-detail.ts`, its docblock with it (see `ReferencesAndMasterDetailHost`).
-    const read_registry = () => this._registry;
-    const host: ThisParameterType<typeof ReferencesAndMasterDetailFacet.masterDetailHeaderExists> = {
-      get _registry() { return read_registry(); },
-      masterDetailHeadersCallerReads: (...a) => this.masterDetailHeadersCallerReads(...a),
-      referenceExists: (...a) => this.referenceExists(...a),
-      resolveObjectName: (...a) => this.resolveObjectName(...a),
-    };
-    return ReferencesAndMasterDetailFacet.masterDetailHeaderExists.call(host, target, id, context);
+    return ReferencesAndMasterDetailFacet.masterDetailHeaderExists.call(referencesAndMasterDetailHost.of(this), target, id, context);
   }
 
   /**
@@ -4777,19 +4350,12 @@ export class ObjectQL implements IObjectQLEngine {
 
   private materializeParentHeader(master: string, row: Record<string, unknown>): Record<string, unknown> {
     // [#29986 codemod] The body moved to `engine-references-and-master-detail.ts`, its docblock with it (see `ReferencesAndMasterDetailHost`).
-    const host: ThisParameterType<typeof ReferencesAndMasterDetailFacet.materializeParentHeader> = {
-      masterDeclaredFields: (...a) => this.masterDeclaredFields(...a),
-    };
-    return ReferencesAndMasterDetailFacet.materializeParentHeader.call(host, master, row);
+    return ReferencesAndMasterDetailFacet.materializeParentHeader.call(referencesAndMasterDetailHost.of(this), master, row);
   }
 
   private masterDeclaredFields(master: string): Record<string, unknown> | undefined {
     // [#29986 codemod] The body moved to `engine-references-and-master-detail.ts`, its docblock with it (see `ReferencesAndMasterDetailHost`).
-    const read_registry = () => this._registry;
-    const host: ThisParameterType<typeof ReferencesAndMasterDetailFacet.masterDeclaredFields> = {
-      get _registry() { return read_registry(); },
-    };
-    return ReferencesAndMasterDetailFacet.masterDeclaredFields.call(host, master);
+    return ReferencesAndMasterDetailFacet.masterDeclaredFields.call(referencesAndMasterDetailHost.of(this), master);
   }
 
   /**
@@ -4894,13 +4460,7 @@ export class ObjectQL implements IObjectQLEngine {
     id: string | number,
   ): Promise<Array<{ object: string; id: string }>> {
     // [#29986 codemod] The body moved to `engine-references-and-master-detail.ts` (see `ReferencesAndMasterDetailHost`).
-    const read_registry = () => this._registry;
-    const host: ThisParameterType<typeof ReferencesAndMasterDetailFacet.inspectCascadeDelete> = {
-      get _registry() { return read_registry(); },
-      collectCascadeDeleteSet: (...a) => this.collectCascadeDeleteSet(...a),
-      resolveObjectName: (...a) => this.resolveObjectName(...a),
-    };
-    return ReferencesAndMasterDetailFacet.inspectCascadeDelete.call(host, object, id);
+    return ReferencesAndMasterDetailFacet.inspectCascadeDelete.call(referencesAndMasterDetailHost.of(this), object, id);
   }
 
   /**
@@ -4933,13 +4493,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   getCascadeDeleteObjects(object: string): string[] | undefined {
     // [#29986 codemod] The body moved to `engine-references-and-master-detail.ts` (see `ReferencesAndMasterDetailHost`).
-    const read_registry = () => this._registry;
-    const host: ThisParameterType<typeof ReferencesAndMasterDetailFacet.getCascadeDeleteObjects> = {
-      get _registry() { return read_registry(); },
-      cascadeRelationBehavior: (...a) => this.cascadeRelationBehavior(...a),
-      resolveObjectName: (...a) => this.resolveObjectName(...a),
-    };
-    return ReferencesAndMasterDetailFacet.getCascadeDeleteObjects.call(host, object);
+    return ReferencesAndMasterDetailFacet.getCascadeDeleteObjects.call(referencesAndMasterDetailHost.of(this), object);
   }
 
   /**
@@ -4960,17 +4514,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   setCryptoProvider(provider: ICryptoProvider): void {
     // [#29986 codemod] The body moved to `engine-secrets-and-routing.ts` (see `SecretsAndRoutingHost`).
-    const readCryptoProvider = () => this.cryptoProvider;
-    const writeCryptoProvider = (v: ObjectQL['cryptoProvider']) => { this.cryptoProvider = v; };
-    const readCryptoProviderListeners = () => this.cryptoProviderListeners;
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof SecretsAndRoutingFacet.setCryptoProvider> = {
-      get cryptoProvider() { return readCryptoProvider(); },
-      set cryptoProvider(v) { writeCryptoProvider(v); },
-      get cryptoProviderListeners() { return readCryptoProviderListeners(); },
-      get logger() { return readLogger(); },
-    };
-    return SecretsAndRoutingFacet.setCryptoProvider.call(host, provider);
+    return SecretsAndRoutingFacet.setCryptoProvider.call(secretsAndRoutingHost.of(this), provider);
   }
 
   /**
@@ -4990,11 +4534,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   getKeyedDigest(): ((plain: string) => Promise<string>) | undefined {
     // [#29986 codemod] The body moved to `engine-secrets-and-routing.ts` (see `SecretsAndRoutingHost`).
-    const readCryptoProvider = () => this.cryptoProvider;
-    const host: ThisParameterType<typeof SecretsAndRoutingFacet.getKeyedDigest> = {
-      get cryptoProvider() { return readCryptoProvider(); },
-    };
-    return SecretsAndRoutingFacet.getKeyedDigest.call(host);
+    return SecretsAndRoutingFacet.getKeyedDigest.call(secretsAndRoutingHost.of(this));
   }
 
   /**
@@ -5017,11 +4557,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   onCryptoProviderChange(listener: () => void): () => void {
     // [#29986 codemod] The body moved to `engine-secrets-and-routing.ts` (see `SecretsAndRoutingHost`).
-    const readCryptoProviderListeners = () => this.cryptoProviderListeners;
-    const host: ThisParameterType<typeof SecretsAndRoutingFacet.onCryptoProviderChange> = {
-      get cryptoProviderListeners() { return readCryptoProviderListeners(); },
-    };
-    return SecretsAndRoutingFacet.onCryptoProviderChange.call(host, listener);
+    return SecretsAndRoutingFacet.onCryptoProviderChange.call(secretsAndRoutingHost.of(this), listener);
   }
 
   /**
@@ -5039,13 +4575,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   setTenancyPostureProvider(provider: () => string | undefined): void {
     // [#29986 codemod] The body moved to `engine-secrets-and-routing.ts` (see `SecretsAndRoutingHost`).
-    const readTenancyPostureProvider = () => this.tenancyPostureProvider;
-    const writeTenancyPostureProvider = (v: ObjectQL['tenancyPostureProvider']) => { this.tenancyPostureProvider = v; };
-    const host: ThisParameterType<typeof SecretsAndRoutingFacet.setTenancyPostureProvider> = {
-      get tenancyPostureProvider() { return readTenancyPostureProvider(); },
-      set tenancyPostureProvider(v) { writeTenancyPostureProvider(v); },
-    };
-    return SecretsAndRoutingFacet.setTenancyPostureProvider.call(host, provider);
+    return SecretsAndRoutingFacet.setTenancyPostureProvider.call(secretsAndRoutingHost.of(this), provider);
   }
 
   /**
@@ -5555,20 +5085,12 @@ export class ObjectQL implements IObjectQLEngine {
    */
   getSchema(objectName: string): ServiceObject | undefined {
     // [#29986 codemod] The body moved to `engine-secrets-and-routing.ts` (see `SecretsAndRoutingHost`).
-    const read_registry = () => this._registry;
-    const host: ThisParameterType<typeof SecretsAndRoutingFacet.getSchema> = {
-      get _registry() { return read_registry(); },
-    };
-    return SecretsAndRoutingFacet.getSchema.call(host, objectName);
+    return SecretsAndRoutingFacet.getSchema.call(secretsAndRoutingHost.of(this), objectName);
   }
 
   private resolveObjectName(name: string): string {
     // [#29986 codemod] The body moved to `engine-secrets-and-routing.ts`, its docblock with it (see `SecretsAndRoutingHost`).
-    const read_registry = () => this._registry;
-    const host: ThisParameterType<typeof SecretsAndRoutingFacet.resolveObjectName> = {
-      get _registry() { return read_registry(); },
-    };
-    return SecretsAndRoutingFacet.resolveObjectName.call(host, name);
+    return SecretsAndRoutingFacet.resolveObjectName.call(secretsAndRoutingHost.of(this), name);
   }
 
   /**
@@ -5596,14 +5118,7 @@ export class ObjectQL implements IObjectQLEngine {
     options?: EngineFilterJudgementOptions,
   ): EngineFilterJudgement {
     // [#29986 codemod] The body moved to `engine-secrets-and-routing.ts` (see `SecretsAndRoutingHost`).
-    const read_registry = () => this._registry;
-    const readRelatedSchemaOf = () => this.relatedSchemaOf;
-    const host: ThisParameterType<typeof SecretsAndRoutingFacet.judgeFilter> = {
-      get _registry() { return read_registry(); },
-      get relatedSchemaOf() { return readRelatedSchemaOf(); },
-      resolveObjectName: (...a) => this.resolveObjectName(...a),
-    };
-    return SecretsAndRoutingFacet.judgeFilter.call(host, objectName, where, options);
+    return SecretsAndRoutingFacet.judgeFilter.call(secretsAndRoutingHost.of(this), objectName, where, options);
   }
 
   /**
@@ -5640,11 +5155,7 @@ export class ObjectQL implements IObjectQLEngine {
 
   private isSystemLedgerObject(objectName: string): boolean {
     // [#29986 codemod] The body moved to `engine-secrets-and-routing.ts`, its docblock with it (see `SecretsAndRoutingHost`).
-    const read_registry = () => this._registry;
-    const host: ThisParameterType<typeof SecretsAndRoutingFacet.isSystemLedgerObject> = {
-      get _registry() { return read_registry(); },
-    };
-    return SecretsAndRoutingFacet.isSystemLedgerObject.call(host, objectName);
+    return SecretsAndRoutingFacet.isSystemLedgerObject.call(secretsAndRoutingHost.of(this), objectName);
   }
 
   /**
@@ -5683,18 +5194,7 @@ export class ObjectQL implements IObjectQLEngine {
     packageId?: string;
   } | undefined {
     // [#29986 codemod] The body moved to `engine-secrets-and-routing.ts`, its docblock with it (see `SecretsAndRoutingHost`).
-    const read_registry = () => this._registry;
-    const readDefaultDriver = () => this.defaultDriver;
-    const readDrivers = () => this.drivers;
-    const readManifests = () => this.manifests;
-    const host: ThisParameterType<typeof SecretsAndRoutingFacet.resolveDatasourceBinding> = {
-      get _registry() { return read_registry(); },
-      get defaultDriver() { return readDefaultDriver(); },
-      get drivers() { return readDrivers(); },
-      get manifests() { return readManifests(); },
-      resolveDatasourceFromMapping: (...a) => this.resolveDatasourceFromMapping(...a),
-    };
-    return SecretsAndRoutingFacet.resolveDatasourceBinding.call(host, objectName);
+    return SecretsAndRoutingFacet.resolveDatasourceBinding.call(secretsAndRoutingHost.of(this), objectName);
   }
 
   /**
@@ -5727,10 +5227,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   resolveEffectiveDatasource(objectName: string): string | undefined {
     // [#29986 codemod] The body moved to `engine-secrets-and-routing.ts` (see `SecretsAndRoutingHost`).
-    const host: ThisParameterType<typeof SecretsAndRoutingFacet.resolveEffectiveDatasource> = {
-      resolveDatasourceBinding: (...a) => this.resolveDatasourceBinding(...a),
-    };
-    return SecretsAndRoutingFacet.resolveEffectiveDatasource.call(host, objectName);
+    return SecretsAndRoutingFacet.resolveEffectiveDatasource.call(secretsAndRoutingHost.of(this), objectName);
   }
 
   /**
@@ -5751,12 +5248,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   resolveMappedDatasource(objectName: string): string | null {
     // [#29986 codemod] The body moved to `engine-secrets-and-routing.ts` (see `SecretsAndRoutingHost`).
-    const read_registry = () => this._registry;
-    const host: ThisParameterType<typeof SecretsAndRoutingFacet.resolveMappedDatasource> = {
-      get _registry() { return read_registry(); },
-      resolveDatasourceFromMapping: (...a) => this.resolveDatasourceFromMapping(...a),
-    };
-    return SecretsAndRoutingFacet.resolveMappedDatasource.call(host, objectName);
+    return SecretsAndRoutingFacet.resolveMappedDatasource.call(secretsAndRoutingHost.of(this), objectName);
   }
 
   /**
@@ -5981,11 +5473,7 @@ export class ObjectQL implements IObjectQLEngine {
 
   private mediaValueShapeStrictFor(objectSchema: any): Promise<boolean> {
     // [#29986 codemod] The body moved to `engine-migration-state.ts`, its docblock with it (see `MigrationStateHost`).
-    const host: ThisParameterType<typeof MigrationStateFacet.mediaValueShapeStrictFor> = {
-      isFileReferencesMigrationVerified: (...a) => this.isFileReferencesMigrationVerified(...a),
-      objectHasMediaField: (...a) => this.objectHasMediaField(...a),
-    };
-    return MigrationStateFacet.mediaValueShapeStrictFor.call(host, objectSchema);
+    return MigrationStateFacet.mediaValueShapeStrictFor.call(migrationStateHost.of(this), objectSchema);
   }
 
   private objectHasCoveredValueField(objectSchema: any): boolean {
@@ -5996,11 +5484,7 @@ export class ObjectQL implements IObjectQLEngine {
 
   private valueShapeStrictFor(objectSchema: any): Promise<boolean> {
     // [#29986 codemod] The body moved to `engine-migration-state.ts`, its docblock with it (see `MigrationStateHost`).
-    const host: ThisParameterType<typeof MigrationStateFacet.valueShapeStrictFor> = {
-      isValueShapesMigrationVerified: (...a) => this.isValueShapesMigrationVerified(...a),
-      objectHasCoveredValueField: (...a) => this.objectHasCoveredValueField(...a),
-    };
-    return MigrationStateFacet.valueShapeStrictFor.call(host, objectSchema);
+    return MigrationStateFacet.valueShapeStrictFor.call(migrationStateHost.of(this), objectSchema);
   }
 
   /**
@@ -6025,10 +5509,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   isFileReferencesMigrationVerified(): Promise<boolean> {
     // [#29986 codemod] The body moved to `engine-migration-state.ts` (see `MigrationStateHost`).
-    const host: ThisParameterType<typeof MigrationStateFacet.isFileReferencesMigrationVerified> = {
-      readFileReferencesFlagRow: (...a) => this.readFileReferencesFlagRow(...a),
-    };
-    return MigrationStateFacet.isFileReferencesMigrationVerified.call(host);
+    return MigrationStateFacet.isFileReferencesMigrationVerified.call(migrationStateHost.of(this));
   }
 
   /**
@@ -6114,10 +5595,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   haveFileColumnsMoved(): Promise<boolean> {
     // [#29986 codemod] The body moved to `engine-migration-state.ts` (see `MigrationStateHost`).
-    const host: ThisParameterType<typeof MigrationStateFacet.haveFileColumnsMoved> = {
-      readFileReferencesFlagRow: (...a) => this.readFileReferencesFlagRow(...a),
-    };
-    return MigrationStateFacet.haveFileColumnsMoved.call(host);
+    return MigrationStateFacet.haveFileColumnsMoved.call(migrationStateHost.of(this));
   }
 
   /**
@@ -6143,10 +5621,7 @@ export class ObjectQL implements IObjectQLEngine {
     verifiedLog: string,
   ): Promise<boolean> {
     // [#29986 codemod] The body moved to `engine-migration-state.ts`, its docblock with it (see `MigrationStateHost`).
-    const host: ThisParameterType<typeof MigrationStateFacet.readMigrationFlagMemoized> = {
-      readMigrationFlagRowMemoized: (...a) => this.readMigrationFlagRowMemoized(...a),
-    };
-    return MigrationStateFacet.readMigrationFlagMemoized.call(host, slot, migrationId, verifiedLog);
+    return MigrationStateFacet.readMigrationFlagMemoized.call(migrationStateHost.of(this), slot, migrationId, verifiedLog);
   }
 
   /**
@@ -6242,11 +5717,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   valueShapeViolationsAdmitted(): Record<string, AdmittedValueShapeViolationTally> {
     // [#29986 codemod] The body moved to `engine-migration-state.ts` (see `MigrationStateHost`).
-    const readAdmittedValueShapeViolations = () => this.admittedValueShapeViolations;
-    const host: ThisParameterType<typeof MigrationStateFacet.valueShapeViolationsAdmitted> = {
-      get admittedValueShapeViolations() { return readAdmittedValueShapeViolations(); },
-    };
-    return MigrationStateFacet.valueShapeViolationsAdmitted.call(host);
+    return MigrationStateFacet.valueShapeViolationsAdmitted.call(migrationStateHost.of(this));
   }
 
   /** Per-migration tally of admitted violations; see the accessor above. */
@@ -6268,10 +5739,7 @@ export class ObjectQL implements IObjectQLEngine {
 
   private admittedViolationSink(object: string): AdmittedValueShapeViolationSink {
     // [#29986 codemod] The body moved to `engine-migration-state.ts`, its docblock with it (see `MigrationStateHost`).
-    const host: ThisParameterType<typeof MigrationStateFacet.admittedViolationSink> = {
-      noteAdmittedValueShapeViolation: (...a) => this.noteAdmittedValueShapeViolation(...a),
-    };
-    return MigrationStateFacet.admittedViolationSink.call(host, object);
+    return MigrationStateFacet.admittedViolationSink.call(migrationStateHost.of(this), object);
   }
 
   private noteAdmittedValueShapeViolation(object: string, violation: AdmittedValueShapeViolation): void {
@@ -6287,46 +5755,12 @@ export class ObjectQL implements IObjectQLEngine {
 
   private recordObservedDeviation(migrationId: string): void {
     // [#29986 codemod] The body moved to `engine-migration-state.ts`, its docblock with it (see `MigrationStateHost`).
-    const read_registry = () => this._registry;
-    const readAdmittedValueShapeViolations = () => this.admittedValueShapeViolations;
-    const readDeviationRecording = () => this.deviationRecording;
-    const writeDeviationRecording = (v: ObjectQL['deviationRecording']) => { this.deviationRecording = v; };
-    const readLogger = () => this.logger;
-    const readRecordedDeviations = () => this.recordedDeviations;
-    const host: ThisParameterType<typeof MigrationStateFacet.recordObservedDeviation> = {
-      get _registry() { return read_registry(); },
-      get admittedValueShapeViolations() { return readAdmittedValueShapeViolations(); },
-      get deviationRecording() { return readDeviationRecording(); },
-      set deviationRecording(v) { writeDeviationRecording(v); },
-      findOne: (...a) => this.findOne(...a),
-      get logger() { return readLogger(); },
-      get recordedDeviations() { return readRecordedDeviations(); },
-      update: (...a) => this.update(...a),
-    };
-    return MigrationStateFacet.recordObservedDeviation.call(host, migrationId);
+    return MigrationStateFacet.recordObservedDeviation.call(migrationStateHost.of(this), migrationId);
   }
 
   private retractCreationAttestation(migrationId: string): void {
     // [#29986 codemod] The body moved to `engine-migration-state.ts`, its docblock with it (see `MigrationStateHost`).
-    const read_registry = () => this._registry;
-    const readAdmittedValueShapeViolations = () => this.admittedValueShapeViolations;
-    const readCreationAttestationRetraction = () => this.creationAttestationRetraction;
-    const writeCreationAttestationRetraction = (v: ObjectQL['creationAttestationRetraction']) => { this.creationAttestationRetraction = v; };
-    const readLogger = () => this.logger;
-    const readRetractedCreationAttestations = () => this.retractedCreationAttestations;
-    const host: ThisParameterType<typeof MigrationStateFacet.retractCreationAttestation> = {
-      get _registry() { return read_registry(); },
-      get admittedValueShapeViolations() { return readAdmittedValueShapeViolations(); },
-      get creationAttestationRetraction() { return readCreationAttestationRetraction(); },
-      set creationAttestationRetraction(v) { writeCreationAttestationRetraction(v); },
-      findOne: (...a) => this.findOne(...a),
-      invalidateDataMigrationFlags: (...a) => this.invalidateDataMigrationFlags(...a),
-      get logger() { return readLogger(); },
-      get retractedCreationAttestations() { return readRetractedCreationAttestations(); },
-      update: (...a) => this.update(...a),
-      wasDatastoreCreatedFromEmpty: (...a) => this.wasDatastoreCreatedFromEmpty(...a),
-    };
-    return MigrationStateFacet.retractCreationAttestation.call(host, migrationId);
+    return MigrationStateFacet.retractCreationAttestation.call(migrationStateHost.of(this), migrationId);
   }
 
   /**
@@ -6343,23 +5777,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   invalidateDataMigrationFlags(): void {
     // [#29986 codemod] The body moved to `engine-migration-state.ts` (see `MigrationStateHost`).
-    const readFileReferencesMigrationVerified = () => this.fileReferencesMigrationVerified;
-    const writeFileReferencesMigrationVerified = (v: ObjectQL['fileReferencesMigrationVerified']) => { this.fileReferencesMigrationVerified = v; };
-    const readMigrationGatesAnnounced = () => this.migrationGatesAnnounced;
-    const writeMigrationGatesAnnounced = (v: ObjectQL['migrationGatesAnnounced']) => { this.migrationGatesAnnounced = v; };
-    const readRecordedDeviations = () => this.recordedDeviations;
-    const readValueShapesMigrationVerified = () => this.valueShapesMigrationVerified;
-    const writeValueShapesMigrationVerified = (v: ObjectQL['valueShapesMigrationVerified']) => { this.valueShapesMigrationVerified = v; };
-    const host: ThisParameterType<typeof MigrationStateFacet.invalidateDataMigrationFlags> = {
-      get fileReferencesMigrationVerified() { return readFileReferencesMigrationVerified(); },
-      set fileReferencesMigrationVerified(v) { writeFileReferencesMigrationVerified(v); },
-      get migrationGatesAnnounced() { return readMigrationGatesAnnounced(); },
-      set migrationGatesAnnounced(v) { writeMigrationGatesAnnounced(v); },
-      get recordedDeviations() { return readRecordedDeviations(); },
-      get valueShapesMigrationVerified() { return readValueShapesMigrationVerified(); },
-      set valueShapesMigrationVerified(v) { writeValueShapesMigrationVerified(v); },
-    };
-    return MigrationStateFacet.invalidateDataMigrationFlags.call(host);
+    return MigrationStateFacet.invalidateDataMigrationFlags.call(migrationStateHost.of(this));
   }
 
   /**
@@ -6513,17 +5931,7 @@ export class ObjectQL implements IObjectQLEngine {
 
   private invalidateSummaryIndex(): void {
     // [#29986 codemod] The body moved to `engine-summaries-and-expansion.ts`, its docblock with it (see `SummariesAndExpansionHost`).
-    const readSummaryIndex = () => this.summaryIndex;
-    const writeSummaryIndex = (v: ObjectQL['summaryIndex']) => { this.summaryIndex = v; };
-    const readSummaryIndexByParent = () => this.summaryIndexByParent;
-    const writeSummaryIndexByParent = (v: ObjectQL['summaryIndexByParent']) => { this.summaryIndexByParent = v; };
-    const host: ThisParameterType<typeof SummariesAndExpansionFacet.invalidateSummaryIndex> = {
-      get summaryIndex() { return readSummaryIndex(); },
-      set summaryIndex(v) { writeSummaryIndex(v); },
-      get summaryIndexByParent() { return readSummaryIndexByParent(); },
-      set summaryIndexByParent(v) { writeSummaryIndexByParent(v); },
-    };
-    return SummariesAndExpansionFacet.invalidateSummaryIndex.call(host);
+    return SummariesAndExpansionFacet.invalidateSummaryIndex.call(summariesAndExpansionHost.of(this));
   }
 
   private buildSummaryIndex(): {
@@ -6531,13 +5939,7 @@ export class ObjectQL implements IObjectQLEngine {
     byParent: Map<string, SummaryDescriptor[]>;
   } {
     // [#29986 codemod] The body moved to `engine-summaries-and-expansion.ts`, its docblock with it (see `SummariesAndExpansionHost`).
-    const read_registry = () => this._registry;
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof SummariesAndExpansionFacet.buildSummaryIndex> = {
-      get _registry() { return read_registry(); },
-      get logger() { return readLogger(); },
-    };
-    return SummariesAndExpansionFacet.buildSummaryIndex.call(host);
+    return SummariesAndExpansionFacet.buildSummaryIndex.call(summariesAndExpansionHost.of(this));
   }
 
   /** `registry.objectRevision` the cached {@link summaryIndex} was built at. */
@@ -6545,43 +5947,17 @@ export class ObjectQL implements IObjectQLEngine {
 
   private ensureSummaryIndexes(): void {
     // [#29986 codemod] The body moved to `engine-summaries-and-expansion.ts`, its docblock with it (see `SummariesAndExpansionHost`).
-    const read_registry = () => this._registry;
-    const readSummaryIndex = () => this.summaryIndex;
-    const writeSummaryIndex = (v: ObjectQL['summaryIndex']) => { this.summaryIndex = v; };
-    const readSummaryIndexByParent = () => this.summaryIndexByParent;
-    const writeSummaryIndexByParent = (v: ObjectQL['summaryIndexByParent']) => { this.summaryIndexByParent = v; };
-    const readSummaryIndexRevision = () => this.summaryIndexRevision;
-    const writeSummaryIndexRevision = (v: ObjectQL['summaryIndexRevision']) => { this.summaryIndexRevision = v; };
-    const host: ThisParameterType<typeof SummariesAndExpansionFacet.ensureSummaryIndexes> = {
-      get _registry() { return read_registry(); },
-      buildSummaryIndex: (...a) => this.buildSummaryIndex(...a),
-      invalidateSummaryIndex: (...a) => this.invalidateSummaryIndex(...a),
-      get summaryIndex() { return readSummaryIndex(); },
-      set summaryIndex(v) { writeSummaryIndex(v); },
-      get summaryIndexByParent() { return readSummaryIndexByParent(); },
-      set summaryIndexByParent(v) { writeSummaryIndexByParent(v); },
-      get summaryIndexRevision() { return readSummaryIndexRevision(); },
-      set summaryIndexRevision(v) { writeSummaryIndexRevision(v); },
-    };
-    return SummariesAndExpansionFacet.ensureSummaryIndexes.call(host);
+    return SummariesAndExpansionFacet.ensureSummaryIndexes.call(summariesAndExpansionHost.of(this));
   }
 
   private getSummaryDescriptors(childObject: string): SummaryDescriptor[] {
     // [#29986 codemod] The body moved to `engine-summaries-and-expansion.ts`, its docblock with it (see `SummariesAndExpansionHost`).
-    const readSummaryIndex = () => this.summaryIndex;
-    const host: ThisParameterType<typeof SummariesAndExpansionFacet.getSummaryDescriptors> = {
-      ensureSummaryIndexes: (...a) => this.ensureSummaryIndexes(...a),
-      get summaryIndex() { return readSummaryIndex(); },
-    };
-    return SummariesAndExpansionFacet.getSummaryDescriptors.call(host, childObject);
+    return SummariesAndExpansionFacet.getSummaryDescriptors.call(summariesAndExpansionHost.of(this), childObject);
   }
 
   private summaryForeignKeyColumns(childObject: string): string[] {
     // [#29986 codemod] The body moved to `engine-summaries-and-expansion.ts`, its docblock with it (see `SummariesAndExpansionHost`).
-    const host: ThisParameterType<typeof SummariesAndExpansionFacet.summaryForeignKeyColumns> = {
-      getSummaryDescriptors: (...a) => this.getSummaryDescriptors(...a),
-    };
-    return SummariesAndExpansionFacet.summaryForeignKeyColumns.call(host, childObject);
+    return SummariesAndExpansionFacet.summaryForeignKeyColumns.call(summariesAndExpansionHost.of(this), childObject);
   }
 
   /** Roll-up descriptors for the summary fields `parentObject` OWNS (#5749) —
@@ -6594,20 +5970,12 @@ export class ObjectQL implements IObjectQLEngine {
    *  would be a second index that disagrees the first time either moves. */
   getOwnedSummaryDescriptors(parentObject: string): SummaryDescriptor[] {
     // [#29986 codemod] The body moved to `engine-summaries-and-expansion.ts` (see `SummariesAndExpansionHost`).
-    const readSummaryIndexByParent = () => this.summaryIndexByParent;
-    const host: ThisParameterType<typeof SummariesAndExpansionFacet.getOwnedSummaryDescriptors> = {
-      ensureSummaryIndexes: (...a) => this.ensureSummaryIndexes(...a),
-      get summaryIndexByParent() { return readSummaryIndexByParent(); },
-    };
-    return SummariesAndExpansionFacet.getOwnedSummaryDescriptors.call(host, parentObject);
+    return SummariesAndExpansionFacet.getOwnedSummaryDescriptors.call(summariesAndExpansionHost.of(this), parentObject);
   }
 
   private initializeSummaryFields(object: string, record: any): any {
     // [#29986 codemod] The body moved to `engine-summaries-and-expansion.ts`, its docblock with it (see `SummariesAndExpansionHost`).
-    const host: ThisParameterType<typeof SummariesAndExpansionFacet.initializeSummaryFields> = {
-      getOwnedSummaryDescriptors: (...a) => this.getOwnedSummaryDescriptors(...a),
-    };
-    return SummariesAndExpansionFacet.initializeSummaryFields.call(host, object, record);
+    return SummariesAndExpansionFacet.initializeSummaryFields.call(summariesAndExpansionHost.of(this), object, record);
   }
 
   /**
@@ -6718,16 +6086,7 @@ export class ObjectQL implements IObjectQLEngine {
     execCtx?: ExecutionContext,
   ): Promise<any[]> {
     // [#29986 codemod] The body moved to `engine-summaries-and-expansion.ts`, its docblock with it (see `SummariesAndExpansionHost`).
-    const read_registry = () => this._registry;
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof SummariesAndExpansionFacet.expandRelatedRecords> = {
-      get _registry() { return read_registry(); },
-      expandRelatedRecords: (...a) => this.expandRelatedRecords(...a),
-      find: (...a) => this.find(...a),
-      get logger() { return readLogger(); },
-      serveReferenceNames: (...a) => this.serveReferenceNames(...a),
-    };
-    return SummariesAndExpansionFacet.expandRelatedRecords.call(host, objectName, records, expand, depth, execCtx);
+    return SummariesAndExpansionFacet.expandRelatedRecords.call(summariesAndExpansionHost.of(this), objectName, records, expand, depth, execCtx);
   }
 
   /**
@@ -7045,12 +6404,7 @@ export class ObjectQL implements IObjectQLEngine {
     lowering: FilterLoweringOptions,
   ): Promise<W> {
     // [#29986 codemod] The body moved to `engine-find.ts`, its docblock with it (see `FindHost`).
-    const read_registry = () => this._registry;
-    const host: ThisParameterType<typeof FindFacet.resolveRelateThenLowerWhere> = {
-      get _registry() { return read_registry(); },
-      lowerRelationConditions: (...a) => this.lowerRelationConditions(...a),
-    };
-    return (FindFacet.resolveRelateThenLowerWhere<W>).call(host, object, operation, where, execCtx, lowering);
+    return (FindFacet.resolveRelateThenLowerWhere<W>).call(findHost.of(this), object, operation, where, execCtx, lowering);
   }
 
   /**
@@ -7106,10 +6460,7 @@ export class ObjectQL implements IObjectQLEngine {
     lowering: FilterLoweringOptions,
   ): Promise<T> {
     // [#29986 codemod] The body moved to `engine-find.ts`, its docblock with it (see `FindHost`).
-    const host: ThisParameterType<typeof FindFacet.withResolvedWhere> = {
-      resolveRelateThenLowerWhere: (...a) => this.resolveRelateThenLowerWhere(...a),
-    };
-    return (FindFacet.withResolvedWhere<T>).call(host, object, operation, options, lowering);
+    return (FindFacet.withResolvedWhere<T>).call(findHost.of(this), object, operation, options, lowering);
   }
 
   private expandSearchOnAst(
@@ -7118,10 +6469,7 @@ export class ObjectQL implements IObjectQLEngine {
     context: ExecutionContext | undefined,
   ): Promise<void> {
     // [#29986 codemod] The body moved to `engine-find.ts`, its docblock with it (see `FindHost`).
-    const host: ThisParameterType<typeof FindFacet.expandSearchOnAst> = {
-      resolveSearchQueryableFields: (...a) => this.resolveSearchQueryableFields(...a),
-    };
-    return FindFacet.expandSearchOnAst.call(host, ast, schema, context);
+    return FindFacet.expandSearchOnAst.call(findHost.of(this), ast, schema, context);
   }
 
   /**
@@ -7152,22 +6500,14 @@ export class ObjectQL implements IObjectQLEngine {
     options: EngineReadOptions | undefined,
   ): Promise<T> {
     // [#29986 codemod] The body moved to `engine-find.ts`, its docblock with it (see `FindHost`).
-    const read_registry = () => this._registry;
-    const host: ThisParameterType<typeof FindFacet.expandSearchOnOptions> = {
-      get _registry() { return read_registry(); },
-      expandSearchOnAst: (...a) => this.expandSearchOnAst(...a),
-    };
-    return (FindFacet.expandSearchOnOptions<T>).call(host, object, query, options);
+    return (FindFacet.expandSearchOnOptions<T>).call(findHost.of(this), object, query, options);
   }
 
   private fillQueryAstDefaults<T extends Pick<QueryInput, 'orderBy' | 'search' | 'expand'>>(
     query: T,
   ): T & Pick<QueryAST, 'orderBy' | 'search'> & { expand?: Record<string, QueryAST> } {
     // [#29986 codemod] The body moved to `engine-find.ts`, its docblock with it (see `FindHost`).
-    const host: ThisParameterType<typeof FindFacet.fillQueryAstDefaults> = {
-      fillQueryAstDefaults: (...a) => this.fillQueryAstDefaults(...a),
-    };
-    return (FindFacet.fillQueryAstDefaults<T>).call(host, query);
+    return (FindFacet.fillQueryAstDefaults<T>).call(findHost.of(this), query);
   }
 
   private requireFindOnePredicate(object: string, ast: QueryAST): void {
@@ -7403,11 +6743,7 @@ export class ObjectQL implements IObjectQLEngine {
 
   private reportFindFailure(object: string, error: unknown): void {
     // [#29986 codemod] The body moved to `engine-find.ts`, its docblock with it (see `FindHost`).
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof FindFacet.reportFindFailure> = {
-      get logger() { return readLogger(); },
-    };
-    return FindFacet.reportFindFailure.call(host, object, error);
+    return FindFacet.reportFindFailure.call(findHost.of(this), object, error);
   }
 
   /**
@@ -7617,11 +6953,7 @@ export class ObjectQL implements IObjectQLEngine {
     },
   ): Promise<{ row: Record<string, unknown>; taken: string[]; error?: unknown }> {
     // [#29986 codemod] The body moved to `engine-insert.ts`, its docblock with it (see `InsertHost`).
-    const host: ThisParameterType<typeof InsertFacet.staticReadonlyCreateStrip> = {
-      applyFieldDefaults: (...a) => this.applyFieldDefaults(...a),
-      resolveDefaultPermissions: (...a) => this.resolveDefaultPermissions(...a),
-    };
-    return InsertFacet.staticReadonlyCreateStrip.call(host, object, readonlySubject, row, supplied, context, pass);
+    return InsertFacet.staticReadonlyCreateStrip.call(insertHost.of(this), object, readonlySubject, row, supplied, context, pass);
   }
 
   /**
@@ -7854,15 +7186,7 @@ export class ObjectQL implements IObjectQLEngine {
     options: Parameters<IDataDriver['findOne']>[2],
   ): Promise<unknown> {
     // [#29986 codemod] The body moved to `engine-insert.ts`, its docblock with it (see `InsertHost`).
-    const readLogger = () => this.logger;
-    const readPreconditionDegradedWarned = () => this.preconditionDegradedWarned;
-    const writePreconditionDegradedWarned = (v: ObjectQL['preconditionDegradedWarned']) => { this.preconditionDegradedWarned = v; };
-    const host: ThisParameterType<typeof InsertFacet.updateByIdExpecting> = {
-      get logger() { return readLogger(); },
-      get preconditionDegradedWarned() { return readPreconditionDegradedWarned(); },
-      set preconditionDegradedWarned(v) { writePreconditionDegradedWarned(v); },
-    };
-    return InsertFacet.updateByIdExpecting.call(host, driver, object, id, data, expect, options);
+    return InsertFacet.updateByIdExpecting.call(insertHost.of(this), driver, object, id, data, expect, options);
   }
 
   /** [ADR-0142 D4] Set once the precondition's no-`updateMany` degradation has been logged. */
@@ -7888,22 +7212,7 @@ export class ObjectQL implements IObjectQLEngine {
 
   private assignment(): AssignmentRuleEvaluator {
     // [#29986 codemod] The body moved to `engine-insert.ts` (see `InsertHost`).
-    const read_registry = () => this._registry;
-    const readAssignmentEvaluator = () => this.assignmentEvaluator;
-    const writeAssignmentEvaluator = (v: ObjectQL['assignmentEvaluator']) => { this.assignmentEvaluator = v; };
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof InsertFacet.assignment> = {
-      get _registry() { return read_registry(); },
-      get assignmentEvaluator() { return readAssignmentEvaluator(); },
-      set assignmentEvaluator(v) { writeAssignmentEvaluator(v); },
-      count: (...a) => this.count(...a),
-      find: (...a) => this.find(...a),
-      insert: (...a) => this.insert(...a),
-      get logger() { return readLogger(); },
-      ownershipQueueService: (...a) => this.ownershipQueueService(...a),
-      update: (...a) => this.update(...a),
-    };
-    return InsertFacet.assignment.call(host);
+    return InsertFacet.assignment.call(insertHost.of(this));
   }
 
   private readUpdatePriorRow(
@@ -7913,13 +7222,7 @@ export class ObjectQL implements IObjectQLEngine {
     base?: unknown,
   ): Promise<Record<string, unknown> | null> {
     // [#29986 codemod] The body moved to `engine-insert.ts` (see `InsertHost`).
-    const read_registry = () => this._registry;
-    const host: ThisParameterType<typeof InsertFacet.readUpdatePriorRow> = {
-      get _registry() { return read_registry(); },
-      buildDriverOptions: (...a) => this.buildDriverOptions(...a),
-      getDriver: (...a) => this.getDriver(...a),
-    };
-    return InsertFacet.readUpdatePriorRow.call(host, object, id, context, base);
+    return InsertFacet.readUpdatePriorRow.call(insertHost.of(this), object, id, context, base);
   }
 
   /**
@@ -9337,10 +8640,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   insertMany(object: string, rows: any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<InsertManyRowOutcome[]> {
     // [#29986 codemod] The body moved to `engine-insert.ts` (see `InsertHost`).
-    const host: ThisParameterType<typeof InsertFacet.insertMany> = {
-      insert: (...a) => this.insert(...a),
-    };
-    return InsertFacet.insertMany.call(host, object, rows, options);
+    return InsertFacet.insertMany.call(insertHost.of(this), object, rows, options);
   }
 
   /**
@@ -11445,30 +10745,12 @@ export class ObjectQL implements IObjectQLEngine {
 
   private planCascadeAtomicity(object: string): 'none' | 'split' | 'atomic' {
     // [#29986 codemod] The body moved to `engine-cascade-planning.ts`, its docblock with it (see `CascadePlanningHost`).
-    const read_registry = () => this._registry;
-    const readDefaultDriver = () => this.defaultDriver;
-    const readDrivers = () => this.drivers;
-    const host: ThisParameterType<typeof CascadePlanningFacet.planCascadeAtomicity> = {
-      get _registry() { return read_registry(); },
-      get defaultDriver() { return readDefaultDriver(); },
-      get drivers() { return readDrivers(); },
-      getDriver: (...a) => this.getDriver(...a),
-      resolveObjectName: (...a) => this.resolveObjectName(...a),
-    };
-    return CascadePlanningFacet.planCascadeAtomicity.call(host, object);
+    return CascadePlanningFacet.planCascadeAtomicity.call(cascadePlanningHost.of(this), object);
   }
 
   private warnCascadeNotAtomic(object: string): void {
     // [#29986 codemod] The body moved to `engine-cascade-planning.ts`, its docblock with it (see `CascadePlanningHost`).
-    const readCascadeNotAtomicReported = () => this.cascadeNotAtomicReported;
-    const readDefaultDriver = () => this.defaultDriver;
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof CascadePlanningFacet.warnCascadeNotAtomic> = {
-      get cascadeNotAtomicReported() { return readCascadeNotAtomicReported(); },
-      get defaultDriver() { return readDefaultDriver(); },
-      get logger() { return readLogger(); },
-    };
-    return CascadePlanningFacet.warnCascadeNotAtomic.call(host, object);
+    return CascadePlanningFacet.warnCascadeNotAtomic.call(cascadePlanningHost.of(this), object);
   }
 
   /**
@@ -11625,12 +10907,7 @@ export class ObjectQL implements IObjectQLEngine {
     context?: ExecutionContext,
   ): Promise<boolean> {
     // [#29986 codemod] The body moved to `engine-cascade-planning.ts`, its docblock with it (see `CascadePlanningHost`).
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof CascadePlanningFacet.dependentCountIsDisclosable> = {
-      find: (...a) => this.find(...a),
-      get logger() { return readLogger(); },
-    };
-    return CascadePlanningFacet.dependentCountIsDisclosable.call(host, childName, probeWhere, probedIds, fieldName, multiValued, id, context);
+    return CascadePlanningFacet.dependentCountIsDisclosable.call(cascadePlanningHost.of(this), childName, probeWhere, probedIds, fieldName, multiValued, id, context);
   }
 
   private cascadeDeleteRelations(
@@ -11640,16 +10917,7 @@ export class ObjectQL implements IObjectQLEngine {
     depth = 0,
   ): Promise<void> {
     // [#29986 codemod] The body moved to `engine-cascade-planning.ts`, its docblock with it (see `CascadePlanningHost`).
-    const read_registry = () => this._registry;
-    const readCascadeDeleteSets = () => this.cascadeDeleteSets;
-    const host: ThisParameterType<typeof CascadePlanningFacet.cascadeDeleteRelations> = {
-      get _registry() { return read_registry(); },
-      get cascadeDeleteSets() { return readCascadeDeleteSets(); },
-      collectCascadeDeleteSet: (...a) => this.collectCascadeDeleteSet(...a),
-      refuseRestrictsInsideOwnCascade: (...a) => this.refuseRestrictsInsideOwnCascade(...a),
-      walkReferencingRelations: (...a) => this.walkReferencingRelations(...a),
-    };
-    return CascadePlanningFacet.cascadeDeleteRelations.call(host, object, ids, context, depth);
+    return CascadePlanningFacet.cascadeDeleteRelations.call(cascadePlanningHost.of(this), object, ids, context, depth);
   }
 
   /**
@@ -11711,10 +10979,7 @@ export class ObjectQL implements IObjectQLEngine {
     fdef: any,
   ): string | undefined {
     // [#29986 codemod] The body moved to `engine-cascade-planning.ts`, its docblock with it (see `CascadePlanningHost`).
-    const host: ThisParameterType<typeof CascadePlanningFacet.cascadeRelationBehavior> = {
-      resolveObjectName: (...a) => this.resolveObjectName(...a),
-    };
-    return CascadePlanningFacet.cascadeRelationBehavior.call(host, object, child, fieldName, fdef);
+    return CascadePlanningFacet.cascadeRelationBehavior.call(cascadePlanningHost.of(this), object, child, fieldName, fdef);
   }
 
   private fileReferenceCheckElevation(
@@ -11726,10 +10991,7 @@ export class ObjectQL implements IObjectQLEngine {
     context: ExecutionContext | undefined,
   ): void {
     // [#29986 codemod] The body moved to `engine-cascade-planning.ts`, its docblock with it (see `CascadePlanningHost`).
-    const host: ThisParameterType<typeof CascadePlanningFacet.fileReferenceCheckElevation> = {
-      recordReferenceCheckElevation: (...a) => this.recordReferenceCheckElevation(...a),
-    };
-    return CascadePlanningFacet.fileReferenceCheckElevation.call(host, set, object, id, childName, fieldName, context);
+    return CascadePlanningFacet.fileReferenceCheckElevation.call(cascadePlanningHost.of(this), set, object, id, childName, fieldName, context);
   }
 
   /**
@@ -11855,10 +11117,7 @@ export class ObjectQL implements IObjectQLEngine {
     ids: ReadonlyArray<string | number>,
   ): Record<string, unknown> {
     // [#29986 codemod] The body moved to `engine-cascade-planning.ts`, its docblock with it (see `CascadePlanningHost`).
-    const host: ThisParameterType<typeof CascadePlanningFacet.referenceProbeFilterOfSet> = {
-      referenceProbeFilter: (...a) => this.referenceProbeFilter(...a),
-    };
-    return CascadePlanningFacet.referenceProbeFilterOfSet.call(host, fieldName, fdef, ids);
+    return CascadePlanningFacet.referenceProbeFilterOfSet.call(cascadePlanningHost.of(this), fieldName, fdef, ids);
   }
 
   private probeReferencingRowsOfSet(
@@ -11869,12 +11128,7 @@ export class ObjectQL implements IObjectQLEngine {
     context: ExecutionContext | undefined,
   ): Promise<Map<string, any[]>> {
     // [#29986 codemod] The body moved to `engine-cascade-planning.ts`, its docblock with it (see `CascadePlanningHost`).
-    const host: ThisParameterType<typeof CascadePlanningFacet.probeReferencingRowsOfSet> = {
-      probeReferencingRows: (...a) => this.probeReferencingRows(...a),
-      referenceProbeFilter: (...a) => this.referenceProbeFilter(...a),
-      referenceProbeFilterOfSet: (...a) => this.referenceProbeFilterOfSet(...a),
-    };
-    return CascadePlanningFacet.probeReferencingRowsOfSet.call(host, childName, fieldName, fdef, ids, context);
+    return CascadePlanningFacet.probeReferencingRowsOfSet.call(cascadePlanningHost.of(this), childName, fieldName, fdef, ids, context);
   }
 
   private walkReferencingRelations(
@@ -11885,22 +11139,7 @@ export class ObjectQL implements IObjectQLEngine {
     cascadeSet: CascadeDeleteSet,
   ): Promise<void> {
     // [#29986 codemod] The body moved to `engine-cascade-planning.ts`, its docblock with it (see `CascadePlanningHost`).
-    const readCascadeIssuedDeletes = () => this.cascadeIssuedDeletes;
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof CascadePlanningFacet.walkReferencingRelations> = {
-      get cascadeIssuedDeletes() { return readCascadeIssuedDeletes(); },
-      cascadeRelationBehavior: (...a) => this.cascadeRelationBehavior(...a),
-      delete: (...a) => this.delete(...a),
-      deleteRestrictedError: (...a) => this.deleteRestrictedError(...a),
-      fileReferenceCheckElevation: (...a) => this.fileReferenceCheckElevation(...a),
-      isTenantColumnSetNull: (...a) => this.isTenantColumnSetNull(...a),
-      get logger() { return readLogger(); },
-      probeReferencingRowsOfSet: (...a) => this.probeReferencingRowsOfSet(...a),
-      referenceProbeFilter: (...a) => this.referenceProbeFilter(...a),
-      refuseOrganizationDeleteWhileOwned: (...a) => this.refuseOrganizationDeleteWhileOwned(...a),
-      update: (...a) => this.update(...a),
-    };
-    return CascadePlanningFacet.walkReferencingRelations.call(host, object, ids, context, objects, cascadeSet);
+    return CascadePlanningFacet.walkReferencingRelations.call(cascadePlanningHost.of(this), object, ids, context, objects, cascadeSet);
   }
 
   /**
@@ -12011,12 +11250,7 @@ export class ObjectQL implements IObjectQLEngine {
     context: ExecutionContext | undefined,
   ): Promise<{ where: Record<string, unknown>; count: number }> {
     // [#29986 codemod] The body moved to `engine-cascade-planning.ts`, its docblock with it (see `CascadePlanningHost`).
-    const host: ThisParameterType<typeof CascadePlanningFacet.countReferencingRowsOutside> = {
-      count: (...a) => this.count(...a),
-      probeReferencingRows: (...a) => this.probeReferencingRows(...a),
-      referenceProbeFilter: (...a) => this.referenceProbeFilter(...a),
-    };
-    return CascadePlanningFacet.countReferencingRowsOutside.call(host, childName, fieldName, fdef, id, cascadeSet, context);
+    return CascadePlanningFacet.countReferencingRowsOutside.call(cascadePlanningHost.of(this), childName, fieldName, fdef, id, cascadeSet, context);
   }
 
   private static organizationCountContext(context?: ExecutionContext): ExecutionContext {
@@ -12031,12 +11265,7 @@ export class ObjectQL implements IObjectQLEngine {
     context: ExecutionContext | undefined,
   ): Promise<boolean> {
     // [#29986 codemod] The body moved to `engine-cascade-planning.ts`, its docblock with it (see `CascadePlanningHost`).
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof CascadePlanningFacet.organizationCountIsDisclosable> = {
-      count: (...a) => this.count(...a),
-      get logger() { return readLogger(); },
-    };
-    return CascadePlanningFacet.organizationCountIsDisclosable.call(host, childName, where, count, context);
+    return CascadePlanningFacet.organizationCountIsDisclosable.call(cascadePlanningHost.of(this), childName, where, count, context);
   }
 
   private refuseOrganizationDeleteWhileOwned(
@@ -12046,14 +11275,7 @@ export class ObjectQL implements IObjectQLEngine {
     cascadeSet: CascadeDeleteSet,
   ): Promise<void> {
     // [#29986 codemod] The body moved to `engine-cascade-planning.ts`, its docblock with it (see `CascadePlanningHost`).
-    const host: ThisParameterType<typeof CascadePlanningFacet.refuseOrganizationDeleteWhileOwned> = {
-      cascadeRelationBehavior: (...a) => this.cascadeRelationBehavior(...a),
-      countReferencingRowsOutside: (...a) => this.countReferencingRowsOutside(...a),
-      fileReferenceCheckElevation: (...a) => this.fileReferenceCheckElevation(...a),
-      isTenantColumnSetNull: (...a) => this.isTenantColumnSetNull(...a),
-      organizationCountIsDisclosable: (...a) => this.organizationCountIsDisclosable(...a),
-    };
-    return CascadePlanningFacet.refuseOrganizationDeleteWhileOwned.call(host, id, context, objects, cascadeSet);
+    return CascadePlanningFacet.refuseOrganizationDeleteWhileOwned.call(cascadePlanningHost.of(this), id, context, objects, cascadeSet);
   }
 
   /**
@@ -12079,14 +11301,7 @@ export class ObjectQL implements IObjectQLEngine {
     options?: { exclude?: Iterable<string>; context?: ExecutionContext },
   ): Promise<Array<{ object: string; count: number }>> {
     // [#29986 codemod] The body moved to `engine-cascade-planning.ts` (see `CascadePlanningHost`).
-    const read_registry = () => this._registry;
-    const host: ThisParameterType<typeof CascadePlanningFacet.organizationOwnedRowCounts> = {
-      get _registry() { return read_registry(); },
-      cascadeRelationBehavior: (...a) => this.cascadeRelationBehavior(...a),
-      count: (...a) => this.count(...a),
-      referenceProbeFilter: (...a) => this.referenceProbeFilter(...a),
-    };
-    return CascadePlanningFacet.organizationOwnedRowCounts.call(host, organizationId, options);
+    return CascadePlanningFacet.organizationOwnedRowCounts.call(cascadePlanningHost.of(this), organizationId, options);
   }
 
   async delete(object: string, options?: EngineDeleteOptions): Promise<boolean | number> {
@@ -12812,11 +12027,7 @@ export class ObjectQL implements IObjectQLEngine {
     options?: InternalFieldEvaluationOptions,
   ): void {
     // [#29986 codemod] The body moved to `engine-delete-and-aggregate.ts` (see `DeleteAndAggregateHost`).
-    const readRelatedSchemaOf = () => this.relatedSchemaOf;
-    const host: ThisParameterType<typeof DeleteAndAggregateFacet.assertNoInternalFieldEvaluated> = {
-      get relatedSchemaOf() { return readRelatedSchemaOf(); },
-    };
-    return DeleteAndAggregateFacet.assertNoInternalFieldEvaluated.call(host, object, query, options);
+    return DeleteAndAggregateFacet.assertNoInternalFieldEvaluated.call(deleteAndAggregateHost.of(this), object, query, options);
   }
 
   /**
@@ -12871,23 +12082,7 @@ export class ObjectQL implements IObjectQLEngine {
 
   aggregate(object: string, query: EngineAggregateOptions, options?: EngineReadOptions): Promise<any[]> {
     // [#29986 codemod] The body moved to `engine-delete-and-aggregate.ts` (see `DeleteAndAggregateHost`).
-    const read_registry = () => this._registry;
-    const readLogger = () => this.logger;
-    const readRelatedSchemaOf = () => this.relatedSchemaOf;
-    const host: ThisParameterType<typeof DeleteAndAggregateFacet.aggregate> = {
-      get _registry() { return read_registry(); },
-      buildDriverOptions: (...a) => this.buildDriverOptions(...a),
-      composeReadableIdsAtBoundary: (...a) => this.composeReadableIdsAtBoundary(...a),
-      executeWithMiddleware: (...a) => this.executeWithMiddleware(...a),
-      expandSearchOnOptions: (...a) => this.expandSearchOnOptions(...a),
-      getDriver: (...a) => this.getDriver(...a),
-      get logger() { return readLogger(); },
-      rejectCredentialAggregation: (...a) => this.rejectCredentialAggregation(...a),
-      get relatedSchemaOf() { return readRelatedSchemaOf(); },
-      resolveObjectName: (...a) => this.resolveObjectName(...a),
-      resolveWhereTokens: (...a) => this.resolveWhereTokens(...a),
-    };
-    return DeleteAndAggregateFacet.aggregate.call(host, object, query, options);
+    return DeleteAndAggregateFacet.aggregate.call(deleteAndAggregateHost.of(this), object, query, options);
   }
   
   /**
@@ -12966,55 +12161,27 @@ export class ObjectQL implements IObjectQLEngine {
     opts?: EngineTransactionOptions,
   ): Promise<T> {
     // [#29986 codemod] The body moved to `engine-transactions-section.ts` (see `TransactionsSectionHost`).
-    const readDefaultDriver = () => this.defaultDriver;
-    const readDrivers = () => this.drivers;
-    const readTxStore = () => this.txStore;
-    const host: ThisParameterType<typeof TransactionsSectionFacet.transaction> = {
-      get defaultDriver() { return readDefaultDriver(); },
-      get drivers() { return readDrivers(); },
-      runOpenedUnit: (...a) => this.runOpenedUnit(...a),
-      get txStore() { return readTxStore(); },
-      warnTransactionUnsupported: (...a) => this.warnTransactionUnsupported(...a),
-    };
-    return (TransactionsSectionFacet.transaction<T>).call(host, callback, baseContext, opts);
+    return (TransactionsSectionFacet.transaction<T>).call(transactionsSectionHost.of(this), callback, baseContext, opts);
   }
 
   private runOpenedUnit<T>(trx: unknown, owner: IDataDriver, body: () => Promise<T>): Promise<T> {
     // [#29986 codemod] The body moved to `engine-transactions-section.ts`, its docblock with it (see `TransactionsSectionHost`).
-    const readOpenedUnits = () => this.openedUnits;
-    const readTxStore = () => this.txStore;
-    const host: ThisParameterType<typeof TransactionsSectionFacet.runOpenedUnit> = {
-      newTransactionScope: (...a) => this.newTransactionScope(...a),
-      get openedUnits() { return readOpenedUnits(); },
-      get txStore() { return readTxStore(); },
-    };
-    return (TransactionsSectionFacet.runOpenedUnit<T>).call(host, trx, owner, body);
+    return (TransactionsSectionFacet.runOpenedUnit<T>).call(transactionsSectionHost.of(this), trx, owner, body);
   }
 
   private isClosedUnitHandle(handle: unknown): boolean {
     // [#29986 codemod] The body moved to `engine-transactions-section.ts`, its docblock with it (see `TransactionsSectionHost`).
-    const readOpenedUnits = () => this.openedUnits;
-    const host: ThisParameterType<typeof TransactionsSectionFacet.isClosedUnitHandle> = {
-      get openedUnits() { return readOpenedUnits(); },
-    };
-    return TransactionsSectionFacet.isClosedUnitHandle.call(host, handle);
+    return TransactionsSectionFacet.isClosedUnitHandle.call(transactionsSectionHost.of(this), handle);
   }
 
   private newTransactionScope(owner: IDataDriver): TransactionScope {
     // [#29986 codemod] The body moved to `engine-transactions-section.ts`, its docblock with it (see `TransactionsSectionHost`).
-    const host: ThisParameterType<typeof TransactionsSectionFacet.newTransactionScope> = {
-      datasourceNameOf: (...a) => this.datasourceNameOf(...a),
-    };
-    return TransactionsSectionFacet.newTransactionScope.call(host, owner);
+    return TransactionsSectionFacet.newTransactionScope.call(transactionsSectionHost.of(this), owner);
   }
 
   private datasourceNameOf(driver: IDataDriver): string {
     // [#29986 codemod] The body moved to `engine-transactions-section.ts`, its docblock with it (see `TransactionsSectionHost`).
-    const readDrivers = () => this.drivers;
-    const host: ThisParameterType<typeof TransactionsSectionFacet.datasourceNameOf> = {
-      get drivers() { return readDrivers(); },
-    };
-    return TransactionsSectionFacet.datasourceNameOf.call(host, driver);
+    return TransactionsSectionFacet.datasourceNameOf.call(transactionsSectionHost.of(this), driver);
   }
 
   /**
@@ -13148,11 +12315,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   unregisterObject(name: string, packageId?: string): void {
     // [#29986 codemod] The body moved to `engine-compatibility-section.ts` (see `CompatibilitySectionHost`).
-    const read_registry = () => this._registry;
-    const host: ThisParameterType<typeof CompatibilitySectionFacet.unregisterObject> = {
-      get _registry() { return read_registry(); },
-    };
-    return CompatibilitySectionFacet.unregisterObject.call(host, name, packageId);
+    return CompatibilitySectionFacet.unregisterObject.call(compatibilitySectionHost.of(this), name, packageId);
   }
 
   /**
@@ -13161,10 +12324,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   getObject(name: string): ServiceObject | undefined {
     // [#29986 codemod] The body moved to `engine-compatibility-section.ts` (see `CompatibilitySectionHost`).
-    const host: ThisParameterType<typeof CompatibilitySectionFacet.getObject> = {
-      getSchema: (...a) => this.getSchema(...a),
-    };
-    return CompatibilitySectionFacet.getObject.call(host, name);
+    return CompatibilitySectionFacet.getObject.call(compatibilitySectionHost.of(this), name);
   }
 
   /**
@@ -13188,11 +12348,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   getDriverByName(name: string): IDataDriver | undefined {
     // [#29986 codemod] The body moved to `engine-compatibility-section.ts` (see `CompatibilitySectionHost`).
-    const readDrivers = () => this.drivers;
-    const host: ThisParameterType<typeof CompatibilitySectionFacet.getDriverByName> = {
-      get drivers() { return readDrivers(); },
-    };
-    return CompatibilitySectionFacet.getDriverByName.call(host, name);
+    return CompatibilitySectionFacet.getDriverByName.call(compatibilitySectionHost.of(this), name);
   }
 
   /**
@@ -13235,10 +12391,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   getDriverForObject(objectName: string): IDataDriver | undefined {
     // [#29986 codemod] The body moved to `engine-compatibility-section.ts` (see `CompatibilitySectionHost`).
-    const host: ThisParameterType<typeof CompatibilitySectionFacet.getDriverForObject> = {
-      getDriver: (...a) => this.getDriver(...a),
-    };
-    return CompatibilitySectionFacet.getDriverForObject.call(host, objectName);
+    return CompatibilitySectionFacet.getDriverForObject.call(compatibilitySectionHost.of(this), objectName);
   }
 
   /**
@@ -13293,12 +12446,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   dropObjectSchema(objectName: string): Promise<void> {
     // [#29986 codemod] The body moved to `engine-compatibility-section.ts` (see `CompatibilitySectionHost`).
-    const read_registry = () => this._registry;
-    const host: ThisParameterType<typeof CompatibilitySectionFacet.dropObjectSchema> = {
-      get _registry() { return read_registry(); },
-      getDriverForObject: (...a) => this.getDriverForObject(...a),
-    };
-    return CompatibilitySectionFacet.dropObjectSchema.call(host, objectName);
+    return CompatibilitySectionFacet.dropObjectSchema.call(compatibilitySectionHost.of(this), objectName);
   }
 
   /**
@@ -13309,11 +12457,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   datasource(name: string): IDataDriver {
     // [#29986 codemod] The body moved to `engine-compatibility-section.ts` (see `CompatibilitySectionHost`).
-    const readDrivers = () => this.drivers;
-    const host: ThisParameterType<typeof CompatibilitySectionFacet.datasource> = {
-      get drivers() { return readDrivers(); },
-    };
-    return CompatibilitySectionFacet.datasource.call(host, name);
+    return CompatibilitySectionFacet.datasource.call(compatibilitySectionHost.of(this), name);
   }
 
   /**
@@ -13330,10 +12474,7 @@ export class ObjectQL implements IObjectQLEngine {
     packageId?: string
   ): void {
     // [#29986 codemod] The body moved to `engine-compatibility-section.ts` (see `CompatibilitySectionHost`).
-    const host: ThisParameterType<typeof CompatibilitySectionFacet.on> = {
-      registerHook: (...a) => this.registerHook(...a),
-    };
-    return CompatibilitySectionFacet.on.call(host, event, objectName, handler, packageId);
+    return CompatibilitySectionFacet.on.call(compatibilitySectionHost.of(this), event, objectName, handler, packageId);
   }
 
   /**
@@ -13357,10 +12498,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   close(): Promise<void> {
     // [#29986 codemod] The body moved to `engine-compatibility-section.ts` (see `CompatibilitySectionHost`).
-    const host: ThisParameterType<typeof CompatibilitySectionFacet.close> = {
-      destroy: (...a) => this.destroy(...a),
-    };
-    return CompatibilitySectionFacet.close.call(host);
+    return CompatibilitySectionFacet.close.call(compatibilitySectionHost.of(this));
   }
 
   /**
@@ -13418,6 +12556,276 @@ export class ObjectQL implements IObjectQLEngine {
       remainderAfterMemberRemoval: { value: (...args: Parameters<typeof ObjectQL.remainderAfterMemberRemoval>) => ObjectQL.remainderAfterMemberRemoval(...args) },
       storedReferenceIncludes: { value: (...args: Parameters<typeof ObjectQL.storedReferenceIncludes>) => ObjectQL.storedReferenceIncludes(...args) },
     });
+  }
+
+  // [#29986 codemod] Installs each facet's host factory (`engine-facet-hosts.ts`): a static block adds
+  // no member to the class, so the published `.d.ts` does not move.
+  static {
+    actionsHost.install((engine) => ({
+      get actionActivation() { return engine.actionActivation; },
+      get actions() { return engine.actions; },
+      get logger() { return engine.logger; },
+    }));
+    cascadePlanningHost.install((engine) => ({
+      get _registry() { return engine._registry; },
+      get cascadeDeleteSets() { return engine.cascadeDeleteSets; },
+      get cascadeIssuedDeletes() { return engine.cascadeIssuedDeletes; },
+      get cascadeNotAtomicReported() { return engine.cascadeNotAtomicReported; },
+      cascadeRelationBehavior: (...a) => engine.cascadeRelationBehavior(...a),
+      collectCascadeDeleteSet: (...a) => engine.collectCascadeDeleteSet(...a),
+      count: (...a) => engine.count(...a),
+      countReferencingRowsOutside: (...a) => engine.countReferencingRowsOutside(...a),
+      get defaultDriver() { return engine.defaultDriver; },
+      delete: (...a) => engine.delete(...a),
+      deleteRestrictedError: (...a) => engine.deleteRestrictedError(...a),
+      get drivers() { return engine.drivers; },
+      fileReferenceCheckElevation: (...a) => engine.fileReferenceCheckElevation(...a),
+      find: (...a) => engine.find(...a),
+      getDriver: (...a) => engine.getDriver(...a),
+      isTenantColumnSetNull: (...a) => engine.isTenantColumnSetNull(...a),
+      get logger() { return engine.logger; },
+      organizationCountIsDisclosable: (...a) => engine.organizationCountIsDisclosable(...a),
+      probeReferencingRows: (...a) => engine.probeReferencingRows(...a),
+      probeReferencingRowsOfSet: (...a) => engine.probeReferencingRowsOfSet(...a),
+      recordReferenceCheckElevation: (...a) => engine.recordReferenceCheckElevation(...a),
+      referenceProbeFilter: (...a) => engine.referenceProbeFilter(...a),
+      referenceProbeFilterOfSet: (...a) => engine.referenceProbeFilterOfSet(...a),
+      refuseOrganizationDeleteWhileOwned: (...a) => engine.refuseOrganizationDeleteWhileOwned(...a),
+      refuseRestrictsInsideOwnCascade: (...a) => engine.refuseRestrictsInsideOwnCascade(...a),
+      resolveObjectName: (...a) => engine.resolveObjectName(...a),
+      update: (...a) => engine.update(...a),
+      walkReferencingRelations: (...a) => engine.walkReferencingRelations(...a),
+    }));
+    compatibilitySectionHost.install((engine) => ({
+      get _registry() { return engine._registry; },
+      destroy: (...a) => engine.destroy(...a),
+      get drivers() { return engine.drivers; },
+      getDriver: (...a) => engine.getDriver(...a),
+      getDriverForObject: (...a) => engine.getDriverForObject(...a),
+      getSchema: (...a) => engine.getSchema(...a),
+      registerHook: (...a) => engine.registerHook(...a),
+    }));
+    defaultsAndAutonumbersHost.install((engine) => ({
+      adoptExplicitAutonumber: (...a) => engine.adoptExplicitAutonumber(...a),
+      applyAutonumbers: (...a) => engine.applyAutonumbers(...a),
+      get autonumberCounters() { return engine.autonumberCounters; },
+      get autonumberReadersUnservedReported() { return engine.autonumberReadersUnservedReported; },
+      defaultFieldEntries: (...a) => engine.defaultFieldEntries(...a),
+      getSchema: (...a) => engine.getSchema(...a),
+      isIssuedAutonumberCollision: (...a) => engine.isIssuedAutonumberCollision(...a),
+      get logger() { return engine.logger; },
+      normalizeExpressionDefault: (...a) => engine.normalizeExpressionDefault(...a),
+      resolveNowDefault: (...a) => engine.resolveNowDefault(...a),
+      resolveOptionDefault: (...a) => engine.resolveOptionDefault(...a),
+      seedAutonumber: (...a) => engine.seedAutonumber(...a),
+      validationMessageContext: (...a) => engine.validationMessageContext(...a),
+    }));
+    deleteAndAggregateHost.install((engine) => ({
+      get _registry() { return engine._registry; },
+      buildDriverOptions: (...a) => engine.buildDriverOptions(...a),
+      composeReadableIdsAtBoundary: (...a) => engine.composeReadableIdsAtBoundary(...a),
+      executeWithMiddleware: (...a) => engine.executeWithMiddleware(...a),
+      expandSearchOnOptions: (...a) => engine.expandSearchOnOptions(...a),
+      getDriver: (...a) => engine.getDriver(...a),
+      get logger() { return engine.logger; },
+      rejectCredentialAggregation: (...a) => engine.rejectCredentialAggregation(...a),
+      get relatedSchemaOf() { return engine.relatedSchemaOf; },
+      resolveObjectName: (...a) => engine.resolveObjectName(...a),
+      resolveWhereTokens: (...a) => engine.resolveWhereTokens(...a),
+    }));
+    findHost.install((engine) => ({
+      get _registry() { return engine._registry; },
+      expandSearchOnAst: (...a) => engine.expandSearchOnAst(...a),
+      fillQueryAstDefaults: (...a) => engine.fillQueryAstDefaults(...a),
+      get logger() { return engine.logger; },
+      lowerRelationConditions: (...a) => engine.lowerRelationConditions(...a),
+      resolveRelateThenLowerWhere: (...a) => engine.resolveRelateThenLowerWhere(...a),
+      resolveSearchQueryableFields: (...a) => engine.resolveSearchQueryableFields(...a),
+    }));
+    hooksAndFunctionsHost.install((engine) => ({
+      get _defaultActionRunner() { return engine._defaultActionRunner; },
+      set _defaultActionRunner(v) { engine._defaultActionRunner = v; },
+      get _defaultBodyRunner() { return engine._defaultBodyRunner; },
+      set _defaultBodyRunner(v) { engine._defaultBodyRunner = v; },
+      get defaultDriver() { return engine.defaultDriver; },
+      get drivers() { return engine.drivers; },
+      get functions() { return engine.functions; },
+      getDriver: (...a) => engine.getDriver(...a),
+      get hooks() { return engine.hooks; },
+      isClosedUnitHandle: (...a) => engine.isClosedUnitHandle(...a),
+      get logger() { return engine.logger; },
+      get residualOwnerSources() { return engine.residualOwnerSources; },
+      get txStore() { return engine.txStore; },
+    }));
+    insertHost.install((engine) => ({
+      get _registry() { return engine._registry; },
+      applyFieldDefaults: (...a) => engine.applyFieldDefaults(...a),
+      get assignmentEvaluator() { return engine.assignmentEvaluator; },
+      set assignmentEvaluator(v) { engine.assignmentEvaluator = v; },
+      buildDriverOptions: (...a) => engine.buildDriverOptions(...a),
+      count: (...a) => engine.count(...a),
+      find: (...a) => engine.find(...a),
+      getDriver: (...a) => engine.getDriver(...a),
+      insert: (...a) => engine.insert(...a),
+      get logger() { return engine.logger; },
+      ownershipQueueService: (...a) => engine.ownershipQueueService(...a),
+      get preconditionDegradedWarned() { return engine.preconditionDegradedWarned; },
+      set preconditionDegradedWarned(v) { engine.preconditionDegradedWarned = v; },
+      resolveDefaultPermissions: (...a) => engine.resolveDefaultPermissions(...a),
+      update: (...a) => engine.update(...a),
+    }));
+    middlewareAndContextHost.install((engine) => ({
+      get _registry() { return engine._registry; },
+      get authzInvalidationBinding() { return engine.authzInvalidationBinding; },
+      set authzInvalidationBinding(v) { engine.authzInvalidationBinding = v; },
+      get authzInvalidationDetach() { return engine.authzInvalidationDetach; },
+      set authzInvalidationDetach(v) { engine.authzInvalidationDetach = v; },
+      get cascadeIssuedDeletes() { return engine.cascadeIssuedDeletes; },
+      detachAuthzInvalidationPubSub: (...a) => engine.detachAuthzInvalidationPubSub(...a),
+      find: (...a) => engine.find(...a),
+      getDriver: (...a) => engine.getDriver(...a),
+      get logger() { return engine.logger; },
+      get middlewares() { return engine.middlewares; },
+      get organizationProbeMemo() { return engine.organizationProbeMemo; },
+      set organizationProbeMemo(v) { engine.organizationProbeMemo = v; },
+      probeInstallOrganizations: (...a) => engine.probeInstallOrganizations(...a),
+      resolveEnginePosture: (...a) => engine.resolveEnginePosture(...a),
+      get txStore() { return engine.txStore; },
+      get writeEpoch() { return engine.writeEpoch; },
+    }));
+    migrationStateHost.install((engine) => ({
+      get _registry() { return engine._registry; },
+      get admittedValueShapeViolations() { return engine.admittedValueShapeViolations; },
+      get creationAttestationRetraction() { return engine.creationAttestationRetraction; },
+      set creationAttestationRetraction(v) { engine.creationAttestationRetraction = v; },
+      get deviationRecording() { return engine.deviationRecording; },
+      set deviationRecording(v) { engine.deviationRecording = v; },
+      get fileReferencesMigrationVerified() { return engine.fileReferencesMigrationVerified; },
+      set fileReferencesMigrationVerified(v) { engine.fileReferencesMigrationVerified = v; },
+      findOne: (...a) => engine.findOne(...a),
+      invalidateDataMigrationFlags: (...a) => engine.invalidateDataMigrationFlags(...a),
+      isFileReferencesMigrationVerified: (...a) => engine.isFileReferencesMigrationVerified(...a),
+      isValueShapesMigrationVerified: (...a) => engine.isValueShapesMigrationVerified(...a),
+      get logger() { return engine.logger; },
+      get migrationGatesAnnounced() { return engine.migrationGatesAnnounced; },
+      set migrationGatesAnnounced(v) { engine.migrationGatesAnnounced = v; },
+      noteAdmittedValueShapeViolation: (...a) => engine.noteAdmittedValueShapeViolation(...a),
+      objectHasCoveredValueField: (...a) => engine.objectHasCoveredValueField(...a),
+      objectHasMediaField: (...a) => engine.objectHasMediaField(...a),
+      readFileReferencesFlagRow: (...a) => engine.readFileReferencesFlagRow(...a),
+      readMigrationFlagRowMemoized: (...a) => engine.readMigrationFlagRowMemoized(...a),
+      get recordedDeviations() { return engine.recordedDeviations; },
+      get retractedCreationAttestations() { return engine.retractedCreationAttestations; },
+      update: (...a) => engine.update(...a),
+      get valueShapesMigrationVerified() { return engine.valueShapesMigrationVerified; },
+      set valueShapesMigrationVerified(v) { engine.valueShapesMigrationVerified = v; },
+      wasDatastoreCreatedFromEmpty: (...a) => engine.wasDatastoreCreatedFromEmpty(...a),
+    }));
+    referencesAndMasterDetailHost.install((engine) => ({
+      get _registry() { return engine._registry; },
+      cascadeRelationBehavior: (...a) => engine.cascadeRelationBehavior(...a),
+      collectCascadeDeleteSet: (...a) => engine.collectCascadeDeleteSet(...a),
+      homeAmountServing: (...a) => engine.homeAmountServing(...a),
+      get homeLocalizationResolver() { return engine.homeLocalizationResolver; },
+      set homeLocalizationResolver(v) { engine.homeLocalizationResolver = v; },
+      get i18nService() { return engine.i18nService; },
+      set i18nService(v) { engine.i18nService = v; },
+      get logger() { return engine.logger; },
+      masterDeclaredFields: (...a) => engine.masterDeclaredFields(...a),
+      masterDetailHeadersCallerReads: (...a) => engine.masterDetailHeadersCallerReads(...a),
+      get realtimeService() { return engine.realtimeService; },
+      set realtimeService(v) { engine.realtimeService = v; },
+      referenceExists: (...a) => engine.referenceExists(...a),
+      resolveObjectName: (...a) => engine.resolveObjectName(...a),
+    }));
+    registrationHost.install((engine) => ({
+      get _registry() { return engine._registry; },
+      applyExternalDriverFloor: (...a) => engine.applyExternalDriverFloor(...a),
+      get datasourceDefs() { return engine.datasourceDefs; },
+      get defaultDriver() { return engine.defaultDriver; },
+      set defaultDriver(v) { engine.defaultDriver = v; },
+      get drivers() { return engine.drivers; },
+      haveFileColumnsMoved: (...a) => engine.haveFileColumnsMoved(...a),
+      get logger() { return engine.logger; },
+      registerMetadataCollections: (...a) => engine.registerMetadataCollections(...a),
+      registerPlugin: (...a) => engine.registerPlugin(...a),
+      resolveNavObjectNames: (...a) => engine.resolveNavObjectNames(...a),
+      get unavailableDatasources() { return engine.unavailableDatasources; },
+    }));
+    secretsAndRoutingHost.install((engine) => ({
+      get _registry() { return engine._registry; },
+      get cryptoProvider() { return engine.cryptoProvider; },
+      set cryptoProvider(v) { engine.cryptoProvider = v; },
+      get cryptoProviderListeners() { return engine.cryptoProviderListeners; },
+      get defaultDriver() { return engine.defaultDriver; },
+      get drivers() { return engine.drivers; },
+      get logger() { return engine.logger; },
+      get manifests() { return engine.manifests; },
+      get relatedSchemaOf() { return engine.relatedSchemaOf; },
+      resolveDatasourceBinding: (...a) => engine.resolveDatasourceBinding(...a),
+      resolveDatasourceFromMapping: (...a) => engine.resolveDatasourceFromMapping(...a),
+      resolveObjectName: (...a) => engine.resolveObjectName(...a),
+      get tenancyPostureProvider() { return engine.tenancyPostureProvider; },
+      set tenancyPostureProvider(v) { engine.tenancyPostureProvider = v; },
+    }));
+    securityResolversHost.install((engine) => ({
+      get _effectiveObjectPermissionsResolver() { return engine._effectiveObjectPermissionsResolver; },
+      set _effectiveObjectPermissionsResolver(v) { engine._effectiveObjectPermissionsResolver = v; },
+      get _fieldOwnedFileReadAuthorizer() { return engine._fieldOwnedFileReadAuthorizer; },
+      set _fieldOwnedFileReadAuthorizer(v) { engine._fieldOwnedFileReadAuthorizer = v; },
+      get _heldFileResolver() { return engine._heldFileResolver; },
+      set _heldFileResolver(v) { engine._heldFileResolver = v; },
+      get _registry() { return engine._registry; },
+      get _writeGateProbe() { return engine._writeGateProbe; },
+      set _writeGateProbe(v) { engine._writeGateProbe = v; },
+      get _writeWallVerdict() { return engine._writeWallVerdict; },
+      set _writeWallVerdict(v) { engine._writeWallVerdict = v; },
+      composeReadableIdsChain: (...a) => engine.composeReadableIdsChain(...a),
+      formulaFaultSink: (...a) => engine.formulaFaultSink(...a),
+      get formulaHopReads() { return engine.formulaHopReads; },
+      formulaOptionLabels: (...a) => engine.formulaOptionLabels(...a),
+      hasObjectMiddleware: (...a) => engine.hasObjectMiddleware(...a),
+      get i18nService() { return engine.i18nService; },
+      get insertRecomputeListeners() { return engine.insertRecomputeListeners; },
+      get logger() { return engine.logger; },
+      permissionResolution: (...a) => engine.permissionResolution(...a),
+      get readableIdsSecurityReported() { return engine.readableIdsSecurityReported; },
+      reportFormulaFault: (...a) => engine.reportFormulaFault(...a),
+      resolveDatasourceBinding: (...a) => engine.resolveDatasourceBinding(...a),
+      resolveFormulaPermissions: (...a) => engine.resolveFormulaPermissions(...a),
+      resolveFormulaRelated: (...a) => engine.resolveFormulaRelated(...a),
+      resolveOneHopRelated: (...a) => engine.resolveOneHopRelated(...a),
+      resolveReadableIdsSecurity: (...a) => engine.resolveReadableIdsSecurity(...a),
+      uncomposableReadableIdsParent: (...a) => engine.uncomposableReadableIdsParent(...a),
+    }));
+    summariesAndExpansionHost.install((engine) => ({
+      get _registry() { return engine._registry; },
+      buildSummaryIndex: (...a) => engine.buildSummaryIndex(...a),
+      ensureSummaryIndexes: (...a) => engine.ensureSummaryIndexes(...a),
+      expandRelatedRecords: (...a) => engine.expandRelatedRecords(...a),
+      find: (...a) => engine.find(...a),
+      getOwnedSummaryDescriptors: (...a) => engine.getOwnedSummaryDescriptors(...a),
+      getSummaryDescriptors: (...a) => engine.getSummaryDescriptors(...a),
+      invalidateSummaryIndex: (...a) => engine.invalidateSummaryIndex(...a),
+      get logger() { return engine.logger; },
+      serveReferenceNames: (...a) => engine.serveReferenceNames(...a),
+      get summaryIndex() { return engine.summaryIndex; },
+      set summaryIndex(v) { engine.summaryIndex = v; },
+      get summaryIndexByParent() { return engine.summaryIndexByParent; },
+      set summaryIndexByParent(v) { engine.summaryIndexByParent = v; },
+      get summaryIndexRevision() { return engine.summaryIndexRevision; },
+      set summaryIndexRevision(v) { engine.summaryIndexRevision = v; },
+    }));
+    transactionsSectionHost.install((engine) => ({
+      datasourceNameOf: (...a) => engine.datasourceNameOf(...a),
+      get defaultDriver() { return engine.defaultDriver; },
+      get drivers() { return engine.drivers; },
+      newTransactionScope: (...a) => engine.newTransactionScope(...a),
+      get openedUnits() { return engine.openedUnits; },
+      runOpenedUnit: (...a) => engine.runOpenedUnit(...a),
+      get txStore() { return engine.txStore; },
+      warnTransactionUnsupported: (...a) => engine.warnTransactionUnsupported(...a),
+    }));
   }
 }
 

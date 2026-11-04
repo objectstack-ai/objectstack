@@ -37,6 +37,18 @@ export {
   resolvePersistedKeyFile,
   type PersistedKeyFile,
   KEY_FILE_CHANNEL_ENV,
+  // When those two files hold different keys, the process that opens the
+  // database rules between them by trial-opening a stored secret, or refuses.
+  KEY_FILE_CANDIDATE_CHANNEL_ENV,
+  chooseKeyFileByTrialOpen,
+  settleKeyFileChannel,
+  storedSecretReaderOverEngine,
+  deferredLocalCryptoProvider,
+  DataKeyOpensNothingError,
+  type KeyFileChoice,
+  type StoredSecretReader,
+  type StoredSecretSample,
+  type DeferredLocalCryptoProvider,
 } from './local-crypto-provider.js';
 export {
   type SettingsActionHandler,

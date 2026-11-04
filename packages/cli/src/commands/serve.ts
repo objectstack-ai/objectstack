@@ -5325,13 +5325,17 @@ export default class Serve extends Command {
           // cleartext (by design).
           let secrets: any = undefined;
           try {
-            const { LocalCryptoProvider } = await import(
+            const { deferredLocalCryptoProvider } = await import(
               /* webpackIgnore: true */ '@objectstack/service-settings'
             );
             // First block to touch `sharedCryptoProvider` (still undefined
-            // here), so create it directly; the secret-field wiring below
-            // reuses this instance so every sys_secret shares one key.
-            sharedCryptoProvider = new LocalCryptoProvider();
+            // here); the secret-field wiring below reuses this instance so
+            // every sys_secret shares one key. Built at its FIRST USE, not
+            // here: the database is not open yet, and when two key files hold
+            // different keys the boot chooses between them only once it is
+            // (the settings service's `start()`). The binder first decrypts at
+            // `kernel:ready`, after that choice.
+            sharedCryptoProvider = deferredLocalCryptoProvider();
             secrets = createDatasourceSecretBinder({
               engine: lazySecretEngine,
               cryptoProvider: sharedCryptoProvider,
@@ -5631,6 +5635,11 @@ export default class Serve extends Command {
             // every sys_secret value after a restart. Let that error be loud:
             // secret writes must not proceed under an unstable key.
             sharedCryptoProvider = new LocalCryptoProvider();
+          } else if (typeof sharedCryptoProvider.resolve === 'function') {
+            // The deferred instance the datasource binder shares: build it now
+            // (the key file was chosen during `runtime.start()`), so the same
+            // production refusal stays at boot rather than at the first write.
+            sharedCryptoProvider.resolve();
           }
           dataEngine.setCryptoProvider(sharedCryptoProvider);
           if (isDev) {

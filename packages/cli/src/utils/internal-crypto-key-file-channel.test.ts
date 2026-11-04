@@ -11,15 +11,17 @@
  * boot, one settings secret) is `test/dev-start-shared-data-key.integration.test.ts`.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { LocalCryptoProvider } from '@objectstack/service-settings';
+import { LocalCryptoProvider, resolvePersistedKeyFile, settleKeyFileChannel } from '@objectstack/service-settings';
 import { applyCryptoKeyFileChannel } from './internal-crypto-key-file-channel.js';
+import { resolveStartHome } from './start-home.js';
 
 const CHANNEL = 'OS_INTERNAL_CRYPTO_KEY_FILE';
+const CANDIDATE = 'OS_INTERNAL_CRYPTO_KEY_FILE_CANDIDATE';
 const ctx = { scope: 'settings', namespace: 'ai', key: 'openai_api_key' } as const;
 
 let home: string;
@@ -102,16 +104,42 @@ describe('#29934 — the key file an earlier `os start` kept in the project', ()
     expect(existsSync(canonicalFile())).toBe(false);
   });
 
-  it('both files hold different keys: the canonical one is used, and the warning names both', async () => {
+  it('both files hold different keys: the child is handed both, and the notice names both', async () => {
     writeKey(legacyFile());
-    const canonical = writeKey(canonicalFile());
-    const sealed = await new LocalCryptoProvider({ key: canonical }).encrypt('sk-canonical', ctx);
-
+    writeKey(canonicalFile());
     for (const { child, notice } of [await startChild(), await devChild()]) {
       expect(child[CHANNEL]).toBe(canonicalFile());
-      expect(notice).toContain(`${canonicalFile()} (used)`);
-      expect(notice).toContain(`${legacyFile()} (NOT used)`);
-      expect(await new LocalCryptoProvider({ env: child }).decrypt(sealed, ctx)).toBe('sk-canonical');
+      // [#30042] Only the child opens the database, so the parent rules
+      // nothing: the second file travels on the candidate channel.
+      expect(child[CANDIDATE]).toBe(legacyFile());
+      expect(notice).toContain(canonicalFile());
+      expect(notice).toContain(legacyFile());
+    }
+  });
+
+  it.each([
+    ['the case-1 shape (a start-sealed project, a foreign home key)', 'legacy'],
+    ['the dev-then-start shape', 'canonical'],
+  ] as const)('%s: the child reads its secret back with the %s key', async (_shape, sealer) => {
+    const keys = { legacy: writeKey(legacyFile()), canonical: writeKey(canonicalFile()) };
+    const handle = await new LocalCryptoProvider({ key: keys[sealer] }).encrypt('sk-30042', ctx);
+    const stored = async () => ({ namespace: ctx.namespace, key: ctx.key, ciphertext: handle.ciphertext });
+    for (const { child } of [await startChild(), await devChild()]) {
+      const quiet = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      // What the child's settings service does at start(), the database open.
+      const choice = await settleKeyFileChannel({ env: child, readStoredSecret: stored });
+      quiet.mockRestore();
+      expect(choice?.path).toBe(sealer === 'legacy' ? legacyFile() : canonicalFile());
+      expect(child[CANDIDATE]).toBeUndefined();
+      expect(await new LocalCryptoProvider({ env: child }).decrypt(handle, ctx)).toBe('sk-30042');
+    }
+  });
+
+  it('an inherited candidate never survives a one-file answer', async () => {
+    writeKey(canonicalFile());
+    const env = { ...operatorEnv, [CANDIDATE]: '/inherited/elsewhere' };
+    for (const { child } of [await startChild(env), await devChild(env)]) {
+      expect(child[CANDIDATE]).toBeUndefined();
     }
   });
 
@@ -131,10 +159,19 @@ describe('#29934 — an explicit env key keeps winning, unchanged', () => {
     ['OS_DEV_CRYPTO_KEY', randomBytes(32).toString('base64')],
   ])('%s set: no file is named and an inherited channel is removed', async (name, value) => {
     writeKey(legacyFile());
-    const env = { ...operatorEnv, [name]: value, [CHANNEL]: '/inherited/elsewhere' };
+    const env = { ...operatorEnv, [name]: value, [CHANNEL]: '/inherited/elsewhere', [CANDIDATE]: '/inherited/too' };
     for (const { child, notice } of [await startChild(env), await devChild(env)]) {
       expect(child[CHANNEL]).toBeUndefined();
+      expect(child[CANDIDATE]).toBeUndefined();
       expect(notice).toBeUndefined();
     }
+  });
+});
+
+describe('#30042 — a leading `~` in OS_HOME names one directory for the key file and for `os start`', () => {
+  it.each(['~/pinned-home', '~'])('OS_HOME=%s', (value) => {
+    const env = { ...operatorEnv, OS_HOME: value };
+    const startHome = resolveStartHome(undefined, { hasProjectConfig: true, cwd: project, env });
+    expect(resolvePersistedKeyFile({ env })?.canonical).toBe(join(startHome, 'dev-crypto-key'));
   });
 });

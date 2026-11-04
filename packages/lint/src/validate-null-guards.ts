@@ -259,9 +259,14 @@
  *         included, wherever no variable holds the name. So a bare name is
  *         judged as `record.<name>` when the flow's bound set is provable
  *         (`flowCelRootScope`) and the name is not one of its declared
- *         variables or node ids (`collectFlowVariableNames`) — those win, and
- *         a flow whose nodes can bind names nobody declared leaves its bare
- *         names unjudged. Guarding either spelling guards both.
+ *         variables or node ids (`collectFlowVariableNames`) or a screen's
+ *         field names (`collectScreenFieldNames`, which a resume binds) —
+ *         those win, and a flow whose nodes can bind names nobody declared
+ *         leaves its bare names unjudged. The type verdict reads the same names
+ *         and the same judge, on the flow's nodes alone
+ *         (`validate-expressions.ts`, `flowBare`): there a bare-name mismatch
+ *         stands down to a warning instead (#30025). Guarding either spelling
+ *         guards both.
  *      3. **The start condition gates every run.** `execute()` evaluates it
  *         before any node, whatever the entrance, so what it proves non-null
  *         is presumed at every edge and `decision` branch of the flow

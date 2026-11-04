@@ -456,11 +456,11 @@ a bare string (auto-wrapped) or their helper, and read the same variable scope.
 | Dialect | Helper | Grammar | Carriers |
 |:---|:---|:---|:---|
 | `cron` | `` cron`0 6 * * MON` `` | 5- or 6-field cron, or one of `@yearly` `@annually` `@monthly` `@weekly` `@daily` `@hourly` `@reboot` | `Job.schedule.expression` (canonical) |
-| `template` | `` tmpl`Hello {{ record.first_name }}` `` | `{{ path }}` or `{{ path \| formatter[:arg] }}` — double braces only, no conditionals; the formatter whitelist is `TEMPLATE_FORMATTERS`, exported from `@objectstack/formula` | `system/email-template` `subject` / `bodyHtml` / `bodyText`, `ai/model-registry` `promptTemplate.system` / `.user`, `Object.titleFormat` (deprecated → `nameField`, ADR-0079) |
+| `template` | `` tmpl`Hello {{ record.first_name }}` `` | `{{ path }}` or `{{ path \| formatter[:arg] }}` — double braces only, no conditionals; the formatter whitelist is `TEMPLATE_FORMATTERS`, exported from `@objectstack/formula` | `system/email-template` `subject` / `bodyHtml` / `bodyText`, `ai/model-registry` `promptTemplate.system` / `.user`, `Object.titleFormat` (a save and `os validate` refuse it; move it to `nameField`, ADR-0079) |
 
 `shared/expression.zod.ts` declares both surfaces and their carriers.
-Missing template paths render as the empty string. Move logic into a CEL field:
-a template holds a path and a formatter, nothing else. A `currency` argument is a
+Missing template paths render as the empty string. Move logic into a CEL field.
+A `currency` argument is a
 literal code (`currency:EUR`); only an email template may read it from the send's
 data instead, `{{ amount | currency:@currency_code }}`.
 
