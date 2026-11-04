@@ -3905,7 +3905,8 @@ const zh = {
       url: '服务器 URL',
     },
     codex: {
-      body: 'Codex 客户端、CLI 和 IDE 插件共用同一份配置:把以下内容加入 ~/.codex/config.toml(在 Codex 客户端中:设置 → MCP 服务器)。如果你的 Codex 版本不支持 OAuth 流程,请改用 API 密钥请求头(见下):',
+      body: '在 Codex 客户端中:设置 → MCP 服务器 → 添加服务器,按下表填写:',
+      hint: '保存后按提示重启,在 objectstack 旁点击「Authenticate」并在浏览器登录。在输入框中输入 /mcp 可查看是否已连接。如果你的版本不支持浏览器登录,请添加请求头 Authorization: Bearer <API 密钥>(在下方创建)。',
     },
     workbuddy: {
       body: '腾讯 WorkBuddy:连接器 → 自定义连接器 → 配置 MCP,把以下条目合并进 mcpServers(配置保存在 ~/.workbuddy/mcp.json):',

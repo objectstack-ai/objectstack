@@ -12,8 +12,8 @@
  *   1. the environment's MCP URL (from `/discovery` → `routes.mcp`) + copy,
  *   2. per-client connect cards with copy-paste-ready content — one Claude
  *      card (claude.ai / Claude Desktop and Claude Code), Cursor deeplink and
- *      Codex (app, CLI and IDE extension) first, then the Chinese clients
- *      WorkBuddy, Doubao Work and QwenWork.
+ *      the Codex app first, then the Chinese clients WorkBuddy, Doubao Work
+ *      and QwenWork.
  *      OAuth is the default story on every card (the deployment is its own
  *      authorization server; you sign in as yourself); the Chinese clients'
  *      cards name the API-key header as the fallback for a client version
@@ -309,7 +309,14 @@ export function ConnectAgent() {
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             <p className="text-muted-foreground">{t('connectAgent.codex.body')}</p>
-            <Snippet text={`[mcp_servers.objectstack]\nurl = "${mcpUrl}"`} />
+            <FieldRows
+              rows={[
+                { label: t('connectAgent.fields.name'), value: 'objectstack' },
+                { label: t('connectAgent.fields.transport'), value: 'Streamable HTTP' },
+                { label: t('connectAgent.fields.url'), value: mcpUrl },
+              ]}
+            />
+            <p className="text-xs text-muted-foreground">{t('connectAgent.codex.hint')}</p>
           </CardContent>
         </Card>
 

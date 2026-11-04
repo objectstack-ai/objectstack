@@ -4485,7 +4485,8 @@ const en = {
       url: 'Server URL',
     },
     codex: {
-      body: 'The Codex app, CLI and IDE extension share one config: add this to ~/.codex/config.toml (in the Codex app: Settings → MCP servers). If your Codex version lacks the OAuth flow, use an API key header instead (see below):',
+      body: 'In the Codex app: Settings → MCP servers → Add server, then fill in:',
+      hint: 'Save, restart when prompted, then click Authenticate next to objectstack and sign in through the browser. Type /mcp in the composer to check it is connected. If your version offers no browser sign-in, add the header Authorization: Bearer <API key> (create a key below).',
     },
     workbuddy: {
       body: 'Connectors → Custom connector → Configure MCP, then merge this entry into mcpServers (WorkBuddy keeps it in ~/.workbuddy/mcp.json):',

@@ -3708,7 +3708,8 @@ const ko = {
       url: '서버 URL',
     },
     codex: {
-      body: 'Codex 앱, CLI, IDE 확장은 같은 설정을 공유합니다: ~/.codex/config.toml에 추가하세요(Codex 앱에서는 설정 → MCP 서버). 사용 중인 Codex 버전이 OAuth 흐름을 지원하지 않으면 대신 API 키 헤더를 사용하세요(아래 참조):',
+      body: 'Codex 앱에서 설정 → MCP 서버 → 서버 추가로 이동한 뒤 다음과 같이 입력하세요:',
+      hint: '저장하고 안내에 따라 다시 시작한 뒤 objectstack 옆의 Authenticate를 클릭해 브라우저에서 로그인하세요. 입력창에 /mcp를 입력하면 연결 상태를 확인할 수 있습니다. 브라우저 로그인을 지원하지 않는 버전이라면 헤더 Authorization: Bearer <API 키>를 추가하세요(키는 아래에서 생성).',
     },
     workbuddy: {
       body: '커넥터 → 사용자 지정 커넥터 → MCP 구성에서 이 항목을 mcpServers에 병합하세요(~/.workbuddy/mcp.json에 저장됨):',

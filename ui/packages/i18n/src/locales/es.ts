@@ -3784,7 +3784,8 @@ const es = {
       url: 'URL del servidor',
     },
     codex: {
-      body: 'La app de Codex, la CLI y la extensión del IDE comparten una misma configuración: añade esto a ~/.codex/config.toml (en la app de Codex: Ajustes → Servidores MCP). Si tu versión de Codex no admite el flujo OAuth, usa una cabecera de clave API (ver abajo):',
+      body: 'En la app de Codex: Ajustes → Servidores MCP → Añadir servidor y rellena:',
+      hint: 'Guarda, reinicia cuando se te pida y haz clic en Authenticate junto a objectstack para iniciar sesión en el navegador. Escribe /mcp en el cuadro de mensaje para comprobar la conexión. Si tu versión no ofrece inicio de sesión en el navegador, añade la cabecera Authorization: Bearer <clave API> (crea una clave abajo).',
     },
     workbuddy: {
       body: 'Conectores → Conector personalizado → Configurar MCP y fusiona esta entrada en mcpServers (se guarda en ~/.workbuddy/mcp.json):',

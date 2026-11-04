@@ -3711,7 +3711,8 @@ const ja = {
       url: 'サーバー URL',
     },
     codex: {
-      body: 'Codex アプリ、CLI、IDE 拡張機能は同じ設定を共有します:~/.codex/config.toml に追加します(Codex アプリでは 設定 → MCP サーバー)。お使いの Codex が OAuth フローに対応していない場合は、代わりに API キーのヘッダーを使用してください(下記参照):',
+      body: 'Codex アプリで 設定 → MCP サーバー → サーバーを追加 を開き、次のとおり入力します:',
+      hint: '保存し、案内に従って再起動したら、objectstack の横の Authenticate をクリックしてブラウザでサインインします。入力欄に /mcp と入力すると接続状況を確認できます。ブラウザでのサインインに対応していないバージョンでは、ヘッダー Authorization: Bearer <API キー> を追加してください(キーは下で作成)。',
     },
     workbuddy: {
       body: 'コネクタ → カスタムコネクタ → MCP を設定 を開き、このエントリを mcpServers にマージします(保存先は ~/.workbuddy/mcp.json):',

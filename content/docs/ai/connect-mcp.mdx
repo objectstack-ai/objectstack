@@ -79,7 +79,7 @@ For a **local or intranet** deployment, connect through
 own machine, so `localhost` and intranet addresses work there.
 </Callout>
 
-## WorkBuddy, Doubao Work and QwenWork
+## Codex, WorkBuddy, Doubao Work and QwenWork
 
 These desktop assistants add a remote MCP server as a **custom
 connector**. Each one takes the same MCP URL; what differs is the menu path and
@@ -90,6 +90,7 @@ client version offers none, add the request header
 
 | Client | Where | What to enter |
 |:---|:---|:---|
+| **Codex** (app) | Settings → MCP servers → Add server | Name `objectstack`, transport `Streamable HTTP`, URL `<MCP URL>`; restart, then **Authenticate** to sign in, and `/mcp` to check |
 | **WorkBuddy** | Connectors → Custom connector → Configure MCP (stored in `~/.workbuddy/mcp.json`) | `{ "mcpServers": { "objectstack": { "type": "streamableHttp", "url": "<MCP URL>" } } }`, then click **Trust** on the connector — it stays inactive until trusted |
 | **Doubao Work** (豆包工作) | Skills · Connectors → New → New custom connector | Name `objectstack`, transport `HTTP`, server URL `<MCP URL>` |
 | **QwenWork** (千问办公) | Extensions → Connectors → + Add → Paste JSON config | `{ "mcpServers": { "objectstack": { "type": "streamable-http", "url": "<MCP URL>" } } }` |

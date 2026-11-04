@@ -166,7 +166,7 @@ describe('Connect an Agent offers the Chinese clients after the international on
     for (const dropped of ['DuMate', 'VS Code / Copilot']) {
       expect(screen.queryByText(dropped)).not.toBeInTheDocument();
     }
-    for (const key of ['workbuddy', 'doubao', 'qwenwork']) {
+    for (const key of ['codex', 'workbuddy', 'doubao', 'qwenwork']) {
       expect(screen.getByText(`«connectAgent.${key}.body»`)).toBeInTheDocument();
       expect(screen.getByText(`«connectAgent.${key}.hint»`)).toBeInTheDocument();
     }
@@ -180,10 +180,13 @@ describe('Connect an Agent offers the Chinese clients after the international on
     // WorkBuddy's mcp.json and QwenWork's JSON import spell Streamable HTTP differently.
     expect(values).toContain(json('streamableHttp'));
     expect(values).toContain(json('streamable-http'));
-    // Doubao Work is a dialog form: name, transport and URL, each copyable.
-    expect(values.filter((v) => v === 'objectstack')).toHaveLength(1);
+    // The Codex app and Doubao Work are dialog forms: name, transport and URL, each copyable.
+    expect(values.filter((v) => v === 'objectstack')).toHaveLength(2);
+    expect(values).toContain('Streamable HTTP');
     expect(values).toContain('HTTP');
-    expect(values.filter((v) => v === MCP_URL).length).toBeGreaterThanOrEqual(3);
+    expect(values.filter((v) => v === MCP_URL).length).toBeGreaterThanOrEqual(4);
+    // The Codex card describes the app's form, not a config.toml snippet.
+    expect(values.some((v) => v.includes('[mcp_servers.objectstack]'))).toBe(false);
   });
 
   it('reveals a minted key in the Authorization: Bearer form the cards point to', async () => {
