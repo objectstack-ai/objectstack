@@ -1539,13 +1539,16 @@
         "last_week",
         "this_month",
         "last_month",
+        "next_month",
         "this_quarter",
         "last_quarter",
+        "next_quarter",
         "this_year",
         "last_year",
         "last_7_days",
         "last_30_days",
-        "last_90_days"
+        "last_90_days",
+        "next_30_days"
       ],
       "enumSource": {
         "file": "packages/spec/src/data/date-range-presets.ts",
