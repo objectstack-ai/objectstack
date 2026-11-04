@@ -93,11 +93,11 @@ describe('record:quick_actions — the declared reason is the one a greyed actio
     const user = userEvent.setup();
     mount(ARCHIVE, { done: false });
     await user.hover(archive().parentElement as HTMLElement);
-    // The role=tooltip node is Radix's visually-hidden copy; the styled
-    // content box that paints on screen is its parent.
-    const box = (await screen.findByRole('tooltip')).parentElement as HTMLElement;
-    expect(box).toHaveTextContent(DECLARED_EN);
-    expect(box).toHaveClass('max-w-xs');
+    // Radix puts role=tooltip on a visually-hidden copy; the painted box is an
+    // ancestor of it and the one carrying the bound.
+    const tip = await screen.findByRole('tooltip');
+    expect(tip).toHaveTextContent(DECLARED_EN);
+    expect(tip.closest('.max-w-xs')).not.toBeNull();
   });
 
   it('no declared reason: the default stays', () => {
