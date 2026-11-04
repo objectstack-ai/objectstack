@@ -2,8 +2,8 @@
   "number": 30061,
   "kind": "issue",
   "title": "spec build: two builds of the same main source write different .d.ts files (10 files, chunk hash rename)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:devx",
     "enhancement",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T12:10:10Z",
-  "updated_at": "2026-11-04T14:15:16Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-04T16:40:54Z",
+  "closed_at": "2026-11-04T16:40:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30061",
   "body": "domain:spec#3 · os-support-ai · session_01WGufzfgvGexKn9vLHsy89K\n\nFiling gate: ③ a follow-up that the contract review of PR #29993 (#29987, merged at `d79eecfe`) carried, and that its ACCEPT promised to file after landing. ⛔ Not a claim. Suggested-grade: p2, because every later move-only split (#29465: `protocol.ts`, `objectql/engine.ts`) proves \"no published change\" with a declaration-file bar, and this noise trips that bar. Route: `domain:devx` (the large-file split lane).\n\n**What happens.** Build `packages/spec` twice from the same `main` source, on a quiet tree, back to back. The two `dist` trees hold the same 134 declaration files, but 10 of them differ byte for byte:\n\n- `api/index.d.ts` and `.d.mts`\n- `contracts/index.d.ts` and `.d.mts`\n- `marketplace/index.d.ts` and `.d.mts`\n- `system/index.d.ts` and `.d.mts`\n- the shared `automation-api.zod-<hash>.d.ts` and `.d.mts` chunk, whose hash name also changes between builds (for example `BhzV22hx` → `pIDYc35h`)\n\nIn each file the statement count is the same and the public surface digest is EQUAL. What moves is the order of union, `ZodEnum` and record members, with 3 or 4 statements changed in each file. The source is the same, so the cause is in the d.ts bundling step: tsup/rollup-plugin-dts chunking, or the type printer's member order. It is not in any one PR.\n\n**Why it matters.** PR #29993 had to read its declaration-file proof pairwise. It ran four builds, and base-1 ≡ head-2 and base-2 ≡ head-1 were 134/134 raw identical with the control caught. A single base-vs-head pair reads FAIL (9) in the codemod's `--dts` check, which is noise and not a change. Each later split would have to repeat the four-build dance, or a reviewer could wave through a real `.d.ts` change as \"the known noise\".\n\n**Evidence.** In the project files under `issue-29987/phase1/`:\n- `dn-b1b2.json` (base vs base, 10 files)\n- `dn-h1h2.json` (head vs head, the same 10)\n- `dn-base-1-head-2.json` and `dn-base-2-head-1.json` (134/134 identical)\n- `dts-p1.log`\n\nThe review record is on PR #29993 (cr 6628915927), and the ACCEPT lists this card under Carried.\n\n## Wanted\n\n- [ ] Find the step that orders the members differently between runs, and make the `@objectstack/spec` d.ts output deterministic: the same source gives the same bytes and the same chunk names. Measure it with two clean builds of one sha (`dn-*` style, raw sha256 per file).\n- [ ] A pin that fails when two builds of one sha differ, or a documented reason why a pin costs too much and the split codemod's `--dts` check reads pairwise instead.\n- [ ] If the fix changes the published `.d.ts` bytes (and not only the order between runs), state it in the declarations. The surface digest must stay EQUAL.\n\n## Out of scope (⛔)\n\n- Any change to spec source or schemas.\n- The split PRs themselves (#29985, #29986)."

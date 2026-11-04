@@ -1,0 +1,29 @@
+{
+  "number": 30172,
+  "kind": "issue",
+  "title": "A flow notice cannot name a select field's option by its label in the recipient's language: the mail renderer has no label formatter and the flow passes no option labels to CEL label()",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T19:53:11Z",
+  "updated_at": "2026-11-04T19:53:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30172",
+  "body": "## Source\n\nMeasured by HotCRM on platform **18.3.0** while fixing hotcrm#2391 (the stalled-deal notice printed the stage as `needs_analysis`). The implementer's report is [hotcrm#2391 comment 6640505913](https://github.com/objectstack-ai/hotcrm/issues/2391#issuecomment-6640505913); the HotCRM side is hotcrm#2406.\n\n## What happens\n\nA `notify` node's `templateData` is evaluated once per run, before the recipients fan out, and each recipient is then sent the template of their own locale. A select field's value reaches the template as its stored value. None of the platform's routes turns it into the option label in the recipient's language:\n\n| # | Route tried on 18.3.0 | Result |\n|---|---|---|\n| 1 | A template formatter, `{{stage \\| label}}` | Refused as an unknown formatter (`known-formatter`). The refusal text says to format the value in the caller and pass finished text. |\n| 2 | CEL `label(currentOpp.stage)` in `templateData` | Refused at parse: `label()` takes `record.FIELD` only. |\n| 3 | CEL `label(record.stage)` in a flow | Refused: \"this evaluation context carries no option labels\". |\n| 4 | A formula field `label(record.stage)` read by the flow | Resolves, but in the reader's locale. A schedule run reads as the system, so a zh-CN recipient got \"Needs Analysis\". |\n\nSeam: `NotifyConfigSchema.templateData` → the `service-automation` notify executor → the `plugin-email` renderer.\n\n## What HotCRM does meanwhile\n\nhotcrm#2406 builds, at flow-build time, a CEL map of every shipped locale's option labels from the package's translation bundle (`stage_label: { en, zh_CN, es_ES, ja_JP }`), and each locale's template reads its own key (`{{stage_label.zh_CN}}`). It works, but every app has to write it, and it covers only the locales the app ships.\n\n## Suggestion\n\nOne of these, at the platform's choice:\n- a renderer formatter that labels an option in the template's locale, given the object and field (for example `{{stage | option:'crm_opportunity.stage'}}`); or\n- the notify executor resolves option labels per recipient when `templateData` names a field by reference rather than by value.\n\nEither lets an app pass the stored value and get the label each recipient reads.\n\nFiling gate **① a reproduced gap**, class b. Filed by the `repo:hotcrm` seat (`huangyiirene`, session `session_01J8VVAnPkgK6CWrJa6t7Fk5`).\n\n**Grade: `priority:p3`.** Apps have a workaround; the cost is a hand-built label map per notice. **Size: M.**\n\n**Dedupe:** searched open objectstack issues for `notify option label locale`, `templateData label recipient`, `label formatter email template` and `known-formatter label`. #9205 (closed) localized a notify node's own title and message, not a field's option label; the rest are QA run logs and unrelated mail cards.\n\n<sub>Filed by the `repo:hotcrm` lane seat from hotcrm#2391's out-of-scope finding.</sub>"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 30138,
+  "kind": "pull_request",
+  "title": "fix(test-shards): judge pin 3c's slice count through a symmetric 5% band",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T15:32:13Z",
+  "updated_at": "2026-11-04T16:32:14Z",
+  "closed_at": "2026-11-04T16:32:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-04T16:32:12Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30138",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSiNjyvCdXYygFqntMNR7S2dW)_\nFixes #29826\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 改了什么:分片切片数校验(pin 3c)由\"只认恰好一个切片数\"改为两侧对称 5% 滞回带,一个常量 `SLICE_COUNT_HYSTERESIS = 0.05`。\n- 为什么改:CLI 测试时长的周间噪声(1339–1493 s)远大于 20 s 余量,每周自动刷新的计时数据 PR 会随机变红,需席位手工开车道 PR 才能落地。\n- 风险与回滚:只改自测接受哪个手写切片数;任何一次 CI 运行的切法、密度上限、整包腿上限都不读它。回滚即 revert 本 PR。\n- 先看:`scripts/partition-test-shards.mjs` 的 `sliceCountProblems()` 两个判定分支,其次是自测新增的 4 个带内/带外夹具。\n- 两分钟验证:`node scripts/partition-test-shards.mjs --self-test`,预期打印 `self-test OK ... file-level slices: @objectstack/cli x2`。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nOption D as ruled in comment 6634084947 on the card. One file: `scripts/partition-test-shards.mjs`.\n\n- New `SLICE_COUNT_HYSTERESIS = 0.05`, commented as the observed noise width of the CLI median.\n- `sliceCountProblems()` (pin 3c) judges both halves through the band. RAISE refuses only when `weight / n > (1 + h) x limit`. LOWER (or Retire) refuses only when `weight / (n - 1)` is at or under `(1 - h) x limit`. A count inside the band passes. Each refusal names the slice, the limit and the band edge, to two decimals. The count a RAISE names is still the smallest one that meets the bare limit, so a raised count lands with margin.\n- `planShards()` (NEEDED / SPREADS / WITHIN CAP), the density cap and pin 3d are byte-for-byte unchanged.\n- Self-test: 4 new pin 3c fixtures on the existing 50 s-filler fixture (limit 65 s, band 61.75 to 68.25 s). Two are in-band passes: RAISE side at 134 s / 2, LOWER side at 125 s / 3. Each is also run with no band, and there it must be refused, so the pass is proven to come from the band. Two are out-of-band refusals beside the edges: 138 s / 2 must say `Raise it to 3` with `one slice is 69.00s`, and 122 s / 3 must say `Lower it to 2` with `one slice (61.00s)`. The balancing-pins battery floor goes from 25 to 29; it now registers 30 cases.\n- The `FILE_SHARDED_PACKAGES` \"RE-DERIVED AT 2\" paragraph gains one sentence saying why the band exists.\n\n## Tests\n\n- `node scripts/partition-test-shards.mjs --self-test`: exit 0 on head `1c0a83b762`.\n- The four existing fixtures keep their verdicts at h = 0.05: PASS (120 / 2), Retire the entry (60 / 2), Lower it to 2 (120 / 3), Raise it to 5 (300 / 2).\n- Ablations, each through `scripts/ablation-replace.mjs`, restored to the HEAD blob with an empty `git diff HEAD`:\n\n<details><summary>Ablation readings (self-test exit code and first failing case)</summary>\n\n| Mutation | Exit | First failure |\n|---|---|---|\n| `SLICE_COUNT_HYSTERESIS = 0` | 1 | a count of 2 inside the RAISE band was not passed by the band alone |\n| LOWER branch judged against the bare `limit` | 1 | a count of 3 inside the LOWER band was not passed by the band alone |\n| RAISE branch judged against the bare `limit` | 1 | a count of 2 inside the RAISE band was not passed by the band alone |\n| `SLICE_COUNT_HYSTERESIS = 0.07` | 1 | a count of 2 past the RAISE band was accepted |\n| `SLICE_COUNT_HYSTERESIS = 0.1` | 1 | a package that is not the floor kept its slicing with no refusal (an existing fixture) |\n| battery floor 29 to 99 | 1 | battery \"the balancing pins (#10472)\" registered 30 case(s), below its pinned floor of 99 |\n\n</details>\n\n## Acceptance notes\n\n- Thresholds re-measured on the committed dataset (CLI 1432.04 s; floor `@objectstack/metadata-protocol` 566.50 s; limit 736.45 s). I called the exported `sliceCountProblems()` on the dataset binned the way the self-test bins it, varied only the CLI weight on a 0.01 s grid, and they agree with the ruling's figures. Map 2 is accepted for CLI 699.63 to 1546.54 s (ruling: up to 1546.5). Map 3 is accepted for CLI 1399.26 to 2319.81 s (ruling: over 1399.3 to 2319.8).\n- Card bullet 1: the dataset with the map at 2 passes, and so does CLI at 1480 s with the map at 2 (also 1493 s, the measured high run).\n- Card bullet 2: a drift past the band still refuses with the numbers. At CLI 1546.6 s with map 2: `one slice is 773.30s -- past 1.3x ... (567s, so 736.45s) by more than its 5% band (773.27s) ... Raise it to 3.` At CLI 1399.2 s with map 3: `at 2 one slice (699.60s) ... with more than its 5% band to spare (699.63s). Lower it to 2`.\n- Floor-side reading by the same formula: with the CLI at 1432.04 s, map 2 holds while the floor stays at or above 524.56 s.\n- The nominal RAISE bound in the self-test moves from 1.3x to 1.365x. The maintainer ruled on that tradeoff (option D). No run's split reads it.\n\n## Verification\n\nAll 31 commands that `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derives for this diff exited 0. The exit codes were captured before any pipe, and `--ran` reconciliation reports `31 derived, 31 run, 0 NOT-MEASURED, 0 UNRUN` (a derived zero: all 31 recorded an exit code). `pnpm check:pm-dispatch-gates` (fast tier, 1945 cases) also exited 0. The CI-only `Plan Test Core shards` step and the type-check lanes are not measured locally; CI runs them. `skip-changeset`: the diff touches only root `scripts/`, which no package publishes. `origin/main` was merged once before opening.\n\nSession: https://claude.ai/code/session_017ihL2ebbZkr2QAEG1x7UC8\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

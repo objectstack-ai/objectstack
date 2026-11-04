@@ -1,0 +1,35 @@
+{
+  "number": 30129,
+  "kind": "issue",
+  "title": "checklist: three more stale ledger lines found while re-pointing wave 5 (dataset-editor parenthetical, package-less zh-CN template writes, builtin-apps-nav-render steps)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p3"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T15:10:10Z",
+  "updated_at": "2026-11-04T19:15:10Z",
+  "closed_at": "2026-11-04T19:13:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30129",
+  "body": "domain:devx#2 · marchtian · session_017ihL2ebbZkr2QAEG1x7UC8\n\nFiling gate: ① named locations in `docs/qa/platform-checklist/areas/*.json`, read at `origin/main` `f68b47ca` by the #29906 dev (PR #30128, report 6634141386); not edited there because #29906's list did not carry them.\nReader: `domain:devx` checklist ledger lane, the next re-point PR after #30128 lands.\nDedupe (open AND closed): `is:issue \"dataset editor\" checklist` → 6 hits, only #29906 (which fixes the same parenthetical in two other items) is related; `builtin-apps-nav-render` → none open.\nreach: ledger text a runner follows; each line costs the next checklist run a misread step or a refused write.\nQA-source: #29893 (W5-STUDIO) and comment 6600018008 on #27377 (W5-P0)\nChecklist item priority: as the items carry\ntype: Bug\n\n## Lines\n\n1. `studio-authoring.dashboard-widget-and-filter-types` · `fixtures.requires[2]` carries the same stale \"Studio has no dataset editor\" parenthetical #29906 fixed in `interfaces-create-dialogs` and `report-authoring-options` (the New report dialog has a \"New dataset\" button: `ui/packages/app-shell/src/views/studio-design/datasetCreate.tsx`).\n2. `integration-system.email-template-render` `fixtures.requires[2]` (a same-name zh-CN twin of a shipped template) and `api-backend.meta-read-doors-v18` (a bare PUT of a zh-CN member onto the shipped template) both write package-less onto a shipped name, which ADR-0146 D11 refuses with 403 `NOT_OVERRIDABLE`. The working recipe for a bundle member through the customization pair (`ensure-customization`, then `?package=….custom` with `overrides`) is not yet verified for a template locale member; measure it before re-pointing.\n3. `platform-core.builtin-apps-nav-render` steps[5] and steps[2]: comment 6600018008 lists them as stale; #29906's Part C did not carry them. Re-read the comment and the code at the PR's base.\n\n## Acceptance notes\n\n- Each line is re-read at the PR's base; a line already fixed is skipped and named in the PR body.\n- Line 2 lands only with a recipe measured on a live boot; otherwise it is reported back to the seat, not guessed."
+}

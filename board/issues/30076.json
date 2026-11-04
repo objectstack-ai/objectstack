@@ -2,8 +2,8 @@
   "number": 30076,
   "kind": "issue",
   "title": "[Decision] Relative dates look only backward: add 下月, 下季度 and 未来 N 天 for forecasting?",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:spec",
     "enhancement",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T12:38:20Z",
-  "updated_at": "2026-11-04T14:04:44Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-04T17:58:01Z",
+  "closed_at": "2026-11-04T17:42:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30076",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nThe maintainer: 「等我决定的都要立卡，并且从业务的角度给我具体解释和我沟通」 (2026-11-04). Measured by the seat on `main` `63b86b385d`, on the example CRM unless noted. No `domain:*` label is set: triage routes this card.\n\n## The question\n\nThe filter panel's 13 relative dates (#29115) include 本月 and 近 30 天 but nothing ahead. A sales manager's question is usually forward: what closes next month, next quarter, in the next 30 days. #29115 left this out on purpose: \"Future-facing presets such as next week: the spec has none, and adding them is a spec change for later.\"\n\nGoverning text: `packages/spec/src/data/date-range-presets.ts:42-49`. The macros already exist in the client: `next_month_start`, `next_quarter_start` (`ui/packages/core/src/utils/date-macros.ts:129-132`).\n\n## Measured\n\n介于 on 预计成交日期 lists 今天, 昨天, 本周, 上周, 本月, 上月, 本季度, 上季度, 今年, 去年, 近 7 天, 近 30 天, 近 90 天, 自定义.\n\n## Options\n\n- **A. Add three:** 下月, 下季度, 未来 30 天, in the spec table, reaching both filter panels and dashboards through it.\n- **B. Add the full mirror:** next week, month, quarter, year, and 7/30/90 days ahead.\n- **C. Leave it:** forward questions use 自定义, which goes stale.\n\n## Recommendation: A\n\n## 四轴分析\n\n**实际业务需求。** 预测是销售管理的主要工作，每周例会都看下个月和下季度。用自定义日期保存后会过期，这正是 #29115 要解决的问题，在往后看的场景里依然存在。\n\n**项目长远合理性。** 预设只有一张 spec 表，加进去处处生效。要确认服务端也能解析这些宏，还有两只钟的差别（#29117）。\n\n**防 AI 写错。** 存的仍是宏，不是固定日期。AI 不用自己算日期，也就不容易写错。\n\n**创业阶段不扩散。** A 只加高频的三个。B 里下周、明年这些没说出真实场景，不做。\n\n| 棱 | A | B | C |\n|:--|:--|:--|:--|\n| 业务 | 强 | 强 | 弱 |\n| 长远 | 强 | 中 | 弱 |\n| 防错 | 强 | 强 | 弱 |\n| 不扩散 | 中 | 弱 | 强 |\n\n## Not measured\n\nWhether the server's macro resolver accepts these three end macros, or a rolling forward window. Check first: the client list holds start macros, and a window also needs its end.\n\n## Re-check\n\n`git grep -n \"last_90_days\" origin/main -- packages/spec/src/data/date-range-presets.ts`"

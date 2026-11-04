@@ -1,0 +1,36 @@
+{
+  "number": 30160,
+  "kind": "issue",
+  "title": "service-ai: under a walled posture (isolated / group) every AI ledger write is refused with SystemWriteOrganizationRequiredError, so a licensed multi-organization ObjectOS EE 4.3.0 stores no conversation",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T17:52:02Z",
+  "updated_at": "2026-11-04T20:07:49Z",
+  "closed_at": "2026-11-04T20:07:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30160",
+  "body": "repo:cloud#2 · os-zhuang · session_0123kRqqdpAJWYMgsgdAJX4G\n\nFiling gate ①: a defect in a shipped release, measured on the real engine. Found while working cloud#3588 (objectos-ee 4.2 → 4.3 upgrade); the record is cloud#3588 comment 6636136603, fact 2.\n\n## 维护者速读\n\n框架 18.x 在多组织（围墙）模式下要求每次系统写入都带组织，`ai_` 前缀不再豁免。`service-ai` 写对话、消息、追踪、待批、记忆和用量时只带 `isSystem: true`，不带调用者的组织，所以全部被拒。结果是：授权的多组织企业版 4.3.0 存不下任何 AI 对话。单组织部署不受影响（写入自动落到默认组织）。\n\n## Measured\n\nMeasured on framework pin `63b86b38` (cloud's 18.3 pin), using the real engine (driver-sql) and the real `ObjectQLConversationService.create`:\n- **`isolated` and `group`:** throws `SystemWriteOrganizationRequiredError`.\n- **`single`** (with a default organization in the database): the write succeeds, and `organization_id` is the default organization.\n\nNot run inside an `objectos-ee` image yet. The first step is to reproduce it once on a walled EE image or a walled kernel composition.\n\n## Cause (read from code)\n\n- `service-ai` system writes pass `AI_SYSTEM_WRITE` = `{ isSystem: true }` with no organization.\n- 18.x (ADR-0131 D9) refuses a system write without an organization under a walled posture.\n- 17.x let these writes through, because the `ai_` namespace sat outside the system-write organization rule.\n\n## Expected\n\nEvery `service-ai` ledger write under a walled posture carries the caller's current organization (`tenantId`):\n- conversations\n- messages\n- traces\n- pending actions\n- agent memories\n- usage rows\n\nReads keep the D8 wall as today. The single-organization behaviour must not change.\n\n## Done when\n\n- A test on a walled kernel (`isolated` and `group`) creates a conversation, appends a message, records a trace and usage, and parks a pending action as a member of organization X. Every row carries X, and a member of organization Y reads none of them.\n- The same test under `single` still passes.\n- cloud then pins the fix and re-reads one walled `objectos-ee` boot.\n\n## Not in this card\n\nWhat happens to the 4.2.x rows that carry no organization when a walled deployment upgrades is a maintainer ruling on cloud#3588, which is independent of this card.\n\n## Dedupe\n\nI searched objectstack issues for `SystemWriteOrganizationRequiredError ai_` and `service-ai organization system write walled`. There were no open hits. objectstack#23280 (closed) gave hosts `--fate-supplement` and left the `ai_*` tables host-declared; it did not touch writes.\n\nReader who acts: the lane owning `packages/services/service-ai` (conversation service and the ledger writers). The cloud seat dispatches it, because the reach is ObjectOS EE."
+}

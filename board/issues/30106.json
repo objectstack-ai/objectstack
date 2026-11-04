@@ -11,17 +11,20 @@
     "type": "Bot"
   },
   "labels": [
-    "bug"
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T14:02:09Z",
-  "updated_at": "2026-11-04T14:02:09Z",
+  "updated_at": "2026-11-04T14:56:41Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30106",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFound in a real-user walkthrough of the development flow, asked for by the maintainer: 「你站在真实用户实际使用的角度完整的走一遍具体的开发流程，再看一下还有什么问题」 (2026-11-04).\n\nGoverning text: `docs/adr/0146-*.md` D2: a customization is \"exported (`GET /packages/:id/export`), committed, reviewed and deployed to another environment as any package is\"; the Dependency range note names \"an export of `hotcrm.custom` deployed into another environment\".\n\n## What a customer sees\n\nAn administrator customizes a view on staging and moves it to production with the documented commands. The CLI prints a success message and production keeps showing the old view. Nothing says the change was dropped.\n\n## Reproduction\n\nProject scaffolded with `create-objectstack@18.3.0`, one code package `com.example.asset-repair`, view `asset_repair_ticket.open`.\n\n1. On the source instance, `POST /api/v1/packages/com.example.asset-repair/ensure-customization`, save the view into `com.example.asset-repair.custom` with `overrides: { package, basedOn }` and a new label, then `publish-drafts`. The instance serves the new label.\n2. `os package export -u SOURCE -o ./export`. The file `01-com.example.asset-repair.custom/objectstack.json` carries `viewItems` with the new label and the `overrides` block.\n3. `os package install ./export/01-com.example.asset-repair.custom/objectstack.json -r TARGET --email OWNER` on a fresh `os start` instance that runs the same base package. It prints `✓ Package installed into the running kernel`.\n4. On the target, `GET /api/v1/meta/view/asset_repair_ticket.open`.\n\n## Measured\n\n| Read on the target | Result |\n|:--|:--|\n| `GET /api/v1/meta/view/asset_repair_ticket.open` | The base label, no `overrides`, package `com.example.asset-repair` |\n| `GET /api/v1/packages/com.example.asset-repair/customizations` | `counts.overrides: 0` |\n| `GET /api/v1/packages` | Both packages `enabled: true`, `status: installed` |\n| Server log | `[Registry] Registered view: com.example.asset-repair.custom:asset_repair_ticket.open` |\n\nSame result on the published 18.3.0 and on `main` `63b86b385d` with the same exported file. On 18.3.0 a server restart does not change it (not repeated on `main`).\n\nOnly `view` was measured. Other overridable types were not run through this path.\n\n## Expected\n\nAfter the install the target serves the override, and the customizations read lists it, the same as on the source. If the install cannot apply an item it says so and does not report success."

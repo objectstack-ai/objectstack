@@ -14,18 +14,20 @@
     "area:i18n",
     "bug",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-justin"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T10:49:42Z",
-  "updated_at": "2026-11-04T11:02:39Z",
+  "updated_at": "2026-11-04T16:52:20Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30050",
   "body": "domain:server#6 · os-support-ai · session_01WGufzibcN9oHa8kDbTTnL5\n\nFiling gate: this is out of scope by ruling in the #29895 order (fold only, never refuse) and reported by the dev of PR #30049. The seat's ACCEPT 6628747931 carries it. ⛔ Not a claim. Triage sets the grade.\nBusiness reason: after PR #30049, `sys_user.locale` is stored in BCP-47 case, so `zh-cn` becomes `zh-CN`. Two gaps from #29895's reproduction remain:\n1. **Server (`domain:server`).** The door still stores `xx-YY`, which is shape-valid but served by no platform locale, and `''`, with 200. Refusing `xx-YY` would narrow the door: a refusal of input accepted before, so it is BREAKING with an ADR-0087 disposition. Whether to refuse, or to store it and let the console fall back, is the decision this card asks for. `''` is how a user clears the preference, so it is probably right as it is. Confirm that and pin it.\n2. **UI (`domain:ui`).** The console picks its UI language by exact match. A row stored mis-cased before #30049 (it is not migrated, and `/auth/me/localization` serves it as stored), or a tag such as `zh`, `zh-Hans-CN` or `en-GB`, renders English. The server's i18n routes already resolve with `resolveLocale` (exact → case → base language → variant). The console should use the same matcher.\n\nReader who acts: triage first, to split the halves. Then `domain:server` (plugin-auth `sys-user-locale-case.ts`, the `locale_bcp47_shape` rule) and `domain:ui` (the console's locale pick).\nDedupe (open and closed): `sys_user locale unsupported`, `console locale exact match`, `zh-Hans-CN console`. The nearest are #29895 (closed by #30049), #28107 (French is not a platform locale, which is a different gap) and #29428 (the platform locale table). **New.**"

@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T09:12:04Z",
-  "updated_at": "2026-11-04T14:13:45Z",
+  "updated_at": "2026-11-04T20:05:19Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30031",
   "body": "domain:spec#2 · os-support-ai · session_01WGufzhJG3tKnksHVa1krBz\n\nFound while reviewing PR #30028 (card #30018), out of its scope.\n\n`skills/objectui/guides/page-builder.md` (around line 101 on `main`) lists `breadcrumb` on the `page:header` row. `PageHeaderProps.breadcrumb` is a `retiredKey` tombstone since @objectstack/spec 17 (ADR-0087 D2, #20758): no renderer drew a trail for it, and an authored `breadcrumb` is refused by the props lint. An agent following the guide writes a key the platform refuses.\n\n## Wanted\n\n- Drop `breadcrumb` from the guide's `page:header` key list (and any example that sets it); if the guide lists header keys, name `subtitle`, `actions`, `recordChrome`, `showCopyId`, `maxVisible` as the live ones, and `placedActions` once #30028 lands.\n- Re-check the rest of `skills/objectui/**` for `breadcrumb` and `showStar` on `page:header` (both retired).\n\nSize S, docs/skills only."

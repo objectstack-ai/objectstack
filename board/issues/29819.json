@@ -2,8 +2,8 @@
   "number": 29819,
   "kind": "issue",
   "title": "checklist: give three Studio items the boot fixtures their steps need (two launch entries, one showcase picklist)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,19 +12,24 @@
   },
   "labels": [
     "domain:devx",
-    "pm:queue",
     "priority:p2",
     "tests"
   ],
-  "assignees": [],
+  "assignees": [
+    "marchtian"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T06:11:15Z",
-  "updated_at": "2026-11-03T06:57:59Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-04T18:04:40Z",
+  "closed_at": "2026-11-04T18:02:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29819",
   "body": "domain:devx#2 · marchtian · session_017ihL2gLghEqeDKTbDTC7Zd\n\nFiling gate: ① follow-up owed by landed work (#29679 / PR #29815), checklist tri-state ②: three items' steps cannot reach the path their title asserts, so every run scores them partial or blocked.\nReader: domain:devx seat, next PR that touches `.claude/launch.json` and `examples/app-showcase/objectstack.config.ts` (two slices if the launch half is governed)\nDedupe (open AND closed): \"launch.json OS_AUTOMATION_SCHEDULED_WORK_ENABLED\", \"OS_PAGE_REACT_ENABLED launch\", \"picklist-bound-select\", \"flow-status-matches-runtime\", \"custom-page-source-tiers\" → 0 cards for this gap (hits are #29679, QA run records, and closed #21957 which added the item)\nreach: QA run #29672 at 3482f3d8d2 scored the three items below without driving their path\nQA-source: #29672 · studio-authoring · flow-status-matches-runtime, custom-page-source-tiers, picklist-bound-select\nChecklist item priority: inherits each item's\ntype: Task\n\n## Why\n\nThe QA run of 2026-11-03 could not drive three studio-authoring items. Each one needs the server booted with something the checklist's own fixture declarations cannot provide. #29679 was scoped to re-point clauses only, and its order says a gap that needs a governed or seed-data change gets reported, not patched. So the three items stay partial or blocked on every run, and that costs a human read each time. This card is that report.\n\n## The gaps (named by #29679's table; the #29679 dev confirmed on main `339f63da30` that no checklist fixture declaration can hold them)\n\n1. **`flow-status-matches-runtime`** needs a boot with `OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1`. A runner that can start servers only from `.claude/launch.json` has no such entry.\n2. **`custom-page-source-tiers`** needs a boot with `OS_PAGE_REACT_ENABLED=false`. `.claude/launch.json` has no such entry either.\n3. **`picklist-bound-select`** needs a package picklist plus an object extension that binds a field to it in `examples/app-showcase/objectstack.config.ts`. Until the showcase ships them, every run scores the item blocked.\n\n`.claude/launch.json` is a governed surface (Tier S); check `check-governed-merges --pr N` on the final file list. The picklist fixture is a seed-data change to the showcase.\n\n## Acceptance notes\n\n- Each item's `fixtures.requires` names the new launch entry or seed artefact by name, with a revision bump and a history row.\n- A run that boots from `.claude/launch.json` reaches each item's path. Score the three items again on the next studio-authoring run."

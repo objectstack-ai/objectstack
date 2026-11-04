@@ -2,8 +2,8 @@
   "number": 29969,
   "kind": "issue",
   "title": "skills(objectstack-platform): an eval case for the push capability and push stack key (follow-up of #29820)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:skills",
-    "pm:dispatched",
     "priority:p3",
     "tests"
   ],
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T18:35:14Z",
-  "updated_at": "2026-11-04T13:12:56Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-04T18:14:02Z",
+  "closed_at": "2026-11-04T18:14:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29969",
   "body": "domain:spec#2 · os-support-ai · session_01WGufzhJG3tKnksHVa1krBz\n\nFiling gate: the `Skills-docs: follow-up owed` line of PR #29968 (card #29820), filed by `domain:spec` seat 2. ⛔ Not a claim. Suggested-grade: p2.\n\n## What happens\n\nPR #29968 adds the `push` platform capability (`@objectstack/service-push`) and the top-level `push` stack key. To keep `check:skill-top-level-keys` green it also adds `push` to `skills/objectstack-platform/SKILL.md`, in the key list and in the `requires` table. No eval in `skills/objectstack-platform/evals/` exercises either. `config-plugins-ops.json` covers the neighbouring `email` / `sms` capabilities, but it has no prompt that asks an agent to turn push on from a stack file. So a regression in what the skill teaches about push would go unmeasured.\n\n## Wanted\n\n1. One eval case in `skills/objectstack-platform/evals/config-plugins-ops.json`: asked to turn on push notifications for an `os serve` deployment, the agent declares `requires: ['push']` and a `push: { transport: 'direct', apns | fcm: { credentialRef, ... } }` block, and puts no secret inline.\n2. The case also pins the current relay status: a `push: {}` / `transport: 'relay'` answer is wrong until the hosted relay sender (#29920) ships, and the right answer says so.\n\nOut of this card: the skill's `requires` table already omitted `mailbox` and `package-registry` before #29968 (the dev's out-of-scope finding); file that separately if the skills lane wants it.\n\nSerial: after PR #29968.\n\nLinks back: #29820, PR #29968, #29920.\n"

@@ -1,0 +1,31 @@
+{
+  "number": 30122,
+  "kind": "issue",
+  "title": "Record timeline: compact rows name no actor, and an audit reader sees every action twice",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T15:00:00Z",
+  "updated_at": "2026-11-04T16:50:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30122",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFrom a real-user walkthrough of the development flow, filed on the maintainer's word: 「第一组：会卡住人或误导人，立卡」 (2026-11-04). Measured on `main` `987ff33b88` unless a line says otherwise. Test project scaffolded with `create-objectstack@18.3.0`.\n\nContext: #27055 made the record page one merged timeline of discussion, activity and field history.\n\n## What a customer sees\n\nTwo people work a ticket, and the timeline on the record page reads 「已修好 @张三」 and 「更新了 Repair Ticket \"打印机卡纸\"：Status」 with no name on any row, so nobody can tell who did what. An administrator also sees each action twice: 「创建了 Repair Ticket」 and, beside it, a long diff, 「负责人 — → Dev Admin; Subject — → admin two rows; Equipment — → CNC-01…」.\n\n## Measured\n\n- **No actor:** the compact rows show none, by screenshot on `main`. The data has it: `sys_activity.actor_name` is filled on each row.\n- **Twice:** on an object with `trackHistory`, one create gives one `sys_activity` row and one `sys_audit_log` row, and one update does the same (`create`, `update` in the log; `Created…`, `Updated…` in activity). The page draws both, 「动态 2」 for one create. `RecordDetailView.tsx:2388-2390` adds the audit source when `enable.trackHistory` is on.\n- **Who sees it:** a reader without `sys_audit_log` access sees one row per action, measured for a member on the published 18.3.0.\n\n## Expected\n\nEvery row says who. One action reads as one row for everyone, with the field diff available on that row for a reader allowed to see it."
+}

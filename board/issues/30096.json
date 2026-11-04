@@ -2,7 +2,7 @@
   "number": 30096,
   "kind": "pull_request",
   "title": "docs(skills): teach that a save and os validate refuse titleFormat",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs-user-decision",
     "size/s",
     "tooling"
   ],
@@ -20,10 +19,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T13:25:51Z",
-  "updated_at": "2026-11-04T14:02:20Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-04T14:20:10Z",
+  "closed_at": "2026-11-04T14:19:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-04T14:19:13Z",
   "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/30096",

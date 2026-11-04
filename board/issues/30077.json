@@ -13,18 +13,20 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-justin"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T12:38:50Z",
-  "updated_at": "2026-11-04T13:12:50Z",
+  "updated_at": "2026-11-04T19:00:55Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30077",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nThe maintainer: 「等我决定的都要立卡，并且从业务的角度给我具体解释和我沟通」 (2026-11-04). Measured by the seat on `main` `63b86b385d`, on the example CRM unless noted. No `domain:*` label is set: triage routes this card.\n\n## The question\n\n显示 → 隐藏字段 lists only the columns the view already has. A rep who wants 负责人 or 距成交天数 on their list has to ask an administrator to change the view for everyone. #28971's first version excluded a field picker.\n\nGoverning text: #28971 「第一版不包含：…字段选择器」, #28912. A reader's list state lives in `sys_user_preference` (`perView.columnState`) and personal views in `sys_personal_view`.\n\n## Measured\n\nThe opportunity list's 隐藏字段 lists 商机名称, 客户, 阶段, 金额, 赢单概率, 预期收入, 预计成交日期. The object also has 负责人, 距成交天数, 折扣 and others, offered in filter and sort but not here.\n\n## Options\n\n- **A. Add columns, personal only:** the panel lists every field the reader may read, and an added column is stored like a hidden one. Reset removes it.\n- **B. Add columns only in My views,** not on a shared view's personalization.\n- **C. Leave it.**\n\n## Recommendation: A\n\n## 四轴分析\n\n**实际业务需求。** 不同角色看同一张表关心的列不一样：经理要负责人，财务要折扣。每周都可能遇到。今天的绕法是找管理员改全公司的视图，或者打开记录一条条看，代价很高。\n\n**项目长远合理性。** 隐藏和添加是同一件事的两面，只能减不能加反而奇怪。字段权限已经有判断（`canReadField`），也不会越权。\n\n**防 AI 写错。** 是用户偏好，不写元数据，AI 写应用时不受影响。\n\n**创业阶段不扩散。** 改动在现有面板和偏好内。查询多一列可能影响性能，要按现有上限处理。\n\n| 棱 | A | B | C |\n|:--|:--|:--|:--|\n| 业务 | 强 | 中 | 弱 |\n| 长远 | 强 | 中 | 弱 |\n| 防错 | 强 | 强 | 强 |\n| 不扩散 | 中 | 中 | 强 |\n\n## Not measured\n\nLookup-field columns, which need extra expansion in the list read, and whether an added column survives the existing column-order and reset paths.\n\n## Re-check\n\n`git grep -n \"hiddenFields\" origin/main -- ui/packages/app-shell/src/views/objectViewListUrlState.ts`"

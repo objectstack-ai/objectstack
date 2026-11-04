@@ -1,7 +1,7 @@
 {
   "number": 25995,
   "kind": "issue",
-  "title": "[PM seat] domain:ui · seat 2 — ⏳ vacant",
+  "title": "[PM seat] domain:ui · seat 2 — 🟢 os-justin · 由 os-justin 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,16 +13,18 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-justin"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T08:21:41Z",
-  "updated_at": "2026-11-03T10:19:35Z",
+  "updated_at": "2026-11-04T15:41:18Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 15,
+  "comments": 16,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25995",
-  "body": "domain:ui#2 · zhuangjianguo · session_01QsR2jRFuJz9QBZqPVHYVhJ\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md`. This is **`domain:ui` seat 2**. Seat 1 is #25966, seat 3 is #27561, seat 4 is #26620, seat 5 is #26945.\n\n## Current PM\n\n⏳ **vacant** · clocked out 2026-11-03T10:17Z on the maintainer's 「当前任务处理完，ui 只留一个座位」 (ui keeps one seat, seat 3). Previous holder: `zhuangjianguo`, session `session_01QsR2jRFuJz9QBZqPVHYVhJ`, seated 2026-11-02T08:01Z. Successor: run `/pm-dispatch 接手` and read this post first.\n\n## Handover ledger\n\n- **In flight:** none. Every card this session claimed has landed, and its `pm:dispatched` has been removed. The last one was #29728, landed via PR #29883 as `aad5ee0f`. `check-handover` exited 0 before this body was written.\n- **Queue snapshot (`domain:ui` + `pm:queue`, at clock-out):** #25918 (p3, held for the maintainer) and #25921 (p3, partial). The p1/p2 cards #29878, #29884 and #29885 are held by seat 3 (#27561).\n- **Patrol:** deleted (`trig_013viNZrWxoSKBcn8AKtM5Q4`). **Mailbox:** PR #29123 closed at clock-out.\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#2` + `head:claude/` PRs. The clock-out brief is the comment after this refresh.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing.\n- **Cross-lane memo:** `ui/packages/app-shell/src/console/appObjectScope.ts` record arm — seat 3's #29878 (history regression from #29846) is the next change there.\n\n## Notes\n\n- **Standing constraints (maintainer):** changesets for ui cards go to the root `.changeset/`. No PR goes to the objectui repository. `node scripts/check-sdui-manifest.mjs` is a gate on every ui card. A `CONTRACT_REVIEW_TIER` review goes to the director seat. Cloud-touching cards go whole to the `repo:cloud` lane.\n- **Publication:** a merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n"
+  "body": "domain:ui#2 · os-justin · session_01QSeKYnE9YNkSZen7sijLA3\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md`. This is **`domain:ui` seat 2**. Seat 1 is #25966, seat 3 is #27561, seat 4 is #26620, seat 5 is #26945. Posture and ledger live in the project; this stub keeps only what other accounts read.\n\n## Current PM\n\n🟢 **`os-justin`** · session `session_01QSeKYnE9YNkSZen7sijLA3` · seated 2026-11-04T15:40Z on the maintainer's summons 「再开两个ui 车道」 (relayed from the maintainer's session `session_01QSeKYn5CmmdShCJifm6WYj`, seat `security#1`).\n\n- **Effort note:** this session's effort setting is not readable from inside the seat, and it is not confirmed `high`. Per `seat-lifecycle.md`, the account owner is asked to reopen at `high` at the next natural clock-out.\n- **Patrol:** `trig_018cTtkVGYxRF3a57n2h2GSq` · `38 * * * *` (hourly). **Mailbox:** PR #30142.\n\n## Handover ledger\n\n- **Inherited from the previous holder** (`zhuangjianguo`, `session_01QsR2jRFuJz9QBZqPVHYVhJ`, clock-out brief 6601002951): nothing in flight, `check-handover` exit 0.\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#2` + `head:claude/` PRs. The previous body revision (2026-11-03T10:19Z) is the archive of the last shift.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing yet.\n\n## Notes\n\n- **Standing constraints (maintainer, carried from the last body):** changesets for ui cards go to the root `.changeset/`. No PR goes to the objectui repository. `node scripts/check-sdui-manifest.mjs` is a gate on every ui card. A `CONTRACT_REVIEW_TIER` review goes before any decision reaches the maintainer. Cloud-touching cards go whole to the `repo:cloud` lane.\n- **Sibling split:** seat 1 (#25966) takes p1 cards only; this seat takes nothing another live seat has claimed.\n- **Publication:** a merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n"
 }

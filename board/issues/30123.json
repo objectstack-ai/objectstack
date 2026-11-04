@@ -1,0 +1,31 @@
+{
+  "number": 30123,
+  "kind": "issue",
+  "title": "Scaffold: a new project has no wired place for permission sets or datasets, and os generate has no type for them",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T15:00:29Z",
+  "updated_at": "2026-11-04T16:50:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30123",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFrom a real-user walkthrough of the development flow, filed on the maintainer's word: 「第一组：会卡住人或误导人，立卡」 (2026-11-04). Measured on `main` `987ff33b88` unless a line says otherwise. Test project scaffolded with `create-objectstack@18.3.0`.\n\n## What a customer sees\n\nA developer scaffolds a project. An app that real users sign in to needs permission sets. The generated project has no `src/security`, the config has no key for it, and `os g` cannot make one. Datasets for a dashboard are the same. Both work once wired by hand, which is what this walkthrough did.\n\n## Measured\n\n- `packages/create-objectstack/src/templates/blank/objectstack.config.ts` imports objects, views, actions, flows, dashboards, apps, skills and picklists. It has no permissions or datasets.\n- `packages/create-objectstack/src/templates/AGENTS.md:76` says these \"are exactly the directories `objectstack.config.ts` wires\" and tells the reader a new directory needs its barrel and its stack key. So the docs are honest, and the gap is the starting point.\n- `GENERATORS` in `packages/cli/src/commands/generate.ts` has object, view, action, flow, dashboard, app, skill, picklist and more, with no permission set and no dataset.\n- `templates/AGENTS.md` writes `npm run …` throughout, and the generated file keeps it in a pnpm project (7 occurrences, published 18.3.0). `npm run` still works there, so this is a small mismatch only.\n- A plain dataset object needs `as const` to pass the type check (published 18.3.0).\n\n## Expected\n\nThe scaffold ships a wired, empty `src/security` (and datasets, if the seat's reading of need holds in review), `os g` covers them, and the generated AGENTS.md names the package manager the project was created with."
+}

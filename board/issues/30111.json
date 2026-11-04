@@ -1,0 +1,36 @@
+{
+  "number": 30111,
+  "kind": "issue",
+  "title": "pm-dispatch skills: the security seat's triage of a non-finding, its ledger states after the close-on-merge order, a release's contents read by ancestry, and the CI recoveries the relay leaves",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T14:23:15Z",
+  "updated_at": "2026-11-04T18:49:53Z",
+  "closed_at": "2026-11-04T18:47:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30111",
+  "body": "security#1 · os-justin · session_01QSeKYn5CmmdShCJifm6WYj\n\n## What\n\nThe security seat's working rounds of 2026-11-03/04 used five steps that the skills do not state, or state differently. This card writes each one into the reference that owns it. Every line stays at rule level: ⛔ no advisory id, mechanism, path or object name, per the charter header of `lanes/security.md`.\n\n**Sequencing:** card #30110 is editing `lanes/security.md` and `security-findings.md` now. Dispatch this card only after #30110 merges, and rebase onto it.\n\n## The five additions\n\n1. **A report that is not a finding** (`lanes/security.md`, 接收与台账). Today, intake is only a finder's `Notify: security` doorbell for a draft the finder created. An advisory can also arrive in `triage` with no doorbell: an outside report, or a relay live test such as the one card 29402 runs.\n   - The seat reads it through `advisory_read`.\n   - The seat claims it as a `received` row on the seat post.\n   - The seat judges it.\n   - For a non-finding, the seat moves it to `closed` through `advisory_state` and records the row as closed, not a finding, with no detail.\n   - For a finding, the seat moves it to `draft` and follows the fix path.\n\n   The maintainer had the seat run this flow on 2026-11-04: 「你试试看认领处理关闭的流程」.\n\n2. **Ledger states** (`lanes/security.md`). The state vocabulary is `received → fixing → merged → awaiting publish → published`, and the charter says the seat stops at `awaiting publish`. The maintainer's standing orders since then:\n   - 「目前的修复都关闭」 / 「你处理完的可以都先关闭」: close once the fix merges.\n   - 「哪些高危要发布应该在我版本发布前决策吧」: the maintainer decides the publish list before each release.\n   - #30110: the relay publishes on the maintainer's list.\n\n   Reconcile the vocabulary so that it contains `closed` (fix merged) and states which publish step is whose. If #30110 has already rewritten the publish half, keep only what remains.\n\n3. **A release's contents are read by ancestry** (`lanes/security.md` or `release-aftercare.md`, whichever owns the post-release publish list). A fix is \"in version X\" only if its merge commit is an ancestor of the commit tagged for X. Check with `git merge-base --is-ancestor <merge> <release commit>`; ⛔ a merge time earlier than the tag time is not proof. On 18.3.0 this check sorted four fixes merged on the release day out of the release.\n\n4. **A change that moves work after the response** (`review-checklist.md` or `true-green.md`). The Dogfood Regression Gate does not run on `pull_request` or `merge_group` (by design, ci.yml THE TWO SPEEDS). So a PR that moves a send or write to after the response can pass every pre-merge check and still red `main` on its push battery: main-red #29991 → forward fix #29992. Before landing such a PR, the seat greps `packages/qa/dogfood/test` for readers of that side effect straight after the answer, and has them wait within a bound in the same PR.\n\n5. **CI recoveries the relay leaves** (`platform-readings.md` or `rest-channel.md`):\n   - `run_rerun_failed` re-runs `ci.yml` runs only. A flake in another workflow cannot be re-run through it: `lint.yml` (a checkout timeout) and `pr-automation.yml` (a `Check Changeset` cancelled with no superseding run).\n   - Recovery for `pr-automation.yml`: an `edited` event re-runs `Check Changeset`. A seat body edit that records the flake reason (the reason the rerun rule already requires) is that event.\n   - Recovery for `lint.yml`: a relay `pr_update_branch` once `main` has moved produces a real new head with a full run. While the head is level with `main`, the update is a no-op.\n   - ⛔ Never an empty commit, never close and reopen.\n   - A merge-group removal whose failed step is `Checkout repository` timing out is re-queued once, with the reason recorded on the PR.\n\n## Acceptance\n\n- Each addition lands in the one reference that owns its topic. No rule is restated in two places, and the hot files' line ratchets are respected.\n- `lanes/security.md` still carries no finding, id, path, object or mechanism.\n- The skills gates the diff derives are green."
+}

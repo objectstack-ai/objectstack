@@ -2,8 +2,8 @@
   "number": 30081,
   "kind": "issue",
   "title": "[Decision] A restart puts seeded records back: a customer's edit to a seeded row is overwritten by the next boot",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:spec",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T12:40:20Z",
-  "updated_at": "2026-11-04T14:04:12Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-04T18:29:23Z",
+  "closed_at": "2026-11-04T18:27:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30081",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nThe maintainer: 「等我决定的都要立卡，并且从业务的角度给我具体解释和我沟通」 (2026-11-04). Measured by the seat on `main` `63b86b385d`, on the example CRM unless noted. No `domain:*` label is set: triage routes this card.\n\n## The question\n\nA package ships starter records with `mode: 'upsert'`, the spec's default. Each boot loads them again by `externalId`, so an edit a customer made to one of those rows goes back to the shipped value, silently. Is that what a seed should do once a customer owns the data?\n\nGoverning text: `packages/spec/src/data/seed.zod.ts:170` (`mode` default `upsert`), `:205` (`env` default includes `prod`), `:61-62` (a column policy `create` writes a column only when the row is created). ADR-0131 (\"declared is code, no seeding\") covers metadata, not this business data.\n\n## Measured\n\n- On the CRM, `Acme — Q3 Platform Renewal`'s probability was edited to 75 in the running app and read 75.\n- After restarting the dev backend it read 70, the seed's value, and `updated_at` was the boot time. A record not in the seed (`Eval Test Opp 1102`) kept its edit.\n- Every seeded opportunity's `updated_at` moves at each boot, so 更新于 reads minutes ago on rows nobody touched.\n\nThis was measured on `objectstack dev` only. The seat did not measure a production `serve` boot or an upgrade, so whether a production customer loses edits this way is **unverified**. The `env` default and the replay comments suggest it can happen. Measure it first.\n\n## Options\n\n- **A. Create-only by default:** a replay inserts missing rows and leaves existing ones alone. An author who wants reset behaviour says so explicitly.\n- **B. Keep upsert, change the examples:** examples use `ignore` or the column policy.\n- **C. Keep as is,** and document it.\n\n## Recommendation: measure production, then A\n\n## 四轴分析\n\n**实际业务需求。** 客户改了预置的客户、产品、配置类记录，升级或重启后被改回去，而且没有任何提示。这是最难被原谅的一类问题：数据悄悄丢了，往往很久才发现。\n\n**项目长远合理性。** 种子是「开始用的初始数据」，一旦交给客户，数据就归客户。A 符合这个归属。B 只治示例，默认值还在坑人。\n\n**防 AI 写错。** AI 写种子常按示例或默认值。A 让默认值是安全的；要覆盖时必须明说。\n\n**创业阶段不扩散。** 这是修正默认行为，不是加能力。但它是破坏性的默认值变更，已发布的包如果依赖覆盖行为会受影响，要先量一下有没有这样的包。\n\n| 棱 | A | B | C |\n|:--|:--|:--|:--|\n| 业务 | 强 | 中 | 弱 |\n| 长远 | 强 | 弱 | 弱 |\n| 防错 | 强 | 中 | 弱 |\n| 不扩散 | 中 | 强 | 强 |\n\n## Re-check\n\n`git grep -n \"SeedMode.default('upsert')\" origin/main -- packages/spec/src/data/seed.zod.ts`"

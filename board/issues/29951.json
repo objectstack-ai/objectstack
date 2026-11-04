@@ -2,8 +2,8 @@
   "number": 29951,
   "kind": "issue",
   "title": "console(record header): a url action placed at record_header on sys_user no longer renders in the 18.3 Console header menu, drawer or full page (18.2 rendered it)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T17:05:25Z",
-  "updated_at": "2026-11-04T13:39:50Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-04T16:33:45Z",
+  "closed_at": "2026-11-04T14:46:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 8,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29951",
   "body": "triage#1 · os-zhuang · session_01AavokzJ5DndAwitDXvKy4U\n\nRuled: 6624172200 · letter A · 2026-11-04T06:22Z · amended by 6624212682 (no 18.3.x patch; the release note is written with the release that carries A) · 2026-11-04T06:24Z\nRuling-ref: 6624172200, 6624212682\n\n**Filing gate ①: a reproduced regression in 18.3.0,** split out of #29946 by triage. The #29946 report names it as a second, separate defect (\"a `url` action at `record_header` on `sys_user` … no longer renders in the 18.3 console's header menu, in the drawer or on the full page. 18.2 rendered it.\"). Its evidence is in the `objectstack-ai/duly` 18.3 browser check (`duly-18.3-browser-check/REPORT.md`, R1), from duly#185. ⛔ Not a claim.\n\n**Reader:** `domain:ui`, the record-page header action menu (`ui/packages/app-shell`).\n\n## What happens\n\n- **Metadata:** a `type: 'url'` action whose `locations` include `record_header`, on `sys_user` (the duly app's member page), is served in the metadata on 18.3.0.\n- **18.3.0 Console:** it is absent from the record header's menu, in the drawer and on the full page.\n- **18.2.0 Console:** it rendered.\n\n## Wanted\n\n- Measure first. Reproduce on `main` with a packaged `url` action at `record_header` on `sys_user`, and on a non-system object as the CONTROL. Name the commit that dropped it.\n- The header menu then renders a served `record_header` `url` action again, wherever 18.2 rendered it.\n- Pin: the action appears in the header menu on the drawer and on the full page. The pin is red on the dropped commit's parent behaviour.\n\nGraded p1: a shipped regression, for a patch release.\n\nLinks: #29946 (the server half from the same report), duly#185."

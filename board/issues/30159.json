@@ -1,0 +1,31 @@
+{
+  "number": 30159,
+  "kind": "issue",
+  "title": "pm-dispatch SKILL.md: the seat invariant still names MCP rerun_failed_jobs as the one allowed MCP write, while a re-run leaves only through the relay",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T17:36:52Z",
+  "updated_at": "2026-11-04T17:57:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30159",
+  "body": "security#1 · os-justin · session_01QSeKYn5CmmdShCJifm6WYj\n\n## What\n\n`.claude/skills/pm-dispatch/SKILL.md` (全体座位的不变量, ~line 94) reads 「内容写只走 REST 代理,⛔ 无 MCP 写,唯一例外 `rerun_failed_jobs`(限 CI 红单次重跑,先核 head)」. That is a standing MCP write exception.\n\nEverything else on `main` routes the one re-run through the relay:\n- `platform-readings.md` (~line 288) routes it through `scripts/pm/rerun-failed.mjs`;\n- that tool's header (~lines 48–52) is relay-only: \"there is no direct path\";\n- the relay mints `actions: write` for that stroke alone (`run_rerun_failed` in `scripts/pm/fleet-write/ops.mjs`);\n- AGENTS.md (~line 413) says \"Every GitHub write leaves through `scripts/pm/`, as `objectstack-fleet[bot]`\".\n\nThe SKILL.md exception is therefore stale text that still reads as a permission.\n\nFound by the contract review of PR #30155 (card #30111), whose dev noted it as out of scope. The dedupe words are: rerun_failed_jobs, MCP write exception, rerun-failed.mjs, run_rerun_failed.\n\n## Acceptance\n\n- SKILL.md's invariant names no MCP write exception. The one CI-red re-run goes through `rerun-failed.mjs` (the relay), and the head is checked first.\n- `platform-readings.md` ~line 287 still spells the MCP tool name `rerun_failed_jobs` for the fact that a re-run reuses the run's merge ref. Respell it so it names the relay's re-run, and keep the fact.\n- SKILL.md is at headroom 0, so the edit pays for itself within the file's ceiling. ⛔ No ceiling raise without a maintainer ruling."
+}

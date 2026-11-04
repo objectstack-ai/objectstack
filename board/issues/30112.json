@@ -1,0 +1,34 @@
+{
+  "number": 30112,
+  "kind": "pull_request",
+  "title": "docs(auth): send newPassword in the reset-password example",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T14:38:12Z",
+  "updated_at": "2026-11-04T15:29:12Z",
+  "closed_at": "2026-11-04T15:29:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-04T15:29:09Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30112",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSiNjyvCdXYygFqntMNR7S2dW)_\nFixes #29852\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 改了什么：认证文档「Reset Password with Token」示例的请求体字段从 `password` 改为 `newPassword`，仅此一行。\n- 为什么改：重置密码接口要求 `newPassword`，照文档复制的请求会被 400 拒绝，用户无法完成密码重置；同页其余重置/验证示例已逐一对照接口校验，均正确。\n- 风险与回滚：纯文档改动，不触任何运行时代码与发布包；回滚即还原这一行。\n- 先看：`content/docs/permissions/authentication.mdx` 第 305 行（唯一改动）。\n- 两分钟验证：`grep -n \"newPassword: 'newSecurePassword456'\" content/docs/permissions/authentication.mdx`，应看到第 305 行一条命中。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n`content/docs/permissions/authentication.mdx`, \"Reset Password with Token\": the body sent to `POST /api/v1/auth/reset-password` now carries `newPassword` instead of `password`. The door's body schema is better-auth 1.7.12 `resetPassword` (`dist/api/routes/password.mjs`): `newPassword: z.string()` required, `token: z.string().optional()`. Sent as previously documented the door answers `400 VALIDATION_ERROR` (`[body.newPassword] ... received undefined`).\n\nThe other reset and verification examples on the page were each checked against the body or query schema their door actually parses (installed better-auth 1.7.12, plus this repo's `packages/plugins/plugin-auth` mounts where one fronts the door). All match, so none changed:\n\n| Example | Door schema read | Verdict |\n|:---|:---|:---|\n| Request Password Reset `{ email }` | better-auth `requestPasswordReset`: `email` required, `redirectTo` optional | matches |\n| Reset Password with Token | better-auth `resetPassword`: `newPassword` required, `token` optional | **fixed** (`password` → `newPassword`) |\n| Setting a first local password `{ newPassword }` | `plugin-auth/src/set-initial-password.ts`: reads `newPassword` | matches |\n| Send Verification Email (no body, bearer) | better-auth requires `email`, but `plugin-auth/src/send-verification-email.ts` (mounted in `auth-plugin.ts`) defaults it to the signed-in caller's email | matches |\n| Verify Email `?token=` | better-auth `verifyEmail` query: `token` required, `callbackURL` optional | matches |\n| Phone `send-otp` `{ phoneNumber }` | `phone-number/routes.mjs` `sendPhoneNumberOTPBodySchema` | matches |\n| Phone `verify` `{ phoneNumber, code }` | `verifyPhoneNumberBodySchema` | matches |\n| Phone `request-password-reset` `{ phoneNumber }` | `requestPasswordResetPhoneNumberBodySchema` | matches |\n| Phone `reset-password` `{ phoneNumber, otp, newPassword }` | `resetPasswordPhoneNumberBodySchema` | matches |\n| 2FA `verify-totp` `{ code }` | `two-factor/totp/index.mjs` `verifyTOTPBodySchema`: `code` required, `trustDevice` optional | matches |\n| Magic link `verify?token=` | `magic-link/index.mjs` `magicLinkVerifyQuerySchema`: `token` required | matches |\n\n## Tests\n\nDocs only. No test pins this example: the block's `os:check` marker makes `check:skill-examples` type-check it with `tsc`, and `JSON.stringify` takes any object, so that gate cannot see a wrong field name. It still type-checks after the change.\n\n## Acceptance notes\n\n- The `os:check` gate proves a marked fetch example compiles, not that its body matches the door. Noted, not filed.\n\n## Verification\n\nGate readings are in the `os-dev-report` comment on #29852 (derived by `scripts/pm/dispatch-gates.mjs --commands`, every exit code captured before any pipe).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

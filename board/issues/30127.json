@@ -1,0 +1,34 @@
+{
+  "number": 30127,
+  "kind": "pull_request",
+  "title": "docs(skills): objectstack-ui says placedActions is drawn, with an eval (#29951)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T15:02:35Z",
+  "updated_at": "2026-11-04T16:32:14Z",
+  "closed_at": "2026-11-04T16:32:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-04T16:32:12Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30127",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwB4xjiquevJqfBXiUoqfQwa1)_\n\nRefs #29951\n\n## 维护者速读\n- 改了什么：`objectstack-ui` 技能的 `rules/pages.md` 里，`page:header` 那一行去掉了 `placedActions: true` 的“not drawn yet”限定语；`evals/record-page.json` 新增一个评测，考 `placedActions: true` 的用法。\n- 为什么改：#29951 的 ui 半边（#30097，已合并）让控制台页头真正读这个键了，#30028 当时写下的限定语和“等渲染器落地再补评测”的说明到这里兑现。\n- 风险与回滚：只改技能文本和评测，不改代码和 spec。`pages.md` 在 token 上限处，改后 5668/5669，没有变长。回滚 = revert 本 PR。\n- 先看：`skills/objectstack-ui/rules/pages.md` 一行，`skills/objectstack-ui/evals/record-page.json` 新增的第 3 个用例。\n- 两分钟验证：`node scripts/check-skills-token-ratchet.mjs`，预期 `pages.md is 5668 tokens (ceiling 5669)`、整体通过。\n- 需要你做的：`skills/**` 是受管文件（Tier H），请你复核后批准合并。\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\n- `skills/objectstack-ui/rules/pages.md`: the component catalogue's `page:header` row now reads `` `placedActions: true` (all placed, read live) `` in place of `(all placed; not drawn yet)`. The console's header renderer reads the key since #30097 (`PageHeaderActions`, through `placedHeaderActions`), so the qualifier #30028 wrote is dropped. This is the sixth of the six qualifiers #30028 listed; #30097 dropped the other five.\n- `skills/objectstack-ui/evals/record-page.json`: a third case. The prompt asks for a custom `kind: 'full'` account record page whose header shows every action packages place on `account`, without listing ids. The expected answer keeps the page and its tab strip and sets `{ type: 'page:header', properties: { placedActions: true } }`, with no `actions` id list beside it (the two are refused together). Assertions: must contain `placedActions: true` and `page:header`; must not contain `slots.tabs` or `actions: ['`.\n- `skills/objectstack-ui/evals/README.md`: the `record-page.json` line names the new case.\n- Changeset `.changeset/29951-skills-placed-actions-drawn.md`: `@objectstack/skills` patch.\n\n## Why\n\n#30028's Skills-docs line deferred both pieces to the reader: \"no eval exercises it while no renderer reads it, so the eval and the qualifier drop ride with the reader.\" The reader landed in #30097. The seat split this Tier H file out of #30097 so that PR could land through the queue.\n\n## Verification\n\n- `node scripts/check-skills-token-ratchet.mjs`: exit 0; `skills/objectstack-ui/rules/pages.md is 5668 tokens (ceiling 5669; headroom 1)`, so the row costs one token less than before.\n- `node scripts/pm/dispatch-gates.mjs --commands` on this diff: 42 commands, all run under `os-verify-lock` (VERDICT command-exit 0), every one exit 0; `--ran`: 42 derived, 42 run, 0 NOT-MEASURED, 0 UNRUN. They include the token ratchet and its self-test, `check:pm-skill-id-lint`, `check:skill-compatibility`, `check:skill-frame-sync` and `check:skill-identifier-liveness`.\n- The branch is `main` at a52761fdd7 (the #30097 squash) merged in, plus this one commit; `git diff origin/main` before the commit was empty.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (Not touched.)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes. (No TypeScript changed; CI's `pnpm lint` covers the tree.)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (Not touched.)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English, except the `## 维护者速读` block, which is written in Chinese for the maintainer.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WGufzh8VRbTbBnqwnrXsSL\n"
+}

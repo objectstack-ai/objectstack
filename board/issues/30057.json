@@ -2,8 +2,8 @@
   "number": 30057,
   "kind": "issue",
   "title": "Studio Data 表单: when the object has a default form view, the designer edits a layout users never see, and says nothing",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T11:34:39Z",
-  "updated_at": "2026-11-04T13:18:49Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-04T16:24:03Z",
+  "closed_at": "2026-11-04T16:17:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30057",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nThe maintainer: 「数据表单改了，可能不生效，也要立卡」 (2026-11-04). Measured by the seat in a browser on `main` `63b86b385d`, on the example CRM and a throwaway writable package. No `domain:*` label is set: triage routes this card.\n\n## Business reason\n\nAn operations person opens Studio → 数据 → an object → 表单 and rearranges the form: new groups, moved fields, then publish. The publish succeeds. If the object has a default form view, users still get the old form, and nothing on either screen says why. The person has no way to tell the work had no effect until a user reports it, and then no hint where the real form lives.\n\n## Measured\n\n| Step | Result |\n|:--|:--|\n| Writable package, object with `fieldGroups` and no default form view; publish; 新建 in the app | The dialog shows the designer's group 设计器分组. The designer works here |\n| Same object, then `eval1104_deal.form` published with `isDefault: true` and sections 基本信息, 金额信息; 新建 in the app | The dialog shows 基本信息 and 金额信息 |\n| The same object's 数据 → 表单 at that moment | Shows 设计器分组 and 未分组, with no mention of the form view |\n| Example CRM, `crm_lead` | `crm_lead.form` has `isDefault: true`. The designer shows 未分组, 14 个字段; 新建 shows 线索信息, 资格审查, 转化, 备注 |\n\n## Code readings on `63b86b385d`\n\n- `ui/packages/app-shell/src/views/studio-design/ObjectFormDesigner.tsx:4-15`: the designer says it arranges \"the object's default form exactly as end users will see it\" and writes `fields[].group` and `fieldGroups` on the object draft.\n- `ui/packages/app-shell/src/providers/MetadataProvider.tsx:604-606`: a form view with `isDefault` becomes the object's `form`.\n- `ui/packages/app-shell/src/utils/recordFormNavigation.ts:213-221`: `selectRecordFormView` picks the object's served `create` form view for a create, then `objectDef.form`. So create and edit can differ from each other too.\n\nThe designer's claim holds only when no default form view exists.\n\n## Wanted\n\nThe designer shows and changes the form users get.\n\n1. With no default form view: unchanged.\n2. With a default form view, the designer reads and writes that view's sections, so what is arranged is what users see. On a read-only base the same customization path as other views applies: a declared override in the paired `.custom` package (ADR-0146 D2). If the implementer finds this cannot be done in the existing form view shape, report it on the card rather than falling back silently.\n3. Where create and edit use different form views, the designer says which one it is showing and lets the author choose.\n4. The 预览 beside the layout shows the same form the app would open. It was not measured here; measure it first.\n\n## Acceptance\n\n1. The two measured cases above, in a browser: after arranging and publishing, 新建 and 编辑 in the app show the arranged layout, on an object with a default form view and on one without.\n2. A test pins that the designer's source follows `selectRecordFormView`'s choice rather than a second reading of it.\n3. Screenshots on the PR, from latest `main`.\n\n## Not in this card\n\nWhere form views are listed in the Interfaces rail (#30046), and any new metadata key.\n\n## Re-check\n\n`git grep -n \"exactly as end users will see it\" origin/main -- ui/packages/app-shell/src/views/studio-design/ObjectFormDesigner.tsx`\n"

@@ -1,0 +1,34 @@
+{
+  "number": 30130,
+  "kind": "pull_request",
+  "title": "docs(skills): rest-channel records the advisory_report 403 re-test as transient, with the seat retry rule",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T15:13:23Z",
+  "updated_at": "2026-11-04T15:24:14Z",
+  "closed_at": "2026-11-04T15:24:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30130",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"huangyiirene\"} -->\n_Requested by **Irene** · [project thread](https://claude.ai/code/project/chan_01TJXtQ1tVD26ecLDZxFS67x?thread=cmsg_01TJXtQ1tVD26ecLDZxFS67xKrdoy3yoTTsnUokgtw4ZPB)_\n\nFixes #29402\n\nClause-②: no\nMetadata-protocol: none\n\nThe maintainer waived the model-tier mandate while that tier had no quota; this PR was developed below it.\n\n## 维护者速读\n\n- 改了什么:`rest-channel.md` 写侧公告两行重写:L50 并入 `advisory_read`,L51 记 `advisory_report` 403 复测读数与席位规则。\n- 为什么改:卡上复测(评论 6632996128)经中继新报一次无 403,11-02 那批 403 不复现,读作瞬态,非通道常限。\n- 风险与回滚:Tier S `.claude/**` 文字,行数不变(82,上限 82),不进任何包,`skip-changeset`;回滚即 revert。\n- 先看:L50-51 两行。\n- 需要你做的:无;席位 contract review PASS 且检查全绿即落地。\n\n## What changes\n\n`.claude/skills/pm-dispatch/references/rest-channel.md`, write side, two lines rewritten, none added:\n\n- **L50** now names `advisory_read` beside the four advisory write operations and keeps the pointer to `security-findings.md`. The old L51's detail (one-time key in the seat process, ciphertext back, `--reveal` prints plaintext) already lives in `security-findings.md` L22 and `lanes/security.md` L19, so folding it in loses no rule. \"发布归维护者\" is likewise held by `security-findings.md` L24.\n- **L51** records the reading and the seat-side rule in one line: a later `advisory_report` 403 was re-tested and is transient; the seat reads a 403 against the two causes `security-findings.md` L23 already names (the advisory write grant and the per-account daily limit on private reports), retries once on a later day, and never switches account.\n\n`security-findings.md` is not edited: the reading does not make L23 wrong, it only says the 11-02 run did not hit either cause as a standing state.\n\n**Ratchets.** Line count 82 → 82 (ceiling 82, the added rule line is paid by folding L51 into L50). Widths: L50 110 bytes, L51 118 bytes, under the 120-byte cap.\n\n## Why\n\nThe card's last bullet. The 11-02 runs answered HTTP 403 on every `advisory_report` after the first. On 2026-11-04 a fresh report through the relay succeeded with no 403, and the maintainer confirmed the lane App shows as reporter on it and on the reports of the last two days (card comment 6632996128). The seat needs a written rule for the next 403 so it neither resends into a refusal nor reaches for another account.\n\n## Verification\n\nHead `93196356`, one commit on `a52761fd`.\n\n<details><summary>Local gates on 93196356: 17 derived, 17 run with exit 0, 0 NOT MEASURED (`dispatch-gates --ran`)</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands` derived 17 commands for the one changed file. All ran after `pnpm install --frozen-lockfile`, each with its exit code captured before any pipe. `check:doc-formula-expressions` first exited 3 (prerequisite not built); after `turbo run build --filter=@objectstack/formula --filter=@objectstack/lint` it exited 0.\n- All 17 exited 0, among them `check:pm-skill-ratchet`, `check:pm-skill-id-lint`, `check:skill-frame-sync`, `check:doc-authoring` and `check-comment-mask-corpus.mjs`.\n- `--ran` printed: `17 derived famil(ies) accounted for — 17 run, 0 NOT-MEASURED (a DERIVED zero — all 17 recorded an exit code and none of them is 3)`.\n- `node scripts/check-empty-changeset.mjs --base origin/main`: exit 0. No changeset: `.claude/**` ships in no package, so `skip-changeset`.\n- `node scripts/check-commit-card-trailers.mjs --range origin/main..HEAD`: **exit 1**, found after the push. The commit message names this card and its co-author trailer carries a model name. The branch is not `claude/issue-*`, so AGENTS.md §3 rules out a force-push to reword it. The squash message is taken from this body, so neither line lands on `main`.\n\n</details>\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (Not touched.)\n- [x] 2. Every name I added uses the casing for its kind. (No names added.)\n- [x] 3. No formatter ran.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (Publishes nothing.)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (Not touched.)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English. (The 维护者速读 section is Chinese, per the lane template.)\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01J8VVAnSGyRU8EkF8acg337\n"
+}

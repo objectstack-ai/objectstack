@@ -1,0 +1,31 @@
+{
+  "number": 30118,
+  "kind": "issue",
+  "title": "Record page: the default record page offers no way to turn on stage press, so authors must write a whole page",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T14:57:59Z",
+  "updated_at": "2026-11-04T16:51:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30118",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFrom a real-user walkthrough of the development flow, filed on the maintainer's word: 「第一组：会卡住人或误导人，立卡」 (2026-11-04). Measured on `main` `987ff33b88` unless a line says otherwise. Test project scaffolded with `create-objectstack@18.3.0`.\n\nGoverning text: #28061 and PR #28303 made stage press an opt-in, `allowStageChange` on the `record:path` block, off by default. #11243 made the inert path stop looking like a control. This card does not reopen that default.\n\n## What a customer sees\n\nOn a ticket the path shows New, In Progress, Resolved. A technician clicks In Progress and nothing happens. They open the edit form, face every field, and change Status there. Measured by clicking on the published 18.3.0.\n\n## Measured\n\n- An object that declares `stageField` gets its record page from `ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts`, which draws `record:path` without `allowStageChange`.\n- `allowStageChange` appears only on the block: `packages/spec/src/ui/component.zod.ts:2175` and `ui/packages/plugin-detail/src/renderers/record-path.tsx`. No key on the object or the default page reaches it.\n- So the author who wants this one behavior has to author and maintain a full record page. The stage press itself was not exercised in this walkthrough.\n\n## Expected\n\nAn author can turn stage press on for the default record page without writing a page, in the same opt-in posture. Where the key belongs is for the contract review."
+}
