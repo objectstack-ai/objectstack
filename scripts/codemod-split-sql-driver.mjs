@@ -249,6 +249,11 @@ const PATH_READER_PINS = Object.freeze({
   createColumn: 'packages/cli generate-{field-type-vocabulary,string-family-width,multiple-json-column} pins and '
     + 'scripts/check-keyed-text-bounds.mjs slice `protected createColumn(` to its type switch',
   createAuditTimestampColumn: 'packages/cli generate-builtin-id-column pin reads 600 characters after its signature',
+  // The durability catches that stay (the `this.runWideningAlters(` row
+  // below) are judged by following `this.logDurabilityFailure(…)` to its
+  // body in the same file; a one-call stub there is a call that gate cannot
+  // follow, so both catches read "swallowed, no log" (measured, #30105).
+  logDurabilityFailure: 'scripts/check-durability-degradation-log-level.mjs follows a catch\'s log helper to its body in the same file',
 });
 
 /**

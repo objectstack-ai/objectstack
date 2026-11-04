@@ -2,12 +2,12 @@
 
 /**
  * [#29520 codemod] The "Class head: dialect probes, logger, configuration"
- * section of `SqlDriver`: the bodies of `logDurabilityFailure`,
- * `emissionClients`, `clientSpelling`, `aliasIdentifierSql`, `dateBucketSql`,
- * `knexConfigFor`, `withConnectBound`, `withUtcSession`,
- * `withMysqlCalendarDayAsText`, `withPostgresCalendarDayAsText`,
- * `installQueryTiming`, `assertSchemaMutable`, `assertDialectEmits` moved out
- * of `sql-driver.ts` whole by `scripts/codemod-split-sql-driver.mjs`.
+ * section of `SqlDriver`: the bodies of `emissionClients`, `clientSpelling`,
+ * `aliasIdentifierSql`, `dateBucketSql`, `knexConfigFor`, `withConnectBound`,
+ * `withUtcSession`, `withMysqlCalendarDayAsText`,
+ * `withPostgresCalendarDayAsText`, `installQueryTiming`, `assertSchemaMutable`,
+ * `assertDialectEmits` moved out of `sql-driver.ts` whole by
+ * `scripts/codemod-split-sql-driver.mjs`.
  *
  * A MOVE, not a redesign. {@link ClassHeadFacet} is a stateless facet of `SqlDriver`
  * (ruling 6624345766): each static method of it is the body of the `SqlDriver`
@@ -62,19 +62,12 @@ export interface ClassHeadHost {
   readonly config: SqlDriverClass['config'];
   readonly isSqlite: SqlDriverClass['isSqlite'];
   readonly knex: SqlDriverClass['knex'];
-  readonly logger: SqlDriverClass['logger'];
   openedEmptyInMemory: SqlDriverClass['openedEmptyInMemory'];
   readonly schemaMode: SqlDriverClass['schemaMode'];
 }
 
 /** The bodies of the "Class head: dialect probes, logger, configuration" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class ClassHeadFacet {
-  /** The body of `SqlDriver#logDurabilityFailure`; the method's docblock there is its contract. */
-  static logDurabilityFailure(this: Pick<ClassHeadHost, 'logger'>, msg: string, meta?: any): void {
-    if (this.logger.error) this.logger.error(msg, meta);
-    else this.logger.warn(msg, meta);
-  }
-
   /** The body of `SqlDriver#emissionClients`; the method's docblock there is its contract. */
   static emissionClients(): string[] {
     return [

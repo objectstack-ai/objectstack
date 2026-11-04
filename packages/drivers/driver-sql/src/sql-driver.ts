@@ -877,8 +877,8 @@ export class SqlDriver implements IDataDriver {
    * Reason ② is why this method exists; it is not what this conversion bought.
    */
   protected logDurabilityFailure(msg: string, meta?: any): void {
-    // [#29520 codemod] The body moved to `sql-driver-class-head.ts` (see `ClassHeadHost`).
-    return ClassHeadFacet.logDurabilityFailure.call(classHeadHost.of(this), msg, meta);
+    if (this.logger.error) this.logger.error(msg, meta);
+    else this.logger.warn(msg, meta);
   }
 
   /**
@@ -10589,7 +10589,6 @@ export class SqlDriver implements IDataDriver {
       get config() { return driver.config; },
       get isSqlite() { return driver.isSqlite; },
       get knex() { return driver.knex; },
-      get logger() { return driver.logger; },
       get openedEmptyInMemory() { return driver.openedEmptyInMemory; },
       set openedEmptyInMemory(v) { driver.openedEmptyInMemory = v; },
       get schemaMode() { return driver.schemaMode; },
