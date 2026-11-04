@@ -1891,6 +1891,11 @@
         "type"
       ]
     },
+    "ui/PageHeaderProps": {
+      "sites": [
+        ""
+      ]
+    },
     "ui/PageRecordBinding": {
       "sites": [
         "filter.element",
