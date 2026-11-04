@@ -560,3 +560,149 @@ describe('a stored configuration on an unreadable field is kept as stored (objec
     expect(screen.getByTestId('filter-badge-status')).toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// objectstack#30077 — adding a field the reader may read to their own list
+// ---------------------------------------------------------------------------
+
+describe('both hide-fields lists offer the fields a reader may add, and only fields they may read (objectstack#30077)', () => {
+  afterEach(() => cleanup());
+
+  const TITLE_ONLY = [{ field: 'title', label: 'Title' }];
+
+  /** Mount with `getObjectSchema` answering `fields`, for a definition this file's fixture does not have. */
+  function mountWithFields(perms: Perms, fields: Record<string, Record<string, unknown>>, schemaExtra: Record<string, unknown>, props: Record<string, unknown>) {
+    const dataSource = makeDataSource();
+    dataSource.getObjectSchema = vi.fn().mockResolvedValue({ name: OBJECT, fields });
+    render(
+      <SchemaRendererProvider dataSource={dataSource as unknown as DataSource}>
+        <MePermissionsProvider initialPermissions={perms as MePermissionsResponse}>
+          {listFor(schemaExtra, props, dataSource)}
+        </MePermissionsProvider>
+      </SchemaRendererProvider>,
+    );
+  }
+
+  /** The Display panel's Hide Fields section, opened when it starts closed. */
+  async function displayHideFields(read: (content: HTMLElement) => Promise<string[]> | string[] | void): Promise<unknown> {
+    return inPopover(viewSettings(), async (content) => {
+      if (content.querySelectorAll('input[type="checkbox"]').length === 0) {
+        fireEvent.click(within(content).getByRole('button', { name: /^Hide Fields/ }));
+      }
+      return read(content);
+    });
+  }
+
+  const LAYOUTS = {
+    wide: { schemaExtra: {}, read: () => inPopover(toolbarButton(/^hide fields/i), checkboxLabels) },
+    compact: { schemaExtra: { compactToolbar: true }, read: () => displayHideFields(checkboxLabels) as Promise<string[]> },
+  } as const;
+
+  for (const [layout, { schemaExtra, read }] of Object.entries(LAYOUTS)) {
+    it(`${layout} toolbar: after the view's columns, the object's other readable fields, unticked; an unreadable one is not offered`, async () => {
+      const onAddedFieldsChange = vi.fn();
+      mount(RESTRICTED, { columns: TITLE_ONLY, ...schemaExtra }, { onAddedFieldsChange });
+      await definitionLoaded();
+      let labels: string[] = [];
+      await waitFor(async () => {
+        labels = await read();
+        expect(labels).toContain('Status');
+      });
+      expect(labels).toEqual(['Title', 'Status', 'Priority']);
+      cleanup();
+
+      // Control: with full read the same list offers the field the restricted caller was not offered.
+      mount(FULL_READ, { columns: TITLE_ONLY, ...schemaExtra }, { onAddedFieldsChange });
+      await definitionLoaded();
+      await waitFor(async () => {
+        labels = await read();
+        expect(labels).toContain('Status');
+      });
+      expect(labels).toEqual(FIELD_LABELS);
+      expect(onAddedFieldsChange).not.toHaveBeenCalled();
+    });
+
+    it(`${layout} toolbar, control: without the host's door the list offers the view's columns alone, as before`, async () => {
+      mount(FULL_READ, { columns: TITLE_ONLY, ...schemaExtra });
+      await definitionLoaded();
+      expect(await read()).toEqual(['Title']);
+    });
+  }
+
+  it('ticking an offered field adds it through the door; hiding and showing a column of the view are unchanged', async () => {
+    const onAddedFieldsChange = vi.fn();
+    const onHiddenFieldsChange = vi.fn();
+    mount(FULL_READ, { columns: TITLE_ONLY }, { onAddedFieldsChange, onHiddenFieldsChange });
+    await definitionLoaded();
+    const content = await openPopover(toolbarButton(/^hide fields/i));
+    await waitFor(() => expect(within(content).getByRole('checkbox', { name: 'Priority' })).not.toBeChecked());
+    fireEvent.click(within(content).getByRole('checkbox', { name: 'Priority' }));
+    expect(onAddedFieldsChange).toHaveBeenLastCalledWith(['priority']);
+    expect(onHiddenFieldsChange).not.toHaveBeenCalled();
+    fireEvent.click(within(content).getByRole('checkbox', { name: 'Title' }));
+    expect(onHiddenFieldsChange).toHaveBeenLastCalledWith(['title']);
+    expect(onAddedFieldsChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('unticking a column the reader added takes it off their list instead of hiding it', async () => {
+    const onAddedFieldsChange = vi.fn();
+    const onHiddenFieldsChange = vi.fn();
+    // The host hands the added column appended to the view's, and names it.
+    mount(
+      FULL_READ,
+      { columns: [...TITLE_ONLY, { field: 'priority' }, { field: 'status' }] },
+      { addedFields: ['priority', 'status'], onAddedFieldsChange, onHiddenFieldsChange },
+    );
+    await definitionLoaded();
+    const content = await openPopover(toolbarButton(/^hide fields/i));
+    expect(within(content).getByRole('checkbox', { name: 'Priority' })).toBeChecked();
+    fireEvent.click(within(content).getByRole('checkbox', { name: 'Priority' }));
+    expect(onAddedFieldsChange).toHaveBeenLastCalledWith(['status']);
+    expect(onHiddenFieldsChange).not.toHaveBeenCalled();
+  });
+
+  it('adding a field a stale hidden entry names clears that entry too, or the column would be drawn hidden', async () => {
+    const onAddedFieldsChange = vi.fn();
+    const onHiddenFieldsChange = vi.fn();
+    mount(FULL_READ, { columns: TITLE_ONLY, hiddenFields: ['priority'] }, { onAddedFieldsChange, onHiddenFieldsChange });
+    await definitionLoaded();
+    const content = await openPopover(toolbarButton(/^hide fields/i));
+    await waitFor(() => expect(within(content).getByRole('checkbox', { name: 'Priority' })).not.toBeChecked());
+    fireEvent.click(within(content).getByRole('checkbox', { name: 'Priority' }));
+    expect(onAddedFieldsChange).toHaveBeenLastCalledWith(['priority']);
+    expect(onHiddenFieldsChange).toHaveBeenLastCalledWith([]);
+  });
+
+  it('the Display panel adds through the same door', async () => {
+    const onAddedFieldsChange = vi.fn();
+    mount(FULL_READ, { columns: TITLE_ONLY, compactToolbar: true }, { onAddedFieldsChange });
+    await definitionLoaded();
+    await waitFor(async () => expect(await displayHideFields(checkboxLabels)).toContain('Priority'));
+    await displayHideFields((content) => {
+      fireEvent.click(within(content).getByRole('checkbox', { name: 'Priority' }));
+    });
+    expect(onAddedFieldsChange).toHaveBeenLastCalledWith(['priority']);
+  });
+
+  it('a field the definition marks hidden is not offered; system fields follow the business fields', async () => {
+    mountWithFields(
+      FULL_READ,
+      {
+        title: { type: 'text', label: 'Title' },
+        owner_id: { type: 'lookup', label: 'Owner', system: true },
+        organization_id: { type: 'lookup', label: 'Organization', hidden: true, system: true },
+        discount: { type: 'percent', label: 'Discount' },
+        status: { type: 'select', label: 'Status', options: [{ label: 'Open', value: 'open' }] },
+      },
+      { columns: TITLE_ONLY },
+      { onAddedFieldsChange: vi.fn() },
+    );
+    await definitionLoaded();
+    let labels: string[] = [];
+    await waitFor(async () => {
+      labels = await inPopover(toolbarButton(/^hide fields/i), checkboxLabels);
+      expect(labels).toContain('Discount');
+    });
+    expect(labels).toEqual(['Title', 'Discount', 'Status', 'Owner']);
+  });
+});
