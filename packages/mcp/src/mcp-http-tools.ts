@@ -681,7 +681,7 @@ const VALIDATION_SEVERITIES = ['error', 'warning', 'info'] as const satisfies re
  * autolaunched flow started by hand, an action or a parent flow).
  */
 type FlowTriggerOrNone = FlowTriggerKind | 'none';
-const FLOW_TRIGGER_INPUTS = [...FLOW_TRIGGER_KINDS, 'none'] as [FlowTriggerOrNone, ...FlowTriggerOrNone[]];
+const FLOW_TRIGGER_INPUTS: [FlowTriggerOrNone, ...FlowTriggerOrNone[]] = ['none', ...FLOW_TRIGGER_KINDS];
 
 // ── Tool arguments: an undeclared key is REFUSED, not stripped (#16913) ──────
 

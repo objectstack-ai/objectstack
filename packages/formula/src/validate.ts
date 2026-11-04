@@ -425,7 +425,7 @@ function typeSoundnessIssue(
       ),
     };
   }
-  const heldKind = mismatch.celType === 'bool' ? 'boolean' : 'text';
+  const heldKind: 'boolean' | 'text' = mismatch.celType === 'bool' ? 'boolean' : 'text';
   const held = heldKind === 'boolean' ? 'a boolean' : 'text';
   const subject = ref ? `${ref} holds ${held}` : `${held === 'a boolean' ? 'a boolean' : 'a text'} field`;
   const params = {

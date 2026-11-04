@@ -7,6 +7,8 @@ import {
   TYPED_EXPRESSION_SOURCE_REQUIRED,
 } from '@objectstack/spec/shared';
 
+import { validateStackExpressions } from '@objectstack/lint';
+
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import type { McpDataBridge } from './mcp-http-tools.js';
 
@@ -129,6 +131,89 @@ describe('validate_expression MCP tool (#1928)', () => {
     expect(bad.warnings).toHaveLength(0);
     expect(bad.errors.map((e: any) => e.code)).toEqual(['type-mismatch-run-fails']);
     expect(bad.errors[0].message).toContain('fails the run');
+  });
+
+  // [#29959] The two facts the gate's fault-outcome ledger reads off the rule
+  // and the flow, as optional inputs: for every value, the tool's verdict on
+  // a text-vs-number comparison is the publish gate's own (severity and
+  // message), read off `validateStackExpressions` on the same rule or flow.
+  describe('answers the publish gate for each severity and trigger kind (#29959)', () => {
+    const fields = { title: { type: 'text', required: true } };
+    const typeVerdicts = (issues: ReturnType<typeof validateStackExpressions>) =>
+      issues.filter((i) => /^type mismatch/.test(i.message)).map((i) => [i.severity, i.message]);
+    const toolVerdicts = (r: { errors: { message: string }[]; warnings: { message: string }[] }) => [
+      ...r.errors.map((e) => ['error', e.message]),
+      ...r.warnings.map((w) => ['warning', w.message]),
+    ];
+
+    for (const severity of [undefined, 'error', 'warning', 'info'] as const) {
+      it(`site validation, severity ${severity ?? '(omitted)'}`, async () => {
+        const expression = 'record.title > 5';
+        const gate = typeVerdicts(validateStackExpressions({
+          objects: [{
+            name: 'crm_opportunity',
+            fields,
+            validations: [{ name: 'r', type: 'script', condition: expression, message: 'm', ...(severity ? { severity } : {}) }],
+          }],
+        }));
+        expect(gate).toHaveLength(1);
+        const r = await validate(runtime, bridge, { objectName: 'crm_opportunity', expression, site: 'validation', ...(severity ? { severity } : {}) });
+        expect(toolVerdicts(r)).toEqual(gate);
+      });
+    }
+
+    for (const [triggerKind, startConfig, flowType] of [
+      [undefined, { triggerType: 'record-after-update' }, 'autolaunched'],
+      ['record_change', { triggerType: 'record-after-create' }, 'autolaunched'],
+      ['time_relative', { timeRelative: { object: 'crm_opportunity', field: 'close_date', offsetDays: 1 }, schedule: '0 * * * *' }, 'autolaunched'],
+      ['schedule', { schedule: '0 * * * *' }, 'autolaunched'],
+      ['api', {}, 'api'],
+      ['none', {}, 'autolaunched'],
+    ] as const) {
+      it(`site flow_condition, triggerKind ${triggerKind ?? '(omitted)'}`, async () => {
+        const expression = 'title * 2 > 10';
+        const gate = typeVerdicts(validateStackExpressions({
+          objects: [{ name: 'crm_opportunity', fields }],
+          flows: [{
+            name: 'f',
+            type: flowType,
+            nodes: [
+              { id: 'start', type: 'start', config: { objectName: 'crm_opportunity', condition: expression, ...startConfig } },
+              { id: 'end', type: 'end' },
+            ],
+            edges: [{ id: 'e1', source: 'start', target: 'end' }],
+          }],
+        }));
+        expect(gate).toHaveLength(1);
+        const r = await validate(runtime, bridge, { objectName: 'crm_opportunity', expression, site: 'flow_condition', ...(triggerKind ? { triggerKind } : {}) });
+        expect(toolVerdicts(r)).toEqual(gate);
+      });
+    }
+
+    it('refuses an input on a site it does not describe', async () => {
+      for (const args of [
+        { site: 'flow_condition', severity: 'warning' },
+        { site: 'formula', severity: 'error' },
+        { severity: 'info' },
+        { site: 'validation', triggerKind: 'api' },
+        { triggerKind: 'record_change' },
+      ]) {
+        const { json } = await call(runtime, toolsCall(1, 'validate_expression', { objectName: 'crm_opportunity', expression: 'record.title > 5', ...args }), bridge);
+        expect(json.result.isError, JSON.stringify(args)).toBe(true);
+        expect(json.result.content[0].text, JSON.stringify(args)).toMatch(/applies only with site/);
+      }
+    });
+
+    it('leaves a well-typed condition clean at every input', async () => {
+      for (const severity of ['error', 'warning', 'info'] as const) {
+        const r = await validate(runtime, bridge, { objectName: 'crm_opportunity', expression: 'size(record.title) > 5', site: 'validation', severity });
+        expect([r.errors, r.warnings], severity).toEqual([[], []]);
+      }
+      for (const triggerKind of ['record_change', 'time_relative', 'schedule', 'api', 'none'] as const) {
+        const r = await validate(runtime, bridge, { objectName: 'crm_opportunity', expression: 'size(title) > 5', site: 'flow_condition', triggerKind });
+        expect([r.errors, r.warnings], triggerKind).toEqual([[], []]);
+      }
+    });
   });
 
   it('errors clearly when the object does not exist', async () => {
