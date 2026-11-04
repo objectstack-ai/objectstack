@@ -302,7 +302,7 @@ const response = await fetch('http://localhost:3000/api/v1/auth/reset-password',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
     token: 'reset-token-from-email',
-    password: 'newSecurePassword456'
+    newPassword: 'newSecurePassword456'
   })
 });
 ```
