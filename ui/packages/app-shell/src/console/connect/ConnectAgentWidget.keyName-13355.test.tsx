@@ -151,7 +151,7 @@ describe('Connect an Agent offers the Chinese clients after the international on
       'claude.ai / Claude Desktop',
       'Claude Code',
       'Cursor',
-      'Codex CLI',
+      'Codex',
       'WorkBuddy',
       // Product names a pack may write in its own script (zh: 豆包工作 / 千问办公).
       '«connectAgent.doubao.title»',

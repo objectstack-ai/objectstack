@@ -4485,7 +4485,7 @@ const en = {
       url: 'Server URL',
     },
     codex: {
-      body: 'Add to ~/.codex/config.toml. If your Codex version lacks the OAuth flow, use an API key header instead (see below):',
+      body: 'The Codex app, CLI and IDE extension share one config: add this to ~/.codex/config.toml (in the Codex app: Settings → MCP servers). If your Codex version lacks the OAuth flow, use an API key header instead (see below):',
     },
     workbuddy: {
       body: 'Connectors → Custom connector → Configure MCP, then merge this entry into mcpServers (WorkBuddy keeps it in ~/.workbuddy/mcp.json):',

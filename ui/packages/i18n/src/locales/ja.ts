@@ -3711,7 +3711,7 @@ const ja = {
       url: 'サーバー URL',
     },
     codex: {
-      body: '~/.codex/config.toml に追加してください。Codex が OAuth フロー未対応の場合は API キーのヘッダーをご利用ください(下記参照):',
+      body: 'Codex アプリ、CLI、IDE 拡張機能は同じ設定を共有します:~/.codex/config.toml に追加します(Codex アプリでは 設定 → MCP サーバー)。お使いの Codex が OAuth フローに対応していない場合は、代わりに API キーのヘッダーを使用してください(下記参照):',
     },
     workbuddy: {
       body: 'コネクタ → カスタムコネクタ → MCP を設定 を開き、このエントリを mcpServers にマージします(保存先は ~/.workbuddy/mcp.json):',

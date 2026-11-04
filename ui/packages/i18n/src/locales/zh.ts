@@ -3905,7 +3905,7 @@ const zh = {
       url: '服务器 URL',
     },
     codex: {
-      body: '加入 ~/.codex/config.toml。如果你的 Codex 版本不支持 OAuth 流程,请改用 API 密钥请求头(见下):',
+      body: 'Codex 客户端、CLI 和 IDE 插件共用同一份配置:把以下内容加入 ~/.codex/config.toml(在 Codex 客户端中:设置 → MCP 服务器)。如果你的 Codex 版本不支持 OAuth 流程,请改用 API 密钥请求头(见下):',
     },
     workbuddy: {
       body: '腾讯 WorkBuddy:连接器 → 自定义连接器 → 配置 MCP,把以下条目合并进 mcpServers(配置保存在 ~/.workbuddy/mcp.json):',

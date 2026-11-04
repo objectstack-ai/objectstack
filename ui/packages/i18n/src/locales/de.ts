@@ -3709,7 +3709,7 @@ const de = {
       url: 'Server-URL',
     },
     codex: {
-      body: 'In ~/.codex/config.toml eintragen. Falls Ihre Codex-Version den OAuth-Flow nicht unterstützt, stattdessen einen API-Schlüssel-Header verwenden (siehe unten):',
+      body: 'Codex-App, CLI und IDE-Erweiterung teilen eine Konfiguration: in ~/.codex/config.toml eintragen (in der Codex-App: Einstellungen → MCP-Server). Falls Ihre Codex-Version den OAuth-Flow nicht unterstützt, stattdessen einen API-Schlüssel-Header verwenden (siehe unten):',
     },
     workbuddy: {
       body: 'Connectors → Benutzerdefinierter Connector → MCP konfigurieren, dann diesen Eintrag in mcpServers übernehmen (gespeichert in ~/.workbuddy/mcp.json):',

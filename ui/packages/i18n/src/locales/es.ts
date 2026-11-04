@@ -3784,7 +3784,7 @@ const es = {
       url: 'URL del servidor',
     },
     codex: {
-      body: 'Añadir a ~/.codex/config.toml. Si su versión de Codex no admite el flujo OAuth, use una cabecera de clave API (ver abajo):',
+      body: 'La app de Codex, la CLI y la extensión del IDE comparten una misma configuración: añade esto a ~/.codex/config.toml (en la app de Codex: Ajustes → Servidores MCP). Si tu versión de Codex no admite el flujo OAuth, usa una cabecera de clave API (ver abajo):',
     },
     workbuddy: {
       body: 'Conectores → Conector personalizado → Configurar MCP y fusiona esta entrada en mcpServers (se guarda en ~/.workbuddy/mcp.json):',
