@@ -269,8 +269,8 @@ create/update payload.
   validation, or flow condition. Returns build-time errors (bare field refs,
   unknown fields/functions) and advisory warnings (text/boolean fields misused
   in arithmetic; an error at a \`validation\` site, worded for the rule's
-  \`severity\`, and at a \`flow_condition\` of a record-triggered flow, where
-  it fails the run; a warning on any other flow), plus the fields and
+  \`severity\`, and at a \`flow_condition\` of a record-triggered or
+  time-relative flow, where it fails the run; a warning on any other flow), plus the fields and
   stdlib functions in scope. \`site\` is \`formula\` | \`validation\` |
   \`flow_condition\` | \`template\` (default \`formula\`). Pass the rule's
   \`severity\` or the flow's \`triggerKind\` (\`record_change\` by default) to

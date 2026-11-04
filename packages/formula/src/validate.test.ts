@@ -829,6 +829,28 @@ describe('validateExpression (ADR-0032)', () => {
       }
     });
 
+    // [#29959] A bare name the run binds as a flow variable (`flowVariables`)
+    // holds the variable — `seedRunVariables` seeds it before the flattening,
+    // which skips a bound name — so it is not typed as the field it shadows.
+    // `record.<name>` still reads the field and keeps its verdict.
+    it('does not type a bare name a flow variable holds, and keeps its record.<name> read typed (#29959)', () => {
+      const flat = { ...schema, scope: 'flattened' as const, faultOutcome: 'run-fails' as const, flowVariables: ['name', 'is_active'] };
+      for (const source of ['name > 5', 'is_active > 0', 'name * 2 > 1']) {
+        const r = validateExpression('predicate', source, flat);
+        expect([r.errors, r.warnings], source).toEqual([[], []]);
+      }
+      for (const [source, reference] of [['record.name > 5', 'record.name'], ['previous.is_active > 0', 'previous.is_active']] as const) {
+        const r = validateExpression('predicate', source, flat);
+        expect(r.errors.map((e) => [e.code, (e.params as { reference?: string }).reference]), source).toEqual([['type-mismatch-run-fails', reference]]);
+      }
+      // A field the hint does not name is judged as before, in the same source.
+      const other = validateExpression('predicate', 'name > 5 && title > 5', { ...flat, flowVariables: ['name'] });
+      expect(other.errors.map((e) => (e.params as { reference?: string }).reference)).toEqual(['title']);
+      // The hint is the flattened scope's: a `record`-scoped site ignores it.
+      expect(validateExpression('predicate', 'record.name > 5', { ...schema, flowVariables: ['name'] }).warnings.map((w) => w.code))
+        .toEqual(['type-mismatch']);
+    });
+
     // [#29959] With no declared outcome a flattened condition is a flow's
     // that is not proven to bind the field: a warning, but one saying the run
     // fails on the fault, since a flow condition never reads null.

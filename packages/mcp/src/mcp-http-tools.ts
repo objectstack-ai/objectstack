@@ -663,11 +663,14 @@ const VALIDATE_SITE_MAP: Record<
   // branch condition (the default `triggerKind`): the trigger record is
   // flattened into the run's variables, a fault fails the run while the write
   // that fired it lands, and the gate grades a text-vs-number comparison an
-  // error worded so. Any other trigger kind declares no outcome: the gate's
-  // `type-mismatch-run-may-fail` warning.
+  // error worded so. A time-relative sweep launches each run with the swept
+  // row of `objectName` as its record, so it is graded the same. Any other
+  // trigger kind declares no outcome: the gate's `type-mismatch-run-may-fail`
+  // warning.
   flow_condition: {
     role: 'predicate', scope: 'flattened', slot: EvaluatedExpressionInputSchema,
-    faultOutcome: ({ triggerKind }) => (triggerKind === 'record_change' ? 'run-fails' : undefined),
+    faultOutcome: ({ triggerKind }) =>
+      (triggerKind === 'record_change' || triggerKind === 'time_relative' ? 'run-fails' : undefined),
   },
   template: { role: 'template', scope: 'record', slot: TemplateExpressionInputSchema },
 };
@@ -1088,8 +1091,8 @@ export function registerObjectTools(
           'Validate a CEL expression against an object\'s schema before authoring it into metadata. Returns ' +
           'build-time errors (bare field refs, unknown fields, unknown functions) and advisory warnings ' +
           '(text/boolean fields misused in arithmetic, an error at a `validation` site, worded for the rule\'s ' +
-          '`severity`, and at a `flow_condition` of a record-triggered flow, where it fails the run; a warning on ' +
-          'any other flow; date-equality pitfalls), plus the fields and stdlib ' +
+          '`severity`, and at a `flow_condition` of a record-triggered or time-relative flow, where it fails the run; ' +
+          'a warning on any other flow; date-equality pitfalls), plus the fields and stdlib ' +
           'functions in scope so you can self-correct. `site` says where the expression will live: a `formula` ' +
           'field, a `validation`/predicate, or a `flow_condition` (fields are bound bare in flow conditions). ' +
           'Pass the rule\'s `severity` (validation) or the flow\'s `triggerKind` (flow_condition) so the verdict ' +
@@ -1127,7 +1130,8 @@ export function registerObjectTools(
               .describe(
                 'site flow_condition only: how the flow is started — record_change (start triggerType record-*), ' +
                 'time_relative, schedule, api, or none (started by hand, an action or a parent flow). A type mismatch ' +
-                'is an error on a record_change flow and a warning on any other. Default: record_change.',
+                'is an error on a record_change or time_relative flow (its record is a row of objectName) and a warning ' +
+                'on any other. Default: record_change.',
               ),
           },
         ),

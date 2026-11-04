@@ -18,6 +18,7 @@ import {
   PREDICATE_SLOT_STRING_REFUSAL,
   STRUCTURAL_CONDITION_SHAPE_REFUSAL,
   TEXT_SLOT_TEMPLATE_REFUSAL,
+  TimeRelativeTriggerSchema,
   VALUE_SLOT_TEMPLATE_REFUSAL,
   flowNodeConfigRefusals,
   predicateSlotRefusal,
@@ -1099,6 +1100,91 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       });
       expect(typeMismatches(issues)).toEqual([]);
       expect(issues.filter(i => i.severity === 'error')).toEqual([]);
+    });
+
+    // [#29959] `time-relative-trigger.ts` launches each run with the swept row
+    // as `{ record: row }` — a stored row of the swept object, flattened like a
+    // record-change trigger's — so a sweep of the object the conditions are
+    // typed against gets the run-fails verdict, bare name included. A sweep of
+    // another object binds a row of THAT object: the warning stays.
+    it('refuses a type mismatch on a time-relative sweep of the flow object, and warns on a sweep of another (#29959)', () => {
+      const flowOf = (name: string, sweepObject: string | undefined) => ({
+        name,
+        nodes: [
+          {
+            id: 'start', type: 'start',
+            config: {
+              objectName: 'crm_opportunity', condition: 'title > 5', schedule: '0 * * * *',
+              timeRelative: { ...(sweepObject ? { object: sweepObject } : {}), dateField: 'close_date', offsetDays: 3 },
+            },
+          },
+          { id: 'route', type: 'decision', config: { conditions: [{ label: 'Long', expression: 'record.title > 5' }] } },
+          { id: 'end', type: 'end' },
+        ],
+        edges: [
+          { id: 'e1', source: 'start', target: 'route', condition: 'title * 2 > 10' },
+          { id: 'e2', source: 'route', target: 'end', label: 'Long' },
+        ],
+      });
+      const objects = [
+        { name: 'crm_opportunity', fields: { title: { type: 'text', required: true }, close_date: { type: 'date' } } },
+        { name: 'crm_task', fields: { close_date: { type: 'date' } } },
+      ];
+      for (const [name, sweepObject, severity] of [
+        ['tr_default', undefined, 'error'],
+        ['tr_same', 'crm_opportunity', 'error'],
+        ['tr_other', 'crm_task', 'warning'],
+      ] as const) {
+        const found = typeMismatches(validateStackExpressions({ objects, flows: [flowOf(name, sweepObject)] }));
+        expect(found.map(i => [i.where, i.severity]), name).toEqual([
+          [`flow '${name}' · node 'start' (start) condition`, severity],
+          [`flow '${name}' · node 'route' (decision) decision branch expression at config.conditions[0].expression`, severity],
+          [`flow '${name}' · edge 'e1' (start→route) condition`, severity],
+        ]);
+        for (const i of found) {
+          expect(i.message, `${name} ${i.where}`).toContain(
+            severity === 'error' ? 'the write that fired it still lands' : 'so this is a warning, not a refusal',
+          );
+        }
+      }
+    });
+
+    // [#29959] `seedRunVariables` seeds the flow's declared variables before it
+    // flattens the record, and the flattening skips a name already bound: a
+    // bare `title` here reads the NUMBER variable and `title > 5` runs. Only
+    // the shadowing warning may name it; `record.title` still reads the field.
+    it('does not type a bare name a declared flow variable holds as the field it shadows (#29959)', () => {
+      const issues = validateStackExpressions({
+        objects: [{ name: 'crm_opportunity', fields: { title: { type: 'text', required: true } } }],
+        flows: [{
+          name: 'rt_vars',
+          variables: [{ name: 'title', type: 'number', defaultValue: 3 }],
+          nodes: [
+            { id: 'start', type: 'start', config: { objectName: 'crm_opportunity', triggerType: 'record-after-update', condition: 'title > 5' } },
+            { id: 'route', type: 'decision', config: { conditions: [{ label: 'Big', expression: 'title > 5' }, { label: 'Long', expression: 'record.title > 5' }] } },
+            { id: 'end', type: 'end' },
+          ],
+          edges: [
+            { id: 'e1', source: 'start', target: 'route', condition: 'title > 5' },
+            { id: 'e2', source: 'route', target: 'end', label: 'Big' },
+            { id: 'e3', source: 'route', target: 'end', label: 'Long' },
+          ],
+        }],
+      });
+      const found = typeMismatches(issues);
+      expect(found.map(i => [i.where, i.severity])).toEqual([
+        ["flow 'rt_vars' · node 'route' (decision) decision branch expression at config.conditions[1].expression", 'error'],
+      ]);
+      expect(found[0]!.message).toContain('`record.title` holds text');
+      // The shadowing itself is still said, at the start and edge sites that read it.
+      const shadowSites = issues.filter(i => /declared flow variable/i.test(i.message) || /shadow/i.test(i.message)).map(i => i.where);
+      expect(shadowSites).toEqual(expect.arrayContaining([
+        "flow 'rt_vars' · node 'start' (start) condition",
+        "flow 'rt_vars' · edge 'e1' (start→route) condition",
+      ]));
+      expect(issues.filter(i => i.severity === 'error').map(i => i.where)).toEqual([
+        "flow 'rt_vars' · node 'route' (decision) decision branch expression at config.conditions[1].expression",
+      ]);
     });
 
     it('keeps the warning on an inert node condition of a record-triggered flow (#29926)', () => {
@@ -3721,6 +3807,15 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     keys: () => Object.keys(AppLandingEntrySchema.shape),
   },
   {
+    // [#29959] A start node's `config.timeRelative` sweep descriptor: its
+    // `object` decides whether the sweep binds a row of the object the flow's
+    // conditions are typed against (the fault-outcome ledger's time-relative row).
+    receiver: 'sweep',
+    expected: ['object'],
+    declaredBy: 'TimeRelativeTriggerSchema',
+    keys: () => shapeKeysOf(TimeRelativeTriggerSchema),
+  },
+  {
     receiver: 'obj',
     // `validationRules` is absent — one of the five #5017 removed.
     // `attachedOnRead` joined with #22386 (#22211 ruling A): the declared read
@@ -4029,12 +4124,13 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // methods, never metadata keys.
       'rootScope', 'declaredVariables', 'nullGuardBare',
       // [#29926] The fault-outcome ledger's own site descriptor (`kind`,
-      // `severity`, `recordTriggered`), built at each call site from the
+      // `severity`, `triggerKind`, `sweepsTypedObject`), built at each call site from the
       // tabled receivers (`rule.severity`) — never read off metadata itself.
       'site',
       // [#29959] A `decision` branch's flow-condition hint (`objectName`,
-      // `faultOutcome`), built at the call site from the walk's own
-      // `objectName` and the ledger's answer — never read off metadata itself.
+      // `faultOutcome`, `flowVariables`), built at the call site from the
+      // walk's own `objectName`, the ledger's answer and the flow's bound
+      // names — never read off metadata itself.
       'flowCondition',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);

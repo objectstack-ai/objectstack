@@ -96,7 +96,9 @@ export interface ExprSchemaHint {
    * text or boolean field used with an arithmetic/ordering operator against a
    * number faults at runtime and the expression silently evaluates to `null`,
    * so it is surfaced as a NON-blocking warning. Absent ⇒ the check is skipped.
-   * Only consulted for `scope: 'record'` sites (where refs are `record.<field>`).
+   * Consulted at both scopes: `record.<field>` at a `'record'` site, the bare
+   * `<field>` and its `record.<field>` / `previous.<field>` read at a
+   * `'flattened'` one (#29959).
    */
   fieldTypes?: Readonly<Record<string, string>>;
   /**
@@ -254,6 +256,17 @@ export interface ExprSchemaHint {
    * the condition faults (#29959) — a flow condition never reads null.
    */
   faultOutcome?: ExprFaultOutcome;
+  /**
+   * [#29959] `'flattened'` scope only: the names the flow's run binds BEFORE it
+   * flattens the record's fields — its declared variables and node ids
+   * (`@objectstack/lint`'s `collectFlowVariableNames`), and the names the
+   * engine binds over the flattening. `seedRunVariables` seeds those first and
+   * the flattening skips a name already bound, so a bare read of one holds the
+   * variable, not the field: the type-soundness check does not type it as the
+   * field. `record.<name>` / `previous.<name>` still read the field and stay
+   * typed. Absent ⇒ every bare field name is typed, exactly as before this key.
+   */
+  flowVariables?: readonly string[];
 }
 
 /**
@@ -400,10 +413,21 @@ function typeSoundnessIssue(
   scope: 'record' | 'flattened',
   role: 'predicate' | 'value',
   faultOutcome: ExprSchemaHint['faultOutcome'],
+  flowVariables?: readonly string[],
 ): { issue: ExprValidationError; severity: 'error' | 'warning' } | null {
   const celFieldTypes = toCelFieldTypes(fieldTypes);
-  const mismatch = firstTypeMismatch(source, celFieldTypes, scope);
-  if (!mismatch) return dateTextIssue(source, celFieldTypes, scope, role);
+  // [#29959] A bare name a flow variable holds is not the field (see
+  // `ExprSchemaHint.flowVariables`), for every bare-name verdict here.
+  const shadowed = scope === 'flattened' && flowVariables && flowVariables.length > 0
+    ? new Set(flowVariables)
+    : undefined;
+  const mismatch = firstTypeMismatch(source, celFieldTypes, scope, shadowed);
+  if (!mismatch) {
+    const bareCelTypes = shadowed
+      ? Object.fromEntries(Object.entries(celFieldTypes).filter(([name]) => !shadowed.has(name)))
+      : celFieldTypes;
+    return dateTextIssue(source, bareCelTypes, scope, role);
+  }
   const reference = mismatch.field
     ? (mismatch.root !== undefined
       ? `${mismatch.root}.${mismatch.field}`
@@ -461,10 +485,11 @@ function typeSoundnessIssue(
     // [#29959] A flattened condition is a flow's, and the engine's
     // `evaluateCondition` throws on a fault (ADR-0032 §1c) on every flow: it
     // never reads null. The caller declared no outcome because what the run
-    // binds under the name is not proven to be the field's value — a flow
-    // that is not record-triggered is handed whatever its entrance carries
-    // (an API request body, an action's partial record, a parent's record,
-    // or nothing), so the mismatch stays a warning, worded for the run.
+    // binds under the name is not proven to be the field's value there — a
+    // flow whose entrance hands over an API request body, an action's partial
+    // record, a parent's record or nothing; a node's inert `condition` — so
+    // the mismatch stays a warning, worded for the run without naming the
+    // flow's kind (the engine's registration log serves it on every flow).
     return {
       severity: 'warning',
       issue: refusal(
@@ -473,8 +498,8 @@ function typeSoundnessIssue(
         source,
         `${faults}, and a flow condition that faults when it is evaluated fails the run: the flow stops ` +
           `at this condition and the work it exists to do is not done (it does not read null). Whether ` +
-          `${ref ?? 'the field'} holds ${held} there depends on what the run binds — on a flow that is not ` +
-          `record-triggered, whatever started it — so this is a warning, not a refusal. ${convert}`,
+          `${ref ?? 'the field'} holds ${held} there depends on what the run binds, which this check cannot ` +
+          `prove here, so this is a warning, not a refusal. ${convert}`,
       ),
     };
   }
@@ -1380,7 +1405,7 @@ export function validateExpression(
       // date-field arithmetic (error). Flow variables stay `dyn` (never flagged);
       // equality/ordering of a date is runtime-safe (never flagged).
       if (schema.fieldTypes) {
-        const r = typeSoundnessIssue(source, schema.fieldTypes, 'flattened', role, schema.faultOutcome);
+        const r = typeSoundnessIssue(source, schema.fieldTypes, 'flattened', role, schema.faultOutcome, schema.flowVariables);
         if (r) (r.severity === 'error' ? errors : warnings).push(r.issue);
       }
     }

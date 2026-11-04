@@ -162,13 +162,15 @@ describe('validate_expression MCP tool (#1928)', () => {
       });
     }
 
-    for (const [triggerKind, startConfig, flowType] of [
-      [undefined, { triggerType: 'record-after-update' }, 'autolaunched'],
-      ['record_change', { triggerType: 'record-after-create' }, 'autolaunched'],
-      ['time_relative', { timeRelative: { object: 'crm_opportunity', field: 'close_date', offsetDays: 1 }, schedule: '0 * * * *' }, 'autolaunched'],
-      ['schedule', { schedule: '0 * * * *' }, 'autolaunched'],
-      ['api', {}, 'api'],
-      ['none', {}, 'autolaunched'],
+    // The severity column is the ledger's own answer (`faultOutcomeOf`): a
+    // time-relative sweep binds a row of `objectName` as its record (#29959).
+    for (const [triggerKind, startConfig, flowType, severity] of [
+      [undefined, { triggerType: 'record-after-update' }, 'autolaunched', 'error'],
+      ['record_change', { triggerType: 'record-after-create' }, 'autolaunched', 'error'],
+      ['time_relative', { timeRelative: { object: 'crm_opportunity', field: 'close_date', offsetDays: 1 }, schedule: '0 * * * *' }, 'autolaunched', 'error'],
+      ['schedule', { schedule: '0 * * * *' }, 'autolaunched', 'warning'],
+      ['api', {}, 'api', 'warning'],
+      ['none', {}, 'autolaunched', 'warning'],
     ] as const) {
       it(`site flow_condition, triggerKind ${triggerKind ?? '(omitted)'}`, async () => {
         const expression = 'title * 2 > 10';
@@ -185,6 +187,7 @@ describe('validate_expression MCP tool (#1928)', () => {
           }],
         }));
         expect(gate).toHaveLength(1);
+        expect(gate[0]![0]).toBe(severity);
         const r = await validate(runtime, bridge, { objectName: 'crm_opportunity', expression, site: 'flow_condition', ...(triggerKind ? { triggerKind } : {}) });
         expect(toolVerdicts(r)).toEqual(gate);
       });

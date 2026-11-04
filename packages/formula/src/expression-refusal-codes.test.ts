@@ -438,8 +438,8 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         'type mismatch `string > int` — `name` holds text but is used with `>` against a number. CEL has no such operation, so ' +
         'wherever the value is not numeric text (an empty value included) the expression faults, and a flow condition that ' +
         'faults when it is evaluated fails the run: the flow stops at this condition and the work it exists to do is not done ' +
-        '(it does not read null). Whether `name` holds text there depends on what the run binds — on a flow that is not ' +
-        'record-triggered, whatever started it — so this is a warning, not a refusal. ' +
+        '(it does not read null). Whether `name` holds text there depends on what the run binds, which this check cannot ' +
+        'prove here, so this is a warning, not a refusal. ' +
         'Compare like with like: use a number field, compare text with text, or convert explicitly — `size(name)` for its ' +
         'length, `double(name)` for its value (which itself faults on text that is not a number).',
     },
@@ -452,7 +452,7 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         'operation, so wherever the value is not numeric text (an empty value included) the expression faults, and a flow ' +
         'condition that faults when it is evaluated fails the run: the flow stops at this condition and the work it exists ' +
         'to do is not done (it does not read null). Whether `record.active` holds a boolean there depends on what the run ' +
-        'binds — on a flow that is not record-triggered, whatever started it — so this is a warning, not a refusal. ' +
+        'binds, which this check cannot prove here, so this is a warning, not a refusal. ' +
         'Compare a boolean with `true` / `false`, or use a number field.',
     },
   ],
