@@ -217,12 +217,14 @@ describe('AppPlugin per-org replayer replays the live union (#3453 seam)', () =>
             'crm_contact',
             'hot_lead',
         ]);
-        // Tenant-scoped, upsert, multi-pass — as the org replay requires.
+        // Tenant-scoped, multi-pass — as the org replay requires. No mode of
+        // its own: each dataset replays in the mode it declares, the spec
+        // default (create-only) when it declares none (#30081).
         expect(loadCalls[0].config).toMatchObject({
-            defaultMode: 'upsert',
             multiPass: true,
             organizationId: 'org_fresh',
         });
+        expect(loadCalls[0].config).not.toHaveProperty('defaultMode');
         expect(result).toMatchObject({ inserted: 3 });
     });
 
@@ -243,5 +245,53 @@ describe('AppPlugin per-org replayer replays the live union (#3453 seam)', () =>
         // …and org #2 replays BOTH, because the closure re-reads the live list.
         await replayer('org_two');
         expect(loadCalls.at(-1).seeds.map((s: any) => s.object)).toEqual(['crm_account', 'hot_lead']);
+    });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+/**
+ * #30081 — one seed default, stated once. The inline seed a single-tenant boot
+ * runs builds its request with no mode of its own: each dataset replays in the
+ * mode it declares, the spec default (`ignore`, create-only) when it declares
+ * none. The per-organization replayer above and the install-local doors
+ * (cloud-connection) are pinned the same way.
+ */
+describe('AppPlugin inline boot seed sets no mode of its own (#30081)', () => {
+    const OLD_MULTI = process.env.OS_MULTI_ORG_ENABLED;
+
+    beforeEach(() => {
+        loadCalls = [];
+        seedResult = loaderResult({ totalInserted: 1, totalUpdated: 0, totalSkipped: 0 });
+        delete process.env.OS_MULTI_ORG_ENABLED; // single-tenant: the inline seed runs at boot
+    });
+    afterEach(() => {
+        if (OLD_MULTI === undefined) delete process.env.OS_MULTI_ORG_ENABLED;
+        else process.env.OS_MULTI_ORG_ENABLED = OLD_MULTI;
+        vi.restoreAllMocks();
+    });
+
+    it('hands the loader a multi-pass request with no defaultMode', async () => {
+        const services = new Map<string, any>();
+        services.set('objectql', { insert: vi.fn(async () => undefined) });
+        services.set('metadata', {}); // present → the SeedLoaderService path, not the basic-insert fallback
+        const ctx: any = {
+            logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+            getService: (n: string) => (services.has(n) ? services.get(n) : undefined),
+            registerService: (n: string, v: any) => {
+                if (services.has(n)) throw new Error(`[Kernel] Service '${n}' already registered`);
+                services.set(n, v);
+            },
+            getServices: () => new Map(services),
+            hook: vi.fn(),
+            trigger: vi.fn(),
+        };
+
+        await new AppPlugin(appBundle('config-app-boot', ds('crm_account', 'a1'))).start(ctx);
+
+        await vi.waitFor(() => expect(loadCalls).toHaveLength(1));
+        expect(loadCalls[0].seeds.map((s: any) => s.object)).toEqual(['crm_account']);
+        expect(loadCalls[0].config).toMatchObject({ multiPass: true });
+        expect(loadCalls[0].config).not.toHaveProperty('defaultMode');
+        expect(loadCalls[0].config).not.toHaveProperty('organizationId');
     });
 });

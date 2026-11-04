@@ -3783,11 +3783,17 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     /**
      * POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data
      *
-     * Re-runs SeedLoaderService against the cached manifest's `data` arrays.
-     * Idempotent (upsert by id). Useful when:
+     * Re-runs SeedLoaderService against the cached manifest's `data` arrays,
+     * each dataset in the mode the installed body carries ([#30081] the spec
+     * default `ignore`, create-only, when it declares none). Idempotent.
+     * Useful when:
      *   • The user installed an app and skipped sample data
-     *   • A purge was undone
-     *   • The user wants a clean baseline back after editing demo rows
+     *   • A purge was undone, or demo rows were deleted
+     * It puts back the rows that are missing and leaves an edited row as it
+     * is; to get the shipped values back over edits, purge first, then
+     * reseed. A ledger entry installed from an artifact built before #30081
+     * carries a written `mode: "upsert"` and still writes the shipped values
+     * back on every reseed until the rebuilt artifact is re-installed.
      *
      * A success answers the loader's four counts — `inserted`, `updated`,
      * `skipped`, `errors` — so the caller sees why nothing changed. A run over
@@ -3927,7 +3933,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * {@link purgeSeedRows} carries the rules; this handler supplies the scope.
      *
      *   • A seed row is matched by the seed's own key — each dataset's
-     *     `externalId`, the key the install's upsert and the reseed match on.
+     *     `externalId`, the key the install and the reseed match on.
      *     A row whose key no seed record declares (user-authored data) is never
      *     touched; a key carried by more than one row in scope is not guessed.
      *   • Scope is the install's: under an organization wall, the caller's
@@ -4618,7 +4624,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     };
 
     /**
-     * One SeedLoaderService run over `datasets` (upsert, multi-pass) — the
+     * One SeedLoaderService run over `datasets` (multi-pass, each dataset in
+     * its own `mode`, the spec default `ignore` when it declares none) — the
      * shared engine behind install-time seeding, the reseed endpoint and the
      * rehydrate-time healer. Throws when objectql/metadata are unavailable;
      * per-row write failures are counted into `errors`, not thrown.
@@ -4642,7 +4649,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             // ADR-0036 / seed rename: the field is `seeds` (was `datasets`).
             seeds: datasets,
             config: {
-                defaultMode: 'upsert',
+                // [#30081] No mode of its own: an install, an upgrade or a
+                // reseed inserts the rows a dataset is missing and leaves the
+                // customer's existing rows alone, unless the dataset declares
+                // `mode: 'upsert'` (the spec default, ruling 6631016988).
                 multiPass: true,
                 ...(organizationId ? { organizationId } : {}),
             },

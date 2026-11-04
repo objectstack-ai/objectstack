@@ -25,9 +25,9 @@ import { defineSeed } from '@objectstack/spec/data';
 import { Account } from './objects/account.object';
 
 export const accountsSeed = defineSeed(Account, {
-  externalId: 'name',      // field used as the upsert / idempotency key
-  mode: 'upsert',          // create if new, update if found
+  externalId: 'name',      // field that matches a record to an existing row on replay
   env: ['dev', 'test'],    // only load in dev and test environments
+  // mode omitted → 'ignore': create-only, a replay never overwrites an edit
   records: [
     {
       name: 'Acme Corporation',
@@ -64,20 +64,44 @@ which half TypeScript checks and which half the call checks.
 The `mode` field controls how the seed runner behaves when it encounters an existing
 record (matched by `externalId`).
 
+Seeds are **replayed**, not applied once: a seed loads again on every boot of a
+single-tenant runtime (production included), on every package install or upgrade,
+and on every publish. The mode decides what each of those replays does to a row a
+customer has since edited.
+
 | Mode | Behavior | Use Case |
 |:-----|:---------|:---------|
-| `upsert` | Create if new, update if found | Default — idempotent for most data |
+| `ignore` | **Default.** Create-only: insert a record whose row is missing, leave an existing row exactly as it is | Business and starter data the customer owns once it is loaded |
+| `upsert` | Create if new, and on **every** replay write each declared column back onto the matched row | Reference data the package must keep current |
 | `insert` | Insert **every** record unconditionally — no existing-row check, so it **duplicates the table on each replay boot** ([#3434](https://github.com/objectstack-ai/objectstack/issues/3434)). Rarely what you want | Append-only rows loaded exactly once (never re-run) |
 | `update` | Update only, skip if not found | Migration patches on existing rows |
-| `ignore` | Create if new, silently skip duplicates | Bootstrap data that must not overwrite user edits |
 | `replace` | Insert without checking for an existing match — the seed loader does **not** delete anything itself; the target table must already be empty (or cleared by the caller) | Cache / lookup tables rebuilt from an already-truncated table |
 
-### `upsert` — Recommended Default
+### `ignore` — The Default (Create-Only)
+
+```typescript
+defineSeed(Account, {
+  externalId: 'name',
+  // no mode: a replay inserts a missing account and leaves an edited one alone
+  records: [
+    { name: 'Acme Corporation', industry: 'technology' },
+    { name: 'Globex Industries', industry: 'manufacturing' },
+  ],
+});
+```
+
+A seed with no `mode` never writes over a row that already exists. A customer who
+renames an account, or a job that advances a status, keeps that change across every
+restart and upgrade. The flip side: a value you later change in the seed reaches only
+a row the load creates. To see a seed edit in development, start from a clean
+database (`os dev --fresh`).
+
+### `upsert` — Reference Data the Package Keeps Current
 
 ```typescript
 defineSeed(Currency, {
   externalId: 'code',
-  mode: 'upsert',
+  mode: 'upsert',   // every replay writes these columns back onto the matched row
   records: [
     { code: 'USD', name: 'US Dollar',    symbol: '$' },
     { code: 'EUR', name: 'Euro',         symbol: '€' },
@@ -86,18 +110,21 @@ defineSeed(Currency, {
 });
 ```
 
-### `ignore` — Bootstrap Without Overwriting
+Declare `upsert` only for data the package must keep refreshed. Every replay puts
+each declared column back, so an edit a customer made to such a row is overwritten
+on the next boot or upgrade, silently. To refresh most columns but leave the ones a
+customer or a job owns, mark those columns create-only — see
+[`applyOn: 'create'`](#columns-your-app-owns-after-the-first-seed--applyon-create).
 
-```typescript
-defineSeed(SystemRole, {
-  externalId: 'code',
-  mode: 'ignore',
-  records: [
-    { code: 'admin',  label: 'Administrator' },
-    { code: 'viewer', label: 'Viewer' },
-  ],
-});
-```
+<Callout type="info">
+  The default used to be `upsert`. A package **built** before the change carries a
+  written `mode: "upsert"` on every dataset in its compiled artifact (the build stores
+  the parsed seed), so it keeps replaying with `upsert` until it is rebuilt. A package
+  installed with `os package install` keeps the body it was installed with, and its
+  sample-data reseed replays that body, so it also has to be **re-installed** from the
+  rebuilt artifact. Rebuild (and re-install) to take the create-only default; declare
+  `mode: 'upsert'` on the datasets that must stay current.
+</Callout>
 
 ### `replace` — Insert Into an Already-Cleared Table
 
@@ -123,8 +150,8 @@ Seeds are **replayed** — they re-load on every dev-server boot and every packa
 re-publish, not applied once. `insert` writes every record with **no existing-row
 check**, so a replayed `insert` dataset duplicates its table on each restart
 (a 3-row fixture becomes 6, then 9 — [#3434](https://github.com/objectstack-ai/objectstack/issues/3434)).
-It is almost never the right mode: reach for `upsert` (or `ignore`) with a stable
-`externalId` instead. `os validate` warns on any `mode: 'insert'` seed.
+It is almost never the right mode: leave `mode` unset (create-only), or declare
+`upsert` for reference data, with a stable `externalId` instead. `os validate` warns on any `mode: 'insert'` seed.
 
 ---
 
@@ -641,11 +668,12 @@ code instead bakes the choice into your build output, so shipping another
 market means another build. Neither approach removes what the market you left
 behind already wrote — see [Locale Scoping](#locale-scoping).
 
-### Use `upsert` by default
+### Leave `mode` unset for data the customer owns
 
-`upsert` is idempotent and the safest default. Only change the mode when the use
-case requires it — for example, `ignore` when you must not overwrite user edits to
-system defaults, or `replace` for ephemeral cache tables.
+The default, `ignore`, is idempotent and never overwrites an edit. Declare a mode only
+when the use case requires it — `upsert` for reference data the package keeps current
+(with `applyOn: 'create'` on the columns the customer or a job owns), or `replace`
+for ephemeral cache tables.
 
 ### Seed in dependency order
 
@@ -673,7 +701,7 @@ function defineSeed<
   objectDef: TObj,
   config: {
     externalId?: string | string[];         // single field, or a composite list (join tables); default: 'name'
-    mode?: 'insert' | 'update' | 'upsert' | 'replace' | 'ignore'; // default: 'upsert'
+    mode?: 'insert' | 'update' | 'upsert' | 'replace' | 'ignore'; // default: 'ignore'
     columns?: { [field: string]: { applyOn?: 'create' | 'always' } }; // per-column write policy; default: 'always'
     env?: Array<'prod' | 'dev' | 'test'>;  // default: ['prod','dev','test']
     locale?: string[];                      // BCP-47 tags; omitted = every locale

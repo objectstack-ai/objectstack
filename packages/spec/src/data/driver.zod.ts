@@ -8,6 +8,11 @@ import { retiredKey } from '../shared/retired-key';
 /**
  * Common Driver Options
  * Passed to most driver methods to control behavior (transactions, timeouts, etc.)
+ *
+ * A closed contract at the engine → driver hop: the ObjectQL engine hands a
+ * driver the keys declared here and nothing else (retired tombstones aside),
+ * whatever else rode in the caller's engine option bag. A key a driver needs is
+ * declared here first.
  */
 import { lazySchema } from '../shared/lazy-schema';
 export const DriverOptionsSchema = lazySchema(() => z.object({

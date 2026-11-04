@@ -57,9 +57,12 @@ export const PLATFORM_TOOLS_BY_PACKAGE: Readonly<Record<string, readonly string[
   /**
    * `@objectstack/service-ai-studio` (cloud) — the shared schema-reader pair
    * (`describe_object`/`list_objects`), the `build` authoring product's
-   * metadata/blueprint/package/verify tools, and the `ask` agent's hand-off
-   * signals (`suggest_builder`, `open_record`, `draft_record`), which write
-   * nothing.
+   * metadata/blueprint/package/verify tools, the chat agents' hand-off
+   * signals (`suggest_builder`, `open_record`), which write nothing, and the
+   * two record-write proposals (`create_record`, `update_record`) and the
+   * sample-data cleanup (`remove_sample_data`), which write ONE record or the
+   * seeded rows only after the user confirms a card and as that user
+   * (cloud#3565; they replaced `draft_record`).
    */
   'service-ai-studio': [
     'add_field',
@@ -68,11 +71,11 @@ export const PLATFORM_TOOLS_BY_PACKAGE: Readonly<Record<string, readonly string[
     'create_metadata',
     'create_object',
     'create_package',
+    'create_record',
     'create_seed',
     'delete_field',
     'describe_metadata',
     'describe_object',
-    'draft_record',
     'get_active_package',
     'get_authoring_rules',
     'get_metadata_schema',
@@ -84,12 +87,14 @@ export const PLATFORM_TOOLS_BY_PACKAGE: Readonly<Record<string, readonly string[
     'modify_field',
     'open_record',
     'propose_blueprint',
+    'remove_sample_data',
     'set_active_package',
     'suggest_builder',
     'test_flow',
     'todo_write',
     'toggle_flow',
     'update_metadata',
+    'update_record',
     'validate_expression',
     'verify_build',
   ],

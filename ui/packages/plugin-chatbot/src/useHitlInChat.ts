@@ -200,9 +200,13 @@ export function useHitlInChat(options: UseHitlInChatOptions): UseHitlInChatRetur
         return;
       }
       const { pendingActionId: id, toolName } = entry;
+      // Which button was pressed rides on every state (cloud#3565): a card
+      // that draws its own outcome reads it rather than the English message.
+      const decision = approved ? 'approved' : 'rejected';
       setDecision(toolCallId, {
         state: 'pending',
         message: approved ? 'Approving…' : 'Rejecting…',
+        decision,
       });
       inflightRef.current += 1;
       setIsDeciding(true);
@@ -223,7 +227,7 @@ export function useHitlInChat(options: UseHitlInChatOptions): UseHitlInChatRetur
             typeof payload.error === 'string'
               ? payload.error
               : `Approval failed: HTTP ${response.status}`;
-          setDecision(toolCallId, { state: 'error', message });
+          setDecision(toolCallId, { state: 'error', message, decision });
           // Not a wire response: on a non-2xx there IS no decision response, so
           // this envelope is synthesized locally to notify `onDecided`. The
           // `id` stays on it deliberately — it has been part of what consumers
@@ -245,19 +249,22 @@ export function useHitlInChat(options: UseHitlInChatOptions): UseHitlInChatRetur
           setDecision(toolCallId, {
             state: 'success',
             message: 'Approved — action executed.',
+            decision,
+            result: payload.result,
           });
           succeeded = true;
         } else if (status === 'rejected') {
           setDecision(toolCallId, {
             state: 'success',
             message: reason ? `Rejected: ${reason}` : 'Rejected.',
+            decision,
           });
           succeeded = true;
         } else if (status === 'failed') {
           const errMsg = (payload.error as string) ?? 'Action approved but execution failed.';
-          setDecision(toolCallId, { state: 'error', message: errMsg });
+          setDecision(toolCallId, { state: 'error', message: errMsg, decision });
         } else {
-          setDecision(toolCallId, { state: 'success', message: `Status: ${status}` });
+          setDecision(toolCallId, { state: 'success', message: `Status: ${status}`, decision });
           succeeded = true;
         }
         onDecided?.(toolCallId, payload as ApproveOutcome | RejectOutcome);
@@ -287,7 +294,7 @@ export function useHitlInChat(options: UseHitlInChatOptions): UseHitlInChatRetur
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        setDecision(toolCallId, { state: 'error', message });
+        setDecision(toolCallId, { state: 'error', message, decision: approved ? 'approved' : 'rejected' });
       } finally {
         inflightRef.current -= 1;
         if (inflightRef.current <= 0) {
