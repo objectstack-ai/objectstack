@@ -2662,6 +2662,9 @@ export function ChatPane({
         recordWriteWrittenLabel={t('console.ai.recordWriteWritten')}
         recordWriteCancelledLabel={t('console.ai.recordWriteCancelled')}
         sampleDataCleanupTitleLabel={t('console.ai.sampleDataCleanupTitle')}
+        sampleDataCleanupIrreversibleLabel={t('console.ai.sampleDataCleanupIrreversible')}
+        sampleDataCleanupAbsentLabel={(count) => t('console.ai.sampleDataCleanupAbsent', { count })}
+        sampleDataCleanupEditedLabel={(count) => t('console.ai.sampleDataCleanupEdited', { count })}
         surface="plain"
         maxHeight="100%"
         headerSlot={headerSlot}

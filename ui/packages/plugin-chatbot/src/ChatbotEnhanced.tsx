@@ -848,6 +848,16 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
   recordWriteCancelledLabel?: string;
   /** cloud#3565 — the sample-data cleanup card's title (default "Remove the sample data"). */
   sampleDataCleanupTitleLabel?: string;
+  /**
+   * cloud#3565 — the sample-data cleanup card's warning that the removal cannot
+   * be undone (default "Removed rows cannot be recovered."). Always shown: there
+   * is no recycle bin until objectstack#3146 lands.
+   */
+  sampleDataCleanupIrreversibleLabel?: string;
+  /** cloud#3565 — the line for the recorded rows the card does not list (shown when `absent` > 0). */
+  sampleDataCleanupAbsentLabel?: (count: number) => string;
+  /** cloud#3565 — the line for the recorded rows kept because someone edited them (shown when `edited` > 0). */
+  sampleDataCleanupEditedLabel?: (count: number) => string;
   /** Label for the publish-drafts button (default "Publish"). */
   publishDraftsLabel?: string;
   /** Label for the published-state badge that replaces the button (default "Published"). */
@@ -2264,6 +2274,11 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       recordWriteWrittenLabel = 'Written',
       recordWriteCancelledLabel = 'Cancelled',
       sampleDataCleanupTitleLabel = 'Remove the sample data',
+      sampleDataCleanupIrreversibleLabel = 'Removed rows cannot be recovered.',
+      sampleDataCleanupAbsentLabel = (count) =>
+        `${count} recorded ${count === 1 ? 'row is' : 'rows are'} not listed: you cannot see ${count === 1 ? 'it' : 'them'}, or ${count === 1 ? 'it is' : 'they are'} already gone.`,
+      sampleDataCleanupEditedLabel = (count) =>
+        `${count} ${count === 1 ? 'row' : 'rows'} edited since being seeded ${count === 1 ? 'stays' : 'stay'}.`,
       builderHandoffSupersededTitle = 'A newer request is available',
       onOpenBuilder,
       onOpenRecord,
@@ -3550,8 +3565,13 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
               </div>
             ) : null}
             {/* cloud#3565 — 「清理示例数据」: what the seed ledger recorded, per
-                table, so the user confirms a list rather than a payload. The
-                generic Approve / Deny strip below stays the decision. */}
+                table, so the user confirms a list rather than a payload, and
+                that the removal cannot be undone (the maintainer's note on
+                cloud#3565: no recycle bin until objectstack#3146). The rows
+                the list leaves out — hidden from the user or already gone —
+                and the rows kept because someone edited them are each said
+                when there are any. The generic Approve / Deny strip below
+                stays the decision. */}
             {tool.sampleDataCleanup ? (
               <div
                 className="flex flex-col gap-2 border-t bg-muted/20 px-3 py-2.5"
@@ -3569,6 +3589,19 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                     </li>
                   ))}
                 </ul>
+                <p className="text-xs font-medium text-destructive" data-testid="sample-data-cleanup-irreversible">
+                  {sampleDataCleanupIrreversibleLabel}
+                </p>
+                {tool.sampleDataCleanup.edited > 0 ? (
+                  <p className="text-xs text-muted-foreground" data-testid="sample-data-cleanup-edited">
+                    {sampleDataCleanupEditedLabel(tool.sampleDataCleanup.edited)}
+                  </p>
+                ) : null}
+                {tool.sampleDataCleanup.absent > 0 ? (
+                  <p className="text-xs text-muted-foreground" data-testid="sample-data-cleanup-absent">
+                    {sampleDataCleanupAbsentLabel(tool.sampleDataCleanup.absent)}
+                  </p>
+                ) : null}
               </div>
             ) : null}
             {/* cloud#3565 — the ONE-record write the user confirms. The card is

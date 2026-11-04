@@ -222,7 +222,7 @@ describe('ChatbotEnhanced — the record-write card (cloud#3565)', () => {
     expect(screen.queryByTestId('record-write-open-written')).not.toBeInTheDocument();
   });
 
-  it('「清理示例数据」 lists the tables and counts and keeps the generic Approve / Deny decision', () => {
+  it('「清理示例数据」 lists the tables and counts, says the rows cannot be recovered, and keeps the generic Approve / Deny decision', () => {
     const onToolApprove = vi.fn();
     render(
       <ChatbotEnhanced
@@ -244,6 +244,7 @@ describe('ChatbotEnhanced — the record-write card (cloud#3565)', () => {
         onSendMessage={vi.fn()}
         onToolApprove={onToolApprove}
         sampleDataCleanupTitleLabel="清理示例数据"
+        sampleDataCleanupIrreversibleLabel="删除后无法恢复。"
         {...LABELS}
       />,
     );
@@ -255,12 +256,47 @@ describe('ChatbotEnhanced — the record-write card (cloud#3565)', () => {
     expect(rows[0]).toHaveTextContent('12');
     expect(rows[1]).toHaveTextContent('线索');
     expect(rows[1]).toHaveTextContent('30');
+    // The maintainer's note on cloud#3565: no recycle bin (objectstack#3146), so the card says it plainly, always.
+    expect(screen.getByTestId('sample-data-cleanup-irreversible')).toHaveTextContent('删除后无法恢复。');
+    // Nothing left out and nothing kept: neither line appears.
+    expect(screen.queryByTestId('sample-data-cleanup-absent')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('sample-data-cleanup-edited')).not.toBeInTheDocument();
     // The decision is the generic strip; the raw payload stays hidden.
     fireEvent.click(screen.getByText('Approve and execute'));
     expect(onToolApprove).toHaveBeenCalledWith('c1', true);
     expect(screen.getByText('Reject')).toBeInTheDocument();
     expect(screen.queryByTestId('record-write')).not.toBeInTheDocument();
     expect(document.body.textContent ?? '').not.toContain('pending_approval');
+  });
+
+  it('「清理示例数据」 says how many recorded rows it does not list, and how many stay because someone edited them', () => {
+    render(
+      <ChatbotEnhanced
+        messages={transcript(
+          {
+            status: 'pending_approval',
+            pendingActionId: 'pa_10',
+            sampleDataCleanup: {
+              tables: [{ objectName: 'crm_account', label: '客户', count: 12 }],
+              total: 12,
+              absent: 3,
+              edited: 2,
+            },
+          },
+          'remove_sample_data',
+        )}
+        onSendMessage={vi.fn()}
+        onToolApprove={vi.fn()}
+        sampleDataCleanupTitleLabel="清理示例数据"
+        sampleDataCleanupIrreversibleLabel="删除后无法恢复。"
+        sampleDataCleanupAbsentLabel={(count) => `另有 ${count} 条未列出`}
+        sampleDataCleanupEditedLabel={(count) => `${count} 条已修改，将保留`}
+        {...LABELS}
+      />,
+    );
+    expect(screen.getByTestId('sample-data-cleanup-irreversible')).toHaveTextContent('删除后无法恢复。');
+    expect(screen.getByTestId('sample-data-cleanup-absent')).toHaveTextContent('另有 3 条未列出');
+    expect(screen.getByTestId('sample-data-cleanup-edited')).toHaveTextContent('2 条已修改，将保留');
   });
 
   it('a refused write shows the server\'s reason on the card', () => {

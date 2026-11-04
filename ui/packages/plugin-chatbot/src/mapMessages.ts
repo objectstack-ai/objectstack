@@ -871,16 +871,20 @@ export function detectRecordWrite(result: unknown): RecordWrite | undefined {
 /**
  * cloud#3565 — 「清理示例数据」: the chat's `remove_sample_data` queues a HITL
  * pending action and answers `{ status:'pending_approval', pendingActionId,
- * sampleDataCleanup:{ tables:[{ objectName, label, count }], total, absent } }`
- * — the tables and counts the card lists before the user confirms. Only the
- * seed ledger's rows are counted; the generic Approve / Deny strip stays the
- * decision. An envelope without the id or without a table is not a card.
+ * sampleDataCleanup:{ tables:[{ objectName, label, count }], total, absent,
+ * edited } }` — the tables and counts the card lists before the user confirms.
+ * Only the seed ledger's rows are counted; the generic Approve / Deny strip
+ * stays the decision. An envelope without the id or without a table is not a
+ * card. The removal cannot be undone (no recycle bin until objectstack#3146),
+ * so the card says so; `absent` and `edited` are each said when above 0.
  */
 export interface SampleDataCleanup {
   tables: Array<{ objectName: string; label: string; count: number }>;
   total: number;
   /** Recorded rows the user cannot see or that are already gone. */
   absent: number;
+  /** Recorded rows someone edited since they were seeded: kept, never removed. Absent in an older envelope → 0. */
+  edited: number;
 }
 
 export function detectSampleDataCleanup(result: unknown): SampleDataCleanup | undefined {
@@ -905,6 +909,7 @@ export function detectSampleDataCleanup(result: unknown): SampleDataCleanup | un
     tables,
     total: typeof o.total === 'number' ? num(o.total) : tables.reduce((n, t) => n + t.count, 0),
     absent: num(o.absent),
+    edited: num(o.edited),
   };
 }
 
