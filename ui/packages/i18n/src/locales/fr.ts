@@ -3784,10 +3784,12 @@ const fr = {
       hint: 'Enregistrez, puis cliquez sur Faire confiance sur le connecteur objectstack — il reste inactif tant qu’il n’est pas approuvé. Si aucune connexion n’est proposée, ajoutez l’en-tête Authorization: Bearer <clé API> (créez une clé ci-dessous).',
     },
     doubao: {
+      title: 'Doubao Work',
       body: 'Compétences · Connecteurs → Nouveau → Nouveau connecteur personnalisé, puis renseignez :',
       hint: 'Connectez-vous dans le navigateur lorsque c’est demandé. Si aucune connexion n’apparaît, ajoutez l’en-tête personnalisé Authorization: Bearer <clé API> (créez une clé ci-dessous). Les tâches exécutées dans le cloud exigent un déploiement joignable en HTTPS public.',
     },
     qwenwork: {
+      title: 'QwenWork',
       body: 'Extensions → Connecteurs → + Ajouter → Coller la configuration JSON :',
       hint: 'Ou ajoutez-le à la main en Streamable HTTP avec cette URL. Si votre version ne propose pas de connexion par navigateur, ajoutez l’en-tête Authorization: Bearer <clé API> (créez une clé ci-dessous).',
     },

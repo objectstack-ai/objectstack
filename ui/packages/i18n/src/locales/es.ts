@@ -3788,10 +3788,12 @@ const es = {
       hint: 'Guarda y haz clic en Confiar en el conector objectstack; no se activa hasta que confíes en él. Si tu versión no muestra el inicio de sesión, añade la cabecera Authorization: Bearer <clave API> (crea una clave abajo).',
     },
     doubao: {
+      title: 'Doubao Work',
       body: 'Habilidades · Conectores → Nuevo → Nuevo conector personalizado y rellena:',
       hint: 'Inicia sesión en el navegador cuando se te pida. Si no aparece el inicio de sesión, añade la cabecera personalizada Authorization: Bearer <clave API> (crea una clave abajo). Las tareas que se ejecutan en la nube requieren un despliegue accesible por HTTPS público.',
     },
     qwenwork: {
+      title: 'QwenWork',
       body: 'Extensiones → Conectores → + Añadir → Pegar configuración JSON:',
       hint: 'O añádelo a mano como Streamable HTTP con esta URL. Si tu versión no ofrece inicio de sesión en el navegador, añade la cabecera Authorization: Bearer <clave API> (crea una clave abajo).',
     },

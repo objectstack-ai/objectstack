@@ -315,7 +315,7 @@ export function ConnectAgent() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Doubao Work</CardTitle>
+            <CardTitle className="text-base">{t('connectAgent.doubao.title')}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             <p className="text-muted-foreground">{t('connectAgent.doubao.body')}</p>
@@ -332,7 +332,7 @@ export function ConnectAgent() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">QwenWork</CardTitle>
+            <CardTitle className="text-base">{t('connectAgent.qwenwork.title')}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             <p className="text-muted-foreground">{t('connectAgent.qwenwork.body')}</p>

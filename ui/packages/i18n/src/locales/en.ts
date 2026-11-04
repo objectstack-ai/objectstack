@@ -4489,10 +4489,12 @@ const en = {
       hint: 'Save, then click Trust on the objectstack connector — it stays inactive until trusted. If your version shows no sign-in prompt, add the request header Authorization: Bearer <API key> (create a key below).',
     },
     doubao: {
+      title: 'Doubao Work',
       body: 'Skills · Connectors → New → New custom connector, then fill in:',
       hint: 'Sign in through the browser when prompted. If no sign-in appears, add the custom header Authorization: Bearer <API key> (create a key below). Tasks that run in the cloud need a deployment reachable over public HTTPS.',
     },
     qwenwork: {
+      title: 'QwenWork',
       body: 'Extensions → Connectors → + Add → Paste JSON config:',
       hint: 'Or add it by hand as Streamable HTTP with this URL. If your version offers no browser sign-in, add the request header Authorization: Bearer <API key> (create a key below).',
     },

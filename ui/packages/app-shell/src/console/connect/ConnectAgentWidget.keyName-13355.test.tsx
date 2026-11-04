@@ -150,8 +150,9 @@ describe('Connect an Agent offers the Chinese clients after the international on
       'Claude Code',
       'Cursor',
       'WorkBuddy',
-      'Doubao Work',
-      'QwenWork',
+      // Product names a pack may write in its own script (zh: 豆包工作 / 千问办公).
+      '«connectAgent.doubao.title»',
+      '«connectAgent.qwenwork.title»',
     ].map((title) => screen.getByText(title));
     for (let i = 1; i < order.length; i++) {
       const follows = order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING;

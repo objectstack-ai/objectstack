@@ -3715,10 +3715,12 @@ const ja = {
       hint: '保存後、objectstack コネクタで「信頼」をクリックします。信頼するまで有効になりません。サインインが表示されない場合は、リクエストヘッダー Authorization: Bearer <API キー> を追加してください(キーは下で作成)。',
     },
     doubao: {
+      title: 'Doubao Work',
       body: 'スキル · コネクタ → 新規 → カスタムコネクタを新規作成 を開き、次のとおり入力します:',
       hint: '案内に従ってブラウザでサインインします。サインインが表示されない場合は、カスタムヘッダー Authorization: Bearer <API キー> を追加してください(キーは下で作成)。クラウドで実行するタスクには、公開 HTTPS で到達できるデプロイが必要です。',
     },
     qwenwork: {
+      title: 'QwenWork',
       body: '拡張 → コネクタ → + 追加 → JSON 設定を貼り付け:',
       hint: '手動で追加する場合は Streamable HTTP を選び、この URL を入力します。ブラウザでのサインインに対応していないバージョンでは、リクエストヘッダー Authorization: Bearer <API キー> を追加してください(キーは下で作成)。',
     },

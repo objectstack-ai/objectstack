@@ -3783,10 +3783,12 @@ const pt = {
       hint: 'Salve e clique em Confiar no conector objectstack; ele só fica ativo depois de confiável. Se a sua versão não mostrar o login, adicione o cabeçalho Authorization: Bearer <chave de API> (crie uma chave abaixo).',
     },
     doubao: {
+      title: 'Doubao Work',
       body: 'Habilidades · Conectores → Novo → Novo conector personalizado e preencha:',
       hint: 'Entre pelo navegador quando solicitado. Se o login não aparecer, adicione o cabeçalho personalizado Authorization: Bearer <chave de API> (crie uma chave abaixo). Tarefas executadas na nuvem exigem uma implantação acessível por HTTPS público.',
     },
     qwenwork: {
+      title: 'QwenWork',
       body: 'Extensões → Conectores → + Adicionar → Colar configuração JSON:',
       hint: 'Ou adicione manualmente como Streamable HTTP com esta URL. Se a sua versão não oferecer login pelo navegador, adicione o cabeçalho Authorization: Bearer <chave de API> (crie uma chave abaixo).',
     },

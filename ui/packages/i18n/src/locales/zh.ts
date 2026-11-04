@@ -3909,11 +3909,13 @@ const zh = {
       hint: '保存后在 objectstack 连接器上点击「信任」——未信任前不会生效。如果你的版本没有弹出登录,请添加请求头 Authorization: Bearer <API 密钥>(在下方创建)。',
     },
     doubao: {
-      body: '豆包工作:技能 · 连接器 → 新建 → 新建自定义连接器,按下表填写:',
+      title: '豆包工作',
+      body: '技能 · 连接器 → 新建 → 新建自定义连接器,按下表填写:',
       hint: '按提示在浏览器登录。若未出现登录,在自定义 Headers 中添加 Authorization: Bearer <API 密钥>(在下方创建)。云端运行的任务要求部署可通过公网 HTTPS 访问。',
     },
     qwenwork: {
-      body: '千问办公:扩展 → 连接器 → + 添加 → 粘贴 JSON 配置:',
+      title: '千问办公',
+      body: '扩展 → 连接器 → + 添加 → 粘贴 JSON 配置:',
       hint: '也可手动添加:传输类型选 Streamable HTTP 并填写此 URL。如果你的版本不支持浏览器登录,请添加请求头 Authorization: Bearer <API 密钥>(在下方创建)。',
     },
     apiKey: {

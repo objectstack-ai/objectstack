@@ -3713,10 +3713,12 @@ const de = {
       hint: 'Speichern und anschließend beim Connector objectstack auf Vertrauen klicken – erst danach ist er aktiv. Erscheint keine Anmeldung, fügen Sie den Request-Header Authorization: Bearer <API-Schlüssel> hinzu (Schlüssel unten erstellen).',
     },
     doubao: {
+      title: 'Doubao Work',
       body: 'Skills · Connectors → Neu → Neuer benutzerdefinierter Connector, dann ausfüllen:',
       hint: 'Melden Sie sich bei Aufforderung im Browser an. Erscheint keine Anmeldung, fügen Sie den benutzerdefinierten Header Authorization: Bearer <API-Schlüssel> hinzu (Schlüssel unten erstellen). Aufgaben, die in der Cloud laufen, brauchen eine über öffentliches HTTPS erreichbare Bereitstellung.',
     },
     qwenwork: {
+      title: 'QwenWork',
       body: 'Erweiterungen → Connectors → + Hinzufügen → JSON-Konfiguration einfügen:',
       hint: 'Oder manuell als Streamable HTTP mit dieser URL hinzufügen. Bietet Ihre Version keine Browser-Anmeldung, fügen Sie den Request-Header Authorization: Bearer <API-Schlüssel> hinzu (Schlüssel unten erstellen).',
     },
