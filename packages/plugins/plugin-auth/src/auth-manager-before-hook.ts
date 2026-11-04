@@ -12,7 +12,7 @@
  * it stood, re-indented four levels and otherwise unedited: the same actor
  * resolver handed to the attribution scope, the same refresh skip for a minted
  * principal session, the same per-number OTP send guard, the same password
- * complexity and reuse checks, the same change-email capture, the same
+ * complexity and reuse checks, the same
  * remove-member, organization-delete and no-record revoke refusals, the same
  * held-caller refusal on the admin plugin's role-scalar actions, the same
  * no-record admin revoke refusal, the same held-caller refusal on rewriting or
@@ -204,38 +204,6 @@ export async function globalBeforeHook(
       }
     }
     // fall through to the path's own handling below
-  }
-
-  // ── #8019: capture the address a change-email would move AWAY from ──
-  // The notice goes out from the after-hook, but the OLD address only
-  // exists BEFORE the endpoint runs — and `ctx.context.session` is not
-  // it: better-auth's own `sensitiveSessionMiddleware` populates that,
-  // and endpoint middleware runs AFTER this global before-hook, so the
-  // field is still empty here. Resolve the session explicitly, the same
-  // hook-order-independent way `/oauth2/authorize` below has to.
-  //
-  // Stashed, never sent from here: at this point the request has not
-  // been accepted yet (it can still fail on `newEmail` equal to the
-  // current address, on rate limiting, or on a missing transport), and
-  // a notice for a request better-auth then refuses would be a false
-  // alarm about an identity move that never happened.
-  if (ctx?.path === '/change-email') {
-    try {
-      const { getSessionFromCtx } = await import('better-auth/api');
-      const s: any = await getSessionFromCtx(ctx as any).catch(() => null);
-      const from = s?.user?.email;
-      if (typeof from === 'string' && from) {
-        ctx.context.__osChangeEmailFrom = {
-          email: from,
-          ...(typeof s?.user?.name === 'string' && s.user.name ? { name: s.user.name } : {}),
-          ...(typeof s?.user?.id === 'string' && s.user.id ? { id: s.user.id } : {}),
-        };
-      }
-    } catch {
-      // Unresolvable session → no stash → no notice. better-auth's own
-      // session middleware still rejects the request with 401, so this
-      // never silently drops a notice for a change that proceeds.
-    }
   }
 
   // ── #8289: remove-member answers its PERMISSION denial itself ──

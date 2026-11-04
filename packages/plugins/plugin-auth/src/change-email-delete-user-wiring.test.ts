@@ -603,6 +603,29 @@ describe('#8019 — a change-email request notifies the current address whatever
       expect(email.sent).toEqual([]);
     });
   }
+
+  it('signed in as two accounts at once: the notice goes to the current address of the account the request changes', async () => {
+    const engine = createMemoryEngine();
+    const email = createRecordingEmailService();
+    const manager = makeManager(engine, email.service);
+    const cookie = cookieFrom(await signUp(manager, 'cookie-holder@example.com'));
+    const bearer = bearerFrom(await signUp(manager, 'token-holder@example.com'));
+    const tokenHolderId = userRows(engine).find((r) => r.email === 'token-holder@example.com')!.id;
+    email.sent.length = 0;
+
+    const response = await changeEmailAs(manager, { cookie, bearer }, 'requested@example.com');
+    expect(response.status, await response.clone().text()).toBe(200);
+
+    // The account the request changes is the one its confirmation is for.
+    const confirmations = email.sent.filter((s) => s.template === 'auth.verify_email');
+    expect(confirmations).toHaveLength(1);
+    expect(confirmations[0].to).toMatchObject({ address: 'requested@example.com' });
+    expect((confirmations[0].data as { user?: { id?: string } }).user?.id).toBe(tokenHolderId);
+
+    // …and the notice goes to that account's current address, and to no other.
+    expect(notices(email.sent).map((s) => s.to)).toEqual([expect.objectContaining({ address: 'token-holder@example.com' })]);
+    expect((notices(email.sent)[0].data as { user?: { id?: string } }).user?.id).toBe(tokenHolderId);
+  });
 });
 
 // ───────────────────────────────────────────────────────────────────────────
