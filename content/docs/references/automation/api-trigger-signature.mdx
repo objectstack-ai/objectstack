@@ -1,0 +1,156 @@
+---
+title: Api Trigger Signature — Automation Protocol
+navTitle: Api Trigger Signature
+description: "An inbound api hook's verifier for a THIRD-PARTY sender, declared. Reference for ApiTriggerBodySignature and 2 more: every property with its type and default."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+An inbound `api` hook's verifier for a THIRD-PARTY sender, declared.
+
+An `api` flow's start node arms an inbound hook (ADR-0041 Tier 1, whose
+acceptance criteria name "HMAC signature verification (GitHub/Stripe style)
+and a constant-time compare"). By default the hook admits a post only by
+ObjectStack's own `x-objectstack-signature`: the timestamped HMAC-SHA256 of
+`<t>.<raw body>` under the hook's secret. A vendor that signs its callbacks
+its own way could not be admitted at all, whatever key it held: DocuSign
+Connect's `X-DocuSign-Signature-1` (base64 HMAC-SHA256 of the raw body), a
+Stripe-style `t=…,v1=…` header (hex HMAC-SHA256 of `<t>.<raw body>`), a
+GitHub-style `sha256=<hex>`. `config.signature` declares how such a sender
+signs: which header carries the digest, which HMAC, which encoding, and what
+is signed.
+
+**The key is `config.secretRef`.** The same reference an ObjectStack-signed
+hook names, resolved the same way at every post: one key per hook, by name
+only. A vendor key is ⛔ never inline: a verifier beside a literal
+`config.secret` is refused, and so is one with no `secretRef` at all.
+
+**One verifier per hook.** A declared `signature` REPLACES the
+`x-objectstack-signature` check for its hook. The hook then verifies the
+declared scheme and nothing else: it does not stack with the platform's own
+check, and it is not optional (a post without the declared header is refused
+like a post with a bad one). A start node with no `signature` is verified
+exactly as it was before this key. `apiTriggerVerifierOf` is the one
+reader that decides which verifier a hook has, and it decides on the key's
+PRESENCE: a `signature` that is present and unusable is never read as
+absent, so it can never fall back to the platform's check.
+
+What the implementer owes (the constant-time compare, the replay window for
+a scheme that signs a timestamp and the absence of one for a scheme that
+does not, the one `401 INVALID_SIGNATURE` for every failure) is stated in
+`contracts/trigger-api-service.ts`, beside the platform's own verifier,
+because the member that verifies is declared there.
+
+Refusals, each anchored on the start node's `config.signature`:
+
+ - a shape the schema refuses (`ApiTriggerSignatureSchema`): an
+   unknown algorithm or encoding, a `signs` that is neither form, a
+   `timestamp.body` scheme that names no timestamp source, a body-only
+   scheme that names one, an undeclared key;
+ - a `timestamp.body` scheme whose timestamp and digest are the same
+   element of the header;
+ - a verifier with no key reference (`config.secretRef` absent);
+ - a verifier beside a literal `config.secret`: an inline key, and a second
+   source for the one key the hook has;
+ - a verifier on a flow that binds no inbound `api` trigger: nothing would
+   ever read it.
+
+This is the vocabulary ADR-0138 D7 left to a follow-up (F1: an HMAC, a
+timestamp, a replay window), placed on the signed inbound-hook channel
+rather than on `ApiEndpointSchema`.
+
+<Callout type="info">
+**Source:** `packages/spec/src/automation/api-trigger-signature.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { ApiTriggerBodySignatureSchema, ApiTriggerSignatureSchema, ApiTriggerTimestampedSignatureSchema } from '@objectstack/spec/automation';
+import type { ApiTriggerBodySignature, ApiTriggerSignature, ApiTriggerTimestampedSignature } from '@objectstack/spec/automation';
+
+// Validate data
+const result = ApiTriggerBodySignatureSchema.parse(data);
+```
+
+---
+
+## ApiTriggerBodySignature
+
+A sender that signs the raw body alone (DocuSign Connect, a GitHub-style `sha256=` sender): the header value, after `prefix`, is the one digest. No replay window applies.
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **signs** | `'body'` | ✅ | The sender signs the raw body alone. No replay window applies. |
+| **header** | `string` | ✅ | The HTTP header the sender puts its signature in (`X-DocuSign-Signature-1`, `Stripe-Signature`), matched without regard to case. The hook reads this header and never `x-objectstack-signature`. |
+| **algorithm** | `Enum<'hmac-sha256'>` | ✅ | The MAC the sender computes under the key `config.secretRef` names. `hmac-sha256` is the only one. |
+| **encoding** | `Enum<'hex' \| 'base64'>` | ✅ | How the sender writes the digest in the header: `hex` or `base64` (the RFC 4648 standard alphabet). The digest is decoded and compared as the 32 bytes of the HMAC. |
+| **prefix** | `string` | optional | Literal text the sender writes before the digest in the header value (`sha256=` for a GitHub-style sender), checked and removed before decoding. Absent: the whole value is the digest. |
+
+
+---
+
+## ApiTriggerSignature
+
+How a third-party sender signs its posts to this inbound hook, verified under the key `config.secretRef` names. Declared, it REPLACES the `x-objectstack-signature` check for this hook: the one verifier, never optional. A trigger that does not implement it refuses every post 401, never admits one unverified.
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+A sender that signs the raw body alone (DocuSign Connect, a GitHub-style `sha256=` sender): the header value, after `prefix`, is the one digest. No replay window applies.
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **signs** | `'body'` | ✅ | The sender signs the raw body alone. No replay window applies. |
+| **header** | `string` | ✅ | The HTTP header the sender puts its signature in (`X-DocuSign-Signature-1`, `Stripe-Signature`), matched without regard to case. The hook reads this header and never `x-objectstack-signature`. |
+| **algorithm** | `Enum<'hmac-sha256'>` | ✅ | The MAC the sender computes under the key `config.secretRef` names. `hmac-sha256` is the only one. |
+| **encoding** | `Enum<'hex' \| 'base64'>` | ✅ | How the sender writes the digest in the header: `hex` or `base64` (the RFC 4648 standard alphabet). The digest is decoded and compared as the 32 bytes of the HMAC. |
+| **prefix** | `string` | optional | Literal text the sender writes before the digest in the header value (`sha256=` for a GitHub-style sender), checked and removed before decoding. Absent: the whole value is the digest. |
+
+---
+
+#### Option 2
+
+A sender that signs `<t>.<raw body>` and writes `t` beside the digest as `NAME=value` elements of one header (Stripe-style `t=…,v1=…`). The same replay window as `x-objectstack-signature` applies.
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **signs** | `'timestamp.body'` | ✅ | The sender signs `<t>.<raw body>`, `t` read from `timestampElement`. The replay window applies. |
+| **header** | `string` | ✅ | The HTTP header the sender puts its signature in (`X-DocuSign-Signature-1`, `Stripe-Signature`), matched without regard to case. The hook reads this header and never `x-objectstack-signature`. |
+| **algorithm** | `Enum<'hmac-sha256'>` | ✅ | The MAC the sender computes under the key `config.secretRef` names. `hmac-sha256` is the only one. |
+| **encoding** | `Enum<'hex' \| 'base64'>` | ✅ | How the sender writes the digest in the header: `hex` or `base64` (the RFC 4648 standard alphabet). The digest is decoded and compared as the 32 bytes of the HMAC. |
+| **timestampElement** | `string` | ✅ | Where the timestamp comes from: the NAME of the header element `NAME=<unix seconds>` (`t`). Its value, exactly as received, is the `<t>` of the signed `<t>.<raw body>`. |
+| **digestElement** | `string` | ✅ | The NAME of the header element that carries the digest (`v1`). A sender may send it more than once while it rolls its key; the post verifies when one of them matches. |
+
+---
+
+
+---
+
+## ApiTriggerTimestampedSignature
+
+A sender that signs `<t>.<raw body>` and writes `t` beside the digest as `NAME=value` elements of one header (Stripe-style `t=…,v1=…`). The same replay window as `x-objectstack-signature` applies.
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **signs** | `'timestamp.body'` | ✅ | The sender signs `<t>.<raw body>`, `t` read from `timestampElement`. The replay window applies. |
+| **header** | `string` | ✅ | The HTTP header the sender puts its signature in (`X-DocuSign-Signature-1`, `Stripe-Signature`), matched without regard to case. The hook reads this header and never `x-objectstack-signature`. |
+| **algorithm** | `Enum<'hmac-sha256'>` | ✅ | The MAC the sender computes under the key `config.secretRef` names. `hmac-sha256` is the only one. |
+| **encoding** | `Enum<'hex' \| 'base64'>` | ✅ | How the sender writes the digest in the header: `hex` or `base64` (the RFC 4648 standard alphabet). The digest is decoded and compared as the 32 bytes of the HMAC. |
+| **timestampElement** | `string` | ✅ | Where the timestamp comes from: the NAME of the header element `NAME=<unix seconds>` (`t`). Its value, exactly as received, is the `<t>` of the signed `<t>.<raw body>`. |
+| **digestElement** | `string` | ✅ | The NAME of the header element that carries the digest (`v1`). A sender may send it more than once while it rolls its key; the post verifies when one of them matches. |
+
+
+---
+

@@ -125,8 +125,11 @@ const element = (key: 'timestampElement' | 'digestElement', what: string) =>
  * after `prefix`, is the one digest. It signs no time, so it carries no
  * timestamp source and the hook bounds no replay for it: the sender offers
  * nothing to bound one with.
+ *
+ * Exported as its own def so the published surface records its keys (a union's
+ * arms are otherwise invisible to the authorable-surface ledger).
  */
-const BodyOnlySignatureSchema = z.strictObject(
+export const ApiTriggerBodySignatureSchema = z.strictObject(
   {
     signs: z.literal('body').describe('The sender signs the raw body alone. No replay window applies.'),
     header,
@@ -153,6 +156,9 @@ const BodyOnlySignatureSchema = z.strictObject(
           'Declare `signs: \'timestamp.body\'` when the sender signs `<t>.<raw body>`, or remove them.'
         : undefined,
   },
+).describe(
+  'A sender that signs the raw body alone (DocuSign Connect, a GitHub-style `sha256=` sender): the header value, ' +
+    'after `prefix`, is the one digest. No replay window applies.',
 );
 
 /**
@@ -160,9 +166,10 @@ const BodyOnlySignatureSchema = z.strictObject(
  * writes `t` beside the digest in the one header, as `NAME=value` elements
  * separated by `,` (`t=1700000000,v1=<hex>`). The timestamp is inside the
  * signed material, so the hook refuses a `t` outside the same window the
- * `x-objectstack-signature` check applies.
+ * `x-objectstack-signature` check applies. Exported as its own def for the
+ * same reason as {@link ApiTriggerBodySignatureSchema}.
  */
-const TimestampedSignatureSchema = z.strictObject(
+export const ApiTriggerTimestampedSignatureSchema = z.strictObject(
   {
     signs: z
       .literal('timestamp.body')
@@ -186,6 +193,9 @@ const TimestampedSignatureSchema = z.strictObject(
           'Remove `prefix`.'
         : undefined,
   },
+).describe(
+  'A sender that signs `<t>.<raw body>` and writes `t` beside the digest as `NAME=value` elements of one header ' +
+    '(Stripe-style `t=…,v1=…`). The same replay window as `x-objectstack-signature` applies.',
 );
 
 /**
@@ -204,7 +214,7 @@ const TimestampedSignatureSchema = z.strictObject(
  * { signs: 'body', header: 'X-Hub-Signature-256', algorithm: 'hmac-sha256', encoding: 'hex', prefix: 'sha256=' }
  */
 export const ApiTriggerSignatureSchema = z
-  .discriminatedUnion('signs', [BodyOnlySignatureSchema, TimestampedSignatureSchema], {
+  .discriminatedUnion('signs', [ApiTriggerBodySignatureSchema, ApiTriggerTimestampedSignatureSchema], {
     error: (issue) =>
       issue.code === 'invalid_union'
         ? '`config.signature.signs` says what the sender signs: `body` (the raw body alone, as DocuSign Connect ' +
@@ -221,6 +231,8 @@ export const ApiTriggerSignatureSchema = z
   );
 
 export type ApiTriggerSignature = z.input<typeof ApiTriggerSignatureSchema>;
+export type ApiTriggerBodySignature = z.input<typeof ApiTriggerBodySignatureSchema>;
+export type ApiTriggerTimestampedSignature = z.input<typeof ApiTriggerTimestampedSignatureSchema>;
 
 /**
  * Which verifier an `api` hook has. Exactly one, decided by whether the start
