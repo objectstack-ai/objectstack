@@ -46,6 +46,7 @@
 import type { IDataDriver } from '@objectstack/core';
 import { redactPropagatedDriverFault } from '@objectstack/types';
 import { CrossDatasourceTransactionWriteError } from './transaction-errors.js';
+import { pickDeclaredDriverOptions } from './engine-driver-options.js';
 import type { ObjectQL } from './engine.js';
 
 /**
@@ -123,8 +124,12 @@ export async function execute(
     // common-table-expression form, a dialect's upsert or merge verb), so
     // the cut must not wait for the predicate to recognise it. The door
     // knows it sent a statement, and says so.
+    //
+    // The driver is handed the declared driver options of the bag and nothing
+    // else: `object` / `datasource` chose the driver and `args` / `params` are
+    // the statement's, already taken above.
     try {
-        return await driver.execute(rawCommand, params, options);
+        return await driver.execute(rawCommand, params, pickDeclaredDriverOptions(options));
     } catch (e) {
         throw redactPropagatedDriverFault(e, { statementSent: true });
     }
