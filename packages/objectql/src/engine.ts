@@ -50,6 +50,7 @@ import {
 // Seek pagination for the walks that must read EVERY row — the autonumber seed
 // scan is one (#6249). Shared with `summary-backfill` rather than re-rolled:
 // the cursor merge is the part that is easy to get subtly wrong.
+import { keysetWalk, type KeysetPageQuery } from '@objectstack/types';
 import {
   DATA_MIGRATION_FLAG_OBJECT,
   FILE_REFERENCES_MIGRATION_ID,
@@ -383,13 +384,14 @@ import { bindHookNotice } from './hook-notice.js';
 import { lowerRelationConditions, resolveSearchQueryableFields, resolveWhereTokens } from './engine-query-lowering.js';
 import {
   auditDanglingReferences,
+  type AuditableObject,
   type DanglingReferenceAuditOptions,
   type DanglingReferenceReport,
 } from './integrity/dangling-reference-audit.js';
 // [#29986 codemod] The top-level declarations that moved whole to `engine-top-level.ts`, as this file still reads them.
 import {
-  AUTONUMBER_COLLISION_ATTEMPTS, DISPATCHABLE_HOOK_EVENTS, ENGINE_DELETE_OPTION_KEYS, ENGINE_FIND_OPTION_KEYS,
-  ENGINE_QUERY_SLOTS, ENGINE_UPDATE_OPTION_KEYS, ENGINE_WHERE_SLOTS, ENGINE_WIRE_ONLY_SLOTS,
+  AUTONUMBER_COLLISION_ATTEMPTS, AUTONUMBER_SEED_PAGE_SIZE, DISPATCHABLE_HOOK_EVENTS, ENGINE_DELETE_OPTION_KEYS,
+  ENGINE_FIND_OPTION_KEYS, ENGINE_QUERY_SLOTS, ENGINE_UPDATE_OPTION_KEYS, ENGINE_WHERE_SLOTS, ENGINE_WIRE_ONLY_SLOTS,
   SECURITY_SERVICE_SOURCE_SLOT, WIRE_ONLY_CANONICAL_SHAPES, WRITE_PRECONDITION_OPTION, applyFormulaPlan,
   applyStoredExpressionsToPatch, assertDispatchableHookEvent, assertHookScopeNotSelfCancelling,
   assertOrderByIsMaterializable, assertProjectionHasNoDottedPaths, assertValidHookExcludeObjects,
@@ -399,11 +401,12 @@ import {
   handBackWithheldInsertReadonly, hookMatchesObject, hydrateWriteFormulas, insertStaticReadonlySubject,
   judgeWhereAdmission, lowerWhereFilterArray, masterIdOf, mergeReadContext, organizationPredicateDeleteRefusal,
   packageBodyCollectionRefusal, packageBodyObjectAndAppOwnerStampRefusal, packageBodySeedDataRefusal,
-  planFormulaProjection, planStoredExpressions, recomputeAutonumberReaders, rejectUnknownEngineOptions,
-  replacedStoredExpressionFields, resolveWhereFilterTokens, rowsWithoutFormulaWidening, settleBulkStoredExpressions,
-  shouldSkipStateMachine, statesDeleteSemantics, staticReadonlyStoredView, storedExpressionsReading,
-  stripComputedWriteFields, undeclaredWriteFieldErrors, updateStaticReadonlySubject, whereResolvedTokenJudge,
-  withFileOwnerKey, withholdInsertReadonlyFromHooks, withoutFormulaWidening, writeFailureLogMeta,
+  planFormulaProjection, planStoredExpressions, readStoredAutonumberCounter, recomputeAutonumberReaders,
+  rejectUnknownEngineOptions, replacedStoredExpressionFields, resolveWhereFilterTokens, rowsWithoutFormulaWidening,
+  settleBulkStoredExpressions, shouldSkipStateMachine, statesDeleteSemantics, staticReadonlyStoredView,
+  storedExpressionsReading, stripComputedWriteFields, undeclaredWriteFieldErrors, updateStaticReadonlySubject,
+  whereResolvedTokenJudge, withFileOwnerKey, withholdInsertReadonlyFromHooks, withoutFormulaWidening,
+  writeFailureLogMeta,
 } from './engine-top-level.js';
 import type {
   AdmittedValueShapeViolationTally, AutonumberReaders, CascadeDeleteSet, CascadeIssuedDelete, DatasourceDef,
@@ -444,7 +447,7 @@ import { executeWithMiddleware, resolveSystemInsertOrganization } from './engine
 // [#29986 codemod] Field defaults and autonumbers: the methods of the same names below hand the bodies what they read (`DefaultsAndAutonumbersHost`).
 import {
   adoptExplicitAutonumber, applyAutonumbers, applyFieldDefaults, defaultFieldEntries, isIssuedAutonumberCollision,
-  resolveNowDefault, resolveOptionDefault, seedAutonumber, warnAutonumberReadersUnserved,
+  resolveNowDefault, resolveOptionDefault, warnAutonumberReadersUnserved,
 } from './engine-defaults-and-autonumbers.js';
 // [#29986 codemod] Package, app, plugin, driver and datasource registration: the methods of the same names below hand the bodies what they read (`RegistrationHost`).
 import {
@@ -452,7 +455,7 @@ import {
   registerPackageBody, supplyFileColumnsMovedResolver,
 } from './engine-registration.js';
 // [#29986 codemod] Realtime, i18n, home amounts, validation messages, references, master-detail: the methods of the same names below hand the bodies what they read (`ReferencesAndMasterDetailHost`).
-import { inspectCascadeDelete, inspectDanglingReferences } from './engine-references-and-master-detail.js';
+import { inspectCascadeDelete } from './engine-references-and-master-detail.js';
 // [#29986 codemod] Crypto, secrets, internal fields, schema and datasource routing, init: the methods of the same names below hand the bodies what they read (`SecretsAndRoutingHost`).
 import { resolveDatasourceBinding } from './engine-secrets-and-routing.js';
 // [#29986 codemod] Summary indexes, related-record expansion, file and reference hydration: the methods of the same names below hand the bodies what they read (`SummariesAndExpansionHost`).
@@ -3855,18 +3858,77 @@ export class ObjectQL implements IObjectQLEngine {
    * matching is LOOSER (a case-insensitive `LIKE`) must not be able to inflate
    * the max with another scope's rows.
    */
-  private seedAutonumber(
+  private async seedAutonumber(
     object: string,
     field: string,
     prefix: string,
     suffix: string,
     execCtx?: ExecutionContext,
   ): Promise<number> {
-    // [#29986 codemod] The body moved to `engine-defaults-and-autonumbers.ts` (see `DefaultsAndAutonumbersHost`).
-    const host: ThisParameterType<typeof seedAutonumber> = {
-      find: (...a) => this.find(...a),
-    };
-    return seedAutonumber.call(host, object, field, prefix, suffix, execCtx);
+    try {
+      // Canonical `fields`, not the wire spelling `select` — this call sat on
+      // the exact #4371 silent drop (the projection never applied; the scan
+      // worked only because an unprojected row still carries `field`), and the
+      // catch below would have swallowed the guard's rejection into "seed
+      // from 0", i.e. duplicate autonumbers.
+      const walk = keysetWalk<Record<string, unknown>>(
+        (q: KeysetPageQuery) => this.find(object, {
+          ...q,
+          fields: ['id', field],
+          context: execCtx,
+        } as any),
+        {
+          where: prefix ? { [field]: { $startsWith: prefix } } : undefined,
+          pageSize: AUTONUMBER_SEED_PAGE_SIZE,
+        },
+      );
+      let max = 0;
+      for await (const page of walk.pages()) {
+        for (const r of page) {
+          const v = r?.[field];
+          if (v == null) continue;
+          // The reading itself lives in `readStoredAutonumberCounter` (the
+          // section above describes it) because #6806's adopt-on-exempt-write
+          // resync must read a supplied value by the SAME rules this scan reads
+          // a stored one — two copies of it would drift into two different
+          // answers for one row, which is a duplicate record number. Its
+          // anchored half is spec's `readAutonumberCounter`, the one the SQL
+          // driver's own scan calls (#6560).
+          const counter = readStoredAutonumberCounter(String(v), prefix, suffix);
+          if (counter != null) max = Math.max(max, counter);
+        }
+      }
+      // The walk is unbounded (no `max`), so truncation here means the scan
+      // could not COMPLETE: a row carried no `id` to seek past, or the reader
+      // never applied the seek predicate. Either way rows were left unread, and
+      // the max over what was read is a floor, not the max. Answering with it
+      // is the "seed below the real MAX" defect this method was fixed for, so
+      // it fails loudly instead — the same disposition #6114 gave the read
+      // outage: allocate nothing, write nothing.
+      if (walk.truncated) {
+        throw new Error(
+          `Cannot seed the autonumber counter for "${object}.${field}": the seeding scan ` +
+            `could not visit every stored row (it stopped after ${walk.scanned} rows without ` +
+            `reaching the end). Seeding from a partial scan would issue record numbers that ` +
+            `collide with existing ones, so no number was allocated.`,
+        );
+      }
+      return max;
+    } catch (error) {
+      // [#5979] Discriminate by error TYPE. Seeding from 0 is the truth for
+      // exactly ONE failure reason — the table has not been provisioned, so
+      // there are genuinely no rows and number 1 collides with nothing.
+      if (isMissingTableError(error, object)) return 0;
+      // Every other failure (connection drop, timeout, permission denial,
+      // query error) means the rows may well exist and simply were not seen.
+      // Answering 0 there restarts the sequence at 1 against a table already
+      // holding N rows and issues autonumbers that COLLIDE with existing ones
+      // — a value written wrong, which no retry and no restart repairs. So the
+      // read failure propagates and the caller allocates nothing: the write
+      // fails loudly instead of succeeding with a forged business identifier.
+      // This is the hazard the #4371 comment above the read already named.
+      throw error;
+    }
   }
 
   /**
@@ -5693,20 +5755,22 @@ export class ObjectQL implements IObjectQLEngine {
    * budget never reached (#5718), `unreadableObjects` for what the datasource
    * refused, and `aborted` for a run called off (#4747).
    */
-  inspectDanglingReferences(
+  async inspectDanglingReferences(
     options?: DanglingReferenceAuditOptions,
   ): Promise<DanglingReferenceReport> {
-    // [#29986 codemod] The body moved to `engine-references-and-master-detail.ts` (see `ReferencesAndMasterDetailHost`).
-    const read_registry = () => this._registry;
-    const readLogger = () => this.logger;
-    const host: ThisParameterType<typeof inspectDanglingReferences> = {
-      get _registry() { return read_registry(); },
-      find: (...a) => this.find(...a),
-      get logger() { return readLogger(); },
-      referenceExists: (...a) => this.referenceExists(...a),
-      resolveEnginePosture: (...a) => this.resolveEnginePosture(...a),
-    };
-    return inspectDanglingReferences.call(host, options);
+    // Read once per run, live — the posture IN FORCE, by the engine's one reader.
+    const unionScope = postureUsesUnionScope(this.resolveEnginePosture());
+    return auditDanglingReferences(
+      {
+        objects: () => this._registry.getAllObjects() as unknown as AuditableObject[],
+        find: (object, opts) => this.find(object, opts as any) as Promise<Array<Record<string, unknown>>>,
+        probe: (target, id, organization) => this.referenceExists(
+          target, id, organization == null || unionScope ? undefined : ({ tenantId: organization } as ExecutionContext),
+        ),
+        warn: (msg, meta) => this.logger?.warn?.(msg, meta as any),
+      },
+      options,
+    );
   }
 
   /**

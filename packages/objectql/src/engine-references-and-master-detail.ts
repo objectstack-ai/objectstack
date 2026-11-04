@@ -3,9 +3,8 @@
 /**
  * [#29986 codemod] The
  * "Realtime, i18n, home amounts, validation messages, references, master-detail"
- * section of `ObjectQL`: the bodies of `inspectDanglingReferences`,
- * `inspectCascadeDelete` moved out of `engine.ts` whole by
- * `scripts/codemod-split-engine.mjs`.
+ * section of `ObjectQL`: the bodies of `inspectCascadeDelete` moved out of
+ * `engine.ts` whole by `scripts/codemod-split-engine.mjs`.
  *
  * A MOVE, not a redesign. Each function below is the body of the `ObjectQL`
  * method of the same name exactly as it stood: not re-indented, not
@@ -24,10 +23,6 @@
  * evaluation cycle. `index.ts` re-exports nothing from this module.
  */
 
-import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { postureUsesUnionScope } from '@objectstack/spec/security';
-import { auditDanglingReferences } from './integrity/dangling-reference-audit.js';
-import type { AuditableObject, DanglingReferenceAuditOptions, DanglingReferenceReport } from './integrity/dangling-reference-audit.js';
 import type { ObjectQL } from './engine.js';
 
 /**
@@ -39,29 +34,8 @@ import type { ObjectQL } from './engine.js';
 export interface ReferencesAndMasterDetailHost {
   readonly _registry: ObjectQL['_registry'];
   collectCascadeDeleteSet: ObjectQL['collectCascadeDeleteSet'];
-  find: ObjectQL['find'];
-  readonly logger: ObjectQL['logger'];
-  referenceExists: ObjectQL['referenceExists'];
-  resolveEnginePosture: ObjectQL['resolveEnginePosture'];
   resolveObjectName: ObjectQL['resolveObjectName'];
 }
-
-/** The body of `ObjectQL#inspectDanglingReferences`; the method's docblock there is its contract. */
-export async function inspectDanglingReferences(this: Pick<ReferencesAndMasterDetailHost, '_registry' | 'find' | 'logger' | 'referenceExists' | 'resolveEnginePosture'>, options?: DanglingReferenceAuditOptions): Promise<DanglingReferenceReport> {
-    // Read once per run, live — the posture IN FORCE, by the engine's one reader.
-    const unionScope = postureUsesUnionScope(this.resolveEnginePosture());
-    return auditDanglingReferences(
-      {
-        objects: () => this._registry.getAllObjects() as unknown as AuditableObject[],
-        find: (object, opts) => this.find(object, opts as any) as Promise<Array<Record<string, unknown>>>,
-        probe: (target, id, organization) => this.referenceExists(
-          target, id, organization == null || unionScope ? undefined : ({ tenantId: organization } as ExecutionContext),
-        ),
-        warn: (msg, meta) => this.logger?.warn?.(msg, meta as any),
-      },
-      options,
-    );
-  }
 
 /** The body of `ObjectQL#inspectCascadeDelete`; the method's docblock there is its contract. */
 export async function inspectCascadeDelete(this: Pick<ReferencesAndMasterDetailHost, '_registry' | 'collectCascadeDeleteSet' | 'resolveObjectName'>, object: string, id: string | number): Promise<Array<{ object: string; id: string }>> {

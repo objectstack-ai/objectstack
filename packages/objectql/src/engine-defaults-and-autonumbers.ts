@@ -5,8 +5,8 @@
  * the bodies of `resolveNowDefault`, `resolveOptionDefault`,
  * `applyFieldDefaults`, `defaultFieldEntries`, `applyAutonumbers`,
  * `adoptExplicitAutonumber`, `isIssuedAutonumberCollision`,
- * `warnAutonumberReadersUnserved`, `seedAutonumber` moved out of `engine.ts`
- * whole by `scripts/codemod-split-engine.mjs`.
+ * `warnAutonumberReadersUnserved` moved out of `engine.ts` whole by
+ * `scripts/codemod-split-engine.mjs`.
  *
  * A MOVE, not a redesign. Each function below is the body of the `ObjectQL`
  * method of the same name exactly as it stood: not re-indented, not
@@ -26,15 +26,11 @@
  */
 
 import { isCurrentUserDefaultToken, isNowDefaultToken, missingFieldValues, parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat } from '@objectstack/spec/data';
-import { isUniqueViolationError, keysetWalk, uniqueViolationColumn } from '@objectstack/types';
-import type { KeysetPageQuery } from '@objectstack/types';
+import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { isMissingTableError } from '@objectstack/metadata/errors';
 import { ExpressionEngine } from '@objectstack/formula';
 import type { EvalPermissions } from '@objectstack/formula';
-import {
-  AUTONUMBER_SEED_PAGE_SIZE, declaredMultiValued, isExpressionDefault, readStoredAutonumberCounter,
-} from './engine-top-level.js';
+import { declaredMultiValued, isExpressionDefault, readStoredAutonumberCounter } from './engine-top-level.js';
 import type { FormulaPlanEntry, IssuedAutonumber } from './engine-top-level.js';
 import type { ObjectQL } from './engine.js';
 
@@ -49,7 +45,6 @@ export interface DefaultsAndAutonumbersHost {
   readonly autonumberCounters: ObjectQL['autonumberCounters'];
   readonly autonumberReadersUnservedReported: ObjectQL['autonumberReadersUnservedReported'];
   defaultFieldEntries: ObjectQL['defaultFieldEntries'];
-  find: ObjectQL['find'];
   getSchema: ObjectQL['getSchema'];
   readonly logger: ObjectQL['logger'];
   normalizeExpressionDefault: ObjectQL['normalizeExpressionDefault'];
@@ -304,72 +299,4 @@ export function warnAutonumberReadersUnserved(this: Pick<DefaultsAndAutonumbersH
       undefined,
       { object, fields, driver: driverName },
     );
-  }
-
-/** The body of `ObjectQL#seedAutonumber`; the method's docblock there is its contract. */
-export async function seedAutonumber(this: Pick<DefaultsAndAutonumbersHost, 'find'>, object: string, field: string, prefix: string, suffix: string, execCtx?: ExecutionContext): Promise<number> {
-    try {
-      // Canonical `fields`, not the wire spelling `select` — this call sat on
-      // the exact #4371 silent drop (the projection never applied; the scan
-      // worked only because an unprojected row still carries `field`), and the
-      // catch below would have swallowed the guard's rejection into "seed
-      // from 0", i.e. duplicate autonumbers.
-      const walk = keysetWalk<Record<string, unknown>>(
-        (q: KeysetPageQuery) => this.find(object, {
-          ...q,
-          fields: ['id', field],
-          context: execCtx,
-        } as any),
-        {
-          where: prefix ? { [field]: { $startsWith: prefix } } : undefined,
-          pageSize: AUTONUMBER_SEED_PAGE_SIZE,
-        },
-      );
-      let max = 0;
-      for await (const page of walk.pages()) {
-        for (const r of page) {
-          const v = r?.[field];
-          if (v == null) continue;
-          // The reading itself lives in `readStoredAutonumberCounter` (the
-          // section above describes it) because #6806's adopt-on-exempt-write
-          // resync must read a supplied value by the SAME rules this scan reads
-          // a stored one — two copies of it would drift into two different
-          // answers for one row, which is a duplicate record number. Its
-          // anchored half is spec's `readAutonumberCounter`, the one the SQL
-          // driver's own scan calls (#6560).
-          const counter = readStoredAutonumberCounter(String(v), prefix, suffix);
-          if (counter != null) max = Math.max(max, counter);
-        }
-      }
-      // The walk is unbounded (no `max`), so truncation here means the scan
-      // could not COMPLETE: a row carried no `id` to seek past, or the reader
-      // never applied the seek predicate. Either way rows were left unread, and
-      // the max over what was read is a floor, not the max. Answering with it
-      // is the "seed below the real MAX" defect this method was fixed for, so
-      // it fails loudly instead — the same disposition #6114 gave the read
-      // outage: allocate nothing, write nothing.
-      if (walk.truncated) {
-        throw new Error(
-          `Cannot seed the autonumber counter for "${object}.${field}": the seeding scan ` +
-            `could not visit every stored row (it stopped after ${walk.scanned} rows without ` +
-            `reaching the end). Seeding from a partial scan would issue record numbers that ` +
-            `collide with existing ones, so no number was allocated.`,
-        );
-      }
-      return max;
-    } catch (error) {
-      // [#5979] Discriminate by error TYPE. Seeding from 0 is the truth for
-      // exactly ONE failure reason — the table has not been provisioned, so
-      // there are genuinely no rows and number 1 collides with nothing.
-      if (isMissingTableError(error, object)) return 0;
-      // Every other failure (connection drop, timeout, permission denial,
-      // query error) means the rows may well exist and simply were not seen.
-      // Answering 0 there restarts the sequence at 1 against a table already
-      // holding N rows and issues autonumbers that COLLIDE with existing ones
-      // — a value written wrong, which no retry and no restart repairs. So the
-      // read failure propagates and the caller allocates nothing: the write
-      // fails loudly instead of succeeding with a forged business identifier.
-      // This is the hazard the #4371 comment above the read already named.
-      throw error;
-    }
   }
