@@ -1215,6 +1215,10 @@ export interface AnalyticsServiceConfig {
    *   Such an amount has one currency per ROW, so its column carries the
    *   `currencyField` pointer instead of a `currency`, and the cube door
    *   refuses an aggregate of it that does not group by that field.
+   *   [ADR-0144 D6, #27195] `homeAmountField` is that amount's stored
+   *   home-currency field: answer `currencyConfig.homeAmount.field` ONLY
+   *   beside a `currencyField`, and `undefined` otherwise. One reader: the
+   *   cube door's refusal names it as the consolidated-total remedy.
    * - Percent scale (objectui#3136): a measure over a `percent` field inherits
    *   that field's storage scale via `percentScaleOf`, so a renderer scales by
    *   declared metadata instead of guessing from the value.
@@ -1244,7 +1248,14 @@ export interface AnalyticsServiceConfig {
   sourceFieldMeta?: (
     object: string,
     field: string,
-  ) => { type?: string; multiple?: boolean; defaultCurrency?: string; currencyField?: string; max?: number } | undefined;
+  ) => {
+    type?: string;
+    multiple?: boolean;
+    defaultCurrency?: string;
+    currencyField?: string;
+    homeAmountField?: string;
+    max?: number;
+  } | undefined;
   /**
    * [#15684] The SQL dialect of the datasource backing `object` — `'sqlite'`,
    * `'postgres'`, `'mysql'`, or `undefined` when the host cannot answer.
@@ -3936,7 +3947,11 @@ export class AnalyticsService implements IAnalyticsService {
           path: sql,
         };
       },
-      (o, field) => fieldMeta(o, field)?.currencyField,
+      (o, field) => {
+        const meta = fieldMeta(o, field);
+        if (meta?.currencyField === undefined) return undefined;
+        return { codeField: meta.currencyField, homeField: meta.homeAmountField };
+      },
     );
   }
 
