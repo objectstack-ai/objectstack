@@ -701,15 +701,13 @@ function effectiveFilterField(
 }
 
 /**
- * Validate every dashboard widget's dataset binding. Returns the list of
- * findings (empty = clean). Caller decides how to surface them: `error`
- * findings describe bindings the analytics service cannot satisfy and
- * should fail validate/build; `warning` findings are advisory and must
- * never fail the build on their own.
+ * [#29900] The datasets a presentation's `dataset` binding resolves against:
+ * `stack.datasets`, then every `packages[]` body's datasets as resolution
+ * context. One index for every presentation that binds a dataset by name (a
+ * dashboard widget, a report and its joined blocks), so the two cannot disagree
+ * about which dataset a name reaches.
  */
-export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
-  const findings: WidgetBindingFinding[] = [];
-
+export function indexResolvableDatasets(stack: AnyRec): Map<string, AnyRec> {
   const datasets = new Map<string, AnyRec>();
   for (const ds of recordsOf(stack.datasets)) {
     if (typeof ds.name === 'string') datasets.set(ds.name, ds);
@@ -721,9 +719,10 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
   // ADR-0130 plan rule "multi-module dashboards move to the app package"), and
   // the runtime serves every package's datasets from one analytics service.
   // ⛔ It changes what a widget can RESOLVE, never what is JUDGED: the
-  // dataset-level checks below still walk `stack.datasets` alone, and a name no
-  // package declares still resolves nowhere. The stack's own declaration wins a
-  // name it shares with a body — on the per-package pass that body IS this one.
+  // dataset-level checks of `validateWidgetBindings` still walk `stack.datasets`
+  // alone, and a name no package declares still resolves nowhere. The stack's
+  // own declaration wins a name it shares with a body — on the per-package
+  // pass that body IS this one.
   for (const entry of packagesOf(stack)) {
     const body = entry.manifest;
     if (!body || typeof body !== 'object' || Array.isArray(body)) continue;
@@ -731,6 +730,83 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
       if (typeof ds.name === 'string' && !datasets.has(ds.name)) datasets.set(ds.name, ds);
     }
   }
+  return datasets;
+}
+
+/** One filter key of a dataset-bound filter that the dataset query cannot satisfy. */
+export type DatasetFilterKeyVerdict =
+  /** The key resolves to no column on the dataset's object graph. */
+  | { kind: 'unknown'; field: string; path: string; object: string; message: string }
+  /** The key resolves, but its relationship prefix is not in the dataset's `include`. */
+  | {
+    kind: 'not-included';
+    field: string;
+    path: string;
+    object: string;
+    prefix: string;
+    included: ReadonlySet<string>;
+  };
+
+/**
+ * [#14148, #29900] Judge every field KEY of a filter that is ANDed into a
+ * dataset's query as `runtimeFilter` — a dashboard widget's own `filter`, and a
+ * report's (or a joined block's) `runtimeFilter` — against that dataset's object
+ * graph. The two clauses are the dataset rule's, one level down: existence
+ * (`unknown`), then joinability (`not-included`, an undeclared relationship
+ * prefix the compiler's `assertDeclared` never sees).
+ *
+ * Holds no rule id, severity or wording beyond the verdict's own message: the
+ * caller owns those. Returns nothing when the dataset's object cannot be judged
+ * (skips 1 and 2: an object this stack does not define, or one with no readable
+ * field map), and never a verdict {@link isUnjudgeable} answers (skip 3, a
+ * registry-injected system column, among them).
+ */
+export function judgeDatasetFilterKeys(
+  graph: ObjectGraph,
+  dataset: AnyRec,
+  filter: unknown,
+  path: string,
+): DatasetFilterKeyVerdict[] {
+  const out: DatasetFilterKeyVerdict[] = [];
+  if (filter === undefined || filter === null) return out;
+  const object = typeof dataset.object === 'string' ? dataset.object : undefined;
+  // Skips 1 and 2, taken once for the whole filter: resolving against an
+  // unknowable base binding would turn it into a finding per filter key.
+  if (!object || !graph.get(object)) return out;
+  const included = joinablePrefixes(dataset.include);
+  walkFilterFieldKeys(filter, path, ({ field, path: at }) => {
+    const verdict = resolveFieldPath(graph, object, field);
+    if (isUnjudgeable(verdict) || !verdict) return;
+
+    const account = describeFieldPathVerdict(verdict, field, 'filter key');
+    if (account) {
+      out.push({ kind: 'unknown', field, path: at, object, message: account.message });
+      return;
+    }
+
+    // The key RESOLVES. Second clause: ADR-0021 joins ONLY declared paths, and
+    // the compiler's `assertDeclared` never sees a `runtimeFilter` — so an
+    // undeclared prefix is a real defect with no runtime door in front of it.
+    const cut = field.lastIndexOf('.');
+    if (cut < 0) return; // a base column needs no join
+    const prefix = field.slice(0, cut);
+    if (included.has(prefix)) return;
+    out.push({ kind: 'not-included', field, path: at, object, prefix, included });
+  });
+  return out;
+}
+
+/**
+ * Validate every dashboard widget's dataset binding. Returns the list of
+ * findings (empty = clean). Caller decides how to surface them: `error`
+ * findings describe bindings the analytics service cannot satisfy and
+ * should fail validate/build; `warning` findings are advisory and must
+ * never fail the build on their own.
+ */
+export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
+  const findings: WidgetBindingFinding[] = [];
+
+  const datasets = indexResolvableDatasets(stack);
 
   // ── (0) dataset measures aggregate their field coherently ──
   // A measure that SUMs a percentage/rate field produces a meaningless total
@@ -1078,57 +1154,34 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
       // KEYS. The condition is ANDed into the dataset query as `runtimeFilter`,
       // so a key naming no column either widens the scope (the condition is
       // dropped) or empties it — and the widget renders successfully either way.
-      if (w.filter !== undefined && w.filter !== null) {
-        const filterObject = typeof dataset.object === 'string' ? dataset.object : undefined;
-        // Skips 1 and 2, taken once for the whole widget: an object this stack
-        // does not define, or one with no readable field map. Resolving against
-        // it would turn an unknowable base binding into a finding per filter key.
-        const base = filterObject ? graph.get(filterObject) : undefined;
-        if (filterObject && base) {
-          const included = joinablePrefixes(dataset.include);
-          walkFilterFieldKeys(w.filter, `${path}.filter`, ({ field, path: at }) => {
-            const verdict = resolveFieldPath(graph, filterObject, field);
-            if (isUnjudgeable(verdict) || !verdict) return;
-
-            const account = describeFieldPathVerdict(verdict, field, 'filter key');
-            if (account) {
-              push({
-                severity: 'error',
-                rule: WIDGET_FILTER_FIELD_UNKNOWN,
-                path: at,
-                message: account.message,
-                // [#22161] One remedy line: the verdict's "Did you mean" names
-                // the nearest field, so the field list (`account.detail`) is
-                // not echoed; which fields traverse is the `os explain` entry's.
-                hint:
-                  `Filter on a field of "${filterObject}" (dataset "${dsName}"), or on a relationship ` +
-                  `path whose prefix that dataset's \`include\` declares.`,
-              });
-              return;
-            }
-
-            // The key RESOLVES. Second clause: ADR-0021 joins ONLY declared
-            // paths, and the compiler's `assertDeclared` never sees a
-            // `runtimeFilter` — so an undeclared prefix is a real defect with
-            // no runtime door in front of it.
-            const cut = field.lastIndexOf('.');
-            if (cut < 0) return; // a base column needs no join
-            const prefix = field.slice(0, cut);
-            if (included.has(prefix)) return;
-            push({
-              severity: 'error',
-              rule: WIDGET_FILTER_FIELD_NOT_INCLUDED,
-              path: at,
-              message:
-                `filter key "${field}" resolves, but its relationship prefix "${prefix}" is not in ` +
-                `dataset "${dsName}"'s \`include\`, so no join reaches it and the widget renders empty`,
-              hint:
-                `Add "${prefix}" to dataset "${dsName}"'s include (declaring "a.b" implicitly ` +
-                `includes "a"), or filter on a field of "${filterObject}" itself. Declared ` +
-                `include paths: ${included.size > 0 ? [...included].sort().join(', ') : '(none)'}.`,
-            });
+      for (const verdict of judgeDatasetFilterKeys(graph, dataset, w.filter, `${path}.filter`)) {
+        if (verdict.kind === 'unknown') {
+          push({
+            severity: 'error',
+            rule: WIDGET_FILTER_FIELD_UNKNOWN,
+            path: verdict.path,
+            message: verdict.message,
+            // [#22161] One remedy line: the verdict's "Did you mean" names
+            // the nearest field, so the field list (`account.detail`) is
+            // not echoed; which fields traverse is the `os explain` entry's.
+            hint:
+              `Filter on a field of "${verdict.object}" (dataset "${dsName}"), or on a relationship ` +
+              `path whose prefix that dataset's \`include\` declares.`,
           });
+          continue;
         }
+        push({
+          severity: 'error',
+          rule: WIDGET_FILTER_FIELD_NOT_INCLUDED,
+          path: verdict.path,
+          message:
+            `filter key "${verdict.field}" resolves, but its relationship prefix "${verdict.prefix}" is not in ` +
+            `dataset "${dsName}"'s \`include\`, so no join reaches it and the widget renders empty`,
+          hint:
+            `Add "${verdict.prefix}" to dataset "${dsName}"'s include (declaring "a.b" implicitly ` +
+            `includes "a"), or filter on a field of "${verdict.object}" itself. Declared ` +
+            `include paths: ${verdict.included.size > 0 ? [...verdict.included].sort().join(', ') : '(none)'}.`,
+        });
       }
 
       const dimensionNames = new Set<string>();
