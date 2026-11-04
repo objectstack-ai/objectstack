@@ -557,7 +557,7 @@ describe('#8019 — a change-email request notifies the current address whatever
     );
 
   const confirmationsTo = (sent: SendTemplateInput[]): unknown[] =>
-    sent.filter((s) => s.template === 'auth.verify_email').map((s) => s.to?.address);
+    sent.filter((s) => s.template === 'auth.verify_email').map((s) => s.to);
 
   const TRANSPORTS: ReadonlyArray<readonly [string, (signedUp: Response) => { cookie?: string; bearer?: string }]> = [
     ['the session cookie', (signedUp) => ({ cookie: cookieFrom(signedUp) })],
@@ -576,7 +576,9 @@ describe('#8019 — a change-email request notifies the current address whatever
       const response = await changeEmailAs(manager, credentials, 'requested@example.com');
       expect(response.status, await response.clone().text()).toBe(200);
       expect(await response.json()).toEqual({ status: true });
-      expect(confirmationsTo(email.sent), 'the request was accepted').toEqual(['requested@example.com']);
+      expect(confirmationsTo(email.sent), 'the request was accepted').toEqual([
+        expect.objectContaining({ address: 'requested@example.com' }),
+      ]);
 
       expect(notices(email.sent), 'exactly one notice, to the address being left').toHaveLength(1);
       const [notice] = notices(email.sent);
