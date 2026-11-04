@@ -119,7 +119,7 @@ import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
-import { parseSourceFile } from './ts-parse.mjs';
+import { createProgramChecked, parseSourceFile } from './ts-parse.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 const PKG_REL = 'packages/metadata-protocol';
@@ -240,8 +240,7 @@ function refuse(message) {
  * identifier to its declaration in this file, an import specifier included.
  */
 function program(ts, fileName, text) {
-  parseSourceFile(fileName, text);
-  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const sf = parseSourceFile(fileName, text);
   const host = {
     getSourceFile: (name) => (name === fileName ? sf : undefined),
     writeFile() {},
@@ -253,7 +252,7 @@ function program(ts, fileName, text) {
     fileExists: (name) => name === fileName,
     readFile: () => undefined,
   };
-  const prog = ts.createProgram([fileName], { noLib: true, noResolve: true, target: ts.ScriptTarget.ES2022, strict: true }, host);
+  const prog = createProgramChecked([fileName], { noLib: true, noResolve: true, target: ts.ScriptTarget.ES2022, strict: true }, host);
   return { sf, checker: prog.getTypeChecker() };
 }
 
@@ -448,7 +447,7 @@ function sectionTable(ts, sf, cls, anchors) {
 function literalLineIndices(ts, bodyText) {
   const prefix = 'function f() ';
   const text = prefix + bodyText;
-  const sf = ts.createSourceFile('x.ts', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const sf = parseSourceFile('x.ts', text);
   const starts = new Set();
   const visit = (node) => {
     if (ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node) || ts.isStringLiteral(node)) {
@@ -476,7 +475,7 @@ function literalLineIndices(ts, bodyText) {
  */
 function undoBody(ts, movedBodyText, privateStatics) {
   const prefix = 'function f(host: any) ';
-  const sf = ts.createSourceFile('x.ts', prefix + movedBodyText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const sf = parseSourceFile('x.ts', prefix + movedBodyText);
   const sites = [];
   const visit = (node) => {
     if (ts.isIdentifier(node) && node.text === 'host' && ts.isPropertyAccessExpression(node.parent) && node.parent.expression === node) {
@@ -494,7 +493,7 @@ function undoBody(ts, movedBodyText, privateStatics) {
 
 /** The body text of the one exported function in `fnText` (what `planMove` writes). */
 function functionBodyOf(ts, fnText) {
-  const sf = ts.createSourceFile('x.ts', fnText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const sf = parseSourceFile('x.ts', fnText);
   const fn = sf.statements.find((s) => ts.isFunctionDeclaration(s));
   return fn && fn.body ? fnText.slice(fn.body.getStart(sf), fn.body.getEnd()) : null;
 }
@@ -925,7 +924,7 @@ function usedImportNames(ts, text) {
  * multi-line one as one binding per line. Pure. Returns `{ text, removed }`.
  */
 function pruneImports(ts, text, used) {
-  const sf = ts.createSourceFile(HOST_PATH, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const sf = parseSourceFile(HOST_PATH, text);
   const edits = [];
   const removed = [];
   for (const st of sf.statements) {
@@ -1003,8 +1002,8 @@ function verify(T, baseText, headText, baseHostText, headHostText, moduleTexts) 
   const failures = [];
   const moved = [];
   const checks = [];
-  const baseSf = ts.createSourceFile(HOST_PATH, baseText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-  const headSf = ts.createSourceFile(HOST_PATH, headText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const baseSf = parseSourceFile(HOST_PATH, baseText);
+  const headSf = parseSourceFile(HOST_PATH, headText);
   const baseCls = hs.classOf(baseSf, CLASS_NAME);
   const headCls = hs.classOf(headSf, CLASS_NAME);
   if (!baseCls || !headCls) return { failures: [`no class ${CLASS_NAME} at base or head`], moved, checks, linesBefore: 0, linesAfter: 0 };
@@ -1014,7 +1013,7 @@ function verify(T, baseText, headText, baseHostText, headHostText, moduleTexts) 
   const modules = new Map();
   for (const [file, text] of moduleTexts) {
     if (!text.includes(MARK)) continue;
-    const sf = ts.createSourceFile(join(SRC_DIR, file), text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const sf = parseSourceFile(join(SRC_DIR, file), text);
     const fns = new Map();
     for (const st of sf.statements) {
       if (ts.isFunctionDeclaration(st) && st.name && st.body && hasModifier(ts, st, ts.SyntaxKind.ExportKeyword)) fns.set(st.name.text, st);

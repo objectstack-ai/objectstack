@@ -563,7 +563,8 @@ const FAILURE_PROPAGATION_CALLEES = new Map([
  */
 const FAILURE_PROPAGATION_SITES = new Map([
     [
-        'packages/metadata-protocol/src/protocol.ts::migrateStoredMetadata',
+        // [#29985] The body moved to `protocol-save.ts` with the codemod split.
+        'packages/metadata-protocol/src/protocol-save.ts::migrateStoredMetadata',
         {
             callees: [['record', 'effect']],
             why:
@@ -575,7 +576,8 @@ const FAILURE_PROPAGATION_SITES = new Map([
         },
     ],
     [
-        'packages/metadata-protocol/src/protocol.ts::duplicatePackage',
+        // [#29985] The body moved to `protocol-package-commits.ts` with the codemod split.
+        'packages/metadata-protocol/src/protocol-package-commits.ts::duplicatePackage',
         {
             callees: [['failed.push', 'effect']],
             why:
@@ -3345,6 +3347,12 @@ function createHostSplit(load) {
     return api;
 }
 
+/** [#29985] Is this call `host.x(…)` — through ruling E's host parameter (`HOST_SPLIT.hostParam`)? */
+function viaHostParameter(call) {
+    const expr = call.expression;
+    return ts.isPropertyAccessExpression(expr) && ts.isIdentifier(expr.expression) && expr.expression.text === HOST_SPLIT.hostParam;
+}
+
 /**
  * Does this call perform a storage READ — directly, or through a same-file
  * wrapper? See `MAX_READ_WRAPPER_DEPTH` for why wrappers are followed, and
@@ -3367,7 +3375,14 @@ function isReadCall(node, functionBodies, seen = new Set(), depth = 0, maxDepth 
     let body = functionBodies.get(name, node);
     let bodies = functionBodies;
     // #25467: own-file first; only an unresolved name may be a host call.
-    if (!body && functionBodies.split) {
+    // [#29985] …except a call through ruling E's `host` parameter: `host.x(…)`
+    // reaches the class's member `x` whatever the module declares, and a
+    // section module routinely declares `x` itself (the moved body of that very
+    // member, with the extra `host` parameter, so the own-file answer failed
+    // the arity check and the seam left the census).
+    const hostHop = functionBodies.split && viaHostParameter(node) ? functionBodies.split.hostCall(node, functionBodies) : undefined;
+    if (hostHop) ({ body, bodies } = hostHop);
+    else if (!body && functionBodies.split) {
         const hop = functionBodies.split.hostCall(node, functionBodies);
         if (hop) ({ body, bodies } = hop);
     }
@@ -3543,7 +3558,19 @@ function establishesBenign(expr, ctx) {
     const seen = ctx.guardSeen ?? new Set();
     const depth = ctx.guardDepth ?? 0;
     if (seen.has(name) || depth >= MAX_GUARD_DEPTH) return false;
-    const body = ctx.functionBodies.get(name, call);
+    let body = ctx.functionBodies.get(name, call);
+    let guardBodies = ctx.functionBodies;
+    // [#29985] A body the host split moved (ruling E) reaches the guard it
+    // delegated to in `protocol.ts` as `host.guard(error)`: the same HOST CALL
+    // `isReadCall` follows, by the same precedence, answered from the host
+    // class's own method — the guard the call reached before the body moved,
+    // and nothing wider.
+    const hostHop = ctx.functionBodies.split && viaHostParameter(call) ? ctx.functionBodies.split.hostCall(call, ctx.functionBodies) : undefined;
+    if (hostHop) ({ body, bodies: guardBodies } = hostHop);
+    else if (!body && ctx.functionBodies.split) {
+        const hop = ctx.functionBodies.split.hostCall(call, ctx.functionBodies);
+        if (hop) ({ body, bodies: guardBodies } = hop);
+    }
     if (!body || !ts.isBlock(body)) return false;
     const exits = [];
     const consulted = new Set();
@@ -3552,6 +3579,7 @@ function establishesBenign(expr, ctx) {
         false,
         {
             ...ctx,
+            functionBodies: guardBodies,
             usedDiscriminators: consulted,
             guardSeen: new Set([...seen, name]),
             guardDepth: depth + 1,
@@ -5025,6 +5053,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
         'passes: #25467 E1 — a stub that hands its body anything but `protocolHost(this)` is not followed': 1,
         'BOUND (#25467 E1): the `host.x()` hop IS a hop — a third hop through the host is still refused': 1,
         'BOUND (#25467 E1): the same host ladder IS a seam one hop deeper — the pin above is not vacuous': 1,
+        'passes: #29985 — a moved body\'s catch that delegates to a `protocol.ts` guard as `host.guard(error)` answers on the discriminated branch': 1,
+        'flags: #29985 — negative control: the same delegation to a host guard that asks no error type still invents the answer': 1,
+        'flags: #29985 — `host.x()` in a module that declares x itself (x\'s own moved body) is the class member x, through its stub': 1,
         'ledger (read seams): a stale entry PASSES and is reported; an unledgered seam still FAILS (#26444)': 1,
         'ledger (read seams): a ledgered file on disk the scan never READ is refused; a deleted one passes (#26444)': 1,
     }),
@@ -5038,7 +5069,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // `undefined` and the comparison fails loudly.
 const SELF_TEST_BATTERY_FLOOR = Object.freeze({
     selfTest: 70,
-    selfTestReadSeams: 67,
+    selfTestReadSeams: 70,
 });
 
 // The roster's TOTAL, checked from BOTH verdict sites. Each entry checks only
@@ -6353,6 +6384,11 @@ function selfTestReadSeams() {
             private async findOverlay(t: string) { return await this.lookup(t); }
             async getItem(t: string) { return await this.findOverlay(t); }
             private static async readStatic(engine: any, t: string) { return await engine.find(t, {}); }
+            private rethrowUnlessGone(error: unknown): void {
+                if (isMissingTableError(error)) return;
+                throw error;
+            }
+            private shrugOff(error: unknown): void { void error; }
             async listRowsMoved(id: string) {
                 return listRowsMoved(protocolHost(this), id);
             }
@@ -6364,6 +6400,9 @@ function selfTestReadSeams() {
             readonly tidy: ObjectStackProtocolImplementation['tidy'];
             readonly getItem: ObjectStackProtocolImplementation['getItem'];
             readonly readStatic: (typeof ObjectStackProtocolImplementation)['readStatic'];
+            readonly rethrowUnlessGone: ObjectStackProtocolImplementation['rethrowUnlessGone'];
+            readonly listRowsMoved: ObjectStackProtocolImplementation['listRowsMoved'];
+            readonly shrugOff: ObjectStackProtocolImplementation['shrugOff'];
             readonly untyped: (t: string) => Promise<unknown[]>;
         }`;
     const E1_MODULE_HEAD = `
@@ -7606,6 +7645,54 @@ function selfTestReadSeams() {
                     export async function listRows(host: Pick<ProtocolHost, 'findRows'>, id: string) {
                         try { return await host.findRows(id); }
                         catch { return []; }
+                    }`,
+            },
+            expectViolation: true,
+            expectSeams: 1,
+        },
+        {
+            // [#29985] \`metaTypeNamespaceExists\` and \`listCommits\`'s shape once moved:
+            // the catch delegates to the host class's discriminating guard.
+            name: 'passes: #29985 — a moved body\'s catch that delegates to a `protocol.ts` guard as `host.guard(error)` answers on the discriminated branch',
+            files: {
+                [`${HOST_SPLIT.dir}/protocol.ts`]: E1_HOST,
+                [`${HOST_SPLIT.dir}/protocol-host.ts`]: E1_HOST_MODULE,
+                [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: E1_MODULE_HEAD + `
+                    export async function listRows(host: Pick<ProtocolHost, 'findRows' | 'rethrowUnlessGone'>, id: string) {
+                        try { return await host.findRows(id); }
+                        catch (error) { host.rethrowUnlessGone(error); return []; }
+                    }`,
+            },
+            expectViolation: false,
+            expectSeams: 1,
+            expectDiscriminatorsUsed: ['isMissingTableError'],
+        },
+        {
+            // [#29985] \`rollbackToPackageCommit\` guarding \`host.revertCommit(…)\` once
+            // both bodies sit in one section module: the module declares the
+            // moved \`revertCommit\` itself, with the extra \`host\` parameter.
+            name: 'flags: #29985 — `host.x()` in a module that declares x itself (x\'s own moved body) is the class member x, through its stub',
+            files: {
+                [`${HOST_SPLIT.dir}/protocol.ts`]: E1_HOST,
+                [`${HOST_SPLIT.dir}/protocol-host.ts`]: E1_HOST_MODULE,
+                [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: E1_MODULE_HEAD + `
+                    export async function rollBack(host: Pick<ProtocolHost, 'listRowsMoved'>, id: string) {
+                        try { return await host.listRowsMoved(id); }
+                        catch { return []; }
+                    }`,
+            },
+            expectViolation: true,
+            expectSeams: 1,
+        },
+        {
+            name: 'flags: #29985 — negative control: the same delegation to a host guard that asks no error type still invents the answer',
+            files: {
+                [`${HOST_SPLIT.dir}/protocol.ts`]: E1_HOST,
+                [`${HOST_SPLIT.dir}/protocol-host.ts`]: E1_HOST_MODULE,
+                [`${HOST_SPLIT.dir}/protocol-uninstall.ts`]: E1_MODULE_HEAD + `
+                    export async function listRows(host: Pick<ProtocolHost, 'findRows' | 'shrugOff'>, id: string) {
+                        try { return await host.findRows(id); }
+                        catch (error) { host.shrugOff(error); return []; }
                     }`,
             },
             expectViolation: true,
