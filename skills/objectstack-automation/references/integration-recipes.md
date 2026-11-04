@@ -159,20 +159,25 @@ Recipe 1's shape with a grant-bearing `auth`, served on `rest`, `openapi` and
 token is fetched per dispatch; no metadata key holds it.
 
 ```ts
-// A user grants access once (PKCE always on); the ref is the client secret, omitted for a public client.
+// PKCE always on; the ref is the client secret, omitted for a public client.
 auth: { type: 'oauth2', grant: 'authorization_code', authorizationUrl: 'https://account.docusign.com/oauth/auth',
         tokenUrl: 'https://account.docusign.com/oauth/token', scopes: ['signature'],
         clientId: 'objectstack-prod', credentialRef: 'DOCUSIGN_CLIENT_SECRET' }
+// Or clientSource: 'installer' in place of clientId + credentialRef.
 // Server to server: grant: 'client_credentials' with tokenUrl, clientId, credentialRef (`resource` optional).
 // Vendor app id + app secret (`vendor`: `feishu` / `dingtalk` / `wecom`):
 auth: { type: 'app-credential', vendor: 'feishu', appId: 'cli_a1b2', credentialRef: 'FEISHU_APP_SECRET' }
 ```
 
-`client_credentials` and `app-credential` dispatch once the ref is set.
 `authorization_code` is degraded "not connected" until an administrator holding
 `manage_connector_connections` connects it, once per organization, from a
 signed-in session (an agent or API key is refused):
 `POST /api/v1/automation/connectors/:name/connection` answers `{ authorizationUrl }`;
 the vendor redirects to `GET …/connectors/oauth/callback`. An `authorization_code`
 instance on `mcp` may omit the `https://` endpoints and `clientId`, discovered at connect.
+Name `clientId` for an app its publisher deploys; `clientSource: 'installer'` for one installed
+on deployments the publisher never sees: the administrator registers a client with the vendor
+against the `redirectUri` that `GET …/:name/connection` answers, then connects with `{ clientId, clientSecret }`
+(no secret for a public client; a reconnect naming no client keeps it). The connection keeps it
+encrypted; a read shows `client: { source: 'installer', clientId, hasSecret }`.
 Still never park a short-lived token behind a `bearer` ref.

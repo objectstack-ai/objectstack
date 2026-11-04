@@ -17,7 +17,7 @@
 // Under a wall the same sign-up has no organization to derive (the registrant
 // belongs to none yet); those rows' fate is not settled by this file.
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import crmStack from '@objectstack/example-crm';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { EmailServicePlugin } from '@objectstack/plugin-email';
@@ -79,6 +79,18 @@ describe('[ADR-0131 D9] a self-registration on a single boot leaves no organizat
       body: JSON.stringify({ email: REGISTRANT, password: 'Census-Passw0rd!', name: 'Census Registrant' }),
     });
     expect(signedUp.status, `sign-up: ${await signedUp.clone().text()}`).toBe(200);
+
+    // The sign-up answers before its verification mail is sent: the send, and
+    // the mail row it persists, follow the response. The census is of what the
+    // whole sign-up writes, so it is taken once that row has landed — bounded,
+    // never assumed.
+    await vi.waitFor(async () => {
+      const registrant = await ql.findOne('sys_user', { where: { email: REGISTRANT }, ...SYS });
+      const mails = registrant?.id
+        ? await ql.find('sys_identity_email', { where: { related_object: 'sys_user', related_id: registrant.id }, ...SYS })
+        : [];
+      expect(mails.length, 'the verification mail sent after the sign-up answer landed').toBeGreaterThan(0);
+    }, { timeout: 15_000 });
   }, 180_000);
 
   afterAll(async () => {
