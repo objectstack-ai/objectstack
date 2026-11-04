@@ -38,7 +38,7 @@ const PRINCIPAL = { userId: 'u1', isSystem: false } as unknown as ExecutionConte
 
 function makeBridge() {
   const engine = {
-    find: vi.fn(async () => [{ id: 'r1', name: 'alpha' }]),
+    find: vi.fn(async (_object: string, _query: unknown) => [{ id: 'r1', name: 'alpha' }]),
   };
   const metadataService = { getObject: vi.fn(async (name: string) => (name === OBJECT ? DEF : undefined)) };
   const bridge = createStdioDataBridge({
