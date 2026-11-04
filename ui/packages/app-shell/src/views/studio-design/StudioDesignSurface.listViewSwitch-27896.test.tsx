@@ -375,7 +375,8 @@ describe('the open view rides in the address (objectstack#30046)', () => {
     await screen.findByTestId('studio-list-view-inspector', undefined, { timeout: 8000 });
     await waitFor(() => expect(shownView()).toBe('showcase_task.mine'));
     await waitFor(() => expect(switcher()).toHaveTextContent('My calendar'));
-    // The address keeps saying so.
+    // The address keeps saying so, once every write the open has made has landed.
+    await new Promise((r) => setTimeout(r, 200));
     expect(address.get('view')).toBe('showcase_task.mine');
   });
 
