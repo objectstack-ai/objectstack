@@ -68,8 +68,11 @@
  *                     of one-line forwarders and makes one forwarding call.
  *   constructor       wiring only: `super(…)`, `this.x = <argument>` or
  *                     `this.x = new Ref(<arguments>)`, and forwarding calls.
- *   static block      forwarding calls only (the host factory
- *                     `installProtocolHost((p) => ({ x: (...a) => p.x(...a) }))`).
+ *   static block      wiring calls only: a call off a reference whose
+ *                     arguments are forwarders or object literals of them (the
+ *                     host factory `installProtocolHost((p) => ({ x: (...a) =>
+ *                     p.x(...a) }))`, the statics host `Object.defineProperties(
+ *                     ObjectQLStatics, { X: { get: () => ObjectQL.X } })`).
  *   field             any declaration; an initializer holding a function must
  *                     hold a forwarding arrow — a block-bodied arrow, a function
  *                     expression or a class expression in a field is a body.
@@ -167,12 +170,19 @@ function unwrap(e) {
   return e;
 }
 
-/** A name, `this`, or a `.`-chain off one of those (no call, no `?.`, no `[]`). */
+/**
+ * A name, `this`, or a `.`-chain off one of those, where a link may also be
+ * `[key]` with a name or literal key (a symbol slot read). No call, no `?.`.
+ */
 function isReference(e) {
   e = unwrap(e);
   if (!e) return false;
   if (ts.isIdentifier(e) || e.kind === ts.SyntaxKind.ThisKeyword) return true;
   if (ts.isPropertyAccessExpression(e) && !e.questionDotToken) return isReference(e.expression);
+  if (ts.isElementAccessExpression(e) && !e.questionDotToken) {
+    const key = unwrap(e.argumentExpression);
+    return (ts.isIdentifier(key) || ts.isStringLiteral(key) || ts.isNumericLiteral(key)) && isReference(e.expression);
+  }
   return false;
 }
 
@@ -252,12 +262,25 @@ function isForwarderValue(e) {
   return false;
 }
 
+/**
+ * A static block statement: a call whose callee is a reference and whose
+ * arguments are forwarder values, object literals of forwarders included, the
+ * shape both host factories take (`installProtocolHost((p) => ({ … }))` and
+ * `Object.defineProperties(ObjectQLStatics, { X: { get: () => ObjectQL.X } })`).
+ */
+function isStaticWiring(s) {
+  if (!ts.isExpressionStatement(s)) return false;
+  const e = unwrap(s.expression);
+  return ts.isCallExpression(e) && !e.questionDotToken && isReference(e.expression) &&
+    e.arguments.every(isForwarderValue);
+}
+
 function isOneLineAccessorBody(body, accept) {
   return !!body && body.statements.length === 1 && accept(body.statements[0]);
 }
 
 function isForwarderProperty(p) {
-  if (p.name && ts.isComputedPropertyName(p.name)) return false;
+  if (p.name && ts.isComputedPropertyName(p.name) && !isReference(p.name.expression)) return false;
   if (ts.isPropertyAssignment(p)) return isForwarderValue(p.initializer);
   if (ts.isShorthandPropertyAssignment(p)) return !p.objectAssignmentInitializer;
   if (ts.isSpreadAssignment(p)) return isReference(p.expression);
@@ -432,7 +455,7 @@ export function judgeClass(cls, sf) {
       continue;
     }
     if (ts.isClassStaticBlockDeclaration(m)) {
-      const i = m.body.statements.findIndex((s) => !(ts.isExpressionStatement(s) && isForwardingCall(s.expression)));
+      const i = m.body.statements.findIndex((s) => !isStaticWiring(s));
       members.push(i === -1 && m.body.statements.length > 0
         ? { key, line: at, verdict: 'delegation', shape: 'static host factory (`installHost((p) => ({ x: (...a) => p.x(...a) }))`)' }
         : { key, line: at, verdict: 'body', why: m.body.statements.length === 0 ? 'an empty static block' : `statement ${i + 1} (${kindName(m.body.statements[i])}) is not a forwarding call` });
@@ -664,6 +687,7 @@ function selfTest() {
       '      engine: this.engine,',
       '      get warned() { return readWarned(); },',
       '      set warned(v) { writeWarned(v); },',
+      '      get [SOURCE_SLOT]() { return (this as unknown as Record<symbol, unknown>)[SOURCE_SLOT]; },',
       '    };',
       '    return convert.call(host, type, data);',
       '  }',
@@ -681,6 +705,10 @@ function selfTest() {
       '      a: (...a) => protocol.a(...a),',
       '      get engine() { return protocol.engine; },',
       '    }));',
+      '    Object.defineProperties(ObjectQLStatics, {',
+      '      MAX_DEPTH: { get: () => ObjectQL.MAX_DEPTH },',
+      '      of: { value: (...args: Parameters<typeof ObjectQL.of>) => ObjectQL.of(...args) },',
+      '    });',
       '  }',
     ].join('\n')))) },
     { label: 'A5 fields: bare, data initializers, forwarding arrows → GREEN', run: () => green(run(facadeOf([
