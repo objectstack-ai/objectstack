@@ -3610,6 +3610,8 @@ export interface ObjectFieldLike {
   inlineHelpText?: string;
   /** `FieldSchema.inlineTitle` — the inline child grid's heading on the parent's form. */
   inlineTitle?: string;
+  /** `FieldSchema.relatedListTitle` — the related list's title on the parent's record page. */
+  relatedListTitle?: string;
   options?: Array<{ label?: string; value: string | number | boolean }>;
   [key: string]: any;
 }
@@ -3633,7 +3635,7 @@ function lookupObjectFieldAttr(
   bundle: TranslationBundle | undefined,
   objectName: string,
   fieldName: string,
-  attr: 'label' | 'help' | 'description' | 'inlineTitle',
+  attr: 'label' | 'help' | 'description' | 'inlineTitle' | 'relatedListTitle',
   opts?: ResolveOptions,
 ): string | undefined {
   if (!bundle) return undefined;
@@ -4472,6 +4474,15 @@ function packagedRulesByName(packagedBase: unknown): Map<string, Record<string, 
  * copies the served child field's `inlineTitle` as is, so serving it
  * translated here is the whole wiring. An authored heading with no entry keeps
  * its text; the child's plural label is never swapped in for it.
+ *
+ * ## A field's `relatedListTitle` — the related list's title
+ *
+ * `objects.<child>.fields.<field>.relatedListTitle` overlays the field's own
+ * `relatedListTitle` under the same rule, for the same reason: the field sits
+ * on the CHILD object, and the console derives the parent record page's
+ * related list (side card or full-width table) from the served child field.
+ * An authored title with no entry keeps its text; the child's label is never
+ * swapped in for it.
  */
 export function translateObject<T extends ObjectLike>(
   doc: T,
@@ -4539,6 +4550,14 @@ export function translateObject<T extends ObjectLike>(
     if (!valueOverridesPackagedBase(packagedField, 'inlineTitle', def.inlineTitle)) {
       const translatedInlineTitle = lookupObjectFieldAttr(bundle, objectName, name, 'inlineTitle', opts);
       if (translatedInlineTitle) next.inlineTitle = translatedInlineTitle;
+    }
+    // The related list's title on the parent's record page, under the same
+    // rule: the console derives the list from the served child field, so this
+    // is the one place it is localized, and an untranslated title keeps its
+    // authored text.
+    if (!valueOverridesPackagedBase(packagedField, 'relatedListTitle', def.relatedListTitle)) {
+      const translatedRelatedListTitle = lookupObjectFieldAttr(bundle, objectName, name, 'relatedListTitle', opts);
+      if (translatedRelatedListTitle) next.relatedListTitle = translatedRelatedListTitle;
     }
     if (Array.isArray(def.options)) {
       // A picklist-bound field is served with its list's options resolved
