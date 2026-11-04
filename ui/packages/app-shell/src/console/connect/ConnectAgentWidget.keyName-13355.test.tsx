@@ -135,3 +135,55 @@ describe('Connect an Agent mints a key only under a typed, confirmed name (objec
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   });
 });
+
+describe('Connect an Agent offers the work-assistant clients (WorkBuddy, Doubao Work, DuMate, QwenWork)', () => {
+  const MCP_URL = `${window.location.origin}/api/v1/mcp`;
+
+  /** Every copy-ready value the widget renders: snippets (`code`) and form rows (`dd`). */
+  const copyable = () =>
+    Array.from(document.querySelectorAll('code, dd')).map((el) => el.textContent ?? '');
+
+  it('renders each card under the work-assistants section, ahead of the coding agents', async () => {
+    await renderSettled();
+    const headings = Array.from(document.querySelectorAll('h3')).map((h) => h.textContent);
+    expect(headings).toEqual([
+      '«connectAgent.sections.assistants.title»',
+      '«connectAgent.sections.coding.title»',
+    ]);
+    for (const title of ['WorkBuddy', 'Doubao Work', 'DuMate', 'QwenWork']) {
+      expect(screen.getByText(title)).toBeInTheDocument();
+    }
+    for (const key of ['workbuddy', 'doubao', 'dumate', 'qwenwork']) {
+      expect(screen.getByText(`«connectAgent.${key}.body»`)).toBeInTheDocument();
+      expect(screen.getByText(`«connectAgent.${key}.hint»`)).toBeInTheDocument();
+    }
+  });
+
+  it('hands each client its own transport spelling for this deployment\'s MCP URL', async () => {
+    await renderSettled();
+    const values = copyable();
+    const json = (type: string) =>
+      JSON.stringify({ mcpServers: { objectstack: { type, url: MCP_URL } } }, null, 2);
+    // WorkBuddy's mcp.json and QwenWork's JSON import spell Streamable HTTP differently.
+    expect(values).toContain(json('streamableHttp'));
+    expect(values).toContain(json('streamable-http'));
+    // Doubao Work and DuMate are dialog forms: name, transport and URL, each copyable.
+    expect(values.filter((v) => v === 'objectstack')).toHaveLength(2);
+    expect(values).toContain('HTTP');
+    expect(values).toContain('Streamable HTTP');
+    expect(values.filter((v) => v === MCP_URL).length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('reveals a minted key in the Authorization: Bearer form the cards point to', async () => {
+    const input = await renderSettled();
+    fireEvent.change(input, { target: { value: 'ci-agent' } });
+    fireEvent.click(createButton());
+    const dialog = await screen.findByRole('alertdialog');
+    const confirm = Array.from(dialog.querySelectorAll('button')).find(
+      (b) => b.textContent === '«connectAgent.apiKey.mint»',
+    );
+    fireEvent.click(confirm!);
+    expect(await screen.findByText(`Authorization: Bearer ${MINTED_KEY}`)).toBeInTheDocument();
+    expect(screen.getByText(`x-api-key: ${MINTED_KEY}`)).toBeInTheDocument();
+  });
+});

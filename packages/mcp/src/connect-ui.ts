@@ -9,9 +9,10 @@
  * dies with the capability — no MCP plugin, no entry). The page body is the
  * SDUI widget `mcp:connect-agent`, provided by objectui's console app-shell:
  * it reads `/discovery` for the environment's MCP URL, renders per-client
- * connect cards (claude.ai / Claude Desktop / Claude Code / Cursor / VS Code /
- * Codex), mints API keys for headless callers, and links the SKILL.md
- * download (`GET /api/v1/mcp/skill`).
+ * connect cards (work assistants: claude.ai / Claude Desktop, WorkBuddy,
+ * Doubao Work, DuMate, QwenWork; coding agents: Claude Code / Cursor /
+ * VS Code / Codex), mints API keys for headless callers, and links the
+ * SKILL.md download (`GET /api/v1/mcp/skill`).
  *
  * Registered by {@link MCPServerPlugin} on `kernel:ready`, gated on the same
  * default-on switch as the HTTP surface — an opted-out deployment
