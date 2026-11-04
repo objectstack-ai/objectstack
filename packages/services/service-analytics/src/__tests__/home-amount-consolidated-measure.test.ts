@@ -178,8 +178,8 @@ const column = (result: AnalyticsResult, name: string) =>
     | { name: string; currency?: string; currencyField?: string }
     | undefined;
 
-const byCode = (rows: unknown[], measure: string) =>
-  Object.fromEntries((rows as Array<Record<string, unknown>>).map((r) => [r.currency, Number(r[measure])]));
+const byCode = (rows: unknown[], measure: string): Record<string, number> =>
+  Object.fromEntries((rows as Array<Record<string, unknown>>).map((r) => [String(r.currency), Number(r[measure])]));
 
 /** The live cell's own schema, created or dropped on a connection outside it. */
 async function pgSchema(statement: 'create' | 'drop'): Promise<void> {
