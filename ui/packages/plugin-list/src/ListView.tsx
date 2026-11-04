@@ -5584,11 +5584,19 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // field still shows: `GroupingEditor` mounts a value its options do not
   // carry as its own entry, labelled with the field name, so the level can be
   // removed, and no other level or "Add group field" offers it.
+  //
+  // objectstack#30077 — a column the READER added (`addedFields`) carries no
+  // label of its own (the host appends the bare field), so its fallback is the
+  // definition's label, the one the add list offered it under.
+  const addedFieldsKey = (addedFields ?? []).join('\u0000');
   const allFields = React.useMemo(() => {
+    const added = new Set(addedFieldsKey ? addedFieldsKey.split('\u0000') : []);
+    const definitionLabel = (name: string): string | undefined =>
+      added.has(name) ? objectDef?.fields?.[name]?.label : undefined;
     return (Array.isArray(schema.columns) ? (schema.columns as any[]) : []).flatMap((f: any) => {
       if (typeof f === 'string') {
         if (!canReadField(perms, schema.objectName, f)) return [];
-        return [{ name: f, label: tFieldLabel(f, f) }];
+        return [{ name: f, label: tFieldLabel(f, definitionLabel(f) || f) }];
       }
       // `name` here is this popover's OWN key (it drives `hiddenFields`), which
       // is why it keeps that shape — but the value is the column identity, so
@@ -5597,9 +5605,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       // No resolvable identity → nothing to hide or show; it used to render a
       // checkbox keyed `undefined` that could never match a column.
       if (!name || !canReadField(perms, schema.objectName, name)) return [];
-      return [{ name, label: tFieldLabel(name, f.label || name) }];
+      return [{ name, label: tFieldLabel(name, f.label || definitionLabel(name) || name) }];
     });
-  }, [schema.columns, tFieldLabel, perms, schema.objectName]);
+  }, [schema.columns, tFieldLabel, perms, schema.objectName, addedFieldsKey, objectDef]);
 
   // objectui#11984 — what the two hide-fields lists (the toolbar popover and
   // the View settings section) are handed of `hiddenFields`. An entry naming a
