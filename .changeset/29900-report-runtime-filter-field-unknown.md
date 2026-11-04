@@ -6,7 +6,7 @@ fix(lint)!: a report whose `runtimeFilter` names a field its dataset's object la
 
 Clause-②: yes (narrowing) — the report publish door, `os validate` and `os build` refuse a report `runtimeFilter` key they accepted before; `@objectstack/lint` also exports `validateReportRuntimeFilters`, `REPORT_FILTER_FIELD_UNKNOWN` and the `ReportRuntimeFilterFinding` type.
 Metadata-protocol: narrowed
-Skills-docs: no move — `skills/**` and `content/docs/**` teach `runtimeFilter` keys that are fields of the dataset's object, which this rule accepts; no page teaches a key the object lacks. The reasoning ships as the `os explain report-filter-field-unknown` entry.
+Skills-docs: none — `skills/**` and `content/docs/**` teach `runtimeFilter` keys that are fields of the dataset's object, which this rule accepts; no page teaches a key the object lacks. The reasoning ships as the `os explain report-filter-field-unknown` entry.
 
 <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed or renamed: ReportSchema.runtimeFilter keeps its shape and meaning, and the build and the publish door now give its keys the verdict a dashboard widget filter key already gets. A refused key never served a report (every reader saw Dataset query failed), so there is no rewrite that keeps what the author meant; the author names a real field or dimension, and the refusal says which. -->
 
