@@ -4175,11 +4175,15 @@ export function InterfacesPillar({
             <button
               type="button"
               data-testid="if-open-in-data"
+              title={t('engine.studio.if.openInData', locale)}
               onClick={() => openSurface({ type: 'object', name: current.name })}
               className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border bg-background px-2.5 text-xs text-foreground hover:bg-muted"
             >
               <Database className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-              {t('engine.studio.if.openInData', locale)}
+              {/* objectstack#30046 — on a narrow header it keeps its glyph, so the title keeps the view's name. */}
+              <span data-studio-fold-label="" className={STUDIO_FOLD_LABEL}>
+                {t('engine.studio.if.openInData', locale)}
+              </span>
             </button>
           )}
           {/* objectstack#28239 — the item tools Setup's item page opens. An

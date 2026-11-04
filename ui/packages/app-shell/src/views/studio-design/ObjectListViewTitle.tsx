@@ -16,9 +16,11 @@
  * takes a new item (`canCreate`): a read-only package switches views and
  * creates nothing.
  *
- * On a narrow row the object's name gives way before the view's: it
- * truncates first, down to a few characters, and the view's name truncates
- * last, its whole text in the trigger's tooltip.
+ * On a narrow row the header's chips and tools fold first (objectstack#29693):
+ * the title declares its whole text as the width it must keep
+ * (`data-studio-title-readable`). Then the object's name gives way: it
+ * truncates, down to a few characters, and the view's name truncates last,
+ * its whole text in the trigger's tooltip.
  */
 
 import * as React from 'react';
@@ -96,6 +98,22 @@ export function ObjectListViewTitle({
   const metadata = useMetadata();
   const objectDef = objectName ? findByName(metadata.objects, objectName) : undefined;
   const [addOpen, setAddOpen] = React.useState(false);
+  // objectstack#29693 — the header folds its chips and tools while the title
+  // is narrower than it reads whole. A composed title shrinks inside its box
+  // rather than overflow it, so the sizer below carries its whole width: it
+  // overflows the title (a cut title, its tooltip), and its width is the
+  // readable width the title declares (`data-studio-title-readable`), written
+  // before the header's own layout effect measures the row (a child's runs
+  // first).
+  const rootRef = React.useRef<HTMLSpanElement | null>(null);
+  const sizerRef = React.useRef<HTMLSpanElement | null>(null);
+  React.useLayoutEffect(() => {
+    const root = rootRef.current;
+    const sizer = sizerRef.current;
+    if (!root || !sizer) return;
+    const width = sizer.getBoundingClientRect().width;
+    root.dataset.studioTitleReadable = width > 0 ? String(Math.ceil(width)) : '';
+  });
   if (!target) return <>{objectText}</>;
 
   const activeLabel = listViewNameOf(listView, target, listView.row, locale);
@@ -136,11 +154,17 @@ export function ObjectListViewTitle({
   const canAdd = canCreate && !fieldState.loading && !fieldState.error;
 
   return (
-    <span className="flex min-w-0 items-baseline gap-1.5" data-testid="if-list-view-title">
-      <span className="min-w-[2.5em] shrink-[1000] truncate" data-testid="if-list-view-title-object" title={objectText}>
+    <>
+    <span ref={rootRef} className="flex min-w-0 items-baseline gap-1.5" data-testid="if-list-view-title">
+      <span
+        className="min-w-[1.5em] shrink-[1000] truncate"
+        data-slot="title-object"
+        data-testid="if-list-view-title-object"
+        title={objectText}
+      >
         {objectText}
       </span>
-      <span aria-hidden="true" className="shrink-0 font-normal text-muted-foreground">
+      <span aria-hidden="true" data-slot="title-separator" className="shrink-0 font-normal text-muted-foreground">
         /
       </span>
       <ObjectViewTitleSwitcher
@@ -171,5 +195,15 @@ export function ObjectListViewTitle({
         />
       )}
     </span>
+    {/* The title's whole text, drawn by no glyph: a pseudo-element's text is
+        in no text node, so no reader and no tooltip reads it twice. The end
+        padding stands for the ▾. */}
+    <span
+      ref={sizerRef}
+      aria-hidden="true"
+      data-full-title={`${objectText} / ${activeLabel}`}
+      className="invisible block h-0 w-max overflow-hidden pr-6 after:content-[attr(data-full-title)]"
+    />
+    </>
   );
 }
