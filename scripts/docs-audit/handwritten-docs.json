@@ -170,6 +170,7 @@
     "content/docs/kernel/runtime-services/email-service.mdx",
     "content/docs/kernel/runtime-services/examples.mdx",
     "content/docs/kernel/runtime-services/index.mdx",
+    "content/docs/kernel/runtime-services/push-service.mdx",
     "content/docs/kernel/runtime-services/queue-service.mdx",
     "content/docs/kernel/runtime-services/settings-service.mdx",
     "content/docs/kernel/runtime-services/sharing-service.mdx",

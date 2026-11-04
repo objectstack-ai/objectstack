@@ -79,6 +79,27 @@ For a **local or intranet** deployment, connect through
 own machine, so `localhost` and intranet addresses work there.
 </Callout>
 
+## Codex, WorkBuddy, Doubao Work and QwenWork
+
+These desktop assistants add a remote MCP server as a **custom
+connector**. Each one takes the same MCP URL; what differs is the menu path and
+how the client spells the Streamable HTTP transport. Where the client offers a
+browser sign-in, it is the same OAuth login as every other track. Where your
+client version offers none, add the request header
+`Authorization: Bearer <API key>` with a key from [below](#headless-api-keys).
+
+| Client | Where | What to enter |
+|:---|:---|:---|
+| **Codex** (app) | Settings → MCP servers → Add server | Name `objectstack`, transport `Streamable HTTP`, URL `<MCP URL>`; restart, then **Authenticate** to sign in, and `/mcp` to check |
+| **WorkBuddy** | Connectors → Custom connector → Configure MCP (stored in `~/.workbuddy/mcp.json`) | `{ "mcpServers": { "objectstack": { "type": "streamableHttp", "url": "<MCP URL>" } } }`, then click **Trust** on the connector — it stays inactive until trusted |
+| **Doubao Work** (豆包工作) | Skills · Connectors → New → New custom connector | Name `objectstack`, transport `HTTP`, server URL `<MCP URL>` |
+| **QwenWork** (千问办公) | Extensions → Connectors → + Add → Paste JSON config | `{ "mcpServers": { "objectstack": { "type": "streamable-http", "url": "<MCP URL>" } } }` |
+
+The **Connect an Agent** page renders each of these with your deployment's URL
+filled in. A client task that runs in the vendor's cloud, rather than on your
+machine, reaches only a deployment on public HTTPS — the same constraint as
+[claude.ai](#claude-desktop-and-claudeai).
+
 ## Any MCP client (`.mcp.json`)
 
 Clients that read an `mcpServers` map connect the same way. With an API key:
@@ -110,9 +131,10 @@ doors — which one you have depends on your permissions:
 
 On the page, the **Create key** button sits at the bottom under *API keys*. The
 new key is shown **once**, together with a ready-to-paste `x-api-key: osk_...`
-header line — copy it before you dismiss the panel. The same page carries
-copy-paste connect snippets for Claude Code, Claude Desktop, Cursor, VS Code,
-and Codex, and a download link for the app's `SKILL.md`.
+header line and its `Authorization: Bearer osk_...` form — copy it before you
+dismiss the panel. The same page carries copy-paste connect snippets for
+claude.ai and Claude Desktop, Claude Code, Codex, Cursor, WorkBuddy, Doubao Work
+and QwenWork, and a download link for the app's `SKILL.md`.
 
 Your own keys are listed (prefix only) and revoked under **Account → Developer
 → API Keys**. Platform admins get the tenant-wide list at **Setup → Access

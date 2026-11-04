@@ -264,3 +264,155 @@ describe('publish refuses a type mismatch in a fail-closed role (#29904)', () =>
         expect(issue.message).not.toMatch(/evaluates to null/);
     });
 });
+
+/**
+ * [#29959] Stage the lead object and one flow into PKG and publish the
+ * package, through the same real door as the cases above.
+ */
+async function publishLeadFlow(
+    startConfig: Record<string, unknown>,
+    nodes: unknown[],
+    edges: unknown[],
+    flowType = 'autolaunched',
+): Promise<any> {
+    const p = await makeProtocol();
+    await (p as any).saveMetaItem({
+        type: 'object',
+        name: 'edu_lead',
+        item: leadObject({ name: { type: 'text', label: 'Name', required: true } }),
+        mode: 'draft',
+        packageId: PKG,
+    });
+    await (p as any).saveMetaItem({
+        type: 'flow',
+        name: 'edu_lead_flow',
+        item: {
+            name: 'edu_lead_flow',
+            label: 'Lead flow',
+            type: flowType,
+            nodes: [{ id: 'start', type: 'start', label: 'Start', config: { objectName: 'edu_lead', ...startConfig } }, ...nodes],
+            edges,
+        },
+        mode: 'draft',
+        packageId: PKG,
+    });
+    return p.publishPackageDrafts({ packageId: PKG });
+}
+
+const routeTo = (expression: string) => ({
+    nodes: [
+        { id: 'route', type: 'decision', label: 'Route', config: { conditions: [{ label: 'Long', expression }] } },
+        { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [
+        { id: 'e1', source: 'start', target: 'route' },
+        { id: 'e2', source: 'route', target: 'end', label: 'Long' },
+    ],
+});
+
+const flowTypeIssue = (raw: any): any => {
+    const causal = raw.failed?.find((f: any) => f.code === 'INVALID_METADATA' && f.type === 'flow');
+    return causal?.issues.find((i: any) => i.rule === 'expression-invalid' && /type mismatch/.test(i.message));
+};
+
+describe('publish gives every flow condition a type-mismatch verdict that says what the run does (#29959)', () => {
+    const RECORD_TRIGGERED = { triggerType: 'record-after-update' };
+
+    it('refuses a `record.name > 5` start condition of a record-triggered flow with the run-fails wording', async () => {
+        const raw = await publishLeadFlow(
+            { ...RECORD_TRIGGERED, condition: 'record.name > 5' },
+            [{ id: 'end', type: 'end', label: 'End' }],
+            [{ id: 'e1', source: 'start', target: 'end' }],
+        );
+        expect(raw.outcome, JSON.stringify(raw)).toBe('refused');
+        const issue = flowTypeIssue(raw);
+        expect(issue, `failed: ${JSON.stringify(raw.failed)}`).toBeDefined();
+        expect(issue.severity).toBe('error');
+        expect(issue.message).toMatch(/`record\.name` holds text/);
+        expect(issue.message).toMatch(/fails the run: the flow stops at this condition, the write that fired it still lands/);
+    });
+
+    it('refuses a `name > 5` decision branch of a record-triggered flow with the run-fails wording', async () => {
+        const { nodes, edges } = routeTo('name > 5');
+        const raw = await publishLeadFlow(RECORD_TRIGGERED, nodes, edges);
+        expect(raw.outcome, JSON.stringify(raw)).toBe('refused');
+        const issue = flowTypeIssue(raw);
+        expect(issue, `failed: ${JSON.stringify(raw.failed)}`).toBeDefined();
+        expect(issue.severity).toBe('error');
+        expect(issue.path).toMatch(/nodes\[1\]\.config\.conditions\[0\]\.expression$/);
+        expect(issue.message).toMatch(/fails the run: the flow stops at this condition, the write that fired it still lands/);
+    });
+
+    it('publishes the same comparison in a flow that is not record-triggered, with a warning that says the run fails', async () => {
+        const { nodes, edges } = routeTo('name > 5');
+        const raw = await publishLeadFlow({ schedule: '0 * * * *', condition: 'record.name > 5' }, nodes, edges);
+        expect(raw.outcome, JSON.stringify(raw)).toBe('published');
+        const el = raw.published.find((e: any) => e.name === 'edu_lead_flow');
+        const advisories = (el.advisories ?? []).filter((a: any) => a.rule === 'expression-invalid' && /type mismatch/.test(a.message));
+        expect(advisories, `advisories: ${JSON.stringify(el.advisories)}`).toHaveLength(2);
+        for (const a of advisories) {
+            expect(a.severity).toBe('warning');
+            expect(a.message).toMatch(/a flow condition that faults when it is evaluated fails the run/);
+            expect(a.message).not.toMatch(/evaluates to null|still lands/);
+        }
+    });
+
+    it('publishes a record-triggered flow whose record read and decision branch are well typed (control)', async () => {
+        const { nodes, edges } = routeTo('size(name) > 5');
+        const raw = await publishLeadFlow({ ...RECORD_TRIGGERED, condition: 'size(record.name) > 0' }, nodes, edges);
+        expect(raw.outcome, JSON.stringify(raw)).toBe('published');
+        const el = raw.published.find((e: any) => e.name === 'edu_lead_flow');
+        expect((el.advisories ?? []).filter((a: any) => /type mismatch/.test(a.message))).toEqual([]);
+    });
+});
+
+/**
+ * [#30025] Through the same real door: a bare name a screen collects is the
+ * collected value downstream of the screen (a resume lands it under its plain
+ * name), so it is not typed as the field; a bare name after a node that can
+ * bind any name (`script`) is not proven to be the field, so its mismatch is
+ * the run-may-fail warning. `record.name` is the field in both, and refused.
+ */
+describe('publish stands a bare flow-condition name down where a screen or an open binder can hold it (#30025)', () => {
+    const RECORD_TRIGGERED = { triggerType: 'record-after-update' };
+    const through = (mid: Record<string, unknown>, edgeCondition: string) => ({
+        nodes: [mid, { id: 'end', type: 'end', label: 'End' }],
+        edges: [
+            { id: 'e1', source: 'start', target: 'mid' },
+            { id: 'e2', source: 'mid', target: 'end', condition: edgeCondition },
+        ],
+    });
+    const SCREEN = { id: 'mid', type: 'screen', label: 'Ask', config: { fields: [{ name: 'name', type: 'number', label: 'Count' }] } };
+    const SCRIPT = { id: 'mid', type: 'script', label: 'Calc', config: { function: 'calc' } };
+
+    it('publishes a bare `name > 5` a screen field holds, with no type verdict', async () => {
+        const { nodes, edges } = through(SCREEN, 'name > 5');
+        const raw = await publishLeadFlow(RECORD_TRIGGERED, nodes, edges);
+        expect(raw.outcome, JSON.stringify(raw)).toBe('published');
+        const el = raw.published.find((e: any) => e.name === 'edu_lead_flow');
+        expect((el.advisories ?? []).filter((a: any) => /type mismatch/.test(a.message))).toEqual([]);
+    });
+
+    it('publishes a bare `name > 5` after a script node with the run-may-fail warning', async () => {
+        const { nodes, edges } = through(SCRIPT, 'name > 5');
+        const raw = await publishLeadFlow(RECORD_TRIGGERED, nodes, edges);
+        expect(raw.outcome, JSON.stringify(raw)).toBe('published');
+        const el = raw.published.find((e: any) => e.name === 'edu_lead_flow');
+        const advisories = (el.advisories ?? []).filter((a: any) => a.rule === 'expression-invalid' && /type mismatch/.test(a.message));
+        expect(advisories, `advisories: ${JSON.stringify(el.advisories)}`).toHaveLength(1);
+        expect(advisories[0].severity).toBe('warning');
+        expect(advisories[0].message).toMatch(/which this check cannot prove here, so this is a warning, not a refusal/);
+    });
+
+    it('still refuses `record.name > 5` after either node', async () => {
+        for (const mid of [SCREEN, SCRIPT]) {
+            const { nodes, edges } = through(mid, 'record.name > 5');
+            const raw = await publishLeadFlow(RECORD_TRIGGERED, nodes, edges);
+            expect(raw.outcome, `${mid.type}: ${JSON.stringify(raw)}`).toBe('refused');
+            const issue = flowTypeIssue(raw);
+            expect(issue, `${mid.type} failed: ${JSON.stringify(raw.failed)}`).toBeDefined();
+            expect(issue.severity).toBe('error');
+            expect(issue.message).toMatch(/`record\.name` holds text/);
+        }
+    });
+});

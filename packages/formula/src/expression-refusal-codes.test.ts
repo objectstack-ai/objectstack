@@ -427,6 +427,35 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         'length, `double(record.name)` for its value (which itself faults on text that is not a number).',
     },
   ],
+  // [#29959] A flow condition the caller declared no outcome for: still a
+  // warning, worded for the failed run a fault is there (never a null). The
+  // second case is the `record.<field>` read, judged as its bare name is.
+  'type-mismatch-run-may-fail': [
+    {
+      produce: () => onlyWarning('predicate', 'name > 5', { scope: 'flattened', fields: ['name'], fieldTypes: { name: 'text' } }),
+      params: { operands: 'string > int', operator: '>', held: 'text', reference: 'name' },
+      message:
+        'type mismatch `string > int` — `name` holds text but is used with `>` against a number. CEL has no such operation, so ' +
+        'wherever the value is not numeric text (an empty value included) the expression faults, and a flow condition that ' +
+        'faults when it is evaluated fails the run: the flow stops at this condition and the work it exists to do is not done ' +
+        '(it does not read null). Whether `name` holds text there depends on what the run binds, which this check cannot ' +
+        'prove here, so this is a warning, not a refusal. ' +
+        'Compare like with like: use a number field, compare text with text, or convert explicitly — `size(name)` for its ' +
+        'length, `double(name)` for its value (which itself faults on text that is not a number).',
+    },
+    {
+      produce: () =>
+        onlyWarning('predicate', 'record.active > 0', { scope: 'flattened', fields: ['active'], fieldTypes: { active: 'boolean' } }),
+      params: { operands: 'bool > int', operator: '>', held: 'boolean', reference: 'record.active' },
+      message:
+        'type mismatch `bool > int` — `record.active` holds a boolean but is used with `>` against a number. CEL has no such ' +
+        'operation, so wherever the value is not numeric text (an empty value included) the expression faults, and a flow ' +
+        'condition that faults when it is evaluated fails the run: the flow stops at this condition and the work it exists ' +
+        'to do is not done (it does not read null). Whether `record.active` holds a boolean there depends on what the run ' +
+        'binds, which this check cannot prove here, so this is a warning, not a refusal. ' +
+        'Compare a boolean with `true` / `false`, or use a number field.',
+    },
+  ],
   'field-near-miss': [
     {
       produce: () => onlyWarning('predicate', "stauts == 'x'", { fields: ['status'], objectName: 'deal' }),
@@ -611,6 +640,9 @@ const SWEEP_SCHEMAS: readonly (ExprSchemaHint | undefined)[] = [
     fieldTypes: { name: 'text', active: 'boolean' },
     faultOutcome,
   })),
+  // [#29959] A flattened (flow) condition with no declared outcome reaches
+  // `type-mismatch-run-may-fail`, bare and through `record.`.
+  { scope: 'flattened', objectName: 'deal', fields: ['amount', 'name', 'active'], fieldTypes: { name: 'text', active: 'boolean' } },
   { fields: ['status'] },
   { fieldTypes: { account: 'lookup' }, traversalHydration: true },
 ];

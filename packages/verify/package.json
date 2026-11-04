@@ -51,6 +51,7 @@
     "@objectstack/service-mailbox": "workspace:*",
     "@objectstack/service-messaging": "workspace:*",
     "@objectstack/service-package": "workspace:*",
+    "@objectstack/service-push": "workspace:*",
     "@objectstack/service-queue": "workspace:*",
     "@objectstack/service-realtime": "workspace:*",
     "@objectstack/service-settings": "workspace:*",

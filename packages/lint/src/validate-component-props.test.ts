@@ -1460,6 +1460,48 @@ describe('validateComponentProps — record:line_items is dispatched (#21142)', 
   });
 });
 
+/**
+ * #30018 (ruling record 6624172200 on #29951, letter A) — `page:header`'s
+ * `placedActions: true` beside an authored `actions` list is refused, and this
+ * rule is the door an author meets it at: `defineStack` never parses a
+ * component's `properties` bag. The refusal is the props schema's own
+ * refinement, so it arrives here as a value verdict, not an unknown key. Each
+ * accepted shape is the control that the refusal is about the PAIR.
+ */
+describe('validateComponentProps — page:header placedActions beside an authored actions list (#30018)', () => {
+  const header = (properties: AnyRec) => stackWith([{ type: 'page:header', properties }]);
+
+  it('refuses the pair as a component-props-invalid error at properties.placedActions, naming both keys', () => {
+    for (const actions of [['convert_lead'], []]) {
+      const findings = validateComponentProps(header({ title: 'T', placedActions: true, actions }));
+      expect(findings.map((f) => [f.rule, f.severity, f.path]), JSON.stringify(actions)).toEqual([
+        [COMPONENT_PROPS_INVALID, 'error', 'pages[0].regions[0].components[0].properties.placedActions'],
+      ]);
+      expect(findings[0].where).toBe('page "probe_page" · page:header');
+      expect(findings[0].message).toContain('`placedActions: true`');
+      expect(findings[0].message).toContain('`actions`');
+    }
+  });
+
+  it('stays silent on placedActions: true alone, an actions list alone, and placedActions: false beside a list', () => {
+    for (const properties of [
+      { title: 'T', placedActions: true },
+      { title: 'T', actions: ['convert_lead'] },
+      { title: 'T', placedActions: false, actions: ['convert_lead'] },
+    ]) {
+      expect(validateComponentProps(header(properties)), JSON.stringify(properties)).toEqual([]);
+    }
+  });
+
+  it('reaches the shared pipeline as an error — the run `os validate` / `os build` / `os lint` refuse on', () => {
+    const findings = runAuthoringRules('validate', {
+      normalized: header({ title: 'T', placedActions: true, actions: ['convert_lead'] }) as never,
+    });
+    const mine = findings.filter((f) => f.rule.startsWith('component-props'));
+    expect(mine.map((f) => [f.rule, f.severity])).toEqual([[COMPONENT_PROPS_INVALID, 'error']]);
+  });
+});
+
 // [#22161] Slice 21: the `fix:` line of a value the props schema rejects is one
 // remedy line. Where the props schema lives, that the page — not the schema — is
 // what to fix in almost every case, and the retired-key and node-binding cases

@@ -2,7 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import {
@@ -19,6 +19,16 @@ import {
   UnknownCiphertextVersionError,
   aadForVersion2,
   ciphertextDerivationStatus,
+  resolvePersistedKeyFile,
+  KEY_FILE_CHANNEL_ENV,
+  KEY_FILE_CANDIDATE_CHANNEL_ENV,
+  chooseKeyFileByTrialOpen,
+  settleKeyFileChannel,
+  storedSecretReaderOverEngine,
+  deferredLocalCryptoProvider,
+  DataKeyOpensNothingError,
+  type PersistedKeyFile,
+  type StoredSecretSample,
 } from './local-crypto-provider.js';
 
 const ctx: CryptoContext = { scope: 'settings', namespace: 'mail', key: 'api_key' };
@@ -135,6 +145,348 @@ describe('LocalCryptoProvider — key resolution', () => {
       env: { OBJECTSTACK_DEV_CRYPTO_KEY: hex, NODE_ENV: 'development', HOME: home },
     });
     expect(p.keySource).toBe('env:OS_DEV_CRYPTO_KEY');
+  });
+});
+
+describe('#29934 — the key file the CLI names, and the one resolution behind it', () => {
+  let home: string;
+  let other: string;
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'os-crypto-home-'));
+    other = mkdtempSync(join(tmpdir(), 'os-crypto-other-'));
+  });
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(other, { recursive: true, force: true });
+  });
+
+  const canonical = () => join(home, '.objectstack', 'dev-crypto-key');
+  const legacy = () => join(other, 'dev-crypto-key');
+  const writeKey = (file: string): Buffer => {
+    const key = randomBytes(32);
+    mkdirSync(join(file, '..'), { recursive: true });
+    writeFileSync(file, key.toString('base64'), { mode: 0o600 });
+    return key;
+  };
+
+  it('the file tier reads and mints at the channel path, over OS_HOME', async () => {
+    const named = join(other, 'named', 'dev-crypto-key');
+    const env = { NODE_ENV: 'production', OS_HOME: home, OS_CRYPTO_AUTOKEY: '1', [KEY_FILE_CHANNEL_ENV]: named };
+    const a = new LocalCryptoProvider({ env });
+    expect(a.keySource).toBe('generated-file');
+    expect(existsSync(named)).toBe(true);
+    expect(existsSync(join(home, 'dev-crypto-key'))).toBe(false);
+    const h = await a.encrypt('v', ctx);
+    expect(await new LocalCryptoProvider({ env }).decrypt(h, ctx)).toBe('v');
+  });
+
+  it('an env key still answers before the channel', () => {
+    const named = join(other, 'dev-crypto-key');
+    writeKey(named);
+    const p = new LocalCryptoProvider({
+      env: { NODE_ENV: 'production', OS_SECRET_KEY: randomBytes(32).toString('hex'), [KEY_FILE_CHANNEL_ENV]: named },
+    });
+    expect(p.keySource).toBe('env:OS_SECRET_KEY');
+  });
+
+  it('canonical = the file the provider reads without the channel; no legacy file → canonical', () => {
+    expect(resolvePersistedKeyFile({ env: { HOME: home }, legacyKeyFile: legacy() })).toEqual({
+      path: canonical(),
+      kind: 'canonical',
+      canonical: canonical(),
+    });
+  });
+
+  it('only the legacy file holds a key → legacy-only, its path', () => {
+    writeKey(legacy());
+    expect(resolvePersistedKeyFile({ env: { HOME: home }, legacyKeyFile: legacy() })).toEqual({
+      path: legacy(),
+      kind: 'legacy-only',
+      canonical: canonical(),
+      legacy: legacy(),
+    });
+  });
+
+  it('both hold different keys → both-differ, the canonical path', () => {
+    writeKey(legacy());
+    writeKey(canonical());
+    expect(resolvePersistedKeyFile({ env: { HOME: home }, legacyKeyFile: legacy() })).toMatchObject({
+      path: canonical(),
+      kind: 'both-differ',
+      legacy: legacy(),
+    });
+  });
+
+  it('a legacy file that IS the canonical file is no legacy file', () => {
+    writeKey(canonical());
+    expect(resolvePersistedKeyFile({ env: { HOME: home }, legacyKeyFile: canonical() })?.kind).toBe('canonical');
+  });
+
+  it('an unusable legacy file counts as absent, as the file tier reads it', () => {
+    mkdirSync(other, { recursive: true });
+    writeFileSync(legacy(), 'not-a-key');
+    expect(resolvePersistedKeyFile({ env: { HOME: home }, legacyKeyFile: legacy() })?.kind).toBe('canonical');
+  });
+
+  it('undefined when an env key answers first', () => {
+    writeKey(legacy());
+    expect(resolvePersistedKeyFile({ env: { OS_SECRET_KEY: 'x' }, legacyKeyFile: legacy() })).toBeUndefined();
+    expect(
+      resolvePersistedKeyFile({ env: { OS_DEV_CRYPTO_KEY: randomBytes(32).toString('hex') }, legacyKeyFile: legacy() }),
+    ).toBeUndefined();
+    // An unusable dev key falls through to the file tier, so a file is named.
+    expect(resolvePersistedKeyFile({ env: { HOME: home, OS_DEV_CRYPTO_KEY: 'short' } })?.kind).toBe('canonical');
+  });
+});
+
+describe('#30042 — two key files: the boot takes the one that opens a stored secret', () => {
+  let home: string;
+  let other: string;
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'os-30042-home-'));
+    other = mkdtempSync(join(tmpdir(), 'os-30042-other-'));
+  });
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(other, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  const canonical = () => join(home, '.objectstack', 'dev-crypto-key');
+  const legacy = () => join(other, 'dev-crypto-key');
+  const writeKey = (file: string): Buffer => {
+    const key = randomBytes(32);
+    mkdirSync(join(file, '..'), { recursive: true });
+    writeFileSync(file, key.toString('base64'), { mode: 0o600 });
+    return key;
+  };
+  const bothDiffer = (): PersistedKeyFile => ({
+    path: canonical(),
+    kind: 'both-differ',
+    canonical: canonical(),
+    legacy: legacy(),
+  });
+  /** A stored row as the reader returns it: sealed under `key` by the producer of `scope`. */
+  const sealed = async (key: Buffer, scope: CryptoContextScope = 'settings'): Promise<StoredSecretSample> => {
+    const h = await new LocalCryptoProvider({ key }).encrypt('sk-30042', { scope, namespace: 'ai', key: 'openai_api_key' });
+    return { namespace: 'ai', key: 'openai_api_key', ciphertext: h.ciphertext };
+  };
+  const reader = (sample: StoredSecretSample | undefined) => async () => sample;
+
+  it('the case-1 shape: a start-sealed database with a foreign home key reads with the legacy key', async () => {
+    writeKey(canonical()); // `os dev` in another project minted this one
+    const startKey = writeKey(legacy());
+    const choice = await chooseKeyFileByTrialOpen({
+      answer: bothDiffer(),
+      readStoredSecret: reader(await sealed(startKey)),
+      mode: 'production',
+    });
+    expect(choice).toMatchObject({ path: legacy(), reason: 'opens', other: canonical() });
+    expect(choice.notice?.level).toBe('warn');
+    expect(choice.notice?.message).toContain(legacy());
+    expect(choice.notice?.message).toContain(canonical());
+  });
+
+  it('the dev-then-start shape: a database the canonical key sealed keeps the canonical key', async () => {
+    const devKey = writeKey(canonical());
+    writeKey(legacy());
+    const choice = await chooseKeyFileByTrialOpen({
+      answer: bothDiffer(),
+      readStoredSecret: reader(await sealed(devKey)),
+      mode: 'production',
+    });
+    expect(choice).toMatchObject({ path: canonical(), reason: 'opens', other: legacy() });
+  });
+
+  it.each(CRYPTO_CONTEXT_SCOPES)('a row sealed by the %s producer is judged too (sys_secret records no scope)', async (scope) => {
+    writeKey(canonical());
+    const startKey = writeKey(legacy());
+    const choice = await chooseKeyFileByTrialOpen({
+      answer: bothDiffer(),
+      readStoredSecret: reader(await sealed(startKey, scope)),
+      mode: 'production',
+    });
+    expect(choice.path).toBe(legacy());
+  });
+
+  it('a key that opens nothing refuses a production boot, naming both paths', async () => {
+    writeKey(canonical());
+    writeKey(legacy());
+    const elsewhere = await sealed(randomBytes(32));
+    const refusal = await chooseKeyFileByTrialOpen({
+      answer: bothDiffer(),
+      readStoredSecret: reader(elsewhere),
+      mode: 'production',
+    }).catch((e: unknown) => e);
+    expect(refusal).toBeInstanceOf(DataKeyOpensNothingError);
+    const message = (refusal as Error).message;
+    // serve's secret-field wiring rethrows exactly this phrase as a boot refusal.
+    expect(message).toContain('Refusing to start in production');
+    expect(message).toContain(canonical());
+    expect(message).toContain(legacy());
+  });
+
+  it.each(['development', 'test'] as const)('%s: a key that opens nothing is a boot ERROR naming both paths, on the canonical file', async (mode) => {
+    writeKey(canonical());
+    writeKey(legacy());
+    const choice = await chooseKeyFileByTrialOpen({
+      answer: bothDiffer(),
+      readStoredSecret: reader(await sealed(randomBytes(32))),
+      mode,
+    });
+    expect(choice).toMatchObject({ path: canonical(), reason: 'opens-nothing' });
+    expect(choice.notice?.level).toBe('error');
+    expect(choice.notice?.message).toContain(canonical());
+    expect(choice.notice?.message).toContain(legacy());
+  });
+
+  it('no stored secret: nothing to judge, the canonical file stands', async () => {
+    writeKey(canonical());
+    writeKey(legacy());
+    const choice = await chooseKeyFileByTrialOpen({ answer: bothDiffer(), readStoredSecret: reader(undefined), mode: 'production' });
+    expect(choice).toMatchObject({ path: canonical(), reason: 'no-stored-secret' });
+  });
+
+  it('a read that fails is no verdict: the canonical file, with a boot error naming the read', async () => {
+    writeKey(canonical());
+    writeKey(legacy());
+    const choice = await chooseKeyFileByTrialOpen({
+      answer: bothDiffer(),
+      readStoredSecret: async () => {
+        throw new Error('connection reset');
+      },
+      mode: 'production',
+    });
+    expect(choice).toMatchObject({ path: canonical(), reason: 'not-judged' });
+    expect(choice.notice?.level).toBe('error');
+    expect(choice.notice?.message).toContain('connection reset');
+  });
+
+  it('every one-file answer passes through untried', async () => {
+    const read = vi.fn(async () => undefined);
+    for (const answer of [
+      { path: canonical(), kind: 'canonical', canonical: canonical() },
+      { path: legacy(), kind: 'legacy-only', canonical: canonical(), legacy: legacy() },
+    ] as PersistedKeyFile[]) {
+      expect(await chooseKeyFileByTrialOpen({ answer, readStoredSecret: read })).toEqual({ path: answer.path, reason: 'single' });
+    }
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('settleKeyFileChannel points the channel at the chosen file, drops the candidate, and says so once', async () => {
+    writeKey(canonical());
+    const startKey = writeKey(legacy());
+    const sample = await sealed(startKey);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const env: Record<string, string | undefined> = {
+      NODE_ENV: 'production',
+      [KEY_FILE_CHANNEL_ENV]: canonical(),
+      [KEY_FILE_CANDIDATE_CHANNEL_ENV]: legacy(),
+    };
+    const read = vi.fn(reader(sample));
+    const [a, b] = await Promise.all([
+      settleKeyFileChannel({ env, readStoredSecret: read }),
+      settleKeyFileChannel({ env, readStoredSecret: read }),
+    ]);
+    expect(a?.path).toBe(legacy());
+    expect(b).toBe(a);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(env[KEY_FILE_CHANNEL_ENV]).toBe(legacy());
+    expect(env[KEY_FILE_CANDIDATE_CHANNEL_ENV]).toBeUndefined();
+    expect(warn.mock.calls.filter(([m]) => String(m).includes(legacy()))).toHaveLength(1);
+    expect(await settleKeyFileChannel({ env, readStoredSecret: read })).toBeUndefined();
+    // A provider built after the settlement opens the stored secret.
+    const handle = { id: 'x', kmsKeyId: 'local:v1', alg: 'aes-256-gcm', version: 1, ciphertext: sample.ciphertext };
+    expect(await new LocalCryptoProvider({ env }).decrypt(handle, { scope: 'settings', namespace: 'ai', key: 'openai_api_key' })).toBe('sk-30042');
+  });
+
+  it('a production refusal leaves both channels as they were', async () => {
+    writeKey(canonical());
+    writeKey(legacy());
+    const env: Record<string, string | undefined> = {
+      NODE_ENV: 'production',
+      [KEY_FILE_CHANNEL_ENV]: canonical(),
+      [KEY_FILE_CANDIDATE_CHANNEL_ENV]: legacy(),
+    };
+    await expect(
+      settleKeyFileChannel({ env, readStoredSecret: reader(await sealed(randomBytes(32))) }),
+    ).rejects.toBeInstanceOf(DataKeyOpensNothingError);
+    expect(env[KEY_FILE_CHANNEL_ENV]).toBe(canonical());
+    expect(env[KEY_FILE_CANDIDATE_CHANNEL_ENV]).toBe(legacy());
+  });
+
+  it('development: neither key opens it → console.error, never a debug line', async () => {
+    writeKey(canonical());
+    writeKey(legacy());
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const env: Record<string, string | undefined> = {
+      NODE_ENV: 'development',
+      [KEY_FILE_CHANNEL_ENV]: canonical(),
+      [KEY_FILE_CANDIDATE_CHANNEL_ENV]: legacy(),
+    };
+    const choice = await settleKeyFileChannel({ env, readStoredSecret: reader(await sealed(randomBytes(32))) });
+    expect(choice?.reason).toBe('opens-nothing');
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(String(error.mock.calls[0]?.[0])).toContain(legacy());
+  });
+
+  it('nothing to settle without a candidate', async () => {
+    const read = vi.fn(reader(undefined));
+    expect(await settleKeyFileChannel({ env: { [KEY_FILE_CHANNEL_ENV]: canonical() }, readStoredSecret: read })).toBeUndefined();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('a provider built before the settlement says so', () => {
+    writeKey(canonical());
+    writeKey(legacy());
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    new LocalCryptoProvider({
+      env: { NODE_ENV: 'production', [KEY_FILE_CHANNEL_ENV]: canonical(), [KEY_FILE_CANDIDATE_CHANNEL_ENV]: legacy() },
+    });
+    expect(warn.mock.calls.some(([m]) => String(m).includes(legacy()) && String(m).includes('never tried'))).toBe(true);
+  });
+
+  it('deferredLocalCryptoProvider reads its options at first use, not at construction', async () => {
+    const first = writeKey(canonical());
+    const env: Record<string, string | undefined> = { NODE_ENV: 'production', [KEY_FILE_CHANNEL_ENV]: '/nowhere/yet' };
+    const deferred = deferredLocalCryptoProvider(() => ({ env: { ...env } }));
+    env[KEY_FILE_CHANNEL_ENV] = canonical();
+    const h = await new LocalCryptoProvider({ key: first }).encrypt('v', ctx);
+    expect(await deferred.decrypt(h, ctx)).toBe('v');
+    expect(deferred.keySource).toBe('file');
+    expect(deferred.resolve()).toBe(deferred.resolve());
+  });
+});
+
+describe('#30042 — the reader over the engine', () => {
+  const v2 = 'v2:' + randomBytes(40).toString('base64');
+  it('reads the newest rows as the system and skips a marker the provider does not know', async () => {
+    const find = vi.fn(async () => [
+      { namespace: 'x', key: 'y', ciphertext: 'v9:abc' },
+      { namespace: 'ai', key: 'openai_api_key', ciphertext: v2 },
+    ]);
+    expect(await storedSecretReaderOverEngine({ find })()).toEqual({ namespace: 'ai', key: 'openai_api_key', ciphertext: v2 });
+    expect(find).toHaveBeenCalledWith('sys_secret', expect.objectContaining({
+      orderBy: [{ field: 'created_at', order: 'desc' }],
+      context: { isSystem: true },
+    }));
+  });
+
+  it('a table that does not exist holds no row; any other failure rejects', async () => {
+    const missing = storedSecretReaderOverEngine({ find: async () => { throw new Error('no such table: sys_secret'); } });
+    expect(await missing()).toBeUndefined();
+    const broken = storedSecretReaderOverEngine({ find: async () => { throw new Error('connection reset'); } });
+    await expect(broken()).rejects.toThrow('connection reset');
+  });
+});
+
+describe('#30042 — a leading `~` in OS_HOME is the home directory, as the CLI reads it', () => {
+  it.each([
+    ['~/pinned', join(homedir(), 'pinned', 'dev-crypto-key')],
+    ['~', join(homedir(), 'dev-crypto-key')],
+  ])('OS_HOME=%s', (value, file) => {
+    expect(resolvePersistedKeyFile({ env: { OS_HOME: value } })?.canonical).toBe(file);
+    expect(resolvePersistedKeyFile({ env: { OBJECTSTACK_HOME: value } })?.canonical).toBe(file);
   });
 });
 

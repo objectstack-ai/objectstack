@@ -282,7 +282,16 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // `assertSortFieldsExist` (#6994) and `assertOrderByIsMaterializable` (#7095)
   // both answer `400 INVALID_SORT` — and a view's sort is its FIRST fetch, so
   // the refusal is the whole view, on every load, traced to nothing.
-  { name: 'validateSortableFields', runtimeTypes: ['flow', 'view'], run: validateSortableFields },
+  //
+  // [#30023] `page` joins: since the projection's `author-declared` verdict
+  // the member also walks every stored PAGE sort (element `dataSource.sort`, a
+  // block's own `sort`, `interfaceConfig.sort`, `record.sort`) and judges it
+  // by the sortability projection alone. It resolves only against
+  // `stack.objects`, which the per-write page snapshot carries, so it has no
+  // missing-collection false-positive channel — the #9313 reason, one write
+  // type over. It is the only member that declares `page`, so a page write
+  // dispatches nothing else from this suite.
+  { name: 'validateSortableFields', runtimeTypes: ['flow', 'view', 'page'], run: validateSortableFields },
   // [#14107] The REST of the same list view's field surface. The two members
   // above own `sort` and `searchableFields`; every OTHER field-naming position
   // on a list view — `columns`, filter keys, `grouping`, `rowColor`,

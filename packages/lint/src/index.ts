@@ -521,9 +521,13 @@ export type {
 // ingress, `assertOrderByIsMaterializable` #7095 in the engine); this is the
 // authoring-time half, which is what makes the refusal traceable back to the
 // declaration that caused it.
+// [#30023] `indexObjectSortability` builds the optional trailing argument of
+// `checkSortDeclaration` that answers the author-declared verdict
+// (`sortable: false`), so an out-of-repo caller of the core can pass it.
 export {
   validateSortableFields,
   checkSortDeclaration,
+  indexObjectSortability,
   SORT_FIELD_UNKNOWN,
   SORT_FIELD_UNSORTABLE,
   SORT_FIELD_UNPROVISIONED,
@@ -531,6 +535,7 @@ export {
 export type {
   SortableFieldFinding,
   SortableFieldSeverity,
+  SortabilityFields,
 } from './validate-sortable-fields.js';
 
 // [#14107] The rest of the list view's field surface — the two rules above own

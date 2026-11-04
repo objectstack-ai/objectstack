@@ -104,9 +104,35 @@ const ASKS: Partial<Record<Disposition, readonly string[]>> = {
 interface Row {
   disposition: Disposition;
   why: string;
-  /** For an ASKS disposition: the same-file function the site calls, which asks. */
+  /** For an ASKS disposition: the same-file function the site calls, which asks (across {@link ENGINE_SPLIT_FILES} for the engine). */
   via?: string;
 }
+
+/**
+ * engine.ts and the modules `scripts/codemod-split-engine.mjs` (#29986) split
+ * out of it. A method there may keep its signature in engine.ts and its body in
+ * one of these, so a {@link Row.via} helper is looked up across the set.
+ */
+const ENGINE_SPLIT_FILES: ReadonlySet<string> = new Set([
+  'engine.ts',
+  'engine-actions.ts',
+  'engine-cascade-planning.ts',
+  'engine-compatibility-section.ts',
+  'engine-defaults-and-autonumbers.ts',
+  'engine-delete-and-aggregate.ts',
+  'engine-find.ts',
+  'engine-hooks-and-functions.ts',
+  'engine-insert.ts',
+  'engine-middleware-and-context.ts',
+  'engine-migration-state.ts',
+  'engine-references-and-master-detail.ts',
+  'engine-registration.ts',
+  'engine-secrets-and-routing.ts',
+  'engine-security-resolvers.ts',
+  'engine-summaries-and-expansion.ts',
+  'engine-top-level.ts',
+  'engine-transactions-section.ts',
+]);
 
 /** The calls that are seams by name. */
 const SEAM_CALLS = new Set([
@@ -128,45 +154,45 @@ const VALIDATION_FORMULA = "a validation rule's or a formula field's own relatio
 
 const READERS: Record<string, Row> = {
   // ── The readers this family fixed, and the one decision they ask ─────────
-  'engine.ts#cascadeRelationBehavior :: isFederatedUnprovisionedInjectedColumn()': {
+  'engine-cascade-planning.ts#cascadeRelationBehavior :: isFederatedUnprovisionedInjectedColumn()': {
     disposition: 'skips',
     why: 'the dependents probe never filters a federated object on a column it does not provision (both phases of the cascade read relations here)',
   },
-  'engine.ts#planCascadeAtomicity :: isFederatedUnprovisionedInjectedColumn()': {
+  'engine-cascade-planning.ts#planCascadeAtomicity :: isFederatedUnprovisionedInjectedColumn()': {
     disposition: 'skips',
     why: "the participant test is the scan's own, so the plan and the scan agree",
   },
   // [#29253] Both readers above find a relation's target through this one
   // helper; each asks the skip itself, after the reference match (the two
   // `isFederatedUnprovisionedInjectedColumn()` rows above).
-  'engine.ts#deleteWalkTargetOf :: referenceCarrierOf()': {
+  'engine-top-level.ts#deleteWalkTargetOf :: referenceCarrierOf()': {
     disposition: 'not-a-read',
     why: 'answers the object a delete-walk relation names, from the field declaration; its callers cascadeRelationBehavior and planCascadeAtomicity skip after the reference match; it reads no row',
   },
-  'engine.ts#deleteWalkTargetOf :: referenceTargetOf()': {
+  'engine-top-level.ts#deleteWalkTargetOf :: referenceTargetOf()': {
     disposition: 'not-a-read',
     why: "answers sys_user, the target a user field's type fixes, for the same two callers; it reads no row",
   },
   // [#24948] The organization-delete refusal reads the tenant column of every
   // relation the cascade follows into `sys_organization`.
-  'engine.ts#organizationOwnedRowCounts :: resolveTenantFieldName()': {
+  'engine-cascade-planning.ts#organizationOwnedRowCounts :: resolveTenantFieldName()': {
     disposition: 'skips',
     via: 'cascadeRelationBehavior',
     why: "counts a tenant column only once the cascade's own relation reading admits it, so a federated object's unprovisioned injected column is never counted",
   },
-  'engine.ts#keepsOrganizationReference :: organization_id': {
+  'engine-cascade-planning.ts#keepsOrganizationReference :: organization_id': {
     disposition: 'not-a-read',
     why: "names the attribution column a tenancy-disabled object keeps through an organization delete; the walk reads its relation through cascadeRelationBehavior; it reads no row",
   },
-  'engine.ts#keepsOrganizationReference :: resolveTenantFieldName()': {
+  'engine-cascade-planning.ts#keepsOrganizationReference :: resolveTenantFieldName()': {
     disposition: 'not-a-read',
     why: 'asks whether the object has a tenant column at all, on a relation the walk already read; it reads no row',
   },
-  'engine.ts#isTenantColumnSetNull :: resolveTenantFieldName()': {
+  'engine-cascade-planning.ts#isTenantColumnSetNull :: resolveTenantFieldName()': {
     disposition: 'not-a-read',
     why: "compares a field name with the object's tenant column, on a relation its callers already read through cascadeRelationBehavior; it reads no row",
   },
-  'engine.ts#<module> :: organization_id': {
+  'engine-top-level.ts#<module> :: organization_id': {
     disposition: 'not-a-read',
     why: "names the field a write-wall verdict (WriteWallRowVerdict, #25062) refuses, in the verdict's type; the plugin that owns the wall decides it, and the engine reads no row",
   },
@@ -213,7 +239,7 @@ const READERS: Record<string, Row> = {
   },
   // [#24410] The formula read names each reference's target to judge, per
   // formula, the related fields that target does not declare.
-  'engine.ts#resolveFormulaRelated :: referenceTargetOf()': {
+  'engine-security-resolvers.ts#resolveFormulaRelated :: referenceTargetOf()': {
     disposition: 'caller-predicate',
     why: "judges a formula's own hop against the target's declared field map; no row is read here",
   },
@@ -223,11 +249,11 @@ const READERS: Record<string, Row> = {
     disposition: 'caller-predicate',
     why: "judges a validation rule's own hop against the target's declared field map; no row is read here",
   },
-  'engine.ts#resolveSystemInsertOrganization :: isFederatedObject()': {
+  'engine-middleware-and-context.ts#resolveSystemInsertOrganization :: isFederatedObject()': {
     disposition: 'exempt',
     why: 'a system insert into a federated object is never stamped with an organization',
   },
-  'engine.ts#resolveSystemInsertOrganization :: resolveTenantFieldName()': {
+  'engine-middleware-and-context.ts#resolveSystemInsertOrganization :: resolveTenantFieldName()': {
     disposition: 'exempt',
     why: 'resolves the stamp column only after the federated exemption',
   },
@@ -263,7 +289,7 @@ const READERS: Record<string, Row> = {
     disposition: 'target-by-id',
     why: "the id a caller wrote into a reference field is looked up on the TARGET object",
   },
-  'engine.ts#expandRelatedRecords :: referenceTargetOf()': {
+  'engine-summaries-and-expansion.ts#expandRelatedRecords :: referenceTargetOf()': {
     disposition: 'target-by-id',
     why: 'the ids read off the rows in hand load the TARGET rows; a federated row carries none',
   },
@@ -311,7 +337,7 @@ const READERS: Record<string, Row> = {
     disposition: 'caller-predicate',
     why: VALIDATION_RULE,
   },
-  'engine.ts#buildSummaryIndex :: referenceCarrierOf()': {
+  'engine-summaries-and-expansion.ts#buildSummaryIndex :: referenceCarrierOf()': {
     disposition: 'author-declared',
     why:
       "infers the foreign key of a roll-up an author declared, from the child's first relation to the " +
@@ -339,8 +365,8 @@ const READERS: Record<string, Row> = {
   'engine-compatibility-api.ts#syncObjectSchema :: isFederatedObject()': { disposition: 'not-a-read', why: SYNC_ROUTE },
   'engine-compatibility-api.ts#syncSchemas :: isFederatedObject()': { disposition: 'not-a-read', why: SYNC_ROUTE },
   'engine-secret-internal-fields.ts#encryptSecretFields :: created_at': { disposition: 'not-a-read', why: PLATFORM_ROW },
-  'engine.ts#recordObservedDeviation :: updated_at': { disposition: 'not-a-read', why: PLATFORM_ROW },
-  'engine.ts#retractCreationAttestation :: updated_at': { disposition: 'not-a-read', why: PLATFORM_ROW },
+  'engine-migration-state.ts#recordObservedDeviation :: updated_at': { disposition: 'not-a-read', why: PLATFORM_ROW },
+  'engine-migration-state.ts#retractCreationAttestation :: updated_at': { disposition: 'not-a-read', why: PLATFORM_ROW },
   'plugin.ts#reconcileFederatedBindings :: isFederatedObject()': { disposition: 'not-a-read', why: SYNC_ROUTE },
   'plugin.ts#registerSchemasWithoutDdl :: isFederatedObject()': { disposition: 'not-a-read', why: SYNC_ROUTE },
   'plugin.ts#syncRegisteredSchemas :: isFederatedObject()': { disposition: 'not-a-read', why: SYNC_ROUTE },
@@ -420,24 +446,24 @@ const READERS: Record<string, Row> = {
   // [#24822] Whether a write's static-`readonly` passes spare the tenant column
   // where the Layer 0 wall's seam declares it judges the write's organization,
   // and the insert's and the update's subjects built from that one answer.
-  'engine.ts#staticReadonlySparesOrganization :: resolveInjectedColumnProvenance()': {
+  'engine-top-level.ts#staticReadonlySparesOrganization :: resolveInjectedColumnProvenance()': {
     disposition: 'not-a-read',
     why:
       "asks whether the write's organization_id is the platform's injected column or the author's; " +
       'it reads a registered definition, never storage',
   },
-  'engine.ts#staticReadonlySparesOrganization :: organization_id': {
+  'engine-top-level.ts#staticReadonlySparesOrganization :: organization_id': {
     disposition: 'not-a-read',
     why:
       "asks whether the insert strip's subject holds the column; it reads a schema view, never storage",
   },
-  'engine.ts#insertStaticReadonlySubject :: organization_id': {
+  'engine-top-level.ts#insertStaticReadonlySubject :: organization_id': {
     disposition: 'not-a-read',
     why:
       "leaves the column out of an insert's static-readonly subject where the wall's seam judges it; " +
       'it reads a schema view and the caller row in hand, never storage',
   },
-  'engine.ts#updateStaticReadonlySubject :: organization_id': {
+  'engine-top-level.ts#updateStaticReadonlySubject :: organization_id': {
     disposition: 'not-a-read',
     why:
       "leaves the column out of an update's static-readonly schema view where the wall's seam judges it; " +
@@ -649,7 +675,14 @@ describe('[#21918] every engine reader of an injected column has a disposition t
       const own = scan.calls.get(site) ?? new Set<string>();
       if (row.via) {
         const file = site.slice(0, site.indexOf('#'));
-        const helper = scan.calls.get(`${file}#${row.via}`) ?? new Set<string>();
+        // [#29986] engine.ts and the modules its codemod split wrote are one
+        // class: a host method's body may live in a sibling `engine-*.ts`
+        // module while engine.ts keeps a stub that calls it, so a via named
+        // from one of them resolves across all of them (ruling 6597555122 A).
+        const helperFiles = ENGINE_SPLIT_FILES.has(file) ? [...ENGINE_SPLIT_FILES] : [file];
+        const helper = new Set<string>(
+          helperFiles.flatMap((f) => [...(scan.calls.get(`${f}#${row.via}`) ?? [])]),
+        );
         expect(own.has(row.via), `${key}: the site does not call ${row.via}`).toBe(true);
         expect(asks.some((p) => helper.has(p)), `${key}: ${row.via} asks none of ${asks.join(', ')}`).toBe(true);
       } else {
@@ -665,9 +698,9 @@ describe('[#21918] every engine reader of an injected column has a disposition t
         .map(([key]) => siteKeyOf(key)),
     );
     expect([...skipping].sort()).toEqual([
-      'engine.ts#cascadeRelationBehavior',
-      'engine.ts#organizationOwnedRowCounts',
-      'engine.ts#planCascadeAtomicity',
+      'engine-cascade-planning.ts#cascadeRelationBehavior',
+      'engine-cascade-planning.ts#organizationOwnedRowCounts',
+      'engine-cascade-planning.ts#planCascadeAtomicity',
       'lifecycle/lifecycle-service.ts#tenantWindowsFor',
     ]);
   });

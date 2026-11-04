@@ -28,47 +28,76 @@
  * new call, a removed one or a re-scoped one turns this red until its row is
  * recorded here with its disposition (and the card's table in the PR that
  * adds it).
+ *
+ * [#29985] …and every `protocol-*.ts` module of the split, by the same rule:
+ * the codemod split moved member bodies out of `protocol.ts` (ruling E's host
+ * split), and a body that moves takes its calls with it. A site in a moved
+ * body is keyed by its module and the function it sits in, and reads the
+ * class as `host.` where `protocol.ts` reads it as `this.`.
  */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 const SOURCE = readFileSync(fileURLToPath(new URL('./protocol.ts', import.meta.url)), 'utf8');
-const LINES = SOURCE.split('\n');
 const CALLEE = 'registerItem(';
 
 /** A class member's header in `protocol.ts`: four spaces, optional modifiers, its name, its parameter list. */
 const MEMBER_HEADER = /^ {4}(?:(?:private|public|protected|static|async|override|readonly)\s+)*([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\(/;
+/** [#29985] A module function's header in a split module: optional `export` and `async`, `function`, its name, its parameter list. */
+// [#29985 facade] ...or, in a codemod module, a facet's static method at the class's depth.
+const FUNCTION_HEADER = /^(?:(?:export )?(?:async )?function | {4}static (?:async )?)([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\(/;
 /** A line of a comment: a block comment's body or opener, or a line comment. */
 const COMMENT_LINE = /^\s*(?:\*|\/\*|\/\/)/;
 
-interface Site { readonly member: string; readonly args: string }
-interface Located extends Site { readonly line: number; readonly headerLine: number }
+/** One scanned file: `protocol.ts` (no `file`) or a split module, with the header shape its members carry. */
+interface Scanned { readonly file?: string; readonly text: string; readonly lines: readonly string[]; readonly header: RegExp }
+/**
+ * [#29985] `protocol.ts`, then every module of the split: `protocol-*.ts`
+ * beside it, tests excluded (the census's own module pattern, `HOST_SPLIT.module`
+ * in `scripts/check-durability-degradation-log-level.mjs`).
+ */
+const SCANNED: readonly Scanned[] = [
+    { text: SOURCE, lines: SOURCE.split('\n'), header: MEMBER_HEADER },
+    ...readdirSync(fileURLToPath(new URL('.', import.meta.url)))
+        .filter((file) => /^protocol-[a-z0-9-]+\.ts$/.test(file))
+        .sort()
+        .map((file) => {
+            const text = readFileSync(fileURLToPath(new URL(`./${file}`, import.meta.url)), 'utf8');
+            return { file, text, lines: text.split('\n'), header: FUNCTION_HEADER };
+        }),
+];
+
+interface Site { readonly file?: string; readonly member: string; readonly args: string }
+interface Located extends Site { readonly line: number; readonly headerLine: number; readonly scanned: Scanned }
 
 /** The member a source offset sits in: the nearest member header above it. */
-function memberAt(offset: number): { name: string; line: number } {
-    for (let line = SOURCE.slice(0, offset).split('\n').length - 1; line >= 0; line--) {
-        const header = MEMBER_HEADER.exec(LINES[line]);
+function memberAt(scanned: Scanned, offset: number): { name: string; line: number } {
+    for (let line = scanned.text.slice(0, offset).split('\n').length - 1; line >= 0; line--) {
+        const header = scanned.header.exec(scanned.lines[line]);
         if (header) return { name: header[1], line };
     }
     return { name: '(no member)', line: -1 };
 }
 
-/** Every `registerItem(` call on a code line: not `unregisterItem(`, not inside a comment. */
+/** Every `registerItem(` call on a code line, in every scanned file: not `unregisterItem(`, not inside a comment. */
 function callsOf(): Located[] {
     const calls: Located[] = [];
-    for (let at = SOURCE.indexOf(CALLEE); at !== -1; at = SOURCE.indexOf(CALLEE, at + 1)) {
-        if (/[A-Za-z_$]/.test(SOURCE[at - 1] ?? '')) continue;
-        const line = SOURCE.slice(0, at).split('\n').length - 1;
-        if (COMMENT_LINE.test(LINES[line])) continue;
-        let end = at + CALLEE.length;
-        for (let depth = 1; depth > 0 && end < SOURCE.length; end++) {
-            if (SOURCE[end] === '(') depth++;
-            else if (SOURCE[end] === ')') depth--;
+    for (const scanned of SCANNED) {
+        const { text, lines } = scanned;
+        for (let at = text.indexOf(CALLEE); at !== -1; at = text.indexOf(CALLEE, at + 1)) {
+            if (/[A-Za-z_$]/.test(text[at - 1] ?? '')) continue;
+            const line = text.slice(0, at).split('\n').length - 1;
+            if (COMMENT_LINE.test(lines[line])) continue;
+            let end = at + CALLEE.length;
+            for (let depth = 1; depth > 0 && end < text.length; end++) {
+                if (text[end] === '(') depth++;
+                else if (text[end] === ')') depth--;
+            }
+            const args = text.slice(at + CALLEE.length, end - 1).replace(/\s+/g, ' ').trim().replace(/,$/, '');
+            const member = memberAt(scanned, at);
+            calls.push({ ...(scanned.file ? { file: scanned.file } : {}), member: member.name, args, line, headerLine: member.line, scanned });
         }
-        const args = SOURCE.slice(at + CALLEE.length, end - 1).replace(/\s+/g, ' ').trim().replace(/,$/, '');
-        const member = memberAt(at);
-        calls.push({ member: member.name, args, line, headerLine: member.line });
     }
     return calls;
 }
@@ -88,7 +117,7 @@ const SITES: ReadonlyArray<Site & {
     readonly viewOnlyBy?: string;
 }> = [
     {
-        member: 'applyObjectRegistryMutation', args: 'request.type, request.item, \'name\'', disposition: 'no',
+        file: 'protocol-registry-hydration.ts', member: 'applyObjectRegistryMutation', args: 'request.type, request.item, \'name\'', disposition: 'no',
         path: 'applyRegistryWriteThrough for `object` (a save, a publish, a rollback, a revert, a replica\'s mutation), on every kernel',
         why: 'an object: the entry lands in the generic map, which no read serves an object from (getItem, listItems and '
             + 'getArtifactItem read the object contributors for `object`); an object has one code owner (ADR-0029 D3), '
@@ -98,7 +127,7 @@ const SITES: ReadonlyArray<Site & {
         // [#23233] The body carries the row's package binding (`withRowBinding`); the disposition is unchanged.
         // [#28412] The body is built one line above (`registered`) so a flow row's `package_id` column is
         // recorded on it (`bindStoredRow`) before it registers; the body and the disposition are unchanged.
-        member: 'hydrateOverlayIntoRegistry', args: 'type, registered, \'name\' as any',
+        file: 'protocol-registry-hydration.ts', member: 'hydrateOverlayIntoRegistry', args: 'type, registered, \'name\' as any',
         disposition: 'yes, view only: skips a name another package ships',
         // [#23298] The write-through runs wherever the registry takes the kernel's stored rows.
         path: 'the list\'s hydration on an unscoped kernel; the write-through on an unscoped kernel and on an environment kernel that hydrated its own store; the boot\'s loadMetaFromDb on every kernel',
@@ -116,7 +145,7 @@ const SITES: ReadonlyArray<Site & {
         viewOnlyBy: 'if (canonicalMetaType(type) !== \'view\') return;',
     },
     {
-        member: 'restoreArtifactRegistryView', args: 'type, baseline.data, \'name\'',
+        file: 'protocol-registry-hydration.ts', member: 'restoreArtifactRegistryView', args: 'type, baseline.data, \'name\'',
         disposition: 'yes, view only: skips a name another package ships',
         path: 'the delete\'s heal, tier 2 (deleteMetaItem, revertCommit\'s removal, a replica\'s removal), on an unscoped kernel',
         why: 'the metadata service\'s baseline: a view baseline bound to a package is not re-registered where another '
@@ -125,7 +154,7 @@ const SITES: ReadonlyArray<Site & {
     },
 ];
 
-const keyOf = (site: Site) => `${site.member}: ${CALLEE}${site.args})`;
+const keyOf = (site: Site) => `${site.file ? `${site.file} ` : ''}${site.member}: ${CALLEE}${site.args})`;
 
 describe('[#22057] every registerItem( in protocol.ts has a recorded disposition', () => {
     const found = callsOf();
@@ -146,15 +175,15 @@ describe('[#22057] every registerItem( in protocol.ts has a recorded disposition
         // Non-vacuity: a scan that found nothing, or lost the members, cannot pass the test above by accident.
         expect(found).toHaveLength(SITES.length);
         expect(found.filter((site) => site.member === '(no member)')).toEqual([]);
-        const callLines = new Set(found.map((site) => site.line));
-        const others = LINES.map((text, line) => ({ text, line }))
-            .filter(({ text, line }) => text.includes(CALLEE) && !callLines.has(line));
+        const callLines = new Set(found.map((site) => `${site.file ?? ''}:${site.line}`));
+        const others = SCANNED.flatMap((scanned) => scanned.lines.map((text, line) => ({ text, line, file: scanned.file ?? '' })))
+            .filter(({ text, line, file }) => text.includes(CALLEE) && !callLines.has(`${file}:${line}`));
         expect(
             others.filter(({ text }) => !COMMENT_LINE.test(text) && !text.includes(`un${CALLEE}`)).map(({ text }) => text.trim()),
             'a line the command prints that is neither a recorded call, a comment, nor unregisterItem(',
         ).toEqual([]);
         // Every other spelling of the method on a code line is the hydrator's capability probe.
-        const spelled = LINES.filter((text) => !COMMENT_LINE.test(text) && /(?<![A-Za-z_$])registerItem\b/.test(text))
+        const spelled = SCANNED.flatMap((scanned) => scanned.lines).filter((text) => !COMMENT_LINE.test(text) && /(?<![A-Za-z_$])registerItem\b/.test(text))
             .filter((text) => !text.includes(CALLEE));
         expect(spelled.map((text) => text.trim())).toEqual(['if (!registry || typeof registry.registerItem !== \'function\') return false;']);
     });
@@ -163,21 +192,28 @@ describe('[#22057] every registerItem( in protocol.ts has a recorded disposition
         for (const site of SITES.filter((s) => s.disposition !== 'no')) {
             const call = found.find((f) => keyOf(f) === keyOf(site));
             expect(call, keyOf(site)).toBeDefined();
-            const body = LINES.slice(call!.headerLine, call!.line).join('\n');
-            expect(body, `${site.member}: the question asked ahead of its registration`).toContain('this.anotherPackageShips(');
+            const body = call!.scanned.lines.slice(call!.headerLine, call!.line).join('\n');
+            // [#29985] A moved body reads the class as `host.` (ruling E's rewrite set).
+            expect(body, `${site.member}: the question asked ahead of its registration`).toMatch(/\b(?:this|host)\.anotherPackageShips\(/);
         }
     });
 
     it('each skip is kept to view, so every other type registers as #4624 rules', () => {
         for (const site of SITES.filter((s) => s.disposition !== 'no')) {
             expect(site.viewOnlyBy, `${site.member}: the text that keeps it to view`).toBeDefined();
-            expect(SOURCE.split(site.viewOnlyBy!).length - 1, `${site.member}: ${site.viewOnlyBy}`).toBe(1);
+            expect(SCANNED.reduce((n, scanned) => n + scanned.text.split(site.viewOnlyBy!).length - 1, 0), `${site.member}: ${site.viewOnlyBy}`).toBe(1);
         }
     });
 
     it('the question is the one predicate, over every package that can ship the name', () => {
+        // [#29985 facade] The class keeps the signature and a one-line delegation;
+        // the body is its facet's static method, reading the class as `host`.
         expect(SOURCE).toMatch(
-            /\n {4}private anotherPackageShips\(type: string, name: string, own: unknown, shipping\?: ShippingPackages\): boolean \{\n {8}return this\.shippedArtifactsOf\(type, name, shipping\)\n/,
+            /\n {4}private anotherPackageShips\(type: string, name: string, own: unknown, shipping\?: ShippingPackages\): boolean \{\n[^\n]*\n {8}return ProtocolRegistryHydrationFacet\.anotherPackageShips\(protocolHost\(this\), type, name, own, shipping\);\n {4}\}\n/,
+        );
+        const hydration = readFileSync(fileURLToPath(new URL('./protocol-registry-hydration.ts', import.meta.url)), 'utf8');
+        expect(hydration).toMatch(
+            /\n {4}static anotherPackageShips\(host: Pick<ProtocolHost, 'shippedArtifactsOf'>, type: string, name: string, own: unknown, shipping\?: ShippingPackages\): boolean \{\n {8}return host\.shippedArtifactsOf\(type, name, shipping\)\n/,
         );
     });
 });

@@ -3702,11 +3702,28 @@ const ko = {
       addButton: 'Cursor에 추가',
       body: '원클릭 버튼을 사용하거나 아래 내용을 .cursor/mcp.json에 추가하세요:',
     },
-    vscode: {
-      body: '.vscode/mcp.json에 추가(또는 MCP: Add Server 명령 사용):',
+    fields: {
+      name: '이름',
+      transport: '전송 방식',
+      url: '서버 URL',
     },
     codex: {
-      body: '~/.codex/config.toml에 추가하세요. Codex 버전이 OAuth 흐름을 지원하지 않으면 API 키 헤더를 사용하세요(아래 참조):',
+      body: 'Codex 앱에서 설정 → MCP 서버 → 서버 추가로 이동한 뒤 다음과 같이 입력하세요:',
+      hint: '저장하고 안내에 따라 다시 시작한 뒤 objectstack 옆의 Authenticate를 클릭해 브라우저에서 로그인하세요. 입력창에 /mcp를 입력하면 연결 상태를 확인할 수 있습니다. 브라우저 로그인을 지원하지 않는 버전이라면 헤더 Authorization: Bearer <API 키>를 추가하세요(키는 아래에서 생성).',
+    },
+    workbuddy: {
+      body: '커넥터 → 사용자 지정 커넥터 → MCP 구성에서 이 항목을 mcpServers에 병합하세요(~/.workbuddy/mcp.json에 저장됨):',
+      hint: '저장한 뒤 objectstack 커넥터에서 신뢰를 클릭하세요. 신뢰하기 전에는 활성화되지 않습니다. 로그인 창이 뜨지 않으면 요청 헤더 Authorization: Bearer <API 키>를 추가하세요(키는 아래에서 생성).',
+    },
+    doubao: {
+      title: 'Doubao Work',
+      body: '스킬 · 커넥터 → 새로 만들기 → 사용자 지정 커넥터 만들기에서 다음과 같이 입력하세요:',
+      hint: '안내에 따라 브라우저에서 로그인하세요. 로그인 창이 뜨지 않으면 사용자 지정 헤더 Authorization: Bearer <API 키>를 추가하세요(키는 아래에서 생성). 클라우드에서 실행되는 작업은 공용 HTTPS로 접근 가능한 배포가 필요합니다.',
+    },
+    qwenwork: {
+      title: 'QwenWork',
+      body: '확장 → 커넥터 → + 추가 → JSON 구성 붙여넣기:',
+      hint: '직접 추가하려면 Streamable HTTP를 선택하고 이 URL을 입력하세요. 브라우저 로그인을 지원하지 않는 버전이라면 요청 헤더 Authorization: Bearer <API 키>를 추가하세요(키는 아래에서 생성).',
     },
     apiKey: {
       title: 'API 키',

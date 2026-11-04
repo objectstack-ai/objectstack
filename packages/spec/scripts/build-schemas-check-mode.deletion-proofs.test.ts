@@ -280,6 +280,7 @@ describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)'
       // …and the two other routes a reader might actually need are named.
       expect(output).toContain('RENAMED_DEFS');
       expect(output).toContain('src/conversions/registry.ts');
+      expect(output).toContain('src/conversions/entries/<toMajor>/');
       // Anchored on the merge base, which is the half a hand-edit cannot reach.
       expect(output).toContain(`merge base ${head.slice(0, 12)}`);
     },

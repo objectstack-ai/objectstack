@@ -184,7 +184,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - governed 面同含 `AGENTS.md`+`CLAUDE.md`;`GOVERNED_REPOS` 同治理、行可限仓,执行席恒随落地仓车道。
 - 另含 `ui/docs/adr/**`+`ui/.claude/**`+`ui/skills/**`+`ui/AGENTS.md`+`ui/CLAUDE.md`+`ui/.github/workflows/**`。
 - 路径面命中 Tier H ⇒ ACCEPT 换终局四件套,混合 diff ⛔ 不按比例判;要拆让 dev 单独开 PR。
-- 改动 >3000 行(含生成物)同换终局四件套,⛔ 无 Tier S 例外;读数 = PR additions+deletions。
+- 改动 >3000 行(含生成物)同换终局四件套含③请审,⛔ 无 Tier S 例外;读数=PR additions+deletions。
 - ① 席位记录落 PR 先于 `pr_ready`/入队且钉 head:速读六行+席位意见,其下 `## 席位核对`。
 - ② PR 悬着等人批,同笔挂 `needs-user-decision`;人工直合即审核记录,授权批准 ⇒ 席位落地。
 - 指针 `ACCEPT → PR #n comment <id>`;受管/spec 面欠完整复核 ①–④,席未达档起隔离达档复核。
@@ -194,11 +194,11 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - PR 上的标签 = 待维护者审阅,不入六态;与请审同为等人批清单,随获批或撤回判决离开。
 - 批准判定单源 = 队列守卫常量 `GOVERNED_APPROVERS`:授权账户 APPROVED 即算,⛔ 不卡 `commit_id`。
 - 批准后再推亦不过期;席位落地 = 过落地前检、清标、ready、auto-merge,踢出/变基同法。
-- ③ 请审 = 席位交棒:ACCEPT 与现 head 同形 PASS 俱在案后,中继 `pr_request_reviewers` 请审批人。
+- ③ 请审 = 席位交棒:ACCEPT 与现 head 同形 PASS 俱在案,同轮中继 `pr_request_reviewers` 请审批人。
 - 作者是审批人 ⇒ `assign` 它、请其余(请它必 422);⛔ 永不派/请席位自身账号;Tier S 不交人。
 - `pr_create` 不请不派;`pr_ready` 只补交棒漏;非例外 head 移 ⇒ 撤挂回等;脱中继 PR 自读请/派。
 - 速读「需要你做的」求批点名 PASS 评论 id+`Head-sha`;无 PASS ⇒ 写 contract review owed 不求批。
-- ④ 轮次报告单列 awaiting a human merge。
+- ④ 轮报单列 awaiting a human merge 并现读请审人;⛔ 未请审不在 chat 报「等你批」,先补请。
 - skills 车道自有 PR:纯代码面如 `scripts/pm/` 由本席按达档自审(清单不减)后落地。
 - 受管面两层:Tier S = `.claude/**` 全树,余皆 Tier H 等人批;S 经达档复核 PASS 后 ready → 入队。
 - 入队资格:每 check 绿或预期 skip,⛔ 非必查子集;名单 check-expected-skips.mjs 只判 objectstack。
