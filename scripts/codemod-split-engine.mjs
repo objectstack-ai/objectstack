@@ -184,6 +184,16 @@ const SECTION_ANCHORS = Object.freeze([
 const LEAF_MODULE = 'engine-top-level.ts';
 
 /**
+ * The module that holds each facet's host, one per engine (#30051): a
+ * `FacetHost` per facet module, built on first use by the factory the class's
+ * static block installs and kept for the engine's life. It imports types only,
+ * so it is evaluated before the class whichever module is loaded first, and
+ * the class's static block can install into it.
+ */
+const HOSTS_MODULE = 'engine-facet-hosts.ts';
+const HOSTS_CLASS = 'FacetHost';
+
+/**
  * Names whose text a reader takes out of `engine.ts` BY PATH. Moving it would
  * leave that reader reading a stub, or nothing. A class method or a top-level
  * declaration of the name stays. Each row names the reader. A row naming
@@ -676,6 +686,12 @@ function facetNameOf(moduleFile) {
   return hostNameOf(moduleFile).replace(/Host$/, 'Facet');
 }
 
+/** `engine-transactions-section.ts` -> `transactionsSectionHost`: the module's `FacetHost` in `HOSTS_MODULE`. */
+function hostVarOf(moduleFile) {
+  const name = hostNameOf(moduleFile);
+  return `${name[0].toLowerCase()}${name.slice(1)}`;
+}
+
 /** The object the class fills with forwarders to the statics the facets read, and its type. */
 const STATICS_NAME = `${CLASS_NAME}Statics`;
 const STATICS_HOST_NAME = `${CLASS_NAME}StaticsHost`;
@@ -717,6 +733,98 @@ function staticsTexts(kinds) {
     '  }',
   ].join('\n');
   return { ahead, block };
+}
+
+/**
+ * The facet hosts (#30051): `HOSTS_MODULE`'s text, and the static block at the
+ * end of the class that installs one host factory per facet into it. `facets`
+ * lists each facet module whose bodies read the class, with `members` (member
+ * -> `method` | `getter`, the union over its bodies) and `written` (the fields
+ * a body assigns). The host is the module's whole `<Section>Host`, so every
+ * stub of the facet hands its body the same object, which carries every
+ * member any body of the facet reads (a `Pick` of it is what each body's
+ * `this` names). Each member forwards as the per-call literal did: a method
+ * as a closure that calls it on the engine at call time, a field or accessor
+ * as a getter read when the body reads it, a written field with a setter that
+ * assigns it on the engine. So a spy or subclass override installed after the
+ * host was built is still the one reached, and the only thing a body can tell
+ * apart is that two calls see the same host object, which no moved body can
+ * observe: a body that reads `this` bare stays on the class (`bare-this`).
+ * Pure: `verify` rebuilds both texts from the head's host interfaces and the
+ * base class, and compares them.
+ */
+function hostsTexts(facets) {
+  const sorted = [...facets].sort((a, b) => (a.moduleFile < b.moduleFile ? -1 : a.moduleFile > b.moduleFile ? 1 : 0));
+  const module = [
+    '// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.',
+    '',
+    '/**',
+    ` * ${MARK} The host of each facet of \`${CLASS_NAME}\`, built ONCE per engine (#30051):`,
+    ` * what every stub of a facet hands that facet's bodies as \`this\`, in place of`,
+    ' * a host literal built on every call. Each `FacetHost` below is filled by the',
+    ` * factory \`${CLASS_NAME}\`'s static block installs, the one place that can read`,
+    ' * the class\'s private members; the host is built on the first call that needs',
+    ' * it and kept for the engine\'s life. A method goes as a closure that calls it',
+    ' * on the engine at call time, a field or accessor as a getter (and a setter',
+    ' * when a body assigns it), so a body reads and writes the engine exactly as',
+    ' * the per-call literal let it.',
+    ' *',
+    ` * Written by \`${SCRIPT}\`; it imports types only, so it forms no`,
+    ' * evaluation cycle and is evaluated before the class whichever module loads',
+    ' * first. `index.ts` re-exports nothing from this module.',
+    ' */',
+    '',
+    `import type { ${CLASS_NAME} } from './engine.js';`,
+    ...sorted.map((f) => `import type { ${hostNameOf(f.moduleFile)} } from './${f.moduleFile.replace(/\.ts$/, '.js')}';`),
+    '',
+    `/** One facet's host for each engine: built on first use, kept for the engine's life. */`,
+    `export class ${HOSTS_CLASS}<H> {`,
+    `  private readonly hosts = new WeakMap<${CLASS_NAME}, H>();`,
+    `  private build: ((engine: ${CLASS_NAME}) => H) | undefined;`,
+    '',
+    '  constructor(private readonly facet: string) {}',
+    '',
+    `  /** Called once, from \`${CLASS_NAME}\`'s static block. */`,
+    `  install(build: (engine: ${CLASS_NAME}) => H): void {`,
+    '    this.build = build;',
+    '  }',
+    '',
+    '  /** The host of `engine`, built on first use. */',
+    `  of(engine: ${CLASS_NAME}): H {`,
+    '    let host = this.hosts.get(engine);',
+    '    if (host === undefined) {',
+    '      if (this.build === undefined) {',
+    `        throw new Error(\`\${this.facet}: ${CLASS_NAME} has not installed its host factory\`);`,
+    '      }',
+    '      host = this.build(engine);',
+    '      this.hosts.set(engine, host);',
+    '    }',
+    '    return host;',
+    '  }',
+    '}',
+    '',
+    ...sorted.map((f) => `export const ${hostVarOf(f.moduleFile)} = new ${HOSTS_CLASS}<${hostNameOf(f.moduleFile)}>('${facetNameOf(f.moduleFile)}');`),
+    '',
+  ].join('\n');
+  const block = [
+    `  // ${MARK} Installs each facet's host factory (\`${HOSTS_MODULE}\`): a static block adds`,
+    '  // no member to the class, so the published `.d.ts` does not move.',
+    '  static {',
+    ...sorted.flatMap((f) => [
+      `    ${hostVarOf(f.moduleFile)}.install((engine) => ({`,
+      ...[...f.members.keys()].sort().flatMap((member) => {
+        if (f.members.get(member) === 'getter') {
+          return [`      get ${member}() { return engine.${member}; },`,
+            ...(f.written.has(member) ? [`      set ${member}(v) { engine.${member} = v; },`] : [])];
+        }
+        if (BOUND_HOST_METHODS.has(member)) return [`      get ${member}() { return engine.${member}.bind(engine); },`];
+        return [`      ${member}: (...a) => engine.${member}(...a),`];
+      }),
+      '    }));',
+    ]),
+    '  }',
+  ].join('\n');
+  return { module, block };
 }
 
 /** Is `node` inside a JSDoc comment? A `{@link X}` there is prose, not a use. */
@@ -1011,8 +1119,6 @@ function groupMovers(records) {
 
 // ── Generation ───────────────────────────────────────────────────────────────
 
-const readerName = (member) => `read${member[0].toUpperCase()}${member.slice(1)}`;
-const writerName = (member) => `write${member[0].toUpperCase()}${member.slice(1)}`;
 
 const byName = ([a], [b]) => (a < b ? -1 : a > b ? 1 : 0);
 const leafSpecifier = () => `./${LEAF_MODULE.replace(/\.ts$/, '.js')}`;
@@ -1154,12 +1260,13 @@ function moduleText(moduleFile, title, movers, scope, leafNames, routed = false)
   out.push(' *');
   if (needsHost) {
     out.push(` * The bodies reach the class through {@link ${hostName}}: exactly the`);
-    out.push(' * `ObjectQL` members they read, private ones included. Each stub hands its');
-    out.push(' * body one literal of the members that body reads, plus a `.call`: methods go');
-    out.push(' * as closures that call them on the engine at call time, so a subclass');
-    out.push(' * override or an instance spy is still the one reached; fields and accessors');
-    out.push(' * go as GETTERS, read when the body reads them, as they were on the class,');
-    out.push(' * and a field a body assigns goes with a SETTER that assigns it on the engine.');
+    out.push(' * `ObjectQL` members they read, private ones included. Every stub hands its');
+    out.push(` * body, by a \`.call\`, the same host: \`${hostVarOf(moduleFile)}\` in \`${HOSTS_MODULE}\`, built`);
+    out.push(' * once per engine by the class\'s static block. Methods go as closures that');
+    out.push(' * call them on the engine at call time, so a subclass override or an instance');
+    out.push(' * spy is still the one reached; fields and accessors go as GETTERS, read when');
+    out.push(' * the body reads them, as they were on the class, and a field a body assigns');
+    out.push(' * goes with a SETTER that assigns it on the engine.');
   } else {
     out.push(' * No body reads an `ObjectQL` member, so each stub calls its body directly.');
   }
@@ -1252,40 +1359,45 @@ function leafText(scope, top, leafExports) {
 
 const DOC_MOVED = 'its docblock with it';
 
-function stubBody(r, moduleFile, closeIndent) {
+/**
+ * A stub's body: the marker line, then ONE call of the facet member of the
+ * same name. A body that reads the class is called with its facet's host, the
+ * one object per engine `HOSTS_MODULE` keeps (#30051), not a literal built per
+ * call. `node` is the method (base or head: the stub keeps its signature).
+ * Pure: `verify` rebuilds every stub with it and compares.
+ */
+function stubBody({ node, name, usesHost, docMoved }, moduleFile, closeIndent) {
   const ind = `${closeIndent}  `;
   const hostName = hostNameOf(moduleFile);
   // A generic method calls its body INSTANTIATED with its own type
   // parameters (`Function#call` alone would erase them).
-  const typeArgs = r.node.getTypeParameters().map((t) => t.getName());
-  const fn = typeArgs.length > 0 ? `(${facetNameOf(moduleFile)}.${r.name}<${typeArgs.join(', ')}>)` : `${facetNameOf(moduleFile)}.${r.name}`;
-  const fnType = `${facetNameOf(moduleFile)}.${r.name}`;
+  const typeArgs = node.getTypeParameters().map((t) => t.getName());
+  const fn = typeArgs.length > 0 ? `(${facetNameOf(moduleFile)}.${name}<${typeArgs.join(', ')}>)` : `${facetNameOf(moduleFile)}.${name}`;
   const out = ['{'];
-  const args = forwardList(r.node).join(', ');
-  const doc = r.doc ? `, ${DOC_MOVED}` : '';
-  if (r.host.size === 0) {
+  const args = forwardList(node).join(', ');
+  const doc = docMoved ? `, ${DOC_MOVED}` : '';
+  if (!usesHost) {
     out.push(`${ind}// ${MARK} The body moved to \`${moduleFile}\`${doc}.`);
     out.push(`${ind}return ${fn}(${args});`);
   } else {
     out.push(`${ind}// ${MARK} The body moved to \`${moduleFile}\`${doc} (see \`${hostName}\`).`);
-    const members = [...r.host.keys()].sort();
-    for (const member of members) {
-      if (r.host.get(member) === 'getter') out.push(`${ind}const ${readerName(member)} = () => this.${member};`);
-      if (r.writes.has(member)) out.push(`${ind}const ${writerName(member)} = (v: ${CLASS_NAME}['${member}']) => { this.${member} = v; };`);
-    }
-    out.push(`${ind}const host: ThisParameterType<typeof ${fnType}> = {`);
-    for (const member of members) {
-      if (r.host.get(member) === 'getter') {
-        out.push(`${ind}  get ${member}() { return ${readerName(member)}(); },`);
-        if (r.writes.has(member)) out.push(`${ind}  set ${member}(v) { ${writerName(member)}(v); },`);
-      } else if (BOUND_HOST_METHODS.has(member)) out.push(`${ind}  ${member}: this.${member}.bind(this),`);
-      else out.push(`${ind}  ${member}: (...a) => this.${member}(...a),`);
-    }
-    out.push(`${ind}};`);
-    out.push(`${ind}return ${fn}.call(host${args ? `, ${args}` : ''});`);
+    out.push(`${ind}return ${fn}.call(${hostVarOf(moduleFile)}.of(this)${args ? `, ${args}` : ''});`);
   }
   out.push(`${closeIndent}}`);
   return out.join('\n');
+}
+
+/** The facets whose bodies read the class, as `hostsTexts` takes them, from the movers of each module. */
+function facetsOf(modules) {
+  const facets = [];
+  for (const [moduleFile, movers] of modules) {
+    const members = new Map();
+    const written = new Set();
+    for (const r of movers) for (const [member, kind] of r.host) members.set(member, kind);
+    for (const r of movers) for (const member of r.writes) written.add(member);
+    if (members.size > 0) facets.push({ moduleFile, members, written });
+  }
+  return facets;
 }
 
 /**
@@ -1325,20 +1437,41 @@ function generate(tm, text, planned) {
       const lineStart = text.lastIndexOf('\n', body.getEnd() - 1) + 1;
       const closeIndent = text.slice(lineStart, body.getEnd() - 1);
       if (!/^ *$/.test(closeIndent)) refuse(`${r.name}: the body's closing brace does not open its own line`);
-      edits.push({ start: body.getStart(), end: body.getEnd(), text: stubBody(r, moduleFile, closeIndent) });
+      if (r.host.size > 0 && r.node.getParameters().some((p) => p.getName() === hostVarOf(moduleFile))) {
+        refuse(`${r.name}: a parameter is named ${hostVarOf(moduleFile)}, which its stub reads as the facet's host`);
+      }
+      const stub = stubBody({ node: r.node, name: r.name, usesHost: r.host.size > 0, docMoved: Boolean(r.doc) }, moduleFile, closeIndent);
+      edits.push({ start: body.getStart(), end: body.getEnd(), text: stub });
       const asyncKw = r.node.getModifiers().find((x) => x.getKind() === tm.SyntaxKind.AsyncKeyword);
       if (asyncKw) edits.push({ start: asyncKw.getStart(), end: r.node.getNameNode().getStart(), text: '' });
       if (r.doc) edits.push({ start: r.node.getStart(true), end: r.node.getStart(), text: '' });
     }
   }
+  // After the class's last member: the static block that fills the statics
+  // forwarders, then the one that installs the facet hosts (one edit, so the
+  // two keep this order).
+  const tail = [];
   if (routedStatics.size > 0) {
     // The private-static-through-host rule: the forwarder object ahead of the
     // class (ahead of its leading comments), the static block that fills it
     // after the class's last member.
     const { ahead, block } = staticsTexts(routedStatics);
     edits.push({ start: ctx.cls.getFullStart(), end: ctx.cls.getFullStart(), text: `\n\n${ahead}` });
+    tail.push(`\n\n${block}`);
+  }
+  const facets = facetsOf(modules);
+  const hosts = facets.length > 0 ? hostsTexts(facets) : null;
+  if (hosts) {
+    for (const f of facets) {
+      if (ctx.scope.bindings.has(hostVarOf(f.moduleFile))) refuse(`engine.ts already binds ${hostVarOf(f.moduleFile)}, the name of ${f.moduleFile}'s host`);
+    }
+    tail.push(`\n\n${hosts.block}`);
+    importBlock.push(`\n// ${MARK} The facets' hosts, one per engine, which the static block at the end of the class builds.`);
+    importBlock.push(`\n${namedStatement('import', facets.map((f) => hostVarOf(f.moduleFile)).sort(), ` from './${HOSTS_MODULE.replace(/\.ts$/, '.js')}';`)}`);
+  }
+  if (tail.length > 0) {
     const last = ctx.cls.getMembers().at(-1);
-    edits.push({ start: last.getEnd(), end: last.getEnd(), text: `\n\n${block}` });
+    edits.push({ start: last.getEnd(), end: last.getEnd(), text: tail.join('') });
   }
   if (hostExportsForSections.size > 0) {
     const spelled = [...hostExportsForSections.keys()].sort().map((n) => {
@@ -1368,6 +1501,7 @@ function generate(tm, text, planned) {
   for (const [moduleFile, movers] of modules) {
     moduleTexts.set(moduleFile, moduleText(moduleFile, movers[0].section, movers, ctx.scope, leafNames, routedModules.has(moduleFile)));
   }
+  if (hosts) moduleTexts.set(HOSTS_MODULE, hosts.module);
   return { host: pruned.text, modules: moduleTexts, pruned: pruned.removed };
 }
 
@@ -1532,8 +1666,10 @@ function verify(tm, baseText, headText, moduleTexts, { readSibling = null } = {}
 
   const modules = new Map();
   let leaf = null;
+  let hostsOnDisk = null;
   for (const [file, text] of moduleTexts) {
     if (!text.includes(MARK)) continue;
+    if (file === HOSTS_MODULE) { hostsOnDisk = text; continue; }
     const sf = parse(tm, join(SRC_DIR, file), text);
     if (file === LEAF_MODULE) {
       const statements = [];
@@ -1613,6 +1749,16 @@ function verify(tm, baseText, headText, moduleTexts, { readSibling = null } = {}
     const fn = mod && mod.fns.get(name);
     if (!fn) { failures.push(`${name}: its stub names ${hit[1]}, which has no function ${name}`); continue; }
     mod.claimed.add(name);
+    // The stub itself is exactly what `stubBody` writes for this method: one
+    // call of the facet member of the same name, with the facet's own host
+    // when the body reads the class (#30051).
+    {
+      const lineStart = headText.lastIndexOf('\n', body.getEnd() - 1) + 1;
+      const closeIndent = headText.slice(lineStart, body.getEnd() - 1);
+      const usesHost = fn.getParameters().some((p) => p.getName() === 'this');
+      const want = stubBody({ node: m, name, usesHost, docMoved: Boolean(hit[2]) }, hit[1], closeIndent);
+      if (body.getText() !== want) failures.push(`${name}: its stub is not the generated one-call stub (want ${JSON.stringify(want.split('\n').at(-2).trim())})`);
+    }
     const base = baseCls.getMethods().find((x) => x.getName() === name && x.isStatic() === m.isStatic());
     if (!base || !base.getBody()) { failures.push(`${name}: no method of that name with a body at base`); continue; }
     const fnParams = fn.getParameters().filter((p) => p.getName() !== 'this').map((p) => p.getText());
@@ -1654,7 +1800,9 @@ function verify(tm, baseText, headText, moduleTexts, { readSibling = null } = {}
   // them.
   const staticsHost = headSf.getInterface(STATICS_HOST_NAME);
   const staticsVar = headSf.getVariableStatement(STATICS_NAME);
-  const staticBlocks = headCls.getMembers().filter((x) => Node.isClassStaticBlockDeclaration(x) && x.getFullText().includes(MARK));
+  const markedBlocks = headCls.getMembers().filter((x) => Node.isClassStaticBlockDeclaration(x) && x.getFullText().includes(MARK));
+  const hostsBlocks = markedBlocks.filter((x) => x.getFullText().includes(`// ${MARK} Installs`));
+  const staticBlocks = markedBlocks.filter((x) => !hostsBlocks.includes(x));
   if (staticsHost || staticsVar || staticBlocks.length > 0) {
     const kinds = new Map();
     for (const member of staticsHost ? staticsHost.getProperties() : []) {
@@ -1681,9 +1829,41 @@ function verify(tm, baseText, headText, moduleTexts, { readSibling = null } = {}
   for (const [file, mod] of modules) {
     for (const name of mod.fns.keys()) if (!mod.claimed.has(name)) failures.push(`${file}: function ${name} has no stub on the class`);
   }
+
+  // The facet hosts (#30051): `HOSTS_MODULE` and the static block that
+  // installs the factories must be exactly what `hostsTexts` writes for the
+  // facets on disk, each member forwarded as the BASE class declares it (a
+  // method as a closure, anything else as a getter, a member the interface
+  // does not mark `readonly` with a setter too). Then the undo drops both.
+  const baseMembers = instanceMembers(tm, baseCls);
+  const facets = [];
+  for (const [file, mod] of modules) {
+    const iface = mod.sf.getInterface(hostNameOf(file));
+    if (!iface) continue;
+    const members = new Map();
+    const written = new Set();
+    for (const p of iface.getProperties()) {
+      const n = p.getName();
+      const info = baseMembers.get(n);
+      if (!info) { failures.push(`${file}: ${hostNameOf(file)}.${n} names no instance member of the base class`); continue; }
+      members.set(n, info.kind === 'method' ? 'method' : 'getter');
+      if (info.kind !== 'method' && !p.isReadonly()) written.add(n);
+    }
+    facets.push({ moduleFile: file, members, written });
+  }
+  if (facets.length > 0 || hostsOnDisk !== null || hostsBlocks.length > 0) {
+    const want = hostsTexts(facets);
+    if (hostsOnDisk !== want.module) failures.push(`${HOSTS_MODULE} is not the generated host module for the facets on disk`);
+    const blockAt = hostsBlocks.length === 1 ? headText.lastIndexOf(`  // ${MARK} Installs`, hostsBlocks[0].getStart()) : -1;
+    if (hostsBlocks.length !== 1 || blockAt < 0 || headText.slice(blockAt, hostsBlocks[0].getEnd()) !== want.block) {
+      failures.push('the class\'s host static block is not the generated installer of the facet hosts');
+    } else {
+      edits.push({ start: headText.lastIndexOf('\n\n', blockAt), end: hostsBlocks[0].getEnd(), text: '' });
+    }
+  }
   const generatedSpecifier = (spec) => {
     const hit = /^\.\/(engine-[a-z0-9-]+)\.js$/.exec(spec ?? '');
-    return Boolean(hit && (modules.has(`${hit[1]}.ts`) || (leaf && `${hit[1]}.ts` === leaf.file)));
+    return Boolean(hit && (modules.has(`${hit[1]}.ts`) || `${hit[1]}.ts` === HOSTS_MODULE || (leaf && `${hit[1]}.ts` === leaf.file)));
   };
   for (const st of headSf.getStatements()) {
     const drop = (Node.isImportDeclaration(st) && generatedSpecifier(st.getModuleSpecifierValue())) ||
@@ -1836,7 +2016,7 @@ function readSibling(rel) {
 
 function generatedModulesOnDisk() {
   const out = new Map();
-  for (const file of [LEAF_MODULE, ...SECTION_ANCHORS.map((row) => row[2])]) {
+  for (const file of [LEAF_MODULE, HOSTS_MODULE, ...SECTION_ANCHORS.map((row) => row[2])]) {
     if (!file) continue;
     const p = join(SRC_DIR, file);
     if (existsSync(p)) out.set(file, readFileSync(p, 'utf8'));
@@ -1938,7 +2118,7 @@ let selfTestReachedVerdict = false;
 
 const SELF_TEST_BATTERIES = Object.freeze({
   'stay rules': 20,
-  'facets, statics and docblocks': 11,
+  'facets, statics and docblocks': 17,
   'top-level moves': 11,
   'byte-identity proof': 10,
   'import prune': 4,
@@ -2240,11 +2420,27 @@ async function selfTest() {
       mod.includes(`  ${placeholderDoc('other')}\n  static other(`));
     check('engine.ts declares the forwarder type and object for exactly the routed statics, and the static block fills them',
       /export interface ObjectQLStaticsHost \{\n  readonly SECRET: \(typeof ObjectQL\)\['SECRET'\];\n\}/.test(out.host) &&
-      out.host.includes('      SECRET: { get: () => ObjectQL.SECRET },\n    });\n  }\n}') && !out.host.includes('bump:'));
+      out.host.includes(`      SECRET: { get: () => ObjectQL.SECRET },\n    });\n  }\n\n  // ${MARK} Installs`) && !out.host.includes('bump:'));
     check('a written field gets a host setter that assigns it on the engine',
-      out.host.includes("const writeCount = (v: ObjectQL['count']) => { this.count = v; };") && out.host.includes('set count(v) { writeCount(v); },'));
+      out.host.includes('      get count() { return engine.count; },\n      set count(v) { engine.count = v; },'));
     check('a generic method calls its body instantiated with its own type parameters',
-      out.host.includes('return (LifecycleFacet.generic<T>).call(host, x);') && mod.includes('  static generic<T extends string>(this: Pick<LifecycleHost, '));
+      out.host.includes('return (LifecycleFacet.generic<T>).call(lifecycleHost.of(this), x);') && mod.includes('  static generic<T extends string>(this: Pick<LifecycleHost, '));
+    const hostsMod = out.modules.get(HOSTS_MODULE) ?? '';
+    check('every stub hands its body the one host of its facet, never a literal built per call',
+      !out.host.includes('const host') && !out.host.includes('ThisParameterType') &&
+      (out.host.match(/\.call\(lifecycleHost\.of\(this\)/g) ?? []).length >= 3 &&
+      out.host.includes("import { lifecycleHost } from './engine-facet-hosts.js';"));
+    check('the host module keeps one FacetHost per facet and imports types only',
+      hostsMod.includes("export const lifecycleHost = new FacetHost<LifecycleHost>('LifecycleFacet');") &&
+      !/^import (?!type )/m.test(hostsMod) && hostsMod.includes("import type { LifecycleHost } from './engine-lifecycle.js';"));
+    check('a method goes into the host as a closure called on the engine at call time',
+      /\n      [a-z]\w*: \(\.\.\.a\) => engine\.[a-z]\w*\(\.\.\.a\),\n/.test(out.host), out.host.slice(out.host.indexOf('Installs')));
+    check('a stub handing another facet\'s host fails', verify(tm, input,
+      out.host.replace('.call(lifecycleHost.of(this), x)', '.call(otherHost.of(this), x)'), out.modules).failures.length > 0);
+    check('an edited host module fails', verify(tm, input, out.host,
+      new Map([...out.modules, [HOSTS_MODULE, hostsMod.replace('this.hosts.set(engine, host);', '')]])).failures.length > 0);
+    check('a written field\'s setter left out of the host fails', verify(tm, input,
+      out.host.replace('      set count(v) { engine.count = v; },\n', ''), out.modules).failures.length > 0);
     check('a static method keeps its static stub and calls its facet body directly',
       out.host.includes('  static staticHelper(n: number): number {\n    // [#29986 codemod] The body moved to `engine-lifecycle.ts`.\n    return LifecycleFacet.staticHelper(n);\n  }'));
     const withMod = (text) => new Map([...out.modules, ['engine-lifecycle.ts', text]]);
