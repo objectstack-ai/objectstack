@@ -10,6 +10,7 @@ export {
     type PushServiceOptions,
 } from './push-service.js';
 export { PushServicePlugin, PUSH_RELAY_NOT_SERVED_MESSAGE, type PushServicePluginOptions } from './push-plugin.js';
+export { resolvePushCapabilityArg, type PushCapabilityArg } from './capability-arg.js';
 export {
     envPushCredentialResolver,
     PushCredentialError,

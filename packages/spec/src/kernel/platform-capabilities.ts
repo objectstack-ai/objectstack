@@ -63,6 +63,11 @@ export const PLATFORM_CAPABILITY_TOKENS: readonly string[] = Object.freeze([
   // mailboxes (ADR-0029 D2).
   'mailbox',
   'sms',
+  // Mobile push (ADR-0012 §4, §6): the kernel's `push` service, the transport
+  // half of the messaging `push` channel, built from the stack's `push` key.
+  // Requested, never always-on: it delivers only with the operator's own
+  // vendor credentials, and a boot with none refuses it.
+  'push',
   'sharing',
   'pinyin-search',
   // `reports` was RETIRED (#20102) — see RETIRED_PLATFORM_CAPABILITY_GUIDANCE.
@@ -212,6 +217,7 @@ export const PLATFORM_CAPABILITY_PROVIDERS: Readonly<Record<string, PlatformCapa
     email: { package: '@objectstack/plugin-email', edition: 'open' },
     mailbox: { package: '@objectstack/service-mailbox', edition: 'open' },
     sms: { package: '@objectstack/service-sms', edition: 'open' },
+    push: { package: '@objectstack/service-push', edition: 'open' },
     sharing: { package: '@objectstack/plugin-sharing', edition: 'open' },
     'pinyin-search': { package: '@objectstack/plugin-pinyin-search', edition: 'open' },
     approvals: { package: '@objectstack/plugin-approvals', edition: 'open' },

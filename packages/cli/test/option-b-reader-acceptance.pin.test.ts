@@ -215,12 +215,12 @@ describe('#15004 — option-B acceptance pin: every subsystem must see its colle
       // #17556 added `devHint` / `devLogins`: what the DEVELOPMENT BOOT BANNER
       // prints, read off the top level by the CLI and refused inside a package
       // body — envelope keys by the same rule `devPlugins` is one. `appName` /
-      // `email` / `sms` are the deployment's product name and its mail and SMS
-      // configuration, read off the top level when the boot builds those
-      // providers. #25777 added `demoStaff`: the demo accounts the development
+      // `email` / `sms` / `push` are the deployment's product name and its mail,
+      // SMS and push configuration, read off the top level when the boot builds
+      // those providers. #25777 added `demoStaff`: the demo accounts the development
       // boot creates, read off the top level by the CLI and refused inside a
       // package body by the same rule.
-      ['api', 'appName', 'demoStaff', 'devHint', 'devLogins', 'devPlugins', 'email', 'i18n', 'manifest', 'onEnable', 'packages', 'plugins', 'runtimeModule', 'server', 'sms'],
+      ['api', 'appName', 'demoStaff', 'devHint', 'devLogins', 'devPlugins', 'email', 'i18n', 'manifest', 'onEnable', 'packages', 'plugins', 'push', 'runtimeModule', 'server', 'sms'],
     );
 
     // Every key option B drops is a package-owned collection, and every key it
