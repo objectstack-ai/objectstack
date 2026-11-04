@@ -4239,7 +4239,7 @@
       "title": "Authorable keys Studio has no control for still work when another door writes them: per metadata type, each key written into a package draft through the metadata API is stored, served after publish and takes its runtime effect",
       "since": "v18",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -4325,7 +4325,7 @@
         "view.list: searchableFields, userFilters, resizable, compactToolbar, selection, pagination, rowHeight, grouping, rowColor, hiddenFields, fieldOrder, rowActions, bulkActions, conditionalFormatting, inlineEdit, exportOptions (needs an export grant), appearance, addRecord, showRecordCount, allowPrinting, emptyState → each renders as its key describes; probe compactToolbar, showRecordCount and resizable at the value opposite to what the list does with the key unset, since at that default a stored key renders exactly like no key and proves nothing (gap-view card, 3fcafcd3)",
         "view.form: groups, subforms, submitBehavior, modalSize, allowSkip, showStepIndicator, buttons → render as described (buttons measured rendering, knownGaps[0]); splitDirection / splitSize / splitResizable → refused at parse (retired in @objectstack/spec 18.3.0 with the split form, ADR-0050); drawerSide / drawerWidth → refused at parse (retired in @objectstack/spec 18.3.0, ADR-0049: no form view opens in a drawer); defaults: partial (knownGaps[0]). layout, defaultTab and tabPosition are not rows: Studio offers a control for each (step 4, knownGaps[0]). modalSize acts only on the form view the record modal selects, the object's default form view, or for a create its `create` form view when one is declared (selectRecordFormView, ui/packages/app-shell/src/utils/recordFormNavigation.ts), so author it there",
         "dashboard.requiredPermissions → a viewer without the capability is refused the dashboard",
-        "dataset (Studio has no dataset editor): include, dimensions with nullLabel, measures count / sum / avg / filtered / ratio, currency format → a report bound to it shows the null bucket labelled and each measure's value",
+        "dataset (Studio's New dataset, ui/packages/app-shell/src/views/studio-design/datasetCreate.tsx DatasetCreateEntry, writes only a name, an object, the seed's count measure, group-by dimensions and sum measures, so it offers no control for the keys below): include, dimensions with nullLabel, measures count / sum / avg / filtered / ratio, currency format → a report bound to it shows the null bucket labelled and each measure's value",
         "permission.description / isDefault / allowExport / rowLevelSecurity[].positions → the Setup list shows the description; isDefault raises a suggestion; allowExport → export 200 with it, 403 EXPORT_NOT_PERMITTED without; positions limit the policy to holders of the position"
       ],
       "traps": [
@@ -4367,7 +4367,13 @@
           "ref": "#28345"
         },
         { "revision": 5, "date": "2026-11-03", "change": "the view.form row drops drawerSide, drawerWidth, layout, defaultTab and tabPosition as step 4 says, fixtures.knownGaps[0] records why, and the object titleFormat cell moves to a refusal. QA run #29672 read drawerSide and drawerWidth answer 422 (retired in spec 18.3.0, ADR-0049; their retiredKey tombstones in packages/spec/src/ui/view.zod.ts), so they are refused, not stored and inert; and Studio's form-view inspector now offers Layout, Columns, Default Tab and Tab Position (ViewVariantInspector.tsx hands the form variant's spec schema to SchemaForm), which step 4 moves out of the matrix. The run's layout:'horizontal' fail on the Studio canvas was #29676, fixed by #29759 (7ba8b11f52). The buttons cell follows revision 3's knownGaps[0] reading. titleFormat has been refused since 3557366c02 (title-format-retired); the run read the publish refuse it on studio-authoring.api-written-keys-survive-studio-save. The other view.form keys' Studio census was not re-read; the next run's step 4 decides it. The clauses are unchanged. Read at base 339f63da30. Card #29679, from QA run #29672", "ref": "#29679" },
-        { "revision": 6, "date": "2026-11-04", "change": "fixtures.knownGaps[0], variants[25], [32] and [33] and acceptance[0].verify corrected from QA run #29890 (W5-FAIL, at 589049b0): a lockedBy-only list view shows its lock indicator since #29312, so it leaves the failing rows; sortable names its observables (header, Sort picker, 400 INVALID_SORT; #29896, #30024); compactToolbar, showRecordCount and resizable are probed at a non-default value; modalSize acts on the form view the record modal selects; a conditionalFormatting condition is stored as a CEL envelope. Read at base f68b47ca", "ref": "#29906" }
+        { "revision": 6, "date": "2026-11-04", "change": "fixtures.knownGaps[0], variants[25], [32] and [33] and acceptance[0].verify corrected from QA run #29890 (W5-FAIL, at 589049b0): a lockedBy-only list view shows its lock indicator since #29312, so it leaves the failing rows; sortable names its observables (header, Sort picker, 400 INVALID_SORT; #29896, #30024); compactToolbar, showRecordCount and resizable are probed at a non-default value; modalSize acts on the form view the record modal selects; a conditionalFormatting condition is stored as a CEL envelope. Read at base f68b47ca", "ref": "#29906" },
+        {
+          "revision": 7,
+          "date": "2026-11-04",
+          "change": "variants[35]: the 'Studio has no dataset editor' parenthetical is stale, found while applying #30129 line 1 (dashboard-widget-and-filter-types). Studio's New dataset (datasetCreate.tsx DatasetCreateEntry, buildDatasetSkeleton) writes only a name, an object, the seed's count measure, group-by dimensions and sum measures, so include, nullLabel, the avg / filtered / ratio measures and a currency format still have no Studio control and the row stays in the matrix. No clause changed. Read at base 232d3bb5ef",
+          "ref": "#30129"
+        }
       ]
     },
     {
