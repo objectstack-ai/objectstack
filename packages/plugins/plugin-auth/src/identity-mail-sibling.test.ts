@@ -88,7 +88,7 @@ async function driveAuthMail(tenancy: Tenancy) {
   await config.hooks.after({
     path: '/change-email',
     body: { newEmail: 'new@example.com' },
-    context: { __osChangeEmailFrom: { email: USER.email, name: USER.name, id: USER.id }, returned: { status: true } },
+    context: { session: { user: { email: USER.email, name: USER.name, id: USER.id } }, returned: { status: true } },
   });
   await config.plugins.find((p: any) => p.id === 'organization')._opts.sendInvitationEmail({
     email: 'invitee@example.com',
