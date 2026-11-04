@@ -1035,7 +1035,8 @@ export interface IApprovalService {
    * - `returned` (ADR-0044) — the submitter ALONE, and only on the LATEST
    *   `returned` request of its (run, node): they abandon the revision window
    *   instead of resubmitting, the request flips `returned → recalled`, and
-   *   the run resumes down `reject` the same way. Neither the override nor the
+   *   the run is cancelled (the revise window has no `reject` edge to resume
+   *   down). Neither the override nor the
    *   system arm reaches a `returned` request (#12775); an override actor is
    *   refused there exactly as any other non-submitter.
    *
@@ -1057,8 +1058,11 @@ export interface IApprovalService {
    *
    * A request with no submitter is sent back the same way, but only a
    * system-context {@link resubmit} moves it on from `returned` (see
-   * {@link recall}): a flow whose trigger resolves no user declares the
-   * `revise` edge only when server-side code will make that call.
+   * {@link recall}): a flow whose trigger never carries a user (schedule,
+   * time-relative, api) declares the `revise` edge only when server-side code
+   * will make that call. A record-change flow has no submitter only when a
+   * system write fired it; that round, sent back, waits for the call, or an
+   * operator's `cancelRun` discards the run and leaves the request `returned`.
    */
   sendBack(
     requestId: string,
@@ -1144,8 +1148,8 @@ export interface IApprovalService {
    * call left the row where none of them can issue the continuation it owes.
    * ⚠️ Not because the row is never `returned`: a stranded send-back leaves
    * it exactly there, and {@link resubmit} is still no way back — it is
-   * submitter-only, and it owes the `resubmit` edge where the stranded
-   * continuation was the `revise` one. Meanwhile a generic engine resume is
+   * by the submitter or a system context only, and it owes the `resubmit`
+   * edge where the stranded continuation was the `revise` one. Meanwhile a generic engine resume is
    * refused at a node declaring `resumeAuthority: 'service'`. The only verb
    * left was cancel, which discards the branch's downstream work. This is the
    * issuer that exits that dead end.
