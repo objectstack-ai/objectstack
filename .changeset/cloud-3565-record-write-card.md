@@ -1,5 +1,5 @@
 ---
-'@object-ui/plugin-chatbot': minor
+'@object-ui/plugin-chatbot': patch
 ---
 
 feat(plugin-chatbot): the record-write card — ONE record the chat proposes and the user confirms, with 确认 / 打开完整表单 / 取消 (cloud#3565)
