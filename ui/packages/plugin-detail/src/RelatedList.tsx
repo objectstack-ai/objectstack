@@ -31,7 +31,7 @@ import {
   useIsMobile,
   RelatedCountStore,
 } from '@object-ui/components';
-import { SchemaRenderer, ActionCtxReact, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, answeredLoadFailure, declaredUserMessage, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
+import { SchemaRenderer, ActionCtxReact, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, answeredLoadFailure, declaredUserMessage, isPermissionError, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
 import {
   Plus,
   ExternalLink,
@@ -3422,7 +3422,16 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       mine: t('detail.relatedChipMine', { defaultValue: 'Mine' }),
       overdue: t('detail.relatedChipOverdue', { defaultValue: 'Overdue' }),
     };
+    // The list page's export question, asked of the child object: the
+    // server-resolved effective API operation set (`/me/permissions`
+    // `apiOperations`), read through the same `usePermissions()` source
+    // `ListView`'s `exportPermitted` reads. A missing set (an unrestricted
+    // object, an old backend, no provider) keeps the button, as there. A UI
+    // mirror only: the export route still answers 403 on its own.
+    const childApiOps = api ? perms.getObjectApiOperations(api) : undefined;
+    const exportPermitted = childApiOps ? childApiOps.includes('export') : true;
     const exportable = typeof (dataSource as DataSource | undefined)?.exportDownload === 'function'
+      && exportPermitted
       && !!api && !!referenceField && parentId != null && parentId !== '';
     const handleExport = () => {
       if (!exportable || exportState.busy) return;
@@ -3453,7 +3462,13 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           URL.revokeObjectURL(url);
           setExportState({ busy: false, error: null });
         } catch (err) {
-          setExportState({ busy: false, error: err instanceof Error ? err.message : String(err) });
+          // A refusal says the Console's sentence, never the server's text.
+          setExportState({
+            busy: false,
+            error: isPermissionError(err)
+              ? t('view.exportNotPermitted')
+              : err instanceof Error ? err.message : String(err),
+          });
         }
       })();
     };

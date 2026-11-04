@@ -1163,6 +1163,7 @@ const pt = {
     readonlyAriaLabel: "Exibição somente leitura",
     readonlyTooltip: "Exibição do sistema — definida no código, somente leitura.",
     malformedFilter: "O filtro desta exibição é inválido, por isso nenhum registro é exibido: a condição {{subject}} não pode ser aplicada.",
+    exportNotPermitted: "Você não tem permissão para exportar estes registros. Contate seu administrador se acha que deveria poder fazê-lo.",
     noObject: "Nenhum objeto indicado: defina {{property}} ou dataSource.object.",
   },
   designer: {

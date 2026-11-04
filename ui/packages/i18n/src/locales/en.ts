@@ -1407,6 +1407,7 @@ const en = {
     readonlyAriaLabel: 'Read-only view',
     readonlyTooltip: 'System view — defined in code, read-only.',
     malformedFilter: 'This view’s filter is malformed, so no records are shown: the {{subject}} condition cannot be applied.',
+    exportNotPermitted: 'You don\u2019t have permission to export these records. Contact your administrator if you think you should be able to.',
     // objectui#11605 — an object-bound block whose node names its object in
     // neither place (no own key, no `dataSource.object`). `{{property}}` is the
     // block's object key (`objectName`), interpolated and never translated; the
