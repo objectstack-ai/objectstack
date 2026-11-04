@@ -1477,7 +1477,7 @@
       "title": "Every date-range preset resolves to its declared macro window, and a bare preset name used as a raw comparand is refused with the prescription",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1489,7 +1489,7 @@
           "an object with a date/datetime field carrying rows spread across the preset windows (today, this week, last quarter, last 90 days) so each preset has a distinguishable answer set"
         ],
         "knownGaps": [
-          "Stock seeds are unlikely to place rows in every one of the 13 windows. Presets whose window contains no seeded row prove only that the window RESOLVED, not that it selected correctly — the run must record which presets were answer-discriminating and which were merely well-formed. Seeding rows at known offsets during the run is the honest way to close this; record it if done.",
+          "Stock seeds are unlikely to place rows in every one of the 16 windows, and the three forward ones (next_month, next_quarter, next_30_days) select only future-dated rows. Presets whose window contains no seeded row prove only that the window RESOLVED, not that it selected correctly — the run must record which presets were answer-discriminating and which were merely well-formed. Seeding rows at known offsets during the run is the honest way to close this; record it if done.",
           "Presets are relative to run time, so a run near a period boundary (month/quarter/year rollover, or a run spanning midnight) can legitimately shift an answer set. Capture the run's clock alongside the results."
         ]
       },
@@ -1553,7 +1553,7 @@
       "enumSource": {
         "file": "packages/spec/src/data/date-range-presets.ts",
         "export": "DATE_RANGE_PRESETS",
-        "expect": 13
+        "expect": 16
       },
       "traps": [
         "clock-skew",
@@ -1577,6 +1577,12 @@
           "date": "2026-10-02",
           "change": "split clause 3 into its two designed arms. The clause expected the preset prescription for step 5's own example, an EQUALITY (where: { created: 'today' }); the platform deliberately raises that message only in ordering positions (18.filter-preset-ordering-comparand-refused.ts) and refuses an equality on a date field at the temporal door (400 INVALID_FILTER). Measured on 17.6.0 by the release-verification run: equality → INVALID_FILTER with the temporal message, $gte → VALIDATION_FAILED with bareDateRangePresetComparandMessage, neither ever 200. Step 5 now drives both arms",
           "ref": "#21330"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-04",
+          "change": "variants widened from 13 to 16: DATE_RANGE_PRESETS gained the forward presets next_month, next_quarter and next_30_days (ruling A on the card). Their windows are [{next_month_start}, {next_month_end}], [{next_quarter_start}, {next_quarter_end}] and [{today}, {30_days_from_now}]; the bare-comparand refusal prescribes them like every other preset. A forward window needs future-dated rows to discriminate, which the knownGaps line now says",
+          "ref": "#30076"
         }
       ]
     },
