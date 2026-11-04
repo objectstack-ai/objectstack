@@ -38,7 +38,7 @@
 //   - the edit-without-read class on `showcase_semantic_zoo`: a principal
 //     whose STORED set grants edit and no read, once without and once with
 //     create. The save door refuses that shape (an object permission that
-//     edits a record also reads it), so the set is a `sys_permission_set` row
+//     edits a record also reads it), so the set is a stored `permission` body
 //     as a store written before the refusal carries it, and its edit grant
 //     grants nothing. The object declares `public_read_write`, so the
 //     platform's `update` ownership floor does not bind it, and no baseline
@@ -141,15 +141,14 @@ describe('upsert by id: a row the caller cannot read answers as a create naming 
   };
 
   /**
-   * A permission-set row granting `grant` on one object, written straight to
-   * the store as one written before the save door judged its shape, bound to a
-   * fresh user.
+   * A permission set granting `grant` on one object, stored as one written
+   * before the save door judged its shape, bound to a fresh user.
    */
   const storedPrincipalWith = async (set: string, object: string, grant: Record<string, boolean>, email: string): Promise<string> => {
-    await ql.insert('sys_permission_set', {
-      name: set, label: set,
-      object_permissions: JSON.stringify({ [object]: grant }), system_permissions: JSON.stringify([]),
-    }, { context: SYS });
+    // Registered through the metadata service in-process: the registry and
+    // store write the save door's parse sits in front of.
+    const metadata = await stack.kernel.getServiceAsync<any>('metadata');
+    await metadata.register('permission', set, { name: set, label: set, systemPermissions: [], objects: { [object]: grant } });
     const token = await stack.signUp(email, PASS);
     const userId = (await ql.findOne('sys_user', { where: { email }, context: SYS }))?.id;
     expect(userId, `${email} provisioned`).toBeTruthy();

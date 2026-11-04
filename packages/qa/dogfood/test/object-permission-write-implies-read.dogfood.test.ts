@@ -9,8 +9,8 @@
 //      `allowDelete` without read on the same entry: `422 INVALID_METADATA`,
 //      the finding at the bit's own path, nothing stored. The same set with
 //      `allowRead: true` beside the bit saves.
-//   2. A permission set STORED before that refusal existed (a
-//      `sys_permission_set` row the save door never judged) still loads, and
+//   2. A permission set STORED before that refusal existed (a stored
+//      `permission` body the save door never judged) still loads, and
 //      its unread edit and delete grants grant nothing: `security/explain`
 //      answers `denies` for update and delete, and the by-id `PATCH` and
 //      `DELETE` answer one refusal for a row that exists and for an id naming
@@ -31,6 +31,7 @@ const PASS = 'Write-Implies-Read-0001';
 const OBJECT = 'showcase_semantic_zoo';
 
 interface Answer { status: number; body: any }
+
 
 describe('an object permission that edits or deletes a record also reads it (stock showcase, HTTP doors)', () => {
   let stack: VerifyStack;
@@ -53,14 +54,15 @@ describe('an object permission that edits or deletes a record also reads it (sto
   const withoutId = (a: Answer, id: string): string => JSON.stringify(a).split(id).join('ID');
   const stored = async (id: string) => JSON.stringify(await ql.findOne(OBJECT, { where: { id }, context: SYS }));
 
-  /** A permission-set row as a store written before the save door judged this shape carries it, bound to a fresh user. */
+  /**
+   * A permission set as a store written before the save door judged this shape
+   * carries it — registered through the metadata service in-process, the
+   * registry and store write the save door's parse sits in front of — bound to
+   * a fresh user.
+   */
   const storedSetPrincipal = async (name: string, grant: Record<string, boolean>, email: string): Promise<string> => {
-    await ql.insert('sys_permission_set', {
-      name,
-      label: name,
-      object_permissions: JSON.stringify({ [OBJECT]: grant }),
-      system_permissions: JSON.stringify([]),
-    }, { context: SYS });
+    const metadata = await stack.kernel.getServiceAsync<any>('metadata');
+    await metadata.register('permission', name, { name, label: name, objects: { [OBJECT]: grant } });
     const token = await stack.signUp(email, PASS);
     const userId = (await ql.findOne('sys_user', { where: { email }, context: SYS }))?.id;
     expect(userId, `${email} provisioned`).toBeTruthy();
