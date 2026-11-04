@@ -55,6 +55,15 @@ export const SalesUser = definePermissionSet({
 | `viewAllRecords` | Read ALL records regardless of ownership (super-user read) |
 | `modifyAllRecords` | Edit and delete ALL records regardless of ownership (super-user write); `allowDelete: false` beside it is refused |
 
+An object permission that edits or deletes a record also reads it. An entry
+granting `allowEdit: true` or `allowDelete: true` must also grant read —
+`allowRead`, `viewAllRecords` or `modifyAllRecords` — or the permission set is
+refused, one issue at the bit's own path. The evaluator grants edit and delete
+as `read ∧ grant`, merged across the caller's sets like the other bits, so the
+read half may come from another set. A set stored before this rule existed
+keeps loading, and its unread edit or delete grant grants nothing. In Setup,
+ticking Edit or Delete ticks Read, and unticking Read unticks Edit and Delete.
+
 ### `allowExport` — the export axis
 
 Read and export are not the same privilege. Reading a record on screen and
