@@ -3773,11 +3773,28 @@ const pt = {
       addButton: 'Adicionar ao Cursor',
       body: 'Use o botão de um clique ou adicione isto ao .cursor/mcp.json:',
     },
-    vscode: {
-      body: 'Adicionar ao .vscode/mcp.json (ou pelo comando MCP: Add Server):',
+    fields: {
+      name: 'Nome',
+      transport: 'Tipo de transporte',
+      url: 'URL do servidor',
     },
     codex: {
-      body: 'Adicionar ao ~/.codex/config.toml. Se sua versão do Codex não suportar o fluxo OAuth, use um cabeçalho de chave de API (veja abaixo):',
+      body: 'No app do Codex: Configurações → Servidores MCP → Adicionar servidor e preencha:',
+      hint: 'Salve, reinicie quando solicitado e clique em Authenticate ao lado de objectstack para entrar pelo navegador. Digite /mcp na caixa de mensagem para verificar a conexão. Se a sua versão não oferecer login pelo navegador, adicione o cabeçalho Authorization: Bearer <chave de API> (crie uma chave abaixo).',
+    },
+    workbuddy: {
+      body: 'Conectores → Conector personalizado → Configurar MCP e mescle esta entrada em mcpServers (salva em ~/.workbuddy/mcp.json):',
+      hint: 'Salve e clique em Confiar no conector objectstack; ele só fica ativo depois de confiável. Se a sua versão não mostrar o login, adicione o cabeçalho Authorization: Bearer <chave de API> (crie uma chave abaixo).',
+    },
+    doubao: {
+      title: 'Doubao Work',
+      body: 'Habilidades · Conectores → Novo → Novo conector personalizado e preencha:',
+      hint: 'Entre pelo navegador quando solicitado. Se o login não aparecer, adicione o cabeçalho personalizado Authorization: Bearer <chave de API> (crie uma chave abaixo). Tarefas executadas na nuvem exigem uma implantação acessível por HTTPS público.',
+    },
+    qwenwork: {
+      title: 'QwenWork',
+      body: 'Extensões → Conectores → + Adicionar → Colar configuração JSON:',
+      hint: 'Ou adicione manualmente como Streamable HTTP com esta URL. Se a sua versão não oferecer login pelo navegador, adicione o cabeçalho Authorization: Bearer <chave de API> (crie uma chave abaixo).',
     },
     apiKey: {
       title: 'Chaves de API',

@@ -135,3 +135,70 @@ describe('Connect an Agent mints a key only under a typed, confirmed name (objec
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   });
 });
+
+describe('Connect an Agent offers the Chinese clients after the international ones (WorkBuddy, Doubao Work, QwenWork)', () => {
+  const MCP_URL = `${window.location.origin}/api/v1/mcp`;
+
+  /** Every copy-ready value the widget renders: snippets (`code`) and form rows (`dd`). */
+  const copyable = () =>
+    Array.from(document.querySelectorAll('code, dd')).map((el) => el.textContent ?? '');
+
+  it('renders one card list, international clients first, then WorkBuddy, Doubao Work and QwenWork', async () => {
+    await renderSettled();
+    const order = [
+      // One Claude card carries both ways in: the connector, then the CLI.
+      'Claude',
+      'claude.ai / Claude Desktop',
+      'Claude Code',
+      'Codex',
+      'Cursor',
+      'WorkBuddy',
+      // Product names a pack may write in its own script (zh: 豆包工作 / 千问办公).
+      '«connectAgent.doubao.title»',
+      '«connectAgent.qwenwork.title»',
+    ].map((title) => screen.getByText(title));
+    for (let i = 1; i < order.length; i++) {
+      const follows = order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING;
+      expect(follows, `${order[i].textContent} renders after ${order[i - 1].textContent}`).toBeTruthy();
+    }
+    // One list: no group headings split the cards.
+    expect(document.querySelectorAll('h3')).toHaveLength(0);
+    for (const dropped of ['DuMate', 'VS Code / Copilot']) {
+      expect(screen.queryByText(dropped)).not.toBeInTheDocument();
+    }
+    for (const key of ['codex', 'workbuddy', 'doubao', 'qwenwork']) {
+      expect(screen.getByText(`«connectAgent.${key}.body»`)).toBeInTheDocument();
+      expect(screen.getByText(`«connectAgent.${key}.hint»`)).toBeInTheDocument();
+    }
+  });
+
+  it('hands each client its own transport spelling for this deployment\'s MCP URL', async () => {
+    await renderSettled();
+    const values = copyable();
+    const json = (type: string) =>
+      JSON.stringify({ mcpServers: { objectstack: { type, url: MCP_URL } } }, null, 2);
+    // WorkBuddy's mcp.json and QwenWork's JSON import spell Streamable HTTP differently.
+    expect(values).toContain(json('streamableHttp'));
+    expect(values).toContain(json('streamable-http'));
+    // The Codex app and Doubao Work are dialog forms: name, transport and URL, each copyable.
+    expect(values.filter((v) => v === 'objectstack')).toHaveLength(2);
+    expect(values).toContain('Streamable HTTP');
+    expect(values).toContain('HTTP');
+    expect(values.filter((v) => v === MCP_URL).length).toBeGreaterThanOrEqual(4);
+    // The Codex card describes the app's form, not a config.toml snippet.
+    expect(values.some((v) => v.includes('[mcp_servers.objectstack]'))).toBe(false);
+  });
+
+  it('reveals a minted key in the Authorization: Bearer form the cards point to', async () => {
+    const input = await renderSettled();
+    fireEvent.change(input, { target: { value: 'ci-agent' } });
+    fireEvent.click(createButton());
+    const dialog = await screen.findByRole('alertdialog');
+    const confirm = Array.from(dialog.querySelectorAll('button')).find(
+      (b) => b.textContent === '«connectAgent.apiKey.mint»',
+    );
+    fireEvent.click(confirm!);
+    expect(await screen.findByText(`Authorization: Bearer ${MINTED_KEY}`)).toBeInTheDocument();
+    expect(screen.getByText(`x-api-key: ${MINTED_KEY}`)).toBeInTheDocument();
+  });
+});
