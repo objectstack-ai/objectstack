@@ -679,6 +679,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         objectName,
         objectDef,
         activeView,
+        viewResolving: awaitingPersonalViews,
         listPrefs,
         perms,
         user,
