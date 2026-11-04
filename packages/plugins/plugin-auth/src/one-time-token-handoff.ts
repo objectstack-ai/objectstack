@@ -96,19 +96,19 @@
  * navigation. A request carrying neither gets the `401`, which is what this
  * route answered before the entry existed.
  *
- * Three more rules, each read off a failure:
+ * Three more rules:
  *
  *  - **The browser stays on the origin it arrived on.** The session cookie and
  *    the sign-in page's same-origin match of `redirect` both depend on it, so
  *    `Location` is root-relative. `AuthManager.getConsoleUrl` composes from the
  *    canonical origin; {@link resolveHandoffSignInEntry} takes only the PATH of
  *    its answer, which keeps `uiBasePath` and any base path in `baseUrl`.
- *  - **No Console, no redirect.** A sign-in page is sent to only when this
- *    process answers it with an HTML document, asked the way the browser would
- *    be about to ask. `--no-ui`, a Console that was not built, a host that
- *    redirects the Console elsewhere and a Console served by something in front
- *    of this process all keep the `401`, and the first one says so once at
- *    `warn`.
+ *  - **No Console, no redirect.** The browser is sent to a sign-in page only when
+ *    this process answers that page with an HTML document, asked the way the
+ *    browser would be about to ask. `--no-ui`, a Console that was not built, a
+ *    host that redirects the Console elsewhere and a Console served by something
+ *    in front of this process all keep the `401`; the first refused navigation
+ *    logs why at `warn`, once.
  *  - **It cannot bounce.** The sign-in page judges a session's age on the
  *    device's clock and this route judges it on the server's, so on a device
  *    whose clock is behind, the page forwards a session this route refuses.
@@ -402,8 +402,9 @@ export async function resolveHandoffSignInEntry(source: {
   authMountPath: string;
   requestUrl: string;
   requestHost: string | null;
-  /** The composed server, answering in-process. */
-  dispatch(request: Request): Response | Promise<Response>;
+  /** The composed server, which answers in-process, and the transport's bindings it runs under. */
+  server: { fetch(request: Request, env?: unknown): Response | Promise<Response> };
+  serverEnv?: unknown;
   /** Told why no entry exists; the caller says so once. */
   onUnserved(path: string, reason: string): void;
 }): Promise<HandoffSignInEntry | null> {
@@ -429,7 +430,7 @@ export async function resolveHandoffSignInEntry(source: {
   if (source.requestHost) headers.set('host', source.requestHost);
   let answer: Response;
   try {
-    answer = await source.dispatch(new Request(new URL(localPath, source.requestUrl), { headers }));
+    answer = await source.server.fetch(new Request(new URL(localPath, source.requestUrl), { headers }), source.serverEnv);
   } catch (error) {
     source.onUnserved(localPath, `asking for it threw: ${error instanceof Error ? error.message : String(error)}`);
     return null;

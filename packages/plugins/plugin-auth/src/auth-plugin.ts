@@ -4050,7 +4050,8 @@ export class AuthPlugin implements Plugin {
                 authMountPath: basePath,
                 requestUrl: c.req.url,
                 requestHost: headers.get('host'),
-                dispatch: (request) => rawApp.fetch(request, c.env),
+                server: rawApp,
+                serverEnv: c.env,
                 onUnserved: (path, reason) => {
                   if (reportedNoHandoffSignInPage) return;
                   reportedNoHandoffSignInPage = true;

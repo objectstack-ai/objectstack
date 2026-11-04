@@ -559,13 +559,13 @@ describe('isPageNavigation', () => {
 });
 
 describe('resolveHandoffSignInEntry', () => {
-  const source = (dispatch: (request: Request) => Response, overrides: Record<string, unknown> = {}) => ({
+  const source = (fetch: (request: Request) => Response, overrides: Record<string, unknown> = {}) => ({
     signInPageUrl: 'https://canonical.example.com/_console/login',
     authBaseUrl: 'https://canonical.example.com/api/v1/auth',
     authMountPath: '/api/v1/auth',
     requestUrl: 'https://arrived-on.example.com/api/v1/auth/one-time-token/handoff?x=1',
     requestHost: 'arrived-on.example.com',
-    dispatch,
+    server: { fetch },
     onUnserved: vi.fn(),
     ...overrides,
   });
