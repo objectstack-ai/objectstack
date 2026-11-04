@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 120 — spawns the real producer twice in one beforeAll (`os dev`, then `os start` over the same project); measured locally before the first CI reading, to be re-measured from CI
+// test-budget: 20 — spawns the real producer once per single-cause fixture: two boots in one beforeAll, `os dev` then `os start` over one project; first reading 11.6 s on a shared local box (no CI reading yet) x 1.25, rounded up
 
 /**
  * #29934 — a secret saved under `os dev` reads back under `os start` over the
@@ -276,10 +276,11 @@ describe('#29934 — `os dev` and `os start` share one data key for one project'
 
   it('`os start` reads the secret back over the same project database', () => {
     const { get, transcript } = recorded();
-    expect(get.status, `${JSON.stringify(get.body)}\n${transcript}`).toBe(200);
+    expect(get.status, `${JSON.stringify(get.body).slice(0, 2000)}\n${transcript}`).toBe(200);
     const entry = aiKey(get.body);
-    expect(entry?.source, `${JSON.stringify(get.body)}\n${transcript}`).toBe('global');
-    expect(entry?.value, `${JSON.stringify(get.body)}\n${transcript}`).not.toBeNull();
+    const why = `openai_api_key = ${JSON.stringify(entry)}\n${transcript}`;
+    expect(entry?.source, why).toBe('global');
+    expect(entry?.value, why).not.toBeNull();
   });
 
   it('the key lives in the one file `os dev` uses, and the project holds no second one', () => {
