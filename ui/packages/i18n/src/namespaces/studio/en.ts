@@ -4273,11 +4273,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.inspector.listView.kind': 'List view',
   'engine.studio.inspector.listView.intro':
     'The list on the canvas. Its columns, filter and sort save to this package\'s draft and show on the canvas at once.',
-  // objectui#13151 — a view with no label is named by its object's display
-  // name and its role, never by its qualified name (`{view}` below is the
-  // panel's title, the same string).
-  'engine.studio.inspector.listView.defaultTitle': '{object} · Default view',
-  'engine.studio.inspector.listView.namedTitle': '{object} · {view}',
+  // objectui#13151 — a view with no label is named by its role, never by its
+  // qualified name (`{view}` below is the panel's title, the same string).
+  // objectstack#30046 — the header's title names the object before it.
+  'engine.studio.inspector.listView.defaultView': 'Default view',
   'engine.studio.inspector.listView.notCreated':
     'There is no list view “{view}” yet. Your first change here creates it in this package\'s draft.',
   'engine.studio.inspector.listView.readOnly': 'This package is read-only: the list view is shown here, not edited.',
@@ -4287,13 +4286,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.inspector.listView.addSort': '+ Add sort…',
   'engine.studio.inspector.listView.sortAsc': '{field} ascending',
   'engine.studio.inspector.listView.sortDesc': '{field} descending',
-  // objectstack#27836 — "Add view": a new list view of the object, its type picked first.
-  'engine.studio.inspector.listView.addView': 'Add view',
+  // objectstack#27836 — New view, from the header's view switcher: a new list view of the object.
   'engine.studio.inspector.listView.addViewTaken': 'A view named “{name}” already exists. Choose another key.',
-  'engine.studio.inspector.listView.backToEntry': 'Back to {view}',
-  // objectstack#27896 — the panel's view picker: the object's list views, a draft one marked.
-  'engine.studio.inspector.listView.switchView': 'View',
-  'engine.studio.inspector.listView.switchViewDraft': 'Draft',
   // objectui#12725 — a kanban view's card section: a card click on the canvas selects it.
   'engine.studio.inspector.listView.kanbanCard': 'Kanban card',
   'engine.studio.inspector.listView.kanbanCard.intro': 'What each card on the board shows, and what a click on a card opens.',
