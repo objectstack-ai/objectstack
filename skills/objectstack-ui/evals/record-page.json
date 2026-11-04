@@ -35,6 +35,22 @@
           "definePage"
         ]
       }
+    },
+    {
+      "id": 3,
+      "prompt": "Our account record page is a custom `kind: 'full'` page with its own tab strip. Installed packages keep adding header actions to `account` (an 'Open in billing' link, for one), and none of them ever shows in the page header. Make the header show every action placed on the account's header, including ones a package adds later, without us listing ids.",
+      "expected_output": "Keep the `kind: 'full'` page and its tab strip, and set `placedActions: true` on its `page:header` node: `{ type: 'page:header', properties: { placedActions: true } }`. The header then draws every action of `account` whose `locations` include `record_header` or `record_more`, read live, so a package's action appears without a page edit. No `actions` id list beside it: an authored list is the whole set, and `placedActions: true` beside one is refused. Not a return to a `slotted` page and never a `slots.tabs`.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "placedActions: true",
+          "page:header"
+        ],
+        "must_not_contain": [
+          "slots.tabs",
+          "actions: ['"
+        ]
+      }
     }
   ]
 }
