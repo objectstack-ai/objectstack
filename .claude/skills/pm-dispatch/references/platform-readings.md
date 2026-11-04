@@ -143,8 +143,7 @@
 - 该配方 = 出处头加裸 `#N` 改全名加关源单为 moved:纯 REST、配额免疫,⛔ 不为它空等重置。
 - 两个瘦身参数都不省池。`fields` 省载荷:MCP list/search 服务器端无条件抓 Project field_values。
 - ⇒ 池枯竭时最小字段请求同样全体失败,报错串是 failed to fetch issue field values。
-- ⛔ `minimal_output: true` 不裁 `list_issues` 的 `body`,⛔ 永不当省额度手段写进任何 skill。
-- 没有参数能关掉 `body`:要么整表 107 点,要么换窄接口(点数未测)。
+- `minimal_output` 不裁 `list_issues` 的 `body`,也无参数关得掉;⛔ 永不当省额度手段写进 skill。
 - 站得住的证据是直接观察 `body` 在,不是前后体积对比 —— 两次调用之间 population 已变。
 - git 先行:本地检出、`git log`、`ls-remote` 不花配额,断粮期分支存在性检查照常可用。
 - PR 文件读取同走 git:REST PR files 端点可瞬态 404。
@@ -284,7 +283,8 @@
 - auto 档判定随命令形状变,不随能力变 ⇒ 被拒的复合命令拆成裸动作重试再报 blocked。
 - 读数:带链接与管道的 `git push` 被拒,裸 `git push origin <分支>` 放行,拒绝文案不点名元素。
 - 判定跨天翻面 ⇒ ⛔ 一次拒绝不是能力边界;`permissions.allow` 条目才是仓库侧确定性通道。
-- `rerun_failed_jobs` 复用原 run 的提交与合并 ref ⇒ 基上缺已合修复时重跑无效,改 merge main。
+- `rerun_failed_jobs` 复用原 run 的提交与合并 ref,不拿新 main 重算。
+- ⇒ 基上缺已合修复(修复合入晚于该 run 建立)时重跑无效,改 merge main。
 - 经 `rerun-failed.mjs` 重跑 PR `ci.yml` 失败 job 仅一次,先在 PR 或卡写明 flake 理由;二败即真红。
 - `run_rerun_failed` 只收 `ci.yml`;他 workflow 的 flake 走下两条,⛔ 永不空提交、永不关了重开。
 - `pr-automation.yml`(`Check Changeset` 取消无后继):席位改正文记下 flake 理由,其 `edited` 即重跑。
