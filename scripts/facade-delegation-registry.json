@@ -1,4 +1,376 @@
 {
-  "facades": [],
-  "exceptions": []
+  "facades": [
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "class": "ObjectStackProtocolImplementation",
+      "card": "#29985"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
+      "card": "#29986"
+    }
+  ],
+  "exceptions": [
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "getDiscovery",
+      "card": "#30020",
+      "reason": "inferred-return-type (#29985 report: stays on the class)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "findData",
+      "card": "#30020",
+      "reason": "inferred-return-type (#29985 report: stays on the class)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "getData",
+      "card": "#30020",
+      "reason": "inferred-return-type (#29985 report: stays on the class)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "cloneData",
+      "card": "#30020",
+      "reason": "inferred-return-type (#29985 report: stays on the class)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "saveMetaItem",
+      "card": "#30020",
+      "reason": "inferred-return-type (#29985 report: stays on the class)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "publishMetaItem",
+      "card": "#30020",
+      "reason": "inferred-return-type (#29985 report: stays on the class)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "rollbackMetaItem",
+      "card": "#30020",
+      "reason": "inferred-return-type (#29985 report: stays on the class)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "deleteMetaItem",
+      "card": "#30020",
+      "reason": "inferred-return-type (#29985 report: stays on the class)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "publishPackageDrafts",
+      "card": "#30020",
+      "reason": "closed-set (#29985 report)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "reconcileViewExpansions",
+      "card": "#30020",
+      "reason": "closed-set (#29985 report)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "packagelessOverlayWriteRefusal",
+      "card": "#30020",
+      "reason": "closed-set (#29985 report)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "namedBaseOverlayWriteRefusal",
+      "card": "#30020",
+      "reason": "closed-set (#29985 report)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "static mergesOverlayAtRead",
+      "card": "#30020",
+      "reason": "static-reads-class (#29985 report)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "static registryAllowsOverlay",
+      "card": "#30020",
+      "reason": "static-reads-class (#29985 report)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "static isOverlayAllowed",
+      "card": "#30020",
+      "reason": "static-reads-class (#29985 report)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "static isRuntimeCreateAllowed",
+      "card": "#30020",
+      "reason": "static-reads-class (#29985 report)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "static codeOnlySourceHint",
+      "card": "#30020",
+      "reason": "static-reads-class (#29985 report)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "static codeOnlyCreateError",
+      "card": "#30020",
+      "reason": "static-reads-class (#29985 report)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "static codeOnlyOverrideError",
+      "card": "#30020",
+      "reason": "static-reads-class (#29985 report)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "static refuseOrganizationScopedWrite",
+      "card": "#30020",
+      "reason": "static-reads-class (#29985 report)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "static overlayPackageMismatchError",
+      "card": "#30020",
+      "reason": "static-reads-class (#29985 report)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "rethrowUnlessMetadataStoreUnprovisioned",
+      "card": "#30020",
+      "reason": "no-host-read (#29985 report)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "triggerAutomation",
+      "card": "#30020",
+      "reason": "no-host-read (#29985 report)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "objectExtensionItemRefusal",
+      "card": "#30020",
+      "reason": "name-taken (#29985 report)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "packagedBaseRefusal",
+      "card": "#30020",
+      "reason": "host-entry-predicate (#29985 report)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "applySeedBodies",
+      "card": "#30020",
+      "reason": "gate reading: a hand-series host slot computes (optional-call service lookup)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "static OVERLAY_ALLOWED_TYPES",
+      "card": "#30020",
+      "reason": "gate reading: a static table built in an initializer body at class load"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "static STATIC_REGISTRY_TYPES",
+      "card": "#30020",
+      "reason": "gate reading: a static table built in an initializer body at class load"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "static RUNTIME_CREATE_ALLOWED_TYPES",
+      "card": "#30020",
+      "reason": "gate reading: a static table built in an initializer body at class load"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "static OVERLAY_CAPABLE_TYPES",
+      "card": "#30020",
+      "reason": "gate reading: a static table built in an initializer body at class load"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "update",
+      "card": "#30020",
+      "reason": "bare-this (#29986 report: stays on the class)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "insert",
+      "card": "#30020",
+      "reason": "bare-this (#29986 report: stays on the class)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "delete",
+      "card": "#30020",
+      "reason": "bare-this (#29986 report: stays on the class)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "find",
+      "card": "#30020",
+      "reason": "bare-this (#29986 report: stays on the class)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "findOne",
+      "card": "#30020",
+      "reason": "bare-this (#29986 report: stays on the class)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "recomputeSummaries",
+      "card": "#30020",
+      "reason": "bare-this (#29986 report: stays on the class)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "resolveReadableIdsSecurity",
+      "card": "#30020",
+      "reason": "bare-this (#29986 report: stays on the class)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "bindHooks",
+      "card": "#30020",
+      "reason": "bare-this (#29986 report: stays on the class)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "readMigrationFlagRowMemoized",
+      "card": "#30020",
+      "reason": "bare-this (#29986 report: stays on the class)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "createContext",
+      "card": "#30020",
+      "reason": "bare-this (#29986 report: stays on the class)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "ownershipQueueService",
+      "card": "#30020",
+      "reason": "bare-this (#29986 report: stays on the class)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "buildHookApi",
+      "card": "#30020",
+      "reason": "bare-this (#29986 report: stays on the class)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "registerApp",
+      "card": "#30020",
+      "reason": "inferred-return-type (#29986 report)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "registerHook",
+      "card": "#30020",
+      "reason": "inferred-return-type (#29986 report)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "registerDriver",
+      "card": "#30020",
+      "reason": "inferred-return-type (#29986 report)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "init",
+      "card": "#30020",
+      "reason": "inferred-return-type (#29986 report)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "triggerHooks",
+      "card": "#30020",
+      "reason": "inferred-return-type (#29986 report)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "destroy",
+      "card": "#30020",
+      "reason": "inferred-return-type (#29986 report)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "setDatasourceMapping",
+      "card": "#30020",
+      "reason": "inferred-return-type (#29986 report)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "getStatus",
+      "card": "#30020",
+      "reason": "inferred-return-type (#29986 report)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "seedAutonumber",
+      "card": "#30020",
+      "reason": "query-options erasure pin, baseline keyed by path (#29986 report)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "probeReferencingRows",
+      "card": "#30020",
+      "reason": "query-options erasure pin, baseline keyed by path (#29986 report)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "resolveMasterDetailParent",
+      "card": "#30020",
+      "reason": "query-options erasure pin, baseline keyed by path (#29986 report)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "resolveMasterDetailParents",
+      "card": "#30020",
+      "reason": "query-options erasure pin, baseline keyed by path (#29986 report)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "inspectDanglingReferences",
+      "card": "#30020",
+      "reason": "query-options erasure pin, baseline keyed by path (#29986 report)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "referenceExists",
+      "card": "#30020",
+      "reason": "query-options erasure pin, baseline keyed by path (#29986 report)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "homeAmountServing",
+      "card": "#30020",
+      "reason": "field-call (#29986 report)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "constructor",
+      "card": "#30020",
+      "reason": "gate reading: constructor logic (a fallback and a branch on an env flag)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "projectHomeAmountsOntoPatch",
+      "card": "#30020",
+      "reason": "gate reading: a parameter default computes (calls this.homeAmountServing)"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "member": "serveReferenceNames",
+      "card": "#30020",
+      "reason": "gate reading: a hand-series host slot holds a try block"
+    }
+  ]
 }
