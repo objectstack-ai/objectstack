@@ -15,13 +15,14 @@
  * docblock on the class, the contract; a private method's docblock moved here
  * with its body. The state stays on `ObjectQL`.
  *
- * The bodies reach the class through {@link InsertHost}: exactly the
- * `ObjectQL` members they read, private ones included. Each stub hands its
- * body one literal of the members that body reads, plus a `.call`: methods go
- * as closures that call them on the engine at call time, so a subclass
- * override or an instance spy is still the one reached; fields and accessors
- * go as GETTERS, read when the body reads them, as they were on the class,
- * and a field a body assigns goes with a SETTER that assigns it on the engine.
+ * The bodies reach the class through {@link InsertHost}: exactly the `ObjectQL`
+ * members they read, private ones included. Every stub hands its body, by a
+ * `.call`, the same host: `insertHost` in `engine-facet-hosts.ts`, built once
+ * per engine by the class's static block. Methods go as closures that call them
+ * on the engine at call time, so a subclass override or an instance spy is
+ * still the one reached; fields and accessors go as GETTERS, read when the body
+ * reads them, as they were on the class, and a field a body assigns goes with a
+ * SETTER that assigns it on the engine.
  *
  * The module imports `engine.ts` for types only, so the two modules form no
  * evaluation cycle. `index.ts` re-exports nothing from this module.
