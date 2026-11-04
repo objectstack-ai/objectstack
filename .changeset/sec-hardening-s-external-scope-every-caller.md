@@ -7,7 +7,7 @@ fix(plugin-security)!: an external object that states no organization scope read
 Clause-②: no (narrowing) — under the `isolated` and `group` postures, an external object registered after the boot that states no organization scope reads as empty for every caller, the declared platform owner included; nothing is widened, and the `single` posture is unchanged.
 Metadata-protocol: none
 
-<!-- adr-0087: already-registered external-object-organization-scope-declared -->
+<!-- adr-0087: not-required (already-registered external-object-organization-scope-declared) the operator's remedy is the existing entry's: declare one of the three scopes on the external object; nothing an author writes changes here -->
 
 **BREAKING** for a deployment running the `isolated` or `group` tenancy posture (`OS_TENANCY_POSTURE`) that registers an external object after the boot without stating its organization scope.
 
