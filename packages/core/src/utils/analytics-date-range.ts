@@ -57,11 +57,13 @@
  *
  * ⚠️ {@link ResolvedAnalyticsDateRange.endExclusive} is the flag that carries
  * that reading to the comparison, and every preset this module resolves sets
- * it: each of the thirteen ends at a day boundary the window must not contain
+ * it: each of them ends at a day boundary the window must not contain
  * ⇒ `endExclusive: true`. The three ROLLING `last_N_days` presets are no
  * exception — they stop before TOMORROW begins, exactly as `today` does,
  * because the spec's `DATE_RANGE_PRESET_MACRO_WINDOWS` closes them on
- * `{today}` and this module must select the same EXTENT. An end at NOW would
+ * `{today}` and this module must select the same EXTENT. The forward rolling
+ * `next_30_days` stops before the 31st day ahead begins, for the same reason:
+ * the spec closes it on the whole of `{30_days_from_now}`. An end at NOW would
  * drop the rest of today's rows (a datetime later today) that the spec's
  * window, the console's lowering and an author's `$between` all count.
  *
@@ -130,8 +132,25 @@ export interface ResolvedAnalyticsDateRange {
  * here came to read "the eight period presets" and stayed there after `today`
  * and `yesterday` were corrected to close on their own last day (#17341).
  */
+/**
+ * A window bound: a macro token, or [#30076] a macro token RE-ANCHORED on the
+ * day another token names.
+ *
+ * Two ends have no token of their own. `next_month` stops before the month
+ * after next begins, and `next_quarter` before the quarter after next; the
+ * period grammar stops at `next_`. The re-anchored form names that day without
+ * calendar arithmetic here and without widening the token vocabulary: resolve
+ * {@link from} as usual, then resolve {@link token} AGAIN with the reference
+ * day moved to the start of that day in the same zone. `{ token:
+ * 'next_month_start', from: 'next_month_start' }` is "next month's start, as
+ * seen from next month's start", which is the month after next. Every day in
+ * the answer is still one the one resolver computed, so its month and quarter
+ * rules, its Monday week and its timezone handling hold unchanged.
+ */
+type PresetWindowBound = string | { readonly token: string; readonly from: string };
+
 const PRESET_WINDOW_TOKENS: Readonly<
-  Record<DateRangePreset, readonly [start: string, endBefore: string]>
+  Record<DateRangePreset, readonly [start: string, endBefore: PresetWindowBound]>
 > = {
   today:        ['today', 'tomorrow'],
   yesterday:    ['yesterday', 'today'],
@@ -146,6 +165,9 @@ const PRESET_WINDOW_TOKENS: Readonly<
   last_7_days:  ['7_days_ago', 'tomorrow'],
   last_30_days: ['30_days_ago', 'tomorrow'],
   last_90_days: ['90_days_ago', 'tomorrow'],
+  next_month:   ['next_month_start', { token: 'next_month_start', from: 'next_month_start' }],
+  next_quarter: ['next_quarter_start', { token: 'next_quarter_start', from: 'next_quarter_start' }],
+  next_30_days: ['today', '31_days_from_now'],
 };
 
 /** Options every `dateRange` resolution reads. */
@@ -163,11 +185,26 @@ export interface AnalyticsDateRangeResolutionOptions {
 
 /** That macro token's calendar day, then the instant it BEGINS in `timezone`. */
 function tokenDayStart(token: string, now: Date, timezone?: string): string {
+  return new Date(tokenDayStartMs(token, now, timezone)).toISOString();
+}
+
+function tokenDayStartMs(token: string, now: Date, timezone?: string): number {
   const day = resolveFilterToken(token, { now, timezone });
   // Every token in the table above is a calendar-day macro, so the resolver
   // answers `YYYY-MM-DD`. A non-string answer would mean the vocabulary moved
   // under this table, which the pin test catches long before a caller does.
-  return new Date(zonedDateStartToUtcMs(String(day), timezone)).toISOString();
+  return zonedDateStartToUtcMs(String(day), timezone);
+}
+
+/**
+ * One bound's instant. A re-anchored bound resolves its `from` token first and
+ * then its `token` with the reference instant moved to the start of that day
+ * in `timezone`, so the resolver reads the anchor day as "today".
+ */
+function boundDayStart(bound: PresetWindowBound, now: Date, timezone?: string): string {
+  if (typeof bound === 'string') return tokenDayStart(bound, now, timezone);
+  const anchor = new Date(tokenDayStartMs(bound.from, now, timezone));
+  return tokenDayStart(bound.token, anchor, timezone);
 }
 
 /**
@@ -185,7 +222,7 @@ export function resolveAnalyticsDateRangePreset(
   const [startToken, endToken] = PRESET_WINDOW_TOKENS[preset];
   return {
     start: tokenDayStart(startToken, now, options.timezone),
-    end: tokenDayStart(endToken, now, options.timezone),
+    end: boundDayStart(endToken, now, options.timezone),
     endExclusive: true,
   };
 }
