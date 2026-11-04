@@ -9,7 +9,7 @@
       "title": "The first-run authoring loop closes: package → object → record → app → publish → end-user, zero code, zero restarts",
       "since": "v16",
       "status": "active",
-      "revision": 11,
+      "revision": 12,
       "priority": "P0",
       "surface": "mixed",
       "personas": ["admin (seeded admin@objectos.ai)", "end user (same account driving the published app)"],
@@ -40,7 +40,7 @@
         {
           "clause": "package create round-trips and the package switcher lists the new writable package without a page reload",
           "oracle": "network",
-          "verify": "the create POST succeeds and the switcher shows the package in the same session. ui/e2e/live/studio-object-designer.spec.ts test F1 pins it (read in objectui at cf153eb2e535, blob 58a7f1cbf024, before the import under ui/): it creates a package through the switcher's New package dialog by the testids studio-pkg-chip, package-form-id-input and package-form-submit, all declared in ui/packages/app-shell (StudioDesignSurface.tsx, PackageFormDialog.tsx), and asserts that the surface moved into the new package and that the switcher lists it by name with no reload. Run F1 from ui/ with `pnpm test:e2e:live studio-object-designer.spec.ts` against a live boot (RUNNER, the objectui-pinned-automation fact) and cite its output naming the commit, or drive the clause by hand. Note the new-package wizard's own state, objectui#11327",
+          "verify": "the create POST succeeds and the switcher shows the package in the same session. ui/e2e/live/studio-object-designer.spec.ts test F1 pins it (read in objectui at cf153eb2e535, blob 58a7f1cbf024, before the import under ui/): it creates a package through the switcher's New package dialog by the testids studio-pkg-chip, package-form-id-input and package-form-submit, all declared in ui/packages/app-shell (PackageSwitcher.tsx, PackageFormDialog.tsx), and asserts that the surface moved into the new package and that the switcher lists it by name with no reload. Run F1 from ui/ with `pnpm test:e2e:live studio-object-designer.spec.ts` against a live boot (RUNNER, the objectui-pinned-automation fact) and cite its output naming the commit, or drive the clause by hand. Note the new-package wizard's own state, objectui#11327",
           "evidence": "the create request/response + switcher screenshot"
         },
         {
@@ -97,7 +97,8 @@
         { "revision": 8, "date": "2026-10-31", "change": "steps[1], [2] and [6] name the controls as the console draws them. steps[1]: Home's build chip reads 'New in Studio' and opens Studio with the New package dialog when the deployment has no agent catalog, which is what QA run #27481 met, and 'Build an app' (opening the Studio landing) only when it has one (ui/packages/app-shell/src/console/home/HomePage.tsx). steps[6]: the way from the Studio landing to the console Home is the top bar's product mark, a link named 'PRODUCT home' (data-testid app-bar-product-home, ui/packages/app-shell/src/layout/AppHeader.tsx), which is why the run found no control named 'Home'. steps[2] carries the same stale button name the run met elsewhere: the New object dialog confirms with 'Save as draft' (engine.studio.createDraft), not Create. Accuracy finding of QA run #27481. No clause changed. Wave anchor #27377, wave-3 accuracy slice S2; read at base a0f865491d", "ref": "#27481" },
         { "revision": 9, "date": "2026-11-01", "change": "steps[3] quotes the publish toast as the console draws it. It still read 'Published 1 item in this package (one atomic release)', a wording retired when the walkthrough of #27521 (row 28) dropped 'atomic' from the publish title, toast and confirm note: the toast is now 'Published N items in this package' ('Published 1 item in this package' for one; engine.studio.publishedAllCount / publishedAllCountOne in ui/packages/i18n/src/namespaces/studio/en.ts), and a publish that puts an app or object live adds the permission-set hint and an 'Open Access' action (ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx). Wording only; no clause changed. Read at base efb1620c", "ref": "#27521" },
         { "revision": 10, "date": "2026-11-01", "change": "QA run #28545 (W3-C1R) finding on steps[2]: the object surface opens on Records after a navigation, Add field is on the Form tab, and an option's stored value derives from its label ('In Repair' gives in_repair), so a run that wants wip must overwrite it. steps[2] now says so, read from source (StudioDesignSurface.tsx viewMode default 'grid'; OptionsEditor derives a new row's value with toFieldNameOrEmpty). The same card's steps[3] finding, the stale publish toast, was fixed upstream by revision 9 (#28526, after eeec88d1). No clause changed. Read from source at base 6b9c1ca991. Wave anchor #27377, wave-3 accuracy slice S9 (#28641); finding parked in anchor comment 6554042054", "ref": "#28545" },
-        { "revision": 11, "date": "2026-11-03", "change": "fixtures.requires[0], steps[0] and a new negative[2] name two locale legs, en and zh-CN, and a clause holds only on both; a new fixtures.knownGaps[3] records the zh-CN leg's open failure; steps[1]'s identifier note follows pinyin derivation. QA run #29672 found the item named no locale while steps[1] uses a Chinese display name: its en leg passed and its zh-CN leg failed acceptance[2] (#29673, extracted by the run), so a run that drove one locale could score the loop either way. Read at base 339f63da30: the registry judge and the swallowed registration are unchanged and #29673 is open; and since #29734 (11c4eb59dd) a Chinese display name derives a pinyin package id (deriveCreatePackageId), so steps[1]'s 'derives no package id' no longer held, while its instruction to type com.example.repairs stands. No clause text changed; each now holds per leg. Card #29679, from QA run #29672", "ref": "#29679" }
+        { "revision": 11, "date": "2026-11-03", "change": "fixtures.requires[0], steps[0] and a new negative[2] name two locale legs, en and zh-CN, and a clause holds only on both; a new fixtures.knownGaps[3] records the zh-CN leg's open failure; steps[1]'s identifier note follows pinyin derivation. QA run #29672 found the item named no locale while steps[1] uses a Chinese display name: its en leg passed and its zh-CN leg failed acceptance[2] (#29673, extracted by the run), so a run that drove one locale could score the loop either way. Read at base 339f63da30: the registry judge and the swallowed registration are unchanged and #29673 is open; and since #29734 (11c4eb59dd) a Chinese display name derives a pinyin package id (deriveCreatePackageId), so steps[1]'s 'derives no package id' no longer held, while its instruction to type com.example.repairs stands. No clause text changed; each now holds per leg. Card #29679, from QA run #29672", "ref": "#29679" },
+        { "revision": 12, "date": "2026-11-04", "change": "acceptance[0].verify re-pointed: the Studio package switcher, which declares the studio-pkg-chip testid, moved unchanged from ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx to PackageSwitcher.tsx beside it (#29988 slice 2, a move-only split). Re-read at base f7aab8958. No clause changed", "ref": "#29988" }
       ]
     },
     {
@@ -3511,7 +3512,7 @@
       "title": "App and menu-entry keys reach the running app: branding, areas and context selectors render; an entry's viewName, recordId / recordMode, filters, badge, requiresObject and visible each change what the entry does or who sees it; hidden takes an app off the switcher and nothing else — and Studio's menu-entry inspector edits them",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3586,7 +3587,7 @@
       "source": [
         "packages/spec/src/ui/app.zod.ts (branding: primaryColor / accentColor / logo / favicon; areas; contextSelectors; hidden — 'navigation only, never an access gate'; the nav item keys viewName, recordId, recordMode, filters, badge, badgeVariant, requiresObject, visible, order)",
         "packages/metadata-core/src/artifact-forward-conversion.ts (where the retired app-hidden-to-unpublished conversion stood; dbf7e04a removed it from packages/spec/src/conversions/registry.ts, so a stored hidden: true round-trips — #26712, closed as fixed)",
-        "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (the Studio menu-entry inspector)",
+        "ui/packages/app-shell/src/views/studio-design/StudioNavItemInspector.tsx (the Studio menu-entry inspector)",
         "cross-ref: the doc-type menu entry is studio-authoring.doc-on-app-menu; nav rendering on the stock showcase is platform-core.nav-surfaces-render"
       ],
       "history": [
@@ -3619,6 +3620,12 @@
           "date": "2026-11-01",
           "change": "QA run #28656 (W3-RT) finding: steps[0] says to give branding.logo a same-origin URL such as /_console/vite.svg (ui/apps/console/public/vite.svg ships in the console build). This is a runner-environment note: an external logo URL is blocked by the runner container's egress proxy and never renders, which is #28656's live reading at 6e11a929. No clause changed. Re-verified against source at base 1c5b1773ec. Wave anchor #27377, wave-3 accuracy slice S10 (#28701); finding parked in anchor comment 6557904764",
           "ref": "#28656"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-04",
+          "change": "source[2] re-pointed: the Studio menu-entry inspector moved unchanged from ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx to StudioNavItemInspector.tsx beside it (#29988 slice 1, PR #30002, a move-only split). Re-read at base f7aab8958. No clause changed",
+          "ref": "#29988"
         }
       ]
     },
