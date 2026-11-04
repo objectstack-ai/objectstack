@@ -21,7 +21,7 @@
  */
 
 import '@testing-library/jest-dom/vitest';
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import React from 'react';
@@ -88,6 +88,10 @@ import { I18nProvider } from '@object-ui/i18n';
 import { ConsoleLayout } from '../ConsoleLayout';
 import { NavigationProvider } from '../../context/NavigationContext';
 import { armChatDockExpanded } from '../chatDockState';
+// The dock body is a `lazy()` chunk carrying the whole chat UI. Loaded at module
+// scope, so no test's send-wait spends its budget on the first cold import and
+// the `lazy()` resolves from the module cache.
+import '../ChatDockConversation';
 
 const CRM = { name: 'crm_app', label: 'Customer Desk', _packageId: 'app.crm' };
 const OBJECTS = [{ name: 'account', label: 'Account' }];
@@ -135,10 +139,12 @@ function installFetch(): void {
 }
 
 /** Lets the test navigate the way a link click does, with the dock open. */
-let go: (to: string) => void = () => {};
+const nav: { go: (to: string) => void } = { go: () => {} };
 function Navigator() {
   const navigate = useNavigate();
-  go = (to) => navigate(to);
+  React.useEffect(() => {
+    nav.go = (to) => navigate(to);
+  }, [navigate]);
   return null;
 }
 
@@ -179,12 +185,6 @@ async function send(text: string): Promise<Record<string, unknown>> {
   await waitFor(() => expect(state.sent.length).toBe(before + 1), { timeout: 4000 });
   return state.sent[before].context ?? {};
 }
-
-// The dock body is a `lazy()` chunk carrying the whole chat UI. Load it once up
-// front, so no test's send-wait spends its budget on the first cold import.
-beforeAll(async () => {
-  await import('../ChatDockConversation');
-}, 60_000);
 
 beforeEach(() => {
   state.isMobile = false;
@@ -240,14 +240,14 @@ describe('console dock — the request names the selected app and the page in vi
     mount('/apps/crm_app/account');
     expect((await send('first')).surface).toEqual({ artifact: { type: 'object', name: 'account' } });
 
-    act(() => go('/apps/crm_app/account/record/rec_9'));
+    act(() => nav.go('/apps/crm_app/account/record/rec_9'));
     expect((await send('second')).surface).toEqual({
       artifact: { type: 'object', name: 'account' },
       selection: { kind: 'record', id: 'rec_9' },
     });
 
     // A page that shows no one artifact drops the key rather than keeping the last one.
-    act(() => go('/apps/crm_app/search'));
+    act(() => nav.go('/apps/crm_app/search'));
     expect(await send('third')).not.toHaveProperty('surface');
   });
 
