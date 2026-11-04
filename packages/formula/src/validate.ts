@@ -267,6 +267,18 @@ export interface ExprSchemaHint {
    * typed. Absent ⇒ every bare field name is typed, exactly as before this key.
    */
   flowVariables?: readonly string[];
+  /**
+   * [#30025] `'flattened'` scope only: the flow's run can bind a name no static
+   * reader sees — a node that hands out the live variable map or folds a
+   * resume bag in (`script`, `connector_action`, `wait`, `subflow`, `map`, a
+   * screen with no input contract), or an entrance whose record is not in hand
+   * (`@objectstack/lint`'s `flowCelRootScope`, `provable: false`). A bare name
+   * is then not proven to hold the field, so a bare-name `type-mismatch` takes
+   * no declared {@link faultOutcome}: it is the `type-mismatch-run-may-fail`
+   * warning. A `record.<name>` / `previous.<name>` read still reads the field
+   * and keeps the outcome. Absent ⇒ every verdict is exactly as before this key.
+   */
+  bareNamesUnproven?: boolean;
 }
 
 /**
@@ -414,6 +426,7 @@ function typeSoundnessIssue(
   role: 'predicate' | 'value',
   faultOutcome: ExprSchemaHint['faultOutcome'],
   flowVariables?: readonly string[],
+  bareNamesUnproven?: boolean,
 ): { issue: ExprValidationError; severity: 'error' | 'warning' } | null {
   const celFieldTypes = toCelFieldTypes(fieldTypes);
   // [#29959] A bare name a flow variable holds is not the field (see
@@ -421,7 +434,21 @@ function typeSoundnessIssue(
   const shadowed = scope === 'flattened' && flowVariables && flowVariables.length > 0
     ? new Set(flowVariables)
     : undefined;
-  const mismatch = firstTypeMismatch(source, celFieldTypes, scope, shadowed);
+  let mismatch = firstTypeMismatch(source, celFieldTypes, scope, shadowed);
+  // [#30025] Where the run can bind a bare name no reader sees
+  // (`ExprSchemaHint.bareNamesUnproven`), a bare-name mismatch is not proven to
+  // be the field's, so it takes no declared outcome. A `record.<field>` /
+  // `previous.<field>` mismatch in the same source still does: with every bare
+  // name left `dyn`, only the record-root pass can answer, and its answer wins.
+  let outcome = faultOutcome;
+  if (
+    mismatch && scope === 'flattened' && bareNamesUnproven && faultOutcome !== undefined
+    && mismatch.category === 'type-mismatch' && mismatch.root === undefined
+  ) {
+    const rootRead = firstTypeMismatch(source, celFieldTypes, scope, new Set(Object.keys(celFieldTypes)));
+    if (rootRead && rootRead.root !== undefined) mismatch = rootRead;
+    else outcome = undefined;
+  }
   if (!mismatch) {
     const bareCelTypes = shadowed
       ? Object.fromEntries(Object.entries(celFieldTypes).filter(([name]) => !shadowed.has(name)))
@@ -472,10 +499,10 @@ function typeSoundnessIssue(
     `type mismatch \`${mismatch.operands}\` — ${subject} but is used with \`${mismatch.operator}\` ` +
     `against a number. CEL has no such operation, so wherever the value is not numeric text ` +
     `(an empty value included) the expression faults`;
-  if (faultOutcome !== undefined) {
+  if (outcome !== undefined) {
     // [#29926] One code per outcome: a code names ONE message template
     // (`expression-refusal.ts`), and the three outcomes are three sentences.
-    const arm = TYPE_MISMATCH_FAULT_ARMS[faultOutcome];
+    const arm = TYPE_MISMATCH_FAULT_ARMS[outcome];
     return {
       severity: 'error',
       issue: refusal(arm.code, params, source, `${faults}, and here ${arm.clause} ${convert}`),
@@ -1405,7 +1432,8 @@ export function validateExpression(
       // date-field arithmetic (error). Flow variables stay `dyn` (never flagged);
       // equality/ordering of a date is runtime-safe (never flagged).
       if (schema.fieldTypes) {
-        const r = typeSoundnessIssue(source, schema.fieldTypes, 'flattened', role, schema.faultOutcome, schema.flowVariables);
+        const r = typeSoundnessIssue(source, schema.fieldTypes, 'flattened', role, schema.faultOutcome, schema.flowVariables,
+          schema.bareNamesUnproven);
         if (r) (r.severity === 'error' ? errors : warnings).push(r.issue);
       }
     }
