@@ -243,7 +243,7 @@ Package manifest installed through POST /api/v1/packages (AUTHORING stage; scope
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Target Object Name |
 | **externalId** | `string \| string[]` | optional (default: `"name"`) | Field (or composite list of fields) matched for the uniqueness check |
-| **mode** | `Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>` | optional (default: `"upsert"`) | Conflict resolution strategy |
+| **mode** | `Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>` | optional (default: `"ignore"`) | What a load does with a record whose `externalId` matches an existing row. `ignore` (default) is create-only: a missing row is inserted and an existing row is left as it is, so a replay (every boot, a package install or upgrade, a publish) never writes a seeded value back over a later edit. `upsert` also writes every declared column back onto the matched row on each replay; declare it for reference data the package keeps current. `update` writes matched rows only, `insert` inserts every record with no match, and `replace` inserts into a table the caller cleared. |
 | **columns** | `Record<string, { applyOn?: Enum<'create' \| 'always'> }>` | optional | Per-column write policy, keyed by field name: `{ status: { applyOn: 'create' } }` writes `status` only when the seed creates the row. Omitted, every column is written on create and update. |
 | **env** | `Enum<'prod' \| 'dev' \| 'test'>[]` | optional (default: `["prod","dev","test"]`) | Applicable environments |
 | **locale** | `string[]` | optional | Applicable locales (BCP-47 tags); omitted applies to every locale. The publish and install paths do not filter by locale — they load every dataset and warn |
@@ -351,7 +351,7 @@ Package manifest installed through POST /api/v1/packages (AUTHORING stage; scope
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Target Object Name |
 | **externalId** | `string \| string[]` | optional (default: `"name"`) | Field (or composite list of fields) matched for the uniqueness check |
-| **mode** | `Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>` | optional (default: `"upsert"`) | Conflict resolution strategy |
+| **mode** | `Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>` | optional (default: `"ignore"`) | What a load does with a record whose `externalId` matches an existing row. `ignore` (default) is create-only: a missing row is inserted and an existing row is left as it is, so a replay (every boot, a package install or upgrade, a publish) never writes a seeded value back over a later edit. `upsert` also writes every declared column back onto the matched row on each replay; declare it for reference data the package keeps current. `update` writes matched rows only, `insert` inserts every record with no match, and `replace` inserts into a table the caller cleared. |
 | **columns** | `Record<string, { applyOn?: Enum<'create' \| 'always'> }>` | optional | Per-column write policy, keyed by field name: `{ status: { applyOn: 'create' } }` writes `status` only when the seed creates the row. Omitted, every column is written on create and update. |
 | **env** | `Enum<'prod' \| 'dev' \| 'test'>[]` | optional (default: `["prod","dev","test"]`) | Applicable environments |
 | **locale** | `string[]` | optional | Applicable locales (BCP-47 tags); omitted applies to every locale. The publish and install paths do not filter by locale — they load every dataset and warn |

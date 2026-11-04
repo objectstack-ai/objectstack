@@ -4,8 +4,11 @@ import { defineSeed } from '@objectstack/spec/data';
 import { cel } from '@objectstack/spec';
 import { Task } from '../objects/task.object';
 
+// The tasks are the user's own once seeded, so the dataset declares no
+// `mode`: a replay inserts a missing task and leaves an existing one as the
+// user left it (the seed default, create-only). Relative dates are resolved
+// when the row is first inserted; `os dev --fresh` starts from a clean database.
 const tasks = defineSeed(Task, {
-  mode: 'upsert',
   externalId: 'subject',
   // NOTE: `owner` is a lookup to `sys_user`; there's no stable seed key for the
   // bootstrap admin (created by auth), so it's left unset rather than pointing

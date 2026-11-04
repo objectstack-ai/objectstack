@@ -62,7 +62,7 @@ import {
 import { resolveItemLock, withItemLockFamily } from './item-lock.js';
 import type { ItemAddress } from './item-lock.js';
 import { itemDiscriminator } from '@objectstack/metadata-core';
-import { externalBindingDatasourceRefusal, resolveInjectedSystemColumns } from '@objectstack/spec/data';
+import { externalBindingDatasourceRefusal, resolveInjectedSystemColumns, SeedSchema } from '@objectstack/spec/data';
 import { METADATA_ITEM_NAME_PATTERN } from '@objectstack/spec/shared';
 import { defaultRecordPageObject } from '@objectstack/spec/ui';
 import { MetadataProtectionFields, validateObjectNamespacePrefix } from '@objectstack/spec/kernel';
@@ -879,10 +879,11 @@ export async function seedExternalIdSaveRefusal(
     const seed = item as { object?: unknown; mode?: unknown; externalId?: unknown };
     if (typeof seed.object !== 'string' || seed.object === '') return undefined;
     const objectName = seed.object;
-    // `SeedSchema`'s defaults, as the loader applies them (`mode: 'upsert'`,
+    // `SeedSchema`'s defaults, as the loader applies them (the `mode` default,
+    // read from the schema rather than restated here [#30081], and
     // `externalId: 'name'`): a body read before the parse filled them keys the
     // same way a parsed one does.
-    const mode = typeof seed.mode === 'string' ? seed.mode : 'upsert';
+    const mode = typeof seed.mode === 'string' ? seed.mode : SeedSchema.shape.mode.parse(undefined);
     if (!KEYED_SEED_MODES.has(mode)) return undefined;
     const declared = seed.externalId !== undefined;
     const externalId = declared ? seed.externalId : 'name';
