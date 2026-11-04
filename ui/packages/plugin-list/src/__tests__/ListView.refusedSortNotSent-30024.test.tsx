@@ -17,11 +17,11 @@
  * Data API answers it `400 INVALID_SORT`: the list failed its first fetch
  * instead of loading.
  *
- * The refused field here is a `formula`, which the platform's own resolver
- * (`resolveObjectSortability`, the one the REST layer serves from) refuses
- * today as `virtual-type`, so these cells hold on `main` with or without the
- * author-declared `sortable: false` verdict objectstack#30021 adds. The
- * projection is built by that resolver, not hand-written.
+ * Two refused fields: a `formula`, which the platform's own resolver
+ * (`resolveObjectSortability`, the one the REST layer serves from) refuses as
+ * `virtual-type`, and a `text` field marked `sortable: false`, refused as
+ * `author-declared` since objectstack#30021. The projection is built by that
+ * resolver, not hand-written.
  *
  * Every negative cell sits beside a control: a sortable field's sort is sent
  * unchanged, and a deployment that serves no projection sends what it sent
@@ -44,6 +44,9 @@ const objectDef = {
     name: { type: 'text', label: 'Name' },
     amount: { type: 'currency', label: 'Amount' },
     expected_revenue: { type: 'formula', label: 'Expected Revenue', expression: 'amount * 2' },
+    // A stored `text` field its author marked unsortable: refused by the
+    // projection as `author-declared` since objectstack#30021.
+    internal_code: { type: 'text', label: 'Internal Code', sortable: false },
   },
 };
 
@@ -52,7 +55,7 @@ const objectDef = {
  * the projection refuses is a `400 INVALID_SORT`, so a list that sends one
  * shows its load error. Any other request answers one row.
  */
-const REFUSED = new Set(['expected_revenue']);
+const REFUSED = new Set(['expected_revenue', 'internal_code']);
 
 function makeDataSource(opts: { servesSignal?: boolean } = {}) {
   return {
@@ -89,7 +92,7 @@ async function renderList(
     type: 'list-view',
     objectName: 'crm_opportunity',
     viewType: 'grid',
-    columns: ['name', 'amount', 'expected_revenue'] as any,
+    columns: ['name', 'amount', 'expected_revenue', 'internal_code'] as any,
     sort,
   } as any;
   render(
@@ -128,6 +131,20 @@ describe('ListView — a refused stored sort never reaches the server (objectsta
     expect(served.fields.expected_revenue?.sortable).toBe(false);
     expect(served.fields.amount).toEqual({ sortable: true });
     expect(served.fields.name).toEqual({ sortable: true });
+    expect(served.fields.internal_code).toEqual({ sortable: false, reason: 'author-declared' });
+  });
+
+  it('sends no sort entry for a stored sort naming a sortable: false field, and the list loads', async () => {
+    const ds = await renderList([
+      { field: 'internal_code', order: 'asc' },
+      { field: 'amount', order: 'desc' },
+    ]);
+    const sent = sentOrderBys(ds);
+    expect(sent.length).toBeGreaterThan(0);
+    for (const orderby of sent) {
+      expect(orderby).toEqual(['amount desc']);
+    }
+    await expectLoaded();
   });
 
   it('sends no sort entry for a stored sort naming only a refused field, and the list loads', async () => {
