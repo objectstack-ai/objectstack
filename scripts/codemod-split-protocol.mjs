@@ -70,6 +70,11 @@
  * from `protocol.ts` by path) and `PATH_READER_NEEDLES` (literal text a reader
  * requires to find there) are the tables rather than rules.
  *
+ * One rule of the pilot is not carried: a non-private method whose return type
+ * is inferred moves. The hand series already moved `getMetaItems`,
+ * `validateData` and `createData` that way under the same declaration bar, so
+ * it is this file's cut pattern; the bar on the built `.d.ts` judges it.
+ *
  * ## The proof (`--write` runs it on its own output; `--verify` re-runs it)
  *
  *  1. Byte-identity: undoing the split rebuilds the base `protocol.ts` AND the
@@ -179,7 +184,6 @@ const STAY_REASONS = Object.freeze({
   'generator': 'a generator',
   'closed-set': 'its body does something outside E1\'s closed rewrite set (host-split.mjs refuses it)',
   'constructor-rewrite': 'it reads `this.constructor.<static>` (that rewrite and the private-static one both print `host.<static>`, so undoing it would be ambiguous)',
-  'inferred-return-type': 'a non-private method whose return type is inferred (the .d.ts would infer it through the module)',
   'parameter-shape': 'a destructured or `this` parameter (the stub forwards parameters by name)',
   'parameter-shadows': 'a parameter is named `host`, `protocolHost` or the method itself (the stub or the moved function would read it)',
   'path-reader': 'a reader takes its text out of protocol.ts by path (PATH_READER_PINS / PATH_READER_NEEDLES)',
@@ -188,6 +192,7 @@ const STAY_REASONS = Object.freeze({
   'name-taken': 'its name is already a module-scope binding of protocol.ts, or a free name protocol.ts reads',
   'name-collision': 'its name collides with a name its module imports or reads',
   'host-entry-conflict': 'it needs a host entry that differs from the one protocol-host.ts already carries for that member',
+  'host-entry-predicate': 'it reaches a type-predicate method through a host entry not yet written (the forwarding closure would drop the predicate)',
   'indent-irreversible': 'its body\'s re-indentation cannot be undone byte for byte (a whitespace-only or under-indented line)',
   'no-yield': 'its stub would be no shorter than its body (moving it would grow protocol.ts)',
 });
@@ -550,6 +555,13 @@ function plan(T, text, hostText, { anchors = SECTION_ANCHORS, pins = PATH_READER
   if (staleNeedles.length > 0) refuse(`PATH_READER_NEEDLES names text ${HOST_BASENAME} no longer carries: ${staleNeedles.map((n) => JSON.stringify(n)).join(', ')}`);
   const existingEntries = hostInterfaceEntries(hostText);
   const privateStatics = new Set([...table.statics].filter(([, s]) => s.private).map(([n]) => n));
+  // Members whose declared return type is a type predicate (`x is T`, not `asserts`).
+  const predicateMembers = new Set();
+  for (const m of cls.members) {
+    if (ts.isMethodDeclaration(m) && m.name && ts.isIdentifier(m.name) && m.type && ts.isTypePredicateNode(m.type) && !m.type.assertsModifier) {
+      predicateMembers.add(m.name.text);
+    }
+  }
 
   // Every free name protocol.ts reads anywhere: a moved function imported
   // under one of these names would capture it.
@@ -582,7 +594,6 @@ function plan(T, text, hostText, { anchors = SECTION_ANCHORS, pins = PATH_READER
     if (cls.members.some((o) => o !== m && ts.isMethodDeclaration(o) && !o.body && o.name && ts.isIdentifier(o.name) && o.name.text === name)) add('overloaded');
     if (ts.canHaveDecorators?.(m) && ts.getDecorators?.(m)?.length) add('decorated');
     if (m.asteriskToken) add('generator');
-    if (!m.type && !hasModifier(ts, m, ts.SyntaxKind.PrivateKeyword)) add('inferred-return-type');
     for (const p of m.parameters) {
       if (!ts.isIdentifier(p.name) || p.name.text === 'this') add(`parameter-shape: ${p.name.getText(sf)}`);
       else if (['host', 'protocolHost', name].includes(p.name.text)) add(`parameter-shadows: ${p.name.text}`);
@@ -608,6 +619,7 @@ function plan(T, text, hostText, { anchors = SECTION_ANCHORS, pins = PATH_READER
     for (const [member, entry] of moved.hostEntries) {
       const have = existingEntries.get(member);
       if (have !== undefined && have !== entry.iface) add(`host-entry-conflict: ${member}`);
+      if (have === undefined && predicateMembers.has(member)) add(`host-entry-predicate: ${member}`);
     }
     const movedBody = functionBodyOf(ts, moved.fnText);
     const baseBody = text.slice(m.body.getStart(sf), m.body.getEnd());
@@ -845,9 +857,105 @@ function generate(T, text, hostText, planned) {
   }
   const sortedEntries = new Map([...entries].sort(byName));
   const inserted = hs.insertHostEntries(hostText, out, sortedEntries);
+  // The imports only the moved bodies read are dropped (the package compiles
+  // with `noUnusedLocals`); `verify` recomputes the same prune from the head.
+  const pruned = pruneImports(ts, inserted.protocol, usedImportNames(ts, inserted.protocol));
   const moduleTexts = new Map();
   for (const [moduleFile, movers] of modules) moduleTexts.set(moduleFile, moduleText(moduleFile, movers[0].section, movers, ctx.scope));
-  return { host: inserted.protocol, hostModule: inserted.host, modules: moduleTexts };
+  return { host: pruned.text, hostModule: inserted.host, modules: moduleTexts, pruned: pruned.removed };
+}
+
+/**
+ * The import bindings of a `protocol.ts` that something outside its import
+ * declarations reads: a reference in code or a type, a local `export { … }`,
+ * or a JSDoc `{@link X}` / `@see X` name. Those JSDoc names count because the
+ * compiler's `noUnusedLocals` counts them; other JSDoc text and `//` comments
+ * do not.
+ */
+function usedImportNames(ts, text) {
+  const { sf, checker } = program(ts, HOST_PATH, text);
+  const used = new Set();
+  const isImportDecl = (d) => d.getSourceFile() === sf && (ts.isImportSpecifier(d) || ts.isImportClause(d) || ts.isNamespaceImport(d));
+  const leftmost = (name) => {
+    let n = name;
+    while (n && (ts.isQualifiedName(n) || ts.isPropertyAccessExpression(n))) n = ts.isQualifiedName(n) ? n.left : n.expression;
+    return n && ts.isIdentifier(n) ? n : undefined;
+  };
+  const visitDoc = (node) => {
+    const linkish = node.kind === ts.SyntaxKind.JSDocLink || node.kind === ts.SyntaxKind.JSDocLinkCode ||
+      node.kind === ts.SyntaxKind.JSDocLinkPlain || node.kind === ts.SyntaxKind.JSDocNameReference;
+    if (linkish && node.name) {
+      const id = leftmost(node.name);
+      const symbol = id && checker.getSymbolAtLocation(id);
+      if (id && (symbol?.declarations ?? []).some(isImportDecl)) used.add(id.text);
+    }
+    if (Array.isArray(node.comment)) node.comment.forEach(visitDoc);
+    ts.forEachChild(node, visitDoc);
+  };
+  const visit = (node) => {
+    if (ts.isImportDeclaration(node)) return;
+    for (const doc of node.jsDoc ?? []) visitDoc(doc);
+    if (ts.isExportDeclaration(node) && node.moduleSpecifier) return;
+    if (ts.isIdentifier(node) && !inJsDoc(ts, node)) {
+      const parent = node.parent;
+      let symbol;
+      if (ts.isExportSpecifier(parent)) symbol = checker.getExportSpecifierLocalTargetSymbol(parent);
+      else if (ts.isShorthandPropertyAssignment(parent) && parent.name === node) symbol = checker.getShorthandAssignmentValueSymbol(parent);
+      else if (!isPropertyNameIdentifier(ts, node)) symbol = checker.getSymbolAtLocation(node);
+      if ((symbol?.declarations ?? []).some(isImportDecl)) used.add(node.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return used;
+}
+
+/**
+ * Drop every import binding `used` lacks. A declaration left with no binding
+ * goes whole (its own text and the line break after it; the comments above it
+ * stay); one left with some keeps them, a one-line `{ … }` on one line, a
+ * multi-line one as one binding per line. Pure. Returns `{ text, removed }`.
+ */
+function pruneImports(ts, text, used) {
+  const sf = ts.createSourceFile(HOST_PATH, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const edits = [];
+  const removed = [];
+  for (const st of sf.statements) {
+    if (!ts.isImportDeclaration(st) || !st.importClause) continue;
+    const clause = st.importClause;
+    const nb = clause.namedBindings;
+    const named = nb && ts.isNamedImports(nb) ? [...nb.elements] : [];
+    const dropDefault = Boolean(clause.name && !used.has(clause.name.text));
+    const dropNs = Boolean(nb && ts.isNamespaceImport(nb) && !used.has(nb.name.text));
+    const dropNamed = named.filter((e) => !used.has(e.name.text));
+    if (!dropDefault && !dropNs && dropNamed.length === 0) continue;
+    if (dropDefault) removed.push(clause.name.text);
+    if (dropNs) removed.push(nb.name.text);
+    for (const e of dropNamed) removed.push(e.name.text);
+    const keepDefault = Boolean(clause.name && !dropDefault);
+    const keepNs = Boolean(nb && ts.isNamespaceImport(nb) && !dropNs);
+    const keepNamed = named.filter((e) => used.has(e.name.text));
+    if (!keepDefault && !keepNs && keepNamed.length === 0) {
+      const end = text[st.getEnd()] === '\n' ? st.getEnd() + 1 : st.getEnd();
+      edits.push({ start: st.getStart(sf), end, text: '' });
+      continue;
+    }
+    if (nb && ts.isNamedImports(nb) && dropNamed.length > 0) {
+      if (keepNamed.length === 0) {
+        edits.push({ start: clause.name.getEnd(), end: nb.getEnd(), text: '' });
+      } else {
+        const one = !nb.getText(sf).includes('\n');
+        const parts = keepNamed.map((e) => e.getText(sf));
+        edits.push({ start: nb.getStart(sf), end: nb.getEnd(), text: one ? `{ ${parts.join(', ')} }` : `{\n${parts.map((x) => `    ${x},`).join('\n')}\n}` });
+      }
+    }
+    if (dropNs) edits.push({ start: clause.name.getEnd(), end: nb.getEnd(), text: '' });
+    if (dropDefault) edits.push({ start: clause.name.getStart(sf), end: nb.getStart(sf), text: '' });
+  }
+  edits.sort((a, b) => b.start - a.start);
+  let out = text;
+  for (const e of edits) out = out.slice(0, e.start) + e.text + out.slice(e.end);
+  return { text: out, removed: removed.sort() };
 }
 
 // ── The proof ────────────────────────────────────────────────────────────────
@@ -925,7 +1033,7 @@ function verify(T, baseText, headText, baseHostText, headHostText, moduleTexts) 
     const baseBody = baseText.slice(base.body.getStart(baseSf), base.body.getEnd());
     const identical = restored === baseBody;
     if (!identical) failures.push(`${name}: its moved body, rewrites and re-indentation undone, is not the base body`);
-    moved.push({ name, module: hit[1], bodySha: sha256(restored), baseBodySha: sha256(baseBody), lines: baseBody.split('\n').length, identical });
+    moved.push({ name, module: hit[1], bodySha: sha256(restored), baseBodySha: sha256(baseBody), lines: baseBody.split('\n').length, identical, restored });
     edits.push({ start: m.body.getStart(headSf), end: m.body.getEnd(), text: restored });
   }
   for (const [file, mod] of modules) {
@@ -960,10 +1068,18 @@ function verify(T, baseText, headText, baseHostText, headHostText, moduleTexts) 
       failures.push(`the factory and the interface gained different entries: factory ${f.dropped.length}, interface ${i.dropped.length}`);
     }
   }
-  if (rebuilt !== baseText) {
-    const at = firstDiff(rebuilt, baseText);
-    failures.push(`undoing the split does not rebuild the base protocol.ts: first difference at line ${at}` +
-      `\n    rebuilt: ${JSON.stringify(rebuilt.split('\n')[at - 1] ?? '<end>')}\n    base:    ${JSON.stringify(baseText.split('\n')[at - 1] ?? '<end>')}`);
+  // The one edit the undo does not reverse by reading the head: the imports
+  // only the moved bodies read. It is recomputed from the head (what does the
+  // head still read?) and applied to the base; the rest must then be equal.
+  const prune = pruneImports(ts, baseText, usedImportNames(ts, headText));
+  const restoredBodies = moved.map((r) => r.restored).join('\n');
+  for (const n of prune.removed) {
+    if (!new RegExp(`\\b${n.replace(/\$/g, '\\$')}\\b`).test(restoredBodies)) failures.push(`the head dropped the import \`${n}\`, which no moved body reads`);
+  }
+  if (rebuilt !== prune.text) {
+    const at = firstDiff(rebuilt, prune.text);
+    failures.push(`undoing the split does not rebuild the base protocol.ts (its unread imports pruned): first difference at line ${at}` +
+      `\n    rebuilt: ${JSON.stringify(rebuilt.split('\n')[at - 1] ?? '<end>')}\n    base:    ${JSON.stringify(prune.text.split('\n')[at - 1] ?? '<end>')}`);
   }
 
   // The hand series' own check, member by member.
@@ -973,7 +1089,7 @@ function verify(T, baseText, headText, baseHostText, headHostText, moduleTexts) 
     for (const p of c.problems) failures.push(`host-split check ${r.name}: ${p}`);
   }
   if (moved.length === 0) failures.push('no moved method found: a proof over nothing is not a proof');
-  return { failures, moved, checks, linesBefore: lineCount(baseText), linesAfter: lineCount(headText) };
+  return { failures, moved, checks, pruned: prune.removed, linesBefore: lineCount(baseText), linesAfter: lineCount(headText) };
 }
 
 function firstDiff(a, b) {
@@ -1045,7 +1161,8 @@ function printVerify(v) {
   const undone = !v.failures.some((f) => f.startsWith('undoing'));
   console.log(`byte-identity: ${identical}/${v.moved.length} moved bodies restore to the base body exactly; ` +
     `host-split check: ${checked}/${v.checks.length} pass (rewrites: ${rewrites.member} member, ${rewrites.privateStatic} private static, ${rewrites.constructor} constructor); ` +
-    `protocol.ts ${v.linesBefore} -> ${v.linesAfter} lines; undoing the split ${undone ? 'does' : 'does NOT'} rebuild the base protocol.ts and ${HOST_MODULE_BASENAME} byte-for-byte`);
+    `protocol.ts ${v.linesBefore} -> ${v.linesAfter} lines; undoing the split ${undone ? 'does' : 'does NOT'} rebuild the base protocol.ts and ${HOST_MODULE_BASENAME} byte-for-byte, ` +
+    `once the ${v.pruned?.length ?? 0} import binding(s) only moved bodies read are pruned from the base (${(v.pruned ?? []).join(', ') || 'none'})`);
 }
 
 function gitShow(ref, path) {
@@ -1133,10 +1250,297 @@ async function main(argv) {
 }
 
 // ── Self-test ────────────────────────────────────────────────────────────────
+//
+// The proofs above are this script's whole value, and a proof that cannot fail
+// proves nothing, so the self-test feeds each one an input it must REFUSE. The
+// roster pins battery NAMES with a floor each, the roster's own size is pinned,
+// and the verdict sets a flag the dispatch reads (AGENTS.md, "Writing a
+// `--self-test`"), so a battery that stops running, or a `return` above the
+// verdict, cannot read as a pass.
 
 let selfTestReachedVerdict = false;
 
+const SELF_TEST_BATTERIES = Object.freeze({
+  'stay rules': 14,
+  'host entries': 4,
+  'byte-identity proof': 9,
+  'determinism': 2,
+  'refusals': 6,
+  'import prune': 4,
+});
+const SELF_TEST_BATTERY_FLOOR = 5;
+
+const FIXTURE_ANCHORS = Object.freeze([
+  ['engine', 'First', 'protocol-first.ts'],
+  ['keptOne', 'Kept', null],
+]);
+const FIXTURE_PINS = Object.freeze({ pinnedMethod: 'a fixture reader' });
+const FIXTURE_NEEDLES = Object.freeze({ 'NEEDLE_TEXT': 'a fixture reader' });
+const fixturePlan = (T, text, hostText = FIXTURE_HOST) => plan(T, text, hostText,
+  { anchors: FIXTURE_ANCHORS, pins: FIXTURE_PINS, needles: FIXTURE_NEEDLES });
+
+const FIXTURE_HOST = `// fixture host
+import type { ObjectStackProtocolImplementation } from './protocol.js';
+
+export interface ProtocolHost {
+    readonly engine: ObjectStackProtocolImplementation['engine'];
+    readonly flag: ObjectStackProtocolImplementation['flag'];
+}
+`;
+
+function fixtureSource(extraMembers = '') {
+  const pad = Array.from({ length: 6 }, (_, i) => `        const p${i} = ${i};`).join('\n');
+  return `import { helperImported } from './other.js';
+import type { Shape } from './types.js';
+import { installProtocolHost, protocolHost } from './protocol-host.js';
+import { already } from './protocol-already.js';
+import { docLinked, onlyMoved } from './moved-only.js';
+
+const LOCAL = 1;
+function localHelper(n: number): number {
+    return n + LOCAL;
+}
+
+export class ObjectStackProtocolImplementation {
+    private engine: any;
+    private count = 0;
+    private flag = false;
+    private static secret(x: number): number { return x; }
+    protected static guarded(): number { return 1; }
+
+    static {
+        installProtocolHost((protocol) => ({
+            get engine() { return protocol.engine; },
+            get flag() { return protocol.flag; },
+        }));
+    }
+
+    /** Docblock that stays. */
+    async movable(a: string, b?: number): Promise<string> {
+${pad}
+        const s = helperImported(onlyMoved(a)) as Shape | string;
+        // a comment the move carries
+        const t = \`line one
+second line at column 0 \${this.count}\`;
+        return String(s) + t + this.engine.x + ObjectStackProtocolImplementation.secret(b ?? 0) + localHelper(1);
+    }
+
+    private tiny(): number {
+        return this.count;
+    }
+
+    private bareThis(): unknown {
+${pad}
+        return this;
+    }
+
+    private viaConstructor(): number {
+${pad}
+        return this.constructor.secret(1);
+    }
+
+    public inferred() {
+${pad}
+        return 1;
+    }
+
+    private destructured({ a }: { a: number }): number {
+${pad}
+        return a;
+    }
+
+    private shadows(host: number): number {
+${pad}
+        return host;
+    }
+
+    private alreadyMoved(x: number): number {
+        // a hand-series stub
+        return already(protocolHost(this), x);
+    }
+
+    private localHelper(): number {
+${pad}
+        return 1;
+    }
+
+    private pinnedMethod(): number {
+${pad}
+        return 3;
+    }
+
+    private carriesNeedle(): string {
+${pad}
+        return 'NEEDLE_TEXT';
+    }
+
+    private readsGuarded(): number {
+${pad}
+        return ObjectStackProtocolImplementation.guarded();
+    }
+
+    private whitespaceLine(): number {
+${pad}
+${'    '}
+        return 1;
+    }
+
+    private writesCount(): void {
+${pad}
+        this.count = 2;
+    }
+
+    private writesFlag(): void {
+${pad}
+        this.flag = true;
+    }
+
+    private isThing(x: unknown): x is string {
+        return typeof x === 'string';
+    }
+
+    /** Stays, and its {@link docLinked} keeps that import in protocol.ts. */
+    private readsPredicate(x: unknown): boolean {
+${pad}
+        return this.isThing(x);
+    }
+${extraMembers}
+    private keptOne(): number {
+${pad}
+        return 2;
+    }
+}
+`;
+}
+
 async function selfTest() {
+  const T = await loadTools();
+  const batterySeen = new Map();
+  let battery = null;
+  let failed = 0;
+  let cases = 0;
+  const open = (name) => { battery = name; };
+  const check = (label, ok, detail = '') => {
+    batterySeen.set(battery, (batterySeen.get(battery) ?? 0) + 1);
+    cases += 1;
+    if (ok) console.log(`  ✓ [${battery}] ${label}`);
+    else { failed += 1; console.error(`  ✗ [${battery}] ${label}${detail ? ` — ${detail}` : ''}`); }
+  };
+  const refused = (fn) => { try { fn(); return false; } catch (e) { return e instanceof CodemodRefusal; } };
+
+  const input = fixtureSource();
+  const planned = fixturePlan(T, input);
+  const out = generate(T, input, FIXTURE_HOST, planned);
+
+  open('stay rules');
+  {
+    const why = (name) => (planned.records.find((r) => r.name === name)?.reasons ?? ['<absent>']).join('; ');
+    const stays = (name, code) => check(`${name} stays (${code})`, why(name).split('; ').some((r) => r.startsWith(code)), why(name));
+    const moves = (name, because) => check(`${name} moves (${because})`, why(name) === '', why(name));
+    moves('movable', 'the canonical body: a member, a private static, an import, a module-scope helper, a template literal');
+    moves('writesCount', 'a field it writes gains a writable host entry');
+    stays('tiny', 'no-yield');
+    stays('bareThis', 'closed-set');
+    stays('viaConstructor', 'constructor-rewrite');
+    moves('inferred', 'an inferred return type moves, as the hand series moved getMetaItems and validateData');
+    stays('destructured', 'parameter-shape');
+    stays('shadows', 'parameter-shadows');
+    stays('alreadyMoved', 'already-moved');
+    stays('localHelper', 'name-taken');
+    check('a pinned method and a method carrying a needle stay (path-reader)',
+      why('pinnedMethod').startsWith('path-reader') && why('carriesNeedle').startsWith('path-reader'),
+      `${why('pinnedMethod')} | ${why('carriesNeedle')}`);
+    stays('readsGuarded', 'non-public-static');
+    stays('whitespaceLine', 'indent-irreversible');
+    stays('keptOne', 'section-kept');
+  }
+
+  open('host entries');
+  {
+    const why = (name) => (planned.records.find((r) => r.name === name)?.reasons ?? ['<absent>']).join('; ');
+    check('a write to a field the host carries readonly stays (host-entry-conflict)', why('writesFlag').startsWith('host-entry-conflict'), why('writesFlag'));
+    check('the interface gains the moved bodies\' members, sorted, the written field writable',
+      /\n {4}count: [^\n]*\n {4}readonly engine:[^\n]*\n {4}readonly flag:[^\n]*\n {4}readonly secret:/.test(out.hostModule), out.hostModule);
+    check('the factory gains a getter and a setter for the written field and a closure to the private static',
+      out.host.includes('            get count() { return protocol.count; },\n            set count(value) { protocol.count = value; },')
+      && out.host.includes('            secret: (...a) => ObjectStackProtocolImplementation.secret(...a),'));
+    check('a move that reaches a type predicate through a new host entry stays (host-entry-predicate)', why('readsPredicate').startsWith('host-entry-predicate'), why('readsPredicate'));
+    check('an entry the host already carries is not written twice', out.hostModule.split('readonly engine:').length === 2 && out.host.split('get engine()').length === 2);
+  }
+
+  open('byte-identity proof');
+  {
+    const v = verify(T, input, out.host, FIXTURE_HOST, out.hostModule, out.modules);
+    check('the generated split proves against its base', v.failures.length === 0 && v.moved.length === 3 && v.checks.every((c) => c.ok),
+      [...v.failures, `moved: ${v.moved.map((m) => m.name).join()}`].join(' | '));
+    const mod = out.modules.get('protocol-first.ts');
+    const withModule = (text) => new Map([...out.modules, ['protocol-first.ts', text]]);
+    check('one edited character in a moved body fails', verify(T, input, out.host, FIXTURE_HOST, out.hostModule, withModule(mod.replace('const p3 = 3;', 'const p3 = 4;'))).failures.length > 0);
+    check('a rewrite pointed at another member fails', verify(T, input, out.host, FIXTURE_HOST, out.hostModule, withModule(mod.replace('host.engine.x', 'host.count.x'))).failures.length > 0);
+    check('an edited stub signature fails',
+      verify(T, input, out.host.replace('b?: number): Promise<string>', 'b?: number): Promise<String>'), FIXTURE_HOST, out.hostModule, out.modules).failures.length > 0);
+    check('an extra top-level statement in a module fails', verify(T, input, out.host, FIXTURE_HOST, out.hostModule, withModule(`${mod}\nexport const extra = 1;\n`)).failures.length > 0);
+    check('an edited host interface entry fails',
+      verify(T, input, out.host, FIXTURE_HOST, out.hostModule.replace("readonly flag: ObjectStackProtocolImplementation['flag']", "flag: ObjectStackProtocolImplementation['flag']"), out.modules).failures.length > 0);
+    check('an edited factory entry the base carried fails',
+      verify(T, input, out.host.replace('get flag() { return protocol.flag; }', 'get flag() { return !protocol.flag; }'), FIXTURE_HOST, out.hostModule, out.modules).failures.length > 0);
+    check('an edit elsewhere in protocol.ts fails', verify(T, input, out.host.replace('const LOCAL = 1;', 'const LOCAL = 2;'), FIXTURE_HOST, out.hostModule, out.modules).failures.length > 0);
+    check('a proof over no moved method fails', verify(T, input, input, FIXTURE_HOST, FIXTURE_HOST, new Map()).failures.length > 0);
+  }
+
+  open('determinism');
+  {
+    const again = generate(T, input, FIXTURE_HOST, fixturePlan(T, input));
+    const tree = (o) => treeHash(new Map([['h', o.host], ['p', o.hostModule], ...o.modules]));
+    check('two runs on one input write byte-identical trees', tree(out) === tree(again));
+    check('the module imports what its bodies read, from where protocol.ts imports it, and nothing else',
+      /import \{ helperImported \} from '\.\/other\.js';\nimport type \{ Shape \} from '\.\/types\.js';\nimport type \{ ProtocolHost \} from '\.\/protocol-host\.js';\nimport \{ onlyMoved \} from '\.\/moved-only\.js';\nimport \{ localHelper \} from '\.\/protocol\.js';/.test(out.modules.get('protocol-first.ts') ?? '')
+      && /export \{ localHelper \};/.test(out.host), (out.modules.get('protocol-first.ts') ?? '').split('\n').filter((l) => l.startsWith('import')).join(' | '));
+  }
+
+  open('import prune');
+  {
+    check('protocol.ts drops the import only a moved body reads and keeps one a staying docblock links',
+      out.host.includes("import { docLinked } from './moved-only.js';\n") && !/\bonlyMoved\b/.test(out.host), out.host.slice(0, 400));
+    check('the module carries the import protocol.ts dropped', /import \{ onlyMoved \} from '\.\/moved-only\.js';/.test(out.modules.get('protocol-first.ts') ?? ''));
+    check('a head that also drops an import it still links fails',
+      verify(T, input, out.host.replace("import { docLinked } from './moved-only.js';\n", ''), FIXTURE_HOST, out.hostModule, out.modules).failures.length > 0);
+    check('a head that keeps an import only moved bodies read fails',
+      verify(T, input, out.host.replace("import { docLinked } from './moved-only.js';", "import { docLinked, onlyMoved } from './moved-only.js';"), FIXTURE_HOST, out.hostModule, out.modules).failures.length > 0);
+  }
+
+  open('refusals');
+  {
+    check('an anchor the class does not declare refuses', refused(() => plan(T, input, FIXTURE_HOST, { anchors: [['engine', 'a', 'protocol-a.ts'], ['gone', 'b', null]], pins: {}, needles: {} })));
+    check('anchors out of class order refuse', refused(() => plan(T, input, FIXTURE_HOST, { anchors: [['engine', 'a', 'protocol-a.ts'], ['keptOne', 'b', null], ['movable', 'c', null]], pins: {}, needles: {} })));
+    check('anchors that do not start at the first member refuse', refused(() => plan(T, input, FIXTURE_HOST, { anchors: [['movable', 'a', 'protocol-a.ts']], pins: {}, needles: {} })));
+    check('a pin naming what the class lacks refuses', refused(() => plan(T, input, FIXTURE_HOST, { anchors: FIXTURE_ANCHORS, pins: { gone: 'x' }, needles: {} })));
+    check('a needle the file no longer carries refuses', refused(() => plan(T, input, FIXTURE_HOST, { anchors: FIXTURE_ANCHORS, pins: {}, needles: { 'gone text': 'x' } })));
+    check('--help is answered, never refused, whatever protocol.ts holds', (await main(['--help']).catch(() => 2)) === 0);
+  }
+
+  const declared = Object.keys(SELF_TEST_BATTERIES);
+  if (declared.length < SELF_TEST_BATTERY_FLOOR) {
+    failed += 1;
+    console.error(`✗ self-test floor: ${declared.length} batteries declared, below the pinned ${SELF_TEST_BATTERY_FLOOR}`);
+  }
+  for (const [name, count] of batterySeen) {
+    if (!declared.includes(name)) { failed += 1; console.error(`✗ self-test floor: battery "${name}" ran ${count} case(s) but is not declared`); }
+  }
+  for (const name of declared) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count < SELF_TEST_BATTERIES[name]) {
+      failed += 1;
+      console.error(`✗ self-test floor: battery "${name}" ran ${count} case(s), below its pinned ${SELF_TEST_BATTERIES[name]}`);
+    }
+  }
+  if (failed > 0) {
+    console.error(`\n✗ codemod-split-protocol self-test: ${failed} failure(s) (cases and floor).`);
+    process.exitCode = 1;
+    selfTestReachedVerdict = true;
+    return;
+  }
+  console.log(`\n✓ codemod-split-protocol self-test: ${cases} cases in ${declared.length} batteries pass.`);
   selfTestReachedVerdict = true;
 }
 

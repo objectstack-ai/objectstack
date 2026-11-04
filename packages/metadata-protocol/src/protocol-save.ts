@@ -4,8 +4,8 @@
  * [#29985 codemod] The "Save refusals, saveMetaItem, saveConflict,
  * migrateStoredMetadata" section of `ObjectStackProtocolImplementation`: the
  * bodies of `metaTypeNamespaceExists`, `viewContainerNameCollisionRefusal`,
- * `saveMetaItemUnaudited`, `migrateStoredMetadata` moved out of `protocol.ts`
- * whole by `scripts/codemod-split-protocol.mjs`.
+ * `saveMetaItem`, `saveMetaItemUnaudited`, `migrateStoredMetadata` moved out of
+ * `protocol.ts` whole by `scripts/codemod-split-protocol.mjs`.
  *
  * A MOVE, not a redesign. Each function below is the body of the class method
  * of the same name as `packages/metadata-protocol/scripts/host-split.mjs` moves
@@ -48,6 +48,7 @@ import { objectBodyExtensionFieldSuffixRefusal } from './protocol-extension-fiel
 import { flowVerdictBody } from './protocol-flow-save-replay.js';
 import { withParsedStoredActions } from './protocol-stored-action-parse.js';
 import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-credentials-ref.js';
+import { withRefusalAudit } from './protocol-refusal-audit.js';
 import { withNullMasterRowCounts } from './protocol-destructive-null-master.js';
 import { canonicalMetaType, canonicalizeMetaRequestType, resolveOverlaySchema } from './protocol-meta-type-schema.js';
 import {
@@ -202,6 +203,15 @@ export async function viewContainerNameCollisionRefusal(host: Pick<ProtocolHost,
         }
     }
     return undefined;
+}
+
+/** The body of `ObjectStackProtocolImplementation#saveMetaItem`; the method's docblock there is its contract. */
+export async function saveMetaItem(host: Pick<ProtocolHost, 'recordMetadataAudit' | 'saveMetaItemUnaudited'>, request: SaveMetaItemRequest) {
+    // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
+    return withRefusalAudit((entry) => host.recordMetadataAudit(entry), {
+        operation: 'save', type: request.type, name: request.name, actor: request.actor,
+        source: request.source ?? 'protocol.saveMetaItem',
+    }, () => host.saveMetaItemUnaudited(request));
 }
 
 /** The body of `ObjectStackProtocolImplementation#saveMetaItemUnaudited`; the method's docblock there is its contract. */

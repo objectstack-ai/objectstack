@@ -6,8 +6,8 @@
  * bodies of `revertStoredPackage`, `duplicatePackage`,
  * `importUnmanagedPackage`, `reassignOrphanedMetadata`, `listCommits`,
  * `readRevertableCommit`, `revertCommit`, `rollbackToPackageCommit`,
- * `rollbackMetaItemUnaudited` moved out of `protocol.ts` whole by
- * `scripts/codemod-split-protocol.mjs`.
+ * `rollbackMetaItem`, `rollbackMetaItemUnaudited` moved out of `protocol.ts`
+ * whole by `scripts/codemod-split-protocol.mjs`.
  *
  * A MOVE, not a redesign. Each function below is the body of the class method
  * of the same name as `packages/metadata-protocol/scripts/host-split.mjs` moves
@@ -42,6 +42,7 @@ import {
 import { REFERENCE_SITES } from './reference-sites.js';
 import { extensionFieldSuffixRefusalError, judgeExtensionFieldSuffix } from './protocol-extension-field-suffix.js';
 import { customizationPairManifestRefusal } from './protocol-customization-package.js';
+import { withRefusalAudit } from './protocol-refusal-audit.js';
 import {
     canonicalMetaType,
     canonicalizeMetaRequestType,
@@ -1877,6 +1878,15 @@ export async function rollbackToPackageCommit(host: Pick<ProtocolHost, 'listComm
         }
     }
     return { success: failed.length === 0, revertedCommits, failed };
+}
+
+/** The body of `ObjectStackProtocolImplementation#rollbackMetaItem`; the method's docblock there is its contract. */
+export async function rollbackMetaItem(host: Pick<ProtocolHost, 'recordMetadataAudit' | 'rollbackMetaItemUnaudited'>, request: RollbackMetaItemRequest) {
+    // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
+    return withRefusalAudit((entry) => host.recordMetadataAudit(entry), {
+        operation: 'rollback', type: request.type, name: request.name, actor: request.actor,
+        source: 'protocol.rollbackMetaItem',
+    }, () => host.rollbackMetaItemUnaudited(request));
 }
 
 /** The body of `ObjectStackProtocolImplementation#rollbackMetaItemUnaudited`; the method's docblock there is its contract. */

@@ -6,19 +6,15 @@ import type {
     MetadataProtocol,
     PackageProtocol,
 } from '@objectstack/spec/api';
-import { IDataEngine, engineCanRollBack, recordNotFoundError } from '@objectstack/core';
-import { declaredUserMessage, resolveTenancyPosture, resolveThrownHttpError } from '@objectstack/types';
-import { assertQueryReadRows, planQueryReadWindow, resolveQueryReadLimits } from '@objectstack/types';
+import { IDataEngine, recordNotFoundError } from '@objectstack/core';
+import { resolveTenancyPosture, resolveThrownHttpError } from '@objectstack/types';
+import { resolveQueryReadLimits } from '@objectstack/types';
 import { type TenancyPosture } from '@objectstack/spec/security';
 // [commit 376c70f98] The derived `version` this file's `getDiscovery()` serves as the
 // `DiscoverySchema` "System Identity" field — never a literal again.
-import { resolveDiscoveryVersion } from './discovery-version.js';
 import type { MetadataHostEngine } from './host-engine.js';
-import { omitInternalFieldsFromWriteResponse } from './write-response-internal-fields.js';
-import { staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 import {
     SDUI_MANIFEST_SERVICE,
-    stampHtmlPageRequires,
     type RuntimePendingDeclarations,
 } from './runtime-authoring-gate.js';
 import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
@@ -29,48 +25,26 @@ import {
     overlayMemberWhere,
 } from './migrations/overlay-index.js';
 import {
-    DraftConflictError,
     SysMetadataRepository,
     envWritableMetadataTypes,
-    historyRowsOfMember,
     packageScopedRowWhere,
     packagelessAddressAmbiguityRefusal,
     resetEnvWritableMetadataTypes,
     unboundItemDraftAddress,
-    versionNotFoundError,
-    type SysMetadataEngine,
 } from './sys-metadata-repository.js';
 import { managedItemSealedSentence, packagedBaseRegimeRow, packagedBaseRegimeSentence } from './packaged-base-regime.js';
 import {
     resolveItemLock,
     resolveItemLockLazily,
     resolveOverlayLockLayer,
-    storedRowDocument,
     withItemLockFamily,
     type ItemAddress,
     type ItemLock,
     type StoredOverlayRow,
 } from './item-lock.js';
 import {
-    bumpWriteEpoch,
-} from './meta-overlay-cache.js';
-import {
     ConflictError,
-    assertProtocolCompat,
-    // [#7774] The i18n-bundle identity table (#7730) and its reader. A type
-    // listed here is identified by `(name, <field>)`, so every merge in the
-    // unscoped `/meta` list keys on the pair — see {@link mergePackageAwareOverlay}.
-    itemDiscriminator,
     type MetadataItem,
-    // [#16319] The field-`type` admission vocabulary. `loadMetaFromDb` asks the
-    // registration door's OWN question — never a second opinion about which
-    // declarations the registry will take, which is the defect class the
-    // 2026-09-10 ruling closes — to choose the sentence it prints and the level
-    // it prints it at.
-    findUndeclarableFieldType,
-    isObjectFieldTypeRefused,
-    // [ADR-0131 D6/D7] A legacy organization's rows, off the physical column,
-    // on a database the ceremony has not migrated — see migrateStoredMetadata.
     readLegacyOrganizationRows,
 } from '@objectstack/metadata-core';
 // [#5532] One vocabulary of "which driver read errors are benign", shared with
@@ -82,7 +56,6 @@ import { isMissingTableError } from '@objectstack/metadata/errors';
 // writes a `sys_metadata` row passes the name it writes the row under: the save
 // door (`saveMetaItem`), the restore doors (`rollbackMetaItem`, `revertCommit`)
 // and the draft promotion (`promoteDraftForPublish`).
-import { savedItemNameRefusal } from '@objectstack/metadata/view-container-name';
 import type {
     BatchUpdateRequest,
     BatchUpdateResponse,
@@ -98,37 +71,22 @@ import type {
 // [ADR-0131 D6] The `unmanaged` install mode: its request is PARSED through
 // the published declaration, and the pure half of the import (what a package
 // body holds, what is copied, what is refused) lives beside this file.
-import { ImportUnmanagedPackageRequestSchema } from '@objectstack/spec/api';
-import { planUnmanagedImport, unmanagedInstallPostureRefusal } from './package-unmanaged-install.js';
-import type { MetadataCacheRequest, MetadataCacheResponse, ServiceInfo, ApiRoutes, WellKnownCapabilities, CapabilityDescriptor } from '@objectstack/spec/api';
-import { readServiceSelfInfo, readChannelRoute, readAuthFamilies, isSubscribableChannel, CHANNEL_SURFACE_SLOTS, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
+import type { MetadataCacheRequest, MetadataCacheResponse } from '@objectstack/spec/api';
 // [#24395] The save's authoring surface.
-import { MetadataAuthoringSurfaceSchema } from '@objectstack/spec/api';
-import { authoringClientOf } from './draft-changes.js';
 import {
-    parseFilterAST,
-    isFilterAST,
     REFERENCE_VALUE_TYPES,
-    foldQueryAliasSlots,
-    QUERY_TRANSPORT_ALIAS_SLOTS,
-    QUERY_TRANSPORT_DOLLAR_ALIASES,
-    QUERY_TRANSPORT_DOLLAR_PARAMS,
     type DroppedFieldsEvent,
-    type EngineAggregateOptions,
-    type EngineCountOptions,
-    type EngineQueryOptions,
     type EngineQueryOptionsParsed,
-    type ValidationAdvisoryEvent,
     externalBindingDatasourceRefusal,
 } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
 // [#13331] The cluster fan-out transport type only — the protocol never
 // depends on `@objectstack/service-cluster`; a bridge plugin there hands the
 // live transport in through `attachMetadataMutationPubSub`.
-import type { IFieldFileService, IObjectQLEngine, IPubSub } from '@objectstack/spec/contracts';
+import type { IFieldFileService, IPubSub } from '@objectstack/spec/contracts';
 import { FIELD_FILE_SERVICE } from '@objectstack/spec/contracts';
 import type { ConversionNotice, ConversionTodoNotice } from '@objectstack/spec';
-import { type I18nLabel, isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec/ui';
+import { type I18nLabel } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
 // structurally mention `FormFieldInput` (FormView `sections[].fields`), and
 // this file imports BOTH `@objectstack/spec` (root, for
@@ -146,28 +104,23 @@ import { type I18nLabel, isAggregatedViewContainer, expandViewContainer } from '
 // (curated entry, unchanged).
 import { type FormFieldInput } from '@objectstack/spec/ui';
 export type { FormFieldInput };
-import { CORE_SERVICE_PROVIDER, serviceUnavailableMessage, type TranslationBundle } from '@objectstack/spec/system';
+import { type TranslationBundle } from '@objectstack/spec/system';
 import {
     restoreTranslatedEchoes,
     translatedEchoNotices,
-    TRANSLATED_ECHO_NOTICE_ID,
     type RestoredTranslatedSlot,
 } from './protocol-translated-echo.js';
-import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeSchema, getMetadataTypeActions, getMetadataCreateSeed, PROTOCOL_VERSION } from '@objectstack/spec/kernel';
+import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import {
     resolveLockState,
     type MetadataLock,
     type MetadataLockSource,
     type MetadataProvenance,
 } from '@objectstack/spec/kernel';
-import { deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
 // [#28409, ADR-0146 D3 / D8 item 2] The pair's id, the one spelling N-08 owns,
 // and the one predicate that says a stored row is the served override of a
 // base's name.
-import { customizationPackageId, isCustomizationPairOf } from '@objectstack/spec/kernel';
 import { isServedOverrideRowOf, type ServedOverrideRow } from './served-override.js';
-import { bindStoredRow } from './stored-row-binding.js';
-import { incomingTakesStoredFlowSlot } from './stored-flow-slot.js';
 import { listServedOverrides, type ServedOverrideEntry } from './protocol-served-overrides.js';
 // [#28413, ADR-0146 D11] The package-less overlay migration (`os migrate
 // packageless-overlays`).
@@ -181,7 +134,6 @@ import {
 } from './protocol-packageless-overlay-migration.js';
 // [#19417] The package-id declaration and its remedy text, imported to be
 // SURFACED rather than restated — see the gate at the top of `installPackage`.
-import { ManifestSchema, manifestIdRefusal } from '@objectstack/spec/kernel';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { REFERENCE_SITES } from './reference-sites.js';
 // [#5488] The `@objectstack/spec/api` import that stood here — `ApiEndpointSchema`,
@@ -206,29 +158,12 @@ import {
 // and `getData` serve `sys_metadata` / `sys_metadata_history` rows, whose
 // `metadata` column is the same stored body, through the same redactor.
 import {
-    hasMetadataRedactor,
-    redactMetadataItem,
-    redactStoredMetadataRow,
-    redactStoredMetadataRows,
-    storedMetadataBodyGroupingRefusal,
-    storedMetadataBodyPredicateRefusal,
-    storedMetadataBodyProjection,
-    // [#21207] The stored content hash of the same rows: served keyed, never
-    // evaluated — see `STORED_METADATA_HASH_COLUMNS`.
     ephemeralStoredHashDigest,
-    servedContentHash,
-    serveStoredHashTokens,
-    serveStoredMetadataHashColumnRows,
-    serveStoredMetadataHashColumns,
-    storedMetadataHashEvaluateRefusal,
     type StoredHashDigest,
 } from './metadata-redaction.js';
 import type {
     StoredFlowCanonicalization,
-    StoredMigrationNotice,
     StoredMigrationReport,
-    StoredMigrationRow,
-    StoredMigrationTodo,
 } from './stored-migration.js';
 import { collectDecisionModeReview } from './stored-migration.js';
 // [#25467 cut 1] The bulk data writes (`batchData`, the `*ManyData` verbs, their
@@ -347,7 +282,6 @@ import {
 import {
     carryForwardRedactedCredentials,
     credentialChannelFor,
-    droppedWithheldKeyNotices,
     restoredCredentialPathsFor,
     storedBodyForCarryForward,
 } from './protocol-credential-carry-forward.js';
@@ -373,11 +307,9 @@ import { applyPublishBackfill, planPublishBackfill } from './protocol-publish-ba
 import { discardDraftInItsScope, listDrafts } from './protocol-drafts.js';
 // [#25467 cut 13] The package door's save refusal and the origin-gated removal verdict.
 import {
-    isPairRowRemoval,
     namedBaseCloseSubject,
     namedBaseOverlayWriteRefusal,
     originGatedRemovalRefusal,
-    overrideWriteRefusalError,
     overrideWriteVerdict,
     packagelessOverlayWriteRefusal,
     refusePackagedBaseOverride,
@@ -393,7 +325,6 @@ import type {
 import {
     extensionFieldSuffixRefusalError,
     judgeExtensionFieldSuffix,
-    objectBodyExtensionFieldSuffixRefusal,
 } from './protocol-extension-field-suffix.js';
 // [#25467 cut 14] The publish batch's seed apply and its own pending declarations.
 import { applySeedBodies, collectBatchPendingDeclarations } from './protocol-publish-batch.js';
@@ -404,7 +335,7 @@ import { namesWithOwnStoredRow, readActiveOverlayRows, readItemActiveRows, store
 // [#25467 cut 17] The object-owner verdicts: which contributor kind a stored object row registers as, and handing an adopted object's name to its rebound row.
 import { classifyObjectContribution, releaseAdoptedObjectOwner } from './protocol-object-owner.js';
 // [#25467 cut 18] The flow save's retired-spelling replay verdict (#23903 ruling B′): does a save newly introduce a retired spelling no stored row carries.
-import { flowSaveReplaysRetired, flowVerdictBody, storedFlowVerdictBody } from './protocol-flow-save-replay.js';
+import { flowSaveReplaysRetired } from './protocol-flow-save-replay.js';
 // [#25467 cut 19] A package write's validation scope: the written package and its declared dependency closure, from the registry.
 import { resolveWritePackageScope } from './protocol-write-package-scope.js';
 // [#28574, ADR-0146 D10] An object extension as an authorable item: the doors' gate, its shape schema, and the body every sync registers.
@@ -422,7 +353,6 @@ import { reportSealedOverlayRows } from './protocol-sealed-overlay-report.js';
 import { expandUnderOwnName, resolveRowlessExpandedView } from './protocol-view-expansion-names.js';
 // [#25467 cut 23] The read-side conversion of a stored item: the ADR-0087 chain with its notices, and the warned-once read with the page `type` default.
 import { convertStoredItem, convertStoredItemDetailed } from './protocol-stored-item-conversion.js';
-import { withParsedStoredActions } from './protocol-stored-action-parse.js';
 // [#25467 cut 24] The live metadata-type listing: the SchemaRegistry's types and the `metadata` service's, de-duplicated.
 import { listLiveMetadataTypes } from './protocol-live-metadata-types.js';
 // [#25467 cut 24] The save door's 409 for a `ConflictError`, with its decision-audit row.
@@ -468,30 +398,23 @@ import { foldStoredCollection } from './protocol-stored-collection-fold.js';
 import { deletePackage } from './protocol-package-uninstall.js';
 // ADR-0146 D3 — the ensure door of a base's paired `.custom` package, and the
 // pair-shaped-id predicate the duplicate asks before it reads a row.
-import { customizationPairManifestRefusal, ensureCustomizationPackage } from './protocol-customization-package.js';
+import { ensureCustomizationPackage } from './protocol-customization-package.js';
 // [#25467 cut 35] The unmanaged import: the names it would collide with, and the rollback of a failed one.
 import { rollBackUnmanagedImport, unmanagedImportCollisions } from './protocol-unmanaged-import.js';
 // [#27762] The own-reference rule for a datasource body's `external.credentialsRef` on the save door.
 import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-credentials-ref.js';
 // [#28355] The `denied` row the four single-item doors leave for a refusal that writes none of its own.
-import { withRefusalAudit } from './protocol-refusal-audit.js';
 // [#28665] The null-master rows a `controlled_by_parent` detail stops serving, counted into the finding that makes its master required.
-import { withNullMasterRowCounts } from './protocol-destructive-null-master.js';
 // [#29510] `getMetaTypes()`'s named return type and the equality its pin reads.
-import type { Equal, MetaTypesListing } from './protocol-meta-types-listing.js';
+import type { MetaTypesListing } from './protocol-meta-types-listing.js';
 // [#25467 E0] The module preamble that stood here moved, verbatim, into the themed
 // `protocol-*.ts` modules below. What this file exported from it, it still exports;
 // the module order below is the order the rolled-up `.d.ts` keeps their declarations in.
 // A byte-offset shift in this file can surface a class comment inside an inferred type
 // of the published `.d.ts`: read its raw diff after any edit here.
 import {
-    HAND_CRAFTED_SCHEMAS,
-    TYPE_TO_FORM,
     canonicalMetaType,
     canonicalizeMetaRequestType,
-    overlaySchemaDeclaredKey,
-    resolveOverlaySchema,
-    toJsonSchemaSafe,
 } from './protocol-meta-type-schema.js';
 export {
     canonicalMetaType,
@@ -501,12 +424,9 @@ export {
 } from './protocol-meta-type-schema.js';
 import {
     isItemOfDisabledPackage,
-    packagelessPublishNoDraftRefusal,
     permissionSetOwnerBindingRefusal,
-    protectionBlockRefusal,
     remainingRowsPhrase,
     runtimeHookWithoutBodyRefusal,
-    withoutProtectionBlock,
 } from './protocol-authoring-refusals.js';
 export {
     isActionWithheldByDisabledPackage,
@@ -518,7 +438,6 @@ export {
     remainingRowsPhrase,
     runtimeHookWithoutBodyRefusal,
 } from './protocol-authoring-refusals.js';
-import { zodIssuesToMetadataIssues } from './protocol-metadata-issues.js';
 import type { MetadataIssueEntry } from './protocol-metadata-issues.js';
 export { zodIssuesToMetadataIssues } from './protocol-metadata-issues.js';
 export type { MetadataIssueEntry } from './protocol-metadata-issues.js';
@@ -526,11 +445,8 @@ import { readPublishBackfillRequest } from './protocol-publish-backfill-request.
 import type { PublishBackfillEntry, PublishBackfillReceipt } from './protocol-publish-backfill-request.js';
 export { PUBLISH_BACKFILL_PAGE_SIZE, publishBackfillRefusal } from './protocol-publish-backfill-request.js';
 export type { PublishBackfillEntry, PublishBackfillReceipt } from './protocol-publish-backfill-request.js';
-import { malformedFilterArrayError } from './protocol-data-request-shapes.js';
 export { byIdUpdateRecord } from './protocol-data-request-shapes.js';
 import {
-    graftFoldedFormSections,
-    graftNormalizedOperators,
     normalizeViewMetadata,
     projectStorableViewBody,
     withDeclaredPageTypeDefault,
@@ -544,13 +460,10 @@ export {
     withDeclaredPageTypeDefault,
 } from './protocol-view-normalization.js';
 import {
-    boundPackageOf,
-    bundleMemberOf,
     declinesBorrowedEnvelope,
     isShippedViewItem,
     mergeArtifactProtection,
     stateTenantAuthorship,
-    stripDerivedProvenance,
     withRowBinding,
 } from './protocol-package-bindings.js';
 import type {
@@ -565,8 +478,6 @@ import {
     bundleMemberDiscriminator,
     commitPlanKey,
     memberOption,
-    mutationEventMember,
-    mutationEventMemberOfBody,
     resolveBundleMemberSelector,
 } from './protocol-bundle-members.js';
 import type { CommitPlanItem } from './protocol-bundle-members.js';
@@ -586,24 +497,18 @@ export {
     servedOverlayRowCandidates,
     servedViewExpansion,
 } from './protocol-overlay-merge.js';
-import { compareAuditInstants, isoFromValidDate, simpleHash } from './protocol-version-tokens.js';
 export {
     ConcurrentUpdateError,
     MalformedVersionTokenError,
     canonicalVersionInstant,
 } from './protocol-version-tokens.js';
-import { CLONE_STRIP_FIELDS } from './protocol-write-constants.js';
 export { FLOW_FALLBACK_VERDICT_NOT_REPLAYED } from './protocol-write-constants.js';
 import {
     carryCatalogedErrorCode,
-    carryDeclaredUserMessage,
     clientFacingFailureCode,
     clientFacingFailureText,
     declaresClientRefusal,
-    metadataIssueHeadline,
-    metadataItemNotFoundError,
     metadataReadFailureError,
-    overlayDeleteFailureMessage,
 } from './protocol-client-failures.js';
 import type { BatchDataLoopOutcome, BatchDataRowResult } from './protocol-client-failures.js';
 export {
@@ -617,18 +522,6 @@ export {
     toRowApiError,
 } from './protocol-client-failures.js';
 export type { BatchDataLoopOutcome, BatchDataRowResult } from './protocol-client-failures.js';
-import {
-    RESERVED_LIST_QUERY_PARAMS,
-    assertQueryParamArity,
-    collectStoredMetadataFilterFields,
-    conflictingQueryParamsError,
-    countFlagValue,
-    narrowStoredMetadataSearch,
-    normalizeSortNodes,
-    pageWindowValue,
-    projectionFieldsValue,
-    unusableFilterError,
-} from './protocol-list-query-params.js';
 export {
     FILTER_LOGICAL_KEYS,
     ODATA_SPELLING,
@@ -642,14 +535,6 @@ export {
     suggestFieldName,
 } from './protocol-list-query-params.js';
 export type { StoredMetadataSearchSchema } from './protocol-list-query-params.js';
-import { SERVICE_CONFIG } from './protocol-discovery-services.js';
-import { collectCompositeKeyHeadHits, collectReferenceHits } from './protocol-reference-hits.js';
-import {
-    destructiveChangeRemedy,
-    detectDestructiveObjectChanges,
-    diffShallow,
-    specValidationFindings,
-} from './protocol-write-face.js';
 import type { MetadataWriteFace } from './protocol-write-face.js';
 export { specValidationFindings } from './protocol-write-face.js';
 export type { MetadataWriteFace } from './protocol-write-face.js';
@@ -674,7 +559,6 @@ export type {
 } from './protocol-package-lifecycle-types.js';
 import { METADATA_MUTATION_CLUSTER_CHANNEL } from './protocol-mutation-events.js';
 import type {
-    ClusterMetadataMutationPayload,
     MetaItemPublishedEvent,
     MetadataMutationEvent,
     MetadataMutationProjector,
@@ -745,6 +629,7 @@ import {
 } from './protocol-class-head.js';
 // [#29985 codemod] Discovery, types, diagnostics, packaged bases, credential carry-forward: the methods of the same names below hand the bodies the host (`protocol-host.ts`).
 import {
+    getDiscovery,
     getMetaTypes,
     getPackagedObjectBase,
     objectRegistrationRefusal,
@@ -755,6 +640,8 @@ import {
     restoreTranslatedObjectEchoes,
     rethrowUnlessMetadataStoreUnprovisioned,
 } from './protocol-discovery-and-bases.js';
+// [#29985 codemod] Data CRUD: the methods of the same names below hand the bodies the host (`protocol-host.ts`).
+import { cloneData, findData, getData } from './protocol-data-crud.js';
 // [#29985 codemod] Global search and the metadata cache: the methods of the same names below hand the bodies the host (`protocol-host.ts`).
 import { getMetaItemCached } from './protocol-search-and-cache.js';
 // [#29985 codemod] Write gates: overlay, code-only, organization, sealed and packaged-base refusals, locks, version tokens, conflict audit: the methods of the same names below hand the bodies the host (`protocol-host.ts`).
@@ -764,7 +651,6 @@ import {
     isArtifactBacked,
     isNestedArtifactField,
     packagedArtifactOwner,
-    packagedBaseRefusal,
     pairOfAddedMember,
     refusePackagedBaseRemoval,
     registryMemberServedAt,
@@ -787,6 +673,7 @@ import {
 import {
     metaTypeNamespaceExists,
     migrateStoredMetadata,
+    saveMetaItem,
     saveMetaItemUnaudited,
     viewContainerNameCollisionRefusal,
 } from './protocol-save.js';
@@ -795,6 +682,7 @@ import {
     discardPackageDrafts,
     historyMetaItem,
     promoteDraftForPublish,
+    publishMetaItem,
     publishMetaItemUnaudited,
     runPublishSideEffects,
 } from './protocol-history-and-publish.js';
@@ -807,11 +695,13 @@ import {
     reassignOrphanedMetadata,
     revertCommit,
     revertStoredPackage,
+    rollbackMetaItem,
     rollbackMetaItemUnaudited,
     rollbackToPackageCommit,
 } from './protocol-package-commits.js';
 // [#29985 codemod] Diff, deleteMetaItem, loadMetaFromDb, load reports, findReferencesToMeta: the methods of the same names below hand the bodies the host (`protocol-host.ts`).
 import {
+    deleteMetaItem,
     deleteMetaItemUnaudited,
     diffMetaItem,
     findReferencesToMeta,
@@ -1371,10 +1261,19 @@ export class ObjectStackProtocolImplementation implements
             applyRemoteMetadataMutation: (...a) => protocol.applyRemoteMetadataMutation(...a),
             applySeedBodies: (...a) => protocol.applySeedBodies(...a),
             artifactLockLayerAt: (...a) => protocol.artifactLockLayerAt(...a),
+            assertAggregationFieldsExist: (...a) => protocol.assertAggregationFieldsExist(...a),
+            assertExpandTargetsExist: (...a) => protocol.assertExpandTargetsExist(...a),
+            assertFilterFieldsExist: (...a) => protocol.assertFilterFieldsExist(...a),
+            assertGroupByFieldsExist: (...a) => protocol.assertGroupByFieldsExist(...a),
             assertLockAllowsDelete: (...a) => protocol.assertLockAllowsDelete(...a),
             assertLockAllowsWrite: (...a) => protocol.assertLockAllowsWrite(...a),
+            assertNoInternalFieldEvaluated: (...a) => protocol.assertNoInternalFieldEvaluated(...a),
             assertObjectRegistered: (...a) => protocol.assertObjectRegistered(...a),
+            assertProjectionFieldsExist: (...a) => protocol.assertProjectionFieldsExist(...a),
+            assertQueryParamsAreFields: (...a) => protocol.assertQueryParamsAreFields(...a),
             assertRuntimeAuthoringRules: (...a) => protocol.assertRuntimeAuthoringRules(...a),
+            assertSearchFieldsAreSearchable: (...a) => protocol.assertSearchFieldsAreSearchable(...a),
+            assertSortFieldsExist: (...a) => protocol.assertSortFieldsExist(...a),
             assertVersionMatch: (...a) => protocol.assertVersionMatch(...a),
             authoredLockFamily: (...a) => protocol.authoredLockFamily(...a),
             get authoringChannel() { return protocol.authoringChannel; },
@@ -1395,6 +1294,7 @@ export class ObjectStackProtocolImplementation implements
             credentialChannelFor: (...a) => protocol.credentialChannelFor(...a),
             declinesStoredRow: (...a) => protocol.declinesStoredRow(...a),
             defaultRecordPageSaveRefusal: (...a) => protocol.defaultRecordPageSaveRefusal(...a),
+            deleteMetaItemUnaudited: (...a) => protocol.deleteMetaItemUnaudited(...a),
             detachMetadataMutationPubSub: (...a) => protocol.detachMetadataMutationPubSub(...a),
             diffMetaItem: (...a) => protocol.diffMetaItem(...a),
             disabledActionsOf: (...a) => protocol.disabledActionsOf(...a),
@@ -1438,7 +1338,6 @@ export class ObjectStackProtocolImplementation implements
             isHostCodeDatasource: (...a) => protocol.isHostCodeDatasource(...a),
             isNestedArtifactField: (...a) => protocol.isNestedArtifactField(...a),
             isOverlayAllowed: (...a) => ObjectStackProtocolImplementation.isOverlayAllowed(...a),
-            isPackagedBaseRefusal: (...a) => ObjectStackProtocolImplementation.isPackagedBaseRefusal(...a),
             isRuntimeCreateAllowed: (...a) => ObjectStackProtocolImplementation.isRuntimeCreateAllowed(...a),
             isSealedManagedItem: (...a) => protocol.isSealedManagedItem(...a),
             isStoredEntryOfDeclinedName: (...a) => protocol.isStoredEntryOfDeclinedName(...a),
@@ -1480,6 +1379,7 @@ export class ObjectStackProtocolImplementation implements
             probeRecord: (...a) => protocol.probeRecord(...a),
             promoteDraftForPublish: (...a) => protocol.promoteDraftForPublish(...a),
             get publishMaterializers() { return protocol.publishMaterializers; },
+            publishMetaItemUnaudited: (...a) => protocol.publishMetaItemUnaudited(...a),
             readActiveOverlayRows: (...a) => protocol.readActiveOverlayRows(...a),
             readFlattenedMetaItems: (...a) => protocol.readFlattenedMetaItems(...a),
             readItemActiveRows: (...a) => protocol.readItemActiveRows(...a),
@@ -1526,6 +1426,7 @@ export class ObjectStackProtocolImplementation implements
             rethrowUnlessMetadataStoreUnprovisioned: (...a) => protocol.rethrowUnlessMetadataStoreUnprovisioned(...a),
             revertCommit: (...a) => protocol.revertCommit(...a),
             rollBackUnmanagedImport: (...a) => protocol.rollBackUnmanagedImport(...a),
+            rollbackMetaItemUnaudited: (...a) => protocol.rollbackMetaItemUnaudited(...a),
             runAuthoringGate: (...a) => protocol.runAuthoringGate(...a),
             runMutationProjector: (...a) => protocol.runMutationProjector(...a),
             runPublishSideEffects: (...a) => protocol.runPublishSideEffects(...a),
@@ -1533,8 +1434,11 @@ export class ObjectStackProtocolImplementation implements
             runtimeViewContainerPackage: (...a) => protocol.runtimeViewContainerPackage(...a),
             saveConflict: (...a) => protocol.saveConflict(...a),
             saveMetaItem: (...a) => protocol.saveMetaItem(...a),
+            saveMetaItemUnaudited: (...a) => protocol.saveMetaItemUnaudited(...a),
             saveWriteBinding: (...a) => protocol.saveWriteBinding(...a),
+            searchAll: (...a) => protocol.searchAll(...a),
             seedExternalIdSaveRefusal: (...a) => protocol.seedExternalIdSaveRefusal(...a),
+            servedExpand: (...a) => protocol.servedExpand(...a),
             servedLockState: (...a) => protocol.servedLockState(...a),
             shippedArtifactsOf: (...a) => protocol.shippedArtifactsOf(...a),
             shippingPackagesOf: (...a) => protocol.shippingPackagesOf(...a),
@@ -2760,464 +2664,8 @@ export class ObjectStackProtocolImplementation implements
     }
 
     async getDiscovery() {
-        // Get registered services from kernel if available
-        const registeredServices = this.getServicesRegistry ? this.getServicesRegistry() : new Map();
-
-        // Build dynamic service info with proper typing. Analytics is NOT in
-        // this kernel-provided block: since the degraded ObjectQL fallback was
-        // retired (#3891) it is an ordinary optional service, computed from the
-        // registry via SERVICE_CONFIG below — absent means `unavailable`, and
-        // no route is advertised (the pre-#2462 hardcode here is exactly what
-        // the fallback was invented to make true).
-        //
-        // [#4089] The `metadata` slot is reported from whatever fills it, not
-        // hardcoded `available`. The kernel auto-registers `createMemoryMetadata`
-        // when no MetadataPlugin is present, and plugin-dev registers its own
-        // in-memory registry; both self-describe as `degraded` (D12), and
-        // hardcoding `available` here overstated them as exactly equivalent to a
-        // sys_metadata-backed registry. Absent or unmarked ⇒ `available`, which
-        // is what the real MetadataPlugin (carrying no marker) reports.
-        //
-        // This is also where the two builders stopped disagreeing: the runtime
-        // dispatcher hardcoded the opposite verdict for the same slot
-        // (`degraded` + "DB persistence pending"), so one host called a persisted
-        // registry degraded while the other called an in-memory one available.
-        // Both now compute it, and `handlerReady: true` is stated on both sides:
-        // `/api/v1/meta` is served by the protocol, not by this service, so it is
-        // mounted whichever implementation occupies the slot.
-        const metadataSelf = readServiceSelfInfo(registeredServices.get('metadata'));
-
-        // [#4130] `data` was the last self-judging entry in this block. Same
-        // reasoning, one degree weaker: its hardcoded `available` is currently
-        // true, but only because ObjectQL is the slot's sole producer and
-        // plugin-dev (whose `data` stub declares `stub`) always loads
-        // ObjectQLPlugin as a child. That is a load-order convention in another
-        // package, not something this builder verifies — so verify it here.
-        // Unmarked implementation ⇒ `available` + `handlerReady: true`, i.e.
-        // exactly what the hardcode said, now derived rather than asserted.
-        const dataSelf = readServiceSelfInfo(registeredServices.get('data'));
-
-        const services: Record<string, ServiceInfo> = {
-            // --- Kernel-provided (objectql is an example kernel implementation) ---
-            metadata:  {
-                enabled: true,
-                status: metadataSelf?.status ?? ('available' as const),
-                handlerReady: true,
-                route: '/api/v1/meta',
-                provider: 'objectql',
-                ...(metadataSelf?.message ? { message: metadataSelf.message } : {}),
-            },
-            data:      {
-                enabled: true,
-                status: dataSelf?.status ?? ('available' as const),
-                handlerReady: dataSelf?.handlerReady ?? true,
-                route: '/api/v1/data',
-                provider: 'objectql',
-                ...(dataSelf?.message ? { message: dataSelf.message } : {}),
-            },
-        };
-
-        // [#4000, #4058] The dispatcher answers a self-declared non-handler in
-        // one of ITS domains' slots with the same 404/501 an empty slot gets
-        // (`isServiceServeable`, runtime/src/service-serveable.ts), so this
-        // builder must not advertise a route for one — that would be the
-        // `declared ≠ enforced` gap discovery exists to close.
-        //
-        // Scoped to the dispatcher-owned domains on purpose. For the other
-        // entries in SERVICE_CONFIG the route belongs to the plugin that
-        // registers the service (service-storage's own `/api/v1/storage`
-        // routes, plugin-search, plugin-graphql, …) rather than to a dispatcher
-        // domain, so `handlerReady` there says nothing about whether THAT route
-        // is mounted, and suppressing it would be a guess. `storage` stays
-        // listed as the one entry with no dispatcher domain behind it — #4087
-        // retired the `/storage` bridge — because for that slot `handlerReady`
-        // is not a proxy for anything, it is the fact itself: an occupant that
-        // mounts no HTTP surface must not have `/api/v1/storage` advertised on
-        // its behalf. When service-storage is installed it registers a real
-        // (unmarked) service and mounts the routes, so the entry never fires.
-        const DISPATCHER_GATED_SERVICES = new Set([
-            'analytics', 'automation', 'notification', 'ai', 'i18n', 'storage',
-        ]);
-        const unserveable = (serviceName: string) =>
-            DISPATCHER_GATED_SERVICES.has(serviceName)
-            && readServiceSelfInfo(registeredServices.get(serviceName))?.handlerReady === false;
-        const advertisedRoute = (serviceName: string, route?: string) =>
-            unserveable(serviceName) ? undefined : route;
-
-        // Check which services are actually registered
-        for (const [serviceName, config] of Object.entries(SERVICE_CONFIG)) {
-            if (registeredServices.has(serviceName)) {
-                // Registered — but honor a stub/dev/fallback self-description
-                // instead of blindly reporting 'available' (ADR-0076 D12).
-                const self = readServiceSelfInfo(registeredServices.get(serviceName));
-                // [#14646] Channel slots answer a different question than every
-                // other row here. `enabled` elsewhere means "the slot is
-                // filled"; for a slot whose advertised capability IS a
-                // subscribable channel that reading is what let `/discovery`
-                // report `enabled: true` beside "no HTTP/WS realtime surface is
-                // mounted" — both true, one field, two meanings. Here `enabled`
-                // is the shared predicate itself, evaluated on the very entry a
-                // consumer reads, so the field and the definition are one
-                // computation. The route comes from the occupant because no
-                // builder in the open framework mounts a realtime transport.
-                if (CHANNEL_SURFACE_SLOTS.has(serviceName)) {
-                    const channelRoute = readChannelRoute(registeredServices.get(serviceName));
-                    const handlerReady = channelRoute !== undefined;
-                    services[serviceName] = {
-                        enabled: isSubscribableChannel({ handlerReady, route: channelRoute }),
-                        // A mounted channel makes an unmarked occupant plainly
-                        // `available`; without one the slot keeps the reduced
-                        // status its row declares (`degraded` for realtime — the
-                        // capability it advertises IS the missing surface).
-                        status: self?.status
-                            ?? (handlerReady
-                                ? ('available' as const)
-                                : (config.noHttpSurface?.statusWhenUnmarked ?? ('available' as const))),
-                        route: channelRoute,
-                        provider: CORE_SERVICE_PROVIDER[serviceName] ?? undefined,
-                        handlerReady,
-                        // The "no surface" sentence is only true while there is
-                        // no surface; a mounted channel drops it and keeps only
-                        // whatever the occupant says about itself.
-                        ...(self?.message
-                            ? { message: self.message }
-                            : !handlerReady && config.noHttpSurface
-                                ? { message: config.noHttpSurface.message }
-                                : {}),
-                    };
-                    continue;
-                }
-                // No HTTP surface at all: the handler can never be ready, and
-                // the entry's own `noHttpSurface` declaration says whether that
-                // also degrades the slot (realtime) or not (cache/queue/job —
-                // in-process contracts, #4318).
-                const noHttpSurface = !config.route;
-                services[serviceName] = {
-                    enabled: true,
-                    status: self?.status ?? (config.noHttpSurface?.statusWhenUnmarked ?? ('available' as const)),
-                    route: advertisedRoute(serviceName, config.route),
-                    provider: CORE_SERVICE_PROVIDER[serviceName] ?? undefined,
-                    ...(noHttpSurface || self?.handlerReady !== undefined
-                        ? { handlerReady: noHttpSurface ? false : self?.handlerReady }
-                        : {}),
-                    ...(self?.message
-                        ? { message: self.message }
-                        : config.noHttpSurface
-                            ? { message: config.noHttpSurface.message }
-                            : {}),
-                };
-            } else {
-                // Service is not registered
-                services[serviceName] = {
-                    enabled: false,
-                    status: 'unavailable' as const,
-                    message: serviceUnavailableMessage(serviceName),
-                };
-            }
-        }
-
-        // [#9683] `file-storage` is the deprecated v17 alias of the `storage`
-        // slot, and it is a key existing consumers really read off this
-        // document (objectui's console endpoint catalog is keyed by it). The
-        // registry resolves both names to the same instance, so discovery
-        // mirrors the canonical row VERBATIM under the alias key until the
-        // alias retires at the next major — dropping the key would be the
-        // silent inside-a-major break the ruling forbids. Deliberately a
-        // byte-equal copy, not a second opinion: one slot, two spellings.
-        services['file-storage'] = { ...services['storage'] };
-
-        // Build routes from services — a flat convenience map for client routing
-        const serviceToRouteKey: Record<string, keyof ApiRoutes> = {
-            analytics: 'analytics',
-            auth: 'auth',
-            automation: 'automation',
-            ui: 'ui',
-            realtime: 'realtime',
-            notification: 'notifications',
-            ai: 'ai',
-            i18n: 'i18n',
-            storage: 'storage',
-            // [#6633] The package-management surface. `package` is NOT a
-            // CoreServiceName slot, so it must not enter SERVICE_CONFIG — a
-            // non-slot row there is the shape of the retired `graphql` defect,
-            // and it would also fabricate a `services` availability entry whose
-            // remedy line lies. Its route flows through the
-            // NON_SLOT_SERVICE_ROUTES loop below instead: same gate
-            // (registered service), same mapping table, one hop over.
-            package: 'packages',
-        };
-
-        // [#6633] Routes advertised for registered services that are not
-        // CoreServiceName slots. Advertised iff the service is registered —
-        // the same convention every SERVICE_CONFIG row uses, and for `package`
-        // it is exactly the predicate that decides the mount on both real host
-        // types: the @objectstack/rest direct-mount registrar is gated on this
-        // same service (`direct-mount-composition.ts`), and the runtime
-        // dispatcher — whose `/packages` domain is unconditional — answers
-        // discovery from its own `getDiscoveryInfo()`, never from this
-        // builder.
-        //
-        // `datasources` is deliberately NOT here (same reasoning as `mcp`,
-        // #5679): the federation mount belongs to the REST host, which this
-        // builder cannot see, and the runtime dispatcher serves no
-        // `/datasources` domain at all — advertising it from here would be the
-        // advertise-the-unmounted half of ADR-0076 D12. The REST discovery
-        // endpoint advertises it from its recorded direct mounts.
-        const NON_SLOT_SERVICE_ROUTES: Record<string, string> = {
-            package: '/api/v1/packages',
-        };
-
-        const optionalRoutes: Partial<ApiRoutes> = {};
-
-        // Add routes for available plugin services. Services without an HTTP
-        // surface (config.route undefined) advertise no route (D12, #2462).
-        for (const serviceName of Object.keys(SERVICE_CONFIG)) {
-            // [#14646] Read the route off the entry that was just built rather
-            // than re-deriving it from the table. Byte-identical for every
-            // table-routed slot, and it is the only spelling that stays correct
-            // for a channel slot, whose route comes from the occupant — two
-            // derivations of one fact is how `routes` and `services` drift.
-            const route = services[serviceName]?.route;
-            if (registeredServices.has(serviceName) && route) {
-                const routeKey = serviceToRouteKey[serviceName];
-                if (routeKey) {
-                    optionalRoutes[routeKey] = route;
-                }
-            }
-        }
-
-        // [#6633] Same flow for the non-slot routed services declared above.
-        for (const [serviceName, route] of Object.entries(NON_SLOT_SERVICE_ROUTES)) {
-            if (registeredServices.has(serviceName)) {
-                const routeKey = serviceToRouteKey[serviceName];
-                if (routeKey) {
-                    optionalRoutes[routeKey] = route;
-                }
-            }
-        }
-
-        const routes: ApiRoutes = {
-            data: '/api/v1/data',
-            metadata: '/api/v1/meta',
-            ...optionalRoutes,
-        };
-
-        // Build well-known capabilities from registered services.
-        //
-        // [#5672] `WellKnownCapabilitiesSchema` is THE capability vocabulary and
-        // `DiscoverySchema.capabilities` is now a closed object over it, so this
-        // literal must answer EVERY key — a capability this host does not
-        // deliver is `enabled: false`, never an absent key (maintainer ruling A,
-        // 2026-08-06). The `WellKnownCapabilities` annotation is what enforces
-        // that at compile time: adding a key to the vocabulary breaks this line
-        // until it is answered here.
-        //
-        // Each key's basis is recorded next to it. Where a capability is backed
-        // by a service slot, the predicate is deliberately the SAME one that
-        // decides whether the route is advertised (`advertisedRoute`/
-        // `unserveable` above) — what we advertise and what we claim cannot
-        // disagree.
-        const capabilityServed = (serviceName: string) =>
-            registeredServices.has(serviceName) && !unserveable(serviceName);
-
-        const wellKnown: WellKnownCapabilities = {
-            // Comments/chatter are served by the `sys_comment` object via the generic
-            // data API (ADR-0052 §5) — not a dedicated service. The capability is true
-            // iff that object is loaded (the always-on audit slate provides it); this
-            // keeps declared === enforced (Prime Directive #10). #3180
-            comments: !!this.engine.registry?.getObject?.('sys_comment'),
-            automation: registeredServices.has('automation'),
-            cron: registeredServices.has('job'),
-            // [#7541] Serveability-gated on the protocol's OWN search
-            // implementation, was slot presence. This is the same predicate the
-            // route refuses on: `registerSearchEndpoints`
-            // (packages/rest/src/rest-server.ts) 501s exactly when
-            // `typeof protocol.searchAll !== 'function'`, so the two ends can no
-            // longer answer the same question differently — the rule stated at
-            // the top of this block, applied to the key that was still exempt.
-            //
-            // The old predicate was wrong in the direction discovery exists to
-            // prevent: `searchAll` is implemented by this class unconditionally,
-            // nothing in either repository registers the `search` slot
-            // (CORE_SERVICE_PROVIDER records that, verified), so every REST host
-            // served `GET /api/v1/search` 200 while advertising
-            // `capabilities.search = false`. A conforming client — one that
-            // trusts the document instead of probing — skipped a working
-            // surface. Prime Directive #10 inverted.
-            //
-            // `services.search` is deliberately NOT collapsed into this. The
-            // slot is a distinct question with its own answer: `CoreServiceName`
-            // declares it "Search Engine (Elastic/Meili)" and `ISearchService`
-            // is an index/query contract, so `services.search` reports WHICH
-            // ENGINE occupies the slot while this bit reports WHETHER THE
-            // SURFACE IS SERVED (`WellKnownCapabilitiesSchema.search`: "whether
-            // the backend supports full-text search"). They may legitimately
-            // differ — an empty slot with a served endpoint is today's normal
-            // host — and `serviceUnavailableMessage('search')` now says so in
-            // the same document, the way `ui` does for the same shape (#4146).
-            search: typeof this.searchAll === 'function',
-            export: registeredServices.has('automation') || registeredServices.has('queue'),
-            // [#5672] Serveability-gated, was presence-only. Two reasons, and
-            // the second is the binding one:
-            //   1. `declared === enforced` — a self-declared stub storage service
-            //      mounts no HTTP surface, so this builder already withholds
-            //      `routes.storage` from it; advertising chunked upload anyway
-            //      promised an upload endpoint that cannot exist.
-            //   2. the runtime dispatcher answers this key `hasFiles`, i.e.
-            //      `isServiceServeable(filesSvc)`. Leaving this one on presence
-            //      would make the two producers give the SAME host opposite
-            //      answers for the SAME key — a new dialect inside the
-            //      vocabulary this issue exists to unify.
-            chunkedUpload: capabilityServed('storage'),
-            // Atomic cross-object batch (#3298 / #1604 / ADR-0034 item 4): the
-            // REST /batch endpoint runs its ops inside `engine.transaction()`,
-            // which only opens a real (all-or-nothing) transaction when the
-            // DEFAULT DRIVER can carry one — otherwise it takes its declared
-            // non-transactional path (ADR-0119 D1) and the batch degrades to a
-            // non-atomic passthrough. Advertise the capability iff the runtime
-            // can actually roll back, so `declared === enforced` (Prime
-            // Directive #10). The rest-server producer ANDs this with
-            // `api.enableBatch` so a server that doesn't mount the route reports
-            // `false` at its layer.
-            //
-            // [#18997] `engineCanRollBack`, NOT `typeof this.engine?.transaction
-            // === 'function'`. The refusal this advertisement exists to help a
-            // caller avoid — `runAtomicBatch`'s `501 NOT_IMPLEMENTED`, whose own
-            // remedy text says to probe `capabilities.transactionalBatch` on
-            // /discovery first — already asks `engineCanRollBack`, which asks the
-            // DRIVER as well as the engine. `engine.transaction` is a function on
-            // every real engine, so the engine-only probe answered `true` for the
-            // two compositions that 501: a default driver with no
-            // `beginTransaction` at all, and one that INHERITED it and declared
-            // `supports.transactionsUnsupported` (#18063). An advertised
-            // capability must answer the same question the refusal path asks,
-            // from the same predicate — two derivations of one capability is how
-            // these drifted. Narrowing only: this predicate is the engine probe
-            // AND a driver clause, so no composition newly advertises `true`
-            // (`protocol.discovery-transactional-batch-honesty.test.ts` pins both
-            // directions, and the driver clause is skipped where the registry is
-            // not inspectable, so a test double keeps its old answer).
-            transactionalBatch: engineCanRollBack(this.engine),
-
-            // ── Joined the vocabulary with ruling A (#5672) ───────────────────
-            // These six used to be the runtime dispatcher's half of the split.
-            // This builder can answer all of them from the services registry it
-            // already reads, so none of them is a "cannot deliver ⇒ false"
-            // placeholder — they are measured, per key:
-
-            // [#14646] Derived, not stated. This flag and `services.realtime`
-            // answer the same question — "is there a channel to subscribe to?"
-            // — so it is the same predicate applied to the same entry
-            // (`isSubscribableChannel`), and a host that mounts a transport
-            // flips both in one step. It was a literal `false` beside an entry
-            // saying `enabled: true`: two constants that happened to be right
-            // are not agreement, they are two places to forget. False on every
-            // host the open framework ships, because `service-realtime` is an
-            // in-process pub/sub bus that names no channel route (ADR-0076 D12,
-            // #2462; maintainer ruling A, 2026-09-04).
-            websockets: isSubscribableChannel(services['realtime']),
-            // Storage: the `storage` slot (#9683), gated on serveability rather
-            // than presence — a self-declared stub mounts nothing, and this
-            // builder already withholds `routes.storage` from it.
-            files: capabilityServed('storage'),
-            analytics: capabilityServed('analytics'),
-            ai: capabilityServed('ai'),
-            // Slot is `notification` (singular, CoreServiceName); the capability
-            // and the route key are plural. Same slot, three spellings — the
-            // mapping is here so nothing has to guess it.
-            notifications: capabilityServed('notification'),
-            i18n: capabilityServed('i18n'),
-        };
-
-        // Convert flat booleans → hierarchical capability objects.
-        //
-        // [#5672] Keyed by the vocabulary, not by `string`. The old
-        // `Record<string, …>` was assignable to the open record
-        // `DiscoverySchema.capabilities` used to be; against the closed shape
-        // it no longer is, and that is the closure doing its job — the compiler
-        // now refuses a producer whose capability map is not the whole
-        // vocabulary. Iterating `wellKnown`'s own keys means fullness is
-        // carried over from the annotated literal above rather than re-asserted.
-        const capabilities = {} as Record<keyof WellKnownCapabilities, CapabilityDescriptor>;
-        for (const key of Object.keys(wellKnown) as Array<keyof WellKnownCapabilities>) {
-            capabilities[key] = { enabled: wellKnown[key] };
-        }
-
-        // [#4828] Locale, derived from the registered i18n service exactly the
-        // way the runtime dispatcher's `getDiscoveryInfo()` derives it — same
-        // accessors, same fallback. `DiscoverySchema` declares `locale`
-        // REQUIRED and this producer never emitted it, so the REST `/discovery`
-        // shape could not satisfy the schema at all; deriving it (rather than
-        // hardcoding `en`) keeps the answer honest on a stack that actually
-        // ships translations.
-        const i18nSvc = registeredServices.get('i18n');
-        let locale = { default: 'en', supported: ['en'], timezone: 'UTC' };
-        if (i18nSvc) {
-            const defaultLocale = typeof i18nSvc.getDefaultLocale === 'function'
-                ? i18nSvc.getDefaultLocale() : 'en';
-            const locales = typeof i18nSvc.getLocales === 'function'
-                ? i18nSvc.getLocales() : [];
-            locale = {
-                default: defaultLocale,
-                supported: locales.length > 0 ? locales : [defaultLocale],
-                timezone: 'UTC',
-            };
-        }
-
-        // [#4828] `name` is the canonical identity key (`DiscoverySchema`
-        // requires it); `apiName` is the deprecated alias, emitted with the
-        // IDENTICAL value until its scheduled removal in protocol 18 (schedule
-        // in `GetDiscoveryResponseSchema`). Before this, the two discovery
-        // producers spelled the same concept differently and disjointly — this
-        // one emitted only `apiName`, the dispatcher only `name` — so no
-        // consumer had a key that worked against both.
-        const name = 'ObjectStack API';
-
-        // [#21046] Which optional `/auth` route families are mounted — the
-        // registered auth service's OWN public-config answer, the object
-        // `GET /auth/config` serves, through the one reader the runtime
-        // dispatcher's `getDiscoveryInfo()` calls too (`readAuthFamilies`,
-        // `@objectstack/spec/api`). This builder never re-derives "is the admin
-        // plugin on" itself. `undefined` — no `auth` service in this kernel
-        // (then no `routes.auth` either), or one that publishes no public
-        // config — emits no key; the REST `/discovery` passes the value through.
-        const authFamilies = readAuthFamilies(registeredServices.get('auth'));
-
-        return {
-            // [commit 376c70f98] The serving system's identity, DERIVED — an injected
-            // `OS_RUNTIME_VERSION` stamp, falling back to this package's own
-            // resolved version. It was the literal `'1.0'` while the other
-            // `DiscoverySchema` producer (`HttpDispatcher.getDiscoveryInfo()`
-            // in `@objectstack/runtime`) carried its own literal `'1.0.0'` —
-            // two producers of the same field disagreeing with each other,
-            // which is what proves neither constant was ever a contract value.
-            // #10993 fixed that producer the same way; see
-            // {@link resolveDiscoveryVersion} for the derivation, the fallback,
-            // and why the resolver is a package-local copy rather than an
-            // import.
-            version: resolveDiscoveryVersion(),
-            name,
-            /** @deprecated Use `name`. Removed in protocol 18 (#4828). */
-            apiName: name,
-            // [#5936] The operator's value, passed as read — no local default.
-            // What an ABSENT `NODE_ENV` advertises is decided once, inside
-            // `resolveDiscoveryEnvironment` (`production`, per the 2026-08-07
-            // ruling, direction 1), so this producer and the runtime dispatcher
-            // cannot drift on it. Before that ruling the default lived at the
-            // dispatcher's own call site and this producer had no equivalent, so
-            // a deployment that forgot the variable was told `development` here
-            // and `production` there — the exact drift the shared mapper exists
-            // to prevent (#4828). Do not re-introduce a default here.
-            environment: resolveDiscoveryEnvironment(
-                (globalThis as { process?: { env?: Record<string, string | undefined> } })
-                    .process?.env?.NODE_ENV,
-            ),
-            routes,
-            locale,
-            services,
-            capabilities,
-            ...(authFamilies ? { authFamilies } : {}),
-        };
+        // [#29985 codemod] The body moved to `protocol-discovery-and-bases.ts`; it reaches this class through `protocol-host.ts`.
+        return getDiscovery(protocolHost(this));
     }
 
     /**
@@ -5634,831 +5082,13 @@ export class ObjectStackProtocolImplementation implements
     }
 
     async findData(request: { object: string, query?: any, context?: any }) {
-        // [#3770] Existence first: an unregistered object is a 404 before any
-        // query parameter is even parsed, so an unknown name can never be
-        // probed for query-shape validity (nor reach the driver as a table).
-        this.assertObjectRegistered(request.object);
-        const options: any = { ...request.query };
-        // The execution context is SERVER-DERIVED and never caller input.
-        //
-        // `request.query` is the raw request bag on every ingress that reaches
-        // here — the REST `POST /data/:object/query` route hands `req.body`
-        // straight in as `query`. `context` is in the known-params set below, so
-        // it was not swept into the implicit-filter bucket either: a caller's
-        // `context` survived this spread and, because the assignment below is
-        // conditional, became the operation's execution context whenever no
-        // server context resolved (before #3963 an anonymous request on a
-        // `requireAuth: false` deployment; the invariant holds regardless).
-        //
-        // What rides on it is total: plugin-security's middleware opens with
-        // `if (opCtx.context?.isSystem) return next()` — the entire RLS / FLS /
-        // CRUD chain skipped — and `__expandRead` marks a read as an expansion
-        // sub-read (#2850; it waived the object-level CRUD gate for "public"
-        // objects until #7626 removed that). Neither is ever schema-stripped on
-        // this path: `ExecutionContextSchema.parse` runs only in
-        // `engine.createContext`, which the read path does not use.
-        //
-        // Route-level `enforceAuth` is what kept that from being reachable, so
-        // this was a fail-OPEN default one layer down. Drop any inbound
-        // `context` unconditionally: the protocol must not depend on a gate
-        // above it staying switched on.
-        delete options.context;
-
-        // [#7321] Arity BEFORE any read, fold or coercion. `IHttpRequest.query`
-        // is `Record< string, string | string[] >`; the array arm is real (the
-        // `node:http` adapter hands `?x=1&x=2` through as `['1','2']`, measured
-        // over a socket on #6878), and every coercion below was written for the
-        // string arm. `Number(['1','2'])` is `NaN`, so `?$top=1&$top=2` used to
-        // reach the driver as `limit: NaN` — a wrong answer served as a 200.
-        //
-        // Single-vs-multi is a PER-PARAMETER judgement, never a sweep: `$select`
-        // / `$expand` / `$searchFields` / `$orderby` accept the array arm on
-        // purpose and are untouched here. See
-        // {@link ARRAY_VALUED_QUERY_SLOTS} for the full disposition.
-        assertQueryParamArity(options);
-
-        // Forward the dispatcher's ExecutionContext so RBAC/RLS middleware
-        // can apply per-request enforcement. The protocol layer is purely
-        // a normalizer — it must never strip security context.
-        if (request.context !== undefined) {
-            options.context = request.context;
-        }
-
-        // ====================================================================
-        // Normalize legacy params → QueryAST standard (where/fields/orderBy/offset/expand)
-        // ====================================================================
-
-        // OData-style `$`-prefixed params → bare aliases that the rest of
-        // this function knows how to normalize. Without this step, params
-        // like `?$top=2&$orderby=...` survive into the catch-all
-        // implicit-filter pass below and get merged into `where` as
-        // bogus field-equality predicates (e.g. `where.$top = "2"`),
-        // which silently returns zero rows for every list endpoint.
-        //
-        // [#4226] `wireSpelling` remembers which alias each rewritten slot
-        // arrived under, so a rejection quotes the parameter the caller
-        // actually wrote. Telling someone who sent `?$orderby=…` that
-        // "'orderBy' is invalid" names a parameter absent from their request.
-        //
-        // [#7321] The table itself now lives at module scope
-        // ({@link QUERY_TRANSPORT_DOLLAR_ALIASES}) so the arity survey above and this fold
-        // cannot drift apart on which `$` spellings exist.
-        const wireSpelling: Record<string, string> = {};
-        for (const [dollar, bare] of QUERY_TRANSPORT_DOLLAR_ALIASES) {
-            if (options[dollar] != null && options[bare] == null) {
-                options[bare] = options[dollar];
-                wireSpelling[bare] = dollar;
-            }
-            delete options[dollar];
-        }
-
-        // [#3795] One slot, one value. Every alias spelling of the six
-        // QueryAST slots resolves HERE, by the spec's own table, before the
-        // per-slot wire coercion below ever runs — so that coercion reads
-        // canonical keys only. An alias alone folds into its canonical key;
-        // redundant identical spellings collapse; different values for one
-        // slot are refused (the #4181 rule, generalized from the filter slot
-        // to all of them — four used to resolve BACKWARDS here, each in its
-        // own way, disagreeing with the spec's documented precedence and with
-        // the runtime dispatcher's copy of the same fold; `top`→`limit`
-        // joined the table last, via #4346).
-        //
-        // `arrivedAs` remembers which spelling carried each slot's value;
-        // composed with `wireSpelling` it names the parameter the caller
-        // actually wrote in every rejection below (#4226).
-        const spellingFor = (name: string): string => wireSpelling[name] ?? name;
-        const arrivedAs = foldQueryAliasSlots(options, QUERY_TRANSPORT_ALIAS_SLOTS, (conflict) => {
-            throw conflictingQueryParamsError(conflict, spellingFor);
-        });
-        const slotParam = (canonical: string): string => spellingFor(arrivedAs[canonical] ?? canonical);
-
-        // Numeric fields — coerce querystring strings. `top` already folded
-        // into `limit` above: the pair joined the #3795 slot table with #4346,
-        // replacing an open-coded rewrite here that resolved it BACKWARDS
-        // (`options.limit = Number(options.top)` — the alias overwrote the
-        // canonical key, so `{top: 1, limit: 3}` answered 1 over HTTP and 3
-        // through a direct engine call).
-        //
-        // [#25229] The coercion is CHECKED, not bare (see
-        // {@link pageWindowValue}). This is the one statement every list door
-        // reaches with the window still unvalidated — `GET /data/:object`'s
-        // querystring, `POST /data/:object/query`'s body (whose schema checks
-        // the type, not the sign) and the runtime dispatcher — so the refusal
-        // lives here, once.
-        if (options.limit != null) options.limit = pageWindowValue(options.limit, slotParam('limit'));
-        if (options.offset != null) options.offset = pageWindowValue(options.offset, slotParam('offset'));
-
-        // Projection: comma-separated string → array. A single-value
-        // querystring param arrives as a bare string — `?fields=name` or the
-        // folded `?select=` / `$select` spellings — which drivers' `.map()`
-        // calls over `query.fields` would otherwise throw on.
-        //
-        // [#26644] …and a value naming no field is refused rather than becoming
-        // `[]`, which every driver serves as no projection at all (see
-        // {@link projectionFieldsValue}).
-        const projectionKey = slotParam('fields');
-        if (typeof options.fields === 'string' || Array.isArray(options.fields)) {
-            options.fields = projectionFieldsValue(options.fields, projectionKey);
-        } else if (options.fields !== undefined) {
-            delete options.fields;
-        }
-        // [#4226] Unknown projection columns are refused rather than dropped —
-        // see `assertProjectionFieldsExist` for why this axis' silent failure
-        // returned MORE than was asked for.
-        this.assertProjectionFieldsExist(request.object, options.fields, projectionKey);
-
-        // Sort: every wire shape → SortNode[].
-        //
-        // [#4226] `normalizeSortNodes` folds the two shapes that used to fall
-        // through this block untouched — `string[]` and `{field: direction}` —
-        // and refuses the ones it cannot read. Before it, "not a string and not
-        // an array" simply skipped the branch, leaving a value on `orderBy`
-        // that `SqlDriver`'s `Array.isArray` guard then declined to turn into
-        // an ORDER BY clause: no sort, no error, no way to tell.
-        const sortValue = options.orderBy;
-        const sortKey = slotParam('orderBy');
-        if (sortValue === undefined || sortValue === null) {
-            // Nothing to sort by — and an explicit `orderBy: null` must not ride
-            // to the engine as a value every driver quietly declines to read.
-            delete options.orderBy;
-        } else {
-            const orderBy = normalizeSortNodes(sortValue, sortKey);
-            // [#4226] Validated on the NORMALIZED nodes, so one gate covers
-            // every spelling — `?sort=no_such`, `['-no_such']`, `{no_such:
-            // 'desc'}` and `[{field:'no_such'}]` are one mistake with one
-            // answer. Assigned only after it passes, so a rejected sort cannot
-            // leave a half-applied one behind.
-            this.assertSortFieldsExist(request.object, orderBy, sortKey);
-            if (orderBy.length > 0) options.orderBy = orderBy;
-            else delete options.orderBy;
-        }
-
-        // Filter: the folded slot value → a usable `FilterCondition` on
-        // `where`, or a rejection. The four spellings of this slot
-        // (`where`/`filter`/`filters`/`$filter`) already resolved through the
-        // #3795 fold above — #4181's one-slot-one-value rule, which this block
-        // pioneered before the fold generalized it.
-        const filterKey = slotParam('where');
-
-        if (options.where !== undefined) {
-            let parsedFilter = options.where;
-            // A blank `?filter=` is ABSENT, not malformed — the same `length > 0`
-            // guard the export route applies before parsing. Deleting `where`
-            // here (rather than leaving `''` on it) is what lets every consumer
-            // below test presence with a plain falsy check.
-            if (typeof parsedFilter === 'string' && parsedFilter.trim() === '') {
-                delete options.where;
-            } else {
-                // [#4181] JSON string → object. Parse failure is a REJECTION, not
-                // a fallback. The `catch { /* keep as-is */ }` this replaces left
-                // the raw string on `where`, a shape no driver consumes — so the
-                // filter was dropped whole and `?filter={status:done` (one missing
-                // quote) answered 200 with the UNFILTERED page. Worst member of
-                // the #3948 family: #4134 zeroed, #4164 dropped one predicate,
-                // this returned everything.
-                //
-                // The sibling `GET /data/:object/export` route has rejected this
-                // exact input since it was written (`400 INVALID_REQUEST`,
-                // "filter must be JSON"); the list path was the outlier. The
-                // guard lives HERE, in the shared normalizer, so `GET
-                // /data/:object`, `POST /data/:object/query` and the runtime
-                // dispatcher all inherit one answer instead of three.
-                if (typeof parsedFilter === 'string') {
-                    try {
-                        parsedFilter = JSON.parse(parsedFilter);
-                    } catch {
-                        throw unusableFilterError(filterKey, 'must be valid JSON');
-                    }
-                }
-                // Filter AST array → FilterCondition object
-                if (isFilterAST(parsedFilter)) {
-                    parsedFilter = parseFilterAST(parsedFilter);
-                } else if (Array.isArray(parsedFilter) && parsedFilter.length > 0) {
-                    // [#4121] `isFilterAST` was being read as a *conversion* gate,
-                    // so an array it refused was assigned to `where` unconverted —
-                    // an opaque value the driver then had to make sense of. Every
-                    // driver now fails on it, so this is not a narrowing; it moves
-                    // the failure to where the malformed filter actually arrived,
-                    // with the request's own vocabulary in the message instead of a
-                    // driver-internal one.
-                    //
-                    // It also closes what the driver-side fix could not: a lone
-                    // `['and']` / `['or']` sets the join mode, matches no element,
-                    // and emits NO predicate — the last shape that still returned
-                    // every row silently after #3948. An empty `[]` is left alone:
-                    // it means "no filter", and every path already treats it that
-                    // way — so it falls through to the shape check below, which
-                    // passes it (an array IS an object).
-                    throw malformedFilterArrayError(parsedFilter);
-                }
-                // [#4181] Parsed-but-unusable is the same failure one step later:
-                // `?filter=5` / `?filter="open"` / `?filter=null` all yield a
-                // non-object `where` that no driver reads. #4121 above catches the
-                // array shapes; this catches the scalar ones, and together they are
-                // what lets the #4164 merge below trust `where` to be an object.
-                if (parsedFilter === null || typeof parsedFilter !== 'object') {
-                    throw unusableFilterError(
-                        filterKey,
-                        `must be a filter object or condition array, received ${parsedFilter === null ? 'null' : typeof parsedFilter}`,
-                    );
-                }
-                options.where = parsedFilter;
-            }
-        }
-
-        // Expand: the folded slot value → `Record<string, QueryAST>`. A comma
-        // list (string) and a name array both lower to `{name: {object: name}}`;
-        // the advanced `{rel: QueryAST}` map a caller may send directly on
-        // `POST /data/:object/query` passes through as-is. Lowering the ARRAY
-        // shape here (not just the string) also closes a pre-#3795 gap: a raw
-        // name array used to survive this block whole, so the #4226 gate read
-        // its INDICES as relation names and refused real requests with
-        // "Unknown field '0'".
-        const expandValue = options.expand;
-        const expandNames: string[] = [];
-        if (typeof expandValue === 'string') {
-            expandNames.push(...expandValue.split(',').map((s: string) => s.trim()).filter(Boolean));
-        } else if (Array.isArray(expandValue)) {
-            expandNames.push(...expandValue);
-        }
-        if (typeof options.expand !== 'object' || options.expand === null || Array.isArray(options.expand)) {
-            delete options.expand;
-        }
-        if (expandNames.length > 0 && !options.expand) {
-            options.expand = {} as Record<string, any>;
-            for (const rel of expandNames) {
-                options.expand[rel] = { object: rel };
-            }
-        }
-        // [#4226] Both routes into `expand` are gated: the comma-list spellings
-        // collected above, and the advanced `{rel: QueryAST}` map a caller may
-        // send directly on `POST /data/:object/query`. Validating the map's KEYS
-        // rather than `expandNames` is what covers the second one.
-        if (options.expand && typeof options.expand === 'object') {
-            this.assertExpandTargetsExist(request.object, Object.keys(options.expand));
-            // [#22661] …then every level's TARGET is asked its declared exposure,
-            // and an entry the decision does not serve is withheld (the field
-            // answers as an unexpanded lookup) — see {@link servedExpand}. Ahead
-            // of the `internal: true` walk below, so nothing about a withheld
-            // target is judged, named or read.
-            options.expand = this.servedExpand(request.object, options.expand, 0);
-            if (Object.keys(options.expand).length === 0) delete options.expand;
-        }
-
-        // [#4254] The `searchFields` override is validated on the value the
-        // ENGINE will read — the standalone parameter when present, otherwise
-        // the object-form `search: { query, fields }` a `POST` body may carry
-        // (same precedence as the engine's own `searchFields ?? search.fields`,
-        // and the same shapes: the engine accepts the comma-string and array
-        // forms from either slot). Checked whether or not a `search` term rode
-        // along: the caller named fields either way, and a stale override is
-        // the same typo before the search that will eventually use it is added.
-        if (options.searchFields != null) {
-            this.assertSearchFieldsAreSearchable(
-                request.object, options.searchFields, wireSpelling.searchFields ?? 'searchFields',
-            );
-        } else if (options.search !== null && typeof options.search === 'object'
-            && (options.search as any)?.fields != null) {
-            this.assertSearchFieldsAreSearchable(
-                request.object, (options.search as any).fields, wireSpelling.search ?? 'search',
-            );
-        }
-        // [#21207] …and on a stored-metadata table a search never scans the body
-        // or content-hash columns: refused when named, narrowed away otherwise.
-        // Runs after the searchability gate above, so a name that is not
-        // searchable at all keeps its own answer. [#21544] The ONE narrowing,
-        // a module function the in-process reader-context seam calls too.
-        const narrowedSearchFields = narrowStoredMetadataSearch(
-            request.object, options, this.engine?.registry?.getObject?.(request.object), wireSpelling,
-        );
-        if (narrowedSearchFields) options.searchFields = narrowedSearchFields;
-
-        // Boolean fields. [#26644] `count` is CHECKED, not merely lowered: a
-        // value that is neither true nor false is refused rather than left to
-        // read as "count anyway" below (see {@link countFlagValue}).
-        if (options.distinct === 'true') options.distinct = true;
-        else if (options.distinct === 'false') options.distinct = false;
-        if (options.count != null) options.count = countFlagValue(options.count, slotParam('count'));
-
-        // [#2926 ⑩] Every supported OData-style `$` alias has been consumed and
-        // deleted above ($top/$skip/$orderby/$select/$count/$search/
-        // $searchFields/$filter/$expand). A `$`-prefixed key can never be a
-        // field name, so anything left is an unsupported query parameter —
-        // fail loudly instead of letting it fall into the implicit-filter
-        // bucket below, where it silently matched zero rows (or, before the
-        // $filter alias existed, was dropped entirely and returned the
-        // UNFILTERED page — a footgun for scripts resolving ids by name).
-        const unsupportedDollarParams = Object.keys(options).filter((k) => k.startsWith('$'));
-        if (unsupportedDollarParams.length > 0) {
-            // [#16066] The supported set is QUOTED from the declaration, never
-            // re-typed here: a spelling added to the spec table used to leave
-            // this sentence naming a set the door no longer had, so the caller
-            // was told to use a parameter list that was already wrong.
-            const err: any = new Error(
-                `Unsupported query parameter(s): ${unsupportedDollarParams.join(', ')}. ` +
-                `Supported $-prefixed parameters: ${QUERY_TRANSPORT_DOLLAR_PARAMS.join(', ')}.`,
-            );
-            err.status = 400;
-            err.code = 'UNSUPPORTED_QUERY_PARAM';
-            throw err;
-        }
-
-        // [#4134] A leftover key is about to be lowered into a field-equality
-        // predicate (or, when an explicit `where` won, dropped on the floor).
-        // Both readings are only sound if the key names a REAL field: a filter
-        // on a field that does not exist can never match, so `?pageSize=5`
-        // returned 200 + `total: 0` — indistinguishable from "no data". The
-        // write path already rejects the same input loudly (`INVALID_FIELD`);
-        // this is the read half of that one piece of knowledge, and the mirror
-        // of #3948's rule for driver-memory: an unapplied filter must not look
-        // like a satisfied one.
-        //
-        // Validated BEFORE the `!options.where` branch below, so a bad param is
-        // a 400 whether or not the caller also sent an explicit filter — the
-        // failure must not depend on which other params rode along.
-        const leftoverParams = Object.keys(options).filter((k) => !RESERVED_LIST_QUERY_PARAMS.has(k));
-        if (leftoverParams.length > 0) {
-            this.assertQueryParamsAreFields(request.object, leftoverParams);
-        }
-
-        // [#7534] The same question, on the EXPLICIT filter the caller wrote —
-        // the sibling door #4134's fix never reached. `options.where` is a
-        // lowered `FilterCondition` by this point whichever of the three doors
-        // carried it (`where` object, `$filter` string, filter AST), so one call
-        // covers all three. Placed here, and not earlier, on purpose: see
-        // `assertFilterFieldsExist` for why it runs after the param gate above
-        // and before the #4164 merge below.
-        this.assertFilterFieldsExist(request.object, options.where, filterKey);
-
-        // Flat field filters: REST-style query params like ?id=abc&status=open
-        // are implicit field-level equality predicates. Every leftover key is a
-        // verified field name by this point — the #4134 gate above runs FIRST,
-        // which is exactly what makes the merge below safe: an unknown name
-        // already 400'd, so nothing merged here can be a predicate that matches
-        // nothing.
-        //
-        // [#4164] Implicit predicates now COMPOSE with an explicit `where`
-        // instead of being silently dropped. `?filter={...}&status=open` means
-        // what it says — both apply, `{ $and: [explicit, implicit] }` — the
-        // same composition the engine itself uses to fold the `$search`
-        // predicate or an expand's declared filter into an existing `where`,
-        // and a combinator the #3774 conformance suite pins across every
-        // FilterCondition backend. Contradictory sides need no special case:
-        // both predicates apply and the intersection is an HONEST zero (the
-        // filters ran), unlike the pre-#4134 zero (a filter that never ran).
-        // Consuming the keys here also stops them riding to `engine.find` as
-        // stray top-level AST junk, and count() below reads the same
-        // `options.where`, so pagination totals see the merged predicate too.
-        //
-        // #4164 shipped with a `typeof explicitWhere === 'object'` guard here,
-        // because the parse tolerance above could leave a raw unparseable string
-        // on `where` and folding real predicates into that garbage would neither
-        // apply them nor surface the bug. #4181 fixed that at the source — a
-        // filter now either parses to an object or 400s — so `where` is an
-        // object or absent by construction and the guard is gone with it.
-        const explicitWhere = options.where;
-        if (leftoverParams.length > 0) {
-            const implicitFilters: Record<string, unknown> = {};
-            for (const key of leftoverParams) {
-                implicitFilters[key] = options[key];
-                delete options[key];
-            }
-            // An absent or empty explicit filter (`?filter={}`, `?filter=`) is
-            // vacuous — the implicit predicates stand alone rather than being
-            // wrapped in a one-armed `$and`.
-            options.where = !explicitWhere || Object.keys(explicitWhere).length === 0
-                ? implicitFilters
-                : { $and: [explicitWhere, implicitFilters] };
-        }
-
-        // [#4254] The aggregation axes name fields too, and were the last
-        // read-path axes that answered a wrong name with a plausible result
-        // (one null-keyed bucket; sum = 0). Validated before the routing
-        // below so an unreadable SHAPE cannot slip past the `Array.isArray`
-        // routing guard and ride to `engine.find` as ignored AST junk —
-        // rows returned ungrouped, looking exactly like a served query.
-        this.assertGroupByFieldsExist(request.object, options.groupBy);
-        this.assertAggregationFieldsExist(request.object, options.aggregations);
-        // [#25819] An aggregate axis sent as an EMPTY list, with no non-empty
-        // axis beside it, asks for an aggregate of nothing. The routing below
-        // reads it as no aggregate and handed the key to `engine.find`, which
-        // refuses an option it does not execute with an uncoded error whose
-        // words carry the quoted object name — read at the REST door as the
-        // unknown-object heuristic: `404 OBJECT_NOT_FOUND`, "Object '…' is not
-        // registered", for a registered object. No shipped caller sends `[]`
-        // meaning the plain rows, so it is refused for what it is. An empty
-        // list beside a non-empty one is served as before (`groupBy` with
-        // `aggregations: []` lists the groups).
-        {
-            const emptyAxes = (['groupBy', 'aggregations'] as const)
-                .filter((k) => Array.isArray(options[k]) && options[k].length === 0);
-            const servedAxis = (['groupBy', 'aggregations'] as const)
-                .some((k) => Array.isArray(options[k]) && options[k].length > 0);
-            if (emptyAxes.length > 0 && !servedAxis) {
-                const named = emptyAxes.map((k) => `'query.${k}'`).join(' and ');
-                const err: any = new Error(
-                    `${named} ${emptyAxes.length > 1 ? 'are empty lists' : 'is an empty list'} on object `
-                    + `'${request.object}': an aggregate query names at least one aggregation, or a non-empty `
-                    + `'groupBy' to list its groups. The query was NOT run. Send e.g. { "aggregations": `
-                    + `[{ "function": "count", "alias": "n" }] }, or omit ${emptyAxes.map((k) => `'${k}'`).join(' and ')} `
-                    + 'for the plain rows.',
-                );
-                err.status = 400;
-                err.code = 'INVALID_QUERY';
-                err.param = emptyAxes[emptyAxes.length - 1];
-                err.object = request.object;
-                throw err;
-            }
-        }
-        // [#21086] A stored metadata body is served only as its type's read
-        // projection (see `redactStoredMetadataRows` below), and a GROUP KEY
-        // cannot be projected — so grouping by the body column of a
-        // stored-metadata table is refused, after the existence gates so an
-        // unknown name keeps its own answer.
-        const bodyGroupingRefusal = storedMetadataBodyGroupingRefusal(request.object, options.groupBy);
-        if (bodyGroupingRefusal) throw bodyGroupingRefusal;
-        // [#21120] …and the FILTER / SORT half of the same family (maintainer
-        // ruling A): a predicate or an order key on the stored body column
-        // evaluates the body — a filter oracle that rebuilds a withheld
-        // credential by probing, or an order over the same bytes — so it is
-        // refused here, in the same shape as the grouping refusal, before the
-        // engine is asked. [#21544] The columns a filter READS are collected by
-        // the family's ONE collector, which the reader-context seam calls too:
-        // every key's head AND every cross-field `{ $field }` comparand, at any
-        // depth, in `where` and each `aggregations[i].filter` — so a filter that
-        // reads the body or a hash without naming it as a key (a comparand), or
-        // names it below the ingress collector's depth backstop, is refused like
-        // a direct one. `[]` outside the family.
-        const filterFields = collectStoredMetadataFilterFields(request.object, options);
-        const sortFields = Array.isArray(options.orderBy)
-            ? (options.orderBy as ReadonlyArray<{ field?: unknown }>).map((e) => e?.field)
-            : [];
-        const bodyPredicateRefusal = storedMetadataBodyPredicateRefusal(request.object, { filterFields, sortFields });
-        if (bodyPredicateRefusal) throw bodyPredicateRefusal;
-        // [#21207] The same three shapes on the stored CONTENT-HASH columns
-        // (maintainer ruling A on the second execution fork): a group key would
-        // serve the stored hash, a filter on it is an online verifier, a sort
-        // orders by it. Refused in the body column's envelope, before the engine.
-        const hashEvaluateRefusal = storedMetadataHashEvaluateRefusal(request.object, {
-            groupBy: options.groupBy,
-            filterFields,
-            sortFields,
-        });
-        if (hashEvaluateRefusal) throw hashEvaluateRefusal;
-
-        // [#22646] A field declared `internal: true` is withheld from every
-        // generic exit (#21197) — the engine omits it from every row. The
-        // EVALUATE positions do not follow that by omission: a filter, sort,
-        // group-by, aggregate operand, per-aggregation filter or a one-level
-        // expand's own filter/sort on such a column reveals the stored value by
-        // evaluating it (a filter is a confirmation oracle, a sort leaks order).
-        // So they are refused here, at the generic data door, after the
-        // existence gates and before the engine — the same shape, envelope and
-        // caller-independence as the stored-metadata body/hash family above.
-        // Internal fields in a `$search` set are handled on their own axes: the
-        // auto-default never scans one (engine), an explicit `$searchFields`
-        // naming one is refused (the gate above, #4254 posture).
-        this.assertNoInternalFieldEvaluated(request.object, options);
-
-        // Route to engine.aggregate() when the query has GROUP BY / aggregations.
-        // engine.find() does not do in-memory aggregation fallback, so without
-        // this branch a spec-shape aggregate request would silently return
-        // ungrouped raw rows on drivers (e.g. SqlDriver) that don't natively
-        // honor groupBy/aggregations in find().
-        const hasGroupBy = Array.isArray(options.groupBy) && options.groupBy.length > 0;
-        const hasAggregations = Array.isArray(options.aggregations) && options.aggregations.length > 0;
-        // The deployment's read limits (`OS_DATA_DEFAULT_PAGE_SIZE`,
-        // `OS_DATA_MAX_PAGE_SIZE`, `OS_DATA_QUERY_ROW_BUDGET`; the rule is
-        // `@objectstack/types`' `query-read-limits.ts`). Planned here, after
-        // every shape gate and before the engine, so a refusal leaves the
-        // driver unasked. All three unset returns the caller's own `limit`.
-        const readLimits = resolveQueryReadLimits();
-        if (hasGroupBy || hasAggregations) {
-            // The grouped branch slices in memory and never reads `offset`, so
-            // the window it is judged on is the groups it returns.
-            const groupRead = {
-                surface: 'list' as const,
-                object: request.object,
-                limit: typeof options.limit === 'number' ? options.limit : undefined,
-                limitParam: slotParam('limit'),
-            };
-            const groupPlan = planQueryReadWindow(groupRead, readLimits, console);
-            if (!groupPlan.probe) options.limit = groupPlan.limit;
-            const aggregateQuery: EngineAggregateOptions = {
-                where: options.where,
-                groupBy: options.groupBy,
-                aggregations: options.aggregations,
-                // Enforced engine-side since #4286 (step 3) — dropping it here
-                // was finding 1: the one wire path to aggregate() lost the
-                // clause before any executor could ever see it.
-                having: options.having,
-                // ADR-0061 `search` is declared on the query beside `groupBy` /
-                // `aggregations` with no carve-out, and the flat branch below
-                // hands it to `engine.find`. Leaving it out of THIS bag answered
-                // a grouped query under a search with the UNSEARCHED groups —
-                // no error, no warning. The engine expands it through the same
-                // expander `find` uses, so the header numbers are the grouping
-                // of exactly the rows the flat query returns. `searchFields` was
-                // validated above on both branches (#4254 gate).
-                search: options.search,
-                searchFields: options.searchFields,
-                context: options.context,
-            };
-            const records = await this.engine.aggregate(request.object, aggregateQuery);
-            assertQueryReadRows(groupRead, groupPlan, records.length, console);
-            // Apply limit client-side (EngineAggregateOptions doesn't carry limit).
-            // `records` is the full grouped set, so its length IS the real total
-            // and `hasMore` follows from whether the slice dropped any groups.
-            const limited = typeof options.limit === 'number' && options.limit > 0
-                ? records.slice(0, options.limit)
-                : records;
-            return {
-                object: request.object,
-                records: limited,
-                total: records.length,
-                hasMore: limited.length < records.length,
-            };
-        }
-
-        // [#4371 option 2] Strip the PROTOCOL-layer keys off the bag before it
-        // becomes the engine option bag — the engine now rejects option keys
-        // it does not execute, and these belong to this layer, not to it:
-        // - `object`: the POST-body convenience copy of the route object
-        //   (reserved above so it is not read as a field filter). It used to
-        //   ride the spread into the engine AST and OVERRIDE the resolved
-        //   object, splitting `ast.object` from the table actually queried —
-        //   a mismatch is refused, never resolved by picking a winner.
-        // - `count`: a response-shape flag this method consumed above (and,
-        //   since #10757, one it actually HONOURS — see `countOptOut` below).
-        // - QueryAST tombstones (`cursor`/`joins`/`windowFunctions`/
-        //   `distinct`): reserved at the wire gate so they are not read as
-        //   field filters; on the wire they stay ignored-with-tombstone-docs
-        //   (schema parse is where they 400), and they must not leak to the
-        //   engine as junk.
-        // - `having`: consumed by the aggregate branch above; the find path
-        //   cannot serve it.
-        if (options.object != null && options.object !== request.object) {
-            const err: any = new Error(
-                `Conflicting object: the route addresses '${request.object}' but the query body ` +
-                `says '${options.object}'. The body 'object' key is a convenience copy of the ` +
-                'route object and must match it.',
-            );
-            err.status = 400;
-            err.code = 'QUERY_OBJECT_MISMATCH';
-            throw err;
-        }
-        // [#10757] `$count=false` — read the flag BEFORE the strip below deletes
-        // it, because the strip is what kept it from ever being honoured: the
-        // parameter has been declared (`ODataQuerySchema.$count`,
-        // `packages/spec/src/api/odata.zod.ts`), aliased (`$count` → `count`,
-        // {@link QUERY_TRANSPORT_DOLLAR_ALIASES}), reserved from the implicit-field-filter
-        // bucket ({@link RESERVED_LIST_QUERY_PARAMS}), arity-checked and boolean-
-        // coerced — and then deleted unread, so every list request paid for the
-        // COUNT query below whether or not the caller wanted a `total`.
-        //
-        // Only an EXPLICIT `false` opts out. An absent `$count` keeps today's
-        // behaviour (count runs, `total` is reported) rather than taking OData's
-        // "absent means omit" reading: every existing caller sends nothing and
-        // reads `total`, so the OData default would silently break all of them.
-        // The parameter is therefore an opt-OUT here, and that asymmetry is
-        // deliberate — see the changeset for the wording that ships to consumers.
-        const countOptOut = options.count === false;
-        for (const k of ['object', 'count', 'joins', 'windowFunctions', 'cursor', 'distinct', 'having']) {
-            delete options[k];
-        }
-        // [#21086] The generic data door is a read exit for the stored metadata
-        // body too: a `sys_metadata` / `sys_metadata_history` row's `metadata`
-        // column is served as its type's read projection — the one `/meta`
-        // serves — so a stored credential is withheld here exactly as there.
-        // The row's `type` selects the redactor, so it is read even when the
-        // projection named only the body, and taken back off before serving.
-        const bodyProjection = storedMetadataBodyProjection(request.object, options.fields);
-        if (bodyProjection.addedType) options.fields = bodyProjection.fields;
-        // A list read with no `limit` takes the default page size, and its
-        // answer says whether more rows exist (`hasMore` / `total` below). A
-        // PROBE limit (a row budget with no page size) is the server's, not the
-        // caller's: the answer is refused when it overruns, and otherwise it is
-        // the whole set, so the probe is taken back off before the page
-        // metadata below reads `limit`.
-        const listRead = {
-            surface: 'list' as const,
-            object: request.object,
-            limit: typeof options.limit === 'number' ? options.limit : undefined,
-            offset: typeof options.offset === 'number' ? options.offset : undefined,
-            limitParam: slotParam('limit'),
-        };
-        const listPlan = planQueryReadWindow(listRead, readLimits, console);
-        if (listPlan.limit !== undefined) options.limit = listPlan.limit;
-        // [#29764] The bag `engine.find` receives is typed as the engine declares
-        // it. `options` is the caller's normalized request bag, and by this line
-        // every key the normalizer does not hand on has been folded, deleted or
-        // moved into `where`. What can still stand is the find set below, plus
-        // `groupBy` / `aggregations` holding null at most (a non-empty one took
-        // the aggregate branch above, an empty one was refused). The engine reads
-        // a null option as absent, so leaving those two out changes nothing. Keys
-        // are copied only when present, so the engine sees the same bag as before.
-        const findQuery: EngineQueryOptions = {
-            ...(options.context !== undefined ? { context: options.context } : {}),
-            ...(options.where !== undefined ? { where: options.where } : {}),
-            ...(options.fields !== undefined ? { fields: options.fields } : {}),
-            ...(options.orderBy !== undefined ? { orderBy: options.orderBy } : {}),
-            ...(options.limit !== undefined ? { limit: options.limit } : {}),
-            ...(options.offset !== undefined ? { offset: options.offset } : {}),
-            ...(options.search !== undefined ? { search: options.search } : {}),
-            ...(options.searchFields !== undefined ? { searchFields: options.searchFields } : {}),
-            ...(options.expand !== undefined ? { expand: options.expand } : {}),
-        };
-        // [#21207] …and its stored CONTENT HASH (`checksum`, `previous_checksum`)
-        // is served in keyed form — never the stored value, which beside the
-        // projected body confirms a guess at the withheld material offline —
-        // under the provider's key, or the process-scoped ephemeral one.
-        const found = await this.engine.find(request.object, findQuery);
-        if (listPlan.probe) {
-            assertQueryReadRows(listRead, listPlan, found.length, console);
-            delete options.limit;
-        }
-        const records = await serveStoredMetadataHashColumnRows(
-            request.object,
-            redactStoredMetadataRows(
-                request.object,
-                found,
-                { dropType: bodyProjection.addedType },
-            ),
-            this.storedHashDigest(),
-        );
-        // Pagination metadata. When a `limit` is present the response is a single
-        // page, so `records.length` is the page size — NOT the match total. Run a
-        // count over the same `where` so the client can render total pages and know
-        // whether more pages remain (true server-side pagination). Without a limit
-        // AND without an offset the full result set is returned, so its length
-        // already IS the total.
-        //
-        // [#28547] An offset with no limit is a paged request too. The read
-        // returns every match AFTER the offset, so `records.length` is the
-        // match count MINUS the offset: `?$skip=3&$count=true` over 14 rows
-        // answered `total: 11` while `?$skip=3&$top=100&$count=true` answered
-        // 14, and an offset past the end answered `total: 0`. Adding the offset
-        // back is not the fix (it says 999 for `offset: 999` over 14 rows), so
-        // such a request takes the one count path below, `$count=false` arm
-        // included: `total` is the filtered count whatever the offset.
-        //
-        // [#22790] The count takes the query's `search` / `searchFields` too: the
-        // engine expands them through the one ADR-0061 expander `find` uses, so
-        // `total` counts exactly the rows this query pages. A search used to skip
-        // the count and report a page-local estimate (`offset + page + 1`) that
-        // the Console rendered as the record count.
-        //
-        // [#22588] `limit: 0` IS a limit. It asks for no rows (objectstack#6485,
-        // the drivers' pagination conformance), so `records.length` is 0 and was
-        // reported as the total: `?$top=0` answered `total: 0` while `?$top=1`
-        // answered the true count, and the Console's footer probe — which sends
-        // exactly `$top: 0` to read the total and nothing else — showed `0` on
-        // every list page. Gated `> 0`, a zero-row page fell into the "no limit,
-        // the full set is the total" arm, which is true of every limit except
-        // this one. So `>= 0`: a zero-row request is a paged request like any
-        // other, and the three arms below keep their meaning for it — the count
-        // runs (`total` is the filtered count, whatever the page size), and
-        // `$count=false` still omits `total` instead of reporting the page's 0.
-        const pageLimit = typeof options.limit === 'number' && options.limit >= 0 ? options.limit : undefined;
-        const pageOffset = typeof options.offset === 'number' && options.offset > 0 ? options.offset : 0;
-        let total: number | undefined = records.length;
-        let hasMore = false;
-        if (pageLimit !== undefined || pageOffset > 0) {
-            // `distinct` used to suppress the count here too — #4286 finding 2:
-            // the flag's ONLY observable effect platform-wide, on a capability
-            // that never deduplicated a row. Removed with `query.distinct`
-            // (tombstoned in spec 17); `total`/`hasMore` are truthful again.
-            if (countOptOut) {
-                // [#10757] The caller said it does not need `total`, so the
-                // COUNT query is not issued at all — that is the whole point of
-                // the parameter, and on a remote database it is a full round
-                // trip saved per list request.
-                //
-                // `total` is OMITTED rather than estimated. `FindDataResponse`
-                // declares it optional ("Total number of records matching the
-                // filter (IF REQUESTED)",
-                // `packages/spec/src/api/protocol.zod.ts`), so absent is the
-                // declared shape for "not requested" — and it is the only
-                // honest one: a real number was available and the caller
-                // declined it. Handing back a plausible-looking guess is how a
-                // page-local estimate ends up rendered as a record count.
-                //
-                // `hasMore` is still answered, from the page alone: a FULL page
-                // means there may be more. It never over-reports the data — it
-                // can only say "maybe more" on an exactly-full last page.
-                // With an offset and no limit, every row after the offset came
-                // back, so there is no further page.
-                hasMore = pageLimit !== undefined && records.length === pageLimit;
-                total = undefined;
-            } else {
-                // [#10757] `counted` is a separate, always-assigned local so
-                // `hasMore` below compares against a `number`: `total` became
-                // optional when `$count=false` gained the right to omit it, and
-                // TypeScript cannot narrow it back across the try/catch.
-                let counted: number;
-                try {
-                    const countQuery: EngineCountOptions = {
-                        where: options.where,
-                        search: options.search,
-                        searchFields: options.searchFields,
-                        context: options.context,
-                    };
-                    counted = await this.engine.count(request.object, countQuery);
-                } catch {
-                    // engine.count() has its own find().length fallback; if it still
-                    // throws, degrade to a page-local total rather than failing the list.
-                    counted = pageOffset + records.length;
-                }
-                total = counted;
-                hasMore = pageOffset + records.length < counted;
-            }
-        }
-        return {
-            object: request.object,
-            records,
-            // [#10757] Omitted, not `undefined`-valued: a JSON body carrying
-            // `"total": null` (or a key some serializers keep) reads as "the
-            // total is nothing", which is a different claim from "no total was
-            // requested". The key is simply absent.
-            ...(total === undefined ? {} : { total }),
-            hasMore,
-        };
+        // [#29985 codemod] The body moved to `protocol-data-crud.ts`; it reaches this class through `protocol-host.ts`.
+        return findData(protocolHost(this), request);
     }
 
     async getData(request: { object: string, id: string, expand?: string | string[], select?: string | string[], context?: any }) {
-        this.assertObjectRegistered(request.object); // [#3770]
-        const queryOptions: any = {
-            where: { id: request.id }
-        };
-        if (request.context !== undefined) {
-            queryOptions.context = request.context;
-        }
-
-        // Support fields for single-record retrieval
-        //
-        // [#4226] Gated exactly as on the list path. `GET /data/:object/:id` and
-        // `GET /data/:object` read the same `select`/`expand` against the same
-        // field map, so answering one with a 400 and the other with a silently
-        // widened projection would recreate, one route over, the very split
-        // ("two routes, opposite answers for one input") this issue was filed
-        // about.
-        //
-        // [#26644] …including the empty projection: a blank `?select=` was
-        // falsy and skipped, a comma-only one became `[]` — both answered every
-        // column. Asked on any value present, as the list path asks it.
-        if (request.select != null) {
-            queryOptions.fields = typeof request.select === 'string' || Array.isArray(request.select)
-                ? projectionFieldsValue(request.select, 'select')
-                : request.select;
-            this.assertProjectionFieldsExist(request.object, queryOptions.fields, 'select');
-        }
-        // [#21086] Same read projection as the list path (`findData`): the row's
-        // `type` is read even when `select` named only the body.
-        const bodyProjection = storedMetadataBodyProjection(request.object, queryOptions.fields);
-        if (bodyProjection.addedType) queryOptions.fields = bodyProjection.fields;
-
-        // Support expand for single-record retrieval
-        if (request.expand) {
-            const expandNames = typeof request.expand === 'string'
-                ? request.expand.split(',').map((s: string) => s.trim()).filter(Boolean)
-                : request.expand;
-            this.assertExpandTargetsExist(request.object, expandNames);
-            const expand = {} as Record<string, any>;
-            for (const rel of expandNames) {
-                expand[rel] = { object: rel };
-            }
-            // [#22661] The same exposure judgement as the list path: an entry
-            // whose target does not serve `get` is withheld ({@link servedExpand}).
-            const served = this.servedExpand(request.object, expand, 0);
-            if (Object.keys(served).length > 0) queryOptions.expand = served;
-        }
-
-        // [#29764] The bag `engine.findOne` receives is typed as the engine
-        // declares it. `queryOptions` stays the working bag: the projection
-        // helpers above answer `unknown` (they serve the raw list query too), so
-        // its `fields` has no declared type until it is handed on here. Keys are
-        // copied only when present, so the engine sees the same bag as before.
-        const findOneQuery: EngineQueryOptions = {
-            where: queryOptions.where,
-            ...(queryOptions.context !== undefined ? { context: queryOptions.context } : {}),
-            ...(queryOptions.fields !== undefined ? { fields: queryOptions.fields } : {}),
-            ...(queryOptions.expand !== undefined ? { expand: queryOptions.expand } : {}),
-        };
-        const result = await this.engine.findOne(request.object, findOneQuery);
-        if (result) {
-            return {
-                object: request.object,
-                id: request.id,
-                // [#21207] Same served form as the list path: the content-hash
-                // columns keyed.
-                record: await serveStoredMetadataHashColumns(
-                    request.object,
-                    redactStoredMetadataRow(request.object, result, { dropType: bodyProjection.addedType }),
-                    this.storedHashDigest(),
-                ),
-            };
-        }
-        throw recordNotFoundError(request.object, request.id);
+        // [#29985 codemod] The body moved to `protocol-data-crud.ts`; it reaches this class through `protocol-host.ts`.
+        return getData(protocolHost(this), request);
     }
 
     /**
@@ -6508,109 +5138,8 @@ export class ObjectStackProtocolImplementation implements
      * clear a unique field, or reset status before insert.
      */
     async cloneData(request: { object: string, id: string, overrides?: Record<string, any>, context?: any }) {
-        // [#3770] This object-existence check used to be open-coded here and
-        // was the ONLY one on the whole data plane; it is now the shared gate
-        // every data entry point runs. Same error envelope as before.
-        this.assertObjectRegistered(request.object);
-        const schema: any = this.engine.registry?.getObject(request.object);
-        // `enable.clone` defaults to true in the spec; treat an absent block /
-        // absent flag as enabled and only block on an explicit `false`.
-        if (schema?.enable?.clone === false) {
-            const err: any = new Error(`Cloning is disabled for object '${request.object}'`);
-            err.code = 'CLONE_DISABLED';
-            err.status = 403;
-            err.object = request.object;
-            throw err;
-        }
-
-        const ctx = request.context;
-        const ctxOpt = ctx !== undefined ? { context: ctx } : undefined;
-
-        const source = await this.engine.findOne(
-            request.object,
-            { where: { id: request.id }, ...ctxOpt },
-        );
-        if (!source) throw recordNotFoundError(request.object, request.id);
-
-        // Copy the source, then strip the columns the engine owns so the insert
-        // path re-derives them rather than carrying the source's values over.
-        const data: Record<string, any> = { ...source };
-        for (const f of CLONE_STRIP_FIELDS) delete data[f];
-        const fields: Record<string, any> = schema?.fields || {};
-        for (const [name, def] of Object.entries(fields)) {
-            if (!def) continue;
-            // Engine-/automation-owned values: injected system/audit columns,
-            // engine-generated autonumbers, and computed formula/summary fields.
-            if ((def as any).system === true
-                || (def as any).type === 'autonumber'
-                || (def as any).type === 'formula'
-                || (def as any).type === 'summary') {
-                delete data[name];
-                continue;
-            }
-            // [#29200] A read-only column the source left EMPTY is not carried
-            // into the insert. Carried, it reached `engine.insert`'s strip as a
-            // present key and was reported in `droppedFields` (and the
-            // `X-ObjectStack-Dropped-Fields` header) although neither the caller
-            // nor the source supplied a value. Leaving it out stores the same
-            // row: the strip would have taken it from a non-system caller, and
-            // the insert's defaults treat an explicit `null` exactly as an
-            // omitted key. A read-only column that HOLDS a value is still
-            // carried, stripped and reported (#15703), and so is one the caller
-            // sets through `overrides`, which are applied below.
-            if ((def as any).readonly && data[name] == null) delete data[name];
-        }
-        // Caller overrides win (new name, cleared unique field, reset status…).
-        if (request.overrides && typeof request.overrides === 'object') {
-            Object.assign(data, request.overrides);
-        }
-
-        // [#3043/#14147] A clone is a create: a non-system caller must not carry
-        // over (or override in) a read-only column — copying the source's
-        // `approval_status` or forging one via `overrides` would mint an approved
-        // record. That strip is `engine.insert`'s since #14147, so the payload
-        // goes over whole and the insert re-derives the field's `defaultValue`,
-        // symmetric with createData. `overrides` are applied ABOVE this line, so
-        // a readonly key smuggled through them is still judged by the strip.
-        //
-        // [#15703] And the verdict is REPORTED, the same listener `createData`
-        // wires: a clone is the one create shape that carries a read-only column
-        // without the caller typing it (the source's `approval_status` travels in
-        // the copy), so the 201 body says which keys the engine dropped instead of
-        // leaving the caller to diff `record` against the source. Maintainer
-        // ruling 2026-09-08 (option 1); `CloneDataResponseSchema` declares the
-        // member in the same change, because that schema is declared AS PRODUCED.
-        const dropped: DroppedFieldsEvent[] = [];
-        // [#22726] A clone is a create: its advisory rule hits are answered as
-        // `warnings`, the same listener `createData` wires.
-        const warnings: ValidationAdvisoryEvent[] = [];
-        const opts: any = {
-            onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); },
-            onValidationAdvisory: (e: ValidationAdvisoryEvent) => { warnings.push(e); },
-        };
-        if (ctx !== undefined) opts.context = ctx;
-        // [#28782] A copy the engine stored but whose parent roll-up it could
-        // not recompute carries this method's answer on the refusal, as
-        // `createData` does since #28781 (`withEarnedAnswer`).
-        let stale: SummaryRecomputeRefusal | undefined;
-        const result = await this.engine.insert(request.object, data, opts)
-            .catch((e: unknown) => (stale = staleSummaryRefusalOrThrow(e)).written as any);
-        // [#7823] Same ingress strip as `createData` — a clone's 201 body is
-        // the same generic-data-path surface. (The SOURCE row was read through
-        // the engine's find path, which already omits internal fields, so the
-        // copy never carried one in; this guards the INSERT RESULT, which the
-        // engine returns whole by design.)
-        omitInternalFieldsFromWriteResponse(schema, result);
-        const answer = {
-            object: request.object,
-            id: result.id,
-            sourceId: request.id,
-            record: result,
-            ...(dropped.length > 0 ? { droppedFields: dropped } : {}),
-            ...(warnings.length > 0 ? { warnings } : {}),
-        };
-        if (stale) throw withEarnedAnswer(stale, answer);
-        return answer;
+        // [#29985 codemod] The body moved to `protocol-data-crud.ts`; it reaches this class through `protocol-host.ts`.
+        return cloneData(protocolHost(this), request);
     }
 
     async updateData(request: { object: string, id: string, data: any, expectedVersion?: string, context?: any }) {
@@ -8256,8 +6785,23 @@ export class ObjectStackProtocolImplementation implements
      *          refuse this write or removal on the locked-base ground.
      */
     packagedBaseRefusal(request: { type: string; name: string; operation: 'save' | 'delete'; packageId?: string | null }): Error | null {
-        // [#29985 codemod] The body moved to `protocol-write-gates.ts`; it reaches this class through `protocol-host.ts`.
-        return packagedBaseRefusal(protocolHost(this), request);
+        // [#9009] Folded HERE, at the producer of the verdict, so a caller that
+        // arrives with a plural spelling cannot address around the lock.
+        const folded = canonicalizeMetaRequestType(request);
+        try {
+            if (folded.operation === 'delete') this.refusePackagedBaseRemoval(folded);
+            else {
+                this.refusePackagedBaseOverride({
+                    type: folded.type,
+                    name: folded.name,
+                    ...(folded.packageId ? { packageId: folded.packageId } : {}),
+                });
+            }
+        } catch (err) {
+            if (ObjectStackProtocolImplementation.isPackagedBaseRefusal(err)) return err;
+            throw err;
+        }
+        return null;
     }
 
     /**
@@ -12358,11 +10902,8 @@ export class ObjectStackProtocolImplementation implements
     // repository as given. ⛔ No transport sets it — every door builds its
     // request field by field from named inputs, never by spreading a body.
     async saveMetaItem(request: SaveMetaItemRequest) {
-        // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
-        return withRefusalAudit((entry) => this.recordMetadataAudit(entry), {
-            operation: 'save', type: request.type, name: request.name, actor: request.actor,
-            source: request.source ?? 'protocol.saveMetaItem',
-        }, () => this.saveMetaItemUnaudited(request));
+        // [#29985 codemod] The body moved to `protocol-save.ts`; it reaches this class through `protocol-host.ts`.
+        return saveMetaItem(protocolHost(this), request);
     }
 
     /** [#28355] The body of {@link saveMetaItem} before its refusal audit; that method's docblock is the contract. */
@@ -12595,11 +11136,8 @@ export class ObjectStackProtocolImplementation implements
      * when there is nothing to publish.
      */
     async publishMetaItem(request: PublishMetaItemRequest) {
-        // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
-        return withRefusalAudit((entry) => this.recordMetadataAudit(entry), {
-            operation: 'publish', type: request.type, name: request.name, actor: request.actor,
-            source: 'protocol.publishMetaItem',
-        }, () => this.publishMetaItemUnaudited(request));
+        // [#29985 codemod] The body moved to `protocol-history-and-publish.ts`; it reaches this class through `protocol-host.ts`.
+        return publishMetaItem(protocolHost(this), request);
     }
 
     /** [#28355] The body of {@link publishMetaItem} before its refusal audit; that method's docblock is the contract. */
@@ -14813,11 +13351,8 @@ export class ObjectStackProtocolImplementation implements
      * tombstone (no body to bring back).
      */
     async rollbackMetaItem(request: RollbackMetaItemRequest) {
-        // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
-        return withRefusalAudit((entry) => this.recordMetadataAudit(entry), {
-            operation: 'rollback', type: request.type, name: request.name, actor: request.actor,
-            source: 'protocol.rollbackMetaItem',
-        }, () => this.rollbackMetaItemUnaudited(request));
+        // [#29985 codemod] The body moved to `protocol-package-commits.ts`; it reaches this class through `protocol-host.ts`.
+        return rollbackMetaItem(protocolHost(this), request);
     }
 
     /** [#28355] The body of {@link rollbackMetaItem} before its refusal audit; that method's docblock is the contract. */
@@ -14903,11 +13438,8 @@ export class ObjectStackProtocolImplementation implements
      * with {@link saveMetaItem}.
      */
     async deleteMetaItem(request: DeleteMetaItemRequest) {
-        // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
-        return withRefusalAudit((entry) => this.recordMetadataAudit(entry), {
-            operation: 'delete', type: request.type, name: request.name, actor: request.actor,
-            source: 'protocol.deleteMetaItem',
-        }, () => this.deleteMetaItemUnaudited(request));
+        // [#29985 codemod] The body moved to `protocol-diff-delete-load.ts`; it reaches this class through `protocol-host.ts`.
+        return deleteMetaItem(protocolHost(this), request);
     }
 
     /** [#28355] The body of {@link deleteMetaItem} before its refusal audit; that method's docblock is the contract. */

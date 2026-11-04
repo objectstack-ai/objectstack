@@ -4,11 +4,10 @@
  * [#29985 codemod] The "Write gates: overlay, code-only, organization, sealed
  * and packaged-base refusals, locks, version tokens, conflict audit" section of
  * `ObjectStackProtocolImplementation`: the bodies of `isArtifactBacked`,
- * `isNestedArtifactField`, `packagedBaseRefusal`, `packagedArtifactOwner`,
- * `storedFlowBindingAgrees`, `refusePackagedBaseRemoval`,
- * `baseServesBundleMember`, `pairOfAddedMember`, `findPairAddedMemberRow`,
- * `registryMemberServedAt` moved out of `protocol.ts` whole by
- * `scripts/codemod-split-protocol.mjs`.
+ * `isNestedArtifactField`, `packagedArtifactOwner`, `storedFlowBindingAgrees`,
+ * `refusePackagedBaseRemoval`, `baseServesBundleMember`, `pairOfAddedMember`,
+ * `findPairAddedMemberRow`, `registryMemberServedAt` moved out of `protocol.ts`
+ * whole by `scripts/codemod-split-protocol.mjs`.
  *
  * A MOVE, not a redesign. Each function below is the body of the class method
  * of the same name as `packages/metadata-protocol/scripts/host-split.mjs` moves
@@ -57,27 +56,6 @@ export function isNestedArtifactField(host: Pick<ProtocolHost, 'lookupArtifactIt
     const fields = objectArtifact?.fields;
     if (!fields || typeof fields !== 'object') return false;
     return Object.prototype.hasOwnProperty.call(fields, name.slice(sep + 1));
-}
-
-/** The body of `ObjectStackProtocolImplementation#packagedBaseRefusal`; the method's docblock there is its contract. */
-export function packagedBaseRefusal(host: Pick<ProtocolHost, 'isPackagedBaseRefusal' | 'refusePackagedBaseOverride' | 'refusePackagedBaseRemoval'>, request: { type: string; name: string; operation: 'save' | 'delete'; packageId?: string | null }): Error | null {
-    // [#9009] Folded HERE, at the producer of the verdict, so a caller that
-    // arrives with a plural spelling cannot address around the lock.
-    const folded = canonicalizeMetaRequestType(request);
-    try {
-        if (folded.operation === 'delete') host.refusePackagedBaseRemoval(folded);
-        else {
-            host.refusePackagedBaseOverride({
-                type: folded.type,
-                name: folded.name,
-                ...(folded.packageId ? { packageId: folded.packageId } : {}),
-            });
-        }
-    } catch (err) {
-        if (host.isPackagedBaseRefusal(err)) return err;
-        throw err;
-    }
-    return null;
 }
 
 /** The body of `ObjectStackProtocolImplementation#packagedArtifactOwner`; the method's docblock there is its contract. */
