@@ -2,21 +2,25 @@
 
 /**
  * [#29986 codemod] The "Delete, count, aggregate and execute" section of
- * `ObjectQL`: the bodies of `aggregate` moved out of `engine.ts` whole by
- * `scripts/codemod-split-engine.mjs`.
+ * `ObjectQL`: the bodies of `assertNoInternalFieldEvaluated`, `aggregate` moved
+ * out of `engine.ts` whole by `scripts/codemod-split-engine.mjs`.
  *
- * A MOVE, not a redesign. Each function below is the body of the `ObjectQL`
+ * A MOVE, not a redesign. {@link DeleteAndAggregateFacet} is a stateless facet of `ObjectQL`
+ * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
  * method of the same name exactly as it stood: not re-indented, not
- * formatted, not edited. The method stays on the class with its docblock and
- * signature, so the published `dist/*.d.ts`, an instance spy and a subclass
- * override are what they were; the docblock there is the contract.
+ * formatted, not edited. The method stays on the class as a one-call stub with
+ * its signature, so the published surface, an instance spy and a subclass
+ * override are what they were. A public or protected method keeps its
+ * docblock on the class, the contract; a private method's docblock moved here
+ * with its body. The state stays on `ObjectQL`.
  *
  * The bodies reach the class through {@link DeleteAndAggregateHost}: exactly the
- * `ObjectQL` members they read, private ones included. Each method hands its
+ * `ObjectQL` members they read, private ones included. Each stub hands its
  * body one literal of the members that body reads, plus a `.call`: methods go
  * as closures that call them on the engine at call time, so a subclass
  * override or an instance spy is still the one reached; fields and accessors
- * go as GETTERS, read when the body reads them, as they were on the class.
+ * go as GETTERS, read when the body reads them, as they were on the class,
+ * and a field a body assigns goes with a SETTER that assigns it on the engine.
  *
  * The module imports `engine.ts` for types only, so the two modules form no
  * evaluation cycle. `index.ts` re-exports nothing from this module.
@@ -24,12 +28,13 @@
 
 import { normalizeFilterComparandTypes } from '@objectstack/spec/data';
 import type { EngineAggregateOptions, QueryAST } from '@objectstack/spec/data';
+import type { InternalFieldEvaluationOptions, InternalFieldEvaluationQuery } from '@objectstack/spec/contracts';
 import { assertFilterIsMaterializable, assertListComparandShapes, invalidFilterError } from './filter-comparand-shape.js';
 import { assertHavingTemporalComparandsInterpretable, assertTemporalComparandsInterpretable } from './temporal-comparand-door.js';
 import { assertTextOperatorTargetsAreStringCapable } from './text-operator-declared-type-door.js';
 import { narrowHavingNumberComparands, narrowNumberComparands } from './number-comparand-declared-type-door.js';
 import { rejectCredentialEvaluation } from './credential-evaluation-guard.js';
-import { rejectInternalFieldEvaluation } from './internal-field-evaluation-guard.js';
+import { assertNoInternalFieldEvaluated, rejectInternalFieldEvaluation } from './internal-field-evaluation-guard.js';
 import { assertGroupByNamesNoJsonStoredField } from './group-by-structured-json-door.js';
 import { assertAggregationFieldTypesAccepted } from './aggregate-field-type-door.js';
 import { assertRecordCurrencyAggregatesGrouped } from './record-currency-aggregate-door.js';
@@ -45,10 +50,11 @@ import type { EngineReadOptions, OperationContext } from './engine-top-level.js'
 import type { ObjectQL } from './engine.js';
 
 /**
- * The `ObjectQL` members the functions below read — every one of them, and
- * no other. Each is typed AS the class member (an indexed access on the
- * class), so a change to a member's signature on the class is a change here
- * too. `readonly` members are the getters.
+ * The `ObjectQL` members the bodies of {@link DeleteAndAggregateFacet} read — every one of
+ * them, and no other. Each is typed AS the class member (an indexed access on
+ * the class), so a change to a member's signature on the class is a change
+ * here too. `readonly` members are the getters; the others are fields a body
+ * assigns.
  */
 export interface DeleteAndAggregateHost {
   readonly _registry: ObjectQL['_registry'];
@@ -64,8 +70,15 @@ export interface DeleteAndAggregateHost {
   resolveWhereTokens: ObjectQL['resolveWhereTokens'];
 }
 
-/** The body of `ObjectQL#aggregate`; the method's docblock there is its contract. */
-export async function aggregate(this: Pick<DeleteAndAggregateHost, '_registry' | 'buildDriverOptions' | 'composeReadableIdsAtBoundary' | 'executeWithMiddleware' | 'expandSearchOnOptions' | 'getDriver' | 'logger' | 'rejectCredentialAggregation' | 'relatedSchemaOf' | 'resolveObjectName' | 'resolveWhereTokens'>, object: string, query: EngineAggregateOptions, options?: EngineReadOptions): Promise<any[]> {
+/** The bodies of the "Delete, count, aggregate and execute" section of `ObjectQL`: a stateless facet, called by the class's stubs. */
+export class DeleteAndAggregateFacet {
+  /** The body of `ObjectQL#assertNoInternalFieldEvaluated`; the method's docblock there is its contract. */
+  static assertNoInternalFieldEvaluated(this: Pick<DeleteAndAggregateHost, 'relatedSchemaOf'>, object: string, query: InternalFieldEvaluationQuery, options?: InternalFieldEvaluationOptions): void {
+    assertNoInternalFieldEvaluated(object, query, this.relatedSchemaOf, options);
+  }
+
+  /** The body of `ObjectQL#aggregate`; the method's docblock there is its contract. */
+  static async aggregate(this: Pick<DeleteAndAggregateHost, '_registry' | 'buildDriverOptions' | 'composeReadableIdsAtBoundary' | 'executeWithMiddleware' | 'expandSearchOnOptions' | 'getDriver' | 'logger' | 'rejectCredentialAggregation' | 'relatedSchemaOf' | 'resolveObjectName' | 'resolveWhereTokens'>, object: string, query: EngineAggregateOptions, options?: EngineReadOptions): Promise<any[]> {
       object = this.resolveObjectName(object);
       // Fold the `filter` alias into `where` (#4346) — the AST below reads
       // `query.where` only, so an unfolded `{ filter }` aggregated every row.
@@ -555,3 +568,4 @@ export async function aggregate(this: Pick<DeleteAndAggregateHost, '_registry' |
 
       return opCtx.result as any[];
   }
+}

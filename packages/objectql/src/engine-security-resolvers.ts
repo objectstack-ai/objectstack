@@ -3,51 +3,219 @@
 /**
  * [#29986 codemod] The
  * "Registration seams, readable-ids security, formula and default permissions"
- * section of `ObjectQL`: the bodies of `refuseUncomposableReadableIdsClasses`,
- * `resolveFormulaRelated` moved out of `engine.ts` whole by
+ * section of `ObjectQL`: the bodies of `registerHeldFileResolver`,
+ * `registerFieldOwnedFileReadAuthorizer`, `registerWriteGateProbe`,
+ * `registerWriteWallVerdict`, `registerEffectiveObjectPermissionsResolver`,
+ * `registerInsertRecomputeListener`, `composeReadableIdsAtBoundary`,
+ * `refuseUncomposableReadableIdsClasses`, `uncomposableReadableIdsParent`,
+ * `resolveFormulaRelated`, `serveFormulaField`, `formulaOptionLabels`,
+ * `formulaFaultSink` moved out of `engine.ts` whole by
  * `scripts/codemod-split-engine.mjs`.
  *
- * A MOVE, not a redesign. Each function below is the body of the `ObjectQL`
+ * A MOVE, not a redesign. {@link SecurityResolversFacet} is a stateless facet of `ObjectQL`
+ * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
  * method of the same name exactly as it stood: not re-indented, not
- * formatted, not edited. The method stays on the class with its docblock and
- * signature, so the published `dist/*.d.ts`, an instance spy and a subclass
- * override are what they were; the docblock there is the contract.
+ * formatted, not edited. The method stays on the class as a one-call stub with
+ * its signature, so the published surface, an instance spy and a subclass
+ * override are what they were. A public or protected method keeps its
+ * docblock on the class, the contract; a private method's docblock moved here
+ * with its body. The state stays on `ObjectQL`.
  *
  * The bodies reach the class through {@link SecurityResolversHost}: exactly the
- * `ObjectQL` members they read, private ones included. Each method hands its
+ * `ObjectQL` members they read, private ones included. Each stub hands its
  * body one literal of the members that body reads, plus a `.call`: methods go
  * as closures that call them on the engine at call time, so a subclass
  * override or an instance spy is still the one reached; fields and accessors
- * go as GETTERS, read when the body reads them, as they were on the class.
+ * go as GETTERS, read when the body reads them, as they were on the class,
+ * and a field a body assigns goes with a SETTER that assigns it on the engine.
  *
  * The module imports `engine.ts` for types only, so the two modules form no
  * evaluation cycle. `index.ts` re-exports nothing from this module.
  */
 
 import { referenceTargetOf } from '@objectstack/spec/data';
-import type { EngineQueryOptions } from '@objectstack/spec/data';
-import { describeReadableIdsLeaf, readableIdsRefusalError } from './filter-comparand-shape.js';
+import type { EngineQueryOptions, QueryAST } from '@objectstack/spec/data';
+import { collectComposableReadableIds, describeReadableIdsLeaf, readableIdsRefusalError } from './filter-comparand-shape.js';
 import type { ComposableReadableIdsSite } from './filter-comparand-shape.js';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
-import { undeclaredRelatedFields } from './engine-top-level.js';
-import type { FormulaPlanEntry, FormulaRelated } from './engine-top-level.js';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
+import type { EvalOptionLabels } from '@objectstack/formula';
+import { readerOptionLabels } from './formula-option-labels.js';
+import { applyFormulaPlan, planFormulaProjection, undeclaredRelatedFields } from './engine-top-level.js';
+import type {
+  FieldOwnedFileReadAuthorizer, FormulaFaultSink, FormulaPlanEntry, FormulaRelated, HeldFileResolver,
+  ReadableIdsChain, WriteWallVerdict,
+} from './engine-top-level.js';
 import type { ObjectQL } from './engine.js';
 
 /**
- * The `ObjectQL` members the functions below read — every one of them, and
- * no other. Each is typed AS the class member (an indexed access on the
- * class), so a change to a member's signature on the class is a change here
- * too. `readonly` members are the getters.
+ * The `ObjectQL` members the bodies of {@link SecurityResolversFacet} read — every one of
+ * them, and no other. Each is typed AS the class member (an indexed access on
+ * the class), so a change to a member's signature on the class is a change
+ * here too. `readonly` members are the getters; the others are fields a body
+ * assigns.
  */
 export interface SecurityResolversHost {
+  _effectiveObjectPermissionsResolver: ObjectQL['_effectiveObjectPermissionsResolver'];
+  _fieldOwnedFileReadAuthorizer: ObjectQL['_fieldOwnedFileReadAuthorizer'];
+  _heldFileResolver: ObjectQL['_heldFileResolver'];
   readonly _registry: ObjectQL['_registry'];
+  _writeGateProbe: ObjectQL['_writeGateProbe'];
+  _writeWallVerdict: ObjectQL['_writeWallVerdict'];
+  composeReadableIdsChain: ObjectQL['composeReadableIdsChain'];
+  formulaFaultSink: ObjectQL['formulaFaultSink'];
   readonly formulaHopReads: ObjectQL['formulaHopReads'];
+  formulaOptionLabels: ObjectQL['formulaOptionLabels'];
+  hasObjectMiddleware: ObjectQL['hasObjectMiddleware'];
+  readonly i18nService: ObjectQL['i18nService'];
+  readonly insertRecomputeListeners: ObjectQL['insertRecomputeListeners'];
+  readonly logger: ObjectQL['logger'];
+  permissionResolution: ObjectQL['permissionResolution'];
+  readonly readableIdsSecurityReported: ObjectQL['readableIdsSecurityReported'];
+  reportFormulaFault: ObjectQL['reportFormulaFault'];
+  resolveDatasourceBinding: ObjectQL['resolveDatasourceBinding'];
+  resolveFormulaPermissions: ObjectQL['resolveFormulaPermissions'];
+  resolveFormulaRelated: ObjectQL['resolveFormulaRelated'];
   resolveOneHopRelated: ObjectQL['resolveOneHopRelated'];
+  resolveReadableIdsSecurity: ObjectQL['resolveReadableIdsSecurity'];
   uncomposableReadableIdsParent: ObjectQL['uncomposableReadableIdsParent'];
 }
 
-/** The body of `ObjectQL#refuseUncomposableReadableIdsClasses`; the method's docblock there is its contract. */
-export function refuseUncomposableReadableIdsClasses(this: Pick<SecurityResolversHost, '_registry' | 'uncomposableReadableIdsParent'>, object: string, operation: string, sites: readonly ComposableReadableIdsSite[]): string[] {
+/** The bodies of the "Registration seams, readable-ids security, formula and default permissions" section of `ObjectQL`: a stateless facet, called by the class's stubs. */
+export class SecurityResolversFacet {
+  /** The body of `ObjectQL#registerHeldFileResolver`; the method's docblock there is its contract. */
+  static registerHeldFileResolver(this: Pick<SecurityResolversHost, '_heldFileResolver' | 'logger'>, fn: HeldFileResolver): void {
+    this._heldFileResolver = fn;
+    this.logger.debug('Registered held-file resolver for sys_file hydration');
+  }
+
+  /** The body of `ObjectQL#registerFieldOwnedFileReadAuthorizer`; the method's docblock there is its contract. */
+  static registerFieldOwnedFileReadAuthorizer(this: Pick<SecurityResolversHost, '_fieldOwnedFileReadAuthorizer' | 'logger'>, fn: FieldOwnedFileReadAuthorizer): void {
+    this._fieldOwnedFileReadAuthorizer = fn;
+    this.logger.debug('Registered field-owned file read authorizer for refused sys_file hydration');
+  }
+
+  /** The body of `ObjectQL#registerWriteGateProbe`; the method's docblock there is its contract. */
+  static registerWriteGateProbe(this: Pick<SecurityResolversHost, '_writeGateProbe' | 'logger'>, fn: (
+      object: string,
+      operation: 'insert' | 'update',
+      context: unknown,
+      data: unknown,
+    ) => Promise<boolean>): void {
+    this._writeGateProbe = fn;
+    this.logger.debug('Registered write-gate probe for validate() relationship resolution');
+  }
+
+  /** The body of `ObjectQL#registerWriteWallVerdict`; the method's docblock there is its contract. */
+  static registerWriteWallVerdict(this: Pick<SecurityResolversHost, '_writeWallVerdict' | 'logger'>, fn: WriteWallVerdict): void {
+    this._writeWallVerdict = fn;
+    this.logger.debug('Registered write-wall verdict for validate() organization judgement');
+  }
+
+  /** The body of `ObjectQL#registerEffectiveObjectPermissionsResolver`; the method's docblock there is its contract. */
+  static registerEffectiveObjectPermissionsResolver(this: Pick<SecurityResolversHost, '_effectiveObjectPermissionsResolver' | 'logger'>, fn: (context: unknown) => Promise<unknown>): void {
+    this._effectiveObjectPermissionsResolver = fn;
+    this.logger.debug('Registered effective object-permission resolver for current_user.can()');
+  }
+
+  /** The body of `ObjectQL#registerInsertRecomputeListener`; the method's docblock there is its contract. */
+  static registerInsertRecomputeListener(this: Pick<SecurityResolversHost, 'insertRecomputeListeners' | 'logger'>, id: string, fn: (event: { object: string; row: Record<string, unknown>; fields: string[] }) => void | Promise<void>): void {
+    this.insertRecomputeListeners.set(id, fn);
+    this.logger.debug('Registered insert recompute listener', { id });
+  }
+
+  /**
+   * [ADR-0139 D2, D5] The executor boundary: every `ReadableIds` leaf in the
+   * FINAL `where` of a read is replaced by its composed form immediately
+   * before the driver call — after the comparand doors, the middleware chain
+   * and the before-hooks, so a leaf the caller, a middleware or a hook wrote
+   * meets the same composition. Returns `ast` by reference when it holds no
+   * leaf, which is every read today; otherwise a shallow copy whose `where` is
+   * rewritten copy-on-write (the hooks' `input.ast` is never edited).
+   *
+   * Per parent object `P`, once per call, in this order:
+   *
+   *  1. **D5's two remaining classes are refused, by name** (`INTERNAL_ERROR`
+   *     / 500), before the security service is asked anything: a parent an
+   *     object-scoped read middleware narrows ({@link hasObjectMiddleware}); a
+   *     parent bound to another datasource than `object`
+   *     ({@link resolveDatasourceBinding}).
+   *  2. **A parent the registry does not hold** ⇒ `$in: []`, unasked.
+   *  3. **The security service** — absent or unusable ⇒ `$in: []`.
+   *  4. **`canReadObject(P)`** (its `explain` fallback when the method is
+   *     absent) — false or a throw ⇒ `$in: []`.
+   *  5. **`getReadFilter(P)`** — `undefined` ⇒ composed, no row restriction;
+   *     the deny sentinel `RLS_DENY_FILTER`, by identity, or a throw ⇒
+   *     `$in: []`; any other filter ⇒ composed with it as the scope, marked
+   *     `'policy'` and otherwise passed exactly as `P`'s own read passes its
+   *     injected scope. The tenant wall is the driver's (D3).
+   *
+   * [ADR-0139 D5.1, as amended] A **delegated (on-behalf-of) caller** is
+   * composed, not refused: both halves are asked with the caller's context
+   * exactly as it stands — `onBehalfOf` intact — and the security service
+   * answers each half for the delegated principal, which under ADR-0090 D10
+   * is the INTERSECTION of the principal's leg and the delegator's. The
+   * engine composes what it is answered and derives no second intersection
+   * of its own: it has one context, the delegated one, and the delegator's
+   * grants are the security service's to resolve. A service that cannot
+   * answer that context answers the deny sentinel, and step 5 turns it into
+   * `$in: []`, closed.
+   *
+   * [ADR-0139 D6, as amended — the nested master chain] A scope the service
+   * answers in step 5 may itself carry a leaf: a parent whose own read scope
+   * is derived from ITS master (a `controlled_by_parent` detail whose master
+   * is `controlled_by_parent` too) is scoped `{ master_fk: { $in:
+   * ReadableIds.of(G) } }`, and a leaf handed to a driver uncomposed is
+   * refused there (D3), never read as "no restriction". So every leaf a
+   * composed scope carries is composed the same way, BEFORE the leaf that
+   * encloses it — the same five steps, the same caller context at every level,
+   * recursively ({@link composeReadableIdsChain}). The driver then receives one
+   * composed leaf whose scope holds composed leaves, and compiles one statement
+   * with the subqueries nested. Each parent is asked once per read, at
+   * whichever level it first appears; a chain that returns to a parent already
+   * on its branch, or runs deeper than {@link READABLE_IDS_MAX_CHAIN_DEPTH}
+   * scopes, is refused by name (D5's envelope), not composed partway.
+   *
+   * Nothing is memoised across calls. `aggregate`'s `having` and its
+   * aggregations' own filters are judged here too, so a leaf a middleware
+   * wrote there is refused rather than evaluated in memory.
+   */
+  static async composeReadableIdsAtBoundary<A extends QueryAST>(this: Pick<SecurityResolversHost, 'composeReadableIdsChain' | 'logger' | 'readableIdsSecurityReported' | 'resolveReadableIdsSecurity'>, object: string, operation: 'find' | 'findOne' | 'count' | 'aggregate', ast: A, context: ExecutionContext | undefined): Promise<A> {
+    if (operation === 'aggregate') {
+      collectComposableReadableIds(object, operation, ast.having, 'having');
+      const aggregations = Array.isArray(ast.aggregations) ? ast.aggregations : [];
+      aggregations.forEach((agg, i) => {
+        collectComposableReadableIds(object, operation, (agg as { filter?: unknown } | undefined)?.filter, `aggregations[${i}].filter`);
+      });
+    }
+    const sites = collectComposableReadableIds(object, operation, ast.where, 'where');
+    if (sites.length === 0) return ast;
+
+    const security = this.resolveReadableIdsSecurity();
+    if (security.kind !== 'usable' && !this.readableIdsSecurityReported.has(security.kind)) {
+      this.readableIdsSecurityReported.add(security.kind);
+      this.logger.warn(
+        `[ObjectQL] ${operation}('${object}') composes a ReadableIds leaf with no usable "security" service ` +
+        `(${security.kind === 'absent' ? 'none is registered' : security.why}): every such leaf is answered ` +
+        '$in: [], no row of its parent, fail-closed. Register a security service for the leaf to serve rows. ' +
+        'Reported once for this engine; later leaves are answered the same way.',
+      );
+    }
+    const chain: ReadableIdsChain = { object, operation, security, context, answers: new Map() };
+    const where = await this.composeReadableIdsChain(chain, ast.where, sites, []);
+    return { ...ast, where };
+  }
+
+  /**
+   * [ADR-0139 D5] Refuse D5's two remaining classes (D5.2 and D5.3), by name,
+   * and return the distinct parent objects of `sites` the security service is
+   * asked about, in walk order (every one but a parent the registry does not
+   * hold). Reads the registry and the middleware registrations only — no
+   * security call, and no reading of the caller's context: a delegated
+   * (on-behalf-of) caller is no longer a class of its own (D5.1, as amended),
+   * it is composed like any other through the security service's answers.
+   */
+  static refuseUncomposableReadableIdsClasses(this: Pick<SecurityResolversHost, '_registry' | 'uncomposableReadableIdsParent'>, object: string, operation: string, sites: readonly ComposableReadableIdsSite[]): string[] {
     const firstSite = new Map<string, ComposableReadableIdsSite>();
     for (const site of sites) if (!firstSite.has(site.leaf.object)) firstSite.set(site.leaf.object, site);
     const refuse = (site: ComposableReadableIdsSite, why: string): Error => readableIdsRefusalError(
@@ -76,8 +244,49 @@ export function refuseUncomposableReadableIdsClasses(this: Pick<SecurityResolver
     return composable;
   }
 
-/** The body of `ObjectQL#resolveFormulaRelated`; the method's docblock there is its contract. */
-export async function resolveFormulaRelated(this: Pick<SecurityResolversHost, '_registry' | 'formulaHopReads' | 'resolveOneHopRelated'>, schema: any, plan: readonly FormulaPlanEntry[], rows: ReadonlyArray<Record<string, unknown> | undefined | null>, context: unknown, query?: EngineQueryOptions): Promise<FormulaRelated | undefined> {
+  /**
+   * [ADR-0139 D5.2 / D5.3] Which of D5's two remaining classes a leaf over
+   * `parent` in a read of `object` falls in, or `undefined` when it falls in
+   * neither — the ONE predicate behind both the read-time refusal
+   * ({@link refuseUncomposableReadableIdsClasses}) and the boot-time refusal of
+   * a `controlled_by_parent` detail over such a master
+   * ({@link findUnservableControlledByParentMasters}), so the two rules cannot
+   * drift. D5.2 is judged first, as the read path always has.
+   */
+  static uncomposableReadableIdsParent(this: Pick<SecurityResolversHost, 'hasObjectMiddleware' | 'resolveDatasourceBinding'>, object: string, parent: string): | { class: 'object-scoped-read-middleware' }
+    | { class: 'other-datasource'; objectDatasource: string | undefined; parentDatasource: string | undefined }
+    | undefined {
+    if (this.hasObjectMiddleware(parent)) return { class: 'object-scoped-read-middleware' };
+    const objectDatasource = this.resolveDatasourceBinding(object)?.datasource;
+    const parentDatasource = this.resolveDatasourceBinding(parent)?.datasource;
+    if (parentDatasource !== objectDatasource) return { class: 'other-datasource', objectDatasource, parentDatasource };
+    return undefined;
+  }
+
+  /**
+   * [#24197] The related rows a formula plan reads ONE hop through a
+   * reference field, resolved for a whole page of `rows` at once — the
+   * formula half of {@link resolveOneHopRelated}, read under the CALLER's
+   * own authority.
+   *
+   * ## What it costs
+   *
+   * Nothing for a plan that traverses nothing (no query, no closure). For one
+   * that does: one batched read per reference field per call — per PAGE of a
+   * `find` (the rows the driver returned, after `limit` / `offset`), per row of
+   * a `findOne`, per write response — never one per row. A formula whose
+   * traversal cannot be served (`hopConflict`) asks for nothing.
+   *
+   * ## One hop, and only one
+   *
+   * A `find` that IS a hop read ({@link formulaHopReads}) serves no hop of its
+   * own: the related object's own formulas over its own columns are computed,
+   * one that reads through a reference of ITS own reads `null` and says so.
+   * That is the declared depth (a second hop is not loaded — the lint refuses
+   * one written out, this refuses one reached through a formula), and it is
+   * what keeps two objects whose titles read each other from recursing.
+   */
+  static async resolveFormulaRelated(this: Pick<SecurityResolversHost, '_registry' | 'formulaHopReads' | 'resolveOneHopRelated'>, schema: any, plan: readonly FormulaPlanEntry[], rows: ReadonlyArray<Record<string, unknown> | undefined | null>, context: unknown, query?: EngineQueryOptions): Promise<FormulaRelated | undefined> {
     const wanted = new Map<string, Set<string>>();
     for (const entry of plan) {
       if (entry.hopConflict) continue;
@@ -118,3 +327,37 @@ export async function resolveFormulaRelated(this: Pick<SecurityResolversHost, '_
       : () => undefined;
     return { bindings: (row) => lookup(row), undeclared };
   }
+
+  /** The body of `ObjectQL#serveFormulaField`; the method's docblock there is its contract. */
+  static async serveFormulaField(this: Pick<SecurityResolversHost, '_registry' | 'formulaFaultSink' | 'formulaOptionLabels' | 'permissionResolution' | 'resolveFormulaPermissions' | 'resolveFormulaRelated'>, objectName: string, record: Record<string, unknown>, field: string, context?: ExecutionContext): Promise<unknown> {
+    const schema = this._registry.getObject(objectName);
+    const { plan } = planFormulaProjection(schema, [field]);
+    if (plan.length === 0) return undefined;
+    const scratch: Record<string, unknown> = { ...record };
+    applyFormulaPlan(plan, [scratch], context, await this.resolveFormulaPermissions(
+      objectName, plan, [scratch], context, this.permissionResolution(context),
+    ), this.formulaFaultSink(objectName), await this.resolveFormulaRelated(schema, plan, [scratch], context),
+    this.formulaOptionLabels(schema, plan, context));
+    return scratch[field];
+  }
+
+  /**
+   * [#26608] The option labels `label(record.<field>)` reads on a read or a
+   * write response of `schema`'s object: in the reader's locale
+   * (`ExecutionContext.locale`, which the request's `Accept-Language` sets),
+   * translated through the bridged i18n service as `GET /meta/object/:name`
+   * serves the object to the same reader — see {@link readerOptionLabels}.
+   * `undefined` when no formula of `plan` calls `label()`.
+   */
+  static formulaOptionLabels(this: Pick<SecurityResolversHost, 'i18nService'>, schema: unknown, plan: FormulaPlanEntry[], context: { locale?: string } | undefined): EvalOptionLabels | undefined {
+    return readerOptionLabels(schema, plan, context?.locale, this.i18nService);
+  }
+
+  /**
+   * [#22019] The sink a read or a write response of `object` hands to
+   * {@link applyFormulaPlan}, bound to the object so a report names the pair.
+   */
+  static formulaFaultSink(this: Pick<SecurityResolversHost, 'reportFormulaFault'>, object: string): FormulaFaultSink {
+    return (field, error) => this.reportFormulaFault(object, field, error);
+  }
+}
