@@ -1,7 +1,7 @@
 {
   "number": 6023,
   "kind": "issue",
-  "title": "[PM seat] domain:devx @ objectstack — ⏳ vacant",
+  "title": "[PM seat] domain:devx @ objectstack — 🟢 os-support-ai · 由 os-support-ai 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,16 +13,18 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-08-06T15:03:28Z",
-  "updated_at": "2026-11-02T23:53:13Z",
+  "updated_at": "2026-11-03T22:48:23Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 455,
+  "comments": 456,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/6023",
-  "body": "domain:devx#1 · os-warren · session_01JQwxbaBjisxkQo9hht9bFB\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md` (⛔ not copied here). This is **`domain:devx` seat 1**. Seat 2 is #20163, and seat 3 is #26373 (⛔ this post is neither).\n\n## Current PM — ⏳ vacant\n\n- **Previous holder:** `os-warren` · `session_01JQwxbaBjisxkQo9hht9bFB` (project thread \"Dispatch the devx lane\"), seated 2026-11-02T07:20Z, signed off 2026-11-02T23:51Z on the maintainer's 「devx 车道走下班流程」 with in-flight zero. Sign-off brief: the comment that follows this revision. `check-handover.mjs` exit 0. No stay-behind.\n- **Mailbox:** PR #29098, closed in this sign-off; the next holder opens its own at seating.\n- **Patrol:** trig_01PCwRHDdLDV3M34Z4318iEU disabled (not deleted).\n- **Takeover:** `/pm-dispatch 接手`, then read this post and the sign-off brief first.\n- **Pointer:** lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:devx#1` + `head:claude/` PRs.\n\n## Ledger\n\n- **Queue at sign-off:** `pm:queue` ∩ `domain:devx` = #29627 (p3; even in the round-3 order, so `domain:devx#2`'s by alternation; untriaged at sign-off).\n- **Held by seat 2 (`marchtian`):** #29520 (codemod pilot), #29561 (console-intercept gate's ui members), #28579 slice 3.\n- **Held by other sessions:** #26993 (`os-tesla`).\n- **Decision box:** #29466 (`needs-user-decision`).\n- **Blocked, by their own `Blocked-by:` lines:** #29469, #29465, #29315, #27197, #26688.\n- **Timed holds, by their own `Restart-when:` lines:** #28333, #27228, #25936, #25870, #25169, #22034.\n- **Awaiting the maintainer:** #27030, #25452, #24539.\n- **Main-red anchor:** #29494 (p0, generated). Triage 6583152845 reads it as already fixed by PR #29451; the next green 4-hourly run closes it.\n- **Owed after 18.3.0 ships:** fold the wave-4 checklist accuracy lines on #27377 into `docs/qa/platform-checklist`, including the re-point of `studio-authoring.expression-editors` A2/A4/A6/N0.\n- **Open with the maintainer, privately:** one question raised in the project thread on 2026-11-02, carried into the next term. ⛔ It is not filed and gets no card here.\n\n## Hot-file serial queue\n\n- None held by this seat.\n\n## Notes\n\n- Seat 2 (#20163, `marchtian`) is in office; no `split` notice is in force.\n\n<!-- signed: domain:devx#1 · os-warren · session_01JQwxbaBjisxkQo9hht9bFB -->"
+  "body": "domain:devx#1 · os-support-ai · session_01WGufzgBDcBNVmSmo7VFHpj\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md` (⛔ not copied here). This is **`domain:devx` seat 1**. Seat 2 is #20163 and seat 3 is #26373 (⛔ this post is neither).\n\n<sub>Refreshed 2026-11-03T22:45Z (seated).</sub>\n\n## Current PM\n\n🟢 **`os-support-ai`** (`GET /user`) · `session_01WGufzgBDcBNVmSmo7VFHpj` (project thread \"Prioritize large-file split cards\" in the os-support-ai account's project \"objectstack spec skills ui server\"), seated 2026-11-03T22:45Z. Summons: the maintainer (Yibo Wang, `os-support-ai`), verbatim 「现在车队不忙，大文件分拆的问题是否可以优先」 and 「已经有一些卡，查一下，需要的话，加一个 devx 车道」 (both 2026-11-03T22:38Z), in this account's project.\n\n- **Grounds:** the previous holder's sign-off brief (os-warren, `session_01JQwxbaBjisxkQo9hht9bFB`, 2026-11-02T23:51Z, `check-handover` exit 0, no stay-behind) is the newest seat event on this post; seat 2 (#20163) also signed off (marchtian, 2026-11-03T17:30Z). The seat is taken directly on that release marker.\n- **Focus:** the large-file split programme under #29465 (ruling A 6583399215, landing plan 6582376616, pilot #29520 landed as PR #29598): file the remaining per-file codemod cards into their lanes, then follow the programme to its landing windows. Plus any p0/p1 `domain:devx` card.\n- **Scope rule (maintainer, 2026-11-03T15:40Z):** p1 and p2 cards only, fleet-wide cap 20 active dev cards; this seat takes up to 3.\n- **Patrol:** `trig_015FA7UU49xu3cWKRCtGFZoC` · `44 * * * *` (hourly, self-bound to the seat session).\n- **Mailbox:** PR objectstack-ai/objectstack#29984 (`Mailbox-of: domain:devx#1 · os-support-ai`), subscribed.\n- Posture, ledger and round reports live in the project (pointer only). Lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:devx#1` + `head:claude/` PRs.\n\n## Inherited ledger\n\n- The previous holder's ledger is in the prior body revision (2026-11-02T23:53Z) and its sign-off brief; ⛔ not restated here.\n\n## Hot-file serial queue\n\n- None held by this seat. ⛔ Re-derive from live `Claim:` comments and open PR file lists before every dispatch.\n\n## Notes\n\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n\n<!-- signed: domain:devx#1 · os-support-ai · session_01WGufzgBDcBNVmSmo7VFHpj -->\n"
 }

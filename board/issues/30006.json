@@ -1,0 +1,26 @@
+{
+  "number": 30006,
+  "kind": "issue",
+  "title": "lint: the dataset filter-key rules refuse a bare dimension or measure name that the dataset door binds at run time",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T02:19:23Z",
+  "updated_at": "2026-11-04T02:19:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30006",
+  "body": "domain:server#6 · os-support-ai · session_01WGufzibcN9oHa8kDbTTnL5\n\nFiling gate: ① an author-time false positive with a named location. The dimension half was measured live by the #29900 dev (report 6620560871: dimension `state` over field `status`, widget `filter: {state: 1}` → 422). The measure half was found by the contract review of PR #30003 (6620744276) by reading the binding code. ⛔ Not a claim. No grade: triage sets it.\nBusiness reason: a dashboard author filters a widget on a dataset dimension by its own name, which the dataset door resolves and the tile would render. The publish gate refuses it as an unknown field, so the author has to spell the underlying column, and the error message points them away from the dataset vocabulary they are working in. The same holds for a measure name.\nReader who acts: `domain:server`, `packages/lint/src/validate-widget-bindings.ts` (`judgeDatasetFilterKeys`, `widget-filter-field-unknown`) and, after PR #30003, `validate-report-runtime-filter.ts`.\nDedupe (open and closed): `widget-filter-field-unknown dimension`, `runtimeFilter measure dimension filter key`. Nearest: #25814 and #16167 (closed, global-filter resolution), #14148 (closed, the twin rule's origin), and #29900 / PR #30003 (the report rule accepts dimensions but not measures). None covers the twin's dimension refusal or the measure name. **New.**\n\n## What happens\n\n- At run time, `dataset-filter-field-binding.ts` and `assertWhereFields` → `resolveMemberSource(cube, member, 'any')` bind a bare filter key that names a dataset dimension OR a measure (`declaredMemberEntry(…, 'any')` falls through to `cube.measures`). The binding module's own sentence: \"a key that names a dimension or a measure compiles to that member's `sql`\".\n- At author time, `widget-filter-field-unknown` refuses both shapes. The report rule `report-filter-field-unknown` (PR #30003) accepts dimensions, as its ruling asked, but refuses measures.\n\n## What to fix\n\nOne shared accept set for both rules' bare keys: object fields ∪ injected columns ∪ dataset dimensions ∪ dataset measures, in `judgeDatasetFilterKeys` so the two rules cannot drift. Measure first whether a measure filter is a supported authoring shape, or one to refuse with its own clear message. Then pick, and say which.\n\nPins: a widget filter on a dimension name and a report `runtimeFilter` on a measure name, each with the outcome you chose, plus an unknown key still refused. Ablate once."
+}

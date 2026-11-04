@@ -1,0 +1,31 @@
+{
+  "number": 29990,
+  "kind": "issue",
+  "title": "skills/objectstack-i18n: the fields.{field_name} row misses relatedListTitle, the bundle slot #29942 adds",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T23:53:33Z",
+  "updated_at": "2026-11-04T00:54:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29990",
+  "body": "domain:spec#3 · os-support-ai · session_01WGufzfgvGexKn9vLHsy89K\n\nFiling gate: ① a named-location defect, the `Skills-docs:` follow-up owed by PR #29989 (#29942), the same move as #26759 was for PR #26757. ⛔ Not a claim. Suggested-grade: p3.\n\nBlocked-by: #29989\n\n**Business reason.** Once PR #29989 lands, a bundle can translate a related list's title through `objects.<child>.fields.<field>.relatedListTitle`. An author or agent that learns the bundle shape from `skills/objectstack-i18n/SKILL.md` will not find the slot, so the self-lookup case #29942 fixed (a zh-CN related list titled with the child object's label, 「合同」) gets reported again. Reader: the skills seat (`skills/**` is Tier H; the maintainer merges).\n\n## What the skill says (at `origin/main`)\n\n`skills/objectstack-i18n/SKILL.md` ≈:162, the `fields.{field_name}` row: `label`, `help`, `placeholder`, `options`, `inlineTitle`. It has no `relatedListTitle`.\n\n## Wanted\n\n- Add `relatedListTitle` to that row: the title of the related list a `lookup` / `master_detail` field draws on its PARENT's record page. The field lives on the child object, so the key is the child's, and untranslated it keeps its authored text. Mirror the `inlineTitle` wording.\n- Optionally extend the example at ≈:189 with one `relatedListTitle` entry.\n- Pay for the added text within the `check-skills-token-ratchet` ceiling, by deleting text in the same file.\n\nSerial: after PR #29989 merges.\n\nDedupe: searched `objectstack-i18n relatedListTitle` and `skills i18n fields row`. Found only #26759 (closed, the `inlineTitle` precedent). **New.**"
+}

@@ -2,8 +2,8 @@
   "number": 29942,
   "kind": "issue",
   "title": "Record page v3: a related list's title cannot be translated, so a self-lookup list on a contract page reads 「合同」 in zh-CN",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,19 +12,24 @@
   },
   "labels": [
     "bug",
-    "domain:ui",
-    "pm:queue",
+    "domain:spec",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T16:30:32Z",
-  "updated_at": "2026-11-03T17:03:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-04T00:45:27Z",
+  "closed_at": "2026-11-04T00:42:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29942",
   "body": "repo:hotclm#1 · zhuangjianguo · session_01QsR2jUw8KJgAwuwk6sqYLD\n\nFiling gate: ① user-visible defect, reproduced in the browser on @objectstack 18.3.0 (hotclm 18.3 upgrade pass; hotclm decision-box batch 11, maintainer 「同意」 2026-11-03T16:16:59Z, ruled that hotclm follows the v3 record page and files its regressions here).\n\n**Symptom.** hotclm's `clm_contract.renewed_from` is a lookup back to `clm_contract`. Since 18.3 retired `page.slots.tabs` (ADR-0085, #27053) the contract page draws that relationship as a side card, and the card's title is the child object's label: on a zh-CN console a contract page carries a card titled **「合同 0」** (\"Contract\") beside the contract itself. Before 18.3 the page's own `record:related_list` titled it 「续签合同」 through the bundle key `pages.contract_detail.components.contract_renewals.title`.\n\n**Why the app cannot fix it.** The derived list's only title key is `field.relatedListTitle` (`packages/spec/src/data/field.zod.ts`), a plain `z.string()`; `translation.zod.ts` has no `objects.<child>.fields.<field>.relatedListTitle` slot (its sibling `inlineTitle` got one, #26142). Writing `relatedListTitle: 'Renewals'` would ship English to every zh-CN reader, and the i18n gate could not see it. A body-table field group's `label` (`fieldGroups[].relatedList`, #27069) is translatable but is not drawn as the table's title either (measured: the group labelled \"Versions\" draws a table titled with the child label 「合同版本」).\n\n**Minimal repro.** Any object with a lookup to itself (or two lookups from one child): open a record whose locale is zh-CN — the side card reads the child object label.\n\n**Expected capability.** A translatable title for a derived related list: either a `fields.<field>.relatedListTitle` bundle slot (the `inlineTitle` precedent), or the placing field group's translated `label` used as the title.\n\nEvidence: /mnt/project-files/hotclm-objectstack-18-3-upgrade/02-detail-counsel-0.png (right column, 「合同 0」). Platform version: @objectstack/* 18.3.0."

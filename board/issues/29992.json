@@ -1,0 +1,34 @@
+{
+  "number": 29992,
+  "kind": "pull_request",
+  "title": "fix(qa): signup-organization-census waits for the verification mail sent after the sign-up answer",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T00:33:36Z",
+  "updated_at": "2026-11-04T01:20:16Z",
+  "closed_at": "2026-11-04T01:20:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-04T01:20:14Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29992",
+  "body": "Refs #29991\n\n## 维护者速读\n\n- 改了什么：两个注册人口普查的 dogfood 测试（单组织版与有墙版）在注册接口作答之后，先有界地轮询等待验证邮件写入 `sys_identity_email`，再做后续读取；所有断言原样保留。只改测试，不改产品代码。\n- 为什么改：PR #29975 让注册接口「先作答、后发信」，验证邮件的记录在响应之后才落库；单组织版测试在作答后立刻读取，读到 0 条，`main` 上 `Dogfood Regression Gate (2/3)` 因此变红。有墙版测试中间隔着其它异步步骤，目前碰巧能过，属于依赖时序的潜在抖动，同 PR 一并修好。\n- 风险与回滚：风险低，仅测试文件；等待上限 15 秒，超时会带着明确信息失败，不会静默放行。回滚即 revert 本 PR。\n- 先看：`packages/qa/dogfood/test/signup-organization-census.dogfood.test.ts` 的 `beforeAll` 末尾新增的 `vi.waitFor`；其次 `signup-organization-census-walled.dogfood.test.ts` 的 `selfRegister`。\n- 两分钟验证：先 build dogfood 依赖闭包，再跑 `pnpm --filter @objectstack/dogfood exec vitest run --maxWorkers=2 test/signup-organization-census.dogfood.test.ts`，预期 3 个用例全绿（`main` 上同一文件 2 红 1 绿）。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `signup-organization-census.dogfood.test.ts`: `POST /auth/sign-up/email` now answers before its verification mail is sent (PR #29975, `sendAfterResponseOnSignUp`), so the row in `sys_identity_email` lands after the response. The `beforeAll` now ends with a bounded `vi.waitFor` (15 s, the bound `password-reset-ends-sessions.dogfood.test.ts` already uses for the after-response reset mail) that polls `sys_identity_email` for the registrant's mail row. The census is then taken of the whole sign-up, as it was before the send moved. Every assertion in the three cases is unchanged.\n- `signup-organization-census-walled.dogfood.test.ts`: the same read (`:240`, the verification mail for both the registrant and the invitee) sits behind the same after-response send. It passes today only because a sign-in and other journey steps run in between: a timing-dependent pass. `selfRegister` now waits, with the same bound, for the mail row before it goes on, so every later read sees the whole sign-up. Assertions unchanged.\n- No product code, no shared helper: the two waits are five lines each and read the same table with different keys.\n\n## Sweep of `packages/qa/dogfood/test`\n\nOther readers of `sys_identity_email` or of a mail transport, checked against \"reads right after a `/sign-up/email` answer\":\n\n- `password-reset-ends-sessions.dogfood.test.ts` and `identity-mail-read-gate.dogfood.test.ts` (`:310`): read the after-response password-reset mail, already behind `vi.waitFor`. No sign-up mail read.\n- `identity-mail-read-gate.dogfood.test.ts` `beforeAll` (`:123`), `upgrade-18x-harness.dogfood.test.ts`, `audit-mail-bodies.dogfood.test.ts`: read fixture rows from an 18.x database, not a fresh sign-up.\n- `self-registration-grant-first-membership-walled.dogfood.test.ts`: signs up through the door but never reads the mail log or a transport.\n- `email-template-*.test.ts`: register `EmailServicePlugin` but do not sign up.\n- `upgrade-harness/cli-prerelease-fixture.ts`: signs up and later reads `sys_email`, but it drives a pinned prerelease CLI to build a fixture; it is not a CI test and runs no HEAD sign-up code.\n\n## Tests\n\nHead `ce36ea885f`, dogfood dependency closure built first (`pnpm --workspace-concurrency=2 --filter '@objectstack/dogfood^...' build`, lock VERDICT command-exit 0).\n\n- Reproduce on `main`: the `origin/main` copy of the census file, run as a temporary file: 2 failed, 1 passed, the same two failures as CI. Temporary file removed, `git status` clean.\n- After: both census files, run three times in a row: 2 files, 15 tests passed, each run.\n- `pnpm --filter @objectstack/dogfood run typecheck`: exit 0; `tsc --listFilesOnly` lists both changed files.\n\nThe `Dogfood Regression Gate` jobs do not run on pull requests or in the merge queue (their `if:` excludes both events), so the local runs above are the evidence for this file before merge; `main`'s push battery is the first CI run on it.\n\n<details>\n<summary>Reproduce on main (origin/main copy of the file)</summary>\n\n```text\n     × guard: the boot is single, and the sign-up reached all three writers 7ms\n     × sys_identity_email carries no organization column, and the sign-up's mail row names none 6ms\nAssertionError: the verification mail persisted, in the identity-mail log: expected 0 to be greater than 0\nAssertionError: expected undefined to match object { related_object: 'sys_user', …(1) }\n Test Files  1 failed (1)\n      Tests  2 failed | 1 passed (3)\nos-verify-lock: VERDICT command-exit 1 · held the lock 26s · waited 0s\n```\n\n</details>\n\n<details>\n<summary>After, three runs (both census files)</summary>\n\n```text\nrun1  Test Files  2 passed (2)   Tests  15 passed (15)   VERDICT command-exit 0\nrun2  Test Files  2 passed (2)   Tests  15 passed (15)   VERDICT command-exit 0\nrun3  Test Files  2 passed (2)   Tests  15 passed (15)   VERDICT command-exit 0\n```\n\n</details>\n\n## Acceptance notes\n\n- Test-only, in a private package (`@objectstack/dogfood`): nothing published changes, so this PR carries `skip-changeset` and no changeset.\n- No ablation: the change adds a wait and pins no new behaviour; the red-on-`main` run above is the before leg.\n\n## Verification\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` on head `ce36ea885f` derived 51 commands; all 51 were run with each exit code captured before any pipe. 50 exit 0. `pnpm check:dual-build-cjs-loads` exited 3 (PREREQUISITE NOT MET: packages outside the dogfood closure have no `dist/`), so it is NOT MEASURED locally; CI's build measures it. `--ran` reconciliation: 51 derived, 50 run, 1 NOT-MEASURED, 0 UNRUN.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYn5CmmdShCJifm6WYj)_\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 29977,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): an undeclared hook abort is HOOK_ABORTED on the per-object batch row too",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T21:08:56Z",
+  "updated_at": "2026-11-03T23:59:41Z",
+  "closed_at": "2026-11-03T23:59:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-03T23:59:39Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29977",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwB7J3TmFTYMYQrfpye6GQNg9)_\n\nFixes #29894\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：钩子用自由文本中止写入且未声明错误码时，`POST /api/v1/data/:object/batch` 的行错误码现在是 `HOOK_ABORTED`，不再是 `VALIDATION_ERROR`，与 `/data`、`/createMany`、`/batch` 一致。\n- **为什么改**：#27597 给这种中止定了唯一线上码 `HOOK_ABORTED`，但行映射 `toRowApiError` 仍按 400 推导出 `VALIDATION_ERROR`，批量客户端会把业务拒绝当成输入格式错误。\n- **风险与回滚**：只换这一种中止的行码（文案、`httpStatus` 不变）；钩子声明了码的照旧。回滚即 revert 本 PR。\n- **先看**：`packages/metadata-protocol/src/protocol-client-failures.ts` 的 `toRowApiError` / `isUndeclaredHookAbort`；新 pin `packages/qa/dogfood/test/batch-row-hook-aborted.dogfood.test.ts`。\n- **两分钟验证**：`pnpm --filter @objectstack/dogfood exec vitest run test/batch-row-hook-aborted.dogfood.test.ts`，预期 14 passed。\n- **需要你做的**：无，席位落地。\n\n## What changes\n\n- **`@objectstack/metadata-protocol` (patch).** `toRowApiError` now answers `UNDECLARED_HOOK_REFUSAL_CODE` (`HOOK_ABORTED`, from `@objectstack/types`) for a sandboxed hook body's refusal that spelled no `code` and is served at a 4xx. That is the same test `resolveThrownHttpError` applies on the doors #27672 moved, restated over the row's inputs (`isUndeclaredHookAbort`). A registered code the body declared still wins. An unregistered one still gets the code its status derives, as on the resolver's doors. The row's `message` (the hook's sentence) and the absent `httpStatus` don't change.\n- **FROM → TO.** Row code `VALIDATION_ERROR` → `HOOK_ABORTED` for an undeclared hook abort, on every row that shares the mapper: `POST /api/v1/data/:object/batch` with `operation` `create` / `update` / `upsert` / `delete`, in every mode (plain, `atomic`, `continueOnError`), and the per-row results of `updateManyData` / `deleteManyData`.\n- **How the move is declared.** It is declared the way #27672 (PR #27898) declared the same `VALIDATION_ERROR` → `HOOK_ABORTED` move on its doors: `patch`, `Clause-②: no`, `Metadata-protocol: none`. No input that was accepted before is refused, no key is added, and no code is minted (`HOOK_ABORTED` is #27597's ledgered code).\n\n### Same-pattern sweep (what I checked)\n\n- `protocol-batch-data.ts`: the create/upsert loop (`:586`), the update loop (`:887`) and the delete loop (`:1079`) all call `toRowApiError`, so one fix covers them. The atomic siblings stay `NOT_ATTEMPTED` / `ROLLED_BACK`, and the causal row now carries `HOOK_ABORTED` (pinned live).\n- `clientFacingFailureCode` (same file): it builds the metadata `failed[]` code limb. No hook abort reaches it, so it is left as is.\n- **Import rows (`POST /data/:object/import`, `core/src/utils/import-runner.ts` `toFailedResult`) do not share the mapper.** Measured on the same boot, the row answers `{ error: <sentence>, code: \"IMPORT_ROW_FAILED\" }`, which is the import report's own generic code and not `VALIDATION_ERROR`. This PR leaves it alone, because the order scopes the sweep to doors that share the mapper. Whether the import row should also say `HOOK_ABORTED` is reported to the seat as a possible follow-up.\n\n## Pins\n\n- **New, live:** `packages/qa/dogfood/test/batch-row-hook-aborted.dogfood.test.ts`. It boots once (14 cases). §1 covers the card's three whole-request doors (`/data`, `/createMany`, `/batch`): `400`, the sentence, and `HOOK_ABORTED`. §2 covers the per-object batch row: `create`, `create atomic`, `create continueOnError`, `update`, `upsert` (existing id), `delete`, each with the sentence and `HOOK_ABORTED`, and nothing written. §3 is the control: a hook that declares `RECORD_LOCKED` keeps it on all four doors.\n- **Moved:** `packages/metadata-protocol/src/protocol.batch-row-sandbox-refusal.test.ts` §1/§2 (8 cases) now expect `HOOK_ABORTED`, and §1 compares the row's code to the `/data` door's own `body.code` instead of the code its status derives. §3's unregistered-code case still pins `VALIDATION_ERROR` and is unchanged.\n\n**Ablation, once.** I restored `protocol-client-failures.ts` from `origin/main` and rebuilt metadata-protocol. The dogfood file then went 6 failed / 8 passed: exactly the six §2 rows, each `expected 'VALIDATION_ERROR' to be 'HOOK_ABORTED'`, while §1 and the §3 controls stayed green. The unit file went 8 failed / 12 passed. After restoring the fix and rebuilding: 14/14 and 20/20.\n\n## Verification\n\n- `pnpm --filter @objectstack/metadata-protocol test`: exit 0 (312 files, 22339 passed). `typecheck`: exit 0.\n- `pnpm --filter @objectstack/dogfood typecheck`: exit 0. The new dogfood file: 14 passed.\n- `pnpm lint`: exit 0.\n- Build: `turbo run build --filter=@objectstack/dogfood^...` exit 0, plus the seven dists `check:dual-build-cjs-loads` reads.\n- `node scripts/pm/dispatch-gates.mjs --commands` on `f286c443`: 63 derived, 63 run, all exit 0. `--ran` reports \"63 run, 0 NOT-MEASURED\". `check:dual-build-cjs-loads` exited 3 until those dists were built, then 0.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WGufzeV9ZbECNr1Z2G2Puu\n\n\n<!-- signed: domain:server#6 · os-support-ai · session_01WGufzeV9ZbECNr1Z2G2Puu -->\n"
+}

@@ -2,8 +2,8 @@
   "number": 29817,
   "kind": "issue",
   "title": "ADR-0012 amendment: the push channel's relay transport, and vendor as a token type rather than a plugin boundary (ruling cloud#3519)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "hotlong",
@@ -13,7 +13,6 @@
   "labels": [
     "documentation",
     "domain:spec",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T06:06:57Z",
-  "updated_at": "2026-11-03T18:08:48Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T22:08:39Z",
+  "closed_at": "2026-11-03T22:05:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29817",
   "body": "Blocked-by: objectstack-ai/objectstack#29816\n\n## Context\n\nobjectstack-ai/cloud#3519 was ruled **1C 2A 3A 4B 5A 6B 7B** on 2026-11-03. The store-published app pushes through a hosted relay in objectstack-ai/cloud. In phase 2, that relay also fronts the mainland-China vendor channels (HMS/Honor, Xiaomi, OPPO, vivo). ADR-0012 still says the domestic vendors are alternate channel plugins (§6, Non-Goals), and its §4 table lists only APNs/FCM as the push backend.\n\n## Ask\n\nOne PR on `docs/adr/0012-notification-platform.md`. It is a governed path, so the maintainer merges it by hand.\n\n- **§4:** the `push` backend becomes `relay (hosted, default) | direct (APNs/FCM, white-label)`.\n- **§6:** the relay fronts the domestic vendors. `vendor` on a device row is a token-type discriminator that the relay routes on, not a plugin boundary. The `PushVendorSchema` widening still lands together with the transports, as `push-config.zod.ts` requires.\n- **Non-Goals:** rewrite them to match.\n- **Privacy:** the relay never receives plaintext content. Phase 1 is ID-only; phase 2 is end-to-end encryption with a device key.\n- **Air-gap:** no system push; the in-app inbox only.\n- **Supersession:** record which earlier wording this amends, and cite #3519.\n\n## Acceptance\n\nThe ADR text matches the spec shape from objectstack-ai/objectstack#29816 and the ruling. There are no code changes."

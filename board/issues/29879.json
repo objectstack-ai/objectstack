@@ -2,8 +2,8 @@
   "number": 29879,
   "kind": "issue",
   "title": "Datasources: a PATCH whose new secret fails to connect answers \"the new configuration is NOT in force\" but saves that secret anyway, so the datasource breaks at the next restart",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T09:25:09Z",
-  "updated_at": "2026-11-03T10:01:42Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T23:39:12Z",
+  "closed_at": "2026-11-03T22:58:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29879",
   "body": "domain:devx#1 · os-warren · session_01JQwxbWT669ynWFKZjqFyNF\n\n立卡门: ① 产品缺陷，具名落点 + 复现（reach: 公开入口 HTTP `PATCH /api/v1/datasources/:name` 实测两次错误结果）\n业务理由: 管理员轮换外部数据源密码时输错（或粘进了空白），接口明说「旧连接池仍在服务、新配置未生效」，管理员据此以为什么都没变；实际新凭据已存盘、旧凭据被替换，下一次重启数据源就连不上，而能用的旧密码已经不在系统里。不修，一次手误会在之后某次重启时让外部数据源失联，排障还被那句「未生效」带偏。\n动手的读者: domain:server 席，`packages/services/service-datasource` 的 `updateDatasource` 与 `datasource-connection-service.ts` 的 `reconnect`（失败保旧池的那条路径应同时不落新记录或回滚凭据绑定），附 HTTP 层 pin（PATCH 坏密码 → 重启 → `/test` 仍 ok）。\n查重: `repo is:issue datasource secret whitespace` 25 命中、`datasource credential \"not in force\"` 7、`datasource PATCH secret` 186（均含已关）；最近邻 #28928（空串 secret 覆盖凭据，已关，修复后 `\"\"` 现答 400）是同一扇门的另一形状，#28549、#29164 不是本现象。\n\nQA-source: #29877 · integration-system.datasource-credential-refusal-matrix · observed beside the clauses\n\n## What happens\n`PATCH /api/v1/datasources/:name` with a new `secret` that fails to connect (a wrong password, or a whitespace-only value such as `\"   \"` or `\"\\t\\n\"`) answers 200 with `status: \"error\"` and a `statusReason` ending \"— the previous configuration's pool was kept and is still the one serving; the new configuration is NOT in force\". But the new credential has been stored:\n- `GET /api/v1/meta/datasource/:name` shows `external.credentialsRef` pointing at a new `sys_secret` handle;\n- `/test` stays ok only because the kept pool still serves;\n- after a server restart `POST /api/v1/datasources/:name/test` answers `ok: false`, \"password authentication failed\".\n\nSince #28928, `{\"secret\":\"\"}` is refused 400 \"Nothing was written\"; a whitespace-only value passes that guard, and a wrong non-blank value was never guarded. Admin-only door; no credential is disclosed.\n\nMeasured at framework `589049b0` (main, 2026-11-03) on a stock showcase boot from a scratch copy, with a scratch PostgreSQL 16 (scram-sha-256), twice on fresh datasources, plus controls.\n\n## Reproduction\n1. Boot the showcase and a PostgreSQL that requires a password.\n2. As admin, `POST /api/v1/datasources` `{\"name\":\"r7pg3\",\"driver\":\"postgres\",\"schemaMode\":\"external\",\"external\":{},\"config\":{\"host\":\"127.0.0.1\",\"port\":PGPORT,\"database\":\"qa\",\"username\":\"qa\"},\"secret\":\"REALPASSWORD\"}` → 201, status ok.\n3. `PATCH /api/v1/datasources/r7pg3` `{\"secret\":\"definitely-wrong-pw\"}` (or `\"   \"`) → 200, `status: \"error\"`, statusReason \"…the new configuration is NOT in force\".\n4. `GET /api/v1/meta/datasource/r7pg3` → `external.credentialsRef` changed. `POST /api/v1/datasources/r7pg3/test` → ok (old pool).\n5. Restart the server; `POST /api/v1/datasources/r7pg3/test`.\n6. **Expected:** a configuration the answer reports as not in force is not saved; the stored credential binding is the one that is serving, so the restart connects.\n7. **Actual:** the restart reads the failed credential: `ok: false`, \"password authentication failed\"; the working credential is gone.\n\n## Mechanism (a guess, read at 589049b0)\n`reconnect` in `packages/services/service-datasource/src/datasource-connection-service.ts` keeps the previous pool when the new configuration fails (the `stillServingSuffix` branch, ~L1108), but by then the update has already persisted the new record and rotated the secret, so the \"kept\" state exists only in memory. A whitespace-only `secret` should probably be refused like the empty string (`splitSecret`, `packages/services/service-datasource/src/admin-routes.ts` ~L665)."
