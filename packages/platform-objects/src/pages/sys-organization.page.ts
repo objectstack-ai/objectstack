@@ -17,10 +17,12 @@ import type { Page } from '@objectstack/spec/ui';
  * to what the slotted page rendered — the synthesized default with the strip
  * swapped in — node for node:
  *
- *  - `page:header` carrying the object's `record_header` actions (Set Active,
- *    Invite User, Leave Organization, Rename Organization — Edit and Delete are
- *    row actions only), the list the synthesized header carried. A full page
- *    renders exactly the nodes it declares, so the header is spelled out.
+ *  - `page:header` with `placedActions: true` (#29951): every action placed on
+ *    `sys_organization` at `record_header` / `record_more`, read live (Set
+ *    Active, Invite User, Leave Organization, Rename Organization — Edit and
+ *    Delete are row actions only — and any an installed package places
+ *    there), the set the synthesized header carried. A full page renders
+ *    exactly the nodes it declares, so the header node is spelled out.
  *  - `record:highlights` over the object's `highlightFields` minus the title
  *    field (`slug`; `name` is the page H1).
  *  - the Members / Invitations / Teams strip, unchanged, Members at index 0
@@ -56,13 +58,15 @@ export const SysOrganizationDetailPage: Page = {
       name: 'main',
       width: 'full',
       components: [
-        // The synthesized header's action list: every `sys_organization`
-        // action declaring `record_header` or `record_more`, in declaration
-        // order. The host appends its own system actions after these.
+        // The synthesized header's action set, read live: every action placed
+        // on `sys_organization` at `record_header` or `record_more`, in
+        // declaration order, including one another package places there (a
+        // frozen id list dropped those, #29951). The host appends its own
+        // system actions after these.
         {
           type: 'page:header',
           properties: {
-            actions: ['set_active_organization', 'invite_user', 'leave_organization', 'rename_organization'],
+            placedActions: true,
           },
         },
         { type: 'record:highlights', properties: { fields: ['slug'] } },

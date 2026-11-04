@@ -3514,6 +3514,11 @@
           "description": "Action IDS — the names of actions declared on the object's own metadata — rendered in the header before any host-injected system actions. An id whose action declares neither record_header nor record_more in its locations renders nowhere."
         },
         {
+          "name": "placedActions",
+          "type": "boolean",
+          "description": "Set true to draw every action of the object placed at record_header or record_more, read live from the object's metadata, in place of an Actions list: an action another package adds to the object is drawn without editing the page. Refused beside an authored Actions list: keep one."
+        },
+        {
           "name": "recordChrome",
           "type": "boolean",
           "description": "Set false for the bare h1 header on non-record pages"

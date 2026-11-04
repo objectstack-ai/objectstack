@@ -66,6 +66,7 @@ import { useNavigationContext, useRecordBreadcrumbTitle } from '../context/Navig
 // Both sets are derived, not restated — see record-detail-system-fields.ts.
 import { deriveRecordDetailSections } from './recordDetailSections.js';
 import type { DataSource, FeedItem, Reaction, RecordPageOperation, RecordPagePayload } from '@object-ui/types';
+import { placedHeaderActions } from '@object-ui/types';
 import type { ActionDef, ActionParamDef, ConfirmationHandler, ParamCollectionHandler } from '@object-ui/core';
 import type { ConsoleActionDispatch } from '../consoleActionDispatch.js';
 import { useRecordApprovals, openApprovalOf, isSubmitterOf } from '../hooks/useRecordApprovals.js';
@@ -3930,15 +3931,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // `record_more` renders inside the header's ⋯ overflow menu (the spec's
     // "overflow menu under the More/⋯ button" location — PageHeaderRenderer
     // routes record_more-only actions into the overflow; #2358 trap 2).
+    // The set is `placedHeaderActions` (`@object-ui/types`): the ONE reader an
+    // authored `page:header` with `placedActions: true` reads too
+    // (objectstack#29951), so the synthesized header and such a page draw the
+    // same actions, an action another package places on the object included.
     const recordHeaderActions = (() => {
-      const seen = new Set<string>();
-      const base = (objectDef.actions || []).filter((a: any) => {
-        if (!a.locations?.includes('record_header') && !a.locations?.includes('record_more')) return false;
-        if (!a.name) return true;
-        if (seen.has(a.name)) return false;
-        seen.add(a.name);
-        return true;
-      }).map((a: any) => localizeActionTexts(objectDef.name, a));
+      const base = placedHeaderActions<any>(objectDef.actions as any[] | undefined)
+        .map((a: any) => localizeActionTexts(objectDef.name, a));
 
       // ⛔ No approval actions are injected here any more (objectui#3055).
       // They used to be two hand-written buttons (approve/reject only, no
