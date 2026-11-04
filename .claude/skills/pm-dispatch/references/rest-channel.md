@@ -48,7 +48,7 @@
 - ✓ `origin/main` 合进 PR head:中继 op `pr_update_branch`(`pull` + 40 位 `expected_head_sha`),真合并提交。
 - 挂子卡走中继 op `sub_issue_add`/`sub_issue_remove`(`issue` 父号,`sub_issue` 子号),回读父列表。
 - 公告经中继 `advisory_create`(首选)等四操作与 `advisory_read`,规则住 `security-findings.md`。
-- `advisory_report` 403 经复测为瞬态:按 `security-findings.md` 两因读,隔日重试一次,⛔ 不换账号。
+- `advisory_report` 403 复测不复现:按 `security-findings.md` 两因读,隔日重试一次,⛔ 不换账号。
 - ✓ 落地经中继 `node scripts/pm/fleet-write/dispatch.mjs --repo O/N --actions-file F`;`--via dispatch` 同载。
 - ✓ 启动 run 走 op `workflow_dispatch`:解锁物是白名单 run 才启;入表只经 workflow 自己的 PR。
 - F = `[{"op":"workflow_dispatch","workflow":"release.yml","ref":"main","inputs":{"refresh_version_pr":true}}]`。
