@@ -728,6 +728,19 @@ describe('both hide-fields lists offer the fields a reader may add, and only fie
     expect(checkboxLabels(content)).toEqual(['Title', 'Account', 'Status']);
   });
 
+  it('a column with no label of its own is listed under the definition\'s label, not its machine name', async () => {
+    // A bare `{ field }` and a bare name, neither labelled and with no translation: the grid's header falls back to
+    // the definition's label, and so does the list.
+    mount(FULL_READ, { columns: [{ field: 'title' }, { field: 'status' }, 'priority'] });
+    await definitionLoaded();
+    let labels: string[] = [];
+    await waitFor(async () => {
+      labels = await inPopover(toolbarButton(/^hide fields/i), checkboxLabels);
+      expect(labels).toContain('Status');
+    });
+    expect(labels).toEqual(['Title', 'Status', 'Priority']);
+  });
+
   it('a field the definition marks hidden is not offered; system fields follow the business fields', async () => {
     mountWithFields(
       FULL_READ,

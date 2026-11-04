@@ -5585,14 +5585,17 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // carry as its own entry, labelled with the field name, so the level can be
   // removed, and no other level or "Add group field" offers it.
   //
-  // objectstack#30077 — a column the READER added (`addedFields`) carries no
-  // label of its own (the host appends the bare field), so its fallback is the
-  // definition's label, the one the add list offered it under.
-  const addedFieldsKey = (addedFields ?? []).join('\u0000');
+  // objectstack#30077 — the label, in order: the translation of the field,
+  // then the column's own `label`, then the object definition's field label,
+  // then the field name. A column with no label of its own (a bare `{ field }`
+  // or name, and every column a reader added) is listed under the label the
+  // definition declares, the source the grid's header falls back to, rather
+  // than under its machine name.
   const allFields = React.useMemo(() => {
-    const added = new Set(addedFieldsKey ? addedFieldsKey.split('\u0000') : []);
-    const definitionLabel = (name: string): string | undefined =>
-      added.has(name) ? objectDef?.fields?.[name]?.label : undefined;
+    const definitionLabel = (name: string): string | undefined => {
+      const label = objectDef?.fields?.[name]?.label;
+      return typeof label === 'string' && label ? label : undefined;
+    };
     return (Array.isArray(schema.columns) ? (schema.columns as any[]) : []).flatMap((f: any) => {
       if (typeof f === 'string') {
         if (!canReadField(perms, schema.objectName, f)) return [];
@@ -5607,7 +5610,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       if (!name || !canReadField(perms, schema.objectName, name)) return [];
       return [{ name, label: tFieldLabel(name, f.label || definitionLabel(name) || name) }];
     });
-  }, [schema.columns, tFieldLabel, perms, schema.objectName, addedFieldsKey, objectDef]);
+  }, [schema.columns, tFieldLabel, perms, schema.objectName, objectDef]);
 
   // objectui#11984 — what the two hide-fields lists (the toolbar popover and
   // the View settings section) are handed of `hiddenFields`. An entry naming a
