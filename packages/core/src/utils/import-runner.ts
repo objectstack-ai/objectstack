@@ -12,7 +12,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { CreateDataRequest, FindDataRequest, GetMetaItemRequest, UpdateDataRequest, ValidateDataIssue, ValidateDataRequest, ValidateDataResponse } from '@objectstack/spec/api';
 import { isMatchKeySets } from '@objectstack/spec/api';
 import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult } from './bulk-write.js';
-import { isUniqueViolationError, isEngineDuplicateRecordEnvelope, mapDataError, sandboxBusinessMessage, isSandboxOrigin, isSandboxOwnFault } from '@objectstack/types';
+import { isUniqueViolationError, isEngineDuplicateRecordEnvelope, mapDataError, sandboxBusinessMessage, isSandboxOrigin, isSandboxOwnFault, resolveThrownHttpError, UNDECLARED_HOOK_REFUSAL_CODE } from '@objectstack/types';
 
 /**
  * import-runner — the shared row-processing core for bulk import.
@@ -527,6 +527,17 @@ export function sanitizeRowError(raw: unknown): string {
  * rule applies: a sandboxed error the door answers with a 5xx takes the door's
  * sentence. ⛔ Still not "every door 5xx": a driver error is neither a sandbox
  * origin nor a sandbox fault, and its row keeps {@link sanitizeRowError}'s text.
+ *
+ * ## An undeclared hook abort is `HOOK_ABORTED`, as on every other write door (#29978)
+ *
+ * A sandboxed body's free-text refusal that declared no code answers
+ * {@link UNDECLARED_HOOK_REFUSAL_CODE} on `/data`, `/createMany`, `/batch` and
+ * the per-object batch row. This row said `IMPORT_ROW_FAILED`, so an import
+ * client branching on `code` could not tell a business rule's refusal from any
+ * other failed row. {@link isUndeclaredHookAbort} now picks that code where
+ * the row had none of its own: a finding's code and a code the body declared
+ * still win, and every other failure keeps `IMPORT_ROW_FAILED`. The row's
+ * sentence is unchanged; it was already the hook's.
  */
 function toFailedResult(rowNo: number, err: unknown, objectName: string): ImportRowResult {
   const e = err as { code?: unknown; message?: unknown; fields?: unknown; field?: unknown } | null | undefined;
@@ -537,7 +548,7 @@ function toFailedResult(rowNo: number, err: unknown, objectName: string): Import
     if (adopted !== undefined) return adopted;
   }
   const thrownCode = isEngineDuplicateRecordEnvelope(e) ? 'UNIQUE_VIOLATION' : e?.code;
-  const code = first?.code ?? thrownCode ?? 'IMPORT_ROW_FAILED';
+  const code = first?.code ?? thrownCode ?? (isUndeclaredHookAbort(err) ? UNDECLARED_HOOK_REFUSAL_CODE : 'IMPORT_ROW_FAILED');
   const field = first?.field != null && first.field !== '' ? first.field : e?.field;
   const sandboxed = isSandboxOrigin(err) || isSandboxOwnFault(err);
   const sandboxFault = sandboxed && door.status >= 500 ? String(door.body.error) : undefined;
@@ -546,6 +557,24 @@ function toFailedResult(rowNo: number, err: unknown, objectName: string): Import
     row: rowNo, ok: false, action: 'failed', error: message, code: String(code),
     ...(field != null && field !== '' ? { field: String(field) } : {}),
   };
+}
+
+/**
+ * [#29978] Is this row failure a hook ABORT that declared no code?
+ *
+ * Asked of `resolveThrownHttpError`, which declares
+ * {@link UNDECLARED_HOOK_REFUSAL_CODE} and answers it for exactly that throw:
+ * a sandboxed body's business refusal ({@link sandboxBusinessMessage}
+ * answered), no `code` spelled, served at a 4xx. The fallback is `400`, the
+ * status the data doors serve an undeclared sandbox refusal at, so a refusal
+ * that declared no status resolves into the 4xx band, and one that declared a
+ * 5xx stays a fault. This is the test the per-object batch row's
+ * `toRowApiError` (`@objectstack/metadata-protocol`) restates; that package
+ * sits above this one, so the resolver is the shared judge both reach.
+ * ⛔ Never a second reading of `innerMessage`, `code` or the status here.
+ */
+function isUndeclaredHookAbort(err: unknown): boolean {
+  return resolveThrownHttpError(err, 400).code === UNDECLARED_HOOK_REFUSAL_CODE;
 }
 
 /** The head of a `fields` list when it is a finding (an object); a bare name or an empty list is none. */
