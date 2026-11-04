@@ -61,7 +61,10 @@
  *
  *   method / accessor body   ONE statement: `return <forwarding call>`,
  *                     `<forwarding call>;`, `return <.-chain>` (a getter over
- *                     state), or `<.-chain> = <argument>` (a setter). It may be
+ *                     state), or `<.-chain> = <argument>` (a setter writing
+ *                     its own state: the chain hangs off `this`, or off the
+ *                     instance parameter of a host factory arrow, never off a
+ *                     module binding or an imported name). It may be
  *                     preceded by `const` declarations whose initializers are
  *                     forwarding arrows or host object literals of forwarders:
  *                     the hand series' `.call(host, …)` stub, which builds a host
@@ -79,6 +82,12 @@
  *   parameters        a default value must be a literal or a `.`-chain: a
  *                     computed default is a body in the signature.
  *
+ *   same-file target  a forwarding call or `new` may not reach a function,
+ *                     class, enum or variable declared at the top level of the
+ *                     facade file itself (the facade class aside): a
+ *                     delegation must reach another module, or the body has
+ *                     only moved one level down the same file.
+ *
  * Anything else is a body: a branch, a loop, a `try`, a local `let`, an
  * operator, a template with substitutions, an object literal built inline as an
  * argument, a nested call two levels deep. A member kind this file does not know
@@ -94,6 +103,8 @@
  *   • a row with no card, or a card that is not `#<number>`        → red
  *   • a row naming a file that is not a registered facade           → red
  *   • a row naming a member the class does not have                 → red
+ *     (the refusal names the nearest member key when only the `static `
+ *     or `get ` / `set ` prefix is missing)
  *   • a row naming a member that is ALREADY a delegation            → red
  *     (its card landed: delete the row, the member stays a delegation)
  *   • two rows for one member, or a key the registry does not know  → red
@@ -116,9 +127,11 @@
  * ## What it does NOT judge (measured, so nobody assumes it)
  *
  * Only the members of the registered class. Top-level functions in the facade
- * file and other classes in it are outside the ruling's "method body" and
- * outside this gate. Measured on #29998's facade head `bba9d24d`: `protocol.ts`
- * holds two top-level functions (24 lines) and one class.
+ * file and other classes in it are outside the ruling's "method body", so their
+ * bodies are not judged; but no facade member may forward to one (the same-file
+ * rule above), so they cannot carry a moved body. Measured on #29998's facade
+ * head `bba9d24d`: `protocol.ts` holds two top-level functions (24 lines) and
+ * one class, and no member of either facade head forwards into its own file.
  *
  * Exit codes: 0 every registered facade is delegation-only (exceptions aside);
  * 1 a body, a registry problem or an unreadable facade; 2 bad arguments;
@@ -301,15 +314,41 @@ function stripAwait(e) {
   return e && ts.isAwaitExpression(e) ? unwrap(e.expression) : e;
 }
 
+/** The name a `.`/`[]` chain hangs off: an Identifier, `this`, or null. */
+function chainRoot(e) {
+  e = unwrap(e);
+  while (e && (ts.isPropertyAccessExpression(e) || ts.isElementAccessExpression(e))) e = unwrap(e.expression);
+  return e && (ts.isIdentifier(e) || e.kind === ts.SyntaxKind.ThisKeyword) ? e : null;
+}
+
+/**
+ * Whether `id` names a parameter of a function or arrow EXPRESSION around it:
+ * the instance a host factory is handed (`installProtocolHost((protocol) =>
+ * ({ set x(v) { protocol.x = v; } }))`). A member's own parameters do not
+ * count, so a write through a caller's object stays a body.
+ */
+function isEnclosingHostParameter(id) {
+  for (let n = id.parent; n; n = n.parent) {
+    if ((ts.isArrowFunction(n) || ts.isFunctionExpression(n)) &&
+        n.parameters.some((p) => ts.isIdentifier(p.name) && p.name.text === id.text)) return true;
+    if (ts.isClassElement(n) && ts.isClassLike(n.parent)) return false;
+  }
+  return false;
+}
+
+/**
+ * A write to the instance's own state: `this.x = v` (also `(this as any)._x = v`),
+ * or `protocol.x = v` through a host factory's instance parameter. Never a write
+ * to a module binding or an imported name (`Facet.cache = v`).
+ */
 function isStateWrite(e) {
   e = unwrap(e);
-  return (
-    !!e &&
-    ts.isBinaryExpression(e) &&
-    e.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-    isReference(e.left) &&
-    isArgument(e.right, 0)
-  );
+  if (!e || !ts.isBinaryExpression(e) || e.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return false;
+  const left = unwrap(e.left);
+  if (!(ts.isPropertyAccessExpression(left) || ts.isElementAccessExpression(left)) || !isReference(left)) return false;
+  const root = chainRoot(left);
+  const ownState = !!root && (root.kind === ts.SyntaxKind.ThisKeyword || isEnclosingHostParameter(root));
+  return ownState && isArgument(e.right, 0);
 }
 
 function isForwardingStatement(s) {
@@ -361,7 +400,7 @@ function judgeDelegationBody(block) {
   }
   if (isForwardingReturn(last) || isForwardingStatement(last)) {
     if (stmts.length > 1) return { shape: 'host-literal stub (`const host = {…}; return fn.call(host, …)`)' };
-    const e = ts.isReturnStatement(last) ? stripAwait(last.expression) : stripAwait(last.expression);
+    const e = stripAwait(last.expression);
     if (isReference(e)) return { shape: 'state read (`return this.x`)' };
     if (isStateWrite(e)) return { shape: 'state write (`this.x = v`)' };
     const hostArg = e.arguments.some((a) => ts.isCallExpression(unwrap(a)));
@@ -413,6 +452,46 @@ function bodyInInitializer(init) {
   return found;
 }
 
+/**
+ * The names a facade file declares at its own top level (functions, classes,
+ * variables, enums), the facade class itself excepted. A delegation that
+ * forwards to one of them keeps the body in the facade file, just one level
+ * down, so the file grows through that door: a forwarding target must live in
+ * another module. Imports are not declarations here, so a facet imported from
+ * its own module is never in this set.
+ */
+function sameFileTargets(sf, facadeClass) {
+  const names = new Set();
+  for (const st of sf.statements) {
+    if ((ts.isFunctionDeclaration(st) || ts.isClassDeclaration(st) || ts.isEnumDeclaration(st)) && st.name) {
+      names.add(st.name.text);
+    } else if (ts.isVariableStatement(st)) {
+      for (const d of st.declarationList.declarations) if (ts.isIdentifier(d.name)) names.add(d.name.text);
+    }
+  }
+  names.delete(facadeClass);
+  return names;
+}
+
+/** The first call or `new` in a member whose target hangs off a same-file declaration, or null. */
+function sameFileForward(m, targets) {
+  if (targets.size === 0) return null;
+  let found = null;
+  const visit = (n) => {
+    if (found) return;
+    if (ts.isCallExpression(n) || ts.isNewExpression(n)) {
+      const root = chainRoot(n.expression);
+      if (root && ts.isIdentifier(root) && targets.has(root.text)) {
+        found = { node: n, name: root.text };
+        return;
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(m);
+  return found;
+}
+
 const hasModifier = (m, kind) => (ts.getModifiers(m) ?? []).some((x) => x.kind === kind);
 
 function memberKey(m, sf, staticBlockIndex) {
@@ -429,6 +508,7 @@ function memberKey(m, sf, staticBlockIndex) {
  */
 export function judgeClass(cls, sf) {
   const members = [];
+  const targets = sameFileTargets(sf, cls.name?.text);
   let staticBlocks = 0;
   const line = (n) => sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
   for (const m of cls.members) {
@@ -436,6 +516,14 @@ export function judgeClass(cls, sf) {
     if (ts.isClassStaticBlockDeclaration(m)) staticBlocks += 1;
     const key = memberKey(m, sf, staticBlocks);
     const at = line(m);
+    const local = sameFileForward(m, targets);
+    if (local) {
+      members.push({
+        key, line: at, verdict: 'body',
+        why: `it forwards to \`${local.name}\` (line ${line(local.node)}), which is declared in the facade file itself — a delegation must reach another module, or the body has only moved one level down the same file`,
+      });
+      continue;
+    }
     const params = m.parameters ?? [];
     const badParam = params.find((p) => p.initializer && !isDataValue(p.initializer));
     if (ts.isPropertyDeclaration(m)) {
@@ -565,7 +653,11 @@ export function checkRegistry(registry, readFile) {
     if (!entry.judged) return; // the facade itself was refused above
     const member = entry.judged.find((m) => m.key === row.member && m.verdict !== 'signature');
     if (!member) {
-      return problem(where, `${label}: \`${entry.row.class}\` has no member \`${row.member}\` with a body — the row is stale; delete it.`);
+      const bare = (k) => k.replace(/^static /, '').replace(/^(get|set) /, '');
+      const near = entry.judged.filter((m) => m.verdict !== 'signature' && bare(m.key) === bare(row.member)).map((m) => `\`${m.key}\``);
+      return problem(where, near.length
+        ? `${label}: \`${entry.row.class}\` has no member spelled \`${row.member}\`; did you mean ${near.join(' or ')}? A static member is keyed \`static name\`, an accessor \`get name\` / \`set name\`.`
+        : `${label}: \`${entry.row.class}\` has no member \`${row.member}\` with a body — the row is stale; delete it.`);
     }
     if (member.verdict !== 'body') {
       return problem(where, `${label}: the member is already a ${member.verdict === 'field' ? 'field' : 'delegation'} — its card ${row.card} has moved it. Delete the row; the member must stay a delegation.`);
@@ -606,6 +698,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'H10 a parameter default that computes → RED': 1,
   'H11 a host literal whose slot computes → RED': 1,
   'H12 one bad member among delegations → RED naming only that member': 1,
+  'H13 a one-line forward to a function or class declared in the facade file → RED': 1,
+  'H14 a state write to a module binding or a caller\'s object, not to this → RED': 1,
   'A1 facet delegation `return F.m(host(this), ...args)` → GREEN': 1,
   'A2 host-literal `.call` stub (reader closures, forwarders, getters) → GREEN': 1,
   'A3 constructor wiring (this.x = p, new Map(), super, a module call) → GREEN': 1,
@@ -620,6 +714,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'E6 an exception row naming an unregistered file → RED': 1,
   'E7 two exception rows for one member → RED': 1,
   'E8 an unknown key in a row → RED': 1,
+  'E9 a row missing its static/get/set prefix → RED naming the nearest member key': 1,
   'N1 a registered facade file that is missing → RED': 1,
   'N2 a registered class that is absent from its file → RED': 1,
   'N3 a registered facade with zero delegations → RED': 1,
@@ -627,7 +722,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'N5 an empty registry → GREEN with nothing guarded, never a crash': 1,
   'N6 the committed registry is well-formed against this checkout': 1,
 });
-const SELF_TEST_BATTERY_FLOOR = 32;
+const SELF_TEST_BATTERY_FLOOR = 35;
 
 function selfTest() {
   const FILE = 'pkg/src/facade.ts';
@@ -676,6 +771,19 @@ function selfTest() {
       if (r.problems.length !== 1) return `expected exactly 1 problem, got ${r.problems.length}`;
       return red(r, /Facade\.b holds a body/);
     } },
+    { label: 'H13 a one-line forward to a function or class declared in the facade file → RED', run: () => {
+      const top = 'function helper(self: unknown, a: string) {\n  if (a) { return a; }\n  return self;\n}\nclass Local { constructor(_x: unknown) {} }\n';
+      const r = run(facadeOf('  m(a: string) { return helper(this, a); }\n  n() { return new Local(host(this)); }\n  static k() { return Facade.k2(); }\n  static k2() { return Facet.k2(); }', top));
+      if (r.problems.length !== 2) return `expected exactly 2 problems (m and n; Facade.k2 is the class itself), got ${JSON.stringify(r.problems.map((p) => p.message))}`;
+      return all(
+        red(r, /Facade\.m holds a body, not a delegation: it forwards to `helper` \(line \d+\), which is declared in the facade file itself/),
+        red(r, /Facade\.n holds a body, not a delegation: it forwards to `Local`/),
+      );
+    } },
+    { label: 'H14 a state write to a module binding or a caller\'s object, not to this → RED', run: () => {
+      const r = run(facadeOf('  set cache(v: unknown) { Facet.cache = v; }\n  m(target: { x: unknown }, v: unknown) { target.x = v; }'));
+      return all(red(r, /Facade\.set cache holds a body/), red(r, /Facade\.m holds a body/));
+    } },
     { label: 'A1 facet delegation `return F.m(host(this), ...args)` → GREEN', run: () =>
       green(run(facadeOf('  async m(a: string, ...rest: unknown[]) { return ProtocolSaveFacet.m(protocolHost(this), a, ...rest); }\n  n() { ProtocolSaveFacet.n(protocolHost(this)); }'))) },
     { label: 'A2 host-literal `.call` stub (reader closures, forwarders, getters) → GREEN', run: () => green(run(facadeOf([
@@ -704,6 +812,7 @@ function selfTest() {
       '    installProtocolHost((protocol) => ({',
       '      a: (...a) => protocol.a(...a),',
       '      get engine() { return protocol.engine; },',
+      '      set nodeId(value) { protocol.nodeId = value; },',
       '    }));',
       '    Object.defineProperties(ObjectQLStatics, {',
       '      MAX_DEPTH: { get: () => ObjectQL.MAX_DEPTH },',
@@ -747,6 +856,13 @@ function selfTest() {
       red(run(facadeOf('  update(x: number) { let y = x; return y; }'), [{ file: FILE, member: 'update', crad: '#30020' }]), /unknown key\(s\) crad/),
       red(run(facadeOf(''), [], [{ ...row, path: 'x' }]), /facades\[0\] unknown key\(s\) path/),
     ) },
+    { label: 'E9 a row missing its static/get/set prefix → RED naming the nearest member key', run: () => {
+      const r = run(facadeOf('  static table() { let t = 1; return t; }\n  get size() { let n = 1; return n; }'), [
+        { file: FILE, member: 'table', card: '#30020' },
+        { file: FILE, member: 'size', card: '#30020' },
+      ]);
+      return all(red(r, /no member spelled `table`; did you mean `static table`\?/), red(r, /no member spelled `size`; did you mean `get size`\?/));
+    } },
     { label: 'N1 a registered facade file that is missing → RED', run: () =>
       red(checkRegistry(reg([row]), () => null), /pkg\/src\/facade\.ts registered as a facade, but the file does not exist/) },
     { label: 'N2 a registered class that is absent from its file → RED', run: () =>
