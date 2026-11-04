@@ -1,6 +1,6 @@
 # ADR-0079: The record display-name contract — `nameField` is the one canonical primary-title pointer
 
-**Status**: Accepted — implemented. **This file is a RETROACTIVE RECONSTRUCTION written 2026-08-08**, not a contemporaneous record; see [Provenance](#provenance-read-this-before-citing-this-file) before you cite it.
+**Status**: Accepted — implemented. **This file is a RETROACTIVE RECONSTRUCTION written 2026-08-08**, not a contemporaneous record; see [Provenance](#provenance-read-this-before-citing-this-file) before you cite it. · **Amended** (2026-11-04, [#29506](https://github.com/objectstack-ai/objectstack/issues/29506), ruling of record [`6574393684`](https://github.com/objectstack-ai/objectstack/issues/29007#issuecomment-6574393684) on #29007, letter B) — `title-format-retired` is an error since PR #29499; see the note under D3.
 - **Decided**: 2026-06-28 (the decision), reconstructed 2026-08-08 (this file)
 - **Reconstructed by**: #6634
 - **Implemented by**: [#2434](https://github.com/objectstack-ai/objectstack/pull/2434) (foundation — `nameField` + resolver), [#2458](https://github.com/objectstack-ai/objectstack/pull/2458) (designate-only provisioning at the registry seam), [#2463](https://github.com/objectstack-ai/objectstack/pull/2463) (the author-time gate)
@@ -133,9 +133,9 @@ output, describe marks the old key deprecated."*
 > restore) and `os validate` / `os build` / `os lint` refuse an object that
 > declares `titleFormat`, and the fix is `nameField`. The key is refused, not
 > removed: the schema still parses it, so a stored object that carries it keeps
-> loading and reading until its next save. The decision below stands; only the
-> "advisory, not an error" sentence and its citation describe the code before
-> #29499, and D8's "never errors" no longer covers this rule
+> loading and reading until its next save. The decision below stands; the
+> "deprecated and lint-warned" and "advisory, not an error" sentences and their
+> citation describe the code before #29499, and D8's "never errors" no longer covers this rule
 > (`packages/lint/src/validate-record-title.ts`, `validateTitleFormatRetired`).
 
 `titleFormat` is deprecated and lint-warned, and an explicit `nameField` takes
@@ -233,6 +233,9 @@ seam (#2434's "Staged (deliberate)" section, kept as the `TODO(ADR-0079)` that
 #2458 then resolved in the designate-only direction).
 
 ### D8 — The author-time gate is advisory by design
+
+> **Amended (2026-11-04, #29506).** `title-format-retired` is an error since #29499; see the
+> amendment under D3. This section's "never errors" and its quotation now describe `title-unresolvable` alone.
 
 `@objectstack/lint`'s `validate-record-title` reports two warnings —
 `title-format-retired` (D3) and `title-unresolvable` (`objectTitleCompleteness`
