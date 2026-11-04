@@ -35,6 +35,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import type { EngineUpdateOptions } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 import { applyDriverQueryInMemory } from './driver-query-in-memory.js';
+import { recomputeHomeAmounts, homeAmountRecomputeComplete, formatHomeAmountRecomputeReport, type HomeAmountRecomputeOptions } from './home-amount-recompute.js';
 
 function makeDriver() {
   const stores = new Map<string, Map<string, Record<string, unknown>>>();
@@ -420,5 +421,231 @@ describe('validate(): the preview refuses what the write refuses', () => {
     const update = await t.engine.validate('fx_invoice', { id: row.id, invoice_date: '2025-01-01' }, { mode: 'update' });
     expect(update.results?.[0]?.errors?.map((e) => e.code)).toEqual(['ERR_EXCHANGE_RATE_MISSING']);
     expect((await t.engine.validate('fx_invoice', { id: row.id, title: 'x' }, { mode: 'update' })).valid).toBe(true);
+  });
+});
+
+// ── The explicit recompute (`recomputeHomeAmounts`, `os migrate recompute-home-amounts`) ──
+//
+// [ADR-0144 D5, D7 parameter 1, Open item 8] A stored home amount moves only
+// through this run. Pinned on the same harness, so every number it reports and
+// writes is checked against what the write stores for the same row.
+
+/** The audit ledger's shape (`sys_audit_log`, owned by plugin-audit; a stand-in here). */
+const AUDIT_OBJECT = {
+  name: 'sys_audit_log',
+  fields: { action: { type: 'text' }, object_name: { type: 'text' }, record_id: { type: 'text' }, metadata: { type: 'textarea' } },
+};
+
+const noopLogger = { info: () => {}, warn: () => {} };
+const recompute = (t: Awaited<ReturnType<typeof boot>>, options: Partial<HomeAmountRecomputeOptions> = {}) =>
+  recomputeHomeAmounts(t.engine as never, noopLogger, { object: 'fx_invoice', ...options });
+const auditRows = (t: Awaited<ReturnType<typeof boot>>) =>
+  [...t.storeFor('sys_audit_log').values()].map((r) => ({ ...r, metadata: JSON.parse(String(r.metadata)) }));
+
+describe('recompute: a corrected rate reaches stored rows through an explicit, reported run', () => {
+  let t: Awaited<ReturnType<typeof boot>>;
+  let id: string;
+  const stored = () => t.storeFor('fx_invoice').get(id)!;
+  beforeEach(async () => {
+    t = await boot();
+    t.engine.registry.registerObject(AUDIT_OBJECT as any);
+    t.rate('USD', '2026-01-01', 0.1389);
+    ({ id } = await t.engine.insert('fx_invoice', { title: 'i1', currency_code: 'USD', invoice_date: '2026-03-15', amount: 10000 }));
+    t.rate('USD', '2026-01-01', 0.125); // the correction: 10,000 ÷ 0.125 = 80,000
+  });
+
+  it('the dry run lists the row with its stored and recomputed values, and writes nothing', async () => {
+    const before = { ...stored() };
+    const report = await recompute(t);
+    expect(report).toMatchObject({ applied: false, amounts: 1, changed: 1, unchanged: 0, written: 0, skippedTotal: 0 });
+    expect(report.changes).toEqual([
+      { recordId: id, organizationId: null, field: 'amount', from: { home: 71994.24, rate: 0.1389 }, to: { home: 80000, rate: 0.125 } },
+    ]);
+    expect(stored()).toEqual(before);
+    expect(t.storeFor('sys_audit_log').size).toBe(0);
+    expect(homeAmountRecomputeComplete(report)).toBe(false);
+  });
+
+  it('the apply writes only the home and rate fields, keeps updated_at, and a second run finds nothing', async () => {
+    const before = { ...stored() };
+    const applied = await recompute(t, { apply: true });
+    expect(applied).toMatchObject({ applied: true, changed: 1, written: 1, failures: [], audit: { written: true } });
+    const after = stored();
+    expect(after).toMatchObject({ amount_home: 80000, amount_rate: 0.125 });
+    const moved = Object.keys(after).filter((k) => !Object.is(after[k], before[k])).sort();
+    expect(moved).toEqual(['amount_home', 'amount_rate']);
+    const again = await recompute(t, { apply: true });
+    expect(again).toMatchObject({ changed: 0, unchanged: 1, written: 0 });
+    expect(homeAmountRecomputeComplete(again)).toBe(true);
+  });
+
+  it('a recomputed row equals what a fresh write of the same row stores', async () => {
+    await recompute(t, { apply: true });
+    const fresh = await t.engine.insert('fx_invoice', { title: 'fresh', currency_code: 'USD', invoice_date: '2026-03-15', amount: 10000 });
+    const pick = (r: Record<string, unknown>) => [r.amount_home, r.amount_rate];
+    expect(pick(stored())).toEqual(pick(t.storeFor('fx_invoice').get(fresh.id)!));
+  });
+
+  it('one audit entry per applied run, carrying its counts per organization; none for a dry run', async () => {
+    await recompute(t);
+    await recompute(t, { apply: true, source: 'test' });
+    const rows = auditRows(t);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ action: 'update', object_name: 'fx_invoice' });
+    expect(rows[0]!.metadata).toMatchObject({
+      event: 'home_amount.recompute', source: 'test', object: 'fx_invoice', fields: ['amount'], since: null,
+      changed: 1, written: 1, skipped: [],
+      organizations: [{ organizationId: null, homeCurrency: 'CNY', amounts: 1, changed: 1, written: 1 }],
+    });
+  });
+
+  it('without the audit ledger in the composition the run says so instead of failing', async () => {
+    const bare = await boot();
+    bare.rate('CNY', '2026-01-01', 1);
+    await bare.engine.insert('fx_invoice', { title: 'i', currency_code: 'CNY', amount: 5 });
+    bare.storeFor('fx_invoice').forEach((r) => { r.amount_home = 4; });
+    const report = await recompute(bare, { apply: true });
+    expect(report).toMatchObject({ written: 1, audit: { written: false, reason: 'ledger_not_mounted' } });
+  });
+});
+
+describe('recompute: rows that cannot be converted are listed, skipped and never written (parameter 1, Open item 8)', () => {
+  let t: Awaited<ReturnType<typeof boot>>;
+  beforeEach(async () => {
+    t = await boot();
+    t.engine.registry.registerObject(AUDIT_OBJECT as any);
+    t.rate('USD', '2026-01-01', 0.1389);
+  });
+
+  it('a missing rate: listed with its currency and date, skipped, nothing written, the run stays incomplete', async () => {
+    const { id } = await t.engine.insert('fx_invoice', { title: 'i1', currency_code: 'USD', invoice_date: '2026-03-15', amount: 10000 });
+    const ok = await t.engine.insert('fx_invoice', { title: 'i2', currency_code: 'CNY', amount: 3 });
+    t.storeFor('fx_invoice').get(ok.id)!.amount_home = 2; // stale, recomputable
+    t.storeFor('sys_exchange_rate').clear(); // the USD rate row is gone
+    const before = { ...t.storeFor('fx_invoice').get(id)! };
+    const report = await recompute(t, { apply: true });
+    expect(report.skipped).toEqual([{ recordId: id, organizationId: null, field: 'amount', reason: 'rate_missing', currency: 'USD', date: '2026-03-15' }]);
+    expect(report).toMatchObject({ skippedTotal: 1, changed: 1, written: 1 });
+    expect(report.skippedByReason).toMatchObject({ rate_missing: 1, code_blank: 0 });
+    expect(t.storeFor('fx_invoice').get(id)).toEqual(before);
+    expect(t.storeFor('fx_invoice').get(ok.id)).toMatchObject({ amount_home: 3, amount_rate: 1 });
+    // The gap outlives the report: the run stays incomplete and its audit entry names the row.
+    expect(homeAmountRecomputeComplete(report)).toBe(false);
+    expect(auditRows(t)[0]!.metadata.skipped).toEqual(report.skipped);
+    expect(auditRows(t)[0]!.metadata.skippedByReason).toMatchObject({ rate_missing: 1 });
+    expect(formatHomeAmountRecomputeReport(report).join('\n')).toContain('no USD rate on or before 2026-03-15');
+  });
+
+  it('a home field added over stored rows: rows without a rate stay blank, never 0, the rest are filled', async () => {
+    // Rows stored before the declaration: an amount, its code, a document date, no home amount.
+    const legacy = (id: string, code: string, date: string) =>
+      t.storeFor('fx_invoice').set(id, { id, title: id, currency_code: code, invoice_date: date, amount: 1389, amount_home: null, amount_rate: null });
+    legacy('old_usd', 'USD', '2026-03-15');
+    legacy('old_jpy', 'JPY', '2026-03-15');
+    const report = await recompute(t, { apply: true });
+    expect(report).toMatchObject({ changed: 1, written: 1, skippedTotal: 1 });
+    expect(t.storeFor('fx_invoice').get('old_usd')).toMatchObject({ amount_home: 10000, amount_rate: 0.1389 });
+    expect(t.storeFor('fx_invoice').get('old_jpy')).toMatchObject({ amount_home: null, amount_rate: null });
+  });
+
+  it('a blank code beside an amount is its own class, apart from a missing rate, with its own remedy', async () => {
+    t.storeFor('fx_invoice').set('codeless', { id: 'codeless', title: 'c', invoice_date: '2026-03-15', amount: 50, amount_home: null, amount_rate: null });
+    const report = await recompute(t, { apply: true });
+    expect(report.skipped).toEqual([{ recordId: 'codeless', organizationId: null, field: 'amount', reason: 'code_blank' }]);
+    expect(report.skippedByReason).toMatchObject({ code_blank: 1, rate_missing: 0 });
+    expect(t.storeFor('fx_invoice').get('codeless')).toMatchObject({ amount_home: null, amount_rate: null });
+    expect(formatHomeAmountRecomputeReport(report).join('\n')).toContain('os migrate record-currency-codes --object fx_invoice');
+  });
+
+  it('a blank document date and an unset home currency are their own classes', async () => {
+    t.storeFor('fx_invoice').set('undated', { id: 'undated', title: 'u', currency_code: 'USD', amount: 50 });
+    expect((await recompute(t)).skipped.map((s) => s.reason)).toEqual(['document_date_blank']);
+    const unset = await boot(invoice(), null);
+    unset.storeFor('fx_invoice').set('x', { id: 'x', title: 'x', currency_code: 'USD', invoice_date: '2026-03-15', amount: 50 });
+    const report = await recompute(unset);
+    expect(report.skipped.map((s) => s.reason)).toEqual(['home_currency_unset']);
+    expect(report.organizations).toEqual([expect.objectContaining({ homeCurrency: null, amounts: 1 })]);
+  });
+});
+
+describe('recompute: the write\'s own rules, per organization', () => {
+  it('the same currency as home is rate 1 and reads no rate', async () => {
+    const t = await boot();
+    const { id } = await t.engine.insert('fx_invoice', { title: 'i', currency_code: 'CNY', amount: 1.005 });
+    t.storeFor('fx_invoice').get(id)!.amount_home = 1; // a stale value
+    const before = t.finds.sys_exchange_rate ?? 0;
+    const report = await recompute(t, { apply: true });
+    expect(report.changes[0]!.to).toEqual({ home: 1.01, rate: 1 });
+    expect(t.storeFor('fx_invoice').get(id)).toMatchObject({ amount_home: 1.01, amount_rate: 1 });
+    expect(t.finds.sys_exchange_rate ?? 0).toBe(before);
+  });
+
+  it('a datetime document date is dated in the organization\'s timezone, for the rate and for since', async () => {
+    const t = await boot(invoice({ dateType: 'datetime' }));
+    let timezone: string | undefined;
+    t.engine.setHomeLocalizationResolver(async () => ({ currency: 'CNY', timezone }));
+    t.rate('USD', '2026-01-01', 0.1389);
+    t.rate('USD', '2026-04-01', 0.15);
+    // 2026-03-31T17:00Z is 01:00 on 2026-04-01 in Shanghai.
+    const { id } = await t.engine.insert('fx_invoice', { title: 'o', currency_code: 'USD', invoice_date: '2026-03-31T17:00:00Z', amount: 1500 });
+    expect(t.storeFor('fx_invoice').get(id)).toMatchObject({ amount_rate: 0.1389 });
+    expect(await recompute(t, { since: '2026-04-01' })).toMatchObject({ amounts: 0, outsideSince: 1 });
+    timezone = 'Asia/Shanghai';
+    const report = await recompute(t, { since: '2026-04-01', apply: true });
+    expect(report).toMatchObject({ amounts: 1, outsideSince: 0, written: 1 });
+    expect(t.storeFor('fx_invoice').get(id)).toMatchObject({ amount_home: 10000, amount_rate: 0.15 });
+  });
+
+  it('since filters on the document date; a row with none is outside every window', async () => {
+    const t = await boot();
+    t.rate('USD', '2026-01-01', 0.1389);
+    await t.engine.insert('fx_invoice', { title: 'march', currency_code: 'USD', invoice_date: '2026-03-15', amount: 1 });
+    await t.engine.insert('fx_invoice', { title: 'april', currency_code: 'USD', invoice_date: '2026-04-15', amount: 1 });
+    await t.engine.insert('fx_invoice', { title: 'undated', currency_code: 'CNY', amount: 1 });
+    t.rate('USD', '2026-01-01', 0.5);
+    const report = await recompute(t, { since: '2026-04-01' });
+    expect(report).toMatchObject({ since: '2026-04-01', amounts: 1, outsideSince: 2, changed: 1 });
+    const april = [...t.storeFor('fx_invoice').values()].find((r) => r.title === 'april')!;
+    expect(report.changes.map((c) => c.recordId)).toEqual([april.id]);
+    expect((await recompute(t)).changed).toBe(2);
+  });
+
+  it('two organizations convert into their own home currencies and are counted apart', async () => {
+    const t = await boot();
+    const homes: Record<string, string> = { org_a: 'CNY', org_b: 'USD' };
+    t.engine.setHomeLocalizationResolver(async (org) => ({ currency: org ? homes[org] : undefined }));
+    t.rate('USD', '2026-01-01', 0.1389); // org_a's rate for USD (home CNY)
+    t.rate('CNY', '2026-01-01', 7.2); // org_b's rate for CNY (home USD)
+    const as = (org: string) => ({ context: { isSystem: true, tenantId: org } }) as any;
+    const a = await t.engine.insert('fx_invoice', { title: 'a', currency_code: 'USD', invoice_date: '2026-03-15', amount: 1389, organization_id: 'org_a' }, as('org_a'));
+    const b = await t.engine.insert('fx_invoice', { title: 'b', currency_code: 'CNY', invoice_date: '2026-03-15', amount: 720, organization_id: 'org_b' }, as('org_b'));
+    t.rate('CNY', '2026-01-01', 8); // a correction that only org_b's row reads
+    const report = await recompute(t, { apply: true });
+    expect(report.organizations).toEqual([
+      expect.objectContaining({ organizationId: 'org_a', homeCurrency: 'CNY', amounts: 1, unchanged: 1, changed: 0 }),
+      expect.objectContaining({ organizationId: 'org_b', homeCurrency: 'USD', amounts: 1, unchanged: 0, changed: 1, written: 1 }),
+    ]);
+    expect(t.storeFor('fx_invoice').get(a.id)).toMatchObject({ amount_home: 10000, amount_rate: 0.1389 });
+    expect(t.storeFor('fx_invoice').get(b.id)).toMatchObject({ amount_home: 90, amount_rate: 8 });
+  });
+});
+
+describe('recompute: refused before any row is read', () => {
+  it('an unknown object, an object with no home amount, a field without one, and a malformed since', async () => {
+    const t = await boot();
+    t.engine.registry.registerObject({ name: 'plain', fields: { title: { type: 'text' } } } as any);
+    const before = t.finds.fx_invoice ?? 0;
+    const codes = await Promise.all([
+      refusalOf(recompute(t, { object: 'nope' })),
+      refusalOf(recompute(t, { object: 'plain' })),
+      refusalOf(recompute(t, { field: 'title' })),
+      refusalOf(recompute(t, { since: '2026-02-30' })),
+      refusalOf(recompute(t, { since: '15/03/2026' })),
+    ]);
+    expect(codes.map((e) => [e?.code, e?.status])).toEqual([
+      ['OBJECT_NOT_FOUND', 404], ['INVALID_FIELD', 400], ['INVALID_FIELD', 400], ['VALIDATION_FAILED', 400], ['VALIDATION_FAILED', 400],
+    ]);
+    expect(codes[2]?.message).toContain("'amount'");
+    expect(t.finds.fx_invoice ?? 0).toBe(before);
   });
 });
