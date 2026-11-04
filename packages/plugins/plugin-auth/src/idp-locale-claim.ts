@@ -21,7 +21,8 @@
  *     claim is closed against the locales the i18n service reports
  *     (`getLocales()`, narrowed to the app's declared `i18n.supportedLocales`)
  *     with the platform's own matcher (`resolveLocale`: exact → case →
- *     base language → variant), and the SUPPORTED spelling is what is stored.
+ *     base language → variant), and the SUPPORTED locale is what is stored,
+ *     in the BCP-47 case every `sys_user.locale` write is stored in.
  *  4. **No claim at all** — the IdP said nothing, so nothing changes.
  *
  * ## How "a local choice" is told apart from an IdP-written value
@@ -71,6 +72,7 @@ import { resolveLocale } from '@objectstack/core';
 import type { IDataEngine } from '@objectstack/core';
 import { normalizeRecipientLocale } from '@objectstack/service-messaging';
 import { authContextOf, type LinkingDbAdapter } from './implicit-account-linking.js';
+import { canonicalUserLocale } from './sys-user-locale-case.js';
 
 /** The `sys_verification.identifier` namespace for the IdP-written locale record. */
 const IDP_LOCALE_RECORD_PREFIX = 'idp-locale';
@@ -128,15 +130,21 @@ export function readIdpLocaleClaim(source: unknown): IdpLocaleClaim | undefined 
 }
 
 /**
- * The supported locale a claim names, in the SUPPORTED spelling, or
- * `undefined` for an unknown or unsupported claim. OIDC Core §5.1 notes that
- * some implementations write the region with an underscore (`en_US`); that
- * spelling is read as the BCP-47 tag it stands for.
+ * The supported locale a claim names, in the SUPPORTED spelling put in its
+ * BCP-47 case, or `undefined` for an unknown or unsupported claim. OIDC Core
+ * §5.1 notes that some implementations write the region with an underscore
+ * (`en_US`); that spelling is read as the BCP-47 tag it stands for.
+ *
+ * The case is the one the column stores ({@link canonicalUserLocale}, the
+ * `sys_user` write fold). Without it a supported list spelled `zh-cn` would
+ * have the column folded to `zh-CN` beside a record holding `zh-cn`, and the
+ * next sign-in would read the IdP's own value as a local choice.
  */
 export function resolveIdpLocale(claim: unknown, supported: readonly string[]): string | undefined {
   const tag = normalizeRecipientLocale(typeof claim === 'string' ? claim.replace(/_/g, '-') : claim);
   if (!tag) return undefined;
-  return resolveLocale(tag, [...supported]);
+  const resolved = resolveLocale(tag, [...supported]);
+  return resolved === undefined ? undefined : (canonicalUserLocale(resolved) as string);
 }
 
 /** The state the decision reads. */
