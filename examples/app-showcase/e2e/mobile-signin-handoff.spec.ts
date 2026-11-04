@@ -17,16 +17,16 @@ declare const process: { env: Record<string, string | undefined> };
  * Console at its real mount, as a deployment does: `Live E2E UI` serves it from
  * `vite preview` at the root, where the route's redirect has nothing to land on.
  *
- * Reached with `reuseExistingServer` on a server that did not boot
- * `e2e/mobile-handoff-server.config.ts`, the first assertion fails with a `400`:
- * no scheme is registered there.
+ * On a server that did not boot with `playwright.config.ts`'s
+ * `OS_TRUSTED_APP_SCHEMES`, such as one `reuseExistingServer` attached to, the first
+ * assertion fails with a `400`: no scheme is registered there.
  */
 
 const API = process.env.SMOKE_API_URL || 'http://localhost:3000';
 const EMAIL = process.env.SMOKE_EMAIL || 'admin@objectos.ai';
 const PASSWORD = process.env.SMOKE_PASSWORD || 'admin123';
 
-/** The scheme `mobile-handoff-server.config.ts` registers. */
+/** The scheme `playwright.config.ts` registers on its `webServer`. */
 const HANDOFF_APP_SCHEME = 'com.example.showcase.e2e';
 const CALLBACK = `${HANDOFF_APP_SCHEME}://auth/callback`;
 /** An RFC 7636 verifier, as the app makes one, and `BASE64URL(SHA-256(verifier))`. */

@@ -81,7 +81,7 @@
  * stays internal to this repository and its release: an installed app lives
  * for months, and a Console upgrade must not be able to strand it. A valid
  * request whose session is missing or too old therefore answers one of two
- * ways, and every `400` above is decided before either:
+ * ways, and every `400` this route answers is decided before either:
  *
  *  - **A page navigation** ({@link isPageNavigation}) answers `302` to this
  *    deployment's sign-in page, with `redirect` naming this same request, so
