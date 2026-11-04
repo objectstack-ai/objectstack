@@ -29,19 +29,25 @@
  *
  * ## Who is a visitor
  *
- * Read from the endpoint, never from the request's URL or headers. better-auth
- * runs each endpoint, and its hooks, inside an endpoint context, and gives each
- * request its own `context.session`, set to `null` until a session is resolved.
- * The resend resolves its caller's session first (`getSessionFromCtx`), and
- * records what it found on that field: the session, or `null` for a caller who
- * has none. That is all before it calls the send, so the send callback reads
- * the field from the endpoint context it runs in
- * ({@link isVisitorResendInEndpointContext}). The before-hook runs before the
- * endpoint and so asks `getSessionFromCtx` itself, which records the same
- * answer on the same field for the endpoint to reuse. (better-auth 1.7.12:
- * `dist/api/dispatch.mjs` sets the field per request, `dist/api/routes/session.mjs`
- * `getSessionFromCtx` records it, `dist/api/routes/email-verification.mjs`
- * reads the session before the send.)
+ * Read from the endpoint, never from the request's URL. better-auth runs each
+ * endpoint, and its hooks, inside an endpoint context, and gives each request
+ * its own `context.session`, `null` until a session is resolved. The resend
+ * resolves its caller's session first (`getSessionFromCtx`) and records what it
+ * found on that field: the session, or `null` for a caller who has none. That
+ * is all before it calls the send, so the send callback reads the field from
+ * the endpoint context it runs in ({@link isVisitorResendInEndpointContext}).
+ * (better-auth 1.7.12: `dist/api/dispatch.mjs` sets the field per request,
+ * `dist/api/routes/session.mjs` `getSessionFromCtx` records it,
+ * `dist/api/routes/email-verification.mjs` reads the session before the send.)
+ *
+ * The before-hook runs before the endpoint, so that field cannot answer there
+ * yet, and neither can `getSessionFromCtx` for every caller: better-auth's
+ * `bearer()` plugin turns an `Authorization: Bearer` credential into the
+ * session cookie in a before-hook of its own, applied only once every
+ * before-hook has run, so a caller signed in by bearer token reads as no
+ * session there. The before-hook therefore asks `AuthManager.resolveActor`,
+ * the actor reader every before-hook gate already uses, which reads the cookie
+ * and the bearer token alike ({@link refuseVisitorResendWithoutLiveTransport}).
  *
  * A call that carries no `Request` is a server-side call, not a visitor's, and
  * is left as it was.
@@ -94,19 +100,25 @@ export function isVisitorResendInEndpointContext(endpointCtx: unknown): boolean 
  * address. A no-op on every other path, on a call without a `Request`, while
  * the transport is live, and for a signed-in caller.
  *
- * The session is asked only while the transport is not live, so a deployment
- * that mails reads nothing extra here. A session read that fails counts as no
- * session: the refusal is the answer every visitor gets anyway.
+ * The caller is asked only while the transport is not live, so a deployment
+ * that mails reads nothing extra here. A read that fails counts as no caller:
+ * the refusal is the answer every visitor gets anyway. Should this read and
+ * the endpoint's ever disagree, the endpoint's decides how the send runs
+ * ({@link isVisitorResendInEndpointContext}), so the resend still answers the
+ * same whatever the send does.
  */
 export async function refuseVisitorResendWithoutLiveTransport(
   ctx: any,
-  isEmailDeliveryLive: () => boolean,
+  deps: {
+    isEmailDeliveryLive: () => boolean;
+    resolveActor: (ctx: any) => Promise<{ userId: string } | null>;
+  },
 ): Promise<void> {
   if (!isResendOverHttp(ctx)) return;
-  if (isEmailDeliveryLive()) return;
-  const { APIError, getSessionFromCtx } = await import('better-auth/api');
-  const session = await getSessionFromCtx(ctx).catch(() => null);
-  if (session) return;
+  if (deps.isEmailDeliveryLive()) return;
+  const actor = await deps.resolveActor(ctx).catch(() => null);
+  if (actor?.userId) return;
+  const { APIError } = await import('better-auth/api');
   throw new APIError('BAD_REQUEST', {
     code: VISITOR_RESEND_REFUSAL_CODE,
     message: VISITOR_RESEND_REFUSAL_MESSAGE,

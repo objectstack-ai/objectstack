@@ -681,7 +681,10 @@ export async function globalBeforeHook(
   // (`sendAfterResponseOnSignUpAndVisitorResend`). A signed-in caller's
   // resend passes through untouched. `visitor-verification-resend.ts`
   // states the rule and how a visitor is told apart.
-  await refuseVisitorResendWithoutLiveTransport(ctx, () => this.isEmailDeliveryLive());
+  await refuseVisitorResendWithoutLiveTransport(ctx, {
+    isEmailDeliveryLive: () => this.isEmailDeliveryLive(),
+    resolveActor: (c) => this.resolveActor(c),
+  });
 
   // ── ADR-0069 D2: account lockout (gate) ─────────────────────
   // Reject a sign-in for a locked identity BEFORE better-auth checks
