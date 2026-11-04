@@ -72,6 +72,7 @@ import {
   resolveNameField,
   composeParentScopeFilter,
   isMultiValueRelationship,
+  leadWithNameField,
   mergeFilterNodes,
   readObjectSortability,
   filterRefusalSubject,
@@ -2377,8 +2378,16 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         )
       : [];
     if (declaredHighlights.length > 0) {
+      // `highlightFields` is what the record page features BESIDE its title, so
+      // it never lists the title. A list has no title above it, so the record's
+      // name (ADR-0079, `leadWithNameField`) leads the set, listed once even
+      // when a highlight names it, and the grid links that first column to the
+      // record. It passes the same gates as the rest: an unreadable or redacted
+      // name, or a name that is the key back to this record, is still dropped.
       const hf = pruneEmpty(
-        filterFLS(filterFK(filterRedacted(declaredHighlights.map(normalizeColumn)))),
+        filterFLS(
+          filterFK(filterRedacted(leadWithNameField(objectSchema, declaredHighlights).map(normalizeColumn))),
+        ),
       );
       if (hf.length > 0) return hf.slice(0, Math.max(1, maxColumns));
     }
@@ -2461,6 +2470,13 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       if (aIsStatus !== bIsStatus) return aIsStatus ? -1 : 1;
       return 0;
     });
+    // The record's name (ADR-0079) leads the walk too, when it survived the
+    // filters above: the name-ish ranking is a guess, the declared name is not.
+    // Only moves an entry that is already there, so a field the filters dropped
+    // never comes back.
+    const lead = leadWithNameField(objectSchema, entries.map(([key]) => key))[0];
+    const leadAt = entries.findIndex(([key]) => key === lead);
+    if (leadAt > 0) entries.unshift(...entries.splice(leadAt, 1));
 
     const generated = entries.map(([key, def]: [string, any]) => {
       const col: any = {
