@@ -27,6 +27,8 @@
  *
  * Three stores: the draft-preview evaluator (in memory, over the very rows
  * the projection wrote, read back from the store), SQLite, and PostgreSQL.
+ * The "memory" cell is that evaluator, ⛔ not `driver-memory` (whose test
+ * consumers are a closed census, `check:driver-memory-census`).
  * The SQLite cell always runs. The PostgreSQL cell runs where
  * `OS_TEST_POSTGRES_URL` is set and is a named skip otherwise; CI provisions
  * that variable for this package in the Temporal Conformance job
@@ -92,6 +94,31 @@ const BARE_INVOICE = {
       type: 'currency' as const,
       currencyConfig: { currencyMode: 'record' as const, currencyField: 'currency_code' },
     },
+  },
+};
+
+/** A line per invoice, whose cube reaches the invoice's amounts through a declared join. */
+const LINE = 'os27195_fx_line';
+const LINE_OBJECT = {
+  name: LINE,
+  label: 'FX invoice line',
+  fields: {
+    note: { name: 'note', type: 'text' as const },
+    invoice: { name: 'invoice', type: 'lookup' as const, reference: OBJECT },
+  },
+};
+const LINE_CUBE = {
+  name: 'os27195_line_cube',
+  title: 'Lines over their invoice amounts',
+  sql: LINE,
+  public: true,
+  joins: { invoice: { name: OBJECT } },
+  measures: {
+    invoice_raw: { type: 'sum', sql: 'invoice.amount', label: 'Invoice amount (record currency)' },
+    invoice_home: { type: 'sum', sql: 'invoice.amount_home', label: 'Invoice amount (home currency)' },
+  },
+  dimensions: {
+    invoice_code: { type: 'string', sql: 'invoice.currency_code', label: 'Invoice currency' },
   },
 };
 
@@ -210,7 +237,7 @@ for (const cell of CELLS) {
         engine = new ObjectQL({ logger: quiet } as never);
         engine.registerDriver(driver as never, true);
         await engine.init();
-        for (const object of [RATE_OBJECT, INVOICE, BARE_INVOICE]) engine.registry.registerObject(object as never);
+        for (const object of [RATE_OBJECT, INVOICE, BARE_INVOICE, LINE_OBJECT]) engine.registry.registerObject(object as never);
         await engine.syncSchemas();
         await installDefaultOrganization(engine as never);
         engine.setHomeLocalizationResolver(async () => ({ currency: HOME }));
@@ -221,16 +248,17 @@ for (const cell of CELLS) {
         for (const row of ROWS) {
           await engine.insert(BARE, { id: row.id, currency_code: row.currency_code, amount: row.amount } as never, SYS as never);
         }
+        for (const row of ROWS) await engine.insert(LINE, { id: `l_${row.id}`, note: row.id, invoice: row.id } as never, SYS as never);
         stored = (await engine.find(OBJECT, { context: SYS.context } as never)) as Array<Record<string, unknown>>;
 
         const realExecute = (engine as any).execute.bind(engine);
         (engine as any).execute = (sql: unknown, opts?: { object?: string }) => {
-          if (opts?.object === OBJECT || opts?.object === BARE) reads.rawSql += 1;
+          if (opts?.object === OBJECT || opts?.object === BARE || opts?.object === LINE) reads.rawSql += 1;
           return realExecute(sql, opts);
         };
         const realAggregate = engine.aggregate.bind(engine);
         (engine as any).aggregate = (object: string, ...rest: unknown[]) => {
-          if (object === OBJECT || object === BARE) reads.aggregate += 1;
+          if (object === OBJECT || object === BARE || object === LINE) reads.aggregate += 1;
           return (realAggregate as any)(object, ...rest);
         };
 
@@ -246,7 +274,7 @@ for (const cell of CELLS) {
         ] as const) {
           const registered: Record<string, unknown> = {};
           const provided: Record<string, unknown> = { data: engine, protocol: pendingSeedProtocol };
-          await new AnalyticsServicePlugin({ ...(caps ? { queryCapabilities: caps } : {}) } as never).init({
+          await new AnalyticsServicePlugin({ cubes: [LINE_CUBE], ...(caps ? { queryCapabilities: caps } : {}) } as never).init({
             getService: (name: string) => provided[name] ?? registered[name],
             registerService: (name: string, svc: unknown) => { registered[name] = svc; },
             replaceService: (name: string, svc: unknown) => { registered[name] = svc; },
@@ -287,6 +315,7 @@ for (const cell of CELLS) {
             // The grand total over `raw_total` drops the code, so the door refuses
             // it; the home field alone is served under the same grand total.
             expect((result as Refusal).code).toBe('INVALID_FIELD');
+            expect((result as Refusal).status).toBe(400);
             expect((result as Refusal).member).toBe('raw_total');
 
             const served = await services[face]!.queryDataset(
@@ -321,12 +350,13 @@ for (const cell of CELLS) {
             expect(reads.aggregate - before.aggregate).toBe(0);
           });
 
-          it('an amount declaring no homeAmount reads the declaration to add, and the grouping', async () => {
+          it('an amount declaring no homeAmount reads the home-field remedy without a name, and the grouping', async () => {
             const err = await refusalOf(services[face]!.queryDataset(BARE_DATASET, { measures: ['raw_total'] }, CTX));
             expect(err.code, err.message).toBe('INVALID_FIELD');
+            expect(err.status).toBe(400);
             expect(err.object).toBe(BARE);
             expect(err.message).toContain(
-              `declare \`currencyConfig.homeAmount\` on 'amount' of object '${BARE}' and point the measure at its home field`,
+              `point the measure at the home field of 'amount' (the field its \`currencyConfig.homeAmount.field\` names on object '${BARE}'; declare \`homeAmount\` there first if it has none)`,
             );
             expect(err.message).toContain("add the dimension over 'currency_code' to the query");
           });
@@ -336,10 +366,30 @@ for (const cell of CELLS) {
             expect(Number((served.rows[0] as Record<string, unknown>).amount_home_sum)).toBe(HOME_TOTAL);
             const err = await refusalOf(services[face]!.query({ cube: OBJECT, measures: ['amount_sum'] } as never, CTX));
             expect(err.code, err.message).toBe('INVALID_FIELD');
+            expect(err.status).toBe(400);
             expect(err.message).toContain("point the measure at 'amount_home'");
+          });
+
+          it('over a relationship path, the ungrouped raw amount is refused naming the joined home field and code field', async () => {
+            const before = { ...reads };
+            const err = await refusalOf(services[face]!.query({ cube: LINE_CUBE.name, measures: ['invoice_raw'] } as never, CTX));
+            expect(err.code, err.message).toBe('INVALID_FIELD');
+            expect(err.status).toBe(400);
+            expect(err.member).toBe('invoice_raw');
+            expect(err.field).toBe('invoice.amount');
+            expect(err.object).toBe(OBJECT);
+            expect(err.message).toContain(`point the measure at 'invoice.amount_home', the home-currency amount object '${OBJECT}' declares for 'amount'`);
+            expect(err.message).toContain("add the dimension over 'invoice.currency_code' to the query");
+            expect(reads.rawSql - before.rawSql).toBe(0);
+            expect(reads.aggregate - before.aggregate).toBe(0);
           });
         });
       }
+
+      it('over a relationship path, a sum over the joined home field is served: the home-currency total (native strategy)', async () => {
+        const served = await services.native!.query({ cube: LINE_CUBE.name, measures: ['invoice_home'] } as never, CTX);
+        expect(Number((served.rows[0] as Record<string, unknown>).invoice_home)).toBe(HOME_TOTAL);
+      });
 
       describe('the draft preview (the in-memory evaluator, over the stored rows)', () => {
         it('a sum over the home field answers the home-currency total, ungrouped and grouped by the code', async () => {
@@ -360,6 +410,7 @@ for (const cell of CELLS) {
             services.native!.queryDataset(DATASET, { measures: ['raw_total'] }, CTX, { previewDrafts: true }),
           );
           expect(err.code, err.message).toBe('INVALID_FIELD');
+          expect(err.status).toBe(400);
           expect(err.member).toBe('raw_total');
           expect(err.message).toContain("point the measure at 'amount_home'");
         });

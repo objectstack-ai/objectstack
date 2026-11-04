@@ -109,8 +109,9 @@ export function assertRecordCurrencyAggregatesGrouped(
     const homeRemedy = homeField !== undefined
       ? `point the measure at '${prefix}${homeField}', the home-currency amount object '${target.object}' `
         + `declares for '${target.column}' (\`homeAmount.field\`), for one total in the home currency`
-      : `for one total in the home currency, declare \`currencyConfig.homeAmount\` on '${target.column}' `
-        + `of object '${target.object}' and point the measure at its home field`;
+      : `for one total in the home currency, point the measure at the home field of '${target.column}' `
+        + `(the field its \`currencyConfig.homeAmount.field\` names on object '${target.object}'; declare `
+        + '`homeAmount` there first if it has none)';
     const err = invalidMemberError(
       `Measure '${member}' on cube '${cubeName}' takes the ${measure.type} of field '${target.path}', `
       + `a record-currency amount whose currency is each record's '${codeField}', but the query does not `
