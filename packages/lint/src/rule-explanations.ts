@@ -2066,6 +2066,32 @@ const FLOW_API_TRIGGER_SECRET_MISSING_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const FLOW_API_TRIGGER_SIGNATURE_UNUSABLE_EXPLANATION: RuleExplanation = {
+  rule: 'flow-api-trigger-signature-unusable',
+  covers: 'why a hook with a broken sender signature admits nothing',
+  paragraphs: [
+    'An inbound api hook may declare how a third-party sender signs its posts, in its start node\'s ' +
+      '`config.signature`: the header the sender writes its digest in, `hmac-sha256`, `hex` or `base64`, and ' +
+      'what is signed, the raw body (`signs: \'body\'`, as DocuSign Connect signs it) or `<t>.<raw body>` ' +
+      '(`signs: \'timestamp.body\'`, a Stripe-style `t=…,v1=…` header). The key is the one ' +
+      '`config.secretRef` names, never a literal. A declared scheme REPLACES the `x-objectstack-signature` ' +
+      'check for its hook: the hook has that one verifier and never reads the platform header.',
+    'The finding means the declaration is present and the spec refuses it: an unknown algorithm or ' +
+      'encoding, a reserved header name, a timestamped scheme without its elements, no `config.secretRef`, ' +
+      'or a literal `config.secret` beside it. The verdict names the key the spec refuses at; the flow ' +
+      'parse prints the refusal itself in full.',
+    'A broken declaration never falls back to `x-objectstack-signature` and is never admitted unsigned. The ' +
+      'automation engine\'s flow parse refuses the flow at registration, and a trigger handed it anyway ' +
+      'refuses every post to its hook with the one `401 INVALID_SIGNATURE` every unverified post gets, so ' +
+      'the flow never receives a post. Fix the declaration, or remove `config.signature` to verify ' +
+      '`x-objectstack-signature` under the hook\'s secret.',
+    'A usable declaration is ready: the hook verifies the sender\'s header under the named key, a ' +
+      'timestamped scheme inside the same 300-second window `x-objectstack-signature` has, a body-only ' +
+      'scheme with no replay window because the sender signs no time.',
+    FLOW_GATE_REACH,
+  ],
+};
+
 // `flow-trigger-unknown-object` lives in the same rule file but is not one of
 // the five: its verdict depends on packages a build cannot see, so it warns —
 // except under a package closure the runtime publish gate states, where the
@@ -5654,6 +5680,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [FLOW_TRIGGER_UNROUTABLE_EXPLANATION.rule]: FLOW_TRIGGER_UNROUTABLE_EXPLANATION,
   [FLOW_TRIGGER_UNKNOWN_EVENT_EXPLANATION.rule]: FLOW_TRIGGER_UNKNOWN_EVENT_EXPLANATION,
   [FLOW_API_TRIGGER_SECRET_MISSING_EXPLANATION.rule]: FLOW_API_TRIGGER_SECRET_MISSING_EXPLANATION,
+  [FLOW_API_TRIGGER_SIGNATURE_UNUSABLE_EXPLANATION.rule]: FLOW_API_TRIGGER_SIGNATURE_UNUSABLE_EXPLANATION,
   [FLOW_TRIGGER_UNKNOWN_OBJECT_EXPLANATION.rule]: FLOW_TRIGGER_UNKNOWN_OBJECT_EXPLANATION,
   [FLOW_INPUT_UNKNOWN_OBJECT_EXPLANATION.rule]: FLOW_INPUT_UNKNOWN_OBJECT_EXPLANATION,
   [VALIDATION_RULE_REGEX_UNCOMPILABLE_EXPLANATION.rule]: VALIDATION_RULE_REGEX_UNCOMPILABLE_EXPLANATION,
