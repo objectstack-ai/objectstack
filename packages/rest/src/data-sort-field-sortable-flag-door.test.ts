@@ -138,7 +138,10 @@ describe('[#29896] field.sortable: false on the sortability projection and the D
   });
 
   it('the card\'s request: `sort=nosort` is 400 INVALID_SORT before any driver read', async () => {
-    for (const q of [{ sort: 'nosort' }, { sort: '-nosort' }, { $orderby: 'nosort desc' }, { sort: 'name,nosort' }]) {
+    const requests: Array<Record<string, string>> = [
+      { sort: 'nosort' }, { sort: '-nosort' }, { $orderby: 'nosort desc' }, { sort: 'name,nosort' },
+    ];
+    for (const q of requests) {
       const before = reads.n;
       const refused = await list(q);
       expect(refused.status, `${JSON.stringify(q)} -> ${JSON.stringify(refused.body)}`).toBe(400);
