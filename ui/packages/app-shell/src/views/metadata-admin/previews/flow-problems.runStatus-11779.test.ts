@@ -15,6 +15,12 @@ import { describe, it, expect } from 'vitest';
 import { deriveFlowRunStatus, describeFlowRunStatus } from './flow-problems';
 import { t } from '../i18n';
 import { FLOW_UNBOUND_CAUSES } from '@objectstack/spec/contracts';
+// The zh rows these cases read live in `@object-ui/i18n`'s `studio` namespace,
+// whose `zh` catalogue is fetched on demand (objectstack#25922): until it lands
+// a zh lookup answers from `en`. Resident before any case, so the zh rows read
+// synchronously whatever else shares this worker.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 const REASON = 'FIXTURE: the platform sentence, shown as sent.';
 

@@ -11,6 +11,12 @@ import {
   type FlowConfigField,
 } from './flow-node-config';
 import { translateNodeHint, translateNodeLabel } from '../i18n';
+// The palette rows (`engine.flowNode.*`) live in `@object-ui/i18n`'s `studio`
+// namespace, whose `zh` catalogue is fetched on demand (objectstack#25922):
+// until it lands a zh lookup answers from `en`. Resident before any case, so
+// the zh rows read synchronously whatever else shares this worker.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 describe('start node trigger-field gating (#5)', () => {
   const fields = fieldsForNodeType('start');
