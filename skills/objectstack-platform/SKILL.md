@@ -39,7 +39,7 @@ are `manifest`, `packages`, `objects`, `objectExtensions`, `picklists`,
 `agents`, `tools`, `skills`, `hooks`, `functions`, `mappings`,
 `analyticsCubes`, `connectors`, `data` (seed), `datasources`,
 `datasourceMapping`, `translations`, `i18n`, `plugins`, `devPlugins`,
-`devHint`, `devLogins`, `demoStaff`, `requires`, `tiers`, `onEnable`, `appName`, `email`, `sms`.
+`devHint`, `devLogins`, `demoStaff`, `requires`, `tiers`, `onEnable`, `appName`, `email`, `sms`, `push`.
 
 There is deliberately **no** top-level `workflows` or `approvals` collection:
 an approval is a flow with Approval nodes, and record
@@ -67,10 +67,6 @@ Undeclared keys are handled per surface, in two postures:
   `defineStack: connectors.stripe.bogusKey: 'bogusKey' is not a declared connector key, so its value is dropped at load.`
   Treat these as errors-in-waiting: a key that only warns today is expected
   to be refused later.
-
-Exact shape: `ObjectStackDefinitionSchema` in
-`node_modules/@objectstack/spec/src/stack.zod.ts`; each collection's item
-schema sits in its domain folder (`data/object.zod.ts`, `ui/view.zod.ts`, …).
 
 → Moved verbatim to [references/bootstrap.md](./references/bootstrap.md) § Map Format (Key → Name) · § Barrel Import Pattern.
 
@@ -133,6 +129,8 @@ to a new protocol major — never to silence a mismatch.
 
 The pair comes from `POST /api/v1/packages/hotcrm/ensure-customization`: `namespace` = the base's + `_custom`, `dependencies: { hotcrm: '^<major>' }`; `GET /packages/hotcrm/customizations` lists its overrides, extensions and switched-off items, and uninstalling the base is refused (`409`) while the pair exists. Only the pair declares: the save, publish and install doors, `os validate` and `os build` refuse `overrides` from any other package, and a dependent's item under a base item's name — its one fix is a new name. A permission set, position or capability is never overridden: copy it under a new name ("new similar", landing in the pair). An object is extended (`__c` fields, **objectstack-data**); a flow is overridden or copied (**objectstack-automation**).
 
+That read's `contributions` lists what other packages add to the base, one entry per item with its `packageId`: a `field` or `flow` names the base's `object` it is on, a `nav` item the base's `app`, its `group` if any, and its id as `name`; `counts.contributions` counts items, not packages.
+
 ---
 
 ## The App / Platform Boundary
@@ -144,7 +142,7 @@ what the platform owns.
 
 - **Business features belong in the app; capability belongs in the platform.**
   A missing default, a wrong diagnostic, a shape the spec refuses — the fix is
-  upstream. Raise it there; do not compensate for it here.
+  upstream.
 - **Could this be written by something that has only the metadata, and no
   knowledge of this company?** *No* — it encodes this company's own judgement (a
   discount ceiling, who a case is assigned to, how won/lost is booked) ⇒ the
@@ -304,12 +302,12 @@ production fails loudly): [Ports & networking](./references/operations.md#ports-
 Step 4's list is the fixed core. Every other service plugin is opt-in, and
 `requires: [...]` on the stack root is what turns it on. The CLI expands each
 token through the `CAPABILITY_PROVIDERS` registry in
-`packages/cli/src/commands/serve.ts` — its 19 opt-in entries:
+`@objectstack/core`:
 
 | Token | Provider package |
 |:--|:--|
 | `automation` | `@objectstack/service-automation` — flows, and any declarative `connectors:` entry |
-| `analytics` `cache` `storage` `queue` `job` `messaging` `realtime` `settings` `sms` | `@objectstack/service-` + the token |
+| `analytics` `cache` `storage` `queue` `job` `messaging` `realtime` `settings` `sms` `push` | `@objectstack/service-` + the token |
 | `marketplace` | `@objectstack/service-package` |
 | `audit` `email` `sharing` `approvals` `webhooks` | `@objectstack/plugin-` + the token |
 | `pinyin-search` | `@objectstack/plugin-pinyin-search` |
@@ -403,8 +401,7 @@ boot writes `manager_id` itself once every account exists and keeps one set
 by hand, so no seed hook writes it; a display name, an address no entry
 has, the entry itself or a loop is refused at load; `os build` drops the
 key and a non-dev boot creates nothing. `devLogins` creates and grants nothing — it only prints an
-existing account on the boot banner. Pick `demoStaff` whenever the demo
-needs an account to exist.
+existing account on the boot banner.
 
 ---
 

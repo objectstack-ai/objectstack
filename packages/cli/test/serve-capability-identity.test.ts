@@ -125,6 +125,7 @@ const EXPECTED_PROVIDER_NAME: Record<string, string> = {
   email: 'com.objectstack.service.email',
   mailbox: 'com.objectstack.service.mailbox',
   sms: 'com.objectstack.service.sms',
+  push: 'com.objectstack.service.push',
   sharing: 'com.objectstack.service.sharing',
   'pinyin-search': 'com.objectstack.plugin.pinyin-search',
   approvals: 'com.objectstack.service.approvals',

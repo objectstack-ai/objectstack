@@ -1249,8 +1249,13 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // tier 1 («the parsers load NEVER») from a standing fact into a red. The
     // measurement that named their bridge named `validateStackExpressions`, a
     // CEL-only rule, for exactly this reason.
+    // [#30023] `page` joins, NARROW by the same mechanism: a page write reaches
+    // exactly `validateSortableFields`, the one member that declares `page`,
+    // so a stored page sort naming a field the list door refuses
+    // (`sortable: false`, a `formula`) is refused at publish rather than at
+    // its first fetch. Every other member keeps its declaration.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['flow', 'view', 'object', 'dataset', 'report'],
+    runtimeTypes: ['flow', 'view', 'object', 'dataset', 'report', 'page'],
     run: (stack, ctx) => validateReferenceIntegrity(stack, ctx),
   },
   // ADR-0078 / #5068 — the SDUI component-props gate. `PageComponent.properties`

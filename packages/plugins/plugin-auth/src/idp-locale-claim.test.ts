@@ -88,6 +88,15 @@ describe('closing the claim against the supported locales', () => {
     expect(resolveIdpLocale('zh_CN', SUPPORTED)).toBe('zh-CN');
   });
 
+  it('answers the supported locale in the BCP-47 case the sys_user column stores', () => {
+    // A supported list spelled off-case would otherwise leave the column
+    // (folded on write) and the idp-locale record (written from this answer)
+    // holding two spellings, and the next sign-in would read the IdP's own
+    // value as a local choice.
+    expect(resolveIdpLocale('zh-CN', ['zh-cn'])).toBe('zh-CN');
+    expect(resolveIdpLocale('ZH-HANS-cn', ['zh-hans-cn'])).toBe('zh-Hans-CN');
+  });
+
   it('an unsupported or unknown claim names no locale', () => {
     for (const claim of ['fr', 'de-DE', 'not a tag', '', '   ', 'undefined', null, 42, {}]) {
       expect(resolveIdpLocale(claim, SUPPORTED)).toBeUndefined();

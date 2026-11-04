@@ -232,10 +232,11 @@ schema page is the authority until one lands.
 **Not in the table, and why.** `viewItems` and `runtimeModule` are not authorable
 at all (`viewItems` is `z.never()`, the machine-assembled channel for
 runtime-assembled manifests; `runtimeModule` is written by `objectstack build`);
-`manifest`, `i18n`, `api`, `server`, `appName`, `email`, `sms`, `requires`,
+`manifest`, `i18n`, `api`, `server`, `appName`, `email`, `sms`, `push`, `requires`,
 `tiers`, `plugins`, `devPlugins`, `devHint`, `devLogins` and `demoStaff` configure
 the stack rather than declare metadata items (`email` and `sms` carry no
-credentials — those stay in the environment or in Settings; `demoStaff` names the
+credentials — those stay in the environment or in Settings; `push` names each
+vendor secret by `credentialRef` and is read only when `requires` names `push`; `demoStaff` names the
 demo accounts a local `os dev` boot creates, and `os build` leaves it out of
 `objectstack.json`); and
 `functions` and `onEnable` are code the runtime calls, not metadata it stores.

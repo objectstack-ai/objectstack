@@ -542,6 +542,9 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'examples/app-showcase/src/data/objects/semantic-zoo.object.ts',
       'examples/app-showcase/src/ui/pages/task-triage.page.ts',
       'content/docs/deployment/cli.mdx',
+      // src/commands/serve-auth-trusted-app-schemes.contract.test.ts holds the
+      // OS_TRUSTED_APP_SCHEMES row beside OS_TRUSTED_ORIGINS on this page (#29972).
+      'content/docs/deployment/environment-variables.mdx',
       'content/docs/deployment/index.mdx',
       'content/docs/deployment/troubleshooting.mdx',
       'content/docs/getting-started/index.mdx',

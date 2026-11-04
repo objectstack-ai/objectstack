@@ -379,7 +379,9 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 103 once objectstack-ai/objectstack#28789 retired
     // `packagedAutomation.cloneCreated` with the Packaged automation flows page
     // it named a clone on — one interpolated span fewer.
-    expect(okSpans, 'correctly paired spans').toBe(103);
+    // 102 once the Connect an Agent page dropped its VS Code card and with it
+    // `connectAgent.vscode.body`, which quoted the „MCP: Add Server“ command.
+    expect(okSpans, 'correctly paired spans').toBe(102);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -457,8 +459,9 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 104 / 104 / 0 after objectstack-ai/objectstack#28382 added
     // `form.requiredForAction`, one more matched pair. 103 / 103 / 0 after
     // objectstack-ai/objectstack#28789 retired `packagedAutomation.cloneCreated`,
-    // one matched pair fewer.
-    expect({ open, close, rdq }).toEqual({ open: 103, close: 103, rdq: 0 });
+    // one matched pair fewer. 102 / 102 / 0 after the Connect an Agent page
+    // dropped `connectAgent.vscode.body`, one matched pair fewer.
+    expect({ open, close, rdq }).toEqual({ open: 102, close: 102, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);

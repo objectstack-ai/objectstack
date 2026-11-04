@@ -231,10 +231,44 @@ never one you supply (ADR-0125 D1/D2). ⛔ **Actions → Release → Run workflo
 all, and left unchecked it starts the repair lane for a publish that died partway —
 checked, it starts the bookkeeping lane described next.
 
-**First, check #4935 is current** (#11233). It is regenerated on a 6-hourly schedule
-rather than on every push, so at cut time it can be up to one refresh window behind
-main — i.e. it may not yet carry a changeset that landed in the last few hours.
-Compare its head against `main` and, if it is behind, **Actions → Release → Run
+The cut, in order (each step is explained below):
+
+1. **Regenerate the Version Packages PR against current `main` right before you
+   merge it.** List the changesets `main` gained since the PR's branch point:
+
+   ```bash
+   git fetch origin main changeset-release/main
+   base=$(git merge-base origin/main origin/changeset-release/main)
+   git diff --name-only --diff-filter=A "$base" origin/main -- .changeset/ | grep -v README
+   ```
+
+   Anything listed is code the cut would ship without a CHANGELOG entry:
+   refresh (below), wait for its CI, and run the list again before you merge.
+2. **Wait for a nearer `CI` run** before approving the publish (below).
+3. **Confirm the version commit left zero changesets pending.** The Release
+   run that queues the publish says so in its job summary (`Changesets:`),
+   or warns with each changeset it did not consume; on a full clone,
+   `node scripts/release-pending-publish.mjs unconsumed --version-commit SHA
+   --version VERSION` answers the same. If it is not zero, name each one in
+   the curated release page, and list a breaking one under 需手动处理 with
+   the refusal it serves. Never edit the generated `CHANGELOG.md` files or the pending
+   changesets: the next cut consumes them and `annotate-shipped` marks them
+   `**Shipped in VERSION**`.
+
+Why step 1 is a step and not a check: `main` takes a changeset-bearing landing
+about every twenty minutes, so a check that refused a stale Version Packages PR
+would refuse nearly every cut (the measurement is in
+`scripts/release-pending-publish.mjs`, under `annotate-shipped`). 18.3.0 shows
+the leak it leaves: #26517 was refreshed at 13:39Z from `40a35ded` and merged
+at 14:44Z without another refresh, five landings behind, so four changesets
+(one of them breaking, #29923) shipped with no entry in its CHANGELOGs
+(#29957).
+
+**First, check the Version Packages PR is current** (#11233). It is regenerated on a
+6-hourly schedule rather than on every push, so at cut time it can be up to one
+refresh window behind main — i.e. it may not yet carry a changeset that landed in
+the last few hours. Compare its head against `main` (step 1's list) and, if it is
+behind, **Actions → Release → Run
 workflow** with **`refresh_version_pr` checked**, which runs the bookkeeping lane
 only: no audit, no publish, and no deployment parked at the `release` environment.
 Wait for the refreshed PR's CI, then merge it. That merge is still the decision to

@@ -3703,11 +3703,28 @@ const de = {
       addButton: 'Zu Cursor hinzufügen',
       body: 'Ein-Klick-Button verwenden oder Folgendes in .cursor/mcp.json eintragen:',
     },
-    vscode: {
-      body: 'In .vscode/mcp.json eintragen (oder über den Befehl „MCP: Add Server“):',
+    fields: {
+      name: 'Name',
+      transport: 'Transportart',
+      url: 'Server-URL',
     },
     codex: {
-      body: 'In ~/.codex/config.toml eintragen. Falls Ihre Codex-Version den OAuth-Flow nicht unterstützt, stattdessen einen API-Schlüssel-Header verwenden (siehe unten):',
+      body: 'In der Codex-App: Einstellungen → MCP-Server → Server hinzufügen, dann ausfüllen:',
+      hint: 'Speichern, bei Aufforderung neu starten, dann neben objectstack auf Authenticate klicken und im Browser anmelden. Mit /mcp im Eingabefeld prüfen Sie die Verbindung. Bietet Ihre Version keine Browser-Anmeldung, fügen Sie den Header Authorization: Bearer <API-Schlüssel> hinzu (Schlüssel unten erstellen).',
+    },
+    workbuddy: {
+      body: 'Connectors → Benutzerdefinierter Connector → MCP konfigurieren, dann diesen Eintrag in mcpServers übernehmen (gespeichert in ~/.workbuddy/mcp.json):',
+      hint: 'Speichern und anschließend beim Connector objectstack auf Vertrauen klicken – erst danach ist er aktiv. Erscheint keine Anmeldung, fügen Sie den Request-Header Authorization: Bearer <API-Schlüssel> hinzu (Schlüssel unten erstellen).',
+    },
+    doubao: {
+      title: 'Doubao Work',
+      body: 'Skills · Connectors → Neu → Neuer benutzerdefinierter Connector, dann ausfüllen:',
+      hint: 'Melden Sie sich bei Aufforderung im Browser an. Erscheint keine Anmeldung, fügen Sie den benutzerdefinierten Header Authorization: Bearer <API-Schlüssel> hinzu (Schlüssel unten erstellen). Aufgaben, die in der Cloud laufen, brauchen eine über öffentliches HTTPS erreichbare Bereitstellung.',
+    },
+    qwenwork: {
+      title: 'QwenWork',
+      body: 'Erweiterungen → Connectors → + Hinzufügen → JSON-Konfiguration einfügen:',
+      hint: 'Oder manuell als Streamable HTTP mit dieser URL hinzufügen. Bietet Ihre Version keine Browser-Anmeldung, fügen Sie den Request-Header Authorization: Bearer <API-Schlüssel> hinzu (Schlüssel unten erstellen).',
     },
     apiKey: {
       title: 'API-Schlüssel',

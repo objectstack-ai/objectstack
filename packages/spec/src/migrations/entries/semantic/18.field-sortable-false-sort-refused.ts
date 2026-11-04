@@ -10,11 +10,13 @@ import type { SemanticMigration } from '../../types.js';
 export const entry: SemanticMigration = {
   id: 'field-sortable-false-sort-refused',
   surface:
-    'a sort naming a field that declares `sortable: false`: a list view\'s `sort`, a page '
-    + '`record:related_list` block\'s `sort` (and the related list\'s `dataSource.sort`), and any '
-    + 'request to `GET /api/v1/data/:object?sort=`, `POST /api/v1/data/:object/query` `orderBy`, the '
-    + 'export route, the RPC dispatcher, the record-page `related[].sort` and the MCP `query_records` '
-    + '`orderBy`',
+    'a sort naming a field that declares `sortable: false`. Stored: a list view\'s `sort`; on a page, a '
+    + 'block\'s own `sort` (`record:related_list`, `record:line_items`, `list-view` and the `object-grid`, '
+    + '`object-calendar`, `object-gantt`, `object-map` and `object-timeline` blocks), every element '
+    + '`dataSource.sort` and a related list\'s `parentDataSource.sort`, a list page\'s `interfaceConfig.sort` '
+    + 'and an app page\'s `record.sort`. Requested: `GET /api/v1/data/:object?sort=`, '
+    + '`POST /api/v1/data/:object/query` `orderBy`, the export route, the RPC dispatcher, the record-page '
+    + '`related[].sort` and the MCP `query_records` `orderBy`',
   replacement:
     'drop the sort on that field or sort by another field; or, when the field should be sortable, '
     + 'remove `sortable: false` from the field. A field with no `sortable` key, or with '
@@ -35,11 +37,15 @@ export const entry: SemanticMigration = {
     + 'sorted, and its first fetch now answers 400, and a `record:related_list` block\'s `sort` reaches '
     + 'the record-page read the same way. No mechanical rewrite exists in either direction: the platform '
     + 'cannot choose the field the author would sort by instead, and it must not silently drop the sort, '
-    + 'which is the declared-but-inert shape this change ends. Lint does not yet judge a view `sort` '
-    + 'against `sortable: false`, so the refusal at read time is where an affected view surfaces.',
+    + 'which is the declared-but-inert shape this change ends. Every one of the stored surfaces above reaches '
+    + 'the same list door. `os validate` and the publish door judge each of them against the same '
+    + 'projection (`sort-field-unsortable`), so an affected view or page is refused when it is next '
+    + 'validated or published, naming the field and its slot, instead of on its first fetch.',
   acceptanceCriteria:
-    'No list view `sort`, no `record:related_list` `sort` and no related-list `dataSource.sort` names a '
-    + 'field that declares `sortable: false` (grep your views and pages for each sort field and check its '
-    + 'object\'s field definition), and no client, script or agent sends one in `sort` / `$orderby` / '
-    + '`orderBy`. Reads complete with no `INVALID_SORT` naming a field that "declares `sortable: false`".',
+    '`os validate` reports no `sort-field-unsortable` finding naming a field that "declares '
+    + '`sortable: false`", which covers every stored surface: no list view `sort`, no page block '
+    + '`sort` or `dataSource.sort`, no related-list `parentDataSource.sort`, no list page '
+    + '`interfaceConfig.sort` and no app page `record.sort` names such a field. No client, script or '
+    + 'agent sends one in `sort` / `$orderby` / `orderBy`. Reads complete with no `INVALID_SORT` naming a '
+    + 'field that "declares `sortable: false`".',
 };

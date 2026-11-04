@@ -5768,11 +5768,31 @@ function selfTest() {
     // the exclusion moved to `CONVERSION_REPLAY_FILE_RE`, which states the fact instead
     // of testing a symptom. So this pin now reads: the file is out because replay data is
     // declared not to be a route surface, not because its contents happen to lack a verb.
+    //
+    // [#29987 codemod] The conversions are split per entry: `registry.ts` imports and
+    // lists them, and each fixture now sits in its module under `entries/` (with the
+    // shared helpers). So "the real file" is that set, read whole: the host and every
+    // `.ts` module under `conversions/entries/`, in sorted order.
+    const conversionTableFiles = (() => {
+      const files = ['packages/spec/src/conversions/registry.ts'];
+      const walk = (rel) => {
+        let names;
+        try { names = readdirSync(join(repoRoot, rel), { withFileTypes: true }); } catch { return; }
+        for (const e of [...names].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+          if (e.isDirectory()) walk(`${rel}/${e.name}`);
+          else if (e.name.endsWith('.ts')) files.push(`${rel}/${e.name}`);
+        }
+      };
+      walk('packages/spec/src/conversions/entries');
+      return files;
+    })();
     check('scanRouteSurface', 'the connector-action input is NOT admitted as a route source',
-      'packages/spec/src/conversions/registry.ts', false,
-      live.routeSources.some((r) => r.file === 'packages/spec/src/conversions/registry.ts'));
+      'packages/spec/src/conversions/registry.ts (and its entries/)', false,
+      live.routeSources.some((r) => conversionTableFiles.includes(r.file)));
     const registryText = (() => {
-      try { return readFileSync(join(repoRoot, 'packages/spec/src/conversions/registry.ts'), 'utf8'); } catch { return null; }
+      try {
+        return conversionTableFiles.map((f) => readFileSync(join(repoRoot, f), 'utf8')).join('\n');
+      } catch { return null; }
     })();
     // The same counterfactual as the fixture pair above, on the real file: it is EVIDENCE
     // that would admit it, and the guard is the only thing that does not.
@@ -5788,8 +5808,8 @@ function selfTest() {
       'registry.ts tails, method-guarded', true,
       registryText === null || parseRouteSource(registryText, { requireMethodSignal: true }).size > 0);
     check('CONVERSION_REPLAY_FILE_RE', 'which is what the directory guard matches',
-      'packages/spec/src/conversions/registry.ts', true,
-      CONVERSION_REPLAY_FILE_RE.test('packages/spec/src/conversions/registry.ts'));
+      'packages/spec/src/conversions/registry.ts (and its entries/)', true,
+      conversionTableFiles.every((f) => CONVERSION_REPLAY_FILE_RE.test(f)));
     // …and it is NARROW: a sibling spec directory is untouched by it.
     check('CONVERSION_REPLAY_FILE_RE', 'and it does not reach the api declarations kind (b) exists to admit',
       'packages/spec/src/api/storage.zod.ts', false,

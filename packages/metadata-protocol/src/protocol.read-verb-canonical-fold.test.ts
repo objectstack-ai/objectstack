@@ -283,23 +283,32 @@ describe('#9157 — the population, re-derived from the code rather than from th
         }
         // The stub's last statement, right before the member's own closing brace
         // (a member slice runs on to the next scanned member's header).
-        const STUB = /\n {8}return (?:await )?([A-Za-z_$][\w$]*)(?:\(protocolHost\(this\)|\.call\([A-Za-z_$][\w$]*)[,)][^\n]*\n {4}\}\n/;
+        // [#29985] A codemod stub calls its facet: `return <X>Facet.<fn>(protocolHost(this), …)`.
+        const STUB = /\n {8}return (?:await )?(?:([A-Za-z_$][\w$]*Facet)\.)?([A-Za-z_$][\w$]*)(?:\(protocolHost\(this\)|\.call\([A-Za-z_$][\w$]*)[,)][^\n]*\n {4}\}\n/;
         const throughSplit: string[] = [];
         const movedBody = (body: string): string => {
             const own = body.slice(0, body.indexOf('\n    }\n') + 7);
-            const fn = STUB.exec(own)?.[1];
-            if (fn === undefined || !moduleImports.has(fn)) return body;
-            const file = moduleImports.get(fn)!;
+            const hit = STUB.exec(own);
+            const facet = hit?.[1];
+            const fn = hit?.[2];
+            if (fn === undefined || !moduleImports.has(facet ?? fn)) return body;
+            const file = moduleImports.get(facet ?? fn)!;
             throughSplit.push(fn);
             const text = readFileSync(fileURLToPath(new URL(`./${file}`, import.meta.url)), 'utf8');
-            const at = text.search(new RegExp(`\\nexport (?:async )?function ${fn}\\b`));
-            expect(at, `the stub hands its body to '${fn}', which ${file} does not export`).toBeGreaterThanOrEqual(0);
-            const end = text.indexOf('\n}\n', at + 1);
-            return text.slice(at, end < 0 ? text.length : end + 2);
+            // A module function at column 0, or (#29985) a facet's static method at the class's depth.
+            const at = text.search(new RegExp(facet === undefined ? `\\nexport (?:async )?function ${fn}\\b` : `\\n {4}static (?:async )?${fn}\\(`));
+            expect(at, `the stub hands its body to '${facet === undefined ? '' : `${facet}.`}${fn}', which ${file} does not declare`).toBeGreaterThanOrEqual(0);
+            const close = facet === undefined ? '\n}\n' : '\n    }\n';
+            const end = text.indexOf(close, at + 1);
+            return text.slice(at, end < 0 ? text.length : end + close.length);
         };
+        // [#29985] A wrapper's own body can move too (the codemod split), so the
+        // delegation is read from the wrapper's body wherever it is: `this.` in
+        // protocol.ts, `host.` in the module it moved to.
         const delegateBody = (body: string): string => {
-            const to = /this\.([A-Za-z_][A-Za-z0-9_]*Unaudited)\(request\)/.exec(body)?.[1];
-            if (to === undefined) return movedBody(body);
+            const wrapper = movedBody(body);
+            const to = /\b(?:this|host)\.([A-Za-z_][A-Za-z0-9_]*Unaudited)\(request\)/.exec(wrapper)?.[1];
+            if (to === undefined) return wrapper;
             const line = lines.findIndex((l) => l.startsWith(`    private async ${to}(`));
             expect(line, `the wrapper delegates to '${to}', which the scan cannot find`).toBeGreaterThanOrEqual(0);
             return movedBody(memberSlice(line));
@@ -308,18 +317,21 @@ describe('#9157 — the population, re-derived from the code rather than from th
         const unfolded: string[] = [];
         const folded: string[] = [];
         for (let k = 0; k < starts.length; k++) {
-            const body = delegateBody(lines.slice(starts[k]!.line, starts[k + 1]?.line ?? lines.length).join('\n'));
+            const member = lines.slice(starts[k]!.line, starts[k + 1]?.line ?? lines.length).join('\n');
+            const body = delegateBody(member);
             // The PARAMETER LIST exactly — walked by paren balance rather than
             // guessed at with a character budget, so a long request type cannot
             // push `type: string` outside the window and drop a verb silently.
-            const open = body.indexOf('(');
+            // [#29985] Read off the class member's own signature (the one the
+            // class names), not the moved function's, which leads with `host`.
+            const open = member.indexOf('(');
             let depth = 0;
             let close = open;
-            for (let i = open; i < body.length; i++) {
-                if (body[i] === '(') depth++;
-                else if (body[i] === ')' && --depth === 0) { close = i; break; }
+            for (let i = open; i < member.length; i++) {
+                if (member[i] === '(') depth++;
+                else if (member[i] === ')' && --depth === 0) { close = i; break; }
             }
-            const declared = body.slice(open, close + 1);
+            const declared = member.slice(open, close + 1);
             const alias = /^\(\s*request\??\s*:\s*([A-Z][A-Za-z0-9_]*)\s*\)$/.exec(declared)?.[1];
             const sig = alias === undefined ? declared : (aliasLiteral(alias) ?? declared);
             // A REQUIRED `type: string` in the request object — the shape a

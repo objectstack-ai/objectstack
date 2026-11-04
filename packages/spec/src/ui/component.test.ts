@@ -143,6 +143,79 @@ describe('PageHeaderProps icon is retired — no renderer reads it', () => {
   });
 });
 
+// #30018 (ruling record 6624172200 on #29951, letter A): `placedActions` is the
+// explicit opt-in to every action of the bound object placed at `record_header`
+// / `record_more`, read live, beside the authored `actions` list, which keeps
+// its #11592 meaning (an authored list is the whole set). The two are refused
+// together. Each refusal is asserted by code AND path, so a refusal for another
+// reason (a closed-shape `unrecognized_keys`, a type miss) cannot pass it; and
+// each acceptance asserts the whole parse is green, not only that the key was
+// recognised.
+describe('PageHeaderProps placedActions — every placed header action, or the authored list, never both', () => {
+  const issuesOf = (result: ReturnType<typeof PageHeaderProps.safeParse>) =>
+    result.success ? [] : result.error.issues.map((issue) => ({ code: issue.code, path: issue.path.join('.') }));
+
+  it('accepts `placedActions: true` alone and keeps it', () => {
+    const result = PageHeaderProps.safeParse({ title: 'User', placedActions: true });
+    expect(issuesOf(result)).toEqual([]);
+    expect(result.data?.placedActions).toBe(true);
+    expect(result.data).not.toHaveProperty('actions');
+  });
+
+  it('accepts an `actions` list alone, its meaning unchanged: the list as written, no switch materialized', () => {
+    const result = PageHeaderProps.safeParse({ title: 'Lead', actions: ['convert_lead', 'send_statement'] });
+    expect(issuesOf(result)).toEqual([]);
+    expect(result.data?.actions).toEqual(['convert_lead', 'send_statement']);
+    expect(result.data).not.toHaveProperty('placedActions');
+  });
+
+  it('refuses `placedActions: true` beside an authored `actions` list, an empty one included, at `placedActions`', () => {
+    for (const actions of [['convert_lead'], []]) {
+      const result = PageHeaderProps.safeParse({ title: 'Lead', placedActions: true, actions });
+      expect(issuesOf(result), JSON.stringify(actions)).toEqual([{ code: 'custom', path: 'placedActions' }]);
+      // The author is told which two keys collide and to keep one.
+      const [issue] = result.error!.issues;
+      expect(issue.message).toContain('`placedActions: true`');
+      expect(issue.message).toContain('`actions`');
+      expect(issue.message).toContain('Keep one');
+    }
+  });
+
+  it('accepts `placedActions: false` beside an `actions` list: it says nothing new', () => {
+    const result = PageHeaderProps.safeParse({ title: 'Lead', placedActions: false, actions: ['convert_lead'] });
+    expect(issuesOf(result)).toEqual([]);
+    expect(result.data?.placedActions).toBe(false);
+    expect(result.data?.actions).toEqual(['convert_lead']);
+  });
+
+  it('leaves the key unset when it is absent: no schema default', () => {
+    for (const header of [{}, { title: 'Lead' }, { title: 'Lead', actions: ['convert_lead'] }]) {
+      const result = PageHeaderProps.safeParse(header);
+      expect(issuesOf(result), JSON.stringify(header)).toEqual([]);
+      expect(result.data, JSON.stringify(header)).not.toHaveProperty('placedActions');
+    }
+  });
+
+  it('refuses a non-boolean value at the key, the type door before the pair rule', () => {
+    const result = PageHeaderProps.safeParse({ title: 'Lead', placedActions: 'true' });
+    expect(issuesOf(result)).toEqual([{ code: 'invalid_type', path: 'placedActions' }]);
+  });
+
+  it('is the row `ComponentPropsMap` judges `page:header` with, so the props door refuses the same pair', () => {
+    expect(ComponentPropsMap['page:header']).toBe(PageHeaderProps);
+    const result = ComponentPropsMap['page:header'].safeParse({ placedActions: true, actions: ['convert_lead'] });
+    expect(issuesOf(result)).toEqual([{ code: 'custom', path: 'placedActions' }]);
+  });
+
+  // The one part of the prose a consumer parses: `check-liveness.mts`
+  // `MARKER_RE.planned` reads it as the key's liveness status, and the
+  // `liveness/page.json` `_note` PLANNED RECORD names the reader that removes it.
+  it('opens its describe with the PLANNED marker until the header renderer reads it', () => {
+    const member = (PageHeaderProps as unknown as { shape: Record<string, { description?: string }> }).shape.placedActions;
+    expect(member.description?.startsWith('[PLANNED — not yet rendered] ')).toBe(true);
+  });
+});
+
 describe('PageTabsProps', () => {
   it('should accept valid tabs with defaults', () => {
     const tabs = {

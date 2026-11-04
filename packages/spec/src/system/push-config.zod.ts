@@ -14,7 +14,8 @@ import { strictObject } from '../shared/strict-object';
  * for the direct transport it builds one vendor transport per block, and it
  * refuses the relay transport, not yet served (#29920). The `push` channel in
  * `@objectstack/service-messaging` delivers through the push service it
- * registers.
+ * registers. Under `objectstack serve` the value is the stack definition's
+ * `push` key, read when the stack declares `requires: ['push']` (below).
  *
  * **Two transports, and the hosted relay is the default.** The store-published
  * ObjectOS app is signed with ObjectStack's own APNs key and Firebase project,
@@ -44,11 +45,13 @@ import { strictObject } from '../shared/strict-object';
  * could deliver to nothing.
  *
  * **What is served today.** The direct transport is: it ships as
- * `@objectstack/service-push` (ADR-0012, amended 2026-11-03, #29041). The
- * relay transport is not yet: the relay sender is follow-up card #29920, and
- * until it ships `PushServicePlugin` refuses a relay block, the default `{}`
- * included, when it initialises, so a server is never left believing it
- * pushes when nothing would deliver.
+ * `@objectstack/service-push` (ADR-0012, amended 2026-11-03, #29041), and
+ * `objectstack serve` reads it from the stack's `push` key. The relay
+ * transport is not yet: the relay sender is follow-up card #29920, and until
+ * it ships the boot refuses a relay block, the default `{}` included (the
+ * `push` capability's reader before the kernel boots, and `PushServicePlugin`
+ * when it initialises), so a server is never left believing it pushes when
+ * nothing would deliver.
  *
  * It sits beside `EmailServiceConfigSchema` (`email-config.zod.ts`), the
  * declaration of the email channel's transport selection.
@@ -65,13 +68,19 @@ import { strictObject } from '../shared/strict-object';
  * is refused because a reference is one token — a PEM block carries
  * whitespace and a JSON document carries braces, and a name carries neither.
  *
- * **What reads it, and why it is not a stack key.** `PushServicePlugin`
- * (`@objectstack/service-push`) is its one reader, through the plugin's
- * constructor: the host that composes the plugin hands it the value. The email
- * transport selection it sits beside is read from `config.email` of the stack
- * definition (`StackEmailConfigSchema`) and `OS_EMAIL_*`; this shape has no
- * stack-definition key and no `os serve` capability yet, so it is authorable
- * only where a host composes the plugin.
+ * **What reads it: the stack's `push` key under `objectstack serve`.** It is
+ * the stack definition's top-level `push` key, beside `email` and `sms`. A
+ * stack that declares `requires: ['push']` has `objectstack serve` (and
+ * `@objectstack/verify`'s `bootStack`) mount `PushServicePlugin`, built by
+ * `resolvePushCapabilityArg` (`@objectstack/service-push`) from that key.
+ * The reader parses the key with this schema again at boot, because a
+ * compiled artifact may not have passed `defineStack`, and it refuses two
+ * things there, failing the boot: a relay block (the default `{}` and an
+ * absent key included), because nothing sends it yet, and an inline secret.
+ * A host that composes the plugin in code hands it the value through the
+ * constructor instead. No `OS_PUSH_*` environment variable carries any of
+ * it: the vendor blocks hold no secret to override, and each `credentialRef`
+ * already names one.
  *
  * Out of scope here: the other vendors ADR-0012 §6 routes to alternate
  * channel plugins (HMS, Xiaomi, OPPO, vivo).
