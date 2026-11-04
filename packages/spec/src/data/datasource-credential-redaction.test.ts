@@ -814,3 +814,62 @@ describe('driver identity: every accepted spelling of a builtin driver is redact
     }
   });
 });
+
+// A URL with a special scheme — `http`, `https`, `ws`, `wss`, `ftp`, in any
+// letter case — is read for a password the way a URL parser reads it, however
+// many `/` or `\` follow the scheme (none included); the datasource read
+// removes the password exactly where the write door judges it, at every
+// URL-bearing driver key, turso `syncUrl` included.
+describe('the datasource read rewrites a special-scheme URL\'s password where the write door judges it, however many slashes follow the scheme', () => {
+  const BS = String.fromCharCode(0x5c);
+  const KEYS: Array<[name: string, driver: string, key: string, make: (url: string) => Record<string, unknown>]> = [
+    ['postgres url', 'postgres', 'url', (url) => ({ url })],
+    ['mysql url', 'mysql', 'url', (url) => ({ url })],
+    ['mongodb url', 'mongodb', 'url', (url) => ({ url })],
+    ['turso url', 'turso', 'url', (url) => ({ url })],
+    ['turso syncUrl', 'turso', 'syncUrl', (syncUrl) => ({ url: 'file:./data/replica.db', syncUrl })],
+  ];
+  const FORMS: Array<[string, (s: string) => string]> = [
+    ['no slash', (s) => `${s}:`],
+    ['one slash', (s) => `${s}:/`],
+    ['a backslash', (s) => `${s}:${BS}`],
+    ['three slashes', (s) => `${s}:///`],
+    ['an uppercase scheme and no slash', (s) => `${s.toUpperCase()}:`],
+  ];
+  const leadsOf = (schemes: readonly string[]) =>
+    schemes.flatMap((scheme) => FORMS.map(([form, lead]) => [`\`${scheme}:\` with ${form}`, lead(scheme)] as [string, string]));
+  const SPECIAL = leadsOf(['http', 'https', 'ws', 'wss', 'ftp']);
+  const NO_AUTHORITY = leadsOf(['file', 'postgresql', 'libsql']).filter(([, lead]) => !lead.endsWith('///'));
+
+  /** Whether the write door refuses `config` for a password in the userinfo at `key`. */
+  const writeRefuses = (driver: string, key: string, config: Record<string, unknown>): boolean => {
+    const result = getDriverConfigSchema(driver)!.safeParse(config);
+    return !result.success && result.error.issues.some(
+      (i) => i.path.join('.') === key && i.message.includes('embeds a password in its userinfo'),
+    );
+  };
+
+  describe.each(KEYS)('%s', (_name, driver, key, make) => {
+    it.each(SPECIAL)('after %s: refused at the write door, served with the password removed, and the served form passes', (_label, lead) => {
+      const stored = make(`${lead}svc:hunter2@db.example.com/prod`);
+      expect(writeRefuses(driver, key, stored), 'the write door refuses the stored URL').toBe(true);
+      const { config, redactedKeys } = redactDatasourceConfig(driver, stored);
+      expect(config[key]).toBe(`${lead}svc@db.example.com/prod`);
+      expect(redactedKeys).toContain(key);
+      expect(writeRefuses(driver, key, config), 'the served URL passes the write door').toBe(false);
+    });
+
+    it.each([...SPECIAL, ...NO_AUTHORITY])('refused ⇔ rewritten after %s', (_label, lead) => {
+      for (const url of [`${lead}svc:hunter2@db.example.com/prod`, `${lead}svc@db.example.com/prod`, `${lead}db.example.com/prod`]) {
+        const config = make(url);
+        const rewritten = redactDatasourceConfig(driver, config).redactedKeys.includes(key);
+        expect(writeRefuses(driver, key, config), 'refused ⇔ rewritten').toBe(rewritten);
+      }
+    });
+
+    it.each(NO_AUTHORITY)('CONTROL: after %s there is no authority, so the URL is served as stored', (_label, lead) => {
+      const stored = make(`${lead}svc:hunter2@db.example.com/prod`);
+      expect(redactDatasourceConfig(driver, stored).config[key]).toBe(stored[key]);
+    });
+  });
+});

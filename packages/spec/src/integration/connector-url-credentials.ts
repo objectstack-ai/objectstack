@@ -29,8 +29,10 @@
  *    (`data/driver/url-boundary.ts`), the one userinfo grammar the datasource
  *    doors read too: on the string as a URL parser reads it — trimmed of its
  *    leading and trailing C0 control characters and spaces, with every ASCII
- *    tab, LF and CR deleted — whose authority starts at `scheme://` or a
- *    scheme-relative `//`;
+ *    tab, LF and CR deleted — whose authority starts where a URL parser
+ *    starts it: after a special scheme (`http`, `https`, `ws`, `wss`, `ftp`,
+ *    any letter case) and however many `/` or `\` follow it, none included;
+ *    after `scheme://` or a scheme-relative `//` otherwise;
  *  - **each credential query parameter** with a non-empty value, in ANY
  *    judged string, whether or not it starts with a scheme: the names in
  *    {@link CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES}, plus the

@@ -400,7 +400,9 @@ export function redactableConfigKeys(driver: unknown): string[] {
  * write refuses: the string is judged as a URL parser reads it — trimmed of
  * its leading and trailing C0 control characters and spaces, with every ASCII
  * tab, LF and CR deleted — and rewritten at the matching offsets of the
- * authored string; a scheme-relative `//` authority counts; the userinfo ends
+ * authored string; a scheme-relative `//` authority counts, and a special
+ * scheme's (`http`, `https`, `ws`, `wss`, `ftp`) authority starts after
+ * however many `/` or `\` follow it, none included; the userinfo ends
  * at the LAST `@` in the authority —
  * a lazier boundary stopping at the first `@` would split
  * `postgres://u:p@ss@host/db` after `p`, leave `ss@host` in place, and publish

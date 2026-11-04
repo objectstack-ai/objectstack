@@ -3205,7 +3205,7 @@
       "title": "/meta read doors on v18: GET /meta/app/PACKAGE_ID returns that package's app, `?member=` selects one bundle member on by-name doors, an unknown query parameter on any by-name door is refused 400, `?package=all` folds to the no-parameter answer, and the object definition marks an FLS-denied field unsortable for that caller",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -3216,7 +3216,7 @@
         "app": "showcase",
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
-          "a showcase email template with two locale members: the showcase ships only the en-US member of showcase_task_done_email (examples/app-showcase/src/system/emails), so author the zh-CN member with PUT /api/v1/meta/email_template/showcase_task_done_email carrying `locale: 'zh-CN'` in the BODY — the save door's closed set is force, package, mode and surface, so ?member= is a READ parameter only"
+          "a showcase email template with two locale members: the showcase ships only the en-US member of showcase_task_done_email (examples/app-showcase/src/system/emails), so author the zh-CN member into the showcase's customization pair: POST /api/v1/packages/com.example.showcase/ensure-customization, then PUT /api/v1/meta/email_template/showcase_task_done_email?package=com.example.showcase.custom carrying `locale: 'zh-CN'` in the BODY and no `overrides` (the base ships no zh-CN member, so a declared override is refused 403 NOT_OVERRIDABLE, and a package-less PUT onto the shipped name is refused 403 NOT_OVERRIDABLE since ADR-0146 D11; packages/qa/dogfood/test/meta-read-doors-live.dogfood.test.ts authors it the same way) — the save door's closed set is force, package, mode and surface, so ?member= is a READ parameter only"
         ]
       },
       "steps": [
@@ -3296,6 +3296,12 @@
           "date": "2026-10-27",
           "change": "acceptance[1]–[4] are pinned at the layer their oracle names (the release-18.2.0 Tier 1 sweep #26468 scored a1–a4 partial: every pin but the data-sort dogfood stopped above the Hono adapter, and that one used a scratch permission set, not client_liaison). The new meta-read-doors-live.dogfood.test.ts drives each step through the HTTP stack of its own showcase boot, client_liaison bound through a sys_user_position row; automated.ref and acceptance[4].verify name it. Measured at base 74db43ef. No clause changed",
           "ref": "#26572"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-04",
+          "change": "fixtures.requires[1] corrected: the bare PUT of a zh-CN member onto the shipped showcase_task_done_email is package-less, which ADR-0146 D11 refuses 403 NOT_OVERRIDABLE. The member is now authored into com.example.showcase.custom with no `overrides`, the shape meta-read-doors-live.dogfood.test.ts already uses. Measured on a fresh showcase boot at base 232d3bb5ef: package-less PUT 403; pair PUT with overrides 403 (the base ships no zh-CN member); pair PUT without overrides 200, then ?member=zh-CN serves it and ?member=en-US the shipped member. No clause changed",
+          "ref": "#30129"
         }
       ]
     },

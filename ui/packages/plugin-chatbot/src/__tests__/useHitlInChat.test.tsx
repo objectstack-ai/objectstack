@@ -224,8 +224,46 @@ describe('useHitlInChat', () => {
     expect(result.current.decisions['tc-1']).toEqual({
       state: 'success',
       message: 'Status: quarantined',
+      decision: 'approved',
     });
     expect(continueConversation).not.toHaveBeenCalled();
+  });
+
+  it('every state says which button was pressed, and an executed approval carries the result (cloud#3565)', async () => {
+    // The record-write card draws its own outcome — "written" plus the record's
+    // link, or "cancelled" — from these two fields rather than from the English
+    // `message`, which the generic strip keeps reading as before.
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          status: 'executed',
+          result: { status: 'written', objectName: 'crm_lead', recordId: 'new_1', label: '张伟' },
+        }),
+    } as Response);
+    const { result } = renderHook(() => useHitlInChat({ messages: [baseMessage('pa_42')] }));
+    await act(async () => {
+      await result.current.decide('tc-1', true);
+    });
+    expect(result.current.decisions['tc-1']).toEqual({
+      state: 'success',
+      message: 'Approved — action executed.',
+      decision: 'approved',
+      result: { status: 'written', objectName: 'crm_lead', recordId: 'new_1', label: '张伟' },
+    });
+
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      text: async () => JSON.stringify({ status: 'rejected', id: 'pa_42' }),
+    } as Response);
+    await act(async () => {
+      await result.current.decide('tc-1', false, '已在卡片上取消');
+    });
+    expect(result.current.decisions['tc-1']).toEqual({
+      state: 'success',
+      message: 'Rejected: 已在卡片上取消',
+      decision: 'rejected',
+    });
   });
 
   it('does NOT continue when option is omitted', async () => {

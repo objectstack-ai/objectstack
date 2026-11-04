@@ -88,8 +88,12 @@ const ADA = AUDITOR_DEMO_USER.email;
  * information-dense empty state rather than broken images.
  */
 
+// No dataset in this file declares `mode: 'upsert'`: each is the demo
+// workspace's business data, which a user edits once it is seeded, so every
+// replay is create-only (the seed default) — a missing row is inserted and an
+// existing row is left as the user left it. A changed value here reaches only
+// a database the seed has not loaded yet (`os dev --fresh`).
 const accounts = defineSeed(Account, {
-  mode: 'upsert',
   externalId: 'name',
   records: [
     // `status` is required and no default is applied at seed-insert time, so it
@@ -126,7 +130,6 @@ const accounts = defineSeed(Account, {
 // (cascading) lookup demo: picking an Account on an invoice scopes its
 // Contact picker to that account's people (invoice.contact dependsOn account).
 const contacts = defineSeed(Contact, {
-  mode: 'upsert',
   externalId: 'email',
   records: [
     { name: 'Nora West', email: 'nora@northwind.example', phone: '+1 555 010 1111', company: 'Northwind', title: 'Procurement Lead', account: 'Northwind', stage: 'qualified' },
@@ -166,11 +169,12 @@ const contacts = defineSeed(Contact, {
  * from the `state_machine` rule (#3433). That lets each project be seeded
  * DIRECTLY at its real status; no FSM-walk workaround (this used to seed all
  * five as `planned` then upsert-hop them through legal transitions, #3415).
- * `mode: 'upsert'` keeps replay idempotent — an unchanged row no-ops, so
- * dev-server restarts and package re-publishes never churn or re-validate.
+ * The dataset declares no `mode`, so a replay is create-only (the seed
+ * default): dev-server restarts and package re-publishes insert a missing
+ * project and leave an existing one — and any edit made to it — alone, so
+ * nothing churns or re-validates.
  */
 const projects = defineSeed(Project, {
-  mode: 'upsert',
   externalId: 'name',
   records: [
     { name: 'Website Relaunch', account: 'Northwind', status: 'active', health: 'green', budget: 150_000, spent: 60_000, owner: ADA, start_date: cel`daysAgo(30)`, end_date: cel`daysFromNow(60)` },
@@ -183,7 +187,6 @@ const projects = defineSeed(Project, {
 
 // Tasks across all five board columns, with dates + locations to drive every view.
 const tasks = defineSeed(Task, {
-  mode: 'upsert',
   externalId: 'title',
   records: [
     { title: 'Audit current IA', project: 'Website Relaunch', assignee: ADA, status: 'done', priority: 'medium', estimate_hours: 8, progress: 100, done: true, created_at: cel`daysAgo(20)`, start_date: cel`daysAgo(20)`, end_date: cel`daysAgo(18)`, due_date: cel`daysAgo(18)`, location: { lat: 47.6062, lng: -122.3321 } },
@@ -200,7 +203,6 @@ const tasks = defineSeed(Task, {
 });
 
 const categories = defineSeed(Category, {
-  mode: 'upsert',
   externalId: 'name',
   records: [
     { name: 'Engineering', sort_order: 1, color: '#3B82F6' },
@@ -213,7 +215,6 @@ const categories = defineSeed(Category, {
 // Org-chart hierarchy seeded by `name` external id; `parent` references another
 // record's name, building a 3-level tree the `tree` view renders.
 const businessUnits = defineSeed(BusinessUnit, {
-  mode: 'upsert',
   externalId: 'name',
   records: [
     { name: 'Acme Corporation', kind: 'company', manager: 'Dana Wong', headcount: 0 },
@@ -248,7 +249,6 @@ const businessUnits = defineSeed(BusinessUnit, {
  */
 const orgUnits = SeedSchema.parse({
   object: 'sys_business_unit',
-  mode: 'upsert',
   externalId: 'id',
   records: [
     { id: 'bu_acme', name: 'Acme Corporation', code: 'ACME', kind: 'company', active: true },
@@ -265,7 +265,6 @@ const orgUnits = SeedSchema.parse({
 // from the definition — no binding row exists to seed.
 
 const teams = defineSeed(Team, {
-  mode: 'upsert',
   externalId: 'name',
   records: [
     { name: 'Platform', lead: 'linus@example.com', capacity_hours: 200 },
@@ -276,7 +275,6 @@ const teams = defineSeed(Team, {
 // Catalog products the invoice line's `product` lookup picks from. Selecting
 // one auto-fills the line's description + unit_price (matching field names).
 const products = defineSeed(Product, {
-  mode: 'upsert',
   externalId: 'sku',
   records: [
     { sku: 'WIDGET-A', name: 'Widget A', description: 'Standard widget', unit_price: 29.99, active: true },
@@ -319,7 +317,6 @@ const memberships = defineSeed(ProjectMembership, {
 // The multi-value USER field (`f_users`) stays unseeded on purpose: sys_user
 // rows come from sign-up, not seeds — see the note on the object.
 const fieldZoo = defineSeed(FieldZoo, {
-  mode: 'upsert',
   externalId: 'name',
   records: [
     {
@@ -358,7 +355,6 @@ const fieldZoo = defineSeed(FieldZoo, {
 // `showcase_invoice_line` is `controlled_by_parent`, the lines below follow
 // automatically — ada sees INV-1001/1002's lines but never linus's INV-1003.
 const invoices = defineSeed(Invoice, {
-  mode: 'upsert',
   externalId: 'name',
   records: [
     { name: 'INV-1001', account: 'Northwind', owner: 'ada@example.com', status: 'sent', issued_on: cel`daysAgo(10)`, tax_rate: 8, region: 'amer' },
@@ -394,7 +390,6 @@ const invoices = defineSeed(Invoice, {
 // start clock; the goods lines are empty on purpose, which is the fixture's
 // empty-cell case.
 const invoiceLines = defineSeed(InvoiceLine, {
-  mode: 'upsert',
   externalId: 'description',
   records: [
     { description: 'INV-1001 \u00b7 Consulting hours', invoice: 'INV-1001', product: 'SERVICE-HR', position: 0, quantity: 10, unit_price: 150, amount: 1500, service_start: '09:15' },
@@ -412,7 +407,6 @@ const invoiceLines = defineSeed(InvoiceLine, {
 // story in the app by flipping a line's status in the inline grid and watching
 // approved_amount / rejected_count move. Merchants are unique → externalId.
 const expenseReports = defineSeed(ExpenseReport, {
-  mode: 'upsert',
   externalId: 'name',
   records: [
     { name: 'EXP-2001', employee: 'Ada Lovelace', status: 'submitted', submitted_on: cel`daysAgo(5)` },
@@ -436,7 +430,6 @@ const expenseReports = defineSeed(ExpenseReport, {
  * documents for exactly this — `<timestamp> + duration("Nh…")`.
  */
 const expenseLines = defineSeed(ExpenseLine, {
-  mode: 'upsert',
   externalId: 'merchant',
   records: [
     // EXP-2001 → total 1500.50 · approved 960 · reimbursable 512 · rejected 0 · over$500 2
@@ -463,7 +456,6 @@ const expenseLines = defineSeed(ExpenseLine, {
 // renders on first boot — the "every view renders real data" principle. One
 // per status; the `closed` row doubles as live prey for InquiryPurgeFlow.
 const inquiries = defineSeed(Inquiry, {
-  mode: 'upsert',
   externalId: 'email',
   records: [
     { name: 'Priya Raman', email: 'priya@meridian.example', company: 'Meridian Labs', message: 'Interested in the delivery workspace for a 40-person team.', status: 'new', source: 'website' },
@@ -473,7 +465,6 @@ const inquiries = defineSeed(Inquiry, {
 });
 
 const preferences = defineSeed(Preference, {
-  mode: 'upsert',
   externalId: 'name',
   records: [
     { name: 'My Preferences', theme: 'light', default_landing: 'my_work', email_digest: 'daily', items_per_page: 50, notifications_enabled: true, compact_density: false },
@@ -488,7 +479,6 @@ const preferences = defineSeed(Preference, {
  * (only `showcase_ops` may create; everyone else is read-only by design).
  */
 const announcements = defineSeed(Announcement, {
-  mode: 'upsert',
   externalId: 'title',
   records: [
     { title: 'Welcome to the Showcase workspace', body: 'This demo org exercises the full permission model: positions, permission sets, sharing rules and field-level security. Log in as different personas to compare what each can see and edit.' },
@@ -512,7 +502,6 @@ const announcements = defineSeed(Announcement, {
  * proves nothing.
  */
 const clientBriefs = defineSeed(ClientBrief, {
-  mode: 'upsert',
   externalId: 'title',
   records: [
     {

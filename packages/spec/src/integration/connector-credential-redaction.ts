@@ -75,9 +75,11 @@
  *     and any URL a kind declares later. A string is judged as a URL parser
  *     reads it — trimmed of its leading and trailing C0 control characters
  *     and spaces, with every ASCII tab, LF and CR deleted: the userinfo of an
- *     authority that starts at `scheme://` or a scheme-relative `//`,
- *     rewritten at the matching position of the authored string; and a
- *     credential query parameter in any string. What a credential part is,
+ *     authority that starts where a URL parser starts it — after a special
+ *     scheme (`http`, `https`, `ws`, `wss`, `ftp`) and however many `/` or `\`
+ *     follow it, none included; after `scheme://` or a scheme-relative `//`
+ *     otherwise — rewritten at the matching position of the authored string;
+ *     and a credential query parameter in any string. What a credential part is,
  *     and the walk that finds every string holding one, live in ONE place,
  *     `./connector-url-credentials.ts`, which the write door's refinement
  *     runs too: an authored URL holding one is refused, so only a row stored
