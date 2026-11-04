@@ -94,7 +94,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 // [#5619] The producer's OWN write-verb dispatch decisions, imported from
@@ -656,6 +656,17 @@ describe('[#14179] every announcing door goes through the choke point', () => {
         fileURLToPath(new URL('./protocol.ts', import.meta.url)),
         'utf8',
     );
+    // [#29985] The codemod split moved door bodies into `protocol-*.ts`
+    // modules (ruling E's host split), where the class is spelled `host.`; a
+    // census of call sites reads every module the split can move a body to
+    // (the census's own pattern, `HOST_SPLIT.module` in
+    // `scripts/check-durability-degradation-log-level.mjs`), tests excluded.
+    const splitSources = readdirSync(fileURLToPath(new URL('.', import.meta.url)))
+        .filter((file) => /^protocol-[a-z0-9-]+\.ts$/.test(file))
+        .sort()
+        .map((file) => readFileSync(fileURLToPath(new URL(`./${file}`, import.meta.url)), 'utf8'));
+    /** Every match of `pattern` in `protocol.ts` and every split module. */
+    const sitesOf = (pattern: RegExp) => [source, ...splitSources].flatMap((text) => text.match(pattern) ?? []);
 
     it('has exactly seven `emitMetadataMutation` call sites — three original, three doors, four limbs', () => {
         // saveMetaItem · runPublishSideEffects · deleteMetaItem (repository)
@@ -665,7 +676,8 @@ describe('[#14179] every announcing door goes through the choke point', () => {
         // A new door that reaches for the LOCAL-only fan-out instead would
         // leave this count untouched and lose the cluster half in silence, so
         // §5's second case counts that method's callers too.
-        const callSites = source.match(/this\.emitMetadataMutation\(/g) ?? [];
+        // [#29985] `host.` in a moved body is the same call (ruling E's rewrite set).
+        const callSites = sitesOf(/\b(?:this|host)\.emitMetadataMutation\(/g);
         expect(callSites).toHaveLength(7);
         // Non-vacuity: the declaration is not one of them.
         expect(source.match(/private emitMetadataMutation\(/g) ?? []).toHaveLength(1);
@@ -677,7 +689,7 @@ describe('[#14179] every announcing door goes through the choke point', () => {
         // replay a peer's event WITHOUT re-publishing. A third caller is
         // either a door that lost its cluster leg or a receive path that grew
         // one, and both are this card's defect in a new place.
-        const callers = source.match(/this\.notifyMutationListenersLocal\(/g) ?? [];
+        const callers = sitesOf(/\b(?:this|host)\.notifyMutationListenersLocal\(/g);
         expect(callers).toHaveLength(2);
         expect(source.match(/private notifyMutationListenersLocal\(/g) ?? []).toHaveLength(1);
     });
@@ -686,10 +698,18 @@ describe('[#14179] every announcing door goes through the choke point', () => {
         // Scoped to `applyRemoteMetadataMutation`'s body: an emit here would
         // re-broadcast every received event and ping-pong across replicas,
         // which the loopback guard (own-messages only) cannot stop.
-        const start = source.indexOf('private async applyRemoteMetadataMutation(');
+        // [#29985] The body moved to `protocol-class-head.ts`, a static method of
+        // its facet, where it reads the class as `host`; the class member keeps
+        // a one-line delegation.
+        const headModule = readFileSync(fileURLToPath(new URL('./protocol-class-head.ts', import.meta.url)), 'utf8');
+        const start = headModule.indexOf('\n    static async applyRemoteMetadataMutation(');
         expect(start).toBeGreaterThan(-1);
-        const body = source.slice(start, source.indexOf('\n    /**', start));
-        expect(body).toContain('this.notifyMutationListenersLocal(');
+        const body = headModule.slice(start, headModule.indexOf('\n    }\n', start));
+        expect(body).toContain('host.notifyMutationListenersLocal(');
+        expect(body).not.toContain('host.emitMetadataMutation(');
         expect(body).not.toContain('this.emitMetadataMutation(');
+        const stubAt = source.indexOf('private async applyRemoteMetadataMutation(');
+        expect(stubAt).toBeGreaterThan(-1);
+        expect(source.slice(stubAt, source.indexOf('\n    }\n', stubAt))).toContain('return ProtocolClassHeadFacet.applyRemoteMetadataMutation(protocolHost(this), evt);');
     });
 });

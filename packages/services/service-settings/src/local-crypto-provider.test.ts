@@ -19,6 +19,8 @@ import {
   UnknownCiphertextVersionError,
   aadForVersion2,
   ciphertextDerivationStatus,
+  resolvePersistedKeyFile,
+  KEY_FILE_CHANNEL_ENV,
 } from './local-crypto-provider.js';
 
 const ctx: CryptoContext = { scope: 'settings', namespace: 'mail', key: 'api_key' };
@@ -135,6 +137,97 @@ describe('LocalCryptoProvider — key resolution', () => {
       env: { OBJECTSTACK_DEV_CRYPTO_KEY: hex, NODE_ENV: 'development', HOME: home },
     });
     expect(p.keySource).toBe('env:OS_DEV_CRYPTO_KEY');
+  });
+});
+
+describe('#29934 — the key file the CLI names, and the one resolution behind it', () => {
+  let home: string;
+  let other: string;
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'os-crypto-home-'));
+    other = mkdtempSync(join(tmpdir(), 'os-crypto-other-'));
+  });
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(other, { recursive: true, force: true });
+  });
+
+  const canonical = () => join(home, '.objectstack', 'dev-crypto-key');
+  const legacy = () => join(other, 'dev-crypto-key');
+  const writeKey = (file: string): Buffer => {
+    const key = randomBytes(32);
+    mkdirSync(join(file, '..'), { recursive: true });
+    writeFileSync(file, key.toString('base64'), { mode: 0o600 });
+    return key;
+  };
+
+  it('the file tier reads and mints at the channel path, over OS_HOME', async () => {
+    const named = join(other, 'named', 'dev-crypto-key');
+    const env = { NODE_ENV: 'production', OS_HOME: home, OS_CRYPTO_AUTOKEY: '1', [KEY_FILE_CHANNEL_ENV]: named };
+    const a = new LocalCryptoProvider({ env });
+    expect(a.keySource).toBe('generated-file');
+    expect(existsSync(named)).toBe(true);
+    expect(existsSync(join(home, 'dev-crypto-key'))).toBe(false);
+    const h = await a.encrypt('v', ctx);
+    expect(await new LocalCryptoProvider({ env }).decrypt(h, ctx)).toBe('v');
+  });
+
+  it('an env key still answers before the channel', () => {
+    const named = join(other, 'dev-crypto-key');
+    writeKey(named);
+    const p = new LocalCryptoProvider({
+      env: { NODE_ENV: 'production', OS_SECRET_KEY: randomBytes(32).toString('hex'), [KEY_FILE_CHANNEL_ENV]: named },
+    });
+    expect(p.keySource).toBe('env:OS_SECRET_KEY');
+  });
+
+  it('canonical = the file the provider reads without the channel; no legacy file → canonical', () => {
+    expect(resolvePersistedKeyFile({ env: { HOME: home }, legacyKeyFile: legacy() })).toEqual({
+      path: canonical(),
+      kind: 'canonical',
+      canonical: canonical(),
+    });
+  });
+
+  it('only the legacy file holds a key → legacy-only, its path', () => {
+    writeKey(legacy());
+    expect(resolvePersistedKeyFile({ env: { HOME: home }, legacyKeyFile: legacy() })).toEqual({
+      path: legacy(),
+      kind: 'legacy-only',
+      canonical: canonical(),
+      legacy: legacy(),
+    });
+  });
+
+  it('both hold different keys → both-differ, the canonical path', () => {
+    writeKey(legacy());
+    writeKey(canonical());
+    expect(resolvePersistedKeyFile({ env: { HOME: home }, legacyKeyFile: legacy() })).toMatchObject({
+      path: canonical(),
+      kind: 'both-differ',
+      legacy: legacy(),
+    });
+  });
+
+  it('a legacy file that IS the canonical file is no legacy file', () => {
+    writeKey(canonical());
+    expect(resolvePersistedKeyFile({ env: { HOME: home }, legacyKeyFile: canonical() })?.kind).toBe('canonical');
+  });
+
+  it('an unusable legacy file counts as absent, as the file tier reads it', () => {
+    mkdirSync(other, { recursive: true });
+    writeFileSync(legacy(), 'not-a-key');
+    expect(resolvePersistedKeyFile({ env: { HOME: home }, legacyKeyFile: legacy() })?.kind).toBe('canonical');
+  });
+
+  it('undefined when an env key answers first', () => {
+    writeKey(legacy());
+    expect(resolvePersistedKeyFile({ env: { OS_SECRET_KEY: 'x' }, legacyKeyFile: legacy() })).toBeUndefined();
+    expect(
+      resolvePersistedKeyFile({ env: { OS_DEV_CRYPTO_KEY: randomBytes(32).toString('hex') }, legacyKeyFile: legacy() }),
+    ).toBeUndefined();
+    // An unusable dev key falls through to the file tier, so a file is named.
+    expect(resolvePersistedKeyFile({ env: { HOME: home, OS_DEV_CRYPTO_KEY: 'short' } })?.kind).toBe('canonical');
   });
 });
 

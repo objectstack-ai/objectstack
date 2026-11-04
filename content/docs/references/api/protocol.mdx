@@ -1471,7 +1471,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **fields** | `Record<string, { sortable: boolean; reason?: 'virtual-type'; caveat?: 'unprovisioned-anchor' }>` | ✅ | Verdict per sortable-addressable column, keyed by field name. The domain is the served field map plus the always-provisioned `id`, less any field the caller's own field permission withholds: a caller exempt from the object-schema mask (ADR-0106 D4) is served such fields in `item` and gets no entry for them; for every other caller the served map already excludes them. A name absent from this map (an unknown field, a dotted path, an unprovisioned audit column, a field the caller may not read) has no platform sort behind it and must get no sort affordance. |
+| **fields** | `Record<string, { sortable: boolean; reason?: Enum<'virtual-type' \| 'author-declared'>; caveat?: 'unprovisioned-anchor' }>` | ✅ | Verdict per sortable-addressable column, keyed by field name. The domain is the served field map plus the always-provisioned `id`, less any field the caller's own field permission withholds: a caller exempt from the object-schema mask (ADR-0106 D4) is served such fields in `item` and gets no entry for them; for every other caller the served map already excludes them. A name absent from this map (an unknown field, a dotted path, an unprovisioned audit column, a field the caller may not read) has no platform sort behind it and must get no sort affordance. |
 
 ### Nested Shape: `GetMetaItemResponse.registration[state='registered']`
 

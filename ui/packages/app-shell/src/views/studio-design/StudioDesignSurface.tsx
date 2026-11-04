@@ -32,10 +32,9 @@ import {
   type DraftChange,
 } from '@object-ui/data-objectstack';
 import type { MetadataClient, MetadataError } from '@object-ui/data-objectstack';
-import type { FlowRuntimeState as SpecFlowRuntimeState } from '@objectstack/spec/contracts';
 import { canonicalMetaUrlType } from '@objectstack/spec/shared';
 import { resolveI18nLabel, type I18nLabel } from '@objectstack/spec/ui';
-import { customizationNamespace, customizationPackageId } from '@objectstack/spec/kernel';
+import { customizationNamespace } from '@objectstack/spec/kernel';
 import { StudioChatDock, type StudioCopilotStatus, type StudioSurfaceLabel } from './StudioAiCopilot.js';
 import { StudioRightSlot } from './StudioRightSlot.js';
 import {
@@ -70,7 +69,6 @@ import {
   StudioItemHeaderFoldedItems,
   StudioStatusChip,
   StudioTab,
-  useStudioTabRowFold,
   type StudioItemStatus,
 } from './StudioItemHeader.js';
 import { StudioItemTools } from '../item-tools/StudioItemTools.js';
@@ -91,7 +89,6 @@ import {
   flowTriggerGlyph,
   groupFlowsByObject,
   navigationObjectOrder,
-  type FlowTriggerGlyph,
 } from './flowGrouping.js';
 import { StudioRefusalStrip } from './StudioRefusalStrip.js';
 import { StudioNavItemInspector, StudioPicker } from './StudioNavItemInspector.js';
@@ -109,6 +106,55 @@ import {
   navOpenedItems,
   type OffNavType,
 } from './InterfacesNavRail.js';
+import {
+  FLOW_COPIED_ARRIVAL_STATE,
+  FLOW_GLYPH_ICON,
+  FLOW_GLYPH_LABEL_KEY,
+  type FlowCopiedStrip,
+  flowDotClass,
+  type FlowRailState,
+  flowRailState,
+  flowRailStatus,
+  type FlowRuntimeState,
+  FlowStatusDot,
+  type NewFlowTrigger,
+  newFlowTriggerFields,
+  NO_OBJECT_GROUP_KEY,
+  NO_OBJECT_ORDER,
+  pairIdOf,
+  readFlowCopiedArrival,
+  readFlowDefinitions,
+  readFlowRegistrations,
+  readObjectLabels,
+  withStartTrigger,
+} from './AutomationsFlowRail.js';
+import {
+  addedExtensionFieldName,
+  addedFieldName,
+  type CelPanelTab,
+  extensionFieldsOf,
+  fieldCelStamp,
+  formFieldNames,
+  formPreviewSource,
+  isCelPanelTab,
+  OWD_OPTION_DESC_KEY,
+  OWD_OPTION_LABEL_KEY,
+  panelItemCelStamp,
+  panelItemOf,
+  STUDIO_SYSTEM_FIELD_NAMES,
+} from './DataPillarHelpers.js';
+import {
+  announceDraftSaved,
+  confirmDropUnsavedWork,
+  CreateTakenNotice,
+  findTakenIdentifier,
+  type StudioBaseCustomization,
+  StudioHeldNotice,
+  StudioReadOnlyLink,
+  type StudioSavedDraft,
+  useHeldEditReport,
+  useShowInputFocus,
+} from './StudioPillarKit.js';
 import {
   GridFieldAuthoringProvider,
   cn,
@@ -162,10 +208,6 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Play,
-  Zap,
-  Clock,
-  MousePointerClick,
-  CornerDownRight,
   FileQuestion,
   PackageX,
   Library,
@@ -290,7 +332,6 @@ import { buildObjectSkeleton, buildFlowSkeleton, buildAppSkeleton, buildPermissi
 import { OWD_CREATE_MODELS, OWD_DEFAULT, type OwdCreateModel } from './owd-sharing.js';
 import { t, tFormat, translateMetadataType, translateValidationMessage, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { useRegisterUnsavedEdits } from '../../chrome/unsavedEdits.js';
-import { fieldsForNodeType, localizeFlowFields, type FlowConfigField } from '../metadata-admin/inspectors/flow-node-config.js';
 import { ObjectPicker } from '../metadata-admin/inspectors/ObjectPicker.js';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { SuggestedBindingsPanel } from '../../components/SuggestedBindingsPanel.js';
@@ -299,10 +340,7 @@ import {
   FlowRegistrationContext,
   FlowRuntimeContext,
   deriveFlowRunStatus,
-  describeFlowRunStatus,
   type FlowRunStatus,
-  type FlowRunStatusView,
-  type FlowRuntimeRow,
 } from '../metadata-admin/previews/flow-problems.js';
 import {
   FlowMetaPills,
@@ -328,9 +366,7 @@ import {
   readFields,
   writeFields,
   newField,
-  toFieldNameLoose,
 } from '../metadata-admin/previews/object-fields-io.js';
-import { romanizeHan } from '../metadata-admin/romanizeHan.js';
 import type { FieldTypeId } from '../metadata-admin/previews/field-types.js';
 import {
   ExternalObjectNotice,
@@ -364,7 +400,7 @@ import {
   type EnsuredCustomizationPackage,
   type PkgEntry,
 } from './packages-io.js';
-import { usePackageCustomizations, type PackageCustomizationsState } from './CustomizationMark.js';
+import { usePackageCustomizations } from './CustomizationMark.js';
 import {
   ContributedRailRow,
   RailCustomizationFilter,
@@ -440,25 +476,6 @@ function formatBackfillReceipt(receipt: PublishBackfillReceipt, locale: string):
     .join(' · ');
 }
 
-/**
- * The create dialog's OWD options reuse the SETTINGS tab's own label and gloss
- * strings verbatim (`7a90afdf9`). The complaint it answered was that the Settings
- * page "is excellent — four options, each with a plain-language gloss" and that
- * nothing routes the author there; copying the wording rather than writing a
- * second, shorter one is what keeps the two surfaces from drifting into two
- * descriptions of one security baseline.
- */
-const OWD_OPTION_LABEL_KEY: Record<OwdCreateModel, string> = {
-  private: 'engine.studio.settings.sharingPrivate',
-  public_read: 'engine.studio.settings.sharingPublicRead',
-  public_read_write: 'engine.studio.settings.sharingPublicReadWrite',
-};
-const OWD_OPTION_DESC_KEY: Record<OwdCreateModel, string> = {
-  private: 'engine.studio.settings.sharingDescPrivate',
-  public_read: 'engine.studio.settings.sharingDescPublicRead',
-  public_read_write: 'engine.studio.settings.sharingDescPublicReadWrite',
-};
-
 // objectui#12452 — Access is the fourth segment, and the "More" overflow that
 // held it alone (objectui#5813) is retired. If a second overflow pillar is ever
 // added, More returns with the objectui#11794 behaviour: its trigger keeps the
@@ -501,146 +518,8 @@ function interfacesSaveBody(type: string, draft: Record<string, unknown>): Recor
   return fromDraft ? fromDraft(draft) : draft;
 }
 
-/**
- * objectui#11786 — tells the surface's Publish what edit a pillar holds unsent
- * (`StudioHeld.clause`, or `null`), and takes it back when the pillar unmounts,
- * so a pillar left behind never keeps Publish refusing — nor, since
- * objectstack#26705, keeps the surface's departure guard asking.
- *
- * Keyed on the clause, a string, never on the view model's identity (AGENTS.md
- * #10); the reporter is read through a ref, so an unmemoised one cannot re-fire it.
- */
-function useHeldEditReport(report: ((clause: string | null) => void) | undefined, clause: string | null): void {
-  const reportRef = React.useRef(report);
-  React.useLayoutEffect(() => {
-    reportRef.current = report;
-  });
-  React.useEffect(() => {
-    reportRef.current?.(clause);
-  }, [clause]);
-  React.useEffect(() => () => reportRef.current?.(null), []);
-}
-
-/**
- * objectstack#26705 — the one question Studio asks before a departure drops
- * unsaved work: a dirty pillar's edits (objectui#2600) or an edit a pillar's
- * autosave holds unsent (objectui#11786). The surface asks it before the header
- * leaves the pillar; a pillar asks it before its rail opens another item, which
- * reloads the one buffer the work lives in. `true` when nothing would be lost
- * or the author agrees to lose it.
- */
-function confirmDropUnsavedWork(unsaved: boolean, locale: string): boolean {
-  return !unsaved || window.confirm(t('engine.edit.unsavedLeaveConfirm', locale));
-}
-
-/**
- * objectstack#26836, objectstack#26917 — the item of `type` that already holds
- * `name`, published or as a draft, in this package or any other; `null` when
- * the identifier is free. Every Studio create reads it before its save and
- * refuses a taken identifier, writing nothing.
- *
- * The create's first-write pin (`ifNoneMatch: '*'` with `mode: 'draft'`)
- * asserts "no DRAFT row" only — the spec's `parentVersion: null` is
- * lifecycle-scoped — so over a PUBLISHED item it would write the blank
- * skeleton as that item's pending draft, and publishing the package would
- * replace the live item with it. The pin stays on the save for a draft that
- * lands between this read and the write; an item published in that window is
- * not refused by it.
- */
-async function findTakenIdentifier(
-  client: Pick<MetadataClient, 'list' | 'listDrafts'>,
-  type: string,
-  name: string,
-  locale: string,
-): Promise<{ name: string; label: string } | null> {
-  const [published, drafts] = await Promise.all([
-    client.list<Record<string, unknown>>(type),
-    client.listDrafts({ type }) as Promise<Array<{ name?: string; label?: I18nLabel | null }>>,
-  ]);
-  const publishedRow = (published ?? []).find((row) => row?.name === name);
-  const draftRow = (drafts ?? []).find((row) => row?.name === name);
-  if (!publishedRow && !draftRow) return null;
-  const label = navItemLabelText((publishedRow?.label as I18nLabel | undefined) ?? draftRow?.label ?? undefined, locale);
-  return { name, label: label.trim() || name };
-}
-
-/**
- * A create refused over a taken identifier (`findTakenIdentifier`), in the
- * create dialog: the sentence naming the item that holds it and, when that item
- * is on the pillar's own rail, a way to open it instead.
- */
-function CreateTakenNotice({
-  scope,
-  sentence,
-  openLabel,
-  onOpen,
-}: {
-  /** The pillar's test-id prefix: `${scope}-create-taken`. */
-  scope: string;
-  sentence: string;
-  openLabel?: string;
-  onOpen?: () => void;
-}): React.ReactElement {
-  return (
-    <div className="space-y-2" data-testid={`${scope}-create-taken`}>
-      <p className="text-sm text-destructive">{sentence}</p>
-      {onOpen && openLabel && (
-        <button
-          type="button"
-          data-testid={`${scope}-create-open-existing`}
-          onClick={onOpen}
-          className="text-sm font-medium text-primary underline-offset-4 hover:underline"
-        >
-          {openLabel}
-        </button>
-      )}
-    </div>
-  );
-}
-
-/**
- * objectui#11786 — the line a pillar shows, in place of a refusal, while its
- * autosave holds an incomplete-but-normal edit: what the edit still needs, that
- * it is kept and not yet saved, and a "Show me" that opens the input when it is
- * not the one already open. Neutral on purpose: nothing was refused, and the
- * author has not finished.
- *
- * Exported for its pins; `index.ts` does not re-export it.
- */
-export function StudioHeldNotice<Target extends MetadataSelection | null = MetadataSelection>({
-  held,
-  locale,
-  onShow,
-  className,
-}: {
-  held: StudioHeld<Target>;
-  locale: string;
-  /** Opens the held input; omitted while that input is the one open. */
-  onShow?: (target: Target) => void;
-  /** Spacing and type size, which differ by pillar. */
-  className?: string;
-}): React.ReactElement {
-  return (
-    <div
-      data-testid="studio-held"
-      role="status"
-      className={cn('flex items-start gap-2 rounded-md border bg-muted/40 text-muted-foreground', className)}
-    >
-      <p data-testid="studio-held-message" className="min-w-0 flex-1">
-        {tFormat('engine.studio.held.line', locale, { clause: held.clause })}
-      </p>
-      {onShow && (
-        <button
-          type="button"
-          onClick={() => onShow(held.target)}
-          className="shrink-0 rounded border px-1.5 py-0.5 font-medium text-foreground hover:bg-muted"
-        >
-          {t('engine.studio.refusal.show', locale)}
-        </button>
-      )}
-    </div>
-  );
-}
+// objectstack#29988 — the pillar kit moved to its own module; re-exported for its pins.
+export { StudioHeldNotice, StudioReadOnlyLink, type StudioBaseCustomization };
 
 /**
  * Which pillar owns a surface type — the routing half of a live surface
@@ -660,96 +539,6 @@ const PILLAR_FOR_SURFACE_TYPE: Readonly<Record<string, string>> = {
 // objectstack#29148 — the strip moved to its own module; re-exported for its pins.
 export { StudioRefusalStrip };
 
-// ---------------------------------------------------------------------------
-// objectstack#26730 — "Show me" ends ON the input a refusal names.
-//
-// A strip's "Show me" used to select its target and stop there: the inspector
-// opened, and the focus stayed on the button, so the author still had to find
-// the input. The pillar now asks for that input once the selection is open:
-// the control the inspector labels with the refusal's `input` (the label the
-// sentence names), or, when the refusal names none, the inspector's first.
-// ---------------------------------------------------------------------------
-
-/** A control the author types into or picks from. */
-const SHOW_FORM_CONTROL = 'input:not([type="hidden"]), textarea, select, [role="combobox"]';
-
-/** How long a request waits for the inspector to draw the input it names. */
-const SHOW_FOCUS_WAIT_MS = 3000;
-
-/** The first enabled match of `selector` in `scope`, outside anything hidden from the author. */
-function enabledControlIn(scope: Element, selector: string): HTMLElement | null {
-  for (const el of scope.querySelectorAll<HTMLElement>(selector)) {
-    if ((el as HTMLInputElement).disabled || el.closest('[aria-hidden="true"]')) continue;
-    return el;
-  }
-  return null;
-}
-
-/** A label's text as the author reads it: without the visual-only required marker. */
-function readLabelText(label: Element): string {
-  const copy = label.cloneNode(true) as Element;
-  copy.querySelectorAll('[aria-hidden="true"]').forEach((node) => node.remove());
-  return (copy.textContent ?? '').trim();
-}
-
-/**
- * The control `input` names in `root`: the one its label is for, else the
- * first control of the nearest block around the label (an editor whose label
- * heads a list of rows, or whose only control adds the first row). With no
- * `input`, the root's first control. `null` while the inspector has not drawn it.
- */
-function showTargetControl(root: Element, input: string | undefined): HTMLElement | null {
-  const first = (scope: Element) => enabledControlIn(scope, SHOW_FORM_CONTROL) ?? enabledControlIn(scope, 'button');
-  if (input === undefined) return first(root);
-  for (const label of root.querySelectorAll('label')) {
-    if (readLabelText(label) !== input) continue;
-    const own = (label as HTMLLabelElement).control;
-    if (own instanceof HTMLElement && !(own as HTMLInputElement).disabled) return own;
-    for (let block = label.parentElement; block && root.contains(block); block = block.parentElement) {
-      const found = first(block);
-      if (found) return found;
-    }
-  }
-  return null;
-}
-
-/**
- * objectstack#26730 — the focus half of a pillar's "Show me". The returned
- * function asks for the input inside `rootRef`'s element (the pillar's
- * inspector); call it beside the selection that opens the target. The request
- * is answered after that commit, or as soon as the inspector draws the input
- * (a registered inspector settling), and dropped after
- * {@link SHOW_FOCUS_WAIT_MS}: an input the inspector never draws for this
- * target is left unfocused, never swapped for another.
- */
-function useShowInputFocus(rootRef: React.RefObject<HTMLElement | null>): (input: string | undefined) => void {
-  const [request, setRequest] = React.useState<{ id: number; input: string | undefined } | null>(null);
-  React.useEffect(() => {
-    if (!request) return;
-    const attempt = (): boolean => {
-      const root = rootRef.current;
-      const control = root ? showTargetControl(root, request.input) : null;
-      if (!control) return false;
-      control.focus();
-      return true;
-    };
-    if (attempt()) return;
-    const observer = new MutationObserver(() => {
-      if (attempt()) stop();
-    });
-    const timer = window.setTimeout(() => stop(), SHOW_FOCUS_WAIT_MS);
-    function stop(): void {
-      observer.disconnect();
-      window.clearTimeout(timer);
-    }
-    observer.observe(document.body, { childList: true, subtree: true, attributes: true });
-    return stop;
-  }, [request, rootRef]);
-  return React.useCallback((input: string | undefined) => {
-    setRequest((prev) => ({ id: (prev?.id ?? 0) + 1, input }));
-  }, []);
-}
-
 /**
  * objectstack#26730 — which Pending changes entry a kept publish refusal
  * belongs to: the draft's canonical type and name. The `_drafts` feed and
@@ -760,87 +549,6 @@ function publishRefusalKey(type: string, name: string): string {
 }
 
 const NO_PUBLISH_REFUSALS: ReadonlyMap<string, StudioRefusal> = new Map();
-
-/** The draft a pillar's save wrote, as it reports it to `onDraftSaved`. */
-interface StudioSavedDraft {
-  type: string;
-  name: string;
-}
-
-/**
- * objectstack#28984 — a landed draft AUTOSAVE says what it saved, by the
- * item's label, as Studio's other writes do (publish names what went live,
- * discard says "Draft discarded: LABEL"). The top bar's "Saved HH:MM" stays,
- * but it names nothing, and only feedback that names the item counts as write
- * feedback (ruling 6545938831 ② on #28345).
- *
- * The autosave lands after every editing pause, so the toast carries one
- * sonner id per item: a later save of the same item UPDATES the toast already
- * on screen instead of stacking another (the `PACKAGE_LIST_TOAST_ID` pattern
- * above). Typing a label is one live toast, not one per pause; another item
- * saved meanwhile gets its own. Called only once the save has landed: a
- * refused save keeps its refusal strip and says nothing about saving, and a
- * conflict the author settled by reloading saved nothing.
- */
-function announceDraftSaved(saved: StudioSavedDraft, label: string, locale: string): void {
-  toast.success(tFormat('engine.studio.draftSaved', locale, { item: label || saved.name }), {
-    id: draftSavedToastId(saved),
-  });
-}
-
-/** The one sonner id a draft save of this item announces under. */
-function draftSavedToastId(saved: StudioSavedDraft): string {
-  return `studio-draft-saved:${saved.type}:${saved.name}`;
-}
-
-/**
- * objectui#12453 — a read-only package says so twice: the lock in the app
- * chip, and this mark at the right of the open item's header, in every
- * pillar. The pillar's read-only sentence (objectui#11781) is its title.
- *
- * objectstack#28576 (ADR-0146 D11) — a plain "Read-only" mark that links
- * nowhere, for every item of a read-only package. It used to link an item of
- * an `allowEnvironmentOverlay` type to its overlay page (Setup's item page,
- * later that page in Studio's "All metadata" area), whose save names no
- * package; the server refuses that write onto a packaged item now, and a customization lives in the base's paired
- * `.custom` package instead (Studio customizes a view, dashboard or report
- * there itself, objectstack#28562). So the mark offers no overlay, whatever
- * the type's registry flag says. `item` stays in the props the pillars pass.
- *
- * objectui#12707 — at a tab row's end, the mark folds to its glyph when the
- * row cannot hold it whole (`useStudioTabRowFold`), rather than being cut
- * mid-word at the row's edge. Folded, its text stays as its accessible name
- * and its title stays its tooltip.
- */
-export function StudioReadOnlyLink({
-  title,
-  locale,
-}: {
-  /** The open item, or `null` when the header has none open. */
-  item: { type: string; name: string } | null;
-  title: string;
-  locale: string;
-}): React.ReactElement {
-  const ref = React.useRef<HTMLSpanElement | null>(null);
-  const label = t('engine.studio.pkg.readonly', locale);
-  const folded = useStudioTabRowFold(ref, label);
-  const className = cn(
-    'inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-amber-400/15 text-xs font-medium text-amber-700 dark:text-amber-300',
-    folded ? 'w-7 justify-center' : 'px-2.5',
-  );
-  return (
-    <span
-      ref={ref}
-      title={title}
-      data-testid="studio-readonly-link"
-      data-folded={folded || undefined}
-      className={className}
-    >
-      <Lock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      <span className={folded ? 'sr-only' : undefined}>{label}</span>
-    </span>
-  );
-}
 
 export interface StudioDesignSurfaceProps {
   /** Open-core slot — the cloud edition injects its AI copilot panel here. */
@@ -2229,33 +1937,6 @@ export { StudioNavItemInspector };
 
 /** The Interfaces pillar's leaf identity, `type:name` (`:` when none is open). */
 const leafKeyOf = (s: Surface | null): string => `${s?.type ?? ''}:${s?.name ?? ''}`;
-
-/**
- * objectstack#28562 (ADR-0146 D2, D3) — what the Interfaces pillar customizes
- * a read-only base with, from the Studio surface: passed only on a read-only
- * base, once the package list has answered for it.
- */
-export interface StudioBaseCustomization {
-  /** The read-only base package. */
-  base: string;
-  /** Its display name, as the top bar shows it. */
-  baseLabel: string;
-  /** The version its listed manifest declares: an override's `basedOn`. `null` when the list states none. */
-  basedOn: string | null;
-  /** The ensure door refuses this caller (`customizeDoorWalled`). */
-  walled: boolean;
-  /** The base's pair, for READS (its drafts); `null` while it has none. */
-  pairId: string | null;
-  /** The ensure door: resolves the pair's id from its answer, which every write names; rejects with its refusal. */
-  ensure: () => Promise<string>;
-  /**
-   * objectstack#28572 — the ensure door's whole answer: a New on the base
-   * creates its item in `packageId`, and a new object takes `namespace`.
-   */
-  ensurePackage: () => Promise<EnsuredCustomizationPackage>;
-  /** objectstack#28572 — the base's served customization read (N-15), which the rails mark rows from. */
-  marks: PackageCustomizationsState;
-}
 
 /** The key an item of `base` is customized under: the base, `type` and `name`. */
 const customizeItemKey = (base: string, type: string, name: string): string => JSON.stringify([base, type, name]);
@@ -5132,75 +4813,6 @@ export function InterfacesPillar({
   );
 }
 
-/** Next unused `field_N` name for a freshly-added field. */
-function nextFieldName(existing: string[]): string {
-  let i = existing.length + 1;
-  let name = `field_${i}`;
-  while (existing.includes(name)) name = `field_${++i}`;
-  return name;
-}
-
-/**
- * The api name of a field added with `label` (objectui#12516): the name the
- * field inspector's Label derives from it (`toFieldNameLoose`, a Chinese label
- * through its pinyin as the popover previewed it — `romanizeHan`), or, as the
- * inspector keeps the default when that derivation is empty (a label with no
- * Latin letters) or names another field, the next free `field_<N>`. The Add
- * field popover asks for the name in those two cases (objectui#13389), so the
- * `field_<N>` fallback is left for a caller that hands no name.
- */
-function addedFieldName(label: string, existing: string[]): string {
-  const derived = toFieldNameLoose(romanizeHan(label));
-  return derived && !existing.includes(derived) ? derived : nextFieldName(existing);
-}
-
-/**
- * objectstack#28575 — {@link addedFieldName} for a customer extension field:
- * the name the Add field popover shows, suffixed (`region__c`), or the next
- * free `field_<N>__c`.
- */
-function addedExtensionFieldName(label: string, existing: string[]): string {
-  const derived = extensionFieldName(toFieldNameLoose(romanizeHan(label)).replace(/_+$/, ''));
-  if (derived && !existing.includes(derived)) return derived;
-  let i = existing.length + 1;
-  let name = extensionFieldName(`field_${i}`);
-  while (existing.includes(name)) name = extensionFieldName(`field_${++i}`);
-  return name;
-}
-
-/** objectstack#28575 — an extension body's `fields` map; `{}` when it declares none. */
-function extensionFieldsOf(body: ObjectExtensionBody): Record<string, unknown> {
-  const fields = body.fields;
-  return fields && typeof fields === 'object' && !Array.isArray(fields) ? (fields as Record<string, unknown>) : {};
-}
-
-/**
- * Data pillar — the package's objects: a records grid (Airtable parity) plus
- * table-based field management. Add a field, or click a column header's edit
- * affordance, to open ObjectFieldInspector (full type list + per-type config)
- * in the right panel; changes persist via the object draft → publish overlay.
- */
-/**
- * Framework-managed/audit fields. They lead the raw metadata order but aren't
- * what a user manages in a data grid, so the Data pillar drops them from the
- * column set (mirrors ObjectGrid's regular-vs-system split) to open on the
- * meaningful fields first — the same way Airtable hides system columns.
- *
- * objectui#11780 — this list is no longer the only test. The columns the
- * platform injects AND hides (`system: true` + `hidden: true` on the served
- * definition: `__search`, `owning_business_unit_id`, `organization_id`) are
- * dropped by `isStudioHiddenSystemField`, read off each field's definition
- * beside this list. The list keeps its own job: the audit columns are
- * `system` but NOT `hidden` in the platform's own definitions
- * (`AUDIT_FIELD_DEFS`), so the marks alone would put them back.
- */
-const STUDIO_SYSTEM_FIELD_NAMES = new Set<string>([
-  '_id', 'id', 'organization_id', 'org_id', 'space_id',
-  'created_at', 'created_by', 'updated_at', 'updated_by',
-  'modified_at', 'modified_by', 'created_time', 'modified_time', 'updated_time',
-  'deleted_at', 'deleted_by',
-]);
-
 /**
  * Render the Data pillar's records grid using the SAME rich list surface as the
  * runtime list pages — the standard toolbar (view switcher, search, sort, filter,
@@ -5276,102 +4888,6 @@ export function renderStudioGridList(props: {
       className={className}
     />
   );
-}
-
-/**
- * The form fields of an object definition's `fields`, in metadata order: the
- * platform's injected-and-hidden fields (objectui#11780) and the audit fields
- * dropped. Read for the draft (`formFields`) and the published baseline.
- */
-function formFieldNames(fields: unknown): string[] {
-  return readFields(fields)
-    .entries.filter((e) => !isStudioHiddenSystemField(e.def))
-    .map((e) => e.name)
-    .filter((n) => !STUDIO_SYSTEM_FIELD_NAMES.has(n));
-}
-
-/**
- * objectstack#27485 — what the field inspector's CEL verdict on `field` was
- * judged from, as the object draft holds it: the field's type, its CEL texts
- * (`expression`, the legacy `formula`, `visibleWhen`, `readonlyWhen`,
- * `requiredWhen`) and the object's field names its lint resolves references
- * against. The same stamp is the same verdict. `null` when the field is gone.
- */
-function fieldCelStamp(draft: Record<string, unknown>, field: string): string | null {
-  const { entries } = readFields(draft.fields);
-  const def = entries.find((e) => e.name === field)?.def;
-  if (!def) return null;
-  const cel = [def.type, def.expression, def.formula, def.visibleWhen, def.readonlyWhen, def.requiredWhen];
-  return JSON.stringify([cel.map((v) => v ?? null), entries.map((e) => e.name)]);
-}
-
-/** objectstack#27629 — the Data pillar panels that mount a CEL editor and report per item. */
-type CelPanelTab = 'rules' | 'actions';
-const isCelPanelTab = (v: string): v is CelPanelTab => v === 'rules' || v === 'actions';
-
-/** The rule (`rules`) or action (`actions`) named `item` in the object draft. */
-function panelItemOf(draft: Record<string, unknown>, tab: CelPanelTab, item: string): Record<string, unknown> | undefined {
-  const list = tab === 'rules' ? draft.validations : draft.actions;
-  if (!Array.isArray(list)) return undefined;
-  return list.find(
-    (e): e is Record<string, unknown> => !!e && typeof e === 'object' && String((e as { name?: unknown }).name ?? '') === item,
-  );
-}
-
-/**
- * objectstack#27629 — what a panel's CEL verdict on `item` was judged from, as
- * the object draft holds it: the rule or action itself (its guard or
- * predicates among its keys) and the object's field names its lint resolves
- * references against. `fieldCelStamp`'s counterpart for the panel family; the
- * same stamp is the same verdict. `null` when the item is gone.
- */
-function panelItemCelStamp(draft: Record<string, unknown>, tab: CelPanelTab, item: string): string | null {
-  const def = panelItemOf(draft, tab, item);
-  if (!def) return null;
-  return JSON.stringify([def, readFields(draft.fields).entries.map((e) => e.name)]);
-}
-
-/** The data-source writes the Form tab's Preview refuses (objectui#12515). */
-const PREVIEW_REFUSED_WRITES = new Set<PropertyKey>(['create', 'update', 'delete', 'bulk', 'bulkUpdate', 'bulkDelete']);
-
-/**
- * objectui#12515 — the data source the Form tab's Preview hands the runtime
- * `ObjectForm`, the same renderer the app's record form uses.
- *
- * The form reads the object's definition only through
- * `dataSource.getObjectSchema(name)`. With `draft` given, that read answers for
- * the open object from the pillar's buffer (the draft as served, plus the
- * edits not yet saved), so a draft-only object previews without a server read
- * and a published one previews its pending change. Every other read (another
- * object's definition, a lookup's options) goes to the real adapter.
- *
- * Preview never saves: the writes in `PREVIEW_REFUSED_WRITES` reject, in the
- * Draft and the Published preview alike.
- */
-function formPreviewSource(
-  adapter: object | null,
-  draft: { name: string; definition: Record<string, unknown> } | null,
-): object | null {
-  // No adapter, no data source: the form says so, as it does today.
-  if (!adapter) return null;
-  return new Proxy(adapter, {
-    get(target, prop) {
-      if (PREVIEW_REFUSED_WRITES.has(prop)) {
-        return () => Promise.reject(new Error('The form preview does not save.'));
-      }
-      if (draft && prop === 'getObjectSchema') {
-        const read = Reflect.get(target, prop, target) as ((name: string) => Promise<unknown>) | undefined;
-        return (name: string) =>
-          name === draft.name
-            ? Promise.resolve(structuredClone({ ...draft.definition, name: draft.name }))
-            : read
-              ? read.call(target, name)
-              : Promise.reject(new Error(`No definition for "${name}".`));
-      }
-      const value = Reflect.get(target, prop, target);
-      return typeof value === 'function' ? value.bind(target) : value;
-    },
-  });
 }
 
 // Exported for tests (StudioDesignSurface.emptyPackage.test.tsx) — the empty-
@@ -7610,355 +7126,10 @@ export function DataPillar({
   );
 }
 
+// objectstack#29988 — the Automations rail's flow helpers moved to their own module; re-exported for their pins.
+export { FlowStatusDot, type NewFlowTrigger };
+
 /** Automations pillar — flows: list → FlowPreview (default OFF / review-then-enable). */
-/**
- * One flow's runtime enable/bound state, as `GET /automation/_status` puts it on
- * the wire — the same report `IAutomationService.getFlowRuntimeStates` produces,
- * so the shape is the spec's and is TAKEN from it rather than restated
- * (objectui#7265; this used to be a module-local copy under the spec's own name,
- * already three keys behind it).
- *
- * `Partial<>` is the one deliberate divergence, and it is about the READER, not
- * the contract: this types a JSON body that has not been validated and may come
- * from an older backend that sends neither `enabled` nor `bound` — the effect
- * hard-codes the degraded case (`if (!res.ok) return`, "dots just don't
- * render"). Every member is therefore optional HERE while the contract keeps
- * `name` / `enabled` / `bound` required, and the reads below narrow each one
- * explicitly (`if (s?.name)`, then `s.enabled !== false`, `!!s.bound` and the
- * two string checks in `flowRailState`) instead of trusting the type. Pinned in
- * `spec-symbol-parity.test.ts`: if the spec ever
- * relaxes those three itself, the pin fails and this alias should collapse to a
- * plain re-export.
- */
-type FlowRuntimeState = Partial<SpecFlowRuntimeState>;
-
-/**
- * What the Automations rail keeps from one flow's runtime row (objectui#11281).
- *
- * `bound` alone cannot say why an enabled flow is unbound. The contract's
- * `FlowRuntimeState.bound` is false both for a flow that declares no trigger
- * and for one whose declared trigger the engine has not armed, and "`triggerType`
- * distinguishes the two". `reason` is the platform's one sentence for why such a
- * flow is not armed: a deployment policy and a binding failure each arrive in
- * the platform's own words. So the rail keeps both beside `enabled` / `bound`.
- *
- * The shape is `flow-problems`' `FlowRuntimeRow` (objectui#11779): the rail,
- * the flow header and the Problems panel derive one run status from it
- * (`deriveFlowRunStatus`), so it is declared once, where that derivation is.
- *
- * `unboundCause` is the one member kept beside it, for the ledger switch on a
- * read-only package's flow (ADR-0146 D4): `activationReading` reads it for its
- * presence, the same reading Setup › Packaged automation shows.
- */
-type FlowRailState = FlowRuntimeRow & { unboundCause?: string };
-
-/**
- * Narrow one unvalidated runtime row into the rail's state. `triggerType`,
- * `reason` and `unboundCause` are kept only as non-empty strings and are
- * otherwise absent, the way the engine omits them, so a row without them, and
- * every older backend, reads exactly as it did before they existed.
- */
-function flowRailState(s: FlowRuntimeState): FlowRailState {
-  const { triggerType, reason, unboundCause } = s;
-  return {
-    enabled: s.enabled !== false,
-    bound: !!s.bound,
-    ...(typeof triggerType === 'string' && triggerType.length > 0 ? { triggerType } : {}),
-    ...(typeof reason === 'string' && reason.length > 0 ? { reason } : {}),
-    ...(typeof unboundCause === 'string' && unboundCause.length > 0 ? { unboundCause } : {}),
-  };
-}
-
-/**
- * A flow's live status in the Automations rail, from the engine's runtime state
- * (persisted `status` is intent; this is what's actually live). Renders nothing
- * for a flow the engine doesn't know yet (never published) — the amber
- * "unpublished draft" chip already covers that case.
- *
- * objectui#12349 — and from the engine's registration verdict, which the flow
- * list serves beside its items. A flow the engine REFUSED has no runtime row,
- * so it used to render nothing here; it now reads "Refused by the engine",
- * titled with the engine's `reason.message`, as sent and never parsed. An
- * `unregistered` flow reads "Not running here". A `registered` verdict, and
- * none at all, leave the row's reading below.
- *
- * The state is the run status `deriveFlowRunStatus` derives, worded by
- * `describeFlowRunStatus` — the derivation the flow header's Status pill and the
- * Problems panel read too (objectui#11779), so the three cannot disagree:
- *   - enabled and bound, or enabled with no declared trigger: "On", titled
- *     "bound to its trigger" / "no trigger (run manually)" — a flow that runs
- *     when invoked is never called "not running";
- *   - enabled, with a declared trigger the engine has not armed: "Not running
- *     here". Its title is the platform's `reason`, verbatim (objectui#11281),
- *     or, from a backend that predates the field, the contract's own reading of
- *     the row: its trigger is not armed here;
- *   - disabled: "Off".
- *
- * objectui#12454 — drawn as a 6 px dot, as the redesign's rail draws it: green
- * for On, grey for Not running here, amber for Refused, a hollow ring for Off
- * (`flowDotClass`). The words are the element's visually hidden text and the
- * row's title (the dot no longer prints them), and the dot's own title is the
- * reason it always carried. The rail's legend names each look.
- * Nothing here is styled as an error: a deployment policy is not a defect.
- */
-export function FlowStatusDot({
-  state,
-  registration,
-  locale,
-}: {
-  state?: FlowRailState;
-  /** The engine's verdict on this flow, from the list's `registrations`; absent when none was served. */
-  registration?: FlowRegistration;
-  locale: string;
-}): React.ReactElement | null {
-  const reading = flowRailStatus(state, registration, locale);
-  if (!reading) return null;
-  const { status, view } = reading;
-  // objectui#12454 — a 6 px dot; the status words stay the element's text
-  // (visually hidden, so a reader and a search still find them) and the hover
-  // text stays the reason as it was.
-  return (
-    <span title={view.title} data-status={status.kind} className="inline-flex h-4 w-3 shrink-0 items-center justify-center">
-      <span aria-hidden className={'h-1.5 w-1.5 rounded-full ' + flowDotClass(status)} />
-      <span className="sr-only">{view.label}</span>
-    </span>
-  );
-}
-
-/**
- * The rail's reading of one flow: the run status `FlowStatusDot` draws and the
- * row's title names, or `null` when there is nothing to say — a flow the engine
- * does not know yet and holds no verdict on (the amber "unpublished draft" chip
- * already covers that case).
- */
-function flowRailStatus(
-  state: FlowRailState | undefined,
-  registration: FlowRegistration | undefined,
-  locale: string,
-): { status: FlowRunStatus; view: FlowRunStatusView } | null {
-  const decides = registration?.state === 'refused' || registration?.state === 'unregistered';
-  if (!state && !decides) return null;
-  const status = deriveFlowRunStatus(state, undefined, registration);
-  return { status, view: describeFlowRunStatus(status, locale) };
-}
-
-/**
- * The dot's look per run status (objectui#12454): green when the flow runs
- * (bound, or run by hand), grey when this deployment does not run it, amber
- * when the engine refused it, and a hollow ring when it is switched off.
- * Nothing here is styled as an error: a deployment policy is not a defect.
- */
-function flowDotClass(status: FlowRunStatus): string {
-  switch (status.kind) {
-    case 'on':
-    case 'manual':
-      return 'bg-emerald-500';
-    case 'refused':
-      return 'bg-amber-500';
-    case 'off':
-      return 'border border-muted-foreground/70';
-    default:
-      return 'bg-muted-foreground/50';
-  }
-}
-
-/** Each trigger kind's 14 px glyph and its words, in the rail rows and the legend (objectui#12454). */
-const FLOW_GLYPH_ICON: Record<FlowTriggerGlyph, LucideIcon> = {
-  record: Zap,
-  scheduled: Clock,
-  screen: MousePointerClick,
-  autolaunched: CornerDownRight,
-};
-const FLOW_GLYPH_LABEL_KEY: Record<FlowTriggerGlyph, string> = {
-  record: 'engine.studio.auto.kind.record',
-  scheduled: 'engine.studio.auto.kind.scheduled',
-  screen: 'engine.studio.auto.kind.screen',
-  autolaunched: 'engine.studio.auto.kind.autolaunched',
-};
-
-/** The React key of the trailing group, whose grouping key is the empty string. */
-const NO_OBJECT_GROUP_KEY = '__no_object__';
-
-/**
- * The engine's registration verdict on each flow of the rail's scope
- * (objectui#12349): the flow list's `registrations`, which the server serves
- * beside the items, read through the same list read the rail's own loader
- * makes (one request when both are in flight). Every entry is parsed with the
- * spec's `FlowRegistrationSchema` at the client.
- *
- * A read that fails leaves every flow unjudged — what an absent
- * `registrations` already means — so the rail reads as it did before the
- * verdict existed; the rail's own list read reports a failing list.
- */
-async function readFlowRegistrations(
-  client: { listResponse: MetadataClient['listResponse'] },
-  packageId: string | null,
-): Promise<Record<string, FlowRegistration>> {
-  try {
-    const answer = await client.listResponse('flow', packageId === null ? {} : { packageId });
-    return answer.registrations ?? {};
-  } catch {
-    return {};
-  }
-}
-
-/**
- * Each flow's definition in the rail's scope, by name (objectui#12454): what
- * the rail's grouping and trigger glyphs read. Read with the drafts overlaid,
- * so a draft-only flow, and a published one whose draft moved its trigger,
- * group as the author's draft has them; a server that refuses that read gives
- * the published list, and a failing list gives none, which groups every flow
- * under "No object" rather than failing the rail.
- */
-async function readFlowDefinitions(client: MetadataClient, packageId: string | null): Promise<Map<string, unknown>> {
-  const scope = packageId === null ? {} : { packageId };
-  const read = async (): Promise<Array<Record<string, unknown>> | null | undefined> => {
-    try {
-      return await client.withPreviewDrafts(true).list<Record<string, unknown>>('flow', scope);
-    } catch {
-      return await client.list<Record<string, unknown>>('flow', scope);
-    }
-  };
-  const definitions = new Map<string, unknown>();
-  try {
-    for (const flow of (await read()) ?? []) {
-      if (flow && typeof flow.name === 'string' && flow.name) definitions.set(flow.name, flow);
-    }
-  } catch {
-    /* no definitions: every flow groups under "No object" */
-  }
-  return definitions;
-}
-
-/**
- * The scope's objects, name → label in the designer locale (objectui#12454):
- * the rail's group headers and their order, and which objects count as the
- * scope's own when a flow is grouped by the data it touches. The package's
- * object list, as the Data rail reads it; unscoped in the package-less scope.
- * A failing read gives an empty index, which `groupFlowsByObject` reads as
- * "every object is the scope's".
- */
-async function readObjectLabels(client: MetadataClient, packageId: string | null, locale: string): Promise<Map<string, string>> {
-  const labels = new Map<string, string>();
-  try {
-    // The package's pending object drafts too, as the Data rail lists them: a
-    // flow on an object not published yet is grouped under it, and the header
-    // reads its label (the `_drafts` row carries one), not its name. A
-    // published object keeps its published label; a failed draft read adds
-    // none and leaves the published index whole (an async function, so even
-    // a throw before the read is sent rejects into the catch).
-    const readDrafts = async (): Promise<Array<{ name?: string | null; label?: I18nLabel | null }>> =>
-      (await client.listDrafts(packageId === null ? { type: 'object' } : { packageId, type: 'object' })) ?? [];
-    const [objects, drafts] = await Promise.all([
-      client.list<Record<string, unknown>>('object', packageId === null ? {} : { packageId }),
-      readDrafts().catch(() => []),
-    ]);
-    for (const object of objects ?? []) {
-      if (!object || typeof object.name !== 'string' || !object.name) continue;
-      const label = resolveI18nLabel(object.label as I18nLabel | undefined, locale)?.trim();
-      labels.set(object.name, label || object.name);
-    }
-    for (const draft of drafts) {
-      if (!draft || typeof draft.name !== 'string' || !draft.name || labels.has(draft.name)) continue;
-      labels.set(draft.name, resolveI18nLabel(draft.label ?? undefined, locale)?.trim() || draft.name);
-    }
-  } catch {
-    /* an empty index */
-  }
-  return labels;
-}
-
-/** The trigger the New automation dialog chose (objectui#11788). */
-export interface NewFlowTrigger {
-  triggerType: string;
-  /** The object a record trigger watches, when the author named one. */
-  objectName?: string;
-}
-
-/**
- * The Start node's own trigger and object fields, localized — the source of the
- * New automation dialog's choices (objectui#11788), so the dialog offers what
- * the Start node offers, under the same labels, and shows the object picker for
- * exactly the triggers the Start node shows it for (`objectName`'s `showWhen`).
- */
-function newFlowTriggerFields(locale: string): { trigger?: FlowConfigField; object?: FlowConfigField } {
-  const start = localizeFlowFields('start', fieldsForNodeType('start'), locale);
-  return {
-    trigger: start.find((f) => f.id === 'triggerType'),
-    object: start.find((f) => f.id === 'objectName'),
-  };
-}
-
-/**
- * `flow` with the chosen trigger written on its Start node, where the Start
- * node's trigger field writes it (`config.triggerType`, and `config.objectName`
- * for the object) — objectui#11788. No choice leaves the skeleton as it was.
- */
-function withStartTrigger(
-  flow: Record<string, unknown>,
-  trigger: NewFlowTrigger | null,
-): Record<string, unknown> {
-  if (!trigger) return flow;
-  const nodes = Array.isArray(flow.nodes) ? (flow.nodes as Array<Record<string, unknown>>) : [];
-  return {
-    ...flow,
-    nodes: nodes.map((n) => {
-      if (n.type !== 'start') return n;
-      const config = n.config && typeof n.config === 'object' && !Array.isArray(n.config) ? (n.config as Record<string, unknown>) : {};
-      return {
-        ...n,
-        config: {
-          ...config,
-          triggerType: trigger.triggerType,
-          ...(trigger.objectName ? { objectName: trigger.objectName } : {}),
-        },
-      };
-    }),
-  };
-}
-
-/** No navigation order: one shared empty list, so the rail's memo holds across renders. */
-const NO_OBJECT_ORDER: readonly string[] = [];
-
-/**
- * objectstack#28567 — what the Automations pillar's "New similar" strip says:
- * the copy the clone door saved, shown on that copy in the package the answer
- * named, or an answer that named no package (nothing opened). `notice` is the
- * door's sentence, and `noticeCode` the code it names it by (objectstack#29727):
- * shown in the console's language for a known code, as sent otherwise.
- */
-type FlowCopiedStrip =
-  | { kind: 'landed'; name: string; packageId: string; notice: string; noticeCode?: string }
-  | { kind: 'noPackage'; name: string; notice: string; noticeCode?: string };
-
-/** The navigation-state key the copy's landing rides to the copy's pillar on. */
-const FLOW_COPIED_ARRIVAL_STATE = 'flowNewSimilar';
-
-/**
- * The landing a "New similar" navigation carried, kept only when it names
- * THIS package, so a stale history entry of another package shows nothing.
- */
-/** objectstack#28572 — `base`'s paired customization package id by the spec's pairing rule, or `null`. For READS only. */
-function pairIdOf(base: string): string | null {
-  const pair = customizationPackageId(base);
-  return pair.ok ? pair.value : null;
-}
-
-function readFlowCopiedArrival(state: unknown, packageId: string | null): FlowCopiedStrip | null {
-  const arrival = (state as Record<string, unknown> | null | undefined)?.[FLOW_COPIED_ARRIVAL_STATE] as
-    | Partial<Extract<FlowCopiedStrip, { kind: 'landed' }>>
-    | undefined;
-  if (!arrival || arrival.kind !== 'landed' || packageId === null || arrival.packageId !== packageId) return null;
-  if (typeof arrival.name !== 'string' || arrival.name === '') return null;
-  return {
-    kind: 'landed',
-    name: arrival.name,
-    packageId,
-    notice: typeof arrival.notice === 'string' ? arrival.notice : '',
-    ...(typeof arrival.noticeCode === 'string' ? { noticeCode: arrival.noticeCode } : {}),
-  };
-}
-
 export function AutomationsPillar({
   packageId: railPackageId,
   objectOrder = NO_OBJECT_ORDER,

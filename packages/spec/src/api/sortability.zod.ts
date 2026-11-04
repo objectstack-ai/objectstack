@@ -30,8 +30,8 @@
  * "Unsortable" is judged by what the two runtime doors —
  * `assertSortFieldsExist` (`@objectstack/metadata-protocol`, #6994) and
  * `assertOrderByIsMaterializable` (`@objectstack/objectql`, #7095) — actually
- * do with an `orderBy` over the name. Three verdicts are REFUSALS, and one
- * measured degradation is not refused; the projection covers all four, and
+ * do with an `orderBy` over the name. Four verdicts are REFUSALS, and one
+ * measured degradation is not refused; the projection covers all five, and
  * one more absence that is a fact about the CALLER, not the column (5.):
  *
  * 1. **Unknown name** — not a field of the object. Refused (`400
@@ -46,10 +46,10 @@
  * 3. **Virtual type** ({@link isVirtualSearchField} / `SEARCH_VIRTUAL_TYPES`
  *    — exactly `formula` today) — computed on read, no driver materialises a
  *    column. Refused at both doors. Encoded as `sortable: false` with
- *    `reason: 'virtual-type'`. This is the ONE per-field refusal fact, and it
- *    is judged by the same spec predicate the linter
- *    (`validate-sortable-fields`) and the search axis read — never by a local
- *    type list.
+ *    `reason: 'virtual-type'`. This is the one per-field STORAGE refusal
+ *    fact (6. is the author's), and it is judged by the same spec predicate
+ *    the linter (`validate-sortable-fields`) and the search axis read — never
+ *    by a local type list.
  * 4. **Unprovisioned injected anchor** ({@link unprovisionedInjectedColumns}
  *    — the platform's own injected columns on an ADR-0015 `external` object,
  *    which registers them and provisions no storage). NOT refused: both doors
@@ -69,6 +69,23 @@
  *    `setup.access`), who IS served the field in `item.fields` because
  *    authoring needs the whole definition. For every other caller the mask
  *    has already removed the field from `item`, so this is case 1's absence.
+ * 6. **Declared unsortable by its author** (`field.sortable: false`, #29896)
+ *    — a stored column the author chose not to offer as a sort (a long text,
+ *    an unindexed column on a large table). Refused at the INGRESS door
+ *    (`assertSortFieldsExist`: `400 INVALID_SORT`) and on the stdio MCP
+ *    `query_records` (`unofferedSortRefusal`, the same envelope), both of
+ *    which judge it by THIS projection rather than by a second reading of the
+ *    key. Encoded as
+ *    `sortable: false` with `reason: 'author-declared'`. Only the literal
+ *    `false` counts: a field with no `sortable` key (or `sortable: true`)
+ *    keeps its storage verdict. A virtual field marked `sortable: false`
+ *    keeps `reason: 'virtual-type'` — the storage fact is the stronger one.
+ *    The engine door (`assertOrderByIsMaterializable`) does NOT judge it: that
+ *    door answers "can a driver order by this column", and a stored column
+ *    can be ordered by, so an in-process caller (a hook, a flow) keeps sorting
+ *    by it. The key governs what the platform OFFERS — the list header, the
+ *    Sort picker, the Data API and the MCP tools — not what the storage can
+ *    do.
  *
  * ## Considered and deliberately NOT members
  *
@@ -111,11 +128,18 @@ import { isVirtualSearchField, type SearchFieldMeta } from '../data/search-field
 import { unprovisionedInjectedColumns } from '../data/injected-system-column-provenance';
 
 /**
- * The one refusal-backed per-field reason: the field's type is virtual
+ * The storage-backed per-field reason: the field's type is virtual
  * (computed on read, no stored column — `SEARCH_VIRTUAL_TYPES`), so both
  * runtime doors refuse an ORDER BY over it with `400 INVALID_SORT`.
  */
 export const FIELD_UNSORTABLE_VIRTUAL_TYPE = 'virtual-type' as const;
+
+/**
+ * The author-declared per-field reason: the field carries `sortable: false`,
+ * so the Data API's ingress door refuses an ORDER BY over it with
+ * `400 INVALID_SORT`, though a stored column stands behind it.
+ */
+export const FIELD_UNSORTABLE_AUTHOR_DECLARED = 'author-declared' as const;
 
 /**
  * The one advisory caveat: the field is a platform-injected anchor on an
@@ -137,10 +161,12 @@ export const FieldSortabilitySchema = lazySchema(() => z.object({
     + 'degradable case. A derived verdict: do not recompute it from field `type` '
     + 'client-side.',
   ),
-  reason: z.literal(FIELD_UNSORTABLE_VIRTUAL_TYPE).optional().describe(
-    'Present exactly when `sortable` is false: the field\'s type is virtual '
-    + '(computed on read, no stored column), so no driver materialises anything '
-    + 'to ORDER BY.',
+  reason: z.enum([FIELD_UNSORTABLE_VIRTUAL_TYPE, FIELD_UNSORTABLE_AUTHOR_DECLARED]).optional().describe(
+    'Present exactly when `sortable` is false, naming why. `virtual-type`: the '
+    + 'field\'s type is virtual (computed on read, no stored column), so no driver '
+    + 'materialises anything to ORDER BY. `author-declared`: the field declares '
+    + '`sortable: false`, so the Data API refuses a sort on it although a column '
+    + 'is stored.',
   ),
   caveat: z.literal(FIELD_SORTABLE_UNPROVISIONED_ANCHOR).optional().describe(
     'Present only with `sortable: true`: the field is a platform-injected anchor '
@@ -216,7 +242,10 @@ function fieldEntriesOf(doc: unknown): Array<[string, SearchFieldMeta | undefine
  *   same storage fact the runtime doors (#6994/#7095) and the authoring linter
  *   (`validate-sortable-fields`) key on;
  * - anchor provenance by {@link unprovisionedInjectedColumns} — the #7865
- *   derivation the runtime guards and the linter converge on.
+ *   derivation the runtime guards and the linter converge on;
+ * - the author's own `sortable: false` (case 6. above) — the literal `false`
+ *   only, so a field with no `sortable` key keeps its storage verdict. The
+ *   Data API's ingress door reads this projection for that verdict.
  *
  * `id` is appended when the document declares no field of that name: the
  * primary key is provisioned by the DRIVER (never authored, never injected),
@@ -228,7 +257,9 @@ export function resolveObjectSortability(doc: unknown): ObjectSortability {
   for (const [name, meta] of fieldEntriesOf(doc)) {
     fields[name] = isVirtualSearchField(meta)
       ? { sortable: false, reason: FIELD_UNSORTABLE_VIRTUAL_TYPE }
-      : { sortable: true };
+      : (meta as { sortable?: unknown } | undefined)?.sortable === false
+        ? { sortable: false, reason: FIELD_UNSORTABLE_AUTHOR_DECLARED }
+        : { sortable: true };
   }
   // The #7865 anchors with no storage: still accepted by the doors, so the
   // enforcement fact stays `sortable: true` — the caveat is the measured

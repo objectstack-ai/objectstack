@@ -1294,10 +1294,15 @@ export async function selfTest() {
   // rollback keeps leaves the count alone, one under a new root moves it and
   // is recorded here by name -- and a root `core` starts covering moves it the
   // other way, recorded the same way.
+  // Plus, since #29972, the one doc page that card declared for
+  // @objectstack/cli: the `OS_TRUSTED_APP_SCHEMES` contract test holds the
+  // variable's row beside `OS_TRUSTED_ORIGINS` in
+  // `deployment/environment-variables.mdx`, covered only through the same
+  // `content/**` root, like #14824's three and #15818's two. Twenty.
   const preFix = judge(fixtureWorkflow({ core: real.filters?.core, crosspkg: ['scripts/**'] }), CROSS_PACKAGE_TEST_INPUTS);
   assert(
-    new Set(uncoveredGlobs(preFix)).size === 19,
-    `rolling \`crosspkg\` back to its pre-#10015 list uncovers the ten it fixed plus #10848's one plus #10178's two plus #12201's one plus #12924's one plus #14561's one plus #14824's three plus #15818's two plus #18650's one, minus the three under the \`skills/**\` build input \`core\` now covers -- got ${new Set(uncoveredGlobs(preFix)).size}`,
+    new Set(uncoveredGlobs(preFix)).size === 20,
+    `rolling \`crosspkg\` back to its pre-#10015 list uncovers the ten it fixed plus #10848's one plus #10178's two plus #12201's one plus #12924's one plus #14561's one plus #14824's three plus #15818's two plus #18650's one plus #29972's one, minus the three under the \`skills/**\` build input \`core\` now covers -- got ${new Set(uncoveredGlobs(preFix)).size}`,
   );
   assert(
     !uncoveredGlobs(preFix).includes('skills/**'),
@@ -1333,6 +1338,10 @@ export async function selfTest() {
       `-- and #14824 added the \`os create plugin\` scaffold-listing page ${page}, by name`,
     );
   }
+  assert(
+    uncoveredGlobs(preFix).includes('content/docs/deployment/environment-variables.mdx'),
+    `-- and #29972 added the OS_TRUSTED_APP_SCHEMES reference page, by name`,
+  );
   for (const page of [
     'content/docs/deployment/troubleshooting.mdx',
     'content/docs/getting-started/index.mdx',
@@ -1885,7 +1894,7 @@ export async function selfTest() {
       `same-root-different-file case observed failing and then covered by naming the file, a glob covered by ` +
       `\`core\`, one covered only by \`crosspkg\` and one covered by neither judged separately in one table, the ` +
       `stale-entry direction, seven refusals over subjects that could not be read, the checked-in ci.yml, the ` +
-      `pre-#10015 rollback uncovering the ten it fixed plus #10848's one plus #10178's two plus #12201's one plus #12924's one plus #14561's one plus #14824's three plus #15818's two plus #18650's one, minus the three under the \`skills/**\` build input \`core\` now covers, ` +
+      `pre-#10015 rollback uncovering the ten it fixed plus #10848's one plus #10178's two plus #12201's one plus #12924's one plus #14561's one plus #14824's three plus #15818's two plus #18650's one plus #29972's one, minus the three under the \`skills/**\` build input \`core\` now covers, ` +
       `and the CI wiring read out of lint.yml; ` +
       `and Build Core's build inputs: a build input dropped from \`core\` observed red by path and declaring task, ` +
       `turbo.json itself, a globalDependencies entry and a new-root input each required, test-task and negated inputs ` +

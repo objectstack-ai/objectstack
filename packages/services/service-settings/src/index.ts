@@ -32,6 +32,11 @@ export {
   // `os secret rewrap` classifies rows with this grammar, not a restated one.
   ciphertextDerivationStatus,
   type CiphertextDerivationStatus,
+  // #29934 — the one key-file answer `os dev` and `os start` both hand their
+  // `serve` child, on the channel the provider's file tier reads.
+  resolvePersistedKeyFile,
+  type PersistedKeyFile,
+  KEY_FILE_CHANNEL_ENV,
 } from './local-crypto-provider.js';
 export {
   type SettingsActionHandler,

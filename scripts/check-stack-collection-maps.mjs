@@ -593,8 +593,12 @@ const SITES = [
     // that remains. (Hand-adding the four names to the second copy was the
     // available alternative and is what #5870 did for `capabilities`; it is
     // what left the other four undiffed.)
+    //
+    // #29986: the codemod split of `engine.ts` (`scripts/codemod-split-engine.mjs`)
+    // moved its top-level declarations, this list among them, into the leaf
+    // `engine-top-level.ts`; both seams still read the one copy there.
     id: 'METADATA_ARRAY_KEYS',
-    file: 'packages/objectql/src/engine.ts',
+    file: 'packages/objectql/src/engine-top-level.ts',
     what: 'collections the engine registers from a manifest AND from a nested plugin (the ADR-0010 provenance seam)',
     extract: (src) => {
       const b = sliceBody(src, 'const METADATA_ARRAY_KEYS = [');

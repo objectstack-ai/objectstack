@@ -10,7 +10,7 @@ import {
 import { createHash, createHmac, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve as resolvePath } from 'node:path';
 
 /**
  * LocalCryptoProvider — the default, KMS-free `ICryptoProvider`. It is an
@@ -28,11 +28,14 @@ import { dirname, join } from 'node:path';
  *      (legacy `OBJECTSTACK_DEV_CRYPTO_KEY`)  `OBJECTSTACK_DEV_CRYPTO_KEY`
  *                                       still honoured).
  *   4. Persisted file                 — `~/.objectstack/dev-crypto-key`
- *                                       (mode 0600). In development it is
- *                                       auto-created; in production it is
- *                                       only *read* unless `OS_CRYPTO_AUTOKEY`
- *                                       opts the single-node self-host case
- *                                       into minting + persisting it too.
+ *                                       (mode 0600), or the file the CLI
+ *                                       names on `OS_INTERNAL_CRYPTO_KEY_FILE`
+ *                                       (see {@link resolvePersistedKeyFile}).
+ *                                       In development it is auto-created; in
+ *                                       production it is only *read* unless
+ *                                       `OS_CRYPTO_AUTOKEY` opts the
+ *                                       single-node self-host case into
+ *                                       minting + persisting it too.
  *   5. Ephemeral random key           — development/test only.
  *
  * ## Fail-loud guarantee (the reason this class exists)
@@ -165,6 +168,16 @@ const DEV_KEY_LEGACY_ENV = 'OBJECTSTACK_DEV_CRYPTO_KEY';
  * leaves it unset and keeps the fail-loud guarantee. See `commands/start.ts`.
  */
 const AUTOKEY_ENV = 'OS_CRYPTO_AUTOKEY';
+/**
+ * The CLI's INTERNAL parent-to-child channel naming the key file a `serve`
+ * child reads (and, where its posture allows, mints) its data key at — set by
+ * `os dev` and `os start` from {@link resolvePersistedKeyFile}, so both
+ * commands land on one file for one project (#29934). Same naming and
+ * ownership rule as the CLI's other `OS_INTERNAL_*` channels: the parent sets
+ * it or deletes it, and it is deliberately not an operator setting. It moves
+ * only WHICH file the file tier reads; an env key still answers first.
+ */
+export const KEY_FILE_CHANNEL_ENV = 'OS_INTERNAL_CRYPTO_KEY_FILE';
 
 /** The data key's only legal length: AES-256 needs exactly 32 bytes. */
 const DATA_KEY_BYTES = 32;
@@ -473,6 +486,10 @@ const keyFilePath = (env: EnvMap): string => {
   return join(home, 'dev-crypto-key');
 };
 
+/** The file the file tier reads: the CLI's channel when set, else {@link keyFilePath}. */
+const effectiveKeyFilePath = (env: EnvMap): string =>
+  env[KEY_FILE_CHANNEL_ENV]?.trim() || keyFilePath(env);
+
 /**
  * Parse an env key value (hex or base64) into a 32-byte Buffer. Returns
  * `undefined` when the value is unusable so the caller can decide whether to
@@ -528,6 +545,57 @@ const loadOrCreateKey = (path: string): { key: Buffer; generated: boolean } | un
     return undefined;
   }
 };
+
+/**
+ * Where the persisted data key of a command's `serve` child lives — the ONE
+ * answer `os dev` and `os start` both take (#29934).
+ *
+ * The canonical file is {@link keyFilePath} over `env`: the location `os dev`
+ * has always used (`$OS_HOME`, else `$HOME/.objectstack`). `os start` used to
+ * read its own home instead (`<project>/.objectstack` in project mode), so the
+ * same project database was sealed under two keys. That earlier file is the
+ * `legacyKeyFile`: it is never orphaned, and it is never chosen silently.
+ *
+ *  - canonical present (or neither present) → `canonical`.
+ *  - only the legacy file holds a key → `legacy-only`: its path is the answer,
+ *    so secrets sealed under it keep opening.
+ *  - both hold keys and they differ → `both-differ`: the canonical file is the
+ *    answer and the caller says so, naming both paths.
+ *
+ * `undefined` when an env key answers first (`OS_SECRET_KEY`, or a usable
+ * `OS_DEV_CRYPTO_KEY` / legacy alias): the file tier is never reached, so
+ * there is no file to name. A file that holds no usable key counts as absent,
+ * exactly as the file tier itself reads it.
+ */
+export interface PersistedKeyFile {
+  /** The key file the child reads (and, where its posture allows, mints). */
+  path: string;
+  /** Which rule chose {@link path}. */
+  kind: 'canonical' | 'legacy-only' | 'both-differ';
+  /** The canonical file ({@link keyFilePath} over the env). */
+  canonical: string;
+  /** The legacy file, when one holds a key and is not the canonical file. */
+  legacy?: string;
+}
+
+export function resolvePersistedKeyFile(
+  opts: { env?: EnvMap; legacyKeyFile?: string } = {},
+): PersistedKeyFile | undefined {
+  const env = opts.env ?? processEnv();
+  if (env[SECRET_KEY_ENV] !== undefined) return undefined;
+  if (parseKey(env[DEV_KEY_ENV] ?? env[DEV_KEY_LEGACY_ENV])) return undefined;
+
+  const canonical = keyFilePath(env);
+  const legacy = opts.legacyKeyFile;
+  const legacyKey =
+    legacy && resolvePath(legacy) !== resolvePath(canonical) ? loadExistingKey(legacy) : undefined;
+  if (!legacy || !legacyKey) return { path: canonical, kind: 'canonical', canonical };
+
+  const canonicalKey = loadExistingKey(canonical);
+  if (!canonicalKey) return { path: legacy, kind: 'legacy-only', canonical, legacy };
+  if (!canonicalKey.equals(legacyKey)) return { path: canonical, kind: 'both-differ', canonical, legacy };
+  return { path: canonical, kind: 'canonical', canonical };
+}
 
 const INVALID_KEY_MSG = (name: string): string =>
   `[LocalCryptoProvider] ${name} is set but is not a 32-byte key (expected 64 hex chars or base64 of 32 bytes). ` +
@@ -597,7 +665,7 @@ function resolveDataKey(opts: LocalCryptoProviderOptions): ResolvedKey {
     return { key: randomBytes(32), source: 'ephemeral' };
   }
 
-  const path = keyFilePath(env);
+  const path = effectiveKeyFilePath(env);
 
   if (mode === 'production') {
     // Honour a pre-existing, operator-provisioned key file first.

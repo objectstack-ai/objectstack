@@ -40,6 +40,7 @@ import { OBJECTSTACK_MCP_SERVER_NAME } from '@objectstack/mcp';
 // no range, no reader, no wording; a second copy of the bound is exactly what
 // #12620 and #12662 protected against.
 import { describePortSource, parseRequestedPort, formatInvalidPortNotice, portFlagEnv } from '../utils/port-contract.js';
+import { applyCryptoKeyFileChannel } from '../utils/internal-crypto-key-file-channel.js';
 // The ONE dev-TLS contract, shared with the `serve` child this command spawns
 // (#16804). ⛔ Nothing about certificates is declared in this file, and ⛔ no
 // certificate is ever generated — the developer brings their own.
@@ -809,6 +810,15 @@ export default class Dev extends Command {
         ...(flags['database-auth-token'] ? { OS_DATABASE_AUTH_TOKEN: flags['database-auth-token'] } : {}),
         ...(flags['auth-secret'] ? { OS_AUTH_SECRET: flags['auth-secret'] } : {}),
       };
+      // The data key's file: the ONE answer `os start` takes too (#29934), so a
+      // secret saved here reads back under `os start` over the same project —
+      // and the file an earlier `os start` kept in the project is still read.
+      const keyFileNotice = await applyCryptoKeyFileChannel(localEnv, {
+        env: freshHome ? { ...process.env, OS_HOME: freshHome } : process.env,
+        cwd: process.cwd(),
+        hasProjectConfig: configExists,
+      });
+      if (keyFileNotice) console.log(chalk.yellow(`  ⚠ ${keyFileNotice}`));
       printKV('Environment ID', environmentId, '🎯');
       if (artifactUrl) {
         // Redacted: the reference may be a pre-signed URL whose query string IS
