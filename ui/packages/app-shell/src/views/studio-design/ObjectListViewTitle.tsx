@@ -98,15 +98,17 @@ export function ObjectListViewTitle({
   const [addOpen, setAddOpen] = React.useState(false);
   if (!target) return <>{objectText}</>;
 
+  const activeLabel = listViewNameOf(listView, target, listView.row, locale);
   const views: TitleSwitcherView[] = listView.views.map((choice) => ({
     id: choice.target.viewId,
-    label: listViewLabelOf(choice.target, choice.label, locale),
+    // The open view's row reads as the title does: a view just created is
+    // named by its own label before the draft list lists it.
+    label: choice.target.viewId === target.viewId ? activeLabel : listViewLabelOf(choice.target, choice.label, locale),
     // A default view no row holds yet is the object's grid.
     type: choice.type ?? 'grid',
     // Kept in the order the choices list them: none is the reader's own.
     authored: true,
   }));
-  const activeLabel = listViewNameOf(listView, target, listView.row, locale);
   const switchView = (viewId: string) => {
     if (viewId === target.viewId) return;
     if (onSwitchView) onSwitchView(viewId);
