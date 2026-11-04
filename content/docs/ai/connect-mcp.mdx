@@ -79,9 +79,9 @@ For a **local or intranet** deployment, connect through
 own machine, so `localhost` and intranet addresses work there.
 </Callout>
 
-## Work assistants: WorkBuddy, Doubao Work, DuMate, QwenWork
+## WorkBuddy, Doubao Work and QwenWork
 
-These desktop work assistants add a remote MCP server as a **custom
+These desktop assistants add a remote MCP server as a **custom
 connector**. Each one takes the same MCP URL; what differs is the menu path and
 how the client spells the Streamable HTTP transport. Where the client offers a
 browser sign-in, it is the same OAuth login as every other track. Where your
@@ -92,7 +92,6 @@ client version offers none, add the request header
 |:---|:---|:---|
 | **WorkBuddy** | Connectors → Custom connector → Configure MCP (stored in `~/.workbuddy/mcp.json`) | `{ "mcpServers": { "objectstack": { "type": "streamableHttp", "url": "<MCP URL>" } } }`, then click **Trust** on the connector — it stays inactive until trusted |
 | **Doubao Work** | Skills · Connectors → New → New custom connector | Name `objectstack`, transport `HTTP`, server URL `<MCP URL>` |
-| **DuMate** | Connected apps → add a custom MCP app (admins: Capability extensions → Connected app management) | Name `objectstack`, transport `Streamable HTTP`, URL `<MCP URL>`; choose OAuth, or token auth with `Bearer <API key>` |
 | **QwenWork** | Extensions → Connectors → + Add → Paste JSON config | `{ "mcpServers": { "objectstack": { "type": "streamable-http", "url": "<MCP URL>" } } }` |
 
 The **Connect an Agent** page renders each of these with your deployment's URL
@@ -133,8 +132,8 @@ On the page, the **Create key** button sits at the bottom under *API keys*. The
 new key is shown **once**, together with a ready-to-paste `x-api-key: osk_...`
 header line and its `Authorization: Bearer osk_...` form — copy it before you
 dismiss the panel. The same page carries copy-paste connect snippets for
-claude.ai and Claude Desktop, WorkBuddy, Doubao Work, DuMate, QwenWork, Claude
-Code, Cursor, VS Code and Codex, and a download link for the app's `SKILL.md`.
+claude.ai and Claude Desktop, Claude Code, Cursor, VS Code, Codex, WorkBuddy,
+Doubao Work and QwenWork, and a download link for the app's `SKILL.md`.
 
 Your own keys are listed (prefix only) and revoked under **Account → Developer
 → API Keys**. Platform admins get the tenant-wide list at **Setup → Access

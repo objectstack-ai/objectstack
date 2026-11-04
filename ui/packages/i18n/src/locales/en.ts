@@ -4485,16 +4485,6 @@ const en = {
     codex: {
       body: 'Add to ~/.codex/config.toml. If your Codex version lacks the OAuth flow, use an API key header instead (see below):',
     },
-    sections: {
-      assistants: {
-        title: 'Work assistants',
-        body: 'Desktop and chat clients: add this system as a custom connector, then sign in through the browser when prompted.',
-      },
-      coding: {
-        title: 'Coding agents',
-        body: 'IDE and terminal agents: one command or one config file.',
-      },
-    },
     fields: {
       name: 'Name',
       transport: 'Transport',
@@ -4507,10 +4497,6 @@ const en = {
     doubao: {
       body: 'Skills · Connectors → New → New custom connector, then fill in:',
       hint: 'Sign in through the browser when prompted. If no sign-in appears, add the custom header Authorization: Bearer <API key> (create a key below). Tasks that run in the cloud need a deployment reachable over public HTTPS.',
-    },
-    dumate: {
-      body: 'Connected apps → add a custom MCP app (admins: Capability extensions → Connected app management), then fill in:',
-      hint: 'Choose OAuth, finish the sign-in in the browser, then confirm back in DuMate. With token auth, put Bearer <API key> in the Authorization field (create a key below).',
     },
     qwenwork: {
       body: 'Extensions → Connectors → + Add → Paste JSON config:',

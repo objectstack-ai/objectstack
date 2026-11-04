@@ -3905,16 +3905,6 @@ const zh = {
     codex: {
       body: '加入 ~/.codex/config.toml。如果你的 Codex 版本不支持 OAuth 流程,请改用 API 密钥请求头(见下):',
     },
-    sections: {
-      assistants: {
-        title: '办公助手',
-        body: '桌面端与对话类客户端:把本系统添加为自定义连接器,按提示在浏览器登录即可。',
-      },
-      coding: {
-        title: '编码智能体',
-        body: 'IDE 与终端智能体:一条命令或一个配置文件即可接入。',
-      },
-    },
     fields: {
       name: '名称',
       transport: '传输类型',
@@ -3927,10 +3917,6 @@ const zh = {
     doubao: {
       body: '豆包工作:技能 · 连接器 → 新建 → 新建自定义连接器,按下表填写:',
       hint: '按提示在浏览器登录。若未出现登录,在自定义 Headers 中添加 Authorization: Bearer <API 密钥>(在下方创建)。云端运行的任务要求部署可通过公网 HTTPS 访问。',
-    },
-    dumate: {
-      body: '百度 DuMate:连接应用 → 添加自定义 MCP 应用(企业管理员:能力扩展管理 → 连接应用管理),按下表填写:',
-      hint: '鉴权方式选 OAuth,在浏览器完成授权后回到 DuMate 确认。若使用 Token 鉴权,在 Authorization 中填入 Bearer <API 密钥>(在下方创建)。',
     },
     qwenwork: {
       body: '千问办公:扩展 → 连接器 → + 添加 → 粘贴 JSON 配置:',

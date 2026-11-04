@@ -10,13 +10,13 @@
  * for people who don't know what MCP is:
  *
  *   1. the environment's MCP URL (from `/discovery` → `routes.mcp`) + copy,
- *   2. per-client connect cards with copy-paste-ready content, grouped by how
- *      the client is used — work assistants (claude.ai / Claude Desktop,
- *      WorkBuddy, Doubao Work, DuMate, QwenWork) and coding agents (Claude
- *      Code, Cursor deeplink, VS Code, Codex CLI). OAuth is the default story
- *      on every card (the deployment is its own authorization server; you sign
- *      in as yourself); each card names the API-key header as the fallback for
- *      a client version without the OAuth flow,
+ *   2. per-client connect cards with copy-paste-ready content — claude.ai /
+ *      Claude Desktop, Claude Code, Cursor deeplink, VS Code and Codex CLI
+ *      first, then the Chinese clients WorkBuddy, Doubao Work and QwenWork.
+ *      OAuth is the default story on every card (the deployment is its own
+ *      authorization server; you sign in as yourself); the Chinese clients'
+ *      cards name the API-key header as the fallback for a client version
+ *      without the OAuth flow,
  *   3. the portable SKILL.md download (`GET /api/v1/mcp/skill`),
  *   4. API-key minting for headless callers (CI, machine accounts) via the
  *      existing `POST /api/v1/keys` — shown once, copy-once. As on Setup →
@@ -129,15 +129,6 @@ function FieldRows({ rows }: { rows: Array<{ label: string; value: string }> }) 
         </div>
       ))}
     </dl>
-  );
-}
-
-function SectionHeading({ title, body }: { title: string; body: string }) {
-  return (
-    <div className="pt-2">
-      <h3 className="text-sm font-semibold">{title}</h3>
-      <p className="text-xs text-muted-foreground">{body}</p>
-    </div>
   );
 }
 
@@ -266,14 +257,9 @@ export function ConnectAgent() {
         </CardContent>
       </Card>
 
-      {/* ── Work assistants ──────────────────────────────────────────── */}
-      <SectionHeading
-        title={t('connectAgent.sections.assistants.title')}
-        body={t('connectAgent.sections.assistants.body')}
-      />
+      {/* ── Per-client cards: international clients first, then the Chinese ones ── */}
       <div className="grid gap-4 lg:grid-cols-2">
-        {/* Full row: a one-URL card, so the four connector cards pair up below it. */}
-        <Card className="lg:col-span-2">
+        <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Claude (claude.ai / Desktop)</CardTitle>
           </CardHeader>
@@ -284,69 +270,6 @@ export function ConnectAgent() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">WorkBuddy</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <p className="text-muted-foreground">{t('connectAgent.workbuddy.body')}</p>
-            <Snippet text={mcpServersJson('streamableHttp', mcpUrl)} />
-            <p className="text-xs text-muted-foreground">{t('connectAgent.workbuddy.hint')}</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Doubao Work</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <p className="text-muted-foreground">{t('connectAgent.doubao.body')}</p>
-            <FieldRows
-              rows={[
-                { label: t('connectAgent.fields.name'), value: 'objectstack' },
-                { label: t('connectAgent.fields.transport'), value: 'HTTP' },
-                { label: t('connectAgent.fields.url'), value: mcpUrl },
-              ]}
-            />
-            <p className="text-xs text-muted-foreground">{t('connectAgent.doubao.hint')}</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">DuMate</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <p className="text-muted-foreground">{t('connectAgent.dumate.body')}</p>
-            <FieldRows
-              rows={[
-                { label: t('connectAgent.fields.name'), value: 'objectstack' },
-                { label: t('connectAgent.fields.transport'), value: 'Streamable HTTP' },
-                { label: t('connectAgent.fields.url'), value: mcpUrl },
-              ]}
-            />
-            <p className="text-xs text-muted-foreground">{t('connectAgent.dumate.hint')}</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">QwenWork</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <p className="text-muted-foreground">{t('connectAgent.qwenwork.body')}</p>
-            <Snippet text={mcpServersJson('streamable-http', mcpUrl)} />
-            <p className="text-xs text-muted-foreground">{t('connectAgent.qwenwork.hint')}</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* ── Coding agents ─────────────────────────────────────────────── */}
-      <SectionHeading
-        title={t('connectAgent.sections.coding.title')}
-        body={t('connectAgent.sections.coding.body')}
-      />
-      <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Claude Code</CardTitle>
@@ -402,6 +325,45 @@ export function ConnectAgent() {
           <CardContent className="space-y-2 text-sm">
             <p className="text-muted-foreground">{t('connectAgent.codex.body')}</p>
             <Snippet text={`[mcp_servers.objectstack]\nurl = "${mcpUrl}"`} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">WorkBuddy</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <p className="text-muted-foreground">{t('connectAgent.workbuddy.body')}</p>
+            <Snippet text={mcpServersJson('streamableHttp', mcpUrl)} />
+            <p className="text-xs text-muted-foreground">{t('connectAgent.workbuddy.hint')}</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Doubao Work</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <p className="text-muted-foreground">{t('connectAgent.doubao.body')}</p>
+            <FieldRows
+              rows={[
+                { label: t('connectAgent.fields.name'), value: 'objectstack' },
+                { label: t('connectAgent.fields.transport'), value: 'HTTP' },
+                { label: t('connectAgent.fields.url'), value: mcpUrl },
+              ]}
+            />
+            <p className="text-xs text-muted-foreground">{t('connectAgent.doubao.hint')}</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">QwenWork</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <p className="text-muted-foreground">{t('connectAgent.qwenwork.body')}</p>
+            <Snippet text={mcpServersJson('streamable-http', mcpUrl)} />
+            <p className="text-xs text-muted-foreground">{t('connectAgent.qwenwork.hint')}</p>
           </CardContent>
         </Card>
       </div>

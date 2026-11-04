@@ -3709,16 +3709,6 @@ const de = {
     codex: {
       body: 'In ~/.codex/config.toml eintragen. Falls Ihre Codex-Version den OAuth-Flow nicht unterstützt, stattdessen einen API-Schlüssel-Header verwenden (siehe unten):',
     },
-    sections: {
-      assistants: {
-        title: 'Arbeitsassistenten',
-        body: 'Desktop- und Chat-Clients: Fügen Sie dieses System als benutzerdefinierten Connector hinzu und melden Sie sich bei Aufforderung im Browser an.',
-      },
-      coding: {
-        title: 'Coding-Agenten',
-        body: 'IDE- und Terminal-Agenten: ein Befehl oder eine Konfigurationsdatei genügt.',
-      },
-    },
     fields: {
       name: 'Name',
       transport: 'Transportart',
@@ -3731,10 +3721,6 @@ const de = {
     doubao: {
       body: 'Skills · Connectors → Neu → Neuer benutzerdefinierter Connector, dann ausfüllen:',
       hint: 'Melden Sie sich bei Aufforderung im Browser an. Erscheint keine Anmeldung, fügen Sie den benutzerdefinierten Header Authorization: Bearer <API-Schlüssel> hinzu (Schlüssel unten erstellen). Aufgaben, die in der Cloud laufen, brauchen eine über öffentliches HTTPS erreichbare Bereitstellung.',
-    },
-    dumate: {
-      body: 'Verbundene Apps → Eigene MCP-App hinzufügen (Administratoren: Erweiterungsverwaltung → Verwaltung verbundener Apps), dann ausfüllen:',
-      hint: 'Wählen Sie OAuth, schließen Sie die Anmeldung im Browser ab und bestätigen Sie anschließend in DuMate. Bei Token-Authentifizierung tragen Sie Bearer <API-Schlüssel> in das Feld Authorization ein (Schlüssel unten erstellen).',
     },
     qwenwork: {
       body: 'Erweiterungen → Connectors → + Hinzufügen → JSON-Konfiguration einfügen:',

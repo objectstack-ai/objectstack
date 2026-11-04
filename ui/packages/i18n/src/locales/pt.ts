@@ -3779,16 +3779,6 @@ const pt = {
     codex: {
       body: 'Adicionar ao ~/.codex/config.toml. Se sua versão do Codex não suportar o fluxo OAuth, use um cabeçalho de chave de API (veja abaixo):',
     },
-    sections: {
-      assistants: {
-        title: 'Assistentes de trabalho',
-        body: 'Clientes de desktop e de chat: adicione este sistema como conector personalizado e entre pelo navegador quando solicitado.',
-      },
-      coding: {
-        title: 'Agentes de código',
-        body: 'Agentes de IDE e de terminal: um comando ou um arquivo de configuração.',
-      },
-    },
     fields: {
       name: 'Nome',
       transport: 'Tipo de transporte',
@@ -3801,10 +3791,6 @@ const pt = {
     doubao: {
       body: 'Habilidades · Conectores → Novo → Novo conector personalizado e preencha:',
       hint: 'Entre pelo navegador quando solicitado. Se o login não aparecer, adicione o cabeçalho personalizado Authorization: Bearer <chave de API> (crie uma chave abaixo). Tarefas executadas na nuvem exigem uma implantação acessível por HTTPS público.',
-    },
-    dumate: {
-      body: 'Aplicativos conectados → adicionar um aplicativo MCP personalizado (administradores: Gerenciamento de extensões → Gerenciamento de aplicativos conectados) e preencha:',
-      hint: 'Escolha OAuth, conclua o login no navegador e confirme de volta no DuMate. Com autenticação por token, informe Bearer <chave de API> no campo Authorization (crie uma chave abaixo).',
     },
     qwenwork: {
       body: 'Extensões → Conectores → + Adicionar → Colar configuração JSON:',

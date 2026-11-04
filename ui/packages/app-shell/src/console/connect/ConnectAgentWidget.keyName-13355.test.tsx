@@ -136,24 +136,33 @@ describe('Connect an Agent mints a key only under a typed, confirmed name (objec
   });
 });
 
-describe('Connect an Agent offers the work-assistant clients (WorkBuddy, Doubao Work, DuMate, QwenWork)', () => {
+describe('Connect an Agent offers the Chinese clients after the international ones (WorkBuddy, Doubao Work, QwenWork)', () => {
   const MCP_URL = `${window.location.origin}/api/v1/mcp`;
 
   /** Every copy-ready value the widget renders: snippets (`code`) and form rows (`dd`). */
   const copyable = () =>
     Array.from(document.querySelectorAll('code, dd')).map((el) => el.textContent ?? '');
 
-  it('renders each card under the work-assistants section, ahead of the coding agents', async () => {
+  it('renders one card list, international clients first, then WorkBuddy, Doubao Work and QwenWork', async () => {
     await renderSettled();
-    const headings = Array.from(document.querySelectorAll('h3')).map((h) => h.textContent);
-    expect(headings).toEqual([
-      '«connectAgent.sections.assistants.title»',
-      '«connectAgent.sections.coding.title»',
-    ]);
-    for (const title of ['WorkBuddy', 'Doubao Work', 'DuMate', 'QwenWork']) {
-      expect(screen.getByText(title)).toBeInTheDocument();
+    const order = [
+      'Claude (claude.ai / Desktop)',
+      'Claude Code',
+      'Cursor',
+      'VS Code / Copilot',
+      'Codex CLI',
+      'WorkBuddy',
+      'Doubao Work',
+      'QwenWork',
+    ].map((title) => screen.getByText(title));
+    for (let i = 1; i < order.length; i++) {
+      const follows = order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING;
+      expect(follows, `${order[i].textContent} renders after ${order[i - 1].textContent}`).toBeTruthy();
     }
-    for (const key of ['workbuddy', 'doubao', 'dumate', 'qwenwork']) {
+    // One list: no group headings split the cards.
+    expect(document.querySelectorAll('h3')).toHaveLength(0);
+    expect(screen.queryByText('DuMate')).not.toBeInTheDocument();
+    for (const key of ['workbuddy', 'doubao', 'qwenwork']) {
       expect(screen.getByText(`«connectAgent.${key}.body»`)).toBeInTheDocument();
       expect(screen.getByText(`«connectAgent.${key}.hint»`)).toBeInTheDocument();
     }
@@ -167,11 +176,10 @@ describe('Connect an Agent offers the work-assistant clients (WorkBuddy, Doubao 
     // WorkBuddy's mcp.json and QwenWork's JSON import spell Streamable HTTP differently.
     expect(values).toContain(json('streamableHttp'));
     expect(values).toContain(json('streamable-http'));
-    // Doubao Work and DuMate are dialog forms: name, transport and URL, each copyable.
-    expect(values.filter((v) => v === 'objectstack')).toHaveLength(2);
+    // Doubao Work is a dialog form: name, transport and URL, each copyable.
+    expect(values.filter((v) => v === 'objectstack')).toHaveLength(1);
     expect(values).toContain('HTTP');
-    expect(values).toContain('Streamable HTTP');
-    expect(values.filter((v) => v === MCP_URL).length).toBeGreaterThanOrEqual(4);
+    expect(values.filter((v) => v === MCP_URL).length).toBeGreaterThanOrEqual(3);
   });
 
   it('reveals a minted key in the Authorization: Bearer form the cards point to', async () => {
