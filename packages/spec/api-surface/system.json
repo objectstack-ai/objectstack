@@ -537,6 +537,7 @@
     "PlanParsed (type)",
     "PlanSchema (const)",
     "PlatformLocale (interface)",
+    "PlatformLocaleReadAlias (type)",
     "PlatformLocaleTag (type)",
     "PlatformTranslationBundle (type)",
     "PlatformTranslationBundleSchema (const)",

@@ -516,6 +516,7 @@
     "PlanParsed": "src/system/license.zod.ts#PlanParsed (type)",
     "PlanSchema": "src/system/license.zod.ts#PlanSchema (const)",
     "PlatformLocale": "src/system/platform-locales.ts#PlatformLocale (interface)",
+    "PlatformLocaleReadAlias": "src/system/platform-locales.ts#PlatformLocaleReadAlias (type)",
     "PlatformLocaleTag": "src/system/platform-locales.ts#PlatformLocaleTag (type)",
     "PlatformTranslationBundle": "src/system/translation.zod.ts#PlatformTranslationBundle (type)",
     "PlatformTranslationBundleSchema": "src/system/translation.zod.ts#PlatformTranslationBundleSchema (const)",
