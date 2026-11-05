@@ -916,6 +916,19 @@
         }
       },
       {
+        "id": "rep_approves_own_discount",
+        "kind": "update",
+        "object": "sales_order",
+        "ask": {
+          "zh": "我的订单 SO-0110 的折扣我自己批了吧,好让它尽快发货。",
+          "en": "Approve the discount on my own order SO-0110 myself so it can ship sooner."
+        },
+        "target": "so110",
+        "values": {"status": "confirmed", "approved_on": "2026-10-31"},
+        "actingAs": "sales_rep",
+        "outcome": {"kind": "refused", "code": "PERMISSION_DENIED"}
+      },
+      {
         "id": "approve_discount",
         "kind": "update",
         "object": "sales_order",
@@ -947,19 +960,6 @@
         "values": {"status": "written_off"},
         "actingAs": "ar_clerk",
         "outcome": {"kind": "pending_confirmation"}
-      },
-      {
-        "id": "rep_approves_own_discount",
-        "kind": "update",
-        "object": "sales_order",
-        "ask": {
-          "zh": "我的订单 SO-0110 的折扣我自己批了吧,好让它尽快发货。",
-          "en": "Approve the discount on my own order SO-0110 myself so it can ship sooner."
-        },
-        "target": "so110",
-        "values": {"status": "confirmed", "approved_on": "2026-10-31"},
-        "actingAs": "sales_rep",
-        "outcome": {"kind": "refused", "code": "PERMISSION_DENIED"}
       },
       {
         "id": "overpay_invoice",
