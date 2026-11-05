@@ -274,8 +274,10 @@ export const SeedSchema = lazySchema(() => strictObject({
    *   `resolveSeedLocaleForLoad` (`@objectstack/runtime`), first answer wins:
    *   the `localization.locale` setting for the organization the rows land in
    *   (a load that names no organization, such as a single-tenant install or
-   *   reseed or the restart heal, still reads it, and the environment override
-   *   or the `global` setting answers), counted only when somebody set it (a
+   *   reseed or the restart heal, still reads it: the environment override
+   *   answers first, then the `global` setting, then, where no wall stands and
+   *   the deployment holds exactly one organization, that organization's own
+   *   setting), counted only when somebody set it (a
    *   value whose `source` is `'default'` is the platform's placeholder, not a
    *   choice); then the `sys_user.locale`
    *   of the user who installs, reseeds or founds the organization, when one
