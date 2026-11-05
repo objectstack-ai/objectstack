@@ -2,14 +2,14 @@
 
 /**
  * objectstack#28562 (ADR-0146 D2, D3) — Customize in Studio: a read-only
- * base's view, dashboard or report becomes an item of the base's paired
+ * base's view, dashboard, report or page becomes an item of the base's paired
  * customization package `<base>.custom`, declared as an override of the
  * base's item, and "Restore package original" brings the base's item back.
  *
  * What this module holds, and what it reads:
  *
  *  - which types Studio customizes ({@link STUDIO_CUSTOMIZE_TYPES}): the
- *    Interfaces pillar's three and the app its rail navigates, each an
+ *    Interfaces pillar's four and the app its rail navigates, each an
  *    `overridable` type of the spec's closed classification
  *    (`isOverridableMetadataType`);
  *  - the body the pair's draft is written with ({@link overrideDraftBody}):
@@ -66,14 +66,16 @@ import { readFields, writeFields, type FieldEntry } from '../metadata-admin/prev
 
 /**
  * The types Studio's Customize door covers: the Interfaces pillar's view,
- * dashboard and report (an `object` leaf's list view is a `view`), and the
- * app whose navigation that pillar's rail edits (objectstack#30059: the whole
- * app is copied into the pair on the first saved navigation edit). Each is an
+ * dashboard, report and page (an `object` leaf's list view is a `view`;
+ * objectstack#30063: a page, block or source, is edited in its designer as
+ * a dashboard is), and the app whose navigation that pillar's rail edits
+ * (objectstack#30059: the whole app is copied into the pair on the first
+ * saved navigation edit). Each is an
  * `overridable` type of the spec's classification. Translations and email
  * templates are too: no pillar designs them, and the All metadata area's form
  * editor customizes them (`StudioBundleItemEditor`, objectstack#28569).
  */
-export const STUDIO_CUSTOMIZE_TYPES: readonly string[] = ['view', 'dashboard', 'report', 'app'];
+export const STUDIO_CUSTOMIZE_TYPES: readonly string[] = ['view', 'dashboard', 'report', 'page', 'app'];
 
 /** Whether Studio customizes an item of `type` into a read-only base's pair. */
 export function isStudioCustomizeType(type: string | undefined | null): boolean {
