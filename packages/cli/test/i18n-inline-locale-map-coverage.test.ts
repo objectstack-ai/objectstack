@@ -33,7 +33,7 @@
 import { describe, it, expect } from 'vitest';
 import { resolveI18nLabel } from '@objectstack/spec/ui';
 import { computeI18nCoverage, inlineLocaleText } from '../src/utils/i18n-coverage.js';
-import { collectExpectedEntries, extractTranslations } from '../src/utils/i18n-extract.js';
+import { collectExpectedEntries, extractTranslations } from '../src/utils/i18n-bundle-extract.js';
 
 const LOCALES = ['en', 'zh-CN', 'ja-JP'];
 

@@ -931,8 +931,8 @@ const zh = {
     },
     betterAuth: {
       short: '身份',
-      title: '由身份提供方管理',
-      body: '此对象的架构由 {{provider}} 管理。直接编辑会绕过密码哈希、会话校验、两步验证检查和审计钩子。请通过身份认证提供方的登录、邀请和安全流程管理这些记录。',
+      title: '经内置身份服务写入',
+      body: '此对象的架构属于平台内置的身份服务 {{provider}}。请用本页上的操作，或通过登录、邀请和安全流程来创建和修改这些记录；它们都经由该服务写入。直接编辑数据表会绕过密码哈希、会话校验、两步验证检查和审计钩子。',
     },
   },
   kanban: {
@@ -1964,6 +1964,8 @@ const zh = {
       sourceBadgeInherited: '继承自{{source}}',
       sourceBadgeOverrides: '覆盖{{source}}',
       resetToDefault: '恢复默认',
+      sourceBadgeModified: '已修改',
+      defaultValueHint: '默认：{{value}}',
       envLockBadge: '环境变量锁定',
       envLockBadgeTitle: '由环境变量固定,无法在界面中编辑。',
       deprecatedBadge: '已弃用',
@@ -2908,6 +2910,8 @@ const zh = {
       useEmailResetText: '改用邮箱重置',
       phoneSuccessTitle: '密码已重置',
       phoneSuccessDescription: '您的密码已重置，现在可以使用新密码登录了。',
+      noDeliveryTitle: '此处无法通过邮件发送重置链接',
+      noDeliveryDescription: '此部署不发送邮件，因此密码重置链接无法送达。请联系管理员：管理员可以在“设置 → 用户”中为你设置新密码。',
     },
     setPassword: {
       title: '设置一个备用密码',
@@ -3463,6 +3467,7 @@ const zh = {
       title: '待发布的变更',
       description: '发布将带来以下变更。“新增”为全新内容，“更新”将覆盖线上版本。',
       savedToCustomization: '保存到 {{package}} 的定制',
+      customizationEnvironment: '这些变更保存在当前环境的数据库里，是 {{pair}} 的条目，不在项目源码中；只有通过 {{command}} 才能带到其他环境。',
       loading: '正在加载待发布变更…',
       loadFailed: '无法加载待发布变更：',
       empty: '没有待发布的内容 —— 所有草稿均已发布。',
@@ -3535,6 +3540,12 @@ const zh = {
         dataset: '数据集 {{count}}',
         dataset_one: '数据集 {{count}}',
         dataset_other: '数据集 {{count}}',
+        hook: '钩子 {{count}}',
+        hook_one: '钩子 {{count}}',
+        hook_other: '钩子 {{count}}',
+        translation: '翻译 {{count}}',
+        translation_one: '翻译 {{count}}',
+        translation_other: '翻译 {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

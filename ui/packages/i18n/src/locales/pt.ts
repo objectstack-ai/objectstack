@@ -933,8 +933,8 @@ const pt = {
     },
     betterAuth: {
       short: "Identidade",
-      title: "Gerenciado pelo provedor de identidade",
-      body: "O esquema deste objeto pertence a {{provider}}. Edições diretas ignoram o hash de senhas, a validação de sessões, as verificações de dois fatores e os hooks de auditoria. Gerencie esses registros pelos fluxos de login, convite e segurança do seu provedor de autenticação.",
+      title: "Gravado pelo serviço de identidade integrado",
+      body: "O esquema deste objeto pertence a {{provider}}, o serviço de identidade integrado da plataforma. Crie e altere esses registros com as ações desta página ou pelos fluxos de login, convite e segurança; todos passam por esse serviço. Editar a tabela diretamente ignoraria o hash de senhas, a validação de sessões, as verificações de dois fatores e os hooks de auditoria.",
     },
   },
   kanban: {
@@ -2251,6 +2251,8 @@ const pt = {
       sourceBadgeInherited: "Herdado de {{source}}",
       sourceBadgeOverrides: "Substitui {{source}}",
       resetToDefault: "Restaurar padrão",
+      sourceBadgeModified: "Modificado",
+      defaultValueHint: "Padrão: {{value}}",
       envLockBadge: "Bloqueado pelo ambiente",
       envLockBadgeTitle: "Fixado por uma variável de ambiente — não pode ser editado pela interface.",
       deprecatedBadge: "Obsoleto",
@@ -2904,6 +2906,8 @@ const pt = {
       useEmailResetText: "Redefinir por e-mail em vez disso",
       phoneSuccessTitle: "Senha redefinida",
       phoneSuccessDescription: "Sua senha foi redefinida. Agora você pode entrar com a nova senha.",
+      noDeliveryTitle: "Não é possível enviar um link de redefinição por e-mail aqui",
+      noDeliveryDescription: "Esta implantação não envia e-mails, então nenhum link de redefinição de senha pode chegar até você. Peça a um administrador: ele pode definir uma nova senha para você em Configuração → Usuários.",
     },
     resetPassword: {
       title: "Definir nova senha",
@@ -4639,6 +4643,7 @@ const pt = {
       title: 'Alterações pendentes',
       description: 'O que a publicação vai mudar. Itens novos são adicionados; atualizações sobrescrevem a versão publicada.',
       savedToCustomization: 'Salvo nas personalizações de {{package}}',
+      customizationEnvironment: 'Estas alterações ficam no banco de dados deste ambiente, como itens de {{pair}}, e não no código-fonte do seu projeto. Só chegam a outro ambiente por meio de {{command}}.',
       loading: 'Carregando alterações pendentes…',
       loadFailed: 'Não foi possível carregar as alterações pendentes:',
       empty: 'Nada pendente — todos os rascunhos foram publicados.',
@@ -4727,6 +4732,14 @@ const pt = {
         dataset_one: '{{count}} conjunto de dados',
         dataset_many: '{{count}} de conjuntos de dados',
         dataset_other: '{{count}} conjuntos de dados',
+        hook: '{{count}} hooks',
+        hook_one: '{{count}} hook',
+        hook_many: '{{count}} de hooks',
+        hook_other: '{{count}} hooks',
+        translation: '{{count}} traduções',
+        translation_one: '{{count}} tradução',
+        translation_many: '{{count}} de traduções',
+        translation_other: '{{count}} traduções',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

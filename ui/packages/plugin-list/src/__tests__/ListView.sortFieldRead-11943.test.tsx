@@ -222,3 +222,19 @@ describe('the Sort picker field list asks the column read check (objectui#11943)
     expect(screen.getByTestId('sort-relational-info')).toBeInTheDocument();
   });
 });
+
+describe('a lookup the definition marks hidden does not raise the relational hint (objectstack#30037)', () => {
+  it('withheld like an unreadable lookup: not offered and no hint; a visible lookup still raises it', async () => {
+    // `organization_id` is the platform's hidden lookup: the picker never
+    // offers it, so the hint has nothing to explain.
+    const hiddenLookup = { ...FIELDS, org: { type: 'lookup', label: 'Organization', reference: 'sys_org', hidden: true } };
+    mount({ perms: FULL_READ, fields: hiddenLookup });
+    expect(await openSortOptions()).toEqual(FULL_READ_LABELS);
+    expect(screen.queryByTestId('sort-relational-info')).toBeNull();
+    cleanup();
+    const visibleLookup = { ...FIELDS, org: { type: 'lookup', label: 'Organization', reference: 'sys_org' } };
+    mount({ perms: FULL_READ, fields: visibleLookup });
+    await openSortOptions();
+    expect(screen.getByTestId('sort-relational-info')).toBeInTheDocument();
+  });
+});

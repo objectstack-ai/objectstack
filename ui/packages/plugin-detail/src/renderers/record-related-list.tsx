@@ -36,7 +36,8 @@ import {
 } from '@object-ui/core';
 import type { RecordRelatedListComponentProps } from '@object-ui/types';
 import { RelatedList } from '../RelatedList';
-import { RelatedListCompactContext } from '../relatedListCompact';
+import { RecordBodyTablesContext, RelatedListCompactContext } from '../relatedListCompact';
+import { relatedCardId } from '../synth/relatedArrangement';
 import { useRecordAriaProps } from './recordComponentAria';
 import { ParentRecordBinding } from './recordBinding';
 import { RelatedListStackSlot } from '../RelatedListEmptyFold';
@@ -226,6 +227,8 @@ const RecordRelatedListBody: React.FC<RecordRelatedListRendererProps> = ({
   const { language } = useObjectTranslation();
   // A panel of the record page's related column (the fold rule below).
   const panel = React.useContext(RelatedListCompactContext);
+  // The record page's body tables (the fold rule below).
+  const bodyTableIds = React.useContext(RecordBodyTablesContext);
 
   const objectName = schema.objectName;
 
@@ -612,8 +615,16 @@ const RecordRelatedListBody: React.FC<RecordRelatedListRendererProps> = ({
    * toolbar actions or an authoring notice keep the list's own row. A panel
    * of the related column folds with its `add` and its actions too: the
    * panel line's 展开 brings it back with them (objectstack#27524, Target 2).
+   * A BODY table of the record page (objectstack#29944) never folds: it is a
+   * section of the record, not a member of a related-list stack, so an empty
+   * one keeps its header where its siblings keep theirs.
    */
+  const bodyTable =
+    !panel &&
+    typeof schema.relationshipField === 'string' &&
+    bodyTableIds.has(relatedCardId(objectName, schema.relationshipField));
   const foldable =
+    !bodyTable &&
     !showActionRefusals &&
     !showUnservedActions &&
     (panel || (!schema.add && !(toolbarActions && toolbarActions.length > 0)));

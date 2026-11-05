@@ -52,7 +52,7 @@
  *
  * What it still deliberately does NOT cover, stated so the next reader does
  * not mistake silence for coverage: the type-level half of the same surface.
- * `walkMetadataForms` in packages/cli/src/utils/i18n-extract.ts emits
+ * `walkMetadataForms` in packages/lint/src/i18n-walk.ts emits
  * `metadataForms.TYPE.label`/`.description` for every entry of
  * DEFAULT_METADATA_TYPE_REGISTRY (packages/spec/src/kernel/metadata-plugin.zod.ts),
  * and the registry module itself (packages/spec/src/system/metadata-form-

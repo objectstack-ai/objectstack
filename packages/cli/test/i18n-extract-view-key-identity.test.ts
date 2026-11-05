@@ -17,7 +17,7 @@
 // the string is the thing under discussion.
 import { describe, it, expect } from 'vitest';
 import { expandViewContainer } from '@objectstack/spec/ui';
-import { collectExpectedEntries } from '../src/utils/i18n-extract';
+import { collectExpectedEntries } from '../src/utils/i18n-bundle-extract';
 
 /** Every `_views` key the extractor scaffolds for `object`, in emit order. */
 function extractorViewKeys(object: string, container: any): string[] {

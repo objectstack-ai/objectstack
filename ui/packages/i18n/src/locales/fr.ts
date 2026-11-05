@@ -933,8 +933,8 @@ const fr = {
     },
     betterAuth: {
       short: "Identité",
-      title: "Géré par le fournisseur d'identité",
-      body: "Le schéma de cet objet appartient à {{provider}}. Les modifications directes contournent le hachage des mots de passe, la validation des sessions, les contrôles à deux facteurs et les hooks d'audit. Gérez ces enregistrements via les flux de connexion, d'invitation et de sécurité de votre fournisseur d'authentification.",
+      title: "Écrit via le service d'identité intégré",
+      body: "Le schéma de cet objet appartient à {{provider}}, le service d'identité intégré de la plateforme. Créez et modifiez ces enregistrements avec les actions de cette page ou via les flux de connexion, d'invitation et de sécurité ; tous passent par ce service. Modifier la table directement contournerait le hachage des mots de passe, la validation des sessions, les contrôles à deux facteurs et les hooks d'audit.",
     },
   },
   kanban: {
@@ -2252,6 +2252,8 @@ const fr = {
       sourceBadgeInherited: "Hérité de {{source}}",
       sourceBadgeOverrides: "Remplace {{source}}",
       resetToDefault: "Rétablir la valeur par défaut",
+      sourceBadgeModified: "Modifié",
+      defaultValueHint: "Par défaut : {{value}}",
       envLockBadge: "Verrouillé par l'env.",
       envLockBadgeTitle: "Fixé par une variable d'environnement — modification impossible depuis l'interface.",
       deprecatedBadge: "Obsolète",
@@ -2905,6 +2907,8 @@ const fr = {
       useEmailResetText: "Réinitialiser par e-mail à la place",
       phoneSuccessTitle: "Mot de passe réinitialisé",
       phoneSuccessDescription: "Votre mot de passe a été réinitialisé. Vous pouvez maintenant vous connecter avec votre nouveau mot de passe.",
+      noDeliveryTitle: "Aucun lien de réinitialisation ne peut être envoyé par e-mail ici",
+      noDeliveryDescription: "Ce déploiement n'envoie pas d'e-mails, aucun lien de réinitialisation du mot de passe ne peut donc vous parvenir. Demandez à un administrateur : il peut vous définir un nouveau mot de passe dans Configuration → Utilisateurs.",
     },
     resetPassword: {
       title: "Définir un nouveau mot de passe",
@@ -4640,6 +4644,7 @@ const fr = {
       title: 'Modifications en attente',
       description: 'Ce que la publication changera. Les nouveaux éléments sont ajoutés ; les mises à jour remplacent la version en ligne.',
       savedToCustomization: 'Enregistré dans les personnalisations de {{package}}',
+      customizationEnvironment: 'Ces modifications sont stockées dans la base de données de cet environnement, comme éléments de {{pair}}, et non dans les sources de votre projet. Elles ne passent dans un autre environnement que par {{command}}.',
       loading: 'Chargement des modifications en attente…',
       loadFailed: 'Impossible de charger les modifications en attente :',
       empty: 'Rien en attente — tous les brouillons ont été publiés.',
@@ -4728,6 +4733,14 @@ const fr = {
         dataset_one: '{{count}} jeu de données',
         dataset_many: '{{count}} de jeux de données',
         dataset_other: '{{count}} jeux de données',
+        hook: '{{count}} hooks',
+        hook_one: '{{count}} hook',
+        hook_many: '{{count}} de hooks',
+        hook_other: '{{count}} hooks',
+        translation: '{{count}} traductions',
+        translation_one: '{{count}} traduction',
+        translation_many: '{{count}} de traductions',
+        translation_other: '{{count}} traductions',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

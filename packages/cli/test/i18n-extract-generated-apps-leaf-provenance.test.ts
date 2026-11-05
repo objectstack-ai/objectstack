@@ -38,7 +38,7 @@ import {
   extractTranslations,
   narrowToCommittedSections,
   translationModuleSections,
-} from '../src/utils/i18n-extract.js';
+} from '../src/utils/i18n-bundle-extract.js';
 import {
   GENERATED_SECTIONS,
   HAND_AUTHORED_SECTIONS,

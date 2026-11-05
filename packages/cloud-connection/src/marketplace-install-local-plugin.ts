@@ -207,6 +207,7 @@ import { PackageExportManifestSchema, type PackageExportManifest } from '@object
 import {
     assertProtocolCompat,
     checkProtocolCompat,
+    type ProtocolCompatAdmitted,
     // [ADR-0141 D2] The pre-install dependency check: the one predicate and
     // the one answer every package-install door gives its refusal.
     checkDeclaredDependencies,
@@ -726,6 +727,58 @@ function withheldMapsLogLine(
     return `[MarketplaceInstallLocal] installed ${manifestId} ${mode} with ${withheldMaps.length} connector map(s) the `
         + `package export withheld whole, each now absent: ${named}. The connector sends none of those headers or `
         + 'environment variables until each map is supplied again where the connector is authored.';
+}
+
+/**
+ * [#30326] What an install answer carries when ADR-0087 D1's handshake
+ * admitted the package WITHOUT checking it: the person who pressed Install is
+ * the one who needs to know, and the `warn` line alone reaches only whoever
+ * reads the server log. Present on a success answer only then; omitted, not
+ * nulled, for a package whose range was checked, so that answer's key set is
+ * unchanged.
+ *
+ * `reason` is the handshake's own verdict, never a second reading of the
+ * range: `no-range` (the package declares no `engines.protocol`, nor either
+ * legacy spelling) or `unparsed-range` (it declares a range the handshake's
+ * grammar does not read). `protocolVersion` is the protocol the package was
+ * loaded under unchecked.
+ */
+export type ProtocolCheckSkipped =
+    | { reason: 'no-range'; packageId: string; protocolVersion: string; message: string }
+    | {
+        reason: 'unparsed-range';
+        packageId: string;
+        protocolVersion: string;
+        requiredRange: string;
+        rangeSource: string;
+        message: string;
+    };
+
+/** [#30326] The notice for a verdict the handshake admitted unchecked; `undefined` for a checked one. */
+function protocolCheckSkippedOf(verdict: ProtocolCompatAdmitted, packageId: string): ProtocolCheckSkipped | undefined {
+    if (verdict.status === 'ok') return undefined;
+    const consequence = `so it was installed under platform protocol ${verdict.protocolVersion} without a compatibility `
+        + 'check and may not work on this platform version. A build of the package that declares the protocol it '
+        + 'supports (`engines.protocol`) is checked at install.';
+    switch (verdict.status) {
+        case 'no-range':
+            return {
+                reason: 'no-range',
+                packageId,
+                protocolVersion: verdict.protocolVersion,
+                message: `Package '${packageId}' does not state which platform protocol it supports, ${consequence}`,
+            };
+        case 'unparsed-range':
+            return {
+                reason: 'unparsed-range',
+                packageId,
+                protocolVersion: verdict.protocolVersion,
+                requiredRange: verdict.requiredRange,
+                rangeSource: verdict.source,
+                message: `Package '${packageId}' states its platform protocol as '${verdict.requiredRange}' `
+                    + `(${verdict.source}), which this runtime cannot read, ${consequence}`,
+            };
+    }
 }
 
 /**
@@ -1911,8 +1964,14 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     hooks with THIS runtime's binder: ADR-0087 D1 checks "before
         //     loading a package's metadata". An absent or unrecognised range is
         //     admitted with a warning, as at every seam the handshake guards.
+        //
+        //     [#30326] The log line is the operator's; the verdict it admitted
+        //     the package under is also the answer's: every success answer
+        //     below carries `protocolCheckSkipped` when the check did not run.
+        let protocolCheckSkipped: ProtocolCheckSkipped | undefined;
         try {
-            assertProtocolCompat(manifest, undefined, (m) => ctx.logger?.warn?.(`[MarketplaceInstallLocal] ${m}`));
+            const admitted = assertProtocolCompat(manifest, undefined, (m) => ctx.logger?.warn?.(`[MarketplaceInstallLocal] ${m}`));
+            protocolCheckSkipped = protocolCheckSkippedOf(admitted, manifestId);
         } catch (err) {
             if (!isProtocolIncompatibleError(err)) throw err;
             const refusal = protocolIncompatibleAnswer(err);
@@ -2090,6 +2149,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 versionId: resolvedVersionId,
                 userId,
                 withheldMaps,
+                protocolCheckSkipped,
             });
         }
 
@@ -2135,6 +2195,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 versionId: resolvedVersionId,
                 userId,
                 withheldMaps,
+                protocolCheckSkipped,
             });
         }
 
@@ -2520,6 +2581,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 // withheld whole, so it arrived absent. Omitted when there are
                 // none, so that answer's key set is unchanged.
                 ...(withheldMaps.length > 0 ? { withheldMaps } : {}),
+                // [#30326] The handshake admitted the package without checking
+                // it (no `engines.protocol`, or a range it cannot read): the
+                // installer is told, not only the server log. Omitted when the
+                // range was checked, so that answer's key set is unchanged.
+                ...(protocolCheckSkipped !== undefined ? { protocolCheckSkipped } : {}),
                 upgradedFrom: conflict === 'marketplace' ? 'previous-marketplace-version' : null,
                 // [ADR-0146 D2, #28410] Names installed dependents already held,
                 // undeclared, that this version now ships (step 2d). Omitted when
@@ -3738,9 +3804,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             manifest: Record<string, any>; manifestId: string; version: string; versionId: string; userId: string | null;
             /** [#28640 ruling ③A] The connector maps the export withheld ({@link judgeWithheldMaps}). */
             withheldMaps: readonly WithheldMap[];
+            /** [#30326] The handshake admitted the package unchecked ({@link protocolCheckSkippedOf}). */
+            protocolCheckSkipped: ProtocolCheckSkipped | undefined;
         },
     ): Promise<Response> => {
-        const { manifest, manifestId, version, versionId, userId, withheldMaps } = args;
+        const { manifest, manifestId, version, versionId, userId, withheldMaps, protocolCheckSkipped } = args;
         let protocol: UnmanagedImporter | undefined;
         try { protocol = ctx.getService<UnmanagedImporter>('protocol'); } catch { /* no protocol service */ }
         if (!protocol || typeof protocol.importUnmanagedPackage !== 'function') {
@@ -3820,6 +3888,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 // withheld whole, so its copy carries it absent. Omitted when
                 // there are none, so that answer's key set is unchanged.
                 ...(withheldMaps.length > 0 ? { withheldMaps: [...withheldMaps] } : {}),
+                // [#30326] Omitted when the handshake checked the package's range.
+                ...(protocolCheckSkipped !== undefined ? { protocolCheckSkipped } : {}),
                 ...(declaresSeeds
                     ? {
                         seeded: {
@@ -3891,9 +3961,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             version: string; versionId: string; userId: string | null;
             /** [#28640 ruling ③A] The connector maps the export withheld ({@link judgeWithheldMaps}). */
             withheldMaps: readonly WithheldMap[];
+            /** [#30326] The handshake admitted the package unchecked ({@link protocolCheckSkippedOf}). */
+            protocolCheckSkipped: ProtocolCheckSkipped | undefined;
         },
     ): Promise<Response> => {
-        const { manifest, manifestId, baseId, version, versionId, userId, withheldMaps } = args;
+        const { manifest, manifestId, baseId, version, versionId, userId, withheldMaps, protocolCheckSkipped } = args;
         const refuse = (status: number, code: string, message: string, details?: Record<string, unknown>) =>
             c.json({ success: false, error: { code, message, ...(details ? { details } : {}) } }, status as any);
 
@@ -4054,6 +4126,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 written,
                 // [#28640 ruling ③A] Omitted when the export withheld none.
                 ...(withheldMaps.length > 0 ? { withheldMaps: [...withheldMaps] } : {}),
+                // [#30326] Omitted when the handshake checked the package's range.
+                ...(protocolCheckSkipped !== undefined ? { protocolCheckSkipped } : {}),
                 ...(plan.carriesSeedData
                     ? {
                         seeded: {
