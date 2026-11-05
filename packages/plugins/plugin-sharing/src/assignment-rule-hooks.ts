@@ -118,6 +118,7 @@ function columnOf(path: ReadonlyArray<PropertyKey>): string {
   if (head === 'name') return 'name';
   if (head === 'object') return 'object_name';
   if (head !== 'entries') return '_record';
+  if (key === 'name') return 'name'; // the one entry is named after the rule
   if (key === 'assignTo') return sub === 'type' ? 'recipient_type' : 'recipient_id';
   if (key === 'criteria' || key === 'strategy' || key === 'load') return key;
   return '_record';
