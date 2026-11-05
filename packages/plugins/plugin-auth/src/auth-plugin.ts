@@ -108,6 +108,7 @@ import {
   reportIfNoSignInAccountExists,
   type SignInPathConfigView,
 } from './boot-sign-in-reachability.js';
+import { registerSignInMethodFloor } from './sign-in-method-floor.js';
 import { judgePlatformAdmin, isPlatformAdminUser, type PlatformAdminActor } from './platform-admin-gate.js';
 import {
   decideDemoStaffEnvironmentGate,
@@ -2046,6 +2047,27 @@ export class AuthPlugin implements Plugin {
       return;
     }
     if (!settings || typeof settings.getNamespace !== 'function') return;
+
+    // The save door refuses turning off the last sign-in method, before the
+    // value is stored; the pass below would only apply it. See the module.
+    const floorManager = this.authManager;
+    registerSignInMethodFloor(
+      settings,
+      {
+        publicConfig: () => floorManager.getPublicConfig(),
+        engine: () => {
+          try {
+            return ctx.getService<IDataEngine>('objectql');
+          } catch {
+            return undefined;
+          }
+        },
+        hostSignInHandoff: this.options.hostSignInHandoff === true,
+        stackConfiguredGoogle: () => !!this.configuredSocialProviders?.google,
+        env: () => ((globalThis as any)?.process?.env ?? {}) as Record<string, string | undefined>,
+      },
+      ctx.logger,
+    );
 
     const applySettings = async (): Promise<void> => {
       if (!this.authManager) return;
