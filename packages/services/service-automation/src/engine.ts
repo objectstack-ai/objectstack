@@ -9003,6 +9003,9 @@ export class AutomationEngine implements IAutomationService {
      * (unknown-field refs, likely bare-field typos, text/boolean fields misused
      * in arithmetic) as ADVISORY warnings (logged, never thrown). Flow conditions
      * bind the record's fields flat, so the schema pass uses `flattened` scope.
+     * The object they are typed against is the one the run binds: a
+     * time-relative flow's swept object, read off {@link deriveTriggerBinding}
+     * (#30396).
      * The fatal set is unchanged — a resolver can never break a flow that used to
      * register cleanly. `advisory: false` skips that pass: the stored pass
      * previews refusals ({@link registrationCheckRefusals}), and an advisory
@@ -9022,6 +9025,7 @@ export class AutomationEngine implements IAutomationService {
             logger: this.logger,
             objectSchemaResolver: this.objectSchemaResolver,
             valueEnvelopeRefusals: (...a) => this.valueEnvelopeRefusals(...a),
+            deriveTriggerBinding: (...a) => this.deriveTriggerBinding(...a),
         };
         return validateFlowExpressions.call(host, flowName, flow, { advisory });
     }

@@ -275,8 +275,10 @@ create/update payload.
   \`flow_condition\` | \`template\` (default \`formula\`). Pass the rule's
   \`severity\` or the flow's \`triggerKind\` (\`record_change\` by default) to
   get the verdict the publish gate gives that rule or flow; for a
-  \`time_relative\` flow that sweeps another object than \`objectName\`, also
-  pass its \`timeRelative.object\` as \`sweepObject\` (then a mismatch warns).
+  \`time_relative\` flow, pass the object its sweep scans (\`timeRelative.object\`)
+  as \`objectName\`: its conditions read rows of that object, and a start whose
+  \`objectName\` names another object is refused at publish
+  (\`flow-time-relative-object-mismatch\`). \`sweepObject\` names that same object.
 - **query_records({ objectName, where?, fields?, limit?, offset?, orderBy? })** —
   read records. \`where\` is a field→value match, e.g. \`{ "status": "open" }\`.
   Results are page-capped; use \`limit\`/\`offset\` to page.

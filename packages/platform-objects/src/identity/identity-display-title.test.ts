@@ -37,7 +37,8 @@
  * (`record.user_id.name`, ADR-0079 addendum 2026-10-18). There the read path
  * evaluates it over a copy of the row whose lookup carries the related row,
  * and the console renders the `titleFormat` placeholder by that related row's
- * display name; the case's `row` is that copy (`sys_business_unit_member`).
+ * display name; the case's `row` is that copy (`sys_business_unit_member`,
+ * `sys_team_member`).
  * The engine-level proof of the hop is
  * `plugin-security/src/business-unit-member-title.test.ts`.
  */
@@ -182,8 +183,14 @@ const FORMULA_CASES: Case[] = [
   },
   {
     schema: SysTeamMember as unknown as Schema,
-    row: { id: 'tmm_4Ds7', user_id: 'usr_Ab12', team_id: 'team_core' },
-    title: 'usr_Ab12 in team_core',
+    // Reads one hop through both lookups, as `sys_business_unit_member` does:
+    // the row carries the related rows the read path preloads.
+    row: {
+      id: 'tmm_4Ds7',
+      user_id: { id: 'usr_Ab12', name: 'Ada Lovelace', email: 'ada@example.com' },
+      team_id: { id: 'team_core', name: 'Core Platform' },
+    },
+    title: 'Ada Lovelace in Core Platform',
   },
   {
     schema: SysTwoFactor as unknown as Schema,
@@ -236,6 +243,40 @@ describe('[#20059] identity objects resolve a real record title under ADR-0079 o
     for (const name of internal) expect(title).not.toContain(String(row[name as 'identifier' | 'value']));
     for (const name of internal) expect(renderTitleFormat(RETIRED_TITLE_TEMPLATES[schema.name], row)).not.toContain(String(row[name as 'identifier' | 'value']));
     for (const name of internal) expect(schema.highlightFields ?? []).not.toContain(name);
+  });
+
+  describe('sys_team_member: titled by the person and the team, never their stored ids', () => {
+    // The title a team's Members panel names each row by (the record page's
+    // related column draws a compact card titled by the record title), a
+    // membership's H1, and every reference to the row. The same hop and the
+    // same handle rule as `sys_business_unit_member`: the user's `name`, else
+    // their `email`.
+    const schema = SysTeamMember as unknown as Schema;
+    const ada = { id: 'usr_Ab12', name: 'Ada Lovelace', email: 'ada@example.com' };
+    const team = { id: 'team_core', name: 'Core Platform' };
+
+    it('reads both lookups only through the hop', () => {
+      const expression = schema.fields.display_title?.expression;
+      const source = String(typeof expression === 'string' ? expression : expression?.source);
+      const reads = [...new Set([...source.matchAll(/record\.([A-Za-z_][A-Za-z0-9_.]*)/g)].map((m) => m[1]))].sort();
+      expect(reads).toEqual(['team_id.name', 'user_id.email', 'user_id.name']);
+    });
+
+    it('a user whose name is blank is titled by their email', () => {
+      const row = { id: 'tmm_5Ef8', user_id: { id: 'usr_Cd34', name: '  ', email: 'grace@example.com' }, team_id: team };
+      expect(evaluateDisplayTitle(schema, row)).toBe('grace@example.com in Core Platform');
+    });
+
+    it('a lookup that carries no related row leaves no title, never an id', () => {
+      // An unresolved hop (a user or team the reader may not read, or one that
+      // no longer exists) leaves the title null; the engine-level proof of
+      // that read is `plugin-security/src/business-unit-member-title.test.ts`.
+      // Here: a lookup still holding its stored id evaluates to null, so the
+      // id never reaches the title.
+      expect(evaluateDisplayTitle(schema, { id: 'tmm_6Gh9', user_id: 'usr_Ab12', team_id: 'team_core' })).toBeNull();
+      expect(evaluateDisplayTitle(schema, { id: 'tmm_6Gh9', user_id: ada, team_id: 'team_core' })).toBeNull();
+      expect(evaluateDisplayTitle(schema, { id: 'tmm_6Gh9', user_id: 'usr_Ab12', team_id: team })).toBeNull();
+    });
   });
 
   it('sys_member: a row without a role is titled by its user alone', () => {

@@ -327,6 +327,7 @@ const RECEIVER_FREE_FIELDS = Object.freeze({
  * annotates, stops the script (exit 2).
  */
 const EXPLICIT_RETURN_TYPES = Object.freeze({
+  applyFilterCondition: 'void',
   applyFilters: 'void',
   createColumn: 'void',
   createDatabase: 'Promise<void>',
