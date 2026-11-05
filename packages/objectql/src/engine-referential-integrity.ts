@@ -43,6 +43,11 @@
  * This module imports the engine only as a TYPE, so there is no module cycle
  * at run time, and nothing re-exports it, so the published surface does not
  * move.
+ *
+ * [#30053 codemod] A PRIVATE method's docblock has since moved here,
+ * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
+ * and the class keeps none for it; a public or protected method's docblock
+ * stays on the class, the contract, and its function keeps the placeholder.
  */
 
 import { referenceTargetOf, type EngineQueryOptions } from '@objectstack/spec/data';
@@ -79,7 +84,109 @@ function isEmptyReferenceValue(v: unknown): boolean {
   return false;
 }
 
-/** The body of `ObjectQL#assertReferencesResolve`; the method's docblock there is its contract. */
+/**
+ * [#4441] Referential integrity on the WRITE path: a `lookup` (or any
+ * reference-typed field) may not be given an id that exists in no row of the
+ * object it declares.
+ *
+ * The field metadata is unambiguous — `{"type":"lookup","required":true,
+ * "reference":"sys_permission_set"}` — and the DELETE side already reasons
+ * about the edge (`deleteBehavior: 'set_null'`). Only the insert side never
+ * checked, so `POST /data/sys_position_permission_set
+ * {"permission_set_id":"ps_does_not_exist_at_all"}` created the row.
+ *
+ * On the RBAC link tables that is a security-surface record that resolves to
+ * nothing: an administrator auditing permissions sees a binding whose target
+ * cannot be inspected, and the audience-anchor gate had to resolve that very
+ * set to evaluate the grant — so a dangling row was an unevaluable gate input,
+ * not merely an untidy one. (That gate and `sys_position_permission_set` are
+ * retired since C3 stage 8; the check stands for the link tables that remain.)
+ *
+ * ## Scope, deliberately narrow
+ *
+ * - **Caller-supplied keys only.** Server stamps (`owner_id`,
+ *   `organization_id`, `created_by`/`updated_by`) are lookups too; they are
+ *   written by hooks and middleware, not by the request, and re-validating
+ *   them here would turn a platform stamp into a caller-facing rejection.
+ * - **Non-system writes only**, like every other write-path guard in this
+ *   engine (`stripReadonlyFields` — which since #14147 runs on the create
+ *   path as well as the update one — and `stripRuntimeOwnedFields`). Seed
+ *   replay,
+ *   package install and boot-time provisioning legitimately write rows in an
+ *   order that resolves only once the batch completes; failing them closed
+ *   would turn an ordering detail into a boot failure. This leaves a real
+ *   residual — an `isSystem` caller can still write a dangling reference —
+ *   which is recorded on the issue rather than silently accepted.
+ *   [#28881] ⛔ Except a flow run's elevated write (`runAs: 'system'`):
+ *   its context carries the flow-write mark (`keepsFlowWriteReferenceCheck`,
+ *   `@objectstack/core`, set by `resolveRunDataContext` in
+ *   service-automation) and is checked like a user write. Its elevation is
+ *   for authorization (other people's rows, past RLS and FLS), never for a
+ *   link to a row that does not exist, and it keeps every authorization
+ *   exemption `isSystem` gives it. A write it sets off (a hook's `ctx.api`,
+ *   its `sudo()`, a cascade leg) spreads that context and is checked as
+ *   the flow's own.
+ * - **Empty values are not references.** `null` / `undefined` / `''` mean
+ *   "no link", which is what `deleteBehavior: 'set_null'` produces.
+ * - **Already-expanded objects are skipped.** A read round-trip can hand back
+ *   `{id, name, …}` in the slot; that is not an id write.
+ * - **A value the row already stores is not the write's (#29062).** The
+ *   check judges only the references a write ADDS. An update's `storedRows`
+ *   (the by-id prior row; a predicate update's matched rows) forgive a
+ *   refused value, or a multi-valued member, that every one of those rows
+ *   already holds: an edit form carries the whole record back, and a stored
+ *   id that has since stopped resolving (the delete walk leaves a `user`
+ *   value in place, `DELETE_SEMANTICS_REFERENCE_TYPES`) is not the editor's
+ *   to answer for. A value new to any of the rows is refused as before, and
+ *   an insert has no stored rows, so every value it supplies is judged.
+ *
+ * ## Why the probe bypasses RLS — and why it keeps the tenant wall
+ *
+ * Existence is a fact about the database, not about the caller's ROW-LEVEL
+ * visibility — the same distinction the #4435 existence probe turns on. A
+ * probe under the caller's own context would refuse a link to a permission
+ * set the caller cannot READ, which is ordinary in an RLS-scoped deployment
+ * and would make the platform's own admin flows fail. Whether the caller may
+ * create the binding at all is the RBAC/RLS layer's decision, made where it
+ * already is. So the probe is elevated: `isSystem` bypasses RBAC, RLS and FLS.
+ *
+ * That argument is about visibility, never about TENANCY, and the elevation
+ * is therefore `sudo()`-shaped — `{ ...context, isSystem: true }`, see
+ * {@link referenceExists} — not a bare `{ isSystem: true }` (#19808). The
+ * bare spelling carried no `tenantId`, so the probe spanned every
+ * organization: an org-bound caller could store a reference to another
+ * organization's row, and could tell "exists in another organization" (the
+ * write committed) from "exists nowhere" (refused) — a cross-tenant existence
+ * oracle. With the caller's context spread first, `buildDriverOptions`
+ * forwards its `tenantId` to the driver, a row stamped with another
+ * organization is not found, and both cases answer the same
+ * `reference_not_found`. The tenancy exemptions stay where they are decided:
+ * `buildDriverOptions` withholds `tenantId` for a `tenancy.enabled: false`
+ * (platform-global) object and for a federated one, so a reference to either
+ * still resolves from an org-bound caller. A row with no organization is no
+ * tenant's (ADR-0131 D1): the driver's scope is the organization equality,
+ * with no `IS NULL` arm, so an org-bound caller's probe does not find one.
+ *
+ * ## …except a master-detail header, which the caller must be able to read (#22519)
+ *
+ * A `master_detail` field names the detail's HEADER, and a write of a detail
+ * whose header the caller cannot read answers exactly what a write naming a
+ * header that exists nowhere answers. Nothing upstream of this check settles
+ * that: ADR-0055 §3 gates a detail write on its header (master edit) only for
+ * a `controlled_by_parent` detail, so an elevated probe alone would tell such
+ * a caller "exists" apart from "exists nowhere". So for a `master_detail`
+ * field the caller's read door is asked first ({@link masterDetailHeaderExists}),
+ * and a header it does not return is `reference_not_found`. ⛔ A plain
+ * `lookup` keeps the elevated probe above, unchanged.
+ *
+ * Fails OPEN when the target cannot be checked (unregistered object, no
+ * driver, a probe that throws): an integrity check that cannot run must not
+ * invent a rejection, and the alternative — refusing every write to an object
+ * whose target lives on an unreachable datasource — converts a connectivity
+ * problem into data loss. A master-detail header's read door that fails is
+ * the exception: it did not return the header, so the header is missing
+ * (see {@link masterDetailHeadersCallerReads}).
+ */
 export async function assertReferencesResolve(
   this: Pick<ReferentialIntegrityHost, 'masterDetailHeaderExists' | 'referenceExists'>,
   schema: any,
@@ -199,7 +306,26 @@ function storedReferenceIds(value: unknown): ReadonlySet<string> {
   return ids;
 }
 
-/** The body of `ObjectQL#masterDetailHeadersCallerReads`; the method's docblock there is its contract. */
+/**
+ * [#22519] Read 1 of the write's master-detail header read: which of `ids`
+ * the caller's READ DOOR returns — one `find` for the whole batch, under the
+ * caller's own context, so every enforcement layer in the middleware chain
+ * (RBAC, RLS, sharing, row scope) answers it, as it answers the preview's
+ * first read ({@link resolvePreviewParents}). Projected to `id`: what the
+ * header HOLDS is read 2's question, never this one's.
+ *
+ * A header it does not return binds as a header that exists nowhere binds:
+ * the reference check answers `reference_not_found` for it
+ * ({@link masterDetailHeaderExists}), and the write's header resolution
+ * leaves `parent` unbound for it ({@link resolveMasterDetailParent},
+ * {@link resolveMasterDetailParents}). A read that fails — a refusal of the
+ * read itself included — returned no header, so every header binds as
+ * missing, as the preview binds them and as the write's own failed header
+ * read does; ⛔ never as readable.
+ *
+ * A SYSTEM caller (seed replay, boot) has no read door to ask: every id goes
+ * straight to read 2, and its write resolves exactly as before.
+ */
 export async function masterDetailHeadersCallerReads(
   this: Pick<ReferentialIntegrityHost, 'find' | 'logger'>,
   master: string,

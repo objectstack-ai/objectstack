@@ -3535,6 +3535,12 @@ const zh = {
         dataset: '数据集 {{count}}',
         dataset_one: '数据集 {{count}}',
         dataset_other: '数据集 {{count}}',
+        hook: '钩子 {{count}}',
+        hook_one: '钩子 {{count}}',
+        hook_other: '钩子 {{count}}',
+        translation: '翻译 {{count}}',
+        translation_one: '翻译 {{count}}',
+        translation_other: '翻译 {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

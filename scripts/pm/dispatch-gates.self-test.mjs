@@ -9428,7 +9428,7 @@ export function selfTest({ tier = 'full' } = {}) {
   // Specimens, not classes: the extractor module whose edit really does move
   // the committed bundles, and a test file that compiles into nothing either
   // gate runs. Both live, so neither direction can pass over an empty set.
-  const CLI_SRC_SPECIMEN = 'packages/cli/src/utils/i18n-extract.ts';
+  const CLI_SRC_SPECIMEN = 'packages/cli/src/utils/i18n-bundle-extract.ts';
   const CLI_TEST_SPECIMEN = 'packages/cli/test/authoring-rule-command-parity.test.ts';
   t(
     'both CLI specimens are real tracked files, so the two directions below are live',

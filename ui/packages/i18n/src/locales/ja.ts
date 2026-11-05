@@ -4616,6 +4616,12 @@ const ja = {
         dataset: 'データセット {{count}}',
         dataset_one: 'データセット {{count}}',
         dataset_other: 'データセット {{count}}',
+        hook: 'フック {{count}}',
+        hook_one: 'フック {{count}}',
+        hook_other: 'フック {{count}}',
+        translation: '翻訳 {{count}}',
+        translation_one: '翻訳 {{count}}',
+        translation_other: '翻訳 {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.
