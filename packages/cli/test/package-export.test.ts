@@ -127,7 +127,13 @@ describe('os package export', () => {
       const posted: any[] = [];
       vi.stubGlobal('fetch', vi.fn(async (_url: string, init: any) => {
         posted.push(JSON.parse(init.body));
-        return new Response(JSON.stringify({ success: true, data: { manifestId: entry.id, version: entry.version, hotLoaded: true } }), { status: 200 });
+        // [ADR-0146 D3] A pair is answered as the runtime installs it: into
+        // its writable pair, never as code (which the command prints as the
+        // failure it is).
+        const answered = entry === PAIR
+          ? { manifestId: entry.id, version: entry.version, customizationPair: { basePackageId: BASE.id, packageId: entry.id, created: true, writable: true }, writtenCount: 0, written: [] }
+          : { manifestId: entry.id, version: entry.version, hotLoaded: true };
+        return new Response(JSON.stringify({ success: true, data: answered }), { status: 200 });
       }));
       const file = join(out, exportedPackageDirectory(i, 3, entry.id), EXPORTED_PACKAGE_FILE);
       const r = await run(PackageInstall, [file, '--runtime', 'http://target.test']);
