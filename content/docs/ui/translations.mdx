@@ -217,8 +217,20 @@ with the same string in the item as the package shipped it:
 - **A widget, global filter or bulk action the package never shipped counts as
   edited**: the org authored it, so its text is served as written.
 - **An edited string is served in the language it was written in, to every
-  reader.** The bundle entry for that string no longer applies to it.
+  reader**, unless the base's paired `.custom` package translates it (below).
+  The bundle entry for that string no longer applies to it.
 - **Resetting the overlay restores the shipped string and its translation.**
+
+A declared override in the base's paired `<base>.custom` package
+([ADR-0146](/docs/concepts/metadata-lifecycle#customizing-an-installed-package-the-paired-custom-override-adr-0146))
+is compared with the base's own item the same way, for a page, dataset, app
+and book as well as a dashboard, view and report, and the pair's own
+translations rank first. A string the override changed is served in the
+pair's translation of its key for that locale, else as written. A string it
+left alone takes the pair's translation, then the base's, locale by locale.
+Only `translation` items saved in the pair count, not an authored translation
+in no package. `GET /meta/:type/:name`, `GET /meta/:type` and the book tree
+`GET /meta/book/:name/tree` serve the same label.
 
 Objects follow the same rule for their `label`, `pluralLabel` and
 `description`: a value that differs from the owning package's declaration (a
