@@ -3482,12 +3482,18 @@ export class ApprovalService implements IApprovalService {
    * fail-open). The service resolves the name registry-first, then the
    * organization's own `sys_queue` row, and answers `[]` for a name that
    * resolves nowhere. With no service registered there is nothing to expand.
+   *
+   * [#29604] `onFailedRead: 'refuse'` (D2 as amended): a failed read behind the
+   * queue rejects instead of answering "nobody", and {@link resolveApproverSpec}'s
+   * catch turns that rejection into the node's {@link ApproverDirectoryUnreadableError},
+   * so the slate is never opened without the people who could not be read. An
+   * axis of its own beside `purpose`.
    */
   private async expandQueueUsers(queueName: string, organizationId?: string | null): Promise<string[]> {
     if (!queueName) return [];
     const queues = this.queueSource();
     if (!queues) return [];
-    return queues.expandMembers(queueName, organizationId ?? null, { purpose: 'addressing' });
+    return queues.expandMembers(queueName, organizationId ?? null, { purpose: 'addressing', onFailedRead: 'refuse' });
   }
 
   /**
