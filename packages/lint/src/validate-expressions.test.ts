@@ -1191,6 +1191,37 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       ] as const) {
         expect(notes(validateStackExpressions({ objects, flows: [flowOf(name, startObject, sweepObject, condition)] })), name).toEqual([]);
       }
+      // A date verdict is an error whatever the outcome: the sweep softens
+      // nothing there, so there is nothing to explain.
+      const dateOnly = validateStackExpressions({ objects, flows: [flowOf('tr_other_date', 'crm_opportunity', 'crm_task', 'close_date + 1 > 3')] });
+      expect(dateOnly.filter(i => /^date arithmetic/.test(i.message)).map(i => i.severity)).toEqual(['error', 'error']);
+      expect(notes(dateOnly)).toEqual([]);
+    });
+
+    // [#30026] Typed against the swept object, a sweep-only flow gets every
+    // verdict a sweep of the start object gets, not only the type check: a
+    // `record.FIELD` read of a field the swept object does not declare, and
+    // date arithmetic. Before, it got none of them.
+    it('refuses an unknown record.FIELD read and date arithmetic on a time-relative flow typed only by its swept object (#30026)', () => {
+      const objects = [{ name: 'crm_opportunity', fields: { title: { type: 'text', required: true }, close_date: { type: 'date' } } }];
+      const sweepOnly = (condition: string) => ({
+        name: 'tr_sweep_only',
+        nodes: [
+          {
+            id: 'start', type: 'start',
+            config: { condition, schedule: '0 * * * *', timeRelative: { object: 'crm_opportunity', dateField: 'close_date', offsetDays: 3 } },
+          },
+          { id: 'end', type: 'end' },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'end' }],
+      });
+      const unknown = validateStackExpressions({ objects, flows: [sweepOnly('record.nope > 1')] });
+      expect(unknown.map(i => i.severity)).toEqual(['error']);
+      expect(unknown[0]!.message).toMatch(/^unknown field `nope` on `crm_opportunity`/);
+      const date = validateStackExpressions({ objects, flows: [sweepOnly('close_date + 1 > 3')] });
+      expect(date.map(i => i.severity)).toEqual(['error']);
+      expect(date[0]!.message).toMatch(/^date arithmetic/);
+      expect(date[0]!.message).toContain(': this faults at runtime, and a flow condition');
     });
 
     // [#30026] Typed against the swept object, a well-typed sweep-only flow

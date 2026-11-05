@@ -2201,9 +2201,12 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
  */
 export function runStackExpressionPasses(stack: AnyRec, options: StackExpressionOptions): ExprIssue[] {
   const issues: ExprIssue[] = [];
-  // [#30026] How many `-run-may-fail` warnings {@link check} has served: a
-  // flow whose own count moved is one an author is told why of, where the
-  // reason is the flow's own (the time-relative note in the flow walk).
+  // [#30026] How many `type-mismatch-run-may-fail` warnings {@link check} has
+  // served: a flow whose own count moved is one an author is told why of,
+  // where the reason is the flow's own (the time-relative note in the flow
+  // walk). Only that code: the date verdicts' `-run-may-fail` arm is an error
+  // whatever the outcome, so a sweep of another object does not soften it and
+  // there is nothing to explain.
   let runMayFailServed = 0;
   // [#22019] See {@link StackExpressionOptions.runtimeWriteType}: on an object
   // write only the passes over the object's own body judge: the field-formula
@@ -2535,7 +2538,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       issues.push({ where, message: e.message, source: e.source, severity: 'error' });
     }
     for (const w of res.warnings) {
-      if (w.code.endsWith('-run-may-fail')) runMayFailServed++;
+      if (w.code === 'type-mismatch-run-may-fail') runMayFailServed++;
       issues.push({ where, message: w.message, source: w.source, severity: 'warning' });
     }
     if (objectName && traversalHydration) refuseStoredMetadataBodyHop(where, raw, objectName, 'rule');
