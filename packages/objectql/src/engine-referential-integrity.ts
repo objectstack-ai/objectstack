@@ -272,7 +272,11 @@ export async function assertReferencesResolve(
   }
   if (users.length > 0) {
     const banned = await bannedUserIds.call(this, users.map((u) => u.value), context);
-    for (const u of users) if (banned.has(String(u.value))) refused.push({ ...u, code: 'reference_user_banned' });
+    for (const u of users) {
+      if (!banned.has(String(u.value))) continue;
+      // adr0112-ok: D6 — a field-addressed FieldErrorCode; this entry becomes `{ field, code }` below
+      refused.push({ ...u, code: 'reference_user_banned' });
+    }
   }
   if (refused.length === 0) return;
   // [#29062] A refused value every row this write lands on already stores
