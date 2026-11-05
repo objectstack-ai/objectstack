@@ -870,6 +870,11 @@ const TYPE_COUNT: Readonly<Record<string, (t: Translate, count: number) => strin
   // A Studio-authored dataset publishes in the same batch as the report or
   // dashboard that reads it; without a row it read as the raw type name.
   dataset: (t, count) => t('preview.changes.typeCount.dataset', { count, defaultValue: '{{count}} datasets' }),
+  // objectstack#29902 — Studio authors both of these itself: a hook from an
+  // object's Hooks tab, a translation from the "All metadata" form editor.
+  hook: (t, count) => t('preview.changes.typeCount.hook', { count, defaultValue: '{{count}} hooks' }),
+  translation: (t, count) =>
+    t('preview.changes.typeCount.translation', { count, defaultValue: '{{count}} translations' }),
 };
 
 function summaryTypeSegment(t: Translate, type: string, count: number): string {

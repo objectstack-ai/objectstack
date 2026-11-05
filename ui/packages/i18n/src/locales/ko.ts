@@ -4613,6 +4613,12 @@ const ko = {
         dataset: '데이터 세트 {{count}}',
         dataset_one: '데이터 세트 {{count}}',
         dataset_other: '데이터 세트 {{count}}',
+        hook: '후크 {{count}}',
+        hook_one: '후크 {{count}}',
+        hook_other: '후크 {{count}}',
+        translation: '번역 {{count}}',
+        translation_one: '번역 {{count}}',
+        translation_other: '번역 {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.
