@@ -2203,6 +2203,9 @@ const ko = {
       unsupportedSpecifierType: "지원되지 않는 설정 항목 유형: {{type}}",
       invalidPhone: "숫자, 공백, + ( ) - . 만 사용하여 전화번호를 입력해주세요",
       invalidColor: "#1a2b3c 와 같은 16진수 색상을 입력해주세요",
+      clientAddressDirect: "서버가 판단한 사용자 주소: {{address}}. 이 주소가 포함되지 않은 목록은 여기에서 저장할 수 없습니다. 이 서버는 프록시 헤더를 신뢰하지 않으므로, 프록시 뒤에서는 프록시의 주소가 표시됩니다.",
+      clientAddressViaProxy: "서버가 판단한 사용자 주소: {{address}} (이 서버가 신뢰하는 프록시의 전달 헤더에서 읽음). 이 주소가 포함되지 않은 목록은 여기에서 저장할 수 없습니다.",
+      clientAddressUnknown: "서버가 사용자 주소를 확인할 수 없으므로, 비어 있지 않은 목록은 여기에서 저장할 수 없습니다.",
     },
     workspaceTimezonePrompt: {
       title: "시스템 시간대 설정",

@@ -2203,6 +2203,9 @@ const de = {
       unsupportedSpecifierType: "Nicht unterstützter Einstellungstyp: {{type}}",
       invalidPhone: "Geben Sie eine Telefonnummer nur mit Ziffern, Leerzeichen und + ( ) - . ein",
       invalidColor: "Geben Sie eine Hex-Farbe ein, z. B. #1a2b3c",
+      clientAddressDirect: "Ihre Adresse, wie der Server sie beurteilt: {{address}}. Eine Liste ohne diese Adresse kann von hier aus nicht gespeichert werden. Dieser Server vertraut keinen Proxy-Headern, hinter einem Proxy ist dies also die Adresse des Proxys.",
+      clientAddressViaProxy: "Ihre Adresse, wie der Server sie beurteilt: {{address}}, gelesen aus den Weiterleitungs-Headern des Proxys, dem dieser Server vertraut. Eine Liste ohne diese Adresse kann von hier aus nicht gespeichert werden.",
+      clientAddressUnknown: "Der Server kann Ihre Adresse nicht ermitteln, daher kann von hier aus keine nicht leere Liste gespeichert werden.",
     },
     workspaceTimezonePrompt: {
       title: "Zeitzone des Systems festlegen",

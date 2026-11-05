@@ -1973,6 +1973,9 @@ const zh = {
       unsupportedSpecifierType: '不支持的设置项类型:{{type}}',
       invalidPhone: '请输入仅由数字、空格和 + ( ) - . 组成的电话号码',
       invalidColor: '请输入十六进制颜色，例如 #1a2b3c',
+      clientAddressDirect: '服务器判定的你的地址：{{address}}。不包含该地址的列表无法在此保存。此服务器不信任代理转发头，若部署在代理之后，这里显示的是代理的地址。',
+      clientAddressViaProxy: '服务器判定的你的地址：{{address}}，取自此服务器所信任代理的转发头。不包含该地址的列表无法在此保存。',
+      clientAddressUnknown: '服务器无法确定你的地址，因此无法在此保存非空的列表。',
     },
     workspaceTimezonePrompt: {
       title: '设置系统时区',

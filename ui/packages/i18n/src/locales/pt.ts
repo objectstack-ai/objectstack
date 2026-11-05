@@ -2260,6 +2260,9 @@ const pt = {
       unsupportedSpecifierType: "Tipo de configuração não suportado: {{type}}",
       invalidPhone: "Insira um número de telefone usando apenas dígitos, espaços e + ( ) - .",
       invalidColor: "Insira uma cor hexadecimal, como #1a2b3c",
+      clientAddressDirect: "Seu endereço, como o servidor o avalia: {{address}}. Uma lista que não o inclua não pode ser salva daqui. Este servidor não confia em cabeçalhos de proxy, então, atrás de um proxy, este é o endereço do proxy.",
+      clientAddressViaProxy: "Seu endereço, como o servidor o avalia: {{address}}, lido dos cabeçalhos encaminhados pelo proxy em que este servidor confia. Uma lista que não o inclua não pode ser salva daqui.",
+      clientAddressUnknown: "O servidor não consegue determinar seu endereço, então uma lista não vazia não pode ser salva daqui.",
     },
     workspaceTimezonePrompt: {
       title: "Definir o fuso horário do sistema",
