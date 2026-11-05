@@ -4791,11 +4791,12 @@ export const INSTRUCTION_FOUR_RULING =
  * `buildBlockingIndex` map H14 is judged against. ④ costs this patrol one
  * `Map.get` per decision card.
  *
- * The inbox label is `GOVERNED_PR_DECISION_LABEL`, deliberately NOT a second
- * spelling of the same string: H52 already reads that constant on CARDS while
- * H48 reads it on PULL REQUESTS, and the self-test pins the single-spelling
- * rule there (「the label constant is the one H48 already owns, not a second
- * spelling」). It is declared further down this file; a `const` in the temporal
+ * The inbox label is `DECISION_INBOX_LABEL`, deliberately NOT a second
+ * spelling of the same string: H52, H62 and H73 already read that constant on
+ * CARDS, and the self-test pins the single-spelling rule there (「the label
+ * constant is the card inbox one, not a second spelling」). H48 reads a
+ * DIFFERENT label on PULL REQUESTS (`GOVERNED_PR_AWAITING_MERGE_LABEL`), never
+ * this one. It is declared further down this file; a `const` in the temporal
  * dead zone is fine HERE because nothing calls this at module-evaluation time.
  *
  * A decision card with NO dependent is omitted rather than rendered empty, for
@@ -4821,7 +4822,7 @@ export function decisionDependentIndex(issues, index) {
   const rows = [];
   let inbox = 0;
   for (const issue of issues ?? []) {
-    if (!labelNames(issue ?? {}).includes(GOVERNED_PR_DECISION_LABEL)) continue;
+    if (!labelNames(issue ?? {}).includes(DECISION_INBOX_LABEL)) continue;
     inbox++;
     const dependents = index?.get?.(issue.number) ?? [];
     if (dependents.length === 0) continue;
@@ -11320,8 +11321,11 @@ export function h47ReleaseRecordDesync(issue, commentRows) {
 //
 // A Tier H surface lands only on the maintainer's word (Prime Directive #14),
 // so the seat's review is not a merge — it is a HANDOFF, and the handoff is one
-// act with two writes: the `needs-user-decision` label puts the PR in the
-// maintainer's inbox, and a `## 维护者速读` comment is what makes reading it a
+// act with two writes: the `pm:awaiting-merge` label puts the PR in the
+// maintainer's awaiting-merge inbox (`needs-user-decision` is the decision-card
+// inbox, ISSUES only — the maintainer ruled the two inboxes apart so a count
+// of decisions owed never includes a PR), and a `## 维护者速读` comment is what
+// makes reading it a
 // two-minute job rather than a diff review. One act, two writes means exactly
 // the shapes this row reads:
 //
@@ -11348,7 +11352,7 @@ export function h47ReleaseRecordDesync(issue, commentRows) {
 // ## The three readings, each from the PR's own state
 //
 //   VERDICT  an issue-comment on the PR whose line begins `**ACCEPT**`.
-//   LABEL    `needs-user-decision` on the PR's labels — read off the LIST row,
+//   LABEL    `pm:awaiting-merge` on the PR's labels — read off the LIST row,
 //            no request.
 //   BRIEF    an issue-comment on the PR whose line begins `## 维护者速读`.
 //
@@ -11390,12 +11394,22 @@ export function h47ReleaseRecordDesync(issue, commentRows) {
 /**
  * The label half of the verdict's second write.
  *
- * ⚠️ On a PULL REQUEST this label means「awaiting the maintainer's review」and
- * it is NOT one of the six card states — ⛔ never add it to a card-state table
- * here (H24/H29 own that vocabulary) and ⛔ never read a card's copy of it
- * through this constant.
+ * ⚠️ PULL REQUESTS ONLY: this label means「landing waits on the maintainer's own
+ * review and merge」(SKILL.md 复核 ②) and it is NOT one of the six card states —
+ * ⛔ never add it to a card-state table here (H24/H29 own that vocabulary),
+ * ⛔ never put it on an issue, and ⛔ never read the decision-card inbox
+ * through this constant: that is `DECISION_INBOX_LABEL` below. The maintainer
+ * ruled the two inboxes apart (verbatim: 「同意 pm:awaiting-merge」) so the count
+ * of decisions owed and the count of PRs awaiting a click never share a label.
  */
-export const GOVERNED_PR_DECISION_LABEL = 'needs-user-decision';
+export const GOVERNED_PR_AWAITING_MERGE_LABEL = 'pm:awaiting-merge';
+
+/**
+ * The decision-card inbox label — ISSUES only, one of the six card states.
+ * H52/H62/H73 and the ④ dependents index read cards through this constant;
+ * ⛔ never H48, whose PR-side label is `GOVERNED_PR_AWAITING_MERGE_LABEL`.
+ */
+export const DECISION_INBOX_LABEL = 'needs-user-decision';
 
 /** One comment page, and the quota backstop on the walk. */
 export const H48_COMMENTS_PAGE_SIZE = 100;
@@ -11483,7 +11497,7 @@ export function h48GovernedVerdictWithoutBrief(pr, governed, commentRows) {
   const verdict = latestMarkedComment(rows, ACCEPT_VERDICT_MARKER);
   if (!verdict) return null;
   const hasBrief = latestMarkedComment(rows, MAINTAINER_BRIEF_MARKER) !== null;
-  const hasLabel = labelNames(pr ?? {}).includes(GOVERNED_PR_DECISION_LABEL);
+  const hasLabel = labelNames(pr ?? {}).includes(GOVERNED_PR_AWAITING_MERGE_LABEL);
   if (hasLabel && hasBrief) return null;
 
   const surfaces = governed ?? [];
@@ -11496,17 +11510,17 @@ export function h48GovernedVerdictWithoutBrief(pr, governed, commentRows) {
     surfaces.length > H48_SURFACE_LIST_CAP ? `, +${surfaces.length - H48_SURFACE_LIST_CAP} more` : '';
   const when = verdict.createdAt ? ` (newest one ${verdict.createdAt})` : '';
   const missing = [
-    hasLabel ? null : `no \`${GOVERNED_PR_DECISION_LABEL}\` label`,
+    hasLabel ? null : `no \`${GOVERNED_PR_AWAITING_MERGE_LABEL}\` label`,
     hasBrief ? null : 'no comment whose line begins `## 维护者速读`',
   ].filter(Boolean);
   const remedy = [
-    hasLabel ? null : `add \`${GOVERNED_PR_DECISION_LABEL}\``,
+    hasLabel ? null : `add \`${GOVERNED_PR_AWAITING_MERGE_LABEL}\``,
     hasBrief ? null : 'post the final 维护者速读 brief as a COMMENT',
   ].filter(Boolean);
   const cost = hasLabel
     ? 'the maintainer opens a governed diff with nothing saying what is being asked of them'
     : hasBrief
-      ? 'the inbox filter that lists what is waiting for a ruling does not list this PR'
+      ? 'the awaiting-merge filter that lists what waits on the maintainer\'s click does not list this PR'
       : 'the PR is neither listed in the inbox nor readable in two minutes once it is found';
   const briefClause = hasBrief
     ? ''
@@ -12421,7 +12435,7 @@ export function h52OpenQuestionsUnrouted(issue, commentRows) {
   if (!Array.isArray(commentRows)) return null;
   if (!h52SpeaksAbout(issue)) return null;
   // The card is already IN the inbox — the state this row exists to reach.
-  if (labelNames(issue).includes(GOVERNED_PR_DECISION_LABEL)) return null;
+  if (labelNames(issue).includes(DECISION_INBOX_LABEL)) return null;
   const report = latestDevReport(commentRows);
   if (!report) return null;
   // A payload that did not read has an UNKNOWN array — decline, never accuse.
@@ -12444,7 +12458,7 @@ export function h52OpenQuestionsUnrouted(issue, commentRows) {
     : 'none of them carries a readable `question` text';
   return (
     `the newest \`os-dev-report\` (${named}, ${stamped}) carries ${n} non-empty \`open_questions\` entry(ies) ` +
-    `while the card carries NO \`${GOVERNED_PR_DECISION_LABEL}\` label: ${listed}. So a question only the ` +
+    `while the card carries NO \`${DECISION_INBOX_LABEL}\` label: ${listed}. So a question only the ` +
     'maintainer can answer is filed, well-formed and UNREACHABLE — it is in no inbox, no candidate query and ' +
     'no staleness alert, while the card\'s own state label — whichever of the six it is — reads as work in ' +
     'progress on every board, so nothing a reader can see says a decision is owed. ⚠️ This is the shape ' +
@@ -14827,7 +14841,7 @@ export function h60ClaimBranchUnparsed(issue, governance) {
 //
 // ## Population, and why BODY only
 //
-// OPEN cards carrying `GOVERNED_PR_DECISION_LABEL` — the constant H48 and H52
+// OPEN cards carrying `DECISION_INBOX_LABEL` — the constant H52 and H73
 // already own, ⛔ never a second spelling. The listing is the UNSCOPED open one
 // (H13/H18's channel) for their reason: `needs-user-decision` is not a
 // member of `SEEN_LABEL_PAGES`, so a decision card carrying no `pm:*` state is
@@ -14968,7 +14982,7 @@ export function h62SpeaksAbout(issue) {
   if (issue?.pull_request) return false;
   if (issue?.state === 'closed') return false;
   if (!Array.isArray(issue?.labels)) return false;
-  return labelNames(issue).includes(GOVERNED_PR_DECISION_LABEL);
+  return labelNames(issue).includes(DECISION_INBOX_LABEL);
 }
 
 /**
@@ -14997,7 +15011,7 @@ export function h62DecisionCardWithoutFacetBlock(issue) {
           'exact gap #15929\'s text-level remedy left open and #16934 fell into (a card presented for ' +
           'a question ADR-0131 D8 already decides).';
   return (
-    `\`${GOVERNED_PR_DECISION_LABEL}\` and its BODY carries no \`${DECISION_FACET_MARKER}\` marker in ` +
+    `\`${DECISION_INBOX_LABEL}\` and its BODY carries no \`${DECISION_FACET_MARKER}\` marker in ` +
     'EITHER spelling — neither the plain-text line nor its HTML-comment form — so the four-facet block ' +
     '〈四棱卡面块固定形状〉 requires is not machine-findable on the card face. 「落卡即带,⛔ 不留待维护者' +
     '到场再补」: the block is a FILING duty, so a marker parked in a COMMENT is not the shape and this ' +
@@ -15118,7 +15132,7 @@ export function h73SpeaksAbout(issue) {
   if (!issue || issue.pull_request) return false;
   if (issue.state === 'closed') return false;
   if (!Array.isArray(issue.labels)) return false;
-  return labelNames(issue).includes(GOVERNED_PR_DECISION_LABEL);
+  return labelNames(issue).includes(DECISION_INBOX_LABEL);
 }
 
 /**
@@ -15148,7 +15162,7 @@ export function h73RuledCardStillInBox(issue, nowMs = Date.now()) {
       ? `owed by the ${domains.map((d) => `\`${d}\``).join(' / ')} lane seat`
       : 'owed by NO lane yet — the card carries no `domain:*` label, so the TRIAGE seat routes it first';
   return (
-    `\`${GOVERNED_PR_DECISION_LABEL}\` still on a card whose BODY carries a ruling record: ` +
+    `\`${DECISION_INBOX_LABEL}\` still on a card whose BODY carries a ruling record: ` +
     `\`${RULED_LINE_KEY}:\` ruling comment ${governing.id}, ${age}. The ruling is recorded and the exit ` +
     `out of the decision box is not: ${owes}, which moves the card in one write as the ruled letter ` +
     'says (`pm:queue`, `pm:blocked` or close) — nothing else will, because the director writes no label. ' +
@@ -19216,7 +19230,7 @@ export function renderDecisionDependents(inventory, { markdown = false } = {}) {
 
   head.push(
     `Report-only and derived at READ TIME: a card below is an open ` +
-      `\`${GOVERNED_PR_DECISION_LABEL}\` card that at least one OPEN card's \`Blocked-by:\` line ` +
+      `\`${DECISION_INBOX_LABEL}\` card that at least one OPEN card's \`Blocked-by:\` line ` +
       `names, and ⛔ no priority label is written for it. The standing instruction this ` +
       `discharges, verbatim: 「${INSTRUCTION_FOUR_RULING}」 It is one lookup over the same ` +
       `reverse index H14 is judged against — no second channel and no second parser (#17968).`,
@@ -19244,7 +19258,7 @@ export function renderDecisionDependents(inventory, { markdown = false } = {}) {
   }
 
   const count =
-    `${rows.length} of ${inbox} open \`${GOVERNED_PR_DECISION_LABEL}\` card(s) have an open ` +
+    `${rows.length} of ${inbox} open \`${DECISION_INBOX_LABEL}\` card(s) have an open ` +
     `downstream dependent.`;
   const notMeasured =
     `NOT MEASURED beside it: ${unmeasured} open \`pm:blocked\` card(s) carry no machine-readable ` +
@@ -28284,7 +28298,7 @@ async function selfTest() {
   const facetCard = (over = {}) => ({
     number: 16934,
     state: 'open',
-    labels: [{ name: GOVERNED_PR_DECISION_LABEL }, { name: 'priority:p2' }],
+    labels: [{ name: DECISION_INBOX_LABEL }, { name: 'priority:p2' }],
     body: '## 一句话问题\n单租户下谁是租户墙?\n',
     ...over,
   });
@@ -28309,11 +28323,11 @@ async function selfTest() {
 
   // ── Direction 2, continued: population boundaries, each with its control ──
   t('⛔ H62: a card without the decision label is out of scope', h62DecisionCardWithoutFacetBlock(facetCard({ labels: [{ name: 'priority:p2' }] })), null);
-  t('H62 control: …and adding exactly that label to the same card fires it', typeof h62DecisionCardWithoutFacetBlock(facetCard({ labels: [{ name: 'priority:p2' }, { name: GOVERNED_PR_DECISION_LABEL }] })), 'string');
+  t('H62 control: …and adding exactly that label to the same card fires it', typeof h62DecisionCardWithoutFacetBlock(facetCard({ labels: [{ name: 'priority:p2' }, { name: DECISION_INBOX_LABEL }] })), 'string');
   t('⛔ H62: a CLOSED decision card is out — the label on it is residue, H22/H39\'s reading', h62DecisionCardWithoutFacetBlock(facetCard({ state: 'closed' })), null);
   t('⛔ H62: a PULL REQUEST row that slipped into the listing is not a card', h62DecisionCardWithoutFacetBlock(facetCard({ pull_request: {} })), null);
   t('H62 control: …and the byte-identical row WITHOUT the `pull_request` field fires, so it is the PR-ness that excluded it', typeof h62DecisionCardWithoutFacetBlock(facetCard()), 'string');
-  t('⛔ H62: …and the decision label on a PULL REQUEST is H48\'s subject, whose own constant this is', GOVERNED_PR_DECISION_LABEL, 'needs-user-decision');
+  t('⛔ H62: …and the card inbox constant is `needs-user-decision`, never H48\'s PR label `pm:awaiting-merge`', [DECISION_INBOX_LABEL, GOVERNED_PR_AWAITING_MERGE_LABEL].join('|'), 'needs-user-decision|pm:awaiting-merge');
   t('⛔ H62: an UNREADABLE `labels` is excluded, never read as unlabelled (#4690)', h62DecisionCardWithoutFacetBlock(facetCard({ labels: undefined })), null);
   t('⛔ H62: a missing row does not crash', h62DecisionCardWithoutFacetBlock(undefined), null);
   t('⛔ H62: an EMPTY body is a finding, not a crash — nothing was written at all', typeof h62DecisionCardWithoutFacetBlock(facetCard({ body: null })), 'string');
@@ -28359,8 +28373,8 @@ async function selfTest() {
   // ── The row's text: the platform hazard, the remedy, the boundaries ───────
   t('H62 text: ⛔ no less-than fragment — the body is written into a GitHub issue', /[<>]/.test(row62(facetCard())), false);
   t('H62 text: …so the comment spelling is named in WORDS', row62(facetCard()).includes('HTML-comment form'), true);
-  t('H62 text: the label constant is printed, ⛔ never a re-typed literal', row62(facetCard()).includes(`\`${GOVERNED_PR_DECISION_LABEL}\``), true);
-  t('H62 text: …and it is the constant H48/H52 already own', GOVERNED_PR_DECISION_LABEL, 'needs-user-decision');
+  t('H62 text: the label constant is printed, ⛔ never a re-typed literal', row62(facetCard()).includes(`\`${DECISION_INBOX_LABEL}\``), true);
+  t('H62 text: …and it is the card inbox constant H52 already owns', DECISION_INBOX_LABEL, 'needs-user-decision');
   t('H62 text: WHO acts is the FILING seat, in one body edit', row62(facetCard()).includes('the FILING seat, in one body edit'), true);
   t('H62 text: …and the prior-ruling reader is named as the paste source', row62(facetCard()).includes('check:pm-prior-rulings'), true);
   t('H62 text: ⛔ never a label written from this script', row62(facetCard()).includes('never a label written from this script'), true);
@@ -28395,7 +28409,7 @@ async function selfTest() {
   t('H63: …while the state row calls the trigger a position on the work state machine', row63(gradedCarrier(['finding', 'pm:queue'])).includes('a position on the work state machine'), true);
   t('H63: this very card\'s own shape fires — `finding` + `pm:queue` + `priority:p3`', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:queue', 'priority:p3', 'domain:skills'])), 'string');
   t('H63: …naming BOTH triggers, state first', row63(gradedCarrier(['finding', 'pm:queue', 'priority:p3'])).includes('`pm:queue`, `priority:p3`'), true);
-  t('H63: every grading state is a trigger — `needs-user-decision` included', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', GOVERNED_PR_DECISION_LABEL])), 'string');
+  t('H63: every grading state is a trigger — `needs-user-decision` included', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', DECISION_INBOX_LABEL])), 'string');
 
   // ── Direction 2: it is SILENT where the screen leaves the card, each silence
   //    with a lit control on the byte-identical card ─────────────────────────
@@ -28577,7 +28591,7 @@ async function selfTest() {
   const card73 = (extra = {}) => ({
     number: 28658,
     state: 'open',
-    labels: [{ name: GOVERNED_PR_DECISION_LABEL }, { name: 'domain:server' }, { name: 'priority:p2' }],
+    labels: [{ name: DECISION_INBOX_LABEL }, { name: 'domain:server' }, { name: 'priority:p2' }],
     body: `director#1 · os-support-ai · session_x\n${RULED73}\n\n## 维护者速读\n\n- 问题:…`,
     ...extra,
   });
@@ -28601,13 +28615,13 @@ async function selfTest() {
   b(BATTERY29386, 'H73: …and the list form under that line is read too', h73({ body: `${RULED73}\n\n**Prior rulings on this card:**\n- 6566731522 — the old question\n` }), null);
   b(BATTERY29386, 'H73 control: …while the same line naming a DIFFERENT ruling still fires', typeof h73({ body: `${RULED73}\n\nPrior rulings on this card: 6400000001 — another ruling.` }), 'string');
   b(BATTERY29386, 'H73 control: …and an id after a blank line below it is not that line\'s', typeof h73({ body: `Prior rulings on this card: none\n\n${RULED73}` }), 'string');
-  b(BATTERY29386, 'H73: no `domain:*` label names the TRIAGE seat instead of inventing a lane', row73({ labels: [{ name: GOVERNED_PR_DECISION_LABEL }] }).includes('the TRIAGE seat routes it first'), true);
-  b(BATTERY29386, 'H73: two `domain:*` labels are both named', row73({ labels: [{ name: GOVERNED_PR_DECISION_LABEL }, { name: 'domain:spec' }, { name: 'domain:server' }] }).includes('`domain:spec` / `domain:server`'), true);
+  b(BATTERY29386, 'H73: no `domain:*` label names the TRIAGE seat instead of inventing a lane', row73({ labels: [{ name: DECISION_INBOX_LABEL }] }).includes('the TRIAGE seat routes it first'), true);
+  b(BATTERY29386, 'H73: two `domain:*` labels are both named', row73({ labels: [{ name: DECISION_INBOX_LABEL }, { name: 'domain:spec' }, { name: 'domain:server' }] }).includes('`domain:spec` / `domain:server`'), true);
   b(BATTERY29386, '⛔ H73 population: a closed card, a PR row, an unreadable `labels`, a missing row and an empty body are all silent, none a crash', [h73({ state: 'closed' }), h73({ pull_request: {} }), h73({ labels: undefined }), h73RuledCardStillInBox(undefined, NOW73), h73({ body: null })].every((v) => v === null), true);
   b(BATTERY29386, 'H73 reader: the live shapes read — a parenthesised re-ruling note and a seconds stamp', JSON.stringify([...ruledRecords('Ruled: 6439314592 · letter A (re-ruled from B, 6435350063) · 2026-10-27T10:22Z'), ...ruledRecords('- Ruled: 6398569691 · letter A · 2026-10-25T13:58:53Z')]), JSON.stringify([{ id: '6439314592', at: at73('2026-10-27T10:22Z') }, { id: '6398569691', at: at73('2026-10-25T13:58:53Z') }]));
   b(BATTERY29386, 'H73 text: no angle-bracket fragment and no tracker number — the row is written into a GitHub issue', /[<>]/.test(row73()) || /#[0-9]/.test(row73()), false);
   b(BATTERY29386, 'H73 text: names the one-act rule, the bell, the shape\'s printout and the report-only boundary', ['ONE act (lanes/director.md)', '`Notify: ruling`', '--mailbox-keys', 'never a label written from this script'].every((x) => row73().includes(x)), true);
-  b(BATTERY29386, 'H73 text: the label is the constant H48/H52/H62 own, ⛔ never a re-typed literal', row73().startsWith(`\`${GOVERNED_PR_DECISION_LABEL}\``), true);
+  b(BATTERY29386, 'H73 text: the label is the card inbox constant H52/H62 own, ⛔ never a re-typed literal', row73().startsWith(`\`${DECISION_INBOX_LABEL}\``), true);
   b(BATTERY29386, 'H73 constants: a six-hour threshold, one standing patrol cycle', `${RULED_IN_BOX_STALE_HOURS}/${PATROL_CADENCE_HOURS}`, '6/6');
   b(BATTERY29386, 'H73 band: registered as `stall`, and the sweep really pushes it', `${familyBand('H73')}/${familyRegistryCoverage().emitted.includes('H73')}`, 'stall/true');
   b(BATTERY29386, 'H73: not a loud finding — it never escalates a sweep', isLoudFinding(row73()), false);
@@ -33345,7 +33359,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   const GOV48 = [{ glob: '.claude/**', files: ['.claude/agents/os-dev.md'] }];
   const VERDICT48 = '**ACCEPT** — lands #15894 as ruled. Governed (`.claude/**`), predicate exit 3.';
   const BRIEF48 = '## 维护者速读\n\n一句话:巡查行,报告态,不写标签。';
-  const LABEL48 = GOVERNED_PR_DECISION_LABEL;
+  const LABEL48 = GOVERNED_PR_AWAITING_MERGE_LABEL;
   const cm48 = (body, at = '2026-09-05T14:30:00Z') => ({ body, created_at: at });
   // ⚠️ The fixture BODY always carries the dev's six-line draft under the SAME
   // `## 维护者速读` heading the comment marker reads, so every case below that
@@ -33366,13 +33380,15 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H48: verdict + label, NO brief -> finding', typeof h48GovernedVerdictWithoutBrief(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]), 'string');
   t('H48: …and the row names the brief half that is missing', h48row(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]).includes('no comment whose line begins `## 维护者速读`'), true);
   t('H48: …and the remedy is posting it as a COMMENT', h48row(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]).includes('post the final 维护者速读 brief as a COMMENT'), true);
-  t('H48: …and never asks for the label, which is already there', h48row(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]).includes('add `needs-user-decision`'), false);
+  t('H48: …and never asks for the label, which is already there', h48row(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]).includes('add `pm:awaiting-merge`'), false);
   t('H48: verdict + brief, NO label -> finding', typeof h48GovernedVerdictWithoutBrief(pr48([]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]), 'string');
-  t('H48: …and the row names the label half that is missing', h48row(pr48([]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]).includes('no `needs-user-decision` label'), true);
-  t('H48: …and the remedy is the label write', h48row(pr48([]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]).includes('Remedy: add `needs-user-decision`.'), true);
+  t('H48: …and the row names the label half that is missing', h48row(pr48([]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]).includes('no `pm:awaiting-merge` label'), true);
+  t('⛔ H48: the OLD shape — `needs-user-decision` on the PR — no longer satisfies the label half (the maintainer split the inboxes)', typeof h48GovernedVerdictWithoutBrief(pr48([DECISION_INBOX_LABEL]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]), 'string');
+  t('H48: the PR-side constant is `pm:awaiting-merge`, PRs only, and NOT one of the six card states', [GOVERNED_PR_AWAITING_MERGE_LABEL, PM_EXCLUSIVE_STATE_LABELS.includes(GOVERNED_PR_AWAITING_MERGE_LABEL)].join('|'), 'pm:awaiting-merge|false');
+  t('H48: …and the remedy is the label write', h48row(pr48([]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]).includes('Remedy: add `pm:awaiting-merge`.'), true);
   t('H48: …and never asks for a brief that is already posted', h48row(pr48([]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]).includes('as a COMMENT'), false);
-  t('H48: verdict and NEITHER half -> ONE finding naming both', h48row(pr48([]), GOV48, [cm48(VERDICT48)]).includes('no `needs-user-decision` label and no comment whose line begins `## 维护者速读`'), true);
-  t('H48: …and both remedies in one sentence, never two rows', h48row(pr48([]), GOV48, [cm48(VERDICT48)]).includes('add `needs-user-decision`, and post the final 维护者速读 brief as a COMMENT'), true);
+  t('H48: verdict and NEITHER half -> ONE finding naming both', h48row(pr48([]), GOV48, [cm48(VERDICT48)]).includes('no `pm:awaiting-merge` label and no comment whose line begins `## 维护者速读`'), true);
+  t('H48: …and both remedies in one sentence, never two rows', h48row(pr48([]), GOV48, [cm48(VERDICT48)]).includes('add `pm:awaiting-merge`, and post the final 维护者速读 brief as a COMMENT'), true);
   t('H48: …and it really is ONE row', (h48row(pr48([]), GOV48, [cm48(VERDICT48)]).match(/Report-only patrol INPUT/gu) ?? []).length, 1);
 
   // The BODY draft is not the brief — the half this row exists to find must not
@@ -33928,7 +33944,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H52 fires: a non-empty `open_questions` on a card with no `needs-user-decision`', typeof h52(OPEN52), 'string');
   t('H52 negative control: an EMPTY `open_questions` array is NOT reported', h52(EMPTY52), null);
   t('H52 negative control: a card ALREADY carrying `needs-user-decision` is NOT reported again', h52(OPEN52, card52(['pm:dispatched', 'needs-user-decision'])), null);
-  t('H52: the label constant is the one H48 already owns, not a second spelling', GOVERNED_PR_DECISION_LABEL, 'needs-user-decision');
+  t('H52: the label constant is the card inbox one, not a second spelling — and not H48\'s PR label', DECISION_INBOX_LABEL, 'needs-user-decision');
   t('H52: a thread with no report at all is silent', h52([cm52(1, 'Triage: routing only.', T52)]), null);
 
   // The marker — two spellings, and what is deliberately NOT one.
