@@ -749,11 +749,12 @@ field's declared contract is the only contract behind it — there is no object
 schema to catch a bad bag downstream.
 
 That sentence carries no "if the value is a number" qualifier, because the
-shape is checked first: on a `type: 'number'` field a submitted value that is
-not a JSON number is **refused** on resume with `invalid_type`. `"25"` — the
-same quantity as a *string* — is **not coerced** into `25` and does not reach
-the bound; it is rejected as the wrong shape. The bound then compares numbers
-only, which is all a bound can do.
+shape is checked first: on a numeric field — `type: 'number'`, `'currency'` or
+`'percent'` — a submitted value that is not a JSON number is **refused** on
+resume with `invalid_type`. `"25"` — the same quantity as a *string* — is **not
+coerced** into `25` and does not reach the bound; it is rejected as the wrong
+shape. The bound then compares numbers only, which is all a bound can do. The
+console renders all three kinds as a numeric input, which posts a number.
 
 **What these keys refuse:**
 
@@ -784,7 +785,8 @@ only, which is all a bound can do.
 - **A bound on a non-numeric field.** A screen field's `type` has no closed
   vocabulary, so this schema cannot judge which types a bound is meaningful on.
   A bound on a `text` field constrains nothing and is not an error — the shape
-  check above reads `type: 'number'` alone, never the presence of a bound.
+  check above reads the three numeric kinds alone (not `rating`, `slider` or
+  `progress`), never the presence of a bound.
 - **An absent value.** A bound constrains a value that is present — an optional
   bounded field left empty is conformant. Presence is `required`'s question.
 - **A bound on a field the user was never shown.** Like `required`, a bound on a
@@ -1302,8 +1304,9 @@ POST /api/v1/automation/{flow}/runs/{runId}/resume
 ```
 
 These conditions are refused, all reported at once and all with
-`code: 'INVALID_SCREEN_INPUT'` (the value shapes of `type: 'number'` and
-`type: 'file'`, and the `min` / `max` bounds, are described with those fields
+`code: 'INVALID_SCREEN_INPUT'` (the value shapes of the numeric kinds
+`number` / `currency` / `percent` and of `type: 'file'`, and the `min` / `max`
+bounds, are described with those fields
 above):
 
 - a **`required` field the caller was actually asked for** is missing (an empty

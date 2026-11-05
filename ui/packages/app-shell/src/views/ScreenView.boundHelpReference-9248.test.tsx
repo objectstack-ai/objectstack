@@ -63,6 +63,33 @@ describe('objectui#9248 — `min` / `max` land on the numeric input', () => {
   });
 });
 
+// objectstack#30178 — the server refuses a non-number on a `percent` field, as
+// on `number` and `currency`, so the console must post one: a `percent` field
+// takes the numeric input, carries its bound, and hands the runner a number.
+describe('objectstack#30178 — a `percent` field is a numeric input that submits a number', () => {
+  it('renders a number input carrying `min` / `max`, and a typed value reaches the runner as a number', () => {
+    const onValueChange = vi.fn();
+    render(
+      <ScreenView
+        screen={specOf([{ name: 'discount', label: 'Discount', type: 'percent', min: 0, max: 60 }])}
+        values={{}}
+        onValueChange={onValueChange}
+      />,
+    );
+    const input = screen.getByRole('spinbutton', { name: 'Discount' });
+    expect(input).toHaveAttribute('type', 'number');
+    expect(input).toHaveAttribute('min', '0');
+    expect(input).toHaveAttribute('max', '60');
+    fireEvent.change(input, { target: { value: '75' } });
+    expect(onValueChange).toHaveBeenLastCalledWith('discount', 75);
+    // …and the client bound check, which compares a present number, now sees one.
+    expect(screenFieldBoundViolations(
+      specOf([{ name: 'discount', type: 'percent', min: 0, max: 60 }]),
+      { discount: 75 },
+    )).toHaveLength(1);
+  });
+});
+
 describe('objectui#9248 — `screenFieldBoundViolations` applies the engine resume rule', () => {
   const qty = { name: 'qty', label: 'Quantity', type: 'number', min: 1, max: 10 };
 
