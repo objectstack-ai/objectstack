@@ -53,11 +53,10 @@ function makeEngine(seed: Record<string, Row[]>) {
   return {
     _tables: tables,
     async find(object: string, options?: any) {
-      return ensure(object).filter((r) => matches(r, options?.filter ?? options?.where));
+      const rows = ensure(object).filter((r) => matches(r, options?.filter ?? options?.where));
+      return typeof options?.limit === 'number' ? rows.slice(0, options.limit) : rows;
     },
     async insert(object: string, data: Row) { ensure(object).push({ ...data }); return { ...data }; },
-    async update() { return {}; },
-    async delete() { return {}; },
     async count(object: string) { return ensure(object).length; },
     registerHook() { /* no-op */ },
     unregisterHooksByPackage() { /* no-op */ },
