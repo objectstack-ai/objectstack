@@ -3,7 +3,7 @@
 '@object-ui/i18n': patch
 ---
 
-feat(app-shell): Studio's publish review sheet says a customization lives in this environment's database and moves only by `os package export` (#30119)
+fix(app-shell): Studio's publish review sheet says a customization lives in this environment's database and moves only by `os package export` (#30119)
 
 Clause-②: yes (widening) — new `@object-ui/i18n` key `preview.changes.customizationEnvironment` in every pack; `preview/savedToCustomization` gains `customizationEnvironmentText` and `PACKAGE_EXPORT_COMMAND`
 Metadata-protocol: none
