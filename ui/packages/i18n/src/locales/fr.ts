@@ -2388,6 +2388,28 @@ const fr = {
       dark: "Sombre",
       system: "Système",
     },
+    // objectstack#30205 — the ban dialog's account of a user's open work (app-shell UserAssignedWorkPanel).
+    assignedWork: {
+      title: 'Enregistrements détenus par cette personne',
+      loading: 'Décompte des enregistrements détenus par cette personne…',
+      countFailed: 'Impossible de compter les enregistrements détenus par cette personne : {{message}}',
+      noClient: 'Les enregistrements détenus par cette personne ne peuvent pas être comptés ici.',
+      none: 'Cette personne ne détient aucun enregistrement que vous pouvez lire.',
+      summary: 'Détient {{total}} enregistrements que vous pouvez lire : propriétaire de {{owned}}, assignée à {{assigned}}.',
+      row: '{{object}} · {{field}}',
+      notTransferable: 'Ce champ contient plusieurs personnes et ne peut pas être transféré ici.',
+      truncated: 'Tous les champs utilisateur n’ont pas été comptés ; cette personne peut en détenir davantage.',
+      unreadable: 'Non comptés, car vous ne pouvez pas les lire : {{objects}}',
+      handoverTo: 'Transférer à',
+      handoverHint: 'Facultatif. Le bannissement n’attend pas le transfert.',
+      handover: 'Transférer',
+      handingOver: 'Transfert en cours…',
+      handoverNext: 'Transférer le lot suivant',
+      targetBanned: 'Cette personne est bannie. Choisissez un utilisateur actif.',
+      transferRefused: 'Le transfert a été refusé : {{message}}',
+      report: '{{updated}} transférés, {{failed}} n’ont pas pu être déplacés, {{remaining}} encore détenus.',
+      failure: '{{object}} {{id}} : {{message}}',
+    },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.
       managedUsers: {

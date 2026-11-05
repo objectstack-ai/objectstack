@@ -2882,6 +2882,28 @@ const en = {
       passwordsMore: 'More entries omitted — use the download.',
       passwordsDownload: 'Download CSV',
     },
+    // objectstack#30205 — the ban dialog's account of a user's open work (app-shell UserAssignedWorkPanel).
+    assignedWork: {
+      title: 'Records this person holds',
+      loading: 'Counting the records this person holds…',
+      countFailed: 'The records this person holds could not be counted: {{message}}',
+      noClient: 'The records this person holds cannot be counted here.',
+      none: 'This person holds no records you can read.',
+      summary: 'Holds {{total}} records you can read: owns {{owned}}, assigned {{assigned}}.',
+      row: '{{object}} · {{field}}',
+      notTransferable: 'Lists several people, so it cannot be handed over here.',
+      truncated: 'Not every user field was counted; this person may hold more.',
+      unreadable: 'Not counted, because you cannot read them: {{objects}}',
+      handoverTo: 'Hand over to',
+      handoverHint: 'Optional. The ban does not wait for the hand-over.',
+      handover: 'Hand over',
+      handingOver: 'Handing over…',
+      handoverNext: 'Hand over the next batch',
+      targetBanned: 'That person is banned. Pick an active user.',
+      transferRefused: 'The hand-over was refused: {{message}}',
+      report: 'Handed over {{updated}}, {{failed}} could not be moved, {{remaining}} still held.',
+      failure: '{{object}} {{id}}: {{message}}',
+    },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.
       managedUsers: {
