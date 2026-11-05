@@ -157,12 +157,14 @@ const ROWS: ReadonlyArray<Record<string, unknown>> = [
 const quiet = { info: () => {}, warn: () => {} };
 
 async function boot(driver: SqlDriver, object: unknown, options: { deferDdl?: boolean } = {}): Promise<ObjectQL> {
+  // `os migrate plan` / `apply` boot with the deferral armed, on the driver
+  // before the engine holds it (the CLI's `DeferSchemaDdlPlugin` arms a driver
+  // ahead of `registerDriver`): the sync registers the metadata and records
+  // the physical work instead of doing it.
+  if (options.deferDdl) driver.setDeferredDdl(true);
   const engine = new ObjectQL();
   engine.registerDriver(driver, true);
   await engine.init();
-  // `os migrate plan` / `apply` boot with the deferral armed: the sync
-  // registers the metadata and records the physical work instead of doing it.
-  if (options.deferDdl) driver.setDeferredDdl(true);
   engine.registerApp(appWith(object));
   await engine.syncSchemas();
   await installDefaultOrganization(engine);
@@ -203,21 +205,33 @@ for (const cell of CELLS) {
         };
       }
 
-      it('the declared home field migrates through the ordinary add-column path, and no stored row moves', async () => {
-        // ── The upgrade boot, as `os migrate apply` runs it. ──
+      // ── The upgrade boot, as `os migrate apply` runs it: the plan is read,
+      // then the confirmed apply performs it. Read here, once, so each test
+      // below stands alone. ──
+      let plan: Awaited<ReturnType<SqlDriver['previewDeferredSchemaWork']>> = [];
+      let drift: Awaited<ReturnType<SqlDriver['detectManagedDrift']>> = [];
+      let performed: Awaited<ReturnType<SqlDriver['flushDeferredSchemaDdl']>> = [];
+      let planAfter: Awaited<ReturnType<SqlDriver['previewDeferredSchemaWork']>> = [];
+
+      beforeAll(async () => {
         driver = cell.open();
         engine = await boot(driver, AFTER, { deferDdl: true });
+        plan = await driver.previewDeferredSchemaWork();
+        drift = await driver.detectManagedDrift();
+        performed = await driver.flushDeferredSchemaDdl();
+        planAfter = await driver.previewDeferredSchemaWork();
+      });
 
+      it('the declared home field migrates through the ordinary add-column path, and no stored row moves', async () => {
         // The plan: the two declared columns, as additive work; nothing rewrites a row.
-        const table = (await driver.previewDeferredSchemaWork()).filter((w) => w.table === OBJECT);
+        const table = plan.filter((w) => w.table === OBJECT);
         expect(table).toEqual([{ table: OBJECT, kind: 'add_columns', columns: ['amount_home', 'amount_rate'] }]);
-        expect((await driver.previewDeferredSchemaWork()).filter((w) => w.table !== OBJECT)).toEqual([]);
-        expect((await driver.detectManagedDrift()).filter((d) => d.table === OBJECT)).toEqual([]);
+        expect(plan.filter((w) => w.table !== OBJECT)).toEqual([]);
+        expect(drift.filter((d) => d.table === OBJECT)).toEqual([]);
 
-        // The confirmed apply.
-        const performed = await driver.flushDeferredSchemaDdl();
+        // The confirmed apply performed exactly that, and left nothing pending.
         expect(performed.filter((w) => w.table === OBJECT)).toEqual(table);
-        expect(await driver.previewDeferredSchemaWork()).toEqual([]);
+        expect(planAfter).toEqual([]);
 
         // Every stored row is still there, as it was, with an empty home field.
         expect((await engine.find(OBJECT, { context: SYS.context } as never)).length).toBe(ROWS.length);
