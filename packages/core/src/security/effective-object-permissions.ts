@@ -240,13 +240,17 @@ const GUARDED_WRITE_BUCKETS: ReadonlySet<string> = new Set(['better-auth', 'engi
  * stands (an admin CAN write them via the data API, and the hint must not
  * under-report that).
  *
- * [#30440] `modifyAllRecords` grants edit, delete and transfer on its own (the
- * spec's `objectPermissionGrants`), so no `allow*: false` beside it takes any of
- * them away. Where the guard refuses `edit` or `delete` it is lowered by
- * {@link lowerModifyAllRecords}: to `viewAllRecords`, the read it implies, plus
- * the plain bit of each verb the object still opts in — `allowTransfer` with
- * `edit`, since an owner change is an update. Where `edit` and `delete` are
- * both opted in it grants nothing the guard refuses, and stays.
+ * [#30440] Every verb the guard refuses is refused whatever grants it:
+ *  - `allowTransfer` follows `edit` — an owner change is an update, which the
+ *    guard refuses unless `edit` is opted in; the super-user wildcard fold
+ *    copies the transfer bit onto every entry it covers;
+ *  - `modifyAllRecords` grants edit, delete and transfer on its own (the
+ *    spec's `objectPermissionGrants`), so no `allow*: false` beside it takes
+ *    any of them away. Where the guard refuses `edit` or `delete` it is lowered
+ *    by {@link lowerModifyAllRecords}: to `viewAllRecords`, the read it
+ *    implies, plus the plain bit of each verb the object still opts in. Where
+ *    `edit` and `delete` are both opted in it grants nothing the guard
+ *    refuses, and stays.
  */
 export function clampManagedObjectWrites(
   objects: Record<string, any>,
@@ -265,6 +269,7 @@ export function clampManagedObjectWrites(
     // would clamp away a legitimate `{ enabled: true, visibleWhen: … }`.
     if (!isWriteOptedIn(ua.create)) acc.allowCreate = false;
     if (!del) acc.allowDelete = false;
+    if (!edit) acc.allowTransfer = false;
     lowerModifyAllRecords(acc, { allowEdit: edit, allowDelete: del, allowTransfer: edit });
   }
 }

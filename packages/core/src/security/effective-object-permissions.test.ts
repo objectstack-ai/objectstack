@@ -591,13 +591,23 @@ describe('[#30440] a guarded managed object grants no verb its write guard refus
     expect(can(map.sys_feed_note)).toEqual({ allowRead: true, allowCreate: false, allowEdit: true, allowDelete: true, allowTransfer: true });
   });
 
+  it('a plain allowTransfer on an object not opting edit in answers no transfer; opting edit in keeps it', () => {
+    const map: any = buildEffectiveObjectPermissions(
+      [{ objects: { sys_automation_run: { allowRead: true, allowTransfer: true }, sys_user: { allowRead: true, allowTransfer: true } } }],
+      source,
+    );
+    expect(objectPermissionGrants(map.sys_automation_run, 'allowTransfer')).toBe(false);
+    expect(objectPermissionGrants(map.sys_automation_run, 'allowRead')).toBe(true);
+    expect(objectPermissionGrants(map.sys_user, 'allowTransfer')).toBe(true);
+  });
+
   it('CONTROL: the same entry on an unguarded object keeps every verb modifyAllRecords grants', () => {
     const map: any = buildEffectiveObjectPermissions([{ objects: { crm_lead: { modifyAllRecords: true } } }], source);
     expect(map.crm_lead.modifyAllRecords).toBe(true);
     expect(can(map.crm_lead)).toEqual({ allowRead: true, allowCreate: false, allowEdit: true, allowDelete: true, allowTransfer: true });
   });
 
-  it('CONTROL: the super-user wildcard fold answers as before', () => {
+  it('CONTROL: the super-user wildcard fold answers as before, transfer on the object opting nothing in aside', () => {
     const map: any = buildEffectiveObjectPermissions(
       [{ objects: { '*': { allowRead: true, viewAllRecords: true, modifyAllRecords: true } } }],
       source,
@@ -605,10 +615,10 @@ describe('[#30440] a guarded managed object grants no verb its write guard refus
     expect(can(map.crm_lead)).toEqual({ allowRead: true, allowCreate: false, allowEdit: true, allowDelete: true, allowTransfer: true });
     expect(can(map.sys_user)).toEqual({ allowRead: true, allowCreate: false, allowEdit: true, allowDelete: false, allowTransfer: true });
     expect(can(map.sys_feed_note)).toEqual({ allowRead: true, allowCreate: false, allowEdit: true, allowDelete: true, allowTransfer: true });
-    // The fold copies the bits the wildcard grants (transfer among them), never
-    // modifyAllRecords itself, so the lowering never reaches a folded entry.
-    expect(can(map.sys_automation_run)).toEqual({ allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false, allowTransfer: true });
+    // The fold copies the bits the wildcard grants, never modifyAllRecords itself.
     for (const name of Object.keys(SCHEMAS)) expect(map[name], name).not.toHaveProperty('modifyAllRecords');
+    // The one answer that moves: the folded transfer bit, on the object whose guard refuses the update.
+    expect(can(map.sys_automation_run)).toEqual({ allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false, allowTransfer: false });
   });
 });
 
