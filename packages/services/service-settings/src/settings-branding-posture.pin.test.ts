@@ -154,7 +154,7 @@ describe('the Branding namespace under a walled posture (#24766)', () => {
         const namespaces = await b.listed();
         expect(namespaces).not.toContain('branding');
         // Control: the listing is real and the rest of the slate is offered.
-        expect(namespaces).toEqual(expect.arrayContaining(['company', 'localization', 'feature_flags']));
+        expect(namespaces).toEqual(expect.arrayContaining(['company', 'localization', 'mail']));
         expect(b.service.listManifests().map((m) => m.namespace)).not.toContain('branding');
       });
 
@@ -205,7 +205,7 @@ describe('the Branding namespace where no wall stands (#24766)', () => {
       expect(ids.filter((id) => id === 'nav_settings_branding')).toHaveLength(1);
       // In the Configuration group, after the platform-objects entries.
       expect(configuration).toContain('nav_settings_branding');
-      expect(configuration.indexOf('nav_settings_branding')).toBeGreaterThan(configuration.indexOf('nav_settings_feature_flags'));
+      expect(configuration.indexOf('nav_settings_branding')).toBeGreaterThan(configuration.indexOf('nav_settings_lifecycle'));
     });
   }
 });

@@ -6,7 +6,7 @@ import { countryOptionLabels } from '../manifests/company.manifest.js';
 /**
  * English (en) — built-in settings manifest translations.
  *
- * Mirrors literals in `manifests/{mail,branding,feature-flags,storage}.manifest.ts`.
+ * Mirrors literals in `manifests/{mail,branding,storage}.manifest.ts`.
  * Keeping them explicit here lets the resolver chain (locale → fallback → literal)
  * always have at least an English entry to fall back to.
  */
@@ -219,28 +219,6 @@ export const en: PlatformTranslationData = {
           label: 'Google client secret',
           help: 'Stored encrypted at rest. It can also be set in the server configuration.',
         },
-      },
-    },
-
-    feature_flags: {
-      title: 'Feature Flags',
-      description: 'Toggle experimental and beta features for this organization.',
-      groups: {
-        productivity: { title: 'Productivity' },
-        collaboration: { title: 'Collaboration' },
-      },
-      keys: {
-        ai_enabled: {
-          label: 'AI Assistant',
-          help: 'Enables the in-app AI assistant panel.',
-        },
-        kanban_swimlanes: { label: 'Kanban swimlanes' },
-        realtime_cursors: { label: 'Realtime cursors' },
-        inline_comments: { label: 'Inline comments' },
-      },
-      banners: {
-        beta_notice: { title: 'Heads up',
-          text: 'Beta features may change without notice. A feature set in the server configuration is locked on or off for the whole deployment and cannot be changed here.' },
       },
     },
 

@@ -29,7 +29,7 @@ a resolver that layers `OS_* env > Tenant > User > Default`.
 `process.env[OS_NAMESPACE_KEY]` (uppercased, with dots / hyphens converted
 to underscores) takes precedence over any stored value. For example,
 `mail.smtp_host` resolves from `OS_MAIL_SMTP_HOST`, and
-`feature_flags.ai_enabled` resolves from `OS_FEATURE_FLAGS_AI_ENABLED`.
+`ai.log_prompts` resolves from `OS_AI_LOG_PROMPTS`.
 Such fields are returned with `source: 'env', locked: true` and writes
 (service or REST) fail with HTTP 409.
 
@@ -108,7 +108,6 @@ the following built-in manifests are pre-registered out of the box:
 | `mail`         | `EmailServicePlugin`        | SMTP / Resend / Postmark + `mail/test`      |
 | `storage`      | `StorageServicePlugin`      | Local FS / S3 + encrypted secret + `storage/test` |
 | `branding`     | (built-in fallback)         | Name, logo and colour served to the console by `RuntimeConfigPlugin` (name also read by `plugin-auth`); offered under the `single` tenancy posture only |
-| `feature_flags`| (built-in fallback)         | Opt-in experimental features                |
 
 ## License
 

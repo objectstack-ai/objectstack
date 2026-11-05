@@ -120,7 +120,7 @@ const UNWALLED_ONLY_SETUP_NAV_BUNDLE_ID = `${SETTINGS_PLUGIN_ID}.setup-nav`;
 export interface SettingsServicePluginOptions {
   /**
    * Pre-register these manifests at boot. When omitted, the bundled
-   * builtin manifests (mail / branding / feature_flags) are loaded so
+   * builtin manifests (`builtinSettingsManifests`) are loaded so
    * a host gets a working Settings hub out of the box. Pass an empty
    * array to opt out entirely. A `branding` manifest, bundled or passed
    * here, is offered only where no organization wall stands (see

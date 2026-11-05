@@ -155,13 +155,12 @@ export {
   SETTINGS_PLUGIN_VERSION,
 } from './manifest.js';
 
-// Reference manifests (mail / branding / feature flags) and the
+// Reference manifests (mail / branding / storage) and the
 // convenience aggregate. Hosts can pass `builtinSettingsManifests`
 // directly to `new SettingsServicePlugin({ manifests })`.
 export {
   builtinSettingsManifests,
   brandingSettingsManifest,
-  featureFlagsSettingsManifest,
   mailSettingsManifest,
   mailTestActionHandler,
   smsSettingsManifest,
