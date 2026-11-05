@@ -4853,6 +4853,16 @@ const ru = {
         dataset_few: 'Наборы данных: {{count}}',
         dataset_many: 'Наборы данных: {{count}}',
         dataset_other: 'Наборы данных: {{count}}',
+        hook: 'Хуки: {{count}}',
+        hook_one: 'Хук: {{count}}',
+        hook_few: 'Хуки: {{count}}',
+        hook_many: 'Хуки: {{count}}',
+        hook_other: 'Хуки: {{count}}',
+        translation: 'Переводы: {{count}}',
+        translation_one: 'Перевод: {{count}}',
+        translation_few: 'Переводы: {{count}}',
+        translation_many: 'Переводы: {{count}}',
+        translation_other: 'Переводы: {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

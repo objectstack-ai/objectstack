@@ -4722,6 +4722,14 @@ const fr = {
         dataset_one: '{{count}} jeu de données',
         dataset_many: '{{count}} de jeux de données',
         dataset_other: '{{count}} jeux de données',
+        hook: '{{count}} hooks',
+        hook_one: '{{count}} hook',
+        hook_many: '{{count}} de hooks',
+        hook_other: '{{count}} hooks',
+        translation: '{{count}} traductions',
+        translation_one: '{{count}} traduction',
+        translation_many: '{{count}} de traductions',
+        translation_other: '{{count}} traductions',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.
