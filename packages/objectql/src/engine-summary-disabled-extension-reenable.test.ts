@@ -14,7 +14,7 @@
  * recompute it serves that stale value until the next write of a child.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ObjectQL } from './engine.js';
 
 function makeDriver() {
@@ -50,6 +50,10 @@ function makeDriver() {
     });
   };
   let n = 0;
+  /** Parent-row writes, by object, so a case can count them. */
+  const updates: Array<{ object: string; id: string; data: Record<string, unknown> }> = [];
+  /** Ids whose next `update` throws, to drive a recompute failure. */
+  const failUpdateOf = new Set<string>();
   const driver: any = {
     name: 'memory', version: '0.0.0', supports: {},
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
@@ -68,6 +72,8 @@ function makeDriver() {
       return { ...row };
     },
     async update(object: string, id: string, data: Record<string, unknown>) {
+      if (failUpdateOf.has(id)) throw new Error(`fake driver: update of ${id} refused`);
+      updates.push({ object, id, data });
       const s = storeFor(object);
       const row = { ...s.get(id), ...data, id };
       s.set(id, row);
@@ -92,7 +98,7 @@ function makeDriver() {
     async beginTransaction() { return { __trx: true, commit: async () => {}, rollback: async () => {} }; },
     async commit() {}, async rollback() {},
   };
-  return { driver, storeFor };
+  return { driver, storeFor, updates, failUpdateOf };
 }
 
 const APP = 'com.qa.rollup.app';
@@ -107,10 +113,15 @@ const manifest = (id: string, type: string) =>
 describe('a roll-up a disabled package contributes by extension, over an enabled package\'s child', () => {
   let engine: ObjectQL;
   let storeFor: ReturnType<typeof makeDriver>['storeFor'];
+  let driver: ReturnType<typeof makeDriver>;
+  let logger: Record<'debug' | 'info' | 'warn' | 'error', ReturnType<typeof vi.fn>> & Record<string, unknown>;
 
   beforeEach(async () => {
-    engine = new ObjectQL();
+    logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), trace: vi.fn(), fatal: vi.fn() };
+    logger.child = () => logger;
+    engine = new ObjectQL({ logger });
     const d = makeDriver();
+    driver = d;
     storeFor = d.storeFor;
     engine.registerDriver(d.driver, true);
     await engine.init();
@@ -158,5 +169,61 @@ describe('a roll-up a disabled package contributes by extension, over an enabled
     const served = await engine.findOne(ACCOUNT, { where: { id: acme.id }, context: { isSystem: true } } as any);
     expect(served?.[TOTAL]).toBe(25);
     expect(stored(beta.id)).toBe(7);
+  });
+
+  it('writes no parent row on an enable when no child moved during the disable', async () => {
+    const acme = await engine.insert(ACCOUNT, { name: 'acme' });
+    await engine.insert(NOTE, { account: acme.id, amount: 10 });
+    engine.registry.disablePackage(MODULE);
+    driver.updates.length = 0;
+
+    engine.registry.enablePackage(MODULE);
+    await engine.summaryRefreshSettled();
+
+    expect(driver.updates.filter((u) => u.object === ACCOUNT)).toEqual([]);
+    expect(stored(acme.id)).toBe(10);
+  });
+
+  it('brings every other parent current when one parent\'s recompute fails, and says so at error', async () => {
+    const acme = await engine.insert(ACCOUNT, { name: 'acme' });
+    const beta = await engine.insert(ACCOUNT, { name: 'beta' });
+    engine.registry.disablePackage(MODULE);
+    await engine.insert(NOTE, { account: acme.id, amount: 5 });
+    await engine.insert(NOTE, { account: beta.id, amount: 7 });
+    driver.failUpdateOf.add(acme.id);
+
+    engine.registry.enablePackage(MODULE);
+    await engine.summaryRefreshSettled();
+
+    expect(stored(beta.id)).toBe(7);
+    expect(stored(acme.id)).toBe(0);
+    const said = logger.error.mock.calls.map((c) => String(c[0])).filter((m) => m.startsWith('[summary-refresh]'));
+    expect(said).toHaveLength(1);
+    expect(said[0]).toContain(`${ACCOUNT}/${acme.id}`);
+    // The operator's re-run, once the cause is cleared.
+    driver.failUpdateOf.clear();
+    const report = await engine.refreshSummariesEnabledBy(MODULE);
+    expect(report.failures).toEqual([]);
+    expect(stored(acme.id)).toBe(5);
+  });
+});
+
+describe('SchemaRegistry.onPackageEnabled', () => {
+  it('announces an enable of a disabled package, and not one of a package already enabled', () => {
+    const engine = new ObjectQL();
+    const registry = engine.registry;
+    registry.installPackage(manifest(APP, 'app'), 'code');
+    const heard: string[] = [];
+    const stop = registry.onPackageEnabled((id) => { heard.push(id); });
+
+    registry.enablePackage(APP);
+    expect(heard).toEqual([]);
+    registry.disablePackage(APP);
+    registry.enablePackage(APP);
+    expect(heard).toEqual([APP]);
+    stop();
+    registry.disablePackage(APP);
+    registry.enablePackage(APP);
+    expect(heard).toEqual([APP]);
   });
 });
