@@ -30,6 +30,9 @@ import { zhHantObjects } from '../translations/zh-Hant.objects.generated.js';
 import { arObjects } from '../translations/ar.objects.generated.js';
 import { frObjects } from '../translations/fr.objects.generated.js';
 import { ptBRObjects } from '../translations/pt-BR.objects.generated.js';
+import { ruObjects } from '../translations/ru.objects.generated.js';
+import { deObjects } from '../translations/de.objects.generated.js';
+import { koObjects } from '../translations/ko.objects.generated.js';
 
 /** The design-record vocabulary an admin-facing string must not carry. */
 const DESIGN_RECORD_VOCABULARY: ReadonlyArray<readonly [string, RegExp]> = [
@@ -103,6 +106,9 @@ const OBJECT_BUNDLES = {
   'ar': arObjects,
   'fr': frObjects,
   'pt-BR': ptBRObjects,
+  'ru': ruObjects,
+  'de': deObjects,
+  'ko': koObjects,
 } as const;
 
 describe('messaging objects: admin-facing copy carries no design-record vocabulary', () => {

@@ -17,8 +17,11 @@
  * platform's `owner_id`, which is itself a lookup to the user object, and the
  * app's own fields such as an `assignee`. Left out, on purpose:
  *
- * - `readonly` and `system` fields: `created_by` / `updated_by` record who did
- *   something, not who holds the work, and moving them would rewrite history.
+ * - `readonly` fields: `created_by` / `updated_by` record who did something,
+ *   not who holds the work, and moving them would rewrite history. `system`
+ *   alone does not exclude a field: it marks a column the platform provides,
+ *   and the injected `owner_id` is one (`OWNER_FIELD_DEF` is `system: true`,
+ *   `readonly: false`, because ownership is transferable).
  * - platform tables (`sys_*`) and `managedBy` objects: `sys_user_permission_set.user_id`
  *   is a grant, not work, and moving it would move the person's permissions.
  * - a column the platform registers but provisions no storage for (an injected
@@ -98,8 +101,8 @@ export function userAssignedWorkFields(
     for (const [field, def] of Object.entries(obj.fields as Record<string, unknown>)) {
       if (phantom.has(field)) continue;
       if (referenceTargetOf(def) !== USER_OBJECT) continue;
-      const d = def as { readonly?: unknown; system?: unknown; multiple?: unknown };
-      if (d.readonly === true || d.system === true) continue;
+      const d = def as { readonly?: unknown; multiple?: unknown };
+      if (d.readonly === true) continue;
       if (fields.length >= cap) return { fields, truncated: true };
       fields.push({ object: name, field, multiple: d.multiple === true });
     }
