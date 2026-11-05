@@ -819,7 +819,8 @@ const SECURITY_FLS_UNKNOWN_FIELD_EXPLANATION: RuleExplanation = {
     'Unlike an unqualified key (`security-fls-unqualified-key`) this one looks correct in review, and ' +
       'it is exactly what a field rename leaves behind; an empty remainder is what a half-finished edit ' +
       'leaves. A key with more dots is judged on its whole remainder, because FLS keys address columns, ' +
-      'never joins.',
+      'never joins. The columns are the object\'s as the registry serves it: the fields it declares and ' +
+      'every field an `objectExtensions` entry adds to it, from any package of the same artifact.',
     'Not judged: an object this stack does not define, an object with no readable field map, and a ' +
       'registry-injected system column, which is real and addressable. To fix it, point the key at a ' +
       'field the object declares, or delete the entry: an entry that cannot match is not protection, ' +
@@ -1990,6 +1991,38 @@ const FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE_EXPLANATION: RuleExplanation = {
       'usually left out. The descriptor is `TimeRelativeTriggerSchema`, documented in ' +
       'content/docs/references/automation/time-relative-trigger.mdx.',
     FLOW_GATE_REACH,
+  ],
+};
+
+const FLOW_TIME_RELATIVE_OBJECT_MISMATCH_EXPLANATION: RuleExplanation = {
+  rule: 'flow-time-relative-object-mismatch',
+  covers: 'why a time-relative start may not name a second object',
+  paragraphs: [
+    'A time-relative run binds the object its descriptor sweeps, `config.timeRelative.object`, and ' +
+      'nothing else. The engine\'s binding resolver reads that key first, and the time-relative trigger ' +
+      'finds the rows of that object whose date field falls in the window, then launches one run per row ' +
+      'with the row as `record` and that object as the run\'s object, which is also the object a declared ' +
+      '`expand` is read from. No part of the run reads the start node\'s `config.objectName`.',
+    'The checks do read it. When the start names an `objectName`, the flow\'s conditions are typed ' +
+      'against that object\'s fields, at `os validate`, at the runtime publish gate and in the engine\'s ' +
+      'registration pass, so a start naming another object than the one it sweeps is checked against ' +
+      'records its runs never hold. Measured both ways: a condition reading a field only the named object ' +
+      'declares passes every check and fails every run (`No such key` for `record.FIELD`, `Unknown ' +
+      'variable` for a bare name), while a correct read of a field of the swept object is refused as an ' +
+      'unknown field on the named object.',
+    'Remove `config.objectName`, or set it to the swept object. Either way nothing the run does changes, ' +
+      'and the conditions are checked against the record each run holds: a field the swept object does not ' +
+      'declare is refused, and a type mismatch fails the publish, as on a record-triggered flow.',
+    'Not reported: a start whose `objectName` equals `timeRelative.object` or that names none; a start ' +
+      'whose `triggerType` routes the flow to the record-change trigger (a `record-` token, or an array ' +
+      'holding one), because that trigger binds `objectName` and the descriptor is never swept; and a ' +
+      'descriptor whose `object` is not a string, which `flow-time-relative-descriptor-invalid` refuses.',
+    'The finding is an error, because the start node alone settles it and nothing installed changes which ' +
+      'object the run binds: it fails `os validate` and `os build`, and the runtime publish gate refuses an ' +
+      'active flow write that carries it. That gate judges only the flow being written, against the ' +
+      'findings the stored stack already had, so a stored flow that names two objects keeps being served ' +
+      'and never blocks another flow\'s save; what is refused is its own publish, until its start names ' +
+      'one object.',
   ],
 };
 
@@ -5684,6 +5717,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT_EXPLANATION.rule]: SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT_EXPLANATION,
   [FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID_EXPLANATION.rule]: FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID_EXPLANATION,
   [FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE_EXPLANATION.rule]: FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE_EXPLANATION,
+  [FLOW_TIME_RELATIVE_OBJECT_MISMATCH_EXPLANATION.rule]: FLOW_TIME_RELATIVE_OBJECT_MISMATCH_EXPLANATION,
   [FLOW_TRIGGER_UNROUTABLE_EXPLANATION.rule]: FLOW_TRIGGER_UNROUTABLE_EXPLANATION,
   [FLOW_TRIGGER_UNKNOWN_EVENT_EXPLANATION.rule]: FLOW_TRIGGER_UNKNOWN_EVENT_EXPLANATION,
   [FLOW_API_TRIGGER_SECRET_MISSING_EXPLANATION.rule]: FLOW_API_TRIGGER_SECRET_MISSING_EXPLANATION,

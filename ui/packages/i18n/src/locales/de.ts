@@ -1804,6 +1804,10 @@ const de = {
     },
   },
   console: {
+    organizationMfa: {
+      needsTwoFactor: "Mehrstufige Authentifizierung erzwingen setzt die Zwei-Faktor-Authentifizierung voraus, die in dieser Bereitstellung deaktiviert ist; Speichern mit gesetztem Häkchen wird daher abgelehnt. Aktivieren Sie zuerst die Zwei-Faktor-Authentifizierung: Schalten Sie unter Einrichtung → Authentifizierung „Mehrstufige Authentifizierung verlangen“ ein (gilt für alle Organisationen), oder setzen Sie OS_AUTH_TWO_FACTOR=true in der Bereitstellung.",
+      nowRequired: "Alle Mitglieder dieser Organisation, die noch keine Authenticator-App eingerichtet haben, müssen das jetzt tun. Jedes wird vom Datenzugriff ausgeschlossen, sobald die MFA-Kulanzfrist endet (7 Tage, sofern unter Einrichtung → Authentifizierung nicht geändert), gerechnet ab der ersten Nutzung nach dieser Änderung. Mitglieder, die bereits einen Authenticator verwenden, sind nicht betroffen.",
+    },
     studio: {
       title: "Studio",
       accessRequired: "Sie benötigen Studio-Zugriff, um Studio zu öffnen. Ein Administrator kann ihn unter Einrichtung → Berechtigungssatz-Zuweisung mit einem Berechtigungssatz erteilen.",
@@ -2954,6 +2958,7 @@ const de = {
         continue: "Weiter",
         preparing: "Wird vorbereitet…",
         enrollFailed: "Registrierung konnte nicht gestartet werden.",
+        unavailable: "Die Zwei-Faktor-Authentifizierung ist in dieser Bereitstellung deaktiviert, daher kann noch keine Authenticator-App eingerichtet werden. Bitten Sie einen Administrator, sie unter Einrichtung → Authentifizierung zu aktivieren, und versuchen Sie es dann erneut.",
         scanTitle: "Mit Ihrer Authenticator-App scannen",
         scanBody: "Scannen Sie diesen QR-Code mit Google Authenticator, 1Password, Authy usw. und geben Sie dann den 6-stelligen Code ein.",
         backupTitle: "Backup-Codes speichern",

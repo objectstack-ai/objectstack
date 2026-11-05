@@ -2124,6 +2124,12 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.if.tabCanvas': '画布',
   'engine.studio.if.noAppTitle': '这个软件包还没有应用',
   'engine.studio.if.noAppHint': '创建一个应用来设计它的导航与界面。',
+  // objectstack#29851
+  'engine.studio.if.noOwnApp': '这个软件包没有自己的应用。',
+  'engine.studio.if.noOwnAppTitle': '这个软件包没有自己的应用',
+  'engine.studio.if.contributesOne': '它向 {package} 的应用添加了 {count} 个导航项。',
+  'engine.studio.if.contributesOther': '它向 {package} 的应用添加了 {count} 个导航项。',
+  'engine.studio.if.openOwner': '打开 {package}',
   'engine.studio.if.objectUnpublishedTitle': '这个对象还没有发布',
   'engine.studio.if.objectUnpublishedHint': '发布软件包后,这里会显示它的记录。',
   'engine.studio.if.designersMissing': '本次会话没有注册任何元数据设计器,因此无法在这里预览或设计 {type}。',

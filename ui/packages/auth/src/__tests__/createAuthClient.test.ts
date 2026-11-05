@@ -575,3 +575,44 @@ describe('createAuthClient — signInWithProvider watchdog (#2626)', () => {
     }
   });
 });
+
+// objectstack#30295 — an enrollment refusal keeps its HTTP `status` and the
+// server's `code`, so the enrollment screen can say in the user's language that
+// two-factor is off (the `/two-factor/*` endpoints answer 404 then) instead of
+// echoing `Two-factor enable failed (404)`. The message is unchanged.
+describe('createAuthClient — enrollment rejections carry the status and the code', () => {
+  type Rejection = Error & { code?: string; status?: number };
+  const rejectionOf = (run: () => Promise<unknown>): Promise<Rejection> =>
+    run().then(
+      () => {
+        throw new Error('expected the call to reject, but it resolved');
+      },
+      (err: unknown) => err as Rejection,
+    );
+  const clientWith = (handlers: Record<string, { status?: number; body: unknown }>) =>
+    createAuthClient({ baseURL: 'http://localhost/api/auth', fetchFn: createMockFetch(handlers).mockFn });
+
+  it('enrollTotp against a deployment with two-factor off rejects with status 404', async () => {
+    const client = clientWith({ '/two-factor/enable': { status: 404, body: {} } });
+    const rejection = await rejectionOf(() => client.enrollTotp('admin123'));
+    expect(rejection.status).toBe(404);
+    expect(rejection.message).toBe('Two-factor enable failed (404)');
+  });
+
+  it('enrollTotp keeps a wrong password’s code beside its status', async () => {
+    const client = clientWith({
+      '/two-factor/enable': { status: 400, body: { message: 'Invalid password', code: 'INVALID_PASSWORD' } },
+    });
+    const rejection = await rejectionOf(() => client.enrollTotp('wrong'));
+    expect(rejection.code).toBe('INVALID_PASSWORD');
+    expect(rejection.status).toBe(400);
+    expect(rejection.message).toBe('Invalid password');
+  });
+
+  it('verifyTotp against a deployment with two-factor off rejects with status 404', async () => {
+    const client = clientWith({ '/two-factor/verify-totp': { status: 404, body: {} } });
+    const rejection = await rejectionOf(() => client.verifyTotp('123456'));
+    expect(rejection.status).toBe(404);
+    expect(rejection.message).toBe('Two-factor verification failed (404)');
+  });
+});

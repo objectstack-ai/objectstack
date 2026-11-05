@@ -1,9 +1,12 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll } from 'vitest';
+import { Hono } from 'hono';
 import { betterAuth } from 'better-auth';
 import { memoryAdapter } from 'better-auth/adapters/memory';
 import { sso } from '@better-auth/sso';
 import { runRegisterSamlProviderFromForm, runRegisterSsoProviderFromForm } from './register-sso-provider';
+import { AuthPlugin } from './auth-plugin';
+import type { PluginContext } from '@objectstack/core';
 
 const makeReq = (body: any) =>
   new Request('http://localhost:3000/api/v1/auth/admin/sso/register-saml', {
@@ -152,6 +155,8 @@ describe('runRegisterSamlProviderFromForm (ADR-0069 P3)', () => {
         cert: 'MIICert...',
         callbackUrl: 'http://localhost:3000/api/v1/auth/sso/saml2/sp/acs/acme-saml',
         identifierFormat: 'urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress',
+        // the form's "IdP Entity ID" is the IdP descriptor's EntityID
+        idpMetadata: { entityID: 'https://idp.acme.com/entity' },
         spMetadata: { entityID: 'http://localhost:3000/api/v1/auth/sso/saml2/sp/metadata?providerId=acme-saml' },
       },
     });
@@ -175,5 +180,110 @@ describe('runRegisterSamlProviderFromForm (ADR-0069 P3)', () => {
     expect(res.status).toBe(400);
     expect(res.body.error?.code).toBe('SAML_REGISTER_FAILED');
     expect(res.body.error?.message).toBe('bad cert');
+  });
+});
+
+describe('Register SAML Provider through the REAL route — the INSTALLED @better-auth/sso judges the form', () => {
+  // The mocked cases above pin the shape the bridge emits; this block pins that
+  // the vendor ACCEPTS it. Before `idpMetadata.entityID` was sent, every
+  // complete form answered `400 SAML_REGISTER_FAILED` "[body.samlConfig.
+  // idpMetadata] idpMetadata.entityID is required when IdP metadata XML is not
+  // provided", and nothing here could see it: every SAML case used a stand-in
+  // for `/sso/register`.
+  //
+  // Wiring: the plugin's own `registerAuthRoutes` mounts the bridge on a real
+  // Hono app; the auth manager is reduced to the two seams the route reads.
+  // `handleRequest` IS the real vendor handler, so the inner `/sso/register`
+  // runs its real schema, session gate and storage. The ADR-0068 platform-admin
+  // gate is judged on a platform-admin session shape (its own file,
+  // admin-sso-bridge-gate.test.ts, pins the refusals), while the vendor sees
+  // the REAL session cookie of a signed-up user.
+  const ORIGIN = 'http://localhost:3000';
+  const BASE = '/api/v1/auth';
+  const COMPLETE_FORM = {
+    providerId: 'acme-saml',
+    issuer: 'https://idp.acme.example/entity',
+    domain: 'acme.example',
+    entryPoint: 'https://idp.acme.example/sso',
+    cert: 'MIIC-PROBE-CERT',
+  };
+
+  let db: Record<string, any[]>;
+  let app: Hono;
+  let cookie: string;
+
+  beforeAll(async () => {
+    db = { user: [], session: [], account: [], verification: [], ssoProvider: [] };
+    const vendor = betterAuth({
+      baseURL: ORIGIN,
+      basePath: BASE,
+      secret: 'register-saml-real-route-secret-0123456789',
+      database: memoryAdapter(db),
+      emailAndPassword: { enabled: true },
+      plugins: [sso()],
+    });
+    const signUp = await vendor.handler(
+      new Request(`${ORIGIN}${BASE}/sign-up/email`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: ORIGIN },
+        body: JSON.stringify({ email: 'admin@example.com', password: 'Admin-Pass-123!', name: 'Admin' }),
+      }),
+    );
+    expect(signUp.status, await signUp.clone().text()).toBe(200);
+    cookie = (signUp.headers.getSetCookie?.() ?? []).map((c) => c.split(';')[0]).join('; ');
+    expect(cookie).toContain('session_token');
+
+    const ctx = {
+      registerService: vi.fn(),
+      getService: vi.fn((name: string) => (name === 'manifest' ? { register: vi.fn() } : undefined)),
+      getServices: vi.fn(() => new Map()),
+      hook: vi.fn(),
+      trigger: vi.fn(),
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+      getKernel: vi.fn(),
+    } as unknown as PluginContext;
+    const plugin = new AuthPlugin({ secret: 'test-secret-at-least-32-chars-long!!', plugins: { oidcProvider: false } });
+    await plugin.init(ctx);
+    (plugin as any).authManager = {
+      handleRequest: (req: Request) => vendor.handler(req),
+      getApi: async () => ({
+        getSession: async () => ({ user: { id: 'usr_admin', positions: ['user', 'platform_admin'], isPlatformAdmin: true } }),
+      }),
+      isSsoDomainVerificationEnabled: () => false,
+    };
+    app = new Hono();
+    (plugin as any).registerAuthRoutes({ getRawApp: () => app, getPort: () => 0 }, ctx);
+  });
+
+  const post = (form: Record<string, unknown>) =>
+    app.request(`${ORIGIN}${BASE}/admin/sso/register-saml`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: ORIGIN, cookie },
+      body: JSON.stringify(form),
+    });
+
+  it('a complete form registers the provider: 200, one stored provider keyed on the IdP EntityID', async () => {
+    const res = await post(COMPLETE_FORM);
+    const body: any = await res.json();
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data.providerId).toBe('acme-saml');
+    expect(body.acsUrl).toBe(`${ORIGIN}${BASE}/sso/saml2/sp/acs/acme-saml`);
+
+    expect(db.ssoProvider).toHaveLength(1);
+    const stored = JSON.parse(db.ssoProvider[0].samlConfig);
+    expect(stored.idpMetadata).toEqual({ entityID: 'https://idp.acme.example/entity' });
+    expect(stored.entryPoint).toBe('https://idp.acme.example/sso');
+  });
+
+  it('an incomplete form is still refused before the vendor, naming the missing field', async () => {
+    const { issuer: _omitted, ...withoutEntityId } = COMPLETE_FORM;
+    const storedBefore = db.ssoProvider.length;
+    const res = await post({ ...withoutEntityId, providerId: 'acme-saml-2' });
+    const body: any = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error?.code).toBe('INVALID_REQUEST');
+    expect(body.error?.message).toContain('issuer');
+    expect(db.ssoProvider).toHaveLength(storedBefore);
   });
 });

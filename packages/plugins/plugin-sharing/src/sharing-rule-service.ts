@@ -1741,10 +1741,16 @@ export class SharingRuleService implements ISharingRuleService {
     }
     if (rule.recipient_type === 'team') return teamHasMember(this.engine, rule.recipient_id, userId);
     // [ADR-0142 D7] A queue reaches the user its specifications reach — the
-    // queue service's holder check, not a full expansion.
+    // queue service's holder check, not a full expansion. Under
+    // `onFailedRead: 'refuse'` (D2 as amended, #29604): a failed member read
+    // rejects rather than answering "not a member", which would revoke the
+    // user's grants; the per-user pass's caller catches it per rule and the
+    // grants stay, as they do for a team or position recipient (#29503).
     if (rule.recipient_type === 'queue') {
       const queues = this.ownershipQueues?.();
-      return queues ? queues.isMember(userId, rule.recipient_id, rule.organization_id ?? null) : false;
+      return queues
+        ? queues.isMember(userId, rule.recipient_id, rule.organization_id ?? null, { onFailedRead: 'refuse' })
+        : false;
     }
     return (await this.expandRecipient(rule, pass)).includes(userId);
   }
@@ -2181,9 +2187,15 @@ export class SharingRuleService implements ISharingRuleService {
       // the two recompute modules' look-through). ⛔ This grants the rule's
       // matched records to the queue's people; it confers no sitting-record
       // access, which is the access path's (`SharingService`).
+      //
+      // [#29604] `onFailedRead: 'refuse'` (D2 as amended): this set is diffed
+      // against the grants the rule holds, so a failed member read answering
+      // "nobody" would revoke every member's grant on an outage. The refusal
+      // throws before any diff, and each recompute's caller keeps the rule's
+      // grants and warns (#29362), as for a team or position recipient.
       const queues = this.ownershipQueues?.();
       if (!queues) return [];
-      return queues.expandMembers(rule.recipient_id, rule.organization_id ?? null);
+      return queues.expandMembers(rule.recipient_id, rule.organization_id ?? null, { onFailedRead: 'refuse' });
     }
     return [];
   }
