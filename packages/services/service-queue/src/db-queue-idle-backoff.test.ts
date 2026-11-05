@@ -443,7 +443,9 @@ describe('#30228 DbQueueAdapter — a running row whose lease ran out is reclaim
         // The holder renews right after the reclaim read saw the lease expired.
         const find = engine.find.bind(engine);
         engine.find = async (table: string, opts: any = {}) => {
-            const out = await find(table, opts);
+            // Copies, as a driver hands out: the read is a snapshot, so the
+            // renewal below changes the table and not what the reclaim saw.
+            const out = (await find(table, opts)).map((r) => ({ ...r }));
             if (opts?.where?.status === 'running') {
                 const [held] = engine.tables.get(QUEUE_TABLE) ?? [];
                 held!.locked_until = new Date(1_000_000 + LEASE).toISOString();
