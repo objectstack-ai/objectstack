@@ -129,11 +129,14 @@ function platformOf(host: ObjectStackNative): 'ios' | 'android' | null {
   return host.platform === 'ios' || host.platform === 'android' ? host.platform : null;
 }
 
-/** `window.location.origin`, only for a page loaded over http or https. */
-function pageOrigin(): string | undefined {
-  if (typeof window === 'undefined') return undefined;
-  const { protocol, origin } = window.location;
-  return protocol === 'http:' || protocol === 'https:' ? origin : undefined;
+/**
+ * The `origin` a registration sends: the page's origin, only when it was loaded
+ * over http or https. A sandboxed or `about:blank` / `data:` page reads the
+ * opaque `"null"`, which the request grammar refuses, and that would refuse the
+ * whole registration; such a page sends no `origin`.
+ */
+export function registrationOrigin(location: Pick<Location, 'protocol' | 'origin'>): string | undefined {
+  return location.protocol === 'http:' || location.protocol === 'https:' ? location.origin : undefined;
 }
 
 function isPushToken(value: unknown): value is NativePushToken {
@@ -158,7 +161,7 @@ function syncRegistration(host: ObjectStackNative, userId: string, token: Native
     const record = readRecord();
     if (record && record.userId === userId && record.token === token.token && record.vendor === token.vendor) return;
     const deviceId = installIdOf(host) ?? (record?.userId === userId ? record.deviceId : undefined);
-    const origin = pageOrigin();
+    const origin = typeof window === 'undefined' ? undefined : registrationOrigin(window.location);
     try {
       const answer = await pushClient().notifications.registerDevice({
         token: token.token,
