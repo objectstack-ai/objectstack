@@ -314,7 +314,7 @@ describe("a by-id write's row re-read judges the platform's own predicates witho
     });
   }
 
-  it("control, 'single': no wall is composed, and the caller who cannot read the column writes as before", async () => {
+  it("control, 'single': no wall is composed, and the caller who cannot read the column writes by id", async () => {
     const engine = await boot('single');
     await seedInvoice(engine, 'single_row', ORG_A);
     expect(await writeById(engine, 'update', 'single_row', ORG_HIDDEN)).toEqual({ status: 200 });
