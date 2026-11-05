@@ -117,7 +117,8 @@ export const UserDevice = ObjectSchema.create({
             required: false,
             // BCP 47 tags are short; 35 is the RFC 5646 practical maximum.
             maxLength: 35,
-            description: 'Device locale that pushes to this device are rendered in.',
+            description: 'Device locale, as the registration named it. Stored for the device; no push renders by it: a push '
+                + 'arrives in the recipient\'s language (their user locale, then the deployment default).',
         }),
 
         name: Field.text({
