@@ -612,6 +612,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.copy-doors-inherited-grants.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.copy-doors-inherited-grants.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.copy-doors-inherited-grants.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.credential-channel.test.ts",
       "verb": "delete",
       "pinned": 1
