@@ -3682,6 +3682,7 @@ const STUDIO_EN: Record<string, string> = {
   // objectstack ADR-0146 D3 (#28568) — the customization marks, counts and
   // filter of the All metadata area, from a base's customization read.
   'engine.customizationMark.customized': 'Customized ({baseName})',
+  'engine.customizationMark.customizedShort': 'Custom',
   'engine.customizationMark.customizedTitle': 'The customization package {pair} overrides this item of {baseName}',
   'engine.customizationMark.added': 'Added',
   'engine.customizationMark.addedTitle': 'Added to {baseName} by its customization package {pair}',
