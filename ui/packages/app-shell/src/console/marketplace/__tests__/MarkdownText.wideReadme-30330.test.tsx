@@ -144,6 +144,14 @@ describe('README tables', () => {
   });
 });
 
+describe('the compact size (release notes)', () => {
+  it('reads images and tables with the same block rules', () => {
+    const root = renderMd('![b](https://img.example/b.svg)\n\n| a |\n|---|\n| 1 |', 'compact');
+    expect(root.querySelector('img')).not.toBeNull();
+    expect(root.querySelector('table td')?.textContent).toBe('1');
+  });
+});
+
 describe('README thematic breaks', () => {
   it.each(['---', '***', '___', ' - - -', '* * *'])('renders %j between blocks as a rule, not text', (rule) => {
     const root = renderMd(`One.\n\n${rule}\n\nTwo.`);
@@ -203,13 +211,14 @@ describe('CONTROL — what a README rendered before still renders the same', () 
     expect(root.querySelector('p')?.textContent).toBe('Use a | b for either. And c | d too.');
   });
 
+  it('keeps a `---` line under a paragraph line as that paragraph’s text', () => {
+    const root = renderMd('Heading-ish\n---');
+    expect(root.querySelector('hr')).toBeNull();
+    expect(root.querySelector('p')?.textContent).toBe('Heading-ish ---');
+  });
+
   it('keeps a text link to a relative path as before', () => {
     expect(renderMd('Read [the changelog](CHANGELOG.md).').querySelector('a')?.getAttribute('href')).toBe('CHANGELOG.md');
   });
 
-  it('renders the compact size (release notes) with the same block rules', () => {
-    const root = renderMd('![b](https://img.example/b.svg)\n\n| a |\n|---|\n| 1 |', 'compact');
-    expect(root.querySelector('img')).not.toBeNull();
-    expect(root.querySelector('table td')?.textContent).toBe('1');
-  });
 });
