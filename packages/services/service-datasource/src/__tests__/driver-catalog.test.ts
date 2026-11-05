@@ -23,7 +23,8 @@ import {
   type BuiltinDriverId,
 } from '@objectstack/spec/data';
 
-import { DRIVER_CATALOG } from '../driver-catalog.js';
+import { DRIVER_CATALOG, driverCatalogFor } from '../driver-catalog.js';
+import { DRIVER_CATALOG_TRANSLATIONS } from '../driver-catalog-translations.js';
 
 describe('DRIVER_CATALOG', () => {
   it('serves the spec projection for every offered driver', () => {
@@ -81,4 +82,125 @@ describe('DRIVER_CATALOG', () => {
       }
     }
   });
+});
+
+type JsonProp = { title?: string; description?: string; type?: string };
+const propsOf = (entry: { configSchema: Record<string, unknown> }) =>
+  (entry.configSchema as { properties: Record<string, JsonProp> }).properties;
+const entryOf = (catalog: typeof DRIVER_CATALOG, id: string) => {
+  const entry = catalog.find((d) => d.id === id);
+  if (!entry) throw new Error(`no ${id} entry`);
+  return entry;
+};
+
+/**
+ * The catalog's words in the requester's language. The New datasource dialog
+ * draws exactly what the drivers route serves and has no key of its own for
+ * these words, so a Chinese console read `Filename`, `Auto-migrate schema`,
+ * `Host` and `Port` in English until the route served them translated.
+ */
+describe('driverCatalogFor', () => {
+  it('serves zh-CN words for SQLite and the network drivers', () => {
+    const zh = driverCatalogFor('zh-CN');
+
+    const sqlite = entryOf(zh, 'sqlite');
+    expect(sqlite.description).toBe('基于文件（或内存）的 SQL 数据库，适合本地开发和小型部署。');
+    expect(propsOf(sqlite).filename.title).toBe('文件名');
+    expect(propsOf(sqlite).filename.description).toBe('数据库文件路径，或填 ":memory:" 使用临时内存数据库');
+    expect(propsOf(sqlite).autoMigrate.title).toBe('自动迁移表结构');
+
+    const postgres = entryOf(zh, 'postgres');
+    expect(propsOf(postgres).host).toMatchObject({ title: '主机', description: '主机地址' });
+    expect(propsOf(postgres).port).toMatchObject({ title: '端口', description: '端口号' });
+    expect(propsOf(postgres).password.title).toBe('密码');
+
+    expect(propsOf(entryOf(zh, 'mysql')).host.title).toBe('主机');
+    expect(propsOf(entryOf(zh, 'mongodb')).port.title).toBe('端口');
+    expect(entryOf(zh, 'memory').label).toBe('内存');
+  });
+
+  it('keeps everything but the words: ids, icons, types and defaults are the English entry\'s', () => {
+    const zh = driverCatalogFor('zh-CN');
+    expect(zh.map((d) => [d.id, d.icon])).toEqual(DRIVER_CATALOG.map((d) => [d.id, d.icon]));
+    for (const entry of zh) {
+      const english = propsOf(entryOf(DRIVER_CATALOG, entry.id));
+      const translated = propsOf(entry);
+      expect(Object.keys(translated), entry.id).toEqual(Object.keys(english));
+      for (const key of Object.keys(english)) {
+        const { title: _t, description: _d, ...rest } = translated[key];
+        const { title: _et, description: _ed, ...englishRest } = english[key];
+        expect(rest, `${entry.id}.${key}`).toEqual(englishRest);
+      }
+    }
+  });
+
+  it('negotiates the requested tag through the platform ladder', () => {
+    for (const tag of ['zh', 'zh-cn', 'zh-SG', 'zh-Hans']) {
+      expect(propsOf(entryOf(driverCatalogFor(tag), 'sqlite')).filename.title, tag).toBe('文件名');
+    }
+  });
+
+  it('serves English for no locale, en, or a locale nothing translates', () => {
+    for (const tag of [undefined, '', 'en', 'en-US', 'fr', 'constructor', '__proto__']) {
+      expect(driverCatalogFor(tag), String(tag)).toBe(DRIVER_CATALOG);
+    }
+    expect(propsOf(entryOf(DRIVER_CATALOG, 'sqlite')).filename.title).toBe('Filename');
+    expect(propsOf(entryOf(DRIVER_CATALOG, 'postgres')).host.title).toBe('Host');
+  });
+
+  it('falls back to the English word where a locale has none, never to a key', () => {
+    const zh = driverCatalogFor('zh-CN');
+    // Product names are not in the zh-CN table: the English label is served.
+    expect(entryOf(zh, 'sqlite').label).toBe('SQLite');
+    expect(entryOf(zh, 'postgres').label).toBe('PostgreSQL');
+    // The memory driver's fields carry a description and no title in English;
+    // the translation adds no title, so the form still names the field by key.
+    expect(propsOf(entryOf(zh, 'memory')).strictMode.title).toBeUndefined();
+    expect(propsOf(entryOf(zh, 'memory')).strictMode.description).toBe('记录不存在时抛出错误，而不是返回 null');
+  });
+
+  it('never writes the spec projection it overlays', () => {
+    driverCatalogFor('zh-CN');
+    const sqlite = getDriverConfigJsonSchemaById('sqlite') as { properties: Record<string, JsonProp> };
+    expect(sqlite.properties.filename.title).toBe('Filename');
+    expect(propsOf(entryOf(DRIVER_CATALOG, 'sqlite')).filename.title).toBe('Filename');
+    expect(entryOf(DRIVER_CATALOG, 'memory').label).toBe('In-Memory');
+  });
+});
+
+/**
+ * Every locale in `driver-catalog-translations.ts` against the served shape:
+ * a driver or field it names must exist, so a renamed field cannot leave a
+ * translation that silently stops applying, and every field word the English
+ * form shows must be translated, so a field the spec adds goes red here rather
+ * than reading English in a translated dialog.
+ */
+describe('DRIVER_CATALOG_TRANSLATIONS coverage', () => {
+  const offered = new Set(DRIVER_CATALOG.map((d) => d.id));
+
+  for (const [locale, table] of Object.entries(DRIVER_CATALOG_TRANSLATIONS)) {
+    it(`${locale}: names only drivers and fields the catalog serves`, () => {
+      for (const [id, text] of Object.entries(table)) {
+        expect(offered.has(id), `${locale}.${id}`).toBe(true);
+        const props = propsOf(entryOf(DRIVER_CATALOG, id));
+        for (const key of Object.keys(text?.fields ?? {})) {
+          expect(Object.prototype.hasOwnProperty.call(props, key), `${locale}.${id}.fields.${key}`).toBe(true);
+        }
+      }
+    });
+
+    it(`${locale}: translates every driver description and every field word the English form shows`, () => {
+      for (const entry of DRIVER_CATALOG) {
+        const text = table[entry.id as keyof typeof table];
+        expect(text?.description, `${locale}.${entry.id}.description`).toBeTruthy();
+        for (const [key, prop] of Object.entries(propsOf(entry))) {
+          const field = text?.fields?.[key];
+          if (prop.title !== undefined) expect(field?.title, `${locale}.${entry.id}.${key}.title`).toBeTruthy();
+          if (prop.description !== undefined) {
+            expect(field?.description, `${locale}.${entry.id}.${key}.description`).toBeTruthy();
+          }
+        }
+      }
+    });
+  }
 });

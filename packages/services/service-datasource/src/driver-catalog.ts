@@ -30,9 +30,24 @@
  * `turso` is absent for the same reason since commit e2798fab7 gave it a contract: it is a
  * full builtin now, but it additionally needs an optional package installed next
  * to the server, which is not a thing a dropdown can arrange.
+ *
+ * ## The words are served in the requester's language
+ *
+ * `DRIVER_CATALOG` is the English catalog. The route serves
+ * {@link driverCatalogFor} the requester's locale, which overlays the
+ * translated label, description and field words of
+ * `driver-catalog-translations.ts` on it; a word with no translation stays
+ * English.
  */
 
 import { getDriverConfigJsonSchemaById, type BuiltinDriverId } from '@objectstack/spec/data';
+import { resolveLocaleAmong } from '@objectstack/spec/system';
+
+import {
+  DRIVER_CATALOG_TRANSLATIONS,
+  type DriverCatalogText,
+  type DriverFieldText,
+} from './driver-catalog-translations.js';
 
 export interface DriverCatalogEntry {
   /** Unique driver identifier used as `datasource.driver`. */
@@ -97,3 +112,69 @@ export const DRIVER_CATALOG: DriverCatalogEntry[] = CURATED.map((entry) => ({
   ...entry,
   configSchema: getDriverConfigJsonSchemaById(entry.id),
 }));
+
+/** A property's own string, read without reaching `Object.prototype`. */
+function ownString(record: Record<string, unknown>, key: string): string | undefined {
+  if (!Object.prototype.hasOwnProperty.call(record, key)) return undefined;
+  const value = record[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+/**
+ * `prop` with its `title` / `description` replaced by `field`'s, each only
+ * where the English side has that word: a translation never adds a word the
+ * English form does not show.
+ */
+function localizeField(prop: Record<string, unknown>, field: DriverFieldText): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...prop };
+  if (field.title !== undefined && ownString(prop, 'title') !== undefined) out.title = field.title;
+  if (field.description !== undefined && ownString(prop, 'description') !== undefined) {
+    out.description = field.description;
+  }
+  return out;
+}
+
+/**
+ * `entry` with `text` laid over it. The spec's projected schema is shared, so
+ * it is copied, never written: the top-level object and `properties` are new,
+ * and every property not translated is the same object as before.
+ */
+function localizeEntry(entry: DriverCatalogEntry, text: DriverCatalogText | undefined): DriverCatalogEntry {
+  if (!text) return entry;
+  let configSchema = entry.configSchema;
+  const properties = configSchema.properties;
+  if (text.fields && properties && typeof properties === 'object') {
+    const props = properties as Record<string, Record<string, unknown>>;
+    const localized: Record<string, unknown> = { ...props };
+    for (const [key, field] of Object.entries(text.fields)) {
+      if (!Object.prototype.hasOwnProperty.call(props, key)) continue;
+      const prop = props[key];
+      if (prop && typeof prop === 'object') localized[key] = localizeField(prop, field);
+    }
+    configSchema = { ...configSchema, properties: localized };
+  }
+  return {
+    ...entry,
+    label: text.label ?? entry.label,
+    description: text.description ?? entry.description,
+    configSchema,
+  };
+}
+
+/**
+ * The driver catalog in the language `requested` names — what
+ * `GET /api/v1/datasources/drivers` serves.
+ *
+ * `requested` is matched against the translated locales by the platform's one
+ * negotiation ladder (`resolveLocaleAmong`, `@objectstack/spec/system`), so a
+ * bare `zh` or `zh-cn` reaches `zh-CN`. No locale, a locale nothing matches
+ * (`en`, `fr`), or a word a locale does not translate is served in English,
+ * the `DRIVER_CATALOG` text, never a key.
+ */
+export function driverCatalogFor(requested: string | undefined): DriverCatalogEntry[] {
+  if (typeof requested !== 'string' || requested.length === 0) return DRIVER_CATALOG;
+  const locale = resolveLocaleAmong(requested, Object.keys(DRIVER_CATALOG_TRANSLATIONS));
+  if (locale === undefined) return DRIVER_CATALOG;
+  const translations = DRIVER_CATALOG_TRANSLATIONS[locale];
+  return DRIVER_CATALOG.map((entry) => localizeEntry(entry, translations?.[entry.id as BuiltinDriverId]));
+}

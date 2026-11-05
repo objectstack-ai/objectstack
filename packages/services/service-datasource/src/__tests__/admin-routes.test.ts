@@ -122,6 +122,38 @@ describe('registerDatasourceAdminRoutes (real HonoHttpServer)', () => {
     expect(sqlite!.configSchema?.properties?.filename?.type).toBe('string');
   });
 
+  it('GET /api/v1/datasources/drivers serves the words in the requester\'s language', async () => {
+    const app = mount({});
+    type Served = { data: { drivers: Array<{ id: string; label: string; description?: string; configSchema: any }> } };
+    const read = async (init?: RequestInit, path = '/api/v1/datasources/drivers') => {
+      const res = await app.fetch(json(path, init));
+      expect(res.status).toBe(200);
+      const drivers = ((await res.json()) as Served).data.drivers;
+      return (id: string) => drivers.find((d) => d.id === id)!;
+    };
+
+    // The console sends its language as `Accept-Language` on every API call.
+    const zh = await read({ headers: { 'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8' } });
+    expect(zh('sqlite').configSchema.properties.filename.title).toBe('文件名');
+    expect(zh('sqlite').configSchema.properties.autoMigrate.title).toBe('自动迁移表结构');
+    expect(zh('postgres').configSchema.properties.host.title).toBe('主机');
+    expect(zh('postgres').configSchema.properties.port.title).toBe('端口');
+    expect(zh('mysql').description).toBe('MySQL 或 MariaDB 连接。');
+    // A word the locale does not translate is the English one, not a key.
+    expect(zh('sqlite').label).toBe('SQLite');
+
+    // `?locale=` when no header names a language.
+    const query = await read(undefined, '/api/v1/datasources/drivers?locale=zh-CN');
+    expect(query('sqlite').configSchema.properties.filename.title).toBe('文件名');
+
+    // English and an untranslated language are served the English words.
+    for (const lang of ['en-US', 'fr-FR']) {
+      const en = await read({ headers: { 'accept-language': lang } });
+      expect(en('sqlite').configSchema.properties.filename.title, lang).toBe('Filename');
+      expect(en('postgres').configSchema.properties.host.title, lang).toBe('Host');
+    }
+  });
+
   it('GET /api/v1/datasources/:name/remote-tables lists remote tables', async () => {
     const listRemoteTables = vi.fn().mockResolvedValue([{ name: 'customers', columnCount: 4 }]);
     const app = mount({ listRemoteTables });
