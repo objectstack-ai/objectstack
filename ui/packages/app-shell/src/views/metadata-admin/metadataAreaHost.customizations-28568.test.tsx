@@ -18,7 +18,8 @@
  *  - the directory's object tile counts the extension, and the header the base's total;
  *  - a failed read draws no mark, no filter and no number, with the server's sentence;
  *  - a base without a pair is unchanged, and Setup (no area) never reads;
- *  - in the cross-package leg an item of a pair is labelled with its base.
+ *  - in the cross-package leg an item of a pair is labelled with its base;
+ *  - objectstack#30063 — the page tile counts a page's override.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -69,6 +70,7 @@ const ENTRIES = [
   entry('translation', 'ui'),
   entry('email_template', 'system'),
   entry('permission', 'security'),
+  entry('page', 'ui'),
 ];
 
 vi.mock('./useMetadata', async (importOriginal) => ({
@@ -81,7 +83,7 @@ vi.mock('./useMetadata', async (importOriginal) => ({
     summary: { entries: [], total: 0, scannedTypes: 0, scannedItems: 0 },
     byType: {},
     warnByType: {},
-    countsByType: { object: 3, translation: 2, email_template: 1 },
+    countsByType: { object: 3, translation: 2, email_template: 1, page: 1 },
     lockedByType: {},
     packagesByType: Object.fromEntries(ENTRIES.map((e) => [e.type, [BASE, PLAIN]])),
     allPackages: [BASE, PLAIN],
@@ -119,6 +121,13 @@ const HOTCRM_READ = {
 const EMPTY_READ = { packageId: PLAIN, overrides: [], extensions: [], switchedOff: [], contributions: [], counts: { overrides: 0, extensions: 0, switchedOff: 0, contributions: 0 } };
 
 let customizationsFail = false;
+/** objectstack#30063 — the read also lists a page's override. */
+let readListsPage = false;
+const withPage = (read: typeof HOTCRM_READ) => ({
+  ...read,
+  overrides: [...read.overrides, { type: 'page', name: 'crm_welcome', basedOn: '2.1.0' }],
+  counts: { ...read.counts, overrides: read.counts.overrides + 1 },
+});
 const fetchMock = vi.fn(async (url: string) => {
   const json = (status: number, body: unknown) =>
     new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -131,7 +140,8 @@ const fetchMock = vi.fn(async (url: string) => {
     if (customizationsFail) {
       return json(503, { success: false, error: { code: 'SERVICE_UNAVAILABLE', message: 'The customization ledger is unavailable.' } });
     }
-    return json(200, { success: true, data: decodeURIComponent(m[1]) === BASE ? HOTCRM_READ : EMPTY_READ });
+    const hotcrm = readListsPage ? withPage(HOTCRM_READ) : HOTCRM_READ;
+    return json(200, { success: true, data: decodeURIComponent(m[1]) === BASE ? hotcrm : EMPTY_READ });
   }
   if (u.startsWith('/api/v1/data/sys_metadata_activation')) {
     return json(200, { object: 'sys_metadata_activation', records: [], hasMore: false });
@@ -141,6 +151,7 @@ const fetchMock = vi.fn(async (url: string) => {
 
 beforeEach(() => {
   customizationsFail = false;
+  readListsPage = false;
   fetchMock.mockClear();
   vi.stubGlobal('fetch', fetchMock);
 });
@@ -263,6 +274,18 @@ describe('the All metadata directory counts a base\'s customizations (objectstac
     expect(screen.getByTestId('directory-tile-customized-email_template')).toHaveTextContent('1 customized');
     // CONTROL: a type with no served customization draws no number, not "0".
     expect(screen.queryByTestId('directory-tile-customized-permission')).toBeNull();
+  });
+
+  it('objectstack#30063 — the page tile counts a page\'s override, and the header the total with it', async () => {
+    readListsPage = true;
+    mountDirectory(area(BASE));
+    const total = await screen.findByTestId('directory-customizations-total');
+    expect(total).toHaveTextContent(
+      tFormat('engine.directory.customizations.total', 'en-US', { customized: 4, baseName: 'HotCRM' }),
+    );
+    expect(screen.getByTestId('directory-tile-customized-page')).toHaveTextContent(
+      tFormat('engine.directory.customizations.tile', 'en-US', { customized: 1 }),
+    );
   });
 
   it('a failed read draws no number, never "0", and says the server\'s sentence', async () => {

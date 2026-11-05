@@ -344,6 +344,27 @@ export interface ListViewProps {
   /** Called when the user toggles fields via the Hide Fields popover. */
   onHiddenFieldsChange?: (hidden: string[]) => void;
   /**
+   * objectstack#30077 — the names among `schema.columns` that the READER added
+   * to their own list (`onAddedFieldsChange`), not the view. The host appends
+   * them to the columns it hands in `schema`; this prop is its split of that
+   * one value into its two sources, so unticking an added column takes it off
+   * the list again instead of hiding it. A HOST prop, never a schema key.
+   * Read by content, never by identity.
+   */
+  addedFields?: ReadonlyArray<string>;
+  /**
+   * objectstack#30077 — the door that lets a reader add a field to their list.
+   * When it is wired, the Hide Fields popover (the toolbar's and the Display
+   * panel's) lists, after the view's columns, every other field of the object
+   * the caller may read (`canReadField`) and the definition does not mark
+   * `hidden`, unticked; ticking one calls this with the whole new list of
+   * added names, and unticking an added column calls it without that name.
+   * The host stores the list as the reader's own and appends it to
+   * `schema.columns`. A HOST prop, never a schema key. Absent ⇒ the popover
+   * lists the view's columns alone, exactly as before.
+   */
+  onAddedFieldsChange?: (added: string[]) => void;
+  /**
    * Called when the user toggles inline record editing. Wiring it is also what
    * offers the wide toolbar's toggle. The toggle switches the grid's edit MODE,
    * which `ListView` keeps in its own state. A host should not persist it into
@@ -1736,6 +1757,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   onGroupingChange,
   onSearchChange,
   onHiddenFieldsChange,
+  addedFields,
+  onAddedFieldsChange,
   onInlineEditChange,
   onColumnStateChange,
   onRowClick,
@@ -5567,11 +5590,22 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // field still shows: `GroupingEditor` mounts a value its options do not
   // carry as its own entry, labelled with the field name, so the level can be
   // removed, and no other level or "Add group field" offers it.
+  //
+  // objectstack#30077 — the label, in order: the translation of the field,
+  // then the column's own `label`, then the object definition's field label,
+  // then the field name. A column with no label of its own (a bare `{ field }`
+  // or name, and every column a reader added) is listed under the label the
+  // definition declares, the source the grid's header falls back to, rather
+  // than under its machine name.
   const allFields = React.useMemo(() => {
+    const definitionLabel = (name: string): string | undefined => {
+      const label = objectDef?.fields?.[name]?.label;
+      return typeof label === 'string' && label ? label : undefined;
+    };
     return (Array.isArray(schema.columns) ? (schema.columns as any[]) : []).flatMap((f: any) => {
       if (typeof f === 'string') {
         if (!canReadField(perms, schema.objectName, f)) return [];
-        return [{ name: f, label: tFieldLabel(f, f) }];
+        return [{ name: f, label: tFieldLabel(f, definitionLabel(f) || f) }];
       }
       // `name` here is this popover's OWN key (it drives `hiddenFields`), which
       // is why it keeps that shape — but the value is the column identity, so
@@ -5580,9 +5614,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       // No resolvable identity → nothing to hide or show; it used to render a
       // checkbox keyed `undefined` that could never match a column.
       if (!name || !canReadField(perms, schema.objectName, name)) return [];
-      return [{ name, label: tFieldLabel(name, f.label || name) }];
+      return [{ name, label: tFieldLabel(name, f.label || definitionLabel(name) || name) }];
     });
-  }, [schema.columns, tFieldLabel, perms, schema.objectName]);
+  }, [schema.columns, tFieldLabel, perms, schema.objectName, objectDef]);
 
   // objectui#11984 — what the two hide-fields lists (the toolbar popover and
   // the View settings section) are handed of `hiddenFields`. An entry naming a
@@ -5601,6 +5635,57 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     : new Set([...hiddenFields].filter((name) => !withheldHiddenFields.includes(name)));
   const updateOfferedHiddenFields = (next: Set<string>) =>
     updateHiddenFields(withheldHiddenFields.length === 0 ? next : new Set([...next, ...withheldHiddenFields]));
+
+  // objectstack#30077 — the fields a reader may add to their own list, offered
+  // by both hide-fields lists after the view's columns when the host wires
+  // `onAddedFieldsChange`: every field of the object's definition that is not
+  // already a column (`allFields`, which carries the added ones the host
+  // appended), that the caller may read (`canReadField`, the predicate every
+  // field list asks), and that the definition does not mark `hidden: true`.
+  // Business fields first, then the system fields, each in the definition's
+  // order, as the Filter panel ranks them. Nothing is offered until the
+  // definition has loaded. Plain per-render values, not memos (AGENTS.md #10).
+  const addedFieldNames = addedFields ?? [];
+  const addableFields: Array<{ name: string; label: string }> = [];
+  if (onAddedFieldsChange && objectDef?.fields) {
+    const defs = objectDef.fields as Record<string, { label?: string; hidden?: unknown; system?: boolean } | undefined>;
+    const listed = new Set(allFields.map((f) => f.name));
+    const candidates = Object.entries(defs).filter(([name, def]) =>
+      !listed.has(name) && def?.hidden !== true && canReadField(perms, schema.objectName, name));
+    for (const tier of [false, true]) {
+      for (const [name, def] of candidates) {
+        if (isSystemManagedField(name, def) !== tier) continue;
+        addableFields.push({ name, label: tFieldLabel(name, def?.label || name) });
+      }
+    }
+  }
+  // What both hide-fields lists write through. Unticking a column the reader
+  // added takes it off their list (`onAddedFieldsChange` without it) rather
+  // than hiding it; every other change is a hide or a show, as before.
+  const updateListedFields = (next: Set<string>) => {
+    const dropped = onAddedFieldsChange
+      ? addedFieldNames.filter((name) => next.has(name) && !offeredHiddenFields.has(name))
+      : [];
+    if (dropped.length === 0) {
+      updateOfferedHiddenFields(next);
+      return;
+    }
+    onAddedFieldsChange!(addedFieldNames.filter((name) => !dropped.includes(name)));
+    const hidden = new Set([...next].filter((name) => !dropped.includes(name)));
+    if (hidden.size !== offeredHiddenFields.size || [...hidden].some((name) => !offeredHiddenFields.has(name))) {
+      updateOfferedHiddenFields(hidden);
+    }
+  };
+  // Ticking an offered field adds it to the reader's list. A stale hidden
+  // entry with the same name (a column the view has since dropped) is cleared
+  // with it, or the added column would be drawn hidden.
+  const addListedField = (name: string) => {
+    if (!onAddedFieldsChange || addedFieldNames.includes(name)) return;
+    onAddedFieldsChange([...addedFieldNames, name]);
+    if (offeredHiddenFields.has(name)) {
+      updateOfferedHiddenFields(new Set([...offeredHiddenFields].filter((n) => n !== name)));
+    }
+  };
 
   // objectui#11984 — a row-color rule on a field the caller may not read is
   // withheld from both Row color selects the same way: they show "None" with
@@ -6217,13 +6302,29 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                           } else {
                             next.add(field.name);
                           }
-                          updateOfferedHiddenFields(next);
+                          updateListedFields(next);
                         }}
                         className="rounded border-input"
                       />
                       <span className="truncate">{field.label}</span>
                     </label>
                   ))}
+                  {/* objectstack#30077 — the object's other readable fields, to add to the reader's list. */}
+                  {addableFields.length > 0 && (
+                    <div className="border-t pt-1 space-y-1" data-testid="hide-fields-addable">
+                      {addableFields.map((field) => (
+                        <label key={field.name} className="flex items-center gap-2 text-sm py-1 px-1 rounded hover:bg-muted cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={false}
+                            onChange={() => addListedField(field.name)}
+                            className="rounded border-input"
+                          />
+                          <span className="truncate">{field.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </PopoverContent>
@@ -6542,7 +6643,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 : density as any}
               showHideFields={toolbarFlags.showHideFields}
               hiddenFields={offeredHiddenFields}
-              updateHiddenFields={updateOfferedHiddenFields}
+              updateHiddenFields={updateListedFields}
+              addableFields={addableFields}
+              onAddField={addListedField}
               rowNumbers={rowNumbers}
               setRowNumbers={currentView === 'grid' ? setRowNumbers : undefined}
               /* [#4647] The Display panel's inline-edit entry — the SECOND

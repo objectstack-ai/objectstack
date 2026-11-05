@@ -49,6 +49,90 @@ describe('shiftFilterByCompareTo', () => {
     });
   });
 
+  // objectstack#30140. A forward window used to keep its own tokens (or, for
+  // the rolling window, move only its start), so the comparison read the
+  // window against itself and the delta was 0.
+  describe('previousPeriod on a forward window', () => {
+    // Monday 2026-05-25: next month is June, next quarter Q3.
+    it('next month compares with this month', () => {
+      const out = shiftFilterByCompareTo(
+        { d: { $gte: '{next_month_start}', $lte: '{next_month_end}' } },
+        { kind: 'previousPeriod' },
+        now,
+      );
+      expect(out.d).toEqual({ $gte: '2026-05-01', $lte: '2026-05-31' });
+    });
+
+    it('next quarter compares with this quarter', () => {
+      const out = shiftFilterByCompareTo(
+        { d: { $gte: '{next_quarter_start}', $lte: '{next_quarter_end}' } },
+        { kind: 'previousPeriod' },
+        now,
+      );
+      expect(out.d).toEqual({ $gte: '2026-04-01', $lte: '2026-06-30' });
+    });
+
+    it('steps back once, across a year boundary too', () => {
+      // From 2026-12-10, next month and next quarter are in 2027; the period
+      // before each is December and Q4 2026, never November or Q3.
+      const dec = new Date(2026, 11, 10, 12, 0);
+      expect(
+        shiftFilterByCompareTo(
+          { d: { $gte: '{next_month_start}', $lte: '{next_month_end}' } },
+          { kind: 'previousPeriod' },
+          dec,
+        ).d,
+      ).toEqual({ $gte: '2026-12-01', $lte: '2026-12-31' });
+      expect(
+        shiftFilterByCompareTo(
+          { d: { $gte: '{next_quarter_start}', $lte: '{next_quarter_end}' } },
+          { kind: 'previousPeriod' },
+          dec,
+        ).d,
+      ).toEqual({ $gte: '2026-10-01', $lte: '2026-12-31' });
+    });
+
+    it('today … 30 days from now compares with the 31 days that end yesterday', () => {
+      // Current window: 2026-05-25 .. 2026-06-24, 31 days.
+      const out = shiftFilterByCompareTo(
+        { d: { $gte: '{today}', $lte: '{30_days_from_now}' } },
+        { kind: 'previousPeriod' },
+        now,
+      );
+      expect(out.d).toEqual({ $gte: '2026-04-24', $lte: '2026-05-24' });
+    });
+
+    it('moves a $between rolling window the same way', () => {
+      const out = shiftFilterByCompareTo(
+        { d: { $between: ['{today}', '{7_days_from_now}'] } },
+        { kind: 'previousPeriod' },
+        now,
+      );
+      // Current 2026-05-25 .. 2026-06-01 (8 days) → 2026-05-17 .. 2026-05-24.
+      expect(out.d.$between).toEqual(['2026-05-17', '2026-05-24']);
+    });
+
+    it('leaves a lone {today} and a lone {N_days_from_now} to their old reading', () => {
+      // Not a forward rolling pair: `{today}` still means yesterday, and a
+      // bound with no `{today}` partner has no window length to move by.
+      expect(shiftFilterByCompareTo({ at: '{today}' }, { kind: 'previousPeriod' }, now).at).toBe('2026-05-24');
+      expect(
+        shiftFilterByCompareTo({ d: { $lte: '{30_days_from_now}' } }, { kind: 'previousPeriod' }, now).d,
+      ).toEqual({ $lte: '2026-06-24' });
+      expect(
+        shiftFilterByCompareTo(
+          { a: { $gte: '{today}' }, b: { $lte: '{30_days_from_now}' } },
+          { kind: 'previousPeriod' },
+          now,
+        ),
+      ).toEqual({ a: { $gte: '2026-05-24' }, b: { $lte: '2026-06-24' } });
+      // Two fields are two conditions, not one window.
+      expect(
+        shiftFilterByCompareTo({ a: '{today}', b: '{30_days_from_now}' }, { kind: 'previousPeriod' }, now),
+      ).toEqual({ a: '2026-05-24', b: '2026-06-24' });
+    });
+  });
+
   describe('previousYear', () => {
     it('re-resolves macros against now shifted back one year', () => {
       const filter = {
@@ -124,6 +208,21 @@ describe('compareToTrendLabelKey', () => {
     });
     it('detects today', () => {
       expect(compareToTrendLabelKey({ kind: 'previousPeriod' }, { d: '{today}' })).toBe('vsYesterday');
+    });
+    it('names the current period for a forward month or quarter (objectstack#30140)', () => {
+      const month = { d: { $gte: '{next_month_start}', $lte: '{next_month_end}' } };
+      const quarter = { d: { $gte: '{next_quarter_start}', $lte: '{next_quarter_end}' } };
+      expect(compareToTrendLabelKey({ kind: 'previousPeriod' }, month)).toBe('vsThisMonth');
+      expect(compareToTrendLabelKey({ kind: 'previousPeriod' }, quarter)).toBe('vsThisQuarter');
+      expect(compareToTrendLabelKey({ kind: 'previousYear' }, month)).toBe('vsLastYear');
+    });
+    it('reads a forward rolling window as the previous period, not yesterday (objectstack#30140)', () => {
+      expect(
+        compareToTrendLabelKey({ kind: 'previousPeriod' }, { d: { $gte: '{today}', $lte: '{30_days_from_now}' } }),
+      ).toBe('vsPreviousPeriod');
+      expect(
+        compareToTrendLabelKey({ kind: 'previousPeriod' }, { d: { $between: ['{today}', '{30_days_from_now}'] } }),
+      ).toBe('vsPreviousPeriod');
     });
     it('falls back to vsPreviousPeriod when no token matches', () => {
       expect(compareToTrendLabelKey({ kind: 'previousPeriod' }, { status: 'open' })).toBe('vsPreviousPeriod');

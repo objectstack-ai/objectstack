@@ -169,3 +169,66 @@ describe('only the causal failures are kept (ADR-0067 D2)', () => {
     expect(causalPublishFailures([aborted('visit'), aborted('ticket')])).toEqual([aborted('visit')]);
   });
 });
+
+describe('a refused dataset publish is placed on its measure or dimension (objectstack#30064)', () => {
+  /** The measured refusal: `sum` over a formula field, as the authoring gate answers it. */
+  const formulaMeasureRefused: PublishFailure = {
+    type: 'dataset',
+    name: 'opportunity_metrics',
+    error: 'dataset/opportunity_metrics failed author-time validation: 1 issue',
+    code: 'INVALID_METADATA',
+    issues: [
+      {
+        path: 'datasets.opportunity_metrics.measures[1].aggregate',
+        message:
+          'aggregate "sum" over field "expected_revenue" (`formula` on object "crm_opportunity") is refused by the ' +
+          'aggregate × field-type table: the number would depend on the SQL dialect',
+      },
+    ],
+  };
+  const DATASET = {
+    name: 'opportunity_metrics',
+    object: 'crm_opportunity',
+    dimensions: [{ name: 'stage', field: 'stage', type: 'string' }],
+    measures: [
+      { name: 'opp_count', label: 'Opportunities', aggregate: 'count' },
+      { name: 'total_amount', label: 'Total Amount', aggregate: 'sum', field: 'expected_revenue' },
+    ],
+  };
+
+  it('names the measure and the designer’s input, and keeps the engine text under Details', async () => {
+    await loadStudioCatalogue('zh');
+    const refusal = publishRefusal(formulaMeasureRefused, 'dataset', DATASET, 'zh');
+    const input = t('engine.inspector.dataset.aggregate', 'zh');
+    expect(refusal.message).toBe(
+      tFormat('engine.studio.refusal.publishWhere', 'zh', {
+        where: tFormat('engine.studio.refusal.datasetMeasureInput', 'zh', { member: 'Total Amount', input }),
+      }),
+    );
+    expect(refusal.message).not.toMatch(/expected_revenue|formula|datasets\./);
+    expect(refusal.target).toBeNull();
+    expect(refusal.input).toBe(input);
+    expect(refusal.detail).toBe(formatMetadataError({ message: formulaMeasureRefused.error, issues: formulaMeasureRefused.issues }));
+  });
+
+  it('a dimension with no label is named by its name; a path under no member is left unplaced', () => {
+    const dimension = publishRefusal(
+      { ...formulaMeasureRefused, issues: [{ path: 'datasets.opportunity_metrics.dimensions[0]', message: 'x' }] },
+      'dataset',
+      DATASET,
+      'en',
+    );
+    expect(dimension.message).toBe(
+      tFormat('engine.studio.refusal.publishWhere', 'en', {
+        where: tFormat('engine.studio.refusal.datasetDimension', 'en', { member: 'stage' }),
+      }),
+    );
+    const unplaced = publishRefusal(
+      { ...formulaMeasureRefused, issues: [{ path: 'datasets.opportunity_metrics.object', message: 'x' }] },
+      'dataset',
+      DATASET,
+      'en',
+    );
+    expect(unplaced.message).toBe(t('engine.studio.refusal.publishUnlocated', 'en'));
+  });
+});

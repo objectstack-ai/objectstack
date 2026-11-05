@@ -199,6 +199,25 @@ describe('form renderer — fields an update action would require (objectstack#2
     expect(noteOnIssuedOn()).toBeNull();
   });
 
+  it('notes nothing when the stored row already lacks the value inside the gate (objectstack#30184)', async () => {
+    // A paid invoice from before the rule: `issued_on` is missing while the
+    // rule already holds. The engine judges every write, an action's included,
+    // against that stored row, under which the field rests, so neither Save
+    // nor the action is refused for it, and the form says neither.
+    const onSubmit = vi.fn();
+    const { getObjectSchema } = renderInvoiceForm({
+      record: { ...DRAFT, status: 'paid' },
+      onSubmit,
+    });
+    await waitFor(() => expect(getObjectSchema).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 20));
+    expect(noteOnIssuedOn()).toBeNull();
+    expect(issuedOnInput().getAttribute('aria-required')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+  });
+
   it('names every action that would require the field, one line each', async () => {
     renderInvoiceForm({
       actions: [

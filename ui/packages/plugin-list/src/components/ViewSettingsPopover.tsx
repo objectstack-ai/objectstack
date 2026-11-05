@@ -188,6 +188,15 @@ export interface ViewSettingsPopoverProps {
   showHideFields?: boolean;
   hiddenFields?: Set<string>;
   updateHiddenFields?: (next: Set<string>) => void;
+  /**
+   * objectstack#30077 — the object's fields that are not columns of the list,
+   * drawn unticked after `allFields` in the Hide Fields section; ticking one
+   * calls `onAddField`, which adds it to the reader's own list. The host
+   * passes only fields the caller may read. Absent or empty ⇒ the section
+   * lists `allFields` alone, as before.
+   */
+  addableFields?: ViewSettingsField[];
+  onAddField?: (name: string) => void;
 
   /**
    * Row numbers on the grid's leading cell — a session-only setting the host
@@ -496,6 +505,8 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
     showHideFields,
     hiddenFields,
     updateHiddenFields,
+    addableFields,
+    onAddField,
     rowNumbers,
     setRowNumbers,
     showInlineEdit,
@@ -658,6 +669,24 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
                     <span className="truncate">{field.label || field.name}</span>
                   </label>
                 ))}
+                {onAddField && addableFields && addableFields.length > 0 && (
+                  <div className="border-t pt-0.5 space-y-0.5" data-testid="view-settings-addable-fields">
+                    {addableFields.map((field) => (
+                      <label
+                        key={field.name}
+                        className="flex items-center gap-2 text-xs py-1 px-1 rounded hover:bg-muted cursor-pointer max-sm:min-h-11"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={false}
+                          onChange={() => onAddField(field.name)}
+                          className="rounded border-input"
+                        />
+                        <span className="truncate">{field.label || field.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
               </div>
             </Section>
           )}

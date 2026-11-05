@@ -2004,6 +2004,8 @@ const en = {
       vsLastYear: 'vs last year',
       vsYesterday: 'vs yesterday',
       vsPreviousPeriod: 'vs previous period',
+      vsThisMonth: 'vs this month',
+      vsThisQuarter: 'vs this quarter',
     },
     filters: {
       label: 'Dashboard filters',
