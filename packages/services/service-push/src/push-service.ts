@@ -22,6 +22,14 @@ export interface PushMessage {
     readonly body: string;
     /** Delivery data for the shell: string values only. */
     readonly data: Readonly<Record<string, string>>;
+    /**
+     * The generic visible line a hosted relay delivery shows instead of the
+     * title and body, in the recipient's language (the `push` channel picks it
+     * by `resolveRecipientLocale`). The relay transport sends it in place of
+     * the content, which never leaves the server through the relay; the direct
+     * transports ignore it. Absent: the English line.
+     */
+    readonly notice?: string;
 }
 
 /**
@@ -41,9 +49,16 @@ export type PushSendResult =
     | { readonly status: 'invalid_token'; readonly reason: string }
     | { readonly status: 'failed'; readonly error: string; readonly retryable: boolean };
 
-/** A vendor transport: APNs or FCM. */
+/** A vendor transport: APNs or FCM, direct or through the hosted relay. */
 export interface IPushTransport {
     readonly vendor: PushVendor;
+    /**
+     * Whether the transport can deliver right now, read on every call. Absent:
+     * always. The relay transport answers `false` while the server is not
+     * bound to the cloud, so {@link IPushService.vendors} leaves its vendor
+     * out and the push channel reports the deployment unable to push.
+     */
+    available?(): boolean;
     send(message: PushMessage): Promise<PushSendResult>;
     /** Release held connections (the APNs HTTP/2 session). */
     close?(): Promise<void> | void;
@@ -59,7 +74,7 @@ export interface IPushTransport {
  * device registry and retires a token this service reports `invalid_token`.
  */
 export interface IPushService {
-    /** The vendors this deployment has a transport for. Empty: push delivers nothing. */
+    /** The vendors this deployment has an available transport for, read on every call. Empty: push delivers nothing. */
     vendors(): PushVendor[];
     /** Send one push. Never throws: a transport error is answered `failed`. */
     send(message: PushMessage): Promise<PushSendResult>;
@@ -85,7 +100,10 @@ export class PushService implements IPushService {
     constructor(private readonly opts: PushServiceOptions) {}
 
     vendors(): PushVendor[] {
-        return (Object.keys(this.opts.transports) as PushVendor[]).filter((v) => this.opts.transports[v]);
+        return (Object.keys(this.opts.transports) as PushVendor[]).filter((v) => {
+            const transport = this.opts.transports[v];
+            return transport !== undefined && (transport.available?.() ?? true);
+        });
     }
 
     async send(message: PushMessage): Promise<PushSendResult> {
