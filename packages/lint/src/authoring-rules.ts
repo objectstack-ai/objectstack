@@ -1252,8 +1252,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // [#30023] `page` joins, NARROW by the same mechanism: a page write reaches
     // exactly `validateSortableFields`, the one member that declares `page`,
     // so a stored page sort naming a field the list door refuses
-    // (`sortable: false`, a `formula`) is refused at publish rather than at
-    // its first fetch. Every other member keeps its declaration.
+    // (`sortable: false`, a `formula`, and since #30093 a field the object
+    // does not have, as `page-field-unknown`) is refused at publish rather
+    // than at its first fetch. Every other member keeps its declaration.
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow', 'view', 'object', 'dataset', 'report', 'page'],
     run: (stack, ctx) => validateReferenceIntegrity(stack, ctx),

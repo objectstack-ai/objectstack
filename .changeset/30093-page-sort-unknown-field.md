@@ -6,7 +6,7 @@ fix(lint)!: a stored page sort naming a field its object lacks is refused by `os
 
 Clause-②: no (narrowing) — an unknown sort field on a page slot moves from silent or warning to error: `os validate` / `os build` / `os lint` and the `page` publish door refuse a page sort they accepted before.
 Metadata-protocol: narrowed
-Skills-docs: none — `skills/**` and `content/docs/**` teach no page sort that names a field the object lacks, and nothing there describes an unknown page sort as a warning; the verdict and its fix line name the field, the object and the nearest declared field.
+Skills-docs: updated here — content/docs/deployment/validating-metadata.mdx
 
 <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed or renamed: every page sort slot keeps its shape and meaning, and the build and the page publish door now give an unknown field there the verdict a list view sort already gets. A refused name never sorted anything (the list door answered every read 400 INVALID_SORT), so there is no rewrite that keeps what the author meant; the author names a real field, and the refusal says which. -->
 
