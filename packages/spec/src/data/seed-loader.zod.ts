@@ -240,10 +240,18 @@ export const SeedLoaderConfigSchema = lazySchema(() => z.object({
 
   /**
    * Default dataset mode when not specified per-dataset.
-   * @default 'upsert'
+   *
+   * It is {@link SeedSchema}'s own `mode` field, default included, so the
+   * seed default is stated once: `ignore` (create-only, ruling 6631016988 on
+   * objectstack#30081). A request parsed through
+   * {@link SeedLoaderRequestSchema} fills every dataset's `mode` from that
+   * same default, so this value is read only for a dataset that reaches the
+   * loader unparsed (`validate()`). A caller ⛔ never restates a mode of its
+   * own here.
+   * @default 'ignore'
    */
-  defaultMode: SeedMode.default('upsert')
-    .describe('Default conflict resolution strategy'),
+  defaultMode: SeedSchema.shape.mode
+    .describe('Default conflict resolution strategy: the seed `mode` default (`ignore`, create-only)'),
 
   /**
    * Maximum number of records to process in a single batch.

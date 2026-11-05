@@ -53,9 +53,13 @@
  *
  * `INVALID_FIELD` / 400 through `invalidMemberError` (ADR-0112), with the
  * column and its object attached, as the #21044 door attaches them: a verdict
- * about one member the request named. The words carry the prescription:
- * group by the code field. A consolidated total aggregates the stored home
- * field instead (ADR-0144 D6), which the write-time projection (D5) fills.
+ * about one member the request named. The words carry both prescriptions
+ * (#27195): for one consolidated total, aggregate the stored home field
+ * instead (ADR-0144 D6), which the write-time projection (D5) fills — named
+ * when the amount declares `currencyConfig.homeAmount`, and the declaration
+ * to add when it does not — or group by the code field for one row per
+ * currency. A measure over the home field is no record-mode amount (the home
+ * field is `dynamic`), so this door never judges it: it is served unchanged.
  */
 
 import type { AnalyticsQuery } from '@objectstack/spec/contracts';
@@ -75,15 +79,17 @@ export const AMOUNT_AGGREGATES: ReadonlySet<string> = new Set(['sum', 'avg', 'mi
  *   reference) — or `undefined` when it resolves to no declared measure.
  * @param dimensionColumnOf - The column a `dimensions` entry groups by, located
  *   the same way, or `null` when this door cannot pin one.
- * @param recordCurrencyFieldOf - The `currencyConfig.currencyField` of a column
- *   declared `currencyMode: 'record'`, or `undefined` for any other column.
+ * @param recordCurrencyOf - For a column declared `currencyMode: 'record'`, its
+ *   `currencyConfig.currencyField` and, when it declares `homeAmount`, the
+ *   home field (`homeAmount.field`) on the same object; `undefined` for any
+ *   other column.
  */
 export function assertRecordCurrencyAggregatesGrouped(
   query: AnalyticsQuery,
   cubeName: string,
   measureOf: (member: string) => { type: unknown; column: MeasureColumn | null } | undefined,
   dimensionColumnOf: (member: string) => MeasureColumn | null,
-  recordCurrencyFieldOf: (object: string, field: string) => string | undefined,
+  recordCurrencyOf: (object: string, field: string) => { codeField: string; homeField?: string } | undefined,
 ): void {
   const measures = query.measures ?? [];
   if (measures.length === 0) return;
@@ -92,20 +98,26 @@ export function assertRecordCurrencyAggregatesGrouped(
     const measure = measureOf(member);
     if (!measure?.column || typeof measure.type !== 'string' || !AMOUNT_AGGREGATES.has(measure.type)) continue;
     const target = measure.column;
-    const codeField = recordCurrencyFieldOf(target.object, target.column);
-    if (codeField === undefined) continue;
+    const declared = recordCurrencyOf(target.object, target.column);
+    if (declared === undefined) continue;
+    const { codeField, homeField } = declared;
     grouped ??= (query.dimensions ?? []).map(dimensionColumnOf);
     if (grouped.some((d) => d?.object === target.object && d.column === codeField)) continue;
 
-    const codePath = target.path === target.column
-      ? codeField
-      : `${target.path.slice(0, target.path.lastIndexOf('.') + 1)}${codeField}`;
+    const prefix = target.path === target.column ? '' : target.path.slice(0, target.path.lastIndexOf('.') + 1);
+    const codePath = `${prefix}${codeField}`;
+    const homeRemedy = homeField !== undefined
+      ? `point the measure at '${prefix}${homeField}', the home-currency amount object '${target.object}' `
+        + `declares for '${target.column}' (\`homeAmount.field\`), for one total in the home currency`
+      : `for one total in the home currency, point the measure at the home field of '${target.column}' `
+        + `(the field its \`currencyConfig.homeAmount.field\` names on object '${target.object}'; declare `
+        + '`homeAmount` there first if it has none)';
     const err = invalidMemberError(
       `Measure '${member}' on cube '${cubeName}' takes the ${measure.type} of field '${target.path}', `
       + `a record-currency amount whose currency is each record's '${codeField}', but the query does not `
-      + `group by '${codePath}', so the query was NOT run. Add the dimension over '${codePath}' to the `
-      + `query, which answers one row per currency. Without the grouping the ${measure.type} would `
-      + 'combine amounts in different currencies into one number.',
+      + `group by '${codePath}', so the query was NOT run. Without the grouping the ${measure.type} would `
+      + `combine amounts in different currencies into one number. Either ${homeRemedy}; or add the `
+      + `dimension over '${codePath}' to the query, which answers one row per currency.`,
       { member, param: 'measures', cube: cubeName },
     ) as Error & { field?: string; object?: string };
     err.field = target.path;

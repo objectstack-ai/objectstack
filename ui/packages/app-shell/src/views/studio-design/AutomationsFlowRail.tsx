@@ -70,11 +70,11 @@ export type FlowRuntimeState = Partial<SpecFlowRuntimeState>;
  * the flow header and the Problems panel derive one run status from it
  * (`deriveFlowRunStatus`), so it is declared once, where that derivation is.
  *
- * `unboundCause` is the one member kept beside it, for the ledger switch on a
- * read-only package's flow (ADR-0146 D4): `activationReading` reads it for its
- * presence, the same reading Setup › Packaged automation shows.
+ * `unboundCause` rides in it too: the ledger switch on a read-only package's
+ * flow (ADR-0146 D4) reads it for its presence, the same reading Setup ›
+ * Packaged automation shows, and the run note words a known cause from it.
  */
-export type FlowRailState = FlowRuntimeRow & { unboundCause?: string };
+export type FlowRailState = FlowRuntimeRow;
 
 /**
  * Narrow one unvalidated runtime row into the rail's state. `triggerType`,

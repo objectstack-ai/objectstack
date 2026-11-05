@@ -28,10 +28,12 @@ import { tmpdir } from 'node:os';
 // Controls what the (mocked) seed loader reports back. The handler under test
 // only cares about result.summary.total{Inserted,Updated,Skipped} + result.errors.
 let seedResult: any = { summary: { totalInserted: 0, totalUpdated: 0, totalSkipped: 0 }, errors: [] };
+// Every request the (mocked) loader was handed, in order.
+let loadCalls: any[] = [];
 
 vi.mock('@objectstack/runtime', () => ({
     SeedLoaderService: class {
-        async load() { return seedResult; }
+        async load(request: any) { loadCalls.push(request); return seedResult; }
     },
 }));
 // Only the seed-request parse is stubbed; every other export stays the real one,
@@ -108,6 +110,7 @@ let dir: string;
 beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'mil-reseed-'));
     seedResult = { summary: { totalInserted: 0, totalUpdated: 0, totalSkipped: 0 }, errors: [] };
+    loadCalls = [];
 });
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); vi.restoreAllMocks(); });
 
@@ -230,5 +233,41 @@ describe('reseed honest result', () => {
         expect(res.status).toBe(200);
         expect(res.payload?.success).toBe(true);
         expect(res.payload?.data).toMatchObject({ inserted: 1, skipped: 1, errors: 1 });
+    });
+});
+
+/**
+ * The reseed follows the create-only seed default (#30081). The handler sets
+ * no mode of its own, so the request it builds — parsed here by the REAL
+ * `SeedLoaderRequestSchema`, which the suite stubs to identity above — hands
+ * the loader a mode-less dataset as `ignore`: a reseed inserts the rows that
+ * are missing and leaves a row the customer kept, or edited, as it is. A
+ * dataset that declares `mode: 'upsert'` keeps it.
+ */
+describe('reseed follows the create-only seed default', () => {
+    it('sets no mode of its own; a mode-less dataset parses to ignore, a declared upsert stays upsert', async () => {
+        const { SeedLoaderRequestSchema: RealSchema } =
+            await vi.importActual<typeof import('@objectstack/spec/data')>('@objectstack/spec/data');
+        const rawApp = await installAndGetRoutes();
+        const declared = { object: 'pm_x', mode: 'upsert', records: [{ name: 'ref' }] };
+        const installRes = await rawApp.routes.get('POST /api/v1/marketplace/install-local')!(
+            makeC({ manifest: { ...MANIFEST, id: 'app.test.declared', data: [declared] } }),
+        );
+        expect(installRes.payload?.success).toBe(true);
+        loadCalls = [];
+        seedResult = { summary: { totalInserted: 2, totalUpdated: 0, totalSkipped: 0 }, errors: [] };
+
+        await rawApp.routes.get(RESEED)!(makeC({}, 'app.test.proj'));
+        await rawApp.routes.get(RESEED)!(makeC({}, 'app.test.declared'));
+        expect(loadCalls).toHaveLength(2);
+
+        for (const call of loadCalls) {
+            expect(call.config).toMatchObject({ multiPass: true });
+            expect(call.config).not.toHaveProperty('defaultMode');
+        }
+        const silent = RealSchema.parse(loadCalls[0]);
+        expect(silent.seeds.map((d) => d.mode)).toEqual(['ignore']);
+        expect(silent.config.defaultMode).toBe('ignore');
+        expect(RealSchema.parse(loadCalls[1]).seeds.map((d) => d.mode)).toEqual(['upsert']);
     });
 });

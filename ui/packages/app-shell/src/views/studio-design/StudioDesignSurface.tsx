@@ -96,6 +96,7 @@ import { PACKAGE_LIST_TOAST_ID, PackageSwitcher, STUDIO_LANDING_PATH } from './P
 import {
   ContributedNavRows,
   InterfacesNavContributionsContext,
+  InterfacesNavOverrideMark,
   InterfacesRailMarksContext,
   NavTree,
   OFF_NAV_TYPES,
@@ -244,6 +245,7 @@ import {
   type DraftOnlyObjects,
   type ListViewCustomization,
 } from './ObjectListViewInspector.js';
+import { ObjectListViewTitle } from './ObjectListViewTitle.js';
 import {
   DEFAULT_PAGE_SOURCE_KIND,
   NO_REPORT_BINDING,
@@ -326,7 +328,13 @@ import { useMetadataRefreshNonce } from './useMetadataRefreshNonce.js';
 import { resolveSurface, findSurfaceInTree, type NavNode, type Surface } from './navSurface.js';
 import { servedNavTextOf, displayNavTree, displayAppLabel, type ServedNavText } from './servedNavText.js';
 import { ServedWidgetTextContext, servedWidgetTextOf } from './servedDashboardText.js';
-import { useSurfaceDeepLink, resolveSurfaceDeepLink, type SurfaceTarget } from './useSurfaceDeepLink.js';
+import {
+  useSurfaceDeepLink,
+  useSurfaceDeepLinkCapture,
+  useSurfaceDeepLinkMirror,
+  resolveSurfaceDeepLink,
+  type SurfaceTarget,
+} from './useSurfaceDeepLink.js';
 import { SurfaceDeepLinkProvider, useRequestedSurface, useSurfaceNavigator } from './surfaceDeepLinkChannel.js';
 import { buildObjectSkeleton, buildFlowSkeleton, buildAppSkeleton, buildPermissionSkeleton, type AppNavSeed } from './skeletons.js';
 import { OWD_CREATE_MODELS, OWD_DEFAULT, type OwdCreateModel } from './owd-sharing.js';
@@ -2076,6 +2084,20 @@ export function InterfacesPillar({
   // spinner.
   const [appStatus, setAppStatus] = React.useState<'loading' | 'ready' | 'missing'>('loading');
 
+  // objectstack#30059 (ADR-0146 D2) — on a read-only base the navigation is
+  // customized as the app's override in the base's pair: the nav editor edits
+  // the app document as on a writable package, and its first saved edit
+  // copies the whole app into the pair, declaring the override, as a view's
+  // Customize does. Unless the ensure door refuses this caller (`walled`), or
+  // the base's manifest declares no version: no override can be declared then
+  // (`basedOn`), so every save of the copy would be refused and the editor is
+  // not offered, as before.
+  // ⛔ The pair a write names is the door's answer (`pairFor`); the pair a
+  // read names is the surface's (`navPairAt`).
+  const navOverridable = readOnly && customization !== null && isStudioCustomizeType('app');
+  const navCustomizable = navOverridable && customization?.walled !== true && !!customization?.basedOn;
+  const navPairAt = navOverridable ? (customization?.pairId ?? null) : null;
+
   // objectui#11167 — a read-only answer closes nav editing. The Studio surface
   // learns the package's write state from its own request (see
   // `readOnlySettled`), and an unknown state stays ungated, so the toggle is on
@@ -2094,8 +2116,9 @@ export function InterfacesPillar({
   // declaration order, and the answer that closes editing is also the one
   // that settles a pending link, so the link applies after the close and its
   // read-only selection is not cleared by it. Both read the same `readOnly`.
+  // objectstack#30059 — unless the navigation is customized into the pair.
   React.useEffect(() => {
-    if (!readOnly) return;
+    if (!readOnly || navCustomizable) return;
     if (editNav) {
       setEditNav(false);
       setNavSel(null);
@@ -2106,7 +2129,7 @@ export function InterfacesPillar({
       // objectui#11776 — a failure of the buffer just put back is moot.
       setNavError(null);
     }
-  }, [readOnly, editNav, navDirty]);
+  }, [readOnly, navCustomizable, editNav, navDirty]);
 
   // #2272 — designer deep-link: `?sel=nav:<id>` selects the nav item with
   // that spec `id` and switches the pillar into nav editing. The id is the
@@ -2174,6 +2197,7 @@ export function InterfacesPillar({
   const {
     save: saveNavDraft,
     recordRead: recordNavRead,
+    forget: forgetNavVersion,
     dialog: navConflictDialog,
   } = useDraftSaveGuard(client, reloadNavDraft);
   // The app load also re-reads after every draft save in the package (the
@@ -2182,6 +2206,10 @@ export function InterfacesPillar({
   // any other install forgets it. Holds the `publishNonce` the save landed
   // under: a publish in between dropped the draft, version and all.
   const navEchoRef = React.useRef<number | null>(null);
+  // objectstack#30059 — the package the nav buffer's draft read was asked at:
+  // the address its pin describes. A first save into a pair the buffer was not
+  // read at pins no draft there (`doNavSave`).
+  const navReadAtRef = React.useRef<string | null>(null);
   // objectui#7255 — the copilot dock shares this document, so a turn that
   // staged/published metadata converges the rail here instead of waiting for a
   // page reload. HELD while the nav editor has unsaved (or in-flight) edits:
@@ -2216,8 +2244,10 @@ export function InterfacesPillar({
   React.useEffect(() => {
     targetLabelRef.current = targetLabel;
   });
-  // `?surface=` capture + mirror — shared plumbing (see useSurfaceDeepLink).
-  const initialSurface = useSurfaceDeepLink(current);
+  // `?surface=` capture — shared plumbing (see useSurfaceDeepLink). The mirror
+  // runs below the list-view buffer: it writes the open view beside the leaf
+  // (objectstack#30046).
+  const initialSurface = useSurfaceDeepLinkCapture();
   // objectstack#28561 — a deep link to a page, dashboard, report or view that
   // no nav entry opens: the "All metadata" area opens such an item here by
   // URL. The app load below finds no entry for it, so it holds its first-leaf
@@ -2356,7 +2386,9 @@ export function InterfacesPillar({
   const [error, setError] = React.useState<StudioRefusal | null>(null);
   // Objects in THIS package (published ∪ draft) — the nav item inspector's
   // object picker, so nav can be wired to sibling objects before publishing.
-  const [pkgObjects, setPkgObjects] = React.useState<Array<{ name: string; label: string; icon?: string }>>([]);
+  const [pkgObjects, setPkgObjects] = React.useState<Array<{ name: string; label: string; icon?: string; pair?: true }>>(
+    [],
+  );
   const objectIconMap = React.useMemo(
     () => Object.fromEntries(pkgObjects.map((o) => [o.name, o.icon])),
     [pkgObjects],
@@ -2375,27 +2407,40 @@ export function InterfacesPillar({
     [draftOnlyObjects, publishNonce],
   );
 
+  // objectstack#30059 — on a read-only base, its pair's objects follow the
+  // base's, so a customized navigation can open an object the pair adds. A
+  // failed read of the pair leaves the base's.
   React.useEffect(() => {
     let cancelled = false;
     const readUnder = publishNonce;
     (async () => {
       try {
-        const [pub, drafts] = await Promise.all([
+        const noRows = () => [] as Array<Record<string, unknown>>;
+        const [pub, drafts, pairPub, pairDrafts] = await Promise.all([
           client.list('object', { packageId }) as Promise<Array<Record<string, unknown>>>,
-          client.listDrafts({ packageId, type: 'object' }).catch(() => [] as Array<Record<string, unknown>>),
+          client.listDrafts({ packageId, type: 'object' }).catch(noRows),
+          railPairId
+            ? (client.list('object', { packageId: railPairId }) as Promise<Array<Record<string, unknown>>>).catch(noRows)
+            : noRows(),
+          railPairId ? client.listDrafts({ packageId: railPairId, type: 'object' }).catch(noRows) : noRows(),
         ]);
         if (cancelled) return;
-        const byName = new Map<string, { name: string; label: string; icon?: string }>();
-        for (const raw of [...(pub || []), ...(drafts || [])]) {
+        const byName = new Map<string, { name: string; label: string; icon?: string; pair?: true }>();
+        const baseRows = [...(pub || []), ...(drafts || [])];
+        for (const raw of [...baseRows, ...(pairPub || []), ...(pairDrafts || [])]) {
           const o = raw as Record<string, unknown>;
           const name = String(o.name ?? '');
           if (!name || byName.has(name)) continue;
-          byName.set(name, { name, label: String(o.label ?? o.name ?? name), icon: o.icon ? String(o.icon) : undefined });
+          const row = { name, label: String(o.label ?? o.name ?? name), icon: o.icon ? String(o.icon) : undefined };
+          // Held by the pair only: the entry bound to it gates on it (`requiresObject`).
+          byName.set(name, baseRows.includes(raw) ? row : { ...row, pair: true });
         }
         setPkgObjects([...byName.values()]);
-        const publishedNames = new Set((pub || []).map((o) => String((o as Record<string, unknown>).name ?? '')));
+        const publishedNames = new Set(
+          [...(pub || []), ...(pairPub || [])].map((o) => String((o as Record<string, unknown>).name ?? '')),
+        );
         const draftOnly = new Set<string>();
-        for (const d of drafts || []) {
+        for (const d of [...(drafts || []), ...(pairDrafts || [])]) {
           const name = String((d as Record<string, unknown>).name ?? '');
           if (name && !publishedNames.has(name)) draftOnly.add(name);
         }
@@ -2410,7 +2455,7 @@ export function InterfacesPillar({
     return () => {
       cancelled = true;
     };
-  }, [client, packageId, publishNonce, draftNonce, metadataRefreshNonce]);
+  }, [client, packageId, railPairId, publishNonce, draftNonce, metadataRefreshNonce]);
 
   // objectstack#26889 — the package's pages, dashboards, reports and views,
   // published ∪ draft, each narrowed by its type's own list filter, as
@@ -2529,11 +2574,15 @@ export function InterfacesPillar({
         const saved = !!published?.[0]?.name;
         // objectui#11773 — the draft is read at the address the nav save writes
         // (`?package=` this package), so the version it serves pins that save.
+        // objectstack#30059 — on a read-only base, its pair, when one is
+        // listed: the pair's draft of the app is the customized navigation.
+        const navReadAt = navPairAt ?? packageId;
         const [layRaw, appDraftRead] = await Promise.all([
           // ADR-0048 — read at this package, the app's owner: a layered read
-          // naming no package is refused for a name two packages hold.
+          // naming no package is refused for a name two packages hold. On a
+          // read-only base it serves the app's declared override (ADR-0146 D8).
           saved ? client.layered<Record<string, unknown>>('app', name, { packageId }) : null,
-          readDraftForSave<Record<string, unknown>>(client, 'app', name, packageId),
+          readDraftForSave<Record<string, unknown>>(client, 'app', name, navReadAt),
         ]);
         if (cancelled) return;
         // objectstack#29148 — an app draft the server refused to read (`403`:
@@ -2585,8 +2634,9 @@ export function InterfacesPillar({
           // served, unless it is the read-back of this pillar's own nav save
           // (see `navEchoRef`), whose receipt already pins it.
           if (!isSameApp || navEchoRef.current !== publishNonce) {
-            recordNavRead('app', name, packageId, appDraftRead.pin);
+            recordNavRead('app', name, navReadAt, appDraftRead.pin);
           }
+          navReadAtRef.current = navReadAt;
           navEchoRef.current = null;
         }
         navBaselineRef.current = body;
@@ -2635,7 +2685,7 @@ export function InterfacesPillar({
     return () => {
       cancelled = true;
     };
-  }, [client, packageId, publishNonce, draftNonce, metadataRefreshNonce, navReloadNonce, recordNavRead]);
+  }, [client, packageId, navPairAt, publishNonce, draftNonce, metadataRefreshNonce, navReloadNonce, recordNavRead]);
 
   const Preview = useRegisteredMetadataPreview(current?.type ?? '');
   // Studio-canvas surface override: the SAME type can render as a different
@@ -2761,6 +2811,23 @@ export function InterfacesPillar({
   const leafInPairRef = React.useRef(leafInPair);
   React.useLayoutEffect(() => {
     leafInPairRef.current = leafInPair;
+  });
+  // objectstack#30059 — the app's override the server serves (the pair's
+  // draft, else the read's overlay): the rail's mark and its Restore read it.
+  // The navigation is editable on a read-only base once the pair holds the
+  // override, or while the version to declare is known.
+  const navServed = useServedOverride(
+    client,
+    navOverridable && appName ? { type: 'app', name: appName } : null,
+    customizeBase,
+    customizePair,
+    servedKey,
+  );
+  const navInPair = navOverridable && navServed.declaration !== null;
+  const navWritable = !readOnly || (navCustomizable && (navInPair || customizeBlock === null));
+  const navInPairRef = React.useRef(navInPair);
+  React.useLayoutEffect(() => {
+    navInPairRef.current = navInPair;
   });
   // objectui#5800 — Design ⇄ Run: one canvas, two modes (ADR-0080's pivot made
   // visible). Run mode is pure subtraction: `editing=false` drops the design
@@ -3150,7 +3217,12 @@ export function InterfacesPillar({
     draftOnlyObjects,
     onDraftSaved,
     customization: listViewCustomization,
+    // objectstack#30046 — the view a link names, shown once its leaf opens.
+    initialView: initialSurface?.viewId ? { surface: initialSurface, viewId: initialSurface.viewId } : null,
   });
+  // `?surface=` mirror (see useSurfaceDeepLink), with the view an `object`
+  // leaf shows when it is not the one its entry opens (objectstack#30046).
+  useSurfaceDeepLinkMirror(current, current?.type === 'object' && listView.entryTarget ? (listView.target?.viewId ?? null) : null);
   const listViewTargetId = listView.target?.viewId ?? null;
   const listViewCustomizable = customizing && listViewTargetId !== null;
   const listViewServed = useServedOverride(
@@ -3301,8 +3373,39 @@ export function InterfacesPillar({
     const sentNav = navPayloadOf(editorNav);
     try {
       const leftOut = sentNav.length !== editorNav.length || sentNav.some((n, i) => n !== editorNav[i]);
-      const saved = { ...doc, navigation: sentNav };
-      const outcome = await saveNavDraft('app', appName, saved, { mode: 'draft', packageId, surface: 'studio' });
+      let saved: Record<string, unknown> = { ...doc, navigation: sentNav };
+      let target = packageId;
+      let entering = false;
+      // objectstack#30059 (ADR-0146 D2) — on a read-only base the app is saved
+      // into the pair the ensure door answers, whole, declaring the override
+      // at the base's version (`overrideDraftBody`). A refused door is shown
+      // as it was sent, and nothing is saved.
+      const custom = readOnly ? customizationRef.current : null;
+      if (custom) {
+        let pair: string;
+        try {
+          pair = await pairFor(custom, 'app', appName);
+        } catch (e) {
+          setNavError(plainRefusal(e));
+          return;
+        }
+        const declared = overrideDraftBody(saved, custom.base, custom.basedOn);
+        if (declared === null) {
+          setNavError({ message: tFormat('engine.studio.customize.noVersion', locale, { package: custom.baseLabel }) });
+          return;
+        }
+        // The buffer was read at another package (the base, before its pair
+        // was listed): the pair is taken to hold no draft of the app, so one
+        // there is a conflict the author is asked about, never overwritten.
+        if (navReadAtRef.current !== pair) {
+          recordNavRead('app', appName, pair, { ifNoneMatch: '*' });
+          navReadAtRef.current = pair;
+        }
+        entering = !navInPairRef.current;
+        saved = declared;
+        target = pair;
+      }
+      const outcome = await saveNavDraft('app', appName, saved, { mode: 'draft', packageId: target, surface: 'studio' });
       // objectui#11773 — the author chose the saved version; the load replaces
       // the buffer, and with it any failure this editor showed (objectui#11776).
       if (outcome === 'reloaded') {
@@ -3312,6 +3415,8 @@ export function InterfacesPillar({
       navEchoRef.current = publishNonce;
       navBaselineRef.current = saved;
       setNavHasDraft(true);
+      // The rail's mark reads the declaration the server now serves.
+      if (entering) setServedNonce((n) => n + 1);
       // objectui#11776 — the save landed: the failure an earlier one showed goes.
       setNavError(null);
       // objectui#11189, objectui#11204 — clean only if the buffer is still what
@@ -3336,7 +3441,7 @@ export function InterfacesPillar({
     } finally {
       setNavSaving(false);
     }
-  }, [saveNavDraft, appName, appDraft, appLabel, onDraftSaved, packageId, publishNonce, locale]);
+  }, [saveNavDraft, appName, appDraft, appLabel, onDraftSaved, packageId, publishNonce, locale, readOnly, pairFor, recordNavRead]);
   // objectui#5813 — nav edits auto-save while edit mode is open.
   const { flush: flushNavSave, sending: navSending } = useDraftAutoSave({
     // objectui#11232 — the app `doNavSave` addresses. The package is this
@@ -3344,7 +3449,7 @@ export function InterfacesPillar({
     target: `app:${appName ?? ''}`,
     loadedFor: appDraftFor,
     dirty: navDirty,
-    blocked: !appName || !editNav || !!navSaving || readOnly,
+    blocked: !appName || !editNav || !!navSaving || !navWritable || restoring,
     snapshot: appDraft,
     save: doNavSave,
   });
@@ -3407,7 +3512,7 @@ export function InterfacesPillar({
   // canvas edits it and the nav autosave sends it.
   const addNavEntry = React.useCallback(
     (kind: NavigationItemType) => {
-      if (readOnly || !appName) return;
+      if (!navWritable || !appName) return;
       const navigation = Array.isArray(appDraft.navigation) ? (appDraft.navigation as NavNode[]) : [];
       const taken = new Set(navigation.map((n) => (typeof n.id === 'string' ? n.id : '')).filter(Boolean));
       let id = `nav_item_${navigation.length + 1}`;
@@ -3419,7 +3524,7 @@ export function InterfacesPillar({
       setInspectorCollapsed(false);
       if (isMobile) setRailOpen(false);
     },
-    [readOnly, appName, appDraft, onNavPatch, setInspectorCollapsed, isMobile],
+    [navWritable, appName, appDraft, onNavPatch, setInspectorCollapsed, isMobile],
   );
   const doCreateSurface = React.useCallback(
     async (
@@ -3816,16 +3921,26 @@ export function InterfacesPillar({
   // this item's saves named, else the surface's; never asked of the door
   // again. The base's item reads back, and the server's refusal is shown as
   // it is sent.
-  const [restoreFor, setRestoreFor] = React.useState<NonNullable<typeof headerCustomize> | null>(null);
+  // objectstack#30059 — and the app whose navigation the rail customizes (`nav`).
+  const [restoreFor, setRestoreFor] = React.useState<{
+    type: string;
+    name: string;
+    key: string;
+    label: string;
+    listView: boolean;
+    nav?: boolean;
+    hasDraft: boolean;
+  } | null>(null);
   const restoreOriginal = React.useCallback(
-    async (item: { type: string; name: string; key: string; label: string; listView: boolean }) => {
+    async (item: { type: string; name: string; key: string; label: string; listView: boolean; nav?: boolean }) => {
       const custom = customizationRef.current;
       if (!custom) return;
       const held = pairsByItemRef.current.get(item.key);
       const pair = (held ? await held.catch(() => null) : null) ?? custom.pairId;
       if (!pair) return;
       setRestoring(true);
-      setError(null);
+      if (item.nav) setNavError(null);
+      else setError(null);
       try {
         await client.reset(item.type, item.name, { state: 'draft', packageId: pair });
         await client.reset(item.type, item.name, { packageId: pair });
@@ -3836,7 +3951,15 @@ export function InterfacesPillar({
           next.delete(item.key);
           return next;
         });
-        if (item.listView) {
+        if (item.nav) {
+          // The base's navigation reads back: editing closes, and the next
+          // read's pin replaces the deleted draft's.
+          setEditNav(false);
+          setNavSel(null);
+          navEchoRef.current = null;
+          forgetNavVersion();
+          reloadNavDraft();
+        } else if (item.listView) {
           setListViewRestoreNonce((n) => n + 1);
         } else {
           setIfDirty(false);
@@ -3847,12 +3970,13 @@ export function InterfacesPillar({
         emitMetadataRefresh();
         toast.success(tFormat('engine.studio.customize.restoreDone', locale, { item: item.label, package: custom.baseLabel }));
       } catch (e) {
-        setError(plainRefusal(e));
+        if (item.nav) setNavError(plainRefusal(e));
+        else setError(plainRefusal(e));
       } finally {
         setRestoring(false);
       }
     },
-    [client, forgetLeafVersion, reloadLeafDraft, locale],
+    [client, forgetLeafVersion, reloadLeafDraft, forgetNavVersion, reloadNavDraft, locale],
   );
   const restoreDialogEl = (
     <StudioRestoreOriginalDialog
@@ -3967,7 +4091,24 @@ export function InterfacesPillar({
       title={
         current ? (
           <>
-            {ifTitleText}
+            {/* objectstack#30046 — an object entry's title is object / view ▾, as the running list's is. */}
+            {isObjectLeaf && listView.target ? (
+              <ObjectListViewTitle
+                listView={listView}
+                objectText={ifTitleText}
+                locale={locale}
+                // objectstack#28562 — a new view is an item of the base, which takes none.
+                canCreate={!readOnly}
+                // The pending edit goes first, or the author is asked.
+                onSwitchView={switchListView}
+                // New view opens another view here: the pending edit goes first.
+                onAddViewOpen={flushListView}
+                // The selection named a column of the view shown before.
+                onViewCreated={() => setSelection(null)}
+              />
+            ) : (
+              ifTitleText
+            )}
             <span className="sr-only"> · {ifKindName}</span>
           </>
         ) : (
@@ -4034,11 +4175,15 @@ export function InterfacesPillar({
             <button
               type="button"
               data-testid="if-open-in-data"
+              title={t('engine.studio.if.openInData', locale)}
               onClick={() => openSurface({ type: 'object', name: current.name })}
               className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border bg-background px-2.5 text-xs text-foreground hover:bg-muted"
             >
               <Database className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-              {t('engine.studio.if.openInData', locale)}
+              {/* objectstack#30046 — on a narrow header it keeps its glyph, so the title keeps the view's name. */}
+              <span data-studio-fold-label="" className={STUDIO_FOLD_LABEL}>
+                {t('engine.studio.if.openInData', locale)}
+              </span>
             </button>
           )}
           {/* objectstack#28239 — the item tools Setup's item page opens. An
@@ -4273,6 +4418,8 @@ export function InterfacesPillar({
           appDraft={appDraft}
           objects={pkgObjects}
           packageId={packageId}
+          // objectstack#30059 — a customized navigation can open what the pair adds.
+          pairId={railPairId}
           onNavPatch={onNavPatch}
           onClear={() => setNavSel(null)}
         />
@@ -4318,18 +4465,12 @@ export function InterfacesPillar({
         <div className="min-h-0 flex-1 overflow-hidden">
           <ObjectListViewInspector
             listView={listView}
-            // objectstack#28562 — a customized view is edited; a new one is
-            // an item of the base, which takes none.
+            // objectstack#28562 — a customized view is edited.
             readOnly={listViewReadOnly}
-            canCreate={!readOnly}
             locale={locale}
             // objectui#12725 — the pillar's selection, which a canvas header click also makes.
             selection={selection}
             onSelectionChange={setSelection}
-            // objectstack#27836 — "Add view" opens another view here: the pending edit goes first.
-            onAddViewOpen={flushListView}
-            // objectstack#27896 — another view of the object: the pending edit goes first, or the author is asked.
-            onSwitchView={switchListView}
           />
         </div>
       ) : (
@@ -4521,8 +4662,27 @@ export function InterfacesPillar({
     itemsRead && railMarks
       ? (packageItems?.byType[type] ?? []).filter((item) => railMarks.markOf({ type, name: item.name, addedIn: item.addedIn }) !== null)
       : [];
-  const markedCount = OFF_NAV_TYPES.reduce((n, type) => n + markedOf(type).length, 0);
+  // objectstack#30059 — the app's override is a customization too: one more,
+  // and "only customizations" keeps the (customized) navigation it is.
+  const navMarked = navServed.declaration !== null;
+  const markedCount = OFF_NAV_TYPES.reduce((n, type) => n + markedOf(type).length, navMarked ? 1 : 0);
   const listOnlyCustomized = onlyCustomized && railMarks !== null && railMarks.failed === null;
+  // objectstack#30059 — the navigation entries the "+" adds, on a read-only
+  // base into the app's override.
+  const navAddable = appStatus === 'ready' && navWritable;
+  const navCustomizeKey = appName && customizeBase ? customizeItemKey(customizeBase, 'app', appName) : '';
+  const navRestoreTarget =
+    appName && navInPair
+      ? {
+          type: 'app',
+          name: appName,
+          key: navCustomizeKey,
+          label: navItemLabelText(appLabel, locale) || appName,
+          listView: false,
+          nav: true,
+          hasDraft: navHasDraft,
+        }
+      : null;
   const offNavSections = OFF_NAV_TYPES.map((type) => ({
     type,
     items: listOnlyCustomized
@@ -4636,6 +4796,22 @@ export function InterfacesPillar({
                   package is writable, as the create flow always was. */}
               {/* objectstack#28572 — on a read-only base, the kinds that
                   create an item, which lands in the base's pair. */}
+              {/* objectstack#30059 — the app's override: its mark, whose popover offers Restore. */}
+              {navServed.declaration && (
+                <InterfacesNavOverrideMark
+                  baseLabel={customizeBaseLabel}
+                  pairId={customizePair ?? ''}
+                  basedOn={navServed.declaration.basedOn}
+                  locale={locale}
+                  onRestore={navRestoreTarget ? () => setRestoreFor(navRestoreTarget) : undefined}
+                  restoreDisabled={
+                    restoring ||
+                    !!navSaving ||
+                    navDirty ||
+                    (customizePair === null && !pairsByItemRef.current.has(navCustomizeKey))
+                  }
+                />
+              )}
               {((appStatus === 'ready' && !readOnly) || (appStatus !== 'loading' && newInPair)) && !editNav && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -4656,10 +4832,10 @@ export function InterfacesPillar({
                     {NAV_ENTRY_TYPES.map((kind) => {
                       const KindIcon = navIcon(kind);
                       const creates = kind === 'page' || kind === 'dashboard' || kind === 'report';
-                      if (readOnly && !creates) return null;
+                      if (readOnly && !creates && !navAddable) return null;
                       return (
                         <React.Fragment key={kind}>
-                          {kind === 'group' && !readOnly && <DropdownMenuSeparator />}
+                          {kind === 'group' && (!readOnly || navAddable) && <DropdownMenuSeparator />}
                           <DropdownMenuItem
                             data-testid={creates ? `if-create-${kind}` : `if-add-nav-${kind}`}
                             onSelect={() => (creates ? openCreate(kind) : addNavEntry(kind))}
@@ -4679,9 +4855,12 @@ export function InterfacesPillar({
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}
-              {appStatus === 'ready' && !readOnly && (
+              {/* objectstack#30059 — on a read-only base, Edit customizes the
+                  navigation: nothing is written until an edit is saved. */}
+              {appStatus === 'ready' && navWritable && (
                 <button
                   type="button"
+                  data-testid="if-edit-nav"
                   onClick={() => {
                     // objectui#11189 — "Done" closes through the effect beside
                     // the nav autosave, which sends an unsent edit first.
@@ -4742,7 +4921,13 @@ export function InterfacesPillar({
                 )}
               </div>
           )}
-            {listOnlyCustomized && !editNav ? null : appStatus === 'missing' && !error ? (
+          {/* objectstack#30059 — where a read-only base's navigation edit is saved. */}
+          {editNav && readOnly && (
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              <SavedToCustomizationNote baseLabel={customizeBaseLabel} testId="if-nav-saved-to" />
+            </p>
+          )}
+            {listOnlyCustomized && !editNav && !navMarked ? null : appStatus === 'missing' && !error ? (
               <div className="px-2 py-3">
                 <p className="text-[11px] text-muted-foreground">{t('engine.studio.if.noApp', locale)}</p>
                 {onCreateApp && (
@@ -9026,9 +9211,12 @@ export function AutomationsPillar({
                   </label>
                   {newChoice === p && startTrigger.object?.showWhen?.equals.includes(p.triggerType) && (
                     <div className="ml-6 mt-1.5">
+                      {/* objectstack#30038 — no expression is legal here: a typed
+                          prefix is never saved as the trigger object. */}
                       <ObjectPicker
                         label={startTrigger.object.label}
                         value={newTriggerObject}
+                        objectsOnly
                         onCommit={(v) => {
                           setNewTriggerObject(v);
                           setNewNeeds(null);
@@ -9083,6 +9271,7 @@ export function AutomationsPillar({
                       <ObjectPicker
                         label={startTrigger.object.label}
                         value={newTriggerObject}
+                        objectsOnly
                         onCommit={setNewTriggerObject}
                         locale={locale}
                       />

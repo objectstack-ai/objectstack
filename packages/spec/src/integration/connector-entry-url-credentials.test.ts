@@ -394,3 +394,92 @@ describe('a URL is judged as a URL parser cleans it: tab and newline characters 
     });
   });
 });
+
+// A URL with a special scheme — `http`, `https`, `ws`, `wss`, `ftp`, in any
+// letter case — is read for credentials the way a URL parser reads it: its
+// authority starts after the whole run of `/` and `\` that follows the scheme,
+// however long, none included. Every other scheme keeps `scheme://` (or a
+// scheme-relative `//`), and `file:` carries no userinfo. Both doors read the
+// one grammar, so the write refusal and the read rewrite move together.
+describe('a URL with a special scheme is read for credentials the way a URL parser reads it, however many slashes follow the scheme', () => {
+  const BS = String.fromCharCode(0x5c);
+  const HOST = 'api.vendor.example.com/v1';
+  const withNote = (note: string) => ({ ...rest(`https://${HOST}`), providerConfig: { baseUrl: `https://${HOST}`, note } });
+  /** [form, the scheme and the run after it] — `s` is the scheme. */
+  const FORMS: Array<[string, (s: string) => string]> = [
+    ['no slash', (s) => `${s}:`],
+    ['one slash', (s) => `${s}:/`],
+    ['a backslash', (s) => `${s}:${BS}`],
+    ['three slashes', (s) => `${s}:///`],
+    ['a run of slashes and backslashes', (s) => `${s}:/${BS}/`],
+    ['an uppercase scheme and no slash', (s) => `${s.toUpperCase()}:`],
+    ['an uppercase scheme and three slashes', (s) => `${s.toUpperCase()}:///`],
+  ];
+  const leadsOf = (schemes: readonly string[]) =>
+    schemes.flatMap((scheme) => FORMS.map(([form, lead]) => [`\`${scheme}:\` with ${form}`, lead(scheme)] as [string, string]));
+  const SPECIAL = leadsOf(['http', 'https', 'ws', 'wss', 'ftp']);
+  const NO_AUTHORITY = leadsOf(['file', 'postgres', 'libsql']).filter(([, lead]) => !lead.endsWith('///'));
+
+  describe('REFUSED at the string, and the read rewrites it at the position the write judged', () => {
+    it.each(SPECIAL)('a userinfo after %s', (_label, lead) => {
+      for (const userinfo of [`u:${PLACEHOLDER}@`, `${PLACEHOLDER}@`]) {
+        const entry = rest(`${lead}${userinfo}${HOST}`);
+        const { located, messages } = refusals(entry);
+        expect(located).toEqual([['custom', 'providerConfig.baseUrl']]);
+        expect(messages[0]).toContain('auth: { type, credentialRef }');
+        expect(messages[0]).not.toContain(PLACEHOLDER);
+        const { item: served, redactedKeys } = redactConnectorItem(entry);
+        expect(redactedKeys).toEqual(['providerConfig.baseUrl']);
+        expect((served.providerConfig as Record<string, unknown>).baseUrl).toBe(`${lead}${HOST}`);
+        accepts(served);
+      }
+    });
+
+    it.each(SPECIAL)('a userinfo after %s, in a string that is not the base URL', (_label, lead) => {
+      const entry = withNote(`${lead}u:${PLACEHOLDER}@hooks.vendor.example.com`);
+      expect(refusals(entry).located).toEqual([['custom', 'providerConfig.note']]);
+      const { item: served, redactedKeys } = redactConnectorItem(entry);
+      expect(redactedKeys).toEqual(['providerConfig.note']);
+      expect((served.providerConfig as Record<string, unknown>).note).toBe(`${lead}hooks.vendor.example.com`);
+      accepts(served);
+    });
+  });
+
+  describe('CONTROL: what a URL parser reads no userinfo from is accepted and served as stored', () => {
+    it.each(SPECIAL)('a URL after %s with no userinfo, and with an `@` only in its path', (_label, lead) => {
+      for (const value of [`${lead}${HOST}`, `${lead}${HOST}/users/@me`]) {
+        accepts(rest(value));
+        expect(redactConnectorItem(rest(value)).redactedKeys).toEqual([]);
+      }
+    });
+
+    it.each(NO_AUTHORITY)('no authority without `//` after a scheme that is not special, or `file:` — %s', (_label, lead) => {
+      const value = `${lead}u:${PLACEHOLDER}@${HOST}`;
+      accepts(rest(value));
+      expect(redactConnectorItem(rest(value)).redactedKeys).toEqual([]);
+    });
+
+    it.each(['file', 'postgres', 'libsql'])('a `%s:///` authority is empty, so what follows the third slash is path', (scheme) => {
+      const value = `${scheme}:///u:${PLACEHOLDER}@${HOST}`;
+      accepts(rest(value));
+      expect(redactConnectorItem(rest(value)).redactedKeys).toEqual([]);
+    });
+
+    it('the `//` forms keep their reading: a userinfo after `scheme://` or `//` is refused, none is accepted', () => {
+      for (const value of [`https://u:${PLACEHOLDER}@${HOST}`, `postgres://u:${PLACEHOLDER}@${HOST}`, `//u:${PLACEHOLDER}@${HOST}`]) {
+        expect(refusals(rest(value)).located).toEqual([['custom', 'providerConfig.baseUrl']]);
+      }
+      for (const value of [`https://${HOST}`, `postgres://${HOST}`, `//${HOST}`]) accepts(rest(value));
+    });
+  });
+
+  it.each([...SPECIAL, ...NO_AUTHORITY])('refused ⇔ rewritten after %s', (_label, lead) => {
+    for (const value of [`${lead}u:${PLACEHOLDER}@${HOST}`, `${lead}${PLACEHOLDER}@${HOST}`, `${lead}${HOST}`]) {
+      for (const entry of [rest(value), withNote(value)]) {
+        const refused = !DeclarativeConnectorEntrySchema.safeParse(entry).success;
+        const rewritten = redactConnectorItem(entry as Record<string, unknown>).redactedKeys.length > 0;
+        expect(refused, 'refused ⇔ rewritten').toBe(rewritten);
+      }
+    }
+  });
+});

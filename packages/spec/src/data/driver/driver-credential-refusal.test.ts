@@ -1302,3 +1302,82 @@ describe('datasource — bound credentialsRef + composed mongo config naming no 
     expect(result.error!.issues.some((i) => i.message.includes('not accepted in the driver-options passthrough'))).toBe(true);
   });
 });
+
+// A URL with a special scheme — `http`, `https`, `ws`, `wss`, `ftp`, in any
+// letter case — is read for a password the way a URL parser reads it: its
+// authority starts after the whole run of `/` and `\` that follows the scheme,
+// however long, none included. Every other scheme keeps `scheme://` (or a
+// scheme-relative `//`), and `file:` carries no userinfo. Judged at every
+// URL-bearing driver key, turso `syncUrl` included.
+const BS = String.fromCharCode(0x5c);
+/** [form, the scheme and the run after it] — `s` is the scheme. */
+const SPECIAL_SCHEME_FORMS: Array<[string, (s: string) => string]> = [
+  ['no slash', (s) => `${s}:`],
+  ['one slash', (s) => `${s}:/`],
+  ['a backslash', (s) => `${s}:${BS}`],
+  ['three slashes', (s) => `${s}:///`],
+  ['a run of slashes and backslashes', (s) => `${s}:/${BS}/`],
+  ['an uppercase scheme and no slash', (s) => `${s.toUpperCase()}:`],
+  ['an uppercase scheme and three slashes', (s) => `${s.toUpperCase()}:///`],
+];
+const schemeLeadsOf = (schemes: readonly string[]) =>
+  schemes.flatMap((scheme) => SPECIAL_SCHEME_FORMS.map(([form, lead]) => [`\`${scheme}:\` with ${form}`, lead(scheme)] as [string, string]));
+const SPECIAL_SCHEME_LEADS = schemeLeadsOf(['http', 'https', 'ws', 'wss', 'ftp']);
+const NO_AUTHORITY_LEADS = schemeLeadsOf(['file', 'postgresql', 'mysql', 'mongodb', 'libsql']).filter(([, lead]) => !lead.endsWith('///'));
+
+describe.each(URL_FAMILY)('$name — a URL with a special scheme is read for a password the way a URL parser reads it, however many slashes follow the scheme', (f) => {
+  /** The userinfo refusal at `f.key` — other refusals at the same key (a driver's own URL grammar) are not this rule's. */
+  const userinfoRefusalAt = (config: Record<string, unknown>) => {
+    const result = f.schema.safeParse(config);
+    if (result.success) return undefined;
+    return result.error.issues.find(
+      (i) => i.path.join('.') === f.key && i.message.includes('embeds a password in its userinfo'),
+    );
+  };
+
+  it.each(SPECIAL_SCHEME_LEADS)('refuses `user:password@host` after %s', (_label, lead) => {
+    const issue = userinfoRefusalAt(f.make(`${lead}svc:hunter2@db.example.com/prod`));
+    expect(issue, `refusal must be pathed at \`${f.key}\``).toBeDefined();
+    expect(issue!.code).toBe('custom');
+    expect(issue!.message).toContain('external.credentialsRef');
+  });
+
+  it.each(SPECIAL_SCHEME_LEADS)('CONTROL: a bare username after %s carries no password and is not refused for one', (_label, lead) => {
+    expect(userinfoRefusalAt(f.make(`${lead}svc@db.example.com/prod`))).toBeUndefined();
+    expect(userinfoRefusalAt(f.make(`${lead}db.example.com/prod/a:b@c`))).toBeUndefined();
+  });
+
+  it.each(NO_AUTHORITY_LEADS)('CONTROL: no authority without `//` after a scheme that is not special, or `file:` — %s', (_label, lead) => {
+    expect(userinfoRefusalAt(f.make(`${lead}svc:hunter2@db.example.com/prod`))).toBeUndefined();
+  });
+
+  it('CONTROL: the `//` forms keep their reading — a password after `scheme://` or `//` is refused, an empty `scheme:///` authority holds none', () => {
+    expect(userinfoRefusalAt(f.make(f.sample('svc:hunter2@')))).toBeDefined();
+    expect(userinfoRefusalAt(f.make('//svc:hunter2@db.example.com/prod'))).toBeDefined();
+    for (const scheme of ['file', 'postgresql', 'libsql']) {
+      expect(userinfoRefusalAt(f.make(`${scheme}:///svc:hunter2@db.example.com/prod`)), scheme).toBeUndefined();
+    }
+  });
+});
+
+describe('the shared userinfo parse reads a special scheme\'s authority however many slashes follow the scheme', () => {
+  it.each(SPECIAL_SCHEME_LEADS)('after %s: the password and the username are read', (_label, lead) => {
+    expect(urlUserinfoPassword(`${lead}u:p@h/db`)).toBe('p');
+    expect(urlUserinfoUsername(`${lead}u:p@h/db`)).toBe('u');
+    expect(urlUserinfoUsername(`${lead}u@h/db`)).toBe('u');
+    // CONTROL: no userinfo, and an `@` in the path, carry none.
+    expect(urlUserinfoUsername(`${lead}h/db`)).toBeUndefined();
+    expect(urlUserinfoUsername(`${lead}h/a:b@c`)).toBeUndefined();
+  });
+
+  it('after a special scheme the authority is read on the cleaned string, tab and newline characters deleted', () => {
+    const TAB = String.fromCharCode(0x09);
+    const LF = String.fromCharCode(0x0a);
+    expect(urlUserinfoPassword(`ht${TAB}tps:u:p@h/db`)).toBe('p');
+    expect(urlUserinfoPassword(` https:/${LF}/${BS}u:p@h/db`)).toBe('p');
+  });
+
+  it.each(NO_AUTHORITY_LEADS)('CONTROL: after %s there is no authority, so no userinfo', (_label, lead) => {
+    expect(urlUserinfoUsername(`${lead}u:p@h/db`)).toBeUndefined();
+  });
+});

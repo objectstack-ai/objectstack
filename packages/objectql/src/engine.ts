@@ -116,7 +116,7 @@ import { serveReferenceNames } from './engine-reference-name-visible.js';
 // [#25522 cut 12] The driver options every driver call receives, and the tenancy
 // posture and Layer 0 verdict they are scoped by; the methods of the same names
 // below hand each body the members it reads (`DriverOptionsHost`).
-import { buildDriverOptions, driverReadScope, driverWriteTarget, engineLayer0Verdict, resolveEnginePosture, wallExemptedOperation } from './engine-driver-options.js';
+import { buildDriverOptions, driverReadScope, driverWriteTarget, engineLayer0Verdict, mergeDriverOptionsIntoHookView, resolveEnginePosture, wallExemptedOperation } from './engine-driver-options.js';
 // [#25522 cut 13] The `sys_migration` flag reads, the certification question a
 // driver is handed, and the admitted-violation tally and boot advisory; the
 // methods of the same names below hand each body the members it reads (`MigrationFlagsHost`).
@@ -263,6 +263,7 @@ import {
   projectHomeAmounts,
   settleBulkHomeAmounts,
   type HomeAmountPlanEntry,
+  type HomeAmountReads,
   type HomeAmountServing,
   type HomeLocalization,
   type HomeLocalizationResolver,
@@ -2454,11 +2455,20 @@ export class ObjectQL implements IObjectQLEngine {
    *    the remote and to the layers above (RBAC/RLS, the datasource binding),
    *    not to a predicate the platform guesses onto someone else's table.
    *
-   * Existing user-supplied shapes (transactions, AST extras) are preserved by
-   * spreading them first — an explicitly-passed `base.tenantId` is deliberate
-   * caller intent and still wins, under every verdict. System / isSystem
-   * callers may still cross tenants by clearing `tenantId` themselves on the
-   * resulting object; this helper does not mask the system path.
+   * # Declared keys only
+   *
+   * The result holds the keys `DriverOptionsSchema` declares and nothing else
+   * (`pickDeclaredDriverOptions`, `engine-driver-options.ts`). `base` is
+   * usually a caller's whole option bag — the query, the write-observability
+   * callbacks and the other engine-level keys ride in it — and only its
+   * declared keys are kept: an explicitly-passed `base.tenantId` /
+   * `base.transaction` / `base.bypassTenantAudit` is deliberate caller intent
+   * and still wins, under every verdict; everything else in the bag is the
+   * engine's, never a driver's. That is why a verb hands its driver THIS
+   * object and keeps `input.options` as the hooks' additive view
+   * (`mergeDriverOptionsIntoHookView`). System / isSystem callers may still
+   * cross tenants by clearing `tenantId` themselves on the resulting object;
+   * this helper does not mask the system path.
    */
   private buildDriverOptions(
     object: string,
@@ -3529,6 +3539,21 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   private homeLocalizationResolver?: HomeLocalizationResolver;
+
+  /**
+   * [ADR-0144 D5, D7 parameter 1] What the write-time home projection reads,
+   * for a caller that projects a STORED row as a write would: the serving a
+   * write under `context` reads each organization's home currency and
+   * timezone and the rate rows through (memoized for the serving's life), and
+   * the organization a write converts a row under. The explicit recompute
+   * (`recomputeHomeAmounts`, `os migrate recompute-home-amounts`) projects
+   * stored rows with these and `projectHomeAmounts`, so its preview is the
+   * write's own computation, never a copy of it.
+   */
+  homeAmountReadsFor(context?: ExecutionContext): HomeAmountReads {
+    // [ADR-0144] The body lives in `engine-references-and-master-detail.ts` (see `ReferencesAndMasterDetailHost`).
+    return ReferencesAndMasterDetailFacet.homeAmountReadsFor.call(referencesAndMasterDetailHost.of(this), context);
+  }
 
   /**
    * [ADR-0144 D5, Open item 2] What one write's home projection reads, memoized
@@ -6637,14 +6662,17 @@ export class ObjectQL implements IObjectQLEngine {
           ql: this
       };
       await this.triggerHooks('beforeFind', hookContext);
-      hookContext.input.options = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
+      // The driver is handed `driverOptions` — the declared driver options and
+      // nothing else; `input.options` stays the hooks' additive view of the bag.
+      const driverOptions = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
+      hookContext.input.options = mergeDriverOptionsIntoHookView(hookContext.input.options, driverOptions);
       // [ADR-0139 D2] The executor boundary: the AST is final here — after the
       // doors, the middleware chain and `beforeFind` — so every `ReadableIds`
       // leaf is composed (or refused) on it, immediately before the driver.
       const driverAst = await this.composeReadableIdsAtBoundary(object, 'find', hookContext.input.ast as QueryAST, opCtx.context);
 
       try {
-          let result = await driver.find(object, driverAst, hookContext.input.options as any);
+          let result = await driver.find(object, driverAst, driverOptions);
 
           // [#21571] The read's default projection is the DECLARED field set:
           // a column no metadata declares (a field retired in an upgrade,
@@ -6865,11 +6893,13 @@ export class ObjectQL implements IObjectQLEngine {
           ql: this
       };
       await this.triggerHooks('beforeFind', hookContext);
-      hookContext.input.options = this.buildDriverOptions(objectName, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
+      // The driver is handed `driverOptions` alone, as in `find`.
+      const driverOptions = this.buildDriverOptions(objectName, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
+      hookContext.input.options = mergeDriverOptionsIntoHookView(hookContext.input.options, driverOptions);
       // [ADR-0139 D2] The executor boundary, as in `find`.
       const driverAst = await this.composeReadableIdsAtBoundary(objectName, 'findOne', hookContext.input.ast as QueryAST, opCtx.context);
 
-      let result = await driver.findOne(objectName, driverAst, hookContext.input.options as any);
+      let result = await driver.findOne(objectName, driverAst, driverOptions);
 
       // [#21571] Same default projection as `find`, same position: the
       // declared field set, applied to the row as the driver returned it.
@@ -8030,8 +8060,11 @@ export class ObjectQL implements IObjectQLEngine {
         // not a read scope (ADR-0131 D8 leaves the write target alone).
         { writeTarget: true },
       );
+      // Every driver call below is handed `driverOptions` — the declared driver
+      // options and nothing else; the hooks keep their additive view of the bag.
+      const hookOptions = mergeDriverOptionsIntoHookView(optionsBase, driverOptions);
       for (const rowCtx of rowHookContexts) {
-        rowCtx.input.options = driverOptions;
+        rowCtx.input.options = hookOptions;
       }
       // [#27495] The credential rows each row's secret fields are sealed into,
       // and the ones this write has actually written to `sys_secret`.
@@ -9640,7 +9673,10 @@ export class ObjectQL implements IObjectQLEngine {
        // refuses before any driver call.
        reportDroppedFields(preComputedPayload, computedStripUpdate.rows[0] as Record<string, unknown> | null | undefined, 'computed');
 
-       hookContext.input.options = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
+       // Every driver call below is handed `driverOptions` — the declared driver
+       // options and nothing else; `input.options` is the hooks' additive view.
+       const driverOptions = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
+       hookContext.input.options = mergeDriverOptionsIntoHookView(hookContext.input.options, driverOptions);
        // [#27495] The credential rows this write seals, the ones it has written
        // to `sys_secret`, and the handles its committed statement moved the
        // secret columns off.
@@ -9760,7 +9796,7 @@ export class ObjectQL implements IObjectQLEngine {
                // secret channel (which carries the secret-arm refusal).
                this.refuseEmptyPasswordFields(object, hookContext.input.data as Record<string, unknown>);
                // [#27582] This record's own stored row is the pre-image read above.
-               sealedSecrets = await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options, async () => [priorRecord]);
+               sealedSecrets = await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, driverOptions, async () => [priorRecord]);
                // [#21663] Scope `'skip'` — the public `validateRecord` IS that
                // scope: the readonly strip has NOT run yet, so a readonly value
                // here may be a caller's the strip is about to drop — judged, a
@@ -10104,8 +10140,8 @@ export class ObjectQL implements IObjectQLEngine {
                    // `OperationContext.writePrecondition`.
                    const precondition = opCtx.writePrecondition;
                    result = precondition && Object.keys(precondition).length > 0
-                     ? await this.updateByIdExpecting(driver, object, hookContext.input.id, hookContext.input.data as Record<string, unknown>, precondition, hookContext.input.options as Parameters<IDataDriver['findOne']>[2])
-                     : await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
+                     ? await this.updateByIdExpecting(driver, object, hookContext.input.id, hookContext.input.data as Record<string, unknown>, precondition, driverOptions)
+                     : await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, driverOptions);
                } catch (driverError) {
                    throw envelopeDriverWriteRefusal(driverError, object, this.getSchema(object), 'update', updateMsgCtx);
                }
@@ -10187,7 +10223,7 @@ export class ObjectQL implements IObjectQLEngine {
                this.refuseEmptyPasswordFields(object, hookContext.input.data as Record<string, unknown>);
                // [#27582] The rows this write lands on are the matched rows: the
                // D7 memo, read here only when a non-system payload carries a ref.
-               sealedSecrets = await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options, readPriorRows);
+               sealedSecrets = await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, driverOptions, readPriorRows);
                // [#21663] Scope `'skip'` — the public `validateRecord` IS that
                // scope: the readonly strip has NOT run yet, so a readonly value
                // here may be a caller's the strip is about to drop — judged, a
@@ -10538,7 +10574,7 @@ export class ObjectQL implements IObjectQLEngine {
                if (summaryKeyColumns.length > 0) {
                    const previous = priorRowsRead
                      ? ((await readPriorRows()) ?? [])
-                     : (((await driver.find(object, { ...ast, fields: summaryKeyColumns }, hookContext.input.options as Parameters<IDataDriver['find']>[2])) ?? []) as Record<string, unknown>[]);
+                     : (((await driver.find(object, { ...ast, fields: summaryKeyColumns }, driverOptions)) ?? []) as Record<string, unknown>[]);
                    const payload = hookContext.input.data as Record<string, unknown>;
                    summaryRows = { previous, next: previous.map((row) => ({ ...row, ...payload })) };
                }
@@ -10552,10 +10588,10 @@ export class ObjectQL implements IObjectQLEngine {
                  ? []
                  : priorRowsRead
                    ? ((await readPriorRows()) ?? [])
-                   : (((await driver.find(object, { ...ast, fields: ['id', ...movedSecretColumns] }, hookContext.input.options as Parameters<IDataDriver['find']>[2])) ?? []) as Record<string, unknown>[]);
+                   : (((await driver.find(object, { ...ast, fields: ['id', ...movedSecretColumns] }, driverOptions)) ?? []) as Record<string, unknown>[]);
                await this.persistSecretRows(sealedSecrets, writtenSecrets);
                try {
-                   result = await driver.updateMany!(object, ast, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
+                   result = await driver.updateMany!(object, ast, hookContext.input.data as Record<string, unknown>, driverOptions);
                } catch (driverError) {
                    throw envelopeDriverWriteRefusal(driverError, object, this.getSchema(object), 'update', updateMsgCtx);
                }
@@ -11714,7 +11750,10 @@ export class ObjectQL implements IObjectQLEngine {
         }
       }
 
-      hookContext.input.options = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
+      // Every driver call below is handed `driverOptions` — the declared driver
+      // options and nothing else; `input.options` is the hooks' additive view.
+      const driverOptions = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
+      hookContext.input.options = mergeDriverOptionsIntoHookView(hookContext.input.options, driverOptions);
 
       try {
           let result;
@@ -11818,7 +11857,7 @@ export class ObjectQL implements IObjectQLEngine {
                if (plan === 'none') {
                  if (summaryKeyColumns.length > 0) {
                    summaryPriorRows = predicateMatchedRows
-                     ?? (((await driver.find(object, { ...opCtx.ast!, fields: summaryKeyColumns }, hookContext.input.options as Parameters<IDataDriver['find']>[2])) ?? []) as Record<string, unknown>[]);
+                     ?? (((await driver.find(object, { ...opCtx.ast!, fields: summaryKeyColumns }, driverOptions)) ?? []) as Record<string, unknown>[]);
                  }
                  // [#27581] The handles the matched rows hold, read BEFORE the
                  // statement removes them: the per-row hook read when it was
@@ -11826,9 +11865,9 @@ export class ObjectQL implements IObjectQLEngine {
                  // this write's AST and options. No secret column, no read.
                  if (secretColumns.length > 0) {
                    deletedSecrets = deletedSecretSlots(deleteSchema, predicateMatchedRows
-                     ?? (((await driver.find(object, { ...opCtx.ast!, fields: ['id', ...secretColumns] }, hookContext.input.options as Parameters<IDataDriver['find']>[2])) ?? []) as Record<string, unknown>[]));
+                     ?? (((await driver.find(object, { ...opCtx.ast!, fields: ['id', ...secretColumns] }, driverOptions)) ?? []) as Record<string, unknown>[]));
                  }
-                 result = await driver.deleteMany!(object, opCtx.ast!, hookContext.input.options as any);
+                 result = await driver.deleteMany!(object, opCtx.ast!, driverOptions);
                } else {
                  // Otherwise: resolve the matched rows through the composed,
                  // row-scoped AST, run `cascadeDeleteRelations` once over them

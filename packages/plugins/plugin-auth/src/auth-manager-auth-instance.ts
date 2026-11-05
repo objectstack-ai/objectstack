@@ -274,7 +274,7 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
       //   approval gate the ruling refuses, not a way to notify.
       //
       // The notice is consequently sent by the framework, from the global
-      // `after` hook on `/change-email` (search `__osChangeEmailFrom`), using
+      // `after` hook on `/change-email` (`auth-manager-after-hook.ts`), using
       // the `auth.email_change_notice` template. It is failure-isolated by
       // construction: it runs after better-auth has already produced the
       // response, and its own errors are swallowed, so a dead mailbox cannot

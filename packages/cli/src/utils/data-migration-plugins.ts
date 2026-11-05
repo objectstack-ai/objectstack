@@ -33,7 +33,7 @@ import { oneShotSettingsPlugin } from './one-shot-settings.js';
  *    swap the adapter out from under the root the operator named.
  */
 export async function buildDataMigrationPlugins(
-  opts: { storage?: boolean; automation?: boolean; audit?: boolean } = {},
+  opts: { storage?: boolean; automation?: boolean; audit?: boolean; settings?: boolean } = {},
 ): Promise<unknown[]> {
   const plugins: unknown[] = [];
   const { PlatformObjectsPlugin } = await import('@objectstack/platform-objects/plugin');
@@ -81,6 +81,14 @@ export async function buildDataMigrationPlugins(
     // process must not become a second server.
     const { AutomationServicePlugin } = await import('@objectstack/service-automation');
     plugins.push(new AutomationServicePlugin({ armRuntime: false, suspendedRunStore: 'memory' }));
+  }
+  if (opts.settings === true && opts.storage !== true) {
+    // [ADR-0144 D4, D5] `os migrate recompute-home-amounts` projects stored
+    // rows as a write does, and a write reads each organization's home
+    // currency and timezone (`localization.currency` / `.timezone`) from the
+    // settings service; without it every organization reads as having no home
+    // currency. The one-shot composition, as the storage arm below takes it.
+    plugins.push(await oneShotSettingsPlugin());
   }
   if (opts.storage === true) {
     try {

@@ -54,8 +54,16 @@ describe('SeedSchema', () => {
     });
 
     expect(dataset.externalId).toBe('name');
-    expect(dataset.mode).toBe('upsert');
+    // Create-only by default (ruling 6631016988 on #30081): a replay inserts
+    // the missing rows and leaves an existing row as the customer left it.
+    expect(dataset.mode).toBe('ignore');
     expect(dataset.env).toEqual(['prod', 'dev', 'test']);
+  });
+
+  it('keeps every authored mode as written — only an omitted mode takes the default', () => {
+    for (const mode of ['insert', 'update', 'upsert', 'replace', 'ignore'] as const) {
+      expect(SeedSchema.parse({ object: 'product', mode, records: [] }).mode).toBe(mode);
+    }
   });
 
   it('should validate object name format (snake_case)', () => {

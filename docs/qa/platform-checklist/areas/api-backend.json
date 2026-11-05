@@ -1477,7 +1477,7 @@
       "title": "Every date-range preset resolves to its declared macro window, and a bare preset name used as a raw comparand is refused with the prescription",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1489,7 +1489,7 @@
           "an object with a date/datetime field carrying rows spread across the preset windows (today, this week, last quarter, last 90 days) so each preset has a distinguishable answer set"
         ],
         "knownGaps": [
-          "Stock seeds are unlikely to place rows in every one of the 13 windows. Presets whose window contains no seeded row prove only that the window RESOLVED, not that it selected correctly — the run must record which presets were answer-discriminating and which were merely well-formed. Seeding rows at known offsets during the run is the honest way to close this; record it if done.",
+          "Stock seeds are unlikely to place rows in every one of the 16 windows, and the three forward ones (next_month, next_quarter, next_30_days) select only future-dated rows. Presets whose window contains no seeded row prove only that the window RESOLVED, not that it selected correctly — the run must record which presets were answer-discriminating and which were merely well-formed. Seeding rows at known offsets during the run is the honest way to close this; record it if done.",
           "Presets are relative to run time, so a run near a period boundary (month/quarter/year rollover, or a run spanning midnight) can legitimately shift an answer set. Capture the run's clock alongside the results."
         ]
       },
@@ -1539,18 +1539,21 @@
         "last_week",
         "this_month",
         "last_month",
+        "next_month",
         "this_quarter",
         "last_quarter",
+        "next_quarter",
         "this_year",
         "last_year",
         "last_7_days",
         "last_30_days",
-        "last_90_days"
+        "last_90_days",
+        "next_30_days"
       ],
       "enumSource": {
         "file": "packages/spec/src/data/date-range-presets.ts",
         "export": "DATE_RANGE_PRESETS",
-        "expect": 13
+        "expect": 16
       },
       "traps": [
         "clock-skew",
@@ -1574,6 +1577,12 @@
           "date": "2026-10-02",
           "change": "split clause 3 into its two designed arms. The clause expected the preset prescription for step 5's own example, an EQUALITY (where: { created: 'today' }); the platform deliberately raises that message only in ordering positions (18.filter-preset-ordering-comparand-refused.ts) and refuses an equality on a date field at the temporal door (400 INVALID_FILTER). Measured on 17.6.0 by the release-verification run: equality → INVALID_FILTER with the temporal message, $gte → VALIDATION_FAILED with bareDateRangePresetComparandMessage, neither ever 200. Step 5 now drives both arms",
           "ref": "#21330"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-04",
+          "change": "variants widened from 13 to 16: DATE_RANGE_PRESETS gained the forward presets next_month, next_quarter and next_30_days (ruling A on the card). Their windows are [{next_month_start}, {next_month_end}], [{next_quarter_start}, {next_quarter_end}] and [{today}, {30_days_from_now}]; the bare-comparand refusal prescribes them like every other preset. A forward window needs future-dated rows to discriminate, which the knownGaps line now says",
+          "ref": "#30076"
         }
       ]
     },
@@ -3196,7 +3205,7 @@
       "title": "/meta read doors on v18: GET /meta/app/PACKAGE_ID returns that package's app, `?member=` selects one bundle member on by-name doors, an unknown query parameter on any by-name door is refused 400, `?package=all` folds to the no-parameter answer, and the object definition marks an FLS-denied field unsortable for that caller",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -3207,7 +3216,7 @@
         "app": "showcase",
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
-          "a showcase email template with two locale members: the showcase ships only the en-US member of showcase_task_done_email (examples/app-showcase/src/system/emails), so author the zh-CN member with PUT /api/v1/meta/email_template/showcase_task_done_email carrying `locale: 'zh-CN'` in the BODY — the save door's closed set is force, package, mode and surface, so ?member= is a READ parameter only"
+          "a showcase email template with two locale members: the showcase ships only the en-US member of showcase_task_done_email (examples/app-showcase/src/system/emails), so author the zh-CN member into the showcase's customization pair: POST /api/v1/packages/com.example.showcase/ensure-customization, then PUT /api/v1/meta/email_template/showcase_task_done_email?package=com.example.showcase.custom carrying `locale: 'zh-CN'` in the BODY and no `overrides` (the base ships no zh-CN member, so a declared override is refused 403 NOT_OVERRIDABLE, and a package-less PUT onto the shipped name is refused 403 NOT_OVERRIDABLE since ADR-0146 D11; packages/qa/dogfood/test/meta-read-doors-live.dogfood.test.ts authors it the same way) — the save door's closed set is force, package, mode and surface, so ?member= is a READ parameter only"
         ]
       },
       "steps": [
@@ -3287,6 +3296,12 @@
           "date": "2026-10-27",
           "change": "acceptance[1]–[4] are pinned at the layer their oracle names (the release-18.2.0 Tier 1 sweep #26468 scored a1–a4 partial: every pin but the data-sort dogfood stopped above the Hono adapter, and that one used a scratch permission set, not client_liaison). The new meta-read-doors-live.dogfood.test.ts drives each step through the HTTP stack of its own showcase boot, client_liaison bound through a sys_user_position row; automated.ref and acceptance[4].verify name it. Measured at base 74db43ef. No clause changed",
           "ref": "#26572"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-04",
+          "change": "fixtures.requires[1] corrected: the bare PUT of a zh-CN member onto the shipped showcase_task_done_email is package-less, which ADR-0146 D11 refuses 403 NOT_OVERRIDABLE. The member is now authored into com.example.showcase.custom with no `overrides`, the shape meta-read-doors-live.dogfood.test.ts already uses. Measured on a fresh showcase boot at base 232d3bb5ef: package-less PUT 403; pair PUT with overrides 403 (the base ships no zh-CN member); pair PUT without overrides 200, then ?member=zh-CN serves it and ?member=en-US the shipped member. No clause changed",
+          "ref": "#30129"
         }
       ]
     },

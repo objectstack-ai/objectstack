@@ -279,6 +279,11 @@ const ROSTER: Record<string, Member> = {
     },
     writes: () => [seams.resumeMigrationJournal],
   },
+  'recompute-home-amounts': {
+    argv: ['--apply', '--object', 'invoice'],
+    confirm: '--yes',
+    writes: BOOT,
+  },
   'record-currency-codes': {
     argv: ['--apply', '--object', 'opportunity', '--field', 'amount', '--code', 'USD'],
     confirm: '--yes',

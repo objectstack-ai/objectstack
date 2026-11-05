@@ -232,6 +232,37 @@ export function resolveUserExportAllowed(
 }
 
 /**
+ * The most-permissive merge of the object permission each set contributes for
+ * `objectName` ({@link resolveObjectPermission}, so the ADR-0066 D2 wildcard
+ * posture is honoured per set): a bit is `true` when ANY set's entry says
+ * `true`, the shape the `/me/permissions` per-object merge hands the client
+ * (`if (v === true) acc[k] = true`). `undefined` when no set contributes an
+ * entry at all.
+ *
+ * Only the boolean grant bits are merged; the depth keys are not, because
+ * {@link PermissionEvaluator.getEffectiveScope} folds those itself.
+ */
+function mergeResolvedObjectPermissions(
+  objectName: string,
+  permissionSets: PermissionSet[],
+  isPrivate: boolean,
+): EffectiveObjectPermission | undefined {
+  let merged: Record<string, boolean> | undefined;
+  for (const ps of permissionSets) {
+    // [ADR-0066 D2] Honour the `'*'` wildcard sentinel — admin permission
+    // sets grant blanket access via a single `objects: { '*': … }` entry —
+    // but a `private` object is excluded from a non-super-user wildcard.
+    const objPerm = resolveObjectPermission(ps, objectName, isPrivate);
+    if (!objPerm) continue;
+    merged ??= {};
+    for (const [key, value] of Object.entries(objPerm)) {
+      if (value === true) merged[key] = true;
+    }
+  }
+  return merged as EffectiveObjectPermission | undefined;
+}
+
+/**
  * PermissionEvaluator
  * 
  * Runtime evaluator for PermissionSet definitions.
@@ -279,27 +310,27 @@ export class PermissionEvaluator {
       return !DESTRUCTIVE_OPERATIONS.has(operation);
     }
 
-    for (const ps of permissionSets) {
-      // [ADR-0066 D2] Honour the `'*'` wildcard sentinel — admin permission
-      // sets grant blanket access via a single `objects: { '*': … }` entry —
-      // but a `private` object is excluded from a non-super-user wildcard.
-      const objPerm = resolveObjectPermission(ps, objectName, opts.isPrivate ?? false);
-      // [#18785] ONE fold, asked — the spec's `objectPermissionGrants` is the
-      // single definition of "does this effective object permission grant this
-      // verb?", and it carries every cell this branch used to restate: the read
-      // bypass on `viewAllRecords || modifyAllRecords`, the write bypass on
-      // `modifyAllRecords` alone (edit/delete/transfer — the
-      // MODIFY_ALL_WRITE_KEYS class), and `allowCreate` deliberately WITHOUT a
-      // bypass. Restating it here is how the enforcement door and every
-      // predicate that advertises the door's answer drift apart: they would
-      // still compile, still pass their own pins, and disagree only for the one
-      // administrator who holds the super-user bit.
-      if (objPerm && objectPermissionGrants(objPerm as EffectiveObjectPermission, permKey)) {
-        return true;
-      }
-    }
-
-    return false;
+    // [#18785] ONE fold, asked — the spec's `objectPermissionGrants` is the
+    // single definition of "does this effective object permission grant this
+    // verb?", and it carries every cell this branch used to restate: the read
+    // bypass on `viewAllRecords || modifyAllRecords`, the write bypass on
+    // `modifyAllRecords` alone (edit/delete/transfer — the
+    // MODIFY_ALL_WRITE_KEYS class), `allowCreate` deliberately WITHOUT a
+    // bypass, and edit and delete as `read ∧ grant`. Restating it here is how
+    // the enforcement door and every predicate that advertises the door's
+    // answer drift apart: they would still compile, still pass their own pins,
+    // and disagree only for the one administrator who holds the super-user bit.
+    //
+    // It is asked of the caller's MERGED entry, not set by set — the
+    // most-permissive per-object merge the `/me/permissions` map is, so the
+    // door and the map the client gates on give one answer. For every cell
+    // that is a plain disjunction of bits the two readings agree; for edit and
+    // delete it is what lets the read half come from a different set than the
+    // grant, as export's does above. An object permission that edits or
+    // deletes a record also reads it: no set list grants either verb to a
+    // caller it does not let read.
+    const merged = mergeResolvedObjectPermissions(objectName, permissionSets, opts.isPrivate ?? false);
+    return merged !== undefined && objectPermissionGrants(merged, permKey);
   }
 
 

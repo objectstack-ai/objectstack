@@ -81,6 +81,34 @@ export function urlAsParsed(value: string): UrlAsParsed {
 /** `scheme://` or a scheme-relative `//`: where an authority starts. */
 const AUTHORITY_START_RE = /^(?:[a-z][a-z0-9+.-]*:)?\/\//i;
 
+/** A leading `scheme:`, the scheme captured. */
+const SCHEME_RE = /^([a-z][a-z0-9+.-]*):/i;
+
+/**
+ * The special schemes (WHATWG URL Standard) after which a URL parser starts
+ * the authority, and so reads a userinfo, past however many `/` or `\`
+ * follow the scheme — none included. `file`, the remaining special scheme,
+ * carries no userinfo.
+ */
+const AUTHORITY_SPECIAL_SCHEMES: ReadonlySet<string> = new Set(['ftp', 'http', 'https', 'ws', 'wss']);
+
+/**
+ * The offset in `text` (a cleaned string, {@link urlAsParsed}) where its
+ * authority starts, or `undefined` when it has none: after a special scheme
+ * ({@link AUTHORITY_SPECIAL_SCHEMES}, in any letter case) and the whole run of
+ * `/` and `\` that follows it, however long, as a URL parser reads it;
+ * otherwise after `scheme://` or a scheme-relative `//`.
+ */
+function authorityStart(text: string): number | undefined {
+  const scheme = SCHEME_RE.exec(text);
+  if (scheme && AUTHORITY_SPECIAL_SCHEMES.has(scheme[1]!.toLowerCase())) {
+    let start = scheme[0].length;
+    while (start < text.length && (text[start] === '/' || text[start] === '\\')) start += 1;
+    return start;
+  }
+  return AUTHORITY_START_RE.exec(text)?.[0].length;
+}
+
 /** Where the userinfo of an authored string sits, and what a URL parser reads there. */
 export interface UrlUserinfoSpan {
   /** Offset in the authored string where the userinfo starts. */
@@ -105,27 +133,36 @@ export interface UrlUserinfoSpan {
  * Deliberately NOT `new URL()`: real DSNs take forms WHATWG parsing rejects or
  * mangles (postgres/mongo multi-host `user:pass@h1:5432,h2:5432/db` throws
  * `ERR_INVALID_URL`, bare `:memory:`, `file:` paths), and a parse that throws
- * on the exact inputs it must judge would fail open. The boundaries are
- * RFC 3986's, read on the cleaned string ({@link urlAsParsed}):
+ * on the exact inputs it must judge would fail open. The boundaries are read
+ * on the cleaned string ({@link urlAsParsed}):
  *
- *  - the authority is what follows `//` (scheme-relative included), up to the
- *    first `/`, `?` or `#` — a `:` or `@` in a path or query is never userinfo;
+ *  - for a special scheme — `http`, `https`, `ws`, `wss`, `ftp`, in any letter
+ *    case — the authority starts where a URL parser starts it: after the whole
+ *    run of `/` and `\` that follows the scheme, however long, none included
+ *    (`https:host`, `https:/host`, `https:\host` and `https:///host` each have
+ *    the authority `host`);
+ *  - for any other scheme, and with no scheme, the authority is RFC 3986's:
+ *    what follows `scheme://` or a scheme-relative `//`;
+ *  - either way the authority runs up to the first `/`, `?` or `#` — a `:` or
+ *    `@` in a path or query is never userinfo. A `\` does not end it: a URL
+ *    parser ends a special scheme's authority there, an RFC 3986 parser (the
+ *    libsql client's) does not, and the longer authority holds every userinfo
+ *    either reads;
  *  - userinfo ends at the LAST `@` in the authority (a malformed literal `@`
  *    inside a password must not decide how much of it goes unjudged).
  *
- * A string with no `//` (sqlite/turso `file:` paths, `:memory:`) has no
- * authority and answers `undefined`.
+ * A string with no authority — a non-special scheme with no `//` (sqlite/turso
+ * `file:` paths, `libsql:host`), `:memory:` — answers `undefined`.
  */
 export function urlUserinfoSpan(value: string): UrlUserinfoSpan | undefined {
   const { text, rawOffsets } = urlAsParsed(value);
-  const scheme = AUTHORITY_START_RE.exec(text);
-  if (!scheme) return undefined;
-  const rest = text.slice(scheme[0].length);
+  const userinfoStart = authorityStart(text);
+  if (userinfoStart === undefined) return undefined;
+  const rest = text.slice(userinfoStart);
   const authorityEnd = rest.search(/[/?#]/);
   const authority = authorityEnd === -1 ? rest : rest.slice(0, authorityEnd);
   const at = authority.lastIndexOf('@');
   if (at === -1) return undefined;
-  const userinfoStart = scheme[0].length;
   const userinfo = authority.slice(0, at);
   const colon = userinfo.indexOf(':');
   return {

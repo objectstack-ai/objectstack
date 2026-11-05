@@ -112,7 +112,9 @@ export async function applySeedBodies(
         const parsedRequest = SeedLoaderRequestSchema.safeParse({
             seeds,
             config: {
-                defaultMode: 'upsert',
+                // [#30081] No mode of its own: a published seed's `mode` is
+                // the spec default (`ignore`, create-only) unless it declares
+                // one, so a re-publish never writes over a customer's edit.
                 multiPass: true,
                 // [ADR-0131 D6, §12] No caller organization: a seed dataset
                 // names the organization it populates itself, and the

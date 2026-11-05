@@ -41,6 +41,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { parsePlatformAdminEmails } from '@objectstack/core';
+import { TENANT_SCOPE_FIELD_DEF } from '@objectstack/metadata-core';
 import { SecurityPlugin } from './security-plugin.js';
 import { RLS_DENY_FILTER } from './rls-compiler.js';
 import {
@@ -91,16 +92,19 @@ async function boot(opts: {
   users?: Record<string, any>;
   tenancy?: { posture: string };
   permissionSets?: PermissionSet[];
+  /** The one object schema served; {@link TENANT_SCHEMA} unless a case names another. */
+  schema?: Record<string, unknown>;
 } = {}) {
   const users = opts.users ?? {};
+  const schema = opts.schema ?? TENANT_SCHEMA;
   const findOne = vi.fn(async (object: string, o: any) =>
     object === 'sys_user' ? (users[o?.where?.id] ?? null) : null,
   );
   const warn = vi.fn();
   const services: Record<string, unknown> = {
     manifest: { register: vi.fn() },
-    objectql: { registerMiddleware: vi.fn(), getSchema: () => TENANT_SCHEMA, findOne },
-    metadata: { get: async () => TENANT_SCHEMA, list: async () => opts.permissionSets ?? [PLAIN_MEMBER] },
+    objectql: { registerMiddleware: vi.fn(), getSchema: () => schema, findOne },
+    metadata: { get: async () => schema, list: async () => opts.permissionSets ?? [PLAIN_MEMBER] },
     'org-scoping': { name: 'com.objectstack.org-scoping' },
   };
   if (opts.tenancy) services['tenancy'] = opts.tenancy;
@@ -307,6 +311,106 @@ describe('[#12974] audit — the ruled floor', () => {
       userId: 'u_owner',
       suppressedFilter: { organization_id: 'org-1' },
     });
+  });
+});
+
+describe('[ADR-0015 §10] an external object that states no organization scope reads as empty for every caller, the platform owner included', () => {
+  /**
+   * What the registry hands the plugin for an external object registered after
+   * the boot that states nothing: its remote columns plus the platform's
+   * injected `organization_id` anchor (the spread `applySystemFields` makes),
+   * which is no declaration — `federated-tenant-layer0.test.ts` pins the
+   * member's half of the same verdict.
+   */
+  const UNDECLARED_EXTERNAL = {
+    name: 'ext_ledger',
+    external: { remoteName: 'ledger' },
+    fields: {
+      organization_id: { ...TENANT_SCOPE_FIELD_DEF },
+      name: { type: 'text', label: 'Name' },
+    },
+  };
+  /** The same remote, declaring its own `organization_id`: walled by organization. */
+  const DECLARED_WALLED_EXTERNAL = {
+    name: 'ext_ledger',
+    external: { remoteName: 'ledger' },
+    fields: {
+      organization_id: { type: 'text', label: 'Organization (remote column)' },
+      name: { type: 'text', label: 'Name' },
+    },
+  };
+  const OWNER_ROW = { u_owner: { id: 'u_owner', email: OWNER_EMAIL, email_verified: true } };
+  const MEMBER = { userId: 'u_m', email: 'member@corp.example' };
+  const layered = (plugin: unknown, ctx: unknown) =>
+    (plugin as any).computeLayeredRlsFilter([PLAIN_MEMBER], 'ext_ledger', 'find', ctx);
+  const bypassEvents = (warn: ReturnType<typeof vi.fn>) =>
+    warn.mock.calls.filter(([, meta]) => meta?.event === PLATFORM_OWNER_WALL_BYPASS_EVENT);
+
+  it('`isolated`: the verified owner reads the deny sentinel, the recorded verdict is `deny`, no crossing is logged and the owner probe is never asked', async () => {
+    process.env.OS_PLATFORM_OWNER_EMAIL = OWNER_EMAIL;
+    const { plugin, warn, findOne } = await boot({ users: OWNER_ROW, schema: UNDECLARED_EXTERNAL });
+    // The spec's frozen deny sentinel, by identity (ADR-0139 D2 step 2).
+    expect(await (plugin as any).getReadFilter('ext_ledger', sessionCtx())).toBe(RLS_DENY_FILTER);
+    const split = await layered(plugin, sessionCtx());
+    expect(split.layer0).toBe(RLS_DENY_FILTER);
+    // The verdict as RECORDED for the engine: the wall still stands, so `deny`, never `none`.
+    expect(split.tenantLayer0Verdict).toEqual({ kind: 'deny' });
+    expect(split.crossedByPlatformAdmin).toBe(false);
+    expect(bypassEvents(warn)).toHaveLength(0);
+    // The verdict judges the object, not the reader: no `sys_user` row is read to reach it.
+    expect(findOne.mock.calls.filter(([object]) => object === 'sys_user')).toHaveLength(0);
+  });
+
+  it('`group`: the verified owner reads the deny sentinel there too', async () => {
+    process.env.OS_PLATFORM_OWNER_EMAIL = OWNER_EMAIL;
+    const { plugin, warn } = await boot({ users: OWNER_ROW, schema: UNDECLARED_EXTERNAL, tenancy: { posture: 'group' } });
+    const ctx = sessionCtx({ accessible_org_ids: ['org-1', 'org-2'] });
+    expect(await (plugin as any).getReadFilter('ext_ledger', ctx)).toBe(RLS_DENY_FILTER);
+    expect((await layered(plugin, ctx)).tenantLayer0Verdict).toEqual({ kind: 'deny' });
+    expect(bypassEvents(warn)).toHaveLength(0);
+  });
+
+  it('an org-less verified owner reads the deny sentinel on it as well: the crossing of the org-less deny does not reach this one', async () => {
+    process.env.OS_PLATFORM_OWNER_EMAIL = OWNER_EMAIL;
+    const { plugin } = await boot({ users: OWNER_ROW, schema: UNDECLARED_EXTERNAL });
+    expect(await (plugin as any).getReadFilter('ext_ledger', sessionCtx({ tenantId: undefined }))).toBe(RLS_DENY_FILTER);
+  });
+
+  it('CONTROL: the verified owner still crosses the wall on an external object that declares its own `organization_id`', async () => {
+    process.env.OS_PLATFORM_OWNER_EMAIL = OWNER_EMAIL;
+    const { plugin, warn } = await boot({ users: OWNER_ROW, schema: DECLARED_WALLED_EXTERNAL });
+    expect(await (plugin as any).getReadFilter('ext_ledger', sessionCtx())).toBeUndefined();
+    const split = await layered(plugin, sessionCtx());
+    expect(split.layer0).toBeNull();
+    expect(split.tenantLayer0Verdict).toEqual({ kind: 'none' });
+    expect(bypassEvents(warn).length).toBeGreaterThan(0);
+    // …and a member of that object keeps the organization equality.
+    expect(await (plugin as any).getReadFilter('ext_ledger', sessionCtx(MEMBER))).toEqual({ organization_id: 'org-1' });
+  });
+
+  it('CONTROL: the verified owner still crosses the wall, and the org-less deny, on a local object', async () => {
+    process.env.OS_PLATFORM_OWNER_EMAIL = OWNER_EMAIL;
+    const { plugin } = await boot({ users: OWNER_ROW });
+    expect(await readFilter(plugin, sessionCtx())).toBeUndefined();
+    expect(await readFilter(plugin, sessionCtx({ tenantId: undefined }))).toBeUndefined();
+  });
+
+  it('CONTROL: a member is unchanged — the deny sentinel, under `isolated` and `group`', async () => {
+    process.env.OS_PLATFORM_OWNER_EMAIL = OWNER_EMAIL;
+    const { plugin } = await boot({ users: OWNER_ROW, schema: UNDECLARED_EXTERNAL });
+    expect(await (plugin as any).getReadFilter('ext_ledger', sessionCtx(MEMBER))).toBe(RLS_DENY_FILTER);
+    const group = await boot({ users: OWNER_ROW, schema: UNDECLARED_EXTERNAL, tenancy: { posture: 'group' } });
+    expect(
+      await (group.plugin as any).getReadFilter('ext_ledger', sessionCtx({ ...MEMBER, accessible_org_ids: ['org-1'] })),
+    ).toBe(RLS_DENY_FILTER);
+  });
+
+  it('CONTROL: `single` is unchanged — no wall, so the owner and a member both read it unwalled', async () => {
+    process.env.OS_PLATFORM_OWNER_EMAIL = OWNER_EMAIL;
+    const { plugin } = await boot({ users: OWNER_ROW, schema: UNDECLARED_EXTERNAL, tenancy: { posture: 'single' } });
+    expect(await (plugin as any).getReadFilter('ext_ledger', sessionCtx())).toBeUndefined();
+    expect(await (plugin as any).getReadFilter('ext_ledger', sessionCtx(MEMBER))).toBeUndefined();
+    expect((await layered(plugin, sessionCtx())).tenantLayer0Verdict).toEqual({ kind: 'none' });
   });
 });
 

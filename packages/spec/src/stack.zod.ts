@@ -1316,8 +1316,9 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
    * using the specified conflict resolution strategy.
    * 
    * Uses the standard SeedSchema which supports:
-   * - `externalId`: Idempotency key for upsert matching (default: 'name')
-   * - `mode`: Conflict resolution (upsert, insert, ignore, replace)
+   * - `externalId`: Idempotency key that matches a record to an existing row (default: 'name')
+   * - `mode`: Conflict resolution (default `ignore`, create-only; `upsert` for
+   *   reference data a replay keeps current; `insert`, `update`, `replace`)
    * - `env`: Environment scoping (prod, dev, test)
    * 
    * @example
@@ -1325,7 +1326,6 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
    * data: [
    *   {
    *     object: 'account',
-   *     mode: 'upsert',
    *     externalId: 'name',
    *     records: [
    *       { name: 'Acme Corp', type: 'customer', industry: 'technology' },

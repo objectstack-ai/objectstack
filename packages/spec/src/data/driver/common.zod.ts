@@ -201,10 +201,12 @@ export const URL_EMBEDDED_CREDENTIAL_REFUSED = (key: string): string =>
  * with every ASCII tab, LF and CR deleted — and the userinfo answered is that
  * cleaned text (why WHATWG parsing itself is refused is on that parse).
  *
- * A string with no `//` (sqlite/turso `file:` paths, `:memory:`) has no
- * authority and answers `undefined`. The FIRST `:` inside the returned
- * userinfo splits username from password; that split belongs to the two
- * accessors, not here.
+ * A special scheme (`http`, `https`, `ws`, `wss`, `ftp`, any letter case)
+ * starts the authority after however many `/` or `\` follow it, none
+ * included, as a URL parser does; any other string with no `//`
+ * (sqlite/turso `file:` paths, `:memory:`) has no authority and answers
+ * `undefined`. The FIRST `:` inside the returned userinfo splits username
+ * from password; that split belongs to the two accessors, not here.
  */
 function urlUserinfo(value: string): string | undefined {
   return urlUserinfoSpan(value)?.userinfo;
