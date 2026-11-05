@@ -261,20 +261,33 @@ export const SeedSchema = lazySchema(() => strictObject({
    * The platform translates nothing. This is the axis that SELECTS between
    * record sets the app authored itself.
    *
-   * **Publishing and installing are locale-neutral acts — this axis is scoped
-   * to the boot path, by decision.** The loader evaluates it against
-   * `SeedLoaderConfig.locale`, which only the boot path supplies (AppPlugin
-   * reads the app's declared `i18n.defaultLocale`). Package apply, draft
-   * publish and marketplace install each build their own load request and pass
-   * no locale, so a `locale`-scoped dataset reaching one of them is loaded for
-   * **every** locale and the loader warns naming each dataset it let through.
-   * That bound is the contract, not an unfinished path: a package is assembled
-   * once for every market, and selecting a market is what happens when it is
-   * opened. Ruled on #17011 (2026-09-10), which also kept the warning rather
-   * than turning those paths into a refusal.
+   * **Which loads filter on it.** The loader evaluates this axis against
+   * `SeedLoaderConfig.locale`; a load request that carries none loads a
+   * `locale`-scoped dataset for **every** locale, and the loader warns naming
+   * each dataset it let through.
+   *
+   * - **Boot.** The boot seed and the dev hot-reload seeder filter on the
+   *   app's declared `i18n.defaultLocale` (AppPlugin).
+   * - **Install, reseed, heal and per-organization replay.** The marketplace
+   *   install, the sample-data reseed, the restart heal and the
+   *   per-organization replay filter on the locale resolved for that load by
+   *   `resolveSeedLocaleForLoad` (`@objectstack/runtime`), first answer wins:
+   *   the `localization.locale` setting for the organization the rows land in,
+   *   counted only when somebody set it (a value whose `source` is `'default'`
+   *   is the platform's placeholder, not a choice); then the `sys_user.locale`
+   *   of the user who installs, reseeds or founds the organization, when one
+   *   started the load; then the app's declared `i18n.defaultLocale`, when the
+   *   caller names one. No answer is a load with no locale, as above. A
+   *   setting or user read that fails seeds nothing rather than another
+   *   language.
+   * - **Package apply and draft publish** pass no locale: they stay
+   *   locale-neutral, because a package is assembled once for every market.
+   *   That is the bound ruled on #17011 (2026-09-10), narrowed to these two
+   *   paths when the maintainer ruled that the install paths pick by locale
+   *   (2026-11-05).
    */
   locale: z.array(LocaleSchema).min(1).optional()
-    .describe('Applicable locales (BCP-47 tags); omitted applies to every locale. The publish and install paths do not filter by locale — they load every dataset and warn'),
+    .describe('Applicable locales (BCP-47 tags); omitted applies to every locale. The boot seed filters on the app\'s i18n.defaultLocale; the marketplace install, sample-data reseed, restart heal and per-organization replay filter on the locale resolved for the load (the localization.locale setting when set, then the installing or founding user\'s locale, then the app\'s i18n.defaultLocale where the load names one); package apply and draft publish do not filter by locale — they load every dataset and warn'),
 
   /**
    * The Payload
