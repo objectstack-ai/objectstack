@@ -45,6 +45,7 @@ import { foldFeedItems, type ActivityTimelineEntry } from './renderers/recordAct
 import {
   TIMELINE_STREAM_FILTERS,
   filterTimelineStream,
+  isFieldHistoryEntry,
   isSystemStreamEntry,
   type TimelineStreamFilter,
 } from './recordTimelineStream';
@@ -158,6 +159,8 @@ export interface RecordActivityTimelineProps {
   variant?: 'panel' | 'stream' | 'peek';
   /** The stream's chip (controlled); `all` when absent. */
   streamFilter?: TimelineStreamFilter;
+  /** The chips the stream offers, in order; all four when absent (objectstack#30074). */
+  streamFilters?: readonly TimelineStreamFilter[];
   onStreamFilterChange?: (filter: TimelineStreamFilter) => void;
   /** How many entries the whole stream holds, for the peek's 「查看全部 N 条 →」. */
   totalCount?: number;
@@ -282,8 +285,10 @@ function filterItems(items: FeedItem[], mode: FeedFilterMode): FeedItem[] {
   switch (mode) {
     case 'comments_only':
       return items.filter((i) => i.type === 'comment');
+    // The stream's 变更 rule (objectstack#30074, ruling C): the audit's field
+    // changes only, so the panel and the stream agree on what a change is.
     case 'changes_only':
-      return items.filter((i) => i.type === 'field_change');
+      return items.filter(isFieldHistoryEntry);
     case 'tasks_only':
       return items.filter((i) => i.type === 'task');
     default:
@@ -339,6 +344,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
   onRetryFeed,
   variant = 'panel',
   streamFilter = 'all',
+  streamFilters = TIMELINE_STREAM_FILTERS,
   onStreamFilterChange,
   totalCount,
   onViewAll,
@@ -979,7 +985,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
                 className="flex flex-wrap items-center gap-1"
                 data-stream-filters=""
               >
-                {TIMELINE_STREAM_FILTERS.map((chip) => (
+                {streamFilters.map((chip) => (
                   <button
                     key={chip}
                     type="button"

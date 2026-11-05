@@ -48,6 +48,7 @@ import {
   type MessageProps,
 } from './elements/message';
 import { RecordLinkContext } from './recordLink';
+import { isHitlContinuation } from './hitlContinuation';
 import type { PublishHealth, PublishOutcome } from './publishHealth';
 import {
   PromptInput,
@@ -4533,6 +4534,11 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
             ) : (
               messages.map((message) => {
                 const isUser = message.role === 'user';
+                // objectstack#30223 — the follow-up turn `useHitlInChat` sends
+                // the model after 确认 / 取消 is not the person's words, so it
+                // draws no bubble: live, after a reload, or on a shared
+                // transcript. The model still received it.
+                if (isUser && isHitlContinuation(message.content)) return null;
                 const tools = message.toolInvocations ?? [];
                 const reasoning = message.reasoning?.trim();
                 const sources = message.sources ?? [];

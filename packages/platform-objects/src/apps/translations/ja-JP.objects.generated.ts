@@ -3388,7 +3388,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       namespace: {
         label: "名前空間",
-        help: "マニフェスト名前空間（例: mail、branding、feature_flags）。"
+        help: "マニフェスト名前空間（例: mail、branding、storage）。"
       },
       key: {
         label: "キー",

@@ -15,7 +15,8 @@
  * `trackHistory`), which the host hands over through
  * {@link RecordFieldChangesContext}. This module is the pure part: the audit
  * rows as feed items, the merge (newest first, an update counted once), and
- * the four filter chips 全部 / 活动 / 讨论 / 变更.
+ * the four filter chips 全部 / 活动 / 讨论 / 变更 (变更 = the audit's field
+ * changes; every activity row is 活动).
  */
 
 import * as React from 'react';
@@ -148,20 +149,51 @@ export type TimelineStreamFilter = 'all' | 'activity' | 'discussion' | 'changes'
 
 export const TIMELINE_STREAM_FILTERS: readonly TimelineStreamFilter[] = ['all', 'activity', 'discussion', 'changes'];
 
+/** The chips while the record's field history is not shown: no 变更. */
+const TIMELINE_STREAM_FILTERS_WITHOUT_HISTORY: readonly TimelineStreamFilter[] = TIMELINE_STREAM_FILTERS.filter(
+  (filter) => filter !== 'changes',
+);
+
+/**
+ * Whether the record page shows the record's field history (objectstack#30074):
+ * the host's `enable.trackHistory` gate, the one that decides whether it reads
+ * the audit log for {@link RecordFieldChangesContext}. While it is `false` the
+ * stream offers no 变更 chip. No host saying: `true`, every chip draws.
+ */
+export const RecordFieldHistoryContext = React.createContext<boolean>(true);
+
+/** The stream's chips, given whether the record's field history is shown. */
+export function timelineStreamFilters(fieldHistory: boolean): readonly TimelineStreamFilter[] {
+  return fieldHistory ? TIMELINE_STREAM_FILTERS : TIMELINE_STREAM_FILTERS_WITHOUT_HISTORY;
+}
+
 /** Whether an item is a system entry — drawn as one compact muted line. */
 export function isSystemStreamEntry(item: FeedItem): boolean {
   return item.type === 'field_change' || item.type === 'system';
 }
 
-/** The items a chip shows: discussion = comments; changes = field changes; activity = the rest. */
+/**
+ * Whether an item is a field-history entry: a field change with its before and
+ * after values, read from the audit log ({@link auditEntriesToFeedItems}
+ * stamps `source: 'sys_audit_log'`). The 变更 chip, and the panel's
+ * `changes_only`, hold these and nothing else (objectstack#30074, ruling C).
+ * An activity row (`created` / `updated` / `deleted` / `assigned` / `shared`)
+ * shares the `field_change` presentation but is an event, so it is judged by
+ * its source and sits under 活动, whatever the history flag.
+ */
+export function isFieldHistoryEntry(item: FeedItem): boolean {
+  return item.type === 'field_change' && item.source === 'sys_audit_log';
+}
+
+/** The items a chip shows: discussion = comments; changes = field-history entries; activity = the rest. */
 export function filterTimelineStream(items: readonly FeedItem[], filter: TimelineStreamFilter): FeedItem[] {
   switch (filter) {
     case 'discussion':
       return items.filter((item) => item.type === 'comment');
     case 'changes':
-      return items.filter((item) => item.type === 'field_change');
+      return items.filter(isFieldHistoryEntry);
     case 'activity':
-      return items.filter((item) => item.type !== 'comment' && item.type !== 'field_change');
+      return items.filter((item) => item.type !== 'comment' && !isFieldHistoryEntry(item));
     default:
       return [...items];
   }
