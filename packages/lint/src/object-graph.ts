@@ -365,6 +365,134 @@ export function indexObjectGraph(stack: unknown): ObjectGraph {
   return graph;
 }
 
+/**
+ * One `objectExtensions` entry as the registry registers it — see
+ * {@link objectExtensionsByTarget}.
+ */
+export interface VisibleObjectExtension {
+  /** The position of the package that ships it: registration order across packages. */
+  carrier: number;
+  /** The entry's path, e.g. `objectExtensions[0]` or `packages[1].manifest.objectExtensions[0]`. */
+  path: string;
+  /** `ext.priority ?? 200`, the registry's default. */
+  priority: number;
+  /** Its field records, name folded in ({@link recordsOf}). */
+  fields: AnyRec[];
+}
+
+/**
+ * [#30303] Every `objectExtensions` entry of a stack, by the object it
+ * `extend`s, as the registry registers and folds them. This is the ONE place
+ * this package reads extensions for an object's merged field set: the
+ * `controlled_by_parent` merge of `validate-security-posture.ts` (#23210),
+ * the membership-key columns of `validate-membership-key-declarations.ts`,
+ * and the served field set {@link objectsAsServed} hands the FLS-key check.
+ *
+ * Read as the registry reads a manifest, since `@objectstack/lint` imports no
+ * runtime (`ObjectQL.registerApp`'s `objectExtensions` loop,
+ * `SchemaRegistry.registerObject`'s `extend` arm and `foldExtenders`, in
+ * `@objectstack/objectql`):
+ *
+ * - Source: with `packages[]`, every body's `objectExtensions`
+ *   (`packages[j].manifest`, `carrier` = `j`, the artifact's registration
+ *   order); without it, the stack's own (`carrier` 0). An artifact's top level
+ *   repeats its bodies' collections, so it is not read beside them.
+ * - `extend` names its target verbatim.
+ * - ONE entry per package per target: registering an extension removes that
+ *   package's earlier one, so a later entry of the same package replaces an
+ *   earlier one whole, its fields included.
+ * - Fold order: ascending `priority` (default 200), equal priorities in
+ *   package order. Each list is returned in that order.
+ *
+ * Which targets to judge is the caller's question: an entry is listed here
+ * whether or not the stack declares its target.
+ */
+export function objectExtensionsByTarget(stack: unknown): Map<string, VisibleObjectExtension[]> {
+  const byTarget = new Map<string, VisibleObjectExtension[]>();
+  if (!isRec(stack)) return byTarget;
+  // The receivers are named as `validate-security-posture.test.ts`'s key-read
+  // meta-test tables them (`stack`, `entry`, `body`, `ext`, `obj`, `f`): that
+  // scan reads this fold as part of the rules that read through it.
+  const collect = (entries: unknown, carrier: number, at: string) => {
+    if (!Array.isArray(entries)) return;
+    entries.forEach((ext: unknown, i: number) => {
+      if (!isRec(ext) || typeof ext.extend !== 'string') return;
+      const kept = (byTarget.get(ext.extend) ?? []).filter((other) => other.carrier !== carrier);
+      kept.push({
+        carrier,
+        path: `${at}objectExtensions[${i}]`,
+        priority: typeof ext.priority === 'number' ? ext.priority : 200,
+        fields: recordsOf(ext.fields),
+      });
+      byTarget.set(ext.extend, kept);
+    });
+  };
+  if (Array.isArray(stack.packages)) {
+    stack.packages.forEach((entry: unknown, j: number) => {
+      const body = isRec(entry) ? entry.manifest : undefined;
+      if (isRec(body)) collect(body.objectExtensions, j, `packages[${j}].manifest.`);
+    });
+  } else {
+    collect(stack.objectExtensions, 0, '');
+  }
+  for (const list of byTarget.values()) {
+    list.sort((left, right) => left.priority - right.priority || left.carrier - right.carrier);
+  }
+  return byTarget;
+}
+
+/**
+ * [#30303] A stack's `objects` as the registry SERVES them: each with every
+ * {@link objectExtensionsByTarget} entry that extends it folded in, the way
+ * `mergeObjectDefinitions` merges `fields` (by name, additively, a later
+ * writer replacing the whole field). An object nothing extends is returned as
+ * it is.
+ *
+ * Only the fields move. The registry plans an object's injected system
+ * columns over its base layer (`foldExtenders` reads
+ * `resolveInjectedSystemColumns(baseDefinition)`), and that plan reads no
+ * field, so {@link indexObjectGraph} over these objects injects what it
+ * injects over the declared ones. `fieldPatches` add no field (they patch the
+ * owner's own), so they are not read.
+ *
+ * A field two packages write at the priority that decides it is merged (its
+ * name is served whichever wins) and named in `tied`, for a caller whose
+ * verdict depends on which definition wins: registration order decides that,
+ * and a stack does not state it.
+ */
+export function objectsAsServed(stack: unknown): { objects: AnyRec[]; tied: Map<string, Set<string>> } {
+  const objects = isRec(stack) ? recordsOf(stack.objects) : [];
+  const tied = new Map<string, Set<string>>();
+  const extensions = objectExtensionsByTarget(stack);
+  if (extensions.size === 0) return { objects, tied };
+
+  const served = objects.map((obj) => {
+    const name = strName(obj.name);
+    const exts = name ? extensions.get(name) : undefined;
+    if (!name || !exts) return obj;
+    const fields = new Map<string, AnyRec>();
+    for (const f of recordsOf(obj.fields)) {
+      const key = strName(f.name);
+      if (key) fields.set(key, f);
+    }
+    const lastWriter = new Map<string, VisibleObjectExtension>();
+    const tiedKeys = new Set<string>();
+    for (const ext of exts) {
+      for (const f of ext.fields) {
+        const key = strName(f.name);
+        if (!key) continue;
+        if (lastWriter.get(key)?.priority === ext.priority) tiedKeys.add(key);
+        else tiedKeys.delete(key);
+        lastWriter.set(key, ext);
+        fields.set(key, f);
+      }
+    }
+    if (tiedKeys.size > 0) tied.set(name, tiedKeys);
+    return { ...obj, fields: [...fields.values()] };
+  });
+  return { objects: served, tied };
+}
+
 /** What a path resolved to, or precisely how it failed. */
 export type FieldPathVerdict =
   /**
