@@ -173,6 +173,7 @@ const fr = {
   },
   form: {
     noPermissionToSave: "Vous n'avez pas l'autorisation d'enregistrer cet enregistrement.",
+    readOnlyExternalSource: "Cette table est en lecture seule. Ses enregistrements proviennent d'une source de données externe qui n'accepte pas de modifications.",
     noPermissionToCreate: "Vous n'avez pas l'autorisation de créer des enregistrements {{object}}. Les champs sont en lecture seule.",
     noPermissionToEdit: "Vous n'avez pas l'autorisation de modifier les enregistrements {{object}}. Les champs sont en lecture seule.",
     noPermissionToEditRecord: "Vous n'avez pas l'autorisation de modifier cet enregistrement. Les champs sont en lecture seule.",
@@ -1854,6 +1855,10 @@ const fr = {
     },
   },
   console: {
+    organizationMfa: {
+      needsTwoFactor: "Exiger l'authentification multifacteur nécessite l'authentification à deux facteurs, désactivée sur ce déploiement : un enregistrement avec la case cochée est donc refusé. Activez d'abord les deux facteurs : activez « Exiger l'authentification multifacteur » dans Configuration → Authentification (cela s'applique à toutes les organisations), ou définissez OS_AUTH_TWO_FACTOR=true sur le déploiement.",
+      nowRequired: "Tous les membres de cette organisation qui n'ont pas configuré d'application d'authentification doivent maintenant le faire. Chacun perd l'accès aux données à la fin du délai de grâce MFA (7 jours sauf modification dans Configuration → Authentification), compté à partir de sa première utilisation après ce changement. Les membres qui utilisent déjà une application d'authentification ne sont pas concernés.",
+    },
     studio: {
       title: "Studio",
       accessRequired: "Vous avez besoin de l'accès à Studio pour ouvrir Studio. Un administrateur peut vous l'accorder avec un ensemble d'autorisations dans Configuration → Attribution des ensembles d’autorisations.",
@@ -3015,6 +3020,7 @@ const fr = {
         continue: "Continuer",
         preparing: "Préparation…",
         enrollFailed: "Impossible de démarrer l'enrôlement.",
+        unavailable: "L'authentification à deux facteurs est désactivée sur ce déploiement : aucune application d'authentification ne peut encore être configurée. Demandez à un administrateur de l'activer dans Configuration → Authentification, puis réessayez.",
         scanTitle: "Scannez avec votre application d'authentification",
         scanBody: "Scannez ce QR code avec Google Authenticator, 1Password, Authy, etc., puis saisissez le code à 6 chiffres.",
         backupTitle: "Enregistrez vos codes de secours",
