@@ -48,22 +48,7 @@
 
 import { REFERENCE_VALUE_TYPES } from '@objectstack/spec/data';
 
-/**
- * What a scenario expects of a build, by name.
- *
- * ⛔ Field-for-field the scenario card's `expect` block (sibling card #30289
- * owns that contract). Mirrored here rather than imported so this module takes
- * no dependency on the package that parses scenario cards; a change there is a
- * change here, in the same shape.
- */
-export interface ScenarioExpectation {
-  objects: string[];
-  minFieldsPerObject?: number;
-  selectFields?: { object: string; field: string; minOptions: number }[];
-  lookups?: { object: string; field: string; to: string }[];
-  dashboards?: string[];
-  appNavTargets?: string[];
-}
+import type { ScenarioExpect } from '../schema.js';
 
 export interface EvalGraphField {
   name: string;
@@ -138,8 +123,10 @@ function navEntryResolves(entry: EvalGraphNavEntry, targets: Set<string>): boole
 /**
  * One check per widget measure: the measure must exist on the dataset the
  * widget binds, and the dataset must exist in the graph (deviation 2 above).
+ * Exported for the capability-tag checks (`scenario-tags.ts`), so a dashboard
+ * tag and these scorers judge a measure by one rule.
  */
-function measureChecks(graph: EvalGraph, label: (dashboard: string, measure: string, dataset: string) => string): CheckResult[] {
+export function measureChecks(graph: EvalGraph, label: (dashboard: string, measure: string, dataset: string) => string): CheckResult[] {
   const out: CheckResult[] = [];
   for (const d of graph.dashboards ?? []) {
     for (const w of d.widgets ?? []) {
@@ -166,7 +153,7 @@ function result(checks: CheckResult[]): ScoreResult {
  * Score a built metadata graph against a scenario's expectations, by exact
  * name.
  */
-export function scoreGraph(graph: EvalGraph, expect: ScenarioExpectation): ScoreResult {
+export function scoreGraph(graph: EvalGraph, expect: ScenarioExpect): ScoreResult {
   const checks: CheckResult[] = [];
   const add = (check: string, pass: boolean, detail?: string) =>
     checks.push(detail === undefined ? { check, pass } : { check, pass, detail });
@@ -246,7 +233,7 @@ export interface ShapeExpectation {
 }
 
 /** Derive a name-agnostic shape from a scenario's (name-coupled) expectations. */
-export function deriveShape(expect: ScenarioExpectation): ShapeExpectation {
+export function deriveShape(expect: ScenarioExpect): ShapeExpectation {
   return {
     minObjects: expect.objects.length,
     minFieldsPerObject: expect.minFieldsPerObject,
