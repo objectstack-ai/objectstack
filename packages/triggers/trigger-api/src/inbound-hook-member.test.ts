@@ -370,3 +370,215 @@ describe('[#22774] the composition — one mount where a raw app exists, read fr
         expect(plugin.lines('warn', 'trigger-api service not registered')).toHaveLength(1);
     });
 });
+
+/**
+ * [#30009] A sender's own scheme, declared (`config.signature`,
+ * `@objectstack/spec/automation`), verified through the REAL door: every row
+ * is posted through the `trigger-api` member AND the self-hosted Hono mount of
+ * one booted plugin, and the two faces must answer the same bytes. The flows
+ * are armed as the engine binds them: `config` as authored, the key through
+ * `resolveSecret` (the engine's `config.secretRef` reader).
+ *
+ * The vectors are the wire forms, not this package's functions: DocuSign
+ * Connect's base64 HMAC-SHA256 of the raw body and a Stripe-style `t=…,v1=…`
+ * hex HMAC-SHA256 of `<t>.<raw body>` are pinned as literals (computed with
+ * `openssl dgst -sha256 -hmac`), and every other digest is `createHmac`'s.
+ */
+describe('[#30009] a declared sender scheme (config.signature) — the one verifier of its hook, through both faces', () => {
+    const DOCUSIGN_KEY = 'pin-docusign-connect-key-30009';
+    const STRIPE_KEY = 'pin-stripe-style-key-30009';
+    const STRIPE_OLD_KEY = 'pin-stripe-style-old-key-30009';
+    const GITHUB_KEY = 'pin-github-style-key-30009';
+    const DOCUSIGN_BODY = '{"envelopeId":"93be49ab-afa0-4adb-933c-f752070d71ec","status":"completed"}';
+    /** `openssl dgst -sha256 -hmac pin-docusign-connect-key-30009 -binary | base64` over DOCUSIGN_BODY. */
+    const DOCUSIGN_VECTOR = 'kXOvpoyCVWjcNhIm7UAIrRvnl2Lq093nx/AmksV1z9Y=';
+    const STRIPE_BODY = '{"id":"evt_30009","type":"payment_intent.succeeded"}';
+    /** `openssl dgst -sha256 -hmac pin-stripe-style-key-30009 -hex` over `1760000000.` + STRIPE_BODY. */
+    const STRIPE_VECTOR = 'f62377afc10d67355a479fe927045e904ccdf17887ea2eaf306157a921275b75';
+
+    const DOCUSIGN = { signs: 'body', header: 'X-DocuSign-Signature-1', algorithm: 'hmac-sha256', encoding: 'base64' };
+    const STRIPE = {
+        signs: 'timestamp.body', header: 'Stripe-Signature', algorithm: 'hmac-sha256', encoding: 'hex',
+        timestampElement: 't', digestElement: 'v1',
+    };
+    const GITHUB = { signs: 'body', header: 'X-Hub-Signature-256', algorithm: 'hmac-sha256', encoding: 'hex', prefix: 'sha256=' };
+
+    const b64 = (key: string, material: string) => createHmac('sha256', key).update(material, 'utf8').digest('base64');
+    const hex = (key: string, material: string) => createHmac('sha256', key).update(material, 'utf8').digest('hex');
+    const stripeSig = (key: string, body: string, t: number) => `t=${t},v1=${hex(key, `${t}.${body}`)}`;
+
+    /** Arms the declared flows on a booted trigger; returns how often each key was read. */
+    function armDeclared(trigger: ApiTrigger) {
+        const reads = { docusign: 0, stripe: 0, github: 0, unusable: 0, beside: 0 };
+        const reader = (name: keyof typeof reads, key: string) => async () => { reads[name] += 1; return key; };
+        trigger.start({ flowName: 'docusign', config: { hookId: 'hk_ds', secretRef: 'DOCUSIGN_CONNECT_KEY', signature: DOCUSIGN }, resolveSecret: reader('docusign', DOCUSIGN_KEY) }, async () => {});
+        trigger.start({ flowName: 'stripe', config: { secretRef: 'PAYMENTS_WEBHOOK_KEY', signature: STRIPE }, resolveSecret: reader('stripe', STRIPE_KEY) }, async () => {});
+        trigger.start({ flowName: 'github', config: { secretRef: 'GITHUB_HOOK_KEY', signature: GITHUB }, resolveSecret: reader('github', GITHUB_KEY) }, async () => {});
+        // Unusable: an algorithm the spec refuses; the reader holds a key that would verify anything signed with it.
+        trigger.start({ flowName: 'unusable', config: { secretRef: 'SOME_KEY', signature: { ...DOCUSIGN, algorithm: 'hmac-sha1' } }, resolveSecret: reader('unusable', DOCUSIGN_KEY) }, async () => {});
+        // Unusable: a well-formed declaration beside a literal secret (an inline key, and a second source).
+        trigger.start({ flowName: 'beside_secret', config: { secret: DOCUSIGN_KEY, signature: DOCUSIGN } }, async () => {});
+        return reads;
+    }
+
+    interface DeclaredRow {
+        label: string;
+        flowName: string;
+        hookId?: string;
+        body: string | Uint8Array;
+        headers: Array<[string, string]>;
+        /** `null`: admitted (`202`); otherwise the cause the log must record. */
+        cause: string | null;
+    }
+
+    const ROWS_30009: DeclaredRow[] = [
+        // DocuSign Connect: base64 HMAC-SHA256 of the raw body.
+        { label: 'DocuSign: the real base64 vector', flowName: 'docusign', hookId: 'hk_ds', body: DOCUSIGN_BODY, headers: [['X-DocuSign-Signature-1', DOCUSIGN_VECTOR]], cause: null },
+        { label: 'DocuSign: the header name in another case', flowName: 'docusign', hookId: 'hk_ds', body: DOCUSIGN_BODY, headers: [['x-docusign-signature-1', DOCUSIGN_VECTOR]], cause: null },
+        { label: 'DocuSign: the vector over another body', flowName: 'docusign', hookId: 'hk_ds', body: DOCUSIGN_BODY.replace('completed', 'voided'), headers: [['X-DocuSign-Signature-1', DOCUSIGN_VECTOR]], cause: 'declared-mismatch' },
+        { label: 'DocuSign: signed under another key', flowName: 'docusign', hookId: 'hk_ds', body: DOCUSIGN_BODY, headers: [['X-DocuSign-Signature-1', b64('not-the-key', DOCUSIGN_BODY)]], cause: 'declared-mismatch' },
+        { label: 'DocuSign: the right digest written in hex, not the declared base64', flowName: 'docusign', hookId: 'hk_ds', body: DOCUSIGN_BODY, headers: [['X-DocuSign-Signature-1', hex(DOCUSIGN_KEY, DOCUSIGN_BODY)]], cause: 'declared-header-malformed' },
+        { label: 'DocuSign: the right digest with its padding dropped', flowName: 'docusign', hookId: 'hk_ds', body: DOCUSIGN_BODY, headers: [['X-DocuSign-Signature-1', DOCUSIGN_VECTOR.slice(0, -1)]], cause: 'declared-header-malformed' },
+        { label: 'DocuSign: the body-only header sent twice (one joined value)', flowName: 'docusign', hookId: 'hk_ds', body: DOCUSIGN_BODY, headers: [['X-DocuSign-Signature-1', DOCUSIGN_VECTOR], ['X-DocuSign-Signature-1', DOCUSIGN_VECTOR]], cause: 'declared-header-malformed' },
+        { label: 'DocuSign: no declared header, a VALID x-objectstack-signature under the same key', flowName: 'docusign', hookId: 'hk_ds', body: DOCUSIGN_BODY, headers: [['x-objectstack-signature', sigV1(DOCUSIGN_KEY, DOCUSIGN_BODY, NOW)]], cause: 'declared-header-absent' },
+        { label: 'DocuSign: no header at all', flowName: 'docusign', hookId: 'hk_ds', body: DOCUSIGN_BODY, headers: [], cause: 'declared-header-absent' },
+        { label: 'DocuSign: the vector under the wrong hook id', flowName: 'docusign', hookId: 'default', body: DOCUSIGN_BODY, headers: [['X-DocuSign-Signature-1', DOCUSIGN_VECTOR]], cause: 'wrong-hook-id' },
+        {
+            label: 'DocuSign: a body that is not UTF-8, signed over its own bytes (re-encoded on read: fails closed)',
+            flowName: 'docusign', hookId: 'hk_ds', body: new Uint8Array([0x7b, 0x22, 0x78, 0x22, 0x3a, 0xff, 0x7d]),
+            headers: [['X-DocuSign-Signature-1', createHmac('sha256', DOCUSIGN_KEY).update(new Uint8Array([0x7b, 0x22, 0x78, 0x22, 0x3a, 0xff, 0x7d])).digest('base64')]],
+            cause: 'declared-mismatch',
+        },
+        // Stripe-style: `t=…,v1=…`, hex HMAC-SHA256 of `<t>.<raw body>`, core's window.
+        { label: 'Stripe-style: the real hex vector', flowName: 'stripe', body: STRIPE_BODY, headers: [['Stripe-Signature', `t=${NOW},v1=${STRIPE_VECTOR}`]], cause: null },
+        { label: 'Stripe-style: a key roll, the new key\'s v1 second', flowName: 'stripe', body: STRIPE_BODY, headers: [['Stripe-Signature', `t=${NOW},v1=${hex(STRIPE_OLD_KEY, `${NOW}.${STRIPE_BODY}`)},v1=${STRIPE_VECTOR}`]], cause: null },
+        { label: 'Stripe-style: a key roll, the new key\'s v1 first, an unknown v0 element ignored', flowName: 'stripe', body: STRIPE_BODY, headers: [['Stripe-Signature', `t=${NOW},v1=${STRIPE_VECTOR},v1=${hex(STRIPE_OLD_KEY, `${NOW}.${STRIPE_BODY}`)},v0=deadbeef`]], cause: null },
+        { label: 'Stripe-style: two v1 elements, neither under the key', flowName: 'stripe', body: STRIPE_BODY, headers: [['Stripe-Signature', `t=${NOW},v1=${hex(STRIPE_OLD_KEY, `${NOW}.${STRIPE_BODY}`)},v1=${hex('other', `${NOW}.${STRIPE_BODY}`)}`]], cause: 'declared-mismatch' },
+        { label: 'Stripe-style: correctly signed, t at the window\'s edge (300 s old)', flowName: 'stripe', body: STRIPE_BODY, headers: [['Stripe-Signature', stripeSig(STRIPE_KEY, STRIPE_BODY, NOW - 300)]], cause: null },
+        { label: 'Stripe-style: correctly signed, t outside the window (301 s old)', flowName: 'stripe', body: STRIPE_BODY, headers: [['Stripe-Signature', stripeSig(STRIPE_KEY, STRIPE_BODY, NOW - 301)]], cause: 'declared-outside-window' },
+        { label: 'Stripe-style: correctly signed, t outside the window (301 s ahead)', flowName: 'stripe', body: STRIPE_BODY, headers: [['Stripe-Signature', stripeSig(STRIPE_KEY, STRIPE_BODY, NOW + 301)]], cause: 'declared-outside-window' },
+        { label: 'Stripe-style: the vector with t moved (the timestamp is signed)', flowName: 'stripe', body: STRIPE_BODY, headers: [['Stripe-Signature', `t=${NOW + 1},v1=${STRIPE_VECTOR}`]], cause: 'declared-mismatch' },
+        { label: 'Stripe-style: t repeated', flowName: 'stripe', body: STRIPE_BODY, headers: [['Stripe-Signature', `t=${NOW},t=${NOW},v1=${STRIPE_VECTOR}`]], cause: 'declared-header-malformed' },
+        { label: 'Stripe-style: no t', flowName: 'stripe', body: STRIPE_BODY, headers: [['Stripe-Signature', `v1=${STRIPE_VECTOR}`]], cause: 'declared-header-malformed' },
+        { label: 'Stripe-style: t with a leading zero', flowName: 'stripe', body: STRIPE_BODY, headers: [['Stripe-Signature', `t=0${NOW},v1=${hex(STRIPE_KEY, `0${NOW}.${STRIPE_BODY}`)}`]], cause: 'declared-header-malformed' },
+        { label: 'Stripe-style: no v1', flowName: 'stripe', body: STRIPE_BODY, headers: [['Stripe-Signature', `t=${NOW},v0=${STRIPE_VECTOR}`]], cause: 'declared-no-digest' },
+        { label: 'Stripe-style: the header sent twice (one joined value, t repeated)', flowName: 'stripe', body: STRIPE_BODY, headers: [['Stripe-Signature', `t=${NOW},v1=${STRIPE_VECTOR}`], ['Stripe-Signature', `t=${NOW},v1=${STRIPE_VECTOR}`]], cause: 'declared-header-malformed' },
+        { label: 'Stripe-style: a VALID x-objectstack-signature only', flowName: 'stripe', body: STRIPE_BODY, headers: [['x-objectstack-signature', sigV1(STRIPE_KEY, STRIPE_BODY, NOW)]], cause: 'declared-header-absent' },
+        { label: 'Stripe-style: the declared header AND a valid x-objectstack-signature, the declared one wrong', flowName: 'stripe', body: STRIPE_BODY, headers: [['Stripe-Signature', stripeSig('not-the-key', STRIPE_BODY, NOW)], ['x-objectstack-signature', sigV1(STRIPE_KEY, STRIPE_BODY, NOW)]], cause: 'declared-mismatch' },
+        // GitHub-style: `sha256=` prefix, hex.
+        { label: 'GitHub-style: sha256= and the hex digest', flowName: 'github', body: STRIPE_BODY, headers: [['X-Hub-Signature-256', `sha256=${hex(GITHUB_KEY, STRIPE_BODY)}`]], cause: null },
+        { label: 'GitHub-style: the hex digest without its declared prefix', flowName: 'github', body: STRIPE_BODY, headers: [['X-Hub-Signature-256', hex(GITHUB_KEY, STRIPE_BODY)]], cause: 'declared-prefix-missing' },
+        // Unusable declarations: nothing admits, whatever is signed.
+        { label: 'unusable (an algorithm the spec refuses): a valid x-objectstack-signature under the reader\'s key', flowName: 'unusable', body: DOCUSIGN_BODY, headers: [['x-objectstack-signature', sigV1(DOCUSIGN_KEY, DOCUSIGN_BODY, NOW)]], cause: 'declared-unusable' },
+        { label: 'unusable (an algorithm the spec refuses): the declared header, correctly signed', flowName: 'unusable', body: DOCUSIGN_BODY, headers: [['X-DocuSign-Signature-1', DOCUSIGN_VECTOR]], cause: 'declared-unusable' },
+        { label: 'unusable (beside a literal secret): the declared header, correctly signed', flowName: 'beside_secret', body: DOCUSIGN_BODY, headers: [['X-DocuSign-Signature-1', DOCUSIGN_VECTOR]], cause: 'declared-unusable' },
+        { label: 'unusable (beside a literal secret): a valid x-objectstack-signature under that secret', flowName: 'beside_secret', body: DOCUSIGN_BODY, headers: [['x-objectstack-signature', sigV1(DOCUSIGN_KEY, DOCUSIGN_BODY, NOW)]], cause: 'declared-unusable' },
+        // The control every answer is compared with: a post that names no armed flow.
+        { label: 'CONTROL: an unknown flow', flowName: 'never_armed', body: DOCUSIGN_BODY, headers: [], cause: 'unknown-flow' },
+    ];
+
+    const declaredRequest = (row: DeclaredRow): Request => {
+        const headers = new Headers([['Content-Type', 'application/json'], ...row.headers]);
+        return new Request(`${ORIGIN}/api/v1/automation/hooks/${row.flowName}/${row.hookId ?? 'default'}`, {
+            method: 'POST', headers, body: row.body,
+        } as RequestInit);
+    };
+
+    /** The cause each `refused an inbound post (<cause>)` line logged, in order. */
+    const causesLogged = (plugin: ObservedApiTriggerPlugin) =>
+        plugin.lines('warn', 'refused an inbound post').map((line) => /refused an inbound post \(([^)]+)\)/.exec(line)?.[1]);
+
+    it('every row: the same status, headers and bytes through the member and the mount; admitted rows enqueue, refused rows log their own cause', async () => {
+        const { fixture, member, plugin, trigger } = await boot({ server: 'canonical' });
+        armDeclared(trigger!);
+        for (const row of ROWS_30009) {
+            const before = fixture.published.length;
+            plugin.logs.length = 0;
+            const hook = { flowName: row.flowName, hookId: row.hookId ?? 'default' };
+            const viaMember = await snapshot(await member(declaredRequest(row), hook));
+            const viaMount = await snapshot(await fixture.canonicalApp.fetch(declaredRequest(row)));
+            expect(viaMember, `${row.label}: the two faces`).toEqual(viaMount);
+            if (row.cause === null) {
+                expect(viaMember.status, row.label).toBe(202);
+                expect(json(viaMember), row.label).toEqual({ accepted: true, messageId: MESSAGE_ID });
+                expect(fixture.published.length - before, `${row.label}: enqueued once per face`).toBe(2);
+                expect(causesLogged(plugin), row.label).toEqual([]);
+            } else {
+                expect(viaMember.status, row.label).toBe(401);
+                expect(fixture.published.length - before, `${row.label}: enqueued`).toBe(0);
+                expect(causesLogged(plugin), `${row.label}: one cause per face`).toEqual([row.cause, row.cause]);
+            }
+        }
+    });
+
+    it('every refusal is the ONE answer: status, headers and bytes equal to an unknown flow\'s, and no line names the key, the header value or the body', async () => {
+        const { member, plugin, trigger } = await boot();
+        armDeclared(trigger!);
+        const control = ROWS_30009.find((r) => r.cause === 'unknown-flow')!;
+        const one = await snapshot(await member(declaredRequest(control), { flowName: control.flowName, hookId: 'default' }));
+        expect(one.status).toBe(401);
+        expect(json(one)).toEqual({ success: false, error: { code: 'INVALID_SIGNATURE', message: 'Signature verification failed.' } });
+        const refused = ROWS_30009.filter((r) => r.cause !== null);
+        expect(new Set(refused.map((r) => r.cause)).size).toBe(9);
+        for (const row of refused) {
+            plugin.logs.length = 0;
+            const answer = await snapshot(await member(declaredRequest(row), { flowName: row.flowName, hookId: row.hookId ?? 'default' }));
+            expect(answer, row.label).toEqual(one);
+            const logged = JSON.stringify(plugin.logs);
+            for (const secret of [DOCUSIGN_KEY, STRIPE_KEY, STRIPE_OLD_KEY, GITHUB_KEY]) {
+                expect(logged.includes(secret), `${row.label}: a key`).toBe(false);
+            }
+            for (const [, value] of row.headers) expect(logged.includes(value), `${row.label}: a header value`).toBe(false);
+            if (typeof row.body === 'string') expect(logged.includes(row.body), `${row.label}: the body`).toBe(false);
+        }
+    });
+
+    it('an unusable declaration is refused before its key is read, so it is never the secret-unavailable 503; a usable one reads its key per post', async () => {
+        const { member, trigger } = await boot();
+        const reads = armDeclared(trigger!);
+        for (const row of ROWS_30009.filter((r) => r.cause === 'declared-unusable')) {
+            const res = await member(declaredRequest(row), { flowName: row.flowName, hookId: 'default' });
+            expect(res.status, row.label).toBe(401);
+        }
+        expect(reads.unusable).toBe(0);
+        const admitted = ROWS_30009.find((r) => r.flowName === 'docusign' && r.cause === null)!;
+        await member(declaredRequest(admitted), { flowName: 'docusign', hookId: 'hk_ds' });
+        await member(declaredRequest(admitted), { flowName: 'docusign', hookId: 'hk_ds' });
+        expect(reads.docusign).toBe(2);
+    });
+
+    it('a declared key that cannot be read answers the 503 every hook secret does, never a verdict', async () => {
+        const { member, trigger, fixture } = await boot();
+        trigger!.start(
+            { flowName: 'docusign', config: { hookId: 'hk_ds', secretRef: 'DOCUSIGN_CONNECT_KEY', signature: DOCUSIGN }, resolveSecret: async () => { throw new Error('the name resolved to no value'); } },
+            async () => {},
+        );
+        const res = await snapshot(await member(declaredRequest(ROWS_30009[0]!), { flowName: 'docusign', hookId: 'hk_ds' }));
+        expect(res.status).toBe(503);
+        expect(json(res)).toMatchObject({ success: false, error: { code: 'SERVICE_UNAVAILABLE' } });
+        expect(fixture.published).toEqual([]);
+    });
+
+    it('a declared scheme arms only with the engine\'s reader for config.secretRef: a binding without one throws and leaves no hook', async () => {
+        const { member, trigger } = await boot();
+        expect(() => trigger!.start(
+            { flowName: 'docusign', config: { hookId: 'hk_ds', secretRef: 'DOCUSIGN_CONNECT_KEY', signature: DOCUSIGN } },
+            async () => {},
+        )).toThrow(/config\.signature[\s\S]*config\.secretRef/);
+        expect(trigger!.listHooks().map((h) => h.flowName)).not.toContain('docusign');
+        const res = await member(declaredRequest(ROWS_30009[0]!), { flowName: 'docusign', hookId: 'hk_ds' });
+        expect(res.status).toBe(401);
+    });
+
+    it('CONTROL: a hook that declares no scheme still verifies x-objectstack-signature, and ignores a vendor header', async () => {
+        const { member, trigger } = await boot();
+        armDeclared(trigger!);
+        const accepted = await member(hookRequest(FLOW, HOOK_ID, BODY, sig(BODY)), { flowName: FLOW, hookId: HOOK_ID });
+        expect(accepted.status).toBe(202);
+        const vendorOnly = await member(
+            hookRequest(FLOW, HOOK_ID, BODY, { 'X-DocuSign-Signature-1': b64(SECRET, BODY) }),
+            { flowName: FLOW, hookId: HOOK_ID },
+        );
+        expect(vendorOnly.status).toBe(401);
+    });
+});

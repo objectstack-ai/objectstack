@@ -73,7 +73,7 @@ function sendProbe(hold?: { recipient: string; until: Promise<void> }): SendProb
     };
 }
 
-function setup(options: { maxIdleIntervalMs?: number; probe?: SendProbe } = {}) {
+function setup(options: { maxIdleIntervalMs?: number; probe?: SendProbe; soleWriter?: boolean } = {}) {
     const outbox = new TickRecordingOutbox(1);
     const probe = options.probe ?? sendProbe();
     const dispatcher = new NotificationDispatcher({
@@ -84,6 +84,7 @@ function setup(options: { maxIdleIntervalMs?: number; probe?: SendProbe } = {}) 
         partitionCount: 1,
         intervalMs: BASE,
         maxIdleIntervalMs: options.maxIdleIntervalMs,
+        soleWriter: options.soleWriter,
     });
     return { outbox, probe, dispatcher };
 }
@@ -252,5 +253,45 @@ describe('#17610 MessagingService.emit() wakes the dispatcher its outbox is wire
         await vi.advanceTimersByTimeAsync(0);
         expect(outbox.tickStarts).toHaveLength(ticksBefore);
         await dispatcher.stop();
+    });
+});
+
+describe('#29919 NotificationDispatcher — a sole writer wakes at the next due time', () => {
+    const FIVE_MINUTES = 5 * MINUTE;
+
+    it('a fresh sole-writer dispatcher on an empty outbox ticks ONCE in its first minute', async () => {
+        const { outbox, dispatcher } = setup({ soleWriter: true, maxIdleIntervalMs: FIVE_MINUTES });
+        dispatcher.start();
+        await vi.advanceTimersByTimeAsync(MINUTE);
+        await dispatcher.stop();
+        expect(outbox.tickStarts).toHaveLength(1);
+    });
+
+    it('a deferred delivery written before boot is sent the moment it comes due, not a ceiling later', async () => {
+        const { outbox, probe, dispatcher } = setup({ soleWriter: true, maxIdleIntervalMs: FIVE_MINUTES });
+        const t0 = Date.now();
+        await outbox.enqueue({ ...row('u1'), notBefore: t0 + 20_000 });
+        dispatcher.start();
+        await vi.advanceTimersByTimeAsync(MINUTE);
+        await dispatcher.stop();
+
+        expect(probe.sent).toEqual(['u1']);
+        expect(outbox.tickStarts.slice(0, 2)).toEqual([t0, t0 + 20_000]);
+    });
+
+    it('a crashed node\'s claim is reaped and re-sent once its claim TTL passes, not a ceiling later', async () => {
+        const { outbox, probe, dispatcher } = setup({ soleWriter: true, maxIdleIntervalMs: FIVE_MINUTES });
+        const t0 = Date.now();
+        await outbox.enqueue(row('u1'));
+        // Claimed by a node that then died: in flight, never acked.
+        const [claimed] = await outbox.claim({ nodeId: 'dead-node', limit: 1, claimTtlMs: 5_000 });
+        expect(claimed?.recipientId).toBe('u1');
+        dispatcher.start();
+        await vi.advanceTimersByTimeAsync(MINUTE);
+        await dispatcher.stop();
+
+        expect(probe.sent).toEqual(['u1']);
+        // claimTtlMs defaults to 2 × lockTtlMs = 10 × intervalMs; reapable just after.
+        expect(outbox.tickStarts[1]! - t0).toBe(10 * BASE + 1);
     });
 });

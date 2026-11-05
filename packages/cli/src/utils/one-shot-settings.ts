@@ -59,6 +59,12 @@ export interface ExistingDataKey {
 /**
  * Resolve the data key this host already has, never minting one. A key that
  * is missing, or set but unusable, is an answer here, not a throw.
+ *
+ * ⚠ It writes the key-file channels (`KEY_FILE_CHANNEL_ENV`,
+ * `KEY_FILE_CANDIDATE_CHANNEL_ENV`) on `opts.env`, which defaults to the real
+ * `process.env`: it sets or deletes both, so this process and every child it
+ * spawns afterwards read the file this call resolved. Pass an env map of your
+ * own to keep `process.env` untouched (the tests do).
  */
 export async function resolveExistingDataKey(
   opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
@@ -77,11 +83,11 @@ export async function resolveExistingDataKey(
   // [#30042] The SAME file a `serve` child of `os dev` / `os start` reads for
   // this project, chosen by the same resolution: the canonical file, the
   // project's legacy file when it alone holds a key, and — when the two hold
-  // different keys — whichever opens a stored secret, ruled by the settings
-  // service in this run's own boot (`settleKeyFileChannel`). This process
-  // opens the database itself, so it is its own parent: it sets both channels
-  // on its own env, exactly as `applyCryptoKeyFileChannel` sets them on a
-  // child's.
+  // different keys — whichever opens more of the newest stored secrets, ruled
+  // by the settings service in this run's own boot (`settleKeyFileChannel`).
+  // This process opens the database itself, so it is its own parent: it sets
+  // both channels on its own env, exactly as `applyCryptoKeyFileChannel` sets
+  // them on a child's.
   const startHome = resolveStartHome(undefined, {
     hasProjectConfig: existsSync(path.resolve(cwd, 'objectstack.config.ts')),
     cwd,

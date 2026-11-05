@@ -29,6 +29,22 @@ Escrow the key in your secret manager the day you generate it, and treat
 key + database as one backup unit.
 </Callout>
 
+**Two key files on one host.** Without `OS_SECRET_KEY` (or `OS_DEV_CRYPTO_KEY`),
+the data key comes from a `dev-crypto-key` file: the canonical one under the
+ObjectStack home dir (`OS_HOME`, else `~/.objectstack`), which `os dev` and
+`os start` share, or a project's own `<project>/.objectstack/dev-crypto-key`,
+left by an earlier `os start`, when that is the only file holding a key. When
+both files exist and hold **different** keys, the boot trial-opens the newest
+stored secrets (up to ten rows) under each key once the database is open, uses
+the file whose key opens more of them, and prints which file it chose and how
+many rows each key opened. If each key opens some of the rows, the database
+holds secrets under both keys: the boot prints an error naming both files, and
+the secrets under the unused key read as unset until they are saved again. If
+neither key opens any of them, a production boot refuses to start and names
+both files. To converge on one key, keep a copy of both files, save again any
+secret that reads as unset, then put the key that opens them at the canonical
+path (or set `OS_SECRET_KEY` to it) and back that one key up with the database.
+
 ## Backing up the database
 
 Use the native tooling of whatever `OS_DATABASE_URL` points at — ObjectStack

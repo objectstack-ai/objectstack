@@ -71,10 +71,17 @@ const FORWARD_PRESETS: readonly string[] = ['next_month', 'next_quarter', 'next_
 const RETIRED_PRESETS = [...DATE_RANGE_PRESETS].filter((p) => !FORWARD_PRESETS.includes(p));
 
 /**
- * CONTROL for #30140: the previous-period and previous-year windows and the
- * trend label of every retired preset at REFERENCE_NOWS[0] (2026-07-15), read
- * off `compare-to.ts` at main b7075d99 before the forward fix. The fix must
- * leave every one of them as it was.
+ * The previous-period and previous-year windows and the trend label of every
+ * retired preset at REFERENCE_NOWS[0], Wednesday 2026-07-15.
+ *
+ * CONTROL rows (`today`, `this_*`): as read off `compare-to.ts` at main
+ * b7075d99, before #30140, and unchanged by #30197.
+ *
+ * #30197 rows: an already-past window used to compare with itself
+ * (`yesterday` with 07-14, `last_month` with June) and `last_N_days` (N + 1
+ * days through today) with the N days that end yesterday. Each now compares
+ * with the period just before it: 07-13; the week of 06-29; May; Q1; 2024;
+ * and for `last_7_days` (07-08..07-15, 8 days) the 8 days 06-30..07-07.
  */
 const RETIRED_COMPARE_AT_REFERENCE: Record<string, {
   label: string;
@@ -82,18 +89,18 @@ const RETIRED_COMPARE_AT_REFERENCE: Record<string, {
   previousYear: [string, string];
 }> = {
   today: { label: 'vsYesterday', previousPeriod: ['2026-07-14', '2026-07-14'], previousYear: ['2025-07-15', '2025-07-15'] },
-  yesterday: { label: 'vsPreviousPeriod', previousPeriod: ['2026-07-14', '2026-07-14'], previousYear: ['2025-07-14', '2025-07-14'] },
+  yesterday: { label: 'vsPreviousPeriod', previousPeriod: ['2026-07-13', '2026-07-13'], previousYear: ['2025-07-14', '2025-07-14'] },
   this_week: { label: 'vsLastWeek', previousPeriod: ['2026-07-06', '2026-07-12'], previousYear: ['2025-07-14', '2025-07-20'] },
-  last_week: { label: 'vsLastWeek', previousPeriod: ['2026-07-06', '2026-07-12'], previousYear: ['2025-07-07', '2025-07-13'] },
+  last_week: { label: 'vsPreviousPeriod', previousPeriod: ['2026-06-29', '2026-07-05'], previousYear: ['2025-07-07', '2025-07-13'] },
   this_month: { label: 'vsLastMonth', previousPeriod: ['2026-06-01', '2026-06-30'], previousYear: ['2025-07-01', '2025-07-31'] },
-  last_month: { label: 'vsLastMonth', previousPeriod: ['2026-06-01', '2026-06-30'], previousYear: ['2025-06-01', '2025-06-30'] },
+  last_month: { label: 'vsPreviousPeriod', previousPeriod: ['2026-05-01', '2026-05-31'], previousYear: ['2025-06-01', '2025-06-30'] },
   this_quarter: { label: 'vsLastQuarter', previousPeriod: ['2026-04-01', '2026-06-30'], previousYear: ['2025-07-01', '2025-09-30'] },
-  last_quarter: { label: 'vsLastQuarter', previousPeriod: ['2026-04-01', '2026-06-30'], previousYear: ['2025-04-01', '2025-06-30'] },
+  last_quarter: { label: 'vsPreviousPeriod', previousPeriod: ['2026-01-01', '2026-03-31'], previousYear: ['2025-04-01', '2025-06-30'] },
   this_year: { label: 'vsLastYear', previousPeriod: ['2025-01-01', '2025-12-31'], previousYear: ['2025-01-01', '2025-12-31'] },
-  last_year: { label: 'vsLastYear', previousPeriod: ['2025-01-01', '2025-12-31'], previousYear: ['2024-01-01', '2024-12-31'] },
-  last_7_days: { label: 'vsYesterday', previousPeriod: ['2026-07-08', '2026-07-14'], previousYear: ['2025-07-08', '2025-07-15'] },
-  last_30_days: { label: 'vsYesterday', previousPeriod: ['2026-06-15', '2026-07-14'], previousYear: ['2025-06-15', '2025-07-15'] },
-  last_90_days: { label: 'vsYesterday', previousPeriod: ['2026-04-16', '2026-07-14'], previousYear: ['2025-04-16', '2025-07-15'] },
+  last_year: { label: 'vsPreviousPeriod', previousPeriod: ['2024-01-01', '2024-12-31'], previousYear: ['2024-01-01', '2024-12-31'] },
+  last_7_days: { label: 'vsPreviousPeriod', previousPeriod: ['2026-06-30', '2026-07-07'], previousYear: ['2025-07-08', '2025-07-15'] },
+  last_30_days: { label: 'vsPreviousPeriod', previousPeriod: ['2026-05-15', '2026-06-14'], previousYear: ['2025-06-15', '2025-07-15'] },
+  last_90_days: { label: 'vsPreviousPeriod', previousPeriod: ['2026-01-15', '2026-04-15'], previousYear: ['2025-04-16', '2025-07-15'] },
 };
 
 /**
@@ -233,11 +240,11 @@ describe('dashboard date presets lower through the spec window table', () => {
         expect(compareToTrendLabelKey({ kind: 'previousPeriod' }, filter)).toBe(
           compareToTrendLabelKey({ kind: 'previousPeriod' }, retiredFilter),
         );
-        return;
       }
 
-      // A forward preset's previous period ends the day before its own window
-      // starts, on every reference date, so it never overlaps it.
+      // Every preset's previous period ends the day before its own window
+      // starts, on every reference date, so it never overlaps it and never is
+      // it (#30140, #30197).
       for (const now of REFERENCE_NOWS) {
         const current = resolveDateMacros(filter, now).created_at as { $gte: string; $lte: string };
         const previous = shiftFilterByCompareTo(filter, { kind: 'previousPeriod' }, now).created_at as {
@@ -246,14 +253,21 @@ describe('dashboard date presets lower through the spec window table', () => {
         };
         const label = `${preset} @ ${now.toString()}`;
         expect(daysBetween(previous.$lte, current.$gte), label).toBe(1);
-        if (preset === 'next_30_days') {
-          // Rolling: the same number of days as the current window.
+        if (/_days$|^today$|^yesterday$|_week$/.test(preset)) {
+          // A rolling window, a day or a week: the same number of days.
           expect(daysBetween(previous.$gte, previous.$lte), label).toBe(daysBetween(current.$gte, current.$lte));
         } else {
-          // Calendar: the whole period just before, starting on its first day.
+          // A month, quarter or year: the whole period just before, from its first day.
           expect(previous.$gte.endsWith('-01'), label).toBe(true);
         }
       }
+
+      // previousYear from a leap day reads the year before on 28 February, so
+      // a February window stays February (#30197).
+      expect(
+        shiftFilterByCompareTo(filter, { kind: 'previousYear' }, new Date(2028, 1, 29, 8, 0)),
+        `${preset} previousYear @ 2028-02-29`,
+      ).toEqual(resolveDateMacros(filter, new Date(2027, 1, 28, 8, 0)));
     },
   );
 
