@@ -485,11 +485,16 @@ const WIDGET_FILTER_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
       'renders successfully either way: nothing reports the miss.',
     'Each key is resolved on the object graph against the dataset\'s object — a dotted ' +
       '`relationship.field` path hop by hop, a bare name against the authored and registry-injected ' +
-      'columns — and the verdict names the hop that failed. This rule judges the KEYS; ' +
-      '`filter-token-unknown` judges the values in the same subtree. Not reported: an object this ' +
-      'stack does not define, or one with no readable field map.',
-    'To fix it, filter on a field of the dataset\'s object, or on a `relationship[.relationship].field` ' +
-      'path: every hop must be a relationship field (lookup, master_detail, user or tree; ADR-0021 ' +
+      'columns, then against the dataset\'s dimensions, which the dataset query binds through each ' +
+      'dimension\'s field — and the verdict names the hop that failed. A bare key naming one of the ' +
+      'dataset\'s measures is refused with its own message: a filter compares each row before ' +
+      'aggregation, so the dataset query would compare the measure\'s raw column (or no column at ' +
+      'all, for a count, derived or duration measure), never the aggregated value. ' +
+      'This rule judges the KEYS; `filter-token-unknown` judges the values in the same subtree. ' +
+      'Not reported: an object this stack does not define, or one with no readable field map.',
+    'To fix it, filter on a field of the dataset\'s object, on a dimension of the dataset, or on a ' +
+      '`relationship[.relationship].field` path: every hop must be a relationship field ' +
+      '(lookup, master_detail, user or tree; ADR-0021 ' +
       'derives every join from the object graph), and the prefix must be declared in the dataset\'s ' +
       '`include` (`widget-filter-field-not-included` otherwise). The verdict\'s "Did you mean" names ' +
       'the nearest field of the object the miss landed on.',
@@ -5570,8 +5575,9 @@ const REPORT_FILTER_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
       'own.',
     'Each key is judged as `widget-filter-field-unknown` judges a widget filter key — a dotted ' +
       '`relationship.field` path hop by hop, a bare name against the authored and registry-injected ' +
-      'columns — and one more name is accepted: a bare key naming a dimension of the bound dataset, ' +
-      'which the dataset query binds through that dimension. Not reported: a `dataset` that resolves to ' +
+      'columns, then against the dimensions of the bound dataset, which the dataset query binds ' +
+      'through each dimension\'s field; a bare key naming a measure of the dataset is refused with its ' +
+      'own message, as the twin refuses it. Not reported: a `dataset` that resolves to ' +
       'nothing (`chart-dataset-unknown` reports that once), an object this stack does not define, or ' +
       'one with no readable field map.',
     'To fix it, filter on a field of the dataset\'s object, on a dimension of the dataset, or on a ' +

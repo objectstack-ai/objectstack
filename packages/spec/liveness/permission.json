@@ -99,6 +99,20 @@
           "evidence": "packages/spec/src/security/permission.zod.ts (retiredKey tombstone — authored values REJECT with the prescription; z.input types the key never)",
           "note": "REMOVED 2026-08-26 (#12497, ADR-0049 enforce-or-remove — maintainer ruling accepting #1883's recommendation B) — the `purge` ObjectQL operation the bit claimed to gate has never existed (no destructive lifecycle verb in the engine's dispatch vocabulary, #8106 pin), so granting it delivered nothing; worse, an admin who set `allowPurge: false` believed a lock on GDPR hard-deletion existed. The former 'live' verdict cited only the evaluator's pre-mapping row, which retired in the same batch. A dispatched `purge` stays denied fail-closed via DESTRUCTIVE_OPERATIONS. Tombstoned at the schema and stripped from sources by the protocol-18 conversion `permission-allow-restore-purge-removed`. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); the key RETURNS with the M2 lifecycle initiative (#1883, feature + RBAC in one batch) — drop the tombstone (and this entry) only if M2 respells it."
         },
+        "allowRestoreOwnDeleted": {
+          "status": "planned",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/spec/src/data/recycle-bin.zod.ts#RECYCLE_BIN_GRANT_KEYS (the spelling the readers import; until they land, `DESTRUCTIVE_OPERATIONS` in plugin-security's permission evaluator denies a dispatched `restore` / `purge` fail-closed whatever this key says)",
+          "note": "PLANNED RECORD (ADR-0148 D2/D5, D7 ratified 6659364907; the spec card #30235): a person restores the recycle-bin entries of this object they deleted. A NEW spelling, not the tombstoned `allowRestore` (that row stays dead). Optional, no default. Read by nothing yet, measured: `OPERATION_TO_PERMISSION` has no `restore` row, so the evaluator's `DESTRUCTIVE_OPERATIONS` backstop denies the operation. The reader is #30237 (the engine's restore and the evaluator mapping); flip this row to live there, citing it. The Console (#30239) shows it. No `authorWarn`: the author-side lint resolves `objects.<key>` without fanning out over the per-object record, so a warned row here would warn nobody; the key's `.describe()` says it is not read yet."
+        },
+        "manageRecycleBin": {
+          "status": "planned",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/spec/src/data/recycle-bin.zod.ts#RECYCLE_BIN_GRANT_KEYS (the spelling the readers import; until they land, `DESTRUCTIVE_OPERATIONS` in plugin-security's permission evaluator denies a dispatched `restore` / `purge` fail-closed whatever this key says)",
+          "note": "PLANNED RECORD (ADR-0148 D2/D5, D7 ratified 6659364907; the spec card #30235): bin administration on this object: list every entry, restore any, purge; emptying purges every entry the holder manages. A NEW spelling, not the tombstoned `allowPurge` (that row stays dead). Optional, no default. Read by nothing yet, measured: `OPERATION_TO_PERMISSION` has no `restore` / `purge` row, so the evaluator's `DESTRUCTIVE_OPERATIONS` backstop denies both. The reader is #30237 (the engine's list, restore, purge and empty doors and the evaluator mapping); flip this row to live there, citing it. The Console's admin page (#30239) reads it. No `authorWarn`: the author-side lint resolves `objects.<key>` without fanning out over the per-object record, so a warned row here would warn nobody; the key's `.describe()` says it is not read yet."
+        },
         "viewAllRecords": {
           "status": "live",
           "verifiedAt": "2026-08-28",

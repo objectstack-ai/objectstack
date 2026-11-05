@@ -18,5 +18,23 @@
  */
 
 export const esESGeneratedSourceHashes: Readonly<Record<string, string>> = {
+  "objects.sys_queue._views.all_queues.label": "6d6f653f8264ab17",
+  "objects.sys_queue.description": "46f6f4c7eea606fa",
+  "objects.sys_queue.fields.description.label": "779a4342c8eb6707",
+  "objects.sys_queue.fields.label.label": "c2da0a529641d467",
+  "objects.sys_queue.fields.name.help": "dcbe38b864a5e775",
+  "objects.sys_queue.fields.name.label": "5274417ff1ccaf01",
+  "objects.sys_queue.label": "87d4b808a85ea103",
+  "objects.sys_queue.pluralLabel": "226d23b8bd681e98",
+  "objects.sys_queue_member._views.by_queue.label": "e2fc3d197e62194f",
+  "objects.sys_queue_member.description": "0a13fcf2729233d6",
+  "objects.sys_queue_member.fields.queue.help": "2fe880a3e213f85f",
+  "objects.sys_queue_member.fields.queue.label": "87d4b808a85ea103",
+  "objects.sys_queue_member.fields.recipient_id.help": "c7c7b9abcdbd2862",
+  "objects.sys_queue_member.fields.recipient_id.label": "28df6ed83bf1854a",
+  "objects.sys_queue_member.fields.recipient_type.help": "2ae5686284ebe563",
+  "objects.sys_queue_member.fields.recipient_type.label": "bdd6823b52227962",
+  "objects.sys_queue_member.label": "671a45ea261c0e92",
+  "objects.sys_queue_member.pluralLabel": "46715e86f5231603",
   "objects.sys_share_link.fields.token.label": "6e8de3393d2cee54",
 };

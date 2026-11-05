@@ -130,8 +130,8 @@ export const SysUserPosition = ObjectSchema.create({
       label: 'Valid From',
       required: false,
       description:
-        'Grant is inactive before this instant. Null = active immediately. ' +
-        'Enforced fail-closed at resolution time — never by a background job.',
+        'The assignment takes effect at this time. Leave empty for it to take effect at once. ' +
+        'It starts on time, with no scheduled job to wait for.',
     }),
 
     // [ADR-0091 D1; mandatory on D3 delegation rows; enforced by the D2 predicate]
@@ -139,8 +139,8 @@ export const SysUserPosition = ObjectSchema.create({
       label: 'Valid Until',
       required: false,
       description:
-        'Grant is inactive AT and AFTER this instant (half-open [from, until), UTC). ' +
-        'Null = never expires. Mandatory on delegation rows. Enforced at resolution time.',
+        'The assignment ends at this time (UTC). Leave empty for no end date. ' +
+        'Required on a delegated assignment. It ends on time, with no scheduled job to wait for.',
     }),
 
     reason: Field.text({

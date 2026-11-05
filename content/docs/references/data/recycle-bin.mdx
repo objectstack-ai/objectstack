@@ -1,0 +1,136 @@
+---
+title: Recycle Bin schema — Data Protocol reference
+navTitle: Recycle Bin
+description: "Recycle Bin schemas of the ObjectStack Data Protocol: RecycleBinClearedReference and 5 more — each property with its type, default and a TypeScript example."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+<Callout type="info">
+**Source:** `packages/spec/src/data/recycle-bin.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { RecycleBinClearedReferenceSchema, RecycleBinEntrySchema, RecycleBinRetentionDaysSchema, RecycleBinRetentionDaysEnvSchema, RecycleBinSnapshotSchema, RecycleBinSnapshotRowSchema } from '@objectstack/spec/data';
+import type { RecycleBinClearedReference, RecycleBinEntry, RecycleBinRetentionDays, RecycleBinRetentionDaysEnv, RecycleBinSnapshot, RecycleBinSnapshotRow } from '@objectstack/spec/data';
+
+// Validate data
+const result = RecycleBinClearedReferenceSchema.parse(data);
+```
+
+---
+
+## RecycleBinClearedReference
+
+A set_null reference the delete cleared, re-linked on restore when still empty
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object of the live row whose reference was cleared |
+| **id** | `string` | ✅ | Id of the live row whose reference was cleared |
+| **field** | `string` | ✅ | The lookup field the delete cleared |
+| **value** | `string` | ✅ | The id the field held, a row in this entry |
+
+
+---
+
+## RecycleBinEntry
+
+One recycle-bin entry: one delete operation
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | optional | Entry id |
+| **object_name** | `string` | ✅ | The object the delete operation targeted |
+| **record_id** | `string` | ✅ | The id of the record the delete operation targeted |
+| **record_count** | `integer` | ✅ | How many rows the snapshot holds |
+| **snapshot** | `{ rows: object[]; clearedReferences: object[] }` | ✅ | The cascade set a recycle-bin entry holds |
+| **deleted_by** | `string` | optional | The deleting principal (a sys_user id) |
+| **deleted_at** | `string` | ✅ | When the delete operation committed |
+| **retention_days** | `integer` | ✅ | The retention in days applied at delete time |
+| **purge_after** | `string` | ✅ | The purge deadline, stamped at delete time |
+
+### Nested Shape: `RecycleBinEntry.snapshot`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **rows** | `{ object: string; id: string; values: Record<string, any> }[]` | ✅ | The removed rows, the master first, then its details in cascade order |
+| **clearedReferences** | `{ object: string; id: string; field: string; value: string }[]` | ✅ | The set_null references the delete cleared |
+
+
+---
+
+## RecycleBinRetentionDays
+
+Recycle-bin retention in days: a positive whole number
+
+**Type:** `integer`
+
+
+---
+
+## RecycleBinRetentionDaysEnv
+
+OS_RECYCLE_BIN_RETENTION_DAYS: the decimal digits of a positive whole number of days
+
+**Type:** `string`
+
+
+---
+
+## RecycleBinSnapshot
+
+The cascade set a recycle-bin entry holds
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **rows** | `{ object: string; id: string; values: Record<string, any> }[]` | ✅ | The removed rows, the master first, then its details in cascade order |
+| **clearedReferences** | `{ object: string; id: string; field: string; value: string }[]` | ✅ | The set_null references the delete cleared |
+
+### Nested Shape: `RecycleBinSnapshot.rows[number]`
+
+One snapshotted row of a recycle-bin entry
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object name of the deleted row |
+| **id** | `string` | ✅ | The row id, restored unchanged |
+| **values** | `Record<string, any>` | ✅ | The row as it stood at delete time, secret-channel refs left out |
+
+### Nested Shape: `RecycleBinSnapshot.clearedReferences[number]`
+
+A set_null reference the delete cleared, re-linked on restore when still empty
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object of the live row whose reference was cleared |
+| **id** | `string` | ✅ | Id of the live row whose reference was cleared |
+| **field** | `string` | ✅ | The lookup field the delete cleared |
+| **value** | `string` | ✅ | The id the field held, a row in this entry |
+
+
+---
+
+## RecycleBinSnapshotRow
+
+One snapshotted row of a recycle-bin entry
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object name of the deleted row |
+| **id** | `string` | ✅ | The row id, restored unchanged |
+| **values** | `Record<string, any>` | ✅ | The row as it stood at delete time, secret-channel refs left out |
+
+
+---
+

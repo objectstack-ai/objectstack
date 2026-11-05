@@ -499,6 +499,17 @@ export const SpecifierSchema = lazySchema(() => z.object({
    * `sms.provider` — where "legal" means "this deployment ships an adapter for
    * it", not "some registrar published it". Do not add `valueDomain` to those.
    *
+   * **The one other boundary mover is a runtime option source.** A select whose
+   * legal values are what the running deployment supports (`localization.locale`:
+   * the languages its i18n service reports) has its table served by the
+   * settings service from that system, not from this declaration. Where a
+   * source answers, its options are what a write is judged against and what
+   * every manifest read serves (the namespace read and the manifest list
+   * alike); the declared `options` are the fallback, standing only while the
+   * source has no answer (the system it reads is absent from the composition).
+   * That is a runtime registration, not an authorable key: a manifest cannot
+   * declare one.
+   *
    * `pattern` / `minLength` / `maxLength` still apply and still narrow: they
    * constrain the *shape* of the string, the domain constrains its
    * *membership*. A value must satisfy both. Reach for `valueDomain` precisely

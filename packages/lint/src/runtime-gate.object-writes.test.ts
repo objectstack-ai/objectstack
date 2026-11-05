@@ -91,6 +91,18 @@ const cleanObject = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+/**
+ * [#30095] A field map carrying each sort verdict: `owner` has no `sortable`
+ * key, `priority` declares `sortable: true`, `body` declares `sortable: false`
+ * and `score` is a virtual `formula`.
+ */
+const SORT_FIELDS = {
+  owner: { type: 'text' },
+  priority: { type: 'number', sortable: true },
+  body: { type: 'textarea', sortable: false },
+  score: { type: 'formula', expression: 'record.priority * 2' },
+};
+
 const gateObject = (item: unknown, context: object = { objects: STORED }) =>
   runRuntimeAuthoringRules({ type: 'object', item, context });
 
@@ -278,16 +290,19 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
     // `defineStack` gives a related-list name matching no inbound FK: resolved
     // against `stack.objects`, so no missing-collection channel. The keys are
     // new (0 shipped declarations, 0 findings); its controls are below.
+    // [#30095] `validateSortableFields` is the sixth, the adjudication this pin
+    // used to hold open: an object's built-in `listViews.*.sort`, resolved
+    // against `stack.objects`. Measured over the shipped object corpus (127
+    // objects, 102 list views, 113 sort keys, 0 findings); its controls are
+    // below.
     expect(crossed).toEqual([
       'validateSearchableFields',
+      'validateSortableFields',
       'validateListViewFieldRefs',
       'validateObjectFieldRefs',
       'validateRelatedListRefs',
       'validateChartBindings',
     ]);
-    // `validateSortableFields` measured equally clean but was NOT crossed:
-    // that is its own adjudication, and this pin is where it has to be made.
-    expect(crossed).not.toContain('validateSortableFields');
     // Every crossed member still judges flow snapshots — the #4463 P1 surface
     // is not narrowed by the member axis existing.
     const offFlow = REFERENCE_INTEGRITY_RULES
@@ -334,6 +349,39 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
     const f = result.errors.find((e) => e.rule === 'list-view-field-unknown')!;
     expect(f.path).toBe('objects.leave_request.listViews.all.columns[1]');
     expect(f.message).toContain('gone_column');
+  });
+
+  // [#30095] The sort axis of the same built-in list view. The list door
+  // refuses each of these `400 INVALID_SORT` on the view's first fetch and
+  // every fetch after it, so the object door refuses the declaration.
+  it.each([
+    ['a field that declares `sortable: false`', 'body', 'sort-field-unsortable', 'declares `sortable: false`'],
+    ['a virtual `formula` field', 'score', 'sort-field-unsortable', "a virtual 'formula' field"],
+    ['a name the object does not have', 'gone_field', 'sort-field-unknown', 'gone_field'],
+  ])('REFUSES an object whose built-in list view sorts by %s', (_label, field, rule, said) => {
+    const result = expectSingleRefusal(
+      cleanObject({
+        fields: SORT_FIELDS,
+        listViews: { inbox: { label: 'Inbox', columns: ['owner'], sort: [{ field, order: 'asc' }] } },
+      }),
+      rule,
+    );
+    const sortErrors = result.errors.filter((e) => e.rule.startsWith('sort-field-'));
+    expect(sortErrors.map((e) => e.path)).toEqual(['objects.leave_request.listViews.inbox.sort[0]']);
+    expect(sortErrors[0]!.message).toContain(said);
+  });
+
+  it('CONTROL — the same list view sorting by a sortable field publishes, and the member ran', () => {
+    for (const field of ['owner', 'priority']) {
+      const result = gateObject(
+        cleanObject({
+          fields: SORT_FIELDS,
+          listViews: { inbox: { label: 'Inbox', columns: ['owner'], sort: [{ field, order: 'asc' }] } },
+        }),
+      );
+      expect(result.errors, `${field}: ${JSON.stringify(result.errors)}`).toEqual([]);
+      expect(result.rulesRun).toContain('validateReferenceIntegrity');
+    }
   });
 
   it('a clean object carrying BOTH declarations publishes — the refusal is about the reference', () => {

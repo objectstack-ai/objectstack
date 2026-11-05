@@ -32,13 +32,11 @@
  *
  * ## What is real and what is faked
  *
- * Only the upload TRANSPORT is faked — `useUpload` answers an upload whose
- * promise this test settles — because that is what makes the mid-upload window
- * deterministic. It is swapped with `vi.mock` rather than mounted as an
- * `UploadProvider` because `@object-ui/providers` is not a dependency of this
- * package: the widgets reach it through `@object-ui/fields`, and importing it
- * here would be an undeclared import. The rest of that module is the real one.
- * The widgets are the shipping `FileField` / `ImageField`, driven through their
+ * Only the upload TRANSPORT is faked — the ambient adapter answers an upload
+ * whose promise this test settles — because that is what makes the mid-upload
+ * window deterministic. It is mounted through the real `UploadProvider`, which
+ * `@object-ui/fields` (a dependency of this package) exports beside the widgets
+ * that read it. The widgets are the shipping `FileField` / `ImageField`, driven through their
  * real file input; the form renderer, react-hook-form and the wizard are real.
  * Both widgets are registered directly rather than through their lazy entries
  * so no module load races the assertions, and the lazy entries are put back
@@ -48,23 +46,24 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import React from 'react';
 import { ComponentRegistry } from '@object-ui/core';
-import { registerAllFields, FileField, ImageField } from '@object-ui/fields';
+import {
+  registerAllFields,
+  FileField,
+  ImageField,
+  UploadProvider,
+  type UploadAdapter,
+} from '@object-ui/fields';
 import { WizardForm } from './WizardForm';
 
 /** The upload the current row installs; see `deferredUpload`. */
-const transport = vi.hoisted(() => ({
-  upload: (_f: File | Blob): Promise<unknown> => Promise.reject(new Error('no upload installed')),
-}));
-vi.mock('@object-ui/providers', async (importOriginal) => {
-  const actual = await importOriginal<Record<string, unknown>>();
-  return {
-    ...actual,
-    useUpload: () => ({
-      upload: (f: File | Blob) => transport.upload(f),
-      adapter: { name: 'deferred', upload: (f: File | Blob) => transport.upload(f) },
-    }),
-  };
-});
+const transport: { upload: UploadAdapter['upload'] } = {
+  upload: () => Promise.reject(new Error('no upload installed')),
+};
+/** The ambient adapter: it hands every pick to the current row's `transport`. */
+const deferredAdapter: UploadAdapter = {
+  name: 'deferred',
+  upload: (f, opts) => transport.upload(f, opts),
+};
 
 registerAllFields();
 
@@ -149,19 +148,21 @@ describe('WizardForm — Next pressed while an upload is in flight (objectui#101
     const { created, ds } = makeDataSource();
     const { upload, settle } = deferredUpload();
     render(
-      <WizardForm
-        schema={{
-          type: 'object-form',
-          formType: 'wizard',
-          objectName: 'o',
-          mode: 'create',
-          sections: [
-            { name: 's1', label: 'One', fields: ['name', fieldName] },
-            { name: 's2', label: 'Two', fields: ['note'] },
-          ],
-        } as any}
-        dataSource={ds}
-      />,
+      <UploadProvider adapter={deferredAdapter}>
+        <WizardForm
+          schema={{
+            type: 'object-form',
+            formType: 'wizard',
+            objectName: 'o',
+            mode: 'create',
+            sections: [
+              { name: 's1', label: 'One', fields: ['name', fieldName] },
+              { name: 's2', label: 'Two', fields: ['note'] },
+            ],
+          } as any}
+          dataSource={ds}
+        />
+      </UploadProvider>,
     );
 
     // ── Step 1: a value typed, a file picked through the widget's real input,
