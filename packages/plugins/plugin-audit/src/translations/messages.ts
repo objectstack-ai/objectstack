@@ -57,3 +57,73 @@ export const esESMessages: Messages = {
   mentionedYou: '{{actor}} te mencionó',
   mentionedYouAnonymous: 'Te han mencionado',
 };
+
+export const zhHantMessages: Messages = {
+  activityCreated: '建立了 {{object}}「{{label}}」',
+  activityUpdated: '更新了 {{object}}「{{label}}」',
+  activityUpdatedFields: '更新了 {{object}}「{{label}}」：{{fields}}',
+  activityMoreFields: '另外 {{count}} 個欄位',
+  activityDeleted: '刪除了 {{object}}「{{label}}」',
+  mentionedYou: '{{actor}} 提及了你',
+  mentionedYouAnonymous: '有人提及了你',
+};
+
+export const arMessages: Messages = {
+  activityCreated: 'أنشأ {{object}} "{{label}}"',
+  activityUpdated: 'حدّث {{object}} "{{label}}"',
+  activityUpdatedFields: 'حدّث {{object}} "{{label}}": {{fields}}',
+  activityMoreFields: '{{count}} أخرى',
+  activityDeleted: 'حذف {{object}} "{{label}}"',
+  mentionedYou: 'أشار إليك {{actor}}',
+  mentionedYouAnonymous: 'تمت الإشارة إليك',
+};
+
+export const frMessages: Messages = {
+  activityCreated: 'A créé {{object}} « {{label}} »',
+  activityUpdated: 'A modifié {{object}} « {{label}} »',
+  activityUpdatedFields: 'A modifié {{object}} « {{label}} » : {{fields}}',
+  activityMoreFields: '{{count}} de plus',
+  activityDeleted: 'A supprimé {{object}} « {{label}} »',
+  mentionedYou: '{{actor}} vous a mentionné',
+  mentionedYouAnonymous: 'Vous avez été mentionné',
+};
+
+export const ptBRMessages: Messages = {
+  activityCreated: 'Criou {{object}} "{{label}}"',
+  activityUpdated: 'Atualizou {{object}} "{{label}}"',
+  activityUpdatedFields: 'Atualizou {{object}} "{{label}}": {{fields}}',
+  activityMoreFields: 'mais {{count}}',
+  activityDeleted: 'Excluiu {{object}} "{{label}}"',
+  mentionedYou: '{{actor}} mencionou você',
+  mentionedYouAnonymous: 'Você foi mencionado',
+};
+
+export const ruMessages: Messages = {
+  activityCreated: 'Создал(а) {{object}} «{{label}}»',
+  activityUpdated: 'Изменил(а) {{object}} «{{label}}»',
+  activityUpdatedFields: 'Изменил(а) {{object}} «{{label}}»: {{fields}}',
+  activityMoreFields: 'ещё {{count}}',
+  activityDeleted: 'Удалил(а) {{object}} «{{label}}»',
+  mentionedYou: '{{actor}} упомянул(а) вас',
+  mentionedYouAnonymous: 'Вас упомянули',
+};
+
+export const deMessages: Messages = {
+  activityCreated: 'Hat {{object}} „{{label}}“ erstellt',
+  activityUpdated: 'Hat {{object}} „{{label}}“ aktualisiert',
+  activityUpdatedFields: 'Hat {{object}} „{{label}}“ aktualisiert: {{fields}}',
+  activityMoreFields: '{{count}} weitere',
+  activityDeleted: 'Hat {{object}} „{{label}}“ gelöscht',
+  mentionedYou: '{{actor}} hat Sie erwähnt',
+  mentionedYouAnonymous: 'Sie wurden erwähnt',
+};
+
+export const koMessages: Messages = {
+  activityCreated: '{{object}} "{{label}}"을(를) 만들었습니다',
+  activityUpdated: '{{object}} "{{label}}"을(를) 수정했습니다',
+  activityUpdatedFields: '{{object}} "{{label}}"의 {{fields}}을(를) 수정했습니다',
+  activityMoreFields: '외 {{count}}개',
+  activityDeleted: '{{object}} "{{label}}"을(를) 삭제했습니다',
+  mentionedYou: '{{actor}}님이 회원님을 멘션했습니다',
+  mentionedYouAnonymous: '회원님이 멘션되었습니다',
+};

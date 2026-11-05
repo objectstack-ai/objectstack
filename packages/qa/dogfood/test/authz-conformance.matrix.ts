@@ -24,7 +24,7 @@
 // hand-curated regex table reaching 1 of 17 REST registrars and 4 of 17
 // dispatcher domain files.
 //
-// The population comes from `packages/rest/src/rest-route-ledger.ts` (18
+// The population comes from `packages/rest/src/rest-route-ledger.ts` (19
 // families) and `packages/runtime/src/route-ledger.ts` (23
 // domains) because those two are enumerated from a RUNNING server and guarded
 // in both directions by their own conformance tests — so a new family or
@@ -311,6 +311,16 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
     // family key needs.
     covers: ['rest-family:rest-route-ledger.ts:openapi'],
     note: 'Measured on a booted showcase before the change: an unauthenticated caller was served the document (and its viewer page, since retired) with 200, just as a signed-in caller was, while the record doors on the same boot answered it 401 — ADR-0056 D2 is default-deny and no ADR-0138 D2 door class names this endpoint. The cited proof drives the document anonymously (401, the REST flat envelope, nothing of it served) and with a signed-in member (200, the document) on one boot. The environment-scoped twin mounts only under project scoping, which the showcase does not enable; it is the same handler closure, pinned per base in rest/src/rest-api-description-anonymous-deny.test.ts beside the gated-session 403 and the permission-store-outage 503. A deployment that publishes its API description to readers without an account publishes a static copy of the document instead.' },
+  // #30205 — a user's assigned work, counted and handed over: a family that
+  // arrives classified, the way `/approvals/act` did.
+  { id: 'anonymous-deny-user-work', summary: 'anonymous-deny on the assigned-work count and hand-over', state: 'enforced',
+    enforcement: 'rest/user-work-routes.ts registerUserWorkEndpoints — both handlers (GET assigned-work, POST assigned-work/transfer) open with enforceAuth (→ shouldDenyAnonymous) as their first act after resolving the caller, ahead of the query-parameter and body checks and of any engine read or write; an anonymous caller gets the REST seam\'s flat 401 UNAUTHENTICATED, and a signed-in caller counts and moves only what their own context can read and update',
+    proof: 'showcase-anonymous-deny-surfaces.dogfood.test.ts',
+    // The REST family at ledger granularity: the family is exactly these two
+    // routes and both handlers open with the floor.
+    covers: ['rest-family:rest-route-ledger.ts:user-work'],
+    // Added by #30205.
+    note: 'The cited proof drives both routes anonymously (401, the REST flat envelope, nothing counted or moved) and with a signed-in member on one boot (the count served 200; the hand-over reaching its own unknown-target refusal, 404, before any write). Row admission and the update of each moved record stay with the security layer behind the engine, because both routes run as the caller.' },
   // #22432 — the `/i18n` dispatcher domain, under the ruling recorded on #22146
   // (the domain gains the domain-level anonymous refusal every other dispatcher
   // domain has, with an objectui companion for the Console's sign-in page).

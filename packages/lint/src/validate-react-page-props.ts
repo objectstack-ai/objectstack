@@ -69,6 +69,7 @@ import {
 // #5020's zod-rejection renderer, shared with the SDUI component-props gate
 // since #5068 — see `zod-issue-format.ts` for why one copy matters here.
 import { describeIssue, type LintZodIssue } from './zod-issue-format.js';
+import { objectsAsServed } from './object-graph.js';
 import { createSourceFileChecked, describeParseFailure, PARSE_FAILURE_FIX } from './checked-parse.js';
 // [#22161] The verdict half of a forwarded `@objectstack/spec` refusal — one
 // cut for every rule that forwards the same producer's words.
@@ -1136,7 +1137,16 @@ function localComponentNames(tsc: typeof ts, sf: ts.SourceFile): Set<string> {
 
 export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
   const findings: ReactPropFinding[] = [];
-  const objectFields = indexObjectFields(stack);
+  // [#30471] Over the objects as served, every `objectExtensions` field
+  // folded in, as `validatePageFieldBindings` reads them: a prop naming a
+  // field a sibling package adds is served, and one no body declares or
+  // extends is still unknown. Handing the index pre-served objects bypasses
+  // the declares-nothing guard by construction: an object that declares no
+  // field but is extended gets the extension's names, not an empty set. No
+  // verdict moves toward a refusal: this rule judged that empty set on main
+  // too (`checkFieldRefs` and `checkObjectChart` skip only a missing object),
+  // so every ref was unknown there and the extension's names now resolve.
+  const objectFields = indexObjectFields({ objects: objectsAsServed(stack).objects });
   // [#8340] The provenance index alongside the existence one — same keying,
   // asked on the path where the existence check stays silent.
   const unprovisionedAnchors = indexUnprovisionedAnchors(stack);

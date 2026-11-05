@@ -18,6 +18,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ObjectQLPlugin } from './plugin.js';
 import { ObjectQL } from './engine.js';
+import { isServedOverrideRowOf } from '@objectstack/metadata-protocol';
 
 type AnyRecord = Record<string, any>;
 
@@ -431,6 +432,29 @@ describe('[#30065] a declared .custom action override rebinds the body, and rest
     }
   });
 
+  it('[#30542] before the base is registered, another base\'s declared override of the same key is replaced by the real base\'s handler, as every read declines it', async () => {
+    // A row of `com.example.other`'s pair declaring that package, for the key
+    // the real base ships: bound on its own declaration while no artifact is
+    // registered, it is not the real base's override.
+    const OTHER = 'com.example.other';
+    const row = overrideRow(`${OTHER}.custom`, 'OTHER BASE', { overrides: { package: OTHER, basedOn: '1.0.0' } });
+    const { ql, resync, run, bindBase } = harness({ baseBound: false });
+    await resync([row]);
+    await expect(run()).resolves.toBe('ran:OTHER BASE');
+    const warn = vi.spyOn((ql as any).logger, 'warn');
+    bindBase();
+    await expect(run()).resolves.toBe('ran:BASE BODY');
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][1]).toMatchObject({ package: `app:${BASE}`, replacedPackage: 'metadata-service' });
+    // The reads judge the row against the real base by the one served-override
+    // predicate, and decline it: the run now agrees with them.
+    expect([isServedOverrideRowOf(row as any, BASE), isServedOverrideRowOf(row as any, OTHER)]).toEqual([false, true]);
+    // The next resync judges the row against the registered artifact and
+    // leaves the base's handler bound.
+    await resync([row]);
+    await expect(run()).resolves.toBe('ran:BASE BODY');
+  });
+
   it('re-binding the armed override keeps the base beneath it, so a later restore still runs the base body', async () => {
     const { resync, run } = harness();
     await resync([overrideRow(PAIR, 'FIRST')]);
@@ -456,6 +480,17 @@ describe('[#30065] a declared .custom action override rebinds the body, and rest
     const { resync, run } = harness();
     await resync([overrideRow(PAIR, 'FLOW', { ...declared, type: 'flow', target: 'close_flow', body: undefined })]);
     await expect(run()).resolves.toBe('ran:BASE BODY');
+  });
+
+  it('[#30542] a registration with no package under an armed override replaces it and is warned, naming both owners', async () => {
+    const ql = new ObjectQL();
+    ql.registerAction(OBJ, ACT, async () => 'base', `app:${BASE}`);
+    ql.registerActionOverride(OBJ, ACT, async () => 'override', 'metadata-service', BASE);
+    const warn = vi.spyOn((ql as any).logger, 'warn');
+    ql.registerAction(OBJ, ACT, async () => 'unpackaged');
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][1]).toMatchObject({ objectName: OBJ, actionName: ACT, package: undefined, replacedPackage: 'metadata-service' });
+    await expect(ql.executeAction(OBJ, ACT, {})).resolves.toBe('unpackaged');
   });
 
   it('the handler stack: removing the base under an armed override keeps the override, and removing both unbinds the name', async () => {
