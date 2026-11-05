@@ -1949,6 +1949,26 @@ function refuseDishonestRecordCurrencyField(
 const HOME_AMOUNT_RATE_DATE_TYPES: ReadonlySet<string> = new Set(['date', 'datetime']);
 
 /**
+ * The decimal places an exchange rate carries: twelve digits after the point
+ * (ruling 6469382727, "scale 12 — twelve digits after the decimal
+ * point, total precision 24"). It is the `scale` platform-objects declares on
+ * `sys_exchange_rate.rate` (`EXCHANGE_RATE_SCALE`); the spec cannot import
+ * that package, so the number is restated here and the ruling is the one
+ * source both cite.
+ *
+ * The floor a `homeAmount.rateField` may declare. The engine stores the rate
+ * row's own value in the rate field, never rounded, and every numeric column
+ * is the same exact decimal, so a declared `scale` there constrains no write
+ * (a `readonly` value is judged for its shape only) and reaches the display
+ * alone: a rate field at `scale: 4` would show 0.1389 for a stored
+ * 0.138912345678, and the shown rate would no longer reproduce the stored
+ * home amount. An UNDECLARED `scale` is not refused: on a `number` field it
+ * declares no fixed width (`resolveFieldScale` answers `undefined`), so the
+ * rate shows the digits it was stored with, all twelve.
+ */
+const HOME_AMOUNT_RATE_SCALE = 12;
+
+/**
  * [ADR-0144 D5] A `record`-mode amount's `currencyConfig.homeAmount` names
  * three fields THIS object declares: `field`, where the engine stores the
  * amount converted into the home currency; `rateDate`, the document date whose
@@ -1976,7 +1996,9 @@ const HOME_AMOUNT_RATE_DATE_TYPES: ReadonlySet<string> = new Set(['date', 'datet
  *  - `rateDate` is not a declared `date` / `datetime` field;
  *  - `rateField` is not a declared `number` field, or is shared with an amount
  *    that names another code field or another document date (the two would
- *    store two different rates into one column);
+ *    store two different rates into one column), or declares a `scale` below
+ *    the rate's twelve decimals ({@link HOME_AMOUNT_RATE_SCALE}; an undeclared
+ *    `scale` is accepted, since it shows every stored digit);
  *  - the home field or the rate field is not marked platform-written. The
  *    engine writes both, so each declares `readonly: true` — the existing mark
  *    that drops every non-system write of the field from the payload — and no
@@ -1996,7 +2018,7 @@ function refuseDishonestHomeAmount(
   const objectName = typeof ownName === 'string' ? ownName : '<unnamed>';
   type HomeAmount = { field?: unknown; rateDate?: unknown; rateField?: unknown };
   type CurrencyConfigView = { currencyMode?: unknown; currencyField?: unknown; homeAmount?: HomeAmount };
-  type FieldView = { type?: unknown; readonly?: unknown; expression?: unknown; currencyConfig?: CurrencyConfigView } | null;
+  type FieldView = { type?: unknown; readonly?: unknown; expression?: unknown; scale?: unknown; currencyConfig?: CurrencyConfigView } | null;
   const map = fields as Record<string, FieldView>;
   const has = (name: string): boolean => Object.prototype.hasOwnProperty.call(map, name);
   const modeOf = (f: FieldView): unknown => f?.currencyConfig?.currencyMode ?? 'dynamic';
@@ -2146,6 +2168,22 @@ function refuseDishonestHomeAmount(
         // sharer stores the same rate into the same, already judged, column.
         rateOwner.set(target, { amount: name, currencyField: config.currencyField, rateDate: home.rateDate });
         refuseUnlessPlatformWritten('rateField', target, 'the rate field');
+        // The rate is stored at twelve decimals whatever the field declares, so
+        // a narrower `scale` only rounds the rate a reader is shown (ruling
+        // 6469382727). Judged once per column, like the mark above.
+        const scale = t?.scale;
+        if (typeof scale === 'number' && scale < HOME_AMOUNT_RATE_SCALE) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [...base, 'rateField'],
+            message: `${at}.rateField\` names \`${target}\`, a \`number\` field declaring \`scale: ${scale}\`, below the `
+              + `${HOME_AMOUNT_RATE_SCALE} decimal places an exchange rate carries. The engine stores the rate it used `
+              + `with all ${HOME_AMOUNT_RATE_SCALE} decimals, so \`${target}\` would show it rounded to ${scale} and the `
+              + 'shown rate would not reproduce the stored home amount. Declare '
+              + `\`scale: ${HOME_AMOUNT_RATE_SCALE}\` (or more) on \`${target}\`, or delete its \`scale\` so the rate `
+              + 'shows every digit it was stored with.',
+          });
+        }
       }
     }
   }
