@@ -14,7 +14,7 @@
  * the host's `DiscussionContext` — and the field changes (`sys_audit_log`,
  * `trackHistory`), which the host hands over through
  * {@link RecordFieldChangesContext}. This module is the pure part: the audit
- * rows as feed items, the merge (newest first, an update counted once), and
+ * rows as feed items, the merge (newest first, one action one row), and
  * the four filter chips 全部 / 活动 / 讨论 / 变更 (变更 = the audit's field
  * changes; every activity row is 活动).
  */
@@ -78,7 +78,33 @@ export interface AuditEntryLike {
   user_name?: string | null;
   user_avatar?: string | null;
   summary?: string | null;
+  /** Who wrote the entry, as `sys_audit_log.user_id`: the same id `sys_activity.actor_id` holds. */
+  user_id?: string | number | null;
   changes?: Array<{ field: string; label?: string; from?: unknown; to?: unknown }>;
+}
+
+/**
+ * What an audit feed item carries beyond {@link FeedItem}, for the pairing in
+ * {@link mergeTimelineStream} (objectstack#30122): the ledger's `action` and
+ * its `user_id`. Package-local: written by {@link auditEntriesToFeedItems},
+ * read here, never authored.
+ */
+interface AuditFeedFacts {
+  auditAction?: string;
+  auditUserId?: string | number | null;
+}
+
+/**
+ * A stream item as {@link mergeTimelineStream} hands it on: an activity row
+ * that one action also wrote to the audit log carries that audit item as
+ * `fieldHistory`, so the action reads as ONE row with its before and after
+ * values (objectstack#30122). Package-local hand-off, never authored.
+ */
+export type TimelineStreamItem = FeedItem & { fieldHistory?: FeedItem };
+
+/** The audit item paired onto an activity row, if any. */
+export function fieldHistoryOf(item: FeedItem): FeedItem | undefined {
+  return (item as TimelineStreamItem).fieldHistory;
 }
 
 const displayOf = (value: unknown): string | undefined =>
@@ -114,7 +140,9 @@ export function auditEntriesToFeedItems(
         ...(displayOf(change.to) !== undefined ? { newDisplayValue: displayOf(change.to) } : {}),
       })),
       source: 'sys_audit_log',
-    } as FeedItem);
+      ...(entry.action ? { auditAction: entry.action } : {}),
+      auditUserId: entry.user_id ?? null,
+    } as FeedItem & AuditFeedFacts);
   }
   return out;
 }
@@ -125,20 +153,91 @@ const timeOf = (item: FeedItem): number => {
 };
 
 /**
+ * How far apart an activity row and an audit entry may be stamped and still
+ * be one action (objectstack#30122). plugin-audit writes both in one call,
+ * the audit row first, so they land milliseconds apart; the window allows a
+ * driver that keeps whole seconds.
+ */
+export const TIMELINE_PAIR_WINDOW_MS = 5000;
+
+/** The ledger's write actions and the activity type the same action writes. */
+const AUDIT_ACTION_TO_ACTIVITY_TYPE: Readonly<Record<string, string>> = {
+  create: 'created',
+  update: RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE,
+  delete: 'deleted',
+};
+
+/** One actor on both sides: the same user id, or, where neither names one, the same name. */
+function sameActor(activity: FeedItem, audit: FeedItem & AuditFeedFacts): boolean {
+  const activityId = activity.actorId ?? null;
+  const auditId = audit.auditUserId ?? null;
+  if (activityId !== null && auditId !== null) return String(activityId) === String(auditId);
+  if (activityId !== null || auditId !== null) return false;
+  return activity.actor === audit.actor;
+}
+
+/**
+ * The activity row that wrote the same action as `audit`, or -1: same record
+ * (the host reads both for this record), the activity type the audit action
+ * writes, the same actor, stamped within {@link TIMELINE_PAIR_WINDOW_MS};
+ * the nearest in time wins, and a row pairs once.
+ */
+function pairedActivityIndex(audit: FeedItem & AuditFeedFacts, feed: readonly FeedItem[], taken: ReadonlySet<number>): number {
+  const activityType = audit.auditAction ? AUDIT_ACTION_TO_ACTIVITY_TYPE[audit.auditAction] : undefined;
+  if (!activityType) return -1;
+  const at = timeOf(audit);
+  let best = -1;
+  let bestGap = Number.POSITIVE_INFINITY;
+  feed.forEach((item, index) => {
+    if (taken.has(index) || item.activityType !== activityType || item.parentId) return;
+    if (!sameActor(item, audit)) return;
+    const gap = Math.abs(timeOf(item) - at);
+    if (gap <= TIMELINE_PAIR_WINDOW_MS && gap < bestGap) {
+      best = index;
+      bestGap = gap;
+    }
+  });
+  return best;
+}
+
+/**
  * The one stream: the host's discussion + activity items and the field
- * changes, newest first. With field changes present, the activity stream's
- * own `updated` rows step aside — the audit entry says the same update with
- * its before and after values, and an update is counted once.
+ * changes, newest first. One action that wrote both an activity row and an
+ * audit entry reads as ONE row (objectstack#30122): the activity row, with
+ * the audit entry as its `fieldHistory`, so it keeps its actor and summary
+ * and gains the before and after values. An audit entry no activity row
+ * pairs with is its own row, as before; with field changes present, an
+ * unpaired `updated` row still steps aside, as before.
  */
 export function mergeTimelineStream(
   feed: readonly FeedItem[] | null | undefined,
   fieldChanges: readonly FeedItem[] | null | undefined,
-): FeedItem[] {
-  const changes = fieldChanges ?? [];
-  const base = (feed ?? []).filter(
-    (item) => !(changes.length > 0 && (item as { activityType?: string }).activityType === RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE),
-  );
-  return [...base, ...changes]
+): TimelineStreamItem[] {
+  const changes = (fieldChanges ?? []) as ReadonlyArray<FeedItem & AuditFeedFacts>;
+  const activity = feed ?? [];
+  const taken = new Set<number>();
+  const pairs = new Map<number, FeedItem>();
+  const unpaired: FeedItem[] = [];
+  for (const audit of changes) {
+    const index = pairedActivityIndex(audit, activity, taken);
+    if (index < 0) {
+      unpaired.push(audit);
+      continue;
+    }
+    taken.add(index);
+    pairs.set(index, audit);
+  }
+  const base: TimelineStreamItem[] = [];
+  activity.forEach((item, index) => {
+    const audit = pairs.get(index);
+    if (audit) {
+      base.push({ ...item, fieldHistory: audit });
+      return;
+    }
+    if (changes.length > 0 && item.activityType === RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE) return;
+    base.push(item);
+  });
+  return [...base, ...unpaired]
     .map((item, index) => ({ item, index }))
     .sort((a, b) => timeOf(b.item) - timeOf(a.item) || a.index - b.index)
     .map(({ item }) => item);
@@ -185,13 +284,27 @@ export function isFieldHistoryEntry(item: FeedItem): boolean {
   return item.type === 'field_change' && item.source === 'sys_audit_log';
 }
 
+/**
+ * The field-history entries of a stream, each on its own: an unpaired audit
+ * entry as it is, and the audit entry an activity row carries
+ * ({@link fieldHistoryOf}). The 变更 chip and the panel's `changes_only`
+ * show these (objectstack#30074 ruling C; objectstack#30122).
+ */
+export function fieldHistoryEntriesOf(items: readonly FeedItem[]): FeedItem[] {
+  return items.flatMap((item) => {
+    if (isFieldHistoryEntry(item)) return [item];
+    const paired = fieldHistoryOf(item);
+    return paired ? [paired] : [];
+  });
+}
+
 /** The items a chip shows: discussion = comments; changes = field-history entries; activity = the rest. */
 export function filterTimelineStream(items: readonly FeedItem[], filter: TimelineStreamFilter): FeedItem[] {
   switch (filter) {
     case 'discussion':
       return items.filter((item) => item.type === 'comment');
     case 'changes':
-      return items.filter(isFieldHistoryEntry);
+      return fieldHistoryEntriesOf(items);
     case 'activity':
       return items.filter((item) => item.type !== 'comment' && !isFieldHistoryEntry(item));
     default:
