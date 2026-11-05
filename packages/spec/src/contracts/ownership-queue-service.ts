@@ -160,7 +160,9 @@ export interface IOwnershipQueueService {
    * behind it succeeded, and a failed read rejects with a failure naming it.
    * Under `'refuse'` the registered service reads the queue's own rows
    * (`sys_queue`, `sys_queue_member`) first, and a failure there rejects at
-   * once, since without them the call does not know what to ask. Past them it
+   * once, since without them the queue's member set would be incomplete (a
+   * declared queue's own specifications come from the registry, but its
+   * authored additions come from `sys_queue_member`). Past them it
    * answers `true` as soon as a read that succeeded reaches `userId`, even
    * beside a failed read, and rejects only when no successful read reaches
    * `userId` and one failed.
