@@ -82,16 +82,21 @@ import { strictObject } from '../shared/strict-object';
  * it: the vendor blocks hold no secret to override, and each `credentialRef`
  * already names one.
  *
- * Out of scope here: the other vendors ADR-0012 §6 routes to alternate
- * channel plugins (HMS, Xiaomi, OPPO, vivo).
+ * Out of scope here: the domestic Android vendors (HMS / Honor, Xiaomi, OPPO,
+ * vivo). ADR-0012 §6.1 has the hosted relay front them in phase 2, as further
+ * values of `vendor`, the token type the relay routes on; there is no
+ * per-vendor plugin and no per-vendor channel.
  */
 
 /**
  * Push vendors core delivers through: `apns` (Apple) and `fcm` (Firebase).
  *
- * Closed on purpose. ADR-0012 §6 plugs the domestic Android vendors in as
- * alternate channel implementations, not as transports of this channel, so a
- * new value here is a spec change made together with its transport.
+ * Closed on purpose. `vendor` is the token type the hosted relay routes on
+ * (ADR-0012 §6.1): phase 1 routes these two, and phase 2 adds the domestic
+ * Android vendors (HMS / Honor, Xiaomi, OPPO, vivo) behind the same relay,
+ * with no per-vendor plugin and no per-vendor channel. So a new value here is
+ * a spec change made together with its transport: the relay's routing for
+ * that vendor.
  */
 export const PushVendorSchema = z.enum(['apns', 'fcm'])
   .describe('Push vendor core delivers through: apns (Apple Push Notification service) or fcm (Firebase Cloud Messaging HTTP v1)');

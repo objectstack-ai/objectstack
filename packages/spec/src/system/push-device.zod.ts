@@ -46,8 +46,9 @@ import { PUSH_SERVER_ORIGIN_MESSAGE, PUSH_SERVER_ORIGIN_PATTERN } from './push-s
  *   row, and a later registration of the same device re-enables it and clears
  *   `invalidatedAt`.
  *
- * Narrowed from ADR-0012 §6: `vendor` is the core pair (`apns` | `fcm`; the
- * domestic Android vendors plug in as alternate channel implementations) and
+ * Narrowed from the ADR-0012 §6 sketch: `vendor` is the core pair (`apns` |
+ * `fcm`; it is the token type the hosted relay routes on, and the domestic
+ * Android vendors join it in phase 2 behind the same relay, ADR-0012 §6.1) and
  * `platform` is the registration's own three (`ios` | `android` | `web`).
  */
 export const UserDeviceSchema = lazySchema(() => z.object({
