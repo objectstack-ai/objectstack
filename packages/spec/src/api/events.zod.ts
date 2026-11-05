@@ -134,11 +134,19 @@ export type MetadataEventSubject = MetadataEventSubjectOf<MetadataEventType>;
  * keying on an event no producer sent (ADR-0078's silently-inert declaration).
  * If a genuine per-field stream is ever needed it gets its own honest contract
  * — the precedent #4639 set for bulk writes — rather than an empty member here.
+ *
+ * ONE member is declared ahead of its producer, by ruling: `data.record.restored`
+ * (ADR-0148 D2/D5, D7's choices ratified). A recycle-bin restore emits it and
+ * never a `data.record.created`, so a flow triggered on record creation does
+ * not fire for a restore and audit records a restore as a restore. Nothing
+ * emits it until the engine's restore lands; `RealtimeEventType` does not
+ * list it until then, so no realtime subscription can wait on it.
  */
 export const DataEventType = z.enum([
   'data.record.created',
   'data.record.updated',
   'data.record.deleted',
+  'data.record.restored',
 ]);
 
 export type DataEventType = z.input<typeof DataEventType>;

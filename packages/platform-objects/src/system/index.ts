@@ -15,6 +15,9 @@ export { SysSetting } from './sys-setting.object.js';
 // [ADR-0131 D7] The settings cascade's global rung, tenant-less.
 export { SysPlatformSetting } from './sys-platform-setting.object.js';
 export { SysSecret } from './sys-secret.object.js';
+// [ADR-0148 D1] The recycle bin: one entry per delete operation. Declared,
+// not yet registered — the engine slice registers it with its writer.
+export { SysRecycleBin } from './sys-recycle-bin.object.js';
 // [ADR-0025 §3.5 M1] Trusted plugin-publisher public keys, tenant-less.
 export { SysTrustedKey } from './sys-trusted-key.object.js';
 export { SysMetadataActivation } from './sys-metadata-activation.object.js';
