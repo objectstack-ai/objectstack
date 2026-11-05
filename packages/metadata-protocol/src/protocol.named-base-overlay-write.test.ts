@@ -25,7 +25,8 @@
  *    draft stays a draft and no active row is written;
  *  - the rollback of a row bound to the base: refused, the row unchanged;
  *  - CONTROLS, open as on `main`: a delete naming the base removes such a row
- *    (the one way to clear it: the ceremony moves package-less rows only), a
+ *    (one way to clear it; [#29392] `os migrate packageless-overlays` moves it
+ *    into the pair, and the sentence names both), a
  *    draft discard naming it, the pair's declared save (served over a row
  *    bound to the base), a server-stated rewrite (`source` set), a writable
  *    package's same name, a name the base does not ship (ADR-0070 D1's own
@@ -211,6 +212,10 @@ function expectClosedSentence(message: string, type: string, name: string, verb:
     expect(message).toContain('ADR-0146 D1, D11');
     if (verb === 'rollback') expect(message).toContain('a rollback of its row bound to the read-only base is closed');
     else expect(message).toContain(`${verb} it into '${PAIR}'`);
+    // [#29392] The ceremony moves a row bound to the base into the pair: the
+    // sentence points an operator holding one to it, beside the other two doors.
+    expect(message).toContain('is served until moved by `os migrate packageless-overlays`, overridden by the pair, '
+        + 'or deleted naming the base.');
     // The REST door cuts a refusal's text at 500 characters
     // (`CLIENT_MESSAGE_MAX`, `@objectstack/types`): the whole sentence fits.
     expect(message.length).toBeLessThan(500);

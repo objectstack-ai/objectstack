@@ -338,6 +338,7 @@ import type {
     NamedBaseWriteSubject,
     OverrideWriteSubject,
     OverrideWriteVerdict,
+    WrittenPackageScope,
     PackagelessWriteOperation,
 } from './protocol-packaged-base-refusal.js';
 // [ADR-0146 D10, #28564] The `__c` extension-field reservation's one judge.
@@ -8267,8 +8268,8 @@ export class ObjectStackProtocolImplementation implements
      * {@link promoteDraftForPublish}) or a rollback that would land a row bound
      * to the base. D1 puts a read-only package's customizations in its paired
      * `<base>.custom`; such a row is served at the base's address with no
-     * declaration, outside the pair, and `os migrate packageless-overlays`
-     * never sees it (its census reads package-less rows only). Refused with
+     * declaration, outside the pair, until [#29392] `os migrate
+     * packageless-overlays` moves it into the pair. Refused with
      * the fix the package-less close names ({@link packagelessOverlayWriteRefusal},
      * one spelling): write it into the pair, declaring the override.
      *
@@ -8282,9 +8283,10 @@ export class ObjectStackProtocolImplementation implements
      * that could not be taken.
      *
      * ⛔ Not a delete: removing a row bound to the base writes nothing, and it
-     * is the only way to clear such a row stored before the close (the
-     * ceremony moves package-less rows only). A row stored before it stays
-     * served until the pair declares the override, which is served over it.
+     * is one way to clear such a row stored before the close; the ceremony is
+     * the other, moving it into the pair with its declaration. A row stored
+     * before it stays served until one of those, or the pair's declared
+     * override, which is served over it; the sentence names all three.
      *
      * Authoring writes only: the server-stated rewrites (`source` set, the
      * `package-duplicate` write face) name the row they rewrite. Registry
@@ -8316,15 +8318,17 @@ export class ObjectStackProtocolImplementation implements
      *
      * Asked by the save door ahead of {@link refusePackagedBaseOverride}, and
      * by the promotion ({@link promoteDraftForPublish}, so both
-     * `publishMetaItem` and `publishPackageDrafts`) on the draft's body.
+     * `publishMetaItem` and `publishPackageDrafts`) on the draft's body. The
+     * two overlay-write closes ask it about the pair their fix writes into,
+     * with the closure a pair not yet ensured will have (`writtenScope`).
      */
-    private overrideWriteVerdict(request: OverrideWriteSubject): OverrideWriteVerdict {
+    private overrideWriteVerdict(request: OverrideWriteSubject, writtenScope?: WrittenPackageScope): OverrideWriteVerdict {
         const host: ThisParameterType<typeof overrideWriteVerdict> = {
             isWritablePackage: (...a) => this.isWritablePackage(...a),
             resolveWritePackageScope: (...a) => this.resolveWritePackageScope(...a),
             shippedArtifactsOf: (...a) => this.shippedArtifactsOf(...a),
         };
-        return overrideWriteVerdict.call(host, request);
+        return overrideWriteVerdict.call(host, request, writtenScope);
     }
 
     /** Docblock and body: {@link ProtocolWriteGatesFacet.refusePackagedBaseRemoval} in `protocol-write-gates.ts` [#29985 codemod]. */
