@@ -2481,6 +2481,15 @@ importers:
 
   packages/qa/scenarios:
     dependencies:
+      '@objectstack/core':
+        specifier: workspace:*
+        version: link:../../core
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../../objectql
+      '@objectstack/plugin-sharing':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-sharing
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec

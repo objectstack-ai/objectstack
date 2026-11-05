@@ -8,9 +8,9 @@
 # its data" — a check each of the line's PRs passes BEFORE it merges. The
 # harness that answers R2 is a dogfood test,
 # `packages/qa/dogfood/test/upgrade-18x-harness.dogfood.test.ts`, and the
-# dogfood jobs in `ci.yml` run only on `main`'s full battery (THE TWO SPEEDS,
-# #22998): they skip `pull_request` and `merge_group`. So without this workflow
-# the line's PRs get their first R2 answer after the merge.
+# dogfood shards in `ci.yml` skip `pull_request` (THE TWO SPEEDS, #22998; they
+# run on `merge_group` since #30461). So without this workflow the line's PRs
+# get their first R2 answer in the merge queue, after the PR is enqueued.
 #
 # This workflow adds the missing TRIGGER for that ONE file, and nothing else.
 # The test, its fixture and its assertions stay where they are, and the full
