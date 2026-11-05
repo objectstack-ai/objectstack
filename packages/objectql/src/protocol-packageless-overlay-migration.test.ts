@@ -891,6 +891,18 @@ describe('[#30261] a view container cannot carry the declaration: the preview sa
         expect(rows(CONTAINER)).toEqual([[null, 'active']]);
     });
 
+    it('the close of a write naming the read-only base leaves it too: its fix, a declared save into the pair, cannot be taken', async () => {
+        const { protocol, rows } = await boot();
+        const named = await refusalOf(protocol.saveMetaItem({ type: 'view', name: CONTAINER, packageId: BASE, item: containerBody(EDITED_COLUMNS) } as any));
+        expect(named).toBeUndefined();
+        expect(rows(CONTAINER)).toEqual([[BASE, 'active']]);
+        // …and the row it stored is the census's, listed with the same way out, bound to the base.
+        const listedCensus = await census(protocol);
+        expect(listedCensus.rows.map((r: any) => `${r.name}@${r.state} ${r.disposition} ${r.boundToBase}`)).toEqual([`${CONTAINER}@active cannot_declare true`]);
+        expect(await refusalOf(protocol.deleteMetaItem({ type: 'view', name: CONTAINER, packageId: BASE } as any))).toBeUndefined();
+        expect(rows(CONTAINER)).toEqual([]);
+    });
+
     it('the way out the preview names holds: each view saved into the pair as a single view, then the container deleted naming no package, leaves nothing to list', async () => {
         const { engine, protocol, rows } = await boot();
         await storeContainer(engine, UNBOUND_COLUMNS);
