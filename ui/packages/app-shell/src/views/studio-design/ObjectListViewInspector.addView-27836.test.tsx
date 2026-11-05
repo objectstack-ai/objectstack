@@ -1,21 +1,23 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectstack#27836 — "Add view" in an `object` leaf's list-view panel: the
- * type first, then the fields that type requires, picked by label; the view is
- * created in the package draft and the panel shows it.
+ * objectstack#27836 — New view, from an `object` leaf's view switcher (the
+ * header's title, objectstack#30046): the type first, then the fields that
+ * type requires, picked by label; the view is created in the package draft and
+ * the panel shows it.
  *
- * The REAL hook (`useObjectListViewDraft`), the REAL panel and the REAL Create
- * View dialog over a REAL `MetadataClient`, whose transport judges every view
- * PUT with the installed spec's `view` schema and answers the write door's 422
- * on refusal.
+ * The REAL hook (`useObjectListViewDraft`), the REAL title switcher
+ * (`ObjectListViewTitle`), the REAL panel and the REAL Create View dialog over
+ * a REAL `MetadataClient`, whose transport judges every view PUT with the
+ * installed spec's `view` schema and answers the write door's 422 on refusal.
  *
  * Pinned:
  *  - a kanban and a calendar are created, each under its own name, with the
  *    picked fields, in the package draft (`If-None-Match: *`), and the spec
  *    accepts them; the panel then edits the new view, and the default grid is
  *    not written;
- *  - "Back to …" shows the view the nav entry opens again;
+ *  - the switcher lists the new view, and picking the nav entry's view there
+ *    shows that one again;
  *  - a name a view already holds is refused: nothing is written, the dialog
  *    stays open, and the panel says why.
  */
@@ -121,6 +123,7 @@ vi.mock('sonner', async (importOriginal) => {
 });
 
 import { ObjectListViewInspector, useObjectListViewDraft } from './ObjectListViewInspector';
+import { ObjectListViewTitle } from './ObjectListViewTitle';
 import type { Surface } from './navSurface';
 import { tFormat } from '../metadata-admin/i18n';
 
@@ -143,7 +146,14 @@ const LEAF: Surface = { type: 'object', name: 'acme_task', label: 'Tasks' };
 
 function Host() {
   const listView = useObjectListViewDraft({ client, packageId: PKG, leaf: LEAF, publishNonce: 0 });
-  return <ObjectListViewInspector listView={listView} readOnly={false} locale="en" />;
+  return (
+    <>
+      <h1>
+        <ObjectListViewTitle listView={listView} objectText="Tasks" locale="en" canCreate />
+      </h1>
+      <ObjectListViewInspector listView={listView} readOnly={false} locale="en" />
+    </>
+  );
 }
 
 async function settle() {
@@ -159,7 +169,15 @@ async function openPanel(): Promise<void> {
     </MetadataCtx.Provider>,
   );
   await settle();
-  await waitFor(() => expect(screen.getByTestId('list-view-add-view')).toBeEnabled());
+}
+
+/** Opens the switcher (the title's ▾) and reads its rows, by label. */
+async function openSwitcher(): Promise<string[]> {
+  if (!screen.queryByTestId('list-view-switcher-menu')) fireEvent.click(screen.getByTestId('list-view-switcher'));
+  const menu = await screen.findByTestId('list-view-switcher-menu');
+  return Array.from(menu.querySelectorAll('[data-testid^="view-switcher-row-"]')).map(
+    (row) => row.querySelector('button')?.textContent ?? '',
+  );
 }
 
 /** The view item name the panel shows beneath its title. */
@@ -174,7 +192,8 @@ const submitButton = () => screen.getByTestId('create-view-submit') as HTMLButto
 
 /** "Add view", pick `type`, pick each required field by its label, name the view `label`, and press Create. */
 async function addView(type: string, picks: Array<[key: string, label: string]>, label: string) {
-  fireEvent.click(screen.getByTestId('list-view-add-view'));
+  await openSwitcher();
+  fireEvent.click(await screen.findByTestId('list-view-switcher-new'));
   await waitFor(() => expect(typeCard(type)?.disabled).toBe(false));
   fireEvent.click(typeCard(type)!);
   for (const [key, option] of picks) {
@@ -221,7 +240,7 @@ describe('ObjectListViewInspector — "Add view" creates a view of the chosen ty
     await waitFor(() => expect(screen.queryByTestId('create-view-submit')).toBeNull());
     await waitFor(() => expect(shownView()).toBe('acme_task.pipeline_board'));
     expect(screen.getByTestId('list-view-kanban-card')).toBeInTheDocument();
-    expect(screen.getByTestId('list-view-back-to-entry')).toBeInTheDocument();
+    expect(screen.getByTestId('list-view-switcher')).toHaveTextContent('Pipeline board');
   });
 
   it('a calendar: born with its start-date and title fields, picked by label', async () => {
@@ -236,15 +255,17 @@ describe('ObjectListViewInspector — "Add view" creates a view of the chosen ty
     await waitFor(() => expect(shownView()).toBe('acme_task.due_dates'));
   });
 
-  it('"Back to …" shows the view the nav entry opens again', async () => {
+  it('the switcher lists the new view, and picking the entry\'s view there shows that one again', async () => {
     await openPanel();
     await addView('kanban', [['groupByField', 'Status']], 'Pipeline board');
     await waitFor(() => expect(shownView()).toBe('acme_task.pipeline_board'));
 
-    fireEvent.click(screen.getByTestId('list-view-back-to-entry'));
+    const rows = await openSwitcher();
+    expect(rows).toContain('Pipeline board');
+    expect(rows).toContain('Default view');
+    fireEvent.click(screen.getByTestId(`view-switcher-row-${DEFAULT_VIEW}`).querySelector('button')!);
     await settle();
     expect(shownView()).toBe(DEFAULT_VIEW);
-    expect(screen.queryByTestId('list-view-back-to-entry')).toBeNull();
   });
 
   it('a name a view already holds: nothing is written, the dialog stays open, and the panel says why', async () => {
