@@ -4,10 +4,13 @@
  * The settings write predicate (ADR-0144 D4): a rule over engine state that a
  * package registers on one manifest key, asked by `setMany` when a write
  * CHANGES that key. The home-currency lock is its first user
- * (`localization-currency-lock.test.ts`); this suite pins the mechanism.
+ * (`localization-currency-lock.test.ts`); this suite pins the mechanism,
+ * including the whole write it is handed as `batch` (a rule over several keys,
+ * the auth sign-in floor in `plugin-auth`, judges the state after the write).
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
+import type { SettingsWritePredicateInput as PackageEntryInput } from './index.js';
 import { SettingsService } from './settings-service.js';
 import { localizationSettingsManifest } from './manifests/localization.manifest.js';
 import {
@@ -86,6 +89,21 @@ describe('SettingsService write predicate', () => {
     });
     await expect(svc.set('localization', 'currency', 'USD', ctx)).rejects.toThrow('rate table unreachable');
     expect((await svc.get('localization', 'currency', ctx)).value ?? null).toBeNull();
+  });
+
+  it('is handed the whole write as `batch`, frozen, a clear as null, so a rule over several keys sees all of them', async () => {
+    const { svc, spy } = rig(() => undefined);
+    await svc.set('localization', 'timezone', 'Europe/Paris', ctx);
+    await svc.setMany('localization', { currency: 'EUR', timezone: null }, ctx);
+    expect(spy).toHaveBeenCalledTimes(1);
+    const input = spy.mock.calls[0][0];
+    expect(input).toMatchObject({ key: 'currency', next: 'EUR' });
+    expect(input.batch).toEqual({ currency: 'EUR', timezone: null });
+    expect(Object.isFrozen(input.batch)).toBe(true);
+  });
+
+  it('`batch` is part of the input type the package entry exports', () => {
+    expectTypeOf<PackageEntryInput['batch']>().toEqualTypeOf<Readonly<Record<string, unknown>> | undefined>();
   });
 
   it('refuses a predicate for an unregistered namespace or an undeclared key', () => {
