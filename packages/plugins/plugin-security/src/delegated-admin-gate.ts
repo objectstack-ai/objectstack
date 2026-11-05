@@ -855,11 +855,11 @@ export class DelegatedAdminGate {
    * it (sub-item B of that ruling): the caller's read is served through its
    * field rules and masking, and a verdict taken on what a rule hid would be
    * taken on less than the row. A refusal names a value only when the caller
-   * reads it at its stored value or wrote it ({@link mayName}). A by-id edit,
-   * which the right never admits, is asked the same question first: an edit
-   * of a row the caller cannot read, or of an id naming none, is refused as no
-   * row, not as an edit — `unreadable`, which the security middleware answers
-   * with the read door's not-found.
+   * reads it at its stored value or wrote it ({@link mayName}). An edit in
+   * place is a verb the right never holds, so it is refused before any row is
+   * looked up, whatever the id names: a row and no row get the same refusal
+   * (the update-by-id refusal order). The not-found is the answer only for a
+   * verb the caller holds, judged on the row.
    */
   private async organizationAdminFailure(
     opCtx: any,
@@ -868,12 +868,6 @@ export class DelegatedAdminGate {
     const op = String(opCtx.operation);
     if (!organizationId) {
       return { reason: 'the request carries no active organization to administer', meta: {} };
-    }
-    if (op === 'update') {
-      const id = extractSingleId(opCtx);
-      if (id != null && (await this.hiddenFromCaller(opCtx, id))) {
-        return { reason: 'the assignment row it addresses could not be read', meta: {}, unreadable: true };
-      }
     }
     if (op !== 'insert' && op !== 'delete') {
       return {
@@ -1698,16 +1692,6 @@ export class DelegatedAdminGate {
     }
     // delete / transfer / restore / purge — judged on the pre-image alone.
     return [{ next: null, prev, wrote: new Set<string>(), reads }];
-  }
-
-  /**
-   * Does the caller's own read answer NO row for `id` ({@link callerRead})?
-   * A declared 4xx refusal of the read is not a hidden row (`false`); a store
-   * fault propagates.
-   */
-  private async hiddenFromCaller(opCtx: any, id: string | number): Promise<boolean> {
-    const read = await this.callerReadUnlessRefused(opCtx, id);
-    return !read.refused && read.row === null;
   }
 
   /**

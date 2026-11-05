@@ -17,10 +17,12 @@
  * the failed condition. Every admission reads the stored row back.
  *
  * At the foot: under the walled postures, an organization administrator's
- * update and delete of a row it cannot read, and of an id naming no row,
- * answer the read door's not-found for that id (ruling of record 5985885287)
- * — whole, and equal to what step 2.7 answers the tenant-level administrator
- * for the same id; a row it reads keeps the boundary guidance. The same rule
+ * delete of a row it cannot read, and of an id naming no row, answers the
+ * read door's not-found for that id (ruling of record 5985885287) — whole, and
+ * equal to what step 2.7 answers the tenant-level administrator for the same
+ * id; its update, a verb the right never holds, is refused before any row is
+ * looked up, one refusal whatever the id names; a row it reads keeps the
+ * boundary guidance. The same rule
  * for the delegated branch follows: a delegate holding an `adminScope` and an
  * organization administrator who holds one too are answered the not-found,
  * and a delegate whose read of the two tables is refused outright is answered
@@ -412,10 +414,10 @@ const wholeWrite = (h: Harness, table: Table, op: 'update' | 'delete', id: strin
 const readDoorNotFound = (table: Table, id: string) =>
   wholeAnswerOf(async () => { throw recordNotFoundError(table, id); });
 
-describe("[ADR-0090 D12; ruling of record 5985885287] an organization administrator's assignment write to a row it cannot read, or to an id naming none, answers the read door's not-found", () => {
+describe("[ADR-0090 D12; ruling of record 5985885287] an organization administrator's assignment removal of a row it cannot read, or of an id naming none, answers the read door's not-found; its edit in place is refused before any row is looked up", () => {
   for (const posture of ['group', 'isolated'] as const) {
     describe(`posture '${posture}'`, () => {
-      it("update and delete of a row the caller cannot read, and of an id naming no row, answer the read door's not-found for that id, whole, as step 2.7 answers the tenant-level administrator — and leave the row", async () => {
+      it("delete of a row the caller cannot read, and of an id naming no row, answers the read door's not-found for that id, whole, as step 2.7 answers the tenant-level administrator; update, a verb the right never holds, gets one refusal whatever the id names — and the row stays", async () => {
         const h = await boot(posture);
         for (const table of Object.keys(TABLES) as Table[]) {
           const id = `unreadable_${table}`;
@@ -432,7 +434,16 @@ describe("[ADR-0090 D12; ruling of record 5985885287] an organization administra
               for (const caller of ORG_ADMINS) {
                 // The precondition, read off the read door: this caller reads no such row.
                 expect(await readAs(h, table, target, caller), `${caller} reads ${table} ${target}`).toBeFalsy();
-                expect(await wholeWrite(h, table, op, target, CALLERS[caller]), `${caller} ${op} ${table} ${target}`).toEqual(notFound);
+                const answer = await wholeWrite(h, table, op, target, CALLERS[caller]);
+                if (op === 'delete') {
+                  expect(answer, `${caller} ${op} ${table} ${target}`).toEqual(notFound);
+                } else {
+                  // An edit in place is never part of the right: refused before the
+                  // row is looked up, so a row and no row answer alike.
+                  expect([answer.status, answer.code], `${caller} ${op} ${table} ${target}: ${answer.message}`).toEqual([403, 'PERMISSION_DENIED']);
+                  expect(answer, `${caller} ${op} ${table} ${target}: the same refusal as for no row`)
+                    .toEqual(await wholeWrite(h, table, op, NOWHERE, CALLERS[caller]));
+                }
               }
             }
           }
@@ -475,7 +486,7 @@ describe("[ADR-0090 D12; ruling of record 5985885287] an organization administra
     });
   }
 
-  it("control, 'single': a row of another organization that the caller reads keeps the guidance that names its organization; an id naming no row answers the read door's not-found", async () => {
+  it("control, 'single': a row of another organization that the caller reads keeps the guidance that names its organization; a removal of an id naming no row answers the read door's not-found, and an edit gets one refusal whatever the id names", async () => {
     const h = await boot('single');
     for (const table of Object.keys(TABLES) as Table[]) {
       const id = `readable_${table}`;
@@ -486,10 +497,11 @@ describe("[ADR-0090 D12; ruling of record 5985885287] an organization administra
         const row = await write(h, table, 'delete', id, context);
         expect([row.status, row.code], `${caller} ${table}: ${row.message}`).toEqual([403, 'PERMISSION_DENIED']);
         expect(row.message).toMatch(/belongs to organization 'org_b'/);
-        for (const op of ['update', 'delete'] as const) {
-          expect(await wholeWrite(h, table, op, NOWHERE, context), `${caller} ${op} ${table}, no row`)
-            .toEqual(await readDoorNotFound(table, NOWHERE));
-        }
+        expect(await wholeWrite(h, table, 'delete', NOWHERE, context), `${caller} delete ${table}, no row`)
+          .toEqual(await readDoorNotFound(table, NOWHERE));
+        const edit = await wholeWrite(h, table, 'update', id, context);
+        expect([edit.status, edit.code], `${caller} update ${table}: ${edit.message}`).toEqual([403, 'PERMISSION_DENIED']);
+        expect(await wholeWrite(h, table, 'update', NOWHERE, context), `${caller} update ${table}, no row`).toEqual(edit);
       }
       expect(await stored(h, table, { id }), `${table}: refused means untouched`).toHaveLength(1);
     }

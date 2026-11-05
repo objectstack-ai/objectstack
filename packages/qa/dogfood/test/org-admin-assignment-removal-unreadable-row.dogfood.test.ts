@@ -12,9 +12,11 @@
 // membership earns). Two assignment rows of organization B — B's owner's own
 // administrator grant (`sys_user_permission_set`) and a position B holds
 // (`sys_user_position`) — sit behind the wall, so A's owner reads neither.
-// For each, and for an id naming no row, `PATCH` and `DELETE` by id answer
-// exactly what a `GET` of that id answers — the read door's `404
-// RECORD_NOT_FOUND`, status and body. Both rows stay.
+// For each, and for an id naming no row, `DELETE` by id answers exactly what
+// a `GET` of that id answers — the read door's `404 RECORD_NOT_FOUND`, status
+// and body. `PATCH` is an edit in place, which the right never holds, so it is
+// refused before the row is looked up: one `403` for the row and for no row.
+// Both rows stay.
 //
 // Controls, so a green run is not "every removal is answered alike":
 //
@@ -135,17 +137,19 @@ describe("behind the organization wall, an organization administrator's assignme
     expect(own.status, `A's own grant — ${JSON.stringify(own.body)}`).toBe(200);
   });
 
-  it("PATCH and DELETE of a row it cannot read, and of an id naming no row, answer exactly what a GET of that id answers — the read door's not-found — and leave the row", async () => {
+  it("DELETE of a row it cannot read, and of an id naming no row, answers exactly what a GET of that id answers — the read door's not-found; PATCH, an edit the right never holds, gets one refusal for the row and for no row — and the row stays", async () => {
     for (const [object, id] of [['sys_user_permission_set', grantB], ['sys_user_position', positionB]]) {
       const before = await stored(object, id);
       for (const target of [id, MISSING]) {
         const readDoor = await call('GET', `/data/${object}/${target}`);
         expect({ status: readDoor.status, code: codeOf(readDoor) }, `GET ${object} ${target} — ${JSON.stringify(readDoor.body)}`)
           .toEqual({ status: 404, code: 'RECORD_NOT_FOUND' });
-        for (const method of ['PATCH', 'DELETE'] as const) {
-          expect(await write(method, object, target), `${method} ${object} ${target}: the read door's answer`).toEqual(readDoor);
-        }
+        expect(await write('DELETE', object, target), `DELETE ${object} ${target}: the read door's answer`).toEqual(readDoor);
       }
+      const hit = await write('PATCH', object, id);
+      const miss = await write('PATCH', object, MISSING);
+      expect({ status: hit.status, code: codeOf(hit) }, `PATCH ${object} — ${JSON.stringify(hit.body)}`).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
+      expect(withoutId(hit, id), `PATCH ${object}: the row answers as no row`).toEqual(withoutId(miss, MISSING));
       expect(await stored(object, id), `${object}: refused writes leave the row as it was`).toEqual(before);
     }
   });
