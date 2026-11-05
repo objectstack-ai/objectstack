@@ -177,27 +177,40 @@ function sameActor(activity: FeedItem, audit: FeedItem & AuditFeedFacts): boolea
 }
 
 /**
- * The activity row that wrote the same action as `audit`, or -1: same record
- * (the host reads both for this record), the activity type the audit action
- * writes, the same actor, stamped within {@link TIMELINE_PAIR_WINDOW_MS};
- * the nearest in time wins, and a row pairs once.
+ * Whether `activity` may be the row that wrote the same action as `audit`:
+ * the activity type the audit action writes, the same actor, stamped within
+ * {@link TIMELINE_PAIR_WINDOW_MS} (both are read for this one record). The gap
+ * in ms, or -1.
  */
-function pairedActivityIndex(audit: FeedItem & AuditFeedFacts, feed: readonly FeedItem[], taken: ReadonlySet<number>): number {
+function pairGap(activity: FeedItem, audit: FeedItem & AuditFeedFacts): number {
   const activityType = audit.auditAction ? AUDIT_ACTION_TO_ACTIVITY_TYPE[audit.auditAction] : undefined;
-  if (!activityType) return -1;
-  const at = timeOf(audit);
-  let best = -1;
-  let bestGap = Number.POSITIVE_INFINITY;
-  feed.forEach((item, index) => {
-    if (taken.has(index) || item.activityType !== activityType || item.parentId) return;
-    if (!sameActor(item, audit)) return;
-    const gap = Math.abs(timeOf(item) - at);
-    if (gap <= TIMELINE_PAIR_WINDOW_MS && gap < bestGap) {
-      best = index;
-      bestGap = gap;
-    }
-  });
-  return best;
+  if (!activityType || activity.activityType !== activityType || activity.parentId) return -1;
+  if (!sameActor(activity, audit)) return -1;
+  const gap = Math.abs(timeOf(activity) - timeOf(audit));
+  return gap <= TIMELINE_PAIR_WINDOW_MS ? gap : -1;
+}
+
+/**
+ * The pairs, activity index to audit index: every candidate pair taken
+ * nearest in time first, each row and each entry at most once.
+ */
+function pairActions(activity: readonly FeedItem[], changes: ReadonlyArray<FeedItem & AuditFeedFacts>): Map<number, number> {
+  const candidates: Array<{ a: number; c: number; gap: number }> = [];
+  changes.forEach((audit, c) =>
+    activity.forEach((item, a) => {
+      const gap = pairGap(item, audit);
+      if (gap >= 0) candidates.push({ a, c, gap });
+    }),
+  );
+  candidates.sort((x, y) => x.gap - y.gap || x.c - y.c || x.a - y.a);
+  const pairs = new Map<number, number>();
+  const usedChanges = new Set<number>();
+  for (const { a, c } of candidates) {
+    if (pairs.has(a) || usedChanges.has(c)) continue;
+    pairs.set(a, c);
+    usedChanges.add(c);
+  }
+  return pairs;
 }
 
 /**
@@ -215,23 +228,14 @@ export function mergeTimelineStream(
 ): TimelineStreamItem[] {
   const changes = (fieldChanges ?? []) as ReadonlyArray<FeedItem & AuditFeedFacts>;
   const activity = feed ?? [];
-  const taken = new Set<number>();
-  const pairs = new Map<number, FeedItem>();
-  const unpaired: FeedItem[] = [];
-  for (const audit of changes) {
-    const index = pairedActivityIndex(audit, activity, taken);
-    if (index < 0) {
-      unpaired.push(audit);
-      continue;
-    }
-    taken.add(index);
-    pairs.set(index, audit);
-  }
+  const pairs = pairActions(activity, changes);
+  const paired = new Set(pairs.values());
+  const unpaired = changes.filter((_, c) => !paired.has(c));
   const base: TimelineStreamItem[] = [];
   activity.forEach((item, index) => {
-    const audit = pairs.get(index);
-    if (audit) {
-      base.push({ ...item, fieldHistory: audit });
+    const c = pairs.get(index);
+    if (c !== undefined) {
+      base.push({ ...item, fieldHistory: changes[c] });
       return;
     }
     if (changes.length > 0 && item.activityType === RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE) return;
