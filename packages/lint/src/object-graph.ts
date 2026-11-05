@@ -500,6 +500,17 @@ export function objectsAsServed(stack: unknown): { objects: AnyRec[]; tied: Map<
   return { objects: served, tied };
 }
 
+/**
+ * [#30383] {@link indexObjectGraph} over {@link objectsAsServed}: the graph of
+ * the objects the registry serves, every `objectExtensions` field folded in.
+ * The field-path rules of this package resolve through it, so a path naming a
+ * field a sibling package adds resolves as it does at runtime, and a field no
+ * body declares or extends is still a miss.
+ */
+export function indexServedObjectGraph(stack: unknown): ObjectGraph {
+  return indexObjectGraph({ objects: objectsAsServed(stack).objects });
+}
+
 /** What a path resolved to, or precisely how it failed. */
 export type FieldPathVerdict =
   /**

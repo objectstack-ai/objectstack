@@ -11,7 +11,7 @@ import {
 import { normalizeFilterOperator } from '@objectstack/spec/ui';
 
 import { filterGroupRules, walkAuthoredFilters, type FilterSurface } from './filter-walk.js';
-import { indexObjectGraph, recordsOf, resolveFieldPath, type ObjectGraph } from './object-graph.js';
+import { indexServedObjectGraph, recordsOf, resolveFieldPath, type ObjectGraph } from './object-graph.js';
 
 /**
  * Build-time refusal of a bare dashboard date-range PRESET name authored as a
@@ -743,7 +743,7 @@ export function validatePresetComparands(
   if (!stack || typeof stack !== 'object') return [];
   const out: PresetComparandFinding[] = [];
 
-  const graph = indexObjectGraph(stack);
+  const graph = indexServedObjectGraph(stack);
   const datasets = new Map<string, AnyRec>();
   for (const dataset of recordsOf(stack.datasets)) {
     const name = strName(dataset.name);

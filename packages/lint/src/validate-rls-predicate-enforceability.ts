@@ -296,7 +296,7 @@ import { ExecutionContextSchema } from '@objectstack/spec/kernel';
 import {
   RELATIONSHIP_FIELD_TYPES,
   describeFieldPathVerdict,
-  indexObjectGraph,
+  indexServedObjectGraph,
   isUnjudgeable,
   listNames,
   recordsOf,
@@ -1904,14 +1904,16 @@ export function validateRlsPredicateEnforceability(
   const findings: RlsPredicateFinding[] = [];
   const cfg = (stack ?? {}) as AnyRec;
 
-  // [#16119] The object graph for the reference pass, built ONCE: `indexObjectGraph`
+  // [#16119] The object graph for the reference pass, built ONCE: `indexServedObjectGraph`
   // walks every object's whole field map, and a stack with N permission sets would
   // otherwise pay for that walk N times to answer the same question. It is the
   // SHARED index every field-existence rule in this package resolves through, so
   // the three skips (an object this stack does not define, an object with no
   // readable field map, registry-injected system columns) are the graph's and not
-  // re-derived here.
-  const graph: ObjectGraph = indexObjectGraph(cfg);
+  // re-derived here. [#30383] It indexes the objects as SERVED: the registry
+  // folds every `objectExtensions` field in before the RLS compiler sees the
+  // object, so a predicate naming a field a sibling package adds resolves.
+  const graph: ObjectGraph = indexServedObjectGraph(cfg);
   // [#25234] The declared membership keys every predicate below is judged
   // against: bound as lists, traced to their targets — see `## Membership keys`.
   const membership = membershipKeyContextOf(cfg, graph, options.membershipKeyOwners);

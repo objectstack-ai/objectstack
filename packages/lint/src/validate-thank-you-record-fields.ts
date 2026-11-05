@@ -57,7 +57,7 @@ import { RUNTIME_OWNED_FIELD_TYPES } from '@objectstack/spec/data';
 import { anonymousFormObjectName, thankYouRecordFieldNames } from '@objectstack/spec/ui';
 
 import { collectionEntries } from './collection-entries.js';
-import { indexObjectGraph, type GraphObject } from './object-graph.js';
+import { indexServedObjectGraph, type GraphObject } from './object-graph.js';
 import { walkPageComponents } from './page-walk.js';
 
 export const THANK_YOU_RECORD_FIELD = 'thank-you-record-field';
@@ -178,7 +178,7 @@ export function validateThankYouRecordFields(
   const findings: ThankYouRecordFieldFinding[] = [];
   const sites = panelSites(stack);
   if (sites.length === 0) return findings;
-  const graph = indexObjectGraph(stack);
+  const graph = indexServedObjectGraph(stack);
 
   for (const site of sites) {
     const names = thankYouRecordFieldNames(site.submitBehavior);
