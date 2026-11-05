@@ -17,17 +17,23 @@
  * the failed condition. Every admission reads the stored row back.
  *
  * At the foot: under the walled postures, an organization administrator's
- * update and delete of a row it cannot read answer exactly what an id naming
- * no row answers (ruling of record 5985885287) — the whole refusal, sentence
- * and details included; a row it reads keeps the boundary guidance, and a
- * tenant-level administrator is answered by the engine as before. The same
- * rule for the delegated branch follows: a delegate holding an `adminScope`,
- * an organization administrator who holds one too, and a delegate whose read
- * of the two tables is refused outright; rows it reads keep their verdict and
- * their guidance, in every posture.
+ * delete of a row it cannot read, and of an id naming no row, answers the
+ * read door's not-found for that id (ruling of record 5985885287) — whole, and
+ * equal to what step 2.7 answers the tenant-level administrator for the same
+ * id; its update, a verb the right never holds, is refused before any row is
+ * looked up, one refusal whatever the id names; a row it reads keeps the
+ * boundary guidance. The same rule
+ * for the delegated branch follows: a delegate holding an `adminScope` and an
+ * organization administrator who holds one too are answered the not-found,
+ * and a delegate whose read of the two tables is refused outright is answered
+ * that read refusal; rows it reads keep their verdict and their guidance, in
+ * every posture. Last, a refusal names a stored value only when the caller
+ * reads it or wrote it, in every posture — a column a field rule hides and a
+ * column a masking rule partially masks alike.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import { recordNotFoundError } from '@objectstack/core';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveThrownHttpError } from '@objectstack/types';
@@ -37,6 +43,7 @@ import { SecurityPlugin } from './security-plugin.js';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { defaultPermissionSets } from './objects/index.js';
+import { maskFieldValue } from './field-masker.js';
 
 const SYS = { isSystem: true } as const;
 const ORG_A = 'org_a';
@@ -58,23 +65,39 @@ const POSITIONS = [
  * The delegated branch's sets (the describe at the foot): one `adminScope` over
  * organization A's `a_ops` unit and its subtree, handing out `qa_in_set` only,
  * held with both tables' CRUD; with CRUD but no read; and with a field rule
- * that hides `position` from the holder's reads.
+ * that hides one column a refusal could name from the holder's reads.
  */
 const A_OPS_SCOPE = { businessUnit: 'a_ops', includeSubtree: true, manageAssignments: true, assignablePermissionSets: ['qa_in_set'] };
 const READ_WRITE = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true };
 const WRITE_ONLY = { allowCreate: true, allowEdit: true, allowDelete: true };
+const HIDDEN = { readable: false, editable: false };
+/** A delegate holding the `a_ops` scope and both tables' CRUD, with a field rule hiding `fields` from its reads. */
+const delegateHiding = (name: string, fields: Record<string, typeof HIDDEN>) => ({
+  name,
+  label: `QA delegate, ${name}`,
+  objects: { sys_user_position: READ_WRITE, sys_user_permission_set: READ_WRITE },
+  fields,
+  adminScope: A_OPS_SCOPE,
+});
 const DELEGATE_SETS = [
   { name: 'qa_delegate', label: 'QA delegate', objects: { sys_user_position: READ_WRITE, sys_user_permission_set: READ_WRITE }, adminScope: A_OPS_SCOPE },
   { name: 'qa_delegate_write_only', label: 'QA delegate, no read', objects: { sys_user_position: WRITE_ONLY, sys_user_permission_set: WRITE_ONLY }, adminScope: A_OPS_SCOPE },
-  {
-    name: 'qa_delegate_position_hidden',
-    label: 'QA delegate, position hidden',
-    objects: { sys_user_position: READ_WRITE, sys_user_permission_set: READ_WRITE },
-    fields: { 'sys_user_position.position': { readable: false, editable: false } },
-    adminScope: A_OPS_SCOPE,
-  },
+  delegateHiding('qa_delegate_position_hidden', { 'sys_user_position.position': HIDDEN }),
+  delegateHiding('qa_delegate_unit_hidden', { 'sys_user_position.business_unit_id': HIDDEN }),
+  delegateHiding('qa_delegate_holder_hidden', { 'sys_user_permission_set.user_id': HIDDEN }),
+  delegateHiding('qa_delegate_set_hidden', { 'sys_user_permission_set.permission_set': HIDDEN }),
 ];
-const PERMISSIONS = [...defaultPermissionSets, QA_IN_SET, ...DELEGATE_SETS];
+/**
+ * Field rules alone, held beside `organization_admin` by an organization
+ * administrator: the two columns its removals are judged on, hidden from its reads.
+ */
+const ORG_ADMIN_FIELDS_HIDDEN = {
+  name: 'qa_org_admin_fields_hidden',
+  label: 'QA organization administrator, columns hidden',
+  objects: {},
+  fields: { 'sys_user_position.position': HIDDEN, 'sys_user_permission_set.permission_set': HIDDEN },
+};
+const PERMISSIONS = [...defaultPermissionSets, QA_IN_SET, ...DELEGATE_SETS, ORG_ADMIN_FIELDS_HIDDEN];
 
 type Posture = 'single' | 'group' | 'isolated';
 const POSTURES: Posture[] = ['single', 'group', 'isolated'];
@@ -105,7 +128,14 @@ afterEach(async () => {
   }
 });
 
-async function boot(posture: Posture) {
+/**
+ * `boot`'s one variation: a partial masking rule declared on
+ * `sys_user_position.position` (a rule, not a field rule's `readable: false`),
+ * which serves every non-system reader the masked value in place of the stored one.
+ */
+type BootOptions = { positionMaskingRule?: { keepHead: number; keepTail: number } };
+
+async function boot(posture: Posture, options: BootOptions = {}) {
   const engine = new ObjectQL();
   engine.registerDriver(
     new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }),
@@ -118,7 +148,12 @@ async function boot(posture: Posture) {
     version: '1.0.0',
     type: 'plugin',
     scope: 'system',
-    objects: [SysUserPosition, SysUserPermissionSet, SysMember, SysBusinessUnit, SysBusinessUnitMember],
+    objects: [
+      options.positionMaskingRule
+        ? { ...SysUserPosition, fields: { ...SysUserPosition.fields, position: { ...SysUserPosition.fields.position, maskingRule: options.positionMaskingRule } } }
+        : SysUserPosition,
+      SysUserPermissionSet, SysMember, SysBusinessUnit, SysBusinessUnitMember,
+    ],
   } as any);
   await engine.syncSchemas();
   // `sys_user` registered and unprovisioned, as in the sibling suites: the
@@ -341,32 +376,67 @@ const write =(h: Harness, table: Table, op: 'update' | 'delete', id: string, con
     ? h.engine.update(table, { reason: 'edited' }, { where: { id }, context } as any)
     : h.engine.delete(table, { where: { id }, context } as any));
 
-describe("[ADR-0090 D12; ruling of record 5985885287] an organization administrator's refused assignment write answers the same for a row it cannot read as for a missing one", () => {
+/** The WHOLE of a refusal: the envelope both doors resolve, the error's name and sentence, and every own field it carries. */
+async function wholeAnswerOf(run: () => Promise<unknown>): Promise<Record<string, unknown>> {
+  try {
+    await run();
+    return { status: 200 };
+  } catch (e) {
+    const r = resolveThrownHttpError(e);
+    return { status: r.status, code: r.code, name: (e as Error).name, message: (e as Error).message, fields: { ...(e as object) } };
+  }
+}
+
+const wholeWrite = (h: Harness, table: Table, op: 'update' | 'delete', id: string, context: object) =>
+  wholeAnswerOf(() => op === 'update'
+    ? h.engine.update(table, { reason: 'edited' }, { where: { id }, context: structuredClone(context) } as any)
+    : h.engine.delete(table, { where: { id }, context: structuredClone(context) } as any));
+
+/**
+ * The read door's not-found for row `id` of `table`, whole — built by its one
+ * producer, the call step 2.7 makes for every other object.
+ */
+const readDoorNotFound = (table: Table, id: string) =>
+  wholeAnswerOf(async () => { throw recordNotFoundError(table, id); });
+
+describe("[ADR-0090 D12; ruling of record 5985885287] an organization administrator's assignment removal of a row it cannot read, or of an id naming none, answers the read door's not-found; its edit in place is refused before any row is looked up", () => {
   for (const posture of ['group', 'isolated'] as const) {
     describe(`posture '${posture}'`, () => {
-      it('update and delete of a row the caller cannot read answer exactly what an id naming no row answers, and leave the row', async () => {
+      it("delete of a row the caller cannot read, and of an id naming no row, answers the read door's not-found for that id, whole, as step 2.7 answers the tenant-level administrator; update, a verb the right never holds, gets one refusal whatever the id names — and the row stays", async () => {
         const h = await boot(posture);
         for (const table of Object.keys(TABLES) as Table[]) {
           const id = `unreadable_${table}`;
           await seedIn(h, table, id, ORG_B, 'u_other_org');
           const before = await stored(h, table, { id });
           expect(before, `${table}: the row exists`).toHaveLength(1);
-          for (const caller of ORG_ADMINS) {
-            const context = CALLERS[caller];
-            // The precondition, read off the read door: this caller reads no such row.
-            expect(await readAs(h, table, id, caller), `${caller} reads ${table} ${id}`).toBeFalsy();
-            for (const op of ['update', 'delete'] as const) {
-              const row = await write(h, table, op, id, context);
-              const none = await write(h, table, op, NOWHERE, context);
-              expect([none.status, none.code], `${caller} ${op} ${table}, no row: ${none.message}`).toEqual([403, 'PERMISSION_DENIED']);
-              expect(row, `${caller} ${op} ${table}: the unreadable row answers as no row`).toEqual(none);
+          for (const op of ['update', 'delete'] as const) {
+            for (const target of [id, NOWHERE]) {
+              const notFound = await readDoorNotFound(table, target);
+              expect([notFound.status, notFound.code], `${table} ${target}`).toEqual([404, 'RECORD_NOT_FOUND']);
+              // The answer step 2.7 gives for this id, measured: the tenant-level
+              // administrator passes the gate, and is answered by the write door.
+              expect(await wholeWrite(h, table, op, target, CALLERS.platform), `platform ${op} ${table} ${target}`).toEqual(notFound);
+              for (const caller of ORG_ADMINS) {
+                // The precondition, read off the read door: this caller reads no such row.
+                expect(await readAs(h, table, target, caller), `${caller} reads ${table} ${target}`).toBeFalsy();
+                const answer = await wholeWrite(h, table, op, target, CALLERS[caller]);
+                if (op === 'delete') {
+                  expect(answer, `${caller} ${op} ${table} ${target}`).toEqual(notFound);
+                } else {
+                  // An edit in place is never part of the right: refused before the
+                  // row is looked up, so a row and no row answer alike.
+                  expect([answer.status, answer.code], `${caller} ${op} ${table} ${target}: ${answer.message}`).toEqual([403, 'PERMISSION_DENIED']);
+                  expect(answer, `${caller} ${op} ${table} ${target}: the same refusal as for no row`)
+                    .toEqual(await wholeWrite(h, table, op, NOWHERE, CALLERS[caller]));
+                }
+              }
             }
           }
           expect(await stored(h, table, { id }), `${table}: refused means untouched`).toEqual(before);
         }
       });
 
-      it('control: a row of its own organization, which it reads, keeps the boundary guidance; the platform administrator is answered as before', async () => {
+      it('control: a row of its own organization, which it reads, keeps the boundary guidance and the refusal of an edit in place; the platform administrator is answered as before', async () => {
         const h = await boot(posture);
         for (const table of Object.keys(TABLES) as Table[]) {
           await seed(h, table, 'own_out', 'out');
@@ -377,6 +447,9 @@ describe("[ADR-0090 D12; ruling of record 5985885287] an organization administra
             expect([own.status, own.code], `${caller} ${table}: ${own.message}`).toEqual([403, 'PERMISSION_DENIED']);
             expect(own.message).toMatch(/'admin_full_access'.*by name/);
             expect(own, `${caller} ${table}: a row it reads is not answered as no row`).not.toEqual(await write(h, table, 'delete', NOWHERE, context));
+            // An edit of a row it reads is refused as an edit, never as no row.
+            const edit = await write(h, table, 'update', 'own_out', context);
+            expect([edit.status, edit.code], `${caller} ${table} edit: ${edit.message}`).toEqual([403, 'PERMISSION_DENIED']);
           }
           expect(await stored(h, table, { id: 'own_out' }), `${table}: refused means untouched`).toHaveLength(1);
 
@@ -398,7 +471,7 @@ describe("[ADR-0090 D12; ruling of record 5985885287] an organization administra
     });
   }
 
-  it("control, 'single': a row of another organization that the caller reads keeps the guidance that names its organization", async () => {
+  it("control, 'single': a row of another organization that the caller reads keeps the guidance that names its organization; a removal of an id naming no row answers the read door's not-found, and an edit gets one refusal whatever the id names", async () => {
     const h = await boot('single');
     for (const table of Object.keys(TABLES) as Table[]) {
       const id = `readable_${table}`;
@@ -409,6 +482,11 @@ describe("[ADR-0090 D12; ruling of record 5985885287] an organization administra
         const row = await write(h, table, 'delete', id, context);
         expect([row.status, row.code], `${caller} ${table}: ${row.message}`).toEqual([403, 'PERMISSION_DENIED']);
         expect(row.message).toMatch(/belongs to organization 'org_b'/);
+        expect(await wholeWrite(h, table, 'delete', NOWHERE, context), `${caller} delete ${table}, no row`)
+          .toEqual(await readDoorNotFound(table, NOWHERE));
+        const edit = await wholeWrite(h, table, 'update', id, context);
+        expect([edit.status, edit.code], `${caller} update ${table}: ${edit.message}`).toEqual([403, 'PERMISSION_DENIED']);
+        expect(await wholeWrite(h, table, 'update', NOWHERE, context), `${caller} update ${table}, no row`).toEqual(edit);
       }
       expect(await stored(h, table, { id }), `${table}: refused means untouched`).toHaveLength(1);
     }
@@ -430,7 +508,14 @@ const DELEGATES = {
   writeOnlyDelegate: delegateContext('u_write_only_delegate', ['qa_delegate_write_only']),
 } as const;
 type Delegate = keyof typeof DELEGATES;
-const POSITION_HIDDEN = delegateContext('u_position_hidden_delegate', ['qa_delegate_position_hidden']);
+/** Delegates of the `a_ops` scope whose field rules each hide one column a refusal could name. */
+const HIDING = {
+  position: delegateContext('u_position_hidden_delegate', ['qa_delegate_position_hidden']),
+  unit: delegateContext('u_unit_hidden_delegate', ['qa_delegate_unit_hidden']),
+  holder: delegateContext('u_holder_hidden_delegate', ['qa_delegate_holder_hidden']),
+  set: delegateContext('u_set_hidden_delegate', ['qa_delegate_set_hidden']),
+} as const;
+const POSITION_HIDDEN = HIDING.position;
 
 /** Members of organization A seated in `a_ops`: one holder per in-scope row a case writes. */
 const IN_SCOPE_HOLDERS = ['u_in_0', 'u_in_1', 'u_in_2', 'u_in_3', 'u_in_4', 'u_in_5'];
@@ -444,7 +529,7 @@ async function seedDelegation(h: Harness) {
     { id: 'bu_a_other', name: 'a_other', parent_business_unit_id: null, organization_id: ORG_A },
   ], inA);
   await h.engine.insert('sys_business_unit', { id: 'bu_b1', name: 'b1', parent_business_unit_id: null, organization_id: ORG_B }, inB);
-  for (const context of [...Object.values(DELEGATES), POSITION_HIDDEN]) {
+  for (const context of [...Object.values(DELEGATES), ...Object.values(HIDING)]) {
     const role = context.permissions.includes('organization_admin') ? 'admin' : 'member';
     await h.engine.insert('sys_member', { id: `m_${context.userId}`, user_id: context.userId, organization_id: ORG_A, role }, inA);
   }
@@ -486,10 +571,10 @@ async function writeCountingCallerReads(h: Harness, table: Table, op: 'update' |
   }
 }
 
-describe("[ADR-0090 D12; ruling of record 5985885287] a delegated administrator's refused assignment write answers the same for a row it cannot read as for a missing one", () => {
+describe("[ADR-0090 D12; ruling of record 5985885287] a delegated administrator's assignment write to a row it cannot read, or to an id naming none, answers the read door's not-found", () => {
   for (const posture of ['group', 'isolated'] as const) {
     describe(`posture '${posture}'`, () => {
-      it('update and delete of a row the caller cannot read answer exactly what an id naming no row answers, for every delegated principal class, and leave the row', async () => {
+      it("update and delete of a row the caller cannot read, and of an id naming no row, answer the read door's not-found for that id, whole, for every delegated principal class — and a caller the read door refuses gets that refusal — and leave the row", async () => {
         const h = await boot(posture);
         await seedDelegation(h);
         for (const table of Object.keys(TABLES) as Table[]) {
@@ -499,15 +584,16 @@ describe("[ADR-0090 D12; ruling of record 5985885287] a delegated administrator'
           expect(before, `${table}: the row exists`).toHaveLength(1);
           for (const caller of Object.keys(DELEGATES) as Delegate[]) {
             const context = DELEGATES[caller];
-            // The precondition, read off the read door: no row for this caller.
-            expect(await readOutcome(h, table, id, context), `${caller} reads ${table} ${id}`)
-              .toBe(caller === 'writeOnlyDelegate' ? 403 : 'none');
-            for (const op of ['update', 'delete'] as const) {
-              const row = await write(h, table, op, id, context);
-              const none = await write(h, table, op, NOWHERE, context);
-              // Refused where it stands, never answered by the engine.
-              expect([none.status, none.code], `${caller} ${op} ${table}, no row: ${none.message}`).toEqual([403, 'PERMISSION_DENIED']);
-              expect(row, `${caller} ${op} ${table}: the unreadable row answers as no row`).toEqual(none);
+            for (const target of [id, NOWHERE]) {
+              // The precondition, read off the read door: no row for this caller.
+              expect(await readOutcome(h, table, target, context), `${caller} reads ${table} ${target}`)
+                .toBe(caller === 'writeOnlyDelegate' ? 403 : 'none');
+              const readDoor = caller === 'writeOnlyDelegate'
+                ? await wholeAnswerOf(() => h.engine.findOne(table, { where: { id: target }, context: structuredClone(context) }))
+                : await readDoorNotFound(table, target);
+              for (const op of ['update', 'delete'] as const) {
+                expect(await wholeWrite(h, table, op, target, context), `${caller} ${op} ${table} ${target}`).toEqual(readDoor);
+              }
             }
           }
           expect(await stored(h, table, { id }), `${table}: refused means untouched`).toEqual(before);
@@ -548,7 +634,8 @@ describe("[ADR-0090 D12; ruling of record 5985885287] a delegated administrator'
         }
 
         // A position the holder's field rules hide from its reads: still held
-        // to the allowlist, because the stored row is what is judged.
+        // to the allowlist, because the stored row is what is judged — and
+        // the refusal names no value the holder cannot read.
         await h.engine.insert('sys_user_position',
           { id: 'hidden_out', user_id: IN_SCOPE_HOLDERS[holder], position: 'qa_out_pos', business_unit_id: 'bu_a_ops', organization_id: ORG_A },
           { context: { isSystem: true, tenantId: ORG_A } } as any);
@@ -558,7 +645,7 @@ describe("[ADR-0090 D12; ruling of record 5985885287] a delegated administrator'
         for (const op of ['update', 'delete'] as const) {
           const r = await write(h, 'sys_user_position', op, 'hidden_out', POSITION_HIDDEN);
           expect([r.status, r.code], `${op}: ${r.message}`).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
-          expect(r.message).toMatch(/position 'qa_out_pos' distributes permission set 'admin_full_access'.*not in the scope's allowlist/);
+          expect(JSON.stringify(r), `${op}: no hidden value in the refusal`).not.toMatch(/qa_out_pos|admin_full_access/);
         }
         expect(await stored(h, 'sys_user_position', { id: 'hidden_out' })).toHaveLength(1);
       });
@@ -602,5 +689,108 @@ describe("[ADR-0090 D12; ruling of record 5985885287] a delegated administrator'
           .toHaveLength(caller === 'writeOnlyDelegate' ? 1 : 0);
       }
     }
+  });
+});
+
+describe('[ADR-0090 D12; ruling of record 5985885287] an administrator\'s refused assignment write names a value only when the caller reads it, or wrote it', () => {
+  /**
+   * One row of organization A per hidden column, each outside the `a_ops`
+   * scope on the axis that column decides — the hidden values it carries, and
+   * the delegate whose field rule hides them.
+   */
+  const CASES = [
+    { column: 'position', table: 'sys_user_position', id: 'out_by_position', hiding: HIDING.position, hidden: ['qa_out_pos', 'admin_full_access'],
+      row: { user_id: 'u_in_0', position: 'qa_out_pos', business_unit_id: 'bu_a_ops' } },
+    { column: 'business_unit_id', table: 'sys_user_position', id: 'out_by_unit', hiding: HIDING.unit, hidden: ['bu_a_other'],
+      row: { user_id: 'u_in_1', position: 'qa_in_pos', business_unit_id: 'bu_a_other' } },
+    { column: 'user_id', table: 'sys_user_permission_set', id: 'out_by_holder', hiding: HIDING.holder, hidden: ['u_seeded'],
+      row: { user_id: 'u_seeded', permission_set: 'qa_in_set' } },
+    { column: 'permission_set', table: 'sys_user_permission_set', id: 'out_by_set', hiding: HIDING.set, hidden: ['admin_full_access'],
+      row: { user_id: 'u_in_2', permission_set: 'admin_full_access' } },
+  ] as const;
+
+  for (const posture of POSTURES) {
+    it(`posture '${posture}': a column the caller's field rules hide is never named in the refusal, and a delegate is still judged on its stored value; an administrator who reads it is told the value`, async () => {
+      const h = await boot(posture);
+      await seedDelegation(h);
+      for (const c of CASES) {
+        await h.engine.insert(c.table, { id: c.id, ...c.row, organization_id: ORG_A }, { context: { isSystem: true, tenantId: ORG_A } } as any);
+        const seen = await h.engine.findOne(c.table, { where: { id: c.id }, context: structuredClone(c.hiding) });
+        expect(seen, `${c.column}: the holder reads the row`).toBeTruthy();
+        expect(seen, `${c.column}: without the hidden column`).not.toHaveProperty(c.column);
+        for (const op of ['update', 'delete'] as const) {
+          const hiddenTo = await write(h, c.table, op, c.id, c.hiding);
+          expect([hiddenTo.status, hiddenTo.code], `${c.column} ${op}: ${hiddenTo.message}`).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
+          for (const value of c.hidden) {
+            expect(JSON.stringify(hiddenTo), `${c.column} ${op}: '${value}' is not in the refusal`).not.toContain(value);
+          }
+          // Control: the delegate who reads every column gets the same verdict, naming the value.
+          const readTo = await write(h, c.table, op, c.id, DELEGATES.delegate);
+          expect([readTo.status, readTo.code], `${c.column} ${op}, read: ${readTo.message}`).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
+          expect(readTo.message, `${c.column} ${op}, read`).toContain(`'${c.hidden[0]}'`);
+        }
+        expect(await stored(h, c.table, { id: c.id }), `${c.column}: refused means untouched`).toHaveLength(1);
+      }
+
+      // A value the caller wrote is its own, so its refusal names it.
+      const rewrote = await answerOf(() => h.engine.update('sys_user_position', { business_unit_id: 'bu_a_other' },
+        { where: { id: 'out_by_unit' }, context: structuredClone(HIDING.unit) } as any));
+      expect([rewrote.status, rewrote.code], String(rewrote.message)).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
+      expect(rewrote.message).toContain("'bu_a_other'");
+
+      // The organization branch holds the same rule: an organization
+      // administrator whose field rules hide the column a removal is judged
+      // on is refused without its value; one who reads it is told it.
+      const orgAdminHiding = { userId: 'u_org_admin_hiding', positions: [] as string[], permissions: ['organization_admin', ORG_ADMIN_FIELDS_HIDDEN.name], tenantId: ORG_A, accessible_org_ids: [ORG_A] };
+      await h.engine.insert('sys_member', { id: 'm_u_org_admin_hiding', user_id: orgAdminHiding.userId, organization_id: ORG_A, role: 'admin' },
+        { context: { isSystem: true, tenantId: ORG_A } } as any);
+      for (const table of Object.keys(TABLES) as Table[]) {
+        const id = `org_out_${table}`;
+        await h.engine.insert(table, { id, user_id: 'u_seeded', ...TABLES[table].out, organization_id: ORG_A },
+          { context: { isSystem: true, tenantId: ORG_A } } as any);
+        const hiddenTo = await write(h, table, 'delete', id, orgAdminHiding);
+        expect([hiddenTo.status, hiddenTo.code], `${table}: ${hiddenTo.message}`).toEqual([403, 'PERMISSION_DENIED']);
+        expect(JSON.stringify(hiddenTo), `${table}: no hidden value in the refusal`).not.toMatch(/qa_out_pos|admin_full_access/);
+        const readTo = await write(h, table, 'delete', id, CALLERS.orgAdmin);
+        expect([readTo.status, readTo.code], `${table}, read: ${readTo.message}`).toEqual([403, 'PERMISSION_DENIED']);
+        expect(readTo.message, `${table}, read`).toContain("'admin_full_access'");
+        expect(await stored(h, table, { id }), `${table}: refused means untouched`).toHaveLength(1);
+      }
+    });
+  }
+
+  it("a partially masked column is never named either — neither its masked nor its stored value — and the delegate is still judged on the stored value", async () => {
+    const rule = { keepHead: 3, keepTail: 0 };
+    const h = await boot('isolated', { positionMaskingRule: rule });
+    await seedDelegation(h);
+    const inA = { context: { isSystem: true, tenantId: ORG_A } } as any;
+    // Outside the scope only by its position, whose stored value distributes a set off the allowlist.
+    await h.engine.insert('sys_user_position',
+      { id: 'masked_out', user_id: 'u_in_0', position: 'qa_out_pos', business_unit_id: 'bu_a_ops', organization_id: ORG_A }, inA);
+    // Inside the scope by its stored position, which the caller reads masked too.
+    await h.engine.insert('sys_user_position',
+      { id: 'masked_in', user_id: 'u_in_1', position: 'qa_in_pos', business_unit_id: 'bu_a_ops', organization_id: ORG_A }, inA);
+
+    const masked = String(maskFieldValue('qa_out_pos', rule));
+    const seen = await h.engine.findOne('sys_user_position', { where: { id: 'masked_out' }, context: structuredClone(DELEGATES.delegate) });
+    expect(seen?.position, 'the delegate reads the position masked, not deleted').toBe(masked);
+    expect(masked, 'and the masked value is not the stored one').not.toBe('qa_out_pos');
+
+    for (const op of ['update', 'delete'] as const) {
+      const r = await write(h, 'sys_user_position', op, 'masked_out', DELEGATES.delegate);
+      // The stored position is what is judged: its sets are off the allowlist, so it is refused.
+      expect([r.status, r.code], `${op}: ${r.message}`).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
+      for (const value of [masked, 'qa_out_pos', 'admin_full_access']) {
+        expect(JSON.stringify(r), `${op}: '${value}' is not in the refusal`).not.toContain(value);
+      }
+    }
+    expect(await stored(h, 'sys_user_position', { id: 'masked_out' }), 'refused means untouched').toHaveLength(1);
+
+    // ...and a stored position inside the scope is admitted, whatever the read showed.
+    for (const op of ['update', 'delete'] as const) {
+      const r = await write(h, 'sys_user_position', op, 'masked_in', DELEGATES.delegate);
+      expect(r, `${op}: ${r.message}`).toEqual({ status: 200 });
+    }
+    expect(await stored(h, 'sys_user_position', { id: 'masked_in' }), 'the delete landed').toHaveLength(0);
   });
 });

@@ -25,9 +25,18 @@
  * `updated_at` as the `ifMatch` concurrency token, and re-reads the record.
  *
  * Which moves are legal is the SERVER's call: the object's `state_machine`
- * rule (ADR-0020), required fields and edit rights are judged on the write, and
- * nothing here evaluates them. A refusal is shown in place, under the rail —
- * the server's own sentences first, a fixed line only when it sent none.
+ * rule (ADR-0020), required fields and edit rights are judged on the write. A
+ * refusal is shown in place, under the rail — the server's own sentences
+ * first, a fixed line only when it sent none.
+ *
+ * What the path OFFERS follows the same machine the record form, the grid's
+ * inline editor and the board read (`stateMachineNextValues`): a stage the
+ * field's blocking `state_machine` rule cannot reach from the STORED value is
+ * drawn as a readout, not a button, so the press never promises a move the
+ * server is bound to refuse. The default record page turns this block's press
+ * on (objectstack#30075), which is why an always-refused button would reach
+ * every app with a machine on its stage field. A field without such a rule
+ * offers every stage, and the server still judges each write.
  */
 
 import React from 'react';
@@ -41,7 +50,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@object-ui/components';
-import { resolveFieldAffordance } from '@object-ui/core';
+import { resolveFieldAffordance, stateMachineNextValues } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import {
   declaredUserMessage,
@@ -113,6 +122,12 @@ const canUpdate = (ds: unknown): boolean => {
 export interface StageChange {
   /** Whether this reader may press a stage of this record's path. */
   pressable: boolean;
+  /**
+   * Whether the field's blocking `state_machine` admits a move from the
+   * stored value to `value` — `true` for every value when no such rule
+   * governs the field. Only meaningful while `pressable`.
+   */
+  admits: (value: unknown) => boolean;
   /** A write is in flight. */
   busy: boolean;
   /** The last refusal's lines, until the next press. */
@@ -152,6 +167,10 @@ export function useStageChange(allowStageChange: boolean, statusField: string | 
     && !NON_EDITABLE_SYSTEM_FIELDS.has(statusField)
     && resolveFieldAffordance('recordEdit', perms, objectName, statusField);
 
+  const stored = statusField ? (ctx?.data as Record<string, unknown> | undefined)?.[statusField] : undefined;
+  const reachable = statusField ? stateMachineNextValues(ctx?.objectSchema, statusField, stored) : null;
+  const admits = (value: unknown): boolean => reachable === null || reachable.has(String(value));
+
   const request = React.useCallback((stage: { value: unknown; label: string }) => {
     setRefusal(null);
     setTarget(stage);
@@ -166,7 +185,7 @@ export function useStageChange(allowStageChange: boolean, statusField: string | 
   const confirm = async () => {
     const stage = target;
     setTarget(null);
-    if (!stage || !pressable) return;
+    if (!stage || !pressable || !admits(stage.value)) return;
     setBusy(true);
     const updatedAt = (ctx?.data as Record<string, unknown> | undefined)?.updated_at;
     const ifMatch = typeof updatedAt === 'string' ? updatedAt : undefined;
@@ -202,5 +221,5 @@ export function useStageChange(allowStageChange: boolean, statusField: string | 
     </AlertDialog>
   );
 
-  return { pressable, busy, refusal, request, dialog };
+  return { pressable, admits, busy, refusal, request, dialog };
 }

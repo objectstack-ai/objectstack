@@ -548,6 +548,46 @@ export function reportInputLocator(locale: string): IssueLocator {
   };
 }
 
+/** objectstack#30064 — the dataset designer's own label for a key of one measure or dimension it edits. */
+const DATASET_MEMBER_INPUT_KEYS: Readonly<Record<string, string>> = {
+  field: 'engine.inspector.dataset.field',
+  aggregate: 'engine.inspector.dataset.aggregate',
+  type: 'engine.inspector.dataset.type',
+  dateGranularity: 'engine.inspector.dataset.dateBucket',
+  format: 'engine.inspector.dataset.displayFormat',
+  currency: 'engine.inspector.dataset.currency',
+  filter: 'engine.inspector.dataset.measureFilter',
+};
+
+/**
+ * objectstack#30064 — a dataset, in the All metadata area's editor:
+ * `measures.INDEX…` / `dimensions.INDEX…` on the body that was judged, placed
+ * on that measure or dimension by its label (its name when it has none), and
+ * on the designer's input when the key under it is one the designer edits.
+ * The designer has no canvas selection, so the target is the item (`null`).
+ */
+export function datasetMemberLocator(sent: SentBody, locale: string): IssueLocator {
+  return (path) => {
+    const list = path[0];
+    if ((list !== 'measures' && list !== 'dimensions') || !/^\d+$/.test(path[1] ?? '')) return null;
+    const rows = sent[list];
+    const member = Array.isArray(rows) ? rows[Number(path[1])] : undefined;
+    if (!isSentBody(member)) return null;
+    const title =
+      labelTextOf(member.label, locale) ||
+      (typeof member.name === 'string' && member.name !== '' ? member.name : String(Number(path[1]) + 1));
+    const inputKey = path[2] !== undefined ? DATASET_MEMBER_INPUT_KEYS[path[2]] : undefined;
+    const measure = list === 'measures';
+    if (!inputKey) {
+      const key = measure ? 'engine.studio.refusal.datasetMeasure' : 'engine.studio.refusal.datasetDimension';
+      return { where: tFormat(key, locale, { member: title }), selection: null };
+    }
+    const input = t(inputKey, locale);
+    const key = measure ? 'engine.studio.refusal.datasetMeasureInput' : 'engine.studio.refusal.datasetDimensionInput';
+    return { where: tFormat(key, locale, { member: title, input }), selection: null, input };
+  };
+}
+
 /**
  * objectstack#26730 — the locator for an Interfaces leaf of `type`: a
  * dashboard's widgets and a report's properties. Any other leaf (a page's
@@ -630,6 +670,7 @@ function publishLocator(type: string, body: SentBody, locale: string): IssueLoca
     return (path) => fields(path) ?? actions(path);
   }
   if (type === 'flow') return flowNodeLocator(body, locale);
+  if (type === 'dataset') return datasetMemberLocator(body, locale);
   return leafIssueLocator(type, body, locale);
 }
 
@@ -1292,7 +1333,7 @@ function joinedReportHeld(draft: SentBody, locale: string): StudioHeld<MetadataS
   if (parsed.success || !parsed.error.issues.every((issue) => issue.path.length === 1 && issue.path[0] === 'blocks')) {
     return null;
   }
-  const rows = (getReportForm()?.sections ?? []).flatMap((section) =>
+  const rows = (getReportForm(locale)?.sections ?? []).flatMap((section) =>
     'fields' in section && Array.isArray(section.fields) ? section.fields : [],
   );
   const list = formRowLabel(formRowOf(rows, 'blocks'), 'blocks', locale);
@@ -1310,7 +1351,7 @@ function joinedReportHeld(draft: SentBody, locale: string): StudioHeld<MetadataS
  */
 export function reportHeldEdit(draft: SentBody, locale: string): StudioHeld<MetadataSelection | null> | null {
   const item = listItemHeldInput(draft, ReportSchema);
-  if (item) return heldListItem(item, getReportForm(), locale);
+  if (item) return heldListItem(item, getReportForm(locale), locale);
   const joined = joinedReportHeld(draft, locale);
   if (joined) return joined;
   const key = objectHeldInput(draft, ReportSchema, 'chart');

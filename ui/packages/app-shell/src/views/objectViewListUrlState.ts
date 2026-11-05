@@ -270,7 +270,8 @@ export function useObjectViewListUrlState({
      * the list reports it (`ListView`'s `onPersonalizationChange`), held with
      * the list identity it came from so a report never outlives its list. The
      * column layout is the one part only this page knows: a stored column
-     * state is the reader's own.
+     * state is the reader's own, and so are the fields they added as columns
+     * (objectstack#30077), which the list draws as columns of the view.
      */
     const [reportedPersonalization, setReportedPersonalization] = useState<{
         key: string;
@@ -288,7 +289,8 @@ export function useObjectViewListUrlState({
             ? reportedPersonalization.parts
             : []),
     ];
-    if (activeView?.id && listPrefs.preference.perView?.[activeView.id]?.columnState
+    const storedViewPreference = activeView?.id ? listPrefs.preference.perView?.[activeView.id] : undefined;
+    if ((storedViewPreference?.columnState || storedViewPreference?.addedFields?.length)
         && !listPersonalizedParts.includes('columns')) {
         listPersonalizedParts.push('columns');
     }
@@ -297,7 +299,7 @@ export function useObjectViewListUrlState({
      * objectstack#28950 — "Reset to view", the marker's one way back: the
      * reader's whole list for the active view returns to the view's own. Their
      * stored entry goes (sort, filters, column layout, density, hidden fields,
-     * objectui#12418), the cached search term with it, and the list opens
+     * objectui#12418; added fields, objectstack#30077), the cached search term with it, and the list opens
      * again from that cleared state (the identity moves, so it remounts and
      * re-seeds; a reset is the one case that WANTS the list's own state thrown
      * away). The new seed ignores the `uf_*` params and its write-back strips

@@ -1407,6 +1407,7 @@ const en = {
     readonlyAriaLabel: 'Read-only view',
     readonlyTooltip: 'System view — defined in code, read-only.',
     malformedFilter: 'This view’s filter is malformed, so no records are shown: the {{subject}} condition cannot be applied.',
+    exportNotPermitted: 'You don\u2019t have permission to export these records. Contact your administrator if you think you should be able to.',
     // objectui#11605 — an object-bound block whose node names its object in
     // neither place (no own key, no `dataSource.object`). `{{property}}` is the
     // block's object key (`objectName`), interpolated and never translated; the
@@ -2003,6 +2004,8 @@ const en = {
       vsLastYear: 'vs last year',
       vsYesterday: 'vs yesterday',
       vsPreviousPeriod: 'vs previous period',
+      vsThisMonth: 'vs this month',
+      vsThisQuarter: 'vs this quarter',
     },
     filters: {
       label: 'Dashboard filters',
@@ -4064,6 +4067,9 @@ const en = {
         object_extension: '{{count}} object extensions',
         object_extension_one: '{{count}} object extension',
         object_extension_other: '{{count}} object extensions',
+        dataset: '{{count}} datasets',
+        dataset_one: '{{count}} dataset',
+        dataset_other: '{{count}} datasets',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

@@ -1256,6 +1256,7 @@ const ar = {
     readonlyAriaLabel: "عرض للقراءة فقط",
     readonlyTooltip: "عرض النظام — معرَّف في الكود، للقراءة فقط.",
     malformedFilter: "عامل تصفية طريقة العرض هذه غير صالح، لذا لا تُعرض أي سجلات: يتعذّر تطبيق الشرط {{subject}}.",
+    exportNotPermitted: "ليس لديك إذن لتصدير هذه السجلات. تواصل مع المسؤول إذا كنت تعتقد أنه يجب أن تتمكن من ذلك.",
     noObject: "لم يُحدَّد أي كائن: عيّن {{property}} أو dataSource.object.",
   },
   designer: {
@@ -1844,6 +1845,8 @@ const ar = {
       vsLastYear: "مقابل العام الماضي",
       vsYesterday: "مقابل أمس",
       vsPreviousPeriod: "مقابل الفترة السابقة",
+      vsThisMonth: "مقابل هذا الشهر",
+      vsThisQuarter: "مقابل هذا الربع",
     },
   },
   appDesigner: {
@@ -5064,6 +5067,13 @@ const ar = {
         object_extension_few: 'امتدادات كائنات {{count}}',
         object_extension_many: 'امتدادات كائنات {{count}}',
         object_extension_other: 'امتدادات كائنات {{count}}',
+        dataset: 'مجموعات بيانات {{count}}',
+        dataset_zero: 'مجموعات بيانات {{count}}',
+        dataset_one: 'مجموعة بيانات {{count}}',
+        dataset_two: 'مجموعات بيانات {{count}}',
+        dataset_few: 'مجموعات بيانات {{count}}',
+        dataset_many: 'مجموعات بيانات {{count}}',
+        dataset_other: 'مجموعات بيانات {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useRef, lazy, Suspense, type ReactNode } from 'react';
-import { DENSITY_MODE_TO_ROW_HEIGHT, normalizeListViewSchema, type FilterTokenScope } from '@object-ui/core';
+import { DENSITY_MODE_TO_ROW_HEIGHT, columnIdentity, normalizeListViewSchema, type FilterTokenScope } from '@object-ui/core';
 import { buildListFilterKey, writeListFilterState } from './listFilterStorage.js';
 import type { useObjectListPreferences, ListViewPreference, ListViewPreferencePatch } from '../context/ListPreferencesProvider.js';
 const ObjectChart = lazy(() =>
@@ -43,6 +43,29 @@ import type { useObjectViewRecordNavigation } from './objectViewRecordNavigation
 import type { useObjectViewToolbarAffordances } from './objectViewToolbarAffordances.js';
 import type { useObjectViewListUrlState, useObjectViewUrlFilters } from './objectViewListUrlState.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
+
+/**
+ * objectstack#30077 — the view's columns with the fields this user added
+ * appended, in the shape the view's own columns take (a bare name beside bare
+ * names, `{ field }` beside column objects), and the added names that are not
+ * already one of the view's columns. A name the view itself declares is the
+ * view's column, not an addition: it is left out of both, so hiding it goes
+ * through `hiddenFields` as before. With nothing added the columns are
+ * returned as they came.
+ */
+export function withAddedListColumns(
+    columns: ListViewSchema['columns'],
+    added: readonly string[] | undefined,
+): { columns: ListViewSchema['columns']; addedFields: string[] } {
+    if (!added || added.length === 0) return { columns, addedFields: [] };
+    const declared = Array.isArray(columns) ? (columns as unknown[]) : [];
+    const names = new Set(declared.map((c) => columnIdentity(c)).filter((n): n is string => !!n));
+    const addedFields = added.filter((name) => !names.has(name));
+    if (addedFields.length === 0) return { columns, addedFields };
+    const asObjects = declared.some((c) => typeof c !== 'string');
+    const appended = addedFields.map((field) => (asObjects ? { field } : field));
+    return { columns: [...declared, ...appended] as ListViewSchema['columns'], addedFields };
+}
 
 export function useObjectViewListRenderer({
     objectName,
@@ -393,6 +416,27 @@ export function useObjectViewListRenderer({
         };
 
         /**
+         * objectstack#30077 (ruling 6631126993, option A) — the object's fields
+         * this user ADDED to their list as columns with the same popover, stored
+         * beside their hidden fields (`addedFields`) and dropped with the rest of
+         * the entry by "Reset to view". The `columns` rung below appends them to
+         * the view's columns, so the list fetches, expands and draws them as it
+         * does a declared column; `ListView` offers only fields the caller may
+         * read. Offered where a Hide Fields choice is stored, never on the
+         * system view or fallback tab whose hide is session-only (objectui#10694
+         * ruling 5839344270): there the door is not wired, so the popover lists
+         * the view's columns alone, as before.
+         */
+        const addedFieldsStored = activeViewDeclaresColumns || activeViewIsSaved;
+        const listColumns = withAddedListColumns(
+            listSchema.columns,
+            addedFieldsStored ? viewPref?.addedFields : undefined,
+        );
+        const persistAddedFields = (added: string[]) => {
+            listPrefs.patchView(viewDef.id, { addedFields: added });
+        };
+
+        /**
          * objectui#12949 — the VIEW'S OWN density and hidden fields, before
          * this user's preference (objectui#12474) is laid over them by the
          * `rowHeight` and `hiddenFields` rungs below. `ListView` reads these
@@ -466,7 +510,9 @@ export function useObjectViewListRenderer({
             // objectstack#27626 — `columns` is named by identity in `ListView`'s
             // fetch effect too, and opening or closing a record hands this page
             // new object documents of equal content: hold it like the blocks.
-            columns: holdBlock('columns', listSchema.columns),
+            // objectstack#30077 — plus the fields this user added (see
+            // `withAddedListColumns`).
+            columns: holdBlock('columns', listColumns.columns),
             // objectui#10035 — the refresh signal, in place of the remount the
             // key used to force. The spread above carries only the plugin
             // ObjectView's counter; this page's own counter (actions, import,
@@ -957,6 +1003,10 @@ export function useObjectViewListRenderer({
                     writeListUrlState({ search });
                 }}
                 onHiddenFieldsChange={persistHiddenFields}
+                // objectstack#30077 — the fields this user added as columns, and
+                // the door that stores a change to them (see `persistAddedFields`).
+                addedFields={listColumns.addedFields}
+                onAddedFieldsChange={addedFieldsStored ? persistAddedFields : undefined}
                 // objectui#5144 (ruling E): session-only, writes nothing.
                 onInlineEditChange={keepInlineEditModeForTheSession}
                 onColumnStateChange={persistListColumnState}

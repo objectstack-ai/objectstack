@@ -1163,6 +1163,7 @@ const fr = {
     readonlyAriaLabel: "Vue en lecture seule",
     readonlyTooltip: "Vue système — définie dans le code, en lecture seule.",
     malformedFilter: "Le filtre de cette vue est incorrect, aucun enregistrement n’est donc affiché : la condition {{subject}} ne peut pas être appliquée.",
+    exportNotPermitted: "Vous n'avez pas la permission d'exporter ces enregistrements. Contactez votre administrateur si vous pensez devoir pouvoir le faire.",
     noObject: "Aucun objet indiqué : définissez {{property}} ou dataSource.object.",
   },
   designer: {
@@ -1687,6 +1688,8 @@ const fr = {
       vsLastYear: "vs. année dernière",
       vsYesterday: "vs. hier",
       vsPreviousPeriod: "vs. période précédente",
+      vsThisMonth: "vs. ce mois-ci",
+      vsThisQuarter: "vs. ce trimestre",
     },
   },
   appDesigner: {
@@ -4712,6 +4715,10 @@ const fr = {
         object_extension_one: '{{count}} extension d’objet',
         object_extension_many: '{{count}} d’extensions d’objet',
         object_extension_other: '{{count}} extensions d’objet',
+        dataset: '{{count}} jeux de données',
+        dataset_one: '{{count}} jeu de données',
+        dataset_many: '{{count}} de jeux de données',
+        dataset_other: '{{count}} jeux de données',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

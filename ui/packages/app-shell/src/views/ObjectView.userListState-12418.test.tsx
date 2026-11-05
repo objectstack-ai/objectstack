@@ -52,6 +52,11 @@
  *      sort) is told apart from a choice: the reset parts are CLEARED from
  *      the stored entry, so the user follows later changes to the view; a
  *      deliberate `sort: []` / `hiddenFields: []` is still stored.
+ *   6e. objectstack#30077 — a field the reader adds with the Hide Fields
+ *      popover is theirs: it writes no view and lands as ONE save
+ *      (`addedFields`), the list is handed it appended to the view's
+ *      columns, a fresh browser opens with it, another user does not see it,
+ *      and "Reset to view" drops it.
  *   7. CONTROL — no provider (a host without the console shell): the state is
  *      this browser's, as the tab order and filters were before; a sort still
  *      writes no view; the older `viewOrder:<object>` key is still honoured.
@@ -886,6 +891,102 @@ describe('the list\'s "Reset to view default" clears the user\'s stored part ins
     await listReady();
     expect(listProps.schema.sort).toEqual([]);
     expect(listProps.schema.hiddenFields).toEqual([]);
+  });
+});
+
+describe('a field the reader adds to their list is theirs, stored with their personalization (objectstack#30077)', () => {
+  const STORED = { [LIST_KEY]: { perView: { [SYSTEM_ID]: { addedFields: ['owner'] } } } };
+
+  it('adding a field writes no view, lands as one save, and the list is handed it as a column', async () => {
+    const ds = makeDataSource();
+    const { family } = makeFamily({});
+    mountWithFamily(ds, family);
+    await listReady();
+    expect(listProps.schema.columns).toEqual(['name', 'amount']);
+    expect(listProps.addedFields).toEqual([]);
+    expect(typeof listProps.onAddedFieldsChange).toBe('function');
+
+    act(() => listProps.onAddedFieldsChange(['owner']));
+    await wait(700);
+
+    expect(viewWrites(ds)).toBe(0);
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(family.save).toHaveBeenCalledTimes(1);
+    expect(family.save).toHaveBeenCalledWith(LIST_KEY, { perView: { [SYSTEM_ID]: { addedFields: ['owner'] } } });
+    expect(listProps.schema.columns).toEqual(['name', 'amount', 'owner']);
+    expect(listProps.addedFields).toEqual(['owner']);
+  });
+
+  it('a fresh browser opens with the added column once the family has loaded', async () => {
+    const ds = makeDataSource();
+    const { family, release } = makeFamily(structuredClone(STORED), { held: true });
+    mountWithFamily(ds, family);
+    await screen.findByTestId('object-view-list-preferences-pending');
+    await act(async () => release());
+    await listReady();
+
+    expect(listProps.schema.columns).toEqual(['name', 'amount', 'owner']);
+    expect(listProps.addedFields).toEqual(['owner']);
+  });
+
+  it('another user, with no state of their own, sees the view\'s columns alone', async () => {
+    session.userId = 'u2';
+    const ds = makeDataSource();
+    const { family } = makeFamily({});
+    mountWithFamily(ds, family);
+    await listReady();
+
+    expect(listProps.schema.columns).toEqual(['name', 'amount']);
+    expect(listProps.addedFields).toEqual([]);
+  });
+
+  it('"Reset to view" drops the added field: the stored added fields alone draw the marker, and the list opens on the view\'s columns', async () => {
+    const ds = makeDataSource();
+    const { family } = makeFamily(structuredClone(STORED));
+    mountWithFamily(ds, family);
+    await listReady();
+    expect(listProps.schema.columns).toEqual(['name', 'amount', 'owner']);
+
+    // Nothing reported by the list: the stored addition is a part of its own.
+    fireEvent.click(await screen.findByTestId('list-personalized-marker'));
+    const parts = await screen.findByTestId('list-personalized-parts');
+    expect([...parts.querySelectorAll('li')].map((li) => li.getAttribute('data-part'))).toEqual(['columns']);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('list-personalized-reset'));
+    });
+    await wait(700);
+
+    expect(viewWrites(ds)).toBe(0);
+    expect(family.save).toHaveBeenCalledTimes(1);
+    expect(family.save).toHaveBeenCalledWith(LIST_KEY, {});
+    expect(listProps.schema.columns).toEqual(['name', 'amount']);
+    expect(listProps.addedFields).toEqual([]);
+    expect(screen.queryByTestId('list-personalized-marker')).toBeNull();
+  });
+
+  it('a stored name the view declares itself is the view\'s column, not an addition: no duplicate, nothing handed as added', async () => {
+    const ds = makeDataSource();
+    const { family } = makeFamily({ [LIST_KEY]: { perView: { [SYSTEM_ID]: { addedFields: ['amount', 'owner'] } } } });
+    mountWithFamily(ds, family);
+    await listReady();
+
+    expect(listProps.schema.columns).toEqual(['name', 'amount', 'owner']);
+    expect(listProps.addedFields).toEqual(['owner']);
+  });
+
+  it('on a saved view that declares `columns` the addition is stored and applied the same way', async () => {
+    const ds = makeDataSource();
+    const { family } = makeFamily({});
+    mountWithFamily(ds, family, SAVED_ID);
+    await listReady();
+    expect(listProps.schema.columns).toEqual(['name']);
+
+    act(() => listProps.onAddedFieldsChange(['amount']));
+    await wait(700);
+
+    expect(viewWrites(ds)).toBe(0);
+    expect(family.save).toHaveBeenCalledWith(LIST_KEY, { perView: { [SAVED_ID]: { addedFields: ['amount'] } } });
+    expect(listProps.schema.columns).toEqual(['name', 'amount']);
   });
 });
 

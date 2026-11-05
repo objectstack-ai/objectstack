@@ -72,6 +72,7 @@ import {
 import { ORGANIZATION_DELETE_PATH } from './organization-delete.js';
 import { carriesPrincipalSession } from './principal-session-mint.js';
 import { snapshotRoleChangeGrants, UPDATE_MEMBER_ROLE_PATH } from './role-change-granted-set.js';
+import { refuseVisitorResendWithoutLiveTransport } from './visitor-verification-resend.js';
 
 /**
  * The `AuthManager` members the function below reads — every one of them, and
@@ -95,6 +96,7 @@ export interface BeforeHookHost {
   hasExistingUserFor: AuthManager['hasExistingUserFor'];
   isAuthGateActive: AuthManager['isAuthGateActive'];
   isBootstrapCreation: AuthManager['isBootstrapCreation'];
+  isEmailDeliveryLive: AuthManager['isEmailDeliveryLive'];
   isOperatorProvisioning: AuthManager['isOperatorProvisioning'];
   isPlatformAdminUserId: AuthManager['isPlatformAdminUserId'];
   resolveActor: AuthManager['resolveActor'];
@@ -638,6 +640,19 @@ export async function globalBeforeHook(
     const roleChangeDeps = this.roleChangeGrantDeps();
     if (roleChangeDeps) await snapshotRoleChangeGrants(ctx, roleChangeDeps);
   }
+
+  // ── The verification-email resend of a visitor who is not signed in ──
+  // While no email transport is live, every such resend is refused here,
+  // before the endpoint runs, with one coded answer whatever the address
+  // (400 `EMAIL_SERVICE_REQUIRED`). While one is live the resend answers
+  // the same whatever the send does: its send runs after the response
+  // (`sendAfterResponseOnSignUpAndVisitorResend`). A signed-in caller's
+  // resend passes through untouched. `visitor-verification-resend.ts`
+  // states the rule and how a visitor is told apart.
+  await refuseVisitorResendWithoutLiveTransport(ctx, {
+    isEmailDeliveryLive: () => this.isEmailDeliveryLive(),
+    resolveActor: (c) => this.resolveActor(c),
+  });
 
   // ── ADR-0069 D2: account lockout (gate) ─────────────────────
   // Reject a sign-in for a locked identity BEFORE better-auth checks
