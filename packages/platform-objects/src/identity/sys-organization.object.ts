@@ -404,9 +404,9 @@ export const SysOrganization = ObjectSchema.create({
       defaultValue: false,
       group: 'Configuration',
       description:
-        'When true, every member of this organization must enroll an authenticator app to access data. ' +
+        'Turn on to require every member of this organization to set up an authenticator app before they can access data. ' +
         'Needs two-factor authentication on for this deployment (OS_AUTH_TWO_FACTOR=true); while it is off, ' +
-        'saving this as true is refused.',
+        'saving this as on is refused.',
     }),
 
     // #14238 — maintainer ruling 2026-09-02, option A (verbatim 「同意」): the

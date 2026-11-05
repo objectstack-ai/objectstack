@@ -30,7 +30,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { UploadProvider } from '@object-ui/providers';
+import { UploadProvider } from '@object-ui/fields';
 import { createI18n } from '@object-ui/i18n';
 import { FormPage } from './FormPage';
 

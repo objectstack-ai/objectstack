@@ -41,7 +41,8 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
-import { UploadProvider, type UploadAdapter, type UploadResult } from '@object-ui/providers';
+import { UploadProvider } from './UploadProvider';
+import type { UploadAdapter, UploadResult } from '@object-ui/types';
 import type { FieldMetadata } from '@object-ui/types';
 import { AvatarField } from './AvatarField';
 import { FileField } from './FileField';

@@ -32,9 +32,11 @@ export { useGroupedData } from './useGroupedData';
 export { GroupRow } from './GroupRow';
 export { RowActionMenu, formatActionLabel } from './components/RowActionMenu';
 export { BulkActionBar } from './components/BulkActionBar';
-// The bare-name fold and its development warning, for the one other surface
-// that draws a selection bar of its own: plugin-list's ListView over a
-// non-grid view (objectstack#30394). One rule, one copy.
+// The bare-name fold, its development warning and the bar's own gate (the
+// capability check, the switch-off and the per-record `visible`), for the one
+// other surface that draws a selection bar of its own: plugin-list's ListView
+// over a non-grid view (objectstack#30394, objectstack#30535). One rule, one copy.
+export { useBulkActionItems } from './components/BulkActionBar';
 export { resolveBulkActions } from './resolveBulkActions';
 export { useUndeclaredActionNamesWarning } from './undeclaredActionNames';
 export { useCellClipboard } from './useCellClipboard';
@@ -59,7 +61,7 @@ export type { ImportWizardProps, ImportResult } from './ImportWizard';
 export type { GroupEntry, UseGroupedDataResult, AggregationType, GroupAggregationConfig, AggregationResult } from './useGroupedData';
 export type { GroupRowProps } from './GroupRow';
 export type { RowActionMenuProps } from './components/RowActionMenu';
-export type { BulkActionBarProps } from './components/BulkActionBar';
+export type { BulkActionBarProps, BulkActionItems, LegacyBulkActionItem } from './components/BulkActionBar';
 export type { ActionLabelResolver, NamedActionDef } from './resolveBulkActions';
 export type {
   UndeclaredActionNameKey,

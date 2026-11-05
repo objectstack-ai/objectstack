@@ -17,7 +17,7 @@ import { DocShell } from './DocShell';
 import { BookSidebar } from './BookSidebar';
 import { DocRefusal } from './BookPage';
 import { useBookData } from './use-book-data';
-import { resolveBookTree, bookSlug, bookNamedBy, type ResolvedBook } from './book-nav';
+import { resolveBookTree, bookSlug, bookNamedBy, labelUncategorized, type ResolvedBook } from './book-nav';
 
 interface DocItem {
   name: string;
@@ -47,10 +47,16 @@ export default function DocPage() {
   // the parent route's package-id segment under `/apps/:appName/docs/:slug/:name`.
   const { slug, name, appName } = useParams<{ slug?: string; name: string; appName?: string }>();
   const navigate = useNavigate();
-  // The docs route's href, router basename included (objectui#12686): the
+  // The docs route this page is read under: the app's own docs tree inside an
+  // app (ADR-0048), else the portal. Body cross-references resolve under it, so
+  // a link followed from an app's doc keeps the app shell (top bar, app nav),
+  // the same answer the book sidebar gives; the flat `<base>/<name>` segment
+  // redirects to the doc's in-book URL under that same base (DocsSlug).
+  const base = appName ? `/apps/${appName}/docs` : '/docs';
+  // That route's href, router basename included (objectui#12686): the
   // rewritten cross-references carry it so a new tab or a copied link reaches
   // the doc. `navigate` takes the bare router path and applies the basename.
-  const docsHref = useHref('/docs');
+  const docsHref = useHref(base);
   const adapter = useAdapter();
   const { t } = useObjectTranslation();
   const [doc, setDoc] = useState<DocItem | null>(null);
@@ -128,13 +134,13 @@ export default function DocPage() {
       if (!href) return;
       if (href.startsWith(`${docsHref}/`)) {
         e.preventDefault();
-        navigate(`/docs${href.slice(docsHref.length)}`);
+        navigate(`${base}${href.slice(docsHref.length)}`);
       } else if (href.startsWith('#')) {
         e.preventDefault();
         scrollToHeading(decodeURIComponent(href.slice(1)));
       }
     },
-    [docsHref, navigate, scrollToHeading],
+    [base, docsHref, navigate, scrollToHeading],
   );
 
   // ToC entries are bare `#id` anchors; scroll in JS for the same <base> reason.
@@ -159,13 +165,16 @@ export default function DocPage() {
   // the portal book set; degrades to no sidebar if the slug is unknown (e.g.
   // the backend serves no books yet).
   const { books, authoredBooks, docs: allDocs } = useBookData();
-  const base = appName ? `/apps/${appName}/docs` : '/docs';
+  // The synthetic catch-all group is titled in the session language, by its key.
+  const uncategorizedLabel = t('help.uncategorized', { defaultValue: 'Uncategorized' });
   const resolvedBook = useMemo<ResolvedBook | null>(() => {
     const book = books.find((b) => bookSlug(b) === slug);
     // Every authored book judges the Uncategorized group, so a doc a sibling
     // book places is not listed there (objectstack#27091).
-    return book ? resolveBookTree(book, allDocs, undefined, authoredBooks) : null;
-  }, [books, authoredBooks, allDocs, slug]);
+    return book
+      ? labelUncategorized(resolveBookTree(book, allDocs, undefined, authoredBooks), uncategorizedLabel)
+      : null;
+  }, [books, authoredBooks, allDocs, slug, uncategorizedLabel]);
   const docHref = useCallback((docName: string) => `${base}/${slug}/${docName}`, [base, slug]);
   // A `:slug` segment that is a book's NAME rather than its slug — what a
   // `{ type: 'doc', book, doc }` navigation entry links to (objectui#11197) — is
