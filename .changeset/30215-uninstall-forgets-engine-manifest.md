@@ -4,7 +4,7 @@
 
 fix(objectql): an uninstalled package no longer reads as read-only until a restart
 
-Clause-②: no
+Clause-②: yes (widening) — `@objectstack/objectql`'s exported `SchemaRegistry` gains the public method `onPackageUninstalled(listener)`, which returns its unsubscribe. Nothing is refused that was accepted before.
 Metadata-protocol: none
 
 An administrator who uninstalled a package through `DELETE /api/v1/marketplace/install-local/:id` got a 200 "withdrawn from the running kernel", but on the same instance the package id still read as a booted code package until the server restarted. Uninstalling a `<base>.custom` pair that an older runtime had installed as code, as the pair install now prescribes, left `POST /api/v1/packages/<base>/ensure-customization` answering `created: true` with `writable: false`, so nothing could be customized into the new pair. The engine's manifest map, which the ADR-0070 writability check reads first, kept the id after the registry had withdrawn the package.
