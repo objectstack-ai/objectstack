@@ -826,3 +826,89 @@ describe('[#30000] the registry follows the move at once: it holds what a restar
         expect(await fiveReads(protocol)).toEqual([UNBOUND_COLUMNS, UNBOUND_COLUMNS, UNBOUND_COLUMNS, UNBOUND_COLUMNS, UNBOUND_COLUMNS]);
     });
 });
+
+describe('[#30261] a view container cannot carry the declaration: the preview says so, and --apply never attempts it', () => {
+    const CONTAINER = 'showcase_task';
+    const MINE = 'showcase_task.mine';
+    const listOf = (columns: readonly string[], label: string) => ({
+        label, type: 'grid', data: { provider: 'object', object: 'showcase_task' }, columns: columns.map((field) => ({ field })),
+    });
+    /** A container a Setup customization stored: the base's default list re-columned, plus a list view the base does not ship. */
+    const containerBody = (columns: readonly string[]) => ({
+        object: 'showcase_task',
+        list: listOf(columns, 'All'),
+        listViews: { mine: listOf(columns, 'Mine') },
+    });
+    const storeContainer = (engine: ObjectQL, columns: readonly string[], packageId: string | null = null, state = 'active') =>
+        engine.insert('sys_metadata', {
+            type: 'view', name: CONTAINER, organization_id: null, package_id: packageId,
+            metadata: JSON.stringify(containerBody(columns)), state, version: 1,
+        }, { context: { isSystem: true } });
+
+    it('the census lists the package-less container `cannot_declare`, naming its base and pair; --apply leaves it and reports no failure; a re-run lists it the same', async () => {
+        const { engine, protocol, rows } = await boot();
+        await storeContainer(engine, UNBOUND_COLUMNS);
+        await storeContainer(engine, EDITED_COLUMNS, null, 'draft');
+
+        const listedCensus = await census(protocol);
+        expect(dispositions(listedCensus)).toEqual([`${CONTAINER}@active cannot_declare`, `${CONTAINER}@draft cannot_declare`]);
+        expect(listedCensus.rows.map((r: any) => [r.base, r.pair])).toEqual([[BASE, PAIR], [BASE, PAIR]]);
+
+        const result = await migrate(protocol);
+        expect(result.outcomes).toEqual([]);
+        expect(result.bases).toEqual([]);
+        expect(rows(CONTAINER).slice().sort()).toEqual([[null, 'active'], [null, 'draft']]);
+        // Nothing was attempted, so no pair was ensured for it.
+        expect((engine.registry as any).getPackage(PAIR)).toBeUndefined();
+
+        const again = await migrate(protocol);
+        expect(dispositions(again)).toEqual([`${CONTAINER}@active cannot_declare`, `${CONTAINER}@draft cannot_declare`]);
+        expect(again.outcomes).toEqual([]);
+    });
+
+    it('beside it, a single view of the same base still moves as the declared override', async () => {
+        const { engine, protocol, rows } = await boot();
+        await storeContainer(engine, UNBOUND_COLUMNS);
+        await storeRow(engine, VIEW, 'showcase_task', UNBOUND_COLUMNS);
+        expect(dispositions(await census(protocol))).toEqual([`${CONTAINER}@active cannot_declare`, `${VIEW}@active movable`]);
+
+        const result = await migrate(protocol);
+        expect(result.outcomes.map((o: any) => o.outcome)).toEqual(['moved']);
+        expect(result.bases).toEqual([{ base: BASE, pair: PAIR, pairCreated: true, moved: 1, declarationsCompleted: 0, failed: 0, shadowed: 0 }]);
+        expect(rows(VIEW)).toEqual([[PAIR, 'active']]);
+        expect(rows(CONTAINER)).toEqual([[null, 'active']]);
+    });
+
+    it('the close leaves its package-less write open: the ceremony cannot move it, so its save and DELETE naming no package succeed', async () => {
+        const { engine, protocol, rows } = await boot();
+        await storeContainer(engine, UNBOUND_COLUMNS);
+        expect(await refusalOf(protocol.saveMetaItem({ type: 'view', name: CONTAINER, item: containerBody(EDITED_COLUMNS) } as any))).toBeUndefined();
+        expect(rows(CONTAINER)).toEqual([[null, 'active']]);
+        expect(await refusalOf(protocol.deleteMetaItem({ type: 'view', name: CONTAINER } as any))).toBeUndefined();
+        expect(rows(CONTAINER)).toEqual([]);
+        // …and a first package-less save of it, with nothing stored yet.
+        expect(await refusalOf(protocol.saveMetaItem({ type: 'view', name: CONTAINER, item: containerBody(EDITED_COLUMNS) } as any))).toBeUndefined();
+        expect(rows(CONTAINER)).toEqual([[null, 'active']]);
+    });
+
+    it('the way out the preview names holds: each view saved into the pair as a single view, then the container deleted naming no package, leaves nothing to list', async () => {
+        const { engine, protocol, rows } = await boot();
+        await storeContainer(engine, UNBOUND_COLUMNS);
+        await (protocol as any).ensureCustomizationPackage({ basePackageId: BASE });
+        // The base ships `showcase_task.default`: the pair declares the override of it.
+        await protocol.saveMetaItem({
+            type: 'view', name: VIEW, packageId: PAIR,
+            item: { ...listBody(VIEW, 'showcase_task', UNBOUND_COLUMNS), overrides: { package: BASE, basedOn: '1.2.0' } },
+        } as any);
+        // The base ships no `showcase_task.mine`: the pair holds it as its own view, declaring nothing.
+        await protocol.saveMetaItem({ type: 'view', name: MINE, packageId: PAIR, item: { ...listBody(MINE, 'showcase_task', UNBOUND_COLUMNS), label: 'Mine' } } as any);
+        expect(await refusalOf(protocol.deleteMetaItem({ type: 'view', name: CONTAINER } as any))).toBeUndefined();
+
+        expect(rows(CONTAINER)).toEqual([]);
+        expect(rows(VIEW)).toEqual([[PAIR, 'active']]);
+        expect(rows(MINE)).toEqual([[PAIR, 'active']]);
+        const after = await census(protocol);
+        expect(after.rows).toEqual([]);
+        expect(columnsOf(await read(protocol))).toEqual(UNBOUND_COLUMNS);
+    });
+});
