@@ -236,6 +236,11 @@ const ADMITTED = [
   // gate still honours the legacy role scalar). No body is read, and no
   // stored state moves, so it has no individual effect pin below.
   'POST /api/v1/auth/admin/list-platform-admins',
+  // #30398 — the address the Allowed IP ranges save check judges, shown on
+  // the Authentication settings page before a save. A READ: an ObjectStack raw
+  // mount carrying the ADR-0068 gate first; no body or query parameter is
+  // read and no stored state moves, so it has no individual effect pin below.
+  'GET /api/v1/auth/admin/client-address',
   'POST /api/v1/auth/admin/unlock-user',
   'POST /api/v1/auth/admin/import-users',
   'POST /api/v1/auth/admin/oauth2/toggle-disabled',
