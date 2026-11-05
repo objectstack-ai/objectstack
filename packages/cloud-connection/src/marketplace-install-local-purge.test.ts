@@ -704,7 +704,7 @@ describe('GET …/sample-data — how many sample rows a purge would delete now 
         const tables: Record<string, Row[]> = { pg_account: [{ id: 'a1', name: 'Acme' }], pg_contact: [] };
         const { count, deletes, reads } = await bootWith({ tables, posture: 'single' });
         reads.length = 0;
-        for (const query of [{ dryRun: '0' }, { confirm: 'true' }]) {
+        for (const query of [{ dryRun: '0' }, { confirm: 'true' }] as Array<Record<string, string>>) {
             const res = await counted(count, query);
             expect(res.status).toBe(400);
             expect(res.payload.error.code).toBe('VALIDATION_ERROR');
