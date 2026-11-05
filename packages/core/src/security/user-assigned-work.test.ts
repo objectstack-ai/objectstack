@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { AUDIT_FIELD_DEFS, OWNER_FIELD_DEF } from '@objectstack/spec/data';
 import {
   countUserAssignedWork,
   transferUserAssignedWork,
@@ -10,18 +11,22 @@ import {
   type UserWorkEngine,
 } from './user-assigned-work.js';
 
+// [#30646] `owner_id`, `created_by` and `updated_by` are the platform's own
+// injected definitions, as `applySystemFields` spreads them: the owner column is
+// `system: true` but not `readonly`, the audit lookups are both.
 const ticket = {
   name: 'ticket',
   fields: {
     title: { type: 'text' },
-    owner_id: { type: 'lookup', reference: 'sys_user' },
+    owner_id: OWNER_FIELD_DEF,
     assignee: { type: 'user' },
     watchers: { type: 'lookup', reference: 'sys_user', multiple: true },
-    created_by: { type: 'lookup', reference: 'sys_user', readonly: true, system: true },
+    created_by: AUDIT_FIELD_DEFS.created_by,
+    updated_by: AUDIT_FIELD_DEFS.updated_by,
     account: { type: 'lookup', reference: 'account' },
   },
 };
-const account = { name: 'account', fields: { owner_id: { type: 'lookup', reference: 'sys_user' } } };
+const account = { name: 'account', fields: { owner_id: OWNER_FIELD_DEF } };
 const grant = { name: 'sys_user_permission_set', fields: { user_id: { type: 'lookup', reference: 'sys_user' } } };
 const managed = { name: 'auth_session', managedBy: 'better-auth', fields: { user_id: { type: 'lookup', reference: 'sys_user' } } };
 
@@ -35,6 +40,14 @@ describe('[#30205] userAssignedWorkFields', () => {
       { object: 'ticket', field: 'watchers', multiple: true },
       { object: 'account', field: 'owner_id', multiple: false },
     ]);
+  });
+
+  it('[#30646] takes the injected owner_id as the platform defines it, and leaves the audit lookups out', () => {
+    // The premise this pins: the injected owner column is a platform column
+    // (`system`) that stays assignable, so `system` alone cannot exclude it.
+    expect({ system: OWNER_FIELD_DEF.system, readonly: OWNER_FIELD_DEF.readonly }).toEqual({ system: true, readonly: false });
+    const { fields } = userAssignedWorkFields([{ name: 'deal', fields: { owner_id: OWNER_FIELD_DEF, ...AUDIT_FIELD_DEFS } }]);
+    expect(fields).toEqual([{ object: 'deal', field: 'owner_id', multiple: false }]);
   });
 
   it('stops at the cap and says so', () => {
@@ -98,7 +111,7 @@ function seed(): Record<string, Row[]> {
       { id: 'u_also_banned', banned: true, ban_expires: null },
     ],
     ticket: [
-      { id: 't1', owner_id: 'u_gone', assignee: 'u_gone', watchers: ['u_gone'] },
+      { id: 't1', owner_id: 'u_gone', assignee: 'u_gone', watchers: ['u_gone'], created_by: 'u_gone', updated_by: 'u_gone' },
       { id: 't2', owner_id: 'u_gone', assignee: 'u_x', watchers: [] },
       { id: 't3', owner_id: 'u_x', assignee: 'u_gone', watchers: ['u_x', 'u_gone'] },
     ],
@@ -157,8 +170,9 @@ describe('[#30205] transferUserAssignedWork', () => {
     });
     const t = engine.tables.get('ticket')!;
     expect(t.map((r) => [r.owner_id, r.assignee])).toEqual([['u_next', 'u_next'], ['u_next', 'u_x'], ['u_x', 'u_next']]);
-    // A multi-valued field is never rewritten.
+    // A multi-valued field is never rewritten, and neither is who did what.
     expect(t[0].watchers).toEqual(['u_gone']);
+    expect([t[0].created_by, t[0].updated_by]).toEqual(['u_gone', 'u_gone']);
     // Every write went through `update` under the caller's own context.
     const writes = engine.calls.filter((c) => c.op === 'update');
     expect(writes).toHaveLength(5);
