@@ -39,7 +39,7 @@ import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '
 /** The fake presigned adapter: `upload` resolving means a `sys_file` was committed. */
 const adapterUpload = vi.fn();
 
-vi.mock('@object-ui/providers', async (importOriginal) => ({
+vi.mock('@object-ui/data-objectstack', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   createObjectStackUploadAdapter: () => ({ upload: adapterUpload }),
 }));

@@ -467,7 +467,6 @@ Atoms and fields stay light; heavy widgets live in lazy-loaded plugins.
 | Package | Description |
 | :--- | :--- |
 | [`@object-ui/app-shell`](ui/packages/app-shell) | The Console's shell, views and Studio; a private workspace package, last published to npm as 18.2.0 |
-| [`@object-ui/providers`](ui/packages/providers) | The upload adapter context the file and image fields upload through |
 | [`@object-ui/auth`](ui/packages/auth) | `AuthProvider`, `useAuth`, `AuthGuard`, sign-in forms |
 | [`@object-ui/permissions`](ui/packages/permissions) | Object / field / row-level permission guards and hooks |
 | [`@object-ui/i18n`](ui/packages/i18n) | Language packs, RTL layout, date and currency formatting |

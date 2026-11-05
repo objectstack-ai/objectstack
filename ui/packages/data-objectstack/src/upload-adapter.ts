@@ -1,192 +1,21 @@
 /**
- * UploadProvider — pluggable file upload context for ObjectUI.
+ * ObjectUI
+ * Copyright (c) 2024-present ObjectStack Inc.
  *
- * Why: `FileField` and `ImageField` historically used `URL.createObjectURL(file)`
- * which only works for the lifetime of the browser tab and never persists the
- * file anywhere. Production deployments need to push the bytes to S3, Azure
- * Blob, or another object store and replace the temporary blob URL with a
- * canonical one.
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+/**
+ * The browser-side upload adapter for `@objectstack/service-storage`.
  *
- * Design:
- * - `UploadProvider` exposes an `upload(file, opts)` function via context.
- * - Apps inject an adapter (`createS3Adapter`, `createAzureBlobAdapter`, or any
- *   custom one implementing `UploadAdapter`).
- * - The default adapter (`createObjectUrlAdapter`) mints a tab-local `blob:`
- *   URL and no `sys_file` id; it keeps the field widgets from crashing when no
- *   provider is mounted, and they refuse every pick through it (objectui#7699).
- * - Upload progress and resumable retries are first-class concerns: each
- *   adapter implementation can chunk + resume; the public API surfaces
- *   `onProgress` and an `abortSignal`.
+ * It implements the `UploadAdapter` contract `@object-ui/types` declares, and
+ * `UploadProvider` from `@object-ui/fields` makes it ambient for the file,
+ * image and avatar widgets. It lives in this package because it is fetch
+ * logic against an ObjectStack server, and every such fetch belongs to the
+ * data adapter.
  */
-import React, {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  type ReactNode,
-} from 'react';
-import type { API } from '@object-ui/types';
-
-export interface UploadResult {
-  /** Canonical, shareable URL (e.g. https://my-bucket.s3.amazonaws.com/avatars/abc.png). */
-  url: string;
-  /** Stored object name / key. */
-  name: string;
-  size: number;
-  mimeType: string;
-  /** Adapter-specific metadata (etag, version, etc.). */
-  meta?: Record<string, unknown>;
-}
-
-export interface UploadOptions {
-  /**
-   * Logical folder / key prefix (e.g. "avatars/"), handed to the presign
-   * callback of `createS3Adapter` and `createAzureBlobAdapter`.
-   * `createObjectStackUploadAdapter` never sends it: that server derives the
-   * object key itself, and a path is not a storage scope (objectui#12055).
-   */
-  path?: string;
-  /** Progress callback in 0–1. */
-  onProgress?: (ratio: number) => void;
-  /** External abort signal — cancels the upload (and any retry attempts). */
-  signal?: AbortSignal;
-  /** Number of retry attempts on network failure. @default 3 */
-  maxRetries?: number;
-  /** Initial backoff in ms; exponential. @default 500 */
-  retryDelayMs?: number;
-}
-
-export interface UploadAdapter {
-  readonly name: string;
-  upload(file: File | Blob, opts?: UploadOptions): Promise<UploadResult>;
-}
-
-interface UploadContextValue {
-  upload: (file: File | Blob, opts?: UploadOptions) => Promise<UploadResult>;
-  adapter: UploadAdapter;
-}
-
-const UploadContext = createContext<UploadContextValue | null>(null);
-
-/**
- * Default adapter — wraps the file in an object URL. It persists nothing and
- * returns no `meta.fileId`, so the `@object-ui/fields` file and image widgets
- * refuse its result (`UploadIncompleteError`); it is a no-crash default, not
- * an upload destination.
- */
-export function createObjectUrlAdapter(): UploadAdapter {
-  return {
-    name: 'object-url',
-    async upload(file) {
-      const f = file as File;
-      const name = ('name' in f && f.name) || 'upload';
-      return {
-        url: URL.createObjectURL(file),
-        name,
-        size: file.size,
-        mimeType: file.type || 'application/octet-stream',
-      };
-    },
-  };
-}
-
-export interface S3AdapterOptions {
-  /**
-   * URL of an endpoint that returns `{ uploadUrl, publicUrl, headers? }`
-   * for a given `{ name, type, size }`. Implementations typically presign an
-   * S3 PUT URL server-side.
-   */
-  getPresignedUrl: (input: { name: string; type: string; size: number; path?: string }) => Promise<{
-    uploadUrl: string;
-    publicUrl: string;
-    headers?: Record<string, string>;
-  }>;
-  /** Override fetch (useful for tests and ServiceWorker offline queues). */
-  fetchImpl?: typeof fetch;
-}
-
-/**
- * S3-style adapter — relies on the app to provide a presign endpoint so that
- * AWS credentials never leak to the browser. Works with any S3-compatible
- * object store (AWS S3, Cloudflare R2, MinIO, …).
- */
-export function createS3Adapter(opts: S3AdapterOptions): UploadAdapter {
-  const fetchFn = opts.fetchImpl ?? fetch;
-  return {
-    name: 's3',
-    async upload(file, options = {}) {
-      const f = file as File;
-      const name = ('name' in f && f.name) || 'upload';
-      const presigned = await opts.getPresignedUrl({
-        name,
-        type: file.type || 'application/octet-stream',
-        size: file.size,
-        path: options.path,
-      });
-      await uploadWithProgress(fetchFn, presigned.uploadUrl, file, {
-        method: 'PUT',
-        headers: presigned.headers,
-        ...options,
-      });
-      return {
-        url: presigned.publicUrl,
-        name,
-        size: file.size,
-        mimeType: file.type || 'application/octet-stream',
-      };
-    },
-  };
-}
-
-export interface AzureBlobAdapterOptions {
-  /**
-   * URL of an endpoint that returns `{ uploadUrl, publicUrl }` — typically a
-   * short-lived SAS URL minted server-side.
-   */
-  getSasUrl: (input: { name: string; type: string; size: number; path?: string }) => Promise<{
-    uploadUrl: string;
-    publicUrl: string;
-  }>;
-  fetchImpl?: typeof fetch;
-}
-
-/**
- * Azure Blob Storage adapter using SAS tokens. Single PUT — for files larger
- * than ~256 MiB, callers should issue chunked SAS URLs (block list + commit)
- * via their backend.
- */
-export function createAzureBlobAdapter(opts: AzureBlobAdapterOptions): UploadAdapter {
-  const fetchFn = opts.fetchImpl ?? fetch;
-  return {
-    name: 'azure-blob',
-    async upload(file, options = {}) {
-      const f = file as File;
-      const name = ('name' in f && f.name) || 'upload';
-      const sas = await opts.getSasUrl({
-        name,
-        type: file.type || 'application/octet-stream',
-        size: file.size,
-        path: options.path,
-      });
-      await uploadWithProgress(fetchFn, sas.uploadUrl, file, {
-        method: 'PUT',
-        headers: {
-          'x-ms-blob-type': 'BlockBlob',
-          'Content-Type': file.type || 'application/octet-stream',
-        },
-        ...options,
-      });
-      return {
-        url: sas.publicUrl,
-        name,
-        size: file.size,
-        mimeType: file.type || 'application/octet-stream',
-      };
-    },
-  };
-}
+import type { API, UploadAdapter, UploadOptions } from '@object-ui/types';
 
 export interface ObjectStackUploadAdapterOptions {
   /**
@@ -271,8 +100,8 @@ export function createObjectStackUploadAdapter(
           mimeType,
           size: file.size,
           // The adapter's own scope, or none. `options.path` is never sent
-          // as the scope: it is a key prefix for the S3/Azure presign
-          // callbacks, and this server refuses any scope outside its
+          // as the scope: it is a key prefix for adapters that key objects
+          // by path, and this server refuses any scope outside its
           // vocabulary (objectui#12055).
           scope: opts.scope,
         }),
@@ -410,41 +239,4 @@ function xhrUpload(url: string, body: Blob, options: UploadFetchOptions): Promis
     }
     xhr.send(body);
   });
-}
-
-export interface UploadProviderProps {
-  adapter?: UploadAdapter;
-  children: ReactNode;
-}
-
-export const UploadProvider: React.FC<UploadProviderProps> = ({ adapter, children }) => {
-  const adapterRef = useRef<UploadAdapter>(adapter ?? createObjectUrlAdapter());
-  useEffect(() => {
-    if (adapter) adapterRef.current = adapter;
-  }, [adapter]);
-
-  const upload = useCallback(
-    (file: File | Blob, opts?: UploadOptions) => adapterRef.current.upload(file, opts),
-    [],
-  );
-
-  const value = useMemo<UploadContextValue>(
-    () => ({ upload, adapter: adapterRef.current }),
-    [upload],
-  );
-  return <UploadContext.Provider value={value}>{children}</UploadContext.Provider>;
-};
-
-/**
- * Hook returning the configured upload function. Falls back to a fresh
- * object-URL adapter so widgets never crash when used outside a provider.
- */
-export function useUpload(): UploadContextValue {
-  const ctx = useContext(UploadContext);
-  // Always call useMemo to honour the rules of hooks; cheap when ctx is set.
-  const fallback = useMemo<UploadContextValue>(() => {
-    const a = createObjectUrlAdapter();
-    return { upload: (f: File | Blob, o?: UploadOptions) => a.upload(f, o), adapter: a };
-  }, []);
-  return ctx ?? fallback;
 }

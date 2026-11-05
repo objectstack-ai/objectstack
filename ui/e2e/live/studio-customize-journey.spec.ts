@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Page, type Response } from '@playwright/test';
+import { test as base, expect, type APIRequestContext, type Page, type Response } from '@playwright/test';
 
 /**
  * Live e2e for the ADR-0146 customization journey, walked through the Studio
@@ -42,6 +42,40 @@ import { test, expect, type APIRequestContext, type Page, type Response } from '
  * 5/5 run of the enlarged allowlist on a fresh backend each) and the job's
  * two-minute budget for the specs step; the readings are on that card's PR.
  */
+
+/**
+ * The spec's API reads each open their own connection (`Connection: close`).
+ *
+ * Playwright's `request` pools its sockets (`http.Agent({ keepAlive: true })`,
+ * no idle timeout of its own), and the reads here are split by Studio steps
+ * the browser drives: the read after the customize step reuses a socket that
+ * has sat idle for about five seconds (4.7–5.2 s measured locally), the read
+ * after the extension step for about four. A Node 22 server closes an idle
+ * keep-alive socket at `keepAliveTimeout` + `keepAliveTimeoutBuffer` = 6 s, so
+ * on a slower runner the read reaches a socket the server is closing and fails
+ * with `read ECONNRESET` instead of an answer (objectstack#30524, reproduced
+ * against @hono/node-server at a 5996–5999 ms idle). With a connection per
+ * read no read depends on that race. The browser's own traffic is unchanged.
+ *
+ * The context is otherwise the one the default `request` fixture builds: the
+ * project's request-relevant `use` options (the signed-in `storageState`,
+ * `baseURL`, the device's `userAgent`, any `extraHTTPHeaders` and
+ * `ignoreHTTPSErrors`) are passed on by name, so the reads run as the admin
+ * session the spec was written for.
+ */
+const test = base.extend({
+  request: async ({ playwright, storageState, baseURL, userAgent, extraHTTPHeaders, ignoreHTTPSErrors }, provide) => {
+    const request = await playwright.request.newContext({
+      storageState,
+      baseURL,
+      userAgent,
+      ignoreHTTPSErrors,
+      extraHTTPHeaders: { ...extraHTTPHeaders, Connection: 'close' },
+    });
+    await provide(request);
+    await request.dispose();
+  },
+});
 
 const API = process.env.LIVE_API_URL || 'http://localhost:3000';
 const BASE = 'com.example.showcase';

@@ -11,7 +11,7 @@
  *
  * The adapter used to send `scope: opts.scope ?? options.path`, so an adapter
  * built without a scope turned an upload's generic `path` (a key prefix for
- * the S3/Azure presign callbacks) into the storage scope. The server takes
+ * adapters that key objects by path) into the storage scope. The server takes
  * only its own scope vocabulary and refuses any other value, so such an
  * upload failed at the presign step.
  *
@@ -21,13 +21,14 @@
  * The option's TYPE is the spec's upload-scope vocabulary, `UploadScope` from
  * `@objectstack/spec/api`, reached through `@object-ui/types`'s `API`
  * namespace. The compile-time pins at the end of this file are checked by
- * `tsconfig.test.json`, which `type-check` chains after the source program.
+ * this package's `tsconfig.json`, whose program includes its tests
+ * (`type-check`).
  */
 
 import { describe, it, expect } from 'vitest';
 import type { API } from '@object-ui/types';
 
-import { createObjectStackUploadAdapter, type ObjectStackUploadAdapterOptions } from '../UploadProvider';
+import { createObjectStackUploadAdapter, type ObjectStackUploadAdapterOptions } from './upload-adapter';
 
 const FILE_ID = 'f-12055';
 
@@ -113,7 +114,7 @@ describe('the in-repo upload shapes send the same request as before (objectui#12
 });
 
 /* -------------------------------------------------------------------------- */
-/* Compile-time pins — compiled by tsconfig.test.json, chained off type-check. */
+/* Compile-time pins — compiled by this package's tsconfig.json (type-check). */
 /* -------------------------------------------------------------------------- */
 
 type Assert<T extends true> = T;

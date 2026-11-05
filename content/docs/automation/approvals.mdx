@@ -737,8 +737,9 @@ On finalization the request row gets `status: 'approved'` (or `'rejected'`),
 mirrored to the same value, and the record unlocks. The parked run resumes down
 the `approve` or `reject` branch.
 
-Statuses in full: `pending`, `approved`, `rejected`, `recalled`, `returned` —
-the `APPROVAL_STATUSES` constant in `@objectstack/spec/contracts`, which is also
+Statuses in full: `pending`, `approved`, `rejected`, `recalled`, `returned`,
+`cancelled` (the platform voided the request, for example because its record was
+deleted; `cancel_reason` on the row says why) — the `APPROVAL_STATUSES` constant in `@objectstack/spec/contracts`, which is also
 what `sys_approval_request.status` offers and what `ApprovalStatus` is derived
 from. If you add a status there, this line is a fourth copy that nothing updates
 for you.
