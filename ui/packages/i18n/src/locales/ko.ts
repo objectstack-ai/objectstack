@@ -1135,6 +1135,7 @@ const ko = {
     readonlyAriaLabel: "읽기 전용 보기",
     readonlyTooltip: "시스템 보기 — 코드에 정의되어 있으며 읽기 전용입니다.",
     malformedFilter: "이 뷰의 필터가 잘못되어 레코드를 표시하지 않습니다: {{subject}} 조건을 적용할 수 없습니다.",
+    exportNotPermitted: "이 레코드를 내보낼 권한이 없습니다. 내보내기가 필요하면 관리자에게 문의하세요.",
     noObject: "개체가 지정되지 않았습니다. {{property}} 또는 dataSource.object를 설정하세요.",
   },
   designer: {

@@ -1163,6 +1163,7 @@ const fr = {
     readonlyAriaLabel: "Vue en lecture seule",
     readonlyTooltip: "Vue système — définie dans le code, en lecture seule.",
     malformedFilter: "Le filtre de cette vue est incorrect, aucun enregistrement n’est donc affiché : la condition {{subject}} ne peut pas être appliquée.",
+    exportNotPermitted: "Vous n'avez pas la permission d'exporter ces enregistrements. Contactez votre administrateur si vous pensez devoir pouvoir le faire.",
     noObject: "Aucun objet indiqué : définissez {{property}} ou dataSource.object.",
   },
   designer: {

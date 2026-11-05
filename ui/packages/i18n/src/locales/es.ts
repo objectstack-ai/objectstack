@@ -1168,6 +1168,7 @@ const es = {
     readonlyAriaLabel: "Vista de solo lectura",
     readonlyTooltip: "Vista del sistema — definida en el código, solo lectura.",
     malformedFilter: "El filtro de esta vista no es válido, por lo que no se muestra ningún registro: la condición {{subject}} no se puede aplicar.",
+    exportNotPermitted: "No tiene permiso para exportar estos registros. Contacte a su administrador si cree que debería poder hacerlo.",
     noObject: "No se ha indicado ningún objeto: define {{property}} o dataSource.object.",
   },
   designer: {

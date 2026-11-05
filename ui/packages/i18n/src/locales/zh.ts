@@ -1158,6 +1158,7 @@ const zh = {
     readonlyAriaLabel: '只读视图',
     readonlyTooltip: '系统视图 — 由代码定义，只读。',
     malformedFilter: '此视图的筛选条件有误，因此不显示任何记录：无法应用 {{subject}} 条件。',
+    exportNotPermitted: '你没有导出这些记录的权限。如需导出，请联系管理员。',
     noObject: '未指定对象：请设置 {{property}} 或 dataSource.object。',
   },
   designer: {
