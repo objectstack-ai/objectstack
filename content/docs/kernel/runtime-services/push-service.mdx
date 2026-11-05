@@ -86,9 +86,10 @@ service its server gets.
 Each vendor block is optional, and at least one is required. A vendor with no
 block is a vendor this deployment does not push to; devices registered on it are
 skipped. Only `apns` and `fcm` ship today. The other Android vendors (HMS /
-Honor, Xiaomi, OPPO, vivo) are planned for a later phase behind the hosted relay
-(below), as further values of `vendor`, the token type the relay routes on, and
-not as plugins or channels of their own.
+Honor / Xiaomi / OPPO / vivo) are planned for a later phase behind the hosted
+relay (below), as further values of `vendor`, the token type the sender routes
+on (this service's transports today, the relay once it is served), and not as
+plugins or channels of their own.
 
 ### Credential references
 
