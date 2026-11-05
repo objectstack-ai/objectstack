@@ -36,7 +36,8 @@ import { render, cleanup, within, fireEvent, waitFor } from '@testing-library/re
 import '@testing-library/jest-dom';
 import { I18nProvider } from '@object-ui/i18n';
 import { en, zh } from '@object-ui/i18n/locales';
-import { UploadProvider, type UploadAdapter, type UploadResult } from '@object-ui/providers';
+import { UploadProvider } from '../widgets/UploadProvider';
+import type { UploadAdapter, UploadResult } from '@object-ui/types';
 import { FileRefusedValueSchema } from '@objectstack/spec/data';
 
 import { getCellRenderer, readFileValue } from '../index';

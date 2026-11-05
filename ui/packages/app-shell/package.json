@@ -86,7 +86,6 @@
     "@object-ui/mobile": "workspace:*",
     "@object-ui/permissions": "workspace:*",
     "@object-ui/plugin-editor": "workspace:*",
-    "@object-ui/providers": "workspace:*",
     "@object-ui/react": "workspace:*",
     "@object-ui/types": "workspace:*",
     "@objectstack/formula": "workspace:^",

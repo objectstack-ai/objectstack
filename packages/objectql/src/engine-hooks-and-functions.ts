@@ -4,12 +4,12 @@
  * [#29986 codemod] The
  * "Class head: units, hooks, functions, body runners, hook dispatch" section of
  * `ObjectQL`: the bodies of `recordResidualOwner`, `residualOwnerSource`,
- * `unregisterHooksByPackage`, `registerFunction`, `resolveFunction`,
- * `resolveFunctionEntry`, `unregisterFunctionsByPackage`,
+ * `getStatus`, `unregisterHooksByPackage`, `registerFunction`,
+ * `resolveFunction`, `resolveFunctionEntry`, `unregisterFunctionsByPackage`,
  * `setDefaultBodyRunner`, `getDefaultBodyRunner`, `setDefaultActionRunner`,
- * `getDefaultActionRunner`, `hasHooksFor`, `opensAfterAbortUnit`,
- * `dispatchUnscopedMultiWriteHooks` moved out of `engine.ts` whole by
- * `scripts/codemod-split-engine.mjs`.
+ * `getDefaultActionRunner`, `triggerHooks`, `hasHooksFor`,
+ * `opensAfterAbortUnit`, `dispatchUnscopedMultiWriteHooks` moved out of
+ * `engine.ts` whole by `scripts/codemod-split-engine.mjs`.
  *
  * A MOVE, not a redesign. {@link HooksAndFunctionsFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
@@ -40,6 +40,8 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { hookStoppedRefusal } from './summary-errors.js';
 import { HookTargetRebindError } from './hook-target-rebind-errors.js';
 import { declaredHookCondition } from './hook-wrappers.js';
+import { CoreServiceName } from '@objectstack/spec/system';
+import { bindHookNotice } from './hook-notice.js';
 import { hookMatchesObject } from './engine-top-level.js';
 import type { FunctionEntry, FunctionRegistrationOptions, HookHandler } from './engine-top-level.js';
 import type { ObjectQL } from './engine.js';
@@ -76,6 +78,21 @@ export class HooksAndFunctionsFacet {
   /** The body of `ObjectQL#residualOwnerSource`; the method's docblock there is its contract. */
   static residualOwnerSource(this: Pick<HooksAndFunctionsHost, 'residualOwnerSources'>, ownerId: string): 'code' | 'marketplace' | undefined {
     return this.residualOwnerSources.get(ownerId);
+  }
+
+  /** The body of `ObjectQL#getStatus`; the method's docblock there is its contract. */
+  static getStatus(): {
+    name: "data";
+    status: string;
+    version: string;
+    features: string[];
+  } {
+      return {
+          name: CoreServiceName.enum.data,
+          status: 'running',
+          version: '0.9.0',
+          features: ['crud', 'query', 'aggregate', 'transactions', 'metadata']
+      };
   }
 
   /** The body of `ObjectQL#unregisterHooksByPackage`; the method's docblock there is its contract. */
@@ -160,6 +177,49 @@ export class HooksAndFunctionsFacet {
   /** The body of `ObjectQL#getDefaultActionRunner`; the method's docblock there is its contract. */
   static getDefaultActionRunner(this: Pick<HooksAndFunctionsHost, '_defaultActionRunner'>): ((actionDef: any) => ((ctx: any) => Promise<unknown>) | undefined) | undefined {
     return this._defaultActionRunner;
+  }
+
+  /** The body of `ObjectQL#triggerHooks`; the method's docblock there is its contract. */
+  static async triggerHooks(this: Pick<HooksAndFunctionsHost, 'hooks' | 'logger'>, event: string, context: HookContext): Promise<void> {
+    const entries = this.hooks.get(event) || [];
+    // [#28251] `ctx.notice` — the write's own `onNotice` listener, bound here
+    // so every insert / update dispatch site carries it (see hook-notice.ts).
+    bindHookNotice(event, context);
+
+    if (entries.length === 0) {
+      this.logger.debug('No hooks registered for event', { event });
+      return;
+    }
+
+    this.logger.debug('Triggering hooks', { event, count: entries.length });
+
+    // `session.skipAutomations` (set from ExecutionContext.skipAutomations —
+    // import with "run automations & triggers" unchecked, import undo)
+    // suppresses hooks bound FROM METADATA (`bindHooksToEngine` stamps
+    // `entry.meta`). Hooks registered in code by plugins — audit, capability
+    // gates, sharing projection — have no `meta` and always run: the opt-out
+    // must never bypass security or audit (#2922).
+    const skipAutomations =
+      (context.session as { skipAutomations?: boolean } | undefined)?.skipAutomations === true;
+
+    for (const entry of entries) {
+      // Per-object matching — allow face minus exclusion face, the one shared
+      // rule `hasHooksFor` also reads (#5928).
+      if (!hookMatchesObject(entry, context.object)) {
+        continue; // Skip non-matching hooks
+      }
+      if (skipAutomations && entry.meta) {
+        this.logger.debug('Skipping metadata-bound hook (skipAutomations)', { event, hook: entry.hookName });
+        continue;
+      }
+      // [#29422] A stale-roll-up refusal a hook's own `ctx.api` write raised
+      // describes THAT write, not this one: `hookStoppedRefusal`.
+      try {
+        await entry.handler(context);
+      } catch (e) {
+        throw hookStoppedRefusal(e, event, context.object, entry.hookName);
+      }
+    }
   }
 
   /**
