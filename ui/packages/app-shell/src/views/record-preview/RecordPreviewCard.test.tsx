@@ -30,6 +30,7 @@ import {
   useInlineEdit,
 } from '@object-ui/react';
 import { PermissionProvider } from '@object-ui/permissions';
+import { createI18n, I18nProvider } from '@object-ui/i18n';
 import { MetadataProvider } from '../../providers/MetadataProvider';
 import { RecordPreviewCard, type RecordPreviewSource } from './RecordPreviewCard';
 
@@ -531,5 +532,37 @@ describe('RecordPreviewCard — the readable state links to the record (objectui
     expect(stateOf(loading.container)).toBe('loading');
     expect(links(loading.container)).toHaveLength(0);
     expect(h.recordHref).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * objectstack#30390 — the card heads a renamed object with its served label,
+ * already translated by the server, never the packaged catalog string.
+ * Directions, written before the run: the renamed cell RED before the change
+ * (`发票`), GREEN after; the control GREEN on both sides.
+ */
+describe('RecordPreviewCard — a served object is headed as served (objectstack#30390)', () => {
+  async function headed(def: Record<string, unknown>) {
+    const i18n = createI18n({ defaultLanguage: 'zh-CN', detectBrowserLanguage: false });
+    i18n.addResourceBundle('zh-CN', 'translation', { showcase: { objects: { [OBJECT]: { label: '发票' } } } }, true, true);
+    const ds = source(() => ({ ...RECORD }));
+    const { container } = mount(
+      <I18nProvider instance={i18n}>
+        <RecordPreviewCard objectName={OBJECT} recordId="INV-1" dataSource={ds} />
+      </I18nProvider>,
+      { [OBJECT]: def },
+    );
+    await settle(container, 'readable');
+  }
+
+  it('zh-CN: a renamed object heads the card with the served label', async () => {
+    await headed({ ...DEF, label: '账单' });
+    expect(screen.getByText('账单')).toBeInTheDocument();
+    expect(screen.queryByText('发票')).toBeNull();
+  });
+
+  it('zh-CN: control — an object served with no label is headed by the bundle', async () => {
+    await headed({ ...DEF, label: undefined });
+    expect(screen.getByText('发票')).toBeInTheDocument();
   });
 });

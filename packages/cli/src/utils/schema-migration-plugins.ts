@@ -2399,7 +2399,13 @@ export async function measureComposedCoverage(
   // the injected-columns plan's input, so it is installed before one object
   // is bound. See this function's docblock.
   notes.push(...installDeploymentPlatformGlobalObjects(kernel, engine?.registry));
-  const objects: unknown = engine?.registry?.getAllObjects?.();
+  // The STORAGE layer's objects: a disabled package's `objectExtensions`
+  // folded in. The DDL-free binding below installs each one as the driver's
+  // managed field set, so a served fold here would make the drift report
+  // propose dropping every column a disable only hides.
+  const objects: unknown = typeof engine?.registry?.getAllStorageObjects === 'function'
+    ? engine.registry.getAllStorageObjects()
+    : engine?.registry?.getAllObjects?.();
   if (
     !Array.isArray(objects)
     || typeof engine?.getDriverForObject !== 'function'
