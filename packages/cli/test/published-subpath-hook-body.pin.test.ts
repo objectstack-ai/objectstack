@@ -161,7 +161,7 @@ const RATIFIED_RUNTIME_SURFACE = ['HookBodyExtractionError', 'extractHookBody'];
  * added here is a `minor` bump (a new accepted key on a published surface).
  * Either way this list is edited on purpose, in the same PR, with a changeset.
  */
-const RATIFIED_SUBPATHS = ['.', './console', HOOK_BODY_SUBPATH, './package.json'];
+const RATIFIED_SUBPATHS = ['.', './console', HOOK_BODY_SUBPATH, './scenario-score', './package.json'];
 
 /**
  * The probe the consumer directory runs. Plain ESM, no transform, no import of
@@ -545,7 +545,7 @@ afterAll(() => {
 });
 
 describe('the exports map of the published package (#15325)', () => {
-  it('declares exactly the ratified subpaths — the root, ./console, ./hook-body and ./package.json', () => {
+  it('declares exactly the ratified subpaths — the root, ./console, ./hook-body, ./scenario-score and ./package.json', () => {
     expect(Object.keys(MANIFEST.exports).sort()).toEqual([...RATIFIED_SUBPATHS].sort());
   });
 

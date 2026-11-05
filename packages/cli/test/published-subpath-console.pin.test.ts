@@ -187,7 +187,7 @@ const INTERNAL_SINCE_RETIREMENT = [
  * here is a `minor` bump. Either way this list is edited on purpose, in the same
  * PR, with a changeset.
  */
-const RATIFIED_SUBPATHS = ['.', CONSOLE_SUBPATH, './hook-body', './package.json'];
+const RATIFIED_SUBPATHS = ['.', CONSOLE_SUBPATH, './hook-body', './scenario-score', './package.json'];
 
 /**
  * The probe the consumer directory runs. Plain ESM, no transform, no import of
@@ -625,7 +625,7 @@ afterAll(() => {
 });
 
 describe('the exports map still opens ./console, and opens it onto the barrel (#16046)', () => {
-  it('declares exactly the ratified subpaths — the root, ./console, ./hook-body and ./package.json', () => {
+  it('declares exactly the ratified subpaths — the root, ./console, ./hook-body, ./scenario-score and ./package.json', () => {
     expect(Object.keys(MANIFEST.exports).sort()).toEqual([...RATIFIED_SUBPATHS].sort());
   });
 

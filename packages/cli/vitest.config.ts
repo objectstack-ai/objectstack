@@ -780,6 +780,7 @@ export const DECLARATION_READER_FILES = Object.freeze([
   'test/create-in-repo-scaffold-typechecks.test.ts',
   'test/published-subpath-console.pin.test.ts',
   'test/published-subpath-hook-body.pin.test.ts',
+  'test/published-subpath-scenario-score.pin.test.ts',
   'test/scaffold-emission-typechecks.test.ts',
   'test/scaffold-test-script-passes.test.ts',
 ]);

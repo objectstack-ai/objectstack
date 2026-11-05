@@ -18,6 +18,10 @@
       "types": "./dist/hook-body.d.ts",
       "default": "./dist/hook-body.js"
     },
+    "./scenario-score": {
+      "types": "./dist/scenario-score.d.ts",
+      "default": "./dist/scenario-score.js"
+    },
     "./package.json": "./package.json"
   },
   "bin": {
