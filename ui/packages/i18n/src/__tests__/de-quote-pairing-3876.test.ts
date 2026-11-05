@@ -381,7 +381,15 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // it named a clone on — one interpolated span fewer.
     // 102 once the Connect an Agent page dropped its VS Code card and with it
     // `connectAgent.vscode.body`, which quoted the „MCP: Add Server“ command.
-    expect(okSpans, 'correctly paired spans').toBe(102);
+    // 103 once objectstack-ai/objectstack#30199 added
+    // `marketplace.suggestedBindings.reopenedToast`, the toast after a dismissed
+    // suggestion is re-opened, which quotes the set („{{set}}“) — one
+    // interpolated span, runtime data.
+    // 104 once objectstack-ai/objectstack#30295 added
+    // `console.organizationMfa.needsTwoFactor`, the organization form's notice
+    // that names the Setup switch to turn on („Mehrstufige Authentifizierung
+    // verlangen“) — one literal span, a UI label.
+    expect(okSpans, 'correctly paired spans').toBe(104);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -460,8 +468,12 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // `form.requiredForAction`, one more matched pair. 103 / 103 / 0 after
     // objectstack-ai/objectstack#28789 retired `packagedAutomation.cloneCreated`,
     // one matched pair fewer. 102 / 102 / 0 after the Connect an Agent page
-    // dropped `connectAgent.vscode.body`, one matched pair fewer.
-    expect({ open, close, rdq }).toEqual({ open: 102, close: 102, rdq: 0 });
+    // dropped `connectAgent.vscode.body`, one matched pair fewer. 103 / 103 / 0
+    // after objectstack-ai/objectstack#30199 added
+    // `marketplace.suggestedBindings.reopenedToast`, one more matched pair.
+    // 104 / 104 / 0 after objectstack-ai/objectstack#30295 added
+    // `console.organizationMfa.needsTwoFactor`, one more matched pair.
+    expect({ open, close, rdq }).toEqual({ open: 104, close: 104, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);

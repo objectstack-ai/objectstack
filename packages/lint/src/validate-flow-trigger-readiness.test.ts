@@ -10,6 +10,7 @@ import {
   FLOW_TRIGGER_UNKNOWN_EVENT,
   FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
   FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
+  FLOW_TIME_RELATIVE_OBJECT_MISMATCH,
   FLOW_TRIGGER_UNROUTABLE,
   FLOW_API_TRIGGER_SECRET_MISSING,
   FLOW_API_TRIGGER_SIGNATURE_UNUSABLE,
@@ -1467,6 +1468,27 @@ describe('validateFlowTriggerReadiness', () => {
         },
       ],
       [
+        FLOW_TIME_RELATIVE_OBJECT_MISMATCH,
+        'error',
+        {
+          objects: [{ name: 'task', label: 'Task', fields: {} }, { name: 'project', label: 'Project', fields: {} }],
+          flows: [
+            {
+              name: 'two_objects',
+              type: 'schedule',
+              status: 'active',
+              nodes: [
+                {
+                  id: 'start',
+                  type: 'start',
+                  config: { objectName: 'project', timeRelative: { object: 'task', dateField: 'due_at', withinDays: 3 } },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      [
         FLOW_TRIGGER_UNKNOWN_EVENT,
         'error',
         {
@@ -1785,6 +1807,116 @@ describe('validateFlowTriggerReadiness', () => {
 // `apiTriggerVerifierOf` (the reader the engine and the trigger share): ready on
 // the key `config.secretRef` names and nothing else, and never ready when the
 // reader answers `unusable`.
+// [#30283] A time-relative start naming, in `config.objectName`, an object other
+// than the one it sweeps. The run binds the swept object alone; the expression
+// checks type the conditions against `objectName`. One finding, at that key.
+describe('[#30283] a time-relative start whose objectName is not the swept object', () => {
+  const objects = [
+    { name: 'crm_opportunity', label: 'Opportunity', sharingModel: 'private', fields: { amount: { type: 'number', required: true } } },
+    { name: 'crm_task', label: 'Task', sharingModel: 'private', fields: { priority: { type: 'number', required: true }, close_date: { type: 'date' } } },
+  ];
+  /** A sweep of `crm_task`; `config` extras ride on the start node. */
+  const sweepFlow = (extra: Record<string, unknown>, timeRelative: unknown = { object: 'crm_task', dateField: 'close_date', offsetDays: [3] }) => ({
+    name: 'task_due',
+    label: 'Task due',
+    type: 'schedule',
+    status: 'active',
+    runAs: 'system',
+    nodes: [
+      { id: 'start', type: 'start', label: 'Start', config: { ...extra, timeRelative, organization: FIXTURE_ORG } },
+      { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [{ id: 'e1', source: 'start', target: 'end' }],
+  });
+  const mismatchOf = (findings: ReadonlyArray<{ rule: string }>) =>
+    findings.filter((f) => f.rule === FLOW_TIME_RELATIVE_OBJECT_MISMATCH);
+
+  it('refuses the start, at config.objectName, naming both objects and the fix', () => {
+    const findings = validateFlowTriggerReadiness({ objects, flows: [sweepFlow({ objectName: 'crm_opportunity' })] });
+    expect(findings.map((f) => [f.rule, f.severity, f.where, f.path])).toEqual([
+      [FLOW_TIME_RELATIVE_OBJECT_MISMATCH, 'error', 'flow "task_due" › start node', 'flows[0].nodes[0].config.objectName'],
+    ]);
+    const [f] = findings;
+    expect(f.message).toContain("config.objectName 'crm_opportunity'");
+    expect(f.message).toContain("('crm_task')");
+    expect(f.message).not.toContain('\n');
+    expect(f.message.length).toBeLessThanOrEqual(200);
+    expect(f.hint).toMatch(/^Remove config\.objectName .*or set it to 'crm_task'/);
+    expect(f.hint).not.toContain('\n');
+    expect(f.hint.length).toBeLessThanOrEqual(200);
+  });
+
+  it('is silent where the start names one object: the swept one, or none', () => {
+    for (const extra of [{ objectName: 'crm_task' }, {}]) {
+      expect(validateFlowTriggerReadiness({ objects, flows: [sweepFlow(extra)] }), JSON.stringify(extra)).toEqual([]);
+    }
+  });
+
+  it('is silent where the engine binds another trigger, which reads objectName and never sweeps', () => {
+    // A `record-*` token outranks the descriptor in the kind resolver, and an
+    // array-form record token is routed to the record-change trigger by the
+    // engine's pre-check. Each is paired with the shape that fires.
+    for (const triggerType of ['record-after-update', ['record-after-create', 'record-after-update']]) {
+      const findings = validateFlowTriggerReadiness({
+        objects,
+        flows: [sweepFlow({ objectName: 'crm_opportunity', triggerType })],
+      });
+      expect(mismatchOf(findings), JSON.stringify(triggerType)).toEqual([]);
+    }
+    expect(
+      mismatchOf(validateFlowTriggerReadiness({ objects, flows: [sweepFlow({ objectName: 'crm_opportunity', triggerType: 'schedule' })] })),
+    ).toHaveLength(1);
+  });
+
+  it('leaves a descriptor whose object is not a string to the descriptor rule, and co-fires with it otherwise', () => {
+    const noObject = validateFlowTriggerReadiness({
+      objects,
+      flows: [sweepFlow({ objectName: 'crm_opportunity' }, { object: 7, dateField: 'close_date', offsetDays: [3] })],
+    });
+    expect(noObject.map((f) => f.rule)).toEqual([FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID]);
+    // Two keys, two facts: a bad window beside a string object reports both.
+    const both = validateFlowTriggerReadiness({
+      objects,
+      flows: [sweepFlow({ objectName: 'crm_opportunity' }, { object: 'crm_task', dateField: 'close_date' })],
+    });
+    expect(both.map((f) => [f.rule, f.path]).sort()).toEqual([
+      [FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID, 'flows[0].nodes[0].config.timeRelative'],
+      [FLOW_TIME_RELATIVE_OBJECT_MISMATCH, 'flows[0].nodes[0].config.objectName'],
+    ]);
+  });
+
+  it('closes the measured hole: a condition only the named object can satisfy no longer passes every authoring command', () => {
+    // The run binds a `crm_task` row, which has no `amount`: this condition
+    // faults every run (`No such key: amount`). Typed against `objectName`,
+    // the expression checks find nothing wrong with it, so before this rule
+    // the stack passed every command clean.
+    const stack = { objects, flows: [sweepFlow({ objectName: 'crm_opportunity', condition: 'record.amount > 10' })] };
+    for (const command of AUTHORING_COMMANDS) {
+      const errors = runAuthoringRules(command, { normalized: stack, parsed: stack }).filter((f) => f.severity === 'error');
+      expect(errors.map((f) => [f.rule, f.path]), command).toEqual([
+        [FLOW_TIME_RELATIVE_OBJECT_MISMATCH, 'flows[0].nodes[0].config.objectName'],
+      ]);
+    }
+  });
+
+  it('the runtime publish gate refuses the write, judged on the flow alone', () => {
+    const gated = runRuntimeAuthoringRules({ type: 'flow', item: sweepFlow({ objectName: 'crm_opportunity' }) });
+    expect(gated.rulesRun).toContain('validateFlowTriggerReadiness');
+    expect(gated.errors.map((f) => [f.rule, f.path])).toEqual([
+      [FLOW_TIME_RELATIVE_OBJECT_MISMATCH, 'flows[0].nodes[0].config.objectName'],
+    ]);
+    expect(runRuntimeAuthoringRules({ type: 'flow', item: sweepFlow({}) }).errors).toEqual([]);
+  });
+
+  it('`os explain flow-time-relative-object-mismatch` carries what the verdict does not say', () => {
+    expect(FLOW_TIME_RELATIVE_OBJECT_MISMATCH).toBe('flow-time-relative-object-mismatch');
+    const text = explanationOf(FLOW_TIME_RELATIVE_OBJECT_MISMATCH);
+    for (const fact of ['No part of the run reads', 'No such key', 'refused as an unknown field', 'nothing the run does changes', 'that trigger binds `objectName`', 'what is refused is its own publish']) {
+      expect(text, fact).toContain(fact);
+    }
+  });
+});
+
 describe('[#30009] api trigger readiness reads the hook\'s one verifier (config.signature)', () => {
   const DOCUSIGN = { signs: 'body', header: 'X-DocuSign-Signature-1', algorithm: 'hmac-sha256', encoding: 'base64' };
   const STRIPE = {

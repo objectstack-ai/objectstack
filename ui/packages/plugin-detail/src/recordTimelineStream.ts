@@ -14,8 +14,9 @@
  * the host's `DiscussionContext` — and the field changes (`sys_audit_log`,
  * `trackHistory`), which the host hands over through
  * {@link RecordFieldChangesContext}. This module is the pure part: the audit
- * rows as feed items, the merge (newest first, an update counted once), and
- * the four filter chips 全部 / 活动 / 讨论 / 变更.
+ * rows as feed items, the merge (newest first, one action one row), and
+ * the four filter chips 全部 / 活动 / 讨论 / 变更 (变更 = the audit's field
+ * changes; every activity row is 活动).
  */
 
 import * as React from 'react';
@@ -77,7 +78,33 @@ export interface AuditEntryLike {
   user_name?: string | null;
   user_avatar?: string | null;
   summary?: string | null;
+  /** Who wrote the entry, as `sys_audit_log.user_id`: the same id `sys_activity.actor_id` holds. */
+  user_id?: string | number | null;
   changes?: Array<{ field: string; label?: string; from?: unknown; to?: unknown }>;
+}
+
+/**
+ * What an audit feed item carries beyond {@link FeedItem}, for the pairing in
+ * {@link mergeTimelineStream} (objectstack#30122): the ledger's `action` and
+ * its `user_id`. Package-local: written by {@link auditEntriesToFeedItems},
+ * read here, never authored.
+ */
+interface AuditFeedFacts {
+  auditAction?: string;
+  auditUserId?: string | number | null;
+}
+
+/**
+ * A stream item as {@link mergeTimelineStream} hands it on: an activity row
+ * that one action also wrote to the audit log carries that audit item as
+ * `fieldHistory`, so the action reads as ONE row with its before and after
+ * values (objectstack#30122). Package-local hand-off, never authored.
+ */
+export type TimelineStreamItem = FeedItem & { fieldHistory?: FeedItem };
+
+/** The audit item paired onto an activity row, if any. */
+export function fieldHistoryOf(item: FeedItem): FeedItem | undefined {
+  return (item as TimelineStreamItem).fieldHistory;
 }
 
 const displayOf = (value: unknown): string | undefined =>
@@ -113,7 +140,9 @@ export function auditEntriesToFeedItems(
         ...(displayOf(change.to) !== undefined ? { newDisplayValue: displayOf(change.to) } : {}),
       })),
       source: 'sys_audit_log',
-    } as FeedItem);
+      ...(entry.action ? { auditAction: entry.action } : {}),
+      auditUserId: entry.user_id ?? null,
+    } as FeedItem & AuditFeedFacts);
   }
   return out;
 }
@@ -124,20 +153,95 @@ const timeOf = (item: FeedItem): number => {
 };
 
 /**
+ * How far apart an activity row and an audit entry may be stamped and still
+ * be one action (objectstack#30122). plugin-audit writes both in one call,
+ * the audit row first, so they land milliseconds apart; the window allows a
+ * driver that keeps whole seconds.
+ */
+export const TIMELINE_PAIR_WINDOW_MS = 5000;
+
+/** The ledger's write actions and the activity type the same action writes. */
+const AUDIT_ACTION_TO_ACTIVITY_TYPE: Readonly<Record<string, string>> = {
+  create: 'created',
+  update: RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE,
+  delete: 'deleted',
+};
+
+/** One actor on both sides: the same user id, or, where neither names one, the same name. */
+function sameActor(activity: FeedItem, audit: FeedItem & AuditFeedFacts): boolean {
+  const activityId = activity.actorId ?? null;
+  const auditId = audit.auditUserId ?? null;
+  if (activityId !== null && auditId !== null) return String(activityId) === String(auditId);
+  if (activityId !== null || auditId !== null) return false;
+  return activity.actor === audit.actor;
+}
+
+/**
+ * Whether `activity` may be the row that wrote the same action as `audit`:
+ * the activity type the audit action writes, the same actor, stamped within
+ * {@link TIMELINE_PAIR_WINDOW_MS} (both are read for this one record). The gap
+ * in ms, or -1.
+ */
+function pairGap(activity: FeedItem, audit: FeedItem & AuditFeedFacts): number {
+  const activityType = audit.auditAction ? AUDIT_ACTION_TO_ACTIVITY_TYPE[audit.auditAction] : undefined;
+  if (!activityType || activity.activityType !== activityType || activity.parentId) return -1;
+  if (!sameActor(activity, audit)) return -1;
+  const gap = Math.abs(timeOf(activity) - timeOf(audit));
+  return gap <= TIMELINE_PAIR_WINDOW_MS ? gap : -1;
+}
+
+/**
+ * The pairs, activity index to audit index: every candidate pair taken
+ * nearest in time first, each row and each entry at most once.
+ */
+function pairActions(activity: readonly FeedItem[], changes: ReadonlyArray<FeedItem & AuditFeedFacts>): Map<number, number> {
+  const candidates: Array<{ a: number; c: number; gap: number }> = [];
+  changes.forEach((audit, c) =>
+    activity.forEach((item, a) => {
+      const gap = pairGap(item, audit);
+      if (gap >= 0) candidates.push({ a, c, gap });
+    }),
+  );
+  candidates.sort((x, y) => x.gap - y.gap || x.c - y.c || x.a - y.a);
+  const pairs = new Map<number, number>();
+  const usedChanges = new Set<number>();
+  for (const { a, c } of candidates) {
+    if (pairs.has(a) || usedChanges.has(c)) continue;
+    pairs.set(a, c);
+    usedChanges.add(c);
+  }
+  return pairs;
+}
+
+/**
  * The one stream: the host's discussion + activity items and the field
- * changes, newest first. With field changes present, the activity stream's
- * own `updated` rows step aside — the audit entry says the same update with
- * its before and after values, and an update is counted once.
+ * changes, newest first. One action that wrote both an activity row and an
+ * audit entry reads as ONE row (objectstack#30122): the activity row, with
+ * the audit entry as its `fieldHistory`, so it keeps its actor and summary
+ * and gains the before and after values. An audit entry no activity row
+ * pairs with is its own row, as before; with field changes present, an
+ * unpaired `updated` row still steps aside, as before.
  */
 export function mergeTimelineStream(
   feed: readonly FeedItem[] | null | undefined,
   fieldChanges: readonly FeedItem[] | null | undefined,
-): FeedItem[] {
-  const changes = fieldChanges ?? [];
-  const base = (feed ?? []).filter(
-    (item) => !(changes.length > 0 && (item as { activityType?: string }).activityType === RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE),
-  );
-  return [...base, ...changes]
+): TimelineStreamItem[] {
+  const changes = (fieldChanges ?? []) as ReadonlyArray<FeedItem & AuditFeedFacts>;
+  const activity = feed ?? [];
+  const pairs = pairActions(activity, changes);
+  const paired = new Set(pairs.values());
+  const unpaired = changes.filter((_, c) => !paired.has(c));
+  const base: TimelineStreamItem[] = [];
+  activity.forEach((item, index) => {
+    const c = pairs.get(index);
+    if (c !== undefined) {
+      base.push({ ...item, fieldHistory: changes[c] });
+      return;
+    }
+    if (changes.length > 0 && item.activityType === RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE) return;
+    base.push(item);
+  });
+  return [...base, ...unpaired]
     .map((item, index) => ({ item, index }))
     .sort((a, b) => timeOf(b.item) - timeOf(a.item) || a.index - b.index)
     .map(({ item }) => item);
@@ -148,20 +252,65 @@ export type TimelineStreamFilter = 'all' | 'activity' | 'discussion' | 'changes'
 
 export const TIMELINE_STREAM_FILTERS: readonly TimelineStreamFilter[] = ['all', 'activity', 'discussion', 'changes'];
 
+/** The chips while the record's field history is not shown: no 变更. */
+const TIMELINE_STREAM_FILTERS_WITHOUT_HISTORY: readonly TimelineStreamFilter[] = TIMELINE_STREAM_FILTERS.filter(
+  (filter) => filter !== 'changes',
+);
+
+/**
+ * Whether the record page shows the record's field history (objectstack#30074):
+ * the host's `enable.trackHistory` gate, the one that decides whether it reads
+ * the audit log for {@link RecordFieldChangesContext}. While it is `false` the
+ * stream offers no 变更 chip. No host saying: `true`, every chip draws.
+ */
+export const RecordFieldHistoryContext = React.createContext<boolean>(true);
+
+/** The stream's chips, given whether the record's field history is shown. */
+export function timelineStreamFilters(fieldHistory: boolean): readonly TimelineStreamFilter[] {
+  return fieldHistory ? TIMELINE_STREAM_FILTERS : TIMELINE_STREAM_FILTERS_WITHOUT_HISTORY;
+}
+
 /** Whether an item is a system entry — drawn as one compact muted line. */
 export function isSystemStreamEntry(item: FeedItem): boolean {
   return item.type === 'field_change' || item.type === 'system';
 }
 
-/** The items a chip shows: discussion = comments; changes = field changes; activity = the rest. */
+/**
+ * Whether an item is a field-history entry: a field change with its before and
+ * after values, read from the audit log ({@link auditEntriesToFeedItems}
+ * stamps `source: 'sys_audit_log'`). The 变更 chip, and the panel's
+ * `changes_only`, hold these and nothing else (objectstack#30074, ruling C).
+ * An activity row (`created` / `updated` / `deleted` / `assigned` / `shared`)
+ * shares the `field_change` presentation but is an event, so it is judged by
+ * its source and sits under 活动, whatever the history flag.
+ */
+export function isFieldHistoryEntry(item: FeedItem): boolean {
+  return item.type === 'field_change' && item.source === 'sys_audit_log';
+}
+
+/**
+ * The field-history entries of a stream, each on its own: an unpaired audit
+ * entry as it is, and the audit entry an activity row carries
+ * ({@link fieldHistoryOf}). The 变更 chip and the panel's `changes_only`
+ * show these (objectstack#30074 ruling C; objectstack#30122).
+ */
+export function fieldHistoryEntriesOf(items: readonly FeedItem[]): FeedItem[] {
+  return items.flatMap((item) => {
+    if (isFieldHistoryEntry(item)) return [item];
+    const paired = fieldHistoryOf(item);
+    return paired ? [paired] : [];
+  });
+}
+
+/** The items a chip shows: discussion = comments; changes = field-history entries; activity = the rest. */
 export function filterTimelineStream(items: readonly FeedItem[], filter: TimelineStreamFilter): FeedItem[] {
   switch (filter) {
     case 'discussion':
       return items.filter((item) => item.type === 'comment');
     case 'changes':
-      return items.filter((item) => item.type === 'field_change');
+      return fieldHistoryEntriesOf(items);
     case 'activity':
-      return items.filter((item) => item.type !== 'comment' && item.type !== 'field_change');
+      return items.filter((item) => item.type !== 'comment' && !isFieldHistoryEntry(item));
     default:
       return [...items];
   }

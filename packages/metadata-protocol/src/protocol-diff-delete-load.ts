@@ -401,12 +401,12 @@ export class ProtocolDiffDeleteLoadFacet {
         // here, but a stored row under its name is, as repair.
         const originGatedRefusal = host.originGatedRemovalRefusal(request.type, request.name);
         // [#28412, ADR-0146 D9 item 1] A removal naming the shipping package's
-        // pair, of a type whose D9 conditions are delivered (`flow` only —
-        // every other open type keeps main's verdict): it removes
-        // the row the override is stored in, and the code package's item is
-        // served — and armed — again. Admitted past the sealed-removal refusal
-        // and told to the store as a runtime-only removal, as the declared
-        // save is ({@link isPairRowRemoval}).
+        // pair, of a type whose declared override the gate admits ([#30062]
+        // every open type, no longer `flow` alone): it removes the row the
+        // override is stored in, and the code package's item is served (a
+        // flow's armed) again. Admitted past the sealed-removal refusal and
+        // told to the store as a runtime-only removal, as the declared save
+        // is ({@link isPairRowRemoval}).
         const pairRowRemoval = isPairRowRemoval(
             request.type, host.packagedArtifactOwner({ type: request.type, name: request.name }), request.packageId,
         );
@@ -755,10 +755,10 @@ export class ProtocolDiffDeleteLoadFacet {
                     // #5927 — was an inline `this.isArtifactBacked(...)` call
                     // with these exact arguments; now reads the method-scoped
                     // binding the receipts share. Same fact, one call fewer.
-                    // [#28412] The pair's row of a type whose D9 conditions
-                    // are delivered (`flow` only, {@link isPairRowRemoval})
+                    // [#28412] The pair's row of a declared override
+                    // ({@link isPairRowRemoval}; [#30062] every open type)
                     // is removed as the declared save wrote it: runtime-only.
-                    // Every other type keeps the intent main gave it.
+                    // Every other removal keeps the intent main gave it.
                     intent: artifactBacked && !pairRowRemoval
                         ? 'override-artifact'
                         : 'runtime-only',

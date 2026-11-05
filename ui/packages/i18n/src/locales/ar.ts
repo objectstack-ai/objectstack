@@ -185,6 +185,7 @@ const ar = {
   },
   form: {
     noPermissionToSave: "ليس لديك إذن لحفظ هذا السجل.",
+    readOnlyExternalSource: "هذا الجدول للقراءة فقط. تأتي سجلاته من مصدر بيانات خارجي لا يقبل التغييرات.",
     noPermissionToCreate: "ليس لديك إذن لإنشاء سجلات {{object}}. الحقول للقراءة فقط.",
     noPermissionToEdit: "ليس لديك إذن لتعديل سجلات {{object}}. الحقول للقراءة فقط.",
     noPermissionToEditRecord: "ليس لديك إذن لتعديل هذا السجل. الحقول للقراءة فقط.",
@@ -2011,6 +2012,10 @@ const ar = {
     },
   },
   console: {
+    organizationMfa: {
+      needsTwoFactor: "يتطلب فرض المصادقة متعددة العوامل تفعيل المصادقة الثنائية، وهي متوقفة في هذا النشر، لذا يُرفض الحفظ مع تحديد الخيار. فعّل المصادقة الثنائية أولًا: شغّل «طلب المصادقة متعددة العوامل» من الإعداد ← المصادقة (ينطبق على جميع المؤسسات)، أو عيّن OS_AUTH_TWO_FACTOR=true في النشر.",
+      nowRequired: "يجب الآن على كل عضو في هذه المؤسسة لم يُعدّ تطبيق مصادقة أن يفعل ذلك. يُمنع كل عضو من الوصول إلى البيانات عند انتهاء فترة السماح للمصادقة متعددة العوامل (7 أيام ما لم تُغيَّر من الإعداد ← المصادقة)، محسوبة من أول استخدام له بعد هذا التغيير. لا يتأثر الأعضاء الذين يستخدمون تطبيق مصادقة بالفعل.",
+    },
     studio: {
       title: "Studio",
       accessRequired: "تحتاج إلى صلاحية الوصول إلى Studio لفتح Studio. يمكن للمسؤول منحها بمجموعة أذونات في الإعداد → إسناد مجموعات الأذونات.",
@@ -3208,6 +3213,7 @@ const ar = {
         continue: "متابعة",
         preparing: "جارٍ التحضير…",
         enrollFailed: "تعذّر بدء التسجيل.",
+        unavailable: "المصادقة الثنائية متوقفة في هذا النشر، لذا لا يمكن إعداد تطبيق مصادقة بعد. اطلب من المسؤول تفعيلها من الإعداد ← المصادقة، ثم أعد المحاولة.",
         scanTitle: "امسح الرمز بتطبيق المصادقة",
         scanBody: "امسح رمز QR هذا باستخدام Google Authenticator أو 1Password أو Authy وغيرها، ثم أدخل الرمز المكوّن من 6 أرقام.",
         backupTitle: "احفظ رموز النسخ الاحتياطي",
@@ -4432,6 +4438,9 @@ const ar = {
       revoke: "إلغاء",
       revoking: "جارٍ الإلغاء…",
       revokedToast: "تم إلغاء قبول «{{set}}».",
+      reopen: "إعادة النظر",
+      reopening: "جارٍ إعادة الفتح…",
+      reopenedToast: "أُعيد فتح اقتراح «{{set}}»: لا يُمنح شيء حتى يُقبل.",
     },
     title: "سوق التطبيقات",
     subtitle: "استعرض التطبيقات المعتمدة المنشورة في كتالوج ObjectStack. انقر على تطبيق لرؤية التفاصيل وتثبيته في أحد بيئاتك.",
@@ -5074,6 +5083,20 @@ const ar = {
         dataset_few: 'مجموعات بيانات {{count}}',
         dataset_many: 'مجموعات بيانات {{count}}',
         dataset_other: 'مجموعات بيانات {{count}}',
+        hook: 'خطافات {{count}}',
+        hook_zero: 'خطافات {{count}}',
+        hook_one: 'خطاف {{count}}',
+        hook_two: 'خطافات {{count}}',
+        hook_few: 'خطافات {{count}}',
+        hook_many: 'خطافات {{count}}',
+        hook_other: 'خطافات {{count}}',
+        translation: 'ترجمات {{count}}',
+        translation_zero: 'ترجمات {{count}}',
+        translation_one: 'ترجمة {{count}}',
+        translation_two: 'ترجمات {{count}}',
+        translation_few: 'ترجمات {{count}}',
+        translation_many: 'ترجمات {{count}}',
+        translation_other: 'ترجمات {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

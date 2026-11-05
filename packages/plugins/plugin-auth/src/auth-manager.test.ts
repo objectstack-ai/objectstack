@@ -3208,6 +3208,8 @@ describe('AuthManager', () => {
         admin: false,
         phoneNumber: false,
         phoneNumberOtp: false,
+        // [#30107] No email service is wired here, so no mail leaves.
+        emailDelivery: false,
         multiOrgEnabled: false,
         // [ADR-0105 D1] Which of `single` | `group` | `isolated` is in force.
         // A vanilla deployment (no tenancy service wired, no env override) is
@@ -3876,7 +3878,8 @@ describe('AuthManager', () => {
       const IMPERSONATION = { impersonatedBy: 'u-admin' };
       // Every posture computable at once: enforced MFA with no grace, and a
       // one-day expiry. Each row below decides which postures its user holds.
-      const POLICY = { mfaRequired: true, mfaGracePeriodDays: 0, passwordExpiryDays: 1 };
+      // [#30201] Two-factor on: the gate holds a user for MFA only while they can enroll.
+      const POLICY = { mfaRequired: true, mfaGracePeriodDays: 0, passwordExpiryDays: 1, plugins: { twoFactor: true } };
       const sessionGateFor = async (row: Record<string, unknown>, session: Record<string, unknown>) => {
         const engine = makeDataEngine({ platformAdmin: false });
         // The block's double, its `findOne` answering the posture read of the user row.
@@ -4695,9 +4698,13 @@ describe('AuthManager', () => {
       }),
       update: vi.fn(async () => ({})),
     });
+    // [#30201] Two-factor on by default here: the gate holds a user for MFA only
+    // while they can enroll. The cases that turn it off say so (`plugins: {}`).
     const mgr = (engine: any, extra: any = {}) => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      const m = new AuthManager({ secret: SECRET, baseUrl: 'http://localhost:3000', dataEngine: engine, ...extra });
+      const m = new AuthManager({
+        secret: SECRET, baseUrl: 'http://localhost:3000', dataEngine: engine, plugins: { twoFactor: true }, ...extra,
+      });
       warn.mockRestore();
       return m;
     };
@@ -4749,6 +4756,63 @@ describe('AuthManager', () => {
       const g = await (m as any).computeAuthGate('u1', undefined, false);
       expect(g?.code).toBe('MFA_REQUIRED');
     });
+
+    // [#30201] The twoFactor plugin's endpoints are the only enrollment path.
+    // A hold while it is off answers MFA_REQUIRED to a user whose remediation
+    // endpoint answers 404 — the whole-tenant lockout the card measured.
+    describe('only a user who can enroll is held (#30201)', () => {
+      const OLD = () => new Date(Date.now() - 30 * 86_400_000).toISOString();
+      const logger = () => ({ warn: vi.fn(), info: vi.fn() });
+
+      it('two-factor off: no hold and no grace clock started, said once with the remedy', async () => {
+        const log = logger();
+        const lapsed = makeEngine({ id: 'u1', two_factor_enabled: false, mfa_required_at: OLD() });
+        const m = mgr(lapsed, { mfaRequired: true, mfaGracePeriodDays: 0, plugins: {}, logger: log });
+        expect(m.isTwoFactorEnabled()).toBe(false);
+        await expect((m as any).computeAuthGate('u1', undefined, false)).resolves.toBeUndefined();
+        expect(await m.resolveUserAuthGates('u1')).toEqual([]);
+        const fresh = makeEngine({ id: 'u2', two_factor_enabled: false, mfa_required_at: null });
+        const m2 = mgr(fresh, { mfaRequired: true, plugins: {}, logger: log });
+        expect(await m2.resolveUserAuthGates('u2')).toEqual([]);
+        // The window opens when enrollment does, not before.
+        expect(fresh.update).not.toHaveBeenCalled();
+        // Once per manager, however many requests ask.
+        expect(log.warn).toHaveBeenCalledTimes(2);
+        expect(String(log.warn.mock.calls[0][0])).toMatch(/NOT enforced/);
+        expect(String(log.warn.mock.calls[0][0])).toMatch(/OS_AUTH_TWO_FACTOR=true/);
+        // The settings remedy is conditional: the env var outranks it.
+        expect(String(log.warn.mock.calls[0][0])).toMatch(/unless OS_AUTH_TWO_FACTOR is set to false/);
+      });
+
+      it('an OS_AUTH_TWO_FACTOR=false pin outranks plugins.twoFactor, so the requirement is not enforced', async () => {
+        const prior = process.env.OS_AUTH_TWO_FACTOR;
+        process.env.OS_AUTH_TWO_FACTOR = 'false';
+        try {
+          const m = mgr(makeEngine({ id: 'u1', two_factor_enabled: false, mfa_required_at: OLD() }), {
+            mfaRequired: true, mfaGracePeriodDays: 0, logger: logger(),
+          });
+          expect(m.isTwoFactorEnabled()).toBe(false);
+          // The one answer: what is wired, what is advertised, what the gate asks.
+          expect(m.getPublicConfig().features.twoFactor).toBe(false);
+          expect(await m.resolveUserAuthGates('u1')).toEqual([]);
+        } finally {
+          if (prior === undefined) delete process.env.OS_AUTH_TWO_FACTOR;
+          else process.env.OS_AUTH_TWO_FACTOR = prior;
+        }
+      });
+
+      it('control: the same user is held once two-factor is on, and an enrolled user never is', async () => {
+        const m = mgr(makeEngine({ id: 'u1', two_factor_enabled: false, mfa_required_at: OLD() }), {
+          mfaRequired: true, mfaGracePeriodDays: 0,
+        });
+        expect(m.isTwoFactorEnabled()).toBe(true);
+        expect((await m.resolveUserAuthGates('u1')).map((g) => g.code)).toEqual(['MFA_REQUIRED']);
+        const enrolled = mgr(makeEngine({ id: 'u1', two_factor_enabled: true, mfa_required_at: OLD() }), {
+          mfaRequired: true, mfaGracePeriodDays: 0, plugins: {},
+        });
+        expect(await enrolled.resolveUserAuthGates('u1')).toEqual([]);
+      });
+    });
   });
 
   // ADR-0069 D3 — per-org MFA tightening (an org may require MFA above the
@@ -4766,9 +4830,12 @@ describe('AuthManager', () => {
       update: vi.fn(async () => ({})),
       count: vi.fn(async () => 1),
     });
+    // [#30201] Two-factor on by default, as in the block above.
     const mgr = (engine: any, extra: any = {}) => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      const m = new AuthManager({ secret: SECRET, baseUrl: 'http://localhost:3000', dataEngine: engine, ...extra });
+      const m = new AuthManager({
+        secret: SECRET, baseUrl: 'http://localhost:3000', dataEngine: engine, plugins: { twoFactor: true }, ...extra,
+      });
       warn.mockRestore();
       return m;
     };
@@ -4801,6 +4868,17 @@ describe('AuthManager', () => {
       const m = mgr(engine, { mfaRequired: false });
       (m as any)._orgMfaCache = { value: true, at: Date.now() };
       await expect((m as any).computeAuthGate('u1', 'org1', false)).resolves.toBeUndefined();
+    });
+
+    it('[#30201] does NOT block for the active org\'s require_mfa while two-factor is off, nor start the clock', async () => {
+      const engine = makeEngine(
+        { id: 'u1', two_factor_enabled: false, mfa_required_at: null },
+        { id: 'org1', require_mfa: true },
+      );
+      const m = mgr(engine, { mfaRequired: false, mfaGracePeriodDays: 0, plugins: {}, logger: { warn: vi.fn() } });
+      (m as any)._orgMfaCache = { value: true, at: Date.now() };
+      await expect((m as any).computeAuthGate('u1', 'org1', false)).resolves.toBeUndefined();
+      expect(engine.update).not.toHaveBeenCalled();
     });
 
     it('is a no-op when no org requires MFA and there is no active org', async () => {
@@ -5004,6 +5082,58 @@ describe('AuthManager', () => {
       expect(ipMatchesRange('::ffff:10.0.0.1', '10.0.0.1')).toBe(true);
       expect(ipMatchesRange('10.0.0.1', '::ffff:10.0.0.1')).toBe(true);
       expect(ipMatchesRange('2001:db8::1', '2001:db8::1')).toBe(true);
+    });
+
+    it('ipMatchesRange reads an IPv6 CIDR as the 128-bit prefix it names', () => {
+      expect(ipMatchesRange('2001:db8::5', '2001:db8::/32')).toBe(true);
+      expect(ipMatchesRange('2001:db8:ffff:ffff:ffff:ffff:ffff:ffff', '2001:db8::/32')).toBe(true);
+      expect(ipMatchesRange('2001:db9::5', '2001:db8::/32')).toBe(false);
+      expect(ipMatchesRange('2001:0DB8:0:0::5', '2001:db8::/32')).toBe(true);
+      expect(ipMatchesRange('2001:db8:1234:5600::1', '2001:db8:1234:5600::/56')).toBe(true);
+      expect(ipMatchesRange('2001:db8:1234:5700::1', '2001:db8:1234:5600::/56')).toBe(false);
+      expect(ipMatchesRange('2001:db8::1', '2001:db8::1/128')).toBe(true);
+      expect(ipMatchesRange('2001:db8::2', '2001:db8::1/128')).toBe(false);
+      expect(ipMatchesRange('2001:db8::5', '::/0')).toBe(true);
+      expect(ipMatchesRange('::1', '::1/128')).toBe(true);
+      expect(ipMatchesRange('::2', '::1/128')).toBe(false);
+      // A zone identifier names an interface, not an address: the address is judged.
+      expect(ipMatchesRange('fe80::1%eth0', 'fe80::/10')).toBe(true);
+    });
+
+    it('ipMatchesRange compares an exact IPv6 entry by the address it denotes, not by its spelling', () => {
+      expect(ipMatchesRange('2001:db8::1', '2001:DB8:0:0:0:0:0:1')).toBe(true);
+      expect(ipMatchesRange('::1', '0:0:0:0:0:0:0:1')).toBe(true);
+      expect(ipMatchesRange('2001:db8::2', '2001:db8::1')).toBe(false);
+    });
+
+    it('ipMatchesRange never matches across address families', () => {
+      // An IPv4 range never admits a pure IPv6 address, an IPv6 range never an IPv4 one.
+      expect(ipMatchesRange('::1', '0.0.0.0/0')).toBe(false);
+      expect(ipMatchesRange('2001:db8::5', '0.0.0.0/0')).toBe(false);
+      expect(ipMatchesRange('203.0.113.5', '::/0')).toBe(false);
+      expect(ipMatchesRange('::ffff:203.0.113.5', '::/0')).toBe(false);
+      // The IPv4-mapped form, dotted or hex, is still the IPv4 address it maps.
+      expect(ipMatchesRange('::ffff:cb00:7105', '203.0.113.0/24')).toBe(true);
+      expect(ipMatchesRange('203.0.113.5', '::ffff:203.0.113.0/24')).toBe(true);
+      expect(ipMatchesRange('203.0.114.5', '::ffff:203.0.113.0/24')).toBe(false);
+    });
+
+    it('ipMatchesRange never widens a malformed IPv6 range past its base address', () => {
+      expect(ipMatchesRange('2001:db8::5', '2001:db8::/129')).toBe(false);
+      expect(ipMatchesRange('2001:db8::5', '2001:db8::/')).toBe(false);
+      expect(ipMatchesRange('2001:db8::5', '2001:db8::/3x')).toBe(false);
+      expect(ipMatchesRange('2001:db8::5', '2001:db8:::/32')).toBe(false);
+      expect(ipMatchesRange('2001:db8::5', 'zz01:db8::/32')).toBe(false);
+      // A prefix the family does not read leaves the base address alone, as before.
+      expect(ipMatchesRange('2001:db8::', '2001:db8::/129')).toBe(true);
+    });
+
+    it('isClientIpAllowed admits an IPv6 client inside an allowed IPv6 range', () => {
+      const m = mgr({ allowedIpRanges: ['2001:db8::/32', '::1'] });
+      expect(m.isClientIpAllowed('2001:db8:abcd::1')).toBe(true);
+      expect(m.isClientIpAllowed('::1')).toBe(true);
+      expect(m.isClientIpAllowed('2001:db9::1')).toBe(false);
+      expect(m.isClientIpAllowed('203.0.113.5')).toBe(false);
     });
 
     it('resolveClientAddress believes forwarded headers only under trustProxy', () => {

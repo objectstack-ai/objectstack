@@ -38,6 +38,10 @@
  *
  * ## [#29613] The second describe: page, app, dataset, doc and book
  *
+ * [#30062] …and mapping, measured the same way: before, a published mapping
+ * override was answered by no read (every reader served S), so an import that
+ * named the mapping ran the base's field mapping.
+ *
  * A `.custom` pair's published override of a base's
  * page, app, dataset, doc or book is served from its ROW, as a dashboard's
  * is, and no longer from a copy in the registry's bare slot wearing the
@@ -76,6 +80,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ServiceObject } from '@objectstack/spec/data';
 import { ObjectStackProtocolImplementation, resetEnvWritableMetadataTypes } from '@objectstack/metadata-protocol';
 import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject } from '@objectstack/metadata-core';
+import { translateMetadataDocument } from '@objectstack/spec/system';
 import { ObjectQL } from './engine.js';
 
 const BASE = 'com.example.showcase';
@@ -359,6 +364,11 @@ const docBody = (label: string) => ({ name: 'showcase_index', label, content: '#
 const bookBody = (label: string) => ({
     name: 'showcase_manual', label, groups: [{ key: 'start', label: 'Start', pages: ['showcase_index'] }],
 });
+/** [#30062] An import mapping: the import door resolves it through the by-name read (`@objectstack/rest`'s `import-mapping.ts`). */
+const mappingBody = (label: string) => ({
+    name: 'showcase_task_feed', label, sourceFormat: 'csv', targetObject: 'showcase_task',
+    fieldMapping: [{ source: 'Title', target: 'title' }], mode: 'insert',
+});
 
 /** Per type: its body and the manifest collection that ships it. */
 const SEALED_TYPES = [
@@ -367,6 +377,8 @@ const SEALED_TYPES = [
     { type: 'dataset', body: datasetBody, collection: 'datasets' },
     { type: 'doc', body: docBody, collection: 'docs' },
     { type: 'book', body: bookBody, collection: 'books' },
+    // [#30062] Before, a published mapping override was answered by no read: every reader served the base's body.
+    { type: 'mapping', body: mappingBody, collection: 'mappings' },
 ] as const;
 
 function sealedBaseManifest(): Record<string, unknown> {
@@ -487,5 +499,197 @@ describe('[#29613] a pair\'s published override of a sealed type is served from 
             expect(await byNameReading(protocol, type, name, BASE), `${type} by name, the base`).toBe(`${SHIPPED}/${BASE}`);
             expect((await protocol.getMetaItemLayered({ type, name, packageId: BASE }))?.effective?.label, `${type} layered`).toBe(SHIPPED);
         });
+    }
+});
+
+/**
+ * [#30062, ADR-0146 D2] "Removing it brings the base's back": a pair's removal
+ * of its own published override succeeds for every type whose declared
+ * override the gate admits and a pair can hold, and the base's item is served
+ * again by every read; a removal naming the base keeps its answer and leaves
+ * the override served (a base's own item is never removed).
+ *
+ * Before, `doc` and `mapping` answered 403 NOT_OVERRIDABLE (`refusePackagedBaseRemoval`,
+ * the pair-row admission being `flow`'s alone) and the override stayed served:
+ * a customization the customer could not undo. `flow` is pinned beside its own
+ * read in `protocol-flow-custom-override.test.ts`; `action` takes no declared
+ * override yet (ADR-0146 D9), so no pair holds one.
+ *
+ * Both topologies: an environment kernel asks the protocol's removal door, a
+ * host-config kernel only the repository's delete gate.
+ */
+const REMOVAL_TYPES = [
+    ...TYPES.map(({ type, name, body }) => ({ type, name, body: body as (label: string) => Record<string, unknown> })),
+    ...SEALED_TYPES.map(({ type, body }) => ({ type, name: body(SHIPPED).name, body: body as (label: string) => Record<string, unknown> })),
+    {
+        type: 'translation', name: 'showcase_zh_cn',
+        body: (label: string) => ({ name: 'showcase_zh_cn', label, locale: 'zh-CN', objects: { showcase_task: { label: '任务' } } }),
+    },
+] as const;
+
+function removalBaseManifest(): Record<string, unknown> {
+    // The #29600 base and the #29613 sealed types in one package; the sealed dataset's body wins the shared name.
+    return { ...baseManifest(), ...sealedBaseManifest(), views: baseManifest().views, dashboards: baseManifest().dashboards, reports: baseManifest().reports, emailTemplates: baseManifest().emailTemplates };
+}
+
+async function bootRemoval(environmentId: string | undefined) {
+    const engine = new ObjectQL();
+    engine.registerDriver(makeMemoryDriver().driver, true);
+    await engine.init();
+    engine.registry.registerObject(sysMetadataObject, 'test-package');
+    for (const o of [SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) {
+        engine.registry.registerObject(o as any, 'test-package');
+    }
+    engine.registerApp(removalBaseManifest());
+    // The manifest door registers no translation artifact here; a code package's translation file does (the metadata plugin).
+    engine.registry.registerItem('translation', REMOVAL_TYPES[REMOVAL_TYPES.length - 1].body(SHIPPED), 'name', BASE);
+    const protocol: any = new ObjectStackProtocolImplementation(engine, () => new Map(), environmentId);
+    await protocol.ensureCustomizationPackage({ basePackageId: BASE });
+    return { engine, protocol };
+}
+
+/** The overridable types that open no overlay channel and are no `supportsOverlay` type: a removal naming the base is refused for them. */
+const SEALED_OUTSIDE_CARVE_OUT: ReadonlySet<string> = new Set(['doc', 'mapping']);
+
+const activePairRows = async (engine: ObjectQL, type: string, name: string): Promise<number> =>
+    ((await engine.find('sys_metadata', { where: { type, name, package_id: PAIR, state: 'active' }, context: { isSystem: true } })) as any[]).length;
+
+describe('[#30062] a pair\'s removal of its own override brings the base\'s item back, for every type a pair can hold', () => {
+    for (const environmentId of [undefined, 'env_1']) {
+        const kernel = environmentId ? 'environment' : 'host-config';
+        for (const { type, name, body } of REMOVAL_TYPES) {
+            it(`${type} (${kernel} kernel): the removal naming the pair succeeds and every read serves the base's item again`, async () => {
+                const { engine, protocol } = await bootRemoval(environmentId);
+                await publishOverride(protocol, type, name, body(EDITED));
+                expect(await byName(protocol, type, name, BASE), `${type} served before the removal`).toBe(EDITED);
+
+                const removed = await protocol.deleteMetaItem({ type, name, packageId: PAIR });
+                expect(removed?.success, `the ${type} removal`).toBe(true);
+                expect(await activePairRows(engine, type, name), `the pair's ${type} row`).toBe(0);
+
+                expect(await byName(protocol, type, name), `${type} by name, no package`).toBe(SHIPPED);
+                expect(await byName(protocol, type, name, BASE), `${type} by name, the base`).toBe(SHIPPED);
+                expect(await effectiveList(protocol, type, name), `${type} list, no package`).toEqual([SHIPPED]);
+                expect((await protocol.getMetaItemLayered({ type, name, packageId: BASE }))?.effective?.label, `${type} layered, the base`).toBe(SHIPPED);
+                expect(await perPackage(protocol, type, name, PAIR), `the pair's ${type} layer`).toEqual([]);
+            });
+
+            it(`${type} (${kernel} kernel): a removal naming the base keeps main's answer, removes nothing, and the override stays served`, async () => {
+                const { engine, protocol } = await boot2(environmentId, type, name, body);
+                const outcome = await protocol.deleteMetaItem({ type, name, packageId: BASE }).then(
+                    (r: any) => ({ success: r?.success, reset: r?.reset }),
+                    (e: any) => ({ code: e?.code, status: e?.status }),
+                );
+                // Main's answer, unchanged: the sealed removal refusal where the protocol's door
+                // asks it of a type outside the #6960 carve-out, else a receipt that removed nothing.
+                expect(outcome, `the ${type} removal naming the base`).toEqual(
+                    environmentId !== undefined && SEALED_OUTSIDE_CARVE_OUT.has(type)
+                        ? { code: 'NOT_OVERRIDABLE', status: 403 }
+                        : { success: true, reset: false },
+                );
+                expect(await activePairRows(engine, type, name), `the pair's ${type} row`).toBe(1);
+                expect(await byName(protocol, type, name, BASE), `${type} by name, the base`).toBe(EDITED);
+                expect((await protocol.getMetaItemLayered({ type, name, packageId: BASE }))?.code?.label, `the base's own ${type}`).toBe(SHIPPED);
+            });
+        }
+    }
+});
+
+/** A removal boot with the pair's override already published. */
+async function boot2(environmentId: string | undefined, type: string, name: string, body: (label: string) => Record<string, unknown>) {
+    const booted = await bootRemoval(environmentId);
+    await publishOverride(booted.protocol, type, name, body(EDITED));
+    return booted;
+}
+
+/**
+ * [#30062 item 3, ruling record 6631250894] The label order on a declared
+ * override — a translation in the pair, then the override's own label, then
+ * the base's translation — needs two inputs only the protocol has, and this
+ * pins both on a real boot (the #29613 harness: the real engine, the boot
+ * hydration, the pair through its ensure door, the override through Studio's
+ * draft save and publish):
+ *
+ *  - the PACKAGED base of a page, dataset, app and book
+ *    (`getPackagedPageBase`, `getPackagedDatasetBase`, `getPackagedAppBase`,
+ *    `getPackagedBookBase`) answers the base's own item while the pair's
+ *    override is served, at once and after a restart, with and without a
+ *    metadata service — never the override it is compared against;
+ *  - the served override names its base (`servedOverrideBaseOf`), the base's
+ *    own item names none, and the pair's own published translation is what
+ *    `getPairTranslationBundle` answers for that base, without the base's.
+ *
+ * Fed to the spec's translator, the two give the ruled answer for each type.
+ */
+const PAIR_TRANSLATION = 'showcase_custom_zh_cn';
+/** The `zh-CN` text each type's catalog group carries, keyed by the item's name. */
+const zhGroup = (type: string, name: string, label: string): Record<string, unknown> => {
+    const group = ({ page: 'pages', app: 'apps', dataset: 'datasets', book: 'books' } as Record<string, string>)[type];
+    return { [group]: { [name]: { label } } };
+};
+const LABEL_ORDER_TYPES = SEALED_TYPES.filter((t) => ['page', 'app', 'dataset', 'book'].includes(t.type));
+const accessorOf = (type: string): string => `getPackaged${type[0].toUpperCase()}${type.slice(1)}Base`;
+
+describe('[#30062] a declared override\'s label order: the packaged base and the pair\'s own translations, on a real boot', () => {
+    for (const withService of [false, true]) {
+        const shape = withService ? 'with a metadata service (a real boot)' : 'with no metadata service';
+        for (const { type, body } of LABEL_ORDER_TYPES) {
+            const name = body(SHIPPED).name;
+
+            it(`${type}, ${shape}: the packaged base is the base's own item while the override is served, at once and after a restart`, async () => {
+                const stores: Stores = new Map();
+                const first = await bootSealed(stores, withService);
+                expect(reading(first.protocol[accessorOf(type)](name)), `${type} before the override`).toBe(`${SHIPPED}/${BASE}`);
+                await publishOverride(first.protocol, type, name, body(EDITED));
+                expect(reading(first.protocol[accessorOf(type)](name)), `${type} at once`).toBe(`${SHIPPED}/${BASE}`);
+                const restarted = await bootSealed(stores, withService);
+                expect(reading(restarted.protocol[accessorOf(type)](name)), `${type} after a restart`).toBe(`${SHIPPED}/${BASE}`);
+                expect(restarted.protocol[accessorOf(type)]('no_such_item'), `${type}, an unknown name`).toBeUndefined();
+            });
+
+            it(`${type}, ${shape}: the served override names its base, the pair's translation is read by its binding, and the translator answers the ruled order`, async () => {
+                const stores: Stores = new Map();
+                const { protocol } = await bootSealed(stores, withService);
+                // Before the override: the base's own item is no declared override.
+                const shipped = (await protocol.getMetaItem({ type, name }))?.item;
+                expect(protocol.servedOverrideBaseOf(type, shipped), `${type}, the base's own item`).toBeUndefined();
+
+                await publishOverride(protocol, type, name, body(EDITED));
+                const served = (await protocol.getMetaItem({ type, name }))?.item;
+                const listed = ((await protocol.getMetaItems({ type }))?.items ?? []).find((i: any) => i?.name === name);
+                expect(protocol.servedOverrideBaseOf(type, served), `${type}, by name`).toBe(BASE);
+                expect(protocol.servedOverrideBaseOf(type, listed), `${type}, listed`).toBe(BASE);
+                // The pair has no translation yet.
+                expect(await protocol.getPairTranslationBundle(BASE), `${type}, a pair with no translation`).toBeUndefined();
+
+                // The pair's own translation, through the same doors; and a package-less one of the
+                // same key, which is in the deployment catalog but is not the pair's. The layer
+                // merges rows in name order, so the package-less row is named to sort AFTER the
+                // pair's: were it read, its text would overwrite the pair's and this pin would see it.
+                const saved = await protocol.saveMetaItem({
+                    type: 'translation', name: PAIR_TRANSLATION, packageId: PAIR,
+                    item: { name: PAIR_TRANSLATION, locale: 'zh-CN', ...zhGroup(type, name, `${EDITED} (zh)`) },
+                });
+                expect(saved?.success, 'the pair translation save').toBe(true);
+                stores.get('sys_metadata')!.set('zz_legacy_zh', {
+                    id: 'zz_legacy_zh', type: 'translation', name: 'zz_legacy_zh_cn', organization_id: null, package_id: null,
+                    state: 'active', version: 1, metadata: JSON.stringify({ name: 'zz_legacy_zh_cn', locale: 'zh-CN', ...zhGroup(type, name, 'not the pair') }),
+                });
+                const pairBundle = await protocol.getPairTranslationBundle(BASE);
+                expect(pairBundle, `${type}, the pair's bundle`).toEqual({ 'zh-CN': zhGroup(type, name, `${EDITED} (zh)`) });
+                expect(await protocol.getPairTranslationBundle(PAIR), 'a pair id has no pair').toBeUndefined();
+
+                const catalog = { 'zh-CN': zhGroup(type, name, '基包译文') };
+                const translate = (pair: unknown) => (translateMetadataDocument(type, served, catalog as any, {
+                    locale: 'zh-CN', packagedBase: protocol[accessorOf(type)](name), ...(pair ? { pairBundle: pair as any } : {}),
+                }) as any)?.label;
+                expect(translate(pairBundle), `${type}: the pair's translation first`).toBe(`${EDITED} (zh)`);
+                expect(translate(undefined), `${type}: then the override's own label`).toBe(EDITED);
+                const base = (translateMetadataDocument(type, shipped, catalog as any, {
+                    locale: 'zh-CN', packagedBase: protocol[accessorOf(type)](name),
+                }) as any)?.label;
+                expect(base, `${type}: the base's own item keeps the base's translation`).toBe('基包译文');
+            });
+        }
     }
 });

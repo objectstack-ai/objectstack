@@ -3388,7 +3388,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       namespace: {
         label: "命名空间",
-        help: "Manifest 命名空间（例如 mail、branding、feature_flags）。"
+        help: "Manifest 命名空间（例如 mail、branding、storage）。"
       },
       key: {
         label: "键",

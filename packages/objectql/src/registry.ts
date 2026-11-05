@@ -3619,6 +3619,47 @@ export class SchemaRegistry {
     this.initialDisabledPackageIds = new Set(ids);
   }
 
+  /** See {@link onPackageUninstalled}. */
+  private packageUninstalledListeners = new Set<(packageId: string) => void>();
+
+  /**
+   * [#30215] Be told, once per package, that {@link uninstallPackage} has
+   * withdrawn it — after its record is gone, never for a refused uninstall
+   * (that one removes nothing). Returns the unsubscribe.
+   *
+   * For a holder of state keyed by package id OUTSIDE this registry, so it is
+   * withdrawn on every uninstall door at once (the protocol's `deletePackage`,
+   * `DELETE /packages/:id`, the install-local DELETE), never per door. The
+   * engine is the one today: its manifest map (`registerApp` → `manifests`) is
+   * the code-package signal ADR-0070's `isWritablePackage` reads first, and an
+   * id left in it kept an uninstalled package read-only until a restart.
+   */
+  onPackageUninstalled(listener: (packageId: string) => void): () => void {
+    this.packageUninstalledListeners.add(listener);
+    return () => { this.packageUninstalledListeners.delete(listener); };
+  }
+
+  /**
+   * Tell every {@link onPackageUninstalled} listener. Never throws: the
+   * uninstall has already happened, so a throwing listener must not read as a
+   * refused one to the door that called {@link uninstallPackage}. It is logged
+   * at `error` instead, because that listener's state now disagrees with this
+   * registry while everything looks healthy.
+   */
+  private announcePackageUninstalled(id: string): void {
+    for (const listener of this.packageUninstalledListeners) {
+      try {
+        listener(id);
+      } catch (err) {
+        console.error(
+          `[Registry] package "${id}" was uninstalled, but a listener keeping state keyed by its id failed to drop it `
+            + `(${(err as Error)?.message ?? err}) — that state still names the package until the next restart, `
+            + 'while the registry no longer does. Restart the runtime to bring the two back in line.',
+        );
+      }
+    }
+  }
+
   // ==========================================
   // Restore on refusal
   // ==========================================
@@ -8219,6 +8260,9 @@ export class SchemaRegistry {
     if (collection) {
       collection.delete(id);
       this.log(`[Registry] Uninstalled package: ${id}`);
+      // …and, last, whoever keeps its own state keyed by this package's id
+      // (the engine's manifest map) drops it, on every uninstall door at once.
+      this.announcePackageUninstalled(id);
       return true;
     }
     return false;

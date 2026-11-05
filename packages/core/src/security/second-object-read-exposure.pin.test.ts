@@ -189,6 +189,13 @@ const CALLERS: Record<string, Classification> = {
       "each target the decision before the engine reads it: the data door's `refuseUnservedRelationTarget`, the MCP " +
       "stdio data bridge's `enforceRelationTargetExposure` and the runtime `callData`'s `refuseUnservedRelationTargets`",
   },
+  'packages/cli/src/lint/scenario-graph.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "the scenario scorer's artifact reader (`artifactToEvalGraph`): it reads a field's declared target out of a " +
+      'built metadata artifact offline, only to score whether the reference resolves to an object the build carries; ' +
+      'it reads no record and serves nothing of the target to any caller',
+  },
   'packages/lint/src/object-graph.ts': {
     kind: 'not-a-served-read',
     reason: 'authoring-time static analysis of metadata; reads no record',

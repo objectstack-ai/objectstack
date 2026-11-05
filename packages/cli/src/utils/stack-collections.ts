@@ -123,6 +123,28 @@ function hasObjectQLPlugin(plugins: readonly unknown[]): boolean {
 }
 
 /**
+ * Does `plugins[]` already hold `@objectstack/metadata`'s `MetadataPlugin`?
+ * (`serve.ts`: the dev artifact door and the host-config door both ask.)
+ *
+ * The plugin's `name` (`com.objectstack.metadata`) is the identity; the class
+ * name is only a fallback. ⚠️ A class-name-only check misses the real plugin:
+ * the published `@objectstack/metadata` bundle emits
+ * `var MetadataPlugin = class _MetadataPlugin { … }`, so on an installed CLI
+ * `constructor.name` is `_MetadataPlugin`. Source-run tests never see that
+ * rename. Measured on the published 18.3.0 CLI (#29936): the dev door's
+ * class-name-only gate missed the standalone stack's own `MetadataPlugin`,
+ * composed a second one, and every `os dev` boot of an `os init -t app`
+ * scaffold warned "Plugin superseded: 'com.objectstack.metadata'".
+ */
+export function hasMetadataPlugin(plugins: readonly unknown[]): boolean {
+  return plugins.some((p) => {
+    const plugin = asBag(p);
+    const ctor = (plugin?.constructor as { name?: string } | undefined)?.name;
+    return plugin?.name === 'com.objectstack.metadata' || ctor === 'MetadataPlugin';
+  });
+}
+
+/**
  * Does `plugins[]` already provide a storage driver? (`serve.ts` step 2.)
  *
  * A `DefaultDatasourcePlugin` counts (#3826): the standalone stack DECLARES its

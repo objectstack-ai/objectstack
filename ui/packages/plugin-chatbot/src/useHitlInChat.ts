@@ -38,6 +38,7 @@
 import * as React from 'react';
 import type { ChatbotEnhancedMessage as ChatMessage, ToolDecisionState } from './ChatbotEnhanced';
 import type { ApproveOutcome, RejectOutcome } from './usePendingActions';
+import { hitlContinuationTag } from './hitlContinuation';
 
 export type { ToolDecisionState };
 
@@ -84,6 +85,12 @@ export interface UseHitlInChatOptions {
    * Failures (`status: 'failed'`, transport errors) still surface in
    * `decisions[toolCallId]` but do NOT trigger a continuation prompt — the
    * operator is expected to read the error and decide what to do next.
+   *
+   * The prompt starts with the `[HITL <id>]` tag, and that tag is how every
+   * reader knows the turn is not the person's own words: the chat transcript
+   * draws no bubble for it, and the conversation list and language probe skip
+   * it (`isHitlContinuation`, objectstack#30223). Send it unchanged — a host
+   * that rewrites or prefixes it puts the text back in front of the person.
    */
   continueConversation?: (prompt: string, context: ContinueContext) => void;
 }
@@ -323,7 +330,10 @@ function buildContinuationPrompt(input: {
   reason?: string;
 }): string | undefined {
   const { approved, status, toolName, pendingActionId, outcome, reason } = input;
-  const tag = `[HITL ${pendingActionId}]`;
+  // The leading tag is the continuation marker every reader filters on
+  // (`isHitlContinuation`): keep it first, and keep its spelling in
+  // `./hitlContinuation` (objectstack#30223).
+  const tag = hitlContinuationTag(pendingActionId);
   if (approved && status === 'executed') {
     const result = outcome.result;
     const resultText =
