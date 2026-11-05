@@ -418,12 +418,26 @@ export interface RuntimePackageScope {
  *  3. it belongs to the **written package** itself;
  *  4. it belongs to one of that package's **declared dependencies**.
  *
+ * [#30005] A fifth limb, stated by the caller and empty unless it says so:
+ *
+ *  5. it is the **base object of a dataset the written item binds**
+ *     (`datasetBoundObjects`, which {@link datasetBoundObjectNames} computes
+ *     for a dashboard or report write). `datasets` is never narrowed — a
+ *     dashboard may bind another package's dataset, and the dataset door binds
+ *     it at run time against the dataset's own object, closure or no closure —
+ *     so a filter key on that binding is judged against that object. Without
+ *     this limb the object fell out of the snapshot while its dataset stayed,
+ *     and `widget-filter-field-unknown` / `report-filter-field-unknown` took
+ *     their "object absent" skip: a misspelled key published and every reader
+ *     got an empty tile or an error panel.
+ *
  * Pure, allocation-light, and total: a non-object member is kept rather than
  * inspected, because deciding it is not this function's job.
  */
 export function narrowObjectsToPackageClosure(
   objects: readonly unknown[],
   scope: RuntimePackageScope | undefined,
+  datasetBoundObjects: ReadonlySet<string> = NO_NAMES,
 ): readonly unknown[] {
   if (!packageScopeInForce(scope)) return objects;
   const reachable = new Set<string>([scope.packageId, ...scope.dependencies]);
@@ -436,10 +450,77 @@ export function narrowObjectsToPackageClosure(
     if (typeof owner !== 'string' || owner === '' || owner === OVERLAY_PROVENANCE_SENTINEL) return true;
     // Limbs 3 and 4.
     if (reachable.has(owner)) return true;
+    // Limb 5 — reached through a dataset the written item binds (#30005).
+    const name = (entry as AnyRec).name;
+    if (typeof name === 'string' && datasetBoundObjects.has(name)) return true;
     // Limb 1 — checked last only because it is the rarest, never because it is
     // the weakest: it is the one limb with no escape.
     return isSystemObject(entry as AnyRec);
   });
+}
+
+const NO_NAMES: ReadonlySet<string> = new Set<string>();
+
+/**
+ * The base objects of the datasets a written dashboard or report binds (#30005)
+ * — limb 5 of {@link narrowObjectsToPackageClosure}.
+ *
+ * Read off the item at the positions the two dataset filter-key rules read:
+ * a dashboard's `widgets[].dataset` (`validateWidgetBindings`, whose
+ * dashboard-level filters resolve through the same widget datasets), a
+ * report's `dataset` and each joined block's `dataset`
+ * (`validateReportRuntimeFilters`). Each name is resolved against the carried
+ * `datasets` collection, which is never narrowed; a name that resolves to
+ * nothing contributes nothing (`widget-dataset-unknown` /
+ * `chart-dataset-unknown` own that typo).
+ *
+ * ⛔ Every other write type answers the empty set, and that is the point, not
+ * an omission. Limb 5 re-admits an object the package did not declare, and a
+ * write that names an OBJECT directly is judged against the closure on
+ * purpose: a flow trigger, a list view or a dataset's base object outside it
+ * is refused (`flow-trigger-unknown-object` at `error` under a closure,
+ * `list-view-object-outside-closure`, the closure fix line on
+ * `object-reference-unknown`). A list view's `chart.dataset` re-admitting the
+ * object the view lists would wave that verdict through. A dashboard or report
+ * reaches an object only THROUGH a dataset, and the dataset door is what binds
+ * it, so the re-admitted object is exactly the universe the door resolves the
+ * filter in.
+ *
+ * Only the base object: a dotted key whose hop lands on an object the snapshot
+ * still does not carry stays the rules' "unknowable" skip — never a refusal.
+ */
+export function datasetBoundObjectNames(
+  type: string,
+  item: unknown,
+  datasets: readonly unknown[] | undefined,
+): ReadonlySet<string> {
+  if (type !== 'dashboard' && type !== 'report') return NO_NAMES;
+  if (!item || typeof item !== 'object' || !Array.isArray(datasets) || datasets.length === 0) return NO_NAMES;
+  const body = item as AnyRec;
+  const bound = new Set<string>();
+  const note = (v: unknown): void => {
+    if (typeof v === 'string' && v !== '') bound.add(v);
+  };
+  if (type === 'dashboard') {
+    for (const w of Array.isArray(body.widgets) ? body.widgets : []) {
+      if (w && typeof w === 'object') note((w as AnyRec).dataset);
+    }
+  } else {
+    note(body.dataset);
+    for (const b of Array.isArray(body.blocks) ? body.blocks : []) {
+      if (b && typeof b === 'object') note((b as AnyRec).dataset);
+    }
+  }
+  if (bound.size === 0) return NO_NAMES;
+  const objects = new Set<string>();
+  for (const ds of datasets) {
+    if (!ds || typeof ds !== 'object') continue;
+    const { name, object } = ds as AnyRec;
+    if (typeof name === 'string' && bound.has(name) && typeof object === 'string' && object !== '') {
+      objects.add(object);
+    }
+  }
+  return objects;
 }
 
 /**
@@ -769,9 +850,17 @@ export function buildRuntimeWriteSnapshotSet(
     // ⛔ Applied to BOTH passes, necessarily. The gate's verdict is
     // candidate MINUS baseline, so narrowing one side and not the other would
     // not be a smaller input — it would be a different question.
+    //
+    // [#30005] `datasets` stays whole, so the objects a written dashboard or
+    // report binds THROUGH a dataset are kept beside the closure (limb 5,
+    // {@link datasetBoundObjectNames}) — in both passes, by the same rule.
     const raw = (args.context?.[key] ?? []) as readonly AnyRec[];
     const collection = key === 'objects'
-      ? (narrowObjectsToPackageClosure(raw, args.packageScope) as readonly AnyRec[])
+      ? (narrowObjectsToPackageClosure(
+          raw,
+          args.packageScope,
+          datasetBoundObjectNames(args.type, item, args.context?.datasets),
+        ) as readonly AnyRec[])
       : raw;
     if (key === stackKey) {
       baseline[key] = collection.filter((o) => !itemName || o?.name !== itemName);
