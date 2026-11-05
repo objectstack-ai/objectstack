@@ -159,7 +159,7 @@ const BLUEPRINT_WIDGET_AGGREGATES = ['sum', 'avg', 'min', 'max', 'count'] as con
 const WIDGET_AGGREGATE_MEANING = '"sum" = the total of the `measure` field; "avg" = its average; "min" / "max" = its smallest / largest value; "count" = the number of records the widget covers (after its `condition`). "sum", "avg", "min" and "max" need `measure` to name a numeric field of the widget\'s object. "count" needs no `measure` field: it counts records, and a field named in `measure` beside it is not read. Say what the widget computes: an average → "avg", a total → "sum", a highest / lowest value → "max" / "min", a number of records → "count".';
 
 /** The widget `measure` rule, read on both sides: it names a field, never an aggregation. */
-const WIDGET_MEASURE_RULE = 'Name the FIELD, not "total_amount" or "avg_score": how it is aggregated is what `aggregate` says, never this key. A "total revenue" widget sets measure:"amount" with aggregate:"sum"; an "average interview score" widget sets measure:"score" with aggregate:"avg"; a "number of deals" widget sets aggregate:"count" and needs no measure.';
+const WIDGET_MEASURE_RULE = 'Name the FIELD, not "total_amount" or "avg_score": how it is aggregated is what `aggregate` says, never this key. A "total revenue" widget sets measure:"amount" with aggregate:"sum"; an "average interview score" widget sets measure:"score" with aggregate:"avg"; a "number of deals" widget sets aggregate:"count" and needs no measure. measure:"count" is the legacy spelling of a record count: write aggregate:"count" instead. Beside "sum", "avg", "min" or "max", measure:"count" names no field to aggregate, so that widget is incomplete: a reader must refuse it, never sum, average or rank a record count.';
 
 /**
  * The blueprint view's calendar date key (ruling B on cloud#3607): which date
@@ -241,7 +241,7 @@ export const BlueprintDashboardSchema = lazySchema(() => z.object({
     measure: z.string().regex(SNAKE_CASE).optional()
       .describe(`The field this widget aggregates (e.g. "amount", "score"), or "count" to count records. ${WIDGET_MEASURE_RULE} Omit for a count widget.`),
     aggregate: z.enum(BLUEPRINT_WIDGET_AGGREGATES).optional()
-      .describe(`How the widget aggregates its records: ${WIDGET_AGGREGATE_MEANING} SET it on every widget that aggregates; omitted, the reader falls back to a default it picks from the field type (a numeric field sums), which is not the average or extreme a widget may mean.`),
+      .describe(`How the widget aggregates its records: ${WIDGET_AGGREGATE_MEANING} SET it on every widget that aggregates; omitted, the reader falls back to a default of its own, which may not be the average or extreme a widget means.`),
     groupBy: z.string().regex(SNAKE_CASE).optional()
       .describe('The field to break the widget down by — the category or time axis (e.g. "stage", "created_at"). A "by status" chart MUST set this to the status field; the title and this field MUST name the SAME field. Omit for a single-number metric.'),
     condition: BlueprintWidgetConditionSchema.optional()
@@ -506,7 +506,7 @@ const StrictDashboard = z.object({
     // cloud#3607 row 2): with it on the lenient side only, the design model
     // could never say "average". The widget key-parity pin fails if it goes.
     aggregate: z.enum(BLUEPRINT_WIDGET_AGGREGATES).nullable()
-      .describe(`How the widget aggregates its records, or null for the reader's field-type default (a numeric field sums). ${WIDGET_AGGREGATE_MEANING} Write it, never null, on every widget that aggregates.`),
+      .describe(`How the widget aggregates its records, or null for the reader's own default. ${WIDGET_AGGREGATE_MEANING} Write it, never null, on every widget that aggregates.`),
     groupBy: strictIdentOrNull('The field to break the widget down by — the category or time axis (e.g. "stage", "created_at"), or null for a single-number metric. A "by status" chart MUST set this to the status field; the title and this field MUST name the SAME field.'),
     condition: z.object({
       field: strictIdent('Field on the widget object to filter by (e.g. "stock_quantity", "status")'),

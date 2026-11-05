@@ -1254,6 +1254,7 @@ describe('blueprint widget `aggregate` and calendar view `startDateField`', () =
         const text: string = widgetShape(root)[key].description;
         expect(text).not.toMatch(/infer/i);
         expect(text).not.toMatch(/chosen automatically/i);
+        expect(text).not.toMatch(/title/i);
       }
     }
   });
