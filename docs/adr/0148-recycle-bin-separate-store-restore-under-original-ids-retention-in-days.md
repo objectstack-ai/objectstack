@@ -18,9 +18,9 @@
   cascade a delete removes and a restore brings back together),
   [ADR-0132](./0132-multi-organization-runtime-is-open-core.md) D2 (mechanism open, entitlement commercial),
   [ADR-0112](./0112-error-code-vocabulary-and-ledger.md) (the envelope every restore refusal answers in),
-  [ADR-0087](./0087-metadata-protocol-upgrade-contract.md) (the retired keys' tombstones stand, and their conversions
-  age out on its schedule — [D5](#d5--the-readers-that-will-exist-and-the-keys-that-stay-retired) says which one is
-  still carried; the new keys arrive as a protocol addition), [ADR-0120](./0120-unique-scope-vocabulary-and-null-safe-tenant-uniqueness.md) (why the
+  [ADR-0087](./0087-metadata-protocol-upgrade-contract.md) (the retired keys' tombstones stand, and their kits age out
+  on its schedule — [D5](#d5--the-readers-that-will-exist-and-the-keys-that-stay-retired) says which kit this major
+  still carries; the new keys arrive as a protocol addition), [ADR-0120](./0120-unique-scope-vocabulary-and-null-safe-tenant-uniqueness.md) (why the
   shape frees a unique value at delete, and why a restore can find it taken),
   [ADR-0100](./0100-credential-field-channels.md) (the `secret` channel the snapshot keeps out),
   [ADR-0041](./0041-flow-trigger-family.md) (record triggers — why a restore is its own event, never a create).
@@ -29,8 +29,8 @@
   ([D5](#d5--the-readers-that-will-exist-and-the-keys-that-stay-retired)).
 - **Leaves unchanged**: every read path (query, aggregate, REST, the analytics engine's SQL, rollups, lookup pickers,
   search, AI tools, MCP and export); the physical delete the engine performs today and its cascade order; the
-  tombstones of `enable.trash`, `softDelete`, `allowRestore` and `allowPurge`, and the one ADR-0087 conversion `main`
-  still carries for them (`allowRestore` / `allowPurge`); the `sys_file` tombstone and its reap; the release of
+  tombstones of `enable.trash`, `softDelete`, `allowRestore` and `allowPurge`, and the one ADR-0087 kit `main` still
+  carries for them (`allowRestore` / `allowPurge`, carried at 18, gone at 19); the `sys_file` tombstone and its reap; the release of
   `sys_secret` handles on a committed delete.
 - **Consumers**: `@objectstack/spec` (what #30235's body lists — the recycle-bin object, the retention hook's contract,
   the refusal codes — and what this record adds to that card, the `restored` event's name and the two grant keys, both
@@ -111,10 +111,14 @@ affordance: authors wrote `trash: false` believing they were opting out of a sof
 removed in the 16.x line (#2377) and tombstoned — `enable.trash` in
 `packages/spec/src/data/object.zod.ts#CAPABILITIES_RETIRED_KEY_GUIDANCE`, `softDelete` in the same file's top-level
 unknown-key guidance, whose text is the standing fact: 「there is no soft-delete/recycle-bin runtime … Deletes are hard
-deletes」. What `main` carries for them under ADR-0087: the 16.x conversion `object-enable-trash-mru-removed` has aged
-out — it is retired from the load path (listed as such in `packages/spec/src/conversions/retired-after.census.json`)
-and no entry file remains, which is why the `enable.trash` tombstone tells an author to apply the edit by hand or run
-the tool on a release that still carries it; `softDelete` never had a conversion entry, only the tombstone. The
+deletes」. What `main` carries for them is set by ADR-0087's kit rule (its addendum of 2026-10-26: a retired key's
+tombstone and conversion — the kit — live one major past the one they retired in): the `enable.trash` kit's conversion,
+`object-enable-trash-mru-removed` (retired at 16.x), was removed when 18 was cut, so no entry file remains and the
+tombstone that stays tells an author to apply the edit by hand or run the tool on a release that still carries it; the
+`allowRestore` / `allowPurge` kit (`packages/spec/src/conversions/entries/18/permission-allow-restore-purge-removed.ts`,
+retired after 17.2.0) is carried at 18 and ages out at 19. Neither conversion replays at load: both are
+`retiredFromLoadPath`, listed as such in `packages/spec/src/conversions/retired-after.census.json`, and the permission
+one runs under `os migrate meta` only. `softDelete` never had a conversion entry, only the tombstone. The
 permission lifecycle bits `allowRestore` / `allowPurge` claimed to gate `restore` / `purge` operations
 that never entered the engine's dispatch vocabulary (pinned by
 `packages/objectql/src/engine-middleware-operation-vocabulary.test.ts`); they were removed with #12497 (the maintainer
@@ -215,9 +219,14 @@ number — zero and anything that is not such a number are refused as a configur
 **When the days become a deadline — stamped at delete time.** The ruling decided days-through-a-hook and no more; this
 record decides that the resolver is asked once, at delete, and its answer is written on the entry as the purge
 deadline. Reasons: the toast and the admin page show the person a date, and a later change of the host's answer (a plan
-change, a new default) must not shorten a window a person was already shown; the sweep then reads one stored column,
-as the `sys_file` reap reads `deleted_at`, and calls no resolver per entry. The consequence is accepted: a longer window
-applies to deletes made after the change, not before. No entry is purged before its stamped deadline.
+change, a new default) must not shorten a window a person was already shown. The alternative the record rejects is
+the one the LifecycleService already runs: resolving an object's window at sweep time from the `lifecycle` settings
+namespace, globally and per tenant (ADR-0057 §3.2, `packages/objectql/src/lifecycle/lifecycle-service.ts`), as the
+`sys_file` reap does with `deleted_at` plus a static `ttl.expireAfter` — a window resolved at sweep can move after the
+person was shown it, and a host's days are not a per-object setting. With the deadline stamped, the sweep reads one
+stored column and asks no resolver; how the reap is declared on that column (a `ttl` on the deadline with no added
+window, or a reap guard) is #30237's. The consequence is accepted: a longer window applies to deletes made after the
+change, not before. No entry is purged before its stamped deadline.
 
 **The TTL purge runs on the existing LifecycleService** (ADR-0057 §3.3: one sweeper, never a bespoke one), following
 the `sys_file` tombstone pattern: an entry is purged once its stamped deadline has passed, by the platform sweep, under
@@ -252,15 +261,17 @@ slice say so.
   the rows held (#27581), and v1 leaves that as it is;
 - a member-facing 「我删除的」 page.
 
-**The privacy rules**, which bind v1 and everything after it:
+**The privacy rules**, which bind v1 and everything after it (the ruling lists them among the risks to plan for;
+making them standing rules is the record's choice, [D7](#d7--what-this-record-fixes-that-the-ruling-left-open)):
 
 - **FLS applies when listing.** A snapshot holds every field; the bin shows a caller a field only where the caller may
   read it on the live object.
 - **Secret fields stay out of the snapshot, or are encrypted.** The ruling allows either; this record chooses **out**
-  for v1, because the ruling's later item (holding attachments and `sys_secret` rows until purge) leaves the committed delete
-  releasing the handles in v1, so an encrypted copy of a value would point at a handle that no longer exists. So the
-  `secret` channel's values (ADR-0100) are not written into the entry, and a restored record's secret fields come back
-  empty, to be re-entered. Holding them until purge is the later item, and it may revisit this choice.
+  for v1. Under ADR-0100 a business row carries only the opaque `secret:<id>` ref and the value lives in `sys_secret`;
+  the committed delete releases those refs in v1 (#27581 — holding `sys_secret` rows until purge is the later item), so
+  a snapshot of the row would hold a ref that dangles, and encrypting the value into the entry would open a second
+  store for a secret outside `sys_secret`. So the `secret` channel's refs are not written into the entry, and a restored
+  record's secret fields come back empty, to be re-entered. The later item may revisit this choice.
 - **Purge on organization or environment deletion.** An organization's or environment's entries go with it.
 - **Bin storage counts toward quota and is shown separately.**
 
@@ -287,18 +298,20 @@ with the card that lands it. Every row below is new; none is a tombstoned spelli
 
 **The old keys stay retired.** `enable.trash`, `softDelete`, `allowRestore` and `allowPurge` are tombstones and none of
 them returns: an author who writes one is refused with the prescription the tombstone carries. What `main` carries for
-them under ADR-0087 is exactly this: the `allowRestore` / `allowPurge` conversion
-(`packages/spec/src/conversions/entries/18/permission-allow-restore-purge-removed.ts`) stands; the 16.x conversion
-`object-enable-trash-mru-removed` has aged out of the load path as ADR-0087 provides (retired in
-`packages/spec/src/conversions/retired-after.census.json`, no entry file), so a 15.x artifact that still writes
-`enable.trash` is refused by the tombstone and migrated by hand or on a release that still carries it; `softDelete` never
-had a conversion. This record changes none of that. The new surface uses new spellings on purpose, so that a key which
+them is what ADR-0087's kit rule leaves at this major: the `allowRestore` / `allowPurge` kit
+(`packages/spec/src/conversions/entries/18/permission-allow-restore-purge-removed.ts`, retired after 17.2.0) is carried
+at 18 and ages out at 19; the `enable.trash` kit's conversion (`object-enable-trash-mru-removed`, 16.x) was removed when
+18 was cut and only its tombstone remains, so a 15.x artifact that still writes `enable.trash` is refused by the
+tombstone and migrated by hand or on a release that still carries it; neither conversion replays at load (both are
+`retiredFromLoadPath` in `packages/spec/src/conversions/retired-after.census.json`); `softDelete` never had a
+conversion. This record changes none of that. The new surface uses new spellings on purpose, so that a key which
 once meant "nothing happens" never comes to mean "a snapshot is kept". The retired `apiMethods` values `restore` and
 `purge` (`packages/spec/src/data/api-derivation.ts`) are likewise unchanged. ADR-0049's Status line carries the dated
 note.
 
 **No object-level authoring key is named by this record.** v1 applies to every business object and to no `sys_*`
-object by rule, not by a flag. Per-object retention is enterprise and lives in cloud; if an open per-object key is
+object by rule, not by a flag — the ruling said only "business objects, not `sys_*`", and that no key carries it is the
+record's choice ([D7](#d7--what-this-record-fixes-that-the-ruling-left-open)). Per-object retention is enterprise and lives in cloud; if an open per-object key is
 ever ruled, it arrives with its reader in the same change, as ADR-0049 requires.
 
 ### D6 — What this record does not decide
@@ -326,7 +339,12 @@ Each of these is the record's choice, not the ruling's, and is marked as such wh
 - secret fields kept out of the snapshot in v1, of the two the ruling allowed
   ([D4](#d4--v1-scope-forward-only-later-items-and-the-privacy-rules));
 - the `restored` event's name and the grant keys declared by #30235, whose body lists neither
-  ([D5](#d5--the-readers-that-will-exist-and-the-keys-that-stay-retired)).
+  ([D5](#d5--the-readers-that-will-exist-and-the-keys-that-stay-retired));
+- no object-level authoring key — v1 reaches every business object and no `sys_*` object by rule, not by a flag; the
+  ruling said only "business objects, not `sys_*`", and #30235's body expects any object-level key the record names,
+  so "none" is the record's answer ([D5](#d5--the-readers-that-will-exist-and-the-keys-that-stay-retired));
+- the privacy rules as standing rules that bind v1 and everything after it — the ruling listed them among the risks
+  to plan for ([D4](#d4--v1-scope-forward-only-later-items-and-the-privacy-rules)).
 
 The ruling itself gives a person the restore of what they deleted and gives an admin everything (list, restore, empty);
 this record adds no permission beyond that.
