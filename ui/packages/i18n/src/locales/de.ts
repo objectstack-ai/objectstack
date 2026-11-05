@@ -2189,6 +2189,8 @@ const de = {
       sourceBadgeInherited: "Geerbt von {{source}}",
       sourceBadgeOverrides: "Überschreibt {{source}}",
       resetToDefault: "Auf Standard zurücksetzen",
+      sourceBadgeModified: "Geändert",
+      defaultValueHint: "Standard: {{value}}",
       envLockBadge: "Per Umgebung gesperrt",
       envLockBadgeTitle: "Durch eine Umgebungsvariable festgelegt — kann nicht in der Oberfläche bearbeitet werden.",
       deprecatedBadge: "Veraltet",

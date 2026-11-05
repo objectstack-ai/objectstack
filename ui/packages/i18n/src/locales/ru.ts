@@ -2315,6 +2315,8 @@ const ru = {
       sourceBadgeInherited: "Унаследовано: {{source}}",
       sourceBadgeOverrides: "Переопределяет: {{source}}",
       resetToDefault: "Сбросить к значению по умолчанию",
+      sourceBadgeModified: "Изменено",
+      defaultValueHint: "По умолчанию: {{value}}",
       envLockBadge: "Задано окружением",
       envLockBadgeTitle: "Закреплено переменной окружения — изменить в интерфейсе нельзя.",
       deprecatedBadge: "Устарело",

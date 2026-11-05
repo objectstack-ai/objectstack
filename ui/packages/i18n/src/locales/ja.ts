@@ -2191,6 +2191,8 @@ const ja = {
       sourceBadgeInherited: "{{source}}から継承",
       sourceBadgeOverrides: "{{source}}を上書き",
       resetToDefault: "デフォルトに戻す",
+      sourceBadgeModified: "変更済み",
+      defaultValueHint: "デフォルト: {{value}}",
       envLockBadge: "環境変数でロック",
       envLockBadgeTitle: "環境変数で固定されているため、画面から編集できません。",
       deprecatedBadge: "非推奨",

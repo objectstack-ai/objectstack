@@ -2251,6 +2251,8 @@ const es = {
       sourceBadgeInherited: "Heredado de {{source}}",
       sourceBadgeOverrides: "Sobrescribe {{source}}",
       resetToDefault: "Restablecer valor predeterminado",
+      sourceBadgeModified: "Modificado",
+      defaultValueHint: "Predeterminado: {{value}}",
       envLockBadge: "Bloqueado por el entorno",
       envLockBadgeTitle: "Fijado por una variable de entorno: no se puede editar desde la interfaz.",
       deprecatedBadge: "Obsoleto",
