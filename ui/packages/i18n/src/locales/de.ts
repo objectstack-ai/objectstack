@@ -2954,6 +2954,7 @@ const de = {
         continue: "Weiter",
         preparing: "Wird vorbereitet…",
         enrollFailed: "Registrierung konnte nicht gestartet werden.",
+        unavailable: "Die Zwei-Faktor-Authentifizierung ist in dieser Bereitstellung deaktiviert, daher kann noch keine Authenticator-App eingerichtet werden. Bitten Sie einen Administrator, sie unter Einstellungen → Authentifizierung zu aktivieren, und versuchen Sie es dann erneut.",
         scanTitle: "Mit Ihrer Authenticator-App scannen",
         scanBody: "Scannen Sie diesen QR-Code mit Google Authenticator, 1Password, Authy usw. und geben Sie dann den 6-stelligen Code ein.",
         backupTitle: "Backup-Codes speichern",

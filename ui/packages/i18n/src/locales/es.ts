@@ -3019,6 +3019,7 @@ const es = {
         continue: "Continuar",
         preparing: "Preparando…",
         enrollFailed: "No se pudo iniciar el registro.",
+        unavailable: "La autenticación de dos factores está desactivada en esta implementación, así que todavía no se puede configurar una app de autenticación. Pide a un administrador que la active en Configuración → Autenticación y vuelve a intentarlo.",
         scanTitle: "Escanee con su aplicación de autenticación",
         scanBody: "Escanee este código QR con Google Authenticator, 1Password, Authy, etc., y luego introduzca el código de 6 dígitos.",
         backupTitle: "Guarde sus códigos de respaldo",

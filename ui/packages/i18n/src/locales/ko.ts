@@ -2954,6 +2954,7 @@ const ko = {
         continue: "계속",
         preparing: "준비 중…",
         enrollFailed: "등록을 시작할 수 없습니다.",
+        unavailable: "이 배포에서는 2단계 인증이 꺼져 있어 아직 인증 앱을 등록할 수 없습니다. 관리자에게 설정 → 인증에서 켜 달라고 요청한 뒤 다시 시도하세요.",
         scanTitle: "인증 앱으로 스캔",
         scanBody: "Google Authenticator, 1Password, Authy 등으로 이 QR 코드를 스캔한 다음 6자리 코드를 입력하세요.",
         backupTitle: "백업 코드 저장",

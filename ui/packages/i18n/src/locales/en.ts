@@ -3525,6 +3525,7 @@ const en = {
         continue: 'Continue',
         preparing: 'Preparing…',
         enrollFailed: 'Could not start enrollment.',
+        unavailable: 'Two-factor authentication is turned off on this deployment, so an authenticator app cannot be set up yet. Ask an administrator to turn it on in Settings → Authentication, then try again.',
         scanTitle: 'Scan with your authenticator',
         scanBody: 'Scan this QR code with Google Authenticator, 1Password, Authy, etc., then enter the 6-digit code.',
         backupTitle: 'Save your backup codes',

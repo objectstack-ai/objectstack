@@ -3015,6 +3015,7 @@ const fr = {
         continue: "Continuer",
         preparing: "Préparation…",
         enrollFailed: "Impossible de démarrer l'enrôlement.",
+        unavailable: "L'authentification à deux facteurs est désactivée sur ce déploiement : aucune application d'authentification ne peut encore être configurée. Demandez à un administrateur de l'activer dans Paramètres → Authentification, puis réessayez.",
         scanTitle: "Scannez avec votre application d'authentification",
         scanBody: "Scannez ce QR code avec Google Authenticator, 1Password, Authy, etc., puis saisissez le code à 6 chiffres.",
         backupTitle: "Enregistrez vos codes de secours",

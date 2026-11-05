@@ -3032,6 +3032,7 @@ const zh = {
         continue: '继续',
         preparing: '正在准备…',
         enrollFailed: '无法开始绑定。',
+        unavailable: '此部署未开启双重验证，暂时无法绑定身份验证器。请联系管理员在“设置 → 认证”中开启后再试。',
         scanTitle: '使用身份验证器扫码',
         scanBody: '使用 Google Authenticator、1Password、Authy 等应用扫描此二维码，然后输入 6 位验证码。',
         backupTitle: '保存您的备用码',

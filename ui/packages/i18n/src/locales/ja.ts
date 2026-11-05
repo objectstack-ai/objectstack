@@ -2956,6 +2956,7 @@ const ja = {
         continue: "続行",
         preparing: "準備しています…",
         enrollFailed: "登録を開始できませんでした。",
+        unavailable: "このデプロイでは二要素認証がオフになっているため、認証アプリをまだ登録できません。管理者に「設定 → 認証」でオンにしてもらってから、もう一度お試しください。",
         scanTitle: "認証アプリでスキャン",
         scanBody: "Google Authenticator、1Password、Authy などでこの QR コードをスキャンし、6 桁のコードを入力してください。",
         backupTitle: "バックアップコードを保存",
