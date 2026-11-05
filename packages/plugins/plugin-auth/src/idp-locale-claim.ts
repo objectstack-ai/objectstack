@@ -20,8 +20,10 @@
  *     is what an unset `sys_user.locale` means everywhere it is read. The
  *     claim is closed against the locales the i18n service reports
  *     (`getLocales()`, narrowed to the app's declared `i18n.supportedLocales`)
- *     with the platform's own matcher (`resolveLocale`: exact → case →
- *     base language → variant), and the SUPPORTED locale is what is stored,
+ *     with the platform's one offered-locale matcher (`resolveOfferedLocale`:
+ *     exact → case → platform-table language → base language → variant, the
+ *     matcher Setup's `localization.locale` accepts by too), and the
+ *     SUPPORTED locale is what is stored,
  *     in the BCP-47 case every `sys_user.locale` write is stored in.
  *  4. **No claim at all** — the IdP said nothing, so nothing changes.
  *
@@ -68,7 +70,7 @@
  * so it is reported at `warn`.
  */
 
-import { resolveLocale } from '@objectstack/core';
+import { resolveOfferedLocale } from '@objectstack/core';
 import type { IDataEngine } from '@objectstack/core';
 import { normalizeRecipientLocale } from '@objectstack/service-messaging';
 import { authContextOf, type LinkingDbAdapter } from './implicit-account-linking.js';
@@ -143,7 +145,7 @@ export function readIdpLocaleClaim(source: unknown): IdpLocaleClaim | undefined 
 export function resolveIdpLocale(claim: unknown, supported: readonly string[]): string | undefined {
   const tag = normalizeRecipientLocale(typeof claim === 'string' ? claim.replace(/_/g, '-') : claim);
   if (!tag) return undefined;
-  const resolved = resolveLocale(tag, [...supported]);
+  const resolved = resolveOfferedLocale(tag, supported);
   return resolved === undefined ? undefined : (canonicalUserLocale(resolved) as string);
 }
 

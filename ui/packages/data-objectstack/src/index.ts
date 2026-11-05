@@ -7300,6 +7300,18 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
      * `DatasetDrillRange` declares them `unknown`.
      */
     drillRanges?: Array<Record<string, DatasetDrillRange>>;
+    /**
+     * The per-MEASURE drill scope (objectstack-ai/objectstack#30526): measure
+     * NAME → the list filter that selects the records that measure aggregates
+     * (the dataset's own `filter` AND the measure's own `filter` AND the
+     * aggregated column holding a value), which the host has no other read of.
+     * A drill composes the clicked bucket AND the widget filter AND this; a
+     * measure with no entry offers no drill. The spec's `AnalyticsResult`
+     * member BY REFERENCE, like `fields`, so its meaning is read in one place.
+     * Only the MAP is validated below; each scope is the server's filter as
+     * sent.
+     */
+    drillScopes?: AnalyticsResult['drillScopes'];
     /** Server-computed marginal aggregates, one entry per requested grouping. */
     totals?: Array<{ dimensions: string[]; rows: Array<Record<string, unknown>> }>;
   }> {
@@ -7466,8 +7478,15 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     // away, the whole drill entry point disappeared, and a mixed grouping
     // drilled to a superset (every bucket, not the clicked one).
     const drillRanges = Array.isArray((data as any)?.drillRanges) ? (data as any).drillRanges : undefined;
+    // objectstack-ai/objectstack#30526 — the measure drill scope. Hand-picked
+    // like every key above, so it is named here or it never reaches a drill:
+    // the fourth key of this family, after objectui#3613, #3752 and #3813.
+    const rawScopes = (data as any)?.drillScopes;
+    const drillScopes = rawScopes && typeof rawScopes === 'object' && !Array.isArray(rawScopes)
+      ? (rawScopes as NonNullable<AnalyticsResult['drillScopes']>)
+      : undefined;
     const totals = Array.isArray((data as any)?.totals) ? (data as any).totals : undefined;
-    return { rows, fields, object, dimensionFields, drillRawRows, drillRanges, totals };
+    return { rows, fields, object, dimensionFields, drillRawRows, drillRanges, drillScopes, totals };
   }
 
   /** Client-side aggregation fallback */
@@ -7998,3 +8017,9 @@ export type {
   MetadataAuditEntry,
   MetadataAuditResponse,
 } from './metadata-client';
+// The browser-side upload adapter for an ObjectStack server's storage service:
+// fetch logic, so it lives in this package. It implements `@object-ui/types`'s
+// `UploadAdapter`, which `UploadProvider` from `@object-ui/fields` makes
+// ambient for the file, image and avatar widgets.
+export { createObjectStackUploadAdapter } from './upload-adapter';
+export type { ObjectStackUploadAdapterOptions } from './upload-adapter';

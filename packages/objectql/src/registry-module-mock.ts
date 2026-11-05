@@ -188,6 +188,10 @@ export function createRegistryModuleMock(
     // so it never announces: it records the subscription and answers the
     // unsubscribe the real member answers.
     onPackageUninstalled: vi.fn(() => () => {}),
+    // [#30377] The engine's constructor subscribes the roll-up recompute an
+    // enable owes. The double never enables a disabled package, so it never
+    // announces either.
+    onPackageEnabled: vi.fn(() => () => {}),
     reset: vi.fn(),
     metadata: { get: vi.fn(() => new Map()) },
     ...instanceOverrides,

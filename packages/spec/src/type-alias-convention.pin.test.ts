@@ -291,9 +291,11 @@ import type * as M198 from './system/push-device.zod.js';
 import type * as M199 from './api/push-relay.zod.js';
 // A third-party sender's signature scheme on an api hook (`config.signature`) -- new module, next free index.
 import type * as M200 from './automation/api-trigger-signature.zod.js';
+// [ADR-0148] The recycle bin's spec half: the entry, its snapshot and the retention values -- new module, next free index.
+import type * as M201 from './data/recycle-bin.zod.js';
 
 // ---------------------------------------------------------------------------
-// 831 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 837 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -948,6 +950,14 @@ export type Iso_data_query__AggregationFunction = Assert<Eq< z.input< typeof M71
 export type Iso_data_query__AggregationNodeSchema = Assert<Eq< z.input< typeof M71.AggregationNodeSchema >, z.infer< typeof M71.AggregationNodeSchema > >>;
 export type Iso_data_query__DateGranularity = Assert<Eq< z.input< typeof M71.DateGranularity >, z.infer< typeof M71.DateGranularity > >>;
 export type Iso_data_query__GroupByNodeSchema = Assert<Eq< z.input< typeof M71.GroupByNodeSchema >, z.infer< typeof M71.GroupByNodeSchema > >>;
+
+// data/recycle-bin.zod.ts
+export type Iso_data_recycleBin__RecycleBinClearedReferenceSchema = Assert<Eq< z.input< typeof M201.RecycleBinClearedReferenceSchema >, z.infer< typeof M201.RecycleBinClearedReferenceSchema > >>;
+export type Iso_data_recycleBin__RecycleBinEntrySchema = Assert<Eq< z.input< typeof M201.RecycleBinEntrySchema >, z.infer< typeof M201.RecycleBinEntrySchema > >>;
+export type Iso_data_recycleBin__RecycleBinRetentionDaysEnvSchema = Assert<Eq< z.input< typeof M201.RecycleBinRetentionDaysEnvSchema >, z.infer< typeof M201.RecycleBinRetentionDaysEnvSchema > >>;
+export type Iso_data_recycleBin__RecycleBinRetentionDaysSchema = Assert<Eq< z.input< typeof M201.RecycleBinRetentionDaysSchema >, z.infer< typeof M201.RecycleBinRetentionDaysSchema > >>;
+export type Iso_data_recycleBin__RecycleBinSnapshotRowSchema = Assert<Eq< z.input< typeof M201.RecycleBinSnapshotRowSchema >, z.infer< typeof M201.RecycleBinSnapshotRowSchema > >>;
+export type Iso_data_recycleBin__RecycleBinSnapshotSchema = Assert<Eq< z.input< typeof M201.RecycleBinSnapshotSchema >, z.infer< typeof M201.RecycleBinSnapshotSchema > >>;
 
 // data/seed-file.zod.ts
 export type Iso_data_seedFile__SeedFilePathSchema = Assert<Eq< z.input< typeof M193.SeedFilePathSchema >, z.infer< typeof M193.SeedFilePathSchema > >>;
@@ -1783,7 +1793,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 831 isomorphic pins', () => {
+  it('still declares all 837 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2804,7 +2814,11 @@ describe('ADR-0122 type-alias convention', () => {
     // a discriminated union of two strict objects of enums, literals and regex
     // strings, no default and no transform
     // (Iso_automation_apiTriggerSignature__*). +3 added.
-    expect(pins).toHaveLength(831);
+    // 831 -> 837 is ADR-0148's recycle-bin spec half (`data/recycle-bin.zod.ts`):
+    // the entry, its snapshot, a snapshot row, a cleared reference and the two
+    // retention value schemas — plain objects, a number and a regex string,
+    // no default and no transform (Iso_data_recycleBin__*). +6 added.
+    expect(pins).toHaveLength(837);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

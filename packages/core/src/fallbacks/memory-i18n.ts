@@ -53,6 +53,28 @@ export function resolveLocale(requestedLocale: string, availableLocales: string[
 }
 
 /**
+ * The offered locale a requested one means, or `undefined`: the ONE matcher
+ * for "is this locale offered here, and as which code", where the offered
+ * codes are a deployment's locale list (`II18nService.getLocales()`).
+ *
+ * Setup's default language (`localization.locale`) accepts a value through
+ * it, and the IdP locale claim (`plugin-auth`'s `resolveIdpLocale`) closes a
+ * claimed locale through it, so a language one door takes the other takes
+ * too.
+ *
+ * It is {@link resolveLocale}, which is `resolveLocaleAmong` from
+ * `@objectstack/spec/system`: exact, case-insensitive, the same platform
+ * locale table language (`platformLocaleTagOf`, through the table's read
+ * aliases, so `zh-TW` is `zh-Hant` and never `zh-Hans`, and `en-US` is
+ * `en`), then base language and variant (`fr-FR` is an offered `fr`, `fr` an
+ * offered `fr-FR`). Kept as its own name for the doors that ask the
+ * offered-locale question; the ladder is the one every locale resolver runs.
+ */
+export function resolveOfferedLocale(requested: string, offered: readonly string[]): string | undefined {
+  return resolveLocaleAmong(requested, offered);
+}
+
+/**
  * In-memory i18n service fallback.
  *
  * Implements the II18nService contract with basic translate/load/getLocales

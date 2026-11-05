@@ -366,7 +366,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       valid_until: {
         label: "Valid Until",
-        help: "Rule is inactive AT and AFTER this instant (half-open [from, until), UTC). Null = never expires."
+        help: "The rule stops applying at this time (UTC). Leave empty for no end date."
       },
       reason: {
         label: "Reason",

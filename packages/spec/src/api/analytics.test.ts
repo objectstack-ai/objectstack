@@ -413,9 +413,37 @@ describe('AnalyticsResultResponseSchema', () => {
 
     // Optional: a cube query answer, and a non-drillable dataset answer, carry none.
     const bare = AnalyticsResultResponseSchema.parse({ success: true, data: { rows: [], fields: [] } });
-    for (const key of ['dimensionFields', 'drillRawRows', 'drillRawTotals', 'drillRanges']) {
+    for (const key of ['dimensionFields', 'drillRawRows', 'drillRawTotals', 'drillRanges', 'drillScopes']) {
       expect(key in bare.data).toBe(false);
     }
+  });
+
+  // [#30526] The per-measure drill scope, in the spec's one filter vocabulary:
+  // a measure filter, a dataset filter conjoined with it, a column holding a
+  // value, the nested-relation form, and `{}` for a count over rows.
+  const scopes = {
+    invoice_count: {},
+    paid_count: { $and: [{ kind: 'sale' }, { status: 'paid' }] },
+    subtotal_sum: { $and: [{ kind: 'sale' }, { total: { $null: false } }] },
+    gold_count: { account: { tier: 'gold' } },
+  };
+
+  it('should preserve every measure\'s drill scope, byte for byte', () => {
+    const resp = AnalyticsResultResponseSchema.parse({ success: true, data: { ...drillable, drillScopes: scopes } });
+    expect(resp.data.drillScopes).toEqual(scopes);
+    expect(JSON.stringify(resp.data.drillScopes)).toBe(JSON.stringify(scopes));
+  });
+
+  it.each([
+    ['a scope that is not a condition object', { paid_count: 'status = paid' }, ['data.drillScopes.paid_count']],
+    ['a list in an equality slot', { paid_count: { status: ['paid', 'open'] } }, ['data.drillScopes.paid_count.status']],
+    ['an $and that is not a list', { paid_count: { $and: { status: 'paid' } } }, ['data.drillScopes.paid_count.$and']],
+    ['a map keyed by row instead of by measure', [{ status: 'paid' }], ['data.drillScopes']],
+  ])('should refuse %s at its own path', (_label, drillScopes, paths) => {
+    const bad = AnalyticsResultResponseSchema.safeParse({ success: true, data: { ...drillable, drillScopes } });
+    expect(bad.success).toBe(false);
+    const issued = bad.success ? [] : bad.error.issues.map((i) => i.path.join('.'));
+    for (const path of paths) expect(issued.some((p) => p.startsWith(path)), `${path} in ${issued.join(' | ')}`).toBe(true);
   });
 
   it.each([

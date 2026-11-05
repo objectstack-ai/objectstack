@@ -3161,6 +3161,8 @@ const pt = {
     allDocs: 'Toda a documentação',
     onlineDocs: 'Documentação online',
     loadingDocumentation: 'Carregando documentação',
+    documentation: 'Documentação',
+    uncategorized: 'Sem categoria',
     about: 'Sobre',
     aboutTitle: 'Sobre este console',
     aboutDescription: 'A build a partir da qual este console foi compilado.',

@@ -98,8 +98,11 @@ describe('the open scenario library (docs/qa/scenarios)', () => {
     expect(result.refusals.map(formatRefusal)).toEqual([]);
   });
 
-  it('holds exactly the three control cards (the mid-tier cards land on their own)', () => {
-    expect(result.cards.map((c) => c.card.id).sort()).toEqual(Object.keys(EXPECTED_TRUTHS).sort());
+  it('holds the three control cards (each mid-tier card pins itself in test/<id>.test.ts)', () => {
+    // The loader lists every `*.json` here and yields a card or a refusal for each, and the test
+    // above asserts no refusal, so every card file loaded. Only the controls are named here, so a
+    // new card never edits this file.
+    expect(result.cards.map((c) => c.card.id)).toEqual(expect.arrayContaining(Object.keys(EXPECTED_TRUTHS)));
   });
 
   for (const [id, expected] of Object.entries(EXPECTED_TRUTHS)) {
