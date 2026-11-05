@@ -18,7 +18,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { act, cleanup, render } from '@testing-library/react';
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { AuthCtx, type AuthContextValue } from '../../../../packages/auth/src/AuthContext';
 import { useAuth } from '../../../../packages/auth/src/useAuth';
 import { resetBeforeSignOutForTests, runBeforeSignOut } from '../../../../packages/auth/src/beforeSignOut';
@@ -97,8 +97,13 @@ function deviceRequests(): Array<{ method: string; url: string; body: unknown }>
     .filter((request) => request.url.includes(DEVICES));
 }
 
+function keepUnregister(fn: () => Promise<void>) {
+  unregister = fn;
+}
+
 function Probe({ pathname }: { pathname: string }) {
-  unregister = useNativePushRegistration(pathname);
+  const fn = useNativePushRegistration(pathname);
+  useEffect(() => keepUnregister(fn), [fn]);
   return null;
 }
 
