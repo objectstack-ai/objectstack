@@ -22,9 +22,16 @@
 import { describe, expect, it } from 'vitest';
 import * as PlatformObjects from '../index.js';
 import { SysSession } from './sys-session.object.js';
+import { SysTeamMember } from './sys-team-member.object.js';
 import { SysUserDetailPage } from '../pages/sys-user.page.js';
 
-type FieldDef = { type?: string; reference?: string; relatedList?: boolean | 'primary'; label?: string };
+type FieldDef = {
+  type?: string;
+  reference?: string;
+  relatedList?: boolean | 'primary';
+  relatedListColumns?: string[];
+  label?: string;
+};
 type ActionDef = { name?: string; locations?: string[] };
 type ObjectDef = { name?: string; fields?: Record<string, FieldDef>; actions?: ActionDef[] };
 
@@ -64,6 +71,45 @@ describe('sys_team derived related lists (Setup → Teams → a team → Related
     expect(field.reference).toBe('sys_team');
     expect(field.label).toBe('Active Team');
     expect(field.relatedList).toBe(false);
+  });
+});
+
+/**
+ * A team's Members list names its columns; the record title does not lead it.
+ *
+ * `sys_team_member`'s record title (`nameField: 'display_title'`) is a formula
+ * over the two lookup ids, so it reads `USER_ID in TEAM_ID`. A derived related
+ * list with no authored columns leads with the child's declared name
+ * (ADR-0079, objectui `leadWithNameField`) and then its `highlightFields`, so
+ * the team page's Members list opened on a Title column of two raw ids beside
+ * the readable User column.
+ *
+ * The columns are the relationship's `relatedListColumns` (`FieldSchema`; the
+ * reader is objectui's `deriveRelatedLists`, which hands them to the related
+ * list as its authored columns). Authored columns are drawn as written, with
+ * no name lead; the list drops only the key back to the parent record, so a
+ * column naming it would vanish and leave one column.
+ */
+describe("sys_team_member's related lists name their columns (Setup → Teams → a team → Members)", () => {
+  const fields = SysTeamMember.fields as Record<string, FieldDef>;
+  const nameField = (SysTeamMember as { nameField?: string }).nameField;
+
+  it.each([
+    // The team page's Members list: who, and since when.
+    { fk: 'team_id', parent: 'sys_team', columns: ['user_id', 'created_at'] },
+    // A user page's Teams list: which team, and since when.
+    { fk: 'user_id', parent: 'sys_user', columns: ['team_id', 'created_at'] },
+  ])('the $parent list over $fk shows $columns', ({ fk, parent, columns }) => {
+    const field = fields[fk];
+    expect(field.type).toBe('lookup');
+    expect(field.reference).toBe(parent);
+    expect(field.relatedListColumns).toEqual(columns);
+    // The record title (two raw ids) is not one of the columns.
+    expect(nameField).toBe('display_title');
+    expect(field.relatedListColumns).not.toContain(nameField);
+    // Every column is a field of the member row, and none is the key the list drops.
+    for (const column of field.relatedListColumns ?? []) expect(Object.keys(fields)).toContain(column);
+    expect(field.relatedListColumns).not.toContain(fk);
   });
 });
 
