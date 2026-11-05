@@ -24,6 +24,8 @@ import type { RichMetadataTypeEntry } from './useMetadata.js';
 import { useMetadataLocale, t, translateMetadataType, translateMetadataDomain } from './i18n.js';
 import { environmentScopeSuffix } from './catalog-scope.js';
 import { useMetadataAreaHost } from './metadataAreaHost.js';
+import { isStudioCustomizeType } from '../studio-design/StudioCustomizeControls.js';
+import { AREA_FORM_EDITOR_TYPES } from '../studio-design/metadataArea.js';
 
 export interface PageShellProps {
   /** The type entry from `/meta/types` (or a synthesized stub). */
@@ -71,8 +73,8 @@ export interface PageShellProps {
  *
  *  - `readOnly` — nothing is written here: the type opens no runtime door, or
  *    the package is read-only and the type takes no customization;
- *  - `customizable` — a read-only package's overlay type that the spec's
- *    classification lets an override replace: a change is saved in the
+ *  - `customizable` — a read-only package's type whose items Studio offers
+ *    Customize on ({@link studioOffersCustomize}): a change is saved in the
  *    deployment's customization package (ADR-0146 D2, D3);
  *  - `writable` — an overlay type of a package this screen writes to;
  *  - `addable` — a create-only type of a package this screen writes to: new
@@ -93,16 +95,29 @@ export const TYPE_STATE_WORD_KEY: Readonly<Record<TypeStateWord, string>> = Obje
   addable: 'engine.studio.customize.addable',
 });
 
+/**
+ * objectstack#30062 — whether Studio offers Customize on a read-only base's
+ * item of `type`, read from the doors that offer it, never from the type's
+ * overlay flag: the Interfaces pillar's header ({@link isStudioCustomizeType}),
+ * the All metadata area's form editor ({@link AREA_FORM_EDITOR_TYPES}), and
+ * the Automations pillar's flow header (objectstack#28570). A type joins here
+ * when its door opens, in the change that opens it.
+ *
+ * Before, a tile read `allowEnvironmentOverlay`, which is false for a flow and
+ * an app, so their tiles read 只读 on a read-only package while their headers
+ * offered 定制.
+ */
+export function studioOffersCustomize(type: string | undefined): boolean {
+  if (!type || !isOverridableMetadataType(type)) return false;
+  return isStudioCustomizeType(type) || AREA_FORM_EDITOR_TYPES.includes(type) || type === 'flow';
+}
+
 /** The {@link TypeStateWord} of `entry`'s items, on a package that is read-only or not. */
 export function typeStateWord(
   entry: Pick<RichMetadataTypeEntry, 'type' | 'allowEnvironmentOverlay' | 'allowRuntimeCreate' | 'overrideSource'> | undefined,
   packageReadOnly: boolean,
 ): TypeStateWord {
-  if (packageReadOnly) {
-    return entry?.allowEnvironmentOverlay && entry.overrideSource !== 'env' && isOverridableMetadataType(entry.type)
-      ? 'customizable'
-      : 'readOnly';
-  }
+  if (packageReadOnly) return studioOffersCustomize(entry?.type) ? 'customizable' : 'readOnly';
   if (entry?.allowEnvironmentOverlay) return 'writable';
   if (entry?.allowRuntimeCreate) return 'addable';
   return 'readOnly';

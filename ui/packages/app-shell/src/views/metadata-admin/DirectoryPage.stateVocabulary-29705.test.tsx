@@ -89,7 +89,10 @@ vi.stubGlobal(
 );
 
 import { MetadataDirectoryPage } from './DirectoryPage';
-import { PageShell, TYPE_STATE_WORD_KEY, typeStateWord, type TypeStateWord } from './PageShell';
+import { PageShell, TYPE_STATE_WORD_KEY, studioOffersCustomize, typeStateWord, type TypeStateWord } from './PageShell';
+import { OVERRIDABLE_METADATA_TYPES } from '@objectstack/spec/kernel';
+import { STUDIO_CUSTOMIZE_TYPES } from '../studio-design/StudioCustomizeControls';
+import { AREA_FORM_EDITOR_TYPES } from '../studio-design/metadataArea';
 
 afterEach(() => {
   cleanup();
@@ -392,5 +395,57 @@ describe('one word per state, the second pass (objectstack#29729)', () => {
     expect(EN['perm.badge.custom']).toBe(EN['engine.customizationMark.added']);
     // CONTROL: the shipped answer is untouched.
     expect(EN['perm.badge.package']).toBe('Package');
+  });
+});
+
+/**
+ * objectstack#30062 — the tile and the door agree for every type: on a
+ * read-only package a type's tile (and its list header) reads 可定制 exactly
+ * when Studio offers Customize on its items — the Interfaces pillar's header
+ * (`STUDIO_CUSTOMIZE_TYPES`), the All metadata area's form editor
+ * (`AREA_FORM_EDITOR_TYPES`) or the flow header — whatever the type's overlay
+ * flag says. Before, a tile read `allowEnvironmentOverlay`, false for a flow
+ * and an app, so both tiles read 只读 while their headers offered 定制.
+ *
+ * ⚠ A door opened later moves its type here with it: a change that adds a type
+ * to either list (a page or dataset door) turns its tile to 可定制, and the
+ * `page` 只读 expectation above moves in that change.
+ */
+describe('the tile and the Customize door agree for every type (objectstack#30062)', () => {
+  const DOORS = new Set<string>([...STUDIO_CUSTOMIZE_TYPES, ...AREA_FORM_EDITOR_TYPES, 'flow']);
+
+  it.each([...OVERRIDABLE_METADATA_TYPES, 'permission', 'object', 'api'])(
+    '%s: 可定制 on a read-only package exactly when a door offers Customize, whatever its overlay flag',
+    (type) => {
+      const offered = DOORS.has(type) && OVERRIDABLE_METADATA_TYPES.includes(type as never);
+      expect(studioOffersCustomize(type)).toBe(offered);
+      for (const overlay of [true, false]) {
+        expect(typeStateWord(entry(type, overlay, true), true), `${type}, allowEnvironmentOverlay ${overlay}`).toBe(
+          offered ? 'customizable' : 'readOnly',
+        );
+      }
+    },
+  );
+
+  it('the flow and the app, whose overlay flag is off, read 可定制 as their headers offer 定制', () => {
+    expect(typeStateWord(entry('flow', false, true), true)).toBe('customizable');
+    expect(typeStateWord(entry('app', false, true), true)).toBe('customizable');
+    // CONTROL: a type with no door stays 只读 (a doc, a mapping), and a writable package keeps its words.
+    expect(typeStateWord(entry('doc', false, true), true)).toBe('readOnly');
+    expect(typeStateWord(entry('mapping', false, true), true)).toBe('readOnly');
+    expect(typeStateWord(entry('flow', false, true), false)).toBe('addable');
+  });
+
+  it("a read-only package's flow list header reads 可定制", () => {
+    render(
+      <MetadataAreaHostContext.Provider value={host(true)}>
+        <MemoryRouter>
+          <PageShell entry={entry('flow', false, true)}>
+            <div />
+          </PageShell>
+        </MemoryRouter>
+      </MetadataAreaHostContext.Provider>,
+    );
+    expect(within(document.querySelector('h1')!.parentElement!).getByText('可定制')).toBeInTheDocument();
   });
 });
