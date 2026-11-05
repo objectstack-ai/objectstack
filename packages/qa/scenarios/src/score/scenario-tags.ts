@@ -417,7 +417,7 @@ export interface TagVerdict {
 /** Judge every tag of a card against the artifact. */
 export function gradeCapabilityTags(facts: ArtifactFacts, card: ScenarioArtifactCard): TagVerdict[] {
   return card.capabilities.map((tag) => {
-    const row = Object.hasOwn(CAPABILITY_TAG_CHECKS, tag) ? CAPABILITY_TAG_CHECKS[tag] : undefined;
+    const row = Object.prototype.hasOwnProperty.call(CAPABILITY_TAG_CHECKS, tag) ? CAPABILITY_TAG_CHECKS[tag] : undefined;
     if (!row) return { tag, status: 'unscored', checks: [], reason: 'no check in the closed tag table' };
     const out = row.run(facts, card);
     if ('unscored' in out) return { tag, status: 'unscored', checks: [], reason: out.unscored };

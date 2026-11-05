@@ -552,15 +552,6 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'content/docs/plugins/index.mdx',
       'content/docs/protocol/kernel/index.mdx',
       'content/docs/protocol/kernel/plugin-spec.mdx',
-      // The scenario scorer's pins (#30291). src/lint/scenario-cards.test.ts
-      // reads the control cards under docs/qa/scenarios (one per golden corpus
-      // case, by name): it holds each card's `expect` equal to what corpus.ts
-      // derives and scores the cards end to end, so a card edit moves this
-      // suite's verdict. src/lint/scenario-tags.test.ts lists the checklist
-      // area basenames, the closed set every tag's area half must belong to
-      // (the card loader reads the same directory).
-      'docs/qa/scenarios/*.json',
-      'docs/qa/platform-checklist/areas/*.json',
       'scripts/check-nul-bytes.mjs',
       // This gate's OWN script, the third entry of the mention shape on this
       // package: test/scaffold-workspace-consistency.test.ts quotes it while
@@ -801,9 +792,6 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
         'packages/cli/src/commands/generate-multiple-json-column.pin.test.ts',
         'packages/cli/src/commands/generate-string-family-width.pin.test.ts',
       ],
-      // Each control card is read by a path built from its corpus case id, so
-      // no literal names a file under the glob (#30291).
-      'docs/qa/scenarios/*.json': ['packages/cli/src/lint/scenario-cards.test.ts'],
     },
   },
   '@objectstack/client': {
@@ -1377,7 +1365,13 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // suite's verdict while touching nothing in the package. The capability
     // area closed set is the basenames of the checklist's area files, read from
     // the tree by every suite here, so adding or renaming an area does too.
-    globs: ['docs/qa/scenarios/*.json', 'docs/qa/platform-checklist/areas/*.json'],
+    //
+    // `corpus.ts` is the CLI's golden `os lint --eval` corpus, imported by the
+    // scorer's suites under test/score/ (#30291): the golden builds the
+    // discrimination tests degrade are its fixtures, and scenario-cards.test.ts
+    // holds each control card's `expect` equal to what that corpus derives, so
+    // a corpus edit moves this suite's verdict.
+    globs: ['docs/qa/scenarios/*.json', 'docs/qa/platform-checklist/areas/*.json', 'packages/cli/src/lint/corpus.ts'],
     heldBy: {
       // The areas directory is listed (`readdirSync`) and its basenames taken,
       // so the roster holds the directory and no `*.json` name under it.

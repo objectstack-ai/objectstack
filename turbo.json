@@ -291,8 +291,6 @@
       "$TURBO_ROOT$/content/docs/plugins/index.mdx",
       "$TURBO_ROOT$/content/docs/protocol/kernel/index.mdx",
       "$TURBO_ROOT$/content/docs/protocol/kernel/plugin-spec.mdx",
-        "$TURBO_ROOT$/docs/qa/scenarios/*.json",
-        "$TURBO_ROOT$/docs/qa/platform-checklist/areas/*.json",
         "$TURBO_ROOT$/scripts/check-nul-bytes.mjs",
         "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
         "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
@@ -713,7 +711,8 @@
         "!.turbo/**",
         "!**/node_modules/**",
         "$TURBO_ROOT$/docs/qa/scenarios/*.json",
-        "$TURBO_ROOT$/docs/qa/platform-checklist/areas/*.json"
+        "$TURBO_ROOT$/docs/qa/platform-checklist/areas/*.json",
+        "$TURBO_ROOT$/packages/cli/src/lint/corpus.ts"
       ]
     },
     "create-objectstack#test": {
