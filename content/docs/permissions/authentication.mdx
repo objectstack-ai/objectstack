@@ -604,7 +604,7 @@ often before the account-level lock engages.
 
 | Setting | Effect |
 |---|---|
-| `mfa_required` | Require MFA org-wide (also settable per organization via `require_mfa`). |
+| `mfa_required` | Require MFA org-wide; saving it on also turns two-factor enrollment on, and the save is refused while `OS_AUTH_TWO_FACTOR=false` pins enrollment off. An organization can require it on its own (`require_mfa`) only while two-factor enrollment is on; a requirement stored while enrollment is off is not enforced, which `GET /api/v1/auth/config` reports as `features.twoFactor: false`. |
 | `mfa_grace_period_days` | Grace window for existing users to enroll. After it elapses, the session is allowed to sign in but **gated from data access** until TOTP is enrolled — the Console surfaces a remediation overlay that walks the user through enrollment. |
 
 ### Sessions
