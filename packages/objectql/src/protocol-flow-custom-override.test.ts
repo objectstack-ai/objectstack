@@ -296,14 +296,17 @@ describe('[#28412] a declared .custom flow override is the packaged flow, at eve
 });
 
 /**
- * [#28412, contract review 6559358939] The pair-row removal is admitted for
- * `flow` alone — the one type whose ADR-0146 D9 conditions this change
- * delivers. Every other open override type keeps the removal verdict and the
- * receipt intent it has on main: a `mapping` (no overlay channel, outside the
- * #6960 carve-out) is still refused, and a `view` (overlay-capable) is still
- * removed as an `override-artifact` delete.
+ * [#28412, contract review 6559358939] The pair-row removal was admitted for
+ * `flow` alone, the one type whose ADR-0146 D9 conditions that change
+ * delivered. [#30062] It is admitted for every open type now: a pair's
+ * `mapping` (no overlay channel, outside the #6960 carve-out) answered 403
+ * and its override could not be removed, and every pair row of a declared
+ * override is removed as the declared save wrote it, runtime-only (a `view`
+ * was removed as an `override-artifact` delete before). The per-type removal
+ * through the publish door, and a removal naming the base, are pinned in
+ * `protocol-custom-override-bare-slot-envelope.test.ts`.
  */
-describe('[#28412] the pair-row removal is flow-only: other open types keep main\'s verdict', () => {
+describe('[#28412, #30062] the pair-row removal admits every open type', () => {
     const storePairRow = (engine: ObjectQL, type: string, name: string, body: Record<string, unknown>) =>
         engine.insert('sys_metadata', {
             type, name, organization_id: null, package_id: PAIR,
@@ -314,17 +317,17 @@ describe('[#28412] the pair-row removal is flow-only: other open types keep main
 
     for (const environmentId of [undefined, 'env_1']) {
         const kernel = environmentId ? 'environment' : 'host-config';
-        it(`a mapping's pair-row delete naming the pair still answers 403 NOT_OVERRIDABLE, and the row stays (${kernel} kernel)`, async () => {
+        it(`a mapping's pair-row delete naming the pair removes the row (${kernel} kernel)`, async () => {
             const { protocol, engine } = await boot(environmentId);
             await install(protocol, PAIR);
             await storePairRow(engine, 'mapping', MAPPING, { name: MAPPING, label: 'Ours', sourceFormat: 'csv', targetObject: 'showcase_task', fieldMapping: [] });
-            await expect(protocol.deleteMetaItem({ type: 'mapping', name: MAPPING, packageId: PAIR } as any))
-                .rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
-            expect((await rowsOf(engine, 'mapping', MAPPING)).map((r) => r.package_id)).toEqual([PAIR]);
+            const removed: any = await protocol.deleteMetaItem({ type: 'mapping', name: MAPPING, packageId: PAIR } as any);
+            expect(removed?.success).toBe(true);
+            expect((await rowsOf(engine, 'mapping', MAPPING)).filter((r) => r.state === 'active')).toEqual([]);
         });
     }
 
-    it('a view\'s pair-row delete naming the pair is removed as an override-artifact delete, as on main', async () => {
+    it('a view\'s pair-row delete naming the pair is removed as the declared save wrote it: runtime-only', async () => {
         const { protocol, engine } = await boot();
         await install(protocol, PAIR);
         await storePairRow(engine, 'view', VIEW, {
@@ -335,7 +338,7 @@ describe('[#28412] the pair-row removal is flow-only: other open types keep main
         try {
             await protocol.deleteMetaItem({ type: 'view', name: VIEW, packageId: PAIR } as any);
             expect(removal).toHaveBeenCalledTimes(1);
-            expect(removal.mock.calls[0][1]).toMatchObject({ intent: 'override-artifact', packageId: PAIR });
+            expect(removal.mock.calls[0][1]).toMatchObject({ intent: 'runtime-only', packageId: PAIR });
         } finally {
             removal.mockRestore();
         }

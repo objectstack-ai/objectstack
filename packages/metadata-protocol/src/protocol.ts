@@ -3808,6 +3808,9 @@ export class ObjectStackProtocolImplementation implements
             isWritablePackage: (...a) => this.isWritablePackage(...a),
             ensureCustomizationPackage: (...a) => this.ensureCustomizationPackage(...a),
             saveMetaItem: (...a) => this.saveMetaItem(...a),
+            getOverlayRepo: (...a) => this.getOverlayRepo(...a),
+            // [#30000] Awaited here too: the census of `sys_metadata` writes reads every call into the heal.
+            restoreArtifactRegistryView: async (...a) => { await this.restoreArtifactRegistryView(...a); },
         };
         return migratePackagelessOverlays.call(host, request);
     }
@@ -7878,7 +7881,7 @@ export class ObjectStackProtocolImplementation implements
      *    written through the `OS_METADATA_WRITABLE` hatch before the seal; they
      *    stay at rest, untouched, and the boot report names them per type with
      *    the two remedies ({@link reportSealedOverlayRows}). [#29613] Except,
-     *    for a `page`, `app`, `dataset`, `doc` or `book`, the shipping
+     *    for a `page`, `app`, `dataset`, `doc`, `book` or [#30062] `mapping`, the shipping
      *    package's declared `.custom` override (`row`, below): ADR-0146 D8
      *    item 2 serves it, as a dashboard's.
      *
@@ -13089,6 +13092,10 @@ export class ObjectStackProtocolImplementation implements
      * (`VERSION_NOT_FOUND`) when the target version doesn't exist;
      * 409 (`VERSION_NOT_RESTORABLE`) when the target is a delete
      * tombstone (no body to bring back).
+     *
+     * [#29848, ADR-0146 D8 item 2] The door names no package: it restores
+     * into the row the by-name read naming no package serves, a `.custom`
+     * pair's declared override over a row bound to its read-only base.
      */
     async rollbackMetaItem(request: RollbackMetaItemRequest) {
         // [#28355] A refusal that carries no row of its own leaves its `denied` row here.

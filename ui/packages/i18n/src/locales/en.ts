@@ -5075,6 +5075,9 @@ const en = {
         revoke: 'Revoke',
         revoking: 'Revoking…',
         revokedToast: 'Acceptance of "{{set}}" revoked.',
+        reopen: 'Reconsider',
+        reopening: 'Reopening…',
+        reopenedToast: 'Suggestion for "{{set}}" reopened: nothing is granted until it is accepted.',
       },
       uninstall: {
         confirm: 'Uninstall {{manifestId}} v{{version}} from this runtime?\n\nThe app will leave the running kernel at once, together with its permission sets and their grants, and its cached manifest will be removed. Records stored in its objects stay in the database.',
