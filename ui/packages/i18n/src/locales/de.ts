@@ -148,6 +148,7 @@ const de = {
     notAvailableHere: '„{{action}}“ ist auf der aktuellen Seite nicht verfügbar.',
     notAvailableForRecord: 'Für diesen Datensatz nicht verfügbar',
     completedSuccessfully: 'Aktion erfolgreich abgeschlossen',
+    completedNamed: 'Aktion abgeschlossen: {{action}}',
     failed: 'Aktion fehlgeschlagen',
     parallelFailed: 'Eine oder mehrere parallele Aktionen sind fehlgeschlagen',
     selectExactlyOneRow: 'Diese Aktion gilt für einen einzelnen Datensatz – wählen Sie genau eine Zeile aus.',

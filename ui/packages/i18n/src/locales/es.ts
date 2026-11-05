@@ -150,6 +150,7 @@ const es = {
     notAvailableHere: '«{{action}}» no está disponible en la página actual.',
     notAvailableForRecord: 'No disponible para este registro',
     completedSuccessfully: 'La acción se completó correctamente',
+    completedNamed: 'Acción completada: {{action}}',
     failed: 'La acción falló',
     parallelFailed: 'Una o más acciones paralelas fallaron',
     selectExactlyOneRow: 'Esta acción se ejecuta sobre un solo registro: seleccione exactamente una fila.',

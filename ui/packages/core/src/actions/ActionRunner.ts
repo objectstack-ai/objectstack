@@ -643,6 +643,9 @@ export type ToastHandler = (message: string, options?: {
  * - `completedSuccessfully` — the success toast when the author supplied no
  *   copy for it: no `outcomeMessages` entry for the answer's `outcome` and no
  *   `successMessage` (objectui#10900, objectui#11344).
+ * - `completedNamed` — the same toast for an action that carries a label: it
+ *   names the action (`{{action}}`), so the user reads what was done rather
+ *   than that something was.
  * - `failed` — the error toast when the error that reached the toast carries
  *   no readable message, and a parallel chain's result when its last action
  *   rejected (objectui#10969).
@@ -666,6 +669,10 @@ const RUNNER_TEXT = {
     key: 'actions.completedSuccessfully',
     defaultValue: 'Action completed successfully',
   },
+  completedNamed: {
+    key: 'actions.completedNamed',
+    defaultValue: '{{action}} completed',
+  },
   failed: {
     key: 'actions.failed',
     defaultValue: 'Action failed',
@@ -681,6 +688,13 @@ const RUNNER_TEXT = {
 } as const;
 
 type RunnerText = { readonly key: string; readonly defaultValue: string };
+
+/**
+ * What {@link ActionRunner.setTranslator} takes: an i18next-shaped `t`. The
+ * options carry `defaultValue` and, for a text with a hole, the hole's value
+ * (`completedNamed`'s `action`).
+ */
+type RunnerTranslate = (key: string, options: { defaultValue: string } & Record<string, string>) => string;
 
 /**
  * Modal handler — consumers provide to render modal dialogs.
@@ -1372,7 +1386,7 @@ export class ActionRunner {
   private navigationHandler: NavigationHandler | null;
   private paramCollectionHandler: ParamCollectionHandler | null;
   private resultDialogHandler: ResultDialogHandler | null;
-  private translate: ((key: string, options: { defaultValue: string }) => string) | null;
+  private translate: RunnerTranslate | null;
   private displayLocale: (() => string | undefined) | null;
   private tenantCurrency: (() => string | undefined) | null;
   /** Who {@link ActionRunner.subscribeContext} tells of a context change. */
@@ -1433,7 +1447,7 @@ export class ActionRunner {
    * an early refusal that names its key (`ActionRunnerHandler`'s
    * `refuseBeforeInput`). With no translator the text stays English.
    */
-  setTranslator(translate: (key: string, options: { defaultValue: string }) => string): void {
+  setTranslator(translate: RunnerTranslate): void {
     this.translate = translate;
   }
 
@@ -1912,8 +1926,16 @@ export class ActionRunner {
    * empty answer from the translator falls back to the English source rather
    * than raising an empty toast or an empty label.
    */
-  private runnerText({ key, defaultValue }: RunnerText): string {
-    return this.translate?.(key, { defaultValue }) || defaultValue;
+  private runnerText({ key, defaultValue }: RunnerText, holes?: Record<string, string>): string {
+    const answer = this.translate?.(key, { ...holes, defaultValue });
+    if (answer) return answer;
+    // No translator, or an empty answer: the English source, its `{{name}}`
+    // holes filled the way i18next fills them.
+    let text: string = defaultValue;
+    for (const [name, value] of Object.entries(holes ?? {})) {
+      text = text.split(`{{${name}}}`).join(value);
+    }
+    return text;
   }
 
   /**
@@ -1924,7 +1946,10 @@ export class ActionRunner {
    *    of the handler's return value — the payload `{{ result.* }}` reads, so
    *    it is the same fact an author writes as `{{ result.outcome }}`;
    * 2. `successMessage`;
-   * 3. the runner's own default text, in its translator's language.
+   * 3. the runner's own default text, in its translator's language: it names
+   *    the action by its `label` when it has one (`completedNamed`; the host
+   *    localizes the label before dispatch, like the copy above), else the
+   *    generic `completedSuccessfully`.
    *
    * Rungs 1 and 2 are the author's copy. Both arrive already localized — the
    * host's localizer resolves the bundle entry or the inline `I18nLabel` map
@@ -1986,7 +2011,10 @@ export class ActionRunner {
         ? fillTemplateHoles(successCopy, resultRoots, this.displayLocale?.(), this.tenantCurrency?.())
         : successCopy;
     }
-    return this.runnerText(RUNNER_TEXT.completedSuccessfully);
+    const label = typeof action.label === 'string' ? action.label.trim() : '';
+    return label
+      ? this.runnerText(RUNNER_TEXT.completedNamed, { action: label })
+      : this.runnerText(RUNNER_TEXT.completedSuccessfully);
   }
 
   /**

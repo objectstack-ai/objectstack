@@ -148,6 +148,7 @@ const ko = {
     notAvailableHere: '"{{action}}"은(는) 현재 페이지에서 사용할 수 없습니다.',
     notAvailableForRecord: '이 레코드에서는 사용할 수 없습니다',
     completedSuccessfully: '작업이 완료되었습니다',
+    completedNamed: '{{action}} 완료',
     failed: '작업 실패',
     parallelFailed: '하나 이상의 병렬 작업이 실패했습니다',
     selectExactlyOneRow: '이 작업은 단일 레코드에서 실행됩니다. 행을 하나만 선택하세요.',
