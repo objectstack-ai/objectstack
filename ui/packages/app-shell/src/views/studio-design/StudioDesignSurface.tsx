@@ -10013,6 +10013,10 @@ export function AccessPillar({
             revoking: t('engine.studio.access.suggestRevoking', locale),
             revokedToast: (s) =>
               tFormat('engine.studio.access.suggestRevokedToast', locale, { set: s.permission_set_name }),
+            reopen: t('engine.studio.access.suggestReopen', locale),
+            reopening: t('engine.studio.access.suggestReopening', locale),
+            reopenedToast: (s) =>
+              tFormat('engine.studio.access.suggestReopenedToast', locale, { set: s.permission_set_name }),
           }}
         />
       )}

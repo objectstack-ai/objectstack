@@ -10,10 +10,10 @@
  * `sqliteTemporalArg`, `filterColumnExpr`, `temporalFilterValue`,
  * `temporalFilterColumnSql`, `isJsonColumn`, `jsonColumnFieldClass`,
  * `isNonTextColumn`, `applyTextOperatorOverNonTextColumn`,
- * `declaredValueShape`, `logWithheldFilterDiagnostic`, `withWithheldFilterLog`,
- * `compileFilters`, `applyContainsLike`, `declaredFieldsFor`,
- * `applyFalseConstant` moved out of `sql-driver.ts` whole by
- * `scripts/codemod-split-sql-driver.mjs`.
+ * `declaredValueShape`, `assertOperatorAppliesToColumn`, `applyFilters`,
+ * `logWithheldFilterDiagnostic`, `withWithheldFilterLog`, `compileFilters`,
+ * `applyContainsLike`, `declaredFieldsFor`, `applyFalseConstant` moved out of
+ * `sql-driver.ts` whole by `scripts/codemod-split-sql-driver.mjs`.
  *
  * A MOVE, not a redesign. {@link FilterHelpersFacet} is a stateless facet of `SqlDriver`
  * (ruling 6624345766): each static method of it is the body of the `SqlDriver`
@@ -39,15 +39,15 @@
  */
 
 import type { DriverOptions, ValueShapeFieldDef } from '@objectstack/spec/data';
-import { presentAsNumber, temporalStorageForm } from '@objectstack/core';
+import { JSON_COLUMN_INCOMPATIBLE_OPERATORS, findMisplacedReadableIds, presentAsNumber, refuseReadableIdsOnce, temporalStorageForm } from '@objectstack/core';
 import type { JsonColumnFieldClass } from '@objectstack/core';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import type { Knex } from 'knex';
 import {
   AUDIT_TIMESTAMP_COLUMNS, SQLITE_TIME_EXPR_REFS, WITHHELD_FILTER_LOGGED, assertCompilableComparand,
   assertDefinedComparands, canonicalTimeOfDay, canonicalUtcDatetime, emptyFieldConstraintError,
-  filterArrayReachedDriverError, isEmptyFieldConstraint, mysqlDatetimeLiteral, normalizeSqliteDatetimeOutput,
-  presentAuditTimestampOutput, refusalSubtree, withheldFilterDiagnosticOf,
+  filterArrayReachedDriverError, isEmptyFieldConstraint, jsonColumnOperatorError, mysqlDatetimeLiteral,
+  normalizeSqliteDatetimeOutput, presentAuditTimestampOutput, refusalSubtree, withheldFilterDiagnosticOf,
 } from './sql-driver-top-level.js';
 import type { ReadPresentationKind } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
@@ -70,12 +70,14 @@ export interface FilterHelpersHost {
   readonly canonicalTimeFields: SqlDriver['canonicalTimeFields'];
   coerceFilterValue: SqlDriver['coerceFilterValue'];
   coercionKey: SqlDriver['coercionKey'];
+  compileFilters: SqlDriver['compileFilters'];
   readonly dateFields: SqlDriver['dateFields'];
   readonly datetimeFields: SqlDriver['datetimeFields'];
   filterColumnExpr: SqlDriver['filterColumnExpr'];
   isJsonColumn: SqlDriver['isJsonColumn'];
   readonly isMysql: SqlDriver['isMysql'];
   readonly isSqlite: SqlDriver['isSqlite'];
+  jsonColumnFieldClass: SqlDriver['jsonColumnFieldClass'];
   readonly jsonFields: SqlDriver['jsonFields'];
   readonly logger: SqlDriver['logger'];
   readonly managedObjectFields: SqlDriver['managedObjectFields'];
@@ -85,6 +87,8 @@ export interface FilterHelpersHost {
   readonly numericFields: SqlDriver['numericFields'];
   readonly objectByPhysicalTable: SqlDriver['objectByPhysicalTable'];
   presentReadValue: SqlDriver['presentReadValue'];
+  readonly readableIdsDriverName: SqlDriver['readableIdsDriverName'];
+  readonly readableIdsRefusalLog: SqlDriver['readableIdsRefusalLog'];
   remoteColumn: SqlDriver['remoteColumn'];
   resolveWithheldFilterRefusal: SqlDriver['resolveWithheldFilterRefusal'];
   sqliteCanonicalDatetimeSql: SqlDriver['sqliteCanonicalDatetimeSql'];
@@ -387,6 +391,43 @@ export class FilterHelpersFacet {
     if (!table) return undefined;
     const shapes = this.valueShapeFields[table];
     return shapes && Object.prototype.hasOwnProperty.call(shapes, localField) ? shapes[localField] : undefined;
+  }
+
+  /** The body of `SqlDriver#assertOperatorAppliesToColumn`; the method's docblock there is its contract. */
+  static assertOperatorAppliesToColumn(this: Pick<FilterHelpersHost, 'jsonColumnFieldClass'>,
+    table: string | null | undefined,
+    localField: string,
+    column: string,
+    op: string,
+    bare = false,
+    // [#8197] The filter node this constraint was read from, so the refusal can
+    // be resolved against the query's `where` root like every other withheld
+    // one. Optional, and absent means WITHHELD — a subclass that overrides this
+    // method without threading it degrades onto the fail-closed branch rather
+    // than onto the disclosing one.
+    subtree?: unknown,
+  ): void {
+    if (!JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(op)) return;
+    // [#21236] The same JSON-column question {@link isJsonColumn} answers, with
+    // the column's class beside it, so the refusal names the class's repair.
+    const fieldClass = this.jsonColumnFieldClass(table, localField);
+    if (fieldClass === undefined) return;
+    throw jsonColumnOperatorError(column, op, bare, fieldClass, subtree);
+  }
+
+  /** The body of `SqlDriver#applyFilters`; the method's docblock there is its contract. */
+  static applyFilters(this: Pick<FilterHelpersHost, 'compileFilters' | 'logger' | 'readableIdsDriverName' | 'readableIdsRefusalLog' | 'resolveWithheldFilterRefusal'>, builder: Knex.QueryBuilder, filters: any, options?: DriverOptions) {
+    // [ADR-0139 D3] A `ReadableIds` leaf this compiler will not evaluate — an
+    // UNCOMPOSED one anywhere, a composed one outside a `$in` comparand — is
+    // refused before anything compiles: INTERNAL_ERROR / 500, logged at
+    // `error` once per driver. ⛔ Never evaluated as "no restriction".
+    const misplaced = findMisplacedReadableIds(filters, true);
+    if (misplaced) throw refuseReadableIdsOnce(this.readableIdsDriverName, misplaced, this.logger, this.readableIdsRefusalLog);
+    try {
+      this.compileFilters(builder, filters, options);
+    } catch (err) {
+      throw this.resolveWithheldFilterRefusal(err, filters);
+    }
   }
 
   /** The body of `SqlDriver#logWithheldFilterDiagnostic`; the method's docblock there is its contract. */

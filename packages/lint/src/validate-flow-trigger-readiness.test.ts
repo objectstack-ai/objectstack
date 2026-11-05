@@ -12,6 +12,7 @@ import {
   FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
   FLOW_TRIGGER_UNROUTABLE,
   FLOW_API_TRIGGER_SECRET_MISSING,
+  FLOW_API_TRIGGER_SIGNATURE_UNUSABLE,
   validateFlowApiTriggerSecret as validateFlowApiTriggerSecretUnrecorded,
   schemaRefusalHead,
 } from './validate-flow-trigger-readiness.js';
@@ -30,6 +31,7 @@ const NEVER_FIRE_IDS: readonly string[] = [
   FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
   FLOW_TRIGGER_UNROUTABLE,
   FLOW_API_TRIGGER_SECRET_MISSING,
+  FLOW_API_TRIGGER_SIGNATURE_UNUSABLE,
   FLOW_TRIGGER_UNKNOWN_EVENT,
 ];
 const fired: Array<{ rule: string; message: string; hint: string }> = [];
@@ -1521,6 +1523,31 @@ describe('validateFlowTriggerReadiness', () => {
           ],
         },
       ],
+      // [#30009] A declared sender scheme the spec refuses: never-fire, like a missing secret.
+      [
+        FLOW_API_TRIGGER_SIGNATURE_UNUSABLE,
+        'error',
+        {
+          objects: [candidateObject],
+          flows: [
+            {
+              name: 'broken_vendor_hook',
+              type: 'api',
+              status: 'active',
+              nodes: [
+                {
+                  id: 'start',
+                  type: 'start',
+                  config: {
+                    secretRef: 'DOCUSIGN_CONNECT_KEY',
+                    signature: { signs: 'body', header: 'X-DocuSign-Signature-1', algorithm: 'hmac-sha1', encoding: 'base64' },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
       // ── The controls. Both are hedged, and the hedge is the whole reason the
       //    promotion above is not "everything in this file is an error now".
       [
@@ -1753,6 +1780,89 @@ describe('validateFlowTriggerReadiness', () => {
   });
 });
 
+// [#30009] A start node that declares its sender's own scheme (`config.signature`)
+// is graded by the hook's ONE verifier, read through the spec's
+// `apiTriggerVerifierOf` (the reader the engine and the trigger share): ready on
+// the key `config.secretRef` names and nothing else, and never ready when the
+// reader answers `unusable`.
+describe('[#30009] api trigger readiness reads the hook\'s one verifier (config.signature)', () => {
+  const DOCUSIGN = { signs: 'body', header: 'X-DocuSign-Signature-1', algorithm: 'hmac-sha256', encoding: 'base64' };
+  const STRIPE = {
+    signs: 'timestamp.body', header: 'Stripe-Signature', algorithm: 'hmac-sha256', encoding: 'hex',
+    timestampElement: 't', digestElement: 'v1',
+  };
+  const vendorFlow = (config: Record<string, unknown>, type = 'api') => ({
+    name: 'vendor_hook',
+    label: 'Vendor hook',
+    type,
+    status: 'active',
+    nodes: [
+      { id: 'start', type: 'start', label: 'Start', config },
+      { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [{ id: 'e1', source: 'start', target: 'end' }],
+  });
+  const judge = (flow: Record<string, unknown>) => cliFlowFamily({ objects: [candidateObject], flows: [flow] });
+  const rules = (flow: Record<string, unknown>) => judge(flow).map((f) => [f.rule, f.severity, f.path]);
+
+  it('a usable declaration keyed by secretRef is ready, on both arms, at the CLI and the runtime publish gate', () => {
+    for (const signature of [DOCUSIGN, STRIPE, { ...DOCUSIGN, encoding: 'hex', prefix: 'sha256=' }]) {
+      const flow = vendorFlow({ hookId: 'vendor', secretRef: 'VENDOR_WEBHOOK_KEY', signature });
+      expect(judge(flow), JSON.stringify(signature)).toEqual([]);
+      expect(runRuntimeAuthoringRules({ type: 'flow', item: flow }).errors, JSON.stringify(signature)).toEqual([]);
+    }
+  });
+
+  it('an unusable declaration is never ready: one error, at the key the spec refuses', () => {
+    const cases: Array<[string, Record<string, unknown>, string]> = [
+      ['an algorithm the spec refuses', { secretRef: 'K', signature: { ...DOCUSIGN, algorithm: 'hmac-sha1' } }, 'config.signature.algorithm'],
+      ['a reserved header', { secretRef: 'K', signature: { ...DOCUSIGN, header: 'x-objectstack-signature' } }, 'config.signature.header'],
+      ['a timestamped scheme with no timestamp element', { secretRef: 'K', signature: { ...STRIPE, timestampElement: undefined } }, 'config.signature.timestampElement'],
+      ['no key reference', { signature: DOCUSIGN }, 'config.signature'],
+      ['a literal secret beside it (an inline key)', { secret: 'whsec_inline', signature: DOCUSIGN }, 'config.signature'],
+      ['a literal secret AND a secretRef beside it', { secret: 'whsec_inline', secretRef: 'K', signature: DOCUSIGN }, 'config.signature'],
+      ['a secretRef that is not a usable name', { secretRef: 'OS_AUTH_SECRET', signature: DOCUSIGN }, 'config.secretRef'],
+    ];
+    for (const [label, config, keyPath] of cases) {
+      const findings = judge(vendorFlow(config)).filter((f) => f.rule === FLOW_API_TRIGGER_SIGNATURE_UNUSABLE);
+      expect(findings.map((f) => [f.severity, f.path]), label).toEqual([['error', `flows[0].nodes[0].${keyPath}`]]);
+      expect(findings[0]!.message, label).toContain(keyPath);
+      expect(findings[0]!.message, label).toContain(`type: 'api'`);
+      // Never the missing-secret id beside it: one verdict per hook.
+      expect(judge(vendorFlow(config)).map((f) => f.rule), label).not.toContain(FLOW_API_TRIGGER_SECRET_MISSING);
+      // And never let through at the runtime publish gate.
+      expect(
+        runRuntimeAuthoringRules({ type: 'flow', item: vendorFlow(config) }).errors.map((f) => f.rule),
+        label,
+      ).toContain(FLOW_API_TRIGGER_SIGNATURE_UNUSABLE);
+    }
+  });
+
+  it('a declared scheme is graded on its key reference alone: a withheld-and-stored literal secret does not make it ready', () => {
+    const flow = vendorFlow({ signature: DOCUSIGN });
+    const findings = validateFlowApiTriggerSecret(
+      { objects: [candidateObject], flows: [flow] },
+      { restoredCredentialPaths: new Set(['flows[0].nodes[0].config.secret']) },
+    );
+    expect(findings.map((f) => [f.rule, f.path])).toEqual([[FLOW_API_TRIGGER_SIGNATURE_UNUSABLE, 'flows[0].nodes[0].config.signature']]);
+  });
+
+  it('CONTROL: a flow that binds no api trigger is not graded by this rule, and a hook with no declaration keeps its own verdicts', () => {
+    expect(rules(vendorFlow({ secretRef: 'K', signature: { ...DOCUSIGN, algorithm: 'hmac-sha1' } }, 'autolaunched'))
+      .map(([rule]) => rule)).not.toContain(FLOW_API_TRIGGER_SIGNATURE_UNUSABLE);
+    expect(rules(vendorFlow({ hookId: 'vendor' }))).toEqual([[FLOW_API_TRIGGER_SECRET_MISSING, 'error', 'flows[0].nodes[0].config.secret']]);
+    expect(judge(vendorFlow({ secretRef: 'VENDOR_WEBHOOK_KEY' }))).toEqual([]);
+  });
+
+  it('`os explain flow-api-trigger-signature-unusable` says what a declared scheme is and why a broken one admits nothing', () => {
+    expect(FLOW_API_TRIGGER_SIGNATURE_UNUSABLE).toBe('flow-api-trigger-signature-unusable');
+    const text = explanationOf(FLOW_API_TRIGGER_SIGNATURE_UNUSABLE);
+    for (const fact of ['config.signature', 'config.secretRef', 'REPLACES', 'never falls back', '401 INVALID_SIGNATURE', '300-second']) {
+      expect(text, fact).toContain(fact);
+    }
+  });
+});
+
 describe('[#22161] one-line verdicts — the never-fire family', () => {
   it('every verdict the cases above fired is one line of at most 200 characters', () => {
     // The coverage control first: each of the five ids fired at least once, so
@@ -1798,9 +1908,10 @@ describe('[#22161] one-line verdicts — the never-fire family', () => {
     [FLOW_TRIGGER_UNROUTABLE]: ['`resolveTriggerBinding`', 'manual — nothing to bind', 'one higher than its bound count', 'RESOLVED type', 'record-{before,after}-{create,insert,update,delete,write}'],
     [FLOW_TRIGGER_UNKNOWN_EVENT]: ['record-{before,after}-{create,insert,update,delete,write}', 'bind-time warn', 'multi-event shape', '`record-after-write`'],
     [FLOW_API_TRIGGER_SECRET_MISSING]: ['ADR-0041', 'HMAC', '`registerFlow`', 'whatever the flow\'s `status`', 'never receives a post', 'withholds'],
+    [FLOW_API_TRIGGER_SIGNATURE_UNUSABLE]: ['REPLACES', 'never falls back', 'flow parse refuses the flow at registration', 'names the key the spec refuses at'],
   };
 
-  it('covers exactly the five ids', () => {
+  it('covers exactly the never-fire ids', () => {
     expect(Object.keys(MOVED).sort()).toEqual([...NEVER_FIRE_IDS].sort());
   });
 

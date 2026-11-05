@@ -102,7 +102,7 @@ const { createRestApiPlugin } = await import('./rest-api-plugin.js');
  */
 const PROVIDERS = [
   { index: 6, label: 'authServiceProvider', slot: 'auth', scope: 'environment' },
-  { index: 7, label: 'objectQLProvider', slot: 'objectql', scope: 'host' },
+  { index: 7, label: 'objectQLProvider', slot: 'objectql', scope: 'environment' },
   { index: 8, label: 'emailServiceProvider', slot: 'email', scope: 'environment' },
   { index: 9, label: 'sharingServiceProvider', slot: 'sharing', scope: 'environment' },
   { index: 11, label: 'approvalsServiceProvider', slot: 'approvals', scope: 'environment' },
@@ -130,7 +130,8 @@ const PROVIDERS = [
  * environment id AND a `kernel-manager`, read the slot on THAT environment's
  * kernel instead of this plugin's own — the slots whose occupants a hosted
  * environment's kernel mounts ([#30192] added `auth`, `i18n`, `settings`,
- * `security` and `metadata` to #30011's five). `host` rows read this plugin's
+ * `security` and `metadata` to #30011's five, and [#30218] the `objectql`
+ * engine). `host` rows read this plugin's
  * kernel whatever id they are handed. The hosted behaviour itself is pinned end to end in
  * `rest-environment-scoped-providers.test.ts`; this table only says which
  * kernel each provider asks, so the slot-identity cases below can ask the
@@ -420,9 +421,10 @@ describe('[#30011] a single-kernel deployment reads the environment-scoped slots
     const { args, ctx } = await boot(services);
 
     // [#30192] `auth`, `i18n`, `settings`, `security` and `metadata` joined
-    // the five #30011 scoped; `objectql` and `tenancy` stay on the host.
+    // the five #30011 scoped, and [#30218] `objectql`; `tenancy` stays on the
+    // host.
     expect(ENVIRONMENT_SCOPED.map((p) => p.slot)).toEqual([
-      'auth', 'email', 'sharing', 'approvals', 'sharingRules', 'i18n', 'analytics', 'settings', 'security', 'metadata',
+      'auth', 'objectql', 'email', 'sharing', 'approvals', 'sharingRules', 'i18n', 'analytics', 'settings', 'security', 'metadata',
     ]);
     for (const { index, label, slot } of ENVIRONMENT_SCOPED) {
       const provider = args[index] as (environmentId?: string) => Promise<unknown>;

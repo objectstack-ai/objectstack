@@ -393,3 +393,86 @@ describe('notify (baseline node)', () => {
         });
     });
 });
+
+// A notify node that writes no link (no `sourceObject`, `sourceId` or
+// `actionUrl`) links to the run's trigger record, when the run has one. The
+// author's own link — a pair, an `actionUrl`, or a half-written pair — is kept
+// as written, and a run with no trigger record links nowhere, as before.
+describe('notify click-through defaults to the trigger record', () => {
+    let engine: AutomationEngine;
+    let messaging: ReturnType<typeof fakeMessaging>;
+
+    /** A record-change run's context: the row that triggered it, and its object. */
+    const recordRun = (event = 'afterInsert') =>
+        ({ record: { id: 't_7', name: 'Pump' }, object: 'repair_ticket', event }) as any;
+
+    beforeEach(() => {
+        messaging = fakeMessaging();
+        engine = new AutomationEngine(createTestLogger());
+        registerNotifyNode(engine, createCtx(messaging.service));
+    });
+
+    it('links a record-triggered notify that names no source to the trigger record', async () => {
+        engine.registerFlow('notify_flow', notifyFlow({ recipients: ['user_1'], title: 'Assigned to you' }));
+
+        const result = await engine.execute('notify_flow', recordRun());
+
+        expect(result.success).toBe(true);
+        expect(messaging.emitted[0].source).toEqual({ object: 'repair_ticket', id: 't_7' });
+        expect(messaging.emitted[0].payload.url).toBeUndefined();
+    });
+
+    it('keeps an explicit pair over the trigger record', async () => {
+        engine.registerFlow('notify_flow', notifyFlow({
+            recipients: ['user_1'],
+            title: 'Quote ready',
+            sourceObject: 'mtc_quotation',
+            sourceId: 'q_42',
+        }));
+
+        await engine.execute('notify_flow', recordRun());
+
+        expect(messaging.emitted[0].source).toEqual({ object: 'mtc_quotation', id: 'q_42' });
+    });
+
+    it('keeps an explicit actionUrl alone: no source is defaulted beside it', async () => {
+        engine.registerFlow('notify_flow', notifyFlow({
+            recipients: ['user_1'],
+            title: 'See the board',
+            actionUrl: '/boards/main',
+        }));
+
+        await engine.execute('notify_flow', recordRun());
+
+        expect(messaging.emitted[0].source).toBeUndefined();
+        expect(messaging.emitted[0].payload.url).toBe('/boards/main');
+    });
+
+    it('still drops a half-written pair rather than defaulting it', async () => {
+        engine.registerFlow('notify_flow', notifyFlow({
+            recipients: ['user_1'],
+            title: 'Heads up',
+            sourceObject: 'opportunity',
+        }));
+
+        await engine.execute('notify_flow', recordRun());
+
+        expect(messaging.emitted[0].source).toBeUndefined();
+    });
+
+    it('links nowhere on a run with no trigger record', async () => {
+        engine.registerFlow('notify_flow', notifyFlow({ recipients: ['user_1'], title: 'Daily digest' }));
+
+        await engine.execute('notify_flow', { object: 'repair_ticket', event: 'manual' } as any);
+
+        expect(messaging.emitted[0].source).toBeUndefined();
+    });
+
+    it('does not link a delete event to the record it removed', async () => {
+        engine.registerFlow('notify_flow', notifyFlow({ recipients: ['user_1'], title: 'Ticket removed' }));
+
+        await engine.execute('notify_flow', recordRun('afterDelete'));
+
+        expect(messaging.emitted[0].source).toBeUndefined();
+    });
+});

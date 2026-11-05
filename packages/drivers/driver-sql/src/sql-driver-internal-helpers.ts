@@ -2,9 +2,10 @@
 
 /**
  * [#29520 codemod] The "Internal helpers" section of `SqlDriver`: the bodies of
- * `getKnex`, `resolveTenantField`, `isMultiTenantMode`, `applyTenantScope`,
- * `readableIdsSubquery`, `injectTenantOnInsert`, `auditMissingTenant` moved out
- * of `sql-driver.ts` whole by `scripts/codemod-split-sql-driver.mjs`.
+ * `getKnex`, `getBuilder`, `resolveTenantField`, `isMultiTenantMode`,
+ * `applyTenantScope`, `readableIdsSubquery`, `injectTenantOnInsert`,
+ * `auditMissingTenant` moved out of `sql-driver.ts` whole by
+ * `scripts/codemod-split-sql-driver.mjs`.
  *
  * A MOVE, not a redesign. {@link InternalHelpersFacet} is a stateless facet of `SqlDriver`
  * (ruling 6624345766): each static method of it is the body of the `SqlDriver`
@@ -50,6 +51,8 @@ export interface InternalHelpersHost {
   isMultiTenantMode: SqlDriver['isMultiTenantMode'];
   readonly knex: SqlDriver['knex'];
   readonly logger: SqlDriver['logger'];
+  readonly physicalSchemaByObject: SqlDriver['physicalSchemaByObject'];
+  readonly physicalTableByObject: SqlDriver['physicalTableByObject'];
   remoteColumn: SqlDriver['remoteColumn'];
   resolveTenantField: SqlDriver['resolveTenantField'];
   readonly tenantAuditWarned: SqlDriver['tenantAuditWarned'];
@@ -61,6 +64,25 @@ export class InternalHelpersFacet {
   /** The body of `SqlDriver#getKnex`; the method's docblock there is its contract. */
   static getKnex(this: Pick<InternalHelpersHost, 'knex'>): Knex {
     return this.knex;
+  }
+
+  /** The body of `SqlDriver#getBuilder`; the method's docblock there is its contract. */
+  static getBuilder(this: Pick<InternalHelpersHost, 'knex' | 'physicalSchemaByObject' | 'physicalTableByObject'>, object: string, options?: DriverOptions) {
+    // Federation (ADR-0015): an external object resolves to its remote table
+    // (`external.remoteName`, optionally schema-qualified). Managed objects miss
+    // both maps, so this is `this.knex(object)` — unchanged. `.withSchema()` is
+    // applied on the builder (not via `knex.withSchema().from()`) so the builder
+    // type is identical to the managed path for every downstream caller.
+    const physical = this.physicalTableByObject[object] ?? object;
+    let builder = this.knex(physical);
+    const remoteSchema = this.physicalSchemaByObject[object];
+    if (remoteSchema) {
+      builder = builder.withSchema(remoteSchema);
+    }
+    if (options?.transaction) {
+      builder = builder.transacting(options.transaction as Knex.Transaction);
+    }
+    return builder;
   }
 
   /** The body of `SqlDriver#resolveTenantField`; the method's docblock there is its contract. */

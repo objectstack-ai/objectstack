@@ -344,6 +344,18 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             // ObjectQL resolver — single-kernel fallback so resolveExecCtx
             // can run sys_member / sys_user_permission_set lookups when
             // there is no kernelManager wired (e.g. `pnpm dev:crm`).
+            //
+            // [#30218] What is written below is the OWN-KERNEL leg only: the
+            // provider itself is `environmentScopedProvider('objectql', …)`,
+            // built after that seam is declared, so a request for an
+            // environment reads THAT environment's engine and never this
+            // plugin's. The hosted host kernel is a routing shell: the
+            // transactional `POST /batch`, the `/meta` object-state and
+            // published reads, and the meta read gate's disabled-package
+            // owner step all asked this kernel's engine for a request that
+            // resolved to an environment, while `computeExecCtx` read the
+            // environment's — two kernels, one request. The legs, the
+            // classification and the sync leg below are otherwise unchanged.
             // [#4251 B3] `IObjectQLEngine`, not `IDataEngine`: the `objectql`
             // slot is the SAME instance as `data` seen whole, and the consumer
             // (`resolveExecCtx`, and the `transaction` probe behind the batch
@@ -380,7 +392,7 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             // its accessor has exactly ONE fault to report — not registered —
             // and absorbing it is the same classification, not a second
             // collapse.
-            const objectQLProvider = async (_environmentId?: string): Promise<IObjectQLEngine | undefined> => {
+            const objectQLOnOwnKernel = async (): Promise<IObjectQLEngine | undefined> => {
                 const kernel = typeof ctx.getKernel === 'function' ? ctx.getKernel() : undefined;
                 if (kernel && typeof kernel.getServiceAsync === 'function') {
                     try {
@@ -396,8 +408,9 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             };
 
             // [#30011] The ENVIRONMENT-SCOPED provider seams: email, sharing,
-            // approvals, sharing rules and analytics — and [#30192] security,
-            // auth, settings, i18n and metadata. Each slot is filled by a
+            // approvals, sharing rules and analytics — [#30192] security,
+            // auth, settings, i18n and metadata — and [#30218] the `objectql`
+            // engine. Each slot is filled by a
             // plugin the ENVIRONMENT's kernel mounts. A host that fronts many
             // environment kernels with this one plugin (cloud's hosted runtime)
             // therefore holds the occupant a request needs on that request's
@@ -428,10 +441,16 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             //    own kernel, exactly as before.
             //
             // On the environment's kernel the classification is the registry's,
-            // as in `objectQLProvider` above: "never registered" (branded) is
+            // as in `objectQLOnOwnKernel` above: "never registered" (branded) is
             // `undefined`, and any other fault — a factory that threw — is
             // re-raised rather than folded into "not configured".
-            const environmentScopedProvider = <T>(slot: string) =>
+            //
+            // [#30218] `onOwnKernel` replaces the last leg for a seam whose
+            // own-kernel read is classified more strictly than `ctx.getService`'s
+            // catch-all — the `objectql` engine, whose own leg keeps its
+            // factory-aware async read and its `LiteKernel` sync leg. The
+            // environment leg is the same for every seam.
+            const environmentScopedProvider = <T>(slot: string, onOwnKernel?: () => Promise<T | undefined>) =>
                 async (environmentId?: string): Promise<T | undefined> => {
                     if (kernelManager && environmentId && environmentId !== 'platform') {
                         const kernel = await kernelManager.getOrCreate(environmentId);
@@ -442,10 +461,19 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
                             throw err;
                         }
                     }
+                    if (onOwnKernel) return onOwnKernel();
                     try {
                         return ctx.getService<T>(slot);
                     } catch { return undefined; }
                 };
+
+            // [#30218] The data engine — `resolveExecCtx`'s single-kernel
+            // lookups, the transactional `POST /batch`, the `/meta` object-state
+            // and published reads, and the meta read gate's disabled-package
+            // owner step. Environment-scoped like the seams below: a request for
+            // environment A is answered by A's engine or by nothing, so a batch
+            // for A opens its transaction on A's store and writes nowhere else.
+            const objectQLProvider = environmentScopedProvider<IObjectQLEngine>('objectql', objectQLOnOwnKernel);
 
             // Email service resolver — used by POST /email/send.
             const emailServiceProvider = environmentScopedProvider<IEmailService>('email');

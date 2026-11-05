@@ -3,10 +3,10 @@
 /**
  * [#29520 codemod] The "Lifecycle" section of `SqlDriver`: the bodies of
  * `connect`, `releaseRefusedSqliteConnection`, `applyAutoVacuumIncremental`,
- * `autoVacuumOf`, `resolveSqliteJournalMode`, `applySqliteJournalMode`,
- * `verifyWalReadable`, `isSqliteBusyError`, `journalModeOf`, `checkHealth`,
- * `disconnect` moved out of `sql-driver.ts` whole by
- * `scripts/codemod-split-sql-driver.mjs`.
+ * `autoVacuumOf`, `resolveSqliteJournalMode`, `supportsWalJournal`,
+ * `applySqliteJournalMode`, `verifyWalReadable`, `isSqliteBusyError`,
+ * `journalModeOf`, `checkHealth`, `disconnect` moved out of `sql-driver.ts`
+ * whole by `scripts/codemod-split-sql-driver.mjs`.
  *
  * A MOVE, not a redesign. {@link LifecycleFacet} is a stateless facet of `SqlDriver`
  * (ruling 6624345766): each static method of it is the body of the `SqlDriver`
@@ -265,6 +265,11 @@ export class LifecycleFacet {
       `Ignoring SQLite journal mode '${requested}' (expected 'wal' or 'delete') — using 'wal'`,
     );
     return 'wal';
+  }
+
+  /** The body of `SqlDriver#supportsWalJournal`; the method's docblock there is its contract. */
+  static supportsWalJournal(): boolean {
+    return true;
   }
 
   /** The body of `SqlDriver#applySqliteJournalMode`; the method's docblock there is its contract. */
