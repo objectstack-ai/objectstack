@@ -261,7 +261,8 @@ export const ActionParamSchema = lazySchema(() => strictObject(
     'Widget override for this param — names a registered field component (resolved as `field:<widget>`) '
     + 'to draw it instead of the `type` default; same key and vocabulary as FieldSchema.widget, and `type` '
     + 'stays the value\'s type. e.g. "permission-ref" on a text param picks a permission set by name '
-    + '(ADR-0131 D4). Degrades to the `type` renderer when unregistered.',
+    + '(ADR-0131 D4). Degrades to the `type` renderer when unregistered. Not read yet: until objectstack#30260 '
+    + 'lands, the console\'s action dialog draws every param with its `type` renderer whatever this names.',
   ).meta({ title: 'Widget' }),
   /**
    * Required override; when omitted defaults to `false`. Consumers that wish
