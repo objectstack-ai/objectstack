@@ -37,6 +37,7 @@ import {
   SysMetadataAuditObject,
 } from '@objectstack/metadata-core';
 import { SysMigration, SysMigrationJournal } from '@objectstack/platform-objects/system';
+import * as IdentityObjects from '@objectstack/platform-objects/identity';
 import { SystemObjectName } from '@objectstack/spec/system';
 
 import { AuditPlugin } from './audit-plugin.js';
@@ -61,6 +62,11 @@ const dealObject = {
 type Row = Record<string, any>;
 type ViewRule = { field: string; operator: string; value?: unknown };
 type ListView = { filter?: ViewRule[]; sort?: Array<{ field: string; order: 'asc' | 'desc' }> };
+
+/** Every object the identity domain exports, read the same way the declaration reads it. */
+const identityNames = Object.values(IdentityObjects)
+  .filter((v: any) => v && typeof v === 'object' && typeof v.name === 'string' && typeof v.fields === 'object')
+  .map((v: any) => v.name as string);
 
 const views = (SysActivity as unknown as { listViews: Record<string, ListView> }).listViews;
 
@@ -90,10 +96,21 @@ describe('sys_activity default list view — the declaration', () => {
         SysMetadataAuditObject.name,
         SysMigration.name,
         SysMigrationJournal.name,
-        SystemObjectName.USER,
-        SystemObjectName.JWKS,
+        ...identityNames,
       ].sort(),
     );
+  });
+
+  it('the identity objects measured writing under a person\'s id are among the excluded', () => {
+    for (const object of [
+      IdentityObjects.SysUser,
+      IdentityObjects.SysMember,
+      IdentityObjects.SysJwks,
+      IdentityObjects.SysOrganization,
+      IdentityObjects.SysInvitation,
+    ]) {
+      expect(ACTIVITY_FEED_EXCLUDED_OBJECTS).toContain(object.name);
+    }
   });
 
   it('`all` carries no filter, so every readable row stays one click away', () => {
@@ -140,6 +157,7 @@ describe('sys_activity default list view — the rows it serves', () => {
       { summary: 'sign-in stamp', object_name: 'sys_user', record_id: 'u_admin', actor_id: 'u_admin', timestamp: at(45) },
       { summary: 'metadata publish', object_name: SysMetadataObject.name, record_id: 'm1', actor_id: 'u_admin', timestamp: at(46) },
       { summary: 'metadata history', object_name: SysMetadataHistoryObject.name, record_id: 'h1', actor_id: 'u_admin', timestamp: at(47) },
+      { summary: 'member added', object_name: IdentityObjects.SysMember.name, record_id: 'mb1', actor_id: 'u_admin', timestamp: at(50) },
       { summary: 'signing key minted', object_name: SystemObjectName.JWKS, record_id: 'k1', actor_id: 'u_admin', timestamp: at(49) },
       { summary: 'migration', object_name: SysMigration.name, record_id: 'g1', actor_id: null, timestamp: at(48) },
     ];
@@ -189,7 +207,7 @@ describe('sys_activity default list view — the rows it serves', () => {
       orderBy: views.all.sort,
       context: SYS,
     })) as Row[]);
-    for (const left of ['sign-in stamp', 'metadata publish', 'metadata history', 'signing key minted', 'migration']) {
+    for (const left of ['sign-in stamp', 'metadata publish', 'metadata history', 'signing key minted', 'member added', 'migration']) {
       expect(all).toContain(left);
     }
   });

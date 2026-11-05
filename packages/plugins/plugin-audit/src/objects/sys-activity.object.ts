@@ -2,7 +2,16 @@
 
 import { ObjectSchema, Field, SYS_ACTIVITY_BUILTIN_TYPES } from '@objectstack/spec/data';
 import { SysMigration, SysMigrationJournal } from '@objectstack/platform-objects/system';
+import * as IdentityObjects from '@objectstack/platform-objects/identity';
 import { SystemObjectName } from '@objectstack/spec/system';
+
+/** Every object the identity domain declares (users, members, organizations, sessions, keys, SCIM, …). */
+const IDENTITY_OBJECT_NAMES: readonly string[] = (Object.values(IdentityObjects) as unknown[])
+  .filter((value): value is { name: string; fields: object } =>
+    !!value && typeof value === 'object' && typeof (value as { name?: unknown }).name === 'string'
+    && typeof (value as { fields?: unknown }).fields === 'object')
+  .map((object) => object.name)
+  .sort();
 
 /**
  * The platform objects whose rows the default `recent` view leaves out, even
@@ -12,12 +21,14 @@ import { SystemObjectName } from '@objectstack/spec/system';
  *    store's own audit): publishing in Studio writes these under the
  *    publisher's name;
  *  - the data-migration ledger;
- *  - `sys_user`: every sign-in stamps `last_login_at` / `last_login_ip` on it
- *    under the signing-in person's own name, and the only column that tells
- *    that stamp from a profile edit is `changed_fields`, which a filter may
- *    not name for every reader (`parent-field-query-guard.ts`);
- *  - `sys_jwks`: the token-signing key pair, minted on first use under
- *    whichever session first needs it (measured: the first sign-in's).
+ *  - the identity domain, every object `@objectstack/platform-objects/identity`
+ *    declares. Measured on a fresh boot, all under a person's own id: every
+ *    sign-in stamps `last_login_at` / `last_login_ip` on `sys_user`; the
+ *    token-signing key in `sys_jwks` is minted under the first sign-in's
+ *    session; adding a person writes a `sys_user` and a `sys_member` row, which
+ *    that person can then read. The only column that tells a sign-in stamp from
+ *    a profile edit is `changed_fields`, which a filter may not name for every
+ *    reader (`parent-field-query-guard.ts`), so the cut is by object.
  *
  * Their writes are mirrored like any other object's, and those rows stay
  * stored and readable: the `all` view below lists them, and each one has its
@@ -40,8 +51,7 @@ export const ACTIVITY_FEED_EXCLUDED_OBJECTS: readonly string[] = Object.freeze([
   'sys_metadata_audit',
   SysMigration.name,
   SysMigrationJournal.name,
-  SystemObjectName.USER,
-  SystemObjectName.JWKS,
+  ...IDENTITY_OBJECT_NAMES,
 ]);
 
 /**
