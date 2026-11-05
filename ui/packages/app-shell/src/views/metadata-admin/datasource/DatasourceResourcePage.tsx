@@ -134,7 +134,7 @@ interface BoundObject {
 }
 
 /** A refused request: the envelope's message, with the HTTP status and the envelope's `code` beside it. */
-type ApiError = Error & { status?: number; code?: string };
+type DatasourceRequestError = Error & { status?: number; code?: string };
 
 /**
  * Status chip per verdict. `unvalidated` stays visually quiet — it means
@@ -300,7 +300,7 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
           (body && body.message) ||
           `HTTP ${res.status}`;
         const code = body && typeof body.error === 'object' && typeof body.error?.code === 'string' ? body.error.code : undefined;
-        throw Object.assign(new Error(detail), { status: res.status, code }) as ApiError;
+        throw Object.assign(new Error(detail), { status: res.status, code }) as DatasourceRequestError;
       }
       return body && typeof body.success === 'boolean' && 'data' in body ? body.data : body;
     },
@@ -373,7 +373,7 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
       // A 400 on a datasource that objects still name is the server's
       // bound-object refusal: read the objects now and name them in the
       // console's language. Any other failure keeps the server's own message.
-      const objects = (err as ApiError).status === 400 ? await readBoundObjects(name).catch(() => []) : [];
+      const objects = (err as DatasourceRequestError).status === 400 ? await readBoundObjects(name).catch(() => []) : [];
       if (objects.length) {
         const list = objects.map(boundObjectText).join(t('engine.datasource.boundObjectSeparator', locale));
         toast.error(tFormat('engine.datasource.deleteBoundRefused', locale, { name, objects: list }));
