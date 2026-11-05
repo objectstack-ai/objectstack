@@ -191,6 +191,25 @@ export function seedOrder(scenario: LoadedScenario): string[] {
   return out;
 }
 
+/**
+ * The values a persona's hidden fields hold in the seed — the leak grader's
+ * `hidden.values`, which it leaves to the caller to compute. Only distinctive
+ * values are passed (the grader's own advice): strings of four characters or
+ * more, numbers of magnitude 100 or more.
+ */
+export function hiddenValues(scenario: LoadedScenario, personaId: string): Array<string | number> {
+  const p = scenario.card.run.personas.find((x) => x.id === personaId);
+  const out = new Set<string | number>();
+  for (const f of p?.hidden.fields ?? []) {
+    for (const row of scenario.card.run.seed[f.object] ?? []) {
+      const v = row[f.field];
+      if (typeof v === 'string' && v.length >= 4) out.add(v);
+      if (typeof v === 'number' && Math.abs(v) >= 100) out.add(v);
+    }
+  }
+  return [...out];
+}
+
 /** The persona (not a card artifact) a scenario's audit trail names, from the user id the app recorded. */
 function personaOfUser(userId: string | null, accounts: readonly PersonaAccount[], adminId: string): string | null {
   if (userId === null) return null;
@@ -291,7 +310,11 @@ export async function runHalf(
         try {
           const turn = await driver.ask({ ...ref, step: q.id, ...(persona ? { persona } : {}), prompt: questionPrompt(scenario, q.id), mcp: { url: app.mcpUrl, apiKey: keyOf(persona) } });
           res.turn = summarize(turn);
-          res.grade = gradeCardAnswer(scenario, { question: q.id, ...(persona ? { persona } : {}), turn });
+          res.grade = gradeCardAnswer(scenario, {
+            question: q.id,
+            ...(persona ? { persona, hidden: { values: hiddenValues(scenario, persona) } } : {}),
+            turn,
+          });
         } catch (e) {
           res.error = errText(e);
         }
