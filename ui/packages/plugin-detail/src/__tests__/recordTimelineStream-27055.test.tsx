@@ -26,6 +26,8 @@ import {
   mergeTimelineStream,
   RecordFieldChangesContext,
   RecordFieldHistoryContext,
+  TIMELINE_PAIR_WINDOW_MS,
+  fieldHistoryOf,
 } from '../recordTimelineStream';
 import { RecordActivityTimeline } from '../RecordActivityTimeline';
 import { RecordActivityRenderer } from '../renderers/record-activity';
@@ -244,5 +246,110 @@ describe('an activity row sits under 活动 whatever the history flag; 变更 ho
     expect(screen.getByText('Status')).toBeTruthy();
     expect(screen.queryByText('Created the lead')).toBeNull();
     expect(screen.queryByText('Logged a call')).toBeNull();
+  });
+});
+
+describe('one action, one row: an activity row carries its audit entry (objectstack#30122)', () => {
+  const at = (ms: number) => new Date(Date.UTC(2026, 10, 1, 9, 0, 0) + ms).toISOString();
+  const activityRow = (id: string, activityType: string, ms: number, actorId: string | null = 'u1', actor = 'Dev Admin') =>
+    ({ id, type: 'field_change', actor, body: `Activity ${id}`, createdAt: at(ms), activityType, actorId }) as FeedItem;
+  const auditOf = (id: number, action: string, ms: number, user_id: string | null = 'u1', user_name = 'Dev Admin') =>
+    auditEntriesToFeedItems(
+      [{ id, action, created_at: at(ms), user_id, user_name, changes: [{ field: 'company', label: 'Company', from: 'Old Co', to: `New Co ${id}` }] }],
+      { unknownUser: 'Unknown' },
+    );
+
+  it('a create: the activity `created` row and the audit `create` entry are one row, the diff on it', () => {
+    const stream = mergeTimelineStream([activityRow('a1', 'created', 0)], auditOf(1, 'create', 200));
+    expect(stream.map((i) => i.id)).toEqual(['a1']);
+    expect(fieldHistoryOf(stream[0])?.id).toBe('audit:1');
+    // Ruling C: 变更 still shows the audit entry on its own; 活动 the activity row.
+    expect(filterTimelineStream(stream, 'changes').map((i) => i.id)).toEqual(['audit:1']);
+    expect(filterTimelineStream(stream, 'activity').map((i) => i.id)).toEqual(['a1']);
+  });
+
+  it('an update: the activity `updated` row and the audit `update` entry are one row', () => {
+    const stream = mergeTimelineStream([activityRow('a2', 'updated', 1000)], auditOf(2, 'update', 1000));
+    expect(stream.map((i) => i.id)).toEqual(['a2']);
+    expect(fieldHistoryOf(stream[0])?.fieldChanges?.[0]).toMatchObject({ field: 'company', newDisplayValue: 'New Co 2' });
+  });
+
+  it('unpaired rows draw as before: an audit entry with no activity row, an activity row with no audit entry', () => {
+    const stream = mergeTimelineStream([activityRow('a3', 'created', 0)], auditOf(3, 'update', 60_000));
+    expect(stream.map((i) => i.id)).toEqual(['audit:3', 'a3']);
+    expect(stream.every((i) => fieldHistoryOf(i) === undefined)).toBe(true);
+  });
+
+  it('different actors do not pair', () => {
+    const stream = mergeTimelineStream([activityRow('a4', 'created', 0, 'u1')], auditOf(4, 'create', 100, 'u2', 'Other'));
+    expect(stream.map((i) => i.id).sort()).toEqual(['a4', 'audit:4']);
+  });
+
+  it(`outside the ${TIMELINE_PAIR_WINDOW_MS} ms window does not pair; at its edge it does`, () => {
+    const outside = mergeTimelineStream([activityRow('a5', 'created', 0)], auditOf(5, 'create', TIMELINE_PAIR_WINDOW_MS + 1));
+    expect(outside.map((i) => i.id).sort()).toEqual(['a5', 'audit:5']);
+    const edge = mergeTimelineStream([activityRow('a6', 'created', 0)], auditOf(6, 'create', TIMELINE_PAIR_WINDOW_MS));
+    expect(edge.map((i) => i.id)).toEqual(['a6']);
+  });
+
+  it('a different action kind does not pair, and a row pairs once (nearest in time)', () => {
+    const kinds = mergeTimelineStream([activityRow('a7', 'created', 0)], auditOf(7, 'delete', 0));
+    expect(kinds.map((i) => i.id).sort()).toEqual(['a7', 'audit:7']);
+    const twice = mergeTimelineStream(
+      [activityRow('a8', 'created', 0)],
+      [...auditOf(8, 'create', 1500), ...auditOf(9, 'create', 300)],
+    );
+    expect(twice.map((i) => i.id).sort()).toEqual(['a8', 'audit:8']);
+    expect(fieldHistoryOf(twice.find((i) => i.id === 'a8')!)?.id).toBe('audit:9');
+  });
+
+  it('the system on both sides (no user id) pairs by name', () => {
+    const stream = mergeTimelineStream([activityRow('a10', 'updated', 0, null, 'System')], auditOf(10, 'update', 50, null, 'System'));
+    expect(stream.map((i) => i.id)).toEqual(['a10']);
+  });
+
+  const page = (fieldChanges: FeedItem[] | null) => (
+    <DefaultRecordPageContext.Provider value>
+      <DiscussionContextProvider items={[activityRow('r1', 'created', 0)] as any[]} loading={false}>
+        <RecordFieldChangesContext.Provider value={fieldChanges}>
+          <RecordActivityRenderer schema={{ type: 'record:activity', showCompleted: true } as any} />
+        </RecordFieldChangesContext.Provider>
+      </DiscussionContextProvider>
+    </DefaultRecordPageContext.Provider>
+  );
+
+  it('an audit reader sees ONE row: the summary, who, and the diff on it', () => {
+    const { container } = render(page(auditOf(11, 'create', 100)));
+    const rows = container.querySelectorAll('[data-stream-system-row]');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].querySelector('[data-stream-change]')?.textContent).toBe('Activity r1');
+    expect(rows[0].textContent).toContain('Dev Admin');
+    expect(rows[0].querySelector('[data-stream-change-diff]')?.textContent).toBe('Company Old Co → New Co 11');
+  });
+
+  it('a reader without the audit log sees the same ONE row, without a diff', () => {
+    const { container } = render(page(null));
+    const rows = container.querySelectorAll('[data-stream-system-row]');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].querySelector('[data-stream-change]')?.textContent).toBe('Activity r1');
+    expect(rows[0].querySelector('[data-stream-change-diff]')).toBeNull();
+  });
+
+  it('变更 shows the audit diff on its own row (ruling C)', () => {
+    const { container } = render(page(auditOf(12, 'create', 100)));
+    fireEvent.click(container.querySelector('[data-stream-filter="changes"]')!);
+    const rows = container.querySelectorAll('[data-stream-system-row]');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].querySelector('[data-stream-change]')?.textContent).toBe('Company Old Co → New Co 12');
+    expect(rows[0].querySelector('[data-stream-change-diff]')).toBeNull();
+  });
+
+  it('every peek row says who', () => {
+    const { container } = render(
+      <RecordActivityTimeline items={[comment, activityRow('p1', 'created', 0)]} variant="peek" />,
+    );
+    const actors = Array.from(container.querySelectorAll('[data-record-timeline-peek-actor]')).map((e) => e.textContent);
+    expect(actors).toEqual(expect.arrayContaining(['Ada', 'Dev Admin']));
+    expect(container.querySelectorAll('[data-record-timeline-peek-row]')).toHaveLength(2);
   });
 });

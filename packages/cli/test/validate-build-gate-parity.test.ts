@@ -364,6 +364,14 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
   // classification, for the same reasons.
   'Artifact assembly — puts already-collected, already-linted content into the bundle `os build` writes; judges nothing':
     ['placeCollectedDocs', 'placeSeedFiles', 'placeConnectorSpecFiles'],
+  // `os build`'s local-customization notice (`utils/local-customizations.ts`):
+  // it reads the local dev DATABASE, never the stack, and says how many
+  // Studio customizations (`<base>.custom` rows) the artifact leaves behind.
+  // It refuses nothing and the exit status never depends on it, so it is no
+  // gate in either direction; `os validate` writes no artifact to leave
+  // anything behind.
+  'An advisory about the local dev database, not the stack — says what the artifact leaves behind; judges no metadata and refuses nothing':
+    ['readLocalCustomizations', 'localCustomizationNotice'],
   'Presentation — renders, formats or serialises a verdict something else reached; judges nothing':
     [
       'printHeader',

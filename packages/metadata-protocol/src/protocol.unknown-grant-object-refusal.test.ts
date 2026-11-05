@@ -22,9 +22,11 @@
  *  - controls, each saved, published and promoted: a registered object, a
  *    platform object (an RBAC link table), the `'*'` wildcard, an object
  *    stored in this environment, an object drafted in the same package and
- *    published in the same batch (promoted after the set), and a re-save
- *    that keeps a grant the set already holds; a registry that cannot look
- *    an object up refuses nothing.
+ *    published in the same batch (promoted after the set), a re-save
+ *    that keeps a grant the set already holds, and [#30255] a copy whose
+ *    grants a set already holds (`inheritedGrantObjects`, the permission-set
+ *    clone door's copy); a registry that cannot look an object up refuses
+ *    nothing.
  *
  * Each refusal is asserted by its code, its status, its path and the first
  * sentence of its finding, spelled out here.
@@ -361,6 +363,25 @@ describe('[#28990] controls — a grant on an object that exists is not refused'
             type: 'permission', name: 'qa_old', item: set('qa_old', ['qa_gone', 'qa_typo']),
         }));
         expectRefusal(err, 'qa_old', ['qa_typo']);
+    });
+
+    it('[#30255] a copy that inherits a grant on an object not registered here (the clone door): saved; a grant the copy adds is still refused', async () => {
+        const { protocol, rows } = makeSession({ objects: ['qa_widget'] });
+
+        const result = await protocol.saveMetaItem({
+            type: 'permission', name: 'qa_copy', item: set('qa_copy', ['qa_widget', 'qa_plugin_object']),
+            inheritedGrantObjects: ['qa_widget', 'qa_plugin_object'],
+        });
+
+        expect(result.success).toBe(true);
+        expect(stored(rows, 'permission', 'qa_copy')).toEqual(['active|-|qa_widget,qa_plugin_object']);
+        // …while an unknown object the copy does not inherit is this save's grant, and refused.
+        const err = await refusalOf(protocol.saveMetaItem({
+            type: 'permission', name: 'qa_copy2', item: set('qa_copy2', ['qa_plugin_object', 'qa_typo']),
+            inheritedGrantObjects: ['qa_plugin_object'],
+        }));
+        expectRefusal(err, 'qa_copy2', ['qa_typo']);
+        expect(stored(rows, 'permission', 'qa_copy2')).toEqual([]);
     });
 
     it('a registry that cannot look an object up refuses nothing', async () => {

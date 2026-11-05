@@ -23,7 +23,10 @@ import {
   type SettingsLiveStatus,
   type SettingsLiveStatusProvider,
   type SettingsWritePredicate,
+  type SettingsWritePredicateOptions,
+  type SettingsRequestTransport,
   type SettingsDisplayOptions,
+  type SettingsWriteOptions,
   SETTINGS_LIVE_STATUS_BANNER_ID,
   type SettingsAuditSink,
   type SettingsContext,
@@ -893,7 +896,10 @@ export class SettingsService {
   /** Live-status providers by namespace — see {@link registerLiveStatus}. */
   private readonly liveStatusProviders = new Map<string, SettingsLiveStatusProvider>();
   /** Write predicates by namespace, then key — see {@link registerWritePredicate}. */
-  private readonly writePredicates = new Map<string, Map<string, SettingsWritePredicate>>();
+  private readonly writePredicates = new Map<
+    string,
+    Map<string, { predicate: SettingsWritePredicate; requestHeaders: ReadonlySet<string> }>
+  >();
   /** Change subscribers, optionally scoped to a namespace. */
   private readonly subscribers = new Set<{
     ns?: string;
@@ -1659,15 +1665,24 @@ export class SettingsService {
    * Register (or replace) the write predicate of one manifest key — a rule
    * over engine state that may refuse a CHANGE to the key. See
    * {@link SettingsWritePredicate}. The last registration wins, the same
-   * override rule as {@link registerAction}.
+   * override rule as {@link registerAction}. `options.requestHeaders` names the
+   * request headers the predicate may read ({@link SettingsWritePredicateOptions}).
    */
-  registerWritePredicate(namespace: string, key: string, predicate: SettingsWritePredicate): void {
+  registerWritePredicate(
+    namespace: string,
+    key: string,
+    predicate: SettingsWritePredicate,
+    options: SettingsWritePredicateOptions = {},
+  ): void {
     const reg = this.registry.get(namespace);
     if (!reg) throw new UnknownNamespaceError(namespace);
     if (!reg.scopes.has(key)) throw new UnknownKeyError(namespace, key);
     let byKey = this.writePredicates.get(namespace);
     if (!byKey) this.writePredicates.set(namespace, (byKey = new Map()));
-    byKey.set(key, predicate);
+    byKey.set(key, {
+      predicate,
+      requestHeaders: new Set((options.requestHeaders ?? []).map((name) => name.toLowerCase())),
+    });
   }
 
   /**
@@ -2345,14 +2360,15 @@ export class SettingsService {
    * the row it would store names no owner, and the user rung answers only its
    * owner, so no reader would ever see it while the write reported success.
    *
-   * `display` picks the language of a write predicate's refusal, and nothing
-   * else (see {@link refuseByWritePredicates}).
+   * `display` picks the language of a write predicate's refusal and hands it
+   * the request the write arrived on, and nothing else (see
+   * {@link refuseByWritePredicates}).
    */
   async setMany(
     namespace: string,
     patch: Record<string, unknown>,
     ctx: SettingsContext = {},
-    display: SettingsDisplayOptions = {},
+    display: SettingsWriteOptions = {},
   ): Promise<Record<string, ResolvedSettingValue>> {
     // The pre-bind window: refuse rather than resolve against a store nothing
     // will ever read. See `assertEngineBound`.
@@ -2668,7 +2684,7 @@ export class SettingsService {
     patch: Record<string, unknown>,
     ctx: SettingsContext,
     reach: OrganizationReach | undefined,
-    display: SettingsDisplayOptions,
+    display: SettingsWriteOptions,
   ): Promise<void> {
     const byKey = this.writePredicates.get(namespace);
     if (!byKey) return;
@@ -2678,14 +2694,27 @@ export class SettingsService {
     );
     const refusals: FieldError[] = [];
     for (const [key, submitted] of Object.entries(patch)) {
-      const predicate = byKey.get(key);
-      if (!predicate) continue;
+      const registered = byKey.get(key);
+      if (!registered) continue;
+      const { predicate } = registered;
       const next = submitted ?? null;
       const current = (await this.get(namespace, key, ctx)).value ?? null;
       if (stableStringify(next) === stableStringify(current)) continue;
       const scope = reg.scopes.get(key)!;
       const organizationId = scope === 'global' || !reach ? undefined : organizationReachRowOwner(reach) ?? null;
-      const refusal = await predicate({ namespace, key, next, current, organizationId, ctx, locale: display.locale, batch });
+      const refusal = await predicate({
+        namespace,
+        key,
+        next,
+        current,
+        organizationId,
+        ctx,
+        locale: display.locale,
+        // The whole write as built once above, never narrowed: `transport`
+        // is narrowed to what this predicate declared, `batch` is the write.
+        batch,
+        ...(display.transport ? { transport: narrowTransport(display.transport, registered.requestHeaders) } : {}),
+      });
       if (!refusal) continue;
       const spec = ((reg.manifest.specifiers ?? []) as Array<Record<string, unknown>>)
         .find((s) => s.key === key);
@@ -3803,6 +3832,24 @@ function stableStringify(input: unknown): string {
 }
 
 /** Re-typed env coercer (the canonical one lives in settings-service.types). */
+/**
+ * [#30203] The request as one write predicate sees it: the peer address, and
+ * only the headers it named at registration.
+ */
+function narrowTransport(
+  transport: SettingsRequestTransport,
+  names: ReadonlySet<string>,
+): SettingsRequestTransport {
+  const headers: Record<string, string | string[] | undefined> = {};
+  for (const [name, value] of Object.entries(transport.headers ?? {})) {
+    if (names.has(name.toLowerCase())) headers[name] = value;
+  }
+  return {
+    headers,
+    ...(transport.remoteAddress ? { remoteAddress: transport.remoteAddress } : {}),
+  };
+}
+
 function coerceEnvValue(raw: string, hint: unknown): unknown {
   if (typeof hint === 'boolean') return raw === 'true' || raw === '1' || raw === 'yes';
   if (typeof hint === 'number') {

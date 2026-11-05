@@ -1,0 +1,231 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * [#30203] `auth.allowed_ip_ranges` (ADR-0069 D5) can neither lock out the
+ * administrator saving it unwarned, nor stay in force after it is cleared.
+ *
+ * The composition: the real `AuthPlugin` bound to a real `SettingsService`
+ * carrying the shipped auth manifest, and the real settings routes in front of
+ * it, so a save travels the console's own door (`PUT /api/settings/auth`) and
+ * the clear reaches the running gate through the real change bus.
+ *
+ *  - Clearing applies at once. The console sends `null` for an emptied field;
+ *    the cascade then answers with source `default`, and the gate returns to
+ *    the deployment's own declaration in the same pass — empty when it
+ *    declared none, its own list when it did. Restoring the namespace's
+ *    defaults does the same.
+ *  - A save whose list leaves out the saving request's address is refused
+ *    (`400 SETTINGS_VALIDATION`, `invalid_value` at the key, the address in
+ *    `constraint.clientAddress`) and nothing is stored. The address is the one
+ *    the gate judges at sign-in: the peer address, or the forwarded one when
+ *    the deployment declares `trustProxy`. A list that includes it saves.
+ *  - The recovery the refusal names: `OS_AUTH_ALLOWED_IP_RANGES` set empty
+ *    opens the gate on the next boot over a stored list.
+ *
+ * `@objectstack/service-settings` resolves to its `src/` here (this package's
+ * `vitest.config.ts`), so the routes and the service are the checkout's.
+ */
+
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { IHttpRequest, IHttpResponse, IHttpServer, RouteHandler } from '@objectstack/spec/contracts';
+import {
+  SettingsService,
+  builtinSettingsManifests,
+  registerSettingsRoutes,
+} from '@objectstack/service-settings';
+import { AuthPlugin } from './auth-plugin.js';
+import type { AuthManager } from './auth-manager.js';
+
+const OFFICE = '203.0.113.0/24';
+const ADMIN_CTX = { enforced: true, permissions: ['manage_platform_settings'], userId: 'usr_admin' };
+const authManifest = builtinSettingsManifests.find((m) => m.namespace === 'auth')!;
+
+class MockHttp implements IHttpServer {
+  routes = new Map<string, RouteHandler>();
+  private add(method: string, path: string, handler: RouteHandler) {
+    this.routes.set(`${method} ${path}`, handler);
+  }
+  get(path: string, h: RouteHandler) { this.add('GET', path, h); return this as any; }
+  post(path: string, h: RouteHandler) { this.add('POST', path, h); return this as any; }
+  put(path: string, h: RouteHandler) { this.add('PUT', path, h); return this as any; }
+  delete(path: string, h: RouteHandler) { this.add('DELETE', path, h); return this as any; }
+  patch(path: string, h: RouteHandler) { this.add('PATCH', path, h); return this as any; }
+  use() { return this as any; }
+  listen() { return Promise.resolve(); }
+  close() { return Promise.resolve(); }
+  getInstance() { return null; }
+}
+
+interface Rig {
+  svc: SettingsService;
+  manager: AuthManager;
+  save(body: Record<string, unknown>, transport?: { headers?: Record<string, string>; remoteAddress?: string }):
+    Promise<{ status: number; body: any }>;
+}
+
+async function boot(
+  opts: { env?: Record<string, string | undefined>; svc?: SettingsService; plugin?: Record<string, unknown> } = {},
+): Promise<Rig> {
+  const svc = opts.svc ?? new SettingsService({ env: opts.env ?? {} });
+  if (!opts.svc) svc.registerManifest(authManifest);
+  const handlers = new Map<string, Array<() => Promise<void>>>();
+  const ctx: any = {
+    registerService: vi.fn(),
+    getService: vi.fn((name: string) => {
+      if (name === 'manifest') return { register: vi.fn() };
+      if (name === 'settings') return svc;
+      return undefined;
+    }),
+    getServices: vi.fn(() => new Map()),
+    hook: vi.fn((name: string, handler: () => Promise<void>) => {
+      handlers.set(name, [...(handlers.get(name) ?? []), handler]);
+    }),
+    trigger: vi.fn(),
+    logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+    getKernel: vi.fn(),
+  };
+  const plugin = new AuthPlugin({
+    secret: 'test-secret-at-least-32-chars-long',
+    baseUrl: 'http://localhost:3000',
+    ...(opts.plugin ?? {}),
+  });
+  await plugin.init(ctx);
+  const manager = ctx.registerService.mock.calls.find(([name]: [string]) => name === 'auth')?.[1] as AuthManager;
+  await plugin.start(ctx);
+  for (const h of handlers.get('kernel:ready') ?? []) await h();
+
+  const http = new MockHttp();
+  registerSettingsRoutes(http, svc, { contextFromRequest: () => ({ ...ADMIN_CTX }) });
+  const save: Rig['save'] = async (body, transport = {}) => {
+    const out = { status: 200, body: undefined as any };
+    const res: IHttpResponse = {
+      json: vi.fn((data: any) => { out.body = data; }) as any,
+      send: vi.fn() as any,
+      status: vi.fn((code: number) => { out.status = code; return res; }) as any,
+      header: vi.fn(() => res) as any,
+    };
+    const req: IHttpRequest = {
+      params: { namespace: 'auth' },
+      query: {},
+      body,
+      headers: transport.headers ?? {},
+      method: 'PUT',
+      path: '/api/settings/auth',
+      ...(transport.remoteAddress ? { remoteAddress: transport.remoteAddress } : {}),
+    };
+    await http.routes.get('PUT /api/settings/:namespace')!(req, res);
+    return out;
+  };
+  return { svc, manager, save };
+}
+
+const stored = async (svc: SettingsService) => (await svc.get('auth', 'allowed_ip_ranges', {})).value ?? null;
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe('#30203 clearing allowed_ip_ranges applies at once', () => {
+  it('a cleared value opens the gate in the same pass, with no restart', async () => {
+    const { svc, manager } = await boot();
+    await svc.set('auth', 'allowed_ip_ranges', OFFICE, {});
+    await vi.waitFor(() => expect(manager.isClientIpAllowed('::1')).toBe(false));
+    expect(manager.isClientIpAllowed('203.0.113.7')).toBe(true);
+
+    await svc.set('auth', 'allowed_ip_ranges', null, {});
+    expect((await svc.get('auth', 'allowed_ip_ranges', {})).source).toBe('default');
+    await vi.waitFor(() => expect(manager.isClientIpAllowed('::1')).toBe(true));
+  });
+
+  it('restoring the namespace defaults opens the gate too', async () => {
+    const { svc, manager } = await boot();
+    await svc.set('auth', 'allowed_ip_ranges', OFFICE, {});
+    await vi.waitFor(() => expect(manager.isClientIpAllowed('::1')).toBe(false));
+
+    await svc.resetNamespace('auth', {});
+    await vi.waitFor(() => expect(manager.isClientIpAllowed('::1')).toBe(true));
+  });
+
+  it("a cleared value hands the gate back to the deployment's own declared list, not to none", async () => {
+    const { svc, manager } = await boot({ plugin: { allowedIpRanges: ['10.0.0.0/8'] } });
+    expect(manager.isClientIpAllowed('203.0.113.7')).toBe(false);
+    await svc.set('auth', 'allowed_ip_ranges', OFFICE, {});
+    await vi.waitFor(() => expect(manager.isClientIpAllowed('203.0.113.7')).toBe(true));
+    expect(manager.isClientIpAllowed('10.1.2.3')).toBe(false);
+
+    await svc.set('auth', 'allowed_ip_ranges', null, {});
+    await vi.waitFor(() => expect(manager.isClientIpAllowed('10.1.2.3')).toBe(true));
+    expect(manager.isClientIpAllowed('203.0.113.7')).toBe(false);
+  });
+});
+
+describe('#30203 a console save that excludes the saving address is refused', () => {
+  it('refuses a list without the peer address, names it, and stores nothing', async () => {
+    const { svc, save } = await boot();
+    const res = await save({ allowed_ip_ranges: OFFICE }, { remoteAddress: '::1' });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('SETTINGS_VALIDATION');
+    const field = res.body.error.details.fields.find((f: any) => f.field === 'allowed_ip_ranges');
+    expect(field.code).toBe('invalid_value');
+    expect(field.constraint).toEqual({ clientAddress: '::1' });
+    expect(field.message).toContain('::1');
+    expect(await stored(svc)).toBeNull();
+  });
+
+  it('saves a list that includes the peer address (preservation)', async () => {
+    const { svc, manager, save } = await boot();
+    const res = await save({ allowed_ip_ranges: `${OFFICE}\n127.0.0.1` }, { remoteAddress: '::ffff:127.0.0.1' });
+    expect(res.status).toBe(200);
+    expect(await stored(svc)).toBe(`${OFFICE}\n127.0.0.1`);
+    await vi.waitFor(() => expect(manager.isClientIpAllowed('198.51.100.1')).toBe(false));
+    expect(manager.isClientIpAllowed('127.0.0.1')).toBe(true);
+  });
+
+  it('judges the address the gate judges: the forwarded one under trustProxy, the peer otherwise', async () => {
+    const forwarded = { headers: { 'x-forwarded-for': '198.51.100.7' }, remoteAddress: '10.0.0.1' };
+
+    const trusting = await boot({ plugin: { trustProxy: true } });
+    const refused = await trusting.save({ allowed_ip_ranges: '10.0.0.0/8' }, forwarded);
+    expect(refused.status).toBe(400);
+    expect(refused.body.error.details.fields[0].constraint).toEqual({ clientAddress: '198.51.100.7' });
+    expect((await trusting.save({ allowed_ip_ranges: '198.51.100.0/24' }, forwarded)).status).toBe(200);
+
+    const untrusting = await boot();
+    const peer = await untrusting.save({ allowed_ip_ranges: '198.51.100.0/24' }, forwarded);
+    expect(peer.status).toBe(400);
+    expect(peer.body.error.details.fields[0].constraint).toEqual({ clientAddress: '10.0.0.1' });
+  });
+
+  it('refuses any list when the saving address cannot be established', async () => {
+    const { svc, save } = await boot();
+    const res = await save({ allowed_ip_ranges: OFFICE }, {});
+    expect(res.status).toBe(400);
+    expect(res.body.error.details.fields[0].constraint).toEqual({ clientAddress: null });
+    expect(await stored(svc)).toBeNull();
+  });
+
+  it('never refuses a clear, and leaves an in-process write (no request) unjudged', async () => {
+    const { svc, save } = await boot();
+    await svc.set('auth', 'allowed_ip_ranges', OFFICE, {});
+    expect(await stored(svc)).toBe(OFFICE);
+    const res = await save({ allowed_ip_ranges: null }, { remoteAddress: '::1' });
+    expect(res.status).toBe(200);
+    expect(await stored(svc)).toBeNull();
+  });
+});
+
+describe('#30203 the recovery the refusal names', () => {
+  it('OS_AUTH_ALLOWED_IP_RANGES set empty opens the gate over a stored list on the next boot', async () => {
+    const env: Record<string, string | undefined> = {};
+    const svc = new SettingsService({ env });
+    svc.registerManifest(authManifest);
+    await svc.set('auth', 'allowed_ip_ranges', OFFICE, {});
+
+    const locked = await boot({ svc });
+    expect(locked.manager.isClientIpAllowed('::1')).toBe(false);
+
+    env.OS_AUTH_ALLOWED_IP_RANGES = '';
+    const recovered = await boot({ svc });
+    expect(recovered.manager.isClientIpAllowed('::1')).toBe(true);
+  });
+});

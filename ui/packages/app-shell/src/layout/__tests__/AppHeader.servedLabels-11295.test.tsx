@@ -175,6 +175,8 @@ const BUNDLE = {
         showcase_task: { label: 'Task', _views: { in_progress: { label: 'In Progress' }, mine: { label: 'My Tasks' }, board: { label: 'Board View' } } },
       },
       dashboards: { ops_board: { label: 'Operations' } },
+      reports: { ops_report: { label: 'Pipeline' } },
+      pages: { welcome_tour: { label: 'Welcome' } },
     },
   },
   'zh-CN': {
@@ -183,6 +185,8 @@ const BUNDLE = {
         showcase_task: { label: '任务', _views: { in_progress: { label: '进行中' }, mine: { label: '我的任务' }, board: { label: '看板' } } },
       },
       dashboards: { ops_board: { label: '运营看板' } },
+      reports: { ops_report: { label: '销售管道' } },
+      pages: { welcome_tour: { label: '欢迎' } },
     },
   },
 };
@@ -325,5 +329,80 @@ describe('AppHeader — a served dashboard is named as served (objectui#11295)',
 
     expect(screen.getAllByText('运营看板').length).toBeGreaterThan(0);
     expect(screen.queryAllByText('Ops Board')).toHaveLength(0);
+  });
+});
+
+/**
+ * objectstack#30244 — a served report's crumb and a served page's phone title
+ * are named as served, as the dashboard's above.
+ *
+ * The packaged catalog translates `ops_report` and `welcome_tour`. An override
+ * (a `.custom` package's, or a published edit) renamed both, and the `/meta`
+ * read serves the new name by the server's label order for an overridden
+ * item; the crumb and the title re-applied the packaged translation over it,
+ * because the served label reached the catalog lookup only as its fallback.
+ *
+ * Directions, written before the run: the renamed cells RED before the change
+ * (the packaged string in both languages), GREEN after; the unedited and the
+ * not-served controls GREEN on both sides.
+ */
+describe('AppHeader — a served report or page is named as served (objectstack#30244)', () => {
+  const RENAMED_REPORT = 'Deal Flow (renamed-30244)';
+  const RENAMED_PAGE = 'Getting Started (renamed-30244)';
+  const PACKAGED_REPORT = { en: 'Pipeline', 'zh-CN': '销售管道' } as const;
+  const PACKAGED_PAGE = { en: 'Welcome', 'zh-CN': '欢迎' } as const;
+
+  function served(reportLabel: string | undefined, pageLabel: string | undefined) {
+    const objects = world(EDITED_VIEW, EDITED_DASHBOARD);
+    meta.value = {
+      ...meta.value,
+      reports: reportLabel === undefined ? [] : [{ name: 'ops_report', label: reportLabel }],
+      pages: pageLabel === undefined ? [] : [{ name: 'welcome_tour', label: pageLabel }],
+    };
+    return objects;
+  }
+
+  it.each(LANGUAGES)('%s: the report crumb draws the renamed report as served, not the packaged string', (language) => {
+    renderAt('/apps/showcase_app/report/ops_report', language, served(RENAMED_REPORT, RENAMED_PAGE));
+
+    expect(screen.getAllByText(RENAMED_REPORT).length).toBeGreaterThan(0);
+    expect(screen.queryAllByText(PACKAGED_REPORT[language])).toHaveLength(0);
+  });
+
+  it.each(LANGUAGES)('%s: the page title draws the renamed page as served, not the packaged string', (language) => {
+    renderAt('/apps/showcase_app/page/welcome_tour', language, served(RENAMED_REPORT, RENAMED_PAGE));
+
+    expect(screen.getAllByText(RENAMED_PAGE).length).toBeGreaterThan(0);
+    expect(screen.queryAllByText(PACKAGED_PAGE[language])).toHaveLength(0);
+  });
+
+  it.each(LANGUAGES)('%s: control — an unedited served report and page show the translation the server put in', (language) => {
+    const objects = served(PACKAGED_REPORT[language], PACKAGED_PAGE[language]);
+    renderAt('/apps/showcase_app/report/ops_report', language, objects);
+    expect(screen.getAllByText(PACKAGED_REPORT[language]).length).toBeGreaterThan(0);
+    cleanup();
+
+    renderAt('/apps/showcase_app/page/welcome_tour', language, objects);
+    expect(screen.getAllByText(PACKAGED_PAGE[language]).length).toBeGreaterThan(0);
+  });
+
+  it('zh-CN: control — a report and a page the `/meta` read did not serve are named by the bundle', () => {
+    // No served document under these names: the text is the humanized slug,
+    // which no server translated, so the bundle is its translation.
+    const objects = served(undefined, undefined);
+    renderAt('/apps/showcase_app/report/ops_report', 'zh-CN', objects);
+    expect(screen.getAllByText('销售管道').length).toBeGreaterThan(0);
+    expect(screen.queryAllByText('Ops Report')).toHaveLength(0);
+    cleanup();
+
+    renderAt('/apps/showcase_app/page/welcome_tour', 'zh-CN', objects);
+    expect(screen.getAllByText('欢迎').length).toBeGreaterThan(0);
+    expect(screen.queryAllByText('Welcome Tour')).toHaveLength(0);
+  });
+
+  it('en: control — a report and a page with no catalogue entry and no served document keep the humanized slug', () => {
+    const objects = served(undefined, undefined);
+    renderAt('/apps/showcase_app/report/q3_results', 'en', objects);
+    expect(screen.getAllByText('Q3 Results').length).toBeGreaterThan(0);
   });
 });

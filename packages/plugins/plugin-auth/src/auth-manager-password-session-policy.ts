@@ -62,7 +62,9 @@ export interface PasswordSessionPolicyHost {
   _orgMfaCache: AuthManager['_orgMfaCache'];
   _orgMfaRefreshing: AuthManager['_orgMfaRefreshing'];
   getDataEngine: AuthManager['getDataEngine'];
+  isTwoFactorEnabled: AuthManager['isTwoFactorEnabled'];
   logDurabilityDegradation: AuthManager['logDurabilityDegradation'];
+  noteMfaRequirementWithoutEnrollment: AuthManager['noteMfaRequirementWithoutEnrollment'];
   parseHashes: AuthManager['parseHashes'];
   refreshMustChangeCacheIfStale: AuthManager['refreshMustChangeCacheIfStale'];
   refreshOrgMfaCacheIfStale: AuthManager['refreshOrgMfaCacheIfStale'];
@@ -136,7 +138,7 @@ export function refreshOrgMfaCacheIfStale(this: Pick<PasswordSessionPolicyHost, 
 
 /** The body of `AuthManager#resolveUserAuthGates`; the method's docblock there is its contract. */
 export async function resolveUserAuthGates(
-  this: Pick<PasswordSessionPolicyHost, '_mustChangeCache' | '_orgMfaCache' | 'config' | 'getDataEngine' | 'refreshMustChangeCacheIfStale' | 'refreshOrgMfaCacheIfStale'>,
+  this: Pick<PasswordSessionPolicyHost, '_mustChangeCache' | '_orgMfaCache' | 'config' | 'getDataEngine' | 'isTwoFactorEnabled' | 'noteMfaRequirementWithoutEnrollment' | 'refreshMustChangeCacheIfStale' | 'refreshOrgMfaCacheIfStale'>,
   userId: string,
   options: { organizationId?: string } = {},
 ): Promise<AuthGate[]> {
@@ -205,7 +207,21 @@ export async function resolveUserAuthGates(
     // A user without TOTP enrolled is blocked once their grace window
     // elapses. The clock (`mfa_required_at`) starts the first time we see
     // them required-but-unenrolled (stamped lazily, best-effort).
-    if (mfaRequired && !(u?.two_factor_enabled === true || u?.two_factor_enabled === 1)) {
+    //
+    // [#30201] Only while they CAN enroll. The twoFactor plugin's
+    // `/two-factor/*` endpoints are the one enrollment path; with the plugin
+    // off, a hold here answers `MFA_REQUIRED` to a user whose remediation
+    // endpoint does not exist, which locks every member of the organization
+    // out, the owner included, behind the very gate that guards Setup. So an
+    // unenrollable requirement is not enforced (no hold, and no grace clock
+    // started: the window opens when enrollment does) and is reported once.
+    // The `require_mfa` write guard refuses a new requirement in that state
+    // (`organization-mfa-enrollment-guard.ts`); this covers rows stored before
+    // it, and an `OS_AUTH_TWO_FACTOR=false` pin under the global setting.
+    const unenrolled = !(u?.two_factor_enabled === true || u?.two_factor_enabled === 1);
+    if (mfaRequired && unenrolled && !this.isTwoFactorEnabled()) {
+      this.noteMfaRequirementWithoutEnrollment();
+    } else if (mfaRequired && unenrolled) {
       const graceDays = Math.max(0, Math.floor(Number(this.config.mfaGracePeriodDays ?? 7)));
       let requiredAt = u?.mfa_required_at;
       if (!requiredAt) {
