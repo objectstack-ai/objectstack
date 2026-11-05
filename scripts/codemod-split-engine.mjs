@@ -2744,8 +2744,12 @@ async function mainScoped(tm, argv) {
  */
 const HAND_DOCS_CARD = '#30053';
 
-/** The marker a hand-series stub's body opens with; group 1 is the module, group 2 the phrase once moved. */
-const HAND_STUB_MARK = /^ *\/\/ \[(?:#25522 cut \d+|#27495|#29460)\] The body (?:moved to|lives in) `(engine-[a-z0-9-]+\.ts)`(, its docblock with it)?/;
+/**
+ * The marker a hand-series stub's body opens with: `[#25522 cut N]` or
+ * `[#27495]` then "The body moved to", or #29460's untagged "The body lives
+ * in". Group 1 is the module, group 2 the phrase once moved.
+ */
+const HAND_STUB_MARK = /^ *\/\/ (?:\[(?:#25522 cut \d+|#27495)\] )?The body (?:moved to|lives in) `(engine-[a-z0-9-]+\.ts)`(, its docblock with it)?/;
 
 /** The phrase a stub's marker gains after its module's backticked name. */
 const HAND_DOC_MOVED = `, ${DOC_MOVED}`;
@@ -3452,7 +3456,7 @@ export class ObjectQL {
 
   /** A beta docblock, {@link LinkedOnly}. */
   private betaPrivate(): number {
-    // [#29460] The body lives in \`engine-beta.ts\`; it reads no member.
+    // The body lives in \`engine-beta.ts\`; it reads no member.
     return betaPrivate();
   }
 
