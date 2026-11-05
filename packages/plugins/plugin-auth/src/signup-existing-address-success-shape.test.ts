@@ -33,11 +33,19 @@
  *    kinds of address get the same answer while every send is still open, and
  *    the mails still go out after the response; a verification send that fails
  *    is logged on the server and answered like one that is sent; the
- *    server-side sign-up call (no `Request`) still awaits its sends, and the
- *    `/send-verification-email` resend still reports a send that failed.
+ *    server-side sign-up call (no `Request`) still awaits its sends, and a
+ *    signed-in caller's `/send-verification-email` resend still reports a send
+ *    that failed;
+ *  - ⑧ a verification-email resend from a visitor who is not signed in answers
+ *    the same whatever the send does: while the transport is live, every
+ *    address gets the success answer before the send settles, and a send that
+ *    fails is logged on the server; while it is not live, every address gets
+ *    the same `EMAIL_SERVICE_REQUIRED` refusal and nothing is sent. A signed-in
+ *    caller, by cookie or by bearer token, is not refused, and a server-side
+ *    call still awaits its send.
  *
- * The mail of ①, ⑤ and ⑥ is sent after the response, so those cases wait for
- * it to arrive before reading it.
+ * The mail of ①, ⑤, ⑥ and ⑧ is sent after the response, so those cases wait
+ * for it to arrive before reading it.
  *
  * Real engine for the same reason the sibling file gives: the uniqueness probe
  * and the row the vendor finds both live below any double.
@@ -439,41 +447,44 @@ describe('[#25060] ⑥ a send that fails after the decision', () => {
   });
 });
 
+/** A promise the case settles by hand. */
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
+/**
+ * A live email service whose every send waits on `gate` and then answers
+ * `status()` (`'throws'` makes the send throw); it records each send it
+ * settled, as `[template, address]`.
+ */
+function gatedEmail(gate: () => Promise<void>, status: () => 'sent' | 'failed' | 'throws' = () => 'sent') {
+  const settled: Array<[string, string]> = [];
+  const service = {
+    async send() { return { id: 'e', status: 'sent' }; },
+    async sendTemplate(input: any) {
+      try {
+        await gate();
+        const outcome = status();
+        if (outcome === 'throws') throw new Error('smtp connection reset (simulated)');
+        return outcome === 'failed'
+          ? { id: 'e', status: 'failed', error: 'smtp refused (simulated)' }
+          : { id: 'e', status: 'sent' };
+      } finally {
+        settled.push([input.template, input.to.address]);
+      }
+    },
+    isConfigured: () => true,
+  };
+  return { settled, service };
+}
+
 describe('⑦ a sign-up answers without waiting for any mail send, whether or not the address already has an account', () => {
   const NEW = 'dave@corp.example';
   const VERIFY = 'auth.verify_email';
-
-  /** A promise the case settles by hand. */
-  function deferred(): { promise: Promise<void>; resolve: () => void } {
-    let resolve!: () => void;
-    const promise = new Promise<void>((r) => {
-      resolve = r;
-    });
-    return { promise, resolve };
-  }
-
-  /**
-   * A live email service whose every send waits on `gate` and then answers
-   * `status()`; it records each send it settled, as `[template, address]`.
-   */
-  function gatedEmail(gate: () => Promise<void>, status: () => 'sent' | 'failed' = () => 'sent') {
-    const settled: Array<[string, string]> = [];
-    const service = {
-      async send() { return { id: 'e', status: 'sent' }; },
-      async sendTemplate(input: any) {
-        try {
-          await gate();
-          return status() === 'failed'
-            ? { id: 'e', status: 'failed', error: 'smtp refused (simulated)' }
-            : { id: 'e', status: 'sent' };
-        } finally {
-          settled.push([input.template, input.to.address]);
-        }
-      },
-      isConfigured: () => true,
-    };
-    return { settled, service };
-  }
 
   const sorted = (pairs: ReadonlyArray<readonly [string, string]>) => pairs.map((p) => p.join(' ')).sort();
 
@@ -538,7 +549,7 @@ describe('⑦ a sign-up answers without waiting for any mail send, whether or no
     expect(sorted(email.settled)).toEqual(sorted([[VERIFY, NEW], [NOTICE, EXISTING]]));
   });
 
-  it('the /send-verification-email resend still awaits its send and reports one that failed', async () => {
+  it("a signed-in caller's /send-verification-email resend still awaits its send and reports one that failed", async () => {
     // A deployment where a new sign-up is signed in at once, so the resend
     // runs for the caller's own session.
     const engine = await bootEngine();
@@ -566,5 +577,122 @@ describe('⑦ a sign-up answers without waiting for any mail send, whether or no
     const failed = await resend();
     expect(failed.status, await failed.clone().text()).toBe(500);
     expect(email.settled).toEqual([[VERIFY, NEW], [VERIFY, NEW]]);
+  });
+});
+
+describe('⑧ a verification-email resend from a visitor who is not signed in answers the same whatever the send does', () => {
+  const NEW = 'dave@corp.example';
+  const VERIFY = 'auth.verify_email';
+  const SERVICE_REQUIRED = 'EMAIL_SERVICE_REQUIRED';
+  /**
+   * One address of each kind: no account; an account whose address is
+   * confirmed; and Alice's, whose confirmation is still outstanding — the one
+   * a resend mails.
+   */
+  const NO_ACCOUNT = 'nobody@corp.example';
+  const CONFIRMED = 'carol@corp.example';
+  const ADDRESSES = [NO_ACCOUNT, CONFIRMED, EXISTING] as const;
+
+  async function bootWithConfirmedAddress(): Promise<ObjectQL> {
+    const engine = await bootEngine();
+    await engine.insert('sys_user', { id: 'usr_carol', email: CONFIRMED, name: 'Carol', email_verified: true }, SYSTEM);
+    return engine;
+  }
+
+  /** The resend, asked over HTTP; with no credential header the caller is a visitor. */
+  function resend(manager: AuthManager, email: string, headers: Record<string, string> = {}): Promise<Response> {
+    return manager.handleRequest(
+      new Request(`${AUTH}/send-verification-email`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: BASE, ...headers },
+        body: JSON.stringify({ email }),
+      }),
+    );
+  }
+
+  /** Every address's answer, as status and parsed body, asked all at once. */
+  async function answersFor(manager: AuthManager): Promise<Array<{ status: number; body: unknown }>> {
+    const responses = await Promise.all(ADDRESSES.map((address) => resend(manager, address)));
+    return Promise.all(responses.map(async (res) => ({ status: res.status, body: await res.json() })));
+  }
+
+  for (const failure of ['failed', 'throws'] as const) {
+    it(`while the transport is live, a send that ${failure === 'failed' ? 'reports failure' : 'throws'} leaves every address the same success answer, given before the send settles, and is logged on the server at error`, async () => {
+      const engine = await bootWithConfirmedAddress();
+      const open = deferred();
+      const email = gatedEmail(() => open.promise, () => failure);
+      const { errors, logger } = recordingLogger();
+      const manager = makeManager(engine, email, { ...OPEN, logger });
+
+      const answers = await answersFor(manager);
+
+      expect(answers).toEqual(ADDRESSES.map(() => ({ status: 200, body: { status: true } })));
+      // Every answer arrived while the send was still open.
+      expect(email.settled).toEqual([]);
+
+      // The control: the send still runs, after the response, and what it did
+      // is the server's to log.
+      open.resolve();
+      await vi.waitFor(() => expect(email.settled).toEqual([[VERIFY, EXISTING]]));
+      await vi.waitFor(() => expect(errors).toHaveLength(1));
+      expect(errors[0]).toContain('verification email was not delivered');
+    });
+  }
+
+  for (const [label, transport] of [
+    ['the log transport: isConfigured() answers false', () => recordingEmail(false)],
+    ['an email service without isConfigured()', () => recordingEmail('absent')],
+    ['no email service at all', () => undefined],
+  ] as const) {
+    it(`while the transport is not live (${label}), every address gets the same ${SERVICE_REQUIRED} refusal and nothing is sent`, async () => {
+      const engine = await bootWithConfirmedAddress();
+      const email = transport();
+      const manager = makeManager(engine, email, { ...OPEN, emailVerification: { sendOnSignUp: false } });
+
+      const answers = await answersFor(manager);
+
+      expect(answers[0].status, JSON.stringify(answers[0].body)).toBe(400);
+      expect((answers[0].body as { code?: string }).code).toBe(SERVICE_REQUIRED);
+      expect(answers).toEqual(ADDRESSES.map(() => answers[0]));
+      expect(email?.sent ?? []).toEqual([]);
+    });
+  }
+
+  it('while the transport is not live, a signed-in caller is not refused: their resend, by cookie or by bearer token, still sends', async () => {
+    const engine = await bootEngine();
+    const email = recordingEmail(false);
+    // A deployment where a new sign-up is signed in at once, so the resend
+    // runs for the caller's own session.
+    const manager = makeManager(engine, email, {
+      ...OPEN,
+      emailAndPassword: { requireEmailVerification: false },
+      emailVerification: { sendOnSignUp: false },
+    });
+    const signedUp = await signUp(manager, NEW);
+    expect(signedUp.status, await signedUp.clone().text()).toBe(200);
+    const cookie = signedUp.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ');
+    const bearer = signedUp.headers.get('set-auth-token');
+    expect(bearer, 'the sign-up handed out no bearer token').toBeTruthy();
+
+    const byCookie = await resend(manager, NEW, { cookie });
+    const byBearer = await resend(manager, NEW, { authorization: `Bearer ${bearer}` });
+
+    for (const res of [byCookie, byBearer]) {
+      expect(res.status, await res.clone().text()).toBe(200);
+      expect(await res.json()).toEqual({ status: true });
+    }
+    expect(email.sent.map((s) => [s.template, s.to.address])).toEqual([[VERIFY, NEW], [VERIFY, NEW]]);
+  });
+
+  it('a server-side call, which carries no Request, still awaits its send and reports one that failed', async () => {
+    const engine = await bootEngine();
+    const email = gatedEmail(async () => {}, () => 'failed');
+    const manager = makeManager(engine, email, { ...OPEN });
+    const api = (await manager.getApi()) as unknown as {
+      sendVerificationEmail(input: { body: { email: string } }): Promise<unknown>;
+    };
+
+    await expect(api.sendVerificationEmail({ body: { email: EXISTING } })).rejects.toThrow(/smtp refused \(simulated\)/);
+    expect(email.settled).toEqual([[VERIFY, EXISTING]]);
   });
 });

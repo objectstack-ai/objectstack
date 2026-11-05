@@ -17,12 +17,16 @@
  * logs `Failed to run background task` and returns normally
  * (`better-auth/dist/context/create-context.mjs`). The `/send-verification-email`
  * route does NOT — it awaits `sendVerificationEmailFn` directly and rethrows —
- * so the resend path is honest today and must stay that way.
+ * so a signed-in caller's resend is honest today and must stay that way. A
+ * resend from a visitor who is not signed in answers the same whatever the
+ * send does: its send runs after the response and this rejection is logged on
+ * the server, and while no transport is live the resend is refused up front
+ * with `EMAIL_SERVICE_REQUIRED` (`visitor-verification-resend.ts`).
  *
- * Hence these assertions: they are the contract the cloud verify-email screen
- * reads through the resend endpoint, and the reason the *first* half of #14318
- * is a configuration-time refusal in plugin-email rather than another layer of
- * error plumbing here.
+ * Hence these assertions: they are the contract a signed-in caller's resend
+ * reads, and the server log a visitor's resend leaves, and the reason the
+ * *first* half of #14318 is a configuration-time refusal in plugin-email
+ * rather than another layer of error plumbing here.
  */
 
 import { describe, it, expect, vi } from 'vitest';

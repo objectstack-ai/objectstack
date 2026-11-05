@@ -115,6 +115,10 @@ const OBJECTS_READERS: Record<string, { kind: Kind; why: string }> = {
   'packages/app-shell/src/views/metadata-admin/AssignedUsersSection.tsx': { kind: 'off', why: 'the metadata admin' },
   'packages/app-shell/src/views/metadata-admin/previews/ScreenPreview.tsx': { kind: 'off', why: "the metadata admin's form-screen preview" },
   'packages/app-shell/src/views/studio-design/ObjectListViewInspector.tsx': { kind: 'off', why: 'Studio' },
+  'packages/app-shell/src/views/studio-design/ObjectListViewTitle.tsx': {
+    kind: 'off',
+    why: "Studio: the object's view labels New view refuses to reuse, the read the list-view panel made before the switcher moved into the header (objectstack#30046)",
+  },
   'packages/app-shell/src/views/studio-design/studio-canvas-preview.tsx': { kind: 'off', why: 'Studio' },
   'packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx': {
     kind: 'off',

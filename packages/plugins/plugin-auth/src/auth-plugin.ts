@@ -82,7 +82,7 @@ import { runSetInitialPassword } from './set-initial-password.js';
 import { runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runVerifyDomain, type AuthRequestHandler } from './register-sso-provider.js';
 import { runResendVerificationEmail } from './send-verification-email.js';
 import { runSysSessionRevoke, sysSessionRevokeDepsFor } from './sys-session-revoke.js';
-import { runOneTimeTokenHandoff } from './one-time-token-handoff.js';
+import { resolveHandoffSignInEntry, runOneTimeTokenHandoff } from './one-time-token-handoff.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import {
   seedCreatedOrganizationCurrency,
@@ -4030,10 +4030,13 @@ export class AuthPlugin implements Plugin {
     // the app redeems at better-auth's own `/one-time-token/verify`, bound to
     // the shell's PKCE challenge so an intercepted callback cannot be
     // redeemed. Mounted unconditionally: with no registered scheme every
-    // target is refused with a 400 that says how to register one. A session
-    // signed in within the last five minutes is required, and a cross-site
-    // navigation is refused (ruling A); the reasons for every refusal live in
+    // target is refused with a 400 that says how to register one. Only a session
+    // signed in within the last five minutes is handed off, and a cross-site
+    // navigation is refused (ruling A). A page navigation without such a session
+    // goes to this deployment's sign-in page and comes back, so the app opens this
+    // route and never names the Console's. The reasons for every answer live in
     // `one-time-token-handoff.ts`. Ledgered in auth-route-ledger.ts.
+    let reportedNoHandoffSignInPage = false;
     rawApp.get(`${basePath}/one-time-token/handoff`, async (c: any) => {
       try {
         const manager = this.authManager!;
@@ -4050,6 +4053,25 @@ export class AuthPlugin implements Plugin {
               const api: any = await manager.getApi();
               return api.generateOneTimeToken({ headers });
             },
+            signInEntry: (headers) =>
+              resolveHandoffSignInEntry({
+                signInPageUrl: manager.getConsoleUrl('/login'),
+                authBaseUrl: manager.getAuthIssuer(),
+                authMountPath: basePath,
+                requestUrl: c.req.url,
+                requestHost: headers.get('host'),
+                server: rawApp,
+                serverEnv: c.env,
+                onUnserved: (path, reason) => {
+                  if (reportedNoHandoffSignInPage) return;
+                  reportedNoHandoffSignInPage = true;
+                  ctx.logger.warn(
+                    `[AuthPlugin] one-time-token/handoff: this server does not serve a sign-in page at ${path} (${reason}), ` +
+                      'so a signed-out browser that opens the mobile sign-in hand-off sees a JSON 401 instead of a sign-in form. ' +
+                      'Mount the Console, or set uiBasePath to where it is mounted. Reported once.',
+                  );
+                },
+              }),
           },
           { queries: (c.req.queries() ?? {}) as Record<string, string[]>, headers: c.req.raw.headers },
         );

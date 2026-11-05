@@ -245,3 +245,63 @@ describe('pickRenderableLocale', () => {
     expect(pickRenderableLocale('ja', null)).toBeNull();
   });
 });
+
+/**
+ * The console resolves a stored tag in the server's `resolveLocale` order
+ * (exact → case → base language → variant), so a legacy mis-cased row and a
+ * tag the deployment offers only as a variant no longer render English.
+ */
+describe('pickRenderableLocale follows the server resolveLocale order', () => {
+  // What a deployment's locale endpoint answers: full BCP-47 tags.
+  const served = ['en', 'zh-CN', 'ja-JP'];
+
+  it('folds case to the offered spelling (a legacy mis-cased row)', () => {
+    expect(pickRenderableLocale('zh-cn', served)).toBe('zh-CN');
+    expect(pickRenderableLocale('ZH-CN', served)).toBe('zh-CN');
+  });
+
+  it('expands a bare language to the offered variant', () => {
+    expect(pickRenderableLocale('zh', served)).toBe('zh-CN');
+    expect(pickRenderableLocale('ja', served)).toBe('ja-JP');
+  });
+
+  it('reaches the offered variant through a script-tagged tag', () => {
+    expect(pickRenderableLocale('zh-Hans-CN', served)).toBe('zh-CN');
+  });
+
+  it('falls back to the base language for an unoffered region', () => {
+    expect(pickRenderableLocale('en-GB', served)).toBe('en');
+    expect(pickRenderableLocale('EN-gb', served)).toBe('en');
+  });
+
+  it('prefers the base language over a sibling variant', () => {
+    expect(pickRenderableLocale('pt-PT', ['en', 'pt', 'pt-BR'])).toBe('pt');
+  });
+
+  it('takes the first offered variant when several share a base', () => {
+    expect(pickRenderableLocale('zh', ['en', 'zh-TW', 'zh-CN'])).toBe('zh-TW');
+  });
+
+  it('still matches nothing for a language nobody offers', () => {
+    expect(pickRenderableLocale('th-TH', served)).toBeNull();
+    expect(pickRenderableLocale('xx-YY', served)).toBeNull();
+    expect(pickRenderableLocale('zh', [])).toBeNull();
+  });
+
+  it('renders the offered variant for a bare column, end to end', async () => {
+    const adapter = fakeUserAdapter('zh');
+    session.user = { id: 'usr_1' };
+    session.adapter = adapter;
+
+    render(
+      <I18nProvider
+        config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}
+        loadLocales={async () => ['en', 'zh-CN']}
+      >
+        <Probe />
+      </I18nProvider>,
+    );
+
+    await waitFor(() => expect(shownLanguage()).toBe('zh-CN'));
+  });
+});
