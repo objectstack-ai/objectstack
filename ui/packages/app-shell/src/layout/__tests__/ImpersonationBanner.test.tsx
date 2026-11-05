@@ -30,10 +30,11 @@
  * resolved, and what the console renders for it.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from 'vitest';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { AuthProvider, TokenStorage } from '@object-ui/auth';
+import { useEffect } from 'react';
+import { AuthProvider, TokenStorage, createAuthenticatedFetch } from '@object-ui/auth';
 import type { AuthClient } from '@object-ui/auth';
 import { I18nProvider } from '@object-ui/i18n';
 import { MemoryRouter, useLocation } from 'react-router-dom';
@@ -131,12 +132,36 @@ function renderBanner() {
   );
 }
 
+/**
+ * Issues the banner's own administrator read — same URL, same authenticated
+ * lane — at the one moment the teardown order decides: when `cleanup()`
+ * unmounts the tree. That is where the banner's read lands when its effect is
+ * still pending as the test body returns (cleanup's act-flush runs it), which
+ * is timing and cannot be held open on purpose; this lands one there every time.
+ */
+function LateAdministratorRead() {
+  useEffect(
+    () => () => {
+      void createAuthenticatedFetch()(ADMIN_READ_PATH, { method: 'GET' }).catch(() => {});
+    },
+    [],
+  );
+  return null;
+}
+
 describe('ImpersonationBanner (#4467)', () => {
   beforeEach(() => {
     TokenStorage.clear();
   });
 
   afterEach(() => {
+    // Unmount BEFORE restoring the real `fetch` (objectui#7439). Vitest runs
+    // this hook before the root setup's RTL cleanup() and the network-escape
+    // guard, so unstubbing first left the tree mounted with the real global
+    // back: the banner's `sys_user` read, when its effect was still pending as
+    // the body returned, then went out to localhost:3000 during that cleanup.
+    // Pinned by 'a read that lands AFTER the test body …' below.
+    cleanup();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     TokenStorage.clear();
@@ -306,6 +331,25 @@ describe('ImpersonationBanner (#4467)', () => {
     // Nobody pressed Stop on THIS impersonation, so nothing may say it failed.
     expect(screen.queryByTestId('impersonation-not-restored')).toBeNull();
     expect(screen.queryByTestId('impersonation-stop-error')).toBeNull();
+  });
+
+  it('a read that lands AFTER the test body still reaches the double, never the network', async () => {
+    TokenStorage.set(IMPERSONATED_TOKEN);
+    const seen = stubStopEndpoint((url) =>
+      url.endsWith(ADMIN_READ_PATH) ? adminRow({ name: 'Dev Admin' }) : new Response('{}'),
+    );
+    renderBanner();
+    await screen.findByTestId('impersonation-started-by');
+    const reads = () => seen.urls.filter((u) => u.endsWith(ADMIN_READ_PATH)).length;
+    const readsInBody = reads();
+    render(<LateAdministratorRead />);
+
+    // Runs after every afterEach, the network-escape guard's included. With
+    // the teardown unstubbing before cleanup(), the late read went to the real
+    // socket instead: this count stays put and the guard reds the test.
+    onTestFinished(() => {
+      expect(reads()).toBe(readsInBody + 1);
+    });
   });
 });
 

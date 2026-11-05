@@ -540,6 +540,12 @@ interface FlowBareNames {
   readonly variables: readonly string[];
   /** The run can bind a name no reader sees: a bare-name mismatch is the warning. */
   readonly unproven: boolean;
+  /**
+   * [#30250] The flow is a time-relative sweep: its `run-fails` verdict names
+   * no write that fired the run (`ExprSchemaHint.timeRelativeSweep`). Rides
+   * here because every flow site that reads the names reads it too.
+   */
+  readonly timeRelativeSweep: boolean;
 }
 
 function buildNullableFieldIndex(objects: AnyRec[]): Map<string, Set<string>> {
@@ -1313,7 +1319,7 @@ function isFlattenedNearMissFor(diagnostic: string, roots: readonly string[]): b
  * | option `visibleWhen`                   | `evaluateOptionVisibility`: refuses a write picking it (ADR-0137 D2, #22402) | `fail-closed` |
  * | hook `condition`                       | `hook-wrappers.ts`: aborts the operation (#4775)             | `fail-closed` |
  * | flow start / edge condition, `decision` branch — record-triggered flow | `evaluateCondition` throws (ADR-0032 §1c); the trigger isolates the write: the run fails, the write lands. A bare name and its `record.<name>` read are the same total trigger record (#29959) | `run-fails` |
- * | the same, time-relative flow sweeping the flow's own object | `evaluateCondition` throws; `time-relative-trigger.ts` launches each run with the swept row of that object as `record` (`{ record: row }`, the stored row a find returns), so the field's type is what the name holds there too (#29959) | `run-fails` |
+ * | the same, time-relative flow sweeping the flow's own object | `evaluateCondition` throws; `time-relative-trigger.ts` launches each run with the swept row of that object as `record` (`{ record: row }`, the stored row a find returns), so the field's type is what the name holds there too (#29959). No write fires the run: the sweep starts one per row it finds, logs a failed one and goes on to the next row | `run-fails`, with `ExprSchemaHint.timeRelativeSweep` so the sentence names no firing write (#30250) |
  * | flow condition, any other flow (API, schedule, no trigger, or a sweep of another object than the one the conditions are typed against) | `evaluateCondition` throws there too, but no row of the typed object is bound (see `validate-null-guards.ts`'s ledger): the run holds what its entrance handed it — an API request body, an action's partial record, a parent's record, or nothing — so the field's type is not proven to be what the name holds | — not declared: the `type-mismatch-run-may-fail` WARNING, worded for the run (#29959) |
  * | a bare name the flow's run binds as a variable (a declared variable, a node id, a `screen` field's `name`) | the run seeds it before the flattening, which skips a bound name, or a screen's resume lands it over the flattened field: it holds the variable, not the field | — not typed as the field at all (`ExprSchemaHint.flowVariables`); `record.<name>` still is (#29959, #30025) |
  | a bare name in a flow a node of which can bind names no reader sees (`flowCelRootScope` read with no entrance: an open binder — `script`, `connector_action`, `wait`, `subflow`, `map` —, a screen with no input contract) | the run can bind the name to a value no reader sees | — no declared outcome for a bare-name mismatch: the `type-mismatch-run-may-fail` WARNING (`ExprSchemaHint.bareNamesUnproven`); `record.<name>` keeps the row's outcome (#30025) |
@@ -1331,7 +1337,8 @@ function isFlattenedNearMissFor(diagnostic: string, roots: readonly string[]): b
  * never gives its advisory — the message says so instead of a refused write.
  * The date verdicts (`date-arithmetic`, `date-text-arithmetic`) are an error
  * at every site; in a flow condition the same outcome picks their sentence:
- * `-run-fails` under `run-fails`, `-run-may-fail` anywhere else (#30016).
+ * `-run-fails` under `run-fails`, `-run-may-fail` anywhere else (#30016); on
+ * a `fail-closed` site it is `-fail-closed`, the refused write (#30250).
  */
 type FaultSite =
   | { readonly kind: 'validation rule'; readonly severity: unknown }
@@ -2531,6 +2538,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           ...(faultOutcome ? { faultOutcome } : {}),
           ...(flowBare ? { flowVariables: flowBare.variables } : {}),
           ...(flowBare?.unproven ? { bareNamesUnproven: true } : {}),
+          ...(flowBare?.timeRelativeSweep ? { timeRelativeSweep: true } : {}),
         }
         : { scope, ...roots });
     for (const e of res.errors) {
@@ -2878,6 +2886,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     const flowBare: FlowBareNames = {
       variables: [...new Set([...declaredVariables, ...screenFields, ...FLOW_ENGINE_BOUND_NAMES])],
       unproven: !flowCelRootScope(flow, graphs, objectName, fieldIndex).provable,
+      // [#30250] No write fires a sweep's run: `time-relative-trigger.ts` starts
+      // one per row it finds. The validator reads it only under `run-fails`.
+      timeRelativeSweep: triggerKind === 'time_relative',
     };
     const nullGuardBare = new Set<string>();
     if (nullGuardObject && rootScope.provable) {

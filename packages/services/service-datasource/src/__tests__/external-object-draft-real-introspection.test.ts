@@ -105,9 +105,9 @@ describe('generateObjectDraft, driven off a real SqlDriver.introspectSchema()', 
     // …and it is the introspected key, not "the first column": a table whose
     // key is not first is covered below.
     expect(draft.definition.fields).toEqual({
-      id: { type: 'text' },
-      name: { type: 'text' },
-      age: { type: 'number' },
+      id: { type: 'text', label: 'Id' },
+      name: { type: 'text', label: 'Name' },
+      age: { type: 'number', label: 'Age' },
     });
 
     // The key survives as a comment and NOWHERE else. `fields.<f>.primaryKey`

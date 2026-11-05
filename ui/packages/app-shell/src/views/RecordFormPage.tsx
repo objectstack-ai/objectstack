@@ -49,6 +49,7 @@ import { buildExpressionUser } from '../providers/expressionUser.js';
 import { SkeletonDetail } from '../skeletons/index.js';
 import { ManagedByBadge } from '../components/ManagedByBadge.js';
 import { resolveFormViewChrome, selectRecordFormView } from '../utils/recordFormNavigation.js';
+import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
 import { useAuth } from '@object-ui/auth';
 
 export interface RecordFormPageProps {
@@ -143,9 +144,10 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
   // Two names, not one (objectui#11733): the title and the toasts speak of ONE
   // record, so they keep the singular; the breadcrumb link opens the object's
   // list, so it reads the plural, as that list page's title and the header
-  // crumb above this page do.
-  const label = objectDef ? objectLabel(objectDef as any) : objectName ?? '';
-  const listLabel = objectDef ? objectPluralLabel(objectDef) : objectName ?? '';
+  // crumb above this page do. Both are the served labels as given; the bundle
+  // only when none is served (objectstack#30390).
+  const label = objectDef ? servedObjectLabel(objectDef, language, objectLabel) : objectName ?? '';
+  const listLabel = objectDef ? servedObjectPluralLabel(objectDef, language, objectPluralLabel) : objectName ?? '';
   // No inline `defaultValue` on these lookups: every key below is defined in
   // all ten locale packs and `all-locales-key-parity.test.ts` pins that
   // permanently, so i18next always resolves the pack value and a fallback

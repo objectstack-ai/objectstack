@@ -241,6 +241,8 @@ describe('a marketplace-off boot that permits install-local, seen by an admin', 
     render(<MarketplacePackagePage />);
     await openLocalMenu();
     fireEvent.click(await screen.findByRole('menuitem', { name: '«marketplace.detail.purgeSampleData»' }));
+    // objectstack#30323 — confirmed in the console's own dialog.
+    fireEvent.click(await screen.findByTestId('purge-sample-data-confirm'));
 
     await waitFor(() =>
       expect(calls).toContainEqual({

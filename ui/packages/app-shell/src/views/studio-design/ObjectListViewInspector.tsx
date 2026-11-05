@@ -36,7 +36,8 @@
  * packageId })`) under its own version guard (objectui#11773), debounced by the
  * pillar's autosave like every other Studio editor. A view that does not exist
  * yet is created by the first edit, seeded with the columns the running app
- * shows an object that has no view (`defaultListColumnsFromObject`).
+ * shows an object that has no view (`defaultListColumnsFromObject`); for a
+ * draft-only object, from this package's drafted definition (objectstack#30317).
  *
  * ## Switching views, and adding one
  *
@@ -567,7 +568,34 @@ export function useObjectListViewDraft({
     objectName && !holding ? listViewChoicesOf(objectName, publishedViews, draftViewRows, entryTarget, target) : [];
   const viewId = target?.viewId ?? '';
   const targetKey = viewId ? listViewBufferKey(viewId) : '';
-  const seedColumns = React.useMemo(() => defaultListColumnsFromObject(objectDef, 5), [objectDef]);
+  // objectstack#30317 — a draft-only object is absent from the merged
+  // metadata, so the columns a view created here starts with are read off
+  // this package's drafted definition, read with the drafts overlaid (the
+  // read `useObjectFields` makes for the panel's field picker). Only when the
+  // merged definition is missing; a failed or empty answer seeds nothing.
+  const [draftedDef, setDraftedDef] = React.useState<{ for: string; def: Row | null }>({ for: '', def: null });
+  const needsDraftedDef = !!objectName && !objectDef;
+  React.useEffect(() => {
+    if (!objectName || !needsDraftedDef) return;
+    let cancelled = false;
+    const forKey = JSON.stringify([packageId, objectName]);
+    client
+      .withPreviewDrafts(true)
+      .get<Row>('object', objectName, { packageId })
+      .then(
+        (def) => {
+          if (!cancelled) setDraftedDef({ for: forKey, def: isPlainObject(def) ? def : null });
+        },
+        () => {
+          if (!cancelled) setDraftedDef({ for: forKey, def: null });
+        },
+      );
+    return () => {
+      cancelled = true;
+    };
+  }, [client, packageId, objectName, needsDraftedDef, publishNonce]);
+  const seedDef = objectDef ?? (needsDraftedDef && draftedDef.for === viewDraftsKey ? draftedDef.def : undefined);
+  const seedColumns = React.useMemo(() => defaultListColumnsFromObject(seedDef, 5), [seedDef]);
 
   const [buffer, setBuffer] = React.useState<{
     for: string;

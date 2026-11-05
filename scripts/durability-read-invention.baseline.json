@@ -46,7 +46,7 @@
   ],
   "entries": [
     {
-      "file": "packages/objectql/src/engine.ts",
+      "file": "packages/objectql/src/engine-references-and-master-detail.ts",
       "fn": "referenceExists",
       "verdict": "reviewed-legitimate",
       "invents": "return null (catch has no log and no error-type discrimination)",

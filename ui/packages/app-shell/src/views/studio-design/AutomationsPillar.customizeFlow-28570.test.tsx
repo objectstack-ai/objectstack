@@ -504,6 +504,10 @@ describe('Customize a read-only base’s flow into its pair (objectstack#28570)'
 describe('the flow header says where a customized flow is saved (objectstack#29691)', () => {
   const SAVED_TO = 'Saved to HotCRM’s customizations';
   const savedTo = () => within(header()).queryByTestId('auto-flow-saved-to');
+  // objectstack#30436 — and the sheet's second sentence, naming the real pair.
+  const ENVIRONMENT =
+    'These changes are kept in this environment’s database as items of com.example.hotcrm.custom, not in your project’s source. They reach another environment only through os package export.';
+  const environment = () => within(header()).queryByTestId('auto-flow-saved-to-environment');
 
   it('Customize unlocks the flow, and the header says it is saved to the base’s customizations', async () => {
     mount();
@@ -511,6 +515,7 @@ describe('the flow header says where a customized flow is saved (objectstack#296
     expect(savedTo()).toBeNull();
     await customize();
     await waitFor(() => expect(savedTo()).toHaveTextContent(SAVED_TO), { timeout: 8000 });
+    expect(environment()).toHaveTextContent(ENVIRONMENT);
     expect(savedTo()!.closest('[data-slot="item-note"]')).not.toBeNull();
   });
 
@@ -520,6 +525,7 @@ describe('the flow header says where a customized flow is saved (objectstack#296
     mount({ listedPair: PAIR });
     await openFlow(/^Notify owner and manager$/);
     await waitFor(() => expect(savedTo()).toHaveTextContent(SAVED_TO), { timeout: 8000 });
+    expect(environment()).toHaveTextContent(ENVIRONMENT);
   });
 
   it('CONTROL: the base’s flow before Customize says nothing of the kind', async () => {
