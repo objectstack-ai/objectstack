@@ -1222,6 +1222,15 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       expect(date.map(i => i.severity)).toEqual(['error']);
       expect(date[0]!.message).toMatch(/^date arithmetic/);
       expect(date[0]!.message).toContain(': this faults at runtime, and a flow condition');
+      // Two date fields, which the runtime holds as their text: the
+      // `date-text-arithmetic` verdict, run-fails worded, refused too.
+      const dateText = validateStackExpressions({
+        objects: [{ name: 'crm_opportunity', fields: { close_date: { type: 'date' }, open_date: { type: 'date' } } }],
+        flows: [sweepOnly('close_date - open_date > duration("1h")')],
+      });
+      expect(dateText.map(i => i.severity)).toEqual(['error']);
+      expect(dateText[0]!.message).toMatch(/^date arithmetic `DateText - DateText`/);
+      expect(dateText[0]!.message).toContain(': this faults at runtime, and a flow condition');
     });
 
     // [#30026] Typed against the swept object, a well-typed sweep-only flow
