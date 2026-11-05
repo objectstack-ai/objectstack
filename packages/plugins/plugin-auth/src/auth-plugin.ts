@@ -2568,6 +2568,11 @@ export class AuthPlugin implements Plugin {
       }
     }
 
+    // The save door refuses turning `mfa_required` on while OS_AUTH_TWO_FACTOR
+    // pins enrollment off; the pass below would store it and enforce nothing.
+    // See mfa-required-enrollment-predicate.ts.
+    registerMfaRequiredEnrollmentPredicate(settings, ctx.logger);
+
     await applySettings();
     if (typeof settings.subscribe === 'function') {
       settings.subscribe('auth', () => {
@@ -2575,11 +2580,6 @@ export class AuthPlugin implements Plugin {
       });
       ctx.logger.info('Auth: bound to settings namespace=auth');
     }
-
-    // The save door refuses turning `mfa_required` on while OS_AUTH_TWO_FACTOR
-    // pins enrollment off; the pass above would store it and enforce nothing.
-    // See mfa-required-enrollment-predicate.ts.
-    registerMfaRequiredEnrollmentPredicate(settings, ctx.logger);
   }
 
   async destroy(): Promise<void> {
