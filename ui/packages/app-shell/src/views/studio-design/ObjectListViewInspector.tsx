@@ -18,9 +18,13 @@
  *    (`resolveViewId`). A name that matches none is the view the entry opens
  *    once it exists, `<object>.<viewName>`;
  *  - any other entry → the object's default list view: the merged view
- *    flagged `isDefault`, else `<object>.default`, the identity the
- *    platform's own composer gives a container's default `list`
- *    (`expandViewContainer`).
+ *    flagged `isDefault`, else this package's drafted list view flagged so
+ *    (objectstack#30177: a draft-only object is absent from the merged
+ *    metadata, so its default is known from the drafts alone), else
+ *    `<object>.default`, the identity the platform's own composer gives a
+ *    container's default `list` (`expandViewContainer`). Until the drafts
+ *    are read, a default no merged view flags is not known yet: nothing is
+ *    loaded or listed for it, so no edit can create a second default view.
  *
  * ## What is written, and where
  *
@@ -161,7 +165,8 @@ function qualifiedViewId(objectName: string, key: string): string {
  * `landingViewName` is the view the entry lands on as the runtime reads the
  * entry (`navEntryListTarget(...).viewName`), not the raw `viewName`: an entry
  * that also slices (`filters`) lands on the data surface, and its view is then
- * the default one. `views` is the object's merged `listViews` map.
+ * the default one. `views` is the object's merged `listViews` map, with this
+ * package's drafted list views of it (objectstack#30177).
  */
 export function listViewTargetOf(
   objectName: string,
@@ -294,6 +299,19 @@ export function listViewChoicesOf(
   if (entry && !byId.has(entry.viewId)) choices.unshift({ target: entry, draft: false });
   if (shown && shown.viewId !== entry?.viewId && !byId.has(shown.viewId)) choices.push({ target: shown, draft: true });
   return choices;
+}
+
+/**
+ * objectstack#30177 — this package's drafted list views of `objectName` (the
+ * draft-overlaid list's `_draft` rows), by item name: the views a draft-only
+ * object has, which the shell's merged `listViews` never holds.
+ */
+function draftedListViewsOf(objectName: string, drafts: readonly Row[]): Record<string, Row> {
+  const views: Record<string, Row> = {};
+  for (const row of drafts) {
+    if (row.object === objectName && typeof row.name === 'string' && isListViewRow(row)) views[row.name] = row;
+  }
+  return views;
 }
 
 /** What `useDraftAutoSave` hands a save: whether the buffer is still what it sent. */
@@ -475,7 +493,6 @@ export function useObjectListViewDraft({
   }, [objectName, navId, filtersKey, entryViewName, currentUserId, currentOrgId]);
   const objectDef = objectName ? findByName(metadata.objects, objectName) : undefined;
   const publishedViews = listViewsOf(objectDef);
-  const entryTarget = objectName ? listViewTargetOf(objectName, landingViewName, publishedViews) : null;
   // objectstack#27836, objectstack#27896 — a view New view created or the
   // view switcher opened, stamped with the nav entry it was opened on, so it
   // expires by construction when another opens.
@@ -490,8 +507,6 @@ export function useObjectListViewDraft({
   React.useEffect(() => {
     if (link && leafOpen && !linkHolds) setLink(null);
   }, [link, leafOpen, linkHolds]);
-  const chosenViewId = (picked && picked.for === entryKey ? picked.viewId : null) ?? (linkHolds ? link.viewId : null);
-  const pickedViewId = chosenViewId && chosenViewId !== entryTarget?.viewId ? chosenViewId : null;
   // objectstack#27896 — this package's pending drafts of the object's views,
   // read with the drafts overlaid: the published world is the merged map
   // above. A failed or refused read (a caller the server serves no pending
@@ -518,7 +533,21 @@ export function useObjectListViewDraft({
       cancelled = true;
     };
   }, [client, packageId, objectName, publishNonce, viewsNonce]);
-  const draftViewRows = viewDrafts.for === viewDraftsKey ? viewDrafts.rows : [];
+  const viewDraftsRead = viewDrafts.for === viewDraftsKey;
+  const draftViewRows = viewDraftsRead ? viewDrafts.rows : [];
+  // objectstack#30177 — the entry's view among the merged views and this
+  // package's drafted list views (the module docblock's "Which view").
+  const entryTarget = objectName
+    ? listViewTargetOf(objectName, landingViewName, { ...publishedViews, ...draftedListViewsOf(objectName, draftViewRows) })
+    : null;
+  const entryUnsettled =
+    !!entryTarget?.isDefault &&
+    !viewDraftsRead &&
+    !Object.values(publishedViews).some((v) => isPlainObject(v) && v.isDefault === true);
+  const chosenViewId = (picked && picked.for === entryKey ? picked.viewId : null) ?? (linkHolds ? link.viewId : null);
+  const pickedViewId = chosenViewId && chosenViewId !== entryTarget?.viewId ? chosenViewId : null;
+  // The entry's default is not known yet: nothing is loaded or listed for it.
+  const holding = !pickedViewId && entryUnsettled;
   const pickedIsDefault =
     !!objectName &&
     !!pickedViewId &&
@@ -527,7 +556,8 @@ export function useObjectListViewDraft({
     );
   const target: ListViewTarget | null =
     objectName && pickedViewId ? { objectName, viewId: pickedViewId, isDefault: pickedIsDefault } : entryTarget;
-  const views = objectName ? listViewChoicesOf(objectName, publishedViews, draftViewRows, entryTarget, target) : [];
+  const views =
+    objectName && !holding ? listViewChoicesOf(objectName, publishedViews, draftViewRows, entryTarget, target) : [];
   const viewId = target?.viewId ?? '';
   const targetKey = viewId ? listViewBufferKey(viewId) : '';
   const seedColumns = React.useMemo(() => defaultListColumnsFromObject(objectDef, 5), [objectDef]);
@@ -571,7 +601,7 @@ export function useObjectListViewDraft({
 
   React.useEffect(() => {
     setFailure(null);
-    if (!viewId) {
+    if (!viewId || holding) {
       setBuffer({ for: '', row: null, dirty: false, hasDraft: false, draftChanges: null, published: undefined });
       return;
     }
@@ -667,7 +697,7 @@ export function useObjectListViewDraft({
     return () => {
       cancelled = true;
     };
-  }, [client, viewId, objectName, packageId, publishNonce, reloadNonce, recordRead, customizing]);
+  }, [client, viewId, holding, objectName, packageId, publishNonce, reloadNonce, recordRead, customizing]);
 
   const edit = React.useCallback((row: Row) => {
     setBuffer((b) => ({ ...b, row, dirty: true }));

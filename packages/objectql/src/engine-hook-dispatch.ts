@@ -38,6 +38,11 @@
  * This module imports the engine only as a TYPE, so there is no module cycle
  * at run time, and nothing re-exports it, so the published surface does not
  * move.
+ *
+ * [#30053 codemod] A PRIVATE method's docblock has since moved here,
+ * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
+ * and the class keeps none for it; a public or protected method's docblock
+ * stays on the class, the contract, and its function keeps the placeholder.
  */
 
 import type { HookContext } from '@objectstack/spec/data';
@@ -66,7 +71,7 @@ export interface HookDispatchHost {
   transaction: ObjectQL['transaction'];
 }
 
-/** The body of `ObjectQL#inAfterAbortUnit`; the method's docblock there is its contract. */
+/** [#22782] The unit {@link opensAfterAbortUnit} asked for; `write` re-enters the door, which joins it. */
 export async function inAfterAbortUnit<T>(
   this: Pick<HookDispatchHost, 'transaction'>,
   write: () => Promise<T>,
@@ -85,7 +90,52 @@ export async function inAfterAbortUnit<T>(
   return result;
 }
 
-/** The body of `ObjectQL#buildPerRowAfterContexts`; the method's docblock there is its contract. */
+/**
+ * [#5038] The per-row after-hook contexts a predicate (`multi: true`) write
+ * dispatches, one per matched row.
+ *
+ * ## Why per row at all
+ *
+ * ADR-0058's bulk-write addendum (the 2026-08-04 ruling on #4800 / #4862)
+ * records the contract: **a bulk write is N record changes, so after-hooks
+ * and the record-change flow triggers riding them evaluate and fire PER
+ * ROW**, with `previous` = that row's pre-write state and `record` = that
+ * row's actual state. Before it, the engine fired the hook ONCE, never
+ * assigned `previous`, and left `record` degraded to the bare payload — so
+ * the transition condition both the docs and ten showcase flows teach
+ * (`status == "done" && previous.status != "done"`) was unevaluable on a
+ * bulk write, and the audit/notification flows behind it silently did not
+ * happen.
+ *
+ * ## The shape is the SINGLE-RECORD shape, deliberately
+ *
+ * Each context is exactly what a single-id write builds — `input.id` is the
+ * row, `input.data` is this write's payload, `result` is the row's state,
+ * `previous` is its pre-image. That is #2922's ruling for batch INSERT
+ * restated: a single array-shaped context "broke every consumer built for
+ * the single shape", so a per-row context must be indistinguishable from a
+ * record-scoped one. It is also what makes this fix land at the PRODUCER:
+ * `hook-wrappers`' `record`/`previous` bindings, the record-change trigger's
+ * `buildContext`, and plugin-audit's diff all read these same four fields and
+ * need no bulk-aware branch of their own.
+ *
+ * `input.data` is a shallow COPY per row: the batch has one payload, but an
+ * after-handler that writes through the flat-input proxy must not have its
+ * mutation leak into the next row's view.
+ *
+ * ## `result` is composed, not re-read
+ *
+ * The row's post-write state is `row ⊕ payload` — the pre-image the matched
+ * set already gave us, overlaid with the payload the driver just applied.
+ * Composing keeps the issue's performance guardrail literal: the matched row
+ * set is read ONCE and reused for every per-row evaluation. Re-reading the
+ * batch after the write to capture driver-side stamps would be a second
+ * full-set query for fields the after-view has never carried on this path.
+ *
+ * For a DELETE there is no post-state, so `result` is left unset and
+ * `input` carries no `data`: consumers fall back to `previous` (the deleted
+ * row), which is what `record` means for a delete.
+ */
 export function buildPerRowAfterContexts(
   this: Pick<HookDispatchHost, '_registry'>,
   object: string,
@@ -113,7 +163,81 @@ export function buildPerRowAfterContexts(
   }) as unknown as HookContext);
 }
 
-/** The body of `ObjectQL#dispatchPerRowBeforeHooks`; the method's docblock there is its contract. */
+/**
+ * [#5574] The per-row `before*` dispatch of a predicate (`multi: true`)
+ * write — ADR-0058 Addendum II, clauses D1–D4.
+ *
+ * ## D1/D2 — one dispatch per matched row, on the SINGLE-RECORD shape
+ *
+ * `input.id` names the row, `previous` is that row's pre-image, and
+ * `input.options` is still the CALLER's bag (the PHASE rule in `hook.zod.ts`
+ * is unchanged: the `before*` phase reads the pre-merge view, `where` and
+ * `multi` visible). `result` stays ABSENT — the before phase has no
+ * post-state, and a value assigned to `ctx.result` here is overwritten by the
+ * write's own result before any `after*` handler could see it.
+ *
+ * Zero matched rows is zero dispatches, and `[]` is meaningful: a batch that
+ * changed nothing is not a record change. The caller checks that BEFORE
+ * calling in, so an empty row set never reaches this loop.
+ *
+ * ## D3 — the payload is BATCH-scoped, and that IS the merge rule
+ *
+ * Every per-row context carries THE payload, not a copy — deliberately
+ * unlike {@link buildPerRowAfterContexts}, which copies because an
+ * after-handler's mutation has nowhere legitimate to go. There is exactly one
+ * payload for a predicate update (`driver.updateMany` takes one SET clause
+ * for N rows), so:
+ *
+ *  - a rewrite takes effect on the WHOLE batch, whichever row's dispatch made
+ *    it, and rewrites ACCUMULATE across the N dispatches in dispatch order;
+ *  - N post-hook payloads cannot diverge, so nothing is reconciled, no
+ *    payload is discarded, and no predicate write is ever split into N
+ *    single-row writes.
+ *
+ * Two ways a handler can write the payload and both must accumulate: mutating
+ * it in place (`ctx.input.data.x = 1`) needs no help, while REPLACING it
+ * (`ctx.input.data = {…}`) would otherwise be lost with the row context that
+ * held it. So each row reads the batch payload fresh and writes it back after
+ * its dispatch — that write-back is what makes "accumulate in dispatch order"
+ * true for both spellings rather than only the first.
+ *
+ * A rewrite CONDITIONED on the row (`ctx.previous`, `ctx.input.id`) cannot
+ * scope itself to the row it was decided on: it widens to every matched row.
+ * Per-row `previous` is supplied so a guard can REFUSE the write (throw),
+ * and — ruled on #16074 — so a hook can make a ROW-INVARIANT-IN-EFFECT
+ * rewrite: one whose written KEY SET is the same on every matched row AND is
+ * assigned IN PLACE (`ctx.input.data.x = 1`, never `ctx.input.data = {…}`,
+ * which the recording below cannot attribute). A rewrite AIMED at one row
+ * stays outside the contract, and what makes the admitted shape safe is that
+ * enforcement rather than the hook's good faith.
+ *
+ * ## D3, ENFORCED — divergent key sets refuse the batch [#14099]
+ *
+ * That last paragraph used to end "a contract statement, not an enforcement
+ * — no static rule can decide whether a rewrite is row-invariant". The second
+ * half is still true and the conclusion no longer follows: nothing STATIC can
+ * decide it, but the dispatch can MEASURE it. #14088's recorder is armed once
+ * more per row here, so each dispatch reports the set of payload keys THAT
+ * row's hook chain assigned; if two rows disagree, the batch is refused whole
+ * before any write ({@link MultiUpdateHookKeyDivergenceError}).
+ *
+ * Maintainer ruling of 2026-09-02, on the corruption `duly` measured against
+ * published 17.2.0 — a `completed_at` transition stamp moved an
+ * already-completed row's timestamp, silently, on a two-row batch. The
+ * criterion is the key SET and never the values, which is what lets the
+ * clock-reading audit stamp through: every row writes `updated_at`, so an
+ * honest batch is never refused non-deterministically. The full argument,
+ * both rejected value-comparison variants, and the blind spot the ruling
+ * carries openly (same key, per-row VALUES) live on
+ * `multi-update-hook-key-divergence.ts`.
+ *
+ * ## D4 — `input.id` is not a reroute lever here
+ *
+ * On the old batch dispatch it was: `input.id` was present-but-`undefined`,
+ * and binding it moved the write onto the single-id branch. A per-row context
+ * arrives with `id` already bound and the dispatch already decided, so
+ * rebinding retargets nothing — and is refused rather than ignored.
+ */
 export async function dispatchPerRowBeforeHooks(
   this: Pick<HookDispatchHost, '_registry' | 'triggerHooks'>,
   object: string,
@@ -226,7 +350,31 @@ export async function dispatchPerRowBeforeHooks(
   }
 }
 
-/** The body of `ObjectQL#assertBulkPerRowHookBudget`; the method's docblock there is its contract. */
+/**
+ * [#5038, one ceiling for both phases since #5574] Ceiling on the matched-row
+ * set a predicate write fires per-row hooks over.
+ *
+ * The consequence ADR-0058's addendum told this implementation to price: a
+ * hook that used to run once per batch now runs once per row, so a
+ * notification hook sends N messages and a cache-invalidation hook runs N
+ * times. Unbounded, a single `multi: true` update matching a whole table
+ * turns into an unbounded fan-out of handler executions inside one write.
+ *
+ * Exceeding it REJECTS the write, before the FIRST per-row dispatch and
+ * before `updateMany`/`deleteMany` runs, so nothing is written and no handler
+ * ran for a batch that was going to be refused anyway. The alternative —
+ * quietly falling back to firing once for the batch — is the silent
+ * degradation this whole family exists to abolish (#4649/#4775): the hooks
+ * would not fire for N-1 rows and nothing would say so.
+ *
+ * [#5574] The rule itself is `resolveBulkPerRowHookBudget` in
+ * `packages/spec/src/data/bulk-write-hook-conformance.ts` (D6), not a copy
+ * kept in step by a pin. This method is the RAISING half only: the contract
+ * is pure and total (no clock, no I/O, no throw), the engine turns a
+ * `refused` verdict into the thrown error. Splitting it that way is what lets
+ * `before*` and `after*`, update and delete, share one ceiling and one
+ * message with nothing to keep synchronised.
+ */
 export function assertBulkPerRowHookBudget(object: string, event: string, matched: number): void {
   const verdict = resolveBulkPerRowHookBudget({ object, event, matched });
   if (verdict.kind === 'ok') return;
