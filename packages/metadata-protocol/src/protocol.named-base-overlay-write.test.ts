@@ -105,7 +105,12 @@ function matches(row: Row, where: Record<string, unknown> = {}): boolean {
     });
 }
 
-function makeProtocol() {
+/**
+ * `pairInstalled: false` boots the base with no pair yet: a fresh install,
+ * before anything ensured `<base>.custom` (the ensure door, or the ceremony's
+ * step 1, creates it on the first write that needs it).
+ */
+function makeProtocol({ pairInstalled = true }: { pairInstalled?: boolean } = {}) {
     const tables = new Map<string, Row[]>();
     const table = (n: string) => {
         if (!tables.has(n)) tables.set(n, []);
@@ -116,7 +121,8 @@ function makeProtocol() {
         const hit = SHIPPED.find((i) => i.type === type && i.name === name);
         return hit ? { ...ITEMS.find((i) => i.type === type && i.name === name)?.body(PACKAGED), name, label: PACKAGED, _packageId: hit.pkg, _provenance: 'package' } : undefined;
     };
-    const packageRecord = (id: string) => (MANIFESTS[id] ? { manifest: { id, ...MANIFESTS[id] } } : undefined);
+    const installed = (id: string) => MANIFESTS[id] !== undefined && (pairInstalled || id !== PAIR);
+    const packageRecord = (id: string) => (installed(id) ? { manifest: { id, ...MANIFESTS[id] } } : undefined);
     const engine: any = {
         // A booted code package is read-only (`isWritablePackage` reads `manifests` first).
         manifests: new Map([[BASE, {}], [NO_PAIR_BASE, {}], [NO_PAIR_ID_BASE, {}], [NO_VERSION_BASE, {}]]),
@@ -161,7 +167,7 @@ function makeProtocol() {
             getItem: (type: string, name: string) => artifact(type, name),
             getObject: () => undefined,
             getPackage: packageRecord,
-            getAllPackages: () => Object.keys(MANIFESTS).map(packageRecord),
+            getAllPackages: () => Object.keys(MANIFESTS).filter(installed).map(packageRecord),
             isPackageDisabled: () => false,
             getArtifactItem: artifact,
             applyNavContributions: (a: unknown) => a,
@@ -430,6 +436,45 @@ describe('CONTROLS: every step the fix takes, failing, leaves the write naming t
 
         expect(saved).toMatchObject({ success: true });
         expect(rows(email.type, email.name)).toEqual([{ package_id: BASE, state: 'active', label: 'Bienvenue' }]);
+    });
+});
+
+describe('a fresh install, the pair not yet ensured: an email template at a locale the base does not ship stays open (ADR-0146 D11)', () => {
+    // The close asks the override write gate about the declared body written
+    // into the pair. Before the pair exists, that question is the one the
+    // ensured pair would meet (its closure: the base and what the base
+    // reaches), never "no such package, not concerned" read as "admitted".
+    const email = ITEMS.find((i) => i.type === 'email_template')!;
+    const unshipped = (label: string) => ({ ...email.body(label), locale: 'fr-FR' });
+
+    it('the package-less save is accepted and served as the environment\'s own member', async () => {
+        const { protocol, rows } = makeProtocol({ pairInstalled: false });
+
+        const saved = await protocol.saveMetaItem({ type: email.type, name: email.name, item: unshipped('Bienvenue') });
+
+        expect(saved).toMatchObject({ success: true });
+        expect(rows(email.type, email.name)).toEqual([{ package_id: null, state: 'active', label: 'Bienvenue' }]);
+    });
+
+    it('the save naming the base is accepted, as it is with the pair installed', async () => {
+        const { protocol, rows } = makeProtocol({ pairInstalled: false });
+
+        const saved = await protocol.saveMetaItem({ type: email.type, name: email.name, item: unshipped('Bienvenue'), packageId: BASE });
+
+        expect(saved).toMatchObject({ success: true });
+        expect(rows(email.type, email.name)).toEqual([{ package_id: BASE, state: 'active', label: 'Bienvenue' }]);
+    });
+
+    it('CONTROL: a member the base ships is still closed onto the pair, naming it, with the pair not yet ensured', async () => {
+        const { protocol, rows } = makeProtocol({ pairInstalled: false });
+
+        const packageless = await thrown(() => protocol.saveMetaItem({ type: email.type, name: email.name, item: email.body('Mine') }));
+        const namedBase = await thrown(() => protocol.saveMetaItem({ type: email.type, name: email.name, item: email.body('Mine'), packageId: BASE }));
+
+        expect(resolveThrownHttpError(packageless)).toMatchObject({ status: 403, code: 'NOT_OVERRIDABLE' });
+        expect(String(packageless.message)).toContain(`'${PAIR}' (?package=${PAIR})`);
+        expectClosed(namedBase, email.type, email.name, 'save');
+        expect(rows(email.type, email.name)).toEqual([]);
     });
 });
 
