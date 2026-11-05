@@ -177,6 +177,10 @@ export {
   type TenancyPostureSource,
 } from './api-key.js';
 
+// The one "does this user's ban hold" predicate: the key-admission seam and
+// plugin-auth's session-shaped refusals all ask it.
+export { isUserBanInForce, USER_BAN_FIELDS, type UserBanFields } from './user-ban.js';
+
 // [#16013] The ONE try/catch CLASSIFICATION every admission seam performs on
 // the `tenancy` read that feeds `effectiveTenancyPosture` above -- branded
 // "never registered" stays quiet, every other rejection is the ADR-0112 outage
