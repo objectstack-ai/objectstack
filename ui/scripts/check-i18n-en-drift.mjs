@@ -159,6 +159,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PACK_NAMESPACE_DIRS } from './check-i18n-call-site-keys.mjs';
 import {
   DESIGNER_TABLE,
   DESIGNER_TABLE_PAIRS,
@@ -177,6 +178,15 @@ export const FOLLOWERS = LOCALES.filter((lang) => lang !== 'en');
 
 /** Repo-relative path of a pack source. */
 export const packPath = (lang) => `packages/i18n/src/locales/${lang}.ts`;
+
+/**
+ * Repo-relative paths of a language's partial packs in the pack-shaped lazy
+ * namespaces (`PACK_NAMESPACE_DIRS`, objectstack#30588). Their keys are pack
+ * keys moved out of the pack, so a language's population is its pack PLUS
+ * these: a key that moved between the two keeps one value on each side, and
+ * the move itself is not drift.
+ */
+export const namespacePackPaths = (lang) => PACK_NAMESPACE_DIRS.map((dir) => `${dir}${lang}.ts`);
 
 /** Where the waiver ledger lives, repo-relative. */
 export const LEDGER_PATH = 'scripts/i18n-en-drift-baseline.json';
@@ -338,28 +348,55 @@ function gitQuiet(root, args) {
 }
 
 /**
- * The ten packs at `ref`, or from the working tree when `ref` is null.
+ * The ten packs at `ref`, or from the working tree when `ref` is null — each
+ * one merged with its partial packs from `namespacePackPaths(lang)`.
  *
  * The working tree is the default "after" side on purpose: an agent editing
  * `en.ts` gets the answer before committing, not after pushing.
  *
+ * `requireNamespaces` is false only on the BASE side: a namespace that does not
+ * exist yet at the base commit is a fact about history (its keys were still in
+ * the pack there), not a stale extractor. On the head side a missing partial
+ * pack is loud. A key defined both in a pack and in its namespace THROWS on
+ * either side — two homes for one key cannot both be what renders.
+ *
  * @returns {Map<string, Map<string, string>>} lang -> (key -> value)
  */
-export function readPacks(root, ref) {
-  const packs = new Map();
-  for (const lang of LOCALES) {
-    const rel = packPath(lang);
+export function readPacks(root, ref, { requireNamespaces = true } = {}) {
+  const read = (rel, required) => {
     const label = ref === null ? rel : revPath(ref, rel);
     let text;
     if (ref === null) {
       const full = join(root, rel);
-      if (!existsSync(full)) throw new Error(`${rel} does not exist in the working tree`);
+      if (!existsSync(full)) {
+        if (!required) return null;
+        throw new Error(`${rel} does not exist in the working tree`);
+      }
       text = readFileSync(full, 'utf8');
     } else {
       text = gitQuiet(root, ['show', revPath(ref, rel)]);
-      if (text === null) throw new Error(`cannot read ${label} — is ${ref} in this clone?`);
+      if (text === null) {
+        if (!required) return null;
+        throw new Error(`cannot read ${label} — is ${ref} in this clone?`);
+      }
     }
-    packs.set(lang, parsePack(text, label));
+    return { values: parsePack(text, label), label };
+  };
+  const packs = new Map();
+  for (const lang of LOCALES) {
+    const pack = read(packPath(lang), true);
+    const values = new Map(pack.values);
+    for (const rel of namespacePackPaths(lang)) {
+      const partial = read(rel, requireNamespaces);
+      if (partial === null) continue;
+      for (const [key, value] of partial.values) {
+        if (values.has(key)) {
+          throw new Error(`${key} is defined both in ${pack.label} and in ${partial.label}`);
+        }
+        values.set(key, value);
+      }
+    }
+    packs.set(lang, values);
   }
   return packs;
 }
@@ -588,7 +625,9 @@ export function applyLedger(findings, ledger, enAfter) {
  */
 export function analyze(root, { base, head = null }) {
   const treeAtBase = treeExistsAt(root, base);
-  const before = treeAtBase ? readPacks(root, base) : new Map(LOCALES.map((lang) => [lang, new Map()]));
+  const before = treeAtBase
+    ? readPacks(root, base, { requireNamespaces: false })
+    : new Map(LOCALES.map((lang) => [lang, new Map()]));
   const after = readPacks(root, head);
   const { findings, counters } = findDrift(before, after);
   return { before, after, findings, counters, treeAtBase };

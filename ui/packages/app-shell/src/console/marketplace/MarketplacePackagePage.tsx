@@ -103,6 +103,7 @@ import { SuggestedBindingsPanel, type SuggestedBindingsStrings } from '../../com
 import { ConnectorCredentialsStep } from './ConnectorCredentialsStep.js';
 import type { SuggestedBinding } from '../../services/suggestedBindingsApi.js';
 import { errorCodeIs } from '@object-ui/types';
+import { MarketplaceNamespaceGate } from './MarketplaceNamespaceGate.js';
 
 /**
  * Whether a cloud install lands in the environment this console renders, read
@@ -154,7 +155,19 @@ function versionEntryId(version: string): string {
   return `marketplace-version-${version}`;
 }
 
+/**
+ * The page under the frame that fetches its strings first — the
+ * `marketplace` namespace (`MarketplaceNamespaceGate.tsx` says why).
+ */
 export function MarketplacePackagePage() {
+  return (
+    <MarketplaceNamespaceGate>
+      <MarketplacePackagePageBody />
+    </MarketplaceNamespaceGate>
+  );
+}
+
+function MarketplacePackagePageBody() {
   const navigate = useNavigate();
   const { packageId, appName } = useParams<{ packageId?: string; appName?: string }>();
   const { isAdmin, isResolved } = useWorkspaceAdminStatus();

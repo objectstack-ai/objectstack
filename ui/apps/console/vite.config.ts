@@ -1235,6 +1235,26 @@ export default defineConfig({
             { name: 'i18n-ns-studio-en', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]studio[\\/]en\.ts$/, priority: 84 },
             { name: 'i18n-ns-studio-zh', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]studio[\\/]zh\.ts$/, priority: 84 },
             //
+            // The `marketplace` namespace (objectstack#30588): the pack group the
+            // two marketplace pages read, moved out of the ten packs so the
+            // eager `i18n-locale-en` chunk stops carrying it. All ten catalogues
+            // are `import()`ed by `packages/i18n/src/namespaces/marketplace/index.ts`
+            // when a marketplace page mounts, none is resident, so one group per
+            // catalogue for the rule above. The loader module gets a group too:
+            // without one it would fall to `i18n-runtime` below and be eager,
+            // while its only reader is the marketplace pages' lazy route chunk.
+            { name: 'i18n-ns-marketplace', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]index\.ts$/, priority: 84 },
+            { name: 'i18n-ns-marketplace-en', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]en\.ts$/, priority: 84 },
+            { name: 'i18n-ns-marketplace-zh', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]zh\.ts$/, priority: 84 },
+            { name: 'i18n-ns-marketplace-ja', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]ja\.ts$/, priority: 84 },
+            { name: 'i18n-ns-marketplace-ko', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]ko\.ts$/, priority: 84 },
+            { name: 'i18n-ns-marketplace-de', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]de\.ts$/, priority: 84 },
+            { name: 'i18n-ns-marketplace-fr', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]fr\.ts$/, priority: 84 },
+            { name: 'i18n-ns-marketplace-es', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]es\.ts$/, priority: 84 },
+            { name: 'i18n-ns-marketplace-pt', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]pt\.ts$/, priority: 84 },
+            { name: 'i18n-ns-marketplace-ru', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]ru\.ts$/, priority: 84 },
+            { name: 'i18n-ns-marketplace-ar', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]ar\.ts$/, priority: 84 },
+            //
             // ⛔ `i18n-runtime` takes `includeDependenciesRecursively: false`
             // for the reason `data-adapter` below does (objectui#9345, read out
             // there in full): it outranks `framework` (83 over 80), and since
