@@ -229,7 +229,9 @@ describe('the copy — every locale the settings bundle ships', () => {
     ['zh-CN', '默认币种已锁定为 USD：它已被 1 个对象（Invoice）和 2 条汇率使用。'],
     ['ja', '既定の通貨は USD でロックされています。1 件のオブジェクト（Invoice）と 2 件の為替レートで使用されているためです。'],
     ['es-MX', 'La moneda predeterminada está bloqueada en USD porque está en uso en 1 objeto (Invoice) y 2 tipos de cambio.'],
-    ['fr-FR', 'The default currency is locked at USD because it is in use by 1 object (Invoice) and 2 exchange rates.'],
+    ['fr-FR', 'La devise par défaut est verrouillée sur USD car elle est utilisée par 1 objet (Invoice) et 2 taux de change.'],
+    // A locale the bundle does not ship falls back to the English copy.
+    ['it-IT', 'The default currency is locked at USD because it is in use by 1 object (Invoice) and 2 exchange rates.'],
   ])('writes the refusal in %s', async (locale, opening) => {
     const { svc, rates, objects } = rig();
     await svc.set('localization', 'currency', 'USD', ctx);
