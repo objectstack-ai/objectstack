@@ -6,10 +6,11 @@
  *
  * Both doors name no view, so the Console opens the FIRST declared list view.
  * That view (`recent`) must answer newest first, and must leave out the rows
- * about the platform's own bookkeeping (the metadata store, the migration
- * ledger) and the rows no person wrote (a sign-in stamp, a migration, a seed:
- * the system actor is `null`, ADR-0118 D1). The second view (`all`) still lists
- * every row, which is where an administrator finds the rest.
+ * about the platform's own objects (the metadata store, the migration ledger,
+ * and `sys_user`, whose sign-in stamp is written under the signing-in person's
+ * own name) and the rows no person wrote (a migration, a seed: the system actor
+ * is `null`, ADR-0118 D1). The second view (`all`) still lists every row, which
+ * is where an administrator finds the rest.
  *
  * ## Why a real engine and a real driver
  *
@@ -36,12 +37,13 @@ import {
   SysMetadataAuditObject,
 } from '@objectstack/metadata-core';
 import { SysMigration, SysMigrationJournal } from '@objectstack/platform-objects/system';
+import { SystemObjectName } from '@objectstack/spec/system';
 
 import { AuditPlugin } from './audit-plugin.js';
 import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 import { SysActivity } from './objects/index.js';
-import { ACTIVITY_PLATFORM_BOOKKEEPING_OBJECTS } from './objects/sys-activity.object.js';
+import { ACTIVITY_FEED_EXCLUDED_OBJECTS } from './objects/sys-activity.object.js';
 
 const ACTIVITY = 'sys_activity';
 const DEAL = 'act_deal';
@@ -80,7 +82,7 @@ describe('sys_activity default list view — the declaration', () => {
   });
 
   it('the excluded objects are read from the definitions they name', () => {
-    expect([...ACTIVITY_PLATFORM_BOOKKEEPING_OBJECTS].sort()).toEqual(
+    expect([...ACTIVITY_FEED_EXCLUDED_OBJECTS].sort()).toEqual(
       [
         SysMetadataObject.name,
         SysMetadataHistoryObject.name,
@@ -88,6 +90,7 @@ describe('sys_activity default list view — the declaration', () => {
         SysMetadataAuditObject.name,
         SysMigration.name,
         SysMigrationJournal.name,
+        SystemObjectName.USER,
       ].sort(),
     );
   });
@@ -131,8 +134,9 @@ describe('sys_activity default list view — the rows it serves', () => {
     const rows: Row[] = [
       { summary: 'person edits a deal (16:44)', object_name: DEAL, record_id: 'd1', actor_id: 'u_admin', timestamp: at(44) },
       { summary: 'person creates a deal (16:34)', object_name: DEAL, record_id: 'd2', actor_id: 'u_admin', timestamp: at(34) },
-      { summary: 'person renames a user (16:40)', object_name: 'sys_user', record_id: 'u1', actor_id: 'u_admin', timestamp: at(40) },
-      { summary: 'sign-in stamp', object_name: 'sys_user', record_id: 'u1', actor_id: null, timestamp: at(45) },
+      { summary: 'person deletes a deal (16:40)', object_name: DEAL, record_id: 'd3', actor_id: 'u_admin', timestamp: at(40) },
+      // Measured on a fresh `dev:crm` boot: the sign-in stamp carries the person who signed in.
+      { summary: 'sign-in stamp', object_name: 'sys_user', record_id: 'u_admin', actor_id: 'u_admin', timestamp: at(45) },
       { summary: 'metadata publish', object_name: SysMetadataObject.name, record_id: 'm1', actor_id: 'u_admin', timestamp: at(46) },
       { summary: 'metadata history', object_name: SysMetadataHistoryObject.name, record_id: 'h1', actor_id: 'u_admin', timestamp: at(47) },
       { summary: 'migration', object_name: SysMigration.name, record_id: 'g1', actor_id: null, timestamp: at(48) },
@@ -164,14 +168,14 @@ describe('sys_activity default list view — the rows it serves', () => {
     const fixed = summaries(recent).filter((s) => / \(16:\d\d\)$/.test(s));
     expect(fixed).toEqual([
       'person edits a deal (16:44)',
-      'person renames a user (16:40)',
+      'person deletes a deal (16:40)',
       'person creates a deal (16:34)',
     ]);
     // The mirrored person row is in, the seeded one is not.
     expect(recent.filter((r) => r.object_name === DEAL && !/ \(16:/.test(r.summary))).toHaveLength(1);
     for (const row of recent) {
       expect(row.actor_id).toBeTruthy();
-      expect(ACTIVITY_PLATFORM_BOOKKEEPING_OBJECTS).not.toContain(row.object_name);
+      expect(ACTIVITY_FEED_EXCLUDED_OBJECTS).not.toContain(row.object_name);
     }
     const stamps = recent.map((r) => Date.parse(r.timestamp));
     expect(stamps).toEqual([...stamps].sort((a, b) => b - a));

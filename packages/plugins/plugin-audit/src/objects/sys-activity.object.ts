@@ -8,26 +8,37 @@ import {
   SysMetadataAuditObject,
 } from '@objectstack/metadata-core';
 import { SysMigration, SysMigrationJournal } from '@objectstack/platform-objects/system';
+import { SystemObjectName } from '@objectstack/spec/system';
 
 /**
- * The platform's own bookkeeping objects whose rows the default `recent` view
- * leaves out: the metadata store (published items, drafts, history, commits,
- * the store's own audit) and the data-migration ledger. Their writes are
- * mirrored like any other object's, and those rows stay stored and readable:
- * the `all` view below lists them, and each one has its compliance row in
- * `sys_audit_log`.
+ * The platform objects whose rows the default `recent` view leaves out, even
+ * when a person's session wrote them:
  *
- * Read from the definitions themselves, so a rename moves this list with it.
- * Deliberately not a name prefix: `sys_*` also names objects whose rows are
- * people's work (a user an admin invites, a file someone uploads).
+ *  - the metadata store (published items, drafts, history, commits, the
+ *    store's own audit): publishing in Studio writes these under the
+ *    publisher's name;
+ *  - the data-migration ledger;
+ *  - `sys_user`: every sign-in stamps `last_login_at` / `last_login_ip` on it
+ *    under the signing-in person's own name, and the only column that tells
+ *    that stamp from a profile edit is `changed_fields`, which a filter may
+ *    not name for every reader (`parent-field-query-guard.ts`).
+ *
+ * Their writes are mirrored like any other object's, and those rows stay
+ * stored and readable: the `all` view below lists them, and each one has its
+ * compliance row in `sys_audit_log`.
+ *
+ * Read from the definitions and the protocol's name constants, so a rename
+ * moves this list with it. Deliberately not a name prefix: `sys_*` also names
+ * objects whose rows are people's work (a file someone uploads).
  */
-export const ACTIVITY_PLATFORM_BOOKKEEPING_OBJECTS: readonly string[] = Object.freeze([
+export const ACTIVITY_FEED_EXCLUDED_OBJECTS: readonly string[] = Object.freeze([
   SysMetadataObject.name,
   SysMetadataHistoryObject.name,
   SysMetadataCommitObject.name,
   SysMetadataAuditObject.name,
   SysMigration.name,
   SysMigrationJournal.name,
+  SystemObjectName.USER,
 ]);
 
 /**
@@ -73,9 +84,9 @@ export const SysActivity = ObjectSchema.create({
   //
   // `recent` is the cut Home's activity card makes, as far as a query column
   // can say it: a person acted (`actor_id` set; a system write leaves it null,
-  // ADR-0118 D1: a sign-in's `last_login_at` stamp, a migration, a seed), and
-  // the row is not about the platform's own bookkeeping
-  // (`ACTIVITY_PLATFORM_BOOKKEEPING_OBJECTS`). It names no value-bearing column
+  // ADR-0118 D1: a migration, a seed, a platform setting written at boot), and
+  // the row is not about one of the platform objects
+  // `ACTIVITY_FEED_EXCLUDED_OBJECTS` names. It names no value-bearing column
   // (`parent-field-query-guard.ts`), so every reader may run it.
   //
   // `all` is every row the reader may read, platform rows included: where an
@@ -90,7 +101,7 @@ export const SysActivity = ObjectSchema.create({
       columns: ['timestamp', 'actor_name', 'type', 'summary'],
       filter: [
         { field: 'actor_id', operator: 'is_not_null' },
-        { field: 'object_name', operator: 'not_in', value: [...ACTIVITY_PLATFORM_BOOKKEEPING_OBJECTS] },
+        { field: 'object_name', operator: 'not_in', value: [...ACTIVITY_FEED_EXCLUDED_OBJECTS] },
       ],
       sort: [{ field: 'timestamp', order: 'desc' }],
       pagination: { pageSize: 50 },
