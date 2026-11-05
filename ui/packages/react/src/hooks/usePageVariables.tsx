@@ -214,13 +214,6 @@ const OUTSIDE_PAGE: PageVariablesContextValue = Object.freeze({
 });
 
 /**
- * Hook to check if a PageVariablesProvider is available.
- */
-export function useHasPageVariables(): boolean {
-  return useContext(PageVariablesContext) !== null;
-}
-
-/**
  * A writer binding for a page variable, resolved from a component id.
  */
 export interface PageVariableBinding {

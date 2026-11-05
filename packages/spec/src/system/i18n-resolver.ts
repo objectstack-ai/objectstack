@@ -85,6 +85,7 @@ import { mapFlowNodeList } from '../conversions/walk.js';
 import { flowScreenFieldOptionKey } from '../automation/flow-screen-option-key.js';
 import { pageComponentSlotPositions } from '../ui/component.zod.js';
 import { templateSlotSource } from '../automation/flow-text-slot-template.js';
+import { platformLocaleTagOf } from './platform-locales.js';
 
 import type {
   PlatformTranslationBundle,
@@ -505,11 +506,12 @@ function overlayRecord(under: Record<string, unknown>, top: Record<string, unkno
  * Resolve a requested locale code against the locales actually present in a
  * bundle, applying BCP-47 fallback so callers that pass a base language
  * (e.g. `zh`) or a differently-cased / region-qualified variant still hit the
- * available data (e.g. `zh-CN`). Mirrors `resolveLocale` in
- * `@objectstack/core` but is inlined here so `@objectstack/spec` stays
- * dependency-free.
+ * available data (e.g. `zh-CN`). The ladder is {@link resolveLocaleAmong}'s,
+ * run over the bundle's keys; `resolveLocale` in `@objectstack/core` runs the
+ * same function, so the two cannot answer differently.
  *
- * Order: exact → case-insensitive → base-language → variant-expansion.
+ * Order: exact → case-insensitive → platform table language →
+ * base-language → variant-expansion.
  * Returns the matched bundle key, or `undefined` when nothing matches.
  *
  * Exported so sibling locale-keyed constant tables in this package — the
@@ -522,21 +524,62 @@ export function resolveBundleLocale(
 ): string | undefined {
   // 1. Exact match (fast path).
   if (bundle[requested] !== undefined) return requested;
+  return resolveLocaleAmong(requested, Object.keys(bundle));
+}
 
-  const available = Object.keys(bundle);
+/**
+ * Resolve a requested locale code against a list of available locale codes:
+ * the one locale-matching ladder of the platform. {@link resolveBundleLocale}
+ * runs it over a bundle's keys, and `resolveLocale` in `@objectstack/core`
+ * is this function.
+ *
+ * 1. Exact match.
+ * 2. Case-insensitive match (`zh-cn` → `zh-CN`): BCP-47 tags are
+ *    case-insensitive.
+ * 3. The same platform table language (`platformLocaleTagOf`, which reads
+ *    the table's read aliases): `zh-TW`, `zh-HK` and `zh-MO` reach a
+ *    `zh-Hant` key; `zh`, `zh-CN`, `zh-SG` and `zh-Hans` reach a `zh-CN` (or
+ *    `zh-Hans`) key; `ja` reaches `ja-JP`. A key spelled as the table tag
+ *    itself wins, else the first key the table maps to that tag. Registration
+ *    order cannot hand a Traditional reader the Simplified key, or the other
+ *    way round, while the bundle holds both. A code the table does not know
+ *    (`es-MX`, `pt-PT`, `en-GB`) skips this step.
+ * 4. Base-language match (`en-GB` → `en`).
+ * 5. Variant expansion (`es-MX` → `es-ES`; the first registered variant
+ *    wins). A `zh-TW` request still reaches `zh-CN` here when the list holds
+ *    no Traditional key: a related language beats none.
+ *
+ * Returns the matched code, or `undefined` when nothing matches.
+ */
+export function resolveLocaleAmong(
+  requested: string,
+  available: readonly string[],
+): string | undefined {
   if (available.length === 0) return undefined;
+
+  // 1. Exact match.
+  if (available.includes(requested)) return requested;
 
   const lower = requested.toLowerCase();
   // 2. Case-insensitive match (e.g. `zh-cn` → `zh-CN`).
   const caseMatch = available.find((code) => code.toLowerCase() === lower);
   if (caseMatch) return caseMatch;
 
+  // 3. The same platform table language (e.g. `zh-TW` → `zh-Hant`).
+  const tag = platformLocaleTagOf(requested);
+  if (tag !== undefined) {
+    const folded = tag.toLowerCase();
+    const tagMatch = available.find((code) => code.toLowerCase() === folded)
+      ?? available.find((code) => platformLocaleTagOf(code) === tag);
+    if (tagMatch) return tagMatch;
+  }
+
   const base = lower.split('-')[0];
-  // 3. Base-language match (e.g. `zh-CN` → `zh`).
+  // 4. Base-language match (e.g. `zh-CN` → `zh`).
   const baseMatch = available.find((code) => code.toLowerCase() === base);
   if (baseMatch) return baseMatch;
 
-  // 4. Variant expansion (e.g. `zh` → `zh-CN`; first registered variant wins).
+  // 5. Variant expansion (e.g. `zh` → `zh-CN`; first registered variant wins).
   const variantMatch = available.find((code) => code.toLowerCase().split('-')[0] === base);
   if (variantMatch) return variantMatch;
 
@@ -4429,9 +4472,10 @@ export const BUILTIN_SYSTEM_FIELD_LABEL_LOCALES: readonly string[] = Object.free
 
 /**
  * Fallback label for a platform-injected system field, honouring the same
- * locale-matching rules as bundle lookup (exact → case-insensitive → base
- * language → variant). Applied only when the field still carries its injected
- * English default — an author's custom label is never overridden.
+ * locale-matching rules as bundle lookup (exact → case-insensitive → platform
+ * table language → base language → variant). Applied only when the field
+ * still carries its injected English default — an author's custom label is
+ * never overridden.
  */
 function builtinSystemFieldLabel(
   fieldName: string,

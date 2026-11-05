@@ -159,7 +159,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "Ban User",
-        description: "Ban this user? They will be signed out, unable to sign in, and their API keys refused until unbanned. The keys work again after the unban.",
+        description: "Ban this user? They will be signed out, unable to sign in, and their API keys refused until unbanned, as are their OAuth access tokens and token refreshes. The keys work again after the unban.",
         successMessage: "User banned",
         params: {
           banReason: {

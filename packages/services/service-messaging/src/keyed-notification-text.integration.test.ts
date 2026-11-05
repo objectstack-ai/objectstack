@@ -86,7 +86,9 @@ const USERS = [
     { id: 'u_en', name: 'Ada', email: 'ada@example.com', phone_number: '+15550000001', locale: 'en' },
     { id: 'u_ja', name: 'Sato', email: 'sato@example.com', phone_number: '+81300000001', locale: 'ja-JP' },
     { id: 'u_none', name: 'Nobody', email: 'nobody@example.com', phone_number: '+15550000002' },
-    // A language no pack in this deployment holds.
+    // A language no pack in this deployment holds (Italian is not a platform-table language).
+    { id: 'u_it', name: 'Rossi', email: 'rossi@example.com', phone_number: '+390600000001', locale: 'it-IT' },
+    // A regional tag of a platform-table language: the messaging bundle ships `fr` (#30512).
     { id: 'u_fr', name: 'Dupont', email: 'dupont@example.com', phone_number: '+33100000001', locale: 'fr-FR' },
 ];
 
@@ -487,22 +489,34 @@ describe("#25015 — a digest's heading is rendered in its recipient's language"
             i18n: catalog({ messagingBundle: true, defaultLocale: 'zh-CN' }),
         });
 
-        const [digest] = await digestOf(ql, c, 'u_fr', 2);
+        const [digest] = await digestOf(ql, c, 'u_it', 2);
 
         expect(digest.title).toBe('您有 2 条通知');
+    });
+
+    it('a regional recipient language reads its platform-table pack (`fr-FR` reads `fr`, #30512)', async () => {
+        const ql = await boot();
+        const c = compose(ql, {
+            outbox: 'memory', preferenceResolver: digestAll, deploymentDefault: 'zh-CN',
+            i18n: catalog({ messagingBundle: true, defaultLocale: 'zh-CN' }),
+        });
+
+        const [digest] = await digestOf(ql, c, 'u_fr', 2);
+
+        expect(digest.title).toBe('Vous avez 2 notifications');
     });
 
     it('when neither the recipient\'s language nor the deployment default has a pack, the English literal — said once', async () => {
         const ql = await boot();
         const c = compose(ql, {
-            outbox: 'memory', preferenceResolver: digestAll, deploymentDefault: 'fr-FR',
-            i18n: catalog({ messagingBundle: true, defaultLocale: 'fr-FR' }),
+            outbox: 'memory', preferenceResolver: digestAll, deploymentDefault: 'it-IT',
+            i18n: catalog({ messagingBundle: true, defaultLocale: 'it-IT' }),
         });
 
-        const [digest] = await digestOf(ql, c, 'u_fr', 2);
+        const [digest] = await digestOf(ql, c, 'u_it', 2);
 
         expect(digest.title).toBe('You have 2 notifications');
-        expect(c.warnings.filter((w) => w.includes(`'${DIGEST_HEADING_KEY}'`) && w.includes('fr-FR'))).toHaveLength(1);
+        expect(c.warnings.filter((w) => w.includes(`'${DIGEST_HEADING_KEY}'`) && w.includes('it-IT'))).toHaveLength(1);
     });
 
     it("a one-item digest keeps its item's own title, rendered in the recipient's language", async () => {

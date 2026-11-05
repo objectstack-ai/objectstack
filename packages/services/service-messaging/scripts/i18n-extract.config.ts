@@ -7,7 +7,7 @@
  * `--merge` preserves every hand-translated string.
  *
  *   os i18n extract packages/services/service-messaging/scripts/i18n-extract.config.ts \
- *     --locales=zh-CN,ja-JP,es-ES --fill=default --objects-only --no-metadata-forms \
+ *     --locales=zh-CN,ja-JP,es-ES,zh-Hant,ar,fr,pt-BR --fill=default --objects-only --no-metadata-forms \
  *     --source-hashes \
  *     --out=packages/services/service-messaging/src/translations
  *
@@ -49,6 +49,10 @@ import { enObjects } from '../src/translations/en.objects.generated.js';
 import { zhCNObjects } from '../src/translations/zh-CN.objects.generated.js';
 import { jaJPObjects } from '../src/translations/ja-JP.objects.generated.js';
 import { esESObjects } from '../src/translations/es-ES.objects.generated.js';
+import { zhHantObjects } from '../src/translations/zh-Hant.objects.generated.js';
+import { arObjects } from '../src/translations/ar.objects.generated.js';
+import { frObjects } from '../src/translations/fr.objects.generated.js';
+import { ptBRObjects } from '../src/translations/pt-BR.objects.generated.js';
 
 /**
  * The annotation is load-bearing, not decoration (#10868). `defineStack`
@@ -79,6 +83,10 @@ const config: ObjectStackDefinition = defineStack({
     { 'zh-CN': { objects: zhCNObjects } },
     { 'ja-JP': { objects: jaJPObjects } },
     { 'es-ES': { objects: esESObjects } },
+    { 'zh-Hant': { objects: zhHantObjects } },
+    { 'ar': { objects: arObjects } },
+    { 'fr': { objects: frObjects } },
+    { 'pt-BR': { objects: ptBRObjects } },
   ],
 });
 

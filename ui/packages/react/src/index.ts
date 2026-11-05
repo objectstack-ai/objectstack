@@ -6,7 +6,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-export * from './SchemaRenderer.js';
+export { buildNodeEvaluationScope, SchemaErrorBoundary, SchemaRenderer } from './SchemaRenderer.js';
+export type { SchemaRendererProps } from './SchemaRenderer.js';
 export * from './schema-input.js';
 export * from './hooks/index.js'; // will be empty for now
 export * from './context/index.js'; // will be empty for now
@@ -17,7 +18,22 @@ export * from './data-invalidation.js';
 export * from './record-save-feedback.js';
 // PageComponentSchema.dataSource — mapping the spec's per-element data binding
 // onto the schema keys each object-bound block reads (objectstack#6953).
-export * from './element-data-source/ElementDataSourceGate.js';
+export {
+  useElementDataSourceSchema,
+  ElementDataSourceErrorPanel,
+  ElementDataSourceLoadingPanel,
+  useResolvedDataSource,
+  noDataSourceMessage,
+  ElementDataSourceGate,
+  elementDataSourceBlock,
+} from './element-data-source/ElementDataSourceGate.js';
+export type {
+  ElementDataSourceLimitKey,
+  ElementDataSourceMapping,
+  UseElementDataSourceSchemaResult,
+  ElementDataSourceStatusPanelProps,
+  ElementDataSourceGateProps,
+} from './element-data-source/ElementDataSourceGate.js';
 // PageComponentSchema.dataSource as the spec's API binding — the read behind
 // the `data` root `SchemaRenderer` binds for it (objectui#12197).
 export * from './element-data-source/useElementApiDataSource.js';
@@ -53,7 +69,6 @@ export { isConfigBag } from './utils/configBag.js';
 // property the 2026-08-25 ruling asked for.
 export {
   reportUnresolvableVisibilityPredicate,
-  formatUnresolvableVisibilityMessage,
   UNRESOLVABLE_VISIBILITY_PREFIX,
   // The ENABLEMENT gate's opening line (objectui#6445). Exported beside its
   // sibling for the reason that one is: an app filtering these out of its

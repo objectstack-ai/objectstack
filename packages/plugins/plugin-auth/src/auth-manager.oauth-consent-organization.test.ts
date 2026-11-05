@@ -33,6 +33,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import { AuthManager } from './auth-manager';
 import { buildJwtPluginSchema } from './auth-schema-config.js';
+import {
+  INVALID_ACCESS_TOKEN_DESCRIPTION,
+  INVALID_ACCESS_TOKEN_WWW_AUTHENTICATE,
+  refuseIntrospectionForBannedSubject,
+} from './oauth-token-read-ban-refusal.js';
 
 // better-auth is mocked so AuthManager's own instance build stays cheap; the
 // authorization server every assertion reads is a SEPARATE, real one booted
@@ -94,14 +99,19 @@ async function captureProviderOptions(): Promise<any> {
  * derived from each plugin's own resolved schema, so they are the platform's
  * `sys_*` names whenever a plugin resolves to them.
  */
-async function bootServer(opts: any) {
-  const [{ betterAuth }, { memoryAdapter }, { jwt }, { organization }, { oauthProvider: realOauthProvider }] =
+async function bootServer(
+  opts: any,
+  { admin = false, introspectionHook = false }: { admin?: boolean; introspectionHook?: boolean } = {},
+) {
+  const [{ betterAuth }, { memoryAdapter }, { jwt }, { organization }, { oauthProvider: realOauthProvider }, adminPlugins, { createAuthMiddleware }] =
     await Promise.all([
       vi.importActual<typeof import('better-auth')>('better-auth'),
       import('better-auth/adapters/memory'),
       import('better-auth/plugins'),
       import('better-auth/plugins/organization'),
       vi.importActual<typeof import('@better-auth/oauth-provider')>('@better-auth/oauth-provider'),
+      import('better-auth/plugins/admin'),
+      import('better-auth/api'),
     ]);
 
   const provider = realOauthProvider(opts);
@@ -110,6 +120,9 @@ async function bootServer(opts: any) {
   // mapped to `sys_jwks` anyway once AuthManager has built one in this process
   // (see auth-manager.mcp-oauth-resource.test.ts).
   const jwtPlugin = jwt({ schema: buildJwtPluginSchema() as any });
+  // The admin plugin, when a leg asks for it, gives the user model its ban
+  // columns (`banned` / `banExpires`), as the platform's admin plugin does.
+  const extra: any[] = admin ? [adminPlugins.admin()] : [];
 
   const db: Record<string, any[]> = {};
   for (const m of ['user', 'session', 'account', 'verification']) db[m] = [];
@@ -125,7 +138,12 @@ async function bootServer(opts: any) {
     secret: SECRET,
     database: memoryAdapter(db),
     emailAndPassword: { enabled: true },
-    plugins: [jwtPlugin, orgPlugin as any, provider as any],
+    plugins: [jwtPlugin, orgPlugin as any, provider as any, ...extra],
+    // The introspection section of AuthManager's global after-hook, when a leg
+    // asks for it, on the real provider's own response pipeline.
+    ...(introspectionHook
+      ? { hooks: { after: createAuthMiddleware(async (ctx: any) => { await refuseIntrospectionForBannedSubject(ctx); }) } }
+      : {}),
   });
   await auth.$context;
 
@@ -139,6 +157,10 @@ async function bootServer(opts: any) {
     /** The stored rows, by the platform's column name. */
     consentRows: () => db[consentModel] ?? [],
     refreshRows: () => db[refreshModel] ?? [],
+    /** The stored user rows — a leg that bans writes the ban columns here, as the admin route does. */
+    userRows: () => db.user ?? [],
+    /** Ends every stored session, as the ban routes do when they place a ban. */
+    endSessions: () => { (db.session ?? []).splice(0); },
   };
 }
 
@@ -411,5 +433,262 @@ describe('existing consents re-confirm once (ruling 6232069920, item 4)', () => 
     const oldFamily = await refresh(server, clientId, old.refresh_token!);
     expect(Object.keys(claimsOf(oldFamily.access_token))).not.toContain('organization_id');
     expect((await verifier(server).verifyMcpAccessToken(oldFamily.access_token))?.organizationId).toBeUndefined();
+  });
+});
+
+describe('a banned user is minted no token at the token endpoint while the ban holds (`oauth-grant-ban-refusal.ts`)', () => {
+  /** The token endpoint's answer, as a caller can tell it apart. */
+  async function tokenAnswer(server: Server, params: Record<string, string>) {
+    const res = await server.auth.handler(
+      new Request(`${ISSUER}/oauth2/token`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams(params).toString(),
+      }),
+    );
+    return {
+      status: res.status,
+      body: (await res.json().catch(() => null)) as any,
+      cacheControl: res.headers.get('cache-control'),
+      wwwAuthenticate: res.headers.get('www-authenticate'),
+    };
+  }
+  const refreshAnswer = (server: Server, clientId: string, refreshToken: string) =>
+    tokenAnswer(server, { grant_type: 'refresh_token', refresh_token: refreshToken, client_id: clientId, resource: MCP_RESOURCE });
+
+  it('the refresh grant of a banned user answers as an invalid refresh token, writes nothing, and renews again once the ban lapses', async () => {
+    const server = await bootServer(await captureProviderOptions(), { admin: true });
+    const clientId = await registerClient(server);
+    const otherClientId = await registerClient(server);
+    const cookie = await signUp(server, 'banned.subject@acme.example.com');
+    const tokens = await consentedGrant(server, clientId, cookie);
+    const [row] = server.userRows();
+    expect(row, 'the user row the leg bans').toBeDefined();
+
+    // The answer an invalid refresh token gets: a real one presented by a client it was not issued to.
+    const control = await refreshAnswer(server, otherClientId, tokens.refresh_token!);
+    expect(control.status).toBe(400);
+    expect(control.body).toEqual({ error_description: 'invalid refresh token', error: 'invalid_grant' });
+
+    row.banned = true;
+    row.banExpires = new Date(Date.now() + 3_600_000);
+    const before = JSON.stringify(server.refreshRows());
+
+    const refused = await refreshAnswer(server, clientId, tokens.refresh_token!);
+
+    expect(refused).toEqual(control);
+    expect(JSON.stringify(server.refreshRows()), 'the refused grant rotated or revoked nothing').toBe(before);
+
+    // The ban's expiry passes: the SAME refresh token renews, nothing reissued in between.
+    row.banExpires = new Date(Date.now() - 1_000);
+    const renewed = await refresh(server, clientId, tokens.refresh_token!);
+    expect(renewed.access_token).toBeTruthy();
+  });
+
+  it('control: a user who is not banned renews as before', async () => {
+    const server = await bootServer(await captureProviderOptions(), { admin: true });
+    const clientId = await registerClient(server);
+    const cookie = await signUp(server, 'not.banned@acme.example.com');
+    const tokens = await consentedGrant(server, clientId, cookie);
+    server.userRows()[0].banned = false;
+    const renewed = await refresh(server, clientId, tokens.refresh_token!);
+    expect(renewed.access_token).toBeTruthy();
+  });
+
+  // ── The code arm. The provider consumes the code and requires the code's
+  // session before the callback runs (`oauth-grant-ban-refusal.ts` header),
+  // so which refusal answers depends on whether the ban ended the session.
+  const codeAnswer = (server: Server, clientId: string, code: string) =>
+    tokenAnswer(server, {
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: REDIRECT_URI,
+      client_id: clientId,
+      code_verifier: PKCE_VERIFIER,
+      resource: MCP_RESOURCE,
+    });
+  const UNKNOWN_CODE = 'not-an-issued-code';
+
+  it('a code issued before a ban that ended the user\'s sessions mints no token: the provider\'s session answer, and the code is spent', async () => {
+    const server = await bootServer(await captureProviderOptions(), { admin: true });
+    const clientId = await registerClient(server);
+    const cookie = await signUp(server, 'code.ban.route@acme.example.com');
+    const code = await consent(server, await authorize(server, clientId, cookie), cookie);
+    const [row] = server.userRows();
+
+    // The ban as the ban routes place it: the ban columns, and every session ended.
+    row.banned = true;
+    row.banExpires = new Date(Date.now() + 3_600_000);
+    server.endSessions();
+
+    const refused = await codeAnswer(server, clientId, code);
+    expect(refused.status).toBe(400);
+    expect(refused.body).toEqual({ error_description: 'session no longer exists', error: 'invalid_request' });
+    expect(server.refreshRows(), 'no refresh family was started').toEqual([]);
+
+    // Spent either way: with the ban lifted, the same code answers as one never issued.
+    row.banned = false;
+    row.banExpires = null;
+    expect(await codeAnswer(server, clientId, code)).toEqual(await codeAnswer(server, clientId, UNKNOWN_CODE));
+  });
+
+  it('a code exchanged while a banned user\'s session survived answers as a code never issued, and mints no token', async () => {
+    const server = await bootServer(await captureProviderOptions(), { admin: true });
+    const clientId = await registerClient(server);
+    const cookie = await signUp(server, 'code.ban.session@acme.example.com');
+    const code = await consent(server, await authorize(server, clientId, cookie), cookie);
+    const [row] = server.userRows();
+
+    const control = await codeAnswer(server, clientId, UNKNOWN_CODE);
+    expect(control.status).toBe(400);
+    expect(control.body).toEqual({ error_description: 'invalid code', error: 'invalid_grant' });
+
+    // A ban written without ending the user's sessions.
+    row.banned = true;
+    row.banExpires = new Date(Date.now() + 3_600_000);
+
+    expect(await codeAnswer(server, clientId, code)).toEqual(control);
+    expect(server.refreshRows(), 'no refresh family was started').toEqual([]);
+  });
+});
+
+describe('a banned user\'s access token reads no userinfo while the ban holds (`oauth-token-read-ban-refusal.ts`)', () => {
+  /** The userinfo endpoint's answer, as a caller can tell it apart. */
+  async function userInfoAnswer(server: Server, token: string) {
+    const res = await server.auth.handler(
+      new Request(`${ISSUER}/oauth2/userinfo`, { method: 'GET', headers: { authorization: `Bearer ${token}` } }),
+    );
+    return {
+      status: res.status,
+      body: (await res.json().catch(() => null)) as any,
+      cacheControl: res.headers.get('cache-control'),
+      wwwAuthenticate: res.headers.get('www-authenticate'),
+    };
+  }
+
+  it('answers as a token that does not verify, and reads the claims again once the ban lapses', async () => {
+    const server = await bootServer(await captureProviderOptions(), { admin: true });
+    const clientId = await registerClient(server);
+    const cookie = await signUp(server, 'userinfo.banned@acme.example.com');
+    const tokens = await consentedGrant(server, clientId, cookie);
+    const sub = claimsOf(tokens.access_token).sub;
+    const [row] = server.userRows();
+
+    const admitted = await userInfoAnswer(server, tokens.access_token);
+    expect(admitted.status, JSON.stringify(admitted.body)).toBe(200);
+    expect(admitted.body?.sub).toBe(sub);
+
+    // The answer a made-up token gets — the provider's own.
+    const control = await userInfoAnswer(server, 'not-a-real-token');
+    expect(control.status).toBe(401);
+    expect(control.body).toEqual({ error_description: INVALID_ACCESS_TOKEN_DESCRIPTION, error: 'invalid_token' });
+    expect(control.wwwAuthenticate).toBe(INVALID_ACCESS_TOKEN_WWW_AUTHENTICATE);
+
+    // A ban written without ending the user's sessions, so nothing but the ban stands between the token and its claims.
+    row.banned = true;
+    row.banExpires = new Date(Date.now() + 3_600_000);
+    expect(await userInfoAnswer(server, tokens.access_token)).toEqual(control);
+
+    row.banExpires = new Date(Date.now() - 1_000);
+    const lapsed = await userInfoAnswer(server, tokens.access_token);
+    expect(lapsed.status).toBe(200);
+    expect(lapsed.body?.sub).toBe(sub);
+  });
+
+  it('control: a user who is not banned reads userinfo', async () => {
+    const server = await bootServer(await captureProviderOptions(), { admin: true });
+    const clientId = await registerClient(server);
+    const cookie = await signUp(server, 'userinfo.not.banned@acme.example.com');
+    const tokens = await consentedGrant(server, clientId, cookie);
+    server.userRows()[0].banned = false;
+    const answer = await userInfoAnswer(server, tokens.access_token);
+    expect(answer.status).toBe(200);
+    expect(answer.body?.sub).toBe(claimsOf(tokens.access_token).sub);
+  });
+});
+
+describe('a banned user\'s tokens introspect as inactive while the ban holds (`oauth-token-read-ban-refusal.ts`)', () => {
+  /** A confidential client, so it can introspect the tokens issued to it (RFC 7662 §2.1). */
+  async function registerConfidentialClient(server: Server): Promise<{ clientId: string; clientSecret: string }> {
+    const { res, body } = await post(server, '/oauth2/register', {
+      client_name: 'Resource server (test)',
+      redirect_uris: [REDIRECT_URI],
+      grant_types: ['authorization_code', 'refresh_token'],
+      response_types: ['code'],
+      token_endpoint_auth_method: 'client_secret_post',
+      scope: SCOPE,
+    });
+    expect(res.status, JSON.stringify(body)).toBe(201);
+    expect(body.client_secret, 'a confidential client is issued a secret').toBeTruthy();
+    return { clientId: body.client_id as string, clientSecret: body.client_secret as string };
+  }
+
+  async function introspectAnswer(server: Server, client: { clientId: string; clientSecret: string }, params: Record<string, string>) {
+    const res = await server.auth.handler(
+      new Request(`${ISSUER}/oauth2/introspect`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ client_id: client.clientId, client_secret: client.clientSecret, ...params }).toString(),
+      }),
+    );
+    return { status: res.status, body: (await res.json().catch(() => null)) as any, cacheControl: res.headers.get('cache-control') };
+  }
+
+  async function grantFor(server: Server, client: { clientId: string; clientSecret: string }, email: string) {
+    const cookie = await signUp(server, email);
+    const code = await consent(server, await authorize(server, client.clientId, cookie), cookie);
+    const tokens = await tokenRequest(server, {
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: REDIRECT_URI,
+      client_id: client.clientId,
+      client_secret: client.clientSecret,
+      code_verifier: PKCE_VERIFIER,
+      resource: MCP_RESOURCE,
+    });
+    expect(tokens.refresh_token, 'offline_access must earn a refresh token').toBeTruthy();
+    return tokens;
+  }
+
+  it('the access token and the refresh token answer as a token that is not valid, and introspect as active again once the ban lapses', async () => {
+    const server = await bootServer(await captureProviderOptions(), { admin: true, introspectionHook: true });
+    const client = await registerConfidentialClient(server);
+    const tokens = await grantFor(server, client, 'introspect.banned@acme.example.com');
+    const sub = claimsOf(tokens.access_token).sub;
+    const [row] = server.userRows();
+
+    const access = { token: tokens.access_token, token_type_hint: 'access_token' };
+    const refreshTok = { token: tokens.refresh_token!, token_type_hint: 'refresh_token' };
+    for (const params of [access, refreshTok]) {
+      const active = await introspectAnswer(server, client, params);
+      expect(active.status, JSON.stringify(active.body)).toBe(200);
+      expect(active.body).toMatchObject({ active: true, sub });
+    }
+
+    // The answer a made-up token gets — the provider's own.
+    const control = await introspectAnswer(server, client, { token: 'not-a-real-token' });
+    expect(control.status).toBe(200);
+    expect(control.body).toEqual({ active: false });
+
+    // A ban written without ending the user's sessions.
+    row.banned = true;
+    row.banExpires = new Date(Date.now() + 3_600_000);
+    for (const params of [access, refreshTok]) {
+      expect(await introspectAnswer(server, client, params)).toEqual(control);
+    }
+
+    row.banExpires = new Date(Date.now() - 1_000);
+    for (const params of [access, refreshTok]) {
+      expect((await introspectAnswer(server, client, params)).body).toMatchObject({ active: true, sub });
+    }
+  });
+
+  it('control: a user who is not banned introspects as active', async () => {
+    const server = await bootServer(await captureProviderOptions(), { admin: true, introspectionHook: true });
+    const client = await registerConfidentialClient(server);
+    const tokens = await grantFor(server, client, 'introspect.not.banned@acme.example.com');
+    server.userRows()[0].banned = false;
+    const answer = await introspectAnswer(server, client, { token: tokens.access_token, token_type_hint: 'access_token' });
+    expect(answer.body).toMatchObject({ active: true, sub: claimsOf(tokens.access_token).sub });
   });
 });
