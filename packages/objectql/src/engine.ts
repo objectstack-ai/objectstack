@@ -3005,11 +3005,20 @@ export class ObjectQL implements IObjectQLEngine {
     storedRows?: StoredReferenceRows,
   ): Promise<void> {
     // [#25522 cut 10] The body moved to `engine-referential-integrity.ts`, its docblock with it (see `ReferentialIntegrityHost`).
+    // [#30205] `referenceRow` answers a referenced user's ban state from the existence probe's own read.
+    const readLogger = () => this.logger;
     const host: ThisParameterType<typeof assertReferencesResolve> = {
+      get logger() { return readLogger(); },
       masterDetailHeaderExists: (...a) => this.masterDetailHeaderExists(...a),
       referenceExists: (...a) => this.referenceExists(...a),
+      referenceRow: (...a) => this.referenceRow(...a),
     };
     return assertReferencesResolve.call(host, schema, data, supplied, context, msgCtx, storedRows);
+  }
+
+  private referenceRow(target: string, id: unknown, context: ExecutionContext | undefined, extraFields: readonly string[]): Promise<Record<string, unknown> | false | null> {
+    // [#30205] The body lives in `engine-references-and-master-detail.ts`, its docblock with it (see `ReferencesAndMasterDetailHost`).
+    return ReferencesAndMasterDetailFacet.referenceRow.call(referencesAndMasterDetailHost.of(this), target, id, context, extraFields);
   }
 
   private referenceExists(target: string, id: unknown, context?: ExecutionContext): Promise<boolean | null> {
@@ -10555,6 +10564,7 @@ export class ObjectQL implements IObjectQLEngine {
       get realtimeService() { return engine.realtimeService; },
       set realtimeService(v) { engine.realtimeService = v; },
       referenceExists: (...a) => engine.referenceExists(...a),
+      referenceRow: (...a) => engine.referenceRow(...a),
       resolveEnginePosture: (...a) => engine.resolveEnginePosture(...a),
       resolveObjectName: (...a) => engine.resolveObjectName(...a),
     }));
