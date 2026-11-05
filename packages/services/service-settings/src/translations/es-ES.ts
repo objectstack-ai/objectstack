@@ -346,28 +346,6 @@ export const esES: PlatformTranslationData = {
       },
     },
 
-    feature_flags: {
-      title: 'Indicadores de función',
-      description: 'Activa funciones experimentales y en beta para esta organización.',
-      groups: {
-        productivity: { title: 'Productividad' },
-        collaboration: { title: 'Colaboración' },
-      },
-      keys: {
-        ai_enabled: {
-          label: 'Asistente de IA',
-          help: 'Habilita el panel del asistente de IA dentro de la aplicación.',
-        },
-        kanban_swimlanes: { label: 'Carriles de Kanban' },
-        realtime_cursors: { label: 'Cursores en tiempo real' },
-        inline_comments: { label: 'Comentarios en línea' },
-      },
-      banners: {
-        beta_notice: { title: 'Atención',
-          text: 'Las funciones beta pueden cambiar sin previo aviso. Una función definida en la configuración del servidor queda fijada, activada o desactivada, en todo el despliegue y no se puede cambiar aquí.' },
-      },
-    },
-
     storage: {
       title: 'Almacenamiento de archivos',
       description: 'Backend usado para adjuntos, exportaciones y subidas de usuarios.',

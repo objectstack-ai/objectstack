@@ -16,23 +16,21 @@ import { authSettingsManifest } from './manifests/auth.manifest.js';
 import { localizationSettingsManifest } from './manifests/localization.manifest.js';
 import { companySettingsManifest } from './manifests/company.manifest.js';
 import { brandingSettingsManifest } from './manifests/branding.manifest.js';
-import { featureFlagsSettingsManifest } from './manifests/feature-flags.manifest.js';
 import { builtinSettingsManifests } from './manifests/index.js';
 import { evaluateVisibility, visibilitySource } from './visibility-eval.js';
 import { SettingsManifestSchema } from '@objectstack/spec/system';
 
 describe('reference manifests are spec-valid', () => {
-  it('mail / branding / feature_flags pass schema', () => {
+  it('mail / branding pass schema', () => {
     expect(() => SettingsManifestSchema.parse(mailSettingsManifest)).not.toThrow();
     expect(() => SettingsManifestSchema.parse(brandingSettingsManifest)).not.toThrow();
-    expect(() => SettingsManifestSchema.parse(featureFlagsSettingsManifest)).not.toThrow();
   });
 });
 
 describe('envKeyOf', () => {
   it('uppercases and underscores', () => {
     expect(envKeyOf('mail', 'smtp_host')).toBe('OS_MAIL_SMTP_HOST');
-    expect(envKeyOf('feature_flags', 'ai-enabled')).toBe('OS_FEATURE_FLAGS_AI_ENABLED');
+    expect(envKeyOf('ai', 'log-prompts')).toBe('OS_AI_LOG_PROMPTS');
   });
 });
 
@@ -41,6 +39,27 @@ describe('SettingsService — registry', () => {
     const svc = new SettingsService();
     await expect(svc.get('nope', 'x')).rejects.toBeInstanceOf(UnknownNamespaceError);
     expect(() => svc.getManifest('nope')).toThrow(UnknownNamespaceError);
+  });
+
+  it('no longer serves the retired feature_flags namespace', async () => {
+    // Its four toggles had no reader, so the namespace was removed rather than
+    // left as a page of switches that change nothing (ADR-0049 enforce-or-remove).
+    // A stored `sys_setting` row or an `OS_FEATURE_FLAGS_*` variable is inert:
+    // nothing registers the namespace, so nothing resolves it.
+    const svc = new SettingsService({ env: { OS_FEATURE_FLAGS_AI_ENABLED: 'true' } });
+    for (const m of builtinSettingsManifests) svc.registerManifest(m);
+    expect(builtinSettingsManifests.map((m) => m.namespace)).not.toContain('feature_flags');
+    let caught: unknown;
+    try {
+      svc.getManifest('feature_flags');
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(UnknownNamespaceError);
+    expect(caught).toMatchObject({ code: 'SETTINGS_UNKNOWN_NAMESPACE', namespace: 'feature_flags' });
+    await expect(svc.get('feature_flags', 'ai_enabled')).rejects.toMatchObject({
+      code: 'SETTINGS_UNKNOWN_NAMESPACE',
+    });
   });
 
   it('rejects unknown key', async () => {
@@ -93,9 +112,9 @@ describe('SettingsService — resolver precedence', () => {
   });
 
   it('coerces env strings via default-type hint', async () => {
-    const svc = new SettingsService({ env: { OS_FEATURE_FLAGS_AI_ENABLED: 'true' } });
-    svc.registerManifest(featureFlagsSettingsManifest);
-    const r = await svc.get('feature_flags', 'ai_enabled');
+    const svc = new SettingsService({ env: { OS_AI_LOG_PROMPTS: 'true' } });
+    svc.registerManifest(aiSettingsManifest);
+    const r = await svc.get('ai', 'log_prompts');
     expect(r.value).toBe(true);
   });
 
@@ -223,11 +242,11 @@ describe('SettingsService — audit sink', () => {
 describe('SettingsService — getNamespace', () => {
   it('returns manifest + values for every key', async () => {
     const svc = new SettingsService({ env: {} });
-    svc.registerManifest(featureFlagsSettingsManifest);
-    const payload = await svc.getNamespace('feature_flags');
-    expect(payload.manifest.namespace).toBe('feature_flags');
-    expect(payload.values.ai_enabled.value).toBe(false);
-    expect(payload.values.inline_comments.value).toBe(true);
+    svc.registerManifest(aiSettingsManifest);
+    const payload = await svc.getNamespace('ai');
+    expect(payload.manifest.namespace).toBe('ai');
+    expect(payload.values.log_prompts.value).toBe(false);
+    expect(payload.values.trace_enabled.value).toBe(true);
   });
 });
 
@@ -815,25 +834,25 @@ describe('SettingsService — env overrides are checked against declared options
     // a pin for the option check specifically: `branding.workspace_name` is
     // free text to the enumeration but does declare `minLength: 1,
     // maxLength: 60`, and since #5932 that window IS enforced on this same path
-    // — `EnvCorp` (7) simply sits inside it. `feature_flags.ai_enabled` is a
+    // — `EnvCorp` (7) simply sits inside it. `ai.log_prompts` is a
     // toggle and declares no window at all.
     const { errors, logger } = spyLogger();
     const svc = new SettingsService({
       env: {
         OS_BRANDING_WORKSPACE_NAME: 'EnvCorp', // no option table; length 7 of [1, 60]
-        OS_FEATURE_FLAGS_AI_ENABLED: 'true',   // boolean — coerced, not enumerated
+        OS_AI_LOG_PROMPTS: 'true',             // boolean — coerced, not enumerated
       },
       logger,
     });
     svc.registerManifest(brandingSettingsManifest);
-    svc.registerManifest(featureFlagsSettingsManifest);
+    svc.registerManifest(aiSettingsManifest);
 
     const name = await svc.get('branding', 'workspace_name');
     expect(name.value).toBe('EnvCorp');
     expect(name.source).toBe('env');
     expect(name.locked).toBe(true);
 
-    const flag = await svc.get('feature_flags', 'ai_enabled');
+    const flag = await svc.get('ai', 'log_prompts');
     expect(flag.value).toBe(true);
     expect(flag.source).toBe('env');
 

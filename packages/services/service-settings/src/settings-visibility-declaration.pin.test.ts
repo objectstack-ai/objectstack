@@ -63,7 +63,7 @@ describe('settings `visible` — declaration ⇄ evaluator', () => {
     expect(refusals).toEqual([]);
   });
 
-  it('the corpus is still the size the ruling measured — 10 manifests, 96 predicates', () => {
+  it('the corpus is still the size the ruling measured — 9 manifests, 96 predicates', () => {
     // If a bundled manifest gains or loses a `visible`, this number moves and
     // the reader is sent back to the measurement rather than trusting a stale
     // one. It is a tripwire on the premise, not a rule about how many
@@ -72,7 +72,9 @@ describe('settings `visible` — declaration ⇄ evaluator', () => {
       ...(typeof m.visible === 'undefined' ? [] : [m.visible]),
       ...(m.specifiers ?? []).filter((s: any) => typeof s.visible !== 'undefined').map((s: any) => s.visible),
     ]);
-    expect(builtinSettingsManifests).toHaveLength(10);
+    // 10 -> 9 at #30204: the `feature_flags` manifest was removed; it declared
+    // no `visible`, so the predicate count does not move.
+    expect(builtinSettingsManifests).toHaveLength(9);
     // 94 -> 96 at #11768: the `audience` group added two gated fields
     // (`audience_allowed_email_domains`, `audience_self_registration_permission_set`),
     // each with one `visible` predicate over `data.audience_posture`.

@@ -99,6 +99,28 @@ export interface SettingsDisplayOptions {
   locale?: string;
 }
 
+/**
+ * [#30203] The HTTP request a write arrived on: its headers and the
+ * transport's own peer address (`IHttpRequest.headers` / `remoteAddress`).
+ * It identifies and authorizes nothing (that is {@link SettingsContext}'s), and
+ * it is never stored or logged.
+ */
+export interface SettingsRequestTransport {
+  headers?: Record<string, string | string[] | undefined>;
+  remoteAddress?: string;
+}
+
+/** How a settings WRITE is carried out beyond its context: its prose, and the request it arrived on. */
+export interface SettingsWriteOptions extends SettingsDisplayOptions {
+  /**
+   * [#30203] The request the write arrived on. The settings routes set it on a
+   * save, for a {@link SettingsWritePredicate} that judges the change against
+   * the caller's own connection (plugin-auth's `allowed_ip_ranges`, which must
+   * not lock out the address saving it). Absent on an in-process write.
+   */
+  transport?: SettingsRequestTransport;
+}
+
 /** Storage row shape used by both the engine and the in-memory store. */
 export interface SettingsRow {
   namespace: string;
@@ -357,6 +379,24 @@ export interface SettingsWritePredicateInput {
   ctx: SettingsContext;
   /** The language the refusal is written in — {@link SettingsDisplayOptions.locale}. */
   locale?: string;
+  /**
+   * [#30203] The request the write arrived on ({@link SettingsWriteOptions.transport}),
+   * narrowed to the headers this predicate declared at registration
+   * ({@link SettingsWritePredicateOptions.requestHeaders}); absent on an
+   * in-process write.
+   */
+  transport?: SettingsRequestTransport;
+}
+
+/** [#30203] How a {@link SettingsWritePredicate} is registered. */
+export interface SettingsWritePredicateOptions {
+  /**
+   * The request headers the predicate reads, lower-case. Only these reach its
+   * `transport.headers`, so a credential header (`cookie`, `authorization`, an
+   * API key) never reaches a predicate that did not name it. None named: the
+   * predicate sees the peer address and no header.
+   */
+  requestHeaders?: readonly string[];
 }
 
 /**

@@ -121,7 +121,9 @@
  * this, extracting a shared reporter — normal, good refactoring — would defeat
  * the gate, which would make "hide the failure behind one indirection" the
  * cheapest way to go quiet. That is the #4420 shape itself, and it is why
- * `check-init-service-contract.mjs` walks a call graph too.
+ * `check-init-service-contract.mjs` walks a call graph too. Moving a body into
+ * a `sql-driver-*.ts` facet module is the same defeat by another route, so that
+ * one facade's helper hop crosses the file (`FACADE_LOG_HOP`, #30147).
  *
  * ## TWO rules live in this file — this one, and the READ-SEAM rule (#5186)
  *
@@ -2853,10 +2855,22 @@ function collectLoggedLevels(block, ctx, lineOf, seen = new Set(), depth = 0) {
         if (depth >= 3) return;
         const name = calleeName(child);
         if (!name || seen.has(name)) return;
-        const body = ctx.functionBodies.get(name, child);
+        let body = ctx.functionBodies.get(name, child);
+        let next = ctx;
+        let nextLineOf = lineOf;
+        // [#30147] A facet module's host call, or a `sql-driver.ts` stub, is
+        // followed across the file it sits in (`FACADE_LOG_HOP`); what is found
+        // there is read with THAT file's indexes, at the line of this call.
+        const hop = ctx.functionBodies.facadeHop?.follow(child, body, ctx.functionBodies);
+        if (hop) {
+            body = hop.body;
+            next = { ...ctx, functionBodies: hop.entry.bodies, logAliases: hop.entry.logAliases };
+            const at = lineOf(child);
+            nextLineOf = () => at;
+        }
         if (!body) return;
         seen.add(name);
-        for (const l of collectLoggedLevels(body, ctx, lineOf, seen, depth + 1)) {
+        for (const l of collectLoggedLevels(body, next, nextLineOf, seen, depth + 1)) {
             levels.push({ ...l, viaHelper: name });
         }
     });
@@ -3376,6 +3390,212 @@ function viaHostParameter(call) {
 }
 
 /**
+ * [#30147] The catch side's cross-file hop through the `sql-driver.ts` facade.
+ *
+ * `collectLoggedLevels` follows a catch's log helper to its body by NAME, in
+ * the same file. The sql-driver codemod (`scripts/codemod-split-sql-driver.mjs`,
+ * #30105) moves a `SqlDriver` method's body into a stateless facet class in a
+ * `sql-driver-*.ts` section module and leaves a one-call stub behind, so that
+ * lookup met the move twice, and both times read a loud catch as silent:
+ *
+ *   - INTO the class. A moved body's `this.logDurabilityFailure(…)` named a
+ *     same-file method while it lived in `sql-driver.ts`. In the facet module
+ *     there is no such declaration, so the helper resolved nowhere and the
+ *     catch read "swallowed, no log" (measured: `migrateMysqlDatetimeColumns`
+ *     and `migrateMysqlTimeColumns` red when moved, #30105).
+ *   - THROUGH a stub. Once `logDurabilityFailure`'s own body moves, the method
+ *     the call reaches is `return ClassHeadFacet.logDurabilityFailure.call(
+ *     classHeadHost.of(this), msg, meta)`, which logs nothing itself.
+ *
+ * The codemod kept both on the class (a pin and a needle) until this hop
+ * existed. It follows exactly the two shapes the codemod writes, and nothing
+ * else:
+ *
+ *   HOST CALL — `this.x(…)` in a `sql-driver-*.ts` module of this directory,
+ *   inside a function whose `this` parameter is typed by an interface the SAME
+ *   module declares (bare, or through `Pick<Host, 'x' | …>` naming `x`), whose
+ *   member `x` is typed `<T>['x']`, `T` a name the module imports for the class
+ *   `SqlDriver` from `./sql-driver.js` (a routed module imports it AS
+ *   `SqlDriverClass`), resolves to `SqlDriver`'s own instance method `x` in
+ *   `sql-driver.ts`. ONE hop, the hop the same call made before the body moved.
+ *
+ *   STUB — a `SqlDriver` instance method whose LAST statement returns
+ *   `<X>Facet.x.call(<y>Host.of(this), …)` (awaited or not), `<X>Facet` a named
+ *   value import from a `./sql-driver-*.js` module that exports the class with
+ *   one static method `x`, is read as that method's body. Not a hop: it is the
+ *   same method's body, relocated, so it costs no depth.
+ *
+ * Every refusal (another directory, a module the pattern does not name, a
+ * `this` typed by anything but the module's own host interface, a member
+ * typed any other way, a stub handing its body anything but `<y>Host.of(this)`)
+ * leaves the helper unresolved: the under-counting direction this file takes
+ * everywhere. A log found across the hop is reported at the line of the call
+ * that reached it, in the file being judged.
+ *
+ * The log-level rule only: the read-seam rule's scan roots
+ * (`READ_SEAM_SCAN_ROOTS`) do not hold this directory, so the two rules still
+ * agree on every file both of them read.
+ */
+const FACADE_LOG_HOP = Object.freeze({
+    dir: 'packages/drivers/driver-sql/src',
+    host: 'sql-driver.ts',
+    hostClass: 'SqlDriver',
+    hostSpecifier: './sql-driver.js',
+    module: /^sql-driver-[a-z0-9-]+\.ts$/,
+    specifier: /^\.\/(sql-driver-[a-z0-9-]+)\.js$/,
+    facet: /^[A-Z][A-Za-z0-9]*Facet$/,
+    hostOf: /^[a-z][A-Za-z0-9]*Host$/,
+});
+
+/**
+ * The hop above, over one set of sources. `load(relPath)` answers a file's
+ * text (or `undefined`); each file it reads is parsed once.
+ *
+ * @returns `{ attach(bodies, relPath), follow(call, body, bodies) }`.
+ *          `follow` answers `{ body, entry }` (the body to read and the file
+ *          it lives in, `entry.bodies` / `entry.logAliases`) or `undefined`
+ *          when the call is not one of the two shapes.
+ */
+function createFacadeLogHop(load, config = FACADE_LOG_HOP) {
+    const hostRel = `${config.dir}/${config.host}`;
+    const isModule = (rel) =>
+        typeof rel === 'string' &&
+        rel.startsWith(`${config.dir}/`) &&
+        !rel.slice(config.dir.length + 1).includes('/') &&
+        config.module.test(rel.slice(config.dir.length + 1));
+    const cache = new Map();
+    const entry = (rel) => {
+        if (cache.has(rel)) return cache.get(rel);
+        let made;
+        const text = rel === hostRel || isModule(rel) ? load(rel) : undefined;
+        if (text !== undefined) {
+            const sf = parseSourceFile(rel, text, ts.ScriptKind.TS);
+            const bodies = indexFunctionBodies(sf);
+            attach(bodies, rel);
+            made = { sf, bodies, logAliases: indexLogAliases(sf, bodies) };
+        }
+        cache.set(rel, made);
+        return made;
+    };
+    const attach = (bodies, rel) => {
+        if (rel === hostRel || isModule(rel)) {
+            bodies.facadeHop = api;
+            bodies.relPath = rel;
+        }
+        return bodies;
+    };
+    const exported = (s) => !!s.modifiers?.some((x) => x.kind === ts.SyntaxKind.ExportKeyword);
+    const isStatic = (m) => !!m.modifiers?.some((x) => x.kind === ts.SyntaxKind.StaticKeyword);
+    /** The one method `name` of class `cls` in `sf` with a body (`static` as asked), or `undefined`. */
+    const classMethod = (sf, cls, name, wantStatic) => {
+        const c = sf.statements.find((s) => ts.isClassDeclaration(s) && s.name?.text === cls);
+        const ms = c?.members.filter((m) => ts.isMethodDeclaration(m) && m.body && ts.isIdentifier(m.name) &&
+            m.name.text === name && isStatic(m) === wantStatic) ?? [];
+        return ms.length === 1 ? { cls: c, body: ms[0].body } : undefined;
+    };
+    /** Named imports of `sf` from `pick(specifier)`: local name → imported name (`value` when not type-only). */
+    const importsOf = (sf, pick) => {
+        const out = new Map();
+        for (const stmt of sf.statements) {
+            if (!ts.isImportDeclaration(stmt) || !ts.isStringLiteral(stmt.moduleSpecifier)) continue;
+            const rel = pick(stmt.moduleSpecifier.text);
+            const named = stmt.importClause?.namedBindings;
+            if (rel === undefined || !named || !ts.isNamedImports(named)) continue;
+            for (const el of named.elements) {
+                out.set(el.name.text, {
+                    rel,
+                    imported: (el.propertyName ?? el.name).text,
+                    value: !stmt.importClause.isTypeOnly && !el.isTypeOnly,
+                });
+            }
+        }
+        return out;
+    };
+
+    /** HOST CALL: `this.x(…)` in a facet module → `SqlDriver#x`'s body in the host file. */
+    const hostCall = (call, bodies) => {
+        if (!isModule(bodies.relPath)) return undefined;
+        const expr = call.expression;
+        if (!ts.isPropertyAccessExpression(expr) || !ts.isIdentifier(expr.name) || expr.expression.kind !== ts.SyntaxKind.ThisKeyword) return undefined;
+        const name = expr.name.text;
+        let fn = call.parent;
+        while (fn && (ts.isArrowFunction(fn) || !ts.isFunctionLike(fn))) fn = fn.parent;
+        const thisParam = fn?.parameters?.[0];
+        if (!thisParam || !ts.isIdentifier(thisParam.name) || thisParam.name.text !== 'this') return undefined;
+        let type = thisParam.type;
+        if (!type || !ts.isTypeReferenceNode(type) || !ts.isIdentifier(type.typeName)) return undefined;
+        if (type.typeName.text === 'Pick') {
+            const [target, keys] = type.typeArguments ?? [];
+            const picked = (k) => ts.isLiteralTypeNode(k) && ts.isStringLiteral(k.literal) && k.literal.text === name;
+            const listed = keys && (ts.isUnionTypeNode(keys) ? keys.types.some(picked) : picked(keys));
+            if (!listed || !target || !ts.isTypeReferenceNode(target) || !ts.isIdentifier(target.typeName)) return undefined;
+            type = target;
+        }
+        const sf = call.getSourceFile();
+        const iface = sf.statements.find((s) => ts.isInterfaceDeclaration(s) && s.name.text === type.typeName.text);
+        const member = iface?.members.find((m) => ts.isPropertySignature(m) && m.name && ts.isIdentifier(m.name) && m.name.text === name);
+        const t = member?.type;
+        if (!t || !ts.isIndexedAccessTypeNode(t) || !ts.isTypeReferenceNode(t.objectType) || !ts.isIdentifier(t.objectType.typeName)
+            || !ts.isLiteralTypeNode(t.indexType) || !ts.isStringLiteral(t.indexType.literal) || t.indexType.literal.text !== name) return undefined;
+        const classImport = importsOf(sf, (s) => (s === config.hostSpecifier ? hostRel : undefined)).get(t.objectType.typeName.text);
+        if (!classImport || classImport.imported !== config.hostClass) return undefined;
+        const host = entry(hostRel);
+        const hit = host && classMethod(host.sf, config.hostClass, name, false);
+        return hit ? { body: hit.body, entry: host } : undefined;
+    };
+
+    /** STUB: a `SqlDriver` method whose last statement is `return <X>Facet.x.call(<y>Host.of(this), …)` → the facet's static `x`. */
+    const stubTarget = (body) => {
+        const method = body?.parent;
+        if (!method || !ts.isBlock(body) || !ts.isMethodDeclaration(method) || !ts.isIdentifier(method.name) || isStatic(method)) return undefined;
+        const cls = method.parent;
+        if (!ts.isClassDeclaration(cls) || cls.name?.text !== config.hostClass) return undefined;
+        const name = method.name.text;
+        const last = body.statements[body.statements.length - 1];
+        if (!last || !ts.isReturnStatement(last) || !last.expression) return undefined;
+        let call = last.expression;
+        if (ts.isAwaitExpression(call)) call = call.expression;
+        if (!ts.isCallExpression(call)) return undefined;
+        const callee = call.expression;
+        if (!ts.isPropertyAccessExpression(callee) || !ts.isIdentifier(callee.name) || callee.name.text !== 'call') return undefined;
+        const member = callee.expression;
+        if (!ts.isPropertyAccessExpression(member) || !ts.isIdentifier(member.name) || member.name.text !== name
+            || !ts.isIdentifier(member.expression) || !config.facet.test(member.expression.text)) return undefined;
+        const first = call.arguments[0];
+        const hostOfThis = !!first && ts.isCallExpression(first) && ts.isPropertyAccessExpression(first.expression) &&
+            ts.isIdentifier(first.expression.name) && first.expression.name.text === 'of' &&
+            ts.isIdentifier(first.expression.expression) && config.hostOf.test(first.expression.expression.text) &&
+            first.arguments.length === 1 && first.arguments[0].kind === ts.SyntaxKind.ThisKeyword;
+        if (!hostOfThis) return undefined;
+        const facetImport = importsOf(body.getSourceFile(), (s) => {
+            const m = config.specifier.exec(s);
+            return m ? `${config.dir}/${m[1]}.ts` : undefined;
+        }).get(member.expression.text);
+        if (!facetImport || !facetImport.value) return undefined;
+        const mod = entry(facetImport.rel);
+        const hit = mod && classMethod(mod.sf, facetImport.imported, name, true);
+        return hit && exported(hit.cls) ? { body: hit.body, entry: mod } : undefined;
+    };
+
+    const follow = (call, body, bodies) => {
+        let at;
+        if (!body) {
+            const h = hostCall(call, bodies);
+            if (!h) return undefined;
+            ({ body, entry: at } = h);
+        }
+        if ((at ? at.bodies.relPath : bodies.relPath) === hostRel) {
+            const s = stubTarget(body);
+            if (s) ({ body, entry: at } = s);
+        }
+        return at ? { body, entry: at } : undefined;
+    };
+
+    const api = { attach, follow, entry };
+    return api;
+}
+
+/**
  * Does this call perform a storage READ — directly, or through a same-file
  * wrapper? See `MAX_READ_WRAPPER_DEPTH` for why wrappers are followed, and
  * `HOST_SPLIT` for the one package where that hop crosses a file.
@@ -3778,6 +3998,8 @@ function analyzeSourceFile(sf, relPath, findings, seams, options = {}) {
     const usedPropagationSites = options.usedPropagationSites;
     const lineOf = (node) => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
     const functionBodies = indexFunctionBodies(sf);
+    // [#30147] The facade hop, when the run hands one in (`FACADE_LOG_HOP`).
+    if (options.facadeHop) options.facadeHop.attach(functionBodies, relPath);
     const logAliases = indexLogAliases(sf, functionBodies);
     // #9748: the summary-limb census. Collected even when the caller does not
     // ask for it, so the limb's code path is identical in every run.
@@ -4566,6 +4788,10 @@ function run({ list = false } = {}) {
     const seams = [];
     const summaryBranches = [];
     const usedPropagationSites = new Set();
+    const facadeHop = createFacadeLogHop((rel) => {
+        const abs = join(ROOT, rel);
+        return existsSync(abs) ? readFileSync(abs, 'utf8') : undefined;
+    });
 
     for (const file of files) {
         const text = readFileSync(file, 'utf8');
@@ -4574,6 +4800,7 @@ function run({ list = false } = {}) {
         analyzeSourceFile(sf, relative(ROOT, file).split(sep).join('/'), findings, seams, {
             usedPropagationSites,
             summaryBranches,
+            facadeHop,
         });
     }
 
@@ -4994,6 +5221,16 @@ const SELF_TEST_BATTERIES = Object.freeze({
         'flags: #22985 — `.apply(recv, args)` and `.bind(recv)(…)` invoke their target too': 1,
         'passes: #22985 — a bare `.bind(recv)` invokes nothing, so it guards nothing': 1,
         'passes: #22985 — a shadowing parameter or a `let` binding is not resolved as an alias': 1,
+        'passes: #30147 — a facet module\'s catch delegating to `this.logDurabilityFailure()` follows the host call and the stub to a loud body': 1,
+        'flags: #30147 — the same hop to a body that only warns is judged at that level': 1,
+        'flags: #30147 — negative control: with no hop handed in, the moved catch reads swallowed': 1,
+        'flags: #30147 — the same files outside packages/drivers/driver-sql/src resolve nowhere': 1,
+        'flags: #30147 — a host member typed any way but AS the class member resolves nowhere': 1,
+        'flags: #30147 — a member the function\'s `Pick` does not name resolves nowhere': 1,
+        'flags: #30147 — a class type not imported from ./sql-driver.js resolves nowhere': 1,
+        'passes: #30147 — a routed module\'s member typed through the class imported AS an alias resolves': 1,
+        'passes: #30147 — a sql-driver.ts catch whose helper is a stub follows the stub to the facet body': 1,
+        'flags: #30147 — a stub handing its body anything but `<y>Host.of(this)` is not followed': 1,
         'ledger: a stale baseline entry PASSES and is reported; an unledgered finding still FAILS (#26444)': 1,
         'ledger: a ledgered file on disk the scan never READ is refused; a deleted one passes (#26444)': 1,
     }),
@@ -5093,7 +5330,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // added to the roster with no size pin at all: the lookup below reads
 // `undefined` and the comparison fails loudly.
 const SELF_TEST_BATTERY_FLOOR = Object.freeze({
-    selfTest: 70,
+    selfTest: 80,
     selfTestReadSeams: 73,
 });
 
@@ -5102,7 +5339,7 @@ const SELF_TEST_BATTERY_FLOOR = Object.freeze({
 // `selfTestReadSeams`'s partition being deleted from the roster wholesale — the
 // deleted partition's own size pin is not evaluated by anyone once its entry
 // stops reaching it. This is the one assertion that survives that deletion.
-const SELF_TEST_BATTERY_TOTAL_FLOOR = 137;
+const SELF_TEST_BATTERY_TOTAL_FLOOR = 147;
 
 /**
  * The floor for ONE partition of the roster, run from that partition's own
@@ -6341,6 +6578,99 @@ function selfTest() {
             console.error(`  ✗ ${row}`);
         } else {
             console.log(`  ✓ ${row}`);
+        }
+    }
+    // ── [#30147] The facade hop (`FACADE_LOG_HOP`), over multi-file fixtures ──
+    //
+    // Driven through `analyzeSourceFile` exactly as `run()` drives it, with the
+    // hop built over the fixture files instead of the disk. Each row is one
+    // battery; the controls show each refusal is what reds its row.
+    {
+        const D = FACADE_LOG_HOP.dir;
+        const host = ({ stubArg = 'classHeadHost.of(this)', catchSite = false } = {}) => `import { ClassHeadFacet } from './sql-driver-class-head.js';
+import { classHeadHost } from './sql-driver-facet-hosts.js';
+export class SqlDriver {
+    protected logger: any = console;
+    protected logDurabilityFailure(msg: string, meta?: any): void {
+        return ClassHeadFacet.logDurabilityFailure.call(${stubArg}, msg, meta);
+    }
+    protected async runWideningAlters(table: string, statements: unknown[]): Promise<void> {}
+${catchSite ? `    protected async migrate(table: string): Promise<void> {
+        try {
+            await this.runWideningAlters(table, []);
+        } catch (err) {
+            this.logDurabilityFailure('widening failed', { err });
+        }
+    }
+` : ''}}
+`;
+        const head = (level = 'error') => `import type { SqlDriver } from './sql-driver.js';
+export interface ClassHeadHost {
+    logger: SqlDriver['logger'];
+}
+export class ClassHeadFacet {
+    static logDurabilityFailure(this: Pick<ClassHeadHost, 'logger'>, msg: string, meta?: any): void {
+        this.logger.${level}(msg, meta);
+    }
+}
+`;
+        const rotation = ({ cls = 'SqlDriver', imp = "import type { SqlDriver } from './sql-driver.js';", type, pick = "'logDurabilityFailure' | 'runWideningAlters'" } = {}) => `${imp}
+export interface RotationHost {
+    logDurabilityFailure: ${type ?? `${cls}['logDurabilityFailure']`};
+    runWideningAlters: ${cls}['runWideningAlters'];
+}
+export class RotationFacet {
+    static async migrate(this: Pick<RotationHost, ${pick}>, table: string): Promise<void> {
+        try {
+            await this.runWideningAlters(table, []);
+        } catch (err) {
+            this.logDurabilityFailure('widening failed', { err });
+        }
+    }
+}
+`;
+        const judge = ({ files, rel, dir = D, hop = true }) => {
+            const texts = new Map(Object.entries(files).map(([f, t]) => [`${dir}/${f}`, t]));
+            const findings = [];
+            const seams = [];
+            const sf = parseSourceFile(`${dir}/${rel}`, texts.get(`${dir}/${rel}`), ts.ScriptKind.TS);
+            analyzeSourceFile(sf, `${dir}/${rel}`, findings, seams, hop ? { facadeHop: createFacadeLogHop((r) => texts.get(r)) } : {});
+            return { findings: findings.length, seams: seams.length };
+        };
+        const moved = (over = {}) => ({
+            files: { 'sql-driver.ts': host(), 'sql-driver-class-head.ts': head(), 'sql-driver-rotation.ts': rotation(), ...over },
+            rel: 'sql-driver-rotation.ts',
+        });
+        const rows = [
+            ['passes: #30147 — a facet module\'s catch delegating to `this.logDurabilityFailure()` follows the host call and the stub to a loud body',
+                judge(moved()), 0],
+            ['flags: #30147 — the same hop to a body that only warns is judged at that level',
+                judge(moved({ 'sql-driver-class-head.ts': head('warn') })), 1],
+            ['flags: #30147 — negative control: with no hop handed in, the moved catch reads swallowed',
+                judge({ ...moved(), hop: false }), 1],
+            ['flags: #30147 — the same files outside packages/drivers/driver-sql/src resolve nowhere',
+                judge({ ...moved(), dir: 'packages/drivers/driver-other/src' }), 1],
+            ['flags: #30147 — a host member typed any way but AS the class member resolves nowhere',
+                judge(moved({ 'sql-driver-rotation.ts': rotation({ type: '(msg: string, meta?: any) => void' }) })), 1],
+            ['flags: #30147 — a member the function\'s `Pick` does not name resolves nowhere',
+                judge(moved({ 'sql-driver-rotation.ts': rotation({ pick: "'runWideningAlters'" }) })), 1],
+            ['flags: #30147 — a class type not imported from ./sql-driver.js resolves nowhere',
+                judge(moved({ 'sql-driver-rotation.ts': rotation({ imp: "import type { SqlDriver } from './other.js';" }) })), 1],
+            ['passes: #30147 — a routed module\'s member typed through the class imported AS an alias resolves',
+                judge(moved({ 'sql-driver-rotation.ts': rotation({ cls: 'SqlDriverClass', imp: "import type { SqlDriver as SqlDriverClass } from './sql-driver.js';" }) })), 0],
+            ['passes: #30147 — a sql-driver.ts catch whose helper is a stub follows the stub to the facet body',
+                judge({ files: { 'sql-driver.ts': host({ catchSite: true }), 'sql-driver-class-head.ts': head() }, rel: 'sql-driver.ts' }), 0],
+            ['flags: #30147 — a stub handing its body anything but `<y>Host.of(this)` is not followed',
+                judge({ files: { 'sql-driver.ts': host({ catchSite: true, stubArg: 'this' }), 'sql-driver-class-head.ts': head() }, rel: 'sql-driver.ts' }), 1],
+        ];
+        for (const [row, got, want] of rows) {
+            registerCase(row);
+            if (got.seams !== 1 || got.findings !== want) {
+                failures++;
+                console.error(`  ✗ ${row}: expected 1 seam and ${want} finding(s), got ${got.seams} seam(s) and ${got.findings} finding(s)`);
+            } else {
+                console.log(`  ✓ ${row}`);
+            }
         }
     }
     failures += checkSelfTestFloor(

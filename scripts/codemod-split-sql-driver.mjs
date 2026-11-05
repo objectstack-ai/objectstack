@@ -249,11 +249,6 @@ const PATH_READER_PINS = Object.freeze({
   createColumn: 'packages/cli generate-{field-type-vocabulary,string-family-width,multiple-json-column} pins and '
     + 'scripts/check-keyed-text-bounds.mjs slice `protected createColumn(` to its type switch',
   createAuditTimestampColumn: 'packages/cli generate-builtin-id-column pin reads 600 characters after its signature',
-  // The durability catches that stay (the `this.runWideningAlters(` row
-  // below) are judged by following `this.logDurabilityFailure(…)` to its
-  // body in the same file; a one-call stub there is a call that gate cannot
-  // follow, so both catches read "swallowed, no log" (measured, #30105).
-  logDurabilityFailure: 'scripts/check-durability-degradation-log-level.mjs follows a catch\'s log helper to its body in the same file',
 });
 
 /**
@@ -276,12 +271,6 @@ const PATH_READER_NEEDLES = Object.freeze({
   'keyed ? this.keyableTextLength(field) : null': 'scripts/check-keyed-text-bounds.mjs EMITTER_ANCHOR and the generate-string-family-width pin',
   'JSON_COLUMN_TYPES.has(type) ? this.jsonColumn(table, name) : table.string(name)': 'packages/cli generate-field-type-vocabulary and generate-string-family-width pins',
   'if (FILE_REFERENCE_TYPES.has(type)) {': 'packages/cli generate-string-family-width pin',
-  // check-durability-degradation-log-level judges the `catch` around a
-  // durability call by following SAME-FILE helpers (its `functionBodies` is
-  // per source file): `this.logDurabilityFailure(…)` resolves only in
-  // sql-driver.ts, so a moved catch reads as "swallowed, no log" (measured:
-  // migrateMysqlDatetimeColumns / migrateMysqlTimeColumns red when moved).
-  'this.runWideningAlters(': 'scripts/check-durability-degradation-log-level.mjs resolves the catch\'s log helper in the same file',
 });
 
 /**
@@ -290,20 +279,15 @@ const PATH_READER_NEEDLES = Object.freeze({
  * class; a top-level declaration carrying one moves as any other, because the
  * reader reads the leaf it moves to. The same stale-needle refusal applies.
  *
- * All three rows are `sql-driver-compile-refusal-seam.test.ts`'s enumeration:
- * it parses `sql-driver.ts`, the leaf and three named seam modules, and asserts
- * the EXACT set of functions that call `unsupportedFilterError` /
- * `withheldFilterError` or write the `INVALID_FILTER` code, by enclosing name.
- * Its `sources` gained the leaf by ruling 6597555122 (#29520 round 3, the path
- * reader migrated in the same PR as #25521 ask 3 asks), so these rows left
- * `PATH_READER_NEEDLES`. A method still stays: its body would move to a section
- * module the test does not read, and `SqlDriver.resolveWithheldFilterRefusal`,
- * a name the test pins, would drop out of the set.
+ * Empty since #30147: its three rows were `sql-driver-compile-refusal-seam.test.ts`'s
+ * enumeration of the functions that call `unsupportedFilterError` /
+ * `withheldFilterError` or write the `INVALID_FILTER` code. That test now reads
+ * every `sql-driver-*.ts` module and names a facet's static `x` as
+ * `SqlDriver.x` (ruling 6597555122 item 3: the reader gains the new modules in
+ * the same PR), so `resolveWithheldFilterRefusal` moves. The table stays for
+ * the next reader of `sql-driver.ts` and the leaf only.
  */
 const CLASS_PATH_READER_NEEDLES = Object.freeze({
-  'unsupportedFilterError(': 'sql-driver-compile-refusal-seam.test.ts enumerates its callers (it reads the leaf, no section module)',
-  'withheldFilterError(': 'sql-driver-compile-refusal-seam.test.ts enumerates its callers (it reads the leaf, no section module)',
-  '.INVALID_FILTER': 'sql-driver-compile-refusal-seam.test.ts enumerates the INVALID_FILTER code writers (it reads the leaf, no section module)',
 });
 
 /**

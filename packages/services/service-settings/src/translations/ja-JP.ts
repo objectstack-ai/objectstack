@@ -346,28 +346,6 @@ export const jaJP: PlatformTranslationData = {
       },
     },
 
-    feature_flags: {
-      title: '機能フラグ',
-      description: 'この組織で実験的・ベータ機能を切替えます。',
-      groups: {
-        productivity: { title: '生産性' },
-        collaboration: { title: 'コラボレーション' },
-      },
-      keys: {
-        ai_enabled: {
-          label: 'AI アシスタント',
-          help: 'アプリ内 AI アシスタントパネルを有効化します。',
-        },
-        kanban_swimlanes: { label: 'カンバンのスイムレーン' },
-        realtime_cursors: { label: 'リアルタイムカーソル' },
-        inline_comments: { label: 'インラインコメント' },
-      },
-      banners: {
-        beta_notice: { title: 'ご注意ください',
-          text: 'ベータ機能は予告なく変更される場合があります。サーバー設定で指定した機能はデプロイ全体でオンまたはオフに固定され、ここでは変更できません。' },
-      },
-    },
-
     storage: {
       title: 'ファイルストレージ',
       description: '添付ファイル・エクスポート・ユーザーアップロードに使用するバックエンド。',

@@ -242,7 +242,7 @@ function buildGetSession(ctx: PluginContext): ((headers: Headers) => Promise<unk
  *
  *  - **The sibling settings namespaces.** `@objectstack/service-settings`'s
  *    manifests split into two cohorts. The tenant-facing, cosmetic ones —
- *    `branding`, `company`, `localization`, `feature-flags` — declare
+ *    `branding`, `company`, `localization` — declare
  *    `readPermission: 'setup.access'` / `writePermission: 'setup.write'`. The
  *    platform-infrastructure ones that carry connection configuration and
  *    credentials — `mail`, `storage`, `sms`, `auth`, `ai`, `knowledge`, and
