@@ -384,7 +384,7 @@ describe('an OS_LOCALIZATION_LOCALE override read while the boot is still fillin
       expect(booted.reader.reads[0]).toEqual({ value: 'xx-XX', source: 'env' });
       // ... then judged at `kernel:bootstrapped`: reported once, and the reader re-read.
       await vi.waitFor(() => expect(booted.reader.reads.length).toBeGreaterThan(1));
-      expect(booted.reader.reads.at(-1)).toEqual({ value: 'en-US', source: 'default' });
+      expect(booted.reader.reads[booted.reader.reads.length - 1]).toEqual({ value: 'en-US', source: 'default' });
       expect(booted.reports()).toHaveLength(1);
       expect(booted.reports()[0]).toContain('IGNORED');
       expect((await booted.service.get('localization', 'locale')).source).toBe('default');
