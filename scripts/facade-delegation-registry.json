@@ -462,12 +462,6 @@
       "member": "get supports",
       "card": "#30147",
       "reason": "codemod limit: inferred-return-type, a get accessor whose object type the base leaves inferred, with a docblock on each key (MOVED_ACCESSORS moves a getter whose type is written, #30147 phase 2a)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "applyFilterCondition",
-      "card": "#30147",
-      "reason": "inferred-return-type (#30105 report: stays on the class until its return type is spelled, #30147 phase 2d); its comment-in-parameters half is retired (#30147 phase 2a)"
     }
   ]
 }

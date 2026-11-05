@@ -17,7 +17,7 @@
 
 import React from 'react';
 import { describe, it, expect, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, within } from '@testing-library/react';
 import { DiscussionContextProvider } from '@object-ui/react';
 import type { FeedItem } from '@object-ui/types';
 import {
@@ -191,6 +191,52 @@ describe('the 变更 chip is offered only while the record shows its field histo
     rerender(page(false));
     expect(container.querySelector('[data-stream-filter="all"]')?.getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByText('Logged a call')).toBeTruthy();
+  });
+});
+
+describe("the panel's `changes_only` is offered by the same rule as the 变更 chip (objectstack#30344)", () => {
+  const panel = (fieldHistory: boolean | undefined, filterMode?: 'all' | 'changes_only') => {
+    const timeline = <RecordActivityTimeline items={[call, comment, ...audit]} filterMode={filterMode} />;
+    return fieldHistory === undefined ? (
+      timeline
+    ) : (
+      <RecordFieldHistoryContext.Provider value={fieldHistory}>{timeline}</RecordFieldHistoryContext.Provider>
+    );
+  };
+  /** The dropdown's options, in order, read off the opened list. */
+  const options = async () => {
+    fireEvent.keyDown(screen.getByRole('combobox'), { key: 'ArrowDown' });
+    const listbox = await screen.findByRole('listbox');
+    return within(listbox).getAllByRole('option').map((option) => option.textContent);
+  };
+
+  it('history shown: all four options, Field Changes among them', async () => {
+    render(panel(true));
+    expect(await options()).toEqual(['All Activity', 'Comments Only', 'Field Changes', 'Tasks Only']);
+  });
+
+  it('history not shown (history off, or a reader whose audit read did not answer): no `changes_only`', async () => {
+    render(panel(false));
+    expect(await options()).toEqual(['All Activity', 'Comments Only', 'Tasks Only']);
+  });
+
+  it('CONTROL: no host saying, every option draws, as before', async () => {
+    render(panel(undefined));
+    expect(await options()).toEqual(['All Activity', 'Comments Only', 'Field Changes', 'Tasks Only']);
+  });
+
+  it('a `changes_only` the dropdown does not offer reads as 全部: every entry draws', () => {
+    render(panel(false, 'changes_only'));
+    expect(screen.getByRole('combobox').textContent).toContain('All Activity');
+    expect(screen.getByText('Logged a call')).toBeTruthy();
+    expect(screen.getByText('Budget is set')).toBeTruthy();
+  });
+
+  it('CONTROL: with history shown, the same `changes_only` holds the field change only', () => {
+    render(panel(true, 'changes_only'));
+    expect(screen.getByText('Status')).toBeTruthy();
+    expect(screen.queryByText('Logged a call')).toBeNull();
+    expect(screen.queryByText('Budget is set')).toBeNull();
   });
 });
 

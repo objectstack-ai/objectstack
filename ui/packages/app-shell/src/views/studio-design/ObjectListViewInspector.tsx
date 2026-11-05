@@ -130,6 +130,8 @@ import {
   listViewTypeHeldEdit,
 } from './ListViewTypeSection.js';
 import { ListViewChartSection } from './ListViewChartSection.js';
+import { ListViewMoreSection } from './ListViewMoreSection.js';
+import { ListViewBulkActionsSection, listViewHasSelectionBar } from './ListViewBulkActionsSection.js';
 import {
   addedArrayElements,
   agentDraftMarkOf,
@@ -394,6 +396,11 @@ export interface ObjectListViewDraft {
    * a pending edit is the caller's to send first.
    */
   showView: (viewId: string) => void;
+  /**
+   * objectstack#30046 — open the leaf `surface` (the host opens it) on its
+   * view `viewId`, as a link naming that view would (`ListViewLink`).
+   */
+  openView: (surface: SurfaceIdentity, viewId: string) => void;
   /** Send the buffer to the package draft — the autosave's `save`. */
   save: (sent: DraftSendClaim) => Promise<void>;
   /** The version-conflict dialog of this buffer's guard; render it once. */
@@ -736,6 +743,14 @@ export function useObjectListViewDraft({
     },
     [entryViewId, entryKey],
   );
+  // objectstack#30046 — a door outside the header (a list view picked under
+  // 不在导航中, a link to the view itself) opens the leaf `surface` on its
+  // view `viewId`: the link's own rule, so it shows once that leaf is open
+  // and expires as a link does.
+  const openView = React.useCallback((surface: SurfaceIdentity, next: string) => {
+    setPicked(null);
+    setLink({ surface, viewId: next });
+  }, []);
 
   const row = buffer.row;
   const notList = !!row && !isListViewRow(row);
@@ -814,6 +829,7 @@ export function useObjectListViewDraft({
     edit,
     createView,
     showView,
+    openView,
     save,
     conflictDialog,
     canvas,
@@ -1204,7 +1220,10 @@ function KanbanCardSection({
  * type's own settings (`ListViewTypeSection`, objectstack#27895); on a chart
  * view, its dataset binding (`ListViewChartSection`, objectstack#27933). The
  * object's other list views are one pick away in the header's title
- * (`ObjectListViewTitle`, objectstack#30046), not here.
+ * (`ObjectListViewTitle`, objectstack#30046), not here. Below them, what only
+ * the view's own page offered before a list view opened here from every door:
+ * its conditional formatting and the spec form's sections
+ * (`ListViewMoreSection`, objectstack#30046).
  */
 export function ObjectListViewInspector({
   listView,
@@ -1212,6 +1231,7 @@ export function ObjectListViewInspector({
   locale,
   selection,
   onSelectionChange,
+  onBlockingIssuesChange,
 }: {
   listView: ObjectListViewDraft;
   readOnly: boolean;
@@ -1223,6 +1243,12 @@ export function ObjectListViewInspector({
    */
   selection?: ListViewColumnSelection | null;
   onSelectionChange?: (selection: ListViewColumnSelection | null) => void;
+  /**
+   * objectstack#30046 — how many conditional-formatting rules' CEL does not
+   * parse (`ListViewMoreSection`): the host holds the view's autosave while
+   * it is not 0.
+   */
+  onBlockingIssuesChange?: (count: number) => void;
 }): React.ReactElement | null {
   const { target, row, notList, seedColumns, failure, saving, hasDraft, edit, loadedFor, targetKey, draftChanges, published } =
     listView;
@@ -1531,6 +1557,27 @@ export function ObjectListViewInspector({
                 </PopoverContent>
               </Popover>
             </div>
+            {objectName && listViewHasSelectionBar(body) && (
+              // objectstack#30089 — the selection bar's actions: `bulkActions` and `bulkActionDefs`.
+              <ListViewBulkActionsSection
+                objectName={objectName}
+                body={body}
+                writeBody={writeBody}
+                readOnly={readOnly}
+                locale={locale}
+              />
+            )}
+            {/* objectstack#30046 — what only the view's own page offered: 条件格式化 and the spec form's sections. */}
+            <ListViewMoreSection
+              body={body}
+              writeBody={writeBody}
+              objectName={objectName}
+              fieldNames={fields.map((f) => f.name)}
+              fieldCatalog={fieldCatalog}
+              readOnly={readOnly}
+              locale={locale}
+              onBlockingIssuesChange={onBlockingIssuesChange}
+            />
             {latestMark && (
               // objectui#12725 — the 来源 line: who drafted the marked settings, and when.
               <DraftSourceLine mark={latestMark} locale={locale} items={addedLabels} className="border-t pt-3" />

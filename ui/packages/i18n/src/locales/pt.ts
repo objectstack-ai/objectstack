@@ -2931,6 +2931,7 @@ const pt = {
       verifyingDescription: "Estamos verificando seu e-mail. Por favor, aguarde.",
       successTitle: "E-mail verificado",
       successDescription: "Seu e-mail foi verificado. Você pode fazer login agora.",
+      handoffSuccessDescription: "Seu e-mail foi verificado. Volte ao aplicativo em que você estava fazendo login e faça login lá.",
       errorTitle: "Falha na verificação",
       errorDescription: "A verificação falhou. Por favor, solicite um novo link.",
       missingToken: "Falta um token no link de verificação.",
@@ -4296,6 +4297,10 @@ const pt = {
         unreadableRange: "{{packageId}} declara {{dependency}} com o intervalo de versões {{range}}, que não pode ser lido. Corrija o intervalo e publique o pacote novamente.",
         unreadableVersion: "Instale uma versão publicada de {{dependency}} dentro de {{range}}. A versão instalada {{installedVersion}} não está no formato MAJOR.MINOR.PATCH.",
         unreadableDeclaration: "{{packageId}} declara as suas dependências num formato que a instalação não consegue ler. Escreva-as como um mapa de ID de pacote para intervalo de versões e publique o pacote novamente.",
+      },
+      protocolCheckSkipped: {
+        noRange: "{{packageId}} não indica qual protocolo de plataforma suporta, por isso foi instalado sob o protocolo {{protocolVersion}} sem verificação de compatibilidade e pode não funcionar nesta versão da plataforma. Uma compilação do pacote que declara o protocolo suportado (engines.protocol) é verificada na instalação.",
+        unparsedRange: "{{packageId}} declara o seu protocolo de plataforma como {{requiredRange}}, que este runtime não consegue ler, por isso foi instalado sob o protocolo {{protocolVersion}} sem verificação de compatibilidade e pode não funcionar nesta versão da plataforma. Uma compilação do pacote que declara um intervalo legível (engines.protocol) é verificada na instalação.",
       },
       localUnauthorized: "Faça login neste runtime primeiro.",
       localMarketplaceUnavailable: "Este runtime não tem OS_CLOUD_URL configurado.",

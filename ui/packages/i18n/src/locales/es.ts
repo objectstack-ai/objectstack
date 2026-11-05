@@ -2936,6 +2936,7 @@ const es = {
       verifyingDescription: "Estamos verificando su correo. Por favor espere.",
       successTitle: "Correo verificado",
       successDescription: "Su correo fue verificado. Ahora puede iniciar sesión.",
+      handoffSuccessDescription: "Su correo fue verificado. Vuelva a la aplicación en la que estaba iniciando sesión e inicie sesión allí.",
       errorTitle: "Verificación fallida",
       errorDescription: "La verificación falló. Solicite un nuevo enlace.",
       missingToken: "Falta un token en el enlace de verificación.",
@@ -4301,6 +4302,10 @@ const es = {
         unreadableRange: "{{packageId}} declara {{dependency}} con el rango de versiones {{range}}, que no se puede leer. Corrija el rango y vuelva a publicar el paquete.",
         unreadableVersion: "Instale una versión publicada de {{dependency}} dentro de {{range}}. La versión instalada {{installedVersion}} no tiene el formato MAJOR.MINOR.PATCH.",
         unreadableDeclaration: "{{packageId}} declara sus dependencias en una forma que la instalación no puede leer. Escríbalas como un mapa de ID de paquete a rango de versiones y vuelva a publicar el paquete.",
+      },
+      protocolCheckSkipped: {
+        noRange: "{{packageId}} no indica qué protocolo de plataforma admite, por lo que se instaló con el protocolo {{protocolVersion}} sin comprobar la compatibilidad y es posible que no funcione en esta versión de la plataforma. Una compilación del paquete que declare el protocolo que admite (engines.protocol) se comprueba al instalarla.",
+        unparsedRange: "{{packageId}} declara su protocolo de plataforma como {{requiredRange}}, que este entorno de ejecución no puede leer, por lo que se instaló con el protocolo {{protocolVersion}} sin comprobar la compatibilidad y es posible que no funcione en esta versión de la plataforma. Una compilación del paquete que declare un rango legible (engines.protocol) se comprueba al instalarla.",
       },
       localUnauthorized: "Primero inicie sesión en este runtime.",
       localMarketplaceUnavailable: "Este runtime no tiene configurado OS_CLOUD_URL.",

@@ -423,6 +423,8 @@
     "api/SearchAllHit",
     "api/SearchAllPageHit",
     "api/SearchAllResponse",
+    "api/SeedAppliedIdList",
+    "api/SeedAppliedLanded",
     "api/ServiceInfo",
     "api/ServiceSelfInfo",
     "api/ServiceStatus",

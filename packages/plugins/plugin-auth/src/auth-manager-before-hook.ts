@@ -71,6 +71,7 @@ import {
 } from './last-local-credential.js';
 import { ORGANIZATION_DELETE_PATH } from './organization-delete.js';
 import { carriesPrincipalSession } from './principal-session-mint.js';
+import { SSO_PROVIDER_DELETE_PATH } from './sign-in-method-floor.js';
 import { snapshotRoleChangeGrants, UPDATE_MEMBER_ROLE_PATH } from './role-change-granted-set.js';
 import { refuseVisitorResendWithoutLiveTransport } from './visitor-verification-resend.js';
 
@@ -91,6 +92,7 @@ export interface BeforeHookHost {
   assertPhoneOtpSendAllowed: AuthManager['assertPhoneOtpSendAllowed'];
   assertRemoveMemberPermitted: AuthManager['assertRemoveMemberPermitted'];
   assertRevokeSessionIdentifiesRecord: AuthManager['assertRevokeSessionIdentifiesRecord'];
+  assertSsoProviderDeletable: AuthManager['assertSsoProviderDeletable'];
   readonly config: AuthManager['config'];
   existingAddressSignUpAnswersSuccess: AuthManager['existingAddressSignUpAnswersSuccess'];
   hasExistingUserFor: AuthManager['hasExistingUserFor'];
@@ -305,6 +307,17 @@ export async function globalBeforeHook(
   ) {
     const actor = await this.resolveActor(ctx);
     if (actor?.userId) await this.assertActorNotHeld(actor);
+    // fall through — the vendor's own provider-access check still runs
+  }
+
+  // ── [#30300] nor delete the last way to sign in ───────────────────
+  // With email and password off and one identity provider as the only
+  // other way in, Setup's "Delete SSO Provider" answered 200 and nobody
+  // could sign in again (measured on a real boot). Asked after the
+  // held-caller refusal above and before the vendor's first write; the
+  // sign-in method floor decides (`sign-in-method-floor.ts`).
+  if (ctx?.path === SSO_PROVIDER_DELETE_PATH) {
+    await this.assertSsoProviderDeletable(ctx);
     // fall through — the vendor's own provider-access check still runs
   }
 

@@ -792,3 +792,42 @@ export function listNames(names: Iterable<string>): string {
   const arr = [...names].sort();
   return arr.length > 0 ? arr.join(', ') : '(none)';
 }
+
+// [#30383] Kept below the fold's section on purpose: `foldCode()` in
+// `validate-security-posture.test.ts` appends this file's text from
+// `export interface VisibleObjectExtension` to `/** What a path resolved to` to
+// the posture rule's code and holds every receiver read there to its tables;
+// these two read only the fold's output.
+
+/**
+ * [#30383] The served objects with every `tied` field taken out: what a rule
+ * may judge a field's DEFINITION on. A field two packages write at the
+ * priority that decides it is served, but which definition wins is the
+ * registration order, and the registry registers an artifact's packages in
+ * dependency-topological order (`resolveArtifactPackageOrder`), not in the
+ * `packages[]` order the fold breaks ties by. So a type arm leaves a tied field
+ * unjudged, as the membership-key rule does, and a rule that only asks whether
+ * the name is served keeps it ({@link indexServedObjectGraph}'s default).
+ */
+export function objectsWithoutTiedFields(served: { objects: AnyRec[]; tied: Map<string, Set<string>> }): AnyRec[] {
+  if (served.tied.size === 0) return served.objects;
+  return served.objects.map((obj) => {
+    const name = strName(obj.name);
+    const tiedKeys = name ? served.tied.get(name) : undefined;
+    if (!tiedKeys) return obj;
+    return { ...obj, fields: recordsOf(obj.fields).filter((f) => !tiedKeys.has(strName(f.name) ?? '')) };
+  });
+}
+
+/**
+ * [#30383] {@link indexObjectGraph} over {@link objectsAsServed}: the graph of
+ * the objects the registry serves, every `objectExtensions` field folded in.
+ * The field-path rules of this package resolve through it, so a path naming a
+ * field a sibling package adds resolves as it does at runtime, and a field no
+ * body declares or extends is still a miss. `{ tied: 'drop' }` is the graph a
+ * type arm judges on ({@link objectsWithoutTiedFields}).
+ */
+export function indexServedObjectGraph(stack: unknown, options: { tied?: 'keep' | 'drop' } = {}): ObjectGraph {
+  const served = objectsAsServed(stack);
+  return indexObjectGraph({ objects: options.tied === 'drop' ? objectsWithoutTiedFields(served) : served.objects });
+}

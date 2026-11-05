@@ -90,6 +90,8 @@ import { getRuntimeConfig } from '../../runtime-config.js';
 import { readMarketplaceInstalls, type LocalInstallEntry } from '../../console/marketplace/marketplaceApi.js';
 import { MarketplaceNotLoaded, MarketplaceRowActions } from '../../console/marketplace/MarketplaceRowActions.js';
 import { useDependencyMissingText } from '../../console/marketplace/dependencyMissing.js';
+import { useProtocolCheckSkippedText } from '../../console/marketplace/protocolCheckSkipped.js';
+import { ProtocolCheckSkippedNote } from '../../console/marketplace/ProtocolCheckSkippedNote.js';
 import type { InstalledPackageAtEitherStage } from '@objectstack/spec/api-assembled';
 import type { PackagePublishResult } from '@objectstack/spec/system';
 import type { ReassignOrphanedMetadataResponse } from '@objectstack/spec/api';
@@ -1376,6 +1378,7 @@ export function PackagesPage() {
   // ADR-0141 D2 — the import door's `DEPENDENCY_MISSING` refusal, one line per
   // unmet dependency, from the locale packs (the `engine.*` table is en/zh only).
   const dependencyMissingText = useDependencyMissingText();
+  const protocolCheckSkippedText = useProtocolCheckSkippedText();
   const { pathname } = useLocation();
   // App base = path up to (and excluding) `/component/...`, so links to
   // `/apps/:app/metadata/...` work regardless of nesting.
@@ -1394,7 +1397,9 @@ export function PackagesPage() {
   const [detailOpen, setDetailOpen] = React.useState(false);
   const fileRef = React.useRef<HTMLInputElement>(null);
   const [importing, setImporting] = React.useState(false);
-  const [importMsg, setImportMsg] = React.useState<{ kind: 'ok' | 'err'; text: string } | null>(
+  // `protocolNote`: the import answer's `protocolCheckSkipped`, drawn
+  // (objectstack#30326) — imported, its platform protocol range unchecked.
+  const [importMsg, setImportMsg] = React.useState<{ kind: 'ok' | 'err'; text: string; protocolNote?: string } | null>(
     null,
   );
   // objectui#12675 — every row with its Source; objectui#12790 — that Source is
@@ -1560,9 +1565,11 @@ export function PackagesPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ manifest }),
       });
+      const protocolNote = protocolCheckSkippedText(res);
       setImportMsg({
         kind: 'ok',
         text: tFormat('engine.packages.import.success', locale, { id: res?.manifestId ?? manifest.id }),
+        ...(protocolNote ? { protocolNote } : {}),
       });
       await load();
     } catch (err: any) {
@@ -1663,6 +1670,7 @@ export function PackagesPage() {
           }`}
         >
           {importMsg.text}
+          {importMsg.protocolNote ? <ProtocolCheckSkippedNote text={importMsg.protocolNote} /> : null}
         </div>
       )}
 
