@@ -36,6 +36,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { PluginContext } from '@objectstack/core';
 import { AUDIENCE_POSTURES } from '@objectstack/spec/system';
+import { MCP_AGENT_PERMISSION_SET_WRITE } from '@objectstack/spec/ai';
 import { AuthPlugin } from './auth-plugin.js';
 import { AuthManager } from './auth-manager.js';
 import { OPEN_POSTURE_VERIFICATION_OFF_WARNING } from './audience-posture.js';
@@ -230,6 +231,19 @@ describe('auth.audience_* — the settings switch surface (#11768)', () => {
     });
     expect(manager.getAudience().posture).toBe('invite_only');
     expect(errorLines().some((m: string) => m.includes('admin_full_access'))).toBe(true);
+  });
+
+  it('an agent ceiling set as the self-registration permission set is refused through the settings channel', async () => {
+    const { manager } = await boot({
+      settings: {
+        audience_posture: { value: 'open', source: 'global' },
+        audience_self_registration_permission_set: { value: MCP_AGENT_PERMISSION_SET_WRITE, source: 'global' },
+      },
+    });
+    expect(manager.getAudience().posture).toBe('invite_only'); // standing default keeps ruling
+    const logged = errorLines();
+    expect(logged.some((m: string) => m.includes('audience settings REFUSED'))).toBe(true);
+    expect(logged.some((m: string) => m.includes(`selfRegistrationPermissionSet must not be '${MCP_AGENT_PERMISSION_SET_WRITE}'`))).toBe(true);
   });
 
   it('open with verification OFF stored only through the CONSOLE is refused — the console cannot make the opt-out', async () => {

@@ -1261,7 +1261,7 @@ All endpoints are available under `/api/v1/auth/*`:
 - `POST /api/v1/auth/admin/set-user-password` - Set/reset a user's password (also provisions a credential for SSO-onboarded users)
 - `POST /api/v1/auth/admin/import-users` - Bulk import users (CSV/JSON/XLSX; `auto` (default, per-row invite-or-temporary) / `invite` / `temporary` / `none` password policy; ≤500 rows, dry-run supported)
 - `POST /api/v1/auth/admin/unlock-user` - Clear a brute-force lockout early
-- `POST /api/v1/auth/admin/ban-user` - Ban a user (blocks sign-in and revokes live sessions; the user's API keys are refused at every door while the ban holds, and a ban with an expiry stops binding once it expires. The keys are not revoked)
+- `POST /api/v1/auth/admin/ban-user` - Ban a user (blocks sign-in and revokes live sessions; the user's API keys are refused at every door while the ban holds; their OAuth access tokens are refused at the MCP endpoint and read as not valid at `/oauth2/userinfo` and `/oauth2/introspect`, and the token endpoint issues them no new token; a ban with an expiry stops binding once it expires. Neither the keys nor the OAuth tokens are revoked)
 - `POST /api/v1/auth/admin/unban-user` - Lift a ban, restoring the account's ability to sign in and its API keys (each key is still judged by its own lifecycle: a key left unused past the inactivity window during the ban answers as inactive, and needs replacing)
 
 #### Organization Membership (requires `plugins.organization`; platform-admin gated)

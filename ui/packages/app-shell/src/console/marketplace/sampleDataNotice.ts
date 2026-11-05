@@ -15,10 +15,12 @@
  *   back, and the banner that follows the installer to the app's own pages
  *   (`SampleDataLeaveBanner`) is raised from it and withdrawn through it.
  *
- * The record is in memory only, and only for installs made in this session:
- * the runtime serves no count of a package's sample rows after the install
- * answer (its listing answers present or not), so a reload drops the count
- * rather than guessing one.
+ * The record is in memory only. A reload drops it, and the package page fills
+ * it again from the runtime's own count of the sample rows a purge would
+ * delete now (`GET …/install-local/:manifestId/sample-data`, objectstack#30616)
+ * through {@link noteServedSampleCount}: a count above zero records it, zero
+ * drops the record and its banner. An answer this session learned after that
+ * read began (an install, a reseed or a clear) is fresher and is kept.
  */
 
 import type { LocalInstallSeeded } from './marketplaceApi.js';
@@ -43,7 +45,7 @@ export interface SampleDataNotice {
   manifestId: string;
   /** The package's display name, as the install note named it. */
   name: string;
-  /** Sample records the install left in place ({@link sampleRecordsLoaded}). */
+  /** Sample records the install left in place ({@link sampleRecordsLoaded}), or the runtime's count of them ({@link noteServedSampleCount}). */
   count: number;
   /** The package page, where the clear confirm is drawn. */
   path: string;
@@ -59,10 +61,43 @@ interface SessionEntry {
 
 const session = new Map<string, SessionEntry>();
 
+/**
+ * Per package, how many times this session learned its sample data from an
+ * answer of its own (install, reseed, clear): a served count read before the
+ * latest of them is older than it, and is not recorded.
+ */
+const learned = new Map<string, number>();
+const learn = (manifestId: string) => learned.set(manifestId, (learned.get(manifestId) ?? 0) + 1);
+
 /** Records what an install loaded, replacing an earlier record for the package. */
 export function rememberSampleData(notice: SampleDataNotice): void {
+  learn(notice.manifestId);
   session.get(notice.manifestId)?.withdrawBanner?.();
   session.set(notice.manifestId, { notice });
+}
+
+/** What {@link noteServedSampleCount} compares against: read it when the count's request starts. */
+export function sampleDataGeneration(manifestId: string): number {
+  return learned.get(manifestId) ?? 0;
+}
+
+/**
+ * Records the runtime's count of a package's sample rows, read on a visit to
+ * its page. A count above zero updates the record in place (a standing banner
+ * and a pending confirm request stay with it) or starts one; zero drops the
+ * record and withdraws its banner. Ignored when this session learned the
+ * package's sample data from an answer after `generation` was read.
+ */
+export function noteServedSampleCount(notice: SampleDataNotice, generation: number): void {
+  if (sampleDataGeneration(notice.manifestId) !== generation) return;
+  const entry = session.get(notice.manifestId);
+  if (notice.count <= 0) {
+    entry?.withdrawBanner?.();
+    session.delete(notice.manifestId);
+    return;
+  }
+  if (entry) entry.notice = notice;
+  else session.set(notice.manifestId, { notice });
 }
 
 /** The record for a package, or `undefined` when this session installed it with no sample data. */
@@ -72,6 +107,7 @@ export function sampleDataNotice(manifestId: string): SampleDataNotice | undefin
 
 /** Drops the record and its banner: the sample data was cleared. */
 export function forgetSampleData(manifestId: string): void {
+  learn(manifestId);
   session.get(manifestId)?.withdrawBanner?.();
   session.delete(manifestId);
 }
@@ -106,4 +142,5 @@ export function takeClearConfirmRequest(manifestId: string): boolean {
 /** Test-only: an empty session. */
 export function resetSampleDataSessionForTesting(): void {
   session.clear();
+  learned.clear();
 }

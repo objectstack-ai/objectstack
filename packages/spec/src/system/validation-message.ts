@@ -360,8 +360,9 @@ export interface RenderValidationMessageOptions {
  *   1. `translate('validation.field.<messageKey>', locale)` — a deployment's
  *      `translation` override. A miss is detected by the II18nService contract
  *      of echoing the key back.
- *   2. the built-in catalog for the locale (BCP-47 matched: exact →
- *      case-insensitive → base language → variant).
+ *   2. the built-in catalog for the locale (BCP-47 matched by
+ *      `resolveBundleLocale`: exact → case-insensitive → platform table
+ *      language → base language → variant).
  *   3. the built-in catalog for `en`.
  *   4. `<label> (<messageKey>)` — only reachable for a messageKey absent from
  *      even the English catalog, i.e. a coding error; still returns something a
