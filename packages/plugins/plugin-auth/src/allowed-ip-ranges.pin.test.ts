@@ -234,6 +234,34 @@ describe('#30203 the recovery the refusal names', () => {
   });
 });
 
+describe('#30320 an IPv6 range is judged at both doors as the range it names', () => {
+  const OFFICE_V6 = '2001:db8:1200::/40';
+
+  it('the sign-in gate admits an IPv6 client inside an allowed IPv6 range and refuses one outside', async () => {
+    const { svc, manager } = await boot();
+    await svc.set('auth', 'allowed_ip_ranges', OFFICE_V6, {});
+    await vi.waitFor(() => expect(manager.isClientIpAllowed('::1')).toBe(false));
+    expect(manager.isClientIpAllowed('2001:db8:1234::7')).toBe(true);
+    expect(manager.isClientIpAllowed('2001:db8:1300::7')).toBe(false);
+    expect(manager.isClientIpAllowed('203.0.113.7')).toBe(false);
+  });
+
+  it('a save from an IPv6 address inside the range is stored, and one from outside is refused', async () => {
+    const { svc, manager, save } = await boot();
+    const outside = await save({ allowed_ip_ranges: OFFICE_V6 }, { remoteAddress: '2001:db8:1300::7' });
+    expect(outside.status).toBe(400);
+    expect(outside.body.error.code).toBe('SETTINGS_VALIDATION');
+    expect(outside.body.error.details.fields[0].constraint).toEqual({ clientAddress: '2001:db8:1300::7' });
+    expect(await stored(svc)).toBeNull();
+
+    const inside = await save({ allowed_ip_ranges: OFFICE_V6 }, { remoteAddress: '2001:db8:1234::7' });
+    expect(inside.status).toBe(200);
+    expect(await stored(svc)).toBe(OFFICE_V6);
+    await vi.waitFor(() => expect(manager.isClientIpAllowed('::1')).toBe(false));
+    expect(manager.isClientIpAllowed('2001:db8:1234::7')).toBe(true);
+  });
+});
+
 describe('#30385 the env recovery clears the stored list, so lifting the override does not lock the caller out again', () => {
   it('set the override empty, sign in, clear the stored list through the settings door, remove the override: the caller is admitted', async () => {
     const env: Record<string, string | undefined> = {};

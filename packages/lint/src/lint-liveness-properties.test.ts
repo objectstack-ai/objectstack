@@ -187,6 +187,34 @@ describe('lintLivenessProperties', () => {
     }).filter((f) => f.message.includes('objectName'))).toEqual([]);
   });
 
+  // #30259 — `action.params[].widget` is declared before the console's dialog
+  // reads it (#30260 adds the pass-through), so the drilled row is `planned` +
+  // `authorWarn`. Pinned through the SHIPPED ledger and an array of params, so
+  // the drill (`params.widget`) and the array fan-out both have to hold.
+  it('warns on an action param that names a widget — planned, nothing reads it yet', () => {
+    const findings = lintLivenessProperties({
+      actions: [{
+        name: 'create_user',
+        params: [
+          { name: 'email', type: 'email', required: true },
+          { name: 'permissionSet', type: 'text', widget: 'permission-ref' },
+        ],
+      }],
+    });
+    const warned = findings.filter((f) => f.message.includes('sets `params.widget`'));
+    expect(warned).toHaveLength(1);
+    expect(warned[0].rule).toBe('liveness-planned-property');
+    expect(warned[0].hint).toContain('nothing reads it yet');
+    // The live siblings the drill graded stay silent.
+    for (const key of ['name', 'type', 'required', 'options', 'helpText', 'carryOver']) {
+      expect(ruleOf(findings, `params.${key}`), key).toBeUndefined();
+    }
+    // And an action whose params name no widget draws nothing about it.
+    expect(lintLivenessProperties({
+      actions: [{ name: 'a2', params: [{ name: 'note', type: 'text' }] }],
+    }).filter((f) => f.message.includes('widget'))).toEqual([]);
+  });
+
   it('warns on an experimental prop with no authorWarn of its own (tool.outputSchema)', () => {
     // `experimental` warns implicitly — shouldWarn() treats a declared-but-
     // unenforced guarantee like an opted-in dead prop. Repointed from

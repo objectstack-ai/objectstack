@@ -1183,6 +1183,8 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       ]);
       expect(notes(other)[0]!.message).toContain("each run's record is a row of 'crm_task'");
       expect(notes(other)[0]!.message).toContain("Set config.objectName to 'crm_task', or remove it");
+      // [#30283] The note names the readiness rule that refuses the start itself.
+      expect(notes(other)[0]!.message).toContain('as flow-time-relative-object-mismatch asks of this start');
       // No warning to explain, or no other object: no note.
       for (const [name, startObject, sweepObject, condition] of [
         ['tr_other_clean', 'crm_opportunity', 'crm_task', 'size(title) > 5'],
