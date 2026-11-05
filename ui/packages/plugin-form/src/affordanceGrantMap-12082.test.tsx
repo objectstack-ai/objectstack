@@ -677,6 +677,8 @@ const WRITE_SITES: Record<string, WriteSite> = {
     mapped(['rowDelete', 'listBulkDelete'], OBJECT_GRID, LIST_VIEW),
   'packages/app-shell/src/hooks/useUserLocale.ts :: useLanguageSelection :: update':
     outOfFamily("the language switcher changes the session's language locally and persists the caller's OWN sys_user.locale best-effort, a refusal surfacing as a toast"),
+  'packages/app-shell/src/hooks/useUserLocale.ts :: saveSignInLanguagePick :: update':
+    outOfFamily("the sign-in page saves the language picked on it as the caller's OWN sys_user.locale, only while that column is unset; a refusal leaves the pick on this device and does not hold the sign-in (no CRUD visibility door)"),
   'packages/app-shell/src/views/RecordAttachmentsPanel.tsx :: RecordAttachmentsPanel > handleFiles :: create':
     mapped(['attachmentUpload'], 'packages/app-shell/src/views/RecordAttachmentsPanel.tsx'),
   'packages/app-shell/src/views/RecordAttachmentsPanel.tsx :: RecordAttachmentsPanel > handleDelete :: delete':
