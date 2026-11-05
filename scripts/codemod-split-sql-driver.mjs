@@ -150,12 +150,14 @@
 
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
+import { readSqlDriverSource } from './sql-driver-split-source.mjs';
 import { parseSourceFile } from './ts-parse.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -244,11 +246,15 @@ const HOSTS_CLASS = 'FacetHost';
  * top-level declaration of the name stays. Each row names the reader. A row
  * naming nothing the file declares stops the script (exit 2), so the table
  * cannot rot into names nobody reads.
+ *
+ * Empty since #30147: its two rows were `createColumn` and
+ * `createAuditTimestampColumn`, sliced by four `packages/cli` generate-* pins
+ * and `scripts/check-keyed-text-bounds.mjs`. Those readers now read `SqlDriver`
+ * through `scripts/sql-driver-split-source.mjs`, which follows each stub this
+ * script writes to the body it moved, so the two members move. The table stays
+ * for the next reader that takes the file's own text.
  */
 const PATH_READER_PINS = Object.freeze({
-  createColumn: 'packages/cli generate-{field-type-vocabulary,string-family-width,multiple-json-column} pins and '
-    + 'scripts/check-keyed-text-bounds.mjs slice `protected createColumn(` to its type switch',
-  createAuditTimestampColumn: 'packages/cli generate-builtin-id-column pin reads 600 characters after its signature',
 });
 
 /**
@@ -259,18 +265,14 @@ const PATH_READER_PINS = Object.freeze({
  * A reader that also reads the leaf (`sql-driver-top-level.ts`) has its rows in
  * `CLASS_PATH_READER_NEEDLES` below instead: there a top-level declaration
  * carrying the text may move, and only a method carrying it stays.
+ *
+ * Empty since #30147: its ten rows were the literals the same readers
+ * required (the id and audit column builders, the media-id width, the keyed
+ * text arm, the JSON and file-reference arms). They read the joined source,
+ * leaf included, so `ensureShardTable`, `initObjects` and `varcharColumnChars`
+ * move, and so do the two top-level declarations that carried a row.
  */
 const PATH_READER_NEEDLES = Object.freeze({
-  "table.string('id').primary();": 'packages/cli generate-builtin-id-column and generate-field-type-vocabulary pins',
-  'table.timestamp(name).defaultTo(this.knex.fn.now());': 'packages/cli generate-builtin-id-column pin',
-  '...STRUCTURED_JSON_TYPES, ...MULTI_OPTION_TYPES,': 'packages/cli generate-field-type-vocabulary and generate-string-family-width pins',
-  'const MEDIA_ID_VARCHAR_CHARS = ': 'packages/cli generate-file-reference-width and generate-field-type-vocabulary pins',
-  'table.string(name, MEDIA_ID_VARCHAR_CHARS)': 'packages/cli generate-file-reference-width and generate-field-type-vocabulary pins',
-  'this.createColumn(table, name, field, keyedColumns.get(name));': 'packages/cli generate-string-family-width pin',
-  'const keyedColumns = indexedKeyColumns({': 'packages/cli generate-string-family-width pin',
-  'keyed ? this.keyableTextLength(field) : null': 'scripts/check-keyed-text-bounds.mjs EMITTER_ANCHOR and the generate-string-family-width pin',
-  'JSON_COLUMN_TYPES.has(type) ? this.jsonColumn(table, name) : table.string(name)': 'packages/cli generate-field-type-vocabulary and generate-string-family-width pins',
-  'if (FILE_REFERENCE_TYPES.has(type)) {': 'packages/cli generate-string-family-width pin',
 });
 
 /**
@@ -326,6 +328,7 @@ const RECEIVER_FREE_FIELDS = Object.freeze({
  */
 const EXPLICIT_RETURN_TYPES = Object.freeze({
   applyFilters: 'void',
+  createColumn: 'void',
   createDatabase: 'Promise<void>',
   ensureDatabaseExists: 'Promise<void>',
   getBuilder: 'knex.Knex.QueryBuilder<any, { _base: any; _hasSelection: false; _keys: never; _aliases: {}; _single: false; _intersectProps: {}; _unionProps: never }[]>',
@@ -2385,8 +2388,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'byte-identity proof': 10,
   'refusals': 6,
   'codemod-limit retirements (#30147)': 31,
+  'split readers (#30147)': 8,
 });
-const SELF_TEST_BATTERY_FLOOR = 6;
+const SELF_TEST_BATTERY_FLOOR = 7;
 
 const FIXTURE_SECTIONS = Object.freeze({ 'Lifecycle': 'sql-driver-lifecycle.ts', 'Kept': null });
 const FIXTURE_HEAD = Object.freeze(['Head', 'sql-driver-head.ts']);
@@ -2858,6 +2862,51 @@ ${pad}
     // `--help` reads no tree: it answers before the "already split" guard, so
     // it exits 0 whether sql-driver.ts on disk is split (as on a branch) or not.
     check('--help is answered, never refused, whatever sql-driver.ts holds', (await main(['--help']).catch(() => 2)) === 0);
+  }
+
+  open('split readers (#30147)');
+  {
+    // `sql-driver-split-source.mjs` hands the by-path readers `SqlDriver` as
+    // one text again. Driven over a split this script generates, written to a
+    // directory the way `--write` lays it out.
+    const input = fixtureSource();
+    const out = generate(tm, input, fixturePlan(tm, input));
+    const dir = mkdtempSync(join(tmpdir(), 'codemod-split-reader-'));
+    const lay = (host, modules) => {
+      rmSync(dir, { recursive: true, force: true });
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, HOST_BASENAME), host);
+      for (const [name, text] of modules) writeFileSync(join(dir, name), text);
+    };
+    const read = () => { try { return readSqlDriverSource(dir); } catch (e) { return { error: e.message }; } };
+    try {
+      lay(out.host, out.modules);
+      const r = read();
+      const base = parse(tm, HOST_BASENAME, input).getClassOrThrow(CLASS_NAME);
+      const baseBody = (name) => (base.getMethod(name) ?? base.getGetAccessor(name))?.getBody()?.getText();
+      const stubs = (out.host.match(new RegExp(`// ${MARK.replace(/[[\]#]/g, '\\$&')} The body moved to`, 'g')) ?? []).length;
+      check('every stub the split writes is followed', !r.error && r.spliced.length === stubs && stubs > 0,
+        r.error ?? `${r.spliced.length} followed of ${stubs}`);
+      check('each followed stub reads its base body, byte for byte, after the signature the class keeps',
+        !r.error && r.spliced.every(({ member }) => baseBody(member) && r.text.includes(baseBody(member))),
+        r.error ?? r.spliced.filter(({ member }) => !r.text.includes(baseBody(member) ?? '\0')).map((x) => x.member).join());
+      check('no stub text survives in the joined source', !r.error && !r.text.includes(`${MARK} The body moved to`));
+      check('the leaf is read and stands ahead of the class',
+        !r.error && r.files.includes(LEAF_MODULE) && r.text.indexOf('const LOCAL_VALUE = 1;') >= 0
+          && r.text.indexOf('const LOCAL_VALUE = 1;') < r.text.indexOf(`export class ${CLASS_NAME}`));
+      lay(input, new Map());
+      const unsplit = read();
+      check('an unsplit sql-driver.ts is read as it stands', !unsplit.error && unsplit.text === input && unsplit.spliced.length === 0);
+      lay(out.host, new Map([...out.modules].filter(([name]) => name !== 'sql-driver-lifecycle.ts')));
+      check('a stub naming a module that is not there refuses', /does not exist/.test(read().error ?? ''), read().error);
+      const mod = out.modules.get('sql-driver-lifecycle.ts');
+      lay(out.host, new Map([...out.modules, ['sql-driver-lifecycle.ts', mod.replace('static async movable(', 'static async renamed(')]]));
+      check('a stub whose facet lacks the static refuses', /has no static `movable`/.test(read().error ?? ''), read().error);
+      lay(out.host.replace(/return LifecycleFacet\.movable\.call\(lifecycleHost\.of\(this\)/, 'return LifecycleFacet.movable.call(this'), out.modules);
+      check('a marked stub of another shape refuses rather than reading the stub', /is not one `return <X>Facet/.test(read().error ?? ''), read().error);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   }
 
   const declared = Object.keys(SELF_TEST_BATTERIES);

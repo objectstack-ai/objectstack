@@ -40,8 +40,8 @@
 import { FILE_REFERENCE_TYPES } from '@objectstack/spec/data';
 import { SqliteDatabaseFileError, makeDatabaseDirectory } from './sqlite-database-file.js';
 import knex from 'knex';
-import { PRE_DDL_QUESTION_SCOPE, isMultiValuedColumn } from './sql-driver-top-level.js';
-import { JSON_COLUMN_TYPES, SqlDriverStatics as SqlDriver } from './sql-driver.js';
+import { JSON_COLUMN_TYPES, PRE_DDL_QUESTION_SCOPE, isMultiValuedColumn } from './sql-driver-top-level.js';
+import { SqlDriverStatics as SqlDriver } from './sql-driver.js';
 import type { SqlDriver as SqlDriverClass } from './sql-driver.js';
 
 /**
