@@ -143,7 +143,7 @@ import {
   appAutomationElevationOf,
 } from '@objectstack/core';
 import { WriteEpoch } from './write-epoch.js';
-import { SummaryRecomputeError, cascadeStoppedRefusal, hookStoppedRefusal, rolledBackRefusal, type SummaryRecomputeFailure } from './summary-errors.js';
+import { SummaryRecomputeError, cascadeStoppedRefusal, rolledBackRefusal, type SummaryRecomputeFailure } from './summary-errors.js';
 import { TransactionUnsupportedError } from './transaction-errors.js';
 import {
   aggregateSummaryValue,
@@ -164,14 +164,11 @@ import {
 import {
   DriverConnectError,
   DatasourceUnavailableError,
-  emitDegradedBootBanner,
-  type DriverConnectFailure,
   type DriverHealth,
   type DatasourceUnavailableInfo,
   type DatasourceUnavailableKind,
   type PrimaryDatasourceVerdict,
 } from './driver-connect-errors.js';
-import { resolveAllowDriverConnectFailure } from '@objectstack/types';
 // [#5979] The ONE shared "which read failure is benign?" predicate (#4825
 // family). Imported from the leaf `/errors` subpath — which exists precisely
 // so a cross-package consumer gets the 40-line predicate without the manager,
@@ -231,7 +228,6 @@ import {
 export type InsertManyRowOutcome =
   | { ok: true; record: any; droppedFields?: DroppedFieldsEvent[] }
   | { ok: false; error: unknown };
-import { CoreServiceName } from '@objectstack/spec/system';
 import { IRealtimeService } from '@objectstack/spec/contracts';
 import type { ICryptoProvider } from '@objectstack/spec/contracts';
 // [#25522 cut 18] `count` and `aggregate()`'s credential guard
@@ -349,7 +345,6 @@ import {
 // members it reads (`ValidateHost`). Imported after every module that body
 // imports, so the engine's module evaluation order is what it was.
 import { validate } from './engine-validate.js';
-import { bindHookNotice } from './hook-notice.js';
 // [#25522 cut 20] The `where`-lowering bodies (`QueryLoweringHost`), imported
 // after every module they import, so module evaluation order is unchanged.
 import { lowerRelationConditions, resolveSearchQueryableFields, resolveWhereTokens } from './engine-query-lowering.js';
@@ -366,7 +361,7 @@ import {
   assertHookScopeNotSelfCancelling, assertOrderByIsMaterializable, assertProjectionHasNoDottedPaths,
   assertValidHookExcludeObjects, assertValidHookObject, assertValidUnscopedMultiWriteFlag, autonumberFieldNames,
   callerKeySets, callerSuppliedRow, computeStoredExpressions, declaredDatetimeLowering, droppedFieldEvents,
-  foldEngineOptionAliases, formulaPlanEntry, handBackWithheldInsertReadonly, hookMatchesObject, hydrateWriteFormulas,
+  foldEngineOptionAliases, formulaPlanEntry, handBackWithheldInsertReadonly, hydrateWriteFormulas,
   insertStaticReadonlySubject, lowerWhereFilterArray, masterIdOf, mergeReadContext,
   organizationPredicateDeleteRefusal, packageBodyCollectionRefusal, packageBodyObjectAndAppOwnerStampRefusal,
   packageBodySeedDataRefusal, planFormulaProjection, planStoredExpressions, recomputeAutonumberReaders,
@@ -761,12 +756,8 @@ export class ObjectQL implements IObjectQLEngine {
     version: string;
     features: string[];
   } {
-      return {
-          name: CoreServiceName.enum.data,
-          status: 'running',
-          version: '0.9.0',
-          features: ['crud', 'query', 'aggregate', 'transactions', 'metadata']
-      };
+    // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts`.
+    return HooksAndFunctionsFacet.getStatus();
   }
 
   /**
@@ -1060,46 +1051,9 @@ export class ObjectQL implements IObjectQLEngine {
    * added here that defers a dispatch past the enclosing unit of work would be
    * changing that ruling, not implementing it.
    */
-  public async triggerHooks(event: string, context: HookContext): Promise<void> {
-    const entries = this.hooks.get(event) || [];
-    // [#28251] `ctx.notice` — the write's own `onNotice` listener, bound here
-    // so every insert / update dispatch site carries it (see hook-notice.ts).
-    bindHookNotice(event, context);
-
-    if (entries.length === 0) {
-      this.logger.debug('No hooks registered for event', { event });
-      return;
-    }
-
-    this.logger.debug('Triggering hooks', { event, count: entries.length });
-
-    // `session.skipAutomations` (set from ExecutionContext.skipAutomations —
-    // import with "run automations & triggers" unchecked, import undo)
-    // suppresses hooks bound FROM METADATA (`bindHooksToEngine` stamps
-    // `entry.meta`). Hooks registered in code by plugins — audit, capability
-    // gates, sharing projection — have no `meta` and always run: the opt-out
-    // must never bypass security or audit (#2922).
-    const skipAutomations =
-      (context.session as { skipAutomations?: boolean } | undefined)?.skipAutomations === true;
-
-    for (const entry of entries) {
-      // Per-object matching — allow face minus exclusion face, the one shared
-      // rule `hasHooksFor` also reads (#5928).
-      if (!hookMatchesObject(entry, context.object)) {
-        continue; // Skip non-matching hooks
-      }
-      if (skipAutomations && entry.meta) {
-        this.logger.debug('Skipping metadata-bound hook (skipAutomations)', { event, hook: entry.hookName });
-        continue;
-      }
-      // [#29422] A stale-roll-up refusal a hook's own `ctx.api` write raised
-      // describes THAT write, not this one: `hookStoppedRefusal`.
-      try {
-        await entry.handler(context);
-      } catch (e) {
-        throw hookStoppedRefusal(e, event, context.object, entry.hookName);
-      }
-    }
+  public triggerHooks(event: string, context: HookContext): Promise<void> {
+    // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
+    return HooksAndFunctionsFacet.triggerHooks.call(hooksAndFunctionsHost.of(this), event, context);
   }
 
   private hasHooksFor(event: string, object: string): boolean {
@@ -3755,10 +3709,8 @@ export class ObjectQL implements IObjectQLEngine {
     datasource: string;
     priority?: number;
   }>): void {
-    this.datasourceMapping = rules;
-    this.logger.info('Datasource mapping rules configured', {
-      ruleCount: rules.length
-    });
+    // [#29986 codemod] The body moved to `engine-secrets-and-routing.ts` (see `SecretsAndRoutingHost`).
+    return SecretsAndRoutingFacet.setDatasourceMapping.call(secretsAndRoutingHost.of(this), rules);
   }
 
   /**
@@ -3789,45 +3741,9 @@ export class ObjectQL implements IObjectQLEngine {
    * `OS_ALLOW_DRIVER_CONNECT_FAILURE=1`, which boots in a state that is warned
    * about loudly rather than assumed.
    */
-  async init(): Promise<void> {
-    this.logger.info('Initializing ObjectQL engine', {
-      driverCount: this.drivers.size,
-      drivers: Array.from(this.drivers.keys())
-    });
-
-    const failures: DriverConnectFailure[] = [];
-    for (const [name, driver] of this.drivers) {
-      try {
-        await driver.connect();
-        this.logger.info('Driver connected successfully', { driverName: name });
-      } catch (e) {
-        failures.push({ driverName: name, error: e });
-        this.logger.error('Failed to connect driver', e as Error, { driverName: name });
-      }
-    }
-
-    if (failures.length > 0) {
-      if (!resolveAllowDriverConnectFailure()) {
-        throw new DriverConnectError(failures, this.drivers.size);
-      }
-      const failedDrivers = failures.map(f => f.driverName);
-      const banner =
-        `⚠️ DEGRADED BOOT: ${failures.length} of ${this.drivers.size} driver(s) failed to connect ` +
-        `(${failedDrivers.join(', ')}), but OS_ALLOW_DRIVER_CONNECT_FAILURE is set — starting anyway. ` +
-        `Every query routed to them fails until the datasource becomes reachable, and the boot-time ` +
-        `schema sync is SKIPPED FOR GOOD — the client will reconnect on its own, but nothing re-runs ` +
-        `the DDL, so those objects may have no tables even after the database comes back. Unset ` +
-        `OS_ALLOW_DRIVER_CONNECT_FAILURE to restore fail-fast boot.`;
-      this.logger.warn(banner, { failedDrivers });
-      // …and again on a channel the operator's log level cannot filter away: the
-      // line above is dropped outright at `error`/`fatal`/`silent`, which is a
-      // normal production setting and precisely where this flag gets used. See
-      // the helper's note — the duplication is deliberate, and it is NOT about
-      // `os serve`'s boot-quiet window (that swallowed it too until #4012).
-      emitDegradedBootBanner(banner);
-    }
-
-    this.logger.info('ObjectQL engine initialization complete');
+  init(): Promise<void> {
+    // [#29986 codemod] The body moved to `engine-secrets-and-routing.ts` (see `SecretsAndRoutingHost`).
+    return SecretsAndRoutingFacet.init.call(secretsAndRoutingHost.of(this));
   }
 
   /**
@@ -4280,27 +4196,9 @@ export class ObjectQL implements IObjectQLEngine {
     return wasDatastoreCreatedFromEmpty.call(host);
   }
 
-  async destroy(): Promise<void> {
-    this.logger.info('Destroying ObjectQL engine', { driverCount: this.drivers.size });
-    
-    for (const [name, driver] of this.drivers.entries()) {
-      try {
-        await driver.disconnect();
-      } catch (e) {
-        this.logger.error('Error disconnecting driver', e as Error, { driverName: name });
-      }
-    }
-
-    // #13578 — teardown is an eviction path too, and it used to disconnect
-    // every driver while leaving all of them REGISTERED. A destroyed engine
-    // therefore still answered `checkDriversHealth()` by pinging pools it had
-    // just closed, so a readiness probe racing shutdown read a list of drivers
-    // that were deliberately dead. Disconnect-then-evict, through the one
-    // primitive, so `defaultDriver` and the datasource defs go with them.
-    // Names are snapshotted first: `unregisterDriver` mutates the Map.
-    for (const name of [...this.drivers.keys()]) this.unregisterDriver(name);
-    
-    this.logger.info('ObjectQL engine destroyed');
+  destroy(): Promise<void> {
+    // [#29986 codemod] The body moved to `engine-migration-state.ts` (see `MigrationStateHost`).
+    return MigrationStateFacet.destroy.call(migrationStateHost.of(this));
   }
 
   // ============================================
@@ -10540,6 +10438,7 @@ export class ObjectQL implements IObjectQLEngine {
       set creationAttestationRetraction(v) { engine.creationAttestationRetraction = v; },
       get deviationRecording() { return engine.deviationRecording; },
       set deviationRecording(v) { engine.deviationRecording = v; },
+      get drivers() { return engine.drivers; },
       get fileReferencesMigrationVerified() { return engine.fileReferencesMigrationVerified; },
       set fileReferencesMigrationVerified(v) { engine.fileReferencesMigrationVerified = v; },
       findOne: (...a) => engine.findOne(...a),
@@ -10556,6 +10455,7 @@ export class ObjectQL implements IObjectQLEngine {
       readMigrationFlagRowMemoized: (...a) => engine.readMigrationFlagRowMemoized(...a),
       get recordedDeviations() { return engine.recordedDeviations; },
       get retractedCreationAttestations() { return engine.retractedCreationAttestations; },
+      unregisterDriver: (...a) => engine.unregisterDriver(...a),
       update: (...a) => engine.update(...a),
       get valueShapesMigrationVerified() { return engine.valueShapesMigrationVerified; },
       set valueShapesMigrationVerified(v) { engine.valueShapesMigrationVerified = v; },
@@ -10601,6 +10501,8 @@ export class ObjectQL implements IObjectQLEngine {
       get cryptoProvider() { return engine.cryptoProvider; },
       set cryptoProvider(v) { engine.cryptoProvider = v; },
       get cryptoProviderListeners() { return engine.cryptoProviderListeners; },
+      get datasourceMapping() { return engine.datasourceMapping; },
+      set datasourceMapping(v) { engine.datasourceMapping = v; },
       get defaultDriver() { return engine.defaultDriver; },
       get drivers() { return engine.drivers; },
       get logger() { return engine.logger; },
