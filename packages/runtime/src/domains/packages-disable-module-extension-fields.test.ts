@@ -65,8 +65,11 @@ const CREDIT = 'qx_credit';
 /** The module's roll-up summary of its own orders, on the app's object. */
 const ORDER_TOTAL = 'qx_order_total';
 const MODULE_FIELDS = [CREDIT, ORDER_TOTAL] as const;
+/** A second, ENABLED module whose formula and rule read the first module's field. */
+const SCORING = 'com.qa.extsuite.scoring';
+const CREDIT_BAND = 'qx_credit_band';
 
-function suiteArtifact() {
+function suiteArtifact(withScoring = false) {
     const app = defineStack({
         manifest: { id: APP, name: 'QA Ext Suite', namespace: 'qx', version: '1.0.0', type: 'app' },
         objects: [{
@@ -100,7 +103,26 @@ function suiteArtifact() {
             },
         }],
     } as any);
-    return composeStacks([orders, app], { manifest: 'preserve' });
+    const scoring = defineStack({
+        manifest: {
+            id: SCORING, name: 'QA Ext Suite Scoring', namespace: 'qx', version: '1.0.0', type: 'module',
+            dependencies: { [APP]: '^1.0.0' },
+        },
+        objectExtensions: [{
+            extend: ACCOUNT,
+            fields: {
+                [CREDIT_BAND]: {
+                    name: CREDIT_BAND, type: 'formula', label: 'Credit band', returnType: 'text',
+                    expression: `record.${CREDIT} > 100 ? "high" : "low"`,
+                },
+            },
+            validations: [{
+                name: 'qx_credit_not_negative', type: 'script', severity: 'error', message: 'Credit cannot be negative',
+                condition: `record.${CREDIT} < 0`,
+            }],
+        }],
+    } as any);
+    return composeStacks(withScoring ? [orders, scoring, app] : [orders, app], { manifest: 'preserve' });
 }
 
 interface Booted {
@@ -108,7 +130,7 @@ interface Booted {
     engine: ObjectQL;
 }
 
-async function bootKernel(root: string): Promise<Booted> {
+async function bootKernel(root: string, withScoring = false): Promise<Booted> {
     const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
     const engine = new ObjectQL();
     engine.registerDriver(new SqlDriver({
@@ -118,7 +140,7 @@ async function bootKernel(root: string): Promise<Booted> {
     }) as any, true);
     await kernel.use(new MetadataPlugin({ watch: false, rootDir: root }));
     await kernel.use(new ObjectQLPlugin({ ql: engine }));
-    await kernel.use(new AppPlugin(suiteArtifact(), { environmentId: ENVIRONMENT_ID, organizationId: 'org_qa' }));
+    await kernel.use(new AppPlugin(suiteArtifact(withScoring), { environmentId: ENVIRONMENT_ID, organizationId: 'org_qa' }));
     const host: Plugin = {
         name: 'qa.extsuite-host',
         dependencies: ['com.objectstack.engine.objectql'],
@@ -137,7 +159,7 @@ async function shutdown(booted: Booted | undefined): Promise<void> {
 const codeOf = (body: any): unknown => (body?.error && typeof body.error === 'object' ? body.error.code : body?.code);
 const messageOf = (body: any): unknown => (body?.error && typeof body.error === 'object' ? body.error.message : body?.message ?? body?.error);
 
-async function dispatchAs(kernel: ObjectKernel, method: string, path: string, body: Record<string, unknown> = {}) {
+async function dispatchAs(kernel: ObjectKernel, method: string, path: string, body: Record<string, unknown> = {}, query: Record<string, string> = {}) {
     const dispatcher = new HttpDispatcher(kernel as any, undefined, { enforceProjectMembership: false });
     (dispatcher as any).timedResolveExecutionContext = async () => ({ ...ADMIN });
     const raw = new Request(`http://localhost/api/v1${path}`, {
@@ -146,7 +168,7 @@ async function dispatchAs(kernel: ObjectKernel, method: string, path: string, bo
         ...(method === 'GET' ? {} : { body: JSON.stringify(body) }),
     });
     try {
-        const out: any = await dispatcher.dispatch(method, path, body, {}, { request: raw, environmentId: ENVIRONMENT_ID } as any, '/api/v1');
+        const out: any = await dispatcher.dispatch(method, path, body, query, { request: raw, environmentId: ENVIRONMENT_ID } as any, '/api/v1');
         const answer = out.response?.body;
         return { status: out.response?.status as number | undefined, code: codeOf(answer), message: messageOf(answer), data: answer?.data };
     } catch (e) {
@@ -319,4 +341,62 @@ describe('a boot that starts with the module disabled still creates the module\'
             await shutdown(booted);
         }
     }, 120_000);
+});
+
+describe('an enabled module whose formula and rule read a field a disabled module contributes', () => {
+    let root: string;
+    let booted: Booted | undefined;
+    let accountId: string;
+    const strip = (a: { status?: number; code?: unknown; message?: unknown }, field: string) =>
+        ({ status: a.status, code: a.code, message: String(a.message).split(field).join('<field>') });
+
+    beforeAll(async () => {
+        root = mkdtempSync(join(tmpdir(), 'os-suite-ext-ref-'));
+        writeFileSync(join(root, '.keep'), '');
+        process.env.OS_HOME = mkdtempSync(join(home, 'ref-'));
+        booted = await bootKernel(root, true);
+        const created = await dispatchAs(booted.kernel, 'POST', `/data/${ACCOUNT}`, { name: 'acme', [CREDIT]: 500 });
+        expect(created.status, 'precondition: the account is written').toBe(201);
+        accountId = idOf(created);
+        expect(await readAccount(booted.kernel, accountId)).toMatchObject({ [CREDIT]: 500, [CREDIT_BAND]: 'high' });
+        expect((await dispatchAs(booted.kernel, 'PATCH', `/packages/${MODULE}/disable`)).status).toBe(200);
+    }, 60_000);
+    afterAll(async () => {
+        await shutdown(booted);
+        rmSync(root, { recursive: true, force: true });
+    }, 60_000);
+
+    it('reads the object (200): the formula over the withheld field answers null, never a 5xx', async () => {
+        const row = await readAccount(booted!.kernel, accountId);
+        expect(row).toMatchObject({ name: 'acme', [CREDIT_BAND]: null });
+        expect(Object.keys(row)).not.toContain(CREDIT);
+        expect(await servedFieldNames(booted!.kernel)).toContain(CREDIT_BAND);
+    });
+
+    it('answers filter, sort and fields naming the withheld field as it answers a field the object does not have', async () => {
+        for (const [key, named, unknown] of [
+            ['filter', JSON.stringify({ [CREDIT]: 500 }), JSON.stringify({ qx_no_such_field: 500 })],
+            ['sort', CREDIT, 'qx_no_such_field'],
+            ['fields', CREDIT, 'qx_no_such_field'],
+        ] as const) {
+            const withheld = await dispatchAs(booted!.kernel, 'GET', `/data/${ACCOUNT}`, {}, { [key]: named });
+            const absent = await dispatchAs(booted!.kernel, 'GET', `/data/${ACCOUNT}`, {}, { [key]: unknown });
+            expect(absent.status, `precondition: ${key} on an unknown field is refused`).toBe(400);
+            expect(strip(withheld, CREDIT), key).toEqual(strip(absent, 'qx_no_such_field'));
+        }
+    });
+
+    it('measures the rule over the withheld field: it cannot be evaluated, so a write is refused 400 VALIDATION_FAILED', async () => {
+        // The answer a rule reading a field its object does not declare already
+        // gets (fail closed, never a 5xx). Recorded as measured: the module the
+        // rule belongs to reads a field of a module it does not depend on.
+        const updated = await dispatchAs(booted!.kernel, 'PATCH', `/data/${ACCOUNT}/${accountId}`, { name: 'renamed' });
+        expect({ status: updated.status, code: updated.code }).toEqual({ status: 400, code: 'VALIDATION_FAILED' });
+        expect(String(updated.message)).toContain('qx_credit_not_negative');
+    });
+
+    it('serves the formula over the stored value again once the module is re-enabled', async () => {
+        expect((await dispatchAs(booted!.kernel, 'PATCH', `/packages/${MODULE}/enable`)).status).toBe(200);
+        expect(await readAccount(booted!.kernel, accountId)).toMatchObject({ name: 'acme', [CREDIT]: 500, [CREDIT_BAND]: 'high' });
+    });
 });
