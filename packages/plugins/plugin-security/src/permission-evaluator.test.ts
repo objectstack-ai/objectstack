@@ -62,8 +62,9 @@ function referenceFold(p: Record<string, unknown>, verb: Verb): boolean {
   switch (verb) {
     case 'allowRead': return read;
     case 'allowCreate': return p.allowCreate === true;
-    case 'allowEdit': return p.allowEdit === true || modifyAll;
-    case 'allowDelete': return p.allowDelete === true || modifyAll;
+    // An object permission that edits or deletes a record also reads it.
+    case 'allowEdit': return read && (p.allowEdit === true || modifyAll);
+    case 'allowDelete': return read && (p.allowDelete === true || modifyAll);
     case 'allowTransfer': return p.allowTransfer === true || modifyAll;
     case 'allowExport': return p.allowExport === true && read;
   }
@@ -152,6 +153,27 @@ describe('checkObjectPermission — the one fold, asked (#18785)', () => {
       expect(evaluator.checkObjectPermission(OPERATION_FOR[verb], OBJ, [set('ps', { [OBJ]: mad })])).toBe(false);
     }
   });
+
+  for (const [verb, op] of [['allowEdit', 'update'], ['allowDelete', 'delete']] as const) {
+    it(`${op}: an object permission that ${op}s a record also reads it — a grant without read grants nothing`, () => {
+      // The shape a row stored before the authoring refusal still carries.
+      expect(evaluator.checkObjectPermission(op, OBJ, [set('writer', { [OBJ]: { [verb]: true } })])).toBe(false);
+      expect(evaluator.checkObjectPermission(op, OBJ, [set('writer', { [OBJ]: { allowRead: false, [verb]: true } })])).toBe(false);
+      expect(evaluator.checkObjectPermission(op, OBJ, [set('writer', { [OBJ]: { allowRead: true, [verb]: true } })])).toBe(true);
+      expect(evaluator.checkObjectPermission(op, OBJ, [set('writer', { [OBJ]: { viewAllRecords: true, [verb]: true } })])).toBe(true);
+      // A wildcard grant without read is the same shape.
+      expect(evaluator.checkObjectPermission(op, OBJ, [set('writer', { '*': { [verb]: true } })])).toBe(false);
+    });
+
+    it(`${op}: the read half may arrive from a different set, as export's does`, () => {
+      const reader = set('reader', { [OBJ]: { allowRead: true } });
+      const writer = set('writer', { [OBJ]: { [verb]: true } });
+      expect(evaluator.checkObjectPermission(op, OBJ, [reader, writer])).toBe(true);
+      expect(evaluator.checkObjectPermission(op, OBJ, [writer, reader])).toBe(true);
+      expect(evaluator.checkObjectPermission(op, OBJ, [writer])).toBe(false);
+      expect(evaluator.checkObjectPermission(op, OBJ, [reader])).toBe(false);
+    });
+  }
 
   it('export stays a CROSS-SET conjunction — the two halves may arrive from different sets', () => {
     // The spec cell is `grant ∧ read` over ONE effective entry; this door asks
