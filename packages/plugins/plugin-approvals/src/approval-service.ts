@@ -475,8 +475,9 @@ type ApprovalNotificationPayload = {
    * deployment's public origin when one resolves (`publicBaseUrl`), for a
    * channel read outside the Console: the approval e-mail's link
    * (`approval-email-templates.ts`). Set by `notify()` beside the
-   * deep-linked `actionUrl`, which stays relative because the Console routes
-   * on it. It opens the request page for a signed-in reader and decides
+   * deep-linked `actionUrl` on the notices that go by e-mail
+   * (`EMAILED_APPROVAL_TOPICS`); `actionUrl` stays relative because the
+   * Console routes on it. It opens the request page for a signed-in reader and decides
    * nothing: not an ADR-0043 action link.
    */
   readonly approvalUrl?: string;
@@ -2162,7 +2163,12 @@ export class ApprovalService implements IApprovalService {
         && event.source.id
       ) {
         const actionUrl = `/system/approvals?request=${encodeURIComponent(event.source.id)}`;
-        payload = { ...payload, actionUrl, approvalUrl: `${this.publicBaseUrl}${actionUrl}` };
+        payload = {
+          ...payload,
+          actionUrl,
+          // [#30509] The e-mail's link: only the notices that go by e-mail carry it.
+          ...(EMAILED_APPROVAL_TOPICS.has(event.topic) ? { approvalUrl: `${this.publicBaseUrl}${actionUrl}` } : {}),
+        };
       }
       // A dedup key names ONE event: a notice split per name keys each part by
       // its first recipient, so messaging never folds one part into another.
