@@ -286,7 +286,11 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // [#30023] `page` joins: since the projection's `author-declared` verdict
   // the member also walks every stored PAGE sort (element `dataSource.sort`, a
   // block's own `sort`, `interfaceConfig.sort`, `record.sort`) and judges it
-  // by the sortability projection alone. It resolves only against
+  // by the sortability projection. [#30093] It also asks each page sort
+  // existence (`page-field-unknown`, `error`) and provenance
+  // (`page-field-unprovisioned`, `warning`), which `validatePageFieldBindings`
+  // no longer reads, so the page door refuses an unknown page sort field too.
+  // It resolves only against
   // `stack.objects`, which the per-write page snapshot carries, so it has no
   // missing-collection false-positive channel — the #9313 reason, one write
   // type over. It is the only member that declares `page`, so a page write

@@ -782,6 +782,10 @@ describe('Customize a read-only base’s navigation into its pair (objectstack#3
     await openPipeline();
     fireEvent.click(await within(rail()).findByTestId('if-edit-nav', undefined, { timeout: 8000 }));
     expect(await within(rail()).findByTestId('if-nav-saved-to')).toBeInTheDocument();
+    // objectstack#30436 — and the sheet's second sentence, naming the pair.
+    expect(within(rail()).getByTestId('if-nav-saved-to-environment')).toHaveTextContent(
+      'These changes are kept in this environment’s database as items of com.example.hotcrm.custom, not in your project’s source. They reach another environment only through os package export.',
+    );
     await sleep(1500);
     expect(srv.ensure).toEqual([]);
     expect(srv.saves).toEqual([]);

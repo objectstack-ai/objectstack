@@ -658,6 +658,18 @@ export function registerDatasourceAdminRoutes(
     if (envelope?.status === 404 && envelope?.code === 'RESOURCE_NOT_FOUND') {
       return sendError(res, 404, 'RESOURCE_NOT_FOUND', (err as Error).message);
     }
+    // [#30444] A refusal that declared this route's own 400 envelope may carry
+    // `details` (the bound-object refusal of `removeDatasource`: its reason and
+    // the objects' names), relayed as thrown. All three must hold, so a driver
+    // error with a stray `details` field keeps answering the bare message.
+    const details = (err as { details?: unknown } | null | undefined)?.details;
+    if (
+      envelope?.status === 400
+      && envelope?.code === SERVICE_ERROR_CODE[service]
+      && details !== null && typeof details === 'object' && !Array.isArray(details)
+    ) {
+      return sendError(res, 400, SERVICE_ERROR_CODE[service], (err as Error).message, { details });
+    }
     return sendError(res, 400, SERVICE_ERROR_CODE[service], err instanceof Error ? err.message : String(err));
   };
 

@@ -135,7 +135,10 @@ export const esES: PlatformTranslationData = {
         },
       },
       keys: {
-        email_password_enabled: { label: 'Habilitar inicio de sesión con correo/contraseña' },
+        email_password_enabled: {
+          label: 'Habilitar inicio de sesión con correo/contraseña',
+          confirmOffText: 'Las personas que inician sesión con contraseña necesitarán otra forma de acceder.',
+        },
         signup_enabled: {
           label: 'Permitir el registro por correo',
           help: 'Abre el formulario de registro con correo y contraseña. A quién admite lo decide la «Audiencia de autorregistro» inferior: con «Solo por invitación», solo a una dirección con una invitación pendiente; con «Dominios de correo», a los dominios de la lista y a las direcciones invitadas; con «Abierto», a cualquiera. Desactivado, cierra el formulario con cualquier audiencia, invitaciones incluidas.',

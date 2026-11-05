@@ -35,6 +35,7 @@ import { usePhoneNavDrawerHistory } from './usePhoneNavDrawerHistory.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 import { primeConsoleSidebarOpen } from './consoleSidebarRail.js';
 import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
+import { servedObjectLabel } from '../hooks/servedObjectLabel.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
 import { CommandPaletteProvider } from '../context/CommandPaletteProvider.js';
 import { confirmUnsavedLeave } from '../chrome/unsavedEdits.js';
@@ -204,15 +205,17 @@ export function ConsoleLayout({
     [location.pathname, hostRoutePaths],
   );
   // The chip's label for an object surface: the object's own translated
-  // label, the one its page shows. Display only; it never enters
-  // `context.surface`. No definition in hand → the chip reads `type · name`.
+  // label, the one its page shows: the served label as given, the bundle only
+  // when none is served. Display only; it never enters `context.surface`. No
+  // definition in hand → the chip reads `type · name`.
   const { objectLabel } = useObjectLabel();
+  const { language } = useObjectTranslation();
   const dockSurfaceLabel = useMemo(() => {
     const artifact = dockSurface?.artifact;
     if (artifact?.type !== 'object') return undefined;
     const def = (objects as ConsoleObject[] | undefined)?.find((o) => o?.name === artifact.name);
-    return def ? objectLabel({ name: def.name, label: def.label ?? '' }) || undefined : undefined;
-  }, [dockSurface, objects, objectLabel]);
+    return def ? servedObjectLabel(def, language, objectLabel) || undefined : undefined;
+  }, [dockSurface, objects, objectLabel, language]);
   // "/ai = the dock maximized": record where we maximized FROM at click time,
   // so the page's collapse-to-dock returns exactly here (history-back could
   // land on a prior /ai URL after in-page conversation switches).

@@ -138,11 +138,16 @@ function formatMetricValue(
   if (isCurrency) {
     const code = currency || symbolMap[trimmed[0]] || 'USD';
     try {
+      // With no pattern the amount keeps the CURRENCY's own width (CNY 2,
+      // JPY 0), which `Intl` applies when no fraction bound is passed: the
+      // width the list cell shows the same amount at. A pattern is the
+      // author's declaration and states its own (`'$0,0'` → 0).
       return formatDisplayNumber(value as number, {
         locale,
         currency: code,
-        minimumFractionDigits: decimals,
-        maximumFractionDigits: decimals,
+        ...(trimmed === ''
+          ? {}
+          : { minimumFractionDigits: decimals, maximumFractionDigits: decimals }),
       });
     } catch {
       return `${code} ${(value as number).toFixed(decimals)}`;

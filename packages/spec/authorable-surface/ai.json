@@ -81,6 +81,7 @@
     "ai/BlueprintView:name",
     "ai/BlueprintView:object",
     "ai/BlueprintView:sort",
+    "ai/BlueprintView:startDateField",
     "ai/BlueprintView:type",
     "ai/BlueprintWidgetCondition:field",
     "ai/BlueprintWidgetCondition:op",

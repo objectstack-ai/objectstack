@@ -335,6 +335,15 @@ shell; the bridge contract is owned by the mobile app (`docs/HYBRID-SHELL.md`,
   connection in the shell: it calls `event.waitUntil()` with the promise its optional
   `onConnectionRemoved` returns (unregister the device's push token under the page's
   own session), or with one already resolved when the option is omitted.
+- Push registration belongs to the page, under its own session: the shell holds no
+  API credential. `nativeGetPushToken()` resolves the token (the first call shows the
+  OS permission prompt, so call it after a meaningful screen, not during sign-in).
+  `installId`, a string on shells that carry it and `null` off the configured
+  server's origin, is the `deviceId` to register with; a shell that rotates the
+  token dispatches `NATIVE_PUSH_TOKEN_CHANGED_EVENT`
+  (`objectstack-native:pushTokenChanged`, announced as `has('pushTokenChanged')`)
+  with the new `NativePushToken` as `detail`, held until the page posts `ready()`.
+  Both are optional: feature-detect them.
 - `ready()` means "the page has painted its own UI", which may be a loading fallback,
   such as an auth guard's spinner while the session is read. The shell lifts its
   loading cover on it, so the cover hands over to that spinner instead of staying up
