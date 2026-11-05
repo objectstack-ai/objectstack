@@ -3034,7 +3034,23 @@ export async function pairTranslationBundleOf(
     } catch {
         return undefined;
     }
-    if (typeof base !== 'string' || base === '') return undefined;
+    return pairTranslationBundleOfBase(p, base, memo);
+}
+
+/**
+ * `getPairTranslationBundle(base)` on `protocol`, read once per base through
+ * `memo` — {@link pairTranslationBundleOf}'s second question, also asked by
+ * {@link withoutStaleObjectPlural} for the base an object's owner ships in.
+ * `undefined` on every uncertainty, {@link pairTranslationBundleOf}'s rule.
+ */
+function pairTranslationBundleOfBase(
+    protocol: unknown,
+    base: unknown,
+    memo?: Map<string, Promise<unknown>>,
+): Promise<unknown> {
+    const p: any = protocol;
+    if (typeof base !== 'string' || base === '') return Promise.resolve(undefined);
+    if (!p || typeof p.getPairTranslationBundle !== 'function') return Promise.resolve(undefined);
     let pending = memo?.get(base);
     if (pending === undefined) {
         pending = Promise.resolve()
@@ -3043,6 +3059,66 @@ export async function pairTranslationBundleOf(
         memo?.set(base, pending);
     }
     return pending;
+}
+
+/** A non-empty string, or `undefined`. */
+function nonEmptyText(value: unknown): string | undefined {
+    return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/**
+ * [#30391] `translated` — what the object translator answered for the served
+ * object `input` — without a plural the catalog made up for a renamed object.
+ *
+ * An object extension that renames `label` and declares no `pluralLabel` is
+ * served without one (the fold takes the plural of the old label off,
+ * `mergeObjectDefinitions` in `@objectstack/objectql`). The translator answers
+ * a missing `pluralLabel` with the catalog's `objects.NAME.pluralLabel`, and
+ * that entry is the base package's translation of the plural the extension
+ * left behind: it names the old label. So where `input` carries no plural, the
+ * packaged base declares one, and `input`'s `label` diverged from the packaged
+ * one, the catalog's plural is not served. In its place, the ruled order
+ * (ruling record 6631250894: a translation in the pair, then the override's
+ * own text, then the base's translation): the base's pair's own translation of
+ * the plural when it ships one, read through the same translator over the
+ * pair's bundle alone; otherwise what `input` carries, which is no plural —
+ * what an object that declares no `pluralLabel` is served.
+ *
+ * An object served WITH a plural (an extension that sets one, a tenant rename
+ * that kept one) and an object whose label is the packaged one are served
+ * unchanged, as is every object with no packaged base. Returns `translated`
+ * itself when nothing changes; the pair is read only when the rule applies.
+ */
+async function withoutStaleObjectPlural(
+    protocol: unknown,
+    input: Record<string, unknown>,
+    translated: Record<string, unknown>,
+    packagedBase: unknown,
+    translateOptions: Record<string, unknown>,
+    memo?: Map<string, Promise<unknown>>,
+): Promise<Record<string, unknown>> {
+    if (nonEmptyText(input.pluralLabel) !== undefined) return translated;
+    const packaged = packagedBase && typeof packagedBase === 'object' ? packagedBase as Record<string, unknown> : undefined;
+    if (!packaged || nonEmptyText(packaged.pluralLabel) === undefined) return translated;
+    const label = nonEmptyText(input.label);
+    if (label === undefined || label === packaged.label) return translated;
+    const pairBundle = await pairTranslationBundleOfBase(protocol, packaged._packageId, memo);
+    let pairPlural: string | undefined;
+    if (pairBundle !== undefined && typeof input.name === 'string') {
+        const { translateMetadataDocument } = await import('@objectstack/spec/system');
+        const read = translateMetadataDocument('object', { name: input.name } as any, pairBundle as any, translateOptions as any);
+        pairPlural = nonEmptyText((read as Record<string, unknown> | undefined)?.pluralLabel);
+    }
+    if (pairPlural !== undefined) {
+        return translated.pluralLabel === pairPlural ? translated : { ...translated, pluralLabel: pairPlural };
+    }
+    if (!('pluralLabel' in input)) {
+        if (!('pluralLabel' in translated)) return translated;
+        const served: Record<string, unknown> = { ...translated };
+        delete served.pluralLabel;
+        return served;
+    }
+    return translated.pluralLabel === input.pluralLabel ? translated : { ...translated, pluralLabel: input.pluralLabel };
 }
 
 /** How a transport reaches what the list translation reads. */
@@ -3110,12 +3186,19 @@ export async function translateMetaList(
     // OUTER `{ type, items }`), so every element translates directly (#5563).
     const translated = await Promise.all(arr.map(async (item) => {
         const pairBundle = p === undefined ? undefined : await pairTranslationBundleOf(p, metaType, item, pairBundles);
+        const packagedBase = packagedObjectBaseOf(p, metaType, item?.name);
         const out = translateMetadataDocument(metaType, item, bundle, {
             ...metaTranslateOptions(i18n, locale),
-            packagedBase: packagedObjectBaseOf(p, metaType, item?.name),
+            packagedBase,
             ...(pairBundle !== undefined ? { pairBundle: pairBundle as any } : {}),
         });
-        return metaType === 'view' && item && typeof item === 'object' ? withoutInventedViewLabel(item, out) : out;
+        if (!item || typeof item !== 'object') return out;
+        if (metaType === 'view') return withoutInventedViewLabel(item, out);
+        // [#30391] A renamed object's plural, read once per base for the page.
+        if (metaType === 'object') {
+            return withoutStaleObjectPlural(p, item, out, packagedBase, metaTranslateOptions(i18n, locale), pairBundles);
+        }
+        return out;
     }));
     return Array.isArray(raw) ? translated : { ...raw, items: translated };
 }
@@ -3183,7 +3266,15 @@ export async function translateMetaDocument(
         packagedBase,
         ...(pairBundle !== undefined ? { pairBundle: pairBundle as any } : {}),
     });
-    return metaType === 'view' ? withoutInventedViewLabel(document as Record<string, unknown>, translated) : translated;
+    if (metaType === 'view') return withoutInventedViewLabel(document as Record<string, unknown>, translated);
+    if (metaType === 'object' && translated && typeof translated === 'object') {
+        // [#30391] A renamed object's plural.
+        return withoutStaleObjectPlural(
+            p, document as Record<string, unknown>, translated as Record<string, unknown>, packagedBase,
+            metaTranslateOptions(i18n, locale),
+        );
+    }
+    return translated;
 }
 
 /**

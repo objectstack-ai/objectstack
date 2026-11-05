@@ -235,7 +235,10 @@ in no package. `GET /meta/:type/:name`, `GET /meta/:type` and the book tree
 Objects follow the same rule for their `label`, `pluralLabel` and
 `description`: a value that differs from the owning package's declaration (a
 label an [object extension](/docs/data-modeling/object-extensions) contributes,
-for one) is served as written.
+for one) is served as written. An extension that renames the object and sets
+no `pluralLabel` is served with no plural in every locale, since the catalog's
+`pluralLabel` translates the old name, unless the owning package's `.custom`
+pair saves a translation of `objects.<name>.pluralLabel`: that one is served.
 
 An object's validation rule messages follow it too, on both places a reader
 sees them: the error a rejected write returns, and the rule served with the
