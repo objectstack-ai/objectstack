@@ -179,6 +179,8 @@ describe('#5882 GET /meta/:type/:name/layers — the declared layered resource',
         await dispatch(protocol, LAYERS_PATH, { type: 'object', name: 'customer' }, { package: 'com.acme.crm' });
         expect(protocol.getMetaItemLayered).toHaveBeenCalledWith(
             expect.objectContaining({ packageId: 'com.acme.crm' }),
+            // [#29814] The draft layer's option: this caller is not admitted to pending drafts.
+            { withDraft: false },
         );
     });
 
