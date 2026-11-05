@@ -2841,6 +2841,8 @@ const ja = {
       useEmailResetText: "メールでリセットする",
       phoneSuccessTitle: "パスワードをリセットしました",
       phoneSuccessDescription: "パスワードをリセットしました。新しいパスワードでサインインできます。",
+      noDeliveryTitle: "ここではリセットリンクをメールで送信できません",
+      noDeliveryDescription: "このデプロイはメールを送信しないため、パスワードリセットリンクは届きません。管理者にお問い合わせください。管理者が「設定 → ユーザー」で新しいパスワードを設定できます。",
     },
     resetPassword: {
       title: "新しいパスワードを設定",

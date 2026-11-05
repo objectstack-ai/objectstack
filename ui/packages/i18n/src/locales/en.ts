@@ -3387,6 +3387,8 @@ const en = {
       useEmailResetText: 'Reset via email instead',
       phoneSuccessTitle: 'Password reset',
       phoneSuccessDescription: 'Your password has been reset. You can now sign in with your new password.',
+      noDeliveryTitle: "A reset link can't be emailed here",
+      noDeliveryDescription: "This deployment doesn't send email, so no password reset link can reach you. Ask an administrator: they can set a new password for you from Setup → Users.",
     },
     resetPassword: {
       title: 'Set a new password',

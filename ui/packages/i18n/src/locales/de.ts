@@ -2839,6 +2839,8 @@ const de = {
       useEmailResetText: "Stattdessen per E-Mail zurücksetzen",
       phoneSuccessTitle: "Passwort zurückgesetzt",
       phoneSuccessDescription: "Ihr Passwort wurde zurückgesetzt. Sie können sich jetzt mit dem neuen Passwort anmelden.",
+      noDeliveryTitle: "Hier kann kein Link zum Zurücksetzen per E-Mail gesendet werden",
+      noDeliveryDescription: "Diese Bereitstellung versendet keine E-Mails, daher kann Sie kein Link zum Zurücksetzen des Passworts erreichen. Wenden Sie sich an einen Administrator: Er kann unter Einrichtung → Benutzer ein neues Passwort für Sie festlegen.",
     },
     resetPassword: {
       title: "Neues Passwort festlegen",

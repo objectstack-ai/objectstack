@@ -2899,6 +2899,8 @@ const pt = {
       useEmailResetText: "Redefinir por e-mail em vez disso",
       phoneSuccessTitle: "Senha redefinida",
       phoneSuccessDescription: "Sua senha foi redefinida. Agora você pode entrar com a nova senha.",
+      noDeliveryTitle: "Não é possível enviar um link de redefinição por e-mail aqui",
+      noDeliveryDescription: "Esta implantação não envia e-mails, então nenhum link de redefinição de senha pode chegar até você. Peça a um administrador: ele pode definir uma nova senha para você em Configuração → Usuários.",
     },
     resetPassword: {
       title: "Definir nova senha",

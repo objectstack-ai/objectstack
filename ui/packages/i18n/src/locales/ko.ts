@@ -2839,6 +2839,8 @@ const ko = {
       useEmailResetText: "이메일로 재설정하기",
       phoneSuccessTitle: "비밀번호가 재설정되었습니다",
       phoneSuccessDescription: "비밀번호가 재설정되었습니다. 이제 새 비밀번호로 로그인할 수 있습니다.",
+      noDeliveryTitle: "여기서는 재설정 링크를 이메일로 보낼 수 없습니다",
+      noDeliveryDescription: "이 배포는 이메일을 보내지 않으므로 비밀번호 재설정 링크가 전달되지 않습니다. 관리자에게 문의하세요. 관리자가 '설정 → 사용자'에서 새 비밀번호를 설정해 줄 수 있습니다.",
     },
     resetPassword: {
       title: "새 비밀번호 설정",
