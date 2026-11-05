@@ -455,15 +455,29 @@ What an entry that resolves to nobody leaves on the slate depends on its kind:
   decide it (the admin-override callout under
   [Acting on requests in the console](#acting-on-requests-in-the-console)).
   Beside entries that do resolve, a literal is a slot like any other, so a
-  `behavior` that needs every slot (`unanimous`) waits on it too. A `team`,
-  `position`, `department` or `org_membership_level` entry whose holder read
-  failed (`sys_team_member`, `sys_user_position`, `sys_business_unit_member`
-  or `sys_member`, and for a `department` also the `sys_business_unit` read of
-  the unit and of its child units) keeps its literal the same way. It logs `could not be
-  expanded — a directory or read-filter lookup failed` with the `error`,
-  instead of `expanded to nobody`, and never routes to the holders that
-  happened to read. An `expression` value whose `resolveAs` read failed keeps
-  its literal and logs the same line, with the `expression` source.
+  `behavior` that needs every slot (`unanimous`) waits on it too. A
+  `department` or `org_membership_level` entry whose holder read failed
+  (`sys_business_unit_member` or `sys_member`, and for a `department` also the
+  `sys_business_unit` read of the unit and of its child units) keeps its
+  literal the same way. It logs `could not be expanded — a directory or
+  read-filter lookup failed` with the `error`, instead of `expanded to
+  nobody`, and never routes to the holders that happened to read. An
+  `expression` value whose `resolveAs: 'department'` read failed keeps its
+  literal and logs the same line, with the `expression` source.
+- **A failed read behind a `team`, `position` or `queue` entry** is not an
+  empty slate, and the node does not open (ADR-0142 D6). That is a failed
+  `sys_team_member` or `sys_user_position` read, the `sys_member` read behind a
+  position, or, for a queue, a failed read of its `sys_queue` row, its
+  `sys_queue_member` rows or a member table one of its members reads. An
+  `expression` value resolved as `team` or `position`, and a cross-organization
+  read filter that fails in front of any of these entries, count the same.
+  Under every `onEmptyApprovers` value, the `fallbackApprovers` slate included,
+  the node fails with a retryable error starting `APPROVER_DIRECTORY_UNREADABLE:`
+  that names the approver and the read, and writes no request. It is not
+  opened on the rest of the slate, on the fallback or on the administrators,
+  and it is not auto-approved. Run the flow again once the directory can be
+  read. A decision on a request opened before approver snapshots existed still
+  re-reads its slate the old way, which keeps the literal.
 - **A slate left empty, or holding only literals,** goes to the node's
   `onEmptyApprovers` policy, whose four values are listed under
   [Approving across organizations](#cross-org-approvers). Under the default,

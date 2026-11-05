@@ -208,11 +208,12 @@ describe('[ADR-0142 D2] OwnershipQueueService — the one expander', () => {
   });
 
   it('[#29503] a failed team or position holder read keeps the queue\'s declared posture: that specification contributes nobody, logged once', async () => {
-    // The team and position reads now refuse a failed read instead of answering
-    // "nobody"; the queue service keeps answering for its own consumers exactly
-    // as its header declares (a failed member-table read contributes nobody),
-    // on the expansion and on the holder check alike. Whether the queue should
-    // refuse too is left to a ruling (ADR-0142 does not declare this posture).
+    // The team and position reads refuse a failed read instead of answering
+    // "nobody"; under the default `onFailedRead: 'nobody'` the queue service
+    // answers its admission consumers as its header declares (a failed
+    // member-table read contributes nobody), on the expansion and on the
+    // holder check alike. Under `'refuse'` it rejects instead — pinned in the
+    // `onFailedRead 'refuse'` describe below (#29604).
     for (const failed of ['sys_team_member', 'sys_user_position'] as const) {
       const warn = vi.fn();
       const svc = service(makeEngine({ declared: SUPPORT_DECLARED, tables: BASE_TABLES(), failOn: [failed] }), { warn });
@@ -387,6 +388,95 @@ describe('[ADR-0142 D2] OwnershipQueueService — the queue reads page to comple
   });
 });
 
+describe('[ADR-0142 D2 as amended] OwnershipQueueService — onFailedRead \'refuse\' rejects a failed read, naming it (#29604)', () => {
+  const REFUSE = { onFailedRead: 'refuse' } as const;
+  const esc = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  /** The refusal's shape: the queue, its organization, then the read that failed, never the walk's own consequence. */
+  const refusal = (queue: string, read: string) =>
+    new RegExp(`^${esc(`[queue] queue '${queue}' in organization 'org_a' does not answer its members, because a read behind it failed: ${read}`)}`);
+
+  it('⛔ a failed sys_queue row read rejects, naming it — the default still resolves the name nowhere', async () => {
+    const warn = vi.fn();
+    const svc = service(makeEngine({ tables: BASE_TABLES(), failOn: ['sys_queue'] }), { warn });
+    const read = "the sys_queue row of queue 'billing' in organization 'org_a' could not be read: sys_queue unavailable.";
+    await expect(svc.expandMembers('billing', 'org_a', REFUSE)).rejects.toThrow(refusal('billing', read));
+    await expect(svc.isMember('u_e', 'billing', 'org_a', REFUSE)).rejects.toThrow(refusal('billing', read));
+    expect(warn).not.toHaveBeenCalled();
+    // The admission answer, unchanged: nobody, logged once.
+    expect(await svc.expandMembers('billing', 'org_a')).toEqual([]);
+    expect(await svc.isMember('u_e', 'billing', 'org_a')).toBe(false);
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('⛔ a failed sys_queue_member read rejects — never the declared positions alone', async () => {
+    const svc = service(makeEngine({ declared: SUPPORT_DECLARED, tables: BASE_TABLES(), failOn: ['sys_queue_member'] }), { warn: vi.fn() });
+    await expect(svc.expandMembers('support_tier1', 'org_a', { purpose: 'addressing', ...REFUSE })).rejects.toThrow(
+      refusal('support_tier1', "the member rows of queue 'support_tier1' in organization 'org_a' could not be read: sys_queue_member unavailable. The caller"),
+    );
+    await expect(svc.isMember('u_d', 'support_tier1', 'org_a', REFUSE)).rejects.toThrow(/sys_queue_member unavailable/);
+    expect(await svc.expandMembers('support_tier1', 'org_a')).toEqual(['u_a', 'u_b']);
+  });
+
+  it('⛔ a failed member-table read behind a specification rejects, naming the read and carrying the driver error as cause', async () => {
+    // support_tier1 = position support_agent (u_a, u_b; its sys_member limb
+    // too) + team t_night (u_a, u_d); billing = position billing_clerk (u_c) + user u_e.
+    for (const [failed, queue, read] of [
+      ['sys_team_member', 'support_tier1', "the members of team 't_night' could not be read: sys_team_member unavailable"],
+      ['sys_user_position', 'support_tier1', "the assignments of position 'support_agent' in organization 'org_a' could not be read: sys_user_position unavailable"],
+      ['sys_member', 'billing', "the holders of role 'billing_clerk' in organization 'org_a' could not be read: sys_member unavailable"],
+    ] as const) {
+      const svc = service(makeEngine({ declared: SUPPORT_DECLARED, tables: BASE_TABLES(), failOn: [failed] }), { warn: vi.fn() });
+      const err = await svc.expandMembers(queue, 'org_a', REFUSE).then(() => null, (e: unknown) => e as Error);
+      expect(err?.message, failed).toMatch(refusal(queue, `${read}. The caller`));
+      expect(err?.message, failed).not.toMatch(/refuses instead/);
+      expect(((err as any)?.cause as Error)?.message, failed).toMatch(new RegExp(`${failed} unavailable`));
+    }
+  });
+
+  it('isMember under refuse: true when a read that succeeded reaches the user, whichever specification failed first; a rejection when none does', async () => {
+    // Position first (declared), team second (authored).
+    const positionDown = service(makeEngine({ declared: SUPPORT_DECLARED, tables: BASE_TABLES(), failOn: ['sys_user_position'] }), { warn: vi.fn() });
+    expect(await positionDown.isMember('u_d', 'support_tier1', 'org_a', REFUSE)).toBe(true); // the team reaches u_d after the failure
+    await expect(positionDown.isMember('u_b', 'support_tier1', 'org_a', REFUSE)).rejects.toThrow(/sys_user_position unavailable/);
+    await expect(positionDown.isMember('u_z', 'support_tier1', 'org_a', REFUSE)).rejects.toThrow(/sys_user_position unavailable/);
+
+    const teamDown = service(makeEngine({ declared: SUPPORT_DECLARED, tables: BASE_TABLES(), failOn: ['sys_team_member'] }), { warn: vi.fn() });
+    expect(await teamDown.isMember('u_b', 'support_tier1', 'org_a', REFUSE)).toBe(true); // the position reaches u_b before it
+    await expect(teamDown.isMember('u_d', 'support_tier1', 'org_a', REFUSE)).rejects.toThrow(
+      refusal('support_tier1', "whether user 'u_d' is a member of team 't_night' could not be read: sys_team_member unavailable. The caller"),
+    );
+    // The admission answer for the same user, unchanged.
+    expect(await teamDown.isMember('u_d', 'support_tier1', 'org_a')).toBe(false);
+  });
+
+  it('facts stay facts: an empty queue is [], an unresolved name is [] / false, and healthy reads answer what the default answers', async () => {
+    const svc = service(makeEngine({ declared: [...SUPPORT_DECLARED, { name: 'empty_q', label: 'Empty', members: [] }], tables: BASE_TABLES() }));
+    expect(await svc.expandMembers('empty_q', 'org_a', REFUSE)).toEqual([]);
+    expect(await svc.expandMembers('nowhere', 'org_a', REFUSE)).toEqual([]);
+    expect(await svc.isMember('u_a', 'nowhere', 'org_a', REFUSE)).toBe(false);
+    expect(await svc.expandMembers('support_tier1', 'org_a', REFUSE)).toEqual(['u_a', 'u_b', 'u_d']);
+    expect(await svc.expandMembers('billing', 'org_a', REFUSE)).toEqual(['u_c', 'u_e']);
+    expect(await svc.isMember('u_z', 'support_tier1', 'org_a', REFUSE)).toBe(false);
+    expect(await svc.isMember('u_d', 'support_tier1', 'org_a', REFUSE)).toBe(true);
+  });
+
+  it('a refusal is not remembered: the next call, once the table reads, answers the members', async () => {
+    const failOn = ['sys_team_member'];
+    const svc = service(makeEngine({ declared: SUPPORT_DECLARED, tables: BASE_TABLES(), failOn }), { warn: vi.fn() });
+    await expect(svc.expandMembers('support_tier1', 'org_a', REFUSE)).rejects.toThrow(/sys_team_member unavailable/);
+    failOn.length = 0;
+    expect(await svc.expandMembers('support_tier1', 'org_a', REFUSE)).toEqual(['u_a', 'u_b', 'u_d']);
+  });
+
+  it('a failed activation-ledger read is not a failed read under refuse either: the declared default — on — answers, logged', async () => {
+    const warn = vi.fn();
+    const svc = service(makeEngine({ declared: SUPPORT_DECLARED, tables: BASE_TABLES(), failOn: [METADATA_ACTIVATION_TABLE] }), { warn });
+    expect(await svc.expandMembers('support_tier1', 'org_a', REFUSE)).toEqual(['u_a', 'u_b', 'u_d']);
+    expect(await svc.isMember('u_b', 'support_tier1', 'org_a', REFUSE)).toBe(true);
+    expect(warn.mock.calls.some(([line]) => /treated as switched ON/.test(String(line)))).toBe(true);
+  });
+});
+
 describe('[ADR-0131 D4] OwnershipQueueService.hasAnyQueue — the session payload\'s one boolean', () => {
   const ROW_ONLY = (): Record<string, Row[]> => ({
     sys_queue: [{ id: 'q1', name: 'billing', label: 'Billing', organization_id: 'org_a' }],
@@ -531,6 +621,22 @@ describe('[ADR-0142 D3] SharingService — a record sitting in a queue the calle
     const bare = new SharingService({ engine: engine as any });
     expect(await bare.checkEdit('ticket', 't1', ctx('u_a'))).toBe('deny');
     expect(JSON.stringify(await bare.buildReadFilter('ticket', ctx('u_a')))).not.toContain('"queue"');
+  });
+
+  it('[#29604] control — a failed member read reaches nobody through the queue and refuses nothing: the access path keeps the default answer', async () => {
+    const down = makeEngine({
+      declared: SUPPORT_DECLARED,
+      tables: engine._tables,
+      schemas: { ticket: TICKET_SCHEMA, job: AUTHOR_QUEUE_SCHEMA, idea: OPEN_SCHEMA, sys_record_share: { name: 'sys_record_share' } },
+      failOn: ['sys_team_member'],
+    });
+    const queues = service(down, { warn: vi.fn() });
+    const s = new SharingService({ engine: down as any, ownershipQueues: () => queues });
+    // u_d sits in support_tier1 only through team t_night, whose read fails: no access, and no throw.
+    expect(await s.checkEdit('ticket', 't1', ctx('u_d'))).toBe('deny');
+    expect(JSON.stringify(await s.buildReadFilter('ticket', ctx('u_d')) ?? {})).not.toContain('"queue"');
+    // u_b sits in it through position support_agent, which reads.
+    expect(await s.checkEdit('ticket', 't1', ctx('u_b'))).toBe('allow');
   });
 
   it('membership is resolved once per request context', async () => {
