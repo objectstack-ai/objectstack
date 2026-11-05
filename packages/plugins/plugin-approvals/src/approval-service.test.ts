@@ -4176,7 +4176,7 @@ describe('ApprovalService — a queue approver routes to the queue\'s members (A
     const req = await svc.openNodeRequest(queueInput('billing'), CTX) as any;
 
     expect(req.pending_approvers).toEqual(['u7', 'u8']);
-    expect(asked).toEqual([['billing', 't1', { purpose: 'addressing' }]]);
+    expect(asked).toEqual([['billing', 't1', { purpose: 'addressing', onFailedRead: 'refuse' }]]);
     expect(warnings.filter(([msg]) => String(msg).includes('expanded to nobody'))).toEqual([]);
     // A member decides it under their own id.
     const decided = await svc.decideNode(req.id, { decision: 'approve', actorId: 'u8' }, SYS);
@@ -4347,6 +4347,62 @@ describe('ApprovalService — a team, position or queue approver whose directory
     const decided = await svc.decideNode(req.id, { decision: 'approve', actorId: 'u2' }, SYS);
     expect(decided.decision).toBe('approve');
   });
+});
+
+// [ADR-0142 D2 as amended, D6; #29604] The queue arm asks the ownership-queue
+// service for its refusal (`onFailedRead: 'refuse'`), beside the ADDRESSING
+// purpose. The registered service (`@objectstack/plugin-sharing`) answers a
+// failed member read with nobody unless asked, so before the arm asked, a
+// queue whose team or position read failed added no slot and the node's
+// `onEmptyApprovers` policy opened, rescued or approved on a slate missing its
+// people. The double below gives the contract's two answers as that service
+// does: a rejection naming the read under `'refuse'`, `[]` under `'nobody'`.
+describe('ApprovalService — a queue approver asks the queue service to refuse a failed read, and the node refuses with it (ADR-0142 D6)', () => {
+  const POLICIES = ['admin_rescue', 'auto_approve', 'fail', 'fallback'] as const;
+  const READ = "[queue] queue 'billing' in organization 't1' does not answer its members, because a read behind it failed: "
+    + "the members of team 't_night' could not be read: SQLITE_IOERR: disk I/O error.";
+
+  const withFailingQueue = () => {
+    const engine = makeFakeEngine();
+    const asked: unknown[] = [];
+    const warnings: any[] = [];
+    let n = 0;
+    const svc = new ApprovalService({
+      engine,
+      clock: { now: () => new Date(1757000000000 + (n++) * 1000) },
+      logger: { warn: (msg: any, meta: any) => warnings.push([msg, meta]) },
+      ownershipQueues: () => ({
+        expandMembers: async (name: string, org: string | null, options?: { purpose?: string; onFailedRead?: string }) => {
+          asked.push([name, org, options]);
+          if (options?.onFailedRead === 'refuse') throw new Error(READ);
+          return [];
+        },
+      }),
+    });
+    return { engine, svc, asked, warnings };
+  };
+  const node = (configExtra: Record<string, any>) => ({
+    ...openInput([]),
+    config: { approvers: [{ type: 'queue' as const, value: 'billing' }], behavior: 'first_response' as const, lockRecord: false, ...configExtra },
+  });
+
+  for (const p of POLICIES) {
+    it(`a queue whose member read fails: onEmptyApprovers '${p}' opens nothing and approves nothing`, async () => {
+      const { engine, svc, asked, warnings } = withFailingQueue();
+      const refusal = await svc.openNodeRequest(node(
+        p === 'fallback' ? { onEmptyApprovers: p, fallbackApprovers: [{ type: 'user', value: 'u_backstop' }] } : { onEmptyApprovers: p },
+      ), CTX).then(() => null, (e: unknown) => e);
+
+      expect(asked).toEqual([['billing', 't1', { purpose: 'addressing', onFailedRead: 'refuse' }]]);
+      expect(refusal).toBeInstanceOf(ApproverDirectoryUnreadableError);
+      expect(refusal).toMatchObject({ approverType: 'queue', approverValue: 'billing', retryable: true, failedRead: READ });
+      expect((refusal as Error).message).toMatch(/^APPROVER_DIRECTORY_UNREADABLE: approver 'queue:billing' could not be expanded in organization 't1'/);
+      expect(warnings.some(([msg]) => String(msg).includes("approver 'queue:billing' expanded to nobody"))).toBe(false);
+      expect(engine._tables['sys_approval_request'] ?? []).toEqual([]);
+      expect(engine._tables['sys_approval_approver'] ?? []).toEqual([]);
+      expect(engine._tables['sys_approval_action'] ?? []).toEqual([]);
+    });
+  }
 });
 
 // [ADR-0142 D6 as amended; ruling record 6599731698 on #29604, letter B] The

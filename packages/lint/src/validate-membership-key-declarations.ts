@@ -66,6 +66,7 @@
 import {
   indexObjectGraph,
   isUnjudgeable,
+  objectsAsServed,
   recordsOf,
   resolveFieldPath,
   suggestName,
@@ -205,75 +206,6 @@ export function stackObjectNamesOf(stack: unknown): Set<string> {
   return names;
 }
 
-/** One `objectExtensions` entry, as the registry folds it. */
-interface VisibleExtension {
-  /** Package order: registration order across packages. */
-  carrier: number;
-  /** `priority ?? 200`, the registry's default. */
-  priority: number;
-  fields: AnyRec[];
-}
-
-/**
- * The stack's objects with every `objectExtensions` entry folded in, as the
- * registry merges them (this file's header). A field two packages write at the
- * priority that decides it is left out of the merged map and named in
- * `tied`, so its verdict is "not judged" rather than either writer's.
- */
-function mergedObjectsOf(stack: AnyRec): { objects: AnyRec[]; tied: Map<string, Set<string>> } {
-  const objects = recordsOf(stack.objects);
-  const tied = new Map<string, Set<string>>();
-  const names = new Set(objects.map((obj) => str(obj.name)).filter(Boolean));
-  const extensions = new Map<string, VisibleExtension[]>();
-  const collect = (entries: unknown, carrier: number) => {
-    if (!Array.isArray(entries)) return;
-    for (const entry of entries) {
-      if (!isRec(entry) || typeof entry.extend !== 'string' || !names.has(entry.extend)) continue;
-      const list = extensions.get(entry.extend) ?? [];
-      // One per package per target: the later entry wins.
-      const kept = list.filter((ext) => ext.carrier !== carrier);
-      kept.push({
-        carrier,
-        priority: typeof entry.priority === 'number' ? entry.priority : 200,
-        fields: recordsOf(entry.fields),
-      });
-      extensions.set(entry.extend, kept);
-    }
-  };
-  if (Array.isArray(stack.packages)) {
-    stack.packages.forEach((pkg: unknown, j: number) => {
-      if (isRec(pkg) && isRec(pkg.manifest)) collect(pkg.manifest.objectExtensions, j);
-    });
-  } else {
-    collect(stack.objectExtensions, 0);
-  }
-  if (extensions.size === 0) return { objects, tied };
-
-  const merged = objects.map((obj) => {
-    const name = str(obj.name);
-    const exts = extensions.get(name);
-    if (!exts) return obj;
-    const fields = new Map<string, AnyRec>();
-    for (const f of recordsOf(obj.fields)) if (str(f.name)) fields.set(str(f.name), f);
-    const lastWriter = new Map<string, VisibleExtension>();
-    const tiedKeys = new Set<string>();
-    for (const ext of [...exts].sort((a, b) => a.priority - b.priority || a.carrier - b.carrier)) {
-      for (const f of ext.fields) {
-        const key = str(f.name);
-        if (!key) continue;
-        const previous = lastWriter.get(key);
-        if (previous && previous.priority === ext.priority) tiedKeys.add(key);
-        else tiedKeys.delete(key);
-        lastWriter.set(key, ext);
-        fields.set(key, f);
-      }
-    }
-    if (tiedKeys.size > 0) tied.set(name, tiedKeys);
-    return { ...obj, fields: [...fields.values()] };
-  });
-  return { objects: merged, tied };
-}
-
 /** U's verdict: `null` when it is a single-valued user reference, else the reason. */
 function userFieldFault(meta: GraphField): string | null {
   const isUserRef =
@@ -332,7 +264,7 @@ export function validateMembershipKeyDeclarations(
   const declared = declaredMembershipKeysOf(stack);
   if (declared.length === 0) return findings;
 
-  const { objects: merged, tied } = mergedObjectsOf(stack);
+  const { objects: merged, tied } = objectsAsServed(stack);
   const graph = indexObjectGraph({ objects: merged });
   const stackNames = stackObjectNamesOf(stack);
   const owners = options.membershipKeyOwners;

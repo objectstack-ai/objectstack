@@ -1259,7 +1259,10 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // 701 since #29442: the flow form's variables repeater offers
       // `objectName` (a start input declared a record id) — one row label,
       // authored in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(701);
+      // 702 since #30259: the action form's params repeater offers `widget`
+      // (the widget that draws the param, the same key as a field's) — one
+      // row label, authored in all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(702);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the
