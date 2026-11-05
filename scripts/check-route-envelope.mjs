@@ -246,6 +246,8 @@ const MODULES = {
   'packages/services/service-datasource/src/admin-routes.ts': { responses: 0, ok: 0, err: 0 },
   'packages/rest/src/external-datasource-routes.ts': { responses: 0, ok: 0, err: 0 },
   'packages/rest/src/package-routes.ts': { responses: 0, ok: 0, err: 0 },
+  // [#30205] The assigned-work count and hand-over: born on the shared pair.
+  'packages/rest/src/user-work-routes.ts': { responses: 0, ok: 0, err: 0 },
   // #3636 put the right envelope on this module's three read routes but built it
   // inline in four places, so it carried a ratchet at 5 / 4 / 1 until those
   // collapsed behind a local `sendOk` — and then onto the shared one.

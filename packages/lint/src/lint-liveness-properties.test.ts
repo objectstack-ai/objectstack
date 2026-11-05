@@ -158,11 +158,26 @@ describe('lintLivenessProperties', () => {
     expect(ruleOf(findings, 'nodes.outputSchema')).toBeUndefined();
   });
 
-  // #29442 — `flow.variables[].objectName` is declared before any start door
-  // reads it, so its row is `planned` + `authorWarn`. Pinned through the SHIPPED
+  /**
+   * A stack authoring a drilled row the shipped ledger still holds `planned` +
+   * `authorWarn` (an app navigation entry's `dataSource`): the control that
+   * the walk below reaches a planned row at all.
+   */
+  const PLANNED_NAV_DATA_SOURCE = {
+    apps: [{
+      name: 'crm',
+      label: 'CRM',
+      navigation: [{ id: 'accounts', type: 'object', label: 'Accounts', objectName: 'crm_account', dataSource: { provider: 'api', read: { url: '/api/v1/crm/summary' } } }],
+    }],
+  };
+
+  // #29442 declared `flow.variables[].objectName` before any start door read
+  // it (`planned` + `authorWarn`, pinned here as a warning). #29425 gave it its
+  // reader, every door that starts a flow by name, and flipped the drilled row
+  // to `live`, so the SAME input now draws nothing. Pinned through the SHIPPED
   // ledger and an array of variables, so the drill (`variables.objectName`)
-  // and the array fan-out both have to hold for the author to be told.
-  it('warns on a flow input declared a record reference — planned, nothing reads it yet', () => {
+  // and the array fan-out both have to hold.
+  it('no longer warns on a flow input declared a record reference — live since the start doors read it (#29425)', () => {
     const findings = lintLivenessProperties({
       flows: [{
         name: 'close_account',
@@ -173,18 +188,16 @@ describe('lintLivenessProperties', () => {
         nodes: [{ id: 'start', type: 'start' }],
       }],
     });
-    const warned = findings.filter((f) => f.message.includes('sets `variables.objectName`'));
-    expect(warned).toHaveLength(1);
-    expect(warned[0].rule).toBe('liveness-planned-property');
-    expect(warned[0].hint).toContain('nothing reads it yet');
-    // The live siblings the drill graded stay silent.
+    expect(findings.filter((f) => f.message.includes('variables.objectName'))).toEqual([]);
+    expect(ruleOf(findings, 'variables.objectName')).toBeUndefined();
+    // The live siblings the drill graded stay silent too.
     for (const key of ['name', 'type', 'isInput', 'isOutput', 'defaultValue']) {
       expect(ruleOf(findings, `variables.${key}`), key).toBeUndefined();
     }
-    // And a flow that writes no `objectName` draws nothing about it.
-    expect(lintLivenessProperties({
-      flows: [{ name: 'f2', variables: [{ name: 'note', type: 'text', isInput: true }], nodes: [] }],
-    }).filter((f) => f.message.includes('objectName'))).toEqual([]);
+    // CONTROL: the same walk still warns on a drilled `planned` + authorWarn
+    // row elsewhere in the shipped ledger, so the silence above is this row's
+    // verdict, not a walk that reaches nothing.
+    expect(ruleOf(lintLivenessProperties(PLANNED_NAV_DATA_SOURCE), 'navigation.dataSource')).toBe('liveness-planned-property');
   });
 
   // #30259 declared `action.params[].widget` before any reader (`planned` +
@@ -211,14 +224,7 @@ describe('lintLivenessProperties', () => {
     // CONTROL: the same walk still warns on a drilled `planned` + authorWarn
     // row elsewhere in the shipped ledger, so the silence above is the
     // widget row's verdict, not a walk that reaches nothing.
-    const flow = lintLivenessProperties({
-      flows: [{
-        name: 'close_account',
-        variables: [{ name: 'accountId', type: 'text', isInput: true, objectName: 'crm_account' }],
-        nodes: [{ id: 'start', type: 'start' }],
-      }],
-    });
-    expect(ruleOf(flow, 'variables.objectName')).toBe('liveness-planned-property');
+    expect(ruleOf(lintLivenessProperties(PLANNED_NAV_DATA_SOURCE), 'navigation.dataSource')).toBe('liveness-planned-property');
   });
 
   it('warns on an experimental prop with no authorWarn of its own (tool.outputSchema)', () => {

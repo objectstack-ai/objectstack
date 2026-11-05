@@ -792,6 +792,42 @@ describe('validateSecurityPosture (ADR-0090 D7)', () => {
     expect(findings[0]).toMatchObject({ severity: 'info', rule: SECURITY_PRIVATE_NO_READSCOPE });
   });
 
+  // The hint offers only the scopes this stack can compile: `defineStack`
+  // refuses `own_and_reports` / `unit` / `unit_and_below` unless `requires`
+  // names `hierarchy-security`, so without that token the hint names the
+  // requirement in the same sentence as those scopes instead of offering them
+  // bare.
+  const noReadscopeHint = (requires?: string[]): string =>
+    validateSecurityPosture({
+      ...(requires ? { requires } : {}),
+      objects: [{ name: 'expense', sharingModel: 'private' }],
+      permissions: [{ name: 'finance_user', objects: { expense: { allowRead: true } } }],
+    }).find((f) => f.rule === SECURITY_PRIVATE_NO_READSCOPE)?.hint ?? '';
+
+  it('without hierarchy-security, offers org and names the requirement beside the hierarchy scopes', () => {
+    const hint = noReadscopeHint();
+    const requirementAt = hint.indexOf("requires: ['hierarchy-security']");
+    expect(requirementAt).toBeGreaterThan(-1);
+    expect(hint).toContain('@objectstack/security-enterprise');
+    const firstHierarchyScope = Math.min(
+      ...["'own_and_reports'", "'unit'", "'unit_and_below'"].map((s) => {
+        const at = hint.indexOf(s);
+        expect(at, `${s} is named`).toBeGreaterThan(-1);
+        return at;
+      }),
+    );
+    // What the hint offers before any hierarchy scope is `org` alone…
+    expect(hint.slice(0, firstHierarchyScope)).toContain("readScope: 'org'");
+    // …and no sentence ends between the first hierarchy scope and the requirement.
+    expect(hint.slice(firstHierarchyScope, requirementAt)).not.toMatch(/\.\s/);
+  });
+
+  it('with hierarchy-security declared, offers every scope and does not name the requirement', () => {
+    const hint = noReadscopeHint(['hierarchy-security']);
+    for (const scope of ["'own_and_reports'", "'unit'", "'unit_and_below'", "'org'"]) expect(hint).toContain(scope);
+    expect(hint).not.toContain('security-enterprise');
+  });
+
   it('stays silent when depth or VAMA is declared, or the object is public', () => {
     expect(
       rulesOf({
@@ -1762,7 +1798,9 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     // controlled-by-parent rules started judging an object on its MERGED
     // field set: the extensions a stack (or each package body of an artifact)
     // declares are folded onto the objects it declares.
-    expected: ['apps', 'books', 'capabilities', 'data', 'objectExtensions', 'objects', 'packages', 'permissions', 'positions'],
+    // [#30210] `requires` joined when the private-no-readscope hint started
+    // offering the hierarchy scopes only where `hierarchy-security` is declared.
+    expected: ['apps', 'books', 'capabilities', 'data', 'objectExtensions', 'objects', 'packages', 'permissions', 'positions', 'requires'],
     declaredBy: 'ObjectStackSchema',
     keys: () => Object.keys(ObjectStackSchema.shape),
   },
@@ -1910,7 +1948,7 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
   },
   {
     receiver: 'ext',
-    expected: ['extend', 'fields', 'priority'],
+    expected: ['extend', 'fields', 'priority', 'validations'],
     declaredBy: 'ObjectStackSchema.objectExtensions[]',
     keys: () => shapeKeysOf(ObjectStackSchema.shape.objectExtensions),
   },

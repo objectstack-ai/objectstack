@@ -188,7 +188,18 @@ import {
 } from '../src/metadata/index.js';
 
 // ── System ────────────────────────────────────────────────────────────────
-import { SysSetting, SysSecret, SysSettingAudit, SysMigration, SysExchangeRate } from '../src/system/index.js';
+// `SysPlatformSetting` / `SysPlatformSettingAudit` are the settings global
+// rung (ADR-0131 D7). service-settings registers them, and their labels are
+// served from this package's bundles like `sys_setting`'s.
+import {
+  SysSetting,
+  SysPlatformSetting,
+  SysSecret,
+  SysSettingAudit,
+  SysPlatformSettingAudit,
+  SysMigration,
+  SysExchangeRate,
+} from '../src/system/index.js';
 
 // ── Existing Setup app + dashboards + translations ────────────────────────
 import { SETUP_APP } from '../src/apps/setup.app.js';
@@ -316,8 +327,10 @@ const config: ObjectStackDefinition = defineStack({
 
     // System
     SysSetting,
+    SysPlatformSetting,
     SysSecret,
     SysSettingAudit,
+    SysPlatformSettingAudit,
     SysMigration,
     SysExchangeRate,
   ] as any,

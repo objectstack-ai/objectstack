@@ -256,7 +256,7 @@ import {
   type FieldSortability,
 } from '@objectstack/spec/api';
 
-import { recordsOf, suggestName } from './object-graph.js';
+import { objectsAsServed, objectsWithoutTiedFields, recordsOf, suggestName } from './object-graph.js';
 import { walkPageComponents } from './page-walk.js';
 import { PAGE_FIELD_UNKNOWN, PAGE_FIELD_UNPROVISIONED } from './validate-page-field-bindings.js';
 import {
@@ -510,6 +510,38 @@ export function indexObjectSortability(stack: AnyRec): Map<string, SortabilityFi
     if (name) out.set(name, resolveObjectSortability(obj).fields);
   }
   return out;
+}
+
+/**
+ * [#30471] The two field indexes over the objects as SERVED (`objectsAsServed`,
+ * the package's one fold), as the list door reads them:
+ *
+ *   - existence ({@link indexObjectSearchTargets}' shape): a field an
+ *     `objectExtensions` entry adds is a known name, a field two packages tie
+ *     on included, since existence never asks which definition wins;
+ *   - sortability ({@link indexObjectSortability}): a question about the
+ *     field's definition, so a tied field is left out
+ *     (`objectsWithoutTiedFields`) and goes unjudged.
+ *
+ * An object that declares no field map keeps its declared answer on both
+ * (skip 2, `null` and its own projection): an extension adding to an
+ * introspected schema does not make that schema knowable, extended or not.
+ */
+function indexServedSortFields(stack: AnyRec): {
+  fieldsByObject: Map<string, ObjectSearchTarget | null>;
+  sortability: Map<string, SortabilityFields>;
+} {
+  const served = objectsAsServed(stack);
+  const fieldsByObject = indexObjectSearchTargets({ objects: served.objects });
+  const sortability = indexObjectSortability({ objects: objectsWithoutTiedFields(served) });
+  const declaredSortability = indexObjectSortability(stack);
+  for (const [name, target] of indexObjectSearchTargets(stack)) {
+    if (target !== null) continue;
+    fieldsByObject.set(name, null);
+    const own = declaredSortability.get(name);
+    if (own) sortability.set(name, own);
+  }
+  return { fieldsByObject, sortability };
 }
 
 /**
@@ -787,12 +819,14 @@ export function validateSortableFields(stack: AnyRec): SortableFieldFinding[] {
     : isRec(stack.objects)
       ? Object.entries(stack.objects).map(([name, def]) => ({ name, ...(def as AnyRec) }))
       : [];
-  const fieldsByObject = indexObjectSearchTargets(stack);
+  // [#30471] The existence index and the sortability projection read the
+  // objects as served ({@link indexServedSortFields}); the walk above stays on
+  // the declared objects, so every finding keeps its declared path.
+  const { fieldsByObject, sortability } = indexServedSortFields(stack);
   // [#10474] The provenance index alongside the existence one — same keying,
-  // asked on the path where the existence check stays silent.
+  // asked on the path where the existence check stays silent. Object-level
+  // (`external`, the injected anchors), so it stays on the declared objects.
   const unprovisionedAnchors = indexUnprovisionedAnchors(stack);
-  // [#30023] The sortability projection the list door refuses by, per object.
-  const sortability = indexObjectSortability(stack);
 
   const check = (
     declared: unknown,
