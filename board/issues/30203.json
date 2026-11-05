@@ -1,0 +1,28 @@
+{
+  "number": 30203,
+  "kind": "issue",
+  "title": "Allowed IP ranges: an administrator can exclude their own address unwarned, and clearing the field does not take effect until a restart",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T02:03:47Z",
+  "updated_at": "2026-11-05T02:03:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30203",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFrom a real-user walkthrough of Setup, filed on the maintainer's word: 「以上都同意，立卡」 (2026-11-05). Measured on `main` `b7075d9908`, with the console in dev mode, unless a line says otherwise. Test app scaffolded with `create-objectstack@18.3.0`.\n\n## What a customer sees\n\nA company wants sign-in only from the office. The administrator, working from home, enters the office range and saves. Nothing says their own address is outside it. They find out on the next sign-in. If they still have a page open and clear the field, the page says saved, and sign-in keeps being refused until someone restarts the server. A business administrator cannot do that and has no way to tell why it did not work.\n\n## Measured\n\n- `allowed_ip_ranges = 203.0.113.0/24` from `::1`: toast 「设置已保存」, no warning, the current address is not shown. `POST /api/v1/auth/sign-in/email` then answers 403 `IP_NOT_ALLOWED`.\n- The open session keeps working, so the field can still be edited.\n- Field cleared and saved: toast 「设置已保存」, the stored value is empty, and sign-in still answers 403 on three tries over 12 seconds. `/api/v1/auth/two-factor/enable` was refused the same way.\n- After a server restart: sign-in 200.\n\n## Likely cause, from reading the code\n\n`packages/plugins/plugin-auth/src/auth-plugin.ts:2062` applies a setting to the running config only when `isExplicit(key)`, and `:2292` does so for this key. A cleared value appears to read as `default`, so the old list stays in force. If so, other settings with an empty or restored-default state may behave the same; 恢复默认 was not measured.\n\n## Expected\n\n- The field shows the caller's current address. A list that excludes it is refused or asks for explicit confirmation.\n- Clearing applies at once, as saving a value does.\n- The documentation says how to recover when locked out. The seat found no environment variable for this key in `content/docs/deployment/environment-variables.mdx`."
+}

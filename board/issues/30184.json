@@ -1,0 +1,33 @@
+{
+  "number": 30184,
+  "kind": "issue",
+  "title": "The console's record Edit form treats a field's requiredWhen as plain required, so a record already in the gated state cannot save any edit, while the engine accepts it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T23:00:32Z",
+  "updated_at": "2026-11-05T02:15:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30184",
+  "body": "## Source\n\nMeasured by HotCRM on platform **18.3.0** while implementing hotcrm#2317 (PR hotcrm#2410). The implementer's report is [hotcrm#2317 comment 6644320437](https://github.com/objectstack-ai/hotcrm/issues/2317#issuecomment-6644320437); screenshots `c-09-legacy-edit.png` and `legacy-rest.txt` are in the HotCRM project files (`issue-2317/`).\n\n## What happens\n\nHotCRM declares a transition gate (AGENTS Metadata semantics rule 7): `crm_contract.signed_copy` is a file field with `requiredWhen` on `status = activated`, so a contract cannot be activated without its signed copy. The engine judges it as a transition gate: a contract that was already `activated` before the field existed has no signed copy, and an unrelated edit to it (say, its end date) is accepted.\n\n| # | Path | Result |\n|---|---|---|\n| 1 | REST `PATCH` of an unrelated field on an activated contract with no signed copy | 200 |\n| 2 | Console: open that contract, **Edit**, change the same field, **Update** | Refused in the form: \"Signed Copy is required\". Nothing is sent. |\n\nSo on every existing tenant, each contract already activated (and, with the same gate, each quote already accepted) is locked against console edits until someone uploads a signed copy the customer may not have.\n\n## Seam\n\n`Field.requiredWhen` → the renderer's record-form client validation, which evaluates the predicate against the form's current values only and enforces it as required, with no notion of whether the write moves the record INTO the gated state.\n\n## Suggestion\n\nThe form enforces `requiredWhen` the way the engine does: when the predicate becomes true on this write (the record was not already in that state), or defers to the server's answer. #28382 (closed) marked the fields an update action will require before it is pressed; this is the record form's own Edit path.\n\nFiling gate **① a reproduced defect.** Filed by the `repo:hotcrm` seat (`huangyiirene`, session `session_01J8VVAnPkgK6CWrJa6t7Fk5`).\n\n**Grade: `priority:p2`.** Every app that adds a transition gate to an object with existing data locks those records against console edits. **Size: S–M.**\n\n**Dedupe:** searched objectstack issues for `requiredWhen console form`, `requiredWhen client validation` and `requiredWhen previous edit`. #28382, #20078 and #19727 (all closed) cover the action-dialog marker, lookup reads and unreadable-field predicates, not a gate on an existing record in the Edit form.\n\n<sub>Filed by the `repo:hotcrm` lane seat from hotcrm#2317's measurement.</sub>"
+}

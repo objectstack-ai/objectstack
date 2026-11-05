@@ -1,0 +1,28 @@
+{
+  "number": 30201,
+  "kind": "issue",
+  "title": "Organization require-MFA can be turned on with two-factor off, and after the grace period everyone is locked out with no way to enroll",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T02:02:47Z",
+  "updated_at": "2026-11-05T02:02:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30201",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFrom a real-user walkthrough of Setup, filed on the maintainer's word: 「以上都同意，立卡」 (2026-11-05). Measured on `main` `b7075d9908`, with the console in dev mode, unless a line says otherwise. Test app scaffolded with `create-objectstack@18.3.0`.\n\n## What a customer sees\n\nAn administrator is told to harden accounts, ticks 强制多因素认证 on the organization, and sees it saved. Nothing changes that day. When the grace period ends, every member, the owner included, is sent to 设置双重验证, enters their password, and reads `Two-factor enable failed (404)`. There is no way forward, and no one inside the company can undo it, because Setup is behind the same gate.\n\n## Measured\n\n- `GET /api/v1/auth/config`: `features.twoFactor: false`, the default.\n- Edit organization, tick the box, save: toast 「组织已更新」, `sys_organization.require_mfa = true`, no warning.\n- Inside the grace period: reads answer 200, and `mfa_required_at` is stamped.\n- With `mfa_required_at` moved 8 days back in the test database to simulate the 7-day grace: reads answer 403 `MFA_REQUIRED` for a member and for the owner, and `POST /api/v1/auth/two-factor/enable` answers 404.\n- **Control:** Setup → Settings → Authentication → 要求多因素认证, the global switch, says it also turns two-factor on. After it, `features.twoFactor` is `true` and a member enrolled and verified a TOTP code. So only the organization field reaches the dead end.\n- Whether members are reminded during the grace period was not measured specifically; none was seen.\n\n## Expected\n\n- Turning the organization field on also makes enrollment available, the same as the global switch. If that cannot be done, the save is refused and says why.\n- The save states who is affected and when the block starts.\n- The enrollment screen's refusal is localized and says what to do."
+}

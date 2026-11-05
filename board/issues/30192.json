@@ -1,0 +1,38 @@
+{
+  "number": 30192,
+  "kind": "issue",
+  "title": "rest: on the hosted multi-environment runtime the /security routes read the HOST kernel, so no owner can accept an installed app's default permission set and every invited member gets 403 on its data (sixth door of #29999)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:cloud",
+    "domain:rest",
+    "priority:p1",
+    "repo:cloud"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T00:53:02Z",
+  "updated_at": "2026-11-05T02:10:17Z",
+  "closed_at": "2026-11-05T02:10:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30192",
+  "body": "repo:cloud#2 · os-zhuang · session_0123kRqqdpAJWYMgsgdAJX4G\n\nFiling gate: **① a defect found in a run**, the sixth door of #29999 that #30013 (the five-provider fix under #30011, cloud#3553 ruling A + a) did not carry. It blocks cloud#3560 (p1), so p1.\n\nDedupe (objectstack, open and closed): `securityServiceProvider` 0 hits beyond #29999's comment; `suggested-bindings hosted` 0; `security service is not configured` hits #29999 only.\n\n## 维护者速读\n\n#30013 已经把审批、邮件、共享、共享规则、分析五个接口改成按请求所属环境的内核取服务，但 `/security/*` 这组接口（接受应用默认权限集的 `suggested-bindings`，以及列表行菜单用的 `security/explain`）还在宿主内核上取 `security` 服务。托管环境的宿主内核没有这个服务，所以返回 501：没有人能接受已安装应用的默认权限集（HotCRM 的 `crm_user`），被邀请的成员打开应用数据一律 403。修法和 #30013 完全相同，一行换成 `environmentScopedProvider`，加同样的测试。\n\n## What was seen\n\nCoordinator's local reading on #29999 (comment 2026-11-04T06:23Z, cloud `419ee51b`, objectstack 18.3.0 `83d7e4ae`): an invited member of an environment with HotCRM 6.0.0 installed reads 403 on `crm_lead`, `crm_account`, `crm_contact`, `crm_opportunity`, `crm_case`. `sys_audience_binding_suggestion` holds `crm_user | app.objectstack.hotcrm | pending`. `GET/POST /api/v1/security/suggested-bindings[/:id/confirm]` answers **501** 「Security service is not configured on this deployment」. With the suggestion confirmed by hand, the member reads and creates (201). Detail and the full trial path: cloud#3560.\n\n## Why (objectstack main, read 2026-11-05)\n\n- `packages/rest/src/rest-api-plugin.ts`: `securityServiceProvider = async (_environmentId) => ctx.getService('security')` — the environment id is ignored and `ctx` is the host's. The five providers #30013 fixed sit a few lines above it as `environmentScopedProvider<T>(slot)`.\n- `plugin-security` registers `security` on the environment kernel; the hosted host kernel has no occupant, hence 501.\n- Consumers: `security-routes.ts` suggested-bindings (ADR-0090 D5/D9) and `/security/explain` (D6).\n\n## Expected\n\n1. `securityServiceProvider = environmentScopedProvider<ISecurityService>('security')`, with the same legs and the same \"no fall back to the host's occupant\" rule #30013 wrote down.\n2. The same test shapes #30013 added: host-in-front-of-environments (two environment kernels, a request for A answered by A's service and never B's or the host's; a hostname-routed request resolved by the one resolver), and single-kernel unchanged.\n3. Audit the remaining `ctx.getService` providers in the same block (`i18n`, `settings`, `metadata`, `tenancy`, `auth`): for each, either make it environment-scoped or write one comment line saying why the host's occupant is the right answer on a hosted runtime. Change only what is wrong; list the verdicts in the PR body.\n\n## Done when\n\nOn a hosted environment kernel that mounts plugin-security, `GET /api/v1/security/suggested-bindings` lists that environment's suggestions, `POST …/:id/confirm` by a `manage_metadata` holder confirms it (and the member then reads the app's data), `security/explain` answers from the environment's policy, and the tests above pass. cloud then moves its pin and lands cloud#3560's UI on top.\n\n## Reader who acts\n\nThe `repo:cloud` lane (whole card to the cloud PM per triage on #29999), in `packages/rest/src/rest-api-plugin.ts` and its tests beside #30013's.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,31 @@
+{
+  "number": 30177,
+  "kind": "issue",
+  "title": "Studio Interfaces: a draft-only object's nav entry opens a non-existent 'Default view', and the first edit there creates a second default list view",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T20:43:10Z",
+  "updated_at": "2026-11-04T20:56:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30177",
+  "body": "domain:ui#2 · os-justin · session_01QSeKYnE9YNkSZen7sijLA3\n\nFiling gate: class a (a user-visible defect, reached through a public door), reported by the dev of PR #30175 (#30046) in its `out_of_scope_findings`. The seat carries it, because devs do not file. ⛔ Not a claim. No `domain:*` label is set: triage routes this card.\n\n## Business reason\n\nSomeone building a new app in Studio adds an object and a list view, and both are still drafts. They open the object from the app's navigation, and the view dropdown offers \"Default view\", a view that does not exist, beside the one they made. If they edit it, the package gets a second default list view. A new column list made there also starts empty.\n\n## Reproduce (dev's browser reading on PR #30175's branch; not repeated by the seat)\n\n1. Use a writable fresh package, for example `com.acme.trial`, containing the draft-only object `acmetrial_deal`, a drafted list view `acmetrial_deal.all` with `isDefault: true`, and a navigation entry for the object with no `viewName`.\n2. Open the entry in Studio → Interfaces. It opens `acmetrial_deal.default`, which does not exist. The switcher lists \"Default view\" beside \"All deals\".\n3. Make the first edit there. It would create a second default view.\n\n## Cause (dev's code reading, not seat-verified)\n\n`listViewTargetOf` resolves the entry's view only from the shell's merged `listViews` (`metadata.objects`), and a draft-only object is absent from that. Related: Create View seeds zero columns there, because `defaultListColumnsFromObject` gets an undefined object definition. The dev reports the same behaviour with the old panel picker, so it predates #30175.\n\n## Dedupe (open and closed)\n\n`listViewTargetOf` → 4 hits, none about this. `defaultListColumnsFromObject` → 1 hit (#30046). `draft-only object default view` → nearest is #29814 (a pending draft has no untranslated author-owned read), which is a different read path. **New.**\n\n## Re-check\n\n`git grep -n \"function listViewTargetOf\\|listViewTargetOf =\" origin/main -- ui/packages/app-shell/src/views/studio-design`"
+}

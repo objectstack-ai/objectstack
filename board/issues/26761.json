@@ -1,7 +1,7 @@
 {
   "number": 26761,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 3 — ⏳ vacant",
+  "title": "[PM seat] domain:server · seat 3 — 🟢 os-bill · 由 os-bill 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,16 +13,18 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T14:46:52Z",
-  "updated_at": "2026-11-03T14:16:28Z",
+  "updated_at": "2026-11-05T00:44:09Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 14,
+  "comments": 15,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26761",
-  "body": "domain:server#3 · os-warren · session_01JQwxbYyp6wSRcywGFK2L4A\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 3**. Seat 1 is #6367, seat 2 is #20966, seat 4 is #27737 and seat 5 is #28677 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-03T14:12Z at sign-off.</sub>\n\n## Current PM — ⏳ vacant\n\n- **Holder:** none. Take the seat with `/pm-dispatch 接手` and read this body first.\n- **Previous holder:** `os-warren` · `session_01JQwxbYyp6wSRcywGFK2L4A` (the os-warren account's project) · seated 2026-11-03T00:37Z (opening mark 6592227865) · signed off on the maintainer's order 「server 当前的任务处理完，合并后就下班」. The sign-off brief is the comment that follows this revision.\n- **Mailbox:** PR #29661 closed at sign-off. The next holder opens a new one (`mailbox-open.mjs`).\n- **Patrol:** `trig_01MSYiRzszcZ1pEk7CbdMJWi` deleted at sign-off.\n- **Pointer:** lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#3` + `head:claude/` PRs.\n\n## Ledger\n\n- **In flight:** none. `check-handover` exit 0 (clear). No open PR or assigned card is left by this seat.\n- **Stay-behind:** none.\n- **Never started (unclaimed, in `pm:queue`):**\n  - #29818, serial after PR #29794.\n  - #29848, serial after PR #29797.\n- **Owed elsewhere:**\n  - #29727 leg 2 (Console `PermissionSetCloned` type) is `domain:ui`, back in `pm:queue`.\n  - #29653 is scoped by note 6598764965 to exclude `readonly: true` columns.\n- **Queue snapshot at sign-off** (`pm:queue` + `domain:server`): #29926 #29919 #29918 #29900 #29898 #29896 #29895 #29894 #29891 #29881 #29880 #29879 #29873 #29872 #29860 #29859 #29848 #29818 #29653 #29604 #29479 #25467.\n- **Paused by the maintainer's 09:10Z stand-down:** #25467 s3b, #29479, #29818, #29848.\n- **Decisions:** none open from this seat.\n\n## Hot-file serial queue\n\n- None held by this seat. `packages/metadata-protocol/src/protocol.ts`: no freeze is active (seat 4's 09:07Z freeze on #27737 was lifted at 09:12Z).\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Lesson this term (#29343):** before passing a storage-form change, census the consumers that read `[]` and NULL differently.\n  - The first PASS missed `sys_activity.changed_fields` (readonly, NULL = unstamped). CI exposed it, and the PASS was superseded by FAIL 6597870397. Round-2 ruling A (6598733139) fixed it.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n"
+  "body": "domain:server#3 · os-bill · session_01Utp6CbPxYq1wQmUNWvMZkC\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 3**. Seat 1 is #6367, seat 2 is #20966, seat 4 is #27737, seat 5 is #28677 and seat 6 is #29908 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-05T00:43Z at seating.</sub>\n\n## Current PM — 🟢 os-bill\n\n- **Holder:** `os-bill` · `session_01Utp6CbPxYq1wQmUNWvMZkC` (the os-bill account's project, thread \"运行 server 车道席位 B 派发\") · seated 2026-11-05T00:38Z (opening mark 6646294079) on the maintainer's summons 「开两个 server 车道」. 由 os-bill 账户的项目负责.\n- **Mailbox:** PR #30187 (`Mailbox-of: domain:server#3 · os-bill`), subscribed by the seated session.\n- **Patrol:** `trig_015PH9AQjktuW8u2ifZYJVTu · 41 * * * *` (hourly, bound to the seated session).\n- **Pointer:** posture, ledger and round reports live in the project. Lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#3` + `head:claude/` PRs.\n- **Previous holder:** `os-warren` · `session_01JQwxbYyp6wSRcywGFK2L4A`, signed off 2026-11-03T14:16Z (brief 6606155810, the previous body revision holds that ledger).\n\n## Ledger\n\n- **In flight:** none at seating.\n- **Split:** seat 2 (#20966) is the same account's project; seat 6 (#29908, `os-support-ai`) takes p1 only. Before every claim this seat re-reads the card for any `Claim:`; the earlier claim stamp wins.\n\n## Hot-file serial queue\n\n- None held by this seat. No `protocol.ts` freeze is active.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- Session effort: project default, not verified `high`.\n"
 }

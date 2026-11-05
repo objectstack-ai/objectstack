@@ -2,8 +2,8 @@
   "number": 30105,
   "kind": "issue",
   "title": "Codemod split: put driver-sql sql-driver.ts into facade form with a deterministic script, like protocol.ts and engine.ts",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:devx",
-    "pm:dispatched",
     "priority:p2",
     "tech-debt"
   ],
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T13:57:23Z",
-  "updated_at": "2026-11-04T16:01:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T00:54:18Z",
+  "closed_at": "2026-11-05T00:54:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30105",
   "body": "domain:devx#1 · os-support-ai · session_01WGufzgBDcBNVmSmo7VFHpj\n\nFiling gate: maintainer ruling 6632500982 on #29465 (decision card pick 「直接立卡拆」, 2026-11-04T13:55Z). It extends the facade form of ruling 6624258595 to `sql-driver.ts`. ⛔ Not a claim.\n\nRuling-ref: 6632500982\nGoverns: 6624258595 items 1 and 2 (facade form, generated, under the same proofs); 6624345766 (public-surface `.d.ts` EQUAL, plus named exceptions that cite a card); 6597555122 item 3 (by-path readers widen in the same PR); 6591753301 (the pilot's cut-pattern widening); the landing plan 6582376616.\n\n**Reader who acts:** the `domain:devx` seat (the pilot #29520's lane), dispatching one dev.\n\n## What to build\n\n1. Extend `scripts/codemod-split-sql-driver.mjs`, the pilot's script, with the facade layer the server codemods added: `scripts/codemod-split-engine.mjs` (#29986 / PR #30012, plus the facet-host compression of #30051 / PR #30083) and `scripts/codemod-split-protocol.mjs` (#29985 / PR #29998).\n   - `SqlDriver` in `packages/drivers/driver-sql/src/sql-driver.ts` (12,460 lines on `main` `f68b47ca`, class from line 357) becomes a thin facade.\n   - Every public member stays as a one-line delegation to stateless facet classes over the host.\n   - Shared state stays on the facade.\n   - Private docblocks move with their bodies; public docblocks stay on the facade.\n2. Run the pilot's proofs plus the facade proofs:\n   - byte-identity of every moved body\n   - determinism\n   - public `.d.ts` EQUAL per 6624345766, read pairwise if the build is nondeterministic (see #30061)\n   - typecheck\n   - the driver-sql suites and their direct consumers, at base counts\n   - dispatch-gates\n   - `check-tenant-chokepoint` readings equal at base and head (its `SCAN_FILES` already covers `sql-driver-*.ts`)\n   - every by-path reader of `sql-driver.ts` widened in the same PR\n3. Register the facade in `scripts/facade-delegation-registry.json` in the same PR, so the #30019 gate (PR #30030) guards it on landing. Each member the codemod cannot make a delegation gets a named exception row. That row cites the card that will move it: #30020 for state-owning bodies, or a new card the dev names for codemod limits.\n\n## How it lands (landing plan 6582376616)\n\n- **Phase 0, no pause:** build and prove the codemod and its generated facade in a draft PR.\n- **Phase 1, a window the maintainer orders:** regenerate on the latest `main` (⛔ never rebase), run CI once, then the maintainer approves if the diff exceeds 3,000 lines, then the queue.\n- ⛔ The generated output is never hand-edited to pass. A proof that fails is reported as a fork on #29465.\n\n## Done when\n\nThe draft PR holds the extended script, the generated facade and the registry row, with every proof passing, and it has landed in the maintainer's window. The alternative ending is a fork reported on #29465.\n\nRe-measure: `git show origin/main:packages/drivers/driver-sql/src/sql-driver.ts | wc -l`; `git log --since='7 days ago' --oneline origin/main -- packages/drivers/driver-sql/src/sql-driver.ts | wc -l` (3 at filing).\n\nDedupe (open and closed): `sql-driver facade`, `codemod split`, `29465`. Hits: #29465, #29520 (the pilot, closed), #29985 and #29986 (the facade cards, closed). None is a facade card for this file. **New.**"

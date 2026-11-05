@@ -2,8 +2,8 @@
   "number": 30102,
   "kind": "issue",
   "title": "docs(adr): ADR-0144 amendment — settle Open items 2, 3, 4, 6, 9 from PR #28302, record ruling 6539345871 A′ and B, the rounding mode and CLDR fraction digits (multi-currency, epic #8345)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "documentation",
     "domain:skills",
-    "pm:dispatched",
     "pm:epic",
     "priority:p2"
   ],
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T13:46:12Z",
-  "updated_at": "2026-11-04T20:05:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T00:53:14Z",
+  "closed_at": "2026-11-05T00:51:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30102",
   "body": "epic:#8345#1 · os-bill · session_01Utp6CZWjnSeed8H4dMjt9d\n\nPart of #8345. Filed by the epic PM: the predecessor's sign-off ledger (brief 6540325320, #8345 body \"Owed by the next epic PM\") owes this amendment. ⛔ Not a claim.\n\nRuling-ref: 6539345871\n\n## 维护者速读\n\n- **改了什么：** 把 R2 已落地的规则写回 ADR-0144：开放项 2（取单据日当天或之前最近一条汇率，datetime 按组织时区取日）、3（精确小数、除法、一次远离零舍入到 CLDR 小数位）、4（未设本位币拒写 `ERR_HOME_CURRENCY_UNSET`）、6（同币种汇率 1）、9（三个错误码）标为已定；记下裁决 6539345871 的 A′ 与 B；删去「the only ledger additions」。\n- **为什么改：** ADR 每有答复就要修订；现在 main 上这几项还写着「未决」，与代码不一致。\n- **风险与回滚：** 纯文字，不动代码；Tier H（`docs/adr/**`）。\n- **先看：** PR #28302 正文「ADR-0144 open items settled here」。\n- **两分钟验证：** `pnpm check:adr-anchors`、`pnpm check:adr-index` 退出 0。\n- **需要您做的：** 契约复审 PASS 与席位 ACCEPT 后，由 os-zhuang 或 hotlong 批准。\n\n## Task\n\n- [ ] Open items 2, 3, 4, 6, 9: a dated `*Note:*` each, marking it settled, from PR #28302's body section \"ADR-0144 open items settled here\" (`6762dd91`), with tree evidence by file#symbol.\n- [ ] Record ruling 6539345871: A′ (18.3.0 shipped R1 + R2 core together; Version Packages #26517) and B (a `datetime` document date is its calendar day in the organization's `localization.timezone`, UTC when unset), in D9 and Open item 2.\n- [ ] Rounding: half away from zero, once; the rate stored unrounded.\n- [ ] `CURRENCY_FRACTION_DIGITS` holds CLDR fraction digits, not ISO 4217 minor units (review 6539117549, S2), in Open item 3 and the Context/Consequences lines that say ISO 4217 minor units.\n- [ ] Drop \"the only ledger additions\" (TL;DR line on Open item 9): three codes landed.\n- [ ] Open item 13: if the maintainer rules PR #28128 S1 (cloud tenants without a CLI; multi-organization single `--code`) before this PR is final, record the ruling; otherwise leave item 13 as it is.\n\nLane: epic-carried (governed docs) · Size: S–M · Model: fable (dispatch-gates `docs/adr/**` mandate), effort xhigh · Review: CONTRACT_REVIEW_TIER. `Clause-②: no` · `Metadata-protocol: none`.\n\nDedupe: #8345 body ledger; PR #28181 settled items 11–13 only; no open card carries items 2/3/4/6/9."

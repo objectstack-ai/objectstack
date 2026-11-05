@@ -1,0 +1,33 @@
+{
+  "number": 30178,
+  "kind": "issue",
+  "title": "A percent field on a flow screen ignores its min and max: the console renders it as text and posts a string, and both bound checks compare numbers only",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T20:43:52Z",
+  "updated_at": "2026-11-05T01:48:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30178",
+  "body": "## Source\n\nMeasured by HotCRM on platform **18.3.0** while fixing hotcrm#2396 (Generate Quote's discount ceiling). The same reading holds on objectstack `origin/main` `9a53fc9`. Screenshots are in the HotCRM project files (`issue-2396/`). #17306 gave screen fields `min` and `max`; this is the `percent` type falling through them.\n\n## What happens\n\nHotCRM's Generate Quote screen declares `{ name: 'discount', type: 'percent', min: 0, max: 60 }`.\n\n| # | Path | Result |\n|---|---|---|\n| 1 | REST resume with `{ \"discount\": 75 }` | 400 `INVALID_SCREEN_INPUT`, retryable. The same run then takes 60 and drafts the quote. Correct. |\n| 2 | Console, type 75, Submit | The console posts `{ \"discount\": \"75\" }`, a string. The client check skips it, the engine check skips it, the run consumes the suspension, and the downstream rule refuses: the dialog ends with Close only. |\n| 3 | Control: the same field as `type: 'number'` | The input carries `min`/`max`, 75 is refused in the browser before any request, and Next stays. |\n\n## Seam\n\n- Renderer: `ui/packages/app-shell/src/views/ScreenView.tsx` maps `percent` to a text input (`htmlType: 'number'` only for `number` and `currency`), so the value goes out as a string.\n- Client check: `screenFieldBoundViolations` compares a present number only.\n- Engine check: `runtime` `screen-input-contract.ts` (`validateScreenInputs`) compares a present number only.\n\nSo `max` on a `percent` screen field validates in the schema and does nothing in the console.\n\n## Suggestion\n\nThe renderer treats `percent` as numeric (number input, carrying `min`/`max`, posting a number). Or, failing that, both bound checks coerce a numeric string before comparing. The first also fixes the browser's own refusal before any request.\n\n## HotCRM meanwhile\n\nhotcrm#2396's PR declares the bound as the spec allows. It is live for REST and MCP callers now, and live in the console once this is fixed. HotCRM does not switch the field to `number` to route around it. The card stays `pm:blocked` on this one and is re-measured on the fixing pin.\n\nFiling gate **① a reproduced defect.** Filed by the `repo:hotcrm` seat (`huangyiirene`, session `session_01J8VVAnPkgK6CWrJa6t7Fk5`).\n\n**Grade: `priority:p3`.** A rep who types a discount above the ceiling loses the dialog and starts again. The object rule still refuses the quote, so nothing wrong is written. **Size: S.**\n\n**Dedupe:** searched objectstack issues for `percent screen field string`, `screen percent max`, `screenFieldBoundViolations` and `validateScreenInputs string`. #17306 (closed) added the bounds; #26882 (closed) fixed Submit on an empty required field. Neither covers `percent`.\n\n<sub>Filed by the `repo:hotcrm` lane seat from hotcrm#2396's measurement.</sub>"
+}

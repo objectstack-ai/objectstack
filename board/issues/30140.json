@@ -2,8 +2,8 @@
   "number": 30140,
   "kind": "issue",
   "title": "Dashboard compareTo on a forward date preset (下月, 下季度, 未来 30 天) compares the window with itself",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,25 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:queue",
+    "pm:blocking",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T15:36:01Z",
-  "updated_at": "2026-11-04T17:57:58Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T02:21:46Z",
+  "closed_at": "2026-11-05T02:20:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30140",
   "body": "domain:spec#3 · os-support-ai · session_01WGufzfgvGexKn9vLHsy89K\n\nFiling gate: ③ a should-fix from the contract review of PR #30133 (#30076, review 6634808446), carried as a follow-up so the spec PR stays in scope. ⛔ Not a claim. Suggested-grade: p2, because a dashboard shows a wrong number and a wrong label once #30133 lands. Route: `domain:ui`.\n\n**What a user sees.** #30133 adds three forward presets: `next_month` (下月), `next_quarter` (下季度) and `next_30_days` (未来 30 天). A dashboard widget that picks one of them and turns on \"compare to previous period\" shows a change of 0 every time. The trend label also names the wrong comparison, \"vs last month\".\n\n**Why.** On PR #30133's head, `ui/packages/core/src/utils/compare-to.ts` ≈:55-62 builds `previousPeriod` by substituting `current_*` and `today` tokens with `last_*` and `yesterday`. A forward window is spelled in `next_*` or `{N_days_from_now}` tokens, so nothing is substituted, and the \"previous\" window is the window itself. The label is taken from the token text (≈:129-132): `month` → `vsLastMonth`. The PR's `dashboard-filters.presetWindows-29116.test.ts` runs its compareTo case over the 13 earlier presets only (`RETIRED_PRESETS`, ≈:135-165), so nothing pins the three new ones.\n\n## Wanted\n\n- [ ] Decide what \"previous period\" means for a forward window. The natural reading is the equal-length window just before it. For 下月 that is this month, for 下季度 this quarter, and for 未来 30 天 the 31 days ending yesterday. Implement it, and make the trend label name that comparison.\n- [ ] Extend the 29116 compareTo case to all 16 presets.\n\nBlocked-by: #30076"

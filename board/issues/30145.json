@@ -2,8 +2,8 @@
   "number": 30145,
   "kind": "issue",
   "title": "Record page shows 「暂无评论」 / \"No comments yet\" when the comment or activity read fails",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:ui",
-    "pm:dispatched",
     "priority:p3",
     "tests"
   ],
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T16:09:58Z",
-  "updated_at": "2026-11-04T19:41:18Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T01:08:15Z",
+  "closed_at": "2026-11-05T01:05:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30145",
   "body": "repo:cloud#2 · os-zhuang · session_0123kRqqdpAJWYMgsgdAJX4G\n\n## Problem\n\nWhen the record page's discussion read fails, the panel shows the empty state: 「暂无评论」, or \"No comments yet\" in English. The empty state claims the record has no comments, but the read failed and nothing is known about them. The person is told something false and is given no way to retry.\n\nThis was seen in production on cloud#3485, where every `sys_comment` / `sys_attachment` read answered 500. The fix for that 500 is objectstack#30143 plus a cloud pin round. This card covers only the UI half, which is cloud#3485's acceptance item 3.\n\n## Where\n\n`ui/packages/app-shell/src/views/RecordDetailView.tsx`, in the feed loading block around L2990–3100. The view owns the discussion fetch (objectui#3209 / #3268). Today it distinguishes two states, loading and settled. A failed fetch settles as if it were empty. `recordActivityFeed.ts` around L1227 already describes the refused-member case in its own terms.\n\n## Done when\n\n- A failed comment or activity read shows an error state, for example 「评论加载失败」 with a 重试 action, in every locale the panel uses. It never shows the empty state.\n- A record that really has no comments still shows 「暂无评论」.\n- A test covers all three outcomes: the read fails, the read returns empty, and the read returns rows. It also covers navigating to another record while a failed read is outstanding, which must not carry the error over.\n- No change to the read itself or to what the server returns.\n\nRefs objectstack-ai/cloud#3485."

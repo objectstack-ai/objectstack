@@ -1,7 +1,7 @@
 {
   "number": 25966,
   "kind": "issue",
-  "title": "[PM seat] domain:ui — ⏳ vacant",
+  "title": "[PM seat] domain:ui — 🟢 os-support-ai",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,16 +13,18 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T06:24:48Z",
-  "updated_at": "2026-11-04T18:00:44Z",
+  "updated_at": "2026-11-05T00:55:17Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 15,
+  "comments": 16,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25966",
-  "body": "domain:ui#1 · os-support-ai · session_01WGufzjDyeFwq6AuFu3vwTd\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md` (⛔ not copied here). This is **`domain:ui` seat 1**. Seat 2 is #25995, seat 3 is #27561, seat 4 is #26620, seat 5 is #26945.\n\n## Current PM\n\n⏳ **vacant** since 2026-11-04T17:58Z. The maintainer (Yibo Wang, `os-support-ai`) said 「ui 车道当前任务处理完就下班」 (2026-11-04T15:32Z). The seat finished its in-flight cards and clocked out. `check-handover --session=session_01WGufzjDyeFwq6AuFu3vwTd --account=os-support-ai` exited 0.\n\n- **Previous PM:** `os-support-ai` · `session_01WGufzjDyeFwq6AuFu3vwTd` (project thread \"Run PM dispatch ui seat 1\") · seated 2026-11-03T10:30Z.\n- **Patrol:** `trig_01RcwDf9WzTeVsgNSdczDUXG`, stopped. **Mailbox:** #29905, closed. A successor reopens both when taking the seat.\n- **To take the seat:** `/pm-dispatch 接手`, after reading this post.\n\n## Handover ledger\n\n- **Landed this shift.** Each card carries its own Landed record.\n\n  | Card | PR | Merge commit |\n  |---|---|---|\n  | #29971 | #29979 | `f35b361997` |\n  | #30035 | #30082 | `8fa370c918` |\n  | #30034 | #30085 | `61b487b2e7` |\n  | #30033 | #30090 | `f68b47cac` |\n  | #29951 | #30097 (ui half), #30127 (skills half) | `a52761fdd7` / `7bafab3c6a` |\n  | #30057 | #30113 | `a9fb14bdee` |\n  | #30059 | #30153 | `6cc0b818c2` |\n\n- **In flight from this seat:** none. No claim is held, and no session is left running for this seat.\n- **Queue snapshot at clock-out** (open `domain:ui`):\n  - Only one `priority:p1` card is open: #26059 (RBAC record-scope UI test findings). It carries no `pm:` label, and no seat has claimed it.\n  - The `priority:p2` `pm:queue` cards are #30145, #30118, #30122, #30046, #30088, #30064, #30063, #30073, #30075 and #30089. The p3 cards are left for the other seats.\n  - ui#2/ui#3 (`os-justin`) hold #30038, #30069, #30039, #30077, #30050, #30074 and #29954. ⛔ They are not touched from here.\n- **Possible follow-ups, not filed.** Each is recorded on its closed card and gets filed only if the maintainer asks:\n  - #30057's Landed record lists three form-view designer gaps: the required star, where a newly added field lands, and the section inspector.\n  - #30059's Landed record notes the raw app label in the pending-changes row and the Restore dialog.\n- **Release-notes item:** #30018's pending changeset has one stale sentence. Per #17712 it is fixed in the release notes, not in the changeset file. Recorded on #29951's Landed records.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing. ⛔ Re-derive from the live `Claim:` comments of every `domain:ui` seat and each open PR's file list before every dispatch.\n\n## Notes\n\n- **Publication:** a merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs --repo objectstack-ai/objectstack`). ⛔ No GitHub MCP writes.\n"
+  "body": "domain:ui#1 · os-support-ai · session_01WGufzfE4V9fzZgJLrLDmMC\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md` (⛔ not copied here). This is **`domain:ui` seat 1**. Seat 2 is #25995, seat 3 is #27561, seat 4 is #26620, seat 5 is #26945.\n\n## Current PM\n\n🟢 `os-support-ai` · `session_01WGufzfE4V9fzZgJLrLDmMC` (project \"objectstack spec ui server devx\", thread \"Run PM dispatch ui seat\") · seated 2026-11-05T00:46Z.\n\n- **Patrol:** `trig_016viDCdiNbSW1uhuBE8UQEM` · `45 * * * *`. **Mailbox:** #30188.\n- **Scope:** `priority:p1` and `priority:p2` cards only (p0 ahead of all, per the skill). Share: 2 active dev cards (maintainer's fleet cap 10). Dispatch back end: `mode:thread`.\n- Posture, ledger and round reports live in the project (⛔ not here).\n\n## Inherited ledger\n\n- Previous PM `os-support-ai` · `session_01WGufzjDyeFwq6AuFu3vwTd` clocked out with nothing in flight; its ledger is in this post's previous body revision.\n- Carried items: unclaimed p1 #26059; #30018's pending changeset carries one stale sentence, fixed in the release notes, not in the file (per #17712).\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing yet. ⛔ Re-derive from the live `Claim:` comments of every `domain:ui` seat and each open PR's file list before every dispatch.\n\n## Notes\n\n- **Publication:** a merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs --repo objectstack-ai/objectstack`). ⛔ No GitHub MCP writes.\n"
 }

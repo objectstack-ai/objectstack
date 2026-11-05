@@ -13,18 +13,20 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T12:14:49Z",
-  "updated_at": "2026-11-04T13:13:08Z",
+  "updated_at": "2026-11-05T01:20:48Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30063",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nThe maintainer: 「全部立，继续测试验证」 (2026-11-04), on the seat's evaluation of which metadata types should support override.\n\nMeasured by the seat through the metadata API and in a browser on `main` `63b86b385d`, on `examples/app-crm` and `examples/app-showcase`, each overriding through its paired customization package. No `domain:*` label is set: triage routes this card.\n\n## Business reason\n\nA customer installs an app and wants its welcome or landing page to say their own thing, or to show different blocks. Today Studio shows the page as 只读 and offers no way forward. The platform already accepts the change: only the door is missing.\n\n## Measured\n\n- The override of `crm_welcome` in `com.example.crm.custom`: save 200, publish `published`, listed by `GET /api/v1/packages/com.example.crm/customizations`.\n- In the running app, `/apps/com.example.crm/page/crm_welcome` showed the changed text and description.\n- Removal returned the shipped page. Also measured on showcase's `showcase_capability_map`.\n- The Studio header on that page reads 只读, 设计, 运行, with no 定制. A dashboard in the same app offers 定制.\n\n## Where\n\n`ui/packages/app-shell/src/views/studio-design/StudioCustomizeControls.tsx:73`: `STUDIO_CUSTOMIZE_TYPES` is view, dashboard and report. `page` is overridable by `OVERRIDE_TYPE_CLASSIFICATION`.\n\n## Acceptance\n\n1. A read-only base's page offers 定制. The first save copies it whole into the pair with the declaration, and 恢复原版 removes it, as a dashboard does.\n2. The page designer edits the pair's copy, and a designer edit shows in the running app after publish.\n3. Marks, the 仅看定制 count and the All metadata tile cover pages.\n4. A browser check on the example CRM, with screenshots on the PR.\n5. No server or spec change is expected. If one is needed, report it here.\n\n## Coordinate with\n\nThe override-label defect filed beside this card: a renamed page's label is hidden by the base's translation today, so a page's rename depends on that fix. #30059 opens `app` the same way; the two may share the `STUDIO_CUSTOMIZE_TYPES` line.\n\n## Re-check\n\n`git grep -n \"STUDIO_CUSTOMIZE_TYPES: readonly\" origin/main -- ui/packages/app-shell/src/views/studio-design/StudioCustomizeControls.tsx`"

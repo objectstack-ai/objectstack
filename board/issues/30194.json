@@ -1,0 +1,33 @@
+{
+  "number": 30194,
+  "kind": "pull_request",
+  "title": "chore(scripts): point each facade-gate exception row at the card that retires it (registry only, #30147 phase 1)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T01:12:38Z",
+  "updated_at": "2026-11-05T02:06:36Z",
+  "closed_at": "2026-11-05T02:06:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-05T02:06:34Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30194",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBWMEECkfNfe2VjW9rMJG3n7)_\n\nPart of #30147 (phase 1 of 3: re-point the rows. Phase 2, the sql-driver codemod extension that retires rows, and phase 3, the protocol.ts / engine.ts measurement, stay open on the card.)\n\n## 维护者速读\n- 改了什么:只改 `scripts/facade-delegation-registry.json` 的 88 条例外行的 `card` 和 `reason`,成员与文件一行不动。\n- 为什么改:裁决 6624345766 第 3 条要求每条例外行写明“由哪张卡把它移走”;原先 63 条都挂在 #30020(状态归属),其中大多数其实是 codemod 能力不足,#30020 不会移走它们。\n- 风险与回滚:无运行时影响,门禁只校验卡号格式和成员是否存在;回滚即 revert 这一个 JSON。\n- 先看:`scripts/facade-delegation-registry.json`(按 `card` 字段看分组是否合理,尤其留在 #30020 的 17 条)。\n- 两分钟验证:`node scripts/check-facade-delegation-only.mjs`,预期打印 3 个 facade、88 条具名例外,退出 0。\n- 需要你做的:无,席位落地。\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\nEach exception row in the facade delegation gate's registry now names the card whose work actually moves it (ruling 6624345766 item 3). Row set, members, files and order are unchanged (88 before, 88 after, same keys in the same order); only `card` and `reason` change.\n\n| card | protocol.ts | engine.ts | sql-driver.ts | total | before |\n|:--|--:|--:|--:|--:|--:|\n| #30020 state-owning facets | 2 | 14 | 1 | 17 | 63 |\n| #30054 inferred return types | 8 | 8 | 6 | 22 | 0 |\n| #30055 query-options erasure pins | 0 | 6 | 0 | 6 | 0 |\n| #30147 other codemod limits | 20 | 2 | 21 | 43 | 25 |\n\nHow each reason was classified (the protocol.ts sub-reasons were read from the #29985 codemod's own plan, run on the unsplit `protocol.ts` at `48914fdc^`):\n\n- **Stays on #30020 (state-owning, 17).** engine.ts `bare-this` (12) and protocol.ts `publishPackageDrafts` (its `closed-set` reason is a bare `this`): the body hands the instance itself on, so a stateless facet over a host cannot carry it. The engine.ts and sql-driver.ts constructors (instance state set up there). The two hand-series host slots that compute (`applySeedBodies`, `serveReferenceNames`): #30020's body names the hand-series stubs' host rule as its own.\n- **To #30054 (22).** Every `inferred-return-type` row, including six on sql-driver.ts. Three of those six also carry a codemod-limit half (`applyFilterCondition` comment-in-parameters, `getBuilder` knex field-call, `createColumn` path-reader); their reason says so, and #30147's phase 2 retires that half.\n- **To #30055 (6).** The engine.ts query-options erasure pins.\n- **To #30147 (43).** protocol.ts `static-reads-class` (9), `no-host-read` (2), `name-taken` (1), `host-entry-predicate` (1), the three `closed-set` rows that are not a bare `this` (a static field read in `reconcileViewExpansions`, a local named `host` in the two overlay refusals), and the four static tables built by an initializer at class load (pure functions of imports). engine.ts `homeAmountServing` (field-call) and `projectHomeAmountsOntoPatch` (computed parameter default). sql-driver.ts's 19 rows that were already here, plus the default `logger` sink and the `DIALECT_CONNECT_TIMEOUT` table (initializers that can be built by a module function).\n\n## Tests\n\nNo code changes. The gate and its self-test were run on this head; see Verification.\n\n## Acceptance notes\n\n- #30054's body names only engine.ts and protocol.ts. Six sql-driver.ts rows now point at it, so its scope needs to grow by those six (or a sibling card takes them). Left for the seat.\n- The protocol.ts static tables and the sql-driver.ts `logger` / `DIALECT_CONNECT_TIMEOUT` rows were filed under \"gate reading\" and sat on #30020; they hold no instance state, so they move to #30147 as initializer lifts.\n- `reconcileViewExpansions` reads a process-wide `WeakMap` held as a private static. The body can move through a statics host the way engine.ts's `ObjectQLStatics` does, with the map staying on the class, so it is filed as a codemod limit. If the seat reads that map as state #30020 should rehome, the row goes back.\n\n## Verification\n\nHead `6cc705e9`, base `origin/main` `b7075d99`.\n\n<details><summary>Gate readings</summary>\n\n- `node scripts/check-facade-delegation-only.mjs`: exit 0, \"3 facade file(s) hold delegations only, 88 named exception(s).\"\n- `node scripts/check-facade-delegation-only.mjs --self-test`: exit 0, 36 cases pass.\n- `node scripts/pm/dispatch-gates.mjs --commands`: 20 derived commands, each run, all exit 0; `--ran` reconciles 20 derived, 20 run, 0 NOT-MEASURED, 0 UNRUN.\n- Also run: `node scripts/check-published-list-mirrors.mjs` exit 0 (roster under `scripts/`).\n- No changeset: the diff publishes nothing from any released package (`scripts/` only), so this PR carries the `skip-changeset` label.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WGufzj4B2cbnRLVdgtLcDZ)_\n"
+}

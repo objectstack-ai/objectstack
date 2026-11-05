@@ -2,8 +2,8 @@
   "number": 29254,
   "kind": "issue",
   "title": "plugin-auth: the showcase dev platform admin gets 403 YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS on POST /api/v1/auth/admin/remove-user",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,21 @@
   },
   "labels": [
     "domain:server",
-    "pm:awaiting-maintainer",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T10:21:47Z",
-  "updated_at": "2026-11-02T12:04:14Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T01:31:24Z",
+  "closed_at": "2026-11-05T01:31:21Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 8,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29254",
   "body": "domain:server#3 · os-steve · session_01ADHkmQJdgarUjPLNgFBY67\n\nFiling gate: ① out-of-scope finding of the #29062 dev (os-dev-report 6574609406, `out_of_scope_findings` class a; measured by the earlier #29062 card thread, report 6571331581). Filed by `domain:server` seat 3. ⛔ Not a claim. Suggested-grade: p3 · the dev admin cannot exercise a documented admin door; no grant or disclosure.\n\nReach: public door `POST /api/v1/auth/admin/remove-user`, called by the dev-seeded platform admin on a fresh showcase boot.\nReader who acts: a `domain:server` seat (`packages/plugins/plugin-auth`, the dev-admin seed or the admin-plugin role mapping).\n\n## What happens (measured by the #29062 card thread on a fresh showcase boot at `6b3ba82c`, not re-measured on this card)\n\n- Signed in as the showcase's dev platform admin, `POST /api/v1/auth/admin/remove-user {\"userId\": …}` answers 403 `YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS`.\n- The dev's reading: the vendor admin plugin checks the user's `role` scalar, and the seeded admin's scalar is not `admin`, even though ObjectStack treats the account as platform admin.\n\n## Wanted\n\nMeasure on `main` first. If the seeded platform admin is meant to hold the vendor admin role, seed or map it so the admin plugin's own checks agree with ObjectStack's platform-admin reading; if not, say which account the docs mean for admin user removal. Check the other `/auth/admin/*` doors for the same split.\n\nDedupe: searched `remove-user 403 admin`, `platform admin better-auth role scalar`; none. **New.**\n\nLinks back: #29062, PR #29245."

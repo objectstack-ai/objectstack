@@ -1,0 +1,34 @@
+{
+  "number": 30193,
+  "kind": "issue",
+  "title": "i18n: an override's own label loses to the base's translation on page, dataset, app and book, and a translation in the .custom pair never wins on any type",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T01:03:35Z",
+  "updated_at": "2026-11-05T01:47:07Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30193",
+  "body": "domain:server#5 · os-bill · session_01Utp6CYVV6fcAQrNTDQRvPb\n\nCarries item 3 of #30062 (label precedence); #30062 keeps items 1, 2, 4 and 5, and item 3's server half (the protocol's `getPackaged*Base` accessors and the REST table rows) waits on this card.\n\nFiling gate ①: a product defect with a named locus and a measured reach, split from an in-flight p1 card because the fix lives in `packages/spec`. No `domain:*` label is set: triage routes it.\n\n## Ruling (not open to re-ruling)\n\nOn #30062, comment 6631250894, the maintainer: 「…其他全部同意」, which rules acceptance item 3 as the seat proposed: **label precedence is a translation in the pair, then the override's own label, then the base's translation.** One rule across types, and across runtime and Studio.\n\n## Business reason\n\nADR-0146 D2: an item in the `.custom` package replaces the base's item. A customer who renames a page or a dataset in their customization sees the old name on a translated locale, so the rename looks like it failed. And a translation they add in the pair is never used, so the documented workaround does not work either.\n\n## Defect (read at `origin/main` `b7075d99`, not built)\n\n1. **The override's own label loses on four types.** In `packages/spec/src/system/i18n-resolver.ts`, `translateView` (:1480), `translateDashboard`, `translateReport` and `translateObject` take `TranslateDocumentOptions` and apply the `packagedBase` rule (a value that differs from the packaged base is the author's and is kept). `translatePage` (:3393), `translateDataset` (:2270), `translateApp` (:1756) and `translateBook` (:2441) take only `ResolveOptions` and apply the catalog translation unconditionally. Matching on the server side, `PACKAGED_BASE_ACCESSORS` in `packages/rest/src/meta-item-read-gate.ts:2954` lists only object, dashboard, view and report. Measured through the API on #30062 (zh-CN CRM): page `crm_welcome` label `OVpage` served as 欢迎页; dataset `opportunity_metrics` label, description and a measure label served as the base's zh-CN text.\n2. **A translation in the pair never wins, on any type.** The card thread's reading: the `packagedBase` rule keeps the original value as soon as it differs from the base, so a translation the pair ships is never applied to an overridden label. Not re-measured by the seat.\n\n## Acceptance\n\n1. All eight translators follow the ruled order: pair translation, then the override's own label, then the base's translation. Pin each type.\n2. A label that is not overridden still takes the base's translation (no regression for uncustomized items).\n3. Studio and runtime read the same answer (the report header case on #30062: runtime shows the override, Studio showed the base's text).\n\n## Reader who acts\n\nSpec lane, the seat that takes it from `pm:queue`. Then `domain:server` seat 5 (#28677) dispatches #30062's server half: the protocol accessors for page, dataset, app and book, and the `PACKAGED_BASE_ACCESSORS` rows.\n\n## Dedup\n\nSearched issues, open and closed: \"translatePage packagedBase\" (1 hit, #28214, a closed thank-you-panel key card, unrelated); \"override label translation precedence\" (59 hits) and \"packaged base translation page dataset label\" (45 hits): beyond #30062 itself, only QA runs and closed cards on other keys; none carries this rule.\n\n## Re-check\n\n`git grep -n \"export function translatePage\" origin/main -- packages/spec/src/system/i18n-resolver.ts` (the signature's options type), and `git grep -n -A6 \"const PACKAGED_BASE_ACCESSORS\" origin/main -- packages/rest/src/meta-item-read-gate.ts`."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 30218,
+  "kind": "issue",
+  "title": "rest: objectQLProvider ignores the environment id, so on a hosted runtime POST /batch, the meta object-state / item-history doors and the disabled-package gate read the host kernel's engine (finish #30013 / #30195)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:cloud",
+    "domain:rest",
+    "pm:dispatched",
+    "priority:p1",
+    "repo:cloud"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T02:12:25Z",
+  "updated_at": "2026-11-05T02:12:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30218",
+  "body": "repo:cloud#2 · os-zhuang · session_0123kRqqdpAJWYMgsgdAJX4G\n\nFiling gate: **① a defect with a named locus**, the provider #30195's audit named and left out (\"Noted for the lane, not changed\"). Suggested priority p1: it is the last env-blind seam in the family #29999 → #30013 → #30195, and one of its consumers is a transactional write door. Triage decides.\n\nDedupe (objectstack, open and closed): `objectQLProvider environment` 0 beyond #30195's body, `batch hosted host kernel` 0, `meta-object-state environment kernel` 0.\n\n## 维护者速读\n\n#30013 和 #30195 已经把审批、邮件、共享、分析、安全、设置等接口改成按请求所属环境的内核取服务。剩下一个 `objectQLProvider`（数据引擎）还是不看环境 id，直接取宿主内核的引擎。用到它的有四处：跨对象事务批量写 `POST /batch`、对象状态和变更历史两个 meta 接口，以及「已停用包」的读取门。托管运行时上这几处拿到的不是环境自己的引擎。修法和前两次一样，并要在托管形态下用测试钉住。\n\n## Where (objectstack main `f2a9007e`)\n\n- `packages/rest/src/rest-api-plugin.ts`: `objectQLProvider = async (_environmentId) => kernel.getServiceAsync('objectql')` on the plugin's own kernel, whatever id it is given.\n- Consumers that pass an environment id: `batch-routes.ts` (`POST /batch`, via `wiredEngineOrLoud`), `meta-object-state-routes.ts`, `meta-item-history-routes.ts`, and the meta read gate's `isItemOfDisabledPackage`.\n- `computeExecCtx` already reads the environment kernel's `objectql`, so the execution context and the engine these doors use can come from different kernels.\n\n## Expected\n\n1. Make `objectQLProvider` environment-scoped with the same legs and the same no-host-fallback rule as `environmentScopedProvider`. Keep its existing loud classification: a factory that faults re-raises, and only \"never registered\" means absent. It should also keep the `LiteKernel` sync leg for a single kernel.\n2. Every consumer passes the id from `resolveRequestEnvironmentId`, not the raw route param. The unscoped mount must resolve the hostname-routed environment.\n3. Tests in #30013's harness (`rest-environment-scoped-providers.test.ts`), with the host carrying its own `objectql`:\n   - each of the four doors on the scoped and hostname mounts is answered by the target environment's engine only;\n   - a batch for env A writes nothing through env B's engine or the host's;\n   - single-kernel is unchanged.\n   Ablate the fix to show the tests catch it.\n\n## Done when\n\nThe tests above pass and go red with the fix reverted. cloud then pins it and reads `POST /api/v1/batch` on a hosted environment of its local stack.\n\n## Reader who acts\n\nThe `repo:cloud` lane, in `packages/rest/` beside #30195.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

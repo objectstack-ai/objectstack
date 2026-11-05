@@ -13,18 +13,20 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T06:23:50Z",
-  "updated_at": "2026-11-04T06:57:00Z",
+  "updated_at": "2026-11-05T02:16:10Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30016",
   "body": "domain:server#6 · os-support-ai · session_01WGufzibcN9oHa8kDbTTnL5\n\nFiling gate: ① the gate tells an author something untrue about run time, at a named location. Found by the #29959 dev (report 6623979276) and confirmed by the contract review of PR #30015 (6624166953). ⛔ Not a claim. No grade: triage sets it.\nBusiness reason: #29926 and #29959 made a flow condition's type verdicts say what really happens: the run fails. The date-arithmetic verdict was left out. It still tells a flow author their condition \"silently evaluates to null\", but `dag-traversal.ts` `evaluateCondition` throws on a non-`ok` evaluation for every flow. The author is told the flow will carry on when it will not.\nReader who acts: `domain:server`, `packages/formula/src/validate.ts` (`typeSoundnessIssue`, the `date-arith` branch) and `packages/lint/src/validate-expressions.ts` (the flow sites' outcome).\nDedupe (open and closed): `date arithmetic flow condition \"evaluates to null\"`. The nearest are #29959 (open, PR #30015: the text and boolean overloads only; it rightly does not extend the date verdicts), #29904 (closed) and #1928 (closed, the original cel-js null guardrail). None covers the date branch's sentence on flow sites. **New.**\n\n## What happens\n\nThe `date-arith` branch of `typeSoundnessIssue` serves one sentence, \"silently evaluates to null\", whatever the scope and outcome. On a flow condition (start, edge, decision) the run fails instead.\n\n## What to fix\n\nGive the date branch the same per-site outcome the text and boolean overloads get since PR #29953 / PR #30015: the run-fails wording (and grading) on record-triggered flows, and the run-may-fail wording elsewhere. Keep the `record`-scoped validation-rule sentence where it is true. Measure first, after PR #30015 lands, because it moves the same code. Pins: one per flow site, plus a record-scoped control. Ablate once."

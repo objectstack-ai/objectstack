@@ -1,0 +1,34 @@
+{
+  "number": 30186,
+  "kind": "pull_request",
+  "title": "test(dogfood): a home field added to an object that already holds rows migrates as add_columns and the recompute fills it (multi-currency M2-4)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T00:40:00Z",
+  "updated_at": "2026-11-05T01:35:38Z",
+  "closed_at": "2026-11-05T01:35:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-05T01:35:36Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30186",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgAYW6ez2s1gqUykrnhwXqEv)_\n\nepic:#8345#1 · os-bill · session_01Utp6CZWjnSeed8H4dMjt9d\n\nFixes #27194\nRuling-ref: 6465431966\n\nClause-②: no — one new test file under `packages/qa/dogfood/test/`; no export, schema, route or accepted value changes\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么：** 只加一个证明测试（无产品代码）：存量对象先以 `record` 模式写入 4 行，再补一行 `homeAmount` 指针和两个字段，走 `os migrate apply` 同一条延迟 DDL 路径加列，然后跑 `recomputeHomeAmounts` 回填。\n- **为什么改：** 证明 R1 期间建的对象升级到 R2 只需加一行指针：加列是普通 `add_columns`，回填就是 M2-3 的重算，不需要新门。\n- **风险与回滚：** 无产品风险，测试卡。回滚即撤 PR。\n- **先看：** `packages/qa/dogfood/test/home-amount-added-to-existing-object.test.ts`。\n- **两分钟验证：** `OS_TEST_POSTGRES_URL=… npx vitest run test/home-amount-added-to-existing-object.test.ts`（在 `packages/qa/dogfood`，6 条，SQLite×2 + PG）；跳过重算或跳过加列，各自变红。\n- **需要您做的：** 无。\n\n## What changes\n\nOne proving test, `packages/qa/dogfood/test/home-amount-added-to-existing-object.test.ts`, on three cells: better-sqlite3 (file), sqlite-wasm (file), PostgreSQL (one schema, named skip without `OS_TEST_POSTGRES_URL`). Each boot is its own engine and its own driver over the same database, as two processes are.\n\n1. **Before.** An object whose amount is `currencyMode: 'record'` with no `homeAmount` and no home field. Four rows written through the engine: USD 10,000 (2026-03-15), USD 1,500 (2026-04-15), CNY 12.345, SEK 500 (no SEK rate row).\n2. **The upgrade boot, as `os migrate apply` runs it.** The amount gains `currencyConfig.homeAmount: { field: 'amount_home', rateDate: 'invoice_date', rateField: 'amount_rate' }` and the two author-declared readonly fields it names (D8 rule 2). The driver boots with `setDeferredDdl(true)` (the plan/apply deferral). Pinned:\n   - `previewDeferredSchemaWork()` for the object is exactly `[{ kind: 'add_columns', columns: ['amount_home', 'amount_rate'] }]`, and nothing for any other table (no in-place work);\n   - `detectManagedDrift()` has no entry for the object;\n   - `flushDeferredSchemaDdl()` performs that same entry, and a plan after it is `[]`;\n   - all four rows are still there with their amount and code unchanged, and an empty home field and rate.\n3. **The recompute** (`recomputeHomeAmounts`, behind `os migrate recompute-home-amounts`, PR #30183):\n   - dry run: 4 amounts, 3 changed, 1 skipped, nothing written;\n   - apply: the column read back holds the ADR's figures (USD 10,000 at 0.1389 → 71994.24; USD 1,500 at 0.15 → 10000; CNY 12.345 at rate 1 → 12.35), each equal to a fresh write of the same row after the upgrade;\n   - the SEK row is listed (`rate_missing`, SEK, 2026-03-15) and skipped, its home field and rate stay blank, the run is not complete (`homeAmountRecomputeComplete` false), and a fresh write of that row is refused `ERR_EXCHANGE_RATE_MISSING`;\n   - a re-run changes nothing and still lists the one row.\n\n**Finding: the add-column path is ordinary.** No refusal, no flag, no data loss: the two columns are a plain `add_columns` entry, as for any field added to an existing object. Nothing in the migrate path changed.\n\nThe in-memory driver has no add-column path (it is schemaless), so it has no cell here; the recompute's in-memory face is `packages/objectql/src/engine-home-amount-projection.test.ts`.\n\n## Why\n\nADR-0144 D5: a home field added to an object that already holds rows is filled by \"an explicit recompute operation\" (the recompute's own header names this case). #27194's task asks for the proof that the R1-to-R2 upgrade is one pointer line, the ordinary migration and the recompute, with nothing new in the product.\n\n## Verification\n\n- The file: 6/6 passed on all three cells (PostgreSQL 16, local, `OS_TEST_POSTGRES_URL` set).\n- Ablation, through `scripts/ablation-replace.mjs` (each mutation landed, anchor 1 → 0, file restored after):\n  - recompute skipped (`apply` forced to `false`): 3 failed, one per cell, on the column read back: expected `{ home: 71994.24, rate: 0.1389 }`, received `{ home: null, rate: null }`;\n  - home field declared without the column migration (the flush replaced by a preview and the deferral disarmed): 6 failed. The plan still lists the `add_columns` entry, and the recompute's apply writes nothing: its report carries one `failures` entry per row, `no such column: amount_home` (SQLite).\n- `npx tsc --noEmit -p packages/qa/dogfood`: 0 errors. `eslint` on the file: exit 0.\n- `dispatch-gates --commands`: 51 commands, exit codes captured before any pipe: 49 exit 0; `check-plugin-teardown-shape --self-test` exited 3 on the shallow clone and exit 0 after fetching its pinned fixture commit; `pnpm check:dual-build-cjs-loads` exit 3, NOT MEASURED (it reads every package's `dist/`; this worktree built only the test's closure), left to CI.\n\nNo changeset: a test file in a private package releases nothing (`skip-changeset`).\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (spec not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; eslint passes on the changed file (whole-repo `pnpm lint` left to CI).\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset: n/a, nothing publishes; both declaration lines are filled in here.\n- [x] 6. `packages/spec` touched: n/a.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CaGBD59SYKhNDMRa8h\n\n<!-- signed: epic:#8345#1 · os-bill · session_01Utp6CZWjnSeed8H4dMjt9d -->\n"
+}

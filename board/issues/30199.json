@@ -1,0 +1,30 @@
+{
+  "number": 30199,
+  "kind": "issue",
+  "title": "app-shell: SuggestedBindingsPanel draws a dismissed default permission set with no Reopen button, though POST /security/suggested-bindings/:id/reopen exists — an owner who chose 「暂不」 cannot change their mind (found by cloud#3560)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T01:58:02Z",
+  "updated_at": "2026-11-05T01:58:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30199",
+  "body": "repo:cloud#2 · os-zhuang · session_0123kRqqdpAJWYMgsgdAJX4G\n\nFiling gate: **① a defect found in a run**, a framework UI gap that cloud#3560's PR (cloud#3595) hit. Suggested priority p2: there is a workaround through the API, and nobody is locked out of the decision for good. Triage decides.\n\nDedupe (objectstack, open and closed): `SuggestedBindingsPanel reopen` 0, `reopenSuggestedBinding` 0, `suggested binding reopen button` 0.\n\n## 维护者速读\n\n装应用时，管理员可以对「给所有成员的默认权限」点「暂不」。之后想反悔，接口已经有（`/security/suggested-bindings/:id/reopen`），但界面上的权限建议面板对已暂不的行只显示状态，没有按钮。结果是管理员只能找开发者调接口。这张卡给这一行加一个「重新考虑」按钮，调用已有的接口。\n\n## What is there (objectstack main, read 2026-11-05)\n\n- `ui/packages/app-shell/src/components/SuggestedBindingsPanel.tsx`: row states are `pending`, `guest`, `accepted`, `notInForce` and `dismissed`. A `dismissed` row (dismissed or revoked) draws only `strings.dismissedState(s)` and has no action. The client imports `dismissSuggestedBinding` and has no reopen call.\n- `packages/rest/src/security-routes.ts`: `POST …/security/suggested-bindings/:id/reopen` calls `svc.reopenAudienceBindingSuggestion`, which puts the row back to `pending`.\n- cloud#3560's card says 「暂不」 records the \"no\" through the dismiss door and that \"a later reopen stays possible\". cloud's home prompt only offers 开通 / 暂不 for `pending` sets, so after 「暂不」 the only way back is this panel.\n\n## Expected\n\n1. A `dismissed` row offers one action, 「重新考虑」 / \"Reconsider\", for a caller who may decide (the same gate as Accept and Dismiss). It calls the reopen door, and the row returns to `pending` with Accept and Dismiss.\n2. A client function `reopenSuggestedBinding(id)` beside `dismissSuggestedBinding`, with the door's 404 and 501 surfaced the way the other two do.\n3. The `strings` table gains the label and a toast in en, zh-CN, ja-JP and es-ES.\n\n## Done when\n\n- A panel test: a dismissed row shows the action, clicking it calls reopen once, and the row redraws as pending.\n- In a single-kernel dev stack: dismiss HotCRM's `crm_user`, reconsider it, then accept it. An invited member then reads `crm_lead`.\n- On a hosted environment this depends on objectstack#30192 (the `/security` doors reading the environment kernel).\n\n## Reader who acts\n\nThe lane that owns `ui/packages/app-shell` (`SuggestedBindingsPanel.tsx` and its client).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 30179,
+  "kind": "pull_request",
+  "title": "test: pin that a guest request reaches create hooks as a named caller",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-04T21:05:44Z",
+  "updated_at": "2026-11-04T21:54:01Z",
+  "closed_at": "2026-11-04T21:53:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-04T21:53:58Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30179",
+  "body": "## 维护者速读\n\n- 改了什么:只加测试,三处钉住同一条规则——经访客入口进来的请求,在创建钩子看来始终是\"有调用者\"的请求,不会被当成内核内部的无上下文调用。\n- 为什么改:这条规则此前只靠阅读成立,没有任何测试守住;访客信封里那个让引擎生成会话的字段一旦在重构中丢掉,不会有测试变红。\n- 风险与回滚:零运行时改动(三个 `*.test.ts`,发布产物字节不变);回滚即 revert 本 PR。\n- 先看:`packages/objectql/src/engine-execution-plumbing.session-locale.test.ts`(会话那一跳的钉子)、`packages/services/service-storage/src/attachment-access-hooks.test.ts`(整机引擎创建被拒)、`packages/core/src/security/assemble-execution-context.test.ts`(信封端)。\n- 两分钟验证:`pnpm --filter @objectstack/service-storage exec vitest run src/attachment-access-hooks.test.ts -t \"guest request\"`,预期 2 passed。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nTest-only. One rule, pinned at three layers: **a request served through the guest entry reaches create hooks as a named caller, so it is never read as a context-less (bare-kernel) engine call.**\n\n- `@objectstack/core` — the guest envelope keeps the `guest` position under every input a face can pass for an anonymous request (no tenant / no grants, and guest-anchor grants in an organization).\n- `@objectstack/objectql` — `buildSession` of the envelope the real `assembleExecutionContextOrGuest` produces is defined and names no user (and is not the system arm); a control pins that an envelope naming nothing the session copies yields no session.\n- `@objectstack/service-storage` — through the wired engine (real `ObjectQL` + the installed attachment hooks), a create of `sys_attachment` under the real guest envelope is refused `403 RECORD_NOT_ACCESSIBLE` and writes no row; control: the same create by a signed-in caller resolves and stamps that caller as the uploader.\n\nNew pins are top-level `describe` blocks in each component's existing test file. No product code changes, so `skip-changeset`: none of the three packages' `files[]` (`dist`, `README.md`, `CHANGELOG.md`) changes — the new test titles have zero hits in the three `dist/` trees while `assembleExecutionContextOrGuest` (positive control) hits `packages/core/dist/index.js`.\n\n## Tests\n\nAll on head `36bffe5b4c`.\n\n<details><summary>Changed files and package suites</summary>\n\n- Changed files, one worker each: core `assemble-execution-context.test.ts` 212/212, objectql `engine-execution-plumbing.session-locale.test.ts` 5/5, service-storage `attachment-access-hooks.test.ts` 153/153; each new test confirmed by name under `--reporter=verbose`.\n- Package suites under `os-verify-lock.sh`: core 133 files / 2974 tests passed; service-storage 71 / 1329 passed; objectql 548 / 10846 passed; each exit 0.\n- `typecheck` for core, objectql, service-storage: exit 0 (each package's `check:test-typecheck` OK).\n\n</details>\n\n<details><summary>One-shot ablation: drop the guest position from the guest envelope</summary>\n\nMutation via `scripts/ablation-replace.mjs` on `packages/core/src/security/assemble-execution-context.ts`: the guest arm of `positions` replaced with an expression that evaluates to undefined (anchor 1 to 0, blob `442040f156df` to `0039cf95db86`). core rebuilt under the lock; `ablation-dist-preflight` found the marker in `dist/index.js` and `dist/index.cjs`.\n\n- core (source): exit 1, both new pins red, alongside the existing frozen-transcription parity pins.\n- service-storage (core aliased to source): exit 1, exactly the new refusal pin red; its control stayed green.\n- objectql (core through `dist/`): exit 1, exactly the new session pin red (`expected undefined to be defined`); its control stayed green.\n\nRestore: blob equals HEAD, `git diff HEAD` empty; core rebuilt, `--absent` preflight clean over 14 built files, objectql file green again (5/5).\n\n</details>\n\n## Acceptance notes\n\n- `buildSession` treats an empty `positions: []` as present (its presence test is `!== undefined`), so the identification hinges on the key being emitted at all, not on its contents; the pins assert the `guest` value, which is the declared vocabulary.\n- The existing core parity pin (`toEqual` on the guest envelope) already went red under the ablation; the new pin names the rule so the reason survives a future edit of that frozen transcription.\n\n## Verification\n\n<details><summary>Gate derivation and reconciliation</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 57 commands for the 3 changed paths. All 57 run, exit codes captured before any pipe; `--ran` reconciliation: \"57 derived famil(ies) accounted for — 55 run, 2 NOT-MEASURED\".\n\n- 55 exit 0.\n- NOT MEASURED (exit 3, PREREQUISITE NOT MET): `pnpm check:dual-build-cjs-loads` (needs every package's `dist/`) and `pnpm check:i18n` (needs the CLI build closure). Neither reads test files; CI's `Lint & Repo Gates` runs both on a full build.\n- Repo-wide scans and `test:repo` are left to CI.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYn5CmmdShCJifm6WYj)_\n"
+}

@@ -1,0 +1,28 @@
+{
+  "number": 30210,
+  "kind": "issue",
+  "title": "Setup and tools: say which organization features need the enterprise edition, and remove fields that do nothing",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T02:06:46Z",
+  "updated_at": "2026-11-05T02:06:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30210",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFrom a real-user walkthrough of Setup, filed on the maintainer's word: 「以上都同意，立卡」 (2026-11-05). Measured on `main` `b7075d9908`, with the console in dev mode, unless a line says otherwise. Test app scaffolded with `create-objectstack@18.3.0`.\n\nAn administrator builds a structure and expects an effect the open edition does not give.\n\n## Items\n\n| # | Where | Observed | Suggestion |\n|:--|:--|:--|:--|\n| 1 | 业务单元 | The page says it is 「用于划定数据和报表的范围」. `readScope: 'unit'` needs `@objectstack/security-enterprise`; compile refuses it in the open edition with a clear message. Sharing rules naming a business unit do work (measured, including revocation when a member leaves) | Say on the page what it does in this edition |\n| 2 | `os validate` | Advisory `security-private-no-readscope` suggests `own_and_reports`, `unit` or `unit_and_below`; a project without the enterprise package then fails to compile on exactly that | Suggest only what this project can use, or name the requirement |\n| 3 | Edit organization | 时区 field whose own help says it does not change any date calculation | Remove it, or make it work |\n| 4 | Edit organization | 上级组织 and 排序 on a single-organization deployment | Hide when there is one organization |\n\nThe compile refusal in row 1 is good and should stay as it is."
+}
