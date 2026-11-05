@@ -176,6 +176,10 @@ export function MarketplacePackagePage() {
     revoking: t('marketplace.suggestedBindings.revoking'),
     revokedToast: (s: SuggestedBinding) =>
       t('marketplace.suggestedBindings.revokedToast', { set: s.permission_set_name }),
+    reopen: t('marketplace.suggestedBindings.reopen'),
+    reopening: t('marketplace.suggestedBindings.reopening'),
+    reopenedToast: (s: SuggestedBinding) =>
+      t('marketplace.suggestedBindings.reopenedToast', { set: s.permission_set_name }),
   };
   const basePath = appName ? `/apps/${appName}` : '';
   const { refresh: refreshMetadata } = useMetadata();

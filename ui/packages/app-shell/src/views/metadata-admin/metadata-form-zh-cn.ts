@@ -14,7 +14,9 @@
  * these forms with), so a form reads the same words whether the server
  * localized it or this console did. A leaf the platform has not translated
  * (still the English source) is left out: the overlay then returns the spec's
- * own English for it, as it does for every type it does not name.
+ * own English for it, as it does for every type it does not name. The one
+ * exception is a leaf a curated inspector SHOWS that the platform has no zh
+ * for; it is hand-worded here and marked so at its row.
  *
  * ## Two depths, by who renders the form
  *
@@ -375,7 +377,9 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
     fields: {
       name: { label: '名称', helpText: 'snake_case，环境内唯一' },
       label: { label: '显示名称' },
-      description: { label: '描述' },
+      // Hand-worded: the platform bundle has no zh leaf for this help, and the
+      // view inspector shows it (the schema's own `.describe()` text).
+      description: { label: '描述', helpText: '视图说明，用于文档与悬停提示' },
       type: { label: '类型', helpText: '主要的视图形态' },
       data: { label: '数据', helpText: '数据源——如：{"provider":"object","object":"task"}' },
       columns: { label: '列', helpText: '要展示的列（来自所选对象的字段名）' },
