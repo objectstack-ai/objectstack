@@ -30,7 +30,7 @@
         { "number": 25401, "labels": [{ "name": "needs-user-decision" }, { "name": "domain:devx" }], "assignees": [], "pull_request": { "url": "x" }, "updated_at": "2026-10-23T02:37:00Z" }
       ],
       "pulls": [
-        { "number": 25427, "state": "open", "head": { "ref": "claude/project-thread-aaaa", "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }, "body": "Fixes #25412", "labels": [] },
+        { "number": 25427, "state": "open", "head": { "ref": "claude/project-thread-aaaa", "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }, "body": "Fixes #25412", "labels": [{ "name": "pm:awaiting-merge" }] },
         { "number": 25392, "state": "open", "head": { "ref": "claude/project-thread-bbbb" }, "body": "Mailbox-of: domain:devx#1 · os-elon-musk\n\nFixes #25416", "labels": [{ "name": "pm:mailbox" }, { "name": "skip-changeset" }] },
         { "number": 25393, "state": "open", "head": { "ref": "mailbox/os-elon-musk/skills-2" }, "body": "Mailbox-of: domain:skills#2 · os-elon-musk\n\nThe mailbox of the seat `domain:skills#2`", "labels": [{ "name": "pm:mailbox" }, { "name": "pinned" }] },
         { "number": 25394, "state": "open", "head": { "ref": "mailbox/os-sales/devx-2" }, "body": "", "labels": [{ "name": "pm:mailbox" }] },

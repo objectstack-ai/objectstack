@@ -15,6 +15,7 @@ import {
   useSafeTranslate,
   extractWriteErrorMessage,
   isPermissionError,
+  isExternalWriteRefusal,
   declaredUserMessage,
   useSettledSchema,
   useDataInvalidation,
@@ -1752,7 +1753,11 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
         // contract draws — a marked 409 or 400 renders identically.
         const refusal =
           declaredUserMessage(err) ??
-          (isPermissionError(err)
+          // A write the object's external datasource does not admit is not a
+          // missing permission: say the table is read-only (ADR-0015).
+          (isExternalWriteRefusal(err)
+            ? tt('form.readOnlyExternalSource', 'This table is read-only. Its records come from an external data source that does not accept changes.')
+            : isPermissionError(err)
             ? tt('errors.unauthorized', 'You are not authorized to perform this action.')
             : extractWriteErrorMessage(err) ?? tt('table.saveFailed', 'Save failed'));
         toast.error(refusal);

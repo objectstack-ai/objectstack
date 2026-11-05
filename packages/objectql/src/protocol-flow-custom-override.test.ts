@@ -32,6 +32,7 @@ import {
 } from '@objectstack/metadata-protocol';
 import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject } from '@objectstack/metadata-core';
 import { ObjectQL } from './engine.js';
+import { InMemoryActionActivationStore } from './action-activation.js';
 
 const BASE = 'com.example.showcase';
 const PAIR = 'com.example.showcase.custom';
@@ -39,6 +40,9 @@ const DEPENDENT = 'com.default.acme-custom';
 const FLOW = 'showcase_task_escalate';
 const DECLARATION = { package: BASE, basedOn: '1.0.0' } as const;
 const MAPPING = 'showcase_import_map';
+/** [#30065] The base's action: a script body behind a capability and the agent confirmation gate. */
+const ACTION = 'showcase_task_close';
+const ACTION_GATES = { requiredPermissions: ['close_tasks'], ai: { requiresConfirmation: true } } as const;
 const VIEW = 'showcase_task.default';
 
 const sysMetadataObject: ServiceObject = {
@@ -149,6 +153,17 @@ const flowBody = (label: string, extra: Record<string, unknown> = {}) => ({
     ...extra,
 });
 
+const actionBody = (label: string, extra: Record<string, unknown> = {}) => ({
+    name: ACTION,
+    label,
+    objectName: 'showcase_task',
+    type: 'script',
+    body: { language: 'js', source: `return { ran: '${label}' };` },
+    locations: ['record_header', 'list_item'],
+    ...ACTION_GATES,
+    ...extra,
+});
+
 function baseManifest(): Record<string, unknown> {
     return {
         id: BASE,
@@ -162,6 +177,7 @@ function baseManifest(): Record<string, unknown> {
             fields: { title: { name: 'title', label: 'title', type: 'text' } },
         }],
         flows: [flowBody('SHIPPED')],
+        actions: [actionBody('SHIPPED')],
         mappings: [{ name: MAPPING, label: 'Import', sourceFormat: 'csv', targetObject: 'showcase_task', fieldMapping: [] }],
         views: [{
             object: 'showcase_task',
@@ -343,5 +359,161 @@ describe('[#28412, #30062] the pair-row removal admits every open type', () => {
             removal.mockRestore();
         }
         expect((await rowsOf(engine, 'view', VIEW)).filter((r) => r.state === 'active')).toEqual([]);
+    });
+});
+
+/**
+ * [#30065, ADR-0146 D9 `action`] An action a code package X ships, overridden
+ * by X's paired `<X>.custom` declaring `overrides: { package: X }`, IS the
+ * packaged action — conditions 1–3 of D9 read for an action, at the grain the
+ * flow's are pinned above:
+ *
+ *  1. served over the code package's name: the save door admits the declared
+ *     save, the publish promotes it, and every read of X's action serves it
+ *     under X's envelope — the by-name and execution reads, the layered read's
+ *     `effective`, both lists, the object read's `actions` (what the console
+ *     draws the list toolbar, row menu and record header from) and the
+ *     engine's schema, the run doors' first rung;
+ *  2. rebound in one reload: deleting the override serves X's action again at
+ *     every one of those reads (the handler half is pinned in
+ *     `plugin-authored-actions.test.ts`);
+ *  3. one ledger row for the name: the switch keyed by the base's name turns
+ *     the armed override off, and the served override carries the base's
+ *     envelope the activation door credits the row to.
+ *
+ * Every other stored row of the name stays unserved, and an override that
+ * widens who may run the action is refused (ADR-0066 D4).
+ */
+describe('[#30065] a declared .custom action override is the packaged action, at every door', () => {
+    const OBJ = 'showcase_task';
+    async function bootWithLedger() {
+        const booted = await boot();
+        const store = new InMemoryActionActivationStore();
+        booted.engine.setActionActivationStore(store);
+        await booted.engine.hydrateActionActivations();
+        // The kernel's service table, as the item read resolves the ledger
+        // reader through it (`objectql`, the slot the run doors read).
+        const protocol = new ObjectStackProtocolImplementation(booted.engine, () => new Map([['objectql', booted.engine]]) as any);
+        return { ...booted, protocol };
+    }
+    const stored = async (engine: ObjectQL) => ((await engine.find('sys_metadata', {
+        where: { type: 'action', name: ACTION }, context: { isSystem: true },
+    })) as any[]).map((r) => [r.package_id, r.state]);
+    async function saveAction(protocol: ObjectStackProtocolImplementation, packageId: string, label: string, extra: Record<string, unknown> = {}) {
+        await protocol.saveMetaItem({ type: 'action', name: ACTION, item: actionBody(label, extra), mode: 'draft', packageId } as any);
+        await protocol.publishMetaItem({ type: 'action', name: ACTION, packageId } as any);
+    }
+    const declared = { overrides: { ...DECLARATION } };
+    /** Every read a drawn or run action is answered from, as `[label, _packageId]`. */
+    async function everyRead(protocol: ObjectStackProtocolImplementation, engine: ObjectQL): Promise<Record<string, unknown>> {
+        const p: any = protocol;
+        const pick = (i: any) => [i?.label, i?._packageId];
+        const ofObject = (o: any) => ((o?.actions ?? []) as any[]).filter((a) => a?.name === ACTION).map(pick);
+        return {
+            byName: pick((await p.getMetaItem({ type: 'action', name: ACTION })).item),
+            byNameBase: pick((await p.getMetaItem({ type: 'action', name: ACTION, packageId: BASE })).item),
+            execution: pick((await p.getMetaItemForExecution({ type: 'action', name: ACTION })).item),
+            layeredEffective: (await p.getMetaItemLayered({ type: 'action', name: ACTION })).effective?.label,
+            listServed: ((await p.getMetaItems({ type: 'action' })).items as any[]).filter((i) => i?.name === ACTION).map(pick),
+            listExecution: ((await p.getMetaItemsForExecution({ type: 'action' })).items as any[]).filter((i) => i?.name === ACTION).map(pick),
+            objectRead: ofObject((await p.getMetaItem({ type: 'object', name: OBJ })).item),
+            objectList: ofObject(((await p.getMetaItems({ type: 'object' })).items as any[]).find((o) => o?.name === OBJ)),
+            runDoorSchema: ofObject((engine as any).getSchema(OBJ)),
+        };
+    }
+    const servedAs = (label: string) => ({
+        byName: [label, BASE], byNameBase: [label, BASE], execution: [label, BASE], layeredEffective: label,
+        listServed: [[label, BASE]], listExecution: [[label, BASE]],
+        objectRead: [[label, BASE]], objectList: [[label, BASE]], runDoorSchema: [[label, BASE]],
+    });
+
+    it('condition 1: the declared save and publish are admitted, and every read serves the override under X', async () => {
+        const { protocol, engine } = await boot();
+        await install(protocol, PAIR);
+        expect(await everyRead(protocol, engine)).toEqual(servedAs('SHIPPED'));
+        await saveAction(protocol, PAIR, 'OVERRIDE', { ...declared, requiredPermissions: ['close_tasks', 'audit_tasks'] });
+        expect(await stored(engine)).toEqual([[PAIR, 'active']]);
+        expect(await everyRead(protocol, engine)).toEqual(servedAs('OVERRIDE'));
+        // The run doors read the override's gates: the capability it added included.
+        const run = ((engine as any).getSchema(OBJ).actions as any[]).find((a) => a?.name === ACTION);
+        expect(run.requiredPermissions).toEqual(['close_tasks', 'audit_tasks']);
+        expect(run.overrides).toEqual(DECLARATION);
+        // The layered read keeps X's own action reachable as `code`.
+        expect((await (protocol as any).getMetaItemLayered({ type: 'action', name: ACTION })).code.label).toBe('SHIPPED');
+    });
+
+    it('condition 2: deleting the override serves X\'s action again at every read', async () => {
+        const { protocol, engine } = await boot();
+        await install(protocol, PAIR);
+        await saveAction(protocol, PAIR, 'OVERRIDE', declared);
+        expect(await everyRead(protocol, engine)).toEqual(servedAs('OVERRIDE'));
+        await protocol.deleteMetaItem({ type: 'action', name: ACTION, packageId: PAIR } as any);
+        expect((await stored(engine)).filter(([, state]) => state === 'active')).toEqual([]);
+        expect(await everyRead(protocol, engine)).toEqual(servedAs('SHIPPED'));
+    });
+
+    it('condition 3: the one ledger row for the name switches the armed override off, credited to X', async () => {
+        const { protocol, engine } = await bootWithLedger();
+        await install(protocol, PAIR);
+        await saveAction(protocol, PAIR, 'OVERRIDE', declared);
+        const served: any = ((engine as any).getSchema(OBJ).actions as any[]).find((a) => a?.name === ACTION);
+        // What the activation door credits the row to (`shippingPackageOf`): a
+        // code artifact of X, not a tenant-authored action.
+        expect([served.label, served._packageId, served._provenance]).toEqual(['OVERRIDE', BASE, 'package']);
+        expect(engine.isActionEnabled(ACTION)).toBe(true);
+        await engine.setActionActive({ name: ACTION, packageId: BASE, active: false });
+        expect(engine.isActionEnabled(ACTION)).toBe(false);
+        const objectRead: any = await protocol.getMetaItem({ type: 'object', name: OBJ });
+        expect(objectRead.disabledActions).toEqual([ACTION]);
+        expect(((objectRead.item.actions ?? []) as any[]).find((a) => a?.name === ACTION)?.label).toBe('OVERRIDE');
+        // Restoring X's action leaves the switch where it was: one row, one name.
+        await protocol.deleteMetaItem({ type: 'action', name: ACTION, packageId: PAIR } as any);
+        expect(engine.isActionEnabled(ACTION)).toBe(false);
+        expect(((engine as any).getSchema(OBJ).actions as any[]).find((a) => a?.name === ACTION)?.label).toBe('SHIPPED');
+    });
+
+    it('an override that widens who may run the action is refused at the save door, and nothing is stored', async () => {
+        const { protocol, engine } = await boot();
+        await install(protocol, PAIR);
+        for (const widening of [
+            { requiredPermissions: [] },
+            { ai: {} },
+            { ai: { requiresConfirmation: true, exposed: true, description: 'Closes the task and notifies its assignee by email.' } },
+        ]) {
+            const refusal = await protocol.saveMetaItem({
+                type: 'action', name: ACTION, item: actionBody('WIDER', { ...declared, ...widening }), mode: 'draft', packageId: PAIR,
+            } as any).then(() => undefined, (e: any) => e);
+            expect(refusal, JSON.stringify(widening)).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+            expect(String(refusal.message)).toContain('widens who may run the action');
+        }
+        expect(await stored(engine)).toEqual([]);
+        expect(await everyRead(protocol, engine)).toEqual(servedAs('SHIPPED'));
+    });
+
+    it('a dependent package\'s declaration is refused at the save door, and laid down before the gate is never served', async () => {
+        const { protocol, engine } = await boot();
+        await install(protocol, DEPENDENT);
+        await expect(protocol.saveMetaItem({
+            type: 'action', name: ACTION, item: actionBody('DEPENDENT', declared), mode: 'draft', packageId: DEPENDENT,
+        } as any)).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+        await engine.insert('sys_metadata', {
+            type: 'action', name: ACTION, organization_id: null, package_id: DEPENDENT,
+            metadata: JSON.stringify(actionBody('DEPENDENT', declared)), state: 'active', version: 1,
+        }, { context: { isSystem: true } });
+        const p: any = protocol;
+        expect((await p.getMetaItem({ type: 'action', name: ACTION })).item.label).toBe('SHIPPED');
+        expect((await p.getMetaItemLayered({ type: 'action', name: ACTION })).effective.label).toBe('SHIPPED');
+    });
+
+    it('the pair\'s undeclared save is refused, and the remedy names the declaration, never a clone', async () => {
+        const { protocol } = await boot();
+        await install(protocol, PAIR);
+        const refusal = await protocol.saveMetaItem({
+            type: 'action', name: ACTION, item: actionBody('UNDECLARED'), mode: 'draft', packageId: PAIR,
+        } as any).then(() => undefined, (e: Error) => e);
+        expect(refusal).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+        expect(refusal!.message).toMatch(/[Dd]eclare/);
+        expect(refusal!.message).not.toMatch(/clone/i);
+        expect(refusal!.message).not.toMatch(/not yet available/);
     });
 });

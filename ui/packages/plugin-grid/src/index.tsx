@@ -32,6 +32,11 @@ export { useGroupedData } from './useGroupedData';
 export { GroupRow } from './GroupRow';
 export { RowActionMenu, formatActionLabel } from './components/RowActionMenu';
 export { BulkActionBar } from './components/BulkActionBar';
+// The bare-name fold and its development warning, for the one other surface
+// that draws a selection bar of its own: plugin-list's ListView over a
+// non-grid view (objectstack#30394). One rule, one copy.
+export { resolveBulkActions } from './resolveBulkActions';
+export { useUndeclaredActionNamesWarning } from './undeclaredActionNames';
 export { useCellClipboard } from './useCellClipboard';
 export { useGradientColor } from './useGradientColor';
 export { useGroupReorder } from './useGroupReorder';
@@ -55,6 +60,12 @@ export type { GroupEntry, UseGroupedDataResult, AggregationType, GroupAggregatio
 export type { GroupRowProps } from './GroupRow';
 export type { RowActionMenuProps } from './components/RowActionMenu';
 export type { BulkActionBarProps } from './components/BulkActionBar';
+export type { ActionLabelResolver, NamedActionDef } from './resolveBulkActions';
+export type {
+  UndeclaredActionNameKey,
+  UndeclaredActionNamesAddress,
+  UndeclaredActionNamesBasis,
+} from './undeclaredActionNames';
 export type { CellRange, UseCellClipboardOptions, UseCellClipboardResult } from './useCellClipboard';
 export type { GradientStop, UseGradientColorOptions } from './useGradientColor';
 export type { UseGroupReorderOptions, UseGroupReorderResult } from './useGroupReorder';

@@ -296,6 +296,23 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         'in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
     },
   ],
+  // [#30250] A fail-closed site: the fault refuses the write, nothing reads null.
+  'date-arithmetic-fail-closed': [
+    {
+      produce: () =>
+        onlyError('predicate', 'record.close_date + 1 > 3', {
+          scope: 'record',
+          fieldTypes: { close_date: 'date' },
+          faultOutcome: 'fail-closed',
+        }),
+      params: { operands: 'google.protobuf.Timestamp + int', reference: 'record.close_date' },
+      message:
+        'date arithmetic `google.protobuf.Timestamp + int` — `record.close_date` is a date, and CEL can\'t do arithmetic ' +
+        'on dates: this faults at runtime, and here an expression that cannot be evaluated fails closed: the write (or the operation ' +
+        'a hook guards) is refused, not skipped (it does not read null). ' +
+        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+    },
+  ],
   // [#30016] A flattened (flow) condition: the fault fails the run, it never
   // reads null — `run-fails` where the run is proven to hold the field.
   'date-arithmetic-run-fails': [
@@ -341,6 +358,23 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         'as its text (`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which CEL can\'t do arithmetic on: this ' +
         'faults at runtime, so the field silently evaluates to null. Use `daysBetween(a, b)` for the span in whole days, ' +
         'and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+    },
+  ],
+  'date-text-arithmetic-fail-closed': [
+    {
+      produce: () =>
+        onlyError('predicate', 'record.end_date - record.start_date > duration("24h")', {
+          scope: 'record',
+          fieldTypes: { start_date: 'date', end_date: 'date' },
+          faultOutcome: 'fail-closed',
+        }),
+      params: { operands: 'DateText - DateText', reference: 'record.start_date' },
+      message:
+        'date arithmetic `DateText - DateText` — `record.start_date` is a date field, and the runtime holds a date field ' +
+        'as its text (`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which CEL can\'t do arithmetic on: ' +
+        'this faults at runtime, and here an expression that cannot be evaluated fails closed: the write (or the operation ' +
+        'a hook guards) is refused, not skipped (it does not read null). ' +
+        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
     },
   ],
   'date-text-arithmetic-run-fails': [
@@ -454,6 +488,24 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         'wherever the value is not numeric text (an empty value included) the expression faults, and here ' +
         'a flow condition that cannot be evaluated fails the run: the flow stops at this condition, the write that fired ' +
         'it still lands, and the work the flow exists to do is not done. ' +
+        'Compare like with like: use a number field, compare text with text, or convert explicitly — `size(name)` for its ' +
+        'length, `double(name)` for its value (which itself faults on text that is not a number).',
+    },
+  ],
+  // [#30250] The same outcome on a time-relative sweep, which no write fires.
+  'type-mismatch-sweep-run-fails': [
+    {
+      produce: () =>
+        onlyError('predicate', 'name > 5', {
+          scope: 'flattened', fields: ['name'], fieldTypes: { name: 'text' }, faultOutcome: 'run-fails', timeRelativeSweep: true,
+        }),
+      params: { operands: 'string > int', operator: '>', held: 'text', reference: 'name' },
+      message:
+        'type mismatch `string > int` — `name` holds text but is used with `>` against a number. CEL has no such operation, so ' +
+        'wherever the value is not numeric text (an empty value included) the expression faults, and here ' +
+        'a flow condition that cannot be evaluated fails the run: the time-relative sweep starts one run per row it finds, ' +
+        'the run for this row stops at this condition and the work the flow exists to do is not done for that row, and ' +
+        'nothing else happens (the sweep logs the failure and goes on to the next row). ' +
         'Compare like with like: use a number field, compare text with text, or convert explicitly — `size(name)` for its ' +
         'length, `double(name)` for its value (which itself faults on text that is not a number).',
     },
@@ -690,6 +742,24 @@ const SWEEP_SCHEMAS: readonly (ExprSchemaHint | undefined)[] = [
     fieldTypes: { name: 'text', active: 'boolean' },
     faultOutcome,
   })),
+  // [#30250] A fail-closed site with a date field reaches the date verdicts'
+  // `-fail-closed` codes; a time-relative sweep's `run-fails` condition
+  // reaches `type-mismatch-sweep-run-fails`.
+  {
+    scope: 'record',
+    objectName: 'deal',
+    fields: ['close_date'],
+    fieldTypes: { close_date: 'date' },
+    faultOutcome: 'fail-closed',
+  },
+  {
+    scope: 'flattened',
+    objectName: 'deal',
+    fields: ['amount', 'name', 'active'],
+    fieldTypes: { name: 'text', active: 'boolean' },
+    faultOutcome: 'run-fails',
+    timeRelativeSweep: true,
+  },
   // [#29959] A flattened (flow) condition with no declared outcome reaches
   // `type-mismatch-run-may-fail`, bare and through `record.`.
   { scope: 'flattened', objectName: 'deal', fields: ['amount', 'name', 'active'], fieldTypes: { name: 'text', active: 'boolean' } },

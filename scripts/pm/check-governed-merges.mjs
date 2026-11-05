@@ -218,7 +218,7 @@
  *
  * Read as: a pull request whose changed line count exceeds 3,000 lands by the
  * same terminal as a Tier H governed diff (ACCEPT on the card,
- * `needs-user-decision` on the PR, a final 维护者速读, review requested from
+ * `pm:awaiting-merge` on the PR, a final 维护者速读, review requested from
  * `GOVERNED_APPROVERS`), whatever paths it touches — on 2026-09-18 that meant
  * the maintainer's own merge alone; since 2026-09-27 it means the two landings
  * a Tier H path has (the "SIZE limb's LIFT" section below). 「比如」 made the
@@ -1943,7 +1943,7 @@ export function renderSizeLines(size) {
     `      as a Tier H governed diff: no seat flips it ready, enqueues it, or arms auto-merge until an account in\n` +
     `      GOVERNED_APPROVERS has APPROVED it, on ANY commit (${SIZE_LIFT_RULING}) — then the OWNING seat lands it\n` +
     `      through the queue; the maintainer's own merge is the other landing. ACCEPT on the card,\n` +
-    `      \`needs-user-decision\` on the PR, the final 维护者速读, review requested from GOVERNED_APPROVERS.`
+    `      \`pm:awaiting-merge\` on the PR, the final 维护者速读, review requested from GOVERNED_APPROVERS.`
   );
 }
 

@@ -80,6 +80,9 @@ function makeDataSource(userActionsDelete?: unknown) {
         name: { type: 'text' },
         status: { type: 'text' },
       },
+      // `archive` is declared: the non-grid bar draws a bare `bulkActions`
+      // name only when the object declares it (objectstack#30394).
+      actions: [{ name: 'archive', label: 'Archive' }],
       ...(userActionsDelete === undefined ? {} : { userActions: { delete: userActionsDelete } }),
     }),
   };
