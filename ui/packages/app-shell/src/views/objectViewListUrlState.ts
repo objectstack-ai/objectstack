@@ -240,9 +240,22 @@ export function useObjectViewListUrlState({
         // resolution that ends on the fall-back keeps the identity unchanged.)
         // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
     }, [listIdentityKey, listPrefs.ready, viewResolving]);
+    /**
+     * objectstack#30073 — the Filter panel's group as the list last reported
+     * it, held with the list identity it came from. The address cannot say
+     * this alone: a panel the reader emptied leaves no `uf_*` param, exactly as
+     * an untouched one does, and a group the URL form cannot carry is dropped
+     * from it. A save reads the panel here ({@link readPanelFilters}).
+     */
+    const listIdentityKeyRef = useRef(listIdentityKey);
+    listIdentityKeyRef.current = listIdentityKey;
+    const reportedPanelFiltersRef = useRef<{ key: string | undefined; filters: ListStatePatch['filters'] } | undefined>(undefined);
     /** Write the list's own change into the URL — replace, never a history entry per keystroke. */
     const writeListUrlState = useCallback(
         (patch: ListStatePatch) => {
+            if ('filters' in patch) {
+                reportedPanelFiltersRef.current = { key: listIdentityKeyRef.current, filters: patch.filters };
+            }
             setSearchParams(prev => {
                 const next = applyListStateParams(prev, patch);
                 ownListParamsRef.current = userFilterParamsKey(next);
@@ -312,6 +325,20 @@ export function useObjectViewListUrlState({
      * of that view brings the conditions back, nor marks it personalized.
      * The caller navigates to the saved view next.
      */
+    /**
+     * objectstack#30073 — the Filter panel's group on screen: the list's last
+     * report for this list, else the group the list opened with (its seed).
+     * `undefined` means the panel holds what the view hands it untouched; a
+     * panel the reader emptied is an empty group, never `undefined`.
+     */
+    const readPanelFilters = useCallback((): ListUrlState['filters'] => {
+        const reported = reportedPanelFiltersRef.current;
+        if (reported && reported.key === listIdentityKeyRef.current) {
+            return reported.filters ?? { id: 'root', logic: 'and', conditions: [] };
+        }
+        const seed = listSeedRef.current;
+        return seed && seed.key === listIdentityKeyRef.current ? seed.state.filters : undefined;
+    }, []);
     const clearSourceListState = useCallback((viewId: string) => {
         listPrefs.resetView(viewId);
         clearListFilterState(buildListFilterKey(user?.id, objectName, viewId));
@@ -319,6 +346,7 @@ export function useObjectViewListUrlState({
     }, [listPrefs.resetView, user?.id, objectName, setSearchParams]);
     return {
         clearSourceListState,
+        readPanelFilters,
         listIdentityKey,
         listSeedRef,
         ownListParamsRef,

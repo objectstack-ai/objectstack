@@ -698,6 +698,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         listPersonalizedParts,
         handleResetView,
         clearSourceListState,
+        readPanelFilters,
     } = useObjectViewListUrlState({
         objectName,
         objectDef,
@@ -723,7 +724,9 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     const handleSaveToPersonalView = async () => {
         if (!activeView || !activeIsPersonal) return;
         const built = buildPersonalViewConfig(objectDef.name, activeView, {
-            url: parseListStateParams(searchParams, acceptListField),
+            // The panel's group is the one the list shows (an emptied panel
+            // included), not the address's copy of it.
+            url: { ...parseListStateParams(searchParams, acceptListField), filters: readPanelFilters() },
             preference: listPrefs.preference.perView?.[activeView.id],
             panelFilters: viewPanelFilters,
         });
@@ -808,7 +811,9 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         // The list's toolbar state is the address's (`uf_*`), through the same
         // field gate its seed reads it with.
         const built = buildPersonalViewConfig(objectDef.name, activeView, {
-            url: parseListStateParams(searchParams, acceptListField),
+            // The panel's group is the one the list shows (an emptied panel
+            // included), not the address's copy of it.
+            url: { ...parseListStateParams(searchParams, acceptListField), filters: readPanelFilters() },
             preference: listPrefs.preference.perView?.[activeView.id],
             panelFilters: viewPanelFilters,
         });
