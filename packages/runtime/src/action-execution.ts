@@ -4343,6 +4343,16 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
         if (refusal) {
             throw Object.assign(new Error(refusal.message), { code: refusal.code, status: refusal.status });
         }
+
+        // The handler the script dispatch below reaches may be one a DIFFERENT
+        // declared action owns: that owner's gates apply too, at the same
+        // point the REST `/actions` door asks the same function.
+        const ownerRefusal = await actionHandlerOwnerRefusal(deps, requestContext, {
+            ql: activationEngine, action, objectName, candidates: resolveActionHandlerKeys(action), ec, envId, obj,
+        });
+        if (ownerRefusal) {
+            throw Object.assign(new Error(ownerRefusal.message), { code: ownerRefusal.code, status: ownerRefusal.status });
+        }
     }
 
     // [ADR-0104 D2] Declared param contract — same enforcement as the REST
@@ -4906,6 +4916,229 @@ export function registeredActionHandlerProbe(_deps: ActionExecutionDeps,
         }
         return false;
     };
+}
+
+
+/**
+ * The handler ENTRY a script dispatch for `(objectName, candidates)` reaches:
+ * the first `object:key` pair of {@link executeRegisteredAction}'s rotation
+ * that the engine's registry holds, read from `registered` (one snapshot of
+ * `listRegisteredActions()` as a `Set` of `object:key`). `undefined` = the
+ * dispatch reaches nothing.
+ */
+function reachedHandlerEntry(registered: ReadonlySet<string>, objectName: string, candidates: string[]): string | undefined {
+    for (const obj of actionHandlerObjectKeys(objectName)) {
+        for (const key of candidates) {
+            if (registered.has(`${obj}:${key}`)) return `${obj}:${key}`;
+        }
+    }
+    return undefined;
+}
+
+/** True when a declaration is dispatched through the engine's handler registry. */
+function dispatchesThroughHandlerRegistry(action: any): boolean {
+    return !isDeclarativeUpdateAction(action) && (action?.type ?? 'script') === 'script';
+}
+
+/** The refusal {@link actionHandlerOwnerRefusal} answers — the ADR-0112 envelope's three fields. */
+export interface ActionHandlerOwnerRefusal {
+    code: string;
+    status: number;
+    message: string;
+}
+
+/**
+ * Every declaration that could own an entry under `entryObjectKey`, as
+ * `{ action, objectName }` rows: each source a declaration is resolved from
+ * on either door, read in full, so a declaration missing from one of them is
+ * still found in another. More rows can only add gates.
+ *
+ *  - object-embedded `actions[]` — of the routed object alone when the entry
+ *    lives under a real object key (only that object's declarations rotate
+ *    to it, {@link actionHandlerObjectKeys}), of every object when the entry
+ *    is object-less: the door's resolved definition, the engine's schema, and
+ *    for an object-less entry the protocol's merged listing (or the metadata
+ *    service's) and the engine registry's;
+ *  - standalone `action` items — the protocol's merged listing (or the
+ *    metadata service's `loadMany`), and the engine registry's, a disabled
+ *    package's items included.
+ *
+ * A read that throws travels to the caller, which refuses: an unread source
+ * is a gate that cannot be verified, never a gate that is absent.
+ */
+async function collectHandlerOwnerCandidates(
+    deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    args: { ql: any; entryObjectKey: string; routedObjectName: string; routedObject?: any; envId?: string },
+): Promise<Array<{ action: any; objectName: string }>> {
+    const { ql, entryObjectKey, routedObjectName, routedObject, envId } = args;
+    const protocol: any = await deps.resolveService(requestContext, 'protocol', envId);
+    const meta: any = await deps.resolveService(requestContext, 'metadata', envId);
+    const mergedListing = async (type: 'object' | 'action'): Promise<any[] | undefined> => {
+        if (!protocol || typeof protocol.getMetaItems !== 'function') return undefined;
+        const answer: any = await protocol.getMetaItems({ type });
+        return Array.isArray(answer) ? answer : Array.isArray(answer?.items) ? answer.items : [];
+    };
+    const registryListing = (type: 'object' | 'action'): any[] => {
+        const registry: any = ql?.registry;
+        if (type === 'object') return typeof registry?.getAllObjects === 'function' ? (registry.getAllObjects() ?? []) : [];
+        return typeof registry?.listItems === 'function'
+            ? (registry.listItems('action', undefined, { includeDisabledPackages: true }) ?? [])
+            : [];
+    };
+
+    const objects: any[] = [];
+    if (routedObject) objects.push(routedObject);
+    if (typeof ql?.getSchema === 'function') {
+        const schema = ql.getSchema(routedObjectName);
+        if (schema) objects.push(schema);
+    }
+    if (isObjectLessActionKey(entryObjectKey)) {
+        objects.push(...((await mergedListing('object')) ?? (await meta?.listObjects?.()) ?? []));
+        objects.push(...registryListing('object'));
+    }
+
+    const standalone: any[] = [
+        ...((await mergedListing('action')) ?? (await meta?.loadMany?.('action')) ?? []),
+        ...registryListing('action'),
+    ];
+
+    const rows: Array<{ action: any; objectName: string }> = [];
+    for (const obj of objects) {
+        const objectName: unknown = obj?.name;
+        if (typeof objectName !== 'string' || objectName === '') continue;
+        for (const action of Array.isArray(obj?.actions) ? obj.actions : []) {
+            if (action && typeof action.name === 'string') rows.push({ action, objectName });
+        }
+    }
+    for (const action of standalone) {
+        if (action && typeof action.name === 'string') rows.push({ action, objectName: standaloneActionOwnerKey(action) });
+    }
+    return rows;
+}
+
+/**
+ * [ADR-0066 D4 · ADR-0126 §8 item 2 · ADR-0110 D2] An action whose dispatch
+ * reaches a handler that a DIFFERENT declared action owns also answers with
+ * that owner's gates: its `requiredPermissions` (403 `PERMISSION_DENIED`) and
+ * its activation-ledger switch (409 `ACTION_DISABLED`), on top of the invoked
+ * declaration's own, which the door has already applied. The sets are unioned,
+ * so this only ever narrows who may run a handler — the reading
+ * `content/docs/ui/actions.mdx` already gives a `flow` action, which inherits
+ * its target flow's `requiredPermissions`.
+ *
+ * ## Owner = the entry the declaration's own dispatch reaches
+ *
+ * ADR-0110 D2 makes a handler KEY an addressing fact, not an identity — so
+ * ownership is read at the handler ENTRY the dispatch actually reaches
+ * (`object:key`, one snapshot of `listRegisteredActions()`, walked in
+ * {@link executeRegisteredAction}'s own rotation), never at every key a
+ * declaration names. A declared `script` action owns the entry ITS OWN
+ * dispatch would reach. Consequences, each pinned by
+ * `domains/action-handler-owner-gates.test.ts`:
+ *
+ *  - a declaration is one identity — its owning object key and its name — so
+ *    the same declaration reaching the population twice (object-embedded and
+ *    as a standalone copy) is the invoked one, not a second owner;
+ *  - two objects that each declare a same-named action are not coupled while
+ *    each has its own entry: each declaration's dispatch stops at its own
+ *    object's key before the object-less one;
+ *  - only `script` declarations dispatch through the registry, so a `flow`,
+ *    `api` or declarative-update declaration owns no entry, and an invocation
+ *    of one is not judged here.
+ *
+ * ## Where it sits
+ *
+ * Both doors call it right after their own D4 gate and activation consult,
+ * ahead of the param contract, the subject-record load and dispatch: a
+ * refused call reads no row and runs nothing. Owner permissions are judged
+ * before owner switches, the doors' own order, so the switch is no oracle to
+ * a caller the owner would refuse. The REST `/actions` door maps the refusal
+ * onto its envelope; the MCP `run_action` bridge throws it with `code` and
+ * `status`.
+ *
+ * `candidates` are the handler keys the door hands {@link executeRegisteredAction},
+ * so the entry judged here is the one the dispatch reaches. An engine that
+ * cannot enumerate its handlers (no `listRegisteredActions`) names no entry,
+ * and this answers `undefined`.
+ */
+export async function actionHandlerOwnerRefusal(deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    args: {
+        ql: any;
+        action: any;
+        objectName: string;
+        candidates: string[];
+        ec: any;
+        envId?: string;
+        /** The routed object's definition, as the door resolved it. */
+        obj?: any;
+    },
+): Promise<ActionHandlerOwnerRefusal | undefined> {
+    const { ql, action, objectName, candidates, ec, envId, obj } = args;
+    if (!dispatchesThroughHandlerRegistry(action)) return undefined;
+    if (!ql || typeof ql.listRegisteredActions !== 'function') return undefined;
+
+    const registered = new Set<string>();
+    for (const row of ql.listRegisteredActions() as Array<{ objectName: string; actionName: string }>) {
+        registered.add(`${row.objectName}:${row.actionName}`);
+    }
+    const entry = reachedHandlerEntry(registered, objectName, candidates);
+    if (!entry) return undefined;
+
+    let population: Array<{ action: any; objectName: string }>;
+    try {
+        population = await collectHandlerOwnerCandidates(deps, requestContext, {
+            ql, entryObjectKey: entry.slice(0, entry.indexOf(':')), routedObjectName: objectName, routedObject: obj, envId,
+        });
+    } catch (err: any) {
+        return {
+            code: standardErrorCodeForHttpStatus(503),
+            status: 503,
+            message:
+                `Cannot verify which declared action owns the handler that action '${action?.name ?? 'unknown'}' ` +
+                `dispatches to — the metadata plane is unavailable (${err?.message ?? String(err)}). ` +
+                'Refusing rather than running it ungated.',
+        };
+    }
+
+    // The invoked declaration's identity: the routed object key when the routed
+    // object embeds that name (both doors resolve object-embedded first, so
+    // the invoked declaration IS that entry), else its own standalone owner
+    // key — an object-less item is routable at any object.
+    const embeddedInRouted = Array.isArray(obj?.actions)
+        && obj.actions.some((a: any) => a === action || (a && a.name === action?.name));
+    const invokedIdentity = `${embeddedInRouted ? objectName : standaloneActionOwnerKey(action)}:${action?.name}`;
+    const owners = new Map<string, { action: any; objectName: string }[]>();
+    for (const row of population) {
+        const identity = `${row.objectName}:${row.action.name}`;
+        if (identity === invokedIdentity) continue;
+        if (!dispatchesThroughHandlerRegistry(row.action)) continue;
+        if (reachedHandlerEntry(registered, row.objectName, resolveActionHandlerKeys(row.action)) !== entry) continue;
+        const copies = owners.get(identity) ?? [];
+        copies.push(row);
+        owners.set(identity, copies);
+    }
+    if (owners.size === 0) return undefined;
+
+    const via = `Action '${action?.name ?? 'unknown'}' on '${objectName}' dispatches to a handler`;
+    for (const copies of owners.values()) {
+        for (const owner of copies) {
+            const denied = actionPermissionError(deps, owner.action, ec, owner.objectName);
+            if (denied) {
+                return {
+                    code: standardErrorCodeForHttpStatus(403),
+                    status: 403,
+                    message: `${via} that action '${owner.action.name}' owns, so it is gated by that action too: ${denied}`,
+                };
+            }
+        }
+    }
+    for (const copies of owners.values()) {
+        const switchedOff = disabledActionRefusal(deps, ql, copies[0].action);
+        if (switchedOff) return switchedOff;
+    }
+    return undefined;
 }
 
 
