@@ -113,6 +113,7 @@ describe('SchemaRegistry.onPackageUninstalled (#30215)', () => {
       seen.push({ id, recordGone: registry.getPackage(id) === undefined });
     });
 
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
     registry.uninstallPackage(PKG);
     registry.uninstallPackage(PKG); // nothing left to withdraw
 
