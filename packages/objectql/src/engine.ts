@@ -2313,7 +2313,7 @@ export class ObjectQL implements IObjectQLEngine {
           ...q,
           fields: ['id', field],
           context: execCtx,
-        } as any),
+        }),
         {
           where: prefix ? { [field]: { $startsWith: prefix } } : undefined,
           pageSize: AUTONUMBER_SEED_PAGE_SIZE,
@@ -3154,7 +3154,7 @@ export class ObjectQL implements IObjectQLEngine {
         where: { id },
         fields: ['id'],
         context: ObjectQL.referenceCheckContext(context),
-      } as any);
+      });
       return !!row;
     } catch {
       return null;
@@ -3300,7 +3300,7 @@ export class ObjectQL implements IObjectQLEngine {
     if (!readable.has(String(parentId))) return null;
     // 2. The write's own elevated, tenant-kept read, for a header read 1 returned.
     try {
-      const row = await this.findOne(rel.master, { where: { id: parentId }, context: ObjectQL.referenceCheckContext(context) } as any);
+      const row = await this.findOne(rel.master, { where: { id: parentId }, context: ObjectQL.referenceCheckContext(context) });
       // `null` stays `null` — the fail-CLOSED signal (#4889) is the ABSENCE of
       // the binding, and materialising a row we do not have would destroy it.
       return row == null ? null : this.materializeParentHeader(rel.master, row as Record<string, unknown>);
@@ -3367,7 +3367,7 @@ export class ObjectQL implements IObjectQLEngine {
       const rows = await this.find(rel.master, {
         where: { id: { $in: [...readable] } },
         context: ObjectQL.referenceCheckContext(context),
-      } as any) as Array<Record<string, unknown>>;
+      }) as Array<Record<string, unknown>>;
       // [#6457] One declared-field lookup for the whole batch, then one shallow
       // copy per header. A master the registry does not know leaves `fields`
       // undefined and every header passes through untouched — see
@@ -3513,7 +3513,10 @@ export class ObjectQL implements IObjectQLEngine {
     return auditDanglingReferences(
       {
         objects: () => this._registry.getAllObjects() as unknown as AuditableObject[],
-        find: (object, opts) => this.find(object, opts as any) as Promise<Array<Record<string, unknown>>>,
+        // The port's options are the audit's own `{ fields, limit, context }`
+        // read; the published port spells them `Record<string, unknown>`, so
+        // the hand-over names the engine contract they are read under.
+        find: (object, opts) => this.find(object, opts as EngineQueryOptions) as Promise<Array<Record<string, unknown>>>,
         probe: (target, id, organization) => this.referenceExists(
           target, id, organization == null || unionScope ? undefined : ({ tenantId: organization } as ExecutionContext),
         ),
@@ -9479,7 +9482,7 @@ export class ObjectQL implements IObjectQLEngine {
         // on-delete behaviour, BEHAVIOUR follows the declaration; the
         // identity of this probe stays system, unconditionally. Do not make
         // this line conditional on `behavior`.
-        { where: probeWhere, context: ObjectQL.referenceCheckContext(context) } as any,
+        { where: probeWhere, context: ObjectQL.referenceCheckContext(context) },
       );
     } catch (error) {
       // [#8895] Discriminate by error TYPE — this probe IS the referential
