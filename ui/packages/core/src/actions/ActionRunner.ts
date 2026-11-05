@@ -884,6 +884,19 @@ export interface ActionParamDef {
   // `ActionParamDialog` renders every param through the same field widgets
   // the object form uses (ADR-0059), so params carry the widget-relevant
   // config for their type. Mirrors `ActionParamSchema` in @objectstack/spec.
+  /**
+   * Widget override — `@objectstack/spec`'s `ActionParamSchema.widget`, the
+   * same key, vocabulary and meaning as `FieldSchema.widget`: it names a
+   * registered field widget that draws this param instead of the `type`
+   * default (`'permission-ref'` on a `text` param picks a permission set by
+   * its machine name, ADR-0131 D4). `type` stays the VALUE's type.
+   *
+   * Set by `resolveActionParams()` — the param's own `widget`, else, for a
+   * field-backed param that also inherits its `type`, the field's. Read by
+   * app-shell's `paramToField()`, which draws the named widget when it is
+   * registered and the `type` widget when it is not.
+   */
+  widget?: string;
   /** Accepted upload types (MIME types / extensions) for `file`/`image` params. */
   accept?: string[];
   /** Max upload size in bytes for `file`/`image` params. */

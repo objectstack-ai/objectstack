@@ -162,6 +162,14 @@ export interface RawActionParam {
    */
   label?: I18nLabel;
   type?: string;
+  /**
+   * Widget override — the spec's `ActionParamSchema.widget`, the same key and
+   * meaning as `FieldSchema.widget`: a registered field widget that draws the
+   * param instead of its `type` default (`'permission-ref'` on a `text`
+   * param). Copied onto `ActionParamDef.widget`; `paramToField()` decides
+   * whether it names a registered widget.
+   */
+  widget?: string;
   required?: boolean;
   /**
    * Option list authored inline on the param. Speaks the same vocabulary as the
@@ -355,6 +363,12 @@ function warnResolvedOnlyKeys(param: RawActionParam): void {
 /** Field metadata as exposed by `useMetadata().objects[].fields`. */
 interface RuntimeField {
   type?: string;
+  /**
+   * `@objectstack/spec`'s `FieldSchema.widget`, the field's input override.
+   * A field-backed param that inherits the field's `type` inherits this with
+   * it (see {@link inheritedWidget}).
+   */
+  widget?: string;
   label?: string;
   required?: boolean;
   placeholder?: string;
@@ -573,6 +587,25 @@ function storedRow(
 }
 
 /**
+ * The widget a FIELD-BACKED param is drawn with: its own `widget`, else the
+ * field's — but the field's only while the param also inherits the field's
+ * `type`.
+ *
+ * The spec resolves a field-backed param's "widget mapping from object
+ * metadata" (`ActionParamSchema`), and the field's `widget` is that mapping.
+ * (A param that restates the field's own `type` still inherits it.)
+ * It is a mapping FOR the field's type, though: the record form draws it over
+ * a value of that type, and the server validates the param's value by the
+ * param's `type` (ADR-0104 D2). A param that overrides `type` asks for a
+ * different value, so a widget picked for the field's value is not inherited
+ * onto it; the param names its own `widget` if it wants one.
+ */
+function inheritedWidget(param: RawActionParam, field: RuntimeField): string | undefined {
+  if (param.widget !== undefined) return param.widget;
+  return param.type === undefined || param.type === field.type ? field.widget : undefined;
+}
+
+/**
  * Resolve a single raw param against object metadata. Inline params pass
  * through (with safe defaults); field-backed params inherit from the
  * referenced field and accept inline overrides on top.
@@ -622,6 +655,9 @@ export function resolveActionParam(
       // copied here never reaches the dialog — which is how `carryOver` went
       // unhonoured until objectui#6246. Same line on the two branches below.
       carryOver: param.carryOver,
+      // Same key-by-key copy: without this line an authored `widget` never
+      // reached the dialog, which drew the `type` widget whatever it named.
+      widget: param.widget,
       multiple: param.multiple,
       accept: param.accept,
       maxSize: param.maxSize,
@@ -679,6 +715,9 @@ export function resolveActionParam(
       defaultValue: rowDefault ?? param.defaultValue,
       visible: normaliseVisible(param.visible),
       carryOver: param.carryOver,
+      // Kept for parity; the dialog refuses an unresolved param before it
+      // builds any widget, so nothing draws it.
+      widget: param.widget,
       multiple: param.multiple,
       accept: param.accept,
       maxSize: param.maxSize,
@@ -845,6 +884,7 @@ export function resolveActionParam(
     visible: normaliseVisible(param.visible),
     // A declaration of the PARAM, never inherited from the field.
     carryOver: param.carryOver,
+    widget: inheritedWidget(param, field),
     // Widget config inherited from the field for every type (not just
     // lookup): multi-value shape and upload constraints (ADR-0059).
     multiple: param.multiple ?? field.multiple,

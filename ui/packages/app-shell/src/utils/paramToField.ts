@@ -17,7 +17,34 @@ import { EXPANDABLE_FIELD_TYPES, type ActionParamDef } from '@object-ui/core';
 // beside the resolver that reads it first (objectui#12105). This adapter asks
 // the same question one step later, so it reads the same function — never a
 // local copy of the table.
-import { resolveParamWidgetType } from '@object-ui/fields';
+import { resolveFormWidgetType, resolveParamWidgetType } from '@object-ui/fields';
+
+/**
+ * What `resolveFormWidgetType` answers for a spelling nothing registers — its
+ * documented `text` fallback. Read by {@link authoredWidgetKey} alone.
+ */
+const UNKNOWN_SPELLING_WIDGET = 'text';
+
+/**
+ * The widget key an authored `widget` names, or `undefined` when it names no
+ * registered widget (or the param authored none).
+ *
+ * `ActionParamDef.widget` is the spec's `ActionParamSchema.widget`, which
+ * shares `FieldSchema.widget`'s key, vocabulary and meaning: a REGISTERED name
+ * wins over `type` outright, and an unregistered one "degrades to the `type`
+ * renderer". So the answer is the shared resolver's own, read for its one
+ * documented fallback: a spelling it answers with `text`, when the author did
+ * not write `text`, named nothing — the same reading the console's `FormPage`
+ * makes of a field's `widget` (`namesRegisteredWidget` there). ⛔ No list of
+ * widgets lives here. A retired spelling resolves to itself, so its tombstone
+ * still refuses visibly rather than degrading.
+ */
+function authoredWidgetKey(param: ActionParamDef): string | undefined {
+  const widget = param.widget;
+  if (!widget) return undefined;
+  const key = resolveFormWidgetType(widget);
+  return key !== UNKNOWN_SPELLING_WIDGET || widget === UNKNOWN_SPELLING_WIDGET ? key : undefined;
+}
 
 /**
  * Widget keys whose picker cannot query without an explicitly DECLARED target,
@@ -60,6 +87,9 @@ const LOOKUP_WIDGET_TYPES = new Set(['lookup', 'master_detail']);
  * for why `user` must never degrade.
  */
 export function paramDegradesWithoutTarget(param: ActionParamDef): boolean {
+  // A registered authored `widget` replaces the `type` widget before the
+  // fallback is ever considered, so such a param never degrades.
+  if (authoredWidgetKey(param) !== undefined) return false;
   return LOOKUP_WIDGET_TYPES.has(resolveParamWidgetType(param.type)) && !param.referenceTo;
 }
 
@@ -81,7 +111,9 @@ export function paramDegradesWithoutTarget(param: ActionParamDef): boolean {
  * the user a box that wants a raw UUID.
  */
 export function paramToField(param: ActionParamDef): Record<string, any> {
-  let type = resolveParamWidgetType(param.type);
+  // An authored `widget` that names a registered widget draws the param;
+  // otherwise its `type` does (see {@link authoredWidgetKey}).
+  let type = authoredWidgetKey(param) ?? resolveParamWidgetType(param.type);
   if (paramDegradesWithoutTarget(param)) {
     if (process.env.NODE_ENV !== 'production') {
       console.warn(
