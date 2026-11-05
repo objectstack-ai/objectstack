@@ -123,6 +123,7 @@ const result = ResolvedSettingValueSchema.parse(data);
 | **pattern** | `string` | optional | Regex pattern (text only) |
 | **rows** | `integer` | optional |  |
 | **handler** | `{ kind: 'http'; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH'>; url: string; body?: Record<string, any>; … } \| { kind: 'action'; name: string; params?: Record<string, any>; confirmText?: string \| Record<string, string> } \| { kind: 'navigate'; url: string; target?: Enum<'_self' \| '_blank'> }` | optional | Action handler (action_button) |
+| **confirmOffText** | `string \| Record<string, string>` | optional | Confirm dialog text shown before a toggle's value changes to off (omit = no confirm) |
 | **childNamespace** | `string` | optional | Sub-namespace (child_pane) |
 | **bannerText** | `string` | optional | Markdown body (info_banner) |
 | **bannerSeverity** | `Enum<'info' \| 'success' \| 'warning' \| 'error'>` | optional |  |
@@ -205,6 +206,7 @@ const result = ResolvedSettingValueSchema.parse(data);
 | **pattern** | `string` | optional | Regex pattern (text only) |
 | **rows** | `integer` | optional |  |
 | **handler** | `{ kind: 'http'; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH'>; url: string; body?: Record<string, any>; … } \| { kind: 'action'; name: string; params?: Record<string, any>; confirmText?: string \| Record<string, string> } \| { kind: 'navigate'; url: string; target?: Enum<'_self' \| '_blank'> }` | optional | Action handler (action_button) |
+| **confirmOffText** | `string \| Record<string, string>` | optional | Confirm dialog text shown before a toggle's value changes to off (omit = no confirm) |
 | **childNamespace** | `string` | optional | Sub-namespace (child_pane) |
 | **bannerText** | `string` | optional | Markdown body (info_banner) |
 | **bannerSeverity** | `Enum<'info' \| 'success' \| 'warning' \| 'error'>` | optional |  |

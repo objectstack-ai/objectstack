@@ -82,6 +82,11 @@ function missingFor(data: { settings?: Record<string, any> }, m: SettingsManifes
       if (tr?.actions?.[s.id]?.label == null) missing.push(`action:${s.id}`);
     } else if (s.key) {
       if (tr?.keys?.[s.key]?.label == null) missing.push(`key:${s.key}`);
+      // A toggle's turn-off question is the toggle's own copy, so it is held to
+      // the label's coverage: an untranslated one asks in English (#30418).
+      if (s.confirmOffText !== undefined && tr?.keys?.[s.key]?.confirmOffText == null) {
+        missing.push(`key:${s.key}.confirmOffText`);
+      }
     }
   }
   return missing;
@@ -103,6 +108,7 @@ function undeclaredIn(data: { settings?: Record<string, any> }): string[] {
     }
     const groups = new Set<string>();
     const keys = new Set<string>();
+    const confirmsOff = new Set<string>();
     const banners = new Set<string>();
     const actions = new Set<string>();
     for (const s of m.specifiers) {
@@ -114,10 +120,16 @@ function undeclaredIn(data: { settings?: Record<string, any> }): string[] {
         if (s.id) actions.add(s.id);
       } else if (s.key) {
         keys.add(s.key);
+        if (s.confirmOffText !== undefined) confirmsOff.add(s.key);
       }
     }
     for (const g of Object.keys(tr?.groups ?? {})) if (!groups.has(g)) extra.push(`${ns}.group:${g}`);
     for (const k of Object.keys(tr?.keys ?? {})) if (!keys.has(k)) extra.push(`${ns}.key:${k}`);
+    for (const [k, v] of Object.entries(tr?.keys ?? {})) {
+      if (keys.has(k) && (v as { confirmOffText?: unknown })?.confirmOffText != null && !confirmsOff.has(k)) {
+        extra.push(`${ns}.key:${k}.confirmOffText`);
+      }
+    }
     for (const b of Object.keys(tr?.banners ?? {})) if (!banners.has(b)) extra.push(`${ns}.banner:${b}`);
     for (const a of Object.keys(tr?.actions ?? {})) if (!actions.has(a)) extra.push(`${ns}.action:${a}`);
   }
