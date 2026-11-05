@@ -594,7 +594,11 @@ export function envKeyOf(namespace: string, key: string): string {
   return `OS_${slug}`;
 }
 
-/** Thrown when a caller tries to write a value pinned by env. */
+/**
+ * Thrown when a caller tries to write a value pinned by env (`locked-by-env`;
+ * a clear — `null` / `undefined` — is not refused, it clears the stored value
+ * beneath the pin), or past a locked row (`locked-by-<scope>`).
+ */
 export class SettingsLockedError extends Error {
   readonly code = 'SETTINGS_LOCKED' as const;
   constructor(
