@@ -1063,6 +1063,34 @@ describe('validateExpression (ADR-0032)', () => {
       expect(r.ok).toBe(true);
       expect(r.errors).toHaveLength(0);
     });
+
+    // [#30016] A flow condition's fault fails the run (`evaluateCondition`
+    // throws on every flow), so the flow codes never say it reads null. The
+    // grade stays an error at every site.
+    it('in a flow condition says the run fails, and keeps the null sentence on a record-scoped rule (#30016)', () => {
+      const flow = { ...schema, scope: 'flattened' } as const;
+      const codeOf = (hint: object) => {
+        const r = validateExpression('predicate', 'start_date + 1 > 3', { ...flow, ...hint });
+        expect(r.warnings).toHaveLength(0);
+        return r.errors.map((e) => [e.code, e.message] as const);
+      };
+      const [[provenCode, proven]] = codeOf({ faultOutcome: 'run-fails' });
+      expect(provenCode).toBe('date-arithmetic-run-fails');
+      expect(proven).toMatch(/this faults at runtime, and a flow condition that cannot be evaluated fails the run/);
+      expect(proven).not.toMatch(/evaluates to null/);
+      for (const hint of [{}, { faultOutcome: 'run-fails', bareNamesUnproven: true }]) {
+        const [[code, message]] = codeOf(hint);
+        expect(code).toBe('date-arithmetic-run-may-fail');
+        expect(message).toMatch(/this faults wherever `start_date` holds the date when the condition runs, and a flow condition/);
+        expect(message).not.toMatch(/evaluates to null/);
+      }
+      // A bare name a flow variable holds is not the field: no verdict.
+      expect(codeOf({ faultOutcome: 'run-fails', flowVariables: ['start_date'] })).toEqual([]);
+      // Control: a record-scoped validation rule keeps its code and sentence.
+      const rule = validateExpression('predicate', 'record.start_date + 1 > 3', { ...schema, faultOutcome: 'fail-closed' });
+      expect(rule.errors.map((e) => e.code)).toEqual(['date-arithmetic']);
+      expect(rule.errors[0].message).toMatch(/this faults at runtime, so the field silently evaluates to null/);
+    });
   });
 
   describe('introspection', () => {
