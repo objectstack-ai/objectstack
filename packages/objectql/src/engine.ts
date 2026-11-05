@@ -740,6 +740,12 @@ export class ObjectQL implements IObjectQLEngine {
   constructor(hostContext: Record<string, any> = {}) {
     // Use provided logger or create a new one
     this.logger = hostContext.logger || createLogger({ level: 'info', format: 'pretty' });
+    // [#30215] `registerApp` writes `manifests`; an uninstall withdraws the
+    // package through the registry's own verb, on every door, so the entry goes
+    // with the registry's record. Left behind, ADR-0070's `isWritablePackage`
+    // (which reads this map first) kept an uninstalled package read-only until
+    // a restart.
+    this._registry.onPackageUninstalled((packageId) => { this.manifests.delete(packageId); });
     // Pick up production hardening switches from env so deployers can
     // enforce strict-body without code changes:
     //   OBJECTQL_STRICT_HOOKS=1 → unresolved hooks throw at bind time
