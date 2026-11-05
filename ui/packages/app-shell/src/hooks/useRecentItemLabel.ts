@@ -19,19 +19,22 @@
  * already asks for that kind:
  *
  *  - an object: what the page the entry opens — the object's LIST — is titled,
- *    `useObjectLabel`'s `objectPluralLabel` over the object's cached metadata
- *    (the translated plural, else the declared `pluralLabel`, else the label
- *    the singular rung reads; objectui#11733). ⛔ Not {@link useNavTargetLabel}:
- *    its object rung is the spec's step 3 for an UNLABELLED NAVIGATION ENTRY
- *    ("the object's label", the singular), a ruling this entry does not reopen;
+ *    the served `pluralLabel`, else the served `label` (objectui#11733). The
+ *    server translated both, by its label order for an overridden item, so
+ *    they are drawn as given (objectstack#30311); `useObjectLabel`'s
+ *    `objectPluralLabel` under the object's name is asked only when the cache
+ *    holds neither. ⛔ Not {@link useNavTargetLabel}: its object rung is the
+ *    spec's step 3 for an UNLABELLED NAVIGATION ENTRY ("the object's label",
+ *    the singular), a ruling this entry does not reopen;
  *  - a dashboard: {@link useNavTargetLabel} — the text the sidebar shows for an
  *    unlabelled navigation entry that opens the same target (the served
  *    label, an inline locale map read in the active language, drawn as given;
  *    the `useObjectLabel` bundle lookup only when the read carries none);
  *  - a list view (objectui#12604): {@link useNavTargetLabel} again — the text
  *    the sidebar shows for an unlabelled navigation entry that opens the same
- *    view (the view's label from its object's `listViews`, through the
- *    `viewLabel` bundle lookup). A view the cache does not hold — one a user
+ *    view (a served view's label from its object's `listViews` as given, a
+ *    view the client derived through the `viewLabel` bundle lookup). A view
+ *    the cache does not hold — one a user
  *    saved for themself — is drawn as the list it opens: the object's, as an
  *    object entry is;
  *  - a page or a report: the same rule for that kind — the page's / report's
@@ -98,11 +101,15 @@ export function useRecentItemLabel(
       /** What an object's list is titled — an `object` entry's label, and a view's fallback. */
       const listTitle = (objectName: string): string => {
         const def = findByName(readObjectsByName(metadata, [objectName]), objectName) as (LabelledRecord & { pluralLabel?: unknown }) | undefined;
-        // The singular half is read exactly as `useNavTargetLabel` reads it;
-        // `pluralLabel` is a plain string in the spec, so only a string is one.
-        const text = metadataText(def?.label, language);
-        const plural = typeof def?.pluralLabel === 'string' ? def.pluralLabel : undefined;
-        return nonEmpty(objectPluralLabel({ name: objectName, label: text ?? '', pluralLabel: plural })) ?? objectName;
+        // A served object's labels are already translated (objectstack#30311):
+        // drawn as given. The singular half is read exactly as
+        // `useNavTargetLabel` reads it; `pluralLabel` is a plain string in the
+        // spec, so only a string is one.
+        const plural = typeof def?.pluralLabel === 'string' ? nonEmpty(def.pluralLabel) : undefined;
+        return plural
+          ?? metadataText(def?.label, language)
+          ?? nonEmpty(objectPluralLabel({ name: objectName, label: '' }))
+          ?? objectName;
       };
       switch (item.type) {
         case 'object':
