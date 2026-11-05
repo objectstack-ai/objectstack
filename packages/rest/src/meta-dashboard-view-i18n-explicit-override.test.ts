@@ -504,7 +504,7 @@ const PRECEDENCE_TYPES: readonly PrecedenceType[] = [
     // An existing type, for the pair's rank: the base was always handed over, the pair's translation never.
     {
         type: 'view', name: VIEW, shippedZh: '进行中',
-        shipped: () => packagedViewItem(VIEW),
+        shipped: () => ({ ...packagedViewItem(VIEW) }),
         catalog: (label) => ({ objects: { [OBJ]: { _views: { in_progress: { label } } } } }),
     },
 ];
