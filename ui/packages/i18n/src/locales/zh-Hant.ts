@@ -157,6 +157,7 @@ const zhHant = {
     notAvailableHere: '「{{action}}」在當前頁面不可用。',
     notAvailableForRecord: '對此記錄不可用',
     completedSuccessfully: '操作已成功完成',
+    completedNamed: '“{{action}}”已完成',
     failed: '操作失敗',
     parallelFailed: '一個或多個並行操作失敗',
     selectExactlyOneRow: '此操作針對單條記錄，請只選擇一行。',
@@ -914,7 +915,7 @@ const zhHant = {
   },
   managedByBadge: {
     config: {
-      short: '管理配置',
+      short: '在此配置',
       title: '管理員配置',
       body: '這些記錄定義平台的執行環境行為。請在此處編寫配置;其產生的執行環境資料存放在單獨的表中。',
     },
@@ -924,7 +925,7 @@ const zhHant = {
       body: '當源記錄上的操作執行時,這裡的行會自動建立。下方列表是只讀監控介面——行級操作(批准、撤回、重發等)在每一行上。',
     },
     systemWritable: {
-      short: '平台架構',
+      short: '平台預置 · 可編輯',
       title: '平台定義,管理員可寫',
       body: '此物件的架構由平台定義,但其資料行可在此處建立和編輯。誰可以寫入由委派管理和記錄級安全控制,而非此標記。',
     },
@@ -934,7 +935,7 @@ const zhHant = {
       body: '不可變審計日誌。行由平台在事件發生時寫入,不能在介面上建立、編輯或刪除。可使用匯出功能下載以供合規審查。',
     },
     betterAuth: {
-      short: '身份',
+      short: '經身份服務寫入',
       title: '經內建身份服務寫入',
       body: '此物件的架構屬於平台內建的身份服務 {{provider}}。請用本頁上的操作，或通過登入、邀請和安全流程來建立和修改這些記錄；它們都經由該服務寫入。直接編輯資料表會繞過密碼雜湊、會話校驗、兩步驗證檢查和審計鉤子。',
     },

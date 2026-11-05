@@ -5433,3 +5433,101 @@ describe('runtime authoring gate — a stored sort on a `sortable: false` field 
         expect(sortIssues(pageErr)[0].message).not.toContain('sortable: false');
     });
 });
+
+// #30093 — a stored page sort naming a field the object does not have is
+// refused at the publish door. The Data API list door answers that sort
+// `400 INVALID_SORT` on the page's first read and every read after it, so the
+// save is refused instead (`page-field-unknown`, `error`, at the slot path).
+// Before it, `interfaceConfig.sort` and a related list's `sort` were judged at
+// `warning` on the CLI alone and the element `dataSource.sort` and app page
+// `record.sort` by nothing, so the page saved green and broke on first read.
+describe('runtime authoring gate — a stored page sort naming an unknown field (#30093)', () => {
+    const OBJECT = 'help_ticket';
+    const ticket = {
+        name: OBJECT,
+        label: 'Ticket',
+        fields: { subject: { type: 'text', label: 'Subject' }, priority: { type: 'number', label: 'Priority' } },
+    };
+    function host() {
+        const { engine, rows } = makeStubEngine();
+        engine.registry.listItems = (type: string) => (type === 'object' ? [ticket] : []);
+        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test') as any;
+        return { protocol, rows };
+    }
+    const unknownIssues = (err: any) => (err?.issues ?? []).filter((i: any) => i.rule === 'page-field-unknown');
+    const activePages = (rows: Map<string, Row>) =>
+        Array.from(rows.values()).filter((r) => r.type === 'page' && r.state === 'active');
+    const savePage = (protocol: any, item: unknown) =>
+        protocol.saveMetaItem({ type: 'page', name: 'ticket_page', item });
+
+    /** One page per stored page slot, each sorting by `field`. */
+    const pages = (field: string): Array<[slot: string, path: string, page: Record<string, unknown>]> => [
+        ['element dataSource.sort', 'pages[0].regions[0].components[0].dataSource.sort[0]', {
+            name: 'ticket_page', label: 'Tickets', type: 'record', object: OBJECT,
+            regions: [{ name: 'main', components: [{
+                type: 'record:related_list',
+                dataSource: { object: OBJECT, sort: [{ field, order: 'desc' }] },
+                properties: { objectName: OBJECT, relationshipField: 'subject' },
+            }] }],
+        }],
+        ['record:related_list parentDataSource.sort', 'pages[0].regions[0].components[0].properties.parentDataSource.sort[0]', {
+            name: 'ticket_page', label: 'Tickets', type: 'record', object: OBJECT,
+            regions: [{ name: 'main', components: [{
+                type: 'record:related_list',
+                properties: {
+                    objectName: OBJECT, relationshipField: 'subject',
+                    parentDataSource: { object: OBJECT, sort: [{ field, order: 'asc' }] },
+                },
+            }] }],
+        }],
+        ['record:related_list sort', 'pages[0].regions[0].components[0].properties.sort[0]', {
+            name: 'ticket_page', label: 'Tickets', type: 'record', object: OBJECT,
+            regions: [{ name: 'main', components: [{
+                type: 'record:related_list',
+                properties: { objectName: OBJECT, relationshipField: 'subject', sort: [{ field, order: 'asc' }] },
+            }] }],
+        }],
+        ['list page interfaceConfig.sort', 'pages[0].interfaceConfig.sort[0]', {
+            name: 'ticket_page', label: 'Tickets', type: 'list', object: OBJECT,
+            interfaceConfig: { source: OBJECT, sort: [{ field, order: 'asc' }] },
+        }],
+        ['app page record.sort', 'pages[0].record.sort[0]', {
+            name: 'ticket_page', label: 'Tickets', type: 'app',
+            record: { object: OBJECT, sort: [{ field, order: 'asc' }] },
+            regions: [{ name: 'main', components: [{ type: 'page:header', properties: { title: 'Tickets' } }] }],
+        }],
+    ];
+
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+    });
+
+    it.each(pages('subjcet').map(([slot, path, page]) => [slot, path, page] as const))(
+        'refuses a page whose %s names it: 422 INVALID_METADATA, the rule at its slot path, nothing stored',
+        async (_slot, path, page) => {
+            const { protocol, rows } = host();
+            const err = await savePage(protocol, page).catch((e: any) => e);
+            expect(err?.status, JSON.stringify(err?.issues ?? err?.message)).toBe(422);
+            expect(err.code).toBe('INVALID_METADATA');
+            expect(unknownIssues(err)).toEqual([expect.objectContaining({
+                severity: 'error',
+                path,
+                message: expect.stringContaining('field "subjcet" is not a field on object "help_ticket"'),
+            })]);
+            expect(activePages(rows)).toEqual([]);
+        },
+    );
+
+    it('CONTROL — the same page on a declared field saves, at every slot', async () => {
+        const { protocol, rows } = host();
+        for (const [slot, , page] of pages('subject')) {
+            await expect(savePage(protocol, page), slot).resolves.toMatchObject({ success: true });
+        }
+        expect(activePages(rows)).toHaveLength(1);
+    });
+});

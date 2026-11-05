@@ -2912,10 +2912,13 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
     const data: any = ctx!.data;
     const objSchema: any = (ctx as any).objectSchema;
     const rawObjectName: string | undefined = ctx!.objectName || objSchema?.name;
-    const fallbackLabel = labelText(objSchema?.label) || objSchema?.name || ctx!.objectName || '';
-    const objectLabel: string | undefined = rawObjectName
-      ? tObjectLabel({ name: rawObjectName, label: fallbackLabel })
-      : fallbackLabel || undefined;
+    // The served label as given — the server already translated it — and the
+    // bundle only when none is served (objectstack#30390).
+    const servedLabel = labelText(objSchema?.label);
+    const nameLabel = objSchema?.name || ctx!.objectName || '';
+    const objectLabel: string | undefined = servedLabel
+      || (rawObjectName ? tObjectLabel({ name: rawObjectName, label: nameLabel }) : nameLabel)
+      || undefined;
     // Honor objectSchema.titleFormat (e.g. `{first_name} {last_name}`) as the
     // rung BELOW the declared pointer. `DetailView.resolveDisplayTitle` ranks
     // the two the same way, so default and synthesized record pages produce

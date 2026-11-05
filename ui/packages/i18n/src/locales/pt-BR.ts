@@ -150,6 +150,7 @@ const pt = {
     notAvailableHere: '"{{action}}" não está disponível na página atual.',
     notAvailableForRecord: 'Não disponível para este registro',
     completedSuccessfully: 'A ação foi concluída com sucesso',
+    completedNamed: 'Ação concluída: {{action}}',
     failed: 'A ação falhou',
     parallelFailed: 'Uma ou mais ações paralelas falharam',
     selectExactlyOneRow: 'Esta ação é executada em um único registro — selecione exatamente uma linha.',
@@ -912,12 +913,12 @@ const pt = {
   },
   managedByBadge: {
     systemWritable: {
-      short: "Esquema da plataforma",
+      short: "Integrado · editável",
       title: "Definido pela plataforma, gravável pelo administrador",
       body: "O esquema deste objeto é definido pela plataforma, mas as linhas são suas para criar e editar aqui. Quem pode gravar é determinado pela administração delegada e pela segurança em nível de registro, não por este selo.",
     },
     config: {
-      short: "Config. de admin",
+      short: "Configurado aqui",
       title: "Configuração do administrador",
       body: "Estas linhas definem o comportamento da plataforma em tempo de execução. Crie-as aqui; os dados de tempo de execução produzidos ficam em uma tabela separada.",
     },
@@ -932,7 +933,7 @@ const pt = {
       body: "Log de auditoria imutável. As linhas não podem ser criadas, editadas ou excluídas pela interface: a plataforma as grava quando os eventos ocorrem. Use Exportar para baixar para revisão de conformidade.",
     },
     betterAuth: {
-      short: "Identidade",
+      short: "Via serviço de identidade",
       title: "Gravado pelo serviço de identidade integrado",
       body: "O esquema deste objeto pertence a {{provider}}, o serviço de identidade integrado da plataforma. Crie e altere esses registros com as ações desta página ou pelos fluxos de login, convite e segurança; todos passam por esse serviço. Editar a tabela diretamente ignoraria o hash de senhas, a validação de sessões, as verificações de dois fatores e os hooks de auditoria.",
     },

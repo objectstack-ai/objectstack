@@ -141,14 +141,17 @@ const NOT_FOUND_ZH = '未找到记录';
 
 /** Open the record page; returns the adapter's two record reads, spied, to count the page's reads. */
 async function openRecordPage(config: I18nConfig = EN) {
+  // The definition as the server serves it in the session's language: a `zh`
+  // session holds the `zh` label (objectstack#30390).
+  const def = config === ZH ? { ...objectDef, label: '发票' } : objectDef;
   const ds = new ObjectStackAdapter({ baseUrl: BASE, fetch: transport, autoReconnect: false });
   await ds.connect();
   // Object metadata is the metadata service's business, not this file's.
-  (ds as unknown as { getObjectSchema: () => Promise<unknown> }).getObjectSchema = async () => objectDef;
+  (ds as unknown as { getObjectSchema: () => Promise<unknown> }).getObjectSchema = async () => def;
   const findOne = vi.spyOn(ds, 'findOne');
   const getRecordPage = vi.spyOn(ds, 'getRecordPage');
   const metadata = {
-    objects: [objectDef], pages: [], loading: false, error: null,
+    objects: [def], pages: [], loading: false, error: null,
     refresh: async () => {}, invalidate: () => {},
     ensureType: async () => [], getItem: async () => null, getItemsByType: () => [],
   } as never;
@@ -158,7 +161,7 @@ async function openRecordPage(config: I18nConfig = EN) {
         <MetadataCtx.Provider value={metadata}>
           <RecordDetailView
             dataSource={ds as never}
-            objects={[objectDef] as never}
+            objects={[def] as never}
             onEdit={() => {}}
             objectNameOverride={OBJECT}
             recordIdOverride={REC}

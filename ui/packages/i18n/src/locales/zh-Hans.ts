@@ -157,6 +157,7 @@ const zh = {
     notAvailableHere: '「{{action}}」在当前页面不可用。',
     notAvailableForRecord: '对此记录不可用',
     completedSuccessfully: '操作已成功完成',
+    completedNamed: '“{{action}}”已完成',
     failed: '操作失败',
     parallelFailed: '一个或多个并行操作失败',
     selectExactlyOneRow: '此操作针对单条记录，请只选择一行。',
@@ -914,7 +915,7 @@ const zh = {
   },
   managedByBadge: {
     config: {
-      short: '管理配置',
+      short: '在此配置',
       title: '管理员配置',
       body: '这些记录定义平台的运行时行为。请在此处编写配置;其产生的运行时数据存放在单独的表中。',
     },
@@ -924,7 +925,7 @@ const zh = {
       body: '当源记录上的操作运行时,这里的行会自动创建。下方列表是只读监控界面——行级操作(批准、撤回、重发等)在每一行上。',
     },
     systemWritable: {
-      short: '平台架构',
+      short: '平台预置 · 可编辑',
       title: '平台定义,管理员可写',
       body: '此对象的架构由平台定义,但其数据行可在此处创建和编辑。谁可以写入由委派管理和记录级安全控制,而非此标记。',
     },
@@ -934,7 +935,7 @@ const zh = {
       body: '不可变审计日志。行由平台在事件发生时写入,不能在界面上创建、编辑或删除。可使用导出功能下载以供合规审查。',
     },
     betterAuth: {
-      short: '身份',
+      short: '经身份服务写入',
       title: '经内置身份服务写入',
       body: '此对象的架构属于平台内置的身份服务 {{provider}}。请用本页上的操作，或通过登录、邀请和安全流程来创建和修改这些记录；它们都经由该服务写入。直接编辑数据表会绕过密码哈希、会话校验、两步验证检查和审计钩子。',
     },

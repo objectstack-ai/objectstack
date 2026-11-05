@@ -80,6 +80,12 @@
 // is this gate's whole value (see the baseline's `$comment`: shrink-only, hand
 // reviewed).
 //
+// A fourth shape sits one layer BELOW the driver (#29859): MongoDB's native
+// `Collection`, faked by driver-mongodb tests to record what the driver sends.
+// `findOne(filter, options)` takes no object name, and `find`/`insertMany`
+// read as engine siblings, so it is vetoed by NATIVE_COLLECTION_ONLY_MEMBERS
+// under the same object-name guard -- out of scan scope, for the same reason.
+//
 // Deliberately NOT covered, and why (each wants its own slice, not a vaguer
 // version of these -- a gate whose scope is fuzzy is indistinguishable from
 // no gate to everyone downstream of it):
@@ -505,6 +511,39 @@ const ENGINE_ONLY_MEMBERS = new Set(['insert', 'insertMany', 'aggregate', 'getSc
  * here so the next reader does not read it as a gap.)
  */
 const REPOSITORY_ONLY_MEMBERS = new Set(['updateById', 'deleteById']);
+
+/**
+ * The fourth shape (#29859): MongoDB's native `Collection`, which a driver-
+ * mongodb test fakes to record what the DRIVER sends (`(driver as any).db =
+ * { collection: () => collection }`). Its read and batch-write names collide
+ * with the engine's -- `find`, `findOne`, `insertMany`, `aggregate` -- so a
+ * fake declaring `insertOne`/`insertMany`/`updateOne`/`findOne`/`find` holds
+ * two engine siblings and reads as an engine `findOne` double whose
+ * `findOne(filter, options)` takes no object name at all. It is not a looser
+ * copy of `ObjectQL.findOne`; it is the driver's DEPENDENCY, one layer below
+ * the driver, and has no dispatch contract to be looser than.
+ *
+ * `insertMany` stays engine evidence: `ObjectQL.insertMany(object, rows)` is a
+ * real member of the engine class, and an engine double spelling it must keep
+ * reading as one. The fix is positive evidence of the OTHER shape, not less
+ * evidence of this one.
+ *
+ * Verified member by member on the tree this landed against: none of these
+ * names is declared in `packages/objectql/src/engine.ts`, nor on `IDataEngine`,
+ * `IDataDriver` or `IScopedObjectRepository` (`packages/spec/src/contracts/`).
+ * Kept to the names only the native Collection speaks -- its single-document
+ * writes, its atomic find-and-modify forms, its counts and `bulkWrite`. Its
+ * `updateMany`/`deleteMany` are absent because DRIVER_ONLY_MEMBERS already
+ * vetoes them at any arity; `distinct`/`createIndex`/`watch` are absent because
+ * those names are too generic to answer "Mongo" in a repo with caches and
+ * routers. Consulted under the same object-name guard as the repository veto,
+ * so `findOne(objectName, query)` beside an `insertOne` helper stays in scope.
+ */
+const NATIVE_COLLECTION_ONLY_MEMBERS = new Set([
+  'insertOne', 'updateOne', 'deleteOne', 'replaceOne', 'bulkWrite',
+  'countDocuments', 'estimatedDocumentCount',
+  'findOneAndUpdate', 'findOneAndDelete', 'findOneAndReplace',
+]);
 
 /**
  * Parameter names that mean "this position holds an OBJECT NAME" — the
@@ -1015,6 +1054,16 @@ function isEngineVerbShape(fn, memberNames = new Set(), opts = {}) {
   // is a measurement, not an opinion: run `--census` before adding a name here.
   if (!opts.skipRepositoryVeto && !takesObjectNameFirst(fn)) {
     for (const n of memberNames) if (REPOSITORY_ONLY_MEMBERS.has(n)) return false;
+  }
+  // The NATIVE COLLECTION veto (#29859): the same two halves for the same
+  // reasons. The member is the evidence (a name only Mongo's `Collection`
+  // speaks); the object-name test keeps an engine double that hangs an
+  // `insertOne` helper off its side in scope. It must decide here, before the
+  // arity paths below: `findOne(filter, options)` has a second parameter that is
+  // neither an id nor a string, so the two-parameter path would admit it on its
+  // own, and the short-arity path reads `insertMany` as engine evidence.
+  if (!opts.skipCollectionVeto && !takesObjectNameFirst(fn)) {
+    for (const n of memberNames) if (NATIVE_COLLECTION_ONLY_MEMBERS.has(n)) return false;
   }
   if (params.length < 2) {
     let engineEvidence = false;
@@ -1651,23 +1700,30 @@ function censusRecognizer() {
   // off and diff. The prose used to assert "the pair moves exactly 2, and 0 of
   // the PINNED doubles" as a constant; this recomputes it on today's corpus,
   // which is the only form of that claim worth having.
-  const vetoed = [];
-  for (const slice of SLICES) {
-    for (const abs of files) {
-      const rel = relative(ROOT, abs).split(sep).join('/');
-      const text = readFileSync(abs, 'utf8');
-      if (!mentionsVerb(text, slice.verb)) continue;
-      const withVeto = scanSource(abs, text, slice);
-      const without = scanSource(abs, text, slice, { skipRepositoryVeto: true });
-      if (without.length === withVeto.length) continue;
-      const kept = new Set(withVeto.map((d) => d.line));
-      for (const d of without) {
-        if (!kept.has(d.line)) vetoed.push({ verb: slice.verb, file: rel, line: d.line, pinned: d.pinned });
+  // The NATIVE_COLLECTION_ONLY_MEMBERS veto (#29859) is ablated the same way,
+  // separately, so each veto's reach is its own reading.
+  const ablate = (skip) => {
+    const moved = [];
+    for (const slice of SLICES) {
+      for (const abs of files) {
+        const rel = relative(ROOT, abs).split(sep).join('/');
+        const text = readFileSync(abs, 'utf8');
+        if (!mentionsVerb(text, slice.verb)) continue;
+        const withVeto = scanSource(abs, text, slice);
+        const without = scanSource(abs, text, slice, { [skip]: true });
+        if (without.length === withVeto.length) continue;
+        const kept = new Set(withVeto.map((d) => d.line));
+        for (const d of without) {
+          if (!kept.has(d.line)) moved.push({ verb: slice.verb, file: rel, line: d.line, pinned: d.pinned });
+        }
       }
     }
-  }
+    return moved;
+  };
+  const vetoed = ablate('skipRepositoryVeto');
+  const collectionVetoed = ablate('skipCollectionVeto');
 
-  return { files: files.length, members, byKind, byCallee, notWidened, assignSites, vetoed };
+  return { files: files.length, members, byKind, byCallee, notWidened, assignSites, vetoed, collectionVetoed };
 }
 
 function censusReport() {
@@ -1716,6 +1772,11 @@ function censusReport() {
       + `${c.vetoed.filter((v) => v.pinned).length} of them pinned:`,
   );
   for (const v of c.vetoed) console.log(`         [${v.verb}] ${v.file}:${v.line}${v.pinned ? ' (pinned)' : ''}`);
+  console.log(
+    `\n  NATIVE_COLLECTION_ONLY_MEMBERS veto moves ${c.collectionVetoed.length} construct(s); `
+      + `${c.collectionVetoed.filter((v) => v.pinned).length} of them pinned:`,
+  );
+  for (const v of c.collectionVetoed) console.log(`         [${v.verb}] ${v.file}:${v.line}${v.pinned ? ' (pinned)' : ''}`);
   console.log('');
 }
 
@@ -3696,6 +3757,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'Arity: a fake omits the parameters it ignores (#5629).': 9,
   'The `update` slice (#5480).': 15,
   'The SCOPED REPOSITORY, the third shape (#6327, from #5945).': 11,
+  'The NATIVE COLLECTION, the fourth shape (#29859).': 7,
   'The CONSUMER SEAMS (#8194)': 20,
   'The ratchet-remedy authority convention (#8435)': 2,
   'The INHERITANCE clause (#8553)': 5,
@@ -3726,7 +3788,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 34;
+const SELF_TEST_BATTERY_FLOOR = 35;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -4305,6 +4367,75 @@ const engine = {
     slices.find((s) => s.slice.verb === 'delete').found
       .some((f) => f.file === 'packages/plugins/plugin-sharing/src/sharing-rule.test.ts'),
   );
+
+  // ── The NATIVE COLLECTION, the fourth shape (#29859) ──────────────────────
+  //
+  // A/B pairs again, for the same reason as the repository battery: every
+  // "out of scope" below is the SAME literal with one thing changed beside a
+  // control that IS discovered, so a veto that silenced everything fails here.
+  battery('The NATIVE COLLECTION, the fourth shape (#29859).');
+  const F = SLICES.find((s) => s.verb === 'findOne');
+  const collectionBody = `
+  insertMany: async (many: Doc[]) => ({}),
+  findOne: async (filter: Doc, options: { projection?: Record<string, number> }) => null,
+  find: (filter: Doc, options?: any) => ({ toArray: async () => [] }),`;
+  const nativeCollection = `const collection = {
+  insertOne: async (doc: Doc) => ({}),${collectionBody}
+  updateOne: async (filter: Doc, update: { $set?: Doc }) => ({ matchedCount: 0 }),
+};
+`;
+  const sameCollectionWithoutMarker = `const collection = {${collectionBody}
+};
+`;
+  expect('a five-member native Mongo Collection fake is out of scope for the findOne slice',
+    scanSource('nc.test.ts', nativeCollection, F).length === 0);
+  expect('…and the SAME literal without insertOne/updateOne is still discovered',
+    scanSource('nc.test.ts', sameCollectionWithoutMarker, F).length === 1);
+
+  // Both arity paths the veto has to outrank: a one-parameter `findOne(filter)`
+  // reaches the short-arity path, where `insertMany` alone is engine evidence.
+  const oneArityCollection = `const collection = {
+  insertOne: async (doc: any) => ({}),
+  insertMany: async (many: any[]) => ({}),
+  findOne: async (filter: any) => null,
+  find: (filter: any) => ({ toArray: async () => [] }),
+};
+`;
+  expect('a one-parameter native findOne beside insertMany is out of scope',
+    scanSource('nc1.test.ts', oneArityCollection, F).length === 0);
+  expect('…and the same without insertOne is discovered',
+    scanSource('nc1.test.ts', oneArityCollection.replace('  insertOne: async (doc: any) => ({}),\n', ''), F)
+      .length === 1);
+
+  // The control the card names: a real engine double holding `find` and
+  // `insertMany` plus engine members is still attributed, still unpinned.
+  const engineWithInsertMany = `
+const engine = {
+  async find(objectName: string, q?: any) { return []; },
+  async insertMany(objectName: string, rows: any[]) { return rows; },
+  async insert(objectName: string, data: any) { return data; },
+  async findOne(objectName: string, q?: any) { return null; },
+};
+`;
+  d = scanSource('em.test.ts', engineWithInsertMany, F);
+  expect('an engine double with find/insertMany is still a findOne double',
+    d.length === 1 && d[0].pinned === false);
+
+  // The member is not a licence by itself: an engine double that takes the
+  // object name first stays in scope however many Mongo-named helpers it adds.
+  const engineWithInsertOneHelper = engineWithInsertMany.replace(
+    '  async insert(',
+    '  async insertOne(doc: any) { return doc; },\n  async insert(',
+  );
+  d = scanSource('eo.test.ts', engineWithInsertOneHelper, F);
+  expect('an engine double that ALSO declares insertOne stays in scope',
+    engineWithInsertOneHelper.includes('insertOne') && d.length === 1 && d[0].pinned === false);
+
+  // Exact-set form: both shapes in one file, only the engine reported.
+  const mixedCollection = `${nativeCollection}${engineWithInsertMany}`;
+  const mixedCollectionFound = scanSource('mc.test.ts', mixedCollection, F);
+  expect('a mixed fixture reports EXACTLY the engine double, not the native Collection',
+    mixedCollectionFound.length === 1 && mixedCollectionFound[0].line === 9);
 
   // ── The CONSUMER SEAMS (#8194) ────────────────────────────────────────────
   //

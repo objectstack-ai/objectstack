@@ -64,3 +64,43 @@ describe('ManagedByBadge — the identity note is true of a team made here (obje
     expect(note).not.toContain('身份提供方');
   });
 });
+
+/**
+ * objectstack#30208 row 9 — the Setup list header tags read 「管理配置」,
+ * 「平台架构」 and 「身份」: the engine's names for how an object is built, which
+ * tell an administrator nothing until they open the tooltip. Each tag now says
+ * what it means for them: configure it here, built in but editable, written
+ * through the identity service.
+ */
+describe('ManagedByBadge — the tag word speaks to an administrator (objectstack#30208)', () => {
+  const tagText = (managedBy: string, language?: string) => {
+    const tag = language ? (
+      <I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false }}>
+        <ManagedByBadge managedBy={managedBy} />
+      </I18nProvider>
+    ) : (
+      <ManagedByBadge managedBy={managedBy} />
+    );
+    const { unmount } = render(tag);
+    const text = screen.getByTestId('managed-by-badge').textContent;
+    unmount();
+    return text;
+  };
+
+  it('Chinese: config, system-data and better-auth read what the administrator can do', () => {
+    expect(tagText('config', 'zh')).toBe('在此配置');
+    expect(tagText('system-data', 'zh')).toBe('平台预置 · 可编辑');
+    expect(tagText('better-auth', 'zh')).toBe('经身份服务写入');
+  });
+
+  it('English: the same three tags', () => {
+    expect(tagText('config')).toBe('Configured here');
+    expect(tagText('system-data')).toBe('Built in · editable');
+    expect(tagText('better-auth')).toBe('Via identity service');
+  });
+
+  it('CONTROL: the tags the walkthrough did not name keep their words', () => {
+    expect(tagText('engine-owned', 'zh')).toBe('系统管理');
+    expect(tagText('append-only', 'zh')).toBe('只读 · 审计日志');
+  });
+});

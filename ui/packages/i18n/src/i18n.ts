@@ -213,6 +213,73 @@ function fallbackLanguagesFor(fallbackLanguage: string): Record<string, string[]
 }
 
 /**
+ * The keys whose interpolated object name is spaced from the Chinese text
+ * around it, and the option that carries the name. Opt-in by key: every other
+ * key, and every static string, renders exactly as authored.
+ *
+ * A Chinese title such as `新建{{object}}` reads `新建联系人` for a translated
+ * label, which is right, and `新建Repair Ticket` for a label with no Chinese
+ * translation, which is not: Chinese typesetting puts a space between Han text
+ * and a Latin word. The space is decided by the VALUE, at render time, because
+ * the pack cannot know which label it will meet. The pack keeps the plain
+ * `{{object}}` spelling (no format spec), the one spelling the provider-less
+ * fallback interpolator can also resolve.
+ */
+export const CJK_LATIN_SPACED_KEYS: Readonly<Record<string, string>> = {
+  'form.createTitle': 'object',
+  'form.editTitle': 'object',
+  'form.viewTitle': 'object',
+  'console.ai.recordWriteCreateTitle': 'object',
+  'console.ai.recordWriteUpdateTitle': 'object',
+};
+
+/** The languages whose packs the spacing applies to. */
+const CJK_LATIN_SPACED_LANGUAGES: ReadonlySet<string> = new Set(['zh']);
+
+const CJK_CHAR = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+const LATIN_OR_DIGIT = /[\p{Script=Latin}\p{Nd}]/u;
+
+/**
+ * Put one space between `value` and a CJK character it touches in `text`, on
+ * each side where `value`'s edge character is a Latin letter or a digit.
+ * `新建Repair Ticket` → `新建 Repair Ticket`; `新建联系人` is unchanged, and so
+ * is a side that already has a space or punctuation.
+ */
+export function spaceLatinValueFromCjk(text: string, value: string): string {
+  if (!value || !text.includes(value)) return text;
+  const chars = Array.from(value);
+  const padStart = LATIN_OR_DIGIT.test(chars[0]);
+  const padEnd = LATIN_OR_DIGIT.test(chars[chars.length - 1]);
+  if (!padStart && !padEnd) return text;
+  const parts = text.split(value);
+  let out = parts[0];
+  for (let i = 1; i < parts.length; i += 1) {
+    const before = Array.from(out).pop() ?? '';
+    const after = Array.from(parts[i])[0] ?? '';
+    out += (padStart && CJK_CHAR.test(before) ? ' ' : '') + value + (padEnd && CJK_CHAR.test(after) ? ' ' : '') + parts[i];
+  }
+  return out;
+}
+
+/** The i18next post-processor that applies {@link CJK_LATIN_SPACED_KEYS}. */
+const CJK_LATIN_SPACING_PROCESSOR = 'objectui-cjk-latin-spacing';
+
+const cjkLatinSpacingProcessor = {
+  type: 'postProcessor' as const,
+  name: CJK_LATIN_SPACING_PROCESSOR,
+  process(value: string, keys: string | string[], options: Record<string, unknown>, translator: { language?: string }): string {
+    if (typeof value !== 'string') return value;
+    const key = Array.isArray(keys) ? keys[0] : keys;
+    const option = typeof key === 'string' ? CJK_LATIN_SPACED_KEYS[key] : undefined;
+    if (!option) return value;
+    const lng = typeof options?.lng === 'string' ? options.lng : translator?.language;
+    if (!lng || !CJK_LATIN_SPACED_LANGUAGES.has(lng.split('-')[0])) return value;
+    const name = options?.[option];
+    return typeof name === 'string' ? spaceLatinValueFromCjk(value, name) : value;
+  },
+};
+
+/**
  * Create and initialize an i18next instance with Object UI defaults
  */
 export function createI18n(config: I18nConfig = {}): I18nInstance {
@@ -266,10 +333,11 @@ export function createI18n(config: I18nConfig = {}): I18nInstance {
   // technically still "initializing" on the very first render in StrictMode),
   // which unmounts the entire App subtree — including ConditionalAuthWrapper,
   // so the discovery fetch never runs and the splash never appears.
-  instance.use(initReactI18next).init({
+  instance.use(initReactI18next).use(cjkLatinSpacingProcessor).init({
     lng,
     fallbackLng: fallbackLanguagesFor(fallbackLanguage),
     resources: mergedResources,
+    postProcess: [CJK_LATIN_SPACING_PROCESSOR],
     interpolation: {
       escapeValue: false, // React already escapes
       ...interpolation,
