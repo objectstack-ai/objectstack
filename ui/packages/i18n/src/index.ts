@@ -2,7 +2,8 @@
  * @object-ui/i18n
  *
  * Internationalization (i18n) support for Object UI.
- * Provides 10+ built-in language packs, RTL support, and date/currency formatting.
+ * Provides one built-in language pack per platform locale (`PLATFORM_LOCALES`
+ * in `@objectstack/spec/system`), RTL support, and date/currency formatting.
  *
  * @example
  * ```tsx
@@ -10,7 +11,7 @@
  *
  * function App() {
  *   return (
- *     <I18nProvider config={{ defaultLanguage: 'zh' }}>
+ *     <I18nProvider config={{ defaultLanguage: 'zh-Hans' }}>
  *       <MyComponent />
  *     </I18nProvider>
  *   );
@@ -22,7 +23,7 @@
  *     <div dir={direction}>
  *       <h1>{t('common.save')}</h1>
  *       <button onClick={() => changeLanguage('en')}>English</button>
- *       <button onClick={() => changeLanguage('zh')}>中文</button>
+ *       <button onClick={() => changeLanguage('zh-Hans')}>中文</button>
  *     </div>
  *   );
  * }
@@ -85,8 +86,8 @@ export { useObjectLabel, useSafeFieldLabel } from './useObjectLabel.js';
 // The record-named save message every record save surface toasts.
 export { recordSaveMessage, type RecordSaveMessageInput } from './recordSaveMessage.js';
 
-// Locale packs — ⛔ ONE catalogue is statically re-exported here, not ten
-// (objectui#7479).
+// Locale packs — ⛔ ONE catalogue is statically re-exported here, not every
+// pack (objectui#7479).
 //
 // This entry used to re-export all ten packs and `builtInLocales`, which made
 // every one of them statically reachable from any import of this package. The
@@ -95,7 +96,7 @@ export { recordSaveMessage, type RecordSaveMessageInput } from './recordSaveMess
 // one, and every new key paid for by every visitor in every language.
 //
 // ⛔ Do not restore a static re-export of a second catalogue here, and do not
-// re-export `builtInLocales` from this entry. Both put all ten back:
+// re-export `builtInLocales` from this entry. Both put every pack back:
 // `builtInLocales` names every pack in one object literal, so nothing can shake
 // it. `scripts/check-eager-locale-catalogues.mjs` fails the build if a
 // non-active catalogue reappears in the console's eager closure, and
@@ -106,9 +107,12 @@ export { recordSaveMessage, type RecordSaveMessageInput } from './recordSaveMess
 //   - `en` stays — it is `fallbackLng`, the source of `TranslationKeys`, and
 //     the synchronous dictionary the app-shell splash renders from before i18n
 //     is usable. See `./locales/registry.js` for the full argument.
-//   - `loadBuiltInLocale(code)` fetches any of the ten on demand.
-//   - `BUILT_IN_LANGUAGE_CODES` enumerates them at zero payload.
-//   - `@object-ui/i18n/locales` is the explicit, published door to all ten for
+//   - `loadBuiltInLocale(code)` fetches any pack on demand, and
+//     `resolveBuiltInLanguage(code)` names the pack a stored or browser code
+//     reads as (`zh-CN` → `zh-Hans`, `zh-TW` → `zh-Hant`).
+//   - `BUILT_IN_LANGUAGE_CODES` enumerates them at zero payload: the platform
+//     locale table's tags, in its menu order.
+//   - `@object-ui/i18n/locales` is the explicit, published door to every pack for
 //     a caller that genuinely wants them all resident (the parity suites do).
 export { isRTL, RTL_LANGUAGES } from './locales/rtl.js';
 export {
@@ -118,6 +122,7 @@ export {
   isBuiltInLanguage,
   isBuiltInLocaleLoaded,
   loadBuiltInLocale,
+  resolveBuiltInLanguage,
   type LocaleCatalogue,
 } from './locales/registry.js';
 export { default as en } from './locales/en.js';

@@ -4,7 +4,7 @@
   "type": "module",
   "sideEffects": false,
   "license": "MIT",
-  "description": "Internationalization (i18n) support for ObjectUI with 10+ language packs, RTL layout, and date/currency formatting.",
+  "description": "Internationalization (i18n) support for ObjectUI with the platform locale table's language packs, RTL layout, and date/currency formatting.",
   "homepage": "https://objectstack.ai/docs/frontend",
   "repository": {
     "type": "git",
@@ -43,10 +43,12 @@
     "build": "tsc && node ../../scripts/check-dist-completeness.mjs",
     "test": "vitest run --root ../.. packages/i18n/",
     "type-check": "tsc --noEmit && tsc -p tsconfig.test.json",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "gen:zh-hant": "node scripts/gen-zh-hant.mjs"
   },
   "dependencies": {
     "@object-ui/core": "workspace:*",
+    "@objectstack/spec": "workspace:^",
     "i18next": "^26.4.0",
     "react-i18next": "^17.0.11"
   },
@@ -56,6 +58,7 @@
   "devDependencies": {
     "@object-ui/test-support": "workspace:*",
     "@types/react": "19.3.0",
+    "opencc-js": "1.3.1",
     "react": "19.3.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"

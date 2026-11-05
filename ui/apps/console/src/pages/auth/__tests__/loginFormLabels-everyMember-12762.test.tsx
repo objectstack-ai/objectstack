@@ -97,7 +97,7 @@ function labelMembers(): string[] {
 }
 
 const MEMBERS = labelMembers();
-const ZH_LOGIN = builtInLocales.zh.auth.login as Record<string, unknown>;
+const ZH_LOGIN = builtInLocales['zh-Hans'].auth.login as Record<string, unknown>;
 
 function createMockClient(): AuthClient {
   return {

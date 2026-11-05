@@ -95,7 +95,7 @@ describe('one word for the owner: detail.owner equals the platform label of owne
   });
 
   it('the words the seat chose: 负责人 in zh, Owner in en', () => {
-    expect((builtInLocales.zh as any).detail.owner).toBe('负责人');
+    expect((builtInLocales['zh-Hans'] as any).detail.owner).toBe('负责人');
     expect(platformOwnerLabel('zh-CN')).toBe('负责人');
     expect((builtInLocales.en as any).detail.owner).toBe('Owner');
     expect(platformOwnerLabel('en')).toBe('Owner');

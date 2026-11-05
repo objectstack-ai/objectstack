@@ -49,6 +49,7 @@
  * which is the most load-bearing assertion in this file.
  */
 import { describe, it, expect } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { builtInLocales } from '../locales/index';
 
 type LocaleCode = keyof typeof builtInLocales;
@@ -180,7 +181,7 @@ describe('objectui#4730 dead-key batch is retired from the ten packs', () => {
   it('covers all ten packs', () => {
     // Guards the premise the rest of the file rests on: a pin that iterates an
     // empty pack list is green for the wrong reason.
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
   });
 
   it('no pack defines any retired key', () => {

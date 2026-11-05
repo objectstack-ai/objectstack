@@ -78,7 +78,7 @@ import { builtInLocales } from '../locales/index';
  * The packs whose script is not Latin. Identity with `en` is decidable evidence
  * of omission here, and only here — see the header on why de/fr/es/pt are out.
  */
-const NON_LATIN = ['zh', 'ja', 'ko', 'ru', 'ar'] as const;
+const NON_LATIN = ['zh-Hans', 'zh-Hant', 'ja', 'ko', 'ru', 'ar'] as const;
 type NonLatin = (typeof NON_LATIN)[number];
 
 /** A run of Latin letters long enough that a non-Latin pack cannot mean it. */

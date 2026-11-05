@@ -81,7 +81,7 @@ function renderRow(language: Lang, spec: Specifier, resolved?: ResolvedSettingVa
   );
 }
 
-const view = builtInLocales.zh.console.settingsView as unknown as Record<string, string>;
+const view = builtInLocales['zh-Hans'].console.settingsView as unknown as Record<string, string>;
 const viewEn = builtInLocales.en.console.settingsView as unknown as Record<string, string>;
 const LATIN = /\p{Script=Latin}/u;
 

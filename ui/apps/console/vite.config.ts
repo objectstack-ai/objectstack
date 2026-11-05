@@ -1188,7 +1188,7 @@ export default defineConfig({
             // (lifting `framework` above these two) is still refused, for the
             // reason it gave.
             //
-            // ## Why there are ELEVEN i18n groups and not one (objectui#7479)
+            // ## Why there is one i18n group PER CATALOGUE and not one (objectui#7479)
             //
             // objectui#7399 gave the catalogues one `i18n-locales` chunk so the
             // `framework` ceiling stopped budgeting them. That chunk held all
@@ -1201,8 +1201,10 @@ export default defineConfig({
             // would be real in the source and absent in the bundle, which is
             // the failure mode this whole card exists to avoid.
             //
-            // So: one group per catalogue, ten single-module chunks, plus a
-            // group for the i18n RUNTIME (provider, hooks, formatters) which
+            // So: one group per catalogue — one per tag of the platform locale
+            // table (`PLATFORM_LOCALES` in `@objectstack/spec/system`; the file
+            // is named for its tag, objectstack#30511), each a single-module
+            // chunk — plus a group for the i18n RUNTIME (provider, hooks, formatters) which
             // stays eager and is a hundredth of the size. The names are the
             // gate's handle — `scripts/check-eager-locale-catalogues.mjs` reads
             // `i18n-locale-<code>` out of the BUILT `eager-closure.json` and
@@ -1214,15 +1216,16 @@ export default defineConfig({
             // `scripts/__tests__/check-eager-closure-budget.test.ts` that pins
             // this attribution.
             { name: 'i18n-locale-en', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]en\.ts$/, priority: 84 },
-            { name: 'i18n-locale-zh', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]zh\.ts$/, priority: 84 },
+            { name: 'i18n-locale-zh-Hans', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]zh-Hans\.ts$/, priority: 84 },
+            { name: 'i18n-locale-zh-Hant', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]zh-Hant\.ts$/, priority: 84 },
+            { name: 'i18n-locale-es', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]es\.ts$/, priority: 84 },
+            { name: 'i18n-locale-ar', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]ar\.ts$/, priority: 84 },
+            { name: 'i18n-locale-fr', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]fr\.ts$/, priority: 84 },
+            { name: 'i18n-locale-pt-BR', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]pt-BR\.ts$/, priority: 84 },
+            { name: 'i18n-locale-ru', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]ru\.ts$/, priority: 84 },
+            { name: 'i18n-locale-de', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]de\.ts$/, priority: 84 },
             { name: 'i18n-locale-ja', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]ja\.ts$/, priority: 84 },
             { name: 'i18n-locale-ko', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]ko\.ts$/, priority: 84 },
-            { name: 'i18n-locale-de', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]de\.ts$/, priority: 84 },
-            { name: 'i18n-locale-fr', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]fr\.ts$/, priority: 84 },
-            { name: 'i18n-locale-es', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]es\.ts$/, priority: 84 },
-            { name: 'i18n-locale-pt', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]pt\.ts$/, priority: 84 },
-            { name: 'i18n-locale-ru', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]ru\.ts$/, priority: 84 },
-            { name: 'i18n-locale-ar', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]ar\.ts$/, priority: 84 },
             //
             // The Studio designer's `studio` namespace (objectstack#25922): the
             // same one-group-per-catalogue rule, for the same reason. Its `zh`

@@ -130,7 +130,7 @@ describe('objectui#10104 — CalendarView a11y labels come from the pack', () =>
     const { container } = renderAt('zh')
     const todayButton = container.querySelector('[aria-label]')
     expect(todayButton, 'nothing rendered at all').toBeTruthy()
-    expect(container.textContent).toContain(builtInLocales.zh.calendar.today)
+    expect(container.textContent).toContain(builtInLocales['zh-Hans'].calendar.today)
     expect(container.textContent).not.toContain(builtInLocales.en.calendar.today)
   })
 

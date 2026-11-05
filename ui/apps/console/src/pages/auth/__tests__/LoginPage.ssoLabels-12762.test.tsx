@@ -90,7 +90,7 @@ async function expectSsoCopy(expected: Record<keyof typeof ENGLISH, string>) {
 
 describe('console LoginPage — SSO copy under zh (objectui#12762)', () => {
   it('draws the zh bundle value of each SSO label, and no English default', async () => {
-    const zh = builtInLocales.zh.auth.login;
+    const zh = builtInLocales['zh-Hans'].auth.login;
     for (const key of SSO_KEYS) {
       expect(typeof zh[key], `zh auth.login.${key}`).toBe('string');
       expect(zh[key], `zh auth.login.${key}`).not.toBe(ENGLISH[key]);

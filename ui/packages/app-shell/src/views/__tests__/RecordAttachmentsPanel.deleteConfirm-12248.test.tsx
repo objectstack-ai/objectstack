@@ -41,7 +41,7 @@ type Pack = {
 /** The packs, read by key — see the header on why nothing is written out. */
 const PACKS = {
   en: builtInLocales.en as unknown as Pack,
-  zh: builtInLocales.zh as unknown as Pack,
+  zh: builtInLocales['zh-Hans'] as unknown as Pack,
 };
 
 const fill = (template: string, vars: Record<string, string>) =>

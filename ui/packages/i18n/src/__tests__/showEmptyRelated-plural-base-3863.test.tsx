@@ -46,6 +46,7 @@
  * prove reachability and prove the English wording did not move.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { renderHook } from '@testing-library/react';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -125,7 +126,7 @@ beforeEach(() => {
 
 describe('objectui#3863 — detail.showEmptyRelated carries a base key in all ten packs', () => {
   it('covers ten packs and three slots — guards the loops from emptying', () => {
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
     expect(SLOTS).toHaveLength(3);
     expect(COUNTS.length).toBeGreaterThanOrEqual(7);
   });
@@ -269,13 +270,14 @@ describe('objectui#3863 — detail.showEmptyRelated carries a base key in all te
       const CASES: Array<[LocaleCode, number, string]> = [
         ['de', 1, '+ 1 leer'],
         ['de', 7, '+ 7 leer'],
-        ['zh', 3, '+ 3 个为空'],
+        ['zh-Hans', 3, '+ 3 个为空'],
+        ['zh-Hant', 3, '+ 3 個為空'],
         ['ja', 3, '+ 3 件（空）'],
         ['ko', 3, '+ 3개 비어 있음'],
         ['fr', 1, '+ 1 vide'],
         ['fr', 7, '+ 7 vides'],
         ['es', 7, '+ 7 vacíos'],
-        ['pt', 7, '+ 7 vazios'],
+        ['pt-BR', 7, '+ 7 vazios'],
       ];
       for (const [lang, count, expected] of CASES) {
         window.localStorage.clear();
@@ -289,7 +291,7 @@ describe('objectui#3863 — detail.showEmptyRelated carries a base key in all te
       // objectui#11432 it has its own slot; on this key it repeats `_other`, because
       // the count governs no noun complement (the "de" of "un million de …" goes
       // before a noun, and this label has none).
-      for (const lang of ['fr', 'es', 'pt'] as const) {
+      for (const lang of ['fr', 'es', 'pt-BR'] as const) {
         expect(new Intl.PluralRules(lang).select(100)).toBe('other');
         expect(new Intl.PluralRules(lang).select(1_000_000)).toBe('many');
         window.localStorage.clear();
