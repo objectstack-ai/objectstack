@@ -62,11 +62,11 @@ const ITEM_OBJECT = {
 
 /**
  * [#29029] A task whose validation rules read each reference one hop: each
- * trips on a target named `tripping`. The reference check runs BEFORE them.
+ * refuses a target named `flagged`. The reference check runs BEFORE them.
  */
 const RULED = 'urt_ruled_task';
-const TRIPPED = 'URT29029: the named target trips the rule';
-const TITLE_TRIPPED = 'URT29029: the title trips the rule';
+const RULE_MESSAGE = 'URT29029: the rule refuses the named target';
+const TITLE_RULE_MESSAGE = 'URT29029: the rule refuses the title';
 const RULED_OBJECT = {
   name: RULED,
   label: 'Ruled task',
@@ -80,9 +80,9 @@ const RULED_OBJECT = {
     // Checked only while the reference is set, as an author guards a traversal.
     name: `urt_${field}_when_set`, type: 'conditional', severity: 'error', message: 'unused',
     when: `record.${field} != null`,
-    then: { name: `urt_${field}_trips`, type: 'script', severity: 'error', message: TRIPPED, condition: `record.${field}.name == 'tripping'` },
+    then: { name: `urt_${field}_rule`, type: 'script', severity: 'error', message: RULE_MESSAGE, condition: `record.${field}.name == 'flagged'` },
   })).concat([
-    { name: 'urt_title_trips', type: 'script', severity: 'error', message: TITLE_TRIPPED, condition: "record.title == 'trip'" } as any,
+    { name: 'urt_title_rule', type: 'script', severity: 'error', message: TITLE_RULE_MESSAGE, condition: "record.title == 'flagged'" } as any,
   ]),
 };
 
@@ -187,9 +187,9 @@ function makeEngine() {
     rows.set('t_mine', { id: 't_mine', name: 'mine', owner_name: 'alice' });
     rows.set('t_mine_2', { id: 't_mine_2', name: 'mine too', owner_name: 'alice' });
     rows.set('t_other', { id: 't_other', name: 'other', owner_name: 'bob' });
-    // [#29029] A readable and an unreadable target that trip the ruled task's rules.
-    rows.set('t_trip_mine', { id: 't_trip_mine', name: 'tripping', owner_name: 'alice' });
-    rows.set('t_trip_other', { id: 't_trip_other', name: 'tripping', owner_name: 'bob' });
+    // [#29029] A readable and an unreadable target the ruled task's rules refuse.
+    rows.set('t_flagged_mine', { id: 't_flagged_mine', name: 'flagged', owner_name: 'alice' });
+    rows.set('t_flagged_other', { id: 't_flagged_other', name: 'flagged', owner_name: 'bob' });
   }
   return { engine, targetReads, ...store };
 }
@@ -360,48 +360,48 @@ describe('[#29029] an unreadable reference answers reference_not_found before th
     { field: 'assignee', kind: 'user' },
     { field: 'header', kind: 'master_detail' },
   ] as const)('a $kind field', ({ field }) => {
-    it.each(DOORS)('%s — a target the caller cannot read that a rule would trip on answers reference_not_found, not the rule', async (door) => {
-      const err = await refusalOf(() => write(door, { [field]: 't_trip_other' }));
+    it.each(DOORS)('%s — a target the caller cannot read answers reference_not_found, before the record\'s validation rules', async (door) => {
+      const err = await refusalOf(() => write(door, { [field]: 't_flagged_other' }));
       expect(envelopeOf(err)).toEqual(notFound(field));
-      expect(String((err as Error).message)).not.toContain(TRIPPED);
+      expect(String((err as Error).message)).not.toContain(RULE_MESSAGE);
       expect(storedRuled()).toEqual([{ id: 'r1', title: 'stored' }]);
     });
 
-    it.each(DOORS)('%s — control: a readable target the rule trips on answers the rule', async (door) => {
-      const err = await refusalOf(() => write(door, { [field]: 't_trip_mine' }));
+    it.each(DOORS)('%s — control: a readable target reaches the record\'s validation rules', async (door) => {
+      const err = await refusalOf(() => write(door, { [field]: 't_flagged_mine' }));
       expect(ruleRefusal(err).code).toBe('VALIDATION_FAILED');
-      expect(ruleRefusal(err).messages.some((m: string) => m.includes(TRIPPED))).toBe(true);
+      expect(ruleRefusal(err).messages.some((m: string) => m.includes(RULE_MESSAGE))).toBe(true);
       expect(storedRuled()).toEqual([{ id: 'r1', title: 'stored' }]);
     });
 
     it.each(DOORS)('%s — control: a system write naming that target answers the rule, as before', async (door) => {
-      const err = await refusalOf(() => write(door, { [field]: 't_trip_other' }, SYSTEM));
-      expect(ruleRefusal(err).messages.some((m: string) => m.includes(TRIPPED))).toBe(true);
+      const err = await refusalOf(() => write(door, { [field]: 't_flagged_other' }, SYSTEM));
+      expect(ruleRefusal(err).messages.some((m: string) => m.includes(RULE_MESSAGE))).toBe(true);
       expect(envelopeOf(err).fields.map((f) => f.code)).not.toContain('reference_not_found');
     });
   });
 
-  it.each(DOORS)('%s — a reference to a record that exists nowhere answers reference_not_found before a rule the record trips', async (door) => {
-    const err = await refusalOf(() => write(door, { title: 'trip', duty: 't_missing' }));
+  it.each(DOORS)('%s — a reference to a record that exists nowhere answers reference_not_found, before the record\'s validation rules', async (door) => {
+    const err = await refusalOf(() => write(door, { title: 'flagged', duty: 't_missing' }));
     expect(envelopeOf(err)).toEqual(notFound('duty'));
-    expect(String((err as Error).message)).not.toContain(TITLE_TRIPPED);
+    expect(String((err as Error).message)).not.toContain(TITLE_RULE_MESSAGE);
   });
 
-  it.each(DOORS)('%s — control: a flow run\'s system write keeps the rules first — the rule its record trips answers, not the reference check', async (door) => {
+  it.each(DOORS)('%s — control: a flow run\'s system write keeps the validation rules first', async (door) => {
     const flowRun = markFlowWriteReferenceCheck({ ...SYSTEM });
-    const err = await refusalOf(() => write(door, { title: 'trip', duty: 't_missing' }, flowRun));
-    expect(ruleRefusal(err).messages.some((m: string) => m.includes(TITLE_TRIPPED))).toBe(true);
+    const err = await refusalOf(() => write(door, { title: 'flagged', duty: 't_missing' }, flowRun));
+    expect(ruleRefusal(err).messages.some((m: string) => m.includes(TITLE_RULE_MESSAGE))).toBe(true);
     expect(envelopeOf(err).fields.map((f) => f.code)).not.toContain('reference_not_found');
   });
 
   it('the validate preview answers as the insert does: reference_not_found for the unreadable target, the rule for the readable one', async () => {
-    const unreadable = (await engine.validate(RULED, { title: 'preview', duty: 't_trip_other' }, { mode: 'insert', context: ALICE } as any)).results?.[0];
+    const unreadable = (await engine.validate(RULED, { title: 'preview', duty: 't_flagged_other' }, { mode: 'insert', context: ALICE } as any)).results?.[0];
     expect(unreadable?.valid).toBe(false);
     expect((unreadable?.errors ?? []).map((e: any) => ({ field: e.field, code: e.code }))).toEqual([{ field: 'duty', code: 'reference_not_found' }]);
-    expect(JSON.stringify(unreadable?.errors ?? [])).not.toContain(TRIPPED);
-    const readable = (await engine.validate(RULED, { title: 'preview', duty: 't_trip_mine' }, { mode: 'insert', context: ALICE } as any)).results?.[0];
+    expect(JSON.stringify(unreadable?.errors ?? [])).not.toContain(RULE_MESSAGE);
+    const readable = (await engine.validate(RULED, { title: 'preview', duty: 't_flagged_mine' }, { mode: 'insert', context: ALICE } as any)).results?.[0];
     expect(readable?.valid).toBe(false);
-    expect((readable?.errors ?? []).some((e: any) => String(e.message).includes(TRIPPED))).toBe(true);
+    expect((readable?.errors ?? []).some((e: any) => String(e.message).includes(RULE_MESSAGE))).toBe(true);
   });
 });
 

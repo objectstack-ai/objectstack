@@ -19,8 +19,7 @@
 //   (the item's fixtures.knownGaps). Such a member may not name the parent at
 //   all (#29029, revision 7): a write naming a parent the caller's own read
 //   door does not return answers `reference_not_found` on the lookup, before
-//   the record's rules, whether or not the parent trips one (acceptance[3],
-//   negative[2]). A read of the parent as that member is the control that the
+//   the record's validation rules (acceptance[3], negative[2]). A read of the parent as that member is the control that the
 //   member really cannot read it.
 //
 // The rule's refusal is scored on the envelope — 400 VALIDATION_FAILED, the
@@ -206,12 +205,12 @@ describe('records-forms.predicate-relationship-traversal — a member who cannot
     expect(read.json.code).toBe('PERMISSION_DENIED');
   });
 
-  it('acceptance[3]: a write naming a non-tripping parent the member cannot read answers reference_not_found, and stores nothing', async () => {
+  it('acceptance[3]: a write naming a parent the member cannot read answers reference_not_found, and stores nothing', async () => {
     expectReferenceRefusal(await call('POST', `/data/${CHILD}`, { name: 'prt-open', parent: openId }), 'parent');
     expect(await stack.rows(CHILD, { name: 'prt-open' })).toHaveLength(0);
   });
 
-  it('acceptance[3], negative[2]: a write naming a tripping parent the member cannot read answers the same, never the rule\'s message', async () => {
+  it('acceptance[3], negative[2]: the reference check answers before the record\'s validation rules, never a rule\'s message', async () => {
     const answer = await call('POST', `/data/${CHILD}`, { name: 'prt-blocked', parent: blockedId });
     expectReferenceRefusal(answer, 'parent');
     expect(JSON.stringify(answer.json)).not.toContain(BLOCKED_MESSAGE);
