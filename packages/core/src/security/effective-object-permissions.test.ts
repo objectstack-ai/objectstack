@@ -555,6 +555,69 @@ describe('[#30370] an object whose external write gate is closed grants no write
   });
 });
 
+describe('[#30440] a guarded managed object grants no verb its write guard refuses, modifyAllRecords included', () => {
+  const SCHEMAS: Record<string, any> = {
+    // engine-owned, nothing opted in: the guard refuses every user-context write.
+    sys_automation_run: { name: 'sys_automation_run', managedBy: 'engine-owned' },
+    // better-auth with only `edit` opted in (the sys_user shape).
+    sys_user: { name: 'sys_user', managedBy: 'better-auth', userActions: { edit: true } },
+    // append-only with both row verbs opted in (object form for delete).
+    sys_feed_note: { name: 'sys_feed_note', managedBy: 'append-only', userActions: { edit: true, delete: { enabled: true } } },
+    // no guard covers it.
+    crm_lead: { name: 'crm_lead' },
+  };
+  const source = { allSchemas: () => Object.values(SCHEMAS), schemaOf: (name: string) => SCHEMAS[name] };
+  const ROW_VERBS = ['allowEdit', 'allowDelete', 'allowTransfer'] as const;
+  const can = (entry: any) => Object.fromEntries(
+    (['allowRead', 'allowCreate', ...ROW_VERBS] as const).map((verb) => [verb, objectPermissionGrants(entry, verb)]),
+  );
+
+  it('an explicit { modifyAllRecords: true } on an object opting nothing in answers no edit, delete or transfer, and the same read', () => {
+    const map: any = buildEffectiveObjectPermissions([{ objects: { sys_automation_run: { modifyAllRecords: true } } }], source);
+    expect(can(map.sys_automation_run)).toEqual({ allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false, allowTransfer: false });
+    expect(map.sys_automation_run).toMatchObject({ modifyAllRecords: false, viewAllRecords: true });
+  });
+
+  it('an object opting edit in keeps edit and transfer through it, and loses delete', () => {
+    const map: any = buildEffectiveObjectPermissions([{ objects: { sys_user: { modifyAllRecords: true } } }], source);
+    expect(can(map.sys_user)).toEqual({ allowRead: true, allowCreate: false, allowEdit: true, allowDelete: false, allowTransfer: true });
+    expect(map.sys_user).toMatchObject({ modifyAllRecords: false, viewAllRecords: true, allowEdit: true, allowTransfer: true });
+  });
+
+  it('an object opting edit and delete in keeps modifyAllRecords as granted', () => {
+    const map: any = buildEffectiveObjectPermissions([{ objects: { sys_feed_note: { modifyAllRecords: true } } }], source);
+    expect(map.sys_feed_note.modifyAllRecords).toBe(true);
+    expect(map.sys_feed_note).not.toHaveProperty('viewAllRecords');
+    expect(can(map.sys_feed_note)).toEqual({ allowRead: true, allowCreate: false, allowEdit: true, allowDelete: true, allowTransfer: true });
+  });
+
+  it('an explicit allowTransfer on an object not opting edit in answers no transfer', () => {
+    const map: any = buildEffectiveObjectPermissions([{ objects: { sys_automation_run: { allowRead: true, allowTransfer: true } } }], source);
+    expect(objectPermissionGrants(map.sys_automation_run, 'allowTransfer')).toBe(false);
+    expect(objectPermissionGrants(map.sys_automation_run, 'allowRead')).toBe(true);
+  });
+
+  it('CONTROL: the same entry on an unguarded object keeps every verb modifyAllRecords grants', () => {
+    const map: any = buildEffectiveObjectPermissions([{ objects: { crm_lead: { modifyAllRecords: true } } }], source);
+    expect(map.crm_lead.modifyAllRecords).toBe(true);
+    expect(can(map.crm_lead)).toEqual({ allowRead: true, allowCreate: false, allowEdit: true, allowDelete: true, allowTransfer: true });
+  });
+
+  it('CONTROL: the super-user wildcard fold answers as before, transfer on the object opting nothing in aside', () => {
+    const map: any = buildEffectiveObjectPermissions(
+      [{ objects: { '*': { allowRead: true, viewAllRecords: true, modifyAllRecords: true } } }],
+      source,
+    );
+    expect(can(map.crm_lead)).toEqual({ allowRead: true, allowCreate: false, allowEdit: true, allowDelete: true, allowTransfer: true });
+    expect(can(map.sys_user)).toEqual({ allowRead: true, allowCreate: false, allowEdit: true, allowDelete: false, allowTransfer: true });
+    expect(can(map.sys_feed_note)).toEqual({ allowRead: true, allowCreate: false, allowEdit: true, allowDelete: true, allowTransfer: true });
+    // The fold copies the bits the wildcard grants, never modifyAllRecords itself.
+    for (const name of Object.keys(SCHEMAS)) expect(map[name], name).not.toHaveProperty('modifyAllRecords');
+    // The one answer that moves: the guard refuses the update a transfer is.
+    expect(can(map.sys_automation_run)).toEqual({ allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false, allowTransfer: false });
+  });
+});
+
 // ── [#25866 / ruling of record 6408558941] A field permission entry's row
 // condition (`when`): the ONE vote per verdict, and the row-blind merge behind
 // `/auth/me/permissions`' `fields` slot.

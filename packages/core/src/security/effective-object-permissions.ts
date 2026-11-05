@@ -239,6 +239,16 @@ const GUARDED_WRITE_BUCKETS: ReadonlySet<string> = new Set(['better-auth', 'engi
  * objects are NOT clamped — no guard covers them, so their permission-set result
  * stands (an admin CAN write them via the data API, and the hint must not
  * under-report that).
+ *
+ * [#30440] Every verb the guard refuses is refused whatever grants it:
+ *  - `allowTransfer` follows `edit` — an owner change is an update, and the
+ *    guard refuses the update unless `edit` is opted in;
+ *  - `modifyAllRecords` grants edit, delete and transfer on its own (the
+ *    spec's `objectPermissionGrants`), so where the guard refuses one of them
+ *    it is lowered by {@link lowerModifyAllRecords}: to `viewAllRecords`, the
+ *    read it implies, plus the plain bit of each verb the object still opts in.
+ *    Where `edit` and `delete` are both opted in it grants nothing the guard
+ *    refuses, and stays.
  */
 export function clampManagedObjectWrites(
   objects: Record<string, any>,
@@ -249,13 +259,40 @@ export function clampManagedObjectWrites(
     const schema = schemaOf(obj);
     if (!schema?.managedBy || !GUARDED_WRITE_BUCKETS.has(schema.managedBy)) continue;
     const ua = schema.userActions ?? {};
-    if (!isWriteOptedIn(ua.edit)) acc.allowEdit = false;
+    const edit = isWriteOptedIn(ua.edit);
+    const del = isWriteOptedIn(ua.delete);
+    if (!edit) acc.allowEdit = false;
     // `create` reads through the same opt-in helper as edit/delete since
     // #7692 widened it to the object form — a bare `ua.create !== true`
     // would clamp away a legitimate `{ enabled: true, visibleWhen: … }`.
     if (!isWriteOptedIn(ua.create)) acc.allowCreate = false;
-    if (!isWriteOptedIn(ua.delete)) acc.allowDelete = false;
+    if (!del) acc.allowDelete = false;
+    if (!edit) acc.allowTransfer = false;
+    lowerModifyAllRecords(acc, { allowEdit: edit, allowDelete: del, allowTransfer: edit });
   }
+}
+
+/**
+ * Lower an entry's `modifyAllRecords` where a server-side layer refuses a verb
+ * it grants. The spec's `objectPermissionGrants` answers edit, delete and
+ * transfer `true` on `modifyAllRecords` alone, so no `allow*: false` beside it
+ * takes any of them away: the bit itself has to go. It becomes
+ * `viewAllRecords` — the read it implies, so the entry keeps exactly the read
+ * it had — and each verb `kept` names is carried over as its plain bit, so a
+ * verb the layer still admits is not lost with it. An entry the layer admits
+ * every one of those verbs on is left as it is.
+ */
+function lowerModifyAllRecords(
+  acc: Record<string, any>,
+  kept: { allowEdit: boolean; allowDelete: boolean; allowTransfer: boolean },
+): void {
+  if (acc.modifyAllRecords !== true) return;
+  if (kept.allowEdit && kept.allowDelete && kept.allowTransfer) return;
+  acc.modifyAllRecords = false;
+  acc.viewAllRecords = true;
+  if (kept.allowEdit) acc.allowEdit = true;
+  if (kept.allowDelete) acc.allowDelete = true;
+  if (kept.allowTransfer) acc.allowTransfer = true;
 }
 
 /** The API-exposure-relevant slice of a registered object schema. */
@@ -551,7 +588,7 @@ const EXTERNAL_WRITE_GATED_OPERATIONS: ReadonlySet<ApiOperation> = new Set<ApiOp
  * answers edit, delete and transfer `true` on it alone, so an entry keeping it
  * would still answer `current_user.can(object, 'edit')` `true`. It is lowered
  * to `viewAllRecords`, the read half it implies, so the entry keeps exactly
- * the read it had.
+ * the read it had ({@link lowerModifyAllRecords}, keeping no verb).
  *
  * An object the map does not mention already grants nothing, and is left out.
  */
@@ -563,10 +600,7 @@ function clampExternalReadOnlyWrites(objects: Record<string, any>, forbidden: Re
     acc.allowEdit = false;
     acc.allowDelete = false;
     acc.allowTransfer = false;
-    if (acc.modifyAllRecords === true) {
-      acc.modifyAllRecords = false;
-      acc.viewAllRecords = true;
-    }
+    lowerModifyAllRecords(acc, { allowEdit: false, allowDelete: false, allowTransfer: false });
   }
 }
 
