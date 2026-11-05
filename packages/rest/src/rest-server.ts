@@ -6181,19 +6181,20 @@ export class RestServer {
      * business) and returns 501 when no security service exposing `explain`
      * is mounted (a deployment without `@objectstack/plugin-security`).
      */
-    private registerUserWorkEndpoints(basePath: string): void {
-        // [#30205] The body lives in `user-work-routes.ts`. This literal hands it
-        // every member it reads (see `UserWorkRouteHost`); the engine provider
-        // FIELD goes as a getter, read when a handler reads it.
-        const readObjectQLProvider = () => this.objectQLProvider;
-        const host: UserWorkRouteHost = {
+    private registerSecurityExplainEndpoints(basePath: string): void {
+        // [#23050 slice 6] The body moved to `security-routes.ts`. This literal
+        // hands it every member it reads — the list IS its dependency on this
+        // class (see `SecurityExplainRouteHost`, and that module's header for why
+        // `securityServiceProvider` is a getter).
+        const readSecurityServiceProvider = () => this.securityServiceProvider;
+        const host: SecurityExplainRouteHost = {
             routeManager: this.routeManager,
-            get objectQLProvider() { return readObjectQLProvider(); },
+            get securityServiceProvider() { return readSecurityServiceProvider(); },
             resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
             enforceAuth: (...a) => this.enforceAuth(...a),
         };
-        registerUserWorkEndpoints.call(host, basePath);
+        registerSecurityExplainEndpoints.call(host, basePath);
     }
 
     /**
@@ -6210,20 +6211,19 @@ export class RestServer {
      * Neither touches the ban. `@objectstack/core`'s `user-assigned-work.ts`
      * holds the rules.
      */
-    private registerSecurityExplainEndpoints(basePath: string): void {
-        // [#23050 slice 6] The body moved to `security-routes.ts`. This literal
-        // hands it every member it reads — the list IS its dependency on this
-        // class (see `SecurityExplainRouteHost`, and that module's header for why
-        // `securityServiceProvider` is a getter).
-        const readSecurityServiceProvider = () => this.securityServiceProvider;
-        const host: SecurityExplainRouteHost = {
+    private registerUserWorkEndpoints(basePath: string): void {
+        // [#30205] The body lives in `user-work-routes.ts`. This literal hands it
+        // every member it reads (see `UserWorkRouteHost`); the engine provider
+        // FIELD goes as a getter, read when a handler reads it.
+        const readObjectQLProvider = () => this.objectQLProvider;
+        const host: UserWorkRouteHost = {
             routeManager: this.routeManager,
-            get securityServiceProvider() { return readSecurityServiceProvider(); },
+            get objectQLProvider() { return readObjectQLProvider(); },
             resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
             enforceAuth: (...a) => this.enforceAuth(...a),
         };
-        registerSecurityExplainEndpoints.call(host, basePath);
+        registerUserWorkEndpoints.call(host, basePath);
     }
 
     /**
