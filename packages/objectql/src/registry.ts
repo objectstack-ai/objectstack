@@ -4817,6 +4817,8 @@ export class SchemaRegistry {
 
   /** {@link getAllObjects} at the storage layer ({@link getStorageObject}), each tagged with its owner's `_packageId`. */
   getAllStorageObjects(): ServiceObject[] {
+    // Nothing disabled: the two layers are one answer, read through the one walk.
+    if (!this.hasDisabledPackage()) return this.getAllObjects();
     const results: ServiceObject[] = [];
     for (const fqn of this.objectContributors.keys()) {
       const merged = this.resolveStorageObject(fqn);

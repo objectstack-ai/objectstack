@@ -2099,8 +2099,9 @@ export class ObjectQLPlugin implements Plugin {
    * exactly the incomplete test double #9154 measured.
    *
    * @param seam - the calling method, named in the thrown message.
+   * @param layer - `storage` for a DDL / binding reader, `served` otherwise.
    */
-  private readRegisteredObjects(seam: string): ServiceObject[] {
+  private readRegisteredObjects(seam: string, layer: 'served' | 'storage' = 'served'): ServiceObject[] {
     const registry: any = (this.ql as any)?.registry;
     const read: unknown = registry?.getAllObjects;
     if (registry == null || typeof read !== 'function') {
@@ -2114,13 +2115,13 @@ export class ObjectQLPlugin implements Plugin {
           '`getAllObjects()` — a duck-typed engine or an incomplete test double is the only way to reach this line.',
       );
     }
-    // Every caller here is a STORAGE reader (DDL, the federated binding), so
-    // it reads the object with every extension folded in, a disabled
-    // package's included: a disable must not take a column away from the data
-    // it keeps (`SchemaRegistry.getStorageObject`). A registry without that
-    // read answers its served fold, as before.
+    // A STORAGE reader (DDL, the federated binding) reads the objects with
+    // every extension folded in, a disabled package's included: a disable must
+    // not take a column away from the data it keeps
+    // (`SchemaRegistry.getAllStorageObjects`). A registry without that read
+    // answers its served fold, as before.
     const storage: unknown = registry.getAllStorageObjects;
-    if (typeof storage === 'function') return (storage as () => ServiceObject[]).call(registry);
+    if (layer === 'storage' && typeof storage === 'function') return (storage as () => ServiceObject[]).call(registry);
     return (read as () => ServiceObject[]).call(registry);
   }
 
@@ -2193,7 +2194,7 @@ export class ObjectQLPlugin implements Plugin {
     // looks healthy while declared data is simply not reachable.
     let allObjects: ServiceObject[];
     try {
-      allObjects = this.readRegisteredObjects('reconcileFederatedBindings');
+      allObjects = this.readRegisteredObjects('reconcileFederatedBindings', 'storage');
     } catch (e: unknown) {
       ctx.logger.error(
         'Federated (external) object reconciliation did NOT run — the object registry could not be read, so this boot ' +
@@ -2345,7 +2346,7 @@ export class ObjectQLPlugin implements Plugin {
     // [#9285] Same propagation contract as the sync pass: "the registry holds
     // nothing" and "the registry could not be read" have opposite consequences
     // and only the first is a truthful reason to register nothing.
-    const allObjects = this.readRegisteredObjects('registerSchemasWithoutDdl');
+    const allObjects = this.readRegisteredObjects('registerSchemasWithoutDdl', 'storage');
     if (allObjects.length === 0) return;
 
     const groups = new Map<any, ServiceObject[]>();
@@ -2430,7 +2431,7 @@ export class ObjectQLPlugin implements Plugin {
     // against a store whose DDL was never run. On the `metadata:reloaded` path
     // the caller already catches this and reports it at `error` (#4632), so
     // propagation there is a loud durability report, not a dead kernel.
-    const allObjects = this.readRegisteredObjects('syncRegisteredSchemas');
+    const allObjects = this.readRegisteredObjects('syncRegisteredSchemas', 'storage');
     if (allObjects.length === 0) return;
 
     let synced = 0;
