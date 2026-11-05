@@ -305,8 +305,10 @@ describe('one run status in the rail, the header and Problems (objectui#11779)',
     expect(note).toHaveTextContent(en('engine.studio.auto.notRunning'));
     expect(note).toHaveTextContent(REASON);
     expect(note.innerHTML).not.toMatch(/destructive/);
-    // The structural verdict stands: a deployment policy is not an authoring problem.
-    expect(screen.getByText(en('engine.flowProblems.empty'))).toBeInTheDocument();
+    // The structural verdict stands, worded so it does not read "no problems"
+    // beneath a note saying the flow does not run here (objectstack#30039).
+    expect(screen.getByText(en('engine.flowProblems.emptyNotRunning'))).toBeInTheDocument();
+    expect(screen.queryByText(en('engine.flowProblems.empty'))).toBeNull();
   });
 
   it('a flow with no declared trigger reads On, says "no trigger", and gets no Problems note — the control', async () => {

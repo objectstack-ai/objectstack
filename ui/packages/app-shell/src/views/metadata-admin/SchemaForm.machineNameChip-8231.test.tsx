@@ -201,7 +201,7 @@ describe('#8231 · untranslatedFieldLabel', () => {
     expect(en).toBe(SOURCE);
     expect(untranslatedFieldLabel(fieldsOf(en)[0])).toBe('Grid width');
     // A type the bundle does not carry is handed back untouched, too.
-    expect(localizeMetadataForm(SOURCE, 'report', 'zh')).toBe(SOURCE);
+    expect(localizeMetadataForm(SOURCE, 'job', 'zh')).toBe(SOURCE);
     expect(untranslatedFieldLabel({ label: '列数' })).toBe('列数');
     expect(untranslatedFieldLabel(undefined)).toBeUndefined();
   });
