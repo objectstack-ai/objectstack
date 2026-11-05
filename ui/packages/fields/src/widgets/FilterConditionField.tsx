@@ -12,7 +12,7 @@ import { useFieldTranslation } from './useFieldTranslation.js';
  * the builder's dropdown does. The English rows are the provider-less render's
  * stand-in, the same values as the `en` pack.
  */
-const useCriteriaWords = createSafeTranslation(
+const useCriteriaWordsTranslation = createSafeTranslation(
   {
     'filterBuilder.and': 'AND',
     'filterBuilder.or': 'OR',
@@ -672,7 +672,7 @@ export function FilterConditionField({
 }: FieldWidgetComponentProps<string | object>) {
   const ctx = React.useContext(SchemaRendererContext);
   const { t } = useFieldTranslation();
-  const { t: tWords } = useCriteriaWords();
+  const { t: tWords } = useCriteriaWordsTranslation();
   // Cast-free context read (objectui#7912); the local stays `any` for the
   // `FieldWidgetProps.dataSource?: unknown` channel it merges with.
   const dataSource: any = props.dataSource ?? ctx?.dataSource ?? null;
