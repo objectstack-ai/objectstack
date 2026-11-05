@@ -142,6 +142,8 @@ describe('sys_audit_log default list view — the rows it serves', () => {
         metadata: JSON.stringify({ endpoint: '/sign-in/email' }) },
       { action: 'config_change', object_name: SysSetting.name, record_id: null, user_id: 'u_admin', created_at: at(2),
         metadata: JSON.stringify({ event: 'settings.set', namespace: 'branding', key: 'workspace_name', scope: 'tenant' }) },
+      { action: 'config_change', object_name: SysPlatformSetting.name, record_id: null, user_id: 'u_admin', created_at: at(3),
+        metadata: JSON.stringify({ event: 'settings.set', namespace: 'mail', key: 'smtp_password', scope: 'global', encrypted: true }) },
       ...MACHINERY_OBJECTS.map((object, i) => ({
         action: 'create', object_name: object, record_id: `m${i}`, user_id: null, created_at: at(10 + i),
       })),
@@ -179,7 +181,11 @@ describe('sys_audit_log default list view — the rows it serves', () => {
       expect.arrayContaining([['name'], ['last_login_at', 'name']]),
     );
     expect(users).toHaveLength(2);
-    for (const row of recent) expect(MACHINERY_OBJECTS).not.toContain(row.object_name);
+    // A settings store's own write is out; the `config_change` row naming that store is in.
+    expect(shape).toContain(`config_change ${SysPlatformSetting.name}`);
+    for (const row of recent.filter((r) => r.action !== 'config_change')) {
+      expect(MACHINERY_OBJECTS).not.toContain(row.object_name);
+    }
   });
 
   it('`recent` reads newest first', async () => {
