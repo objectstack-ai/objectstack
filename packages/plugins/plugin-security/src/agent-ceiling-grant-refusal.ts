@@ -23,7 +23,6 @@
  *
  * A non-system insert or update that would STORE an assignment naming one of
  * those sets is refused, for every caller, a platform administrator included.
- * A picker that does not offer them is a convenience; this is the rule.
  *
  * ## Which rows it judges
  *
