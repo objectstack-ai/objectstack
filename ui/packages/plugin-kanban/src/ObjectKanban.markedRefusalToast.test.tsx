@@ -241,3 +241,42 @@ describe('ObjectKanban — a marked refusal reaches the card-move toast (#5902)'
     expect(String(said)).not.toContain('insufficient privileges');
   });
 });
+
+/**
+ * 403 EXTERNAL_WRITE_FORBIDDEN: the ADR-0015 write gate refusing a write on an
+ * object bound to an external datasource that does not admit writes. Shaped
+ * like the gate's body (`code` on the error, the whole body under `details`
+ * where `@objectstack/client` parks it), optionally marked.
+ */
+const READ_ONLY_LINE =
+  'This table is read-only. Its records come from an external data source that does not accept changes.';
+const externalWriteForbidden = (userMessage?: string) =>
+  normaliseClientError(
+    Object.assign(
+      new Error("Write 'update' blocked on object 'task': datasource 'ext' is external"),
+      {
+        code: 'EXTERNAL_WRITE_FORBIDDEN',
+        httpStatus: 403,
+        details: { code: 'EXTERNAL_WRITE_FORBIDDEN', object: 'task' },
+        ...(userMessage ? { userMessage } : {}),
+      },
+    ),
+  );
+
+describe('ObjectKanban — a card move on a read-only external object says the table is read-only', () => {
+  it('renders the read-only line, not the permission line, for EXTERNAL_WRITE_FORBIDDEN', async () => {
+    // RED before the fix: `isPermissionError` claims every 403 and printed
+    // "You are not authorized to perform this action.". The plain-403 control
+    // is "keeps the localized substitution for an UNMARKED 403" above.
+    await mountBoard(makeDataSource(externalWriteForbidden()));
+    const said = await dropAndReadToast();
+    expect(said).toBe(READ_ONLY_LINE);
+    expect(String(said)).not.toContain('blocked on object');
+  });
+
+  it('still renders an author-marked refusal ahead of the read-only line', async () => {
+    // The order every other write door uses: the marking wins first.
+    await mountBoard(makeDataSource(externalWriteForbidden(MARKED)));
+    expect(await dropAndReadToast()).toBe(MARKED);
+  });
+});

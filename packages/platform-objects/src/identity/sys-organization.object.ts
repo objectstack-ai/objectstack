@@ -395,7 +395,9 @@ export const SysOrganization = ObjectSchema.create({
     // ADR-0069 D3 — per-org MFA tightening above the global floor. When true,
     // members of this org must enrol TOTP to access data (enforced at the
     // session-validation gate). An org can only tighten, never loosen, the
-    // global `mfa_required` setting.
+    // global `mfa_required` setting. Saving it on is refused while two-factor
+    // enrollment is off for the deployment (plugin-auth's
+    // `organization-mfa-enrollment-guard.ts`), which the help says (#30411).
     require_mfa: Field.boolean({
       label: 'Require Multi-Factor Auth',
       required: false,

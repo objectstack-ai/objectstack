@@ -289,7 +289,8 @@ export function registerSettingsRoutes(
   mountFamilyRoute('get', `${base}/:namespace`, {
     async serve(req, res, ctx) {
       const ns = req.params.namespace;
-      const payload = await service.getNamespace(ns, ctx);
+      // The request's language names a served option no longer offered.
+      const payload = await service.getNamespace(ns, ctx, { locale: requestLocaleOf(req) });
       // The page states what is LIVE, not only what is stored: the owning
       // package's statement heads the specifiers as an `info_banner`, asked on
       // this read (see `SettingsService.liveStatusOf`). Added here and not in

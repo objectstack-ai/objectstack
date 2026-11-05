@@ -450,6 +450,11 @@ describe('A Chinese label names a base object\'s extension field by pinyin, suff
 describe('the object header says where a base object’s extension is saved (objectstack#29691)', () => {
   const SAVED_TO = 'Saved to HotCRM’s customizations';
   const savedTo = () => within(screen.getByTestId('data-object-header')).queryByTestId('data-object-saved-to');
+  // objectstack#30436 — and the sheet's second sentence, naming the real pair.
+  const ENVIRONMENT =
+    'These changes are kept in this environment’s database as items of com.example.hotcrm.custom, not in your project’s source. They reach another environment only through os package export.';
+  const environment = () =>
+    within(screen.getByTestId('data-object-header')).queryByTestId('data-object-saved-to-environment');
 
   it('the first add makes the extension, and the header says it is saved to the base’s customizations', async () => {
     await renderBase();
@@ -458,6 +463,7 @@ describe('the object header says where a base object’s extension is saved (obj
     await addFromFormToolbar('Region');
     await waitFor(() => expect(extensionSaves()).toHaveLength(1), { timeout: 8000 });
     await waitFor(() => expect(savedTo()).toHaveTextContent(SAVED_TO), { timeout: 8000 });
+    expect(environment()).toHaveTextContent(ENVIRONMENT);
     expect(savedTo()!.closest('[data-slot="item-note"]')).not.toBeNull();
   });
 
@@ -467,6 +473,7 @@ describe('the object header says where a base object’s extension is saved (obj
     srv.publishedExt = { extend: OBJECT, fields: { region__c: region }, _packageId: PAIR };
     await renderBase();
     await waitFor(() => expect(savedTo()).toHaveTextContent(SAVED_TO), { timeout: 8000 });
+    expect(environment()).toHaveTextContent(ENVIRONMENT);
   });
 
   it('CONTROL: a base object with no extension says nothing of the kind', async () => {

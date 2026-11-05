@@ -5,6 +5,8 @@ import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { SqlDriver } from '@objectstack/driver-sql';
+import { SchemaRegistry } from '@objectstack/objectql';
 import {
   findHostConfig,
   composeForDeclarations,
@@ -800,6 +802,66 @@ describe('measureComposedCoverage (#13028)', () => {
     expect(out.coverage).toMatchObject({ registeredObjects: 3, examinedObjects: 2, unexaminedObjects: 1 });
     expect(out.coverage.reasons.unsupported).toBe(1);
     expect(out.notes.join(' ')).not.toContain('did not defer schema DDL');
+  });
+});
+
+/**
+ * A disabled package's `objectExtensions` are withheld from the SERVED object
+ * and kept at the storage layer. The DDL-free binding (`OS_SKIP_SCHEMA_SYNC`)
+ * installs each object it reads as the driver's managed field set, which is
+ * what the drift report diffs the live table against, so it must read the
+ * storage fold: on the served one, a column a disable only hides is reported
+ * as an orphan to drop. The one case in this file that reaches a real driver,
+ * because the answer at stake is that driver's own drift report.
+ */
+describe('measureComposedCoverage, DDL-free, with a disabled package\'s extension', () => {
+  const APP = 'com.qa.migrate.app';
+  const MODULE = 'com.qa.migrate.orders';
+  const OBJECT = 'qm_account';
+  let dir: string | undefined;
+  const drivers: SqlDriver[] = [];
+  afterEach(async () => {
+    while (drivers.length) await drivers.pop()!.disconnect().catch(() => {});
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    dir = undefined;
+  });
+
+  const sqlDriver = (file: string): SqlDriver => {
+    const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: file }, useNullAsDefault: true });
+    (driver as any).logger = { debug() {}, info() {}, warn() {}, error() {} };
+    drivers.push(driver);
+    return driver;
+  };
+
+  it('binds the column the disable hides, so the drift report proposes no drop of it and the value stays', async () => {
+    const registry = new SchemaRegistry({ multiTenant: false });
+    (registry as any).logLevel = 'silent';
+    registry.installPackage({ id: APP, name: APP, version: '1.0.0', type: 'app', namespace: 'qm' } as any, 'code');
+    registry.installPackage({ id: MODULE, name: MODULE, version: '1.0.0', type: 'module', namespace: 'qm', dependencies: { [APP]: '^1.0.0' } } as any, 'code');
+    registry.registerObject({ name: OBJECT, fields: { name: { name: 'name', type: 'text' } } } as any, APP, undefined, 'own');
+    registry.registerObject({ name: OBJECT, fields: { qm_credit: { name: 'qm_credit', type: 'number' } } } as any, MODULE, undefined, 'extend');
+
+    // The table as a boot with the module enabled created it, holding a value.
+    dir = mkdtempSync(join(tmpdir(), 'os-migrate-disabled-ext-'));
+    const file = join(dir, 'data.db');
+    const first = sqlDriver(file);
+    await first.initObjects([registry.getStorageObject(OBJECT) as any]);
+    await (first as any).knex(OBJECT).insert({ id: 'a1', name: 'acme', qm_credit: 500, organization_id: 'org_a' });
+    await first.disconnect();
+    drivers.pop();
+
+    registry.disablePackage(MODULE);
+    expect(Object.keys(registry.getObject(OBJECT)?.fields ?? {}), 'precondition: the served object withholds it').not.toContain('qm_credit');
+
+    const driver = sqlDriver(file);
+    const engine = { registry, getDriverForObject: () => driver, syncObjectSchema: async () => { throw new Error('DDL on a DDL-free plan'); } };
+    const kernel = { getService: (slot: string) => (slot === 'objectql' ? engine : undefined) };
+    const out = await measureComposedCoverage(kernel, [driver], false, { ddlFree: true });
+    expect(out.coverage).toMatchObject({ registeredObjects: 1, examinedObjects: 1 });
+
+    const drift = (await driver.detectManagedDrift()).map((d: any) => `${d.op?.type}:${d.op?.column ?? d.op?.indexName ?? ''}`);
+    expect(drift.filter((op) => op.includes('qm_credit'))).toEqual([]);
+    expect(await (driver as any).knex(OBJECT).where({ id: 'a1' }).first()).toMatchObject({ qm_credit: 500 });
   });
 });
 

@@ -17,7 +17,7 @@ metadata:
 
 你是 PM 座位。PM 永不写代码,代码全由 `os-dev` 开发 agent 完成,一单一 agent 一 worktree。
 PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报告 → 下一批。
-维护者只在两点进入循环:轮次报告,与 `needs-user-decision` 决策卡。
+维护者只在三点进入循环:轮次报告,`needs-user-decision` 决策卡,`pm:awaiting-merge` PR。
 
 ## 红线
 
@@ -104,7 +104,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | open + 队列标签 + 无 assignee | 可派发(同卡带 `pm:retriage` 的除外);`pm:queue` 卡恒无 assignee,有即半态 |
 | assignee 已设 | 已认领/在飞,不是你的就永不碰;离手恒走释放 —— 三因 = 改路由(限未派发)、前提证伪、弃飞无接管,去向 = 新标签态或车道;在飞卡跟到 MERGED,⛔ 不静默摘 assignee |
 | `pm:dispatched` | 已派发(派发评论记轮次),恒带 assignee;与摘 `pm:queue` 同一次标签写入成对落地 |
-| `needs-user-decision` | 决定待做:永不派发、永不代答;维护者的收件箱,只由人工裁 |
+| `needs-user-decision` | 决定待做:永不派发、永不代答;维护者的决策收件箱,只挂决策卡(issue)、⛔ 永不挂 PR,只由人工裁 |
 | `pm:on-hold` | 决定已做且答案是暂不做:不派发不催;仅当带机器可读 `Restart-when:` 行才合法 |
 | `pm:blocked` + 正文行 `Blocked-by: #N` | 等上游:选择期跳过,#N 关单(PR 则合并,关而未合并不放)时由解锁扫描或 `scheduled-full-run-card.yml` 放回;工已完而被门禁卡住的同用本态;双通道行首 `Blocked-by:` 指向无 `Ruled:` 的 open `needs-user-decision` 卡 ⇒ ⛔ 不派发,直至其 `Ruled:` |
 | `pm:awaiting-maintainer` | 决定已做,只剩一次 GitHub 之外的人工动作:不派发不催;与其它 pm 状态标签互斥;入态恒带行首 `Maintainer-action:` 行(细则见 `references/state-machine.md`),无行即半态 |
@@ -186,12 +186,12 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 路径面命中 Tier H ⇒ ACCEPT 换终局四件套,混合 diff ⛔ 不按比例判;要拆让 dev 单独开 PR。
 - 改动 >3000 行(含生成物)同换终局四件套含③请审,⛔ 无 Tier S 例外;读数=PR additions+deletions。
 - ① 席位记录落 PR 先于 `pr_ready`/入队且钉 head:速读六行+席位意见,其下 `## 席位核对`。
-- ② PR 悬着等人批,同笔挂 `needs-user-decision`;人工直合即审核记录,授权批准 ⇒ 席位落地。
+- ② PR 悬着等人批,同笔挂 `pm:awaiting-merge`;人工直合即审核记录,授权批准 ⇒ 席位落地。
 - 指针 `ACCEPT → PR #n comment <id>`;受管/spec 面欠完整复核 ①–④,席未达档起隔离达档复核。
 - 核对六项:形态/前提实测/门禁 check-runs/接受的偏差/范围外去向+`Skills-docs:`/落地条款。
 - 草稿归 dev:PR 正文带 `## 维护者速读` 六行(见 os-dev.md),中文、业务角度,不写席位意见。
 - 终稿 = 席位对照自己读的 diff 校正六行、加席位意见行,置顶席位记录;维护者只读评论。
-- PR 上的标签 = 待维护者审阅,不入六态;与请审同为等人批清单,随获批或撤回判决离开。
+- `pm:awaiting-merge` 只挂 PR、不入六态,与请审同为等人批清单,随获批或撤回判决离开。
 - 批准判定单源 = 队列守卫常量 `GOVERNED_APPROVERS`:授权账户 APPROVED 即算,⛔ 不卡 `commit_id`。
 - 批准后再推亦不过期;席位落地 = 过落地前检、清标、ready、auto-merge,踢出/变基同法。
 - ③ 请审 = 席位交棒:ACCEPT 与现 head 同形 PASS 俱在案,同轮中继 `pr_request_reviewers` 请审批人。

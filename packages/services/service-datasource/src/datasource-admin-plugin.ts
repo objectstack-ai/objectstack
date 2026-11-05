@@ -560,16 +560,24 @@ export class DatasourceAdminServicePlugin implements Plugin {
         const metadata = metadataOf();
         const objects = ((await metadata?.listObjects?.()) ??
           (await metadata?.list('object')) ??
-          []) as Array<{ datasource?: string }>;
-        const count = objects.filter((o) => o?.datasource === datasource).length;
+          []) as Array<{ name?: unknown; datasource?: string }>;
+        // [#30444] The names ride on the same filtered listing as the count,
+        // so a refusal's message and its `details` describe one read.
+        const bound = objects.filter((o) => o?.datasource === datasource);
+        const count = bound.length;
+        const names = bound
+          .map((o) => o.name)
+          .filter((n): n is string => typeof n === 'string')
+          .sort();
         if (typeof metadata?.listDiagnosed !== 'function') {
-          return { count, degraded: false, errors: [] };
+          return { count, degraded: false, errors: [], objects: names };
         }
         const diagnosed = await metadata.listDiagnosed('object');
         return {
           count,
           degraded: diagnosed?.degraded === true,
           errors: Array.isArray(diagnosed?.errors) ? diagnosed.errors : [],
+          objects: names,
         };
       },
 

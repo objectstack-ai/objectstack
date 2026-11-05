@@ -3692,11 +3692,13 @@ const TEXTUAL_BASE_TYPES = new Set(['text', 'textarea', 'string', 'longtext', ''
  *
  * Only a widget listed here promotes, and only over a textual base type, the
  * same bound the `format` hints keep: a widget with no read face of its own
- * (`filter-condition`, …) still draws as its `type`.
+ * still draws as its `type`. `filter-condition` is not a reference: its face
+ * draws the stored criteria as a sentence instead of JSON.
  */
 const WIDGET_CELL_RENDERER_TYPES: ReadonlySet<string> = new Set([
   'object-ref',
   'recipient-picker',
+  'filter-condition',
   'position-ref',
   'permission-ref',
 ]);
@@ -4417,6 +4419,7 @@ export function getCellRenderer(fieldType: string): React.FC<CellRendererProps> 
 }
 
 import { PositionRefCell, PermissionRefCell } from './widgets/RegistryRefCell.js';
+import { FilterConditionCell } from './widgets/FilterConditionCell.js';
 // Register standard renderers immediately
 registerFieldRenderer('lookup', LookupCellRenderer);
 registerFieldRenderer('master_detail', LookupCellRenderer);
@@ -4442,6 +4445,9 @@ registerFieldRenderer('recipient-picker', TextCellRenderer);
 // source and type, which `check:eager-closure` weighs with the rest of it.
 registerFieldRenderer('position-ref', PositionRefCell);
 registerFieldRenderer('permission-ref', PermissionRefCell);
+// The criteria key draws its sentence through the widget's own read display,
+// loaded lazily on the first cell that shows one (the stored text until then).
+registerFieldRenderer('filter-condition', FilterConditionCell);
 // `owner` was registered here to the same UserCellRenderer until objectui#4814
 // retired the spelling — see the TOMBSTONE below. `getCellRenderer('owner')`
 // now reports the prescription and falls to the text cell.

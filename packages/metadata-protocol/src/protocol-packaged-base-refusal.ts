@@ -187,10 +187,9 @@ export function refusePackagedBaseOverride(
  *   (ruling A on #28390), so a dependent's one fix is a new name, and the
  *   declare advice would send it to a refusal (`declared_outside_pair`).
  *
- * Empty for a type with no open channel — `action` waits for ADR-0146 D9's
- * conditions (its regime row keeps its own routes), and an excluded type has
- * none — and when the shipping package has no pair id. [#28412] `flow` is
- * open: its sealed sentence names the declaration too.
+ * Empty for a type with no open channel — an excluded type has none — and
+ * when the shipping package has no pair id. [#28412] `flow` is open: its
+ * sealed sentence names the declaration too, and so, [#30065], does `action`'s.
  */
 function sealedDeclareOrRenameTail(type: string, basePackageId: unknown, writerPackageId: unknown): string {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
@@ -617,19 +616,33 @@ export function namedBaseCloseSubject(
  *    base); version pinning (#28405: a suspended run finishes on the body it
  *    started on).
  *
- * ⛔ Not `action`: its override door is not cut (D9's `action` paragraph), so
- * its declaration keeps the "not yet available" refusal. A type joins this set
- * in the change that delivers its conditions, never ahead of it.
+ *  - [#30065] `action` — conditions 1–3 (D9's `action` paragraph; condition 4
+ *    does not apply, an action has no suspended run). Served over the code
+ *    package's name: every read that serves the name — the by-name and
+ *    execution reads, the lists, the layered read's `effective`, and the
+ *    object read's `actions` the console draws the list toolbar, row menu and
+ *    record header from — serves the `.custom` row `isServedOverrideRowOf`
+ *    names, under the base's envelope, and the run doors resolve that
+ *    declaration. Rebound in one reload: `@objectstack/objectql`'s authored
+ *    action resync binds the override's body over the base's handler and
+ *    restores the base's when the override is removed, in one step. One
+ *    ledger row for the name: the activation ledger keys an action by name
+ *    alone, and the served override carries the base's envelope, so the
+ *    switch and its row's package are the base's whichever definition is
+ *    armed. Its declaration may not widen who may run it
+ *    ({@link actionOverrideWidening}).
+ *
+ * A type joins this set in the change that delivers its conditions, never
+ * ahead of it.
  */
-const CONDITIONS_DELIVERED: ReadonlySet<string> = new Set(['flow']);
+const CONDITIONS_DELIVERED: ReadonlySet<string> = new Set(['flow', 'action']);
 
 /**
  * Whether a declared override of `type` is admitted today: the closed list's
  * disposition is `overridable` AND the type waits for no ADR-0146 D9
  * condition this runtime has not delivered ({@link CONDITIONS_DELIVERED}).
- * `flow` carries `conditions` and is delivered; `action` (its door is not cut)
- * carries them and is not, so it is classified overridable and still refused
- * here. The disposition and the conditions are read from
+ * `flow` and `action` carry `conditions` and are delivered. The disposition
+ * and the conditions are read from
  * `OVERRIDE_TYPE_CLASSIFICATION`, never re-derived.
  */
 function isOpenOverrideType(singular: string): boolean {
@@ -659,9 +672,9 @@ function isOpenOverrideType(singular: string): boolean {
  *
  * ⛔ Only the pair, named: a removal naming no package, the base, or any
  * other package, keeps the refusal it had — a base's own item is never
- * removed. ⛔ Only an open type: `action` (its D9 conditions are not
- * delivered, so no pair holds a declared action override) and every excluded
- * type keep main's delete verdict.
+ * removed. ⛔ Only an open type: every excluded type keeps main's delete
+ * verdict. [#30065] `action` is open, so a pair's removal of its declared
+ * action override is admitted and the base's action is served again.
  */
 export function isPairRowRemoval(type: string, basePackageId: unknown, packageId: unknown): boolean {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
@@ -670,6 +683,53 @@ export function isPairRowRemoval(type: string, basePackageId: unknown, packageId
     if (typeof packageId !== 'string' || packageId.length === 0) return false;
     const pair = customizationPackageId(basePackageId);
     return pair.ok && pair.value === packageId;
+}
+
+/**
+ * [#30065, ADR-0146 D9, ADR-0066 D4] What a declared `action` override would
+ * widen about who may run the action, as one clause per widened gate — empty
+ * when it widens nothing, or when the base's action is not in hand
+ * ({@link OverrideWriteClosure.baseItemOf}).
+ *
+ * The override replaces the base's action whole (D2), so every key the run
+ * doors read is the override's. Three of them decide WHO may run it, and the
+ * override may only keep or tighten each:
+ *
+ *  - `requiredPermissions` — the capability gate the REST and MCP action
+ *    doors answer 403 with: every capability the base requires stays
+ *    required (adding one is allowed);
+ *  - `ai.exposed` — the MCP surface's opt-in: an action the base keeps off
+ *    the agent surface stays off it;
+ *  - `ai.requiresConfirmation` — the human-confirmation gate an agent call
+ *    answers 428 with: a base that declares it keeps it.
+ *
+ * What runs (`type`, `target`, `body`, `operation`, `patch`, `params`) and how
+ * it is drawn (`label`, `visible`, `disabled`, `locations`) are replaced
+ * whole: those change what the people who may already run the action get,
+ * never who they are. `visible`, `disabled` and the keys lowered into
+ * `visible` are rendering predicates no run door reads, so they gate nothing.
+ */
+export function actionOverrideWidening(baseItem: unknown, overrideItem: unknown): string[] {
+    if (!isPlainRecord(baseItem)) return [];
+    const override = isPlainRecord(overrideItem) ? overrideItem : {};
+    const capabilities = (value: unknown): string[] =>
+        Array.isArray(value) ? value.filter((c): c is string => typeof c === 'string') : [];
+    const kept = new Set(capabilities(override.requiredPermissions));
+    const dropped = capabilities(baseItem.requiredPermissions).filter((c) => !kept.has(c));
+    const aiOf = (item: Record<string, unknown>): Record<string, unknown> => (isPlainRecord(item.ai) ? item.ai : {});
+    const baseAi = aiOf(baseItem);
+    const overrideAi = aiOf(override);
+    const out: string[] = [];
+    if (dropped.length > 0) {
+        out.push(`it drops ${dropped.map((c) => `'${c}'`).join(', ')} from \`requiredPermissions\``);
+    }
+    if (baseAi.exposed !== true && overrideAi.exposed === true) {
+        out.push('it sets `ai.exposed: true` on an action the base keeps off the agent surface');
+    }
+    if (baseAi.requiresConfirmation === true && overrideAi.requiresConfirmation !== true) {
+        out.push('it drops `ai.requiresConfirmation: true`');
+    }
+    return out;
 }
 
 /**
@@ -733,6 +793,18 @@ export interface OverrideWriteClosure {
      * ({@link overrideWriteIdentityOf}).
      */
     readonly shippers: readonly string[];
+    /**
+     * [#30065] The item a shipping base ships under this name (for a
+     * pair-identified type, at this bundle member), read by the door that
+     * knows it — the protocol's artifact lookup, the artifact `os validate`
+     * walks, the install door's listing. The gate reads it for one question
+     * only: whether a declared `action` override widens who may run the
+     * action ({@link actionOverrideWidening}). `undefined` when the door does
+     * not hold the base's item (an `os validate` artifact that names a base it
+     * does not carry): that question is then the publish door's, which always
+     * holds it.
+     */
+    readonly baseItemOf?: (basePackageId: string) => unknown;
 }
 
 /** [#28834] The item door an `object_extension` is saved through (#28574), as the refusals name it. */
@@ -746,7 +818,8 @@ export type OverrideWriteRule =
     | 'declared_package_ships_no_such_item'
     | 'declared_type_not_overridable'
     | 'declared_object'
-    | 'declared_type_not_yet_available';
+    | 'declared_type_not_yet_available'
+    | 'declared_action_widens_access';
 
 /**
  * The gate's verdict on one write:
@@ -924,10 +997,10 @@ export function judgeOverrideWrite(
                 `${item} carries \`overrides\`, but ${articleFor(type)} ${type} takes no override (${cite}). `
                 + excludedTypeRemedy(type, declaration.base));
         }
-        // `action` is classified overridable and waits for D9's conditions
-        // (`isOpenOverrideType`): "action customization is not yet available".
-        // [#28412] `flow`'s conditions are delivered, so it is judged below
-        // like every open type.
+        // A type classified overridable that still waits for D9's conditions
+        // (`isOpenOverrideType`) is refused: its customization "is not yet
+        // available". [#28412, #30065] `flow`'s and `action`'s conditions are
+        // delivered, so both are judged below like every open type.
         if (!isOpenOverrideType(type)) {
             return refuse('declared_type_not_yet_available',
                 `${item} carries \`overrides\`: ${type} customization is not yet available, so a declared ${type} `
@@ -956,6 +1029,19 @@ export function judgeOverrideWrite(
             return refuse('declared_package_ships_no_such_item',
                 `${item} declares an override of '${base}', which ships no ${type} named '${name}'${ofMember}. `
                 + `Remove \`overrides\` to keep it as '${packageId}''s own item, or correct the name (ADR-0146 D2).`);
+        }
+        // [#30065] A declared action override replaces the whole action, so
+        // it could drop the gates that decide who may run it — the base's
+        // vendor handler, which runs trusted, then answering callers the
+        // base refused. It may tighten them and never widen them.
+        if (type === 'action') {
+            const widened = actionOverrideWidening(closure.baseItemOf?.(base), subject.item);
+            if (widened.length > 0) {
+                return refuse('declared_action_widens_access',
+                    `${item} declares an override of '${base}' that widens who may run the action: ${widened.join('; ')}. `
+                    + 'An action override may add a gate and never remove one: keep the base\'s gates in the override, '
+                    + 'or add the action under a new name in the paired .custom package (ADR-0146 D9, ADR-0066 D4).');
+            }
         }
         return { verdict: 'admit', base };
     }
@@ -1099,7 +1185,12 @@ export function overrideWriteVerdict(
                 .filter((id): id is string => typeof id === 'string' && dependencies.includes(id)
                     && !this.isWritablePackage(id)),
         ));
-    return judgeOverrideWrite(request, { dependencies, shippers });
+    // [#30065] The base's own item, the one a declared action override is
+    // judged against: the shipping artifact under that base's envelope.
+    const baseItemOf = (basePackageId: string): unknown => this.shippedArtifactsOf(request.type, request.name, undefined, member)
+        .find((a) => overrideWriteMemberOf(request.type, a) === member
+            && (a as { _packageId?: unknown } | null | undefined)?._packageId === basePackageId);
+    return judgeOverrideWrite(request, { dependencies, shippers, baseItemOf });
 }
 
 

@@ -71,6 +71,17 @@ export interface PasswordSessionPolicyHost {
   resolveActor: AuthManager['resolveActor'];
 }
 
+/**
+ * The MFA grace period in force, in whole days (ADR-0069 D3): the configured
+ * `mfaGracePeriodDays` (the `auth.mfa_grace_period_days` setting), 7 when
+ * unset, never below 0. The one reading of it: the gate's clock below and the
+ * organization MFA guard's save notice (`AuthManager#getMfaGracePeriodDays`)
+ * both ask here, so the number a saver is told is the number the gate holds to.
+ */
+export function resolveMfaGracePeriodDays(config: { mfaGracePeriodDays?: number }): number {
+  return Math.max(0, Math.floor(Number(config.mfaGracePeriodDays ?? 7)));
+}
+
 /** The body of `AuthManager#assertPasswordComplexity`; the method's docblock there is its contract. */
 export async function assertPasswordComplexity(this: Pick<PasswordSessionPolicyHost, 'config'>, password: string): Promise<void> {
   if (!this.config.passwordRequireComplexity) return;
@@ -222,7 +233,7 @@ export async function resolveUserAuthGates(
     if (mfaRequired && unenrolled && !this.isTwoFactorEnabled()) {
       this.noteMfaRequirementWithoutEnrollment();
     } else if (mfaRequired && unenrolled) {
-      const graceDays = Math.max(0, Math.floor(Number(this.config.mfaGracePeriodDays ?? 7)));
+      const graceDays = resolveMfaGracePeriodDays(this.config);
       let requiredAt = u?.mfa_required_at;
       if (!requiredAt) {
         requiredAt = new Date();

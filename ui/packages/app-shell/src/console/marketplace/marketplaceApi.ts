@@ -777,6 +777,30 @@ export interface LocalManagedInstallResult {
    * `engines.protocol`, or one the runtime cannot read. Omitted when checked.
    */
   protocolCheckSkipped?: ProtocolCheckSkipped;
+  /** The install's sample-data report ({@link LocalInstallSeeded}). */
+  seeded?: LocalInstallSeeded;
+}
+
+/**
+ * What an install-local answer's `seeded` says about the package's sample
+ * data: `inline` when this install ran the package's seed datasets now, with
+ * the per-record counts of that run; `skipped` (with its `reason`) when it ran
+ * none, as on a package that bundles no datasets or on a copy, which loads
+ * metadata only; `refused` (with its sentence in `reason`) when a walled
+ * deployment's session named no active organization to seed into. `replayer`
+ * is in the door's declared vocabulary and carries no counts.
+ *
+ * `skipped` inside an `inline` run counts records whose row was already in the
+ * database (a reinstall over live sample data), so `inserted + updated +
+ * skipped` is the number of sample records the run left in place.
+ */
+export interface LocalInstallSeeded {
+  mode: 'inline' | 'replayer' | 'skipped' | 'refused';
+  inserted?: number;
+  updated?: number;
+  skipped?: number;
+  errors?: number;
+  reason?: string;
 }
 
 /**
@@ -815,6 +839,8 @@ export interface LocalUnmanagedInstallResult {
   note?: string;
   /** As on the managed answer ({@link LocalManagedInstallResult.protocolCheckSkipped}). */
   protocolCheckSkipped?: ProtocolCheckSkipped;
+  /** `skipped` when the package bundles sample data: a copy loads none of it. */
+  seeded?: LocalInstallSeeded;
 }
 
 export type LocalInstallResult = LocalManagedInstallResult | LocalUnmanagedInstallResult;

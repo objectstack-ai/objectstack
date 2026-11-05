@@ -12239,7 +12239,7 @@ export function changedLineLines(size) {
     `${reading} ⛔ OVER — this PR lands as a Tier H surface does: an authorized APPROVED review (GOVERNED_APPROVERS, on ANY` +
       ' commit) and then the owning seat, or a HUMAN MERGE (maintainer rulings 2026-09-18 and 2026-09-27; no exemption for' +
       ' generated files, regen artefacts, docs builds or reverts). The governed terminal: no seat flips it ready, enqueues' +
-      ' it, or arms auto-merge before that — ACCEPT on the card, `needs-user-decision` on the PR, the final 维护者速读,' +
+      ' it, or arms auto-merge before that — ACCEPT on the card, `pm:awaiting-merge` on the PR, the final 维护者速读,' +
       ' review requested from GOVERNED_APPROVERS. The landing pre-check `check-governed-merges.mjs --pr <n>` reads the' +
       ' PR\'s own number.',
   ];

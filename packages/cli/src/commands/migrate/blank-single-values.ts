@@ -149,6 +149,38 @@ export async function cleanBlankSingleValues(
   logger: BlankSingleValuesLogger,
   options: BlankSingleValuesOptions = {},
 ): Promise<BlankSingleValuesReport> {
+  return walkBlankColumns(engine, logger, options, {
+    step: 'blank-single-values',
+    columnsOf: blankSingleValueColumns,
+    isBlank: (value) => value === '',
+  });
+}
+
+/**
+ * Which columns a blank-to-null walk covers and which stored values it
+ * rewrites: the one difference between `blank-single-values` and its
+ * multi-value sibling `blank-multi-values` (#29653), which share the walk.
+ */
+export interface BlankColumnsWalkSpec {
+  /** The step name, prefixed to every warning. */
+  step: string;
+  /** The in-scope columns of one object's schema. */
+  columnsOf(schema: unknown): Array<{ name: string; type: string }>;
+  /** Whether a value as the engine reads it back is a blank this step rewrites to `null`. */
+  isBlank(value: unknown): boolean;
+}
+
+/**
+ * The walk itself: every stored row of every object with a column in scope,
+ * each blank counted per column and, on `apply`, the row's blank columns
+ * rewritten to `null` in one update through the engine.
+ */
+export async function walkBlankColumns(
+  engine: BlankSingleValuesEngine,
+  logger: BlankSingleValuesLogger,
+  options: BlankSingleValuesOptions,
+  spec: BlankColumnsWalkSpec,
+): Promise<BlankSingleValuesReport> {
   const apply = options.apply === true;
   const maxPerObject = options.maxRecordsPerObject ?? 100_000;
   const candidates =
@@ -162,7 +194,7 @@ export async function cleanBlankSingleValues(
   let truncated = false;
 
   for (const object of candidates) {
-    const inScope = blankSingleValueColumns(engine.getObject(object));
+    const inScope = spec.columnsOf(engine.getObject(object));
     if (inScope.length === 0) continue;
     scannedObjects.push(object);
     for (const { name, type } of inScope) {
@@ -186,7 +218,7 @@ export async function cleanBlankSingleValues(
           scannedRecords++;
           const id = row.id;
           if (id == null || id === '') continue;
-          const blank = inScope.filter((c) => row[c.name] === '');
+          const blank = inScope.filter((c) => spec.isBlank(row[c.name]));
           if (blank.length === 0) continue;
           for (const c of blank) {
             const col = columns.get(`${object}.${c.name}`)!;
@@ -201,9 +233,9 @@ export async function cleanBlankSingleValues(
             for (const c of blank) columns.get(`${object}.${c.name}`)!.cleared++;
           } catch (err) {
             // One row's failure does not abort the rest; re-running revisits
-            // only what still holds `''`.
+            // only what still holds a blank.
             const message = (err as Error)?.message ?? String(err);
-            logger.warn(`[blank-single-values] ${object} record ${String(id)}: ${message}`);
+            logger.warn(`[${spec.step}] ${object} record ${String(id)}: ${message}`);
             failures.push({ object, recordId: String(id), fields: blank.map((c) => c.name), error: message });
           }
         }
@@ -212,7 +244,7 @@ export async function cleanBlankSingleValues(
       // An object this run cannot read is one it cannot vouch for: reported,
       // and the run is truncated rather than quietly clean.
       logger.warn(
-        `[blank-single-values] cannot read ${object} (${(err as Error)?.message ?? err}) — ` +
+        `[${spec.step}] cannot read ${object} (${(err as Error)?.message ?? err}) — ` +
           'reported as unreadable; this run does not cover it',
       );
       unreadableObjects.push(object);

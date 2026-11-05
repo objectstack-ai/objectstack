@@ -22,6 +22,8 @@ import {
   type SettingsActionHandler,
   type SettingsLiveStatus,
   type SettingsLiveStatusProvider,
+  type SettingsOptionSource,
+  type SettingsOptionSourceAnswer,
   type SettingsWritePredicate,
   type SettingsWritePredicateOptions,
   type SettingsRequestTransport,
@@ -895,6 +897,10 @@ export class SettingsService {
   private organizationSource?: SettingsOrganizationSource;
   /** Live-status providers by namespace — see {@link registerLiveStatus}. */
   private readonly liveStatusProviders = new Map<string, SettingsLiveStatusProvider>();
+  /** Option sources by namespace, then key — see {@link registerOptionSource}. */
+  private readonly optionSources = new Map<string, Map<string, SettingsOptionSource>>();
+  /** Option-source failures already said, `namespace.key:cause` — see {@link optionSourceAnswer}. */
+  private readonly reportedOptionSourceFaults = new Set<string>();
   /** Write predicates by namespace, then key — see {@link registerWritePredicate}. */
   private readonly writePredicates = new Map<
     string,
@@ -1317,7 +1323,10 @@ export class SettingsService {
     // keys are found by type. `effectiveEnvOverride` does the judging (and the
     // reporting); the value it returns is of no interest here.
     const enforceable = new Set([
-      ...reg.optionTables.keys(),
+      // A key whose options a source serves is judged when it is read: the
+      // source reads services that register later in the boot, so a verdict
+      // here would be drawn from the declared table it replaces.
+      ...[...reg.optionTables.keys()].filter((key) => !this.optionSources.get(namespace)?.has(key)),
       ...reg.bounds.keys(),
       ...reg.valueDomains.keys(),
       ...reg.patterns.keys(),
@@ -1396,9 +1405,9 @@ export class SettingsService {
       // A key with no declared table has nothing to enforce — unchanged
       // behaviour (#5131's exhaustive-options semantics, untouched when no
       // domain is declared).
-      const allowed = reg.optionTables.get(key);
-      if (allowed) {
-        const rejected = firstRejectedOption(allowed, value);
+      const { allowed, judge } = this.optionTableOf(namespace, key, reg.optionTables.get(key) ?? []);
+      if (allowed.length > 0) {
+        const rejected = judge(value);
         if (rejected) {
           this.reportRejectedEnvOverride(reg, namespace, key, envName, rejected.value, {
             what: 'is not a declared option for',
@@ -1659,6 +1668,104 @@ export class SettingsService {
   registerLiveStatus(namespace: string, provider: SettingsLiveStatusProvider): void {
     if (!this.registry.has(namespace)) throw new UnknownNamespaceError(namespace);
     this.liveStatusProviders.set(namespace, provider);
+  }
+
+  /**
+   * Register (or replace) the source that serves one option-bearing key's
+   * options from the running system, in place of its manifest's declared
+   * table. See {@link SettingsOptionSource}. The last registration wins, the
+   * same override rule as {@link registerAction}.
+   *
+   * Unlike the other registrations it may come BEFORE the namespace's
+   * manifest: registered first, the manifest's registration-time audit of
+   * `OS_*` overrides already leaves the key's options to be judged when read,
+   * and draws no verdict from the declared table the source replaces.
+   */
+  registerOptionSource(namespace: string, key: string, source: SettingsOptionSource): void {
+    let byKey = this.optionSources.get(namespace);
+    if (!byKey) this.optionSources.set(namespace, (byKey = new Map()));
+    byKey.set(key, source);
+  }
+
+  /**
+   * The source's answer for one key, or `undefined` when no source is
+   * registered or it has none. A source that throws is answered `undefined`
+   * and said once per cause: the declared table then stands, the same answer a
+   * composition without the source's service gets.
+   */
+  private optionSourceAnswer(
+    namespace: string,
+    key: string,
+    input: Parameters<SettingsOptionSource>[0] = {},
+  ): SettingsOptionSourceAnswer | undefined {
+    const source = this.optionSources.get(namespace)?.get(key);
+    if (!source) return undefined;
+    try {
+      return source(input) ?? undefined;
+    } catch (err: any) {
+      const cause = String(err?.message ?? err);
+      const dedupeAt = `${namespace}.${key}:${cause}`;
+      if (!this.reportedOptionSourceFaults.has(dedupeAt)) {
+        this.reportedOptionSourceFaults.add(dedupeAt);
+        this.logger?.warn?.(
+          `SettingsService: the options of '${namespace}.${key}' could not be read from the running system; ` +
+            `the manifest's declared options apply instead. Cause: ${cause}`,
+        );
+      }
+      return undefined;
+    }
+  }
+
+  /**
+   * The option table one key is judged against, as the values it offers and
+   * the judgment of a written value: a registered source's answer when it has
+   * one, else `declared`, judged by {@link firstRejectedOption}. Both doors ask
+   * here, the save (`validatePatch`) and the `OS_*` override
+   * (`effectiveEnvOverride`), so a source moves both at once.
+   */
+  private optionTableOf(
+    namespace: string,
+    key: string,
+    declared: string[],
+  ): { allowed: string[]; judge: (value: unknown) => { value: unknown } | null } {
+    const answer = this.optionSourceAnswer(namespace, key);
+    if (!answer) return { allowed: declared, judge: (value) => firstRejectedOption(declared, value) };
+    return {
+      allowed: answer.options.map((opt) => opt.value),
+      judge: (value) => {
+        // Element-wise and in string form, as `firstRejectedOption` judges.
+        const picked = Array.isArray(value) ? value : [value];
+        const at = picked.findIndex((v) => !answer.admits(String(v)));
+        return at === -1 ? null : { value: picked[at] };
+      },
+    };
+  }
+
+  /**
+   * The manifest a page is served: the registered one, with each sourced
+   * key's `options` replaced by its source's answer for the value in effect.
+   * The registered manifest itself is never changed.
+   */
+  private servedManifest(
+    reg: RegisteredManifest,
+    namespace: string,
+    values: Record<string, ResolvedSettingValue>,
+    display: SettingsDisplayOptions,
+  ): SettingsManifest {
+    const sources = this.optionSources.get(namespace);
+    if (!sources || sources.size === 0) return reg.manifest;
+    let changed = false;
+    const specifiers = reg.manifest.specifiers.map((spec) => {
+      if (!spec.key || !sources.has(spec.key)) return spec;
+      const answer = this.optionSourceAnswer(namespace, spec.key, {
+        current: values[spec.key]?.value,
+        locale: display.locale,
+      });
+      if (!answer) return spec;
+      changed = true;
+      return { ...spec, options: answer.options.map((opt) => ({ ...opt })) } as typeof spec;
+    });
+    return changed ? { ...reg.manifest, specifiers } : reg.manifest;
   }
 
   /**
@@ -2087,6 +2194,7 @@ export class SettingsService {
   async getNamespace(
     namespace: string,
     ctx: SettingsContext = {},
+    display: SettingsDisplayOptions = {},
   ): Promise<SettingsNamespacePayload> {
     const reg = this.registry.get(namespace);
     if (!reg) throw new UnknownNamespaceError(namespace);
@@ -2097,7 +2205,9 @@ export class SettingsService {
     // [#10826] One grouped row load instead of one per key — same resolution
     // per key by construction (getMany shares get()'s extracted cascade).
     const values = await this.getMany(namespace, Array.from(reg.scopes.keys()), ctx);
-    return { manifest: reg.manifest, values };
+    // A key whose options a source serves is offered what the running system
+    // offers, for the value in effect (`registerOptionSource`).
+    return { manifest: this.servedManifest(reg, namespace, values, display), values };
   }
 
   /**
@@ -2935,7 +3045,9 @@ export class SettingsService {
       // `provider: 'sendgrid'` into a namespace that has no such provider and
       // the write would succeed silently, leaving each consumer to improvise.
       if (!empty && OPTION_BEARING_TYPES.has(type) && !domain) {
-        const allowed = declaredOptionValues(spec.options);
+        // The table a registered option source serves, else the declared one
+        // (see `optionTableOf`).
+        const { allowed, judge } = this.optionTableOf(namespace, key, declaredOptionValues(spec.options));
         // A manifest with no option table cannot say what is legal. The spec
         // refuses that shape at parse time, but `registerManifest` takes
         // manifests as given (no Zod pass), so skip rather than reject every
@@ -2944,7 +3056,7 @@ export class SettingsService {
         if (allowed.length > 0) {
           // Shared with the env path (#5204) — see `firstRejectedOption` for the
           // array/scalar handling and why the result is wrapped.
-          const rejected = firstRejectedOption(allowed, value);
+          const rejected = judge(value);
           if (rejected) {
             const offending = rejected.value;
             // An option value is not a secret, but `encrypted` is authorable on
