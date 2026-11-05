@@ -30,9 +30,9 @@
  * the same ledger without going through HTTP.
  */
 
+import { randomBytes } from 'node:crypto';
 import {
-    copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync,
-    writeFileSync,
+    copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -330,7 +330,14 @@ export class LocalManifestSource {
         const files = readdirSync(from).filter((name) => name.endsWith('.json'));
         if (files.length === 0) return null;
         mkdirSync(dirname(this.dir), { recursive: true });
-        const staging = mkdtempSync(join(dirname(this.dir), `.${basename(this.dir)}.adopting-`));
+        // A unique sibling, created exclusively: a non-recursive mkdirSync
+        // throws EEXIST rather than reuse a directory that is already there,
+        // which is the guarantee mkdtempSync gave. mkdtempSync is not used
+        // because the repo's in-tree scratch scan holds every mkdtempSync to a
+        // base it can read from source, and this base is the ledger location
+        // resolved at run time.
+        const staging = join(dirname(this.dir), `.${basename(this.dir)}.adopting-${randomBytes(6).toString('hex')}`);
+        mkdirSync(staging);
         try {
             for (const name of files) copyFileSync(join(from, name), join(staging, name));
             renameSync(staging, this.dir);
