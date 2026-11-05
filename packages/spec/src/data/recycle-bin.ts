@@ -9,7 +9,12 @@
 // bin at runtime.
 
 import { z } from 'zod';
+import { Field } from './field.zod';
 
+// The object FILE, its registration in `PlatformObjectsPlugin` and its row in
+// `PLATFORM_OBJECTS_BY_PACKAGE` land together with the engine slice (#30237):
+// that registry means "a table exists", so the name joins it only with the
+// table. The object file builds `fields` from RECYCLE_BIN_ENTRY_FIELDS below.
 /**
  * The recycle bin: one system object, one entry per delete operation
  * (ADR-0148 D1).
@@ -18,8 +23,8 @@ import { z } from 'zod';
  * its master-detail cascade in cascade order, into one entry of this object,
  * and then deletes physically as before. A restore writes the rows back under
  * their original ids; a purge removes the entry. No read path filters on it.
- * The object is declared by `@objectstack/platform-objects` (`SysRecycleBin`)
- * and stored by the default datasource, like every `sys_*` object.
+ * Stored by the default datasource and organization-owned, like every `sys_*`
+ * object. Its fields are {@link RECYCLE_BIN_ENTRY_FIELDS}.
  */
 export const RECYCLE_BIN_OBJECT = 'sys_recycle_bin' as const;
 
@@ -140,6 +145,88 @@ export const RecycleBinSnapshotSchema = z.object({
   clearedReferences: z.array(RecycleBinClearedReferenceSchema)
     .describe('The set_null references the delete cleared'),
 }).describe('The cascade set a recycle-bin entry holds');
+
+/**
+ * The fields of a `sys_recycle_bin` entry (ADR-0148 D1): the one field list
+ * the object is built from (`fields: RECYCLE_BIN_ENTRY_FIELDS`), so the object
+ * and this contract cannot drift. Every field is read-only: only the engine's
+ * recycle-bin paths write an entry, and the object serves no generic
+ * data-API method, because `snapshot` holds every field of the deleted rows
+ * and a listing must apply field-level security on the live object.
+ */
+export const RECYCLE_BIN_ENTRY_FIELDS = Object.freeze({
+  id: Field.text({
+    label: 'ID',
+    readonly: true,
+    description: 'Entry id. One entry per delete operation.',
+  }),
+  object_name: Field.text({
+    label: 'Object',
+    required: true,
+    readonly: true,
+    maxLength: 255,
+    description: 'The object the delete operation targeted: the master of the cascade set.',
+  }),
+  record_id: Field.text({
+    label: 'Record ID',
+    required: true,
+    readonly: true,
+    maxLength: 255,
+    description: 'The id of the record the delete operation targeted, restored unchanged.',
+  }),
+  record_count: Field.number({
+    label: 'Rows',
+    required: true,
+    readonly: true,
+    description: 'How many rows the snapshot holds: the master and its cascaded details.',
+  }),
+  snapshot: Field.json({
+    label: 'Snapshot',
+    required: true,
+    readonly: true,
+    description:
+      'The cascade set as it stood at delete time, the master first, then its details in cascade order, plus the set_null references the delete cleared. Secret-channel refs are left out.',
+  }),
+  deleted_by: Field.lookup('sys_user', {
+    label: 'Deleted By',
+    readonly: true,
+    description: 'The principal who deleted the rows. A person restores the entries they deleted.',
+  }),
+  deleted_at: Field.datetime({
+    label: 'Deleted At',
+    required: true,
+    readonly: true,
+    description: 'When the delete operation committed.',
+  }),
+  retention_days: Field.number({
+    label: 'Retention (days)',
+    required: true,
+    readonly: true,
+    description: 'The days the retention resolver answered at delete time, else the configured default: a positive whole number.',
+  }),
+  purge_after: Field.datetime({
+    label: 'Purge After',
+    required: true,
+    readonly: true,
+    description: 'The purge deadline, stamped at delete time as deleted_at plus retention_days. No entry is purged before it.',
+  }),
+});
+
+/**
+ * One `sys_recycle_bin` entry as the engine writes it: the value shape of
+ * {@link RECYCLE_BIN_ENTRY_FIELDS}, key for key. Timestamps are ISO 8601.
+ */
+export const RecycleBinEntrySchema = z.object({
+  id: z.string().min(1).optional().describe('Entry id'),
+  object_name: z.string().min(1).describe('The object the delete operation targeted'),
+  record_id: z.string().min(1).describe('The id of the record the delete operation targeted'),
+  record_count: z.number().int().positive().describe('How many rows the snapshot holds'),
+  snapshot: RecycleBinSnapshotSchema,
+  deleted_by: z.string().min(1).optional().describe('The deleting principal (a sys_user id)'),
+  deleted_at: z.string().datetime({ offset: true }).describe('When the delete operation committed'),
+  retention_days: z.number().int().positive().describe('The retention in days applied at delete time'),
+  purge_after: z.string().datetime({ offset: true }).describe('The purge deadline, stamped at delete time'),
+}).describe('One recycle-bin entry: one delete operation');
 
 /**
  * The three reasons a restore refuses (ADR-0148 D2), each a code in the

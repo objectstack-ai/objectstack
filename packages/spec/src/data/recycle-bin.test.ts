@@ -8,12 +8,14 @@ import { describe, expect, it } from 'vitest';
 import {
   RECORD_RESTORED_EVENT,
   RECYCLE_BIN_DEFAULT_RETENTION_DAYS,
+  RECYCLE_BIN_ENTRY_FIELDS,
   RECYCLE_BIN_GRANT_KEYS,
   RECYCLE_BIN_OBJECT,
   RECYCLE_BIN_RESTORE_REFUSAL_CODES,
   RECYCLE_BIN_RESTORE_REFUSAL_STATUS,
   RECYCLE_BIN_RETENTION_DAYS_ENV,
   RecycleBinRetentionDaysEnvSchema,
+  RecycleBinEntrySchema,
   RecycleBinRetentionDaysSchema,
   RecycleBinSnapshotSchema,
   recycleBinRetentionRefusal,
@@ -23,6 +25,7 @@ import { DataEventType } from '../api/events.zod';
 import { RealtimeEventType } from '../api/realtime.zod';
 import { REGISTERED_ERROR_CODES } from '../api/error-code-ledger.zod';
 import { ObjectPermissionSchema } from '../security/permission.zod';
+import { ObjectSchema } from './object.zod';
 
 describe('recycle bin names (ADR-0148 D1/D3, D7 ratified)', () => {
   it('fixes the object, the variable and the default', () => {
@@ -87,6 +90,56 @@ describe('the entry snapshot (ADR-0148 D1/D2/D4)', () => {
 
   it('refuses an entry with no rows', () => {
     expect(RecycleBinSnapshotSchema.safeParse({ rows: [], clearedReferences: [] }).success).toBe(false);
+  });
+});
+
+describe('the entry field contract (ADR-0148 D1)', () => {
+  const fields = RECYCLE_BIN_ENTRY_FIELDS as Record<string, { type: string; required?: boolean; readonly?: boolean; reference?: string }>;
+
+  it('records what was removed, who deleted and when, and the stamped purge deadline', () => {
+    expect(Object.fromEntries(Object.entries(fields).map(([k, f]) => [k, f.type]))).toEqual({
+      id: 'text',
+      object_name: 'text',
+      record_id: 'text',
+      record_count: 'number',
+      snapshot: 'json',
+      deleted_by: 'lookup',
+      deleted_at: 'datetime',
+      retention_days: 'number',
+      purge_after: 'datetime',
+    });
+    expect(fields.deleted_by.reference).toBe('sys_user');
+    for (const key of ['object_name', 'record_id', 'record_count', 'snapshot', 'deleted_at', 'retention_days', 'purge_after']) {
+      expect(fields[key].required, `${key} required`).toBe(true);
+    }
+    for (const [key, field] of Object.entries(fields)) expect(field.readonly, `${key} readonly`).toBe(true);
+  });
+
+  it('builds a valid object under the fixed name, engine-owned with no generic API method', () => {
+    expect(() => ObjectSchema.parse({
+      name: RECYCLE_BIN_OBJECT,
+      label: 'Recycle Bin Entry',
+      isSystem: true,
+      managedBy: 'engine-owned',
+      fields: RECYCLE_BIN_ENTRY_FIELDS,
+      enable: { apiMethods: [] },
+    })).not.toThrow();
+  });
+
+  it('has a value schema key for key with the fields', () => {
+    expect(Object.keys(RecycleBinEntrySchema.shape).sort()).toEqual(Object.keys(fields).sort());
+    const entry = {
+      object_name: 'invoice',
+      record_id: 'inv_1',
+      record_count: 1,
+      snapshot: { rows: [{ object: 'invoice', id: 'inv_1', values: {} }], clearedReferences: [] },
+      deleted_by: 'usr_1',
+      deleted_at: '2026-11-05T10:00:00Z',
+      retention_days: 30,
+      purge_after: '2026-12-05T10:00:00Z',
+    };
+    expect(RecycleBinEntrySchema.parse(entry)).toEqual(entry);
+    expect(RecycleBinEntrySchema.safeParse({ ...entry, retention_days: 0 }).success).toBe(false);
   });
 });
 
