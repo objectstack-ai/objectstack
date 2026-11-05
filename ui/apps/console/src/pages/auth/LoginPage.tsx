@@ -70,6 +70,8 @@ import {
   InvitationSignUpPrompt,
   invitationArrivalCopy,
   useInvitationArrival,
+  hasSignInLanguagePick,
+  saveSignInLanguagePick,
 } from '@object-ui/app-shell';
 import { AuthLayout } from './AuthLayout';
 import { AuthFooter, readLegalLinks } from './AuthFooter';
@@ -153,6 +155,11 @@ export function LoginPage() {
   const ssoHandoffStartedRef = useRef(false);
   // The same once-only latch for the mobile sign-in hand-off navigation.
   const mobileHandoffStartedRef = useRef(false);
+  // #30399 — a language picked on this page, saved as the person's own before
+  // any exit below navigates away. The ref is the once-only latch; the state
+  // re-runs the post-login effect when the save has settled.
+  const signInPickSaveRef = useRef<'idle' | 'saving' | 'settled'>('idle');
+  const [signInPickSaved, setSignInPickSaved] = useState(false);
 
   // `isLoading` from useAuth() is overloaded: it is true both during the
   // initial session check AND during every in-flight signIn. The full-page
@@ -244,6 +251,27 @@ export function LoginPage() {
   useEffect(() => {
     if (!user) return;
 
+    // 0. A language picked on this page while signed out (#30399): saved as
+    //    this person's own when they have none, and AWAITED before every exit
+    //    below — each leaves by a full navigation, which ends the page-load
+    //    that knows the pick was made here, and a write sent beside it races
+    //    the unload. Without a pick nothing is sent and nothing waits. A failed
+    //    save does not hold the sign-in: the pick still applies on this device.
+    //    A session the hand-off would refuse is not a sign-in yet: skipped.
+    if (signInPickSaveRef.current === 'saving') return;
+    if (
+      signInPickSaveRef.current === 'idle' &&
+      !handoff.holdForSignIn &&
+      hasSignInLanguagePick()
+    ) {
+      signInPickSaveRef.current = 'saving';
+      void saveSignInLanguagePick(String(user.id)).finally(() => {
+        signInPickSaveRef.current = 'settled';
+        setSignInPickSaved(true);
+      });
+      return;
+    }
+
     // 1. OAuth provider hand-off (see file header). Replay the signed
     //    authorize params so the IdP issues the code, then FOLLOW the redirect
     //    it hands back. better-auth's oauth-provider answers a same-origin
@@ -310,6 +338,7 @@ export function LoginPage() {
     switchOrganization,
     handoff.target,
     handoff.holdForSignIn,
+    signInPickSaved,
   ]);
 
   if ((isLoading && !hasBootstrapped) || !signInNeeded) {
