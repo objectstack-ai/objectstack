@@ -36,12 +36,15 @@
  *    more.
  *
  * Neither `II18nService` implementation selects a plural form: `t()`
- * interpolates `{{name}}` holes and nothing else. None is needed for the
- * locales shipped here, because the count is always two or more, and in each
- * of them every count from two up takes ONE form (en and es-ES: the plural;
- * zh-CN and ja-JP: no plural inflection). A locale whose form varies above two
- * (Polish, Russian, Arabic) would need plural selection in the catalog, which
- * is the `i18n` service's to add, not this bundle's.
+ * interpolates `{{name}}` holes and nothing else. The count is always two or
+ * more, and in most shipped locales every count from two up takes ONE form
+ * (en, es-ES, fr, pt-BR: the plural; zh-CN, zh-Hant, ja-JP: no plural
+ * inflection). Arabic does vary above two (3–10 vs 11+), so its sentence is
+ * worded count-neutrally — the number stands after a colon as a tally
+ * (`عدد الإشعارات لديك: {{count}}`), which reads correctly for every count
+ * without choosing a noun form (#30512). A sentence that cannot be phrased
+ * that way needs plural selection in the catalog, which is the `i18n`
+ * service's to add, not this bundle's.
  */
 
 import type { TranslationData } from '@objectstack/spec/system';
@@ -70,10 +73,34 @@ export const esESMessages: MessagingMessages = {
     notificationDigestTitle: 'Tiene {{count}} notificaciones',
 };
 
-/** The four shipped locales, keyed as the bundle beside this file keys them. */
-export const messagingMessages: Readonly<Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', MessagingMessages>> = {
+export const zhHantMessages: MessagingMessages = {
+    notificationDigestTitle: '您有 {{count}} 則通知',
+};
+
+export const arMessages: MessagingMessages = {
+    notificationDigestTitle: 'عدد الإشعارات لديك: {{count}}',
+};
+
+export const frMessages: MessagingMessages = {
+    notificationDigestTitle: 'Vous avez {{count}} notifications',
+};
+
+export const ptBRMessages: MessagingMessages = {
+    notificationDigestTitle: 'Você tem {{count}} notificações',
+};
+
+/** The shipped locales, keyed as the bundle beside this file keys them. */
+export type MessagingLocale =
+    | 'en' | 'zh-CN' | 'ja-JP' | 'es-ES'
+    | 'zh-Hant' | 'ar' | 'fr' | 'pt-BR';
+
+export const messagingMessages: Readonly<Record<MessagingLocale, MessagingMessages>> = {
     en: enMessages,
     'zh-CN': zhCNMessages,
     'ja-JP': jaJPMessages,
     'es-ES': esESMessages,
+    'zh-Hant': zhHantMessages,
+    'ar': arMessages,
+    'fr': frMessages,
+    'pt-BR': ptBRMessages,
 };

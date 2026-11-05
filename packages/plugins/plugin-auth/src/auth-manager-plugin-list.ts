@@ -89,6 +89,8 @@ import {
   registeredAppSchemesOf,
 } from './one-time-token-handoff.js';
 import { userInfoLocaleClaim } from './oidc-userinfo-locale-claim.js';
+import { refuseGrantForBannedUser } from './oauth-grant-ban-refusal.js';
+import { refuseUserInfoForBannedUser } from './oauth-token-read-ban-refusal.js';
 import { buildTurnstileSignUpPlugin, reportHalfConfiguredTurnstile, resolveTurnstileKeys } from './turnstile-sign-up.js';
 
 /**
@@ -687,20 +689,36 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
       // `IAuthService.verifyMcpAccessToken` contract names.
       customAccessTokenClaims: ({ referenceId }) =>
         referenceId ? { [OAUTH_ORGANIZATION_CLAIM]: referenceId } : {},
+      // ── A banned user is minted no token (`oauth-grant-ban-refusal.ts`) ──
+      // The provider's one pre-write callback for every grant that acts for a
+      // user, with that user's row in hand: while the ban holds, the grant is
+      // answered as an invalid grant of its type and nothing is written. It
+      // contributes no response field.
+      customTokenResponseFields: async ({ grantType, user }) => {
+        await refuseGrantForBannedUser({ grantType, user });
+        return {};
+      },
       // ── The standard `locale` claim at userinfo (OIDC Core §5.1) ──
       // `sys_user.locale` under the `profile` scope, so an environment that
       // signs in through this OP follows the user's language; the rule and
       // its failure posture live in `oidc-userinfo-locale-claim.ts`. Userinfo
       // only: the provider keeps profile claims out of the ID token, and the
       // platform RP reads userinfo.
-      customUserInfoClaims: ({ user, scopes }) =>
-        userInfoLocaleClaim(
+      //
+      // A banned user's token reads no claims while the ban holds
+      // (`oauth-token-read-ban-refusal.ts`): userinfo answers it as an access
+      // token that does not verify, from the user row the provider hands this
+      // callback. Judged first, so a refused request reads no locale either.
+      customUserInfoClaims: async ({ user, scopes }) => {
+        await refuseUserInfoForBannedUser({ user });
+        return userInfoLocaleClaim(
           {
             getEngine: () => this.getDataEngine(),
             warn: (message, meta) => this.config.logger?.warn?.(message, meta),
           },
           { user, scopes },
-        ),
+        );
+      },
     })];
     });
   }
