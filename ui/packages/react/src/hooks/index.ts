@@ -23,14 +23,15 @@ export * from './useDynamicApp.js';
 export * from './useDiscovery.js';
 export * from './useKeyboardShortcuts.js';
 export * from './useCrudShortcuts.js';
-export * from './useReducedMotion.js';
-export * from './useAnimation.js';
+// SUPPORTED_TRANSITION_PRESETS / SUPPORTED_EASING_FUNCTIONS stay module-level for
+// the spec-parity test that imports them from the module; no host imports them.
+export { useAnimation } from './useAnimation.js';
+export type { EasingPreset, TransitionPresetType, AnimationConfig, AnimationResult } from './useAnimation.js';
 export * from './useDensityMode.js';
 export * from './useViewSharing.js';
 export * from './useOffline.js';
 export * from './usePerformance.js';
 export * from './usePerformanceBudget.js';
-export * from './useViewTransition.js';
 export * from './useETagCache.js';
 export * from './useGlobalUndo.js';
 export * from './useDebugMode.js';

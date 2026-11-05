@@ -87,6 +87,7 @@ const datasetOf = (rows: Array<Record<string, unknown>>, rawRows: Array<Record<s
     ],
     object: 'crm_opportunity',
     dimensionFields: { owner_name: 'owner_id' },
+    drillScopes: { deals: {} },
     drillRawRows: rawRows,
   })),
 });
@@ -257,5 +258,66 @@ describe('DatasetWidget — a bucket drills to ITS OWN rows (objectui#4508)', ()
     capturedChartProps.onSegmentClick({ category: NULL_CATEGORY_LABEL });
     // objectui#9085 spelling; the identity-free fallback path itself is unchanged.
     await waitFor(() => expect(lastFilter()).toEqual({ owner_id: { $null: true } }));
+  });
+});
+
+// ── objectstack-ai/objectstack#30615 — a chart mark lists ITS measure's records ──
+// The app-showcase `revenue-pulse` shape: `invoice_count` (scope `{}`) beside
+// `paid_count` (`filter: { status: 'paid' }`), one series per measure.
+describe('DatasetWidget chart drill — measure drill scopes (#30615)', () => {
+  const invoices = (drillScopes?: Record<string, Record<string, unknown>>) => ({
+    queryDataset: vi.fn(async () => ({
+      rows: [{ status: 'Sent', invoice_count: 4, paid_count: 0 }],
+      fields: [
+        { name: 'status', type: 'text', label: 'Status' },
+        { name: 'invoice_count', type: 'number', label: 'Invoices' },
+        { name: 'paid_count', type: 'number', label: 'Paid Invoices' },
+      ],
+      object: 'showcase_invoice',
+      dimensionFields: { status: 'status' },
+      drillRawRows: [{ status: 'sent' }],
+      ...(drillScopes ? { drillScopes } : {}),
+    })),
+  });
+  const renderBars = (src: ReturnType<typeof invoices>) =>
+    render(
+      <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false, resources: {} }}>
+        <DatasetWidget
+          widget={{ type: 'bar', dataset: 'invoices', dimensions: ['status'], values: ['invoice_count', 'paid_count'], filter: { region: 'emea' } }}
+          dataSource={src as any}
+        />
+      </I18nProvider>,
+    );
+  const SCOPES = { invoice_count: {}, paid_count: { status: 'paid' } };
+
+  it('a filtered measure bar lists bucket AND widget filter AND the measure scope', async () => {
+    installMetaRouter();
+    renderBars(invoices(SCOPES));
+    await waitFor(() => expect(chartRows()).toHaveLength(1));
+    capturedChartProps.onSegmentClick({ category: 'Sent', series: 'paid_count' });
+    await waitFor(() => expect(drillFilters.length).toBeGreaterThan(0));
+    expect(lastFilter()).toEqual({ $and: [{ $and: [{ region: 'emea' }, { status: 'paid' }] }, { status: 'sent' }] });
+  });
+
+  it('an unfiltered measure bar (`{}`) lists bucket AND widget filter only', async () => {
+    installMetaRouter();
+    renderBars(invoices(SCOPES));
+    await waitFor(() => expect(chartRows()).toHaveLength(1));
+    capturedChartProps.onSegmentClick({ category: 'Sent', series: 'invoice_count' });
+    await waitFor(() => expect(drillFilters.length).toBeGreaterThan(0));
+    expect(lastFilter()).toEqual({ $and: [{ region: 'emea' }, { status: 'sent' }] });
+  });
+
+  it('a series with no entry opens nothing, and an answer with no drillScopes offers no chart drill', async () => {
+    installMetaRouter();
+    renderBars(invoices({ invoice_count: {} }));
+    await waitFor(() => expect(chartRows()).toHaveLength(1));
+    capturedChartProps.onSegmentClick({ category: 'Sent', series: 'paid_count' });
+    expect(drillFilters).toHaveLength(0);
+    cleanup();
+    renderBars(invoices());
+    await waitFor(() => expect(chartRows()).toHaveLength(1));
+    expect(capturedChartProps.onSegmentClick).toBeUndefined();
+    expect(capturedChartProps.onChartClick).toBeUndefined();
   });
 });

@@ -17,7 +17,8 @@
  * and throws `AuthzStoreUnavailableError` (503) for the one class of fault
  * that leaves the answer undetermined: an authorization INPUT that exists and
  * could not be read (a permission-store read that failed, commit 6a180e42d; a `tenancy`
- * service that is registered and failed to build, #13906 decision 1 A). The
+ * service that is registered and failed to build, #13906 decision 1 A; the ban
+ * columns of an OAuth credential's user, `oauth-subject-ban.ts`). The
  * dispatcher's net (`HttpDispatcher.resolveRequestScope`) re-raises exactly
  * that class and degrades everything else to anonymous, as before.
  */
@@ -29,6 +30,7 @@ import { preferredLocaleFromHeader } from '@objectstack/spec/system';
 
 import { resolveRequestExecutionContext, type RequestAdmission } from '@objectstack/core';
 import { presentedForwardCredential, redeemForwardCredential, type ForwardAgentProvenance } from '@objectstack/rest';
+import { isOAuthSubjectBanned } from './oauth-subject-ban.js';
 
 /**
  * [#4127 batch 4] The lookup facade, typed by slot like the ones on
@@ -170,7 +172,15 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
   // principal through the same assembler input: the provenance handed over at
   // the mint, never re-derived from a token. The forward carries no caller
   // header, so nothing else here can answer for it.
-  const forwardAgent = forwardAgentOf(opts.request, headers);
+  //
+  // A banned user's credentials are refused while the ban holds, on both ways
+  // (`isOAuthSubjectBanned`): a forward credential whose agent acts for a
+  // banned user resolves as one that does not redeem, and a verified token
+  // whose subject is banned as one that does not verify. One read of the
+  // user's ban columns per credential resolved; a read that throws is the
+  // branded store outage, and propagates as the class this door re-raises.
+  let forwardAgent = forwardAgentOf(opts.request, headers);
+  if (forwardAgent && await isOAuthSubjectBanned(ql, forwardAgent.userId)) forwardAgent = undefined;
   if (forwardAgent) {
     oauthPrincipal = {
       userId: forwardAgent.userId,
@@ -182,16 +192,19 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
     const jwtBearer = extractJwtBearer(headers);
     if (jwtBearer) {
       oauthBearerPresented = true;
+      let verified: Awaited<ReturnType<NonNullable<IAuthService['verifyMcpAccessToken']>>>;
       try {
         // `verifyMcpAccessToken` is declared by `IAuthService` and reached
         // through the slot-typed lookup, so the verified result is read as the
         // contract states it — `organizationId` included.
-        const verified = await authService?.verifyMcpAccessToken?.(jwtBearer);
-        if (verified?.userId && Array.isArray(verified.scopes)) {
-          oauthPrincipal = verified;
-        }
+        verified = await authService?.verifyMcpAccessToken?.(jwtBearer);
       } catch {
         // verification error → fail closed (anonymous), handled below
+      }
+      // Read OUTSIDE the verifier's net: a ban read that throws is the store
+      // outage (503), never a token that did not verify.
+      if (verified?.userId && Array.isArray(verified.scopes) && !(await isOAuthSubjectBanned(ql, verified.userId))) {
+        oauthPrincipal = verified;
       }
     }
   }
