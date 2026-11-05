@@ -755,10 +755,19 @@ describe('[#30343] one action is one entry in the timeline count, as the 动态 
     const ofRecord = { object_name: 'account', record_id: 'a1' };
     // Rows, not canned totals: each count read is answered by filtering these
     // with its own `where`, so the sum is the one the rows give.
+    // It implements the field equality, `$in` and `$nin` the route sends, and
+    // refuses anything else (a combinator, another operator) rather than
+    // misreading it.
     const matches = (row: Record<string, unknown>, where: Record<string, any>) =>
         Object.entries(where).every(([key, want]) => {
-            if (want && typeof want === 'object' && '$in' in want) return want.$in.includes(row[key]);
-            if (want && typeof want === 'object' && '$nin' in want) return !want.$nin.includes(row[key]);
+            if (key.startsWith('$')) throw new Error(`the timeline double does not implement the combinator ${key}`);
+            if (want && typeof want === 'object') {
+                const ops = Object.keys(want);
+                if (ops.length !== 1 || (ops[0] !== '$in' && ops[0] !== '$nin')) {
+                    throw new Error(`the timeline double does not implement ${ops.join(', ')}`);
+                }
+                return ops[0] === '$in' ? want.$in.includes(row[key]) : !want.$nin.includes(row[key]);
+            }
             return row[key] === want;
         });
     const rowsBoot = (rows: Record<string, Array<Record<string, unknown>>>, refuse: string[] = []) =>
