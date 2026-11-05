@@ -16,6 +16,7 @@ import type {
   ISharingService,
 } from '@objectstack/spec/contracts';
 import { SysAuditLog, SysActivity, SysComment, SysCommentReaction } from './objects/index.js';
+import { SysAuditLogDetailPage } from './sys-audit-log.page.js';
 // `sys_notification` was parked here "until that [ADR-0030] migration lands".
 // It has landed, so the contribution moved to @objectstack/service-messaging —
 // the service that writes the row on every `emit()` (#4154). This plugin never
@@ -273,6 +274,10 @@ export class AuditPlugin implements Plugin {
       defaultDatasource: 'cloud',
       namespace: 'sys',
       objects: [SysAuditLog, SysActivity, SysComment, SysCommentReaction],
+      // The ledger row's record page: its fields, and every ledger row about
+      // the same record beside it, so a `config_change` row's digest sits next
+      // to the mirror's row that carries the value (`sys-audit-log.page.ts`).
+      pages: [SysAuditLogDetailPage],
       // ADR-0029 D7 — contribute the one Audit Log entry into the Setup app's
       // `group_diagnostics` slot. The plugin owns sys_audit_log (K2), so the
       // entry lives and dies with this plugin and needs no item gate.

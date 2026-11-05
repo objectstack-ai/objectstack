@@ -37,7 +37,10 @@
  *    which name the session, and its `login_failed` / `account_locked`, which
  *    name the account's `sys_user` row (`auth-event-audit.ts`), and an
  *    `action_invocation` row whose action named a subject record
- *    (`action-invocation-audit.ts`). Judged by the record gate;
+ *    (`action-invocation-audit.ts`), and service-settings' `config_change`,
+ *    which names the stored settings row the write changed (`sys_setting`, or
+ *    `sys_platform_setting` for a global value), the row the mirror's own
+ *    `create` / `update` about that write names. Judged by the record gate;
  *    the session is in the audit writer's `AUDIT_EXCLUDED_OBJECTS`, so the gate
  *    names it ({@link LEDGER_NAMED_PARENTS}) to keep judging it.
  *    A record that no longer exists is read by no caller, so its rows are
@@ -46,10 +49,11 @@
  *    deleted record, and every `logout` row (sign-out deletes the session it
  *    names).
  *  - **Rows about no record** — they name no `record_id` and their action is
- *    not a record action: the run-level `import` (plugin-auth's user import),
- *    `config_change` (service-settings) and `platform_admin_standing_change`
- *    (plugin-security) rows, an auth event that carried no session id, and an
- *    `action_invocation` row of an action invoked with no subject record.
+ *    not a record action: the run-level `import` (plugin-auth's user import)
+ *    and `platform_admin_standing_change` (plugin-security) rows, a
+ *    `config_change` row stored before its writer recorded the settings row,
+ *    an auth event that carried no session id, and an `action_invocation` row
+ *    of an action invoked with no subject record.
  *    There is no record to judge, and none carries a record's field values
  *    (the per-writer measurement in `audit-log-field-redaction.ts`), so they
  *    are OUTSIDE this gate's class and are served under the ledger's own grant
@@ -57,7 +61,8 @@
  *    ({@link ledgerRowAboutNoRecordWhere}), so a broad read is served whole. This is where the ledger differs from the activity
  *    stream, which excludes every row naming no parent: the stream has no
  *    platform producer of such rows, while these have three, and the shipped
- *    `config_changes` list view reads two of them through the data door.
+ *    `config_changes` list view reads `import` rows (and the older
+ *    `config_change` rows) through the data door.
  *  - **A record action that names no record** — a `create` / `read` / `update`
  *    / `delete` row with no `record_id` (the CRUD mirror stamps `null` when it
  *    cannot derive the id): about a record the gate cannot name, so excluded
