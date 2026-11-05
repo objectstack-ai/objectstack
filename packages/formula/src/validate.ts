@@ -440,9 +440,10 @@ const DATE_FAIL_CLOSED_CLAUSE =
  *    (`date − date + 1`, `today() + 30`) — always faults at runtime and never
  *    recovers, so it blocks the build. A formula reads that fault as null; a
  *    flattened (flow) condition's fault fails the run, under the
- *    `date-arithmetic-run-fails` / `-run-may-fail` codes (#30016), and a
+ *    `date-arithmetic-run-fails` / `-run-may-fail` codes (#30016), a
  *    fail-closed site's refuses the write, under `date-arithmetic-fail-closed`
- *    (#30250, {@link dateArm}).
+ *    (#30250), and an advisory rule's skips the rule, under
+ *    `date-arithmetic-fail-open` (#30494, {@link dateArm}).
  *  - `type-mismatch` (**warning**): a text/boolean field used with an
  *    arithmetic/ordering operator against a number — nulls unless the text value
  *    happens to be numeric, so it stays advisory. An **error** where the caller
@@ -611,25 +612,32 @@ function typeSoundnessIssue(
  * where it holds the date: `run-may-fail`. A `record`-scoped site that fails
  * closed (`faultOutcome: 'fail-closed'`: an `error` validation rule, a field
  * write rule, an option `visibleWhen`, a hook `condition`) refuses the write
- * on the fault: `fail-closed` (#30250). An advisory rule (`fail-open`) keeps
- * the null sentence. The grade stays an error everywhere.
+ * on the fault: `fail-closed` (#30250). An advisory rule (`faultOutcome:
+ * 'fail-open'`) is skipped on the fault and the write proceeds: `fail-open`,
+ * the `type-mismatch-fail-open` clause (#30494). The grade stays an error
+ * everywhere.
  */
-type DateArm = 'run-fails' | 'run-may-fail' | 'fail-closed';
+type DateArm = 'run-fails' | 'run-may-fail' | 'fail-closed' | 'fail-open';
 function dateArm(
   scope: 'record' | 'flattened',
   faultOutcome: ExprSchemaHint['faultOutcome'],
   bareNamesUnproven: boolean | undefined,
 ): DateArm | null {
-  if (scope !== 'flattened') return faultOutcome === 'fail-closed' ? 'fail-closed' : null;
+  if (scope !== 'flattened') {
+    return faultOutcome === 'fail-closed' || faultOutcome === 'fail-open' ? faultOutcome : null;
+  }
   return faultOutcome === 'run-fails' && !bareNamesUnproven ? 'run-fails' : 'run-may-fail';
 }
 
 /**
- * [#30016, #30250] The fault clause of a date verdict whose fault does not read
- * null; `held` names what a flow condition's field holds at run time.
+ * [#30016, #30250, #30494] The fault clause of a date verdict whose fault does
+ * not read null; `held` names what a flow condition's field holds at run time.
+ * An advisory rule's is the type mismatch's own `fail-open` clause, word for
+ * word: one outcome, one sentence.
  */
 function dateArmFault(arm: DateArm, ref: string | null, held: 'date' | 'text'): string {
   if (arm === 'fail-closed') return `this faults at runtime, and here ${DATE_FAIL_CLOSED_CLAUSE}`;
+  if (arm === 'fail-open') return `this faults at runtime, and here ${TYPE_MISMATCH_FAULT_ARMS['fail-open'].clause}`;
   const fails =
     'a flow condition that cannot be evaluated fails the run: the flow stops at this condition and the ' +
     'work the flow exists to do is not done (it does not read null).';
@@ -645,8 +653,9 @@ function dateArmFault(arm: DateArm, ref: string | null, held: 'date' | 'text'): 
  *  - `date-text-arithmetic`: arithmetic on that text the evaluator faults on —
  *    `record.end_date - record.start_date` (either field kind), `record.d -
  *    duration('24h')` — so the expression reads null (in a flow condition the
- *    run fails instead, and on a fail-closed site the write is refused:
- *    `flowArm`, #30016, #30250). Any role.
+ *    run fails instead, on a fail-closed site the write is refused, and on an
+ *    advisory rule the rule is skipped: `flowArm`, #30016, #30250, #30494).
+ *    Any role.
  *  - `date-duration-value`: a formula (`value` role) that computes a
  *    `google.protobuf.Duration` — `today() - record.start_date` — which a field
  *    serialises as `{}`. A predicate that COMPARES a duration
