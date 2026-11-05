@@ -5508,6 +5508,9 @@ importers:
       '@object-ui/plugin-detail':
         specifier: workspace:*
         version: link:../plugin-detail
+      '@object-ui/plugin-grid':
+        specifier: workspace:*
+        version: link:../plugin-grid
       '@object-ui/react':
         specifier: workspace:*
         version: link:../react
