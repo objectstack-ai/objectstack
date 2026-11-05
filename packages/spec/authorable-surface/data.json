@@ -903,6 +903,7 @@
     "data/SeedLoadResult:errored",
     "data/SeedLoadResult:errors",
     "data/SeedLoadResult:inserted",
+    "data/SeedLoadResult:insertedIds",
     "data/SeedLoadResult:landedIds",
     "data/SeedLoadResult:mode",
     "data/SeedLoadResult:object",

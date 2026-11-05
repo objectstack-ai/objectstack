@@ -1980,6 +1980,11 @@ const STUDIO_EN: Record<string, string> = {
   'engine.datasource.deleteTitle': 'Delete datasource "{item}"?',
   'engine.datasource.deleteBody': 'The connection {name} is removed. This cannot be undone.',
   'engine.datasource.delete': 'Delete',
+  // The objects bound to a datasource, read from object metadata (each object's
+  // `datasource`): the delete confirm lists them, and a refused delete names them.
+  'engine.datasource.deleteBoundBody': 'These objects still use {name}, so it cannot be deleted yet. Delete each object or move it to another datasource first:',
+  'engine.datasource.deleteBoundRefused': '{name} was not deleted: {objects} still use it. Delete these objects or move them to another datasource, then delete {name} again.',
+  'engine.datasource.boundObjectSeparator': ', ',
   // objectui#13460 — the datasource page's own copy. Author data (names, driver
   // labels and descriptions, server messages) and the driver config schema's enum
   // option values (objectui#13353) are not rows here.
@@ -4365,6 +4370,27 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.inspector.listView.chart.noDatasets': 'No dataset is built on this object, so this chart has nothing to bind to.',
   'engine.studio.inspector.listView.chart.readFailed': 'The datasets could not be read ({reason}). The binding is shown as saved.',
   'engine.studio.inspector.listView.chart.membersFailed': 'This dataset’s measures and dimensions could not be read ({reason}). They are shown as saved.',
+  'engine.studio.inspector.listView.bulk': 'Selection actions',
+  'engine.studio.inspector.listView.bulk.intro': 'The buttons this list shows when rows are selected: actions of this object, run once for each selected record, and field updates that write the same value to every selected record.',
+  'engine.studio.inspector.listView.bulk.delete.default': 'This view declares no selection action, so the list shows its built-in Delete when rows are selected.',
+  'engine.studio.inspector.listView.bulk.delete.kept': 'The built-in Delete is listed below, so it stays on the selection bar.',
+  'engine.studio.inspector.listView.bulk.delete.dropped': 'This view declares its own selection actions, so the built-in Delete is not shown. Add Delete below to keep it.',
+  'engine.studio.inspector.listView.bulk.readFailed': 'This object’s actions and fields could not be read ({reason}). The selection actions are shown as saved.',
+  'engine.studio.inspector.listView.bulk.actions': 'Actions',
+  'engine.studio.inspector.listView.bulk.addAction': 'Add an action…',
+  'engine.studio.inspector.listView.bulk.builtinDelete': 'Delete (built-in)',
+  'engine.studio.inspector.listView.bulk.notAnAction': 'Not an action of this object',
+  'engine.studio.inspector.listView.bulk.fieldUpdates': 'Field updates',
+  'engine.studio.inspector.listView.bulk.addFieldUpdate': 'Add a field update',
+  'engine.studio.inspector.listView.bulk.defLabel': 'Button label',
+  'engine.studio.inspector.listView.bulk.defLabelPlaceholder': 'Button label, e.g. Change owner',
+  'engine.studio.inspector.listView.bulk.defFields': 'Fields to ask for',
+  'engine.studio.inspector.listView.bulk.addField': 'Add a field…',
+  'engine.studio.inspector.listView.bulk.confirm': 'Confirmation',
+  'engine.studio.inspector.listView.bulk.confirmPlaceholder': 'Confirmation, e.g. Update {{ count }} record(s)?',
+  'engine.studio.inspector.listView.bulk.inMetadata': 'Edited in metadata',
+  'engine.studio.inspector.listView.bulk.add': 'Add',
+  'engine.studio.inspector.listView.bulk.cancel': 'Cancel',
   'engine.studio.inspector.designersMissing':
     'No metadata designers are registered in this session, so there is nothing to edit here.',
   'engine.studio.inspector.noPageSchema': 'Page settings are unavailable — the page schema could not be loaded.',
