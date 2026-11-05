@@ -43,66 +43,78 @@
       "note": "record-page binding + interfaceConfig source object — objectui PageView / InterfaceListPage."
     },
     "record": {
-      "status": "planned",
-      "verifiedAt": "2026-10-18",
-      "evidence": "packages/spec/src/ui/page.zod.ts#checkPageRecordBindingPlacement (the parse refuses `record` on every page that is not `type: 'app'`, so the key reaches only the one page type that opens no row of its own); packages/spec/src/ui/page.zod.ts#PageRecordBindingSchema (the strict one-row query shape: `object`, `view`, `filter`, `sort`, and no `limit`)",
-      "note": "PLANNED, the renderer half pending — consumer card objectstack-ai/objectui#12931: measured on objectui `main` @79cb8c03eb, nothing reads a page-level `record` yet. `SchemaRenderer`'s `configEvaluationScope` binds `record` from `RecordContext` (`boundRecord = recordContext?.data`), and on an `app` page the only provider of that context is a record block's own one-row binding (`plugin-detail/src/renderers/recordBinding.tsx`), which wraps that block's BODY — so neither the block's own `visibleWhen` nor a sibling's sees the row. The renderer half mounts the page binding with that same one-record semantics at the page root, so every component predicate reads it as `record`. Until then `record` is unbound on an `app` page exactly as before the key existed: a predicate reading it faults, and a faulting `visibleWhen` renders the component. Flip to `live` when the console mounts it, citing the read point.",
+      "status": "live",
+      "verifiedAt": "2026-11-05",
+      "evidenceScope": "in-repo",
+      "evidence": "ui/packages/app-shell/src/views/PageView.tsx#appPageRecordBinding (takes `page.record` on a `type: 'app'` page only, and only a binding that names its object, through isElementDataSourceConfig); ui/packages/app-shell/src/views/PageView.tsx#PageView mounts `<AppPageRecord binding={appPageRecordBinding(page)}>` around the page body; ui/packages/app-shell/src/views/PageView.tsx#AppPageRecordRead reads the FIRST row of the bound set (`$top: 1`) and hands it to ui/packages/app-shell/src/providers/ExpressionProvider.tsx#PageRecordScope, which publishes it as `record` on the predicate scope; ui/packages/react/src/SchemaRenderer.tsx#buildNodeEvaluationScope spreads that scope into every component's evaluation, so each `visibleWhen` reads it as `record` (a record block's own bound row still wins for its own subtree)",
+      "producer": "ui/packages/app-shell/src/views/PageView.tsx#PageView — the read runs on the page's own adapter (`useAdapter()`), passed to AppPageRecord beside the binding; there is no second input: the author's binding is the query",
+      "note": "RE-GRADED planned → live 2026-11-05 (#30094) by reading the renderer in this checkout: the renderer half the previous note waited on (objectui#12931, measured then on objectui `main` @79cb8c03eb) has landed in `ui/`. The page-level scope the old note said was missing is PageRecordScope, mounted by the page host, not RecordContext: the page row is `record` to every component predicate on the page, and a record block that binds its own row still provides that row to its own subtree. The three states a predicate sees: pending (body not drawn), no row or a refused read (`record` is null — absent and not-yours read the same), any other failure (body not drawn; the record page's failed-read state with Retry). Pinned by ui/packages/app-shell/src/views/__tests__/PageView.appPageRecord-12931.test.tsx (tier and count predicates, the one read per open with the org token resolved, no binding and non-app page read nothing, 0 rows, 403, failed closed). The parse half is unchanged: packages/spec/src/ui/page.zod.ts#checkPageRecordBindingPlacement refuses `record` on every page that is not `type: 'app'`, and packages/spec/src/ui/page.zod.ts#PageRecordBindingSchema is the strict one-row shape (no `limit`). The schema's own describe() and TSDoc still say 'Planned in the renderer' — stale prose left for a spec change, not this ledger regrade.",
       "children": {
         "object": {
-          "status": "planned",
-          "verifiedAt": "2026-10-18",
-          "evidence": "packages/spec/src/ui/page.zod.ts#PageRecordBindingSchema (declares `object` on the strict one-row query shape)",
-          "note": "The object the page row is read from. Planned with its container: no renderer reads a page-level `record` yet."
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/app-shell/src/views/PageView.tsx#AppPageRecordGate lands the binding's object on `objectName` (ui/packages/core/src/data-scope/element-data-source.ts#composeElementDataSource: `object: config.object`) and ui/packages/app-shell/src/views/PageView.tsx#AppPageRecordRead queries it: `dataSource.find(object, params)`",
+          "note": "The object the page row is read from. Required to bind at all: #appPageRecordBinding treats a binding with no object as no binding, and the page renders with `record` unbound."
         },
         "view": {
-          "status": "planned",
-          "verifiedAt": "2026-10-18",
-          "evidence": "packages/spec/src/ui/page.zod.ts#PageRecordBindingSchema (declares `view` on the strict one-row query shape)",
-          "note": "The named view whose filter AND-combines with `filter` — the element `dataSource` semantics. Planned with its container."
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/react/src/hooks/useElementDataSource.ts#useElementDataSource (reads `config.view`, lists the object's saved views through the adapter and resolves the name with resolveSavedView; an unresolved name answers `missing`, which ElementDataSourceGate draws as its error panel in place of the page body, never a wider read); ui/packages/core/src/data-scope/element-data-source.ts#composeElementDataSource (the named view's filter AND-combined with the binding's; the view's sort when the binding declares none)",
+          "producer": "ui/packages/app-shell/src/views/PageView.tsx#AppPageRecordGate passes the page's adapter to ElementDataSourceGate as its `dataSource`, which is what lists the saved views",
+          "note": "The named view whose filter AND-combines with `filter` — the element `dataSource` semantics, through the same gate a block's binding uses."
         },
         "filter": {
-          "status": "planned",
-          "verifiedAt": "2026-10-18",
-          "evidence": "packages/spec/src/ui/page.zod.ts#PageRecordBindingSchema (declares `filter` on the strict one-row query shape)",
-          "note": "ViewFilterRule array form, the one orthography every `filter` door shares. Planned with its container.",
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/react/src/element-data-source/ElementDataSourceGate.tsx#useElementDataSourceSchema (the page's mapping sets `filter: true`: the composed filter is lowered by toFilterNodeSafely and lands on the bound schema); ui/packages/app-shell/src/views/PageView.tsx#AppPageRecordRead resolves its placeholder tokens (useResolvedFilter over useFilterScope) and sends it as `$filter`",
+          "note": "ViewFilterRule array form, the one orthography every `filter` door shares. A filter the lowering refuses withholds the read and the page body (the malformed-filter panel), never an unfiltered read.",
           "children": {
             "field": {
-              "status": "planned",
-              "verifiedAt": "2026-10-18",
-              "evidence": "packages/spec/src/ui/view.zod.ts#ViewFilterRuleSchema (declares `field` on the rule the binding's `filter` array holds)",
-              "note": "`field` of one `filter` item on the page record binding. Planned with its container: no renderer reads a page-level `record` yet."
+              "status": "live",
+              "verifiedAt": "2026-11-05",
+              "evidenceScope": "in-repo",
+              "evidence": "ui/packages/core/src/utils/filter-converter.ts#viewFilterRuleToNode (each rule of the landed `filter` array lowers to the comparison `[rule.field, operator, rule.value]`, the operator through normalizeFilterOperator; a rule it cannot lower is refused as a FilterOperatorError, which ui/packages/react/src/element-data-source/ElementDataSourceGate.tsx#ElementDataSourceGate draws as its malformed-filter panel in place of the page body)",
+              "note": "`field` of one `filter` item on the page record binding: the left operand of the lowered comparison."
             },
             "operator": {
-              "status": "planned",
-              "verifiedAt": "2026-10-18",
-              "evidence": "packages/spec/src/ui/view.zod.ts#ViewFilterRuleSchema (declares `operator` on the rule the binding's `filter` array holds)",
-              "note": "`operator` of one `filter` item on the page record binding. Planned with its container: no renderer reads a page-level `record` yet."
+              "status": "live",
+              "verifiedAt": "2026-11-05",
+              "evidenceScope": "in-repo",
+              "evidence": "ui/packages/core/src/utils/filter-converter.ts#viewFilterRuleToNode (each rule of the landed `filter` array lowers to the comparison `[rule.field, operator, rule.value]`, the operator through normalizeFilterOperator; a rule it cannot lower is refused as a FilterOperatorError, which ui/packages/react/src/element-data-source/ElementDataSourceGate.tsx#ElementDataSourceGate draws as its malformed-filter panel in place of the page body)",
+              "note": "`operator` of one `filter` item on the page record binding: normalised, then the comparison operator."
             },
             "value": {
-              "status": "planned",
-              "verifiedAt": "2026-10-18",
-              "evidence": "packages/spec/src/ui/view.zod.ts#ViewFilterRuleSchema (declares `value` on the rule the binding's `filter` array holds)",
-              "note": "`value` of one `filter` item on the page record binding. Planned with its container: no renderer reads a page-level `record` yet."
+              "status": "live",
+              "verifiedAt": "2026-11-05",
+              "evidenceScope": "in-repo",
+              "evidence": "ui/packages/core/src/utils/filter-converter.ts#viewFilterRuleToNode (each rule of the landed `filter` array lowers to the comparison `[rule.field, operator, rule.value]`, the operator through normalizeFilterOperator; a rule it cannot lower is refused as a FilterOperatorError, which ui/packages/react/src/element-data-source/ElementDataSourceGate.tsx#ElementDataSourceGate draws as its malformed-filter panel in place of the page body)",
+              "note": "`value` of one `filter` item on the page record binding: the right operand; placeholder tokens such as `{current_org_id}` resolve before the read (#AppPageRecordRead)."
             }
           }
         },
         "sort": {
-          "status": "planned",
-          "verifiedAt": "2026-10-18",
-          "evidence": "packages/spec/src/ui/page.zod.ts#PageRecordBindingSchema (declares `sort` on the strict one-row query shape)",
-          "note": "Decides which row is FIRST — the page row. Planned with its container.",
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/app-shell/src/views/PageView.tsx#AppPageRecordRead sends the landed sort as `params.$orderby` beside `$top: 1`, so the first row under it is the page row; ui/packages/core/src/data-scope/element-data-source.ts#composeElementDataSource (the binding's sort overrides the named view's)",
+          "note": "Decides which row is FIRST — the page row.",
           "children": {
             "field": {
-              "status": "planned",
-              "verifiedAt": "2026-10-18",
-              "evidence": "packages/spec/src/shared/enums.zod.ts#SortItemSchema (declares `field` on the item the binding's `sort` array holds)",
-              "note": "`field` of one `sort` item on the page record binding. Planned with its container: no renderer reads a page-level `record` yet."
+              "status": "live",
+              "verifiedAt": "2026-11-05",
+              "evidenceScope": "in-repo",
+              "evidence": "ui/packages/data-objectstack/src/index.ts#serializeOrderBy (each `{ field, order }` item of `$orderby` becomes `field` or `-field` on the wire `sort` parameter of the adapter's find)",
+              "note": "`field` of one `sort` item on the page record binding: the column the read orders by, through the shipping ObjectStack adapter."
             },
             "order": {
-              "status": "planned",
-              "verifiedAt": "2026-10-18",
-              "evidence": "packages/spec/src/shared/enums.zod.ts#SortItemSchema (declares `order` on the item the binding's `sort` array holds)",
-              "note": "`order` of one `sort` item on the page record binding. Planned with its container: no renderer reads a page-level `record` yet."
+              "status": "live",
+              "verifiedAt": "2026-11-05",
+              "evidenceScope": "in-repo",
+              "evidence": "ui/packages/data-objectstack/src/index.ts#serializeOrderBy (`order` compared case-insensitively to `desc` decides `-field` against `field`)",
+              "note": "`order` of one `sort` item on the page record binding: `desc` sorts descending; anything else ascending."
             }
           }
         }

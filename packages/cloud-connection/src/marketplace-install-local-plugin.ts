@@ -240,7 +240,7 @@ import {
 import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
-import { matchSeedRows, purgeSeedRows, type PurgeSeedDataset } from './marketplace-install-local-purge.js';
+import { countSeedRows, matchSeedRows, purgeSeedRows, type PurgeSeedDataset } from './marketplace-install-local-purge.js';
 import { planCustomizationPairInstall, type PairInstallItem } from './marketplace-install-local-customization-pair.js';
 import type {
     AuthSessionApi, ConnectorCredentialRef, IAuthService, IAutomationService, IHttpServer, IMetadataService, IObjectQLEngine,
@@ -268,6 +268,7 @@ import { judgeOverrideWrite, overrideWriteIdentityOf, overrideWriteItemsOf, type
 // [ADR-0146 D10, #28564] The `__c` extension-field reservation's one judge, step 1c''.
 import { judgeExtensionFieldSuffix } from '@objectstack/metadata-protocol';
 import { resolveThrownHttpError } from '@objectstack/types';
+import { unknownQueryParamRefusalMessage } from '@objectstack/rest';
 // [#25366] The code the registry's security-catalog refusal carries, compared
 // rather than `instanceof`-tested: the engine keeps the class unexported so a
 // consumer holding the other build realm's copy cannot misread it.
@@ -277,6 +278,13 @@ import { NAMESPACE_CONFLICT_CODE } from '@objectstack/objectql';
 type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
 
 const ROUTE_BASE = '/api/v1/marketplace/install-local';
+
+/**
+ * The closed query-parameter set of `GET …/:manifestId/sample-data` (AGENTS.md,
+ * route rule 5): it reads none. An unknown name is refused with a located
+ * `400`, never ignored — the door has no dry-run switch to mistype.
+ */
+export const SAMPLE_DATA_COUNT_QUERY_PARAMS: readonly string[] = Object.freeze([]);
 
 /**
  * [#25366] Whether a `manifest.register` failure is the registry's security
@@ -568,6 +576,8 @@ type NamespaceHoldingEngine = PackageWritabilityEngine & {
 type OverrideGateEngine = PackageWritabilityEngine & {
     registry?: PackageWritabilityEngine['registry'] & {
         getAllPackages?(): unknown;
+        /** [#30542] An installed package's code artifact (`SchemaRegistry#getArtifactItem`). */
+        getArtifactItem?(type: string, name: string, currentPackageId?: string): unknown;
     };
 };
 type OverrideGateLister = {
@@ -1240,9 +1250,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
 
             const reseedHandler = async (c: any) => this.handleReseed(c, ctx);
             const purgeHandler = async (c: any) => this.handlePurge(c, ctx);
+            const sampleDataCountHandler = async (c: any) => this.handleSampleDataCount(c, ctx);
 
             if (typeof rawApp.post === 'function') rawApp.post(ROUTE_BASE, postHandler);
             if (typeof rawApp.get === 'function') rawApp.get(ROUTE_BASE, getHandler);
+            if (typeof rawApp.get === 'function') rawApp.get(`${ROUTE_BASE}/:manifestId/sample-data`, sampleDataCountHandler);
             if (typeof rawApp.delete === 'function') rawApp.delete(`${ROUTE_BASE}/:manifestId`, deleteHandler);
             if (typeof rawApp.post === 'function') {
                 rawApp.post(`${ROUTE_BASE}/:manifestId/reseed-sample-data`, reseedHandler);
@@ -3681,6 +3693,20 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             return read;
         };
         const isBase = (id: string): boolean => delivered.has(id) || !isWritablePackage(ql, id);
+        // [#30542] An installed base's own item is its code artifact, the one
+        // the protocol door judges a declared action override against
+        // (`overrideWriteVerdict`'s `baseItemOf`). The listing is not: once
+        // the base's declared override is armed, it serves the override under
+        // the base's envelope, so a re-install of the pair was judged against
+        // its own previous version, and a v2 that relaxes a v1 tightening
+        // back to the base's own gates was refused. A registry that answers
+        // no artifact leaves the listed item.
+        const artifactOf = (item: OverrideWriteItem, base: string): unknown => {
+            const artifact = registry.getArtifactItem?.(item.type, item.name, base);
+            return isPlainObject(artifact) && artifact._packageId === base && listedIdentity(item.type, artifact) === item.identity
+                ? artifact
+                : undefined;
+        };
 
         const refusals: OverrideInstallRefusal[] = [];
         for (const [packageId, pkg] of delivered) {
@@ -3693,7 +3719,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 const shipped = new Map<string, unknown>();
                 for (const base of bases) {
                     const held = (await heldBy(item.type, base)).get(item.identity);
-                    if (held !== undefined) { shippers.push(base); shipped.set(base, held); }
+                    if (held !== undefined) {
+                        shippers.push(base);
+                        shipped.set(base, (delivered.has(base) ? undefined : artifactOf(item, base)) ?? held);
+                    }
                 }
                 const verdict = judgeOverrideWrite(
                     { type: item.type, name: item.name, packageId, item: item.item },
@@ -4535,6 +4564,108 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             success: true,
             data: { manifestId, deleted, skipped, errors, withSampleData: false },
         }, 200);
+    };
+
+    /**
+     * GET /api/v1/marketplace/install-local/:manifestId/sample-data
+     *
+     * How many of the package's sample rows the caller's scope still holds:
+     * `{ manifestId, count, unidentified }`. `count` is the number of rows a
+     * purge run now would delete — {@link countSeedRows}, the purge's own
+     * {@link matchSeedRows} pass with nothing deleted — so the console can say
+     * "N records will go" after a reload, when the install answer's
+     * `data.seeded` is long gone. `unidentified` is the seed records the purge
+     * would report in `errors` and leave in place.
+     *
+     * A read of its own, not a switch on the purge: a GET can delete nothing,
+     * whatever the request carries, and it takes no query parameter at all
+     * ({@link SAMPLE_DATA_COUNT_QUERY_PARAMS}). Not a field on the listing
+     * either: the listing answers `withSampleData` for every installed package
+     * on every visit, from the FIRST seed row it finds; a count reads every
+     * seeded object's rows, so it is asked for one package, when it is needed.
+     *
+     * Every answer is the purge's for the same request, read-only:
+     *   • the purge's gate, `manage_metadata` ({@link requireInstallCapability}),
+     *     since the count exists to word the purge's confirm;
+     *   • `404` for no install, the unreadable-entry answer, and the protocol
+     *     handshake's `422 OS_PROTOCOL_INCOMPATIBLE` (#21834), in that order;
+     *   • the purge's scope: under an organization wall the caller's active
+     *     organization, table-wide without one. A walled session with NO active
+     *     organization reads nothing and answers `count: 0` — ADR-0123 D2's
+     *     answer for a tenant-scoped READ, the listing's `withSampleData: false`
+     *     for the same session; the purge it would word refuses that session;
+     *   • a package that declares no seed datasets answers `count: 0` (the
+     *     purge's `400 NOTHING_TO_PURGE` is about acting, and nothing is acted on);
+     *   • no data engine or metadata service: the purge's `500
+     *     DRIVER_UNAVAILABLE`, never a `0` that reads as "nothing left".
+     */
+    private handleSampleDataCount = async (c: any, ctx: PluginContext): Promise<Response> => {
+        const admission = await this.requireInstallCapability(c, ctx, 'Counting sample data');
+        if (!admission.ok) return admission.response;
+        const query = typeof c.req?.query === 'function' ? c.req.query() : undefined;
+        const queryRefusal = unknownQueryParamRefusalMessage(query, SAMPLE_DATA_COUNT_QUERY_PARAMS);
+        if (queryRefusal) {
+            return c.json({ success: false, error: { code: 'VALIDATION_ERROR', message: queryRefusal } }, 400);
+        }
+        const manifestId = String(c.req.param?.('manifestId') ?? c.req.params?.manifestId ?? '').trim();
+        if (!manifestId) {
+            return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'manifestId path param required.' } }, 400);
+        }
+        if (!this.ledger.has(manifestId)) {
+            return c.json({ success: false, error: { code: 'RESOURCE_NOT_FOUND', message: `No marketplace install for ${manifestId}.` } }, 404);
+        }
+        const { entry, failure } = this.ledger.read(manifestId);
+        if (!entry) {
+            return this.unreadableLedgerEntry(c, ctx, manifestId, failure, 'count sample data');
+        }
+        const incompatible = this.refuseProtocolIncompatibleEntry(c, entry);
+        if (incompatible) return incompatible;
+
+        const answer = (count: number, unidentified: number): Response => c.json({
+            success: true,
+            data: { manifestId, count, unidentified },
+        }, 200);
+
+        const datasets = seedDatasetsOf(entry.manifest);
+        if (datasets.length === 0) return answer(0, 0);
+
+        let ql: IObjectQLEngine | undefined;
+        let metadata: IMetadataService | undefined;
+        try { ql = ctx.getService<IObjectQLEngine>('objectql'); } catch { /* no data engine */ }
+        try { metadata = ctx.getService<IMetadataService>('metadata'); } catch { /* no metadata service */ }
+        if (!ql || !metadata) {
+            return c.json({
+                success: false,
+                error: {
+                    code: 'DRIVER_UNAVAILABLE',
+                    message: 'The data engine (objectql) or the metadata service is not available on this runtime — cannot count sample data.',
+                },
+            }, 500);
+        }
+
+        let organizationId: string | undefined;
+        if (organizationWallActive(ctx)) {
+            const resolved = await this.resolveActiveOrgId(c, ctx);
+            // [ADR-0123 D2] No organization, so no organization's rows to count.
+            if (!resolved) return answer(0, 0);
+            organizationId = resolved;
+        }
+
+        const { SeedLoaderService } = await import('@objectstack/runtime');
+        const loader = new (SeedLoaderService as any)(ql, metadata, ctx.logger);
+        const graph = await loader.buildDependencyGraph([...new Set(datasets.map((d: any) => String(d.object)))]);
+        const { count, unidentified } = await countSeedRows({
+            engine: ql,
+            datasets,
+            graph,
+            organizationId,
+            report: (problem) => ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] ${manifestId}: the sample-data count could not identify `
+                + `${problem.records} seed record(s) of ${problem.object} (${problem.kind}: ${problem.detail}); `
+                + 'a purge would leave them in place',
+            ),
+        });
+        return answer(count, unidentified);
     };
 
     /**

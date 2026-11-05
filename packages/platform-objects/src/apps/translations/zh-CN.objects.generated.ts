@@ -984,7 +984,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
   sys_business_unit: {
     label: "业务单元",
     pluralLabel: "业务单元",
-    description: "公司的组织结构——事业部、部门、区域和办公地点——用于划定数据和报表的范围。",
+    description: "公司的组织结构——事业部、部门、区域和办公地点。共享规则可以把记录共享给某个业务单元，或某个业务单元及其下级单元：成员获得这些访问权限，离开后即失去。让权限集按业务单元读取全部记录（读取范围「unit」）需要企业版。",
     fields: {
       name: {
         label: "名称"
@@ -1010,7 +1010,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       timezone: {
         label: "时区",
-        help: "该业务单元计算日期边界所用的 IANA 时区（如 Asia/Shanghai）。留空则依次继承上级业务单元的时区、组织的时区，最后为 UTC。"
+        help: "为该业务单元保存的 IANA 时区（如 Asia/Shanghai）；留空则取上级业务单元的，再取组织的。它目前不会改变任何日期计算：公式、报表和显示的日期使用 设置 → 本地化 → 默认时区。"
       },
       organization_id: {
         label: "组织",
@@ -3446,6 +3446,54 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_platform_setting: {
+    label: "平台设置",
+    pluralLabel: "平台设置",
+    description: "整个部署共用的设置值：设置级联中的全局层。",
+    fields: {
+      id: {
+        label: "设置 ID"
+      },
+      created_at: {
+        label: "创建时间"
+      },
+      updated_at: {
+        label: "更新时间"
+      },
+      namespace: {
+        label: "命名空间",
+        help: "Manifest 命名空间（例如 mail、storage、ai）。"
+      },
+      key: {
+        label: "键",
+        help: "命名空间内的标识键（snake_case）。"
+      },
+      value: {
+        label: "值",
+        help: "JSON 编码的值。加密存储时为空（见「加密值」）。"
+      },
+      encrypted: {
+        label: "已加密",
+        help: "开启后，值加密存放在「加密值」中，「值」一列为空。"
+      },
+      locked: {
+        label: "已锁定",
+        help: "开启后，组织和用户的设置不能覆盖该值；对这两层的写入会被拒绝（409）。"
+      },
+      locked_reason: {
+        label: "锁定原因",
+        help: "锁定时在界面提示中显示的说明。"
+      },
+      value_enc: {
+        label: "加密值",
+        help: "保存密文的 sys_secret 记录的句柄。仅在加密存储时有值。"
+      },
+      updated_by: {
+        label: "更新人",
+        help: "最近一次通过设置服务写入该记录的人。"
+      }
+    }
+  },
   sys_secret: {
     label: "密钥",
     pluralLabel: "密钥",
@@ -3565,6 +3613,84 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       request_id: {
         label: "请求 ID",
         help: "与 sys_audit_log / tracing 关联。"
+      }
+    },
+    _views: {
+      recent: {
+        label: "最近"
+      }
+    }
+  },
+  sys_platform_setting_audit: {
+    label: "平台设置审计记录",
+    pluralLabel: "平台设置审计",
+    description: "设置服务对全局设置的每次变更的追加写入审计记录。",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      created_at: {
+        label: "创建时间",
+        help: "记录该变更的时间。"
+      },
+      namespace: {
+        label: "命名空间"
+      },
+      key: {
+        label: "键"
+      },
+      scope: {
+        label: "范围",
+        help: "该记录写入的级联层；这里始终是全局层。",
+        options: {
+          global: "全局"
+        }
+      },
+      action: {
+        label: "操作",
+        help: "变更类型。",
+        options: {
+          set: "设置",
+          reset: "重置",
+          lock: "锁定",
+          unlock: "解锁",
+          rotate: "轮换"
+        }
+      },
+      actor_id: {
+        label: "执行人",
+        help: "执行该变更的用户；系统任务时为空。"
+      },
+      source: {
+        label: "来源",
+        help: "变更入口。",
+        options: {
+          ui: "UI",
+          api: "API",
+          migration: "迁移",
+          import: "导入",
+          system: "系统"
+        }
+      },
+      reason: {
+        label: "原因",
+        help: "执行人提供的说明（可选）。"
+      },
+      old_hash: {
+        label: "旧哈希",
+        help: "旧值的摘要，绝不是明文：普通值为 sha256: 十六进制摘要，机密值为带密钥的 hmac-sha256: 摘要。此前未设置时为空，机密值没有可用的带密钥摘要时也为空。"
+      },
+      new_hash: {
+        label: "新哈希",
+        help: "新值的摘要，绝不是明文：普通值为 sha256: 十六进制摘要，机密值为带密钥的 hmac-sha256: 摘要。重置时为空，机密值没有可用的带密钥摘要时也为空。"
+      },
+      encrypted: {
+        label: "已加密",
+        help: "该设置保存的是密钥材料时为是（轮换更值得关注）。"
+      },
+      request_id: {
+        label: "请求 ID",
+        help: "用于与审计日志和链路追踪关联。"
       }
     },
     _views: {

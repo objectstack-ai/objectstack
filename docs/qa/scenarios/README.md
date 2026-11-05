@@ -156,4 +156,6 @@ meet this floor:
 1. Write `<id>.json` here; `id` equals the basename.
 2. Keep it generic — a scenario anyone could write from the domain alone.
 3. Run `pnpm --filter @objectstack/scenarios test`: a refusal names the file and the field
-   path. Then add the card's hand-worked truths, per persona too, to `test/library.test.ts`.
+   path. Then pin the card's hand-worked truths, per persona too, in its own
+   `packages/qa/scenarios/test/<id>.test.ts` (model: `travel-expense.test.ts`). The three control
+   cards keep theirs in `test/library.test.ts`.
