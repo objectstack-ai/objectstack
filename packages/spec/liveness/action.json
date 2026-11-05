@@ -95,7 +95,7 @@
       "verifiedAt": "2026-09-15",
       "evidenceScope": "cross-repo",
       "evidence": "cloud @cb8ee7ff: packages/service-ai/src/tools/action-tools.ts#buildParametersSchema — each declared param becomes one JSON Schema property on the exposed tool.",
-      "note": "field/objectOverride/defaultFromRow/options/placeholder/helpText/defaultValue/required all consumed."
+      "note": "field/objectOverride/defaultFromRow/options/placeholder/helpText/defaultValue/required all consumed. `widget` (#30259, ADR-0131 D4) is the exception, and PLANNED: it is declared spec-first, and the console's param resolver (ui/packages/fields/src/resolveActionParams.ts, then ui/packages/app-shell/src/utils/paramToField.ts) does not carry it to the dialog's widget until #30260 adds that pass-through. Until then the dialog draws the param's `type` renderer and submits its value as before, which is the degradation the key's own describe() promises for an unregistered name. This container is undrilled (a `containers` row in packages/spec/scripts/liveness/undrilled-containers.baseline.json), so the gate asks no per-key verdict here and drilling it means evidence for every member; this sentence is the record until #30260 lands and flips it."
     },
     "variant": {
       "status": "live",

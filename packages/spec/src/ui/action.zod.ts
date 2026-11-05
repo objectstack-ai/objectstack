@@ -237,6 +237,33 @@ export const ActionParamSchema = lazySchema(() => strictObject(
   /** Overrides the resolved field type (or sets it for inline params). */
   type: FieldType.optional().meta({ title: 'Type' }),
   /**
+   * Widget override (#30259) — the same key, with the same vocabulary and the
+   * same meaning, as `FieldSchema.widget`: it names a registered field
+   * component (looked up as `field:` plus this name) that draws this param in
+   * the dialog instead of the `type` default. `type` stays the VALUE's type;
+   * the widget only changes how the value is picked.
+   *
+   * The case it exists for is a name that must be picked, not typed:
+   * `widget: 'permission-ref'` on a `text` param lists the permission sets of
+   * the security catalog and submits the chosen machine name — the picker
+   * ADR-0131 D4 gives the grant column
+   * `sys_user_permission_set.permission_set` ("a picker lists the registry, an
+   * assignment names one of its entries"). Before this key no param could ask
+   * for it, so Create User's `permissionSet` was a box for a typed name.
+   *
+   * Like the field key it is an open string, not an enum: an unregistered name
+   * is kept and the dialog draws the `type` renderer instead, so it degrades
+   * safely. Planned: the console's param resolver does not carry it to the
+   * widget yet (#30260); until it does, the param draws its `type` renderer
+   * and its value is submitted as before.
+   */
+  widget: z.string().optional().describe(
+    'Widget override for this param — names a registered field component (resolved as `field:<widget>`) '
+    + 'to draw it instead of the `type` default; same key and vocabulary as FieldSchema.widget, and `type` '
+    + 'stays the value\'s type. e.g. "permission-ref" on a text param picks a permission set by name '
+    + '(ADR-0131 D4). Degrades to the `type` renderer when unregistered.',
+  ).meta({ title: 'Widget' }),
+  /**
    * Required override; when omitted defaults to `false`. Consumers that wish
    * to inherit the underlying field's `required` flag should leave this
    * undefined in the source schema and resolve at runtime (the dialog
