@@ -718,9 +718,11 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // shape is the same), then the reader's list state for it is cleared and
     // the list opens again on the saved view. A panel the fold cannot write
     // losslessly keeps the refusal Save as my view gives.
-    const canUpdatePersonalView = activeIsPersonal
-        && personalViews.status === 'ready'
-        && (!perms.isLoaded || perms.can(PERSONAL_VIEW_OBJECT, 'update'));
+    // The reader's own `sys_personal_view` rows: one grant read for Save as my
+    // view (create) and for Rename and 保存 (update).
+    const personalViewsReady = personalViews.status === 'ready';
+    const personalGrant = (action: 'create' | 'update') => !perms.isLoaded || perms.can(PERSONAL_VIEW_OBJECT, action);
+    const canUpdatePersonalView = activeIsPersonal && personalViewsReady && personalGrant('update');
     const handleSaveToPersonalView = async () => {
         if (!activeView || !activeIsPersonal) return;
         const built = buildPersonalViewConfig(objectDef.name, activeView, {
@@ -797,8 +799,6 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // one (`sys_personal_view` read and create), not to admins only; the name
     // is asked in `PersonalViewNameDialog`. A reader who cannot read the
     // list's own object is offered no Save: there is no list to keep.
-    const personalViewsReady = personalViews.status === 'ready';
-    const personalGrant = (action: 'create' | 'update') => !perms.isLoaded || perms.can(PERSONAL_VIEW_OBJECT, action);
     const listReadable = !perms.isLoaded || perms.can(objectDef.name, 'read');
     const [personalViewDialog, setPersonalViewDialog] = useState<{ mode: 'save' } | { mode: 'rename'; viewId: string } | null>(null);
     const openPersonalView = (id: string) => {
