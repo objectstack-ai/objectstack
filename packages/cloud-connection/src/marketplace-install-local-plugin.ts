@@ -241,6 +241,12 @@ import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
 import { countSeedRows, matchSeedRows, purgeSeedRows, type PurgeSeedDataset } from './marketplace-install-local-purge.js';
+import {
+    isStampableOwner,
+    stampSeedOwner,
+    type SeedOwnerStampInput,
+    type SeedOwnerStampResult,
+} from './marketplace-install-local-seed-owner.js';
 import { planCustomizationPairInstall, type PairInstallItem } from './marketplace-install-local-customization-pair.js';
 import type {
     AuthSessionApi, ConnectorCredentialRef, IAuthService, IAutomationService, IHttpServer, IMetadataService, IObjectQLEngine,
@@ -1161,6 +1167,17 @@ export interface MarketplaceInstallLocalPluginConfig {
 // this plugin is its HTTP mutation surface).
 type InstalledEntry = InstalledManifestEntry;
 
+/**
+ * [#30324] The person a seeding door names as the owner of the rows its load
+ * creates, or `null` with the reason the door has none (logged, never
+ * invented).
+ */
+interface SeedOwnerOfLoad {
+    userId: string | null;
+    door: string;
+    none?: string;
+}
+
 export class MarketplaceInstallLocalPlugin implements Plugin {
     readonly name = 'com.objectstack.runtime.marketplace-install-local';
     readonly version = '1.0.0';
@@ -1462,7 +1479,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         try {
             // [#30281] No user starts a boot heal: the setting, then this
             // package's declared default locale.
-            const summary = await this.runInlineSeed(ctx, datasets, undefined, { app: converted });
+            const summary = await this.runInlineSeed(ctx, datasets, undefined, { app: converted }, await this.resolveRecordedInstaller(ctx, entry));
             const landed = (summary.inserted ?? 0) + (summary.updated ?? 0);
             if (landed > 0) {
                 entry.withSampleData = true;
@@ -1725,7 +1742,14 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             // then the founder's language. No app default rung — the shared
             // list is every installed package's datasets, and no one package's
             // declared default speaks for the union.
-            const s = await this.runInlineSeed(ctx, datasetsNow, organizationId, { userId: options?.userId });
+            // [#30324] The founder owns the rows: the organization's first
+            // admin, the one person this door is handed. With none, the rows
+            // keep no owner, as before.
+            const s = await this.runInlineSeed(ctx, datasetsNow, organizationId, { userId: options?.userId }, {
+                userId: options?.userId ?? null,
+                door: 'per-organization seed replay',
+                none: `the replay of organization ${organizationId} names no founder`,
+            });
             return { inserted: s.inserted, updated: s.updated, skipped: s.skipped, errors: s.errorList };
         };
     };
@@ -5239,6 +5263,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                         const s = await this.runInlineSeed(ctx, datasets, organizationId, {
                             userId: opts.userId,
                             app: manifest,
+                        }, {
+                            // [#30324] The person who ran this install (or reseed).
+                            userId: opts.userId ?? null,
+                            door: opts.door ?? 'install',
+                            none: 'the request names no person',
                         });
                         seedSummary = { mode: 'inline', ...s };
                         ctx.logger?.info?.(`[MarketplaceInstallLocal] inline seed for ${appId}${organizationId ? ` (org=${organizationId})` : ''}: inserted=${s.inserted} updated=${s.updated} skipped=${s.skipped} errors=${s.errors}`);
@@ -5251,6 +5280,82 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         }
 
         return { translationsLoaded, seeded: seedSummary };
+    };
+
+    /**
+     * [#30324 · ruling 6670861426] Stamp the person a seeding door names as
+     * `owner_id` / `created_by` on the rows its load created
+     * ({@link stampSeedOwner}), and say what happened: one info line for the
+     * stamp, one for a door with no person (the rows keep no owner, as before
+     * the ruling), one warning per object a write was refused on. Never throws:
+     * the load already landed, and a refused stamp leaves its rows as the seed
+     * wrote them.
+     */
+    private stampLoadOwner = async (
+        ctx: PluginContext,
+        ql: any,
+        results: unknown,
+        owner: SeedOwnerOfLoad,
+        organizationId: string | undefined,
+    ): Promise<void> => {
+        const loaded = (Array.isArray(results) ? results : []) as SeedOwnerStampInput[];
+        const created = loaded.reduce((n, r) => n + (Array.isArray(r?.insertedIds) ? r.insertedIds.length : 0), 0);
+        if (created === 0) return;
+        const where = organizationId ? ` (org=${organizationId})` : '';
+        if (!isStampableOwner(owner.userId)) {
+            ctx.logger?.info?.(
+                `[MarketplaceInstallLocal] ${owner.door}${where}: the ${created} sample row(s) this load created keep no owner `
+                + `— ${owner.none ?? 'no person named'}`,
+            );
+            return;
+        }
+        let stamp: SeedOwnerStampResult;
+        try {
+            stamp = await stampSeedOwner(ql, loaded, owner.userId, { organizationId });
+        } catch (err: any) {
+            ctx.logger?.warn?.(`[MarketplaceInstallLocal] ${owner.door}${where}: the owner stamp of ${created} sample row(s) failed — they keep no owner: ${err?.message ?? err}`);
+            return;
+        }
+        const owned = stamp.objects.filter((o) => o.owner > 0 || o.createdBy > 0);
+        if (owned.length > 0) {
+            ctx.logger?.info?.(
+                `[MarketplaceInstallLocal] ${owner.door}${where}: sample rows owned by ${owner.userId}: `
+                + owned.map((o) => `${o.object}=${Math.max(o.owner, o.createdBy)}`).join(', '),
+            );
+        }
+        for (const o of stamp.objects) {
+            if (o.refused === 0) continue;
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] ${owner.door}${where}: ${o.refused} sample row(s) of '${o.object}' keep the owner the seed `
+                + `wrote — the owner stamp was refused: ${o.error ?? 'no reason given'}`,
+                { object: o.object, ownerUserId: owner.userId, refused: o.refused },
+            );
+        }
+    };
+
+    /**
+     * [#30324] The person a boot heal names as its rows' owner: the installer
+     * the ledger entry records (`installedBy`), when that is a person who can
+     * still sign in — a `sys_user` row a system read finds. No boot request
+     * carries a person, so this is the one the heal has; an entry with none,
+     * or an installer since removed, names nobody (the rows keep no owner, as
+     * before) and says which.
+     */
+    private resolveRecordedInstaller = async (ctx: PluginContext, entry: InstalledEntry): Promise<SeedOwnerOfLoad> => {
+        const door = 'sample-data heal';
+        const installedBy = entry?.installedBy;
+        if (!isStampableOwner(installedBy)) {
+            return { userId: null, door, none: `the install ledger records no installer for ${entry?.manifestId}` };
+        }
+        try {
+            const ql: any = ctx.getService('objectql');
+            const rows = await ql.find('sys_user', { where: { id: installedBy }, fields: ['id'], limit: 1 }, { context: { isSystem: true } });
+            const found = Array.isArray(rows) ? rows[0] : rows?.items?.[0];
+            if (found && String(found.id) === installedBy) return { userId: installedBy, door };
+            return { userId: null, door, none: `the recorded installer ${installedBy} of ${entry.manifestId} is no longer a user` };
+        } catch (err: any) {
+            return { userId: null, door, none: `the recorded installer ${installedBy} of ${entry.manifestId} could not be looked up: ${err?.message ?? err}` };
+        }
     };
 
     /**
@@ -5274,6 +5379,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         datasets: any[],
         organizationId?: string,
         localeFrom: { userId?: string; app?: unknown } = {},
+        owner: SeedOwnerOfLoad = { userId: null, door: 'seed', none: 'no person named' },
     ): Promise<{ inserted: number; updated: number; skipped: number; errors: number; errorList: any[]; droppedRefs: number; errorSample?: string }> => {
         const ql: any = ctx.getService('objectql');
         let metadata: any;
@@ -5308,6 +5414,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             },
         });
         const result = await seedLoader.load(request);
+        // [#30324 · ruling 6670861426] The rows this load CREATED get the
+        // person this door names as `owner_id` and `created_by`, then follow
+        // the ordinary permission rules like any record they own.
+        await this.stampLoadOwner(ctx, ql, result?.results, owner, organizationId);
         return {
             inserted: result.summary.totalInserted,
             updated: result.summary.totalUpdated,
