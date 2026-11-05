@@ -69,6 +69,7 @@ import {
 import { registerLastAdminGuard } from './last-admin-guard.js';
 import { registerApiKeyRestoreGuard } from './api-key-restore-guard.js';
 import { registerOrganizationMfaEnrollmentGuard } from './organization-mfa-enrollment-guard.js';
+import { registerMfaRequiredEnrollmentPredicate } from './mfa-required-enrollment-predicate.js';
 import { registerPersonalViewHooks } from './personal-view-hooks.js';
 import { registerUserPreferenceHooks } from './user-preference-hooks.js';
 import { personalViewCallerResolver, registerPersonalViewRoutes, PERSONAL_VIEW_REMOVE_ROUTE, type PersonalViewEngine } from './personal-view-routes.js';
@@ -109,6 +110,7 @@ import {
   reportIfNoSignInAccountExists,
   type SignInPathConfigView,
 } from './boot-sign-in-reachability.js';
+import { providerCredentialIndex, providerCredentialsFrom, registerSignInMethodFloor } from './sign-in-method-floor.js';
 import { judgePlatformAdmin, isPlatformAdminUser, type PlatformAdminActor } from './platform-admin-gate.js';
 import {
   decideDemoStaffEnvironmentGate,
@@ -554,6 +556,8 @@ export class AuthPlugin implements Plugin {
   /** [#30203] Whether the running allow-list is the one a stored setting gave it. */
   private allowedIpRangesFromSettings = false;
   private configuredSocialProviders: SocialProviderConfig | undefined;
+  /** Whether each provider declared at boot holds a credential pair (the sign-in floor's count). */
+  private bootProviderCredentials: ReadonlyMap<string, boolean> = new Map();
   // ADR-0092 D6 — the EFFECTIVE better-auth secondaryStorage (host-supplied or
   // the kernel-cache adapter wired in init). The identity write guard's
   // session-snapshot refresh reads through this; undefined = refresh no-ops.
@@ -751,6 +755,7 @@ export class AuthPlugin implements Plugin {
     this.configuredSocialProviders = authConfig.socialProviders
       ? { ...authConfig.socialProviders }
       : undefined;
+    this.bootProviderCredentials = providerCredentialIndex(authConfig.socialProviders, authConfig.oidcProviders);
 
     // [ADR-0105 D8] Lazy handle to plugin-security's `invitation-placement`
     // service. LAZY on purpose: plugin-security starts after plugin-auth, so
@@ -2079,6 +2084,29 @@ export class AuthPlugin implements Plugin {
     }
     if (!settings || typeof settings.getNamespace !== 'function') return;
 
+    // The save door refuses turning off the last sign-in method, before the
+    // value is stored; the pass below would only apply it. See the module.
+    const floorManager = this.authManager;
+    registerSignInMethodFloor(
+      settings,
+      {
+        publicConfig: () => floorManager.getPublicConfig(),
+        engine: () => {
+          try {
+            return ctx.getService<IDataEngine>('objectql');
+          } catch {
+            return undefined;
+          }
+        },
+        hostSignInHandoff: this.options.hostSignInHandoff === true,
+        stackConfiguredGoogle: () => !!this.configuredSocialProviders?.google,
+        // Read at save time: the index is set in init, after `auth:configure`.
+        providerHasCredentials: (provider) => providerCredentialsFrom(this.bootProviderCredentials)(provider),
+        env: () => ((globalThis as any)?.process?.env ?? {}) as Record<string, string | undefined>,
+      },
+      ctx.logger,
+    );
+
     const applySettings = async (): Promise<void> => {
       if (!this.authManager) return;
       const authManager = this.authManager;
@@ -2244,6 +2272,9 @@ export class AuthPlugin implements Plugin {
         // gated users would have no way to comply. [#20412] So the enforcement
         // and the plugin are ONE piece: a refused plugins block leaves MFA at
         // its standing value too, never enforced without its enrollment path.
+        // The env var OS_AUTH_TWO_FACTOR outranks this piece's plugin flag, so
+        // under a pin to off the save itself is refused, before this pass
+        // (mfa-required-enrollment-predicate.ts).
         if (isExplicit('mfa_required')) {
           const on = asBoolean(values.mfa_required, false);
           if (on) {
@@ -2563,6 +2594,11 @@ export class AuthPlugin implements Plugin {
         );
       }
     }
+
+    // The save door refuses turning `mfa_required` on while OS_AUTH_TWO_FACTOR
+    // pins enrollment off; the pass below would store it and enforce nothing.
+    // See mfa-required-enrollment-predicate.ts.
+    registerMfaRequiredEnrollmentPredicate(settings, ctx.logger);
 
     await applySettings();
     if (typeof settings.subscribe === 'function') {
