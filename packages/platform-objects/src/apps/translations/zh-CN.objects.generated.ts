@@ -984,7 +984,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
   sys_business_unit: {
     label: "业务单元",
     pluralLabel: "业务单元",
-    description: "公司的组织结构——事业部、部门、区域和办公地点——用于划定数据和报表的范围。",
+    description: "公司的组织结构——事业部、部门、区域和办公地点。共享规则可以把记录共享给某个业务单元，或某个业务单元及其下级单元：成员获得这些访问权限，离开后即失去。让权限集按业务单元读取全部记录（读取范围「unit」）需要企业版。",
     fields: {
       name: {
         label: "名称"
@@ -1010,7 +1010,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       timezone: {
         label: "时区",
-        help: "该业务单元计算日期边界所用的 IANA 时区（如 Asia/Shanghai）。留空则依次继承上级业务单元的时区、组织的时区，最后为 UTC。"
+        help: "为该业务单元保存的 IANA 时区（如 Asia/Shanghai）；留空则取上级业务单元的，再取组织的。它目前不会改变任何日期计算：公式、报表和显示的日期使用 设置 → 本地化 → 默认时区。"
       },
       organization_id: {
         label: "组织",

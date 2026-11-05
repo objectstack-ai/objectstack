@@ -30,8 +30,17 @@ export const SysBusinessUnit = ObjectSchema.create({
   managedBy: 'platform',
   // Admin-facing copy: what the records are and what an admin does here. The
   // design reference (canonical org/data-partition tree, ADR-0057 D2) lives in
-  // the docblock above, never in this string.
-  description: 'Your company structure — divisions, departments, regions and offices — used to scope data and reports.',
+  // the docblock above, never in this string. It says what a unit does in
+  // the open edition (sharing rules naming a unit, whose access follows
+  // membership in and out) and that scoping a permission set's read access by
+  // unit (`readScope: 'unit'` and the other ADR-0057 hierarchy scopes) needs
+  // the enterprise edition: `defineStack` refuses those scopes without
+  // `requires: ['hierarchy-security']`, which only
+  // @objectstack/security-enterprise provides.
+  description:
+    'Your company structure — divisions, departments, regions and offices. Sharing rules can share records with a unit, ' +
+    'or a unit and the units under it: members get that access, and lose it when they leave. ' +
+    "Letting a permission set read every record of a unit (read scope 'unit') needs the enterprise edition.",
   displayNameField: 'name',
   nameField: 'name', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   highlightFields: ['name', 'kind', 'parent_business_unit_id', 'manager_user_id'],
@@ -189,13 +198,18 @@ export const SysBusinessUnit = ObjectSchema.create({
     // bound unconverged). No `defaultValue`, deliberately: an explicit
     // default here would mean "stop inheriting", which is the opposite of what
     // an unset unit means.
+    //
+    // [#30210] Because nothing reads the column, the help says so in the
+    // reader's terms and names the setting in effect — the same correction
+    // `sys_organization.timezone` took (#25347). The old help said date
+    // boundaries ARE computed in this zone, a claim no reader backed.
     timezone: Field.text({
       label: 'Timezone',
       required: false,
       maxLength: 64,
       valueDomain: 'iana_time_zone',
       description:
-        'IANA time zone (e.g. Asia/Shanghai) date boundaries are computed in for this unit. Leave unset to inherit the parent unit\'s zone, then the organization\'s, then UTC.',
+        'IANA time zone (e.g. Asia/Shanghai) kept for this unit; leave it empty to take the parent unit\'s, then the organization\'s. It does not change any date calculation today: formulas, reports and displayed dates use Settings → Localization → Default timezone.',
       group: 'Hierarchy',
     }),
 
