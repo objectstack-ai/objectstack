@@ -119,7 +119,7 @@ import {
 } from '@object-ui/react';
 import type { QueryParams } from '@object-ui/types';
 import { Link2Off, Loader2 } from 'lucide-react';
-import { servedObjectLabel } from '../../hooks/useNavTargetLabel.js';
+import { servedObjectLabel } from '../../hooks/servedObjectLabel.js';
 
 /**
  * The one read the card makes. Structural, so the console's adapter satisfies

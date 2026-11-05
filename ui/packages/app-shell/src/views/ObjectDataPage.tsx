@@ -78,7 +78,7 @@ import {
   PREVIEW_QUERY_VALUE,
 } from '../preview/PreviewModeContext.js';
 import { useTenancyPosture } from '../hooks/useTenancyPosture.js';
-import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/useNavTargetLabel.js';
+import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
 import type { RowCrudPredicates } from '../utils/crudAffordances.js';
 
 /** Field types the auto-derived user-filter bar offers as dropdowns. */

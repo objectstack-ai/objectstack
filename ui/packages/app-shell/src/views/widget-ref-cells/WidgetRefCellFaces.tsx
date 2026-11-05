@@ -29,7 +29,7 @@ import {
 import { EmptyValue, LazyIcon } from '@object-ui/components';
 import { isEmptyValue } from '@object-ui/core';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
-import { servedObjectLabel } from '../../hooks/useNavTargetLabel.js';
+import { servedObjectLabel } from '../../hooks/servedObjectLabel.js';
 import { useObjectRefLabel, useRecipientLabel } from './refLabelDirectory.js';
 
 /**

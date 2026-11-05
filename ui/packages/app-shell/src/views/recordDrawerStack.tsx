@@ -64,7 +64,7 @@ import {
 import { overlayWidthFor } from '@object-ui/plugin-view';
 import type { FieldContainerLike } from '@object-ui/core';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
-import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/useNavTargetLabel.js';
+import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
 import { prefetchRelatedCounts, relatedCountTargetsIn } from '@object-ui/plugin-detail';
 import { useFilterScope } from '@object-ui/react';
 import {

@@ -35,7 +35,7 @@ import { usePhoneNavDrawerHistory } from './usePhoneNavDrawerHistory.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 import { primeConsoleSidebarOpen } from './consoleSidebarRail.js';
 import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
-import { servedObjectLabel } from '../hooks/useNavTargetLabel.js';
+import { servedObjectLabel } from '../hooks/servedObjectLabel.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
 import { CommandPaletteProvider } from '../context/CommandPaletteProvider.js';
 import { confirmUnsavedLeave } from '../chrome/unsavedEdits.js';

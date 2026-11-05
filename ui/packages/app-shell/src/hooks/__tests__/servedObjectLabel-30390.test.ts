@@ -8,7 +8,7 @@
  * bundle's packaged string, so every case says which side won.
  */
 import { describe, expect, it } from 'vitest';
-import { servedObjectLabel, servedObjectPluralLabel } from '../useNavTargetLabel';
+import { servedObjectLabel, servedObjectPluralLabel } from '../servedObjectLabel';
 
 /** The base package's catalog entry, as the bundle would answer it. */
 const objectLabel = ({ name, label }: { name: string; label: string }) =>

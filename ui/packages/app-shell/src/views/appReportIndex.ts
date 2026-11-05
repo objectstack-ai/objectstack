@@ -102,7 +102,7 @@
 import { usePermissions } from '@object-ui/permissions';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { useMetadata } from '../providers/MetadataProvider.js';
-import { metadataText, servedObjectLabel, servedObjectPluralLabel } from '../hooks/useNavTargetLabel.js';
+import { metadataText, servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
 import { mayReadObject, type ObjectReadCheck } from '../utils/navObjectReadGate.js';
 import { navEntriesShownToMember, type NavMemberGates } from '../hooks/useNavMemberGates.js';
 import { defineWorkspacePreference, versionedPreferenceCodec } from '../utils/workspacePreference.js';

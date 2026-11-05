@@ -49,7 +49,7 @@ import { buildExpressionUser } from '../providers/expressionUser.js';
 import { SkeletonDetail } from '../skeletons/index.js';
 import { ManagedByBadge } from '../components/ManagedByBadge.js';
 import { resolveFormViewChrome, selectRecordFormView } from '../utils/recordFormNavigation.js';
-import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/useNavTargetLabel.js';
+import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
 import { useAuth } from '@object-ui/auth';
 
 export interface RecordFormPageProps {
