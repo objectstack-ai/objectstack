@@ -129,7 +129,7 @@ export function RegisterPage() {
   // Entered by a full-page navigation to the root, as the accept page's
   // "Continue" does: every data scope re-seats on the joined organization.
   useEffect(() => {
-    if (invitationJoin === 'joined') window.location.href = resolveRootUrl();
+    if (invitationJoin === 'joined') window.location.assign(resolveRootUrl());
   }, [invitationJoin]);
 
   // Sign-up switched off — bounce a signed-out visitor to /login, keeping
