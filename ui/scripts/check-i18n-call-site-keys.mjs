@@ -1355,9 +1355,12 @@ export function collectEnKeys(root) {
   const branches = new Set();
   const values = new Map();
   const homeOf = new Map();
+  // The pack is required; a namespace's `en` file is read when it exists. A
+  // missing one cannot hide anything: its keys simply are not defined, so every
+  // call site that asks for one is reported as asking for a missing key.
   const files = [
     join(root, 'packages/i18n/src/locales/en.ts'),
-    ...PACK_NAMESPACE_DIRS.map((dir) => join(root, dir, 'en.ts')),
+    ...PACK_NAMESPACE_DIRS.map((dir) => join(root, dir, 'en.ts')).filter((file) => existsSync(file)),
   ];
   for (const file of files) {
     const source = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);

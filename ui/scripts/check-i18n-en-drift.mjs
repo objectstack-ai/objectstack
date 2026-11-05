@@ -354,15 +354,16 @@ function gitQuiet(root, args) {
  * The working tree is the default "after" side on purpose: an agent editing
  * `en.ts` gets the answer before committing, not after pushing.
  *
- * `requireNamespaces` is false only on the BASE side: a namespace that does not
- * exist yet at the base commit is a fact about history (its keys were still in
- * the pack there), not a stale extractor. On the head side a missing partial
- * pack is loud. A key defined both in a pack and in its namespace THROWS on
- * either side — two homes for one key cannot both be what renders.
+ * A partial pack is read when it exists at that side and skipped when it does
+ * not: a namespace absent at the base is history (its keys were still in the
+ * pack there), and one absent anywhere holds no key, so a key it took with it
+ * is a key-set change — `all-locales-key-parity`'s, never drift. A partial pack
+ * that exists and cannot be parsed still throws, and so does a key defined both
+ * in a pack and in its namespace: two homes for one key cannot both render.
  *
  * @returns {Map<string, Map<string, string>>} lang -> (key -> value)
  */
-export function readPacks(root, ref, { requireNamespaces = true } = {}) {
+export function readPacks(root, ref) {
   const read = (rel, required) => {
     const label = ref === null ? rel : revPath(ref, rel);
     let text;
@@ -387,7 +388,7 @@ export function readPacks(root, ref, { requireNamespaces = true } = {}) {
     const pack = read(packPath(lang), true);
     const values = new Map(pack.values);
     for (const rel of namespacePackPaths(lang)) {
-      const partial = read(rel, requireNamespaces);
+      const partial = read(rel, false);
       if (partial === null) continue;
       for (const [key, value] of partial.values) {
         if (values.has(key)) {
@@ -625,9 +626,7 @@ export function applyLedger(findings, ledger, enAfter) {
  */
 export function analyze(root, { base, head = null }) {
   const treeAtBase = treeExistsAt(root, base);
-  const before = treeAtBase
-    ? readPacks(root, base, { requireNamespaces: false })
-    : new Map(LOCALES.map((lang) => [lang, new Map()]));
+  const before = treeAtBase ? readPacks(root, base) : new Map(LOCALES.map((lang) => [lang, new Map()]));
   const after = readPacks(root, head);
   const { findings, counters } = findDrift(before, after);
   return { before, after, findings, counters, treeAtBase };

@@ -16,6 +16,7 @@ import {
   HAND_ROLLED_TABLES,
   holesOf,
   PACK_HOOK,
+  PACK_NAMESPACE_DIRS,
   readVocabulary,
   RESERVED_OPTION_NAMES,
   unresolvableSpellings,
@@ -95,10 +96,27 @@ const tempRoots: string[] = [];
  * AST walk reports only workspace-package specifiers and would not have
  * caught a relative one. Computing the path keeps the premise true instead of stepping
  * around the pin that guards it.
+ *
+ * The gate's `en` is the pack PLUS the `en` partial pack of every pack-shaped
+ * namespace (`PACK_NAMESPACE_DIRS`, objectstack#30588), so the module-evaluated
+ * side is the same union, merged the way the runtime merges it.
  */
+const evaluatedPack = async (rel: string): Promise<Record<string, unknown>> =>
+  (await import(pathToFileURL(path.join(repoRoot, rel)).href)).default;
+const mergedPacks = (into: Record<string, unknown>, from: Record<string, unknown>): Record<string, unknown> => {
+  const out: Record<string, unknown> = { ...into };
+  for (const [key, value] of Object.entries(from)) {
+    const existing = out[key];
+    out[key] =
+      typeof existing === 'object' && existing !== null && typeof value === 'object' && value !== null
+        ? mergedPacks(existing as Record<string, unknown>, value as Record<string, unknown>)
+        : value;
+  }
+  return out;
+};
 const realEn: unknown = (
-  await import(pathToFileURL(path.join(repoRoot, 'packages/i18n/src/locales/en.ts')).href)
-).default;
+  await Promise.all(PACK_NAMESPACE_DIRS.map((dir) => evaluatedPack(`${dir}en.ts`)))
+).reduce(mergedPacks, await evaluatedPack('packages/i18n/src/locales/en.ts'));
 
 /**
  * The workspace specifier that appears inside the FIXTURE SOURCES below — text
@@ -231,6 +249,55 @@ describe('the parsed en key set equals the module vitest actually evaluates', ()
   it('records branches separately from leaves, for `returnObjects` lookups', () => {
     expect(parsed.branches.has('common')).toBe(true);
     expect(parsed.leaves.has('common')).toBe(false);
+  });
+});
+
+describe('the pack-shaped namespaces are part of the en pack (objectstack#30588)', () => {
+  const NS_EN = `${PACK_NAMESPACE_DIRS[0]}en.ts`;
+
+  it('reads a key the namespace defines as a pack key', () => {
+    const root = repoWith({
+      'packages/i18n/src/locales/en.ts': EN_FIXTURE,
+      [NS_EN]: "const en = { shop: { title: 'Shop', install: { go: 'Install' } } } as const;\nexport default en;\n",
+    });
+    const keys = collectEnKeys(root);
+    expect(keys.leaves.has('shop.title')).toBe(true);
+    expect(keys.values.get('shop.install.go')).toBe('Install');
+    expect(keys.branches.has('shop')).toBe(true);
+    expect(keys.leaves.has('common.save')).toBe(true);
+  });
+
+  it('merges a group both files hold, key by key', () => {
+    const root = repoWith({
+      'packages/i18n/src/locales/en.ts': "const en = { shop: { kept: 'Kept' } } as const;\nexport default en;\n",
+      [NS_EN]: "const en = { shop: { moved: 'Moved' } } as const;\nexport default en;\n",
+    });
+    const keys = collectEnKeys(root);
+    expect([...keys.leaves].sort()).toEqual(['shop.kept', 'shop.moved']);
+  });
+
+  it('refuses a key defined in both homes', () => {
+    const root = repoWith({
+      'packages/i18n/src/locales/en.ts': "const en = { shop: { title: 'A' } } as const;\nexport default en;\n",
+      [NS_EN]: "const en = { shop: { title: 'B' } } as const;\nexport default en;\n",
+    });
+    expect(() => collectEnKeys(root)).toThrow(/`shop\.title` is defined in/);
+  });
+
+  it('refuses a key in one home that is a group in the other', () => {
+    const root = repoWith({
+      'packages/i18n/src/locales/en.ts': "const en = { shop: { title: 'A' } } as const;\nexport default en;\n",
+      [NS_EN]: "const en = { shop: { title: { short: 'B' } } } as const;\nexport default en;\n",
+    });
+    expect(() => collectEnKeys(root)).toThrow(/`shop\.title` is a group in/);
+  });
+
+  it('reports a call site asking for a namespace key the namespace no longer defines', () => {
+    const root = repoWith({
+      'packages/i18n/src/locales/en.ts': EN_FIXTURE,
+      'packages/x/src/page.tsx': `import { useObjectTranslation } from '${I18N_PKG}';\nexport function P() { const { t } = useObjectTranslation(); return t('shop.title'); }\n`,
+    });
+    expect(findingsOf(root, 'missing-key')).toEqual(['shop.title@packages/x/src/page.tsx:2']);
   });
 });
 
