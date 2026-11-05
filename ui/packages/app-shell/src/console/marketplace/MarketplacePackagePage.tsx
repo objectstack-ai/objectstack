@@ -43,13 +43,21 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
 } from '@object-ui/components';
 import { ArrowLeft, ExternalLink, Download, AlertCircle, Package, Trash2, MoreHorizontal, CheckCircle2, ArrowUpCircle, Database, Loader2 } from 'lucide-react';
 import { useWorkspaceAdminStatus } from '@object-ui/auth';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { useServedAppLabel } from '../../hooks/useServedAppLabel.js';
-import { useAdapter } from '@object-ui/react';
+import { useAdapter, useHasNotificationProvider } from '@object-ui/react';
 import { PackageIcon } from './PackageIcon.js';
 import { MarkdownText } from './MarkdownText.js';
 import { PluginDisclosure } from './PluginDisclosure.js';
@@ -84,6 +92,8 @@ import {
 import { useDependencyMissingText } from './dependencyMissing.js';
 import { useProtocolCheckSkippedText } from './protocolCheckSkipped.js';
 import { ProtocolCheckSkippedNote } from './ProtocolCheckSkippedNote.js';
+import { forgetSampleData, rememberSampleData, sampleDataNotice, sampleRecordsLoaded, takeClearConfirmRequest } from './sampleDataNotice.js';
+import { SampleDataLeaveBanner } from './SampleDataLeaveBanner.js';
 import { getCloudBase, getRuntimeConfig, isMarketplaceEnabled } from '../../runtime-config.js';
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
 import { useMetadata } from '../../providers/MetadataProvider.js';
@@ -273,7 +283,16 @@ export function MarketplacePackagePage() {
     // objectstack#30326 — the install answer's `protocolCheckSkipped`, drawn:
     // installed, but its platform protocol range was not checked.
     protocolNote?: string;
+    // objectstack#30323 — the sample records the install answer says it left
+    // in place (`seeded`), and whether this was an install over an existing
+    // one, which loads the sample data again. Cleared once they are purged.
+    sampleData?: { count: number; reinstall: boolean };
   } | null>(null);
+  // objectstack#30323 — the console's own confirm for a sample-data purge, in
+  // place of the browser's: which install it purges, and how many sample
+  // records this session knows that install loaded (`null`: none known).
+  const [purgeConfirm, setPurgeConfirm] = useState<{ target: 'local' | 'cloud'; count: number | null } | null>(null);
+  const hasNotificationProvider = useHasNotificationProvider();
   // ADR-0131 D6 — the install modes the package's latest manifest declares,
   // read from the manifest install-local judges, and the operator's pick among
   // them. Both are kept with the package they belong to, so a page that moves
@@ -602,6 +621,9 @@ export function MarketplacePackagePage() {
     // Declaring none sends none, and the door's own default stands.
     const installMode = requestedInstallMode;
     if (offeredInstallModes && !installMode) return;
+    // Read before the install answers: an install over an existing one loads
+    // the package's sample data again, and its note says so.
+    const reinstall = !!localInstall;
     setInstallingLocal(true);
     setLocalResult(null);
     try {
@@ -611,6 +633,15 @@ export function MarketplacePackagePage() {
       // admitted with its protocol range unchecked; each note below carries it.
       const protocolNote = protocolCheckSkippedText(result) ?? undefined;
       const withProtocolNote = protocolNote ? { protocolNote } : {};
+      // objectstack#30323 — the answer's own count of the sample records the
+      // install left in place. Remembered for this session: the clear confirm
+      // reads it back, and the banner that follows the installer to the app is
+      // raised from it. An unmanaged copy loads none (`seeded.mode: skipped`).
+      const loaded = sampleRecordsLoaded(result);
+      const withSampleData = loaded !== null ? { sampleData: { count: loaded, reinstall } } : {};
+      if (loaded !== null) {
+        rememberSampleData({ manifestId: result.manifestId, name, count: loaded, path: `${basePath}/system/marketplace/${packageId}` });
+      }
       // An unmanaged copy (ADR-0131 D6): the package's metadata is this
       // runtime's own from now on, in the base the answer names; the answer
       // lists every protection lock the copy dropped, with the package's reason.
@@ -640,8 +671,8 @@ export function MarketplacePackagePage() {
       // and the page says when the app will appear.
       if (!result.hotLoaded) {
         setLocalResult(ignoredCopy
-          ? { ok: false, message: t('marketplace.install.unmanagedIgnored', { name }), ...withProtocolNote }
-          : { ok: true, message: t('marketplace.install.localLoadsAtRestart', { version: result.version, name }), ...withProtocolNote });
+          ? { ok: false, message: t('marketplace.install.unmanagedIgnored', { name }), ...withProtocolNote, ...withSampleData }
+          : { ok: true, message: t('marketplace.install.localLoadsAtRestart', { version: result.version, name }), ...withProtocolNote, ...withSampleData });
         return;
       }
       try {
@@ -650,12 +681,13 @@ export function MarketplacePackagePage() {
         // Non-fatal: the install succeeded; the app list will refresh on next navigation.
       }
       setLocalResult(ignoredCopy
-        ? { ok: false, message: t('marketplace.install.unmanagedIgnored', { name }), ...withProtocolNote }
+        ? { ok: false, message: t('marketplace.install.unmanagedIgnored', { name }), ...withProtocolNote, ...withSampleData }
         : {
             ok: true,
             message: t('marketplace.install.localSuccess', { version: result.version, name }),
             credentials: { packageId: result.manifestId, note: result.credentialNote },
             ...withProtocolNote,
+            ...withSampleData,
           });
       emitMetadataRefresh();
     } catch (e: any) {
@@ -762,9 +794,6 @@ export function MarketplacePackagePage() {
    */
   const doPurgeSampleData = async () => {
     if (!cloudInstall) return;
-    if (!confirm(t('marketplace.detail.purgeConfirm'))) {
-      return;
-    }
     setSampleDataBusy('purge');
     setSampleDataMsg(null);
     try {
@@ -801,6 +830,13 @@ export function MarketplacePackagePage() {
       const inserted = r.inserted ?? 0;
       const updated = r.updated ?? 0;
       const errored = r.errors ?? 0;
+      // objectstack#30323 — what the reseed left in place, for the clear
+      // confirm and the banner, as an install's count is.
+      const reseeded = sampleRecordsLoaded({ seeded: { mode: 'inline', inserted, updated, skipped: r.skipped } });
+      if (reseeded !== null) {
+        const name = data?.package ? localizePackage(data.package as any, language).displayName : localInstall.manifestId;
+        rememberSampleData({ manifestId: localInstall.manifestId, name, count: reseeded, path: `${basePath}/system/marketplace/${packageId}` });
+      }
       const base = t('marketplace.detail.reseedLocalSuccess', { inserted, updated });
       // A reseed can land some rows and fail others (the server only hard-fails
       // when ZERO rows write). Don't hide the partial failures behind a green
@@ -817,9 +853,6 @@ export function MarketplacePackagePage() {
 
   const doPurgeLocalSampleData = async () => {
     if (!localInstall) return;
-    if (!confirm(t('marketplace.detail.purgeConfirm'))) {
-      return;
-    }
     setSampleDataBusy('purge');
     setSampleDataMsg(null);
     try {
@@ -827,6 +860,10 @@ export function MarketplacePackagePage() {
       setLocalInstalls((prev) => prev.map((i) =>
         i.manifestId === localInstall.manifestId ? { ...i, withSampleData: false } : i,
       ));
+      // objectstack#30323 — cleared: the install note drops its clear, and the
+      // session record and its banner go.
+      forgetSampleData(localInstall.manifestId);
+      setLocalResult((prev) => (prev?.sampleData ? { ...prev, sampleData: undefined } : prev));
       const removed = r.deleted ?? 0;
       setSampleDataMsg({
         ok: true,
@@ -853,6 +890,23 @@ export function MarketplacePackagePage() {
   const localInstall = (marketplaceEnabled
     ? localInstalls.find((i) => !!data && i.manifestId === data.package.manifest_id)
     : localInstalls.find((i) => i.packageId === packageId)) ?? null;
+
+  // objectstack#30323 — the console's confirm for a local purge, with the
+  // count this session knows the install left in place, when it knows one.
+  const openLocalPurgeConfirm = () => {
+    if (!localInstall) return;
+    setPurgeConfirm({ target: 'local', count: sampleDataNotice(localInstall.manifestId)?.count ?? null });
+  };
+  // The app's banner brought the installer here to clear: the confirm opens
+  // once the listing says the sample data is still there.
+  const localInstallId = localInstall?.manifestId;
+  const localHasSampleData = !!localInstall?.withSampleData && !localInstall.notLoaded;
+  useEffect(() => {
+    if (!localInstallId || !localHasSampleData) return;
+    if (takeClearConfirmRequest(localInstallId)) {
+      setPurgeConfirm({ target: 'local', count: sampleDataNotice(localInstallId)?.count ?? null });
+    }
+  }, [localInstallId, localHasSampleData]);
 
   // The local-install menu and the two status banners, drawn by both the
   // catalog view and the marketplace-off local view below (objectui#11627).
@@ -910,7 +964,7 @@ export function MarketplacePackagePage() {
                 : t('marketplace.detail.addSampleData')}
             </DropdownMenuItem>
             <DropdownMenuItem
-              onSelect={doPurgeLocalSampleData}
+              onSelect={openLocalPurgeConfirm}
               disabled={sampleDataBusy !== null || !localInstall.withSampleData}
               className="text-destructive focus:text-destructive"
             >
@@ -944,6 +998,44 @@ export function MarketplacePackagePage() {
       </button>
     </div>
   );
+  // objectstack#30323 — the purge confirm, in the console's own dialog. The
+  // count line is drawn only when this session knows what the install loaded:
+  // the runtime serves no count of a package's sample rows after that answer.
+  const purgeConfirmDialog = (
+    <AlertDialog open={purgeConfirm !== null} onOpenChange={(open) => { if (!open) setPurgeConfirm(null); }}>
+      <AlertDialogContent data-testid="purge-sample-data-dialog">
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t('marketplace.detail.purgeSampleData')}</AlertDialogTitle>
+          <AlertDialogDescription className="whitespace-pre-line">
+            {purgeConfirm?.count != null
+              ? `${t('marketplace.detail.purgeConfirmAtMost', { count: purgeConfirm.count })}\n${t('marketplace.detail.purgeConfirm')}`
+              : t('marketplace.detail.purgeConfirm')}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            data-testid="purge-sample-data-confirm"
+            onClick={() => {
+              const target = purgeConfirm?.target;
+              setPurgeConfirm(null);
+              if (target === 'local') void doPurgeLocalSampleData();
+              else if (target === 'cloud') void doPurgeSampleData();
+            }}
+          >
+            {t('marketplace.detail.purgeSampleData')}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+  // The banner that follows the installer to the app once they leave this
+  // page, for the package this page is about (`SampleDataLeaveBanner`).
+  const leaveBanner = hasNotificationProvider ? (
+    <SampleDataLeaveBanner manifestId={data?.package?.manifest_id ?? localInstall?.manifestId ?? null} />
+  ) : null;
+
   // objectui#12087 — the install-into-this-environment status, from the
   // install answering until its app is served (or the wait expires). Drawn in
   // the install dialog while it is open and on the page once it is closed, so
@@ -1009,6 +1101,29 @@ export function MarketplacePackagePage() {
       <div className="flex-1">
         {localResult.message}
         {localResult.protocolNote ? <ProtocolCheckSkippedNote text={localResult.protocolNote} /> : null}
+        {/* objectstack#30323 — how many sample records the install loaded, and
+            the clear, right where the installer reads that it is installed. */}
+        {localResult.sampleData ? (
+          <div className="mt-2 whitespace-normal text-foreground" data-testid="install-sample-data">
+            <p>
+              {t('marketplace.detail.sampleDataLoaded', { count: localResult.sampleData.count })}
+              {localResult.sampleData.reinstall ? <>{' '}{t('marketplace.detail.sampleDataReloaded')}</> : null}
+            </p>
+            {localInstall?.manifestId && !localInstall.notLoaded ? (
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-2"
+                onClick={openLocalPurgeConfirm}
+                disabled={sampleDataBusy !== null}
+                data-testid="install-sample-data-clear"
+              >
+                <Trash2 className="h-4 w-4 mr-1.5" aria-hidden="true" />
+                {t('marketplace.detail.purgeSampleData')}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
         {/* ADR-0131 D6 — each protection lock the unmanaged copy dropped, as
             the answer states it: the item, the lock and the package's reason
             verbatim, so the operator reads why the vendor locked an item
@@ -1100,6 +1215,8 @@ export function MarketplacePackagePage() {
         )}
         {sampleDataNote}
         {localResultNote(null)}
+        {purgeConfirmDialog}
+        {leaveBanner}
         <MarketplaceDisabled />
       </div>
     );
@@ -1395,7 +1512,7 @@ export function MarketplacePackagePage() {
                     : t('marketplace.detail.addSampleData')}
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onSelect={doPurgeSampleData}
+                  onSelect={() => setPurgeConfirm({ target: 'cloud', count: null })}
                   disabled={sampleDataBusy !== null || cloudSampleDataRefused || !cloudInstall.withSampleData}
                   className="text-destructive focus:text-destructive"
                 >
@@ -1415,6 +1532,8 @@ export function MarketplacePackagePage() {
       {!installOpen && deployNote}
 
       {localResultNote(pkg.manifest_id)}
+      {purgeConfirmDialog}
+      {leaveBanner}
 
       {/* `min-w-0` on each cell: a grid item's automatic minimum is its content's
           width, so a long line in the README would widen the page past its edge
