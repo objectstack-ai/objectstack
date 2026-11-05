@@ -43,16 +43,8 @@ const fr = {
     noDescription: "Aucune description disponible.",
     back: "Retour au marketplace",
     browseLink: "Parcourir le marketplace →",
-    installedAdditiveNote: "La désinstallation retire immédiatement l'application du noyau en cours d'exécution, avec ses jeux d'autorisations et leurs attributions, et supprime le manifeste en cache pour que le paquet ne se charge pas au prochain démarrage. Les enregistrements stockés dans ses objets restent dans la base de données.",
     versionBadge: "v{{version}}",
     installedBadge: "Installé v{{version}}",
-    // objectui#11645 — an install-local entry this runtime refused to load at
-    // startup (the listing's `notLoaded` marker), read on Installed Apps.
-    notLoaded: {
-      badge: "Non chargé",
-      protocolIncompatible: "Ce runtime n'a pas chargé ce paquet : il cible le protocole {{requiredRange}}, que ce runtime ne prend pas en charge.",
-      otherReason: "Ce runtime n'a pas chargé ce paquet ({{code}}).",
-    },
     load: {
       failed: "Impossible de charger le marketplace",
       failedHintConfigured: "Ce runtime accède à la place de marché via le plan de contrôle situé à {{url}}. Vérifiez qu'il est en ligne et joignable depuis ici.",
@@ -118,9 +110,6 @@ const fr = {
       installToCloud: "Installer dans le cloud…",
       installing: "Installation…",
       updating: "Mise à jour…",
-      uninstall: "Désinstaller",
-      uninstalling: "Désinstallation…",
-      details: "Détails",
       close: "Fermer",
       dismiss: "Fermer",
       openOnCloud: "Ouvrir dans le cloud",
@@ -206,11 +195,7 @@ const fr = {
       },
     },
     uninstall: {
-      confirm: "Désinstaller {{manifestId}} v{{version}} de ce runtime ?\n\nL'application sera retirée immédiatement du noyau en cours d'exécution, avec ses jeux d'autorisations et leurs attributions, et le manifeste en cache sera supprimé. Les enregistrements stockés dans ses objets restent dans la base de données.",
-      successInList: "{{manifestId}} supprimé : l'application a été retirée du noyau en cours d'exécution, avec ses jeux d'autorisations et leurs attributions. Les enregistrements stockés dans ses objets restent dans la base de données.",
       successInDetail: "{{manifestId}} et son manifeste en cache supprimés : l'application a été retirée du noyau en cours d'exécution, avec ses jeux d'autorisations et leurs attributions. Les enregistrements stockés dans ses objets restent dans la base de données.",
-      confirmNotLoaded: "Désinstaller {{manifestId}} v{{version}} de ce runtime ?\n\nLe manifeste en cache sera supprimé. Ce runtime n'a pas chargé le paquet, donc aucune partie n'est en cours d'exécution.",
-      successNotLoaded: "{{manifestId}} supprimé. Il n'était pas chargé, aucun redémarrage n'est nécessaire.",
     },
     accessDenied: {
       title: "Marketplace réservé aux administrateurs",

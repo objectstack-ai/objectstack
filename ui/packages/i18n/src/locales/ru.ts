@@ -4277,11 +4277,32 @@ const ru = {
   },
   // The rest of `marketplace.*` is the lazy `marketplace` namespace
   // (`../namespaces/marketplace/ru.ts`), fetched when a marketplace page
-  // mounts. These two families stay in the pack because a page outside the
-  // marketplace route reads them: Studio's packages page renders an import's
-  // refusal and its protocol note through `useDependencyMissingText` and
+  // mounts. What stays here is read by a page outside the marketplace route:
+  // Studio's packages page draws a marketplace install's row through
+  // `MarketplaceRowActions` and `MarketplaceNotLoaded` (the Not loaded badge
+  // and reason, Uninstall with its confirmation and result), and an import's
+  // refusal and protocol note through `useDependencyMissingText` and
   // `useProtocolCheckSkippedText`.
   marketplace: {
+    installedAdditiveNote: "Удаление сразу убирает приложение из работающего ядра вместе с его наборами разрешений и их назначениями, а также удаляет кэшированный манифест, чтобы пакет не загружался при следующем запуске. Записи, хранящиеся в его объектах, остаются в базе данных.",
+    // objectui#11645 — an install-local entry this runtime refused to load at
+    // startup (the listing's `notLoaded` marker), read on Installed Apps.
+    notLoaded: {
+      badge: "Не загружен",
+      protocolIncompatible: "Рантайм не загрузил этот пакет: он рассчитан на протокол {{requiredRange}}, который этот рантайм не поддерживает.",
+      otherReason: "Рантайм не загрузил этот пакет ({{code}}).",
+    },
+    action: {
+      uninstall: "Удалить",
+      uninstalling: "Удаление…",
+      details: "Подробности",
+    },
+    uninstall: {
+      confirm: "Удалить {{manifestId}} v{{version}}?\n\nПриложение сразу будет убрано из работающего ядра вместе с его наборами разрешений и их назначениями, а кэшированный манифест будет удалён. Записи, хранящиеся в его объектах, остаются в базе данных.",
+      confirmNotLoaded: "Удалить {{manifestId}} v{{version}}?\n\nКэшированный манифест будет удалён. Рантайм не загружал этот пакет, поэтому ничего из него не запущено.",
+      successInList: "{{manifestId}} удалён: приложение убрано из работающего ядра вместе с его наборами разрешений и их назначениями. Записи, хранящиеся в его объектах, остаются в базе данных.",
+      successNotLoaded: "{{manifestId}} удалён. Пакет не был загружен, перезапуск не требуется.",
+    },
     install: {
       // ADR-0141 D2 — the install refusal DEPENDENCY_MISSING, one line per unmet entry.
       dependencyMissing: {

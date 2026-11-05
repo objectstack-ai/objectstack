@@ -24,16 +24,8 @@ const zh = {
       noDescription: '未提供描述。',
       back: '返回应用市场',
       browseLink: '去应用市场看看 →',
-      installedAdditiveNote: '卸载会立即将该应用从运行中的内核中移除，其权限集及相应授权也一并移除；同时删除缓存的清单，下次启动时不再加载该包。其对象中已存储的记录仍保留在数据库中。',
       versionBadge: 'v{{version}}',
       installedBadge: '已安装 v{{version}}',
-      // objectui#11645 — an install-local entry this runtime refused to load at
-      // startup (the listing's `notLoaded` marker), read on Installed Apps.
-      notLoaded: {
-        badge: '未加载',
-        protocolIncompatible: '本运行时未加载此包：它面向协议 {{requiredRange}}，而本运行时不支持该协议。',
-        otherReason: '本运行时未加载此包（{{code}}）。',
-      },
       load: {
         failed: '应用市场加载失败',
         failedHintConfigured: '本运行时通过 {{url}} 上的控制面访问应用市场。请检查该地址是否在线、能否从本运行时访问。',
@@ -95,9 +87,6 @@ const zh = {
         installed: '已安装',
         installing: '安装中…',
         updating: '更新中…',
-        uninstall: '卸载',
-        uninstalling: '卸载中…',
-        details: '详情',
         close: '关闭',
         dismiss: '关闭',
         openOnCloud: '在云端打开',
@@ -204,11 +193,7 @@ const zh = {
         reopenedToast: '已重新打开「{{set}}」的建议：接受之前不授予任何权限。',
       },
       uninstall: {
-        confirm: '从本运行时卸载 {{manifestId}} v{{version}}？\n\n该应用将立即从运行中的内核中移除，其权限集及相应授权也一并移除，缓存的清单也将被删除。其对象中已存储的记录仍保留在数据库中。',
-        successInList: '已移除 {{manifestId}}：该应用已从运行中的内核中移除，其权限集及相应授权也已一并移除。其对象中已存储的记录仍保留在数据库中。',
         successInDetail: '已移除 {{manifestId}} 及其清单缓存：该应用已从运行中的内核中移除，其权限集及相应授权也已一并移除。其对象中已存储的记录仍保留在数据库中。',
-        confirmNotLoaded: '从本运行时卸载 {{manifestId}} v{{version}}？\n\n磁盘上的清单缓存将被移除。本运行时并未加载该包，因此它没有任何部分在运行。',
-        successNotLoaded: '已移除 {{manifestId}}。该包未被加载，无需重启运行时。',
       },
       accessDenied: {
         title: '应用市场仅限管理员使用',

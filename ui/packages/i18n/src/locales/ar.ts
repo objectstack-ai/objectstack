@@ -4435,11 +4435,32 @@ const ar = {
   },
   // The rest of `marketplace.*` is the lazy `marketplace` namespace
   // (`../namespaces/marketplace/ar.ts`), fetched when a marketplace page
-  // mounts. These two families stay in the pack because a page outside the
-  // marketplace route reads them: Studio's packages page renders an import's
-  // refusal and its protocol note through `useDependencyMissingText` and
+  // mounts. What stays here is read by a page outside the marketplace route:
+  // Studio's packages page draws a marketplace install's row through
+  // `MarketplaceRowActions` and `MarketplaceNotLoaded` (the Not loaded badge
+  // and reason, Uninstall with its confirmation and result), and an import's
+  // refusal and protocol note through `useDependencyMissingText` and
   // `useProtocolCheckSkippedText`.
   marketplace: {
+    installedAdditiveNote: "يزيل إلغاء التثبيت التطبيق من النواة الجارية فوراً، ومعه مجموعات الأذونات الخاصة به وتعييناتها، ويحذف المانيفست المخزن مؤقتاً لكي لا يتم تحميل الحزمة عند التشغيل التالي. تبقى السجلات المخزنة في كائناته في قاعدة البيانات.",
+    // objectui#11645 — an install-local entry this runtime refused to load at
+    // startup (the listing's `notLoaded` marker), read on Installed Apps.
+    notLoaded: {
+      badge: "غير محمّل",
+      protocolIncompatible: "لم يقم وقت التشغيل هذا بتحميل هذه الحزمة: فهي تستهدف البروتوكول {{requiredRange}}، وهو بروتوكول لا يدعمه وقت التشغيل هذا.",
+      otherReason: "لم يقم وقت التشغيل هذا بتحميل هذه الحزمة ({{code}}).",
+    },
+    action: {
+      uninstall: "إلغاء التثبيت",
+      uninstalling: "جارٍ إلغاء التثبيت…",
+      details: "التفاصيل",
+    },
+    uninstall: {
+      confirm: "إلغاء تثبيت {{manifestId}} v{{version}} من وقت التشغيل هذا؟\n\nستتم إزالة التطبيق من النواة الجارية فوراً، ومعه مجموعات الأذونات الخاصة به وتعييناتها، وستتم إزالة المانيفست المخزن مؤقتاً. تبقى السجلات المخزنة في كائناته في قاعدة البيانات.",
+      confirmNotLoaded: "إلغاء تثبيت {{manifestId}} v{{version}} من وقت التشغيل هذا؟\n\nسيتم إزالة المانيفست المخزن مؤقتاً. لم يقم وقت التشغيل هذا بتحميل الحزمة، لذا لا يعمل أي جزء منها.",
+      successInList: "تمت إزالة {{manifestId}}: خرج التطبيق من النواة الجارية، ومعه مجموعات الأذونات الخاصة به وتعييناتها. تبقى السجلات المخزنة في كائناته في قاعدة البيانات.",
+      successNotLoaded: "تمت إزالة {{manifestId}}. لم تكن الحزمة محمّلة، لذا لا حاجة لإعادة التشغيل.",
+    },
     install: {
       // ADR-0141 D2 — the install refusal DEPENDENCY_MISSING, one line per unmet entry.
       dependencyMissing: {

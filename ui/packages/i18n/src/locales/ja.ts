@@ -4100,11 +4100,32 @@ const ja = {
   },
   // The rest of `marketplace.*` is the lazy `marketplace` namespace
   // (`../namespaces/marketplace/ja.ts`), fetched when a marketplace page
-  // mounts. These two families stay in the pack because a page outside the
-  // marketplace route reads them: Studio's packages page renders an import's
-  // refusal and its protocol note through `useDependencyMissingText` and
+  // mounts. What stays here is read by a page outside the marketplace route:
+  // Studio's packages page draws a marketplace install's row through
+  // `MarketplaceRowActions` and `MarketplaceNotLoaded` (the Not loaded badge
+  // and reason, Uninstall with its confirmation and result), and an import's
+  // refusal and protocol note through `useDependencyMissingText` and
   // `useProtocolCheckSkippedText`.
   marketplace: {
+    installedAdditiveNote: "アンインストールすると、アプリは実行中のカーネルから直ちに削除され、その権限セットと権限セットの付与も併せて削除されます。キャッシュされたマニフェストも削除されるため、次回起動時にパッケージは読み込まれません。オブジェクトに保存されたレコードはデータベースに残ります。",
+    // objectui#11645 — an install-local entry this runtime refused to load at
+    // startup (the listing's `notLoaded` marker), read on Installed Apps.
+    notLoaded: {
+      badge: "未読み込み",
+      protocolIncompatible: "このランタイムはこのパッケージを読み込んでいません。このパッケージはプロトコル {{requiredRange}} を対象としていますが、このランタイムはそのプロトコルをサポートしていません。",
+      otherReason: "このランタイムはこのパッケージを読み込んでいません（{{code}}）。",
+    },
+    action: {
+      uninstall: "アンインストール",
+      uninstalling: "アンインストール中…",
+      details: "詳細",
+    },
+    uninstall: {
+      confirm: "このランタイムから {{manifestId}} v{{version}} をアンインストールしますか？\n\nアプリは実行中のカーネルから直ちに削除され、その権限セットと権限セットの付与も併せて削除されます。キャッシュされたマニフェストも削除されます。オブジェクトに保存されたレコードはデータベースに残ります。",
+      confirmNotLoaded: "このランタイムから {{manifestId}} v{{version}} をアンインストールしますか？\n\nキャッシュされたマニフェストが削除されます。このランタイムはこのパッケージを読み込んでいないため、実行中の部分はありません。",
+      successInList: "{{manifestId}} を削除しました。アプリは実行中のカーネルから削除され、その権限セットと権限セットの付与も削除されました。オブジェクトに保存されたレコードはデータベースに残ります。",
+      successNotLoaded: "{{manifestId}} を削除しました。読み込まれていなかったため、再起動は不要です。",
+    },
     install: {
       // ADR-0141 D2 — the install refusal DEPENDENCY_MISSING, one line per unmet entry.
       dependencyMissing: {

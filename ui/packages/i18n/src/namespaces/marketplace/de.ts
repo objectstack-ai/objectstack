@@ -43,16 +43,8 @@ const de = {
     noDescription: "Keine Beschreibung vorhanden.",
     back: "Zurück zum Marktplatz",
     browseLink: "Marktplatz durchsuchen →",
-    installedAdditiveNote: "Die Deinstallation entfernt die App sofort aus dem laufenden Kernel, samt ihren Berechtigungssets und deren Zuweisungen, und löscht das zwischengespeicherte Manifest, damit das Paket beim nächsten Start nicht geladen wird. Datensätze in ihren Objekten bleiben in der Datenbank erhalten.",
     versionBadge: "v{{version}}",
     installedBadge: "Installiert v{{version}}",
-    // objectui#11645 — an install-local entry this runtime refused to load at
-    // startup (the listing's `notLoaded` marker), read on Installed Apps.
-    notLoaded: {
-      badge: "Nicht geladen",
-      protocolIncompatible: "Dieses Laufzeitsystem hat das Paket nicht geladen: Es zielt auf das Protokoll {{requiredRange}} ab, das dieses Laufzeitsystem nicht unterstützt.",
-      otherReason: "Dieses Laufzeitsystem hat das Paket nicht geladen ({{code}}).",
-    },
     load: {
       failed: "Marktplatz konnte nicht geladen werden",
       failedHintConfigured: "Diese Laufzeitumgebung erreicht den Marktplatz über die Control Plane unter {{url}}. Prüfen Sie, ob diese online und von hier aus erreichbar ist.",
@@ -114,9 +106,6 @@ const de = {
       installToCloud: "In der Cloud installieren…",
       installing: "Installiere…",
       updating: "Aktualisiere…",
-      uninstall: "Deinstallieren",
-      uninstalling: "Deinstalliere…",
-      details: "Details",
       close: "Schließen",
       dismiss: "Schließen",
       openOnCloud: "In der Cloud öffnen",
@@ -202,11 +191,7 @@ const de = {
       },
     },
     uninstall: {
-      confirm: "{{manifestId}} v{{version}} aus diesem Laufzeitsystem deinstallieren?\n\nDie App wird sofort aus dem laufenden Kernel entfernt, samt ihren Berechtigungssets und deren Zuweisungen, und das zwischengespeicherte Manifest wird gelöscht. Datensätze in ihren Objekten bleiben in der Datenbank erhalten.",
-      successInList: "{{manifestId}} entfernt: Die App ist aus dem laufenden Kernel entfernt, samt ihren Berechtigungssets und deren Zuweisungen. Datensätze in ihren Objekten bleiben in der Datenbank erhalten.",
       successInDetail: "{{manifestId}} und das zugehörige zwischengespeicherte Manifest entfernt: Die App ist aus dem laufenden Kernel entfernt, samt ihren Berechtigungssets und deren Zuweisungen. Datensätze in ihren Objekten bleiben in der Datenbank erhalten.",
-      confirmNotLoaded: "{{manifestId}} v{{version}} aus diesem Laufzeitsystem deinstallieren?\n\nDas zwischengespeicherte Manifest wird entfernt. Dieses Laufzeitsystem hat das Paket nicht geladen, daher läuft nichts davon.",
-      successNotLoaded: "{{manifestId}} entfernt. Es war nicht geladen, ein Neustart ist nicht nötig.",
     },
     accessDenied: {
       title: "App-Marktplatz nur für Administratoren",

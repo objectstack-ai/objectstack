@@ -17,10 +17,11 @@
  * for it again — never a skeleton that waits forever, and never a retry loop.
  *
  * ⛔ Every component in this directory that reads a `marketplace.*` key renders
- * under this frame: the two pages wrap their bodies in it. The two families a
- * page outside this route reads (`marketplace.install.dependencyMissing`,
- * `marketplace.install.protocolCheckSkipped`) stayed in the packs for that
- * reason, so `dependencyMissing.ts` and `protocolCheckSkipped.ts` need no frame.
+ * under this frame (the two pages wrap their bodies in it), or is one of the
+ * files Studio's packages page also renders — `MarketplaceRowActions.tsx`,
+ * `dependencyMissing.ts`, `protocolCheckSkipped.ts` — whose keys stayed in
+ * the packs for that reason and need no frame.
+ * `__tests__/marketplaceNamespaceBoundary.test.ts` holds both halves.
  */
 
 import type { ReactNode } from 'react';

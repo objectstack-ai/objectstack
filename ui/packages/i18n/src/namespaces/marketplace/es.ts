@@ -43,16 +43,8 @@ const es = {
     noDescription: "Sin descripción disponible.",
     back: "Volver al marketplace",
     browseLink: "Explorar marketplace →",
-    installedAdditiveNote: "La desinstalación retira la aplicación del kernel en ejecución de inmediato, junto con sus conjuntos de permisos y sus asignaciones, y elimina el manifiesto en caché para que el paquete no se cargue en el próximo inicio. Los registros almacenados en sus objetos permanecen en la base de datos.",
     versionBadge: "v{{version}}",
     installedBadge: "Instalado v{{version}}",
-    // objectui#11645 — an install-local entry this runtime refused to load at
-    // startup (the listing's `notLoaded` marker), read on Installed Apps.
-    notLoaded: {
-      badge: "No cargado",
-      protocolIncompatible: "Este runtime no cargó este paquete: está dirigido al protocolo {{requiredRange}}, que este runtime no admite.",
-      otherReason: "Este runtime no cargó este paquete ({{code}}).",
-    },
     load: {
       failed: "No se pudo cargar el marketplace",
       failedHintConfigured: "Este runtime accede al marketplace a través del plano de control en {{url}}. Compruebe que esté en línea y sea accesible desde aquí.",
@@ -118,9 +110,6 @@ const es = {
       installToCloud: "Instalar en la nube…",
       installing: "Instalando…",
       updating: "Actualizando…",
-      uninstall: "Desinstalar",
-      uninstalling: "Desinstalando…",
-      details: "Detalles",
       close: "Cerrar",
       dismiss: "Descartar",
       openOnCloud: "Abrir en la nube",
@@ -206,11 +195,7 @@ const es = {
       },
     },
     uninstall: {
-      confirm: "¿Desinstalar {{manifestId}} v{{version}} de este runtime?\n\nLa aplicación se retirará de inmediato del kernel en ejecución, junto con sus conjuntos de permisos y sus asignaciones, y el manifiesto en caché será eliminado. Los registros almacenados en sus objetos permanecen en la base de datos.",
-      successInList: "{{manifestId}} eliminado: la aplicación se retiró del kernel en ejecución, junto con sus conjuntos de permisos y sus asignaciones. Los registros almacenados en sus objetos permanecen en la base de datos.",
       successInDetail: "{{manifestId}} y su manifiesto en caché eliminados: la aplicación se retiró del kernel en ejecución, junto con sus conjuntos de permisos y sus asignaciones. Los registros almacenados en sus objetos permanecen en la base de datos.",
-      confirmNotLoaded: "¿Desinstalar {{manifestId}} v{{version}} de este runtime?\n\nEl manifiesto en caché será eliminado. Este runtime no cargó el paquete, así que ninguna parte de él está en ejecución.",
-      successNotLoaded: "{{manifestId}} eliminado. No estaba cargado, así que no es necesario reiniciar.",
     },
     accessDenied: {
       title: "Marketplace solo para administradores",

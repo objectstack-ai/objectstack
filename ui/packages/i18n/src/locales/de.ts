@@ -4098,11 +4098,32 @@ const de = {
   },
   // The rest of `marketplace.*` is the lazy `marketplace` namespace
   // (`../namespaces/marketplace/de.ts`), fetched when a marketplace page
-  // mounts. These two families stay in the pack because a page outside the
-  // marketplace route reads them: Studio's packages page renders an import's
-  // refusal and its protocol note through `useDependencyMissingText` and
+  // mounts. What stays here is read by a page outside the marketplace route:
+  // Studio's packages page draws a marketplace install's row through
+  // `MarketplaceRowActions` and `MarketplaceNotLoaded` (the Not loaded badge
+  // and reason, Uninstall with its confirmation and result), and an import's
+  // refusal and protocol note through `useDependencyMissingText` and
   // `useProtocolCheckSkippedText`.
   marketplace: {
+    installedAdditiveNote: "Die Deinstallation entfernt die App sofort aus dem laufenden Kernel, samt ihren Berechtigungssets und deren Zuweisungen, und löscht das zwischengespeicherte Manifest, damit das Paket beim nächsten Start nicht geladen wird. Datensätze in ihren Objekten bleiben in der Datenbank erhalten.",
+    // objectui#11645 — an install-local entry this runtime refused to load at
+    // startup (the listing's `notLoaded` marker), read on Installed Apps.
+    notLoaded: {
+      badge: "Nicht geladen",
+      protocolIncompatible: "Dieses Laufzeitsystem hat das Paket nicht geladen: Es zielt auf das Protokoll {{requiredRange}} ab, das dieses Laufzeitsystem nicht unterstützt.",
+      otherReason: "Dieses Laufzeitsystem hat das Paket nicht geladen ({{code}}).",
+    },
+    action: {
+      uninstall: "Deinstallieren",
+      uninstalling: "Deinstalliere…",
+      details: "Details",
+    },
+    uninstall: {
+      confirm: "{{manifestId}} v{{version}} aus diesem Laufzeitsystem deinstallieren?\n\nDie App wird sofort aus dem laufenden Kernel entfernt, samt ihren Berechtigungssets und deren Zuweisungen, und das zwischengespeicherte Manifest wird gelöscht. Datensätze in ihren Objekten bleiben in der Datenbank erhalten.",
+      confirmNotLoaded: "{{manifestId}} v{{version}} aus diesem Laufzeitsystem deinstallieren?\n\nDas zwischengespeicherte Manifest wird entfernt. Dieses Laufzeitsystem hat das Paket nicht geladen, daher läuft nichts davon.",
+      successInList: "{{manifestId}} entfernt: Die App ist aus dem laufenden Kernel entfernt, samt ihren Berechtigungssets und deren Zuweisungen. Datensätze in ihren Objekten bleiben in der Datenbank erhalten.",
+      successNotLoaded: "{{manifestId}} entfernt. Es war nicht geladen, ein Neustart ist nicht nötig.",
+    },
     install: {
       // ADR-0141 D2 — the install refusal DEPENDENCY_MISSING, one line per unmet entry.
       dependencyMissing: {

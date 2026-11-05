@@ -4178,11 +4178,32 @@ const pt = {
   },
   // The rest of `marketplace.*` is the lazy `marketplace` namespace
   // (`../namespaces/marketplace/pt.ts`), fetched when a marketplace page
-  // mounts. These two families stay in the pack because a page outside the
-  // marketplace route reads them: Studio's packages page renders an import's
-  // refusal and its protocol note through `useDependencyMissingText` and
+  // mounts. What stays here is read by a page outside the marketplace route:
+  // Studio's packages page draws a marketplace install's row through
+  // `MarketplaceRowActions` and `MarketplaceNotLoaded` (the Not loaded badge
+  // and reason, Uninstall with its confirmation and result), and an import's
+  // refusal and protocol note through `useDependencyMissingText` and
   // `useProtocolCheckSkippedText`.
   marketplace: {
+    installedAdditiveNote: "A desinstalação remove o aplicativo do kernel em execução imediatamente, junto com seus conjuntos de permissões e as respectivas atribuições, e exclui o manifesto em cache para que o pacote não seja carregado na próxima inicialização. Os registros armazenados em seus objetos permanecem no banco de dados.",
+    // objectui#11645 — an install-local entry this runtime refused to load at
+    // startup (the listing's `notLoaded` marker), read on Installed Apps.
+    notLoaded: {
+      badge: "Não carregado",
+      protocolIncompatible: "Este runtime não carregou este pacote: ele é destinado ao protocolo {{requiredRange}}, que este runtime não suporta.",
+      otherReason: "Este runtime não carregou este pacote ({{code}}).",
+    },
+    action: {
+      uninstall: "Desinstalar",
+      uninstalling: "Desinstalando…",
+      details: "Detalhes",
+    },
+    uninstall: {
+      confirm: "Desinstalar {{manifestId}} v{{version}} deste runtime?\n\nO aplicativo será removido do kernel em execução imediatamente, junto com seus conjuntos de permissões e as respectivas atribuições, e o manifesto em cache será removido. Os registros armazenados em seus objetos permanecem no banco de dados.",
+      confirmNotLoaded: "Desinstalar {{manifestId}} v{{version}} deste runtime?\n\nO manifesto em cache será removido. Este runtime não carregou o pacote, então nenhuma parte dele está em execução.",
+      successInList: "{{manifestId}} removido: o aplicativo saiu do kernel em execução, junto com seus conjuntos de permissões e as respectivas atribuições. Os registros armazenados em seus objetos permanecem no banco de dados.",
+      successNotLoaded: "{{manifestId}} removido. Não estava carregado, então não é necessário reiniciar.",
+    },
     install: {
       // ADR-0141 D2 — the install refusal DEPENDENCY_MISSING, one line per unmet entry.
       dependencyMissing: {

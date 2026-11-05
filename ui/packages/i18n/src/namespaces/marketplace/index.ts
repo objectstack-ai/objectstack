@@ -24,14 +24,20 @@
  *
  * ## What stayed in the packs
  *
- * `marketplace.install.dependencyMissing` and
- * `marketplace.install.protocolCheckSkipped` are still pack keys. Studio's
- * packages page — outside the marketplace route — renders an import's refusal
- * and protocol note through the same readers the marketplace pages use
- * (`useDependencyMissingText`, `useProtocolCheckSkippedText` in app-shell), so
- * those two families must be resident wherever that page can open. ⛔ A key
+ * Studio's packages page — outside the marketplace route — draws marketplace
+ * installs with the same app-shell components the marketplace pages use:
+ * `MarketplaceRowActions` / `MarketplaceNotLoaded` for a row's Not loaded
+ * badge and reason and its Uninstall action, confirmation and result, and
+ * `useDependencyMissingText` / `useProtocolCheckSkippedText` for an import's
+ * refusal and protocol note. The keys those read are still pack keys, resident
+ * wherever that page can open: `marketplace.installedAdditiveNote`,
+ * `marketplace.notLoaded.*`, `marketplace.action.{uninstall,uninstalling,details}`,
+ * four `marketplace.uninstall.*` leaves, and
+ * `marketplace.install.{dependencyMissing,protocolCheckSkipped}.*`. ⛔ A key
  * that a page outside the marketplace route reads belongs in the pack, not
  * here; a key here is only reachable under {@link useMarketplaceNamespace}.
+ * App-shell's `marketplaceNamespaceBoundary` test walks what those files read
+ * and fails on a key that is only here.
  *
  * ## Residency, and why every catalogue is lazy
  *
@@ -42,6 +48,11 @@
  * (`apps/console/vite.config.ts` names them `i18n-ns-marketplace-<code>`).
  * ⛔ Never collapse the loaders into a template-literal `import()`; the
  * registry's header says why.
+ *
+ * The one exception is a host that made every catalogue resident on purpose:
+ * `registerBuiltInLocales()` (the all-ten door, `@object-ui/i18n/locales`)
+ * registers each language COMPLETE, namespace included, so a catalogue the
+ * registry already holds is used as it stands and never fetched.
  *
  * A page waits for TWO catalogues: the one that serves its language, and
  * `en`. `en` is what the packs' `fallbackLng: 'en'` falls back to, so loading
@@ -63,7 +74,7 @@
  */
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import type { i18n as I18nInstance } from 'i18next';
-import { DEFAULT_BUILT_IN_LANGUAGE, matchLanguageTag } from '../../locales/registry.js';
+import { DEFAULT_BUILT_IN_LANGUAGE, getLoadedBuiltInLocales, matchLanguageTag } from '../../locales/registry.js';
 import { useObjectTranslation } from '../../provider.js';
 
 /** One language's catalogue: a partial pack holding the `marketplace` group. */
@@ -126,9 +137,26 @@ function announce(): void {
   for (const listener of [...listeners]) listener();
 }
 
+/**
+ * The catalogue `code` names when it needs no fetch: one this module fetched,
+ * or the namespace group of the COMPLETE catalogue the registry holds once a
+ * host called `registerBuiltInLocales()` (see the header).
+ */
+function residentCatalogue(code: string): MarketplaceCatalogue | undefined {
+  if (own(loaded, code)) return loaded[code];
+  if (!hasMarketplaceCatalogue(code)) return undefined;
+  const registered = getLoadedBuiltInLocales()[code] as Record<string, unknown> | undefined;
+  const group = registered?.[MARKETPLACE_NAMESPACE] as Record<string, unknown> | undefined;
+  const probe = MARKETPLACE_NAMESPACE_PROBE_KEY.slice(MARKETPLACE_NAMESPACE.length + 1);
+  if (typeof group?.[probe] !== 'string') return undefined;
+  // Kept, so every later answer for `code` is this same object.
+  loaded[code] = Object.freeze({ [MARKETPLACE_NAMESPACE]: group });
+  return loaded[code];
+}
+
 /** Whether the catalogue `code` names is resident (no fetch needed). */
 export function isMarketplaceCatalogueLoaded(code: string): boolean {
-  return own(loaded, code);
+  return residentCatalogue(code) !== undefined;
 }
 
 /**
@@ -141,7 +169,8 @@ export function loadMarketplaceCatalogue(code: string): Promise<MarketplaceCatal
   if (!hasMarketplaceCatalogue(code)) {
     return Promise.reject(new Error(`The marketplace namespace ships no \`${code}\` catalogue.`));
   }
-  if (own(loaded, code)) return Promise.resolve(loaded[code]);
+  const resident = residentCatalogue(code);
+  if (resident) return Promise.resolve(resident);
   const existing = inFlight.get(code);
   if (existing) return existing;
   failed.delete(code);
@@ -178,14 +207,21 @@ function catalogueTargets(lang: string): Array<readonly [string, string]> {
 }
 
 /**
- * Whether `instance` can render the namespace in `lng` without leaning on a
- * fallback language. Asks i18next itself, along its own resolution path for
- * `lng` (`zh-CN` reads `zh-CN`, then `zh`), so a catalogue a host supplied
- * through `resources`, or one the all-ten door made resident, counts too.
+ * Whether `instance` still holds the namespace in `lng`, without leaning on a
+ * fallback language — i18next's own answer, so a bundle removed since it was
+ * installed is installed again.
  */
 function holdsNamespace(instance: I18nInstance, lng: string): boolean {
   return instance.exists(MARKETPLACE_NAMESPACE_PROBE_KEY, { lng, fallbackLng: false });
 }
+
+/**
+ * The language keys each instance has been given its catalogue under. Kept
+ * per instance rather than read off the instance's keys: a host whose own
+ * `resources` spell one `marketplace.*` key in a language has not supplied
+ * that language's catalogue, and must still get the rest of it.
+ */
+const installed = new WeakMap<I18nInstance, Set<string>>();
 
 /** The writes {@link installResident} makes are SILENT: see there. */
 const SILENT_WRITE = Object.freeze({ silent: true });
@@ -202,15 +238,21 @@ const SILENT_WRITE = Object.freeze({ silent: true });
  * @returns whether the instance now holds every catalogue `lang` needs.
  */
 function installResident(instance: I18nInstance, lang: string): boolean {
+  let given = installed.get(instance);
+  if (!given) {
+    given = new Set();
+    installed.set(instance, given);
+  }
   let complete = true;
   for (const [target, code] of catalogueTargets(lang)) {
-    if (holdsNamespace(instance, target)) continue;
-    if (!own(loaded, code)) {
+    if (given.has(target) && holdsNamespace(instance, target)) continue;
+    const catalogue = residentCatalogue(code);
+    if (!catalogue) {
       complete = false;
       continue;
     }
-    instance.addResourceBundle(target, 'translation', loaded[code], true, false, SILENT_WRITE);
-    if (!holdsNamespace(instance, target)) complete = false;
+    instance.addResourceBundle(target, 'translation', catalogue, true, false, SILENT_WRITE);
+    given.add(target);
   }
   return complete;
 }
@@ -260,9 +302,16 @@ export function useMarketplaceNamespace(): MarketplaceNamespaceState {
   const lang = instance?.language || DEFAULT_BUILT_IN_LANGUAGE;
 
   const retry = useCallback(() => {
+    let started = false;
     for (const [, code] of catalogueTargets(lang)) {
-      if (failed.has(code)) loadMarketplaceCatalogue(code).catch(() => undefined);
+      if (!failed.has(code) || inFlight.has(code)) continue;
+      loadMarketplaceCatalogue(code).catch(() => undefined);
+      started = true;
     }
+    // The failure is cleared and the request is under way, so the frame shows
+    // its loading state again instead of the failure it is retrying. Never
+    // called while rendering (an effect or a click), so announcing is safe.
+    if (started) announce();
   }, [lang]);
   // A page opened (or switched to a language) after an earlier failure tries
   // again, once; otherwise a failure stays a failure until the visitor asks
@@ -277,8 +326,8 @@ export function useMarketplaceNamespace(): MarketplaceNamespaceState {
   if (installResident(instance, lang)) return { status: 'ready', retry };
 
   let status: MarketplaceNamespaceState['status'] = 'loading';
-  for (const [target, code] of catalogueTargets(lang)) {
-    if (holdsNamespace(instance, target) || own(loaded, code)) continue;
+  for (const [, code] of catalogueTargets(lang)) {
+    if (residentCatalogue(code)) continue;
     if (failed.has(code) && !inFlight.has(code)) {
       status = 'failed';
       continue;

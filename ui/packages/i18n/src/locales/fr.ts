@@ -4179,11 +4179,32 @@ const fr = {
   },
   // The rest of `marketplace.*` is the lazy `marketplace` namespace
   // (`../namespaces/marketplace/fr.ts`), fetched when a marketplace page
-  // mounts. These two families stay in the pack because a page outside the
-  // marketplace route reads them: Studio's packages page renders an import's
-  // refusal and its protocol note through `useDependencyMissingText` and
+  // mounts. What stays here is read by a page outside the marketplace route:
+  // Studio's packages page draws a marketplace install's row through
+  // `MarketplaceRowActions` and `MarketplaceNotLoaded` (the Not loaded badge
+  // and reason, Uninstall with its confirmation and result), and an import's
+  // refusal and protocol note through `useDependencyMissingText` and
   // `useProtocolCheckSkippedText`.
   marketplace: {
+    installedAdditiveNote: "La désinstallation retire immédiatement l'application du noyau en cours d'exécution, avec ses jeux d'autorisations et leurs attributions, et supprime le manifeste en cache pour que le paquet ne se charge pas au prochain démarrage. Les enregistrements stockés dans ses objets restent dans la base de données.",
+    // objectui#11645 — an install-local entry this runtime refused to load at
+    // startup (the listing's `notLoaded` marker), read on Installed Apps.
+    notLoaded: {
+      badge: "Non chargé",
+      protocolIncompatible: "Ce runtime n'a pas chargé ce paquet : il cible le protocole {{requiredRange}}, que ce runtime ne prend pas en charge.",
+      otherReason: "Ce runtime n'a pas chargé ce paquet ({{code}}).",
+    },
+    action: {
+      uninstall: "Désinstaller",
+      uninstalling: "Désinstallation…",
+      details: "Détails",
+    },
+    uninstall: {
+      confirm: "Désinstaller {{manifestId}} v{{version}} de ce runtime ?\n\nL'application sera retirée immédiatement du noyau en cours d'exécution, avec ses jeux d'autorisations et leurs attributions, et le manifeste en cache sera supprimé. Les enregistrements stockés dans ses objets restent dans la base de données.",
+      confirmNotLoaded: "Désinstaller {{manifestId}} v{{version}} de ce runtime ?\n\nLe manifeste en cache sera supprimé. Ce runtime n'a pas chargé le paquet, donc aucune partie n'est en cours d'exécution.",
+      successInList: "{{manifestId}} supprimé : l'application a été retirée du noyau en cours d'exécution, avec ses jeux d'autorisations et leurs attributions. Les enregistrements stockés dans ses objets restent dans la base de données.",
+      successNotLoaded: "{{manifestId}} supprimé. Il n'était pas chargé, aucun redémarrage n'est nécessaire.",
+    },
     install: {
       // ADR-0141 D2 — the install refusal DEPENDENCY_MISSING, one line per unmet entry.
       dependencyMissing: {

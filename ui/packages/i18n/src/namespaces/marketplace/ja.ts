@@ -43,16 +43,8 @@ const ja = {
     noDescription: "説明がありません。",
     back: "マーケットプレイスに戻る",
     browseLink: "マーケットプレイスを参照 →",
-    installedAdditiveNote: "アンインストールすると、アプリは実行中のカーネルから直ちに削除され、その権限セットと権限セットの付与も併せて削除されます。キャッシュされたマニフェストも削除されるため、次回起動時にパッケージは読み込まれません。オブジェクトに保存されたレコードはデータベースに残ります。",
     versionBadge: "v{{version}}",
     installedBadge: "インストール済み v{{version}}",
-    // objectui#11645 — an install-local entry this runtime refused to load at
-    // startup (the listing's `notLoaded` marker), read on Installed Apps.
-    notLoaded: {
-      badge: "未読み込み",
-      protocolIncompatible: "このランタイムはこのパッケージを読み込んでいません。このパッケージはプロトコル {{requiredRange}} を対象としていますが、このランタイムはそのプロトコルをサポートしていません。",
-      otherReason: "このランタイムはこのパッケージを読み込んでいません（{{code}}）。",
-    },
     load: {
       failed: "マーケットプレイスの読み込みに失敗しました",
       failedHintConfigured: "このランタイムは {{url}} のコントロールプレーン経由でマーケットプレイスに接続します。オンラインであること、ここから到達できることを確認してください。",
@@ -114,9 +106,6 @@ const ja = {
       installToCloud: "クラウドにインストール…",
       installing: "インストール中…",
       updating: "更新中…",
-      uninstall: "アンインストール",
-      uninstalling: "アンインストール中…",
-      details: "詳細",
       close: "閉じる",
       dismiss: "閉じる",
       openOnCloud: "クラウドで開く",
@@ -202,11 +191,7 @@ const ja = {
       },
     },
     uninstall: {
-      confirm: "このランタイムから {{manifestId}} v{{version}} をアンインストールしますか？\n\nアプリは実行中のカーネルから直ちに削除され、その権限セットと権限セットの付与も併せて削除されます。キャッシュされたマニフェストも削除されます。オブジェクトに保存されたレコードはデータベースに残ります。",
-      successInList: "{{manifestId}} を削除しました。アプリは実行中のカーネルから削除され、その権限セットと権限セットの付与も削除されました。オブジェクトに保存されたレコードはデータベースに残ります。",
       successInDetail: "{{manifestId}} とそのキャッシュされたマニフェストを削除しました。アプリは実行中のカーネルから削除され、その権限セットと権限セットの付与も削除されました。オブジェクトに保存されたレコードはデータベースに残ります。",
-      confirmNotLoaded: "このランタイムから {{manifestId}} v{{version}} をアンインストールしますか？\n\nキャッシュされたマニフェストが削除されます。このランタイムはこのパッケージを読み込んでいないため、実行中の部分はありません。",
-      successNotLoaded: "{{manifestId}} を削除しました。読み込まれていなかったため、再起動は不要です。",
     },
     accessDenied: {
       title: "アプリマーケットプレイスは管理者専用です",

@@ -24,16 +24,8 @@ const en = {
       noDescription: 'No description provided.',
       back: 'Back to marketplace',
       browseLink: 'Browse the marketplace →',
-      installedAdditiveNote: 'Uninstall removes the app from the running kernel at once, together with its permission sets and their grants, and deletes the cached manifest so the package does not load at the next start. Records stored in its objects stay in the database.',
       versionBadge: 'v{{version}}',
       installedBadge: 'Installed v{{version}}',
-      // objectui#11645 — an install-local entry this runtime refused to load at
-      // startup (the listing's `notLoaded` marker), read on Installed Apps.
-      notLoaded: {
-        badge: 'Not loaded',
-        protocolIncompatible: 'This runtime did not load this package: it targets protocol {{requiredRange}}, which this runtime does not support.',
-        otherReason: 'This runtime did not load this package ({{code}}).',
-      },
       load: {
         failed: 'Failed to load marketplace',
         failedHintConfigured: 'This runtime reaches the marketplace through the control plane at {{url}}. Check that it is online and reachable from here.',
@@ -95,9 +87,6 @@ const en = {
         installed: 'Installed',
         installing: 'Installing…',
         updating: 'Updating…',
-        uninstall: 'Uninstall',
-        uninstalling: 'Uninstalling…',
-        details: 'Details',
         close: 'Close',
         dismiss: 'Dismiss',
         openOnCloud: 'Open on cloud',
@@ -210,11 +199,7 @@ const en = {
         reopenedToast: 'Suggestion for "{{set}}" reopened: nothing is granted until it is accepted.',
       },
       uninstall: {
-        confirm: 'Uninstall {{manifestId}} v{{version}} from this runtime?\n\nThe app will leave the running kernel at once, together with its permission sets and their grants, and its cached manifest will be removed. Records stored in its objects stay in the database.',
-        successInList: 'Removed {{manifestId}}: the app has left the running kernel, with its permission sets and their grants. Records stored in its objects stay in the database.',
         successInDetail: 'Removed {{manifestId}} and its cached manifest: the app has left the running kernel, with its permission sets and their grants. Records stored in its objects stay in the database.',
-        confirmNotLoaded: 'Uninstall {{manifestId}} v{{version}} from this runtime?\n\nThe cached manifest will be removed. This runtime did not load the package, so none of it is running.',
-        successNotLoaded: 'Removed {{manifestId}}. It was not loaded, so no restart is needed.',
       },
       accessDenied: {
         title: 'App Marketplace is admin-only',

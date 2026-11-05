@@ -4919,11 +4919,32 @@ const en = {
   },
   // The rest of `marketplace.*` is the lazy `marketplace` namespace
   // (`../namespaces/marketplace/en.ts`), fetched when a marketplace page
-  // mounts. These two families stay in the pack because a page outside the
-  // marketplace route reads them: Studio's packages page renders an import's
-  // refusal and its protocol note through `useDependencyMissingText` and
+  // mounts. What stays here is read by a page outside the marketplace route:
+  // Studio's packages page draws a marketplace install's row through
+  // `MarketplaceRowActions` and `MarketplaceNotLoaded` (the Not loaded badge
+  // and reason, Uninstall with its confirmation and result), and an import's
+  // refusal and protocol note through `useDependencyMissingText` and
   // `useProtocolCheckSkippedText`.
   marketplace: {
+      installedAdditiveNote: 'Uninstall removes the app from the running kernel at once, together with its permission sets and their grants, and deletes the cached manifest so the package does not load at the next start. Records stored in its objects stay in the database.',
+      // objectui#11645 — an install-local entry this runtime refused to load at
+      // startup (the listing's `notLoaded` marker), read on Installed Apps.
+      notLoaded: {
+        badge: 'Not loaded',
+        protocolIncompatible: 'This runtime did not load this package: it targets protocol {{requiredRange}}, which this runtime does not support.',
+        otherReason: 'This runtime did not load this package ({{code}}).',
+      },
+    action: {
+        uninstall: 'Uninstall',
+        uninstalling: 'Uninstalling…',
+        details: 'Details',
+    },
+    uninstall: {
+        confirm: 'Uninstall {{manifestId}} v{{version}} from this runtime?\n\nThe app will leave the running kernel at once, together with its permission sets and their grants, and its cached manifest will be removed. Records stored in its objects stay in the database.',
+        confirmNotLoaded: 'Uninstall {{manifestId}} v{{version}} from this runtime?\n\nThe cached manifest will be removed. This runtime did not load the package, so none of it is running.',
+        successInList: 'Removed {{manifestId}}: the app has left the running kernel, with its permission sets and their grants. Records stored in its objects stay in the database.',
+        successNotLoaded: 'Removed {{manifestId}}. It was not loaded, so no restart is needed.',
+    },
     install: {
         // ADR-0141 D2 — the install refusal DEPENDENCY_MISSING, one line per unmet entry.
         dependencyMissing: {

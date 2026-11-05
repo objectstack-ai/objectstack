@@ -439,9 +439,15 @@ through the `@object-ui/i18n/namespaces/marketplace` subpath:
   marketplace pages render a copy-free loading frame until it answers `ready`,
   and again after a language switch, so a visitor never reads English in a
   translated page nor a raw key.
-- **Two families stay in the packs.** `marketplace.install.dependencyMissing`
-  and `marketplace.install.protocolCheckSkipped` are read by Studio's packages
-  page too, outside the marketplace route, so they stay resident.
+- **What Studio's packages page reads stays in the packs.** That page, outside
+  the marketplace route, draws a marketplace install's row with app-shell's
+  `MarketplaceRowActions` / `MarketplaceNotLoaded` and an import's refusal and
+  protocol note with the `dependencyMissing` / `protocolCheckSkipped` readers,
+  so the keys those read (`marketplace.installedAdditiveNote`,
+  `marketplace.notLoaded.*`, three `marketplace.action.*` and four
+  `marketplace.uninstall.*` leaves, `marketplace.install.dependencyMissing.*`,
+  `marketplace.install.protocolCheckSkipped.*`) stay resident. App-shell's
+  `marketplaceNamespaceBoundary` test holds that set to what those files read.
 - **Inside the pack gates.** `@object-ui/i18n/locales` hands out each language
   COMPLETE — its pack merged with its namespace catalogue — so key parity and
   every suite that walks `builtInLocales` still walk these keys, and

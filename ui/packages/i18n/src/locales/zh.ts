@@ -4304,11 +4304,32 @@ const zh = {
   },
   // The rest of `marketplace.*` is the lazy `marketplace` namespace
   // (`../namespaces/marketplace/zh.ts`), fetched when a marketplace page
-  // mounts. These two families stay in the pack because a page outside the
-  // marketplace route reads them: Studio's packages page renders an import's
-  // refusal and its protocol note through `useDependencyMissingText` and
+  // mounts. What stays here is read by a page outside the marketplace route:
+  // Studio's packages page draws a marketplace install's row through
+  // `MarketplaceRowActions` and `MarketplaceNotLoaded` (the Not loaded badge
+  // and reason, Uninstall with its confirmation and result), and an import's
+  // refusal and protocol note through `useDependencyMissingText` and
   // `useProtocolCheckSkippedText`.
   marketplace: {
+      installedAdditiveNote: '卸载会立即将该应用从运行中的内核中移除，其权限集及相应授权也一并移除；同时删除缓存的清单，下次启动时不再加载该包。其对象中已存储的记录仍保留在数据库中。',
+      // objectui#11645 — an install-local entry this runtime refused to load at
+      // startup (the listing's `notLoaded` marker), read on Installed Apps.
+      notLoaded: {
+        badge: '未加载',
+        protocolIncompatible: '本运行时未加载此包：它面向协议 {{requiredRange}}，而本运行时不支持该协议。',
+        otherReason: '本运行时未加载此包（{{code}}）。',
+      },
+    action: {
+        uninstall: '卸载',
+        uninstalling: '卸载中…',
+        details: '详情',
+    },
+    uninstall: {
+        confirm: '从本运行时卸载 {{manifestId}} v{{version}}？\n\n该应用将立即从运行中的内核中移除，其权限集及相应授权也一并移除，缓存的清单也将被删除。其对象中已存储的记录仍保留在数据库中。',
+        confirmNotLoaded: '从本运行时卸载 {{manifestId}} v{{version}}？\n\n磁盘上的清单缓存将被移除。本运行时并未加载该包，因此它没有任何部分在运行。',
+        successInList: '已移除 {{manifestId}}：该应用已从运行中的内核中移除，其权限集及相应授权也已一并移除。其对象中已存储的记录仍保留在数据库中。',
+        successNotLoaded: '已移除 {{manifestId}}。该包未被加载，无需重启运行时。',
+    },
     install: {
         // ADR-0141 D2 — the install refusal DEPENDENCY_MISSING, one line per unmet entry.
         dependencyMissing: {
