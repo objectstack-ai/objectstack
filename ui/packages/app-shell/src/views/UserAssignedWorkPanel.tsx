@@ -134,8 +134,8 @@ export function UserAssignedWorkPanel({ userId }: UserAssignedWorkPanelProps) {
     try {
       const report = await adapter.getClient().security.assignedWork.transfer(userId, { toUserId: targetId });
       setTransfer({ phase: 'done', report });
-      // Read the counts again: what moved no longer holds the user.
-      setCount({ phase: 'loading' });
+      // Read the counts again: what moved no longer holds the user. The
+      // previous answer stays drawn until the new one arrives.
       setGeneration((g) => g + 1);
     } catch (err) {
       const fields = (err as { fields?: Array<{ code?: unknown }> } | null)?.fields;
