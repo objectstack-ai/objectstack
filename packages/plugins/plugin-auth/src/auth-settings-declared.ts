@@ -20,8 +20,9 @@
  *    stored value lands in a block the manager can refuse (`emailAndPassword`,
  *    `plugins`, `audience`) restores through that same block, so the manager
  *    judges a restored value exactly as it judges a saved one. Keys that rule
- *    one runtime value together (the rate-limit pair, the Google trio, the
- *    audience trio) restore as a group, and only once none of them is stored.
+ *    one runtime value together restore as a group: the rate-limit pair and
+ *    the Google trio once none of them is stored, the audience trio once its
+ *    posture is not (a sibling stored without a posture is ignored).
  */
 
 import type { AuthManagerOptions } from './auth-manager.js';
@@ -88,7 +89,7 @@ export type AuthSettingRestore =
   | { readonly via: 'session'; readonly field: 'expiresIn' | 'updateAge' }
   /** Enforced MFA: restored exactly as a save of the declared value would apply. */
   | { readonly via: 'mfaRequired' }
-  /** One runtime value ruled by several keys: restored whole once none of them is stored. */
+  /** One runtime value ruled by several keys: restored whole (see the module note for when). */
   | { readonly via: 'group'; readonly group: 'rateLimit' | 'google' | 'audience' };
 
 /**

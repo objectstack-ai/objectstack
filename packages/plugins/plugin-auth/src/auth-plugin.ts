@@ -2115,6 +2115,8 @@ export class AuthPlugin implements Plugin {
         // Read at save time: the index is set in init, after `auth:configure`.
         providerHasCredentials: (provider) => providerCredentialsFrom(this.bootProviderCredentials)(provider),
         env: () => ((globalThis as any)?.process?.env ?? {}) as Record<string, string | undefined>,
+        // [#30312] A cleared toggle returns to the declaration: judge it there.
+        declaredEmailPasswordEnabled: () => this.declaredAuthOptions.emailAndPassword?.enabled !== false,
       },
       ctx.logger,
     );
@@ -2140,7 +2142,7 @@ export class AuthPlugin implements Plugin {
         // restart while the console showed the default. See auth-settings-declared.ts.
         const declared = this.declaredAuthOptions;
         const restoring = (key: string) => !isExplicit(key) && this.authSettingsFromStore.has(key);
-        const groupRestoring = (group: 'rateLimit' | 'google' | 'audience'): string[] => {
+        const groupRestoring = (group: 'rateLimit' | 'google'): string[] => {
           const keys = restoreGroupKeys(group);
           return keys.some(isExplicit) ? [] : keys.filter(restoring);
         };
@@ -2595,6 +2597,24 @@ export class AuthPlugin implements Plugin {
         // Missing required siblings are NOT guessed: the patch goes out
         // without them and `applyConfigPatch` refuses the merged result
         // (standing config keeps ruling — refusing to OPEN fails closed).
+        // [#30312] No posture stored any more (cleared, or the namespace
+        // restored) while an audience key had been: the declared audience comes
+        // back whole, judged by the same merged-result validation. A sibling
+        // still stored without a posture is then IGNORED as below.
+        if (!isExplicit('audience_posture')) {
+          const audienceRestoring = audienceKeys.filter(restoring);
+          if (audienceRestoring.length > 0) {
+            try {
+              authManager.applyConfigPatch({ audience: copyDeclared(declared.audience) });
+            } catch (audienceErr: any) {
+              owed.push(...audienceRestoring);
+              ctx.logger.error(
+                `[auth] audience settings REFUSED — the standing posture ('${authManager.getAudience().posture}') keeps ruling. ` +
+                  String(audienceErr?.message ?? audienceErr),
+              );
+            }
+          }
+        }
         if (audienceKeys.some((key) => isExplicit(key))) {
           const rawPosture = values.audience_posture;
           if (!isExplicit('audience_posture')) {
@@ -2643,21 +2663,6 @@ export class AuthPlugin implements Plugin {
               // broken afterwards.
               ctx.logger.error(
                 `[auth] audience settings REFUSED — the standing posture ('${this.authManager.getAudience().posture}') keeps ruling. ` +
-                  String(audienceErr?.message ?? audienceErr),
-              );
-            }
-          }
-        } else {
-          // [#30312] No audience key stored any more: the declared audience
-          // comes back whole, judged by the same merged-result validation.
-          const audienceRestoring = groupRestoring('audience');
-          if (audienceRestoring.length > 0) {
-            try {
-              authManager.applyConfigPatch({ audience: copyDeclared(declared.audience) });
-            } catch (audienceErr: any) {
-              owed.push(...audienceRestoring);
-              ctx.logger.error(
-                `[auth] audience settings REFUSED — the standing posture ('${authManager.getAudience().posture}') keeps ruling. ` +
                   String(audienceErr?.message ?? audienceErr),
               );
             }

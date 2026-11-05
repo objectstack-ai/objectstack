@@ -57,7 +57,10 @@
  * settings); a key the save sets is read from the batch unless an environment
  * override is in force for it, which wins over what is saved; a cleared key
  * reads as its default (on, for both toggles), as the settings service's own
- * save-time view does.
+ * save-time view does — except that a cleared `email_password_enabled` reads
+ * as the deployment's own declaration, which the settings pass hands the
+ * running value back to (#30312): a deployment that declared email and
+ * password off turns it off again with that clear.
  *
  * A deployment that stored the dead-end state before this check existed gets
  * back in with `OS_AUTH_EMAIL_PASSWORD_ENABLED=true`, the settings environment
@@ -97,6 +100,12 @@ export interface SignInMethodFloorDeps {
    */
   providerHasCredentials(provider: { id: string; type: 'social' | 'oidc' }): boolean;
   env(): Record<string, string | undefined>;
+  /**
+   * [#30312] Whether the deployment itself declared email and password on (the
+   * plugin options and `auth:configure`, before any setting): what a cleared
+   * `email_password_enabled` hands the running value back to. Absent ⇒ on.
+   */
+  declaredEmailPasswordEnabled?(): boolean;
 }
 
 const hasCredentialPair = (entry: unknown): boolean => {
@@ -335,7 +344,10 @@ export function signInMethodFloorPredicate(deps: SignInMethodFloorDeps, read: Au
     const batch = input.batch ?? { [key]: next };
     const config = deps.publicConfig();
     const emailPasswordAfter = Object.prototype.hasOwnProperty.call(batch, 'email_password_enabled')
-      ? readToggle(await valueAfter(read, input, batch, 'email_password_enabled'), true)
+      ? readToggle(
+        await valueAfter(read, input, batch, 'email_password_enabled'),
+        deps.declaredEmailPasswordEnabled?.() ?? true,
+      )
       : config.emailPassword?.enabled !== false;
     if (emailPasswordAfter) return undefined;
     const googleNow = (config.socialProviders ?? []).some((p) => isSettingsGoogle(p) && providerCounts(deps, p));
