@@ -600,7 +600,8 @@ export const GetPackageCustomizationsResponseSchema = lazySchema(() => z.object(
   ])).describe(
     'Every field, flow and navigation item another installed package contributes to the base, one entry per '
     + 'item and contributing package: the fields of every object extension of an object the base owns, from any '
-    + 'package but the base and its pair; every flow registered under such a package whose trigger object the '
+    + 'package but the base and its pair (a disabled package\'s are not listed, as the served object withholds '
+    + 'them); every flow registered under such a package whose trigger object the '
     + 'base owns (a flow of a disabled package is not served, so not listed); and every navigation item such a '
     + 'package contributes to an app the base owns (a disabled package\'s are not listed). The entry '
     + 'shape is per `kind`: `object` for `field` and `flow`, `app` and an optional `group` for `nav`. Ordered: '
