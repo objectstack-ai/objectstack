@@ -1648,7 +1648,21 @@ const RULE_CODE = RULE_SOURCE.replace(/\/\*[\s\S]*?\*\//g, '')
   // PLUMBING as though it were a local variable, which is a lie the next
   // author would have to re-derive. Strip the import block instead; nothing in
   // it is a read off a metadata record.
-  .replace(/^import[\s\S]*?from '[^']*';$/gm, '');
+  .replace(/^import[\s\S]*?from '[^']*';$/gm, '')
+  // [#30303] The extension fold the controlled-by-parent merge and the FLS-key
+  // check read through (`objectExtensionsByTarget`, `objectsAsServed`) lives in
+  // `object-graph.ts`, and its reads off `stack`, `entry`, `body` and `ext` are
+  // this rule's reads: scanned here, so they stay held to the tables below.
+  + foldCode();
+
+/** The shared extension fold's code in `object-graph.ts`, comments stripped. */
+function foldCode(): string {
+  const source = readFileSync(new URL('./object-graph.ts', import.meta.url), 'utf8');
+  const start = source.indexOf('export interface VisibleObjectExtension');
+  const end = source.indexOf('/** What a path resolved to');
+  if (start < 0 || end <= start) throw new Error('object-graph.ts: the extension fold was not found; re-point this scan');
+  return '\n' + source.slice(start, end).replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+}
 
 /** Distinct property names read off `receiver` in the rule's code. */
 function keysReadOff(receiver: string): string[] {
@@ -1966,6 +1980,9 @@ describe('validateSecurityPosture — reads only keys the spec declares (meta-te
       'ownershipGap',
       // #29544: the inert-mask arm's list of unbound bits — `.filter` / `.join` / `.length`, JS methods.
       'inertBits',
+      // #30303: the shared extension fold's own collections (`object-graph.ts`, scanned with this rule) —
+      // JS Map / Set / Array methods, and `other.carrier`, the fold's own record of a package's entry.
+      'byTarget', 'kept', 'other', 'list', 'lastWriter', 'tiedKeys', 'tied',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });
