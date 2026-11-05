@@ -168,9 +168,11 @@ async function boot(kind: 'secret' | 'public', posture?: 'single' | 'group' | 'i
     { id: 'line_y', kind, organization_id: 'org_y' },
   ]);
   // The caller u_x and its peer u_x2 (org X); u_y belongs to org Y only.
+  // [#30205] u_x2's ban has expired: `banned` still reads true, which is what
+  // the rule reads, and the write's ban check (a ban in force) leaves it be.
   await table('sys_user').insert([
     { id: 'u_x', name: 'X', email: 'x@x.test', banned: false },
-    { id: 'u_x2', name: 'X2', email: 'x2@x.test', banned: true },
+    { id: 'u_x2', name: 'X2', email: 'x2@x.test', banned: true, ban_expires: '2020-01-01T00:00:00.000Z' },
     { id: 'u_y', name: 'Y', email: 'y@y.test', banned: kind === 'secret' },
   ]);
 
