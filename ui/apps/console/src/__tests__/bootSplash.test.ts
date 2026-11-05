@@ -318,8 +318,13 @@ describe('apps/console/index.html — boot splash behaviour', () => {
 const installedListeners: Array<[string, EventListenerOrEventListenerObject, boolean]> = [];
 const windowAddEventListener = window.addEventListener;
 beforeEach(() => {
-  window.addEventListener = function (this: Window, type: string, fn: any, opts?: any) {
-    installedListeners.push([type, fn, opts === true]);
+  window.addEventListener = function (
+    this: Window,
+    type: string,
+    fn: EventListenerOrEventListenerObject,
+    opts?: boolean | AddEventListenerOptions,
+  ) {
+    installedListeners.push([type, fn, typeof opts === 'boolean' ? opts : !!opts?.capture]);
     return windowAddEventListener.call(this, type, fn, opts);
   } as typeof window.addEventListener;
 });
