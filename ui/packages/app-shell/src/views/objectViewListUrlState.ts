@@ -303,7 +303,22 @@ export function useObjectViewListUrlState({
         resetPendingRef.current = true;
         setListResetGeneration(g => g + 1);
     }, [activeView?.id, listPrefs.resetView, user?.id, objectName]);
+    /**
+     * objectstack#30073 — the list the reader just saved as a view of its own
+     * leaves the view it came from: that view's stored list state (sort,
+     * filters, column layout, density, hidden fields, every part the saved
+     * body carries) and its cached search term go, and the address the page
+     * is leaving loses its `uf_*` params, so neither Back nor the next open
+     * of that view brings the conditions back, nor marks it personalized.
+     * The caller navigates to the saved view next.
+     */
+    const clearSourceListState = useCallback((viewId: string) => {
+        listPrefs.resetView(viewId);
+        clearListFilterState(buildListFilterKey(user?.id, objectName, viewId));
+        setSearchParams(prev => withoutListStateParams(prev), { replace: true });
+    }, [listPrefs.resetView, user?.id, objectName, setSearchParams]);
     return {
+        clearSourceListState,
         listIdentityKey,
         listSeedRef,
         ownListParamsRef,

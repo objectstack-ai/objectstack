@@ -17,6 +17,7 @@ const ObjectChart = lazy(() =>
 );
 import { ListView, type ListViewProps } from '@object-ui/plugin-list';
 import type { ListViewSchema, TreeViewConfig } from '@object-ui/types';
+import type { FilterBuilderRowGroup } from '@object-ui/components';
 import type { useAuth } from '@object-ui/auth';
 import type { useActionTextLocalizer } from '@object-ui/react';
 import { useLocalization, type useObjectLabel, type useObjectTranslation } from '@object-ui/i18n';
@@ -77,6 +78,7 @@ export function useObjectViewListRenderer({
     initialUfSelections,
     handleUserFilterSelectionsChange,
     handleListTotalChange,
+    viewPanelFilters,
 }: {
     objectName: string | undefined;
     inSetup: ReturnType<typeof isSetupAppSegment>;
@@ -121,6 +123,13 @@ export function useObjectViewListRenderer({
     handleUserFilterSelectionsChange: ReturnType<typeof useObjectViewUrlFilters>['handleUserFilterSelectionsChange'];
     /** objectstack#27594 — the records the active view matched, for the title's count. */
     handleListTotalChange: (total: number) => void;
+    /**
+     * objectstack#30073 — the active view's own conditions when the Filter
+     * panel holds them as rows (a personal view, `personalViewPanelFilters`):
+     * the panel opens on them, they are not applied under the list a second
+     * time, and the list judges its 「Personalized」 filters against them.
+     */
+    viewPanelFilters?: FilterBuilderRowGroup;
 }) {
     // objectui#10694 — does the active view, as AUTHORED, declare a non-empty
     // `columns`? Booleans, so the relay keys on values and not on the memo's
@@ -529,7 +538,9 @@ export function useObjectViewListRenderer({
             // URL filters). Now: base ?? listSchema, concatenated with the URL
             // filters, and substituted as a whole.
             filter: (() => {
-                const base = (viewDef as any).filter ?? listSchema.filter;
+                // A view whose conditions the panel holds is filtered by the
+                // panel (objectstack#30073), never by its stored list as well.
+                const base = viewPanelFilters ? undefined : ((viewDef as any).filter ?? listSchema.filter);
                 const baseArr = Array.isArray(base) ? base : base ? [base] : [];
                 const combined = urlFilters.length ? [...baseArr, ...urlFilters] : base;
                 const resolved = substituteFilterTokens(combined, filterScope);
@@ -885,7 +896,7 @@ export function useObjectViewListRenderer({
                 // objectstack#28950 — and the view's own grouping, under a
                 // grouping the URL carries (the `grouping` rung above), so the
                 // list can tell the reader's from the view's.
-                viewDefaults={{ hiddenFields: viewHiddenFields, rowHeight: viewRowHeight, sort: viewSort, grouping: listSchema.grouping }}
+                viewDefaults={{ hiddenFields: viewHiddenFields, rowHeight: viewRowHeight, sort: viewSort, grouping: listSchema.grouping, filters: viewPanelFilters }}
                 // objectstack#28948 — those resets clear the user's state.
                 onRestoreViewDefaults={restoreViewDefaults}
                 // objectstack#28950 — what of the list differs from the view,
@@ -951,7 +962,9 @@ export function useObjectViewListRenderer({
                 onColumnStateChange={persistListColumnState}
                 userFilterSelections={initialUfSelections}
                 onUserFilterSelectionsChange={handleUserFilterSelectionsChange}
-                initialFilters={listSeed?.filters}
+                // objectstack#30073 — with no list state of the reader's own,
+                // a personal view's panel opens on the view's own conditions.
+                initialFilters={listSeed?.filters ?? viewPanelFilters}
                 initialSearchTerm={listSeed?.search}
                 // objectui#12606 — Setup's list opens without row numbers in
                 // the leading cell. A host prop, not a view key: a console
@@ -979,7 +992,7 @@ export function useObjectViewListRenderer({
                 dataSource={ds}
             />
         );
-    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, handleListTotalChange, managedUsers, managedUserMarker, recordOpen, openAsPage, handleListRowsChange, phoneTitle, handleListPersonalizationChange, workspaceTimeZone]);
+    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, handleListTotalChange, managedUsers, managedUserMarker, recordOpen, openAsPage, handleListRowsChange, phoneTitle, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters]);
 
     return { renderListView };
 }
