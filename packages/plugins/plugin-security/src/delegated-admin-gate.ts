@@ -446,7 +446,7 @@ interface DelegatedTarget {
 }
 
 /**
- * [ruling of record 5985885287, sub-item B] The columns of the stored row
+ * [ruling of record 6649064874] The columns of the stored row
  * `prev` that the caller's own read `seen` returned at their stored value.
  *
  * The read is the read door's answer to this caller, field rules and masking
@@ -464,7 +464,7 @@ function columnsReadAsStored(seen: any | null, prev: any | null): Set<string> {
 }
 
 /**
- * [ruling of record 5985885287, sub-item B] May a refusal of `t` name the
+ * [ruling of record 6649064874] May a refusal of `t` name the
  * value of `column` on its `side`?
  *
  * Only a value the caller already has: one it wrote (an insert's row, a
@@ -1315,7 +1315,7 @@ export class DelegatedAdminGate {
       const positionSide = t.next && (t.next.position != null || !t.prev) ? 'next' : 'prev';
       const positionName = String(t.next?.position ?? t.prev?.position ?? '');
       const boundSets = positionName ? await this.setsBoundToPosition(positionName) : [];
-      // [ruling of record 5985885287, sub-item B] Each value below is named
+      // [ruling of record 6649064874] Each value below is named
       // only when the caller wrote or reads it ({@link mayName}); the verdict
       // is the stored row's either way.
       const positionNamed = mayName(t, positionSide, 'position');
@@ -1381,7 +1381,7 @@ export class DelegatedAdminGate {
       const { setRow, setName, unresolved, setNamed } = await this.directGrantSet(t, row);
       const targetUserId = row.user_id ? String(row.user_id) : null;
       const userBUs = targetUserId ? await this.businessUnitsOfUser(targetUserId) : new Set<string>();
-      // [ruling of record 5985885287, sub-item B] Named only when the caller
+      // [ruling of record 6649064874] Named only when the caller
       // wrote or reads it ({@link mayName}); the verdict is the stored row's.
       const userNamed = mayName(t, side, 'user_id');
 
@@ -1644,10 +1644,11 @@ export class DelegatedAdminGate {
    * ({@link callerRead}): a row the caller cannot read answers exactly what an
    * id naming no row answers — one refusal, here at the gate, never a
    * fall-through to the engine. A row the caller reads is judged on the stored
-   * row, as before, never on the caller's read of it: that read is served
-   * through the caller's field-level security, and a judgement made on what a
-   * field rule hid would be made on less than the row. So a row the caller
-   * reads keeps its verdict and its guidance.
+   * row, never on the caller's read of it (ruling of record 6649064874): that
+   * read is served through the caller's field-level security, and a judgement
+   * made on what a field rule hid would be made on less than the row. So a row
+   * the caller reads keeps its verdict, and its guidance names only what the
+   * caller may be told ({@link mayName}).
    *
    * A read the read door REFUSES (a declared 4xx — the object's read grant
    * withheld) hides no row: the stored row is judged as before, and a refusal

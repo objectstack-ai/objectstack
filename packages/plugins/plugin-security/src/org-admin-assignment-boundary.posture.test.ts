@@ -707,7 +707,7 @@ describe("[ADR-0090 D12; ruling of record 5985885287] a delegated administrator'
   });
 });
 
-describe('[ADR-0090 D12; ruling of record 5985885287] an administrator\'s refused assignment write names a value only when the caller reads it, or wrote it', () => {
+describe('[ADR-0090 D12; ruling of record 6649064874] an administrator\'s refused assignment write names a value only when the caller reads it, or wrote it', () => {
   /**
    * One row of organization A per hidden column, each outside the `a_ops`
    * scope on the axis that column decides — the hidden values it carries, and
