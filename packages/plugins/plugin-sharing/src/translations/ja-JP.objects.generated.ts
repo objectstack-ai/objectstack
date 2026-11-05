@@ -326,11 +326,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "Member Type",
         help: "What kind of member this is. A team, position or business unit makes everyone in it a member. \"Business unit and subordinates\" also covers every unit below the one you pick.",
         options: {
-          user: "User",
-          team: "Team",
-          position: "Position",
-          business_unit: "Business unit",
-          unit_and_subordinates: "Business unit and subordinates"
+          user: "ユーザー",
+          team: "チーム",
+          position: "ポジション",
+          business_unit: "ビジネスユニット",
+          unit_and_subordinates: "ビジネスユニットと下位階層"
         }
       },
       recipient_id: {

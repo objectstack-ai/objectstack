@@ -326,11 +326,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Member Type",
         help: "What kind of member this is. A team, position or business unit makes everyone in it a member. \"Business unit and subordinates\" also covers every unit below the one you pick.",
         options: {
-          user: "User",
-          team: "Team",
-          position: "Position",
-          business_unit: "Business unit",
-          unit_and_subordinates: "Business unit and subordinates"
+          user: "Usuario",
+          team: "Equipo",
+          position: "Puesto",
+          business_unit: "Unidad de negocio",
+          unit_and_subordinates: "Unidad de negocio y subordinados"
         }
       },
       recipient_id: {
