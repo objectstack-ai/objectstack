@@ -984,7 +984,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_business_unit: {
     label: "Business Unit",
     pluralLabel: "Business Units",
-    description: "Your company structure — divisions, departments, regions and offices — used to scope data and reports.",
+    description: "Your company structure — divisions, departments, regions and offices. Sharing rules can share records with a unit, or a unit and the units under it: members get that access, and lose it when they leave. Letting a permission set read every record of a unit (read scope 'unit') needs the enterprise edition.",
     fields: {
       name: {
         label: "Name"
@@ -1010,7 +1010,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       timezone: {
         label: "Timezone",
-        help: "IANA time zone (e.g. Asia/Shanghai) date boundaries are computed in for this unit. Leave unset to inherit the parent unit's zone, then the organization's, then UTC."
+        help: "IANA time zone (e.g. Asia/Shanghai) kept for this unit; leave it empty to take the parent unit's, then the organization's. It does not change any date calculation today: formulas, reports and displayed dates use Settings → Localization → Default timezone."
       },
       organization_id: {
         label: "Organization",

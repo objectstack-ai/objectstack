@@ -1798,7 +1798,9 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     // controlled-by-parent rules started judging an object on its MERGED
     // field set: the extensions a stack (or each package body of an artifact)
     // declares are folded onto the objects it declares.
-    expected: ['apps', 'books', 'capabilities', 'data', 'objectExtensions', 'objects', 'packages', 'permissions', 'positions'],
+    // [#30210] `requires` joined when the private-no-readscope hint started
+    // offering the hierarchy scopes only where `hierarchy-security` is declared.
+    expected: ['apps', 'books', 'capabilities', 'data', 'objectExtensions', 'objects', 'packages', 'permissions', 'positions', 'requires'],
     declaredBy: 'ObjectStackSchema',
     keys: () => Object.keys(ObjectStackSchema.shape),
   },
