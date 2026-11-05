@@ -39,6 +39,7 @@ import { useAdapter, useMetadata } from '@object-ui/react';
 import { getLazyFieldWidget } from '@object-ui/fields';
 import type { ObjectStackAdapter } from '@object-ui/data-objectstack';
 import { servedObjectLabel } from '@object-ui/core';
+import { readObjectsByName } from '../hooks/useObjectPresence.js';
 import { splitAssignedWork, type AssignedWorkSummary, type AssignedWorkTransferReport } from './userAssignedWork.js';
 
 /** The `user` field widget the hand-over picks its person with (lazy until drawn). */
@@ -81,7 +82,7 @@ export function UserAssignedWorkPanel({ userId }: UserAssignedWorkPanelProps) {
   const { t, language } = useObjectTranslation();
   const { objectLabel, fieldLabel } = useObjectLabel();
   const adapter = useAdapter() as ObjectStackAdapter | null;
-  const { objects } = useMetadata();
+  const metadata = useMetadata();
   const [count, setCount] = useState<CountState>({ phase: 'loading' });
   const [transfer, setTransfer] = useState<TransferState>({ phase: 'idle' });
   const [target, setTarget] = useState<unknown>(null);
@@ -104,10 +105,22 @@ export function UserAssignedWorkPanel({ userId }: UserAssignedWorkPanelProps) {
     return () => { live = false; };
   }, [adapter, userId, generation]);
 
+  // The definitions of the objects the answers name, read by name: opening
+  // the ban dialog never pulls the whole object registry back.
+  const namesKey = useMemo(() => {
+    const names = new Set<string>();
+    if (count.phase === 'ready') {
+      for (const row of count.summary.objects) names.add(row.object);
+      for (const name of count.summary.unreadable) names.add(name);
+    }
+    if (transfer.phase === 'done') for (const row of transfer.report.objects) names.add(row.object);
+    return JSON.stringify([...names].sort());
+  }, [count, transfer]);
+  const namedObjects = useMemo(() => JSON.parse(namesKey) as string[], [namesKey]);
+  const objectDefs = readObjectsByName(metadata, namedObjects) as ReadonlyArray<ObjectDefLike | null | undefined>;
   const objectDefOf = useCallback(
-    (name: string) => ((objects ?? []) as ReadonlyArray<ObjectDefLike | null | undefined>)
-      .find((o) => o?.name === name) ?? undefined,
-    [objects],
+    (name: string) => objectDefs.find((o) => o?.name === name) ?? undefined,
+    [objectDefs],
   );
   // An object's name follows the served-object-label rule (objectstack#30486):
   // the label the server served is drawn as given, and the client bundle is

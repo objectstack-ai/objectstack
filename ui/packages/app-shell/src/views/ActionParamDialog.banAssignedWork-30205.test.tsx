@@ -77,12 +77,11 @@ const SUMMARY = {
 let count: ReturnType<typeof vi.fn>;
 let transfer: ReturnType<typeof vi.fn>;
 
-function mount(resolve = vi.fn()) {
+function mount(resolve = vi.fn(), metadata: unknown = { objects: OBJECTS }) {
   const adapter = { getClient: () => ({ security: { assignedWork: { count, transfer } } }) } as any;
-  const metadata = { objects: OBJECTS } as any;
   render(
     <AdapterCtx.Provider value={adapter}>
-      <MetadataCtx.Provider value={metadata}>
+      <MetadataCtx.Provider value={metadata as any}>
         <ActionParamDialog
           state={{
             open: true,
@@ -153,6 +152,28 @@ describe('the ban dialog says how many records the user holds (objectstack#30205
     // No definition served: the bundle names it, else the object's name.
     expect(screen.getByTestId('user-assigned-work-unreadable').textContent)
       .toBe('console.assignedWork.unreadable {"objects":"Catalogue Leave, no_such_def"}');
+  });
+
+  it('reads the counted objects by name, never the whole object registry', async () => {
+    let wholeListRead = false;
+    const readObjectScope = vi.fn(({ names }: { names: string[] }) => ({
+      objects: OBJECTS.filter((o) => names.includes(o.name)),
+    }));
+    count = vi.fn(async () => ({ ...SUMMARY, unreadable: ['hr_review'] }));
+    mount(vi.fn(), {
+      getTypeStatus: () => 'idle',
+      readObjectScope,
+      get objects() { wholeListRead = true; return OBJECTS; },
+    });
+    const ownerRow = await screen.findByTestId('user-assigned-work-row-showcase_project-owner_id');
+    expect(ownerRow.textContent).toContain('console.assignedWork.row {"object":"Project","field":"Owner"}');
+    expect(screen.getByTestId('user-assigned-work-unreadable').textContent)
+      .toBe('console.assignedWork.unreadable {"objects":"Review"}');
+    expect(readObjectScope).toHaveBeenLastCalledWith({
+      names: ['hr_review', 'showcase_field_zoo', 'showcase_project'],
+      views: false,
+    });
+    expect(wholeListRead).toBe(false);
   });
 
   it('a user who holds nothing readable: says so and offers no hand-over', async () => {
