@@ -22,7 +22,7 @@ export { resolveFieldCurrency, recordCurrencyField } from '@object-ui/i18n';
 const DEFAULT_FRACTION_DIGITS = 2;
 
 /**
- * ISO 4217 minor-unit width, memoized per currency code.
+ * CLDR fraction-digit width, memoized per currency code.
  *
  * The probe is deliberately made with NO locale. Measured across
  * en-US / de-DE / ja-JP / ar-KW / zh-CN / fr-FR / pl-PL / es-ES and the runtime
@@ -38,7 +38,7 @@ const DEFAULT_FRACTION_DIGITS = 2;
 const fractionDigitsByCurrency = new Map<string, number>();
 
 /**
- * The number of fraction digits ISO 4217 gives `currency` — 0 for JPY/KRW/CLP,
+ * The number of fraction digits CLDR gives `currency` — 0 for JPY/KRW/CLP,
  * 2 for USD/EUR/CNY, 3 for KWD/BHD/OMR/TND — as ICU reports it.
  *
  * Returns {@link DEFAULT_FRACTION_DIGITS} when the code is not a currency code

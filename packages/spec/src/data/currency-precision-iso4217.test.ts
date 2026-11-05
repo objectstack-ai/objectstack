@@ -8,8 +8,8 @@
  * #19992 — `currencyConfig.precision` is REMOVED (ADR-0049 enforce-or-remove).
  * It was declared, validated against ISO 4217 by the #7918 rule, and baked to
  * `2` into parse output by the #11423 `.overwrite()` — and read by nothing:
- * objectui's `CurrencyField` derives the width from the currency's ISO 4217
- * minor unit. The #7918 / #11423 blocks that used to open this file pinned a
+ * objectui's `CurrencyField` derives the width from the currency's CLDR
+ * fraction digits. The #7918 / #11423 blocks that used to open this file pinned a
  * rule over a key nobody honoured; they are replaced below by the retirement's
  * own pins (the refusal, its two alias spellings, the parse output, and the
  * ADR-0087 conversion at rest).
@@ -57,7 +57,7 @@ describe('`currencyConfig.precision` is removed: refused with the prescription, 
     expect(issue.message).toContain(RETIREMENT_LEAD);
     expect(issue.message).toContain('no renderer or runtime ever read it');
     expect(issue.message).toContain(
-      "a currency amount's decimal places are its currency's ISO 4217 minor unit (2 for USD, 0 for JPY, 3 for KWD)",
+      "a currency amount's decimal places are its currency's CLDR fraction digits (2 for USD, 0 for JPY, 3 for KWD)",
     );
     expect(issue.message).toContain('Do not move the number to the field-level `precision`');
     expect(issue.message).toContain('Delete the key.');
@@ -105,7 +105,7 @@ describe('`currencyConfig.precision` is removed: refused with the prescription, 
       expect(issue.message).toContain(
         `\`currencyConfig.${key}\` is not a currency configuration key, and nothing replaces it`,
       );
-      expect(issue.message).toContain("ISO 4217 minor unit (2 for USD, 0 for JPY, 3 for KWD)");
+      expect(issue.message).toContain("CLDR fraction digits (2 for USD, 0 for JPY, 3 for KWD)");
       expect(issue.message).toContain('Delete the key.');
       expect(issue.message).not.toContain('Did you mean');
       // Never keys: no conversion strips them, so the message names no command.

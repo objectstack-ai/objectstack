@@ -234,9 +234,11 @@ what a record-currency amount refuses.
 { name: 'price', label: 'Price', type: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' } }
 ```
 
-A currency amount's decimal places are its currency's ISO 4217 minor unit
-(2 for USD, 0 for JPY, 3 for KWD), not a field setting, and they are declared
-nowhere. A `currency` field takes no `scale`, and `currencyConfig` has no
+A currency amount's decimal places are its currency's CLDR fraction digits
+(2 for USD, 0 for JPY, 3 for KWD; not ISO 4217's minor units, which differ for
+sixteen codes such as IQD, 0 in CLDR and 3 in ISO 4217: see
+[Currency fields](/docs/data-modeling/currency)), not a field setting, and they
+are declared nowhere. A `currency` field takes no `scale`, and `currencyConfig` has no
 decimal-places key: publish-time validation refuses `scale` on the field and
 `currencyConfig.precision` (removed in `@objectstack/spec` 17.5.0 — no renderer
 or runtime ever read it), each with a prescription to delete the key. The
