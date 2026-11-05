@@ -549,6 +549,7 @@ export {
   type UserWorkEngine,
   type UserAssignedWorkCount,
   type UserAssignedWorkSummary,
+  type UserWorkFailureDescriber,
   type UserWorkTransferFailure,
   type UserWorkTransferOutcome,
   type UserWorkTransferReport,

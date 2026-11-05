@@ -37,6 +37,7 @@ import {
     UserWorkTransferRefusal,
     type UserWorkEngine,
 } from '@objectstack/core';
+import { handleRouteError } from './error-response.js';
 import { refuseUnknownQueryParams } from './query-allowlist.js';
 import { wiredEngineOrLoud, type RestServer } from './rest-server.js';
 
@@ -54,6 +55,25 @@ export const USER_WORK_QUERY_PARAMS: readonly string[] = [];
 
 /** The keys a transfer body may carry. */
 const TRANSFER_BODY_KEYS = new Set(['toUserId', 'objects']);
+
+/**
+ * A refused row, worded the way the `/data` write door answers the same throw:
+ * the shared classification (`handleRouteError`) sent to a sink, so a hook's
+ * refusal reads as the hook's sentence, a crash or a store fault has its words
+ * withheld and is logged, and nothing here is a second rule.
+ */
+function rowFailureAnswer(err: unknown, object: string): { code: string; message: string } {
+    const sink: { body?: Record<string, unknown>; status(code: number): typeof sink; json(body: Record<string, unknown>): typeof sink } = {
+        status() { return sink; },
+        json(body) { sink.body = body; return sink; },
+    };
+    handleRouteError(sink, err, object);
+    const body = sink.body ?? {};
+    return {
+        code: typeof body.code === 'string' && body.code.length > 0 ? body.code : 'UPDATE_FAILED',
+        message: typeof body.error === 'string' ? body.error : 'The record could not be updated',
+    };
+}
 
 /**
  * Register the assigned-work routes — `RestServer#registerUserWorkEndpoints`'
@@ -127,7 +147,10 @@ export function registerUserWorkEndpoints(this: UserWorkRouteHost, basePath: str
                 const engine = await resolveEngine(environmentId, req);
                 if (!engine) return sendError(res, 501, 'NOT_IMPLEMENTED', 'No data engine is configured on this deployment');
                 try {
-                    const report = await transferUserAssignedWork(engine, userId, toUserId, context, { objects });
+                    const report = await transferUserAssignedWork(engine, userId, toUserId, context, {
+                        objects,
+                        describeFailure: rowFailureAnswer,
+                    });
                     return res.json({ success: true, data: report });
                 } catch (err) {
                     if (!(err instanceof UserWorkTransferRefusal)) throw err;

@@ -241,7 +241,16 @@ export interface UserWorkTransferReport {
   remaining: number;
 }
 
-function failureOf(id: unknown, err: unknown): UserWorkTransferFailure {
+/**
+ * How a serving door words a refused row: the code and the caller-facing
+ * sentence its own write door would answer for the same throw. `undefined`
+ * keeps the raw reading below.
+ */
+export type UserWorkFailureDescriber = (err: unknown, object: string) => { code: string; message: string } | undefined;
+
+function failureOf(id: unknown, err: unknown, object: string, describe?: UserWorkFailureDescriber): UserWorkTransferFailure {
+  const described = describe?.(err, object);
+  if (described) return { id: String(id), code: described.code, message: described.message.slice(0, 500) };
   const e = err as { code?: unknown; message?: unknown } | null;
   return {
     id: String(id),
@@ -263,7 +272,7 @@ export async function transferUserAssignedWork(
   fromUserId: string,
   toUserId: string,
   context: unknown,
-  options: { objects?: readonly string[]; rowCap?: number } = {},
+  options: { objects?: readonly string[]; rowCap?: number; describeFailure?: UserWorkFailureDescriber } = {},
 ): Promise<UserWorkTransferReport> {
   if (fromUserId === toUserId) {
     throw new UserWorkTransferRefusal(400, 'VALIDATION_ERROR', 'toUserId must name a different user than the one whose work is transferred');
@@ -312,7 +321,7 @@ export async function transferUserAssignedWork(
         outcome.updated += 1;
       } catch (err) {
         outcome.failed += 1;
-        if (outcome.failures.length < USER_WORK_FAILURE_SAMPLE) outcome.failures.push(failureOf(row.id, err));
+        if (outcome.failures.length < USER_WORK_FAILURE_SAMPLE) outcome.failures.push(failureOf(row.id, err, ref.object, options.describeFailure));
       }
     }
     try {

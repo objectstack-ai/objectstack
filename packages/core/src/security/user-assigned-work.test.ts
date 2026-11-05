@@ -196,6 +196,17 @@ describe('[#30205] transferUserAssignedWork', () => {
     expect(engine.tables.get('account')![0].owner_id).toBe('u_gone');
   });
 
+  it('a serving door may word a refused row the way its own write door answers it', async () => {
+    const engine = fakeEngine(seed(), { refuseUpdate: (object, id) => object === 'ticket' && id === 't2' });
+    const seen: string[] = [];
+    const report = await transferUserAssignedWork(engine, 'u_gone', 'u_next', CALLER, {
+      objects: ['ticket'],
+      describeFailure: (_err, object) => { seen.push(object); return { code: 'FORBIDDEN', message: 'You may not change this record' }; },
+    });
+    expect(report.objects[0].failures).toEqual([{ id: 't2', code: 'FORBIDDEN', message: 'You may not change this record' }]);
+    expect(seen).toEqual(['ticket']);
+  });
+
   it('moves at most the row cap per call and answers what remains', async () => {
     const engine = fakeEngine(seed());
     const first = await transferUserAssignedWork(engine, 'u_gone', 'u_next', CALLER, { rowCap: 3 });
