@@ -822,7 +822,7 @@ describe('[ADR-0090 D12; ruling of record 5985885287] an administrator\'s refuse
 
 // ── The organization branch: judged on the stored row ──────────────────────
 
-describe("[ADR-0090 D12; ruling of record 5985885287, sub-item B] an organization administrator's removal is judged on the stored row, and its refusal names only values the caller can read", () => {
+describe("[ADR-0090 D12; ruling of record 6649064874] an organization administrator's removal is judged on the stored row, and its refusal names only values the caller can read", () => {
   const inA = { context: { isSystem: true, tenantId: ORG_A } } as any;
   const MASK: MaskingRule = { keepHead: 3, keepTail: 0 };
 

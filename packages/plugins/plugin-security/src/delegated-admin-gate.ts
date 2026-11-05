@@ -852,7 +852,7 @@ export class DelegatedAdminGate {
    * ({@link organizationTargets}), so a row the caller cannot read is answered
    * exactly as an id naming no row is (ruling of record 5985885287). A row the
    * caller reads is judged on the STORED row, as the delegated branch judges
-   * it (sub-item B of that ruling): the caller's read is served through its
+   * it (ruling of record 6649064874): the caller's read is served through its
    * field rules and masking, and a verdict taken on what a rule hid would be
    * taken on less than the row. A refusal names a value only when the caller
    * reads it at its stored value or wrote it ({@link mayName}). An edit in
@@ -889,9 +889,9 @@ export class DelegatedAdminGate {
       // alike: one refusal, and never a fall-through to the engine.
       if (!row) return { reason: 'the assignment row to remove could not be read', meta: {}, unreadable: op === 'delete' };
 
-      // [ruling of record 5985885287, sub-item B] The verdict is the stored
-      // row's; each value below is named only when the caller wrote or reads
-      // it ({@link mayName}).
+      // [ruling of record 6649064874] The verdict is the stored row's; each
+      // value below is named only when the caller wrote or reads it
+      // ({@link mayName}).
       const rowOrg = rowOrganizationId(row);
       if (t.next ? rowOrg !== null && rowOrg !== organizationId : rowOrg !== organizationId) {
         if (!mayName(t, side, 'organization_id')) {
@@ -954,12 +954,12 @@ export class DelegatedAdminGate {
    * visibility and wall included: a row the caller cannot read answers what an
    * id naming no row answers, and no system read is made for it. A row it
    * reads is then judged on the stored row ({@link storedRow}), never on the
-   * caller's read of it — sub-item B: that read is served through the caller's
-   * field rules and masking — and `reads` holds the columns that read returned
-   * at their stored value ({@link columnsReadAsStored}). A read refusal or a
-   * store fault, in either read, propagates as raised: an outage is neither an
-   * answer nor a refusal, and the by-id write door answers a caller the read
-   * door refuses with that refusal.
+   * caller's read of it, which is served through the caller's field rules and
+   * masking (ruling of record 6649064874); `reads` holds the columns that read
+   * returned at their stored value ({@link columnsReadAsStored}). A read
+   * refusal or a store fault, in either read, propagates as raised: an outage
+   * is neither an answer nor a refusal, and the by-id write door answers a
+   * caller the read door refuses with that refusal.
    */
   private async organizationTargets(opCtx: any): Promise<DelegatedTarget[]> {
     if (opCtx.operation === 'insert') {

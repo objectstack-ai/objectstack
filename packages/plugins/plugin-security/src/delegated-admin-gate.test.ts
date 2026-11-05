@@ -1413,7 +1413,7 @@ function serveCallerReadsThrough(o: ReturnType<typeof makeOrganizationHarness>, 
   return systemReads;
 }
 
-describe("[ADR-0090 D12; ruling of record 5985885287, sub-item B] an organization administrator's removal is judged on the stored row, and its refusal names only values the caller reads", () => {
+describe("[ADR-0090 D12; ruling of record 6649064874] an organization administrator's removal is judged on the stored row, and its refusal names only values the caller reads", () => {
   let o: ReturnType<typeof makeOrganizationHarness>;
   beforeEach(() => { o = makeOrganizationHarness(); });
 
