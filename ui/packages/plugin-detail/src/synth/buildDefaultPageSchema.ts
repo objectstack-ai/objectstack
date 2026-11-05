@@ -535,6 +535,18 @@ export function buildDefaultActions(
  *
  * Returns an array because the strip is conceptually one region with
  * two adjacent nodes.
+ *
+ * The default page's path turns click-to-advance on (`allowStageChange:
+ * true`, maintainer ruling recorded on objectstack#30075, option A): moving a
+ * record to its next stage is the record page's most frequent edit, and most
+ * apps never author a page to opt in on. Nothing about WHO may press moves
+ * here — `record:path`'s `useStageChange` still asks the page's edit session,
+ * the field's read-only/computed markers and the caller's field edit grant,
+ * offers only the moves the field's blocking `state_machine` admits, confirms
+ * every press, and saves through the ordinary record update, so the server's
+ * validation decides. A reader who may not edit the field keeps the readout.
+ * An authored page — or an authored `highlights` slot — writes its own
+ * `record:path` node and keeps whatever it declared; no new key is involved.
  */
 export function buildDefaultHighlights(
   def: ObjectDefLike | undefined,
@@ -550,7 +562,7 @@ export function buildDefaultHighlights(
     out.push(componentNode('record:highlights', { fields: highlightFields }));
   }
   if (statusField && stages && stages.length > 0) {
-    out.push(componentNode('record:path', { statusField, stages }));
+    out.push(componentNode('record:path', { statusField, stages, allowStageChange: true }));
   }
   return out;
 }

@@ -5320,7 +5320,7 @@ export default class Serve extends Command {
           };
 
           // Fail-closed binder over the shared dev crypto provider. If the
-          // provider can't be created, leave `secrets` undefined — the plugin
+          // binder can't be built, leave `secrets` undefined — the plugin
           // then rejects secret-bearing create/update instead of storing
           // cleartext (by design).
           let secrets: any = undefined;
@@ -5341,12 +5341,14 @@ export default class Serve extends Command {
               cryptoProvider: sharedCryptoProvider,
             });
           } catch (cryptoErr: any) {
-            // Best-effort fail-closed: leave `secrets` undefined so the plugin
-            // rejects secret-bearing create/update rather than storing
-            // cleartext. A production deployment with no stable key still
-            // aborts boot loudly at the secret-field wiring below (where
-            // LocalCryptoProvider's "Refusing to start in production" error is
-            // rethrown), so we don't duplicate that abort here.
+            // Reached only when the module or the binder fails to load: the
+            // deferred provider constructs nothing here, so a key problem
+            // never lands in this catch. Leave `secrets` undefined so the
+            // plugin rejects secret-bearing create/update rather than storing
+            // cleartext. A key problem surfaces where the provider is first
+            // built, the secret-field wiring below (`resolve()`), which
+            // rethrows a production "Refusing to start in production" error,
+            // so the boot still refuses and nothing is duplicated here.
             console.warn(
               chalk.yellow(
                 `  ⚠ datasource admin: no CryptoProvider (${cryptoErr?.message ?? cryptoErr}); secret-bearing datasource create/update will fail closed`,
