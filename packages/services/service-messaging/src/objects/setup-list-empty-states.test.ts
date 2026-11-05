@@ -32,6 +32,9 @@ import { zhHantObjects } from '../translations/zh-Hant.objects.generated.js';
 import { arObjects } from '../translations/ar.objects.generated.js';
 import { frObjects } from '../translations/fr.objects.generated.js';
 import { ptBRObjects } from '../translations/pt-BR.objects.generated.js';
+import { ruObjects } from '../translations/ru.objects.generated.js';
+import { deObjects } from '../translations/de.objects.generated.js';
+import { koObjects } from '../translations/ko.objects.generated.js';
 
 interface ViewLike {
   columns?: unknown;
@@ -58,6 +61,9 @@ const BUNDLES = {
   'ar': arObjects,
   'fr': frObjects,
   'pt-BR': ptBRObjects,
+  'ru': ruObjects,
+  'de': deObjects,
+  'ko': koObjects,
 } as const;
 
 function views(def: ObjectLike): Array<[string, ViewLike]> {
