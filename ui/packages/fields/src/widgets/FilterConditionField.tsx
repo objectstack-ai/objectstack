@@ -565,6 +565,56 @@ export function isMatchAllCriteria(parsed: any): boolean {
   return true;
 }
 
+/** Builder operators that take no comparand: the row reads "FIELD OPERATOR". */
+const VALUELESS_OPERATORS: ReadonlySet<string> = new Set([
+  'is_empty', 'is_not_empty', 'is_null', 'is_not_null', 'exists', 'notExists',
+]);
+
+/**
+ * One builder row in words: the field's label, the operator's label and the
+ * comparand as the field draws it (an option's label for a select, the boolean
+ * words for a boolean, both bounds for a range). A field the schema does not
+ * list keeps its api name, and a value no option holds stays as stored, so the
+ * sentence never invents a label.
+ */
+function describeCondition(
+  cond: BuilderCondition,
+  fieldByName: ReadonlyMap<string, FilterFieldDef>,
+  t: (key: string) => string,
+): string {
+  const def = fieldByName.get(cond.field);
+  const parts = [def?.label || cond.field, t(`filterBuilder.operators.${cond.operator}`)];
+  if (VALUELESS_OPERATORS.has(cond.operator)) return parts.join(' ');
+  const word = (v: unknown): string => {
+    if (typeof v === 'boolean') return t(v ? 'filterBuilder.trueLabel' : 'filterBuilder.falseLabel');
+    const option = def?.options?.find((o) => o.value === String(v));
+    return option ? option.label : stringifyValue(v as string | object | null | undefined);
+  };
+  const value = cond.value;
+  if (cond.operator === 'between' && Array.isArray(value)) {
+    parts.push(`${word(value[0])} – ${word(value[1])}`);
+  } else if (Array.isArray(value)) {
+    parts.push(value.map(word).join(', '));
+  } else {
+    parts.push(word(value));
+  }
+  return parts.join(' ');
+}
+
+/**
+ * A criteria the builder can represent, as one sentence: each row in words,
+ * joined by the group's AND / OR word.
+ */
+function describeFilterGroup(
+  group: BuilderGroup,
+  fields: readonly FilterFieldDef[],
+  t: (key: string) => string,
+): string {
+  const fieldByName = new Map(fields.map((f) => [f.value, f]));
+  const joiner = ` ${t(group.logic === 'or' ? 'filterBuilder.or' : 'filterBuilder.and')} `;
+  return group.conditions.map((c) => describeCondition(c, fieldByName, t)).join(joiner);
+}
+
 function stringifyValue(value: string | object | undefined | null): string {
   if (value == null || value === '') return '';
   if (typeof value === 'string') return value;
@@ -689,14 +739,6 @@ export function FilterConditionField({
     onChange((mongo == null ? '' : JSON.stringify(mongo)) as any);
   };
 
-  if (!objectName) {
-    return (
-      <p className={cn('text-sm text-muted-foreground', className)}>
-        {t('fields.filterCondition.selectObjectFirst')}
-      </p>
-    );
-  }
-
   if (readonly) {
     if (!rawValue.trim()) {
       // Used to read "All records" — which was both wrong and the most
@@ -709,10 +751,28 @@ export function FilterConditionField({
         </span>
       );
     }
+    // A criteria the builder can represent reads as a sentence, in the
+    // object's field and option labels once its schema answers; one it cannot
+    // represent stays the stored JSON, so nothing is hidden or reworded.
+    if (group && group.conditions.length > 0) {
+      return (
+        <span className={cn('text-sm', className)} data-filter-condition="words" title={rawValue}>
+          {describeFilterGroup(group, fields ?? [], t)}
+        </span>
+      );
+    }
     return (
       <pre className={cn('overflow-x-auto rounded bg-muted/40 p-2 text-xs', className)}>
         {rawValue}
       </pre>
+    );
+  }
+
+  if (!objectName) {
+    return (
+      <p className={cn('text-sm text-muted-foreground', className)}>
+        {t('fields.filterCondition.selectObjectFirst')}
+      </p>
     );
   }
 
