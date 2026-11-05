@@ -2155,6 +2155,9 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.if.offNav.dashboard': '仪表盘',
   'engine.studio.if.offNav.report': '报表',
   'engine.studio.if.offNav.view': '视图',
+  'engine.studio.if.offNav.viewForms': '表单视图',
+  'engine.studio.if.offNav.viewMixed': '表单视图与列表视图',
+  'engine.studio.if.offNav.formName': '{object}表单',
   'engine.studio.if.openInData': '在「数据」中打开',
   // objectui#12725 — 画布上方的状态行，以及条目的 ⋯ 菜单。
   'engine.studio.if.status.design': '设计态',

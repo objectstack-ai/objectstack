@@ -404,6 +404,48 @@ export function navOpenedItems(nodes: readonly NavNode[], locale: string): Set<s
 }
 
 /**
+ * objectstack#30046 — whether the 视图 group leaves `item` out: a list view
+ * whose object a nav entry opens (`opened`, {@link navOpenedItems}), which the
+ * entry's header dropdown reaches. A form view, a list view of an object no
+ * entry opens, and a view whose family or object is unknown stay listed, as
+ * does a view a read-only base's pair adds (`addedIn`), which opens at that
+ * pair.
+ */
+export function offNavViewReachedByEntry(
+  item: Pick<PackageSurface, 'object' | 'viewKind'> & { addedIn?: string },
+  opened: ReadonlySet<string>,
+): boolean {
+  return item.viewKind === 'list' && !!item.object && !item.addedIn && opened.has(itemKeyOf('object', item.object));
+}
+
+/**
+ * objectstack#30046 — the 视图 group's heading, saying what it holds once
+ * the list views the dropdowns reach are gone: form views, list views (of
+ * objects no entry opens), or both.
+ */
+export function offNavViewHeading(items: ReadonlyArray<Pick<PackageSurface, 'viewKind'>>, locale: string): string {
+  const forms = items.filter((item) => item.viewKind === 'form').length;
+  if (forms === 0) return t('engine.studio.if.offNav.view', locale);
+  return t(forms === items.length ? 'engine.studio.if.offNav.viewForms' : 'engine.studio.if.offNav.viewMixed', locale);
+}
+
+/**
+ * objectstack#30046 — what a 视图 row reads: the view's label, else, for a
+ * form view, its object's name and the word for a form ("Lead form"; a named
+ * form adds its key), never the item name (`crm_lead.form`). `objectLabel` is
+ * the object's name as the Studio shows it. A list view without a label keeps
+ * its item name, as before.
+ */
+export function offNavViewLabel(item: PackageSurface, objectLabel: string, locale: string): string {
+  const own = item.label && item.label !== item.name ? item.label : '';
+  if (own || item.viewKind !== 'form') return own || item.name;
+  const form = tFormat('engine.studio.if.offNav.formName', locale, { object: objectLabel });
+  const prefix = item.object ? `${item.object}.` : '';
+  const key = prefix && item.name.startsWith(prefix) ? item.name.slice(prefix.length) : item.name;
+  return key === 'form' ? form : `${form} · ${key}`;
+}
+
+/**
  * objectstack#26889 — the package's pages, dashboards, reports and views that
  * no nav entry opens (`navOpenedItems`), one collapsible section per type,
  * under the navigation tree. A package with no app lists everything it ships
@@ -414,11 +456,22 @@ export function navOpenedItems(nodes: readonly NavNode[], locale: string): Set<s
 export function OffNavSections({
   sections,
   active,
+  activeViewId = null,
   onPick,
   onlyCustomized = false,
 }: {
-  sections: ReadonlyArray<{ type: OffNavType; items: ReadonlyArray<PackageSurface & { addedIn?: string }> }>;
+  /**
+   * objectstack#30046 — a section may name itself (`label`): the 视图 group
+   * says what it holds. Without one, the type's own heading.
+   */
+  sections: ReadonlyArray<{ type: OffNavType; label?: string; items: ReadonlyArray<PackageSurface & { addedIn?: string }> }>;
   active: Surface | null;
+  /**
+   * objectstack#30046 — the list view the open object page shows, when that
+   * page was opened from here (an object no entry opens): its row is the
+   * active one, as a tree row is for its entry.
+   */
+  activeViewId?: string | null;
   onPick: (s: Surface) => void;
   /** objectstack#28572 — "only customizations" is on: the sections list the marked items, and head nothing. */
   onlyCustomized?: boolean;
@@ -432,7 +485,15 @@ export function OffNavSections({
         <p className="px-2 pb-1 text-[11px] text-muted-foreground">{t('engine.studio.if.offNav.heading', locale)}</p>
       )}
       {shown.map((s) => (
-        <OffNavSection key={s.type} type={s.type} items={s.items} active={active} onPick={onPick} />
+        <OffNavSection
+          key={s.type}
+          type={s.type}
+          label={s.label}
+          items={s.items}
+          active={active}
+          activeViewId={activeViewId}
+          onPick={onPick}
+        />
       ))}
     </div>
   );
@@ -441,13 +502,17 @@ export function OffNavSections({
 /** One type's section: its rows, open until the author closes it. */
 function OffNavSection({
   type,
+  label,
   items,
   active,
+  activeViewId,
   onPick,
 }: {
   type: OffNavType;
+  label?: string;
   items: ReadonlyArray<PackageSurface & { addedIn?: string }>;
   active: Surface | null;
+  activeViewId: string | null;
   onPick: (s: Surface) => void;
 }): React.ReactElement {
   const locale = useMetadataLocale();
@@ -457,7 +522,7 @@ function OffNavSection({
   return (
     <StudioRailGroup
       testId={`if-off-nav-${type}`}
-      label={t(`engine.studio.if.offNav.${type}`, locale)}
+      label={label ?? t(`engine.studio.if.offNav.${type}`, locale)}
       count={items.length}
       collapsed={!open}
       onToggle={() => setOpen((v) => !v)}
@@ -474,7 +539,7 @@ function OffNavSection({
           <StudioRailRow
             key={item.name}
             onClick={() => onPick(surface)}
-            active={!!active && isSameSurface(active, surface)}
+            active={(!!active && isSameSurface(active, surface)) || (type === 'view' && item.name === activeViewId)}
             indent
             // The label is what the row says; the machine name rides on the
             // tooltip with the type, as on a tree row (objectui#11862).
