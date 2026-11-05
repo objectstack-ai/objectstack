@@ -25,6 +25,10 @@ import {
   placeNavContributions,
   placesAnyNav,
   withContributedFlowGroups,
+  servedContributedNavOf,
+  servedEntryOf,
+  declaredNavTargetApps,
+  contributedNavCountOf,
 } from './contributionRows';
 
 const BASE = 'com.example.hotcrm';
@@ -154,5 +158,93 @@ describe('withContributedFlowGroups', () => {
       'crm_case',
     ]);
     expect(withContributedFlowGroups(groups, null, make)).toEqual([{ group: groups[0], contributed: [] }]);
+  });
+});
+
+/**
+ * objectstack#29851 — a contributed nav row's label is looked up by `(app, id)`
+ * in the served app row the pillar already reads: the entries the published
+ * layer lacks. An ambiguous id gives no label.
+ */
+describe('the served text of contributed nav entries (objectstack#29851)', () => {
+  const published = {
+    name: 'crm_app',
+    navigation: [{ id: 'sales', type: 'group', label: 'Sales', children: [{ id: 'nav_accounts', type: 'object', label: 'Accounts' }] }],
+  };
+  const served = {
+    name: 'crm_app',
+    navigation: [
+      {
+        id: 'sales',
+        type: 'group',
+        label: 'Sales',
+        children: [
+          { id: 'nav_accounts', type: 'object', label: 'Accounts' },
+          { id: 'nav_orders', type: 'object', label: 'Orders', objectName: 'crm_order' },
+        ],
+      },
+      { id: 'nav_portal', type: 'url', label: { en: 'Portal', zh: '门户' } },
+    ],
+  };
+
+  it('keys the entries the fold added by id, at any depth, and never the base’s own', () => {
+    const got = servedContributedNavOf(published, served);
+    expect(got.app).toBe('crm_app');
+    expect([...got.entries.keys()]).toEqual(['nav_orders', 'nav_portal']);
+    expect(got.entries.get('nav_orders')).toMatchObject({ label: 'Orders' });
+    expect(servedEntryOf(got, { app: 'crm_app', name: 'nav_orders' })).toMatchObject({ label: 'Orders' });
+    // Another app's entry of the same id is not this app's.
+    expect(servedEntryOf(got, { app: 'other_app', name: 'nav_orders' })).toBeUndefined();
+  });
+
+  it('an id the base also holds keeps no label', () => {
+    const clash = { ...served, navigation: [...served.navigation, { id: 'nav_accounts', type: 'url', label: 'Their accounts' }] };
+    const got = servedContributedNavOf(published, clash);
+    expect(got.entries.has('nav_accounts')).toBe(false);
+  });
+
+  it('an id two contributions share keeps no label', () => {
+    const twice = { ...served, navigation: [...served.navigation, { id: 'nav_orders', type: 'url', label: 'Other orders' }] };
+    const got = servedContributedNavOf(published, twice);
+    expect(got.entries.has('nav_orders')).toBe(false);
+    expect(got.entries.has('nav_portal')).toBe(true);
+  });
+
+  it('no served row, or another app’s, gives nothing', () => {
+    expect(servedContributedNavOf(published, null).entries.size).toBe(0);
+    expect(servedContributedNavOf(null, served).entries.size).toBe(0);
+    expect(servedContributedNavOf(published, { ...served, name: 'other_app' }).entries.size).toBe(0);
+  });
+});
+
+describe('what a contributor-only package adds elsewhere (objectstack#29851)', () => {
+  it('the declared target apps are addresses, each once, in order', () => {
+    expect(
+      declaredNavTargetApps({
+        navigationContributions: [
+          { app: 'setup', group: 'a', items: [] },
+          { app: 'crm_app', items: [] },
+          { app: 'setup', group: 'b', items: [] },
+          { items: [] },
+        ],
+      }),
+    ).toEqual(['setup', 'crm_app']);
+    expect(declaredNavTargetApps({})).toEqual([]);
+    expect(declaredNavTargetApps(undefined)).toEqual([]);
+  });
+
+  it('counts the owner’s served nav contributions stamped with the package, for that app', () => {
+    const read = {
+      contributions: [
+        { kind: 'nav', app: 'crm_app', name: 'nav_a', packageId: 'acme' },
+        { kind: 'nav', app: 'crm_app', name: 'nav_b', packageId: 'acme' },
+        { kind: 'nav', app: 'other_app', name: 'nav_c', packageId: 'acme' },
+        { kind: 'nav', app: 'crm_app', name: 'nav_d', packageId: 'someone_else' },
+        { kind: 'field', object: 'crm_account', name: 'acme_score', packageId: 'acme' },
+      ],
+    };
+    expect(contributedNavCountOf(read, 'acme', 'crm_app')).toBe(2);
+    expect(contributedNavCountOf(read, 'acme', 'missing_app')).toBe(0);
+    expect(contributedNavCountOf({ contributions: [] }, 'acme', 'crm_app')).toBe(0);
   });
 });

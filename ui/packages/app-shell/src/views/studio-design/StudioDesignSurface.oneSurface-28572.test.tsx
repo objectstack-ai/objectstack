@@ -55,6 +55,18 @@ const srv = vi.hoisted(() => ({
   saves: [] as Array<{ path: string; search: string; body: Record<string, unknown> }>,
   /** objectstack#29786 — the read serves {@link CONTRIBUTIONS}, and the app and object hold what they target. */
   contributed: false,
+  /** objectstack#29851 — the base's `/meta/app` row serves the folded navigation ({@link SERVED_APP}). */
+  servedFold: false,
+  /** objectstack#29851 — the add-on is a contributor with no app of its own (see {@link addonRow}). */
+  addonContributes: false,
+  /** objectstack#29851 — the add-on's listed row says it is disabled; the server then lists none of its entries. */
+  addonDisabled: false,
+  /** objectstack#29851 — how `GET /meta/app/crm_app` answers. */
+  targetApp: 'served' as 'served' | 'missing' | 'fails',
+  /** objectstack#29851 — the base's customization read fails. */
+  ownerReadFails: false,
+  /** objectstack#29851 — the add-on declares its entries for this app. */
+  declaredApp: 'crm_app',
 }));
 
 vi.mock('@object-ui/auth', async (importOriginal) => {
@@ -122,8 +134,23 @@ function packageRows() {
     ...(srv.pairListed
       ? [{ manifest: { id: PAIR, name: 'HotCRM customizations', namespace: 'hotcrm_custom', version: '0.1.0' }, writable: true }]
       : []),
-    { manifest: { id: ADDON, name: 'Acme add-on', namespace: 'acme', version: '1.0.0' }, writable: false },
+    addonRow(),
   ];
+}
+
+/**
+ * objectstack#29851 — the add-on's listed row. As a contributor it declares
+ * navigation for the base's app: the declaration is an address only, so the
+ * stub's served reads decide what Studio says.
+ */
+function addonRow() {
+  const manifest: Record<string, unknown> = { id: ADDON, name: 'Acme add-on', namespace: 'acme', version: '1.0.0' };
+  if (srv.addonContributes) {
+    manifest.navigationContributions = [
+      { app: srv.declaredApp, group: 'service_group', items: [{ id: 'nav_cases', type: 'url', url: '/cases' }] },
+    ];
+  }
+  return { manifest, writable: false, ...(srv.addonDisabled ? { enabled: false } : {}) };
 }
 
 /** The base's read: its `pipeline` dashboard overridden, and a field its pair adds to `crm_account`. */
@@ -163,8 +190,28 @@ const ACCOUNT_SERVED = {
     acme_score: { type: 'number', label: 'Acme score' },
   },
 };
-const readWith = (read: typeof READ) =>
-  srv.contributed ? { ...read, contributions: CONTRIBUTIONS, counts: { ...read.counts, contributions: CONTRIBUTIONS.length } } : read;
+const readWith = (read: typeof READ) => {
+  if (!srv.contributed) return read;
+  // A disabled package's contributions are not listed (the server's fold drops them).
+  const served = srv.addonDisabled ? CONTRIBUTIONS.filter((c) => c.packageId !== ADDON) : CONTRIBUTIONS;
+  return { ...read, contributions: served, counts: { ...read.counts, contributions: served.length } };
+};
+/**
+ * objectstack#29851 — the base's app as `/meta/app?package=` serves it: the
+ * fold has added the add-on's entries to it. `nav_cases` once, under the
+ * group it names; `nav_knowledge` twice (two contributions share the id), so
+ * no label can be told for it.
+ */
+const SERVED_APP = {
+  name: 'crm_app',
+  label: 'CRM',
+  navigation: [
+    ...NAV,
+    { id: 'service_group', type: 'group', label: 'Service', children: [{ id: 'nav_cases', type: 'url', label: 'Cases', url: '/cases' }] },
+    { id: 'nav_knowledge', type: 'url', label: 'Knowledge', url: '/kb' },
+    { id: 'nav_knowledge', type: 'url', label: 'Knowledge base', url: '/kb2' },
+  ],
+};
 const EMPTY_READ = { packageId: BASE, overrides: [], extensions: [], switchedOff: [], contributions: [], counts: { overrides: 0, extensions: 0, switchedOff: 0, contributions: 0 } };
 
 /** The base's own lists, by type. The override is served under the base's name (ADR-0146 D8 item 2). */
@@ -216,6 +263,12 @@ beforeEach(() => {
   srv.ensure.length = 0;
   srv.saves.length = 0;
   srv.contributed = false;
+  srv.servedFold = false;
+  srv.addonContributes = false;
+  srv.addonDisabled = false;
+  srv.targetApp = 'served';
+  srv.ownerReadFails = false;
+  srv.declaredApp = 'crm_app';
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: unknown, init?: RequestInit) => {
@@ -225,7 +278,16 @@ beforeEach(() => {
       if (method === 'GET') srv.reads.push(`${path}${url.search}`);
       if (path === '/api/v1/packages') return json({ success: true, data: packageRows() });
       if (path === `/api/v1/packages/${BASE}/customizations`) {
+        if (srv.ownerReadFails) return json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'down' } }, 500);
         return json({ success: true, data: readWith(srv.pairListed ? READ : EMPTY_READ) });
+      }
+      if (path === `/api/v1/packages/${ADDON}/customizations`) {
+        return json({ success: true, data: { ...EMPTY_READ, packageId: ADDON } });
+      }
+      if (path === '/api/v1/meta/app/crm_app') {
+        if (srv.targetApp === 'fails') return json({ success: false, error: { message: 'down' } }, 500);
+        if (srv.targetApp === 'missing') return json({}, 404);
+        return json({ type: 'app', name: 'crm_app', item: { ...SERVED_APP, _packageId: BASE } });
       }
       if (path === `/api/v1/packages/${BASE}/ensure-customization` && method === 'POST') {
         const created = !srv.pairListed;
@@ -240,7 +302,9 @@ beforeEach(() => {
         return json({ drafts: draftRows(url.searchParams.get('packageId'), url.searchParams.get('type')) });
       }
       if (path === '/api/v1/meta/app') {
-        return json(url.searchParams.get('package') === PAIR ? [] : [{ name: 'crm_app', label: 'CRM' }]);
+        const pkg = url.searchParams.get('package');
+        if (pkg === PAIR || (pkg === ADDON && srv.addonContributes)) return json([]);
+        return json([srv.servedFold ? SERVED_APP : { name: 'crm_app', label: 'CRM' }]);
       }
       if (path === '/api/v1/meta/app/crm_app/layers') {
         return json({ code: null, overlay: null, overlayScope: null, effective: srv.contributed ? APP_WITH_GROUP : APP });
@@ -254,6 +318,7 @@ beforeEach(() => {
         const pkg = url.searchParams.get('package');
         if (pkg === PAIR) return json(srv.pairListed ? pairList(type) : []);
         if (pkg === BASE) return json(BASE_LISTS[type] ?? []);
+        if (pkg === ADDON && srv.addonContributes) return json([]);
         return json([...(BASE_LISTS[type] ?? []), ...pairList(type)]);
       }
       const one = /^\/api\/v1\/meta\/([^/]+)\/([^/]+)$/.exec(path);
@@ -649,5 +714,132 @@ describe('items another package contributes are drawn greyed, with the package (
     await waitFor(() => expect(contributed(autoRail, 'flow', 'acme_sync')).not.toBeNull(), { timeout: 8000 });
     expect(srv.reads.filter((r) => r.includes(encodeURIComponent(ADDON)) || r.includes(`package=${ADDON}`))).toEqual([]);
     expect(srv.reads.filter((r) => r.startsWith(`/api/v1/packages/${BASE}/customizations`)).length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * objectstack#29851 — a contributed nav row reads the label the live app
+ * shows, looked up by `(app, id)` in the served app row the pillar already
+ * reads; a package that only contributes says what it adds, as the owner's
+ * served read lists it.
+ */
+describe('contributed nav entries show their served label, and a contributor says what it adds (objectstack#29851)', () => {
+  const contributed = (root: HTMLElement, name: string) =>
+    root.querySelector<HTMLElement>(`[data-contributed="nav"][data-testid="contributed-nav-${name}"]`);
+
+  it('a unique id shows its served label with the id as a second line; a shared id keeps the bare id', async () => {
+    srv.contributed = true;
+    srv.servedFold = true;
+    renderAt(`/studio/${BASE}/interfaces`);
+    await interfacesReady();
+    await waitFor(() => expect(contributed(ifRail(), 'nav_cases')).not.toBeNull(), { timeout: 8000 });
+    const cases = contributed(ifRail(), 'nav_cases')!;
+    await waitFor(() => expect(within(cases).getByTestId('contributed-label')).toHaveTextContent('Cases'));
+    expect(within(cases).getByTestId('contributed-id')).toHaveTextContent('nav_cases');
+    // Two served entries share `nav_knowledge`: no label is guessed.
+    const knowledge = contributed(ifRail(), 'nav_knowledge')!;
+    expect(within(knowledge).getByTestId('contributed-label')).toHaveTextContent('nav_knowledge');
+    expect(within(knowledge).queryByTestId('contributed-id')).toBeNull();
+    // No request of its own: the app item is never read for a package that has an app.
+    expect(srv.reads.filter((r) => r.startsWith('/api/v1/meta/app/crm_app') && !r.includes('/layers'))).toEqual([]);
+  });
+
+  it('CONTROL: with no served fold, the row keeps the id alone', async () => {
+    srv.contributed = true;
+    renderAt(`/studio/${BASE}/interfaces`);
+    await interfacesReady();
+    await waitFor(() => expect(contributed(ifRail(), 'nav_cases')).not.toBeNull(), { timeout: 8000 });
+    const cases = contributed(ifRail(), 'nav_cases')!;
+    expect(within(cases).getByTestId('contributed-label')).toHaveTextContent('nav_cases');
+    expect(within(cases).queryByTestId('contributed-id')).toBeNull();
+  });
+
+  /** The package-list reads this harness's surface sends for an app-less package, with or without the empty state's reads. */
+  const SURFACE_PACKAGE_LIST_READS = 2;
+  const NO_APP = () => t('engine.studio.if.noApp', 'en');
+  const ADDS_TWO = () => tFormat('engine.studio.if.contributesOther', 'en', { count: 2, package: 'HotCRM' });
+
+  async function contributorRailSays(): Promise<HTMLElement> {
+    renderAt(`/studio/${ADDON}/interfaces`);
+    const rail = await screen.findByTestId('if-no-app-rail', undefined, { timeout: 8000 });
+    return rail;
+  }
+
+  it('a contributor-only package says what it adds to the owner’s app, from two reads, and opens the owner', async () => {
+    srv.contributed = true;
+    srv.addonContributes = true;
+    const rail = await contributorRailSays();
+    await waitFor(() => expect(rail).toHaveTextContent(ADDS_TWO()), { timeout: 8000 });
+    expect(rail).toHaveTextContent(t('engine.studio.if.noOwnApp', 'en'));
+    expect(rail).not.toHaveTextContent(NO_APP());
+    const pane = screen.getByTestId('if-contributes-elsewhere');
+    expect(pane).toHaveTextContent(t('engine.studio.if.noOwnAppTitle', 'en'));
+    expect(pane).toHaveTextContent(ADDS_TWO());
+    // The request budget: one owner lookup and one customization read for the one target,
+    // and no package-list request of its own: the surface's reads are reused, as many as
+    // the CONTROL below (a package declaring nothing) sends.
+    expect(srv.reads.filter((r) => r === '/api/v1/packages')).toHaveLength(SURFACE_PACKAGE_LIST_READS);
+    expect(srv.reads.filter((r) => r === '/api/v1/meta/app/crm_app')).toHaveLength(1);
+    expect(srv.reads.filter((r) => r.startsWith(`/api/v1/packages/${BASE}/customizations`))).toHaveLength(1);
+    fireEvent.click(within(pane).getByTestId('if-open-owner'));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(`/studio/${encodeURIComponent(BASE)}/interfaces`));
+  });
+
+  async function keepsTodaysText(): Promise<void> {
+    const rail = await contributorRailSays();
+    await waitFor(() => expect(rail).toHaveTextContent(NO_APP()), { timeout: 8000 });
+    // Let the reads settle: the text still says what it said.
+    await new Promise((r) => setTimeout(r, 300));
+    expect(rail).toHaveTextContent(NO_APP());
+    expect(screen.queryByTestId('if-contributes-elsewhere')).toBeNull();
+    expect(screen.getByText(t('engine.studio.if.noAppTitle', 'en'))).toBeInTheDocument();
+  }
+
+  it('FALLBACK: a disabled package (the owner lists none of its entries) keeps today’s text', async () => {
+    srv.contributed = true;
+    srv.addonContributes = true;
+    srv.addonDisabled = true;
+    await keepsTodaysText();
+  });
+
+  it('FALLBACK: a missing target app keeps today’s text, and the owner is never read', async () => {
+    srv.contributed = true;
+    srv.addonContributes = true;
+    srv.targetApp = 'missing';
+    await keepsTodaysText();
+    expect(srv.reads.filter((r) => r.startsWith(`/api/v1/packages/${BASE}/customizations`))).toEqual([]);
+  });
+
+  it('FALLBACK: a failed app read or a failed owner read keeps today’s text', async () => {
+    srv.contributed = true;
+    srv.addonContributes = true;
+    srv.targetApp = 'fails';
+    await keepsTodaysText();
+    cleanup();
+    srv.targetApp = 'served';
+    srv.ownerReadFails = true;
+    await keepsTodaysText();
+  });
+
+  it('FALLBACK: 0 entries for the declared app keeps today’s text', async () => {
+    srv.contributed = true;
+    srv.addonContributes = true;
+    // The owner serves the add-on's field, flow and `other_app` entry, but no entry on `crm_app`.
+    const answer = CONTRIBUTIONS.splice(0, CONTRIBUTIONS.length);
+    CONTRIBUTIONS.push(...answer.filter((c) => !(c.kind === 'nav' && 'app' in c && c.app === 'crm_app')));
+    try {
+      await keepsTodaysText();
+      expect(srv.reads.filter((r) => r.startsWith(`/api/v1/packages/${BASE}/customizations`))).toHaveLength(1);
+    } finally {
+      CONTRIBUTIONS.splice(0, CONTRIBUTIONS.length, ...answer);
+    }
+  });
+
+  it('CONTROL: a package with no app that declares no contribution reads nothing more', async () => {
+    srv.addonContributes = true;
+    srv.declaredApp = '';
+    await keepsTodaysText();
+    expect(srv.reads.filter((r) => r.startsWith('/api/v1/meta/app/'))).toEqual([]);
+    expect(srv.reads.filter((r) => r === '/api/v1/packages')).toHaveLength(SURFACE_PACKAGE_LIST_READS);
   });
 });
