@@ -3327,7 +3327,6 @@ const ar = {
     createButton: "إنشاء مؤسسة",
     nameLabel: "اسم المؤسسة",
     namePlaceholder: "مثلاً، Acme Inc",
-    defaultPersonalName: "مؤسسة {{name}}",
     slugLabel: "معرف URL",
     slugHint: "يستخدم في عناوين URL. أحرف صغيرة وأرقام وشرطات فقط.",
     settings: "إعدادات المؤسسة",

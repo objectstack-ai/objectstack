@@ -3073,7 +3073,6 @@ const de = {
     createButton: "Organisation erstellen",
     nameLabel: "Name der Organisation",
     namePlaceholder: "z.B. Acme Inc",
-    defaultPersonalName: "Organisation von {{name}}",
     slugLabel: "URL-Slug",
     slugHint: "In URLs verwendet. Nur Kleinbuchstaben, Zahlen und Bindestriche.",
     settings: "Organisationseinstellungen",

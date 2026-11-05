@@ -3150,7 +3150,6 @@ const zh = {
     createButton: '创建组织',
     nameLabel: '组织名称',
     namePlaceholder: '例如：极客科技',
-    defaultPersonalName: '{{name}}的组织',
     slugLabel: 'URL 标识',
     slugHint: '用于 URL 中，仅支持小写字母、数字和连字符。',
     settings: '组织设置',

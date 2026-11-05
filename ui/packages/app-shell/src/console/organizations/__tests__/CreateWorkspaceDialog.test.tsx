@@ -284,7 +284,8 @@ describe('CreateWorkspaceDialog', () => {
 
 // Maintainer ruling objectstack-ai/cloud#3559 A: the dialog that opens right
 // after sign-up prefills a default name so one click continues; the field stays
-// editable, and nothing is created until the user clicks.
+// editable, and nothing is created until the user clicks. A work e-mail names
+// the company; a public mailbox takes the existing `workspace.default` copy.
 describe('prefills a first organization from the e-mail (objectstack-ai/cloud#3559 A)', () => {
   const GMAIL_USER = { id: 'u1', email: 'zhang.san@gmail.com', name: 'Zhang San' };
   const WORK_USER = { id: 'u2', email: 'jane@acme.com', name: 'Jane Doe' };
@@ -294,11 +295,11 @@ describe('prefills a first organization from the e-mail (objectstack-ai/cloud#35
   }
 
   it.each([
-    ['en', 'Zhang San', "Zhang San's organization", 'zhang-sans-organization'],
-    ['zh', '张三', '张三的组织', null],
-  ] as const)('%s: a public-mailbox user sees the personal default and one click creates it', async (lang, person, expected, slug) => {
+    ['en', 'My Organization', 'my-organization'],
+    ['zh', '我的组织', null],
+  ] as const)('%s: a public-mailbox user sees the generic default and one click creates it', async (lang, expected, slug) => {
     packLang = lang;
-    authState = { user: { ...GMAIL_USER, name: person }, organizations: [], isOrganizationsLoading: false };
+    authState = { user: GMAIL_USER, organizations: [], isOrganizationsLoading: false };
     render(<CreateWorkspaceDialog open onOpenChange={() => {}} onCreated={() => {}} />);
     await settleAuthConfig();
 
@@ -314,12 +315,31 @@ describe('prefills a first organization from the e-mail (objectstack-ai/cloud#35
     await waitFor(() => expect(provisionMock).toHaveBeenCalledWith({ organizationId: 'org-123', displayName: expected }));
   });
 
+  it('a public mailbox subdomain (vip.qq.com) and a punycode work label take the generic default', () => {
+    packLang = 'zh';
+    for (const email of ['li@vip.qq.com', 'li@xn--fiqs8s.com']) {
+      authState = { user: { ...GMAIL_USER, email }, organizations: [], isOrganizationsLoading: false };
+      const { unmount } = render(<CreateWorkspaceDialog open onOpenChange={() => {}} />);
+      expect(screen.getByTestId('workspace-name-input'), email).toHaveValue('我的组织');
+      unmount();
+    }
+  });
+
   it('a work-domain user sees the company name in both locales', async () => {
     for (const lang of ['en', 'zh'] as const) {
       packLang = lang;
       authState = { user: WORK_USER, organizations: [], isOrganizationsLoading: false };
       const { unmount } = render(<CreateWorkspaceDialog open onOpenChange={() => {}} />);
       expect(screen.getByTestId('workspace-name-input')).toHaveValue('Acme');
+      unmount();
+    }
+    for (const [email, company] of [
+      ['jane@mail.acme.co.uk', 'Acme'],
+      ['jane@notgmail.com', 'Notgmail'],
+    ] as const) {
+      authState = { user: { ...WORK_USER, email }, organizations: [], isOrganizationsLoading: false };
+      const { unmount } = render(<CreateWorkspaceDialog open onOpenChange={() => {}} />);
+      expect(screen.getByTestId('workspace-name-input'), email).toHaveValue(company);
       unmount();
     }
   });

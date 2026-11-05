@@ -3663,7 +3663,6 @@ const en = {
     createButton: 'Create organization',
     nameLabel: 'Organization name',
     namePlaceholder: 'e.g., Acme Inc',
-    defaultPersonalName: "{{name}}'s organization",
     slugLabel: 'URL slug',
     slugHint: 'Used in URLs. Only lowercase letters, numbers, and hyphens.',
     settings: 'Organization settings',
