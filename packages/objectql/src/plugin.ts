@@ -2114,6 +2114,13 @@ export class ObjectQLPlugin implements Plugin {
           '`getAllObjects()` — a duck-typed engine or an incomplete test double is the only way to reach this line.',
       );
     }
+    // Every caller here is a STORAGE reader (DDL, the federated binding), so
+    // it reads the object with every extension folded in, a disabled
+    // package's included: a disable must not take a column away from the data
+    // it keeps (`SchemaRegistry.getStorageObject`). A registry without that
+    // read answers its served fold, as before.
+    const storage: unknown = registry.getAllStorageObjects;
+    if (typeof storage === 'function') return (storage as () => ServiceObject[]).call(registry);
     return (read as () => ServiceObject[]).call(registry);
   }
 

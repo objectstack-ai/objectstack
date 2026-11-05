@@ -3291,7 +3291,8 @@ async function readPackageCustomizations(
  *    `definition` is its extension body as declared, so its `fields` keys ARE
  *    the fields it adds, and its `packageId` is the package that declared it.
  *    One entry per contributor and field, so two packages adding a field of
- *    one name are two entries.
+ *    one name are two entries. A disabled package's contributor is skipped
+ *    (`isPackageDisabled`), as the served object's fold withholds it.
  *  - **flow** — the metadata registry's flows (`listItems('flow')`, which
  *    already leaves a disabled package's out), whose `start` node's
  *    `config.objectName` is a base-owned object, attributed to the package
@@ -3348,6 +3349,10 @@ function readBaseContributions(
     for (const name of owned) {
         for (const contributor of registry.getObjectContributors(name) as Array<{ packageId?: unknown; ownership?: unknown; definition?: any }>) {
             if (contributor.ownership !== 'extend') continue;
+            // A disabled package's extension is withheld from the served object
+            // (`SchemaRegistry.resolveObject`), so its fields are not listed:
+            // the fold's own predicate, asked as the `nav` loop below asks it.
+            if (typeof registry.isPackageDisabled === 'function' && registry.isPackageDisabled(contributor.packageId)) continue;
             const packageId = codePackageOf(contributor.packageId, contributor.definition);
             if (packageId === undefined) continue;
             for (const field of Object.keys(contributor.definition?.fields ?? {})) {

@@ -52,7 +52,7 @@ import { setPackageDisabled } from '../package-state-store.js';
 const ENVIRONMENT_ID = 'env_suite_extension_fields';
 const ADMIN = {
     userId: 'u_admin', tenantId: 'org_qa', isSystem: false,
-    positions: [], permissions: [], systemPermissions: ['manage_metadata'],
+    positions: [], permissions: [], systemPermissions: ['manage_metadata', 'studio.access'],
 };
 
 const APP = 'com.qa.extsuite';
