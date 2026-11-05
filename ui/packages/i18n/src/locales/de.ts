@@ -887,12 +887,12 @@ const de = {
   },
   managedByBadge: {
     systemWritable: {
-      short: "Plattform-Schema",
+      short: "Integriert · bearbeitbar",
       title: "Plattformdefiniert, für Admins beschreibbar",
       body: "Das Schema dieses Objekts wird von der Plattform definiert, seine Zeilen können Sie hier jedoch selbst anlegen und bearbeiten. Wer schreiben darf, regeln die delegierte Administration und die Datensatzsicherheit — nicht dieses Abzeichen.",
     },
     config: {
-      short: "Admin-Konfiguration",
+      short: "Hier konfiguriert",
       title: "Administrator-Konfiguration",
       body: "Diese Zeilen definieren das Laufzeitverhalten der Plattform. Erstellen Sie sie hier; die erzeugten Laufzeitdaten liegen in einer separaten Tabelle.",
     },
@@ -907,7 +907,7 @@ const de = {
       body: "Unveränderliches Audit-Log. Zeilen können in der UI nicht erstellt, bearbeitet oder gelöscht werden – die Plattform schreibt sie bei Ereignissen. Nutzen Sie Export für Compliance-Prüfungen.",
     },
     betterAuth: {
-      short: "Identität",
+      short: "Über den Identitätsdienst",
       title: "Über den integrierten Identitätsdienst geschrieben",
       body: "Das Schema dieses Objekts gehört {{provider}}, dem integrierten Identitätsdienst der Plattform. Legen Sie diese Datensätze mit den Aktionen auf dieser Seite oder über Anmelde-, Einladungs- und Sicherheitsabläufe an und ändern Sie sie dort; alle laufen über diesen Dienst. Direkte Änderungen an der Tabelle würden Passwort-Hashing, Sitzungsvalidierung, Zwei-Faktor-Prüfungen und Audit-Hooks umgehen.",
     },
