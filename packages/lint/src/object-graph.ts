@@ -793,8 +793,11 @@ export function listNames(names: Iterable<string>): string {
   return arr.length > 0 ? arr.join(', ') : '(none)';
 }
 
-// [#30383] Kept out of the fold's section on purpose: `validate-security-posture.test.ts`
-// tables every receiver read in that section, and these two read only the fold's output.
+// [#30383] Kept below the fold's section on purpose: `foldCode()` in
+// `validate-security-posture.test.ts` appends this file's text from
+// `export interface VisibleObjectExtension` to `/** What a path resolved to` to
+// the posture rule's code and holds every receiver read there to its tables;
+// these two read only the fold's output.
 
 /**
  * [#30383] The served objects with every `tied` field taken out: what a rule

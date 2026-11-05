@@ -23,7 +23,7 @@ import { walkFilterFieldKeys, type FilterFieldKey } from './filter-walk.js';
 import { DATASET_FIELD_UNKNOWN, validateDatasetReferences } from './validate-dataset-references.js';
 import { MEASURE_AGGREGATE_FIELD_TYPE_REFUSED, validateDatasetMeasureAggregates } from './validate-dataset-measure-aggregates.js';
 import { FIELD_NO_CONSUMERS, validateFieldConsumers } from './validate-field-consumers.js';
-import { LIST_VIEW_FIELD_UNKNOWN, validateListViewFieldRefs } from './validate-list-view-field-refs.js';
+import { LIST_VIEW_FIELD_UNKNOWN, LIST_VIEW_KANBAN_LANE_UNKNOWN, validateListViewFieldRefs } from './validate-list-view-field-refs.js';
 import { MAPPING_TARGET_FIELD_UNKNOWN, validateMappingTargetFields } from './validate-mapping-target-fields.js';
 import { OBJECT_FIELD_REF_UNKNOWN, validateObjectFieldRefs } from './validate-object-field-refs.js';
 import { PAGE_FIELD_UNKNOWN, validatePageFieldBindings } from './validate-page-field-bindings.js';
@@ -33,7 +33,7 @@ import { REPORT_FILTER_FIELD_UNKNOWN, validateReportRuntimeFilters } from './val
 import { RLS_PREDICATE_UNKNOWN_FIELD, validateRlsPredicateEnforceability } from './validate-rls-predicate-enforceability.js';
 import { SHARING_RULE_UNLOWERABLE_CONDITION, validateSharingRuleEnforceability } from './validate-sharing-rule-enforceability.js';
 import { THANK_YOU_RECORD_FIELD, validateThankYouRecordFields } from './validate-thank-you-record-fields.js';
-import { WIDGET_FILTER_FIELD_UNKNOWN, validateWidgetBindings } from './validate-widget-bindings.js';
+import { MEASURE_AGGREGATE_INCOHERENT, WIDGET_FILTER_FIELD_UNKNOWN, validateWidgetBindings } from './validate-widget-bindings.js';
 // [#16340] Read back the registry's OWN definition table to assert the graph
 // derives its injected types rather than carrying a second copy of them.
 import { injectedSystemColumnDefs } from '@objectstack/spec/data';
@@ -737,22 +737,52 @@ describe('[#30383] the field-path rules read the objects as served', () => {
         { manifest: { id: 'mod2', objectExtensions: [{ extend: 'xs_deal', fields: b }] } },
       ],
     });
+    // The fold keeps the LAST writer at a tied priority, so each pair below
+    // lists the definition a type arm would refuse last: an arm that read the
+    // kept definition instead of dropping the tie goes red.
     const numberOrText = (extra: Rec) => ({ ...tie({ score: { type: 'number' } }, { score: { type: 'text' } }), ...extra });
-    const dateOrText = (extra: Rec) => ({ ...tie({ closed_on: { type: 'date' } }, { closed_on: { type: 'text' } }), ...extra });
+    const textOrDate = (extra: Rec) => ({ ...tie({ closed_on: { type: 'text' } }, { closed_on: { type: 'date' } }), ...extra });
+    const numberOrPercent = (extra: Rec) => ({ ...tie({ score: { type: 'number' } }, { score: { type: 'percent' } }), ...extra });
+    const stage = (values: string[]) => ({ stage: { type: 'select', options: values.map((value) => ({ value, label: value })) } });
+    const abOrAc = (extra: Rec) => ({ ...tie(stage(['a', 'b']), stage(['a', 'c'])), ...extra });
 
     it('is still a served name for the existence rules', () => {
       expect(ids(validateDatasetReferences, numberOrText({ datasets: [{ ...dataset('score'), include: [] }] }))).toEqual([]);
       expect(ids(validateDatasetReferences, numberOrText({ datasets: [{ ...dataset('zq_absent'), include: [] }] }))).toEqual([DATASET_FIELD_UNKNOWN]);
     });
 
-    it('is not judged on its type by the type arms', () => {
+    it('is not judged on its type by measure aggregates', () => {
       const sum = { datasets: [{ name: 'deals', object: 'xs_deal', measures: [{ name: 's', aggregate: 'sum', field: 'score' }] }] };
       expect(ids(validateDatasetMeasureAggregates, numberOrText(sum))).toEqual([]);
       expect(ids(validateDatasetMeasureAggregates, { ...tie({ score: { type: 'text' } }, {}), ...sum }))
         .toEqual([MEASURE_AGGREGATE_FIELD_TYPE_REFUSED]);
-      expect(ids(validatePresetComparands, dateOrText(widget({ closed_on: 'last_30_days' })))).toEqual([]);
+    });
+
+    it('is not judged on its type by preset comparands', () => {
+      const preset = widget({ closed_on: 'last_30_days' });
+      expect(ids(validatePresetComparands, textOrDate(preset))).toEqual([]);
+      expect(ids(validatePresetComparands, { ...tie({ closed_on: { type: 'date' } }, {}), ...preset })).toEqual([FILTER_PRESET_COMPARAND]);
+    });
+
+    it('is not judged on its type by sharing-rule criteria', () => {
       const rule = { sharingRules: [{ name: 'sr', object: 'xs_deal', condition: 'record.closed_on == record.name', sharedWith: { type: 'role', value: 'r' }, accessLevel: 'read' }] };
-      expect(ids(validateSharingRuleEnforceability, dateOrText(rule))).toEqual([]);
+      expect(ids(validateSharingRuleEnforceability, textOrDate(rule))).toEqual([]);
+      expect(ids(validateSharingRuleEnforceability, { ...tie({ closed_on: { type: 'date' } }, {}), ...rule }))
+        .toEqual([SHARING_RULE_UNLOWERABLE_CONDITION]);
+    });
+
+    it('is not judged on its type by the widget field-type map', () => {
+      const sum = { datasets: [{ name: 'deals', object: 'xs_deal', measures: [{ name: 's', aggregate: 'sum', field: 'score' }] }] };
+      expect(ids(validateWidgetBindings, numberOrPercent(sum))).toEqual([]);
+      expect(ids(validateWidgetBindings, { ...tie({ score: { type: 'percent' } }, {}), ...sum })).toEqual([MEASURE_AGGREGATE_INCOHERENT]);
+    });
+
+    it('lends no options to a kanban lane check', () => {
+      const lanes = {
+        views: [{ name: 'v', object: 'xs_deal', list: { type: 'kanban', columns: ['name'], kanban: { groupByField: 'stage', columns: ['name'], lanes: ['b'] } } }],
+      };
+      expect(ids(validateListViewFieldRefs, abOrAc(lanes))).toEqual([]);
+      expect(ids(validateListViewFieldRefs, { ...tie(stage(['a', 'c']), {}), ...lanes })).toEqual([LIST_VIEW_KANBAN_LANE_UNKNOWN]);
     });
 
     it('is admitted on a thank-you panel only when every tied definition is engine-generated', () => {

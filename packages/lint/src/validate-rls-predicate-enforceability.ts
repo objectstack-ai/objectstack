@@ -1913,6 +1913,10 @@ export function validateRlsPredicateEnforceability(
   // re-derived here. [#30383] It indexes the objects as SERVED: the registry
   // folds every `objectExtensions` field in before the RLS compiler sees the
   // object, so a predicate naming a field a sibling package adds resolves.
+  // A field two packages write at the same deciding priority (`objectsAsServed`'s
+  // `tied`) is kept as the fold keeps it, the last writer: its list-holding and
+  // cross-class questions are answered on that definition, although which one
+  // the registry serves is its registration order.
   const graph: ObjectGraph = indexServedObjectGraph(cfg);
   // [#25234] The declared membership keys every predicate below is judged
   // against: bound as lists, traced to their targets — see `## Membership keys`.
