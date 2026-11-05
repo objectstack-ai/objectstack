@@ -440,8 +440,9 @@ interface LabelCatalogs {
  *    pair that ships only `en` never displaces the base's `zh-CN` on a string
  *    it left alone.
  *
- * With no `pairBundle` the unchanged catalog IS `bundle` (the same reference)
- * and the changed one is empty, which is exactly what every translator did
+ * With no `pairBundle` — or one that answers none of the chain's locales — the
+ * unchanged catalog IS `bundle` (the same reference) and the changed one is
+ * empty, which is exactly what every translator did
  * before the option existed: a changed string keeps its text, an unchanged
  * one reads `bundle`. With no `packagedBase` nothing counts as changed.
  */
@@ -451,14 +452,20 @@ function labelCatalogs(
 ): LabelCatalogs {
   const pair = opts?.pairBundle;
   if (!pair) return { unchanged: bundle, changed: undefined };
+  const chain = localeChain(opts);
+  const pairData = chain.map((code) => pickData(pair, code));
+  // A pair that answers none of the chain's locales adds nothing to read, so
+  // the catalogs are the ones without it — the same references, which is what
+  // keeps "no bundle" handing back the input document untouched.
+  if (pairData.every((data) => data === undefined)) return { unchanged: bundle, changed: undefined };
   // Keyed by the chain's own codes, each resolved against both bundles the
   // way `pickData` resolves it, so every lookup on the result hits exactly.
   // A code neither bundle answers gets `{}`: a bare miss would let
   // `pickData` re-resolve the code against the OTHER codes kept here.
   const unchanged: Record<string, TranslationData> = {};
-  for (const code of localeChain(opts)) {
-    unchanged[code] = overlayTranslationData(pickData(bundle, code), pickData(pair, code)) ?? {};
-  }
+  chain.forEach((code, index) => {
+    unchanged[code] = overlayTranslationData(pickData(bundle, code), pairData[index]) ?? {};
+  });
   return { unchanged: unchanged as TranslationBundle, changed: pair };
 }
 
