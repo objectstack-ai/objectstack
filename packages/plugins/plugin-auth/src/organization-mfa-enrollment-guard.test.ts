@@ -545,9 +545,10 @@ describe('#30411 on a real engine: the caller\'s locale reaches the refusal, the
     expect(await storedRequireMfa(engine, 'org_a')).toBe(true);
     expect(told).toEqual([organizationMfaRequiredNotice(21, 'zh-CN')]);
     // The setting changes; the next write that turns it on names the new number.
+    // (An insert: user-context creates are the D2 guard's to refuse, so the system writes it.)
     grace.value = 3;
     await engine.insert('sys_organization', { id: 'org_c', name: 'Cove', slug: 'cove', require_mfa: true }, {
-      ...ADMIN, onNotice: (m: string) => told.push(m),
+      ...SYSTEM, onNotice: (m: string) => told.push(m),
     } as any);
     expect(told[1]).toBe(organizationMfaRequiredNotice(3, 'en'));
     // A re-save of the stored `true` answers no notice.
