@@ -48,7 +48,8 @@ type Row = Record<string, any>;
  */
 function makeCountingEngine() {
     const tables = new Map<string, Row[]>();
-    const calls = { find: 0, insert: 0, update: 0, delete: 0 };
+    // [#30228] `reclaim` counts the lease-reclaim read alone (a `find` too).
+    const calls = { find: 0, insert: 0, update: 0, delete: 0, reclaim: 0 };
     function compare(cell: any, v: any): boolean {
         if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
             for (const [op, target] of Object.entries(v)) {
@@ -82,6 +83,7 @@ function makeCountingEngine() {
         calls,
         async find(table: string, opts: any = {}) {
             if (table === QUEUE_TABLE) calls.find++;
+            if (table === QUEUE_TABLE && opts?.where?.status === 'running') calls.reclaim++;
             const t = tables.get(table) ?? [];
             let out = opts.where ? t.filter((r) => matches(r, opts.where)) : [...t];
             if (opts.orderBy) {
@@ -585,6 +587,63 @@ describe('#29919 DbQueueAdapter — wake at the next due time, no ramp for a sol
 
         expect(at).toHaveLength(2);
         expect(at[1]! - at[0]!).toBe(15_000);
+    });
+
+    it('[#30228] an idle sole writer reads for expired leases ONCE an hour, at boot — even after work; the control reads 120', async () => {
+        const hourOf = async (soleWriter: boolean) => {
+            vi.useFakeTimers();
+            const engine = makeCountingEngine();
+            const adapter = adapterOn(engine, { soleWriter });
+            let ran = 0;
+            await adapter.subscribe('q1', async () => { ran++; });
+            adapter.start();
+            await vi.advanceTimersByTimeAsync(10 * 60_000);
+            // Work in between: its claim is settled, so it costs no later read.
+            await adapter.publish('q1', { n: 1 });
+            await vi.advanceTimersByTimeAsync(HOUR - 10 * 60_000);
+            await adapter.stop();
+            vi.useRealTimers();
+            expect(ran).toBe(1);
+            return engine.calls.reclaim;
+        };
+        // No other process claims rows: the boot read covers what a crashed
+        // previous process left, and nothing else can run out of lease.
+        expect(await hourOf(true)).toBe(1);
+        // CONTROL: other nodes may claim at any time, so one read per 30 s
+        // lease window that a tick lands in — at boot, then on the ceiling
+        // ticks (the publish at 10 min restarts the ramp, and its 2/6/14 s
+        // ticks fall inside one window, so one boundary fewer than idle: 120).
+        expect(await hourOf(false)).toBe(120);
+    });
+
+    it('[#30228] a sole writer\'s own claim whose settling write failed is reclaimed when its lease runs out', async () => {
+        vi.useFakeTimers();
+        const engine = makeCountingEngine();
+        // The `completed` write fails once (a dropped connection, say): the
+        // handler ran, but the row is still `running` under this worker.
+        const update = engine.update.bind(engine);
+        let failOnce = true;
+        engine.update = async (table: string, patch: Row, options?: any) => {
+            if (failOnce && patch.status === 'completed') { failOnce = false; throw new Error('connection reset'); }
+            return update(table, patch, options);
+        };
+        const adapter = adapterOn(engine, { soleWriter: true, leaseMs: 3_000 });
+        const at: number[] = [];
+        await adapter.subscribe('q1', async () => { at.push(Date.now()); });
+        adapter.start();
+        await vi.advanceTimersByTimeAsync(10);
+        const t0 = Date.now();
+        await adapter.publish('q1', { n: 1 });
+        await vi.advanceTimersByTimeAsync(60_000);
+        await adapter.stop();
+
+        // Run, settling write lost, lease out at +3 s, reclaimed (the lost
+        // settle counts as an attempt: delivery is at-least-once), run again.
+        expect(at).toHaveLength(2);
+        expect(at[1]! - t0).toBeLessThanOrEqual(3_000 + DEFAULT_MAX_IDLE_INTERVAL_MS + 2 * BASE);
+        expect((engine.tables.get(QUEUE_TABLE) ?? [])[0]).toMatchObject({ status: 'completed', attempts: 2 });
+        // The boot read, and the one its expired lease asked for.
+        expect(engine.calls.reclaim).toBe(2);
     });
 
     it('[#30228] a row its own previous process left running is reclaimed when the lease runs out, not at the ceiling', async () => {

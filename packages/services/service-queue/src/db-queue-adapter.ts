@@ -239,8 +239,8 @@ export class DbQueueAdapter implements IQueueService {
   private readonly handlers = new Map<string, RegisteredHandler[]>();
   private loop?: DispatchLoop;
   /**
-   * [#30228] Adapter-clock instant (ms) before which no `running` row of a
-   * subscribed queue can have an expired lease, so {@link reclaimExpired}
+   * [#30228] Adapter-clock instant (ms) before which no `running` row can
+   * have an expired lease, so {@link reclaimExpired}
    * need not read. `0` = read on the next tick. See that method for why the
    * bound is sound.
    */
@@ -251,6 +251,16 @@ export class DbQueueAdapter implements IQueueService {
    * {@link nextDueAt} reports it, so an idle loop wakes when it runs out.
    */
   private earliestLiveLeaseMs: number | null = null;
+  /**
+   * [#30228] {@link DbQueueAdapterOptions.soleWriter} only: the lease
+   * (adapter-clock ms) of each row this process claimed and has not yet
+   * settled — completed, retried, dead-lettered or released. A sole writer's
+   * only other source of `running` rows is its previous process, which the
+   * first read after `start` covers; so instead of re-reading every lease
+   * window, it reads again only when one of these runs out — a settling write
+   * that failed and left its row `running`.
+   */
+  private readonly unsettledLeases = new Map<string, number>();
 
   constructor(args: {
     engine: JobEngine;
@@ -557,7 +567,7 @@ export class DbQueueAdapter implements IQueueService {
     const queues = [...this.handlers.keys()];
     if (queues.length === 0) return 0;
 
-    let processed = await this.reclaimExpired(queues);
+    let processed = await this.reclaimExpired();
     for (const queue of queues) {
       const claimed = await this.claimBatch(queue, this.opts.batchSize);
       for (const row of claimed) {
@@ -582,8 +592,10 @@ export class DbQueueAdapter implements IQueueService {
    * {@link reclaimExpired} may take it back. The earliest live lease that
    * method's last read saw is folded in at no read of its own — that read ran
    * on the empty tick this answer follows, or the bound it set has not passed
-   * yet. So a sole-writer loop, which otherwise sleeps to the ceiling, wakes
-   * for a row its own previous process left `running` across a restart.
+   * yet — and so are a sole writer's own unsettled claims. So a sole-writer
+   * loop, which otherwise sleeps to the ceiling, wakes for a row its own
+   * previous process left `running` across a restart, or one a failed
+   * settling write of this process left behind.
    */
   private async nextDueAt(): Promise<number | null> {
     const queues = [...this.handlers.keys()];
@@ -604,10 +616,14 @@ export class DbQueueAdapter implements IQueueService {
     // Instants, not strings — the dialects materialize `scheduled_for`
     // differently (ISO text on SQLite/turso, a `Date` on Postgres/MySQL).
     const scheduledMs = cell ? new Date(cell).getTime() : NaN;
-    const leaseMs = this.earliestLiveLeaseMs ?? NaN;
-    const dueMs = Number.isFinite(scheduledMs) && Number.isFinite(leaseMs)
-      ? Math.min(scheduledMs, leaseMs)
-      : Number.isFinite(scheduledMs) ? scheduledMs : leaseMs;
+    const leaseMs = Math.min(
+      this.earliestLiveLeaseMs ?? Infinity,
+      this.earliestUnsettledLeaseMs() ?? Infinity,
+    );
+    const dueMs = Math.min(
+      Number.isFinite(scheduledMs) ? scheduledMs : Infinity,
+      leaseMs,
+    );
     if (!Number.isFinite(dueMs)) return null;
     // Re-based onto the loop's clock, so an injected `clock` keeps its meaning.
     return Date.now() + (dueMs - now.getTime());
@@ -616,8 +632,14 @@ export class DbQueueAdapter implements IQueueService {
   // ── Internals ────────────────────────────────────────────────────
 
   /**
-   * [#30228] Return every `running` row of a subscribed queue whose lease ran
-   * out to the retry path, and answer how many were reclaimed.
+   * [#30228] Return every `running` row whose lease ran out to the retry path,
+   * and answer how many were reclaimed.
+   *
+   * Every queue's, not only the subscribed ones': reclaiming runs nothing (the
+   * row goes back to `pending` for whichever worker subscribes to it), and the
+   * predicate is then the claim read's own plain equality on `status`, served
+   * by the declared `status` index — no operator a stand-in engine might not
+   * answer.
    *
    * ## Why a lease that ran out means a dead worker, not a slow one
    *
@@ -648,7 +670,7 @@ export class DbQueueAdapter implements IQueueService {
    *
    * ## Why it does not read on every tick
    *
-   * One read answers every subscribed queue, and it also returns the
+   * One read answers every queue, and it also returns the
    * earliest lease still running. Until the earlier of that lease and
    * `now + leaseMs` no lease can run out: every row already `running` was
    * in the read, and a row claimed after it carries a lease of at least
@@ -657,14 +679,20 @@ export class DbQueueAdapter implements IQueueService {
    * a busy 1 s poll pays one read per lease window, an idle one at most one
    * per tick, and an expired lease is still reclaimed on the first tick after
    * it runs out.
+   *
+   * A {@link DbQueueAdapterOptions.soleWriter} drops the `now + leaseMs`
+   * term: no other process claims rows, so after the first read (which finds
+   * what a crashed previous process left behind) the only leases that can run
+   * out are the ones that read saw and this process's own unsettled claims
+   * ({@link unsettledLeases}). An idle sole writer then reads once per boot.
    */
-  private async reclaimExpired(queues: string[]): Promise<number> {
+  private async reclaimExpired(): Promise<number> {
     const now = this.now();
     const nowMs = now.getTime();
-    if (nowMs < this.reclaimNotBeforeMs) return 0;
+    if (nowMs < this.reclaimNotBeforeMs && !this.anyUnsettledLeaseExpired(nowMs)) return 0;
     const max = this.opts.batchSize;
     const rows = await this.engine.find(QUEUE_TABLE, {
-      where: { queue: { $in: queues }, status: 'running' },
+      where: { status: 'running' },
       fields: [
         'id', 'locked_by', 'locked_until', 'attempts', 'max_attempts',
         'backoff_type', 'backoff_delay_ms', 'backoff_max_delay_ms',
@@ -689,11 +717,33 @@ export class DbQueueAdapter implements IQueueService {
       if (await this.reclaimRow(row, now)) reclaimed++;
     }
     this.earliestLiveLeaseMs = earliestLive;
+    // The read is the truth about every `running` row, this process's own
+    // included: no dispatch is in flight while a tick reclaims.
+    this.unsettledLeases.clear();
+    const windowMs = this.opts.soleWriter ? Infinity : nowMs + this.opts.leaseMs;
     // A full page may hide more expired rows behind it: read again next tick.
     this.reclaimNotBeforeMs = (rows?.length ?? 0) >= max
       ? 0
-      : Math.min(nowMs + this.opts.leaseMs, earliestLive ?? Infinity);
+      : Math.min(windowMs, earliestLive ?? Infinity);
     return reclaimed;
+  }
+
+  /** [#30228] Whether one of this sole writer's unsettled claims ran out of lease. */
+  private anyUnsettledLeaseExpired(nowMs: number): boolean {
+    for (const until of this.unsettledLeases.values()) if (until <= nowMs) return true;
+    return false;
+  }
+
+  /** [#30228] Earliest lease among this sole writer's unsettled claims, or null. */
+  private earliestUnsettledLeaseMs(): number | null {
+    let min: number | null = null;
+    for (const until of this.unsettledLeases.values()) min = min === null ? until : Math.min(min, until);
+    return min;
+  }
+
+  /** [#30228] A claimed row reached a settling write: its lease is no longer this process's concern. */
+  private settled(id: unknown): void {
+    this.unsettledLeases.delete(String(id));
   }
 
   /** [#30228] The compare-and-set write of {@link reclaimExpired}, one row. */
@@ -763,6 +813,8 @@ export class DbQueueAdapter implements IQueueService {
         .then((res) => {
           if (typeof res === 'number' && res === 0) {
             this.logger?.warn?.('DbQueueAdapter: lease lost while the handler was still running', { id } as any);
+          } else if (this.unsettledLeases.has(id)) {
+            this.unsettledLeases.set(id, now.getTime() + this.opts.leaseMs);
           }
         })
         .catch((err) => { this.logger?.warn?.('DbQueueAdapter: lease renewal failed', err as any); })
@@ -832,6 +884,7 @@ export class DbQueueAdapter implements IQueueService {
           updated_at: now.toISOString(),
         }, { context: SYSTEM_CTX });
         out.push({ ...row, status: 'running' });
+        if (this.opts.soleWriter) this.unsettledLeases.set(String(row.id), now.getTime() + this.opts.leaseMs);
       } catch (err) {
         this.logger?.warn?.('DbQueueAdapter: claim CAS failed', err as any);
       }
@@ -882,6 +935,7 @@ export class DbQueueAdapter implements IQueueService {
         locked_until: null,
         updated_at: now.toISOString(),
       }, { context: SYSTEM_CTX });
+      this.settled(row.id);
       return;
     }
 
@@ -898,6 +952,7 @@ export class DbQueueAdapter implements IQueueService {
         locked_until: null,
         updated_at: now.toISOString(),
       }, { context: SYSTEM_CTX });
+      this.settled(row.id);
       return;
     }
 
@@ -912,6 +967,7 @@ export class DbQueueAdapter implements IQueueService {
       locked_until: null,
       updated_at: now.toISOString(),
     }, { context: SYSTEM_CTX });
+    this.settled(row.id);
   }
 
   private computeBackoff(row: any, attempt: number): number {
@@ -933,6 +989,7 @@ export class DbQueueAdapter implements IQueueService {
         scheduled_for: new Date(now.getTime() + this.opts.pollIntervalMs * 5).toISOString(),
         updated_at: now.toISOString(),
       }, { context: SYSTEM_CTX });
+      this.settled(id);
     } catch (err) {
       this.logger?.warn?.('DbQueueAdapter: release failed', err as any);
     }
