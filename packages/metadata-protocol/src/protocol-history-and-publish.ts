@@ -45,6 +45,7 @@ import type { MutationProjectionOutcome } from './protocol-mutation-events.js';
 import { withPendingAudit } from './protocol-audit-entry.js';
 import type { PublishMetaItemRequest } from './protocol-door-requests.js';
 import type { ProtocolHost } from './protocol-host.js';
+import type { SeedAppliedLandedParsed } from '@objectstack/spec/api';
 
 export class ProtocolHistoryAndPublishFacet {
     /** The body of `ObjectStackProtocolImplementation#historyMetaItem`; the method's docblock there is its contract. */
@@ -162,6 +163,8 @@ export class ProtocolHistoryAndPublishFacet {
                 updated: number;
                 error?: string;
                 errors?: unknown[];
+                /** [#30348] Per object, the rows created vs matched — `SeedAppliedLandedSchema`. */
+                landed?: SeedAppliedLandedParsed[];
             };
             /**
              * Present when a publish-time materializer is registered for this type
@@ -344,7 +347,7 @@ export class ProtocolHistoryAndPublishFacet {
             version: string;
             seq: number;
             message?: string;
-            seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[] };
+            seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[]; landed?: SeedAppliedLandedParsed[] };
             materializeApplied?: PublishMaterializeResult;
             projectionApplied?: MutationProjectionOutcome;
             advisories?: RuntimeAuthoringIssue[];
@@ -1044,12 +1047,12 @@ export class ProtocolHistoryAndPublishFacet {
             actor?: string;
             skipSeedApply?: boolean;
         }): Promise<{
-            seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[] };
+            seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[]; landed?: SeedAppliedLandedParsed[] };
             materializeApplied?: PublishMaterializeResult;
             projectionApplied?: MutationProjectionOutcome;
         }> {
         const out: {
-            seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[] };
+            seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[]; landed?: SeedAppliedLandedParsed[] };
             materializeApplied?: PublishMaterializeResult;
             projectionApplied?: MutationProjectionOutcome;
         } = {};

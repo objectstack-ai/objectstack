@@ -46,8 +46,9 @@ import {
 } from '@object-ui/components';
 import { ArrowLeft, ExternalLink, Download, AlertCircle, Package, Trash2, MoreHorizontal, CheckCircle2, ArrowUpCircle, Database, Loader2 } from 'lucide-react';
 import { useWorkspaceAdminStatus } from '@object-ui/auth';
-import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
+import { useObjectTranslation } from '@object-ui/i18n';
 import { useDisplayLocale } from '@object-ui/i18n';
+import { useServedAppLabel } from '../../hooks/useServedAppLabel.js';
 import { useAdapter } from '@object-ui/react';
 import { PackageIcon } from './PackageIcon.js';
 import { MarkdownText } from './MarkdownText.js';
@@ -86,7 +87,7 @@ import { ProtocolCheckSkippedNote } from './ProtocolCheckSkippedNote.js';
 import { getCloudBase, getRuntimeConfig, isMarketplaceEnabled } from '../../runtime-config.js';
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
 import { useMetadata } from '../../providers/MetadataProvider.js';
-import { appRouteSegment, filterActiveApps, resolveKeyedI18nLabel } from '../../utils/index.js';
+import { appRouteSegment, filterActiveApps } from '../../utils/index.js';
 import { waitForServedApp, type ServedApp } from './waitForServedApp.js';
 import { SuggestedBindingsPanel, type SuggestedBindingsStrings } from '../../components/SuggestedBindingsPanel.js';
 import { ConnectorCredentialsStep } from './ConnectorCredentialsStep.js';
@@ -189,7 +190,7 @@ export function MarketplacePackagePage() {
   // The adapter `MetadataProvider` reads through: the deploy wait asks the
   // same `GET /meta/app` the cache would, without the cache persisting it.
   const adapter = useAdapter();
-  const { appLabel } = useObjectLabel();
+  const { appLabel } = useServedAppLabel();
   // The runtime's own answer, read once per render -- the same read the
   // catalog page makes (objectui#5504). `false` means this runtime mounts no
   // marketplace at all, so there is no package to fetch and nothing to
@@ -981,8 +982,8 @@ export function MarketplacePackagePage() {
           <Button size="sm" onClick={() => navigate(`/apps/${appRouteSegment(deployApp)}`)}>
             {t('marketplace.install.openApp', {
               name: appLabel({
+                ...deployApp,
                 name: String(deployApp.name ?? appRouteSegment(deployApp)),
-                label: resolveKeyedI18nLabel(deployApp.label, t),
               }),
             })}
           </Button>

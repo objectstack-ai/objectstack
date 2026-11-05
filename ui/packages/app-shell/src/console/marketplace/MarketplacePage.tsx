@@ -26,7 +26,8 @@ import {
   Package, Search, Store, AlertCircle, CheckCircle2, Settings, Loader2, ChevronDown, Copy, Check,
 } from 'lucide-react';
 import { useWorkspaceAdminStatus } from '@object-ui/auth';
-import { useDisplayLocale, useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
+import { useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
+import { useServedAppLabel } from '../../hooks/useServedAppLabel.js';
 import { useAdapter } from '@object-ui/react';
 import { PackageIcon } from './PackageIcon.js';
 import { MarketplaceAccessDenied } from './MarketplaceAccessDenied.js';
@@ -47,7 +48,7 @@ import {
 import { getCloudBase, getRuntimeConfig, isMarketplaceEnabled } from '../../runtime-config.js';
 import { PageHeader } from '../../layout/PageHeader.js';
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
-import { appRouteSegment, filterActiveApps, resolveKeyedI18nLabel } from '../../utils/index.js';
+import { appRouteSegment, filterActiveApps } from '../../utils/index.js';
 import { waitForServedApp, type ServedApp } from './waitForServedApp.js';
 import { splitPackageSuffix } from './middleTruncate.js';
 import { useDependencyMissingText } from './dependencyMissing.js';
@@ -312,7 +313,7 @@ export function MarketplacePage() {
   const { t, language } = useObjectTranslation();
   const dependencyMissingText = useDependencyMissingText();
   const protocolCheckSkippedText = useProtocolCheckSkippedText();
-  const { appLabel } = useObjectLabel();
+  const { appLabel } = useServedAppLabel();
   // The adapter `MetadataProvider` reads through: the deploy wait asks the
   // same `GET /meta/app` the cache would, without the cache persisting it.
   const adapter = useAdapter();
@@ -627,8 +628,8 @@ export function MarketplacePage() {
           <Button size="sm" onClick={() => navigate(`/apps/${appRouteSegment(orgDeployApp)}`)}>
             {t('marketplace.install.openApp', {
               name: appLabel({
+                ...orgDeployApp,
                 name: String(orgDeployApp.name ?? appRouteSegment(orgDeployApp)),
-                label: resolveKeyedI18nLabel(orgDeployApp.label, t),
               }),
             })}
           </Button>
