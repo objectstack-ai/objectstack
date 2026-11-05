@@ -80,6 +80,30 @@ under `src/` is never loaded, and `{{PM}} run validate` neither counts nor check
 what it holds, until its `index.ts` barrel is imported in `objectstack.config.ts`
 and handed to its stack key there.
 
+## Change the app in `src/` — a Studio change stays in its database
+
+`src/` is what ships: `{{PM}} run build` and the `Dockerfile` compile it, and
+nothing else, into `dist/objectstack.json`. Studio, in the Console that
+`{{PM}} run dev` serves, never writes `src/`. A change saved there to an item
+this app ships (a view, a dashboard, a report) is an item of the package
+`<this app's package id>.custom`, stored in that environment's database —
+locally, `.objectstack/data/`. It is not in the build and does not reach a
+deployment.
+
+- **Make every change to the app in `src/`**, never through Studio or the
+  metadata API of a running server: `src/` is what is validated, reviewed and
+  deployed. When a person tried something in Studio and wants it in the app,
+  make the same change in `src/`.
+- **A customization that should stay one moves as a package.** With the dev
+  server running, `npx os package export` writes every package the database
+  holds that `src/` does not register, the `.custom` package among them, to
+  `objectstack-export/NN-ID/objectstack.json`. Commit that directory. After
+  the deployment is up, install each file into it, in the numbered order:
+  `npx os package install objectstack-export/NN-ID/objectstack.json --runtime URL`.
+
+`{{PM}} run build` prints a notice when the local dev database holds such a
+customization.
+
 ## AI Skills
 
 This project uses the ObjectStack skills catalog from the `@objectstack/skills`
