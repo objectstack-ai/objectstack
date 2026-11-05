@@ -500,3 +500,103 @@ describe('[#29613] a pair\'s published override of a sealed type is served from 
         });
     }
 });
+
+/**
+ * [#30062, ADR-0146 D2] "Removing it brings the base's back": a pair's removal
+ * of its own published override succeeds for every type whose declared
+ * override the gate admits and a pair can hold, and the base's item is served
+ * again by every read; a removal naming the base keeps its answer and leaves
+ * the override served (a base's own item is never removed).
+ *
+ * Before, `doc` and `mapping` answered 403 NOT_OVERRIDABLE (`refusePackagedBaseRemoval`,
+ * the pair-row admission being `flow`'s alone) and the override stayed served:
+ * a customization the customer could not undo. `flow` is pinned beside its own
+ * read in `protocol-flow-custom-override.test.ts`; `action` takes no declared
+ * override yet (ADR-0146 D9), so no pair holds one.
+ *
+ * Both topologies: an environment kernel asks the protocol's removal door, a
+ * host-config kernel only the repository's delete gate.
+ */
+const REMOVAL_TYPES = [
+    ...TYPES.map(({ type, name, body }) => ({ type, name, body: body as (label: string) => Record<string, unknown> })),
+    ...SEALED_TYPES.map(({ type, body }) => ({ type, name: body(SHIPPED).name, body: body as (label: string) => Record<string, unknown> })),
+    {
+        type: 'translation', name: 'showcase_zh_cn',
+        body: (label: string) => ({ name: 'showcase_zh_cn', label, locale: 'zh-CN', objects: { showcase_task: { label: '任务' } } }),
+    },
+] as const;
+
+function removalBaseManifest(): Record<string, unknown> {
+    // The #29600 base and the #29613 sealed types in one package; the sealed dataset's body wins the shared name.
+    return { ...baseManifest(), ...sealedBaseManifest(), views: baseManifest().views, dashboards: baseManifest().dashboards, reports: baseManifest().reports, emailTemplates: baseManifest().emailTemplates };
+}
+
+async function bootRemoval(environmentId: string | undefined) {
+    const engine = new ObjectQL();
+    engine.registerDriver(makeMemoryDriver().driver, true);
+    await engine.init();
+    engine.registry.registerObject(sysMetadataObject, 'test-package');
+    for (const o of [SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) {
+        engine.registry.registerObject(o as any, 'test-package');
+    }
+    engine.registerApp(removalBaseManifest());
+    // The manifest door registers no translation artifact here; a code package's translation file does (the metadata plugin).
+    engine.registry.registerItem('translation', REMOVAL_TYPES[REMOVAL_TYPES.length - 1].body(SHIPPED), 'name', BASE);
+    const protocol: any = new ObjectStackProtocolImplementation(engine, () => new Map(), environmentId);
+    await protocol.ensureCustomizationPackage({ basePackageId: BASE });
+    return { engine, protocol };
+}
+
+/** The overridable types that open no overlay channel and are no `supportsOverlay` type: a removal naming the base is refused for them. */
+const SEALED_OUTSIDE_CARVE_OUT: ReadonlySet<string> = new Set(['doc', 'mapping']);
+
+const activePairRows = async (engine: ObjectQL, type: string, name: string): Promise<number> =>
+    ((await engine.find('sys_metadata', { where: { type, name, package_id: PAIR, state: 'active' }, context: { isSystem: true } })) as any[]).length;
+
+describe('[#30062] a pair\'s removal of its own override brings the base\'s item back, for every type a pair can hold', () => {
+    for (const environmentId of [undefined, 'env_1']) {
+        const kernel = environmentId ? 'environment' : 'host-config';
+        for (const { type, name, body } of REMOVAL_TYPES) {
+            it(`${type} (${kernel} kernel): the removal naming the pair succeeds and every read serves the base's item again`, async () => {
+                const { engine, protocol } = await bootRemoval(environmentId);
+                await publishOverride(protocol, type, name, body(EDITED));
+                expect(await byName(protocol, type, name, BASE), `${type} served before the removal`).toBe(EDITED);
+
+                const removed = await protocol.deleteMetaItem({ type, name, packageId: PAIR });
+                expect(removed?.success, `the ${type} removal`).toBe(true);
+                expect(await activePairRows(engine, type, name), `the pair's ${type} row`).toBe(0);
+
+                expect(await byName(protocol, type, name), `${type} by name, no package`).toBe(SHIPPED);
+                expect(await byName(protocol, type, name, BASE), `${type} by name, the base`).toBe(SHIPPED);
+                expect(await effectiveList(protocol, type, name), `${type} list, no package`).toEqual([SHIPPED]);
+                expect((await protocol.getMetaItemLayered({ type, name, packageId: BASE }))?.effective?.label, `${type} layered, the base`).toBe(SHIPPED);
+                expect(await perPackage(protocol, type, name, PAIR), `the pair's ${type} layer`).toEqual([]);
+            });
+
+            it(`${type} (${kernel} kernel): a removal naming the base keeps main's answer, removes nothing, and the override stays served`, async () => {
+                const { engine, protocol } = await boot2(environmentId, type, name, body);
+                const outcome = await protocol.deleteMetaItem({ type, name, packageId: BASE }).then(
+                    (r: any) => ({ success: r?.success, reset: r?.reset }),
+                    (e: any) => ({ code: e?.code, status: e?.status }),
+                );
+                // Main's answer, unchanged: the sealed removal refusal where the protocol's door
+                // asks it of a type outside the #6960 carve-out, else a receipt that removed nothing.
+                expect(outcome, `the ${type} removal naming the base`).toEqual(
+                    environmentId !== undefined && SEALED_OUTSIDE_CARVE_OUT.has(type)
+                        ? { code: 'NOT_OVERRIDABLE', status: 403 }
+                        : { success: true, reset: false },
+                );
+                expect(await activePairRows(engine, type, name), `the pair's ${type} row`).toBe(1);
+                expect(await byName(protocol, type, name, BASE), `${type} by name, the base`).toBe(EDITED);
+                expect((await protocol.getMetaItemLayered({ type, name, packageId: BASE }))?.code?.label, `the base's own ${type}`).toBe(SHIPPED);
+            });
+        }
+    }
+});
+
+/** A removal boot with the pair's override already published. */
+async function boot2(environmentId: string | undefined, type: string, name: string, body: (label: string) => Record<string, unknown>) {
+    const booted = await bootRemoval(environmentId);
+    await publishOverride(booted.protocol, type, name, body(EDITED));
+    return booted;
+}
