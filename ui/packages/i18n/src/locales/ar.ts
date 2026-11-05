@@ -3125,6 +3125,7 @@ const ar = {
       verifyingDescription: "نقوم بالتحقق من بريدك الإلكتروني. يرجى الانتظار.",
       successTitle: "تم التحقق من البريد الإلكتروني",
       successDescription: "تم التحقق من بريدك الإلكتروني. يمكنك الآن تسجيل الدخول.",
+      handoffSuccessDescription: "تم التحقق من بريدك الإلكتروني. ارجع إلى التطبيق الذي كنت تسجّل الدخول إليه، وسجّل الدخول هناك.",
       errorTitle: "فشل التحقق",
       errorDescription: "فشل التحقق. يرجى طلب رابط جديد.",
       missingToken: "رابط التحقق لا يحتوي على رمز.",
@@ -4559,6 +4560,10 @@ const ar = {
         unreadableRange: "تعلن {{packageId}} عن {{dependency}} بنطاق الإصدارات {{range}}، ولا يمكن قراءته. صحّح النطاق ثم أعد نشر الحزمة.",
         unreadableVersion: "ثبّت إصدارًا نهائيًا من {{dependency}} ضمن {{range}}. الإصدار المثبّت {{installedVersion}} ليس بصيغة MAJOR.MINOR.PATCH.",
         unreadableDeclaration: "تعلن {{packageId}} عن تبعياتها بصيغة لا يستطيع التثبيت قراءتها. اكتبها كخريطة من معرّف الحزمة إلى نطاق الإصدارات ثم أعد نشر الحزمة.",
+      },
+      protocolCheckSkipped: {
+        noRange: "لا تحدد الحزمة {{packageId}} بروتوكول المنصة الذي تدعمه، لذلك ثُبّتت تحت البروتوكول {{protocolVersion}} دون فحص التوافق وقد لا تعمل على إصدار المنصة هذا. يُفحص عند التثبيت أي إصدار من الحزمة يصرّح بالبروتوكول الذي يدعمه (engines.protocol).",
+        unparsedRange: "تصرّح الحزمة {{packageId}} ببروتوكول المنصة على أنه {{requiredRange}}، وهو ما لا تستطيع بيئة التشغيل هذه قراءته، لذلك ثُبّتت تحت البروتوكول {{protocolVersion}} دون فحص التوافق وقد لا تعمل على إصدار المنصة هذا. يُفحص عند التثبيت أي إصدار من الحزمة يصرّح بنطاق مقروء (engines.protocol).",
       },
       localUnauthorized: "سجل الدخول إلى هذا الوقت التشغيل أولاً.",
       localMarketplaceUnavailable: "هذا الوقت التشغيل لا يحتوي على OS_CLOUD_URL مُهيأ.",

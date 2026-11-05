@@ -464,8 +464,8 @@ describe('the Interfaces rail lists a base and its pair as one list (objectstack
   });
 });
 
-describe('the rail mark never takes the row’s name (objectstack#29693)', () => {
-  it('is its glyph alone: the row prints only its label, and the mark’s text is its name and leads its tooltip', async () => {
+describe('the rail mark never takes the row’s name (objectstack#29693, objectstack#30070)', () => {
+  it('prints one short word with no fill and no glyph: its full text is its name and leads its tooltip', async () => {
     renderAt(`/studio/${BASE}/interfaces`);
     await interfacesReady();
     const row = rowOf(ifRail(), 'dashboard', 'pipeline')!;
@@ -475,11 +475,16 @@ describe('the rail mark never takes the row’s name (objectstack#29693)', () =>
     expect(mark).toHaveAttribute('data-compact');
     expect(mark).toHaveAccessibleName(label);
     expect(mark.getAttribute('title')?.split('\n')[0]).toBe(label);
-    expect(mark.textContent).toBe('');
+    expect(mark.textContent).toBe(t('engine.customizationMark.customizedShort', 'en'));
     expect(within(row).queryByText(label)).toBeNull();
     const added = within(rowOf(ifRail(), 'dashboard', 'wins')!).getByTestId('customization-mark');
     expect(added).toHaveAccessibleName(t('engine.customizationMark.added', 'en'));
-    expect(added.textContent).toBe('');
+    expect(added.textContent).toBe(t('engine.customizationMark.added', 'en'));
+    // A status, not a control: no filled block, no glyph that reads as an add button.
+    for (const m of [mark, added]) {
+      expect(m.querySelector('svg')).toBeNull();
+      expect(m.className).not.toMatch(/(^|\s)bg-/);
+    }
   });
 });
 

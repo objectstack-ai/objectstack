@@ -18,7 +18,9 @@
  *
  * The inspector keeps a thin curated layer for two cross-cutting concerns
  * the spec form can't express well on its own:
- *   1. the VIEW TYPE picker (options sourced from the spec `type` enum), and
+ *   1. the VIEW TYPE picker (options sourced from the spec `type` enum of the
+ *      view's own family: list types for a list view, form layouts for a
+ *      form view), and
  *   2. the bound OBJECT (stored at `data.object`, drives field loading).
  *
  * Column add / reorder / select lives in the live column canvas above the
@@ -140,6 +142,27 @@ export interface ViewVariantInspectorProps extends MetadataDefaultInspectorProps
   objectFieldsOverride?: ObjectFieldInfo[];
 }
 
+/**
+ * objectstack#30046 — English fallback labels for a FORM view's `type`, the
+ * form layouts of the spec's `FormViewSchema.type` enum.
+ */
+const FORM_TYPE_LABELS: Record<string, string> = {
+  simple: 'Simple',
+  tabbed: 'Tabbed',
+  wizard: 'Wizard',
+};
+
+/**
+ * objectstack#30046 — localized label for a form view's layout: the words the
+ * page form block already gives the same enum (`FormViewSchema.type`), else
+ * the English map, else the raw value.
+ */
+function formTypeLabel(value: string, locale?: string): string {
+  const key = `engine.inspector.pageBlock.option.formType.${value}`;
+  const translated = t(key, locale);
+  return translated === key ? (FORM_TYPE_LABELS[value] ?? value) : translated;
+}
+
 /** Keys re-pinned from the live draft after every spec-form edit. */
 const PRESERVED_KEYS = ['columns', 'data', 'name'] as const;
 
@@ -169,23 +192,32 @@ function readObjectBinding(
   return { value: '', path: 'top' };
 }
 
-/** Build the View-type picker's options (`InspectorSelectField`) from the spec `type` enum. */
-function useTypeOptions(locale?: string) {
+/**
+ * Build the View-type picker's options (`InspectorSelectField`) from the spec
+ * `type` enum of the view's own family. objectstack#30046 — a form view's
+ * `type` is a form layout (`FormViewSchema.type`), which the list-variant
+ * enum does not carry: read from that roster, every form view's valid type
+ * read as not found. A list view reads the list-variant enum, as before.
+ */
+function useTypeOptions(locale: string | undefined, formFamily: boolean) {
   return React.useMemo(() => {
-    const schema = getListVariantSchema();
+    const schema = formFamily ? getFormVariantSchema() : getListVariantSchema();
     const rawEnum = schema?.properties?.type?.enum;
     const values: string[] =
       Array.isArray(rawEnum) && rawEnum.length
         ? rawEnum.filter((v: unknown): v is string => typeof v === 'string')
-        : ['grid', 'kanban', 'calendar', 'gallery', 'gantt', 'timeline'];
-    const opts = values.map((v) => ({ value: v, label: typeLabel(v, locale) }));
+        : formFamily
+          ? Object.keys(FORM_TYPE_LABELS)
+          : ['grid', 'kanban', 'calendar', 'gallery', 'gantt', 'timeline'];
+    const label = formFamily ? formTypeLabel : typeLabel;
+    const opts = values.map((v) => ({ value: v, label: label(v, locale) }));
     // objectui#8488 — a `type` the spec enum does not carry used to be appended
     // here UNFLAGGED, so an off-spec view type read exactly like an offered
     // one. `InspectorSelectField` synthesises and flags it now; `typeLabel`
     // still gets its say through `unknownValueLabel` at the call site, since a
     // retired type can still have a human name in `viewTypeLabels.ts`.
     return opts;
-  }, [locale]);
+  }, [locale, formFamily]);
 }
 
 export function ViewVariantInspector({
@@ -205,9 +237,12 @@ export function ViewVariantInspector({
   const variant = (draft[variantKey] as Record<string, unknown> | undefined) ?? {};
 
   const isFormFamily = isFormFamilyKey(familyKey ?? variantKey);
+  // objectstack#30046 — a form view without a `type` is the spec's default
+  // layout (`FormViewSchema.type` defaults to `simple`), not a grid.
   const viewType =
-    typeof variant.type === 'string' ? (variant.type as string) : 'grid';
-  const typeOptions = useTypeOptions(locale);
+    typeof variant.type === 'string' ? (variant.type as string) : isFormFamily ? 'simple' : 'grid';
+  const typeOptions = useTypeOptions(locale, isFormFamily);
+  const viewTypeLabel = isFormFamily ? formTypeLabel : typeLabel;
   const binding = readObjectBinding(variant, draft);
 
   // Canonical label lives at the top level (`draft.label`); a list `config`
@@ -411,7 +446,7 @@ export function ViewVariantInspector({
         value={viewType}
         options={typeOptions}
         unknownValueLabel={(v) =>
-          flagUnknownValue(typeLabel(v, locale), t('engine.form.notFound', locale), locale)
+          flagUnknownValue(viewTypeLabel(v, locale), t('engine.form.notFound', locale), locale)
         }
         onCommit={(v) => writeVariant({ type: v })}
         disabled={readOnly}

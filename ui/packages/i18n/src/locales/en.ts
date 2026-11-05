@@ -3426,6 +3426,7 @@ const en = {
       verifyingDescription: 'Hang tight while we confirm your email.',
       successTitle: 'Email verified',
       successDescription: 'Your email is confirmed. You can now sign in.',
+      handoffSuccessDescription: 'Your email is confirmed. Go back to the app you were signing in to, and sign in there.',
       errorTitle: 'Verification failed',
       errorDescription: 'Verification failed. Please request a new link.',
       missingToken: 'Verification link is missing a token.',
@@ -5015,6 +5016,11 @@ const en = {
           unreadableRange: '{{packageId}} declares {{dependency}} with the version range {{range}}, which cannot be read. Fix the range and republish the package.',
           unreadableVersion: 'Install a release version of {{dependency}} inside {{range}}. The installed version {{installedVersion}} is not MAJOR.MINOR.PATCH.',
           unreadableDeclaration: '{{packageId}} declares its dependencies in a shape install cannot read. Write them as a map from package ID to version range and republish the package.',
+        },
+        // objectstack#30326 — the install answer's data.protocolCheckSkipped: installed, the protocol range unchecked.
+        protocolCheckSkipped: {
+          noRange: '{{packageId}} does not state which platform protocol it supports, so it was installed under protocol {{protocolVersion}} without a compatibility check and may not work on this platform version. A build of the package that declares the protocol it supports (engines.protocol) is checked at install.',
+          unparsedRange: '{{packageId}} states its platform protocol as {{requiredRange}}, which this runtime cannot read, so it was installed under protocol {{protocolVersion}} without a compatibility check and may not work on this platform version. A build of the package that declares a range this runtime reads (engines.protocol) is checked at install.',
         },
         localUnauthorized: 'Sign in to this runtime first, then try again.',
         localMarketplaceUnavailable: 'This runtime has no OS_CLOUD_URL configured, so the marketplace catalog is unreachable.',

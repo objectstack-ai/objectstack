@@ -77,11 +77,24 @@ import {
   type CustomizeBlock,
 } from './StudioCustomizeControls.js';
 import type { StudioBaseCustomization } from './StudioDesignSurface.js';
+import { StudioTranslationTable } from './StudioTranslationTable.js';
+
+/**
+ * objectstack#30285 — what the form still offers for a translation item: its
+ * identity and language. Its translation groups are the table's, below it.
+ */
+const TRANSLATION_FORM_KEYS = new Set(['label', 'locale', 'description']);
 
 /** The keys the form never offers: the identity, and the declaration Customize writes. */
-function hiddenFieldsOf(type: string): string[] {
+function hiddenFieldsOf(type: string, schema?: Record<string, unknown>): string[] {
   // An email template's locale is its member: an edit of it would write another member.
-  return type === 'email_template' ? ['name', 'locale', 'overrides'] : ['name', 'overrides'];
+  if (type === 'email_template') return ['name', 'locale', 'overrides'];
+  if (type === 'translation') {
+    const properties = schema?.properties;
+    const keys = properties && typeof properties === 'object' ? Object.keys(properties) : [];
+    return ['name', 'overrides', ...keys.filter((key) => key !== 'name' && key !== 'overrides' && !TRANSLATION_FORM_KEYS.has(key))];
+  }
+  return ['name', 'overrides'];
 }
 
 /** `doc` without its top-level `_` keys: the read's decorations are not the item's. */
@@ -246,7 +259,10 @@ export function StudioBundleItemEditor({
   const schema =
     (entry?.schema as Record<string, unknown> | undefined) ??
     (config.defaultSchema as Record<string, unknown> | undefined);
-  const Preview = useRegisteredMetadataPreview(type);
+  // objectstack#30285 — a translation's table shows its source text and gaps itself.
+  const isTranslation = type === 'translation';
+  const RegisteredPreview = useRegisteredMetadataPreview(type);
+  const Preview = isTranslation ? null : RegisteredPreview;
   // objectstack#30064 — a type with a designer of its own (a dataset) is edited in it, not in the form.
   const Designer = useRegisteredMetadataDefaultInspector(type);
   // What the designer reports as blocking (a dimension with no field): held, never sent.
@@ -639,10 +655,21 @@ export function StudioBundleItemEditor({
                 form={entry?.form}
                 value={draft}
                 onChange={onChange}
-                hiddenFields={hiddenFieldsOf(type)}
+                hiddenFields={hiddenFieldsOf(type, schema)}
                 fieldOrder={config.fieldOrder}
                 readOnly={!editable}
               />
+            )}
+            {isTranslation && (
+              <div className="mt-4">
+                <StudioTranslationTable
+                  packageId={packageId}
+                  draft={draft}
+                  onChange={onChange}
+                  readOnly={!editable}
+                  locale={locale}
+                />
+              </div>
             )}
           </div>
           {Preview && (

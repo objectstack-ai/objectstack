@@ -35,9 +35,10 @@ import {
 } from '@object-ui/components';
 import { ChevronDown, Check, Eye, Home, LayoutGrid, Pencil, Settings } from 'lucide-react';
 import { useMetadata } from '../providers/MetadataProvider.js';
-import { resolveKeyedI18nLabel, matchAppBySegment, appRouteSegment } from '../utils/index.js';
+import { matchAppBySegment, appRouteSegment } from '../utils/index.js';
 import { appAddressSegment } from '../utils/appRoute.js';
-import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
+import { useObjectTranslation } from '@object-ui/i18n';
+import { useServedAppLabel } from '../hooks/useServedAppLabel.js';
 import { useHomePath } from '../hooks/useHomePath.js';
 import { useLauncherApps } from '../hooks/useLauncherApps.js';
 import { SETUP_APP_NAME, SETUP_APP_PACKAGE_ID } from '../console/ConsoleShell.js';
@@ -77,7 +78,7 @@ export interface AppSwitcherProps {
 export function AppSwitcher({ activeAppName, onAppChange, designInStudioPath, studioPosture = 'edit' }: AppSwitcherProps) {
   const { apps: metadataApps } = useMetadata();
   const { t } = useObjectTranslation();
-  const { appLabel } = useObjectLabel();
+  const { appLabel } = useServedAppLabel();
   // objectui#7256 — 「All apps」 goes to the DECLARED home, like every other
   // Home affordance in the chrome.
   const homePath = useHomePath();
@@ -104,7 +105,7 @@ export function AppSwitcher({ activeAppName, onAppChange, designInStudioPath, st
 
   if (!activeApp) return null;
 
-  const appLabelText = appLabel({ name: activeApp.name, label: resolveKeyedI18nLabel(activeApp.label, t) });
+  const appLabelText = appLabel(activeApp);
 
   // objectui#12913 — the host asked for no switcher, and there is nothing to
   // switch to: the viewer is served one active, un-hidden app, counted off the
@@ -162,7 +163,7 @@ export function AppSwitcher({ activeAppName, onAppChange, designInStudioPath, st
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         {switchApps.map((app: any) => {
-          const label = appLabel({ name: app.name, label: resolveKeyedI18nLabel(app.label, t) });
+          const label = appLabel(app);
           const isActive = activeApp.name === app.name;
           return (
             <DropdownMenuItem
@@ -210,7 +211,7 @@ export function AppSwitcher({ activeAppName, onAppChange, designInStudioPath, st
               <span className="flex-1 truncate">
                 {/* The Setup app's own label, as its header draws it once it
                     is open, so the entry and the app it opens share one name. */}
-                {appLabel({ name: setupApp.name, label: resolveKeyedI18nLabel(setupApp.label, t) }) ||
+                {appLabel(setupApp) ||
                   t('layout.appSwitcher.settings', { defaultValue: 'Settings' })}
               </span>
               {activeApp === setupApp && <Check className="size-3.5 text-primary shrink-0" />}

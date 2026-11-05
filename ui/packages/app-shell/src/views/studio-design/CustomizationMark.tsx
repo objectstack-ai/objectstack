@@ -15,7 +15,6 @@
  */
 
 import * as React from 'react';
-import { Layers3, PencilRuler, Plus } from 'lucide-react';
 import { cn } from '@object-ui/components';
 import { customizationPackageId } from '@objectstack/spec/kernel';
 import { t, tFormat } from '../metadata-admin/i18n.js';
@@ -36,18 +35,20 @@ const KIND_CLASS: Record<CustomizationMarkChipKind, string> = {
   customizationOf: 'bg-muted text-muted-foreground',
 };
 
-/** objectstack#29693 — the glyph the compact mark draws in place of its text. */
-const KIND_ICON: Record<CustomizationMarkChipKind, React.ElementType> = {
-  customized: PencilRuler,
-  added: Plus,
-  customizationOf: Layers3,
+/** The compact mark's colour: its word alone, no fill, so it never reads as a button. */
+const KIND_TEXT_CLASS: Record<CustomizationMarkChipKind, string> = {
+  customized: 'text-violet-700 dark:text-violet-300',
+  added: 'text-emerald-700 dark:text-emerald-300',
+  customizationOf: 'text-muted-foreground',
 };
 
 /**
- * objectstack#29693 — `compact` (the pillar rails): the mark is its glyph
- * alone, so it never takes a row's name ("已定制（ObjectStack Showcase）" left a
- * selected flow row no room for its label). Its text is its accessible name
- * and leads its tooltip, before the sentence naming the pair.
+ * `compact` (the pillar rails): the mark prints one short word with no
+ * background (objectstack#30070: 定制 for customized, 新增 for added), so it
+ * reads as a status, never as a button, and never takes a row's name
+ * (objectstack#29693). Its full text is its accessible name and leads its
+ * tooltip, before the sentence naming the pair. It is not a control: a click
+ * on it is a click on its row.
  */
 export function CustomizationMark({
   kind,
@@ -64,7 +65,7 @@ export function CustomizationMark({
   pairId?: string;
   locale: string;
   className?: string;
-  /** Draw the glyph alone, the text in its accessible name and tooltip. */
+  /** Print one short word, no fill; the full text is its accessible name and leads its tooltip. */
   compact?: boolean;
 }): React.ReactElement {
   const base = baseName ?? '';
@@ -76,7 +77,6 @@ export function CustomizationMark({
     ? tFormat(`engine.customizationMark.${kind}Title`, locale, { baseName: base, pair: pairId })
     : undefined;
   if (compact) {
-    const Icon = KIND_ICON[kind];
     return (
       <span
         data-testid="customization-mark"
@@ -85,9 +85,9 @@ export function CustomizationMark({
         role="img"
         aria-label={label}
         title={title ? `${label}\n${title}` : label}
-        className={cn('inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px]', KIND_CLASS[kind], className)}
+        className={cn('inline-flex shrink-0 items-center whitespace-nowrap text-[11px] font-medium leading-none', KIND_TEXT_CLASS[kind], className)}
       >
-        <Icon className="h-3 w-3" aria-hidden="true" />
+        {kind === 'customized' ? t('engine.customizationMark.customizedShort', locale) : label}
       </span>
     );
   }

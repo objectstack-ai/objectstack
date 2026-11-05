@@ -36,11 +36,19 @@
  *     session not created after that, whatever the device's clock says
  *     ({@link isHandoffSessionFresh}). The links between `/login` and `/register`
  *     carry it beside a hand-off `redirect` ({@link handoffMarkQuery}), so following
- *     "Sign up" does not put the device's clock back in charge.
+ *     "Sign up" does not put the device's clock back in charge. So do the hops
+ *     through `/verify-email-prompt` and back to `/login`.
+ *  6. **Not from the verification mail.** The mail is opened in whatever browser
+ *     reads mail, usually not the system auth session the app is waiting on, and
+ *     often on another device. Its link ends on a Console page that says the
+ *     address is confirmed and to go back to the app, which signs in where the
+ *     hand-off started ({@link verificationCallbackURL}); it never names the
+ *     route, so no token is handed out in a browser no app is waiting on.
  */
 
 import { useLayoutEffect, useState } from 'react';
 import { getAuthEndpointUrl } from '@objectstack/spec/api';
+import { withConsoleBaseRootRelative } from '../../utils/consoleBase';
 
 /** The auth API base this Console talks to: the same formula `App.tsx` hands `AuthProvider`. */
 const AUTH_BASE = `${import.meta.env.VITE_SERVER_URL || ''}/api/v1/auth`;
@@ -132,6 +140,30 @@ export function handoffMarkQuery(
   if (handoffNavigationTarget(redirect) === null) return '';
   const refusedAt = handoffRefusedAt(search);
   return refusedAt === null ? '' : `&${HANDOFF_REFUSED_AT_PARAM}=${refusedAt}`;
+}
+
+/**
+ * On `/verify-email`, the server's landing after a verification mail whose
+ * sign-in was a hand-off (rule 6): the page says the address is confirmed and
+ * to go back to the app, and reads the server's `error` beside it.
+ */
+export const HANDOFF_VERIFIED_PARAM = 'handoff';
+
+/**
+ * The `callbackURL` a verification mail's link returns to, root-relative,
+ * or `undefined` for none (the server default).
+ *
+ * A hand-off `redirect` returns to `/verify-email` with
+ * {@link HANDOFF_VERIFIED_PARAM} (rule 6). Any other safe in-app `redirect` is
+ * resolved into the Console mount (objectui#10893), exactly as before; an unsafe
+ * one gives none.
+ */
+export function verificationCallbackURL(redirect: string | null): string | undefined {
+  if (!redirect || !redirect.startsWith('/') || redirect.startsWith('//')) return undefined;
+  if (handoffNavigationTarget(redirect) !== null) {
+    return withConsoleBaseRootRelative(`/verify-email?${HANDOFF_VERIFIED_PARAM}=verified`);
+  }
+  return withConsoleBaseRootRelative(redirect);
 }
 
 /**

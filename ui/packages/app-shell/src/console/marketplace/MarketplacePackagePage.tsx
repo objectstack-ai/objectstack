@@ -46,8 +46,9 @@ import {
 } from '@object-ui/components';
 import { ArrowLeft, ExternalLink, Download, AlertCircle, Package, Trash2, MoreHorizontal, CheckCircle2, ArrowUpCircle, Database, Loader2 } from 'lucide-react';
 import { useWorkspaceAdminStatus } from '@object-ui/auth';
-import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
+import { useObjectTranslation } from '@object-ui/i18n';
 import { useDisplayLocale } from '@object-ui/i18n';
+import { useServedAppLabel } from '../../hooks/useServedAppLabel.js';
 import { useAdapter } from '@object-ui/react';
 import { PackageIcon } from './PackageIcon.js';
 import { MarkdownText } from './MarkdownText.js';
@@ -81,10 +82,12 @@ import {
   type CloudInstallationInfo,
 } from './marketplaceApi.js';
 import { useDependencyMissingText } from './dependencyMissing.js';
+import { useProtocolCheckSkippedText } from './protocolCheckSkipped.js';
+import { ProtocolCheckSkippedNote } from './ProtocolCheckSkippedNote.js';
 import { getCloudBase, getRuntimeConfig, isMarketplaceEnabled } from '../../runtime-config.js';
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
 import { useMetadata } from '../../providers/MetadataProvider.js';
-import { appRouteSegment, filterActiveApps, resolveKeyedI18nLabel } from '../../utils/index.js';
+import { appRouteSegment, filterActiveApps } from '../../utils/index.js';
 import { waitForServedApp, type ServedApp } from './waitForServedApp.js';
 import { SuggestedBindingsPanel, type SuggestedBindingsStrings } from '../../components/SuggestedBindingsPanel.js';
 import { ConnectorCredentialsStep } from './ConnectorCredentialsStep.js';
@@ -147,6 +150,7 @@ export function MarketplacePackagePage() {
   const { isAdmin, isResolved } = useWorkspaceAdminStatus();
   const { t, language } = useObjectTranslation();
   const dependencyMissingText = useDependencyMissingText();
+  const protocolCheckSkippedText = useProtocolCheckSkippedText();
   // Dates and numbers on this surface read the display locale; a bare
   // `toLocale*()` call used the MACHINE's locale (objectui#9909).
   const displayLocale = useDisplayLocale();
@@ -186,7 +190,7 @@ export function MarketplacePackagePage() {
   // The adapter `MetadataProvider` reads through: the deploy wait asks the
   // same `GET /meta/app` the cache would, without the cache persisting it.
   const adapter = useAdapter();
-  const { appLabel } = useObjectLabel();
+  const { appLabel } = useServedAppLabel();
   // The runtime's own answer, read once per render -- the same read the
   // catalog page makes (objectui#5504). `false` means this runtime mounts no
   // marketplace at all, so there is no package to fetch and nothing to
@@ -266,6 +270,9 @@ export function MarketplacePackagePage() {
     message: string;
     unmanaged?: { strippedLocks: LocalInstallStrippedLock[] };
     credentials?: { packageId: string; note?: string };
+    // objectstack#30326 — the install answer's `protocolCheckSkipped`, drawn:
+    // installed, but its platform protocol range was not checked.
+    protocolNote?: string;
   } | null>(null);
   // ADR-0131 D6 — the install modes the package's latest manifest declares,
   // read from the manifest install-local judges, and the operator's pick among
@@ -600,6 +607,10 @@ export function MarketplacePackagePage() {
     try {
       const result = await installLocal({ packageId, ...(installMode ? { installMode } : {}) });
       const name = data?.package ? localizePackage(data.package as any, language).displayName : result.manifestId;
+      // objectstack#30326 — every success answer can say the package was
+      // admitted with its protocol range unchecked; each note below carries it.
+      const protocolNote = protocolCheckSkippedText(result) ?? undefined;
+      const withProtocolNote = protocolNote ? { protocolNote } : {};
       // An unmanaged copy (ADR-0131 D6): the package's metadata is this
       // runtime's own from now on, in the base the answer names; the answer
       // lists every protection lock the copy dropped, with the package's reason.
@@ -613,6 +624,7 @@ export function MarketplacePackagePage() {
           ok: true,
           message: t('marketplace.install.unmanagedSuccess', { version: result.version, name, base: result.targetPackageId }),
           unmanaged: { strippedLocks: result.strippedLocks },
+          ...withProtocolNote,
         });
         emitMetadataRefresh();
         return;
@@ -628,8 +640,8 @@ export function MarketplacePackagePage() {
       // and the page says when the app will appear.
       if (!result.hotLoaded) {
         setLocalResult(ignoredCopy
-          ? { ok: false, message: t('marketplace.install.unmanagedIgnored', { name }) }
-          : { ok: true, message: t('marketplace.install.localLoadsAtRestart', { version: result.version, name }) });
+          ? { ok: false, message: t('marketplace.install.unmanagedIgnored', { name }), ...withProtocolNote }
+          : { ok: true, message: t('marketplace.install.localLoadsAtRestart', { version: result.version, name }), ...withProtocolNote });
         return;
       }
       try {
@@ -638,11 +650,12 @@ export function MarketplacePackagePage() {
         // Non-fatal: the install succeeded; the app list will refresh on next navigation.
       }
       setLocalResult(ignoredCopy
-        ? { ok: false, message: t('marketplace.install.unmanagedIgnored', { name }) }
+        ? { ok: false, message: t('marketplace.install.unmanagedIgnored', { name }), ...withProtocolNote }
         : {
             ok: true,
             message: t('marketplace.install.localSuccess', { version: result.version, name }),
             credentials: { packageId: result.manifestId, note: result.credentialNote },
+            ...withProtocolNote,
           });
       emitMetadataRefresh();
     } catch (e: any) {
@@ -969,8 +982,8 @@ export function MarketplacePackagePage() {
           <Button size="sm" onClick={() => navigate(`/apps/${appRouteSegment(deployApp)}`)}>
             {t('marketplace.install.openApp', {
               name: appLabel({
+                ...deployApp,
                 name: String(deployApp.name ?? appRouteSegment(deployApp)),
-                label: resolveKeyedI18nLabel(deployApp.label, t),
               }),
             })}
           </Button>
@@ -995,6 +1008,7 @@ export function MarketplacePackagePage() {
       {localResult.ok ? <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" aria-hidden="true" /> : <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" aria-hidden="true" />}
       <div className="flex-1">
         {localResult.message}
+        {localResult.protocolNote ? <ProtocolCheckSkippedNote text={localResult.protocolNote} /> : null}
         {/* ADR-0131 D6 — each protection lock the unmanaged copy dropped, as
             the answer states it: the item, the lock and the package's reason
             verbatim, so the operator reads why the vendor locked an item

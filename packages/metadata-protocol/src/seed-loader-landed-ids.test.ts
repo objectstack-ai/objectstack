@@ -98,8 +98,9 @@ function createFaithfulEngine(opts: { refuseInsert?: (object: string, row: any) 
   return { engine, store };
 }
 
-function createMetadata(): IMetadataService {
+function createMetadata(extra: Record<string, any> = {}): IMetadataService {
   const objects: Record<string, any> = {
+    ...extra,
     lid_team: { name: 'lid_team', fields: { name: { type: 'text' } } },
     lid_case: { name: 'lid_case', fields: { name: { type: 'text' }, status: { type: 'text' } } },
     // A junction keyed on its REFERENCE: the stored `team` is the resolved
@@ -276,5 +277,117 @@ describe('SeedLoadResult.landedIds — the rows a seed landed on (#23354)', () =
     expect(result.summary.totalInserted).toBe(5);
     expect(store.lid_case).toBeUndefined();
     for (const r of result.results) expect(r.landedIds).toEqual([]);
+  });
+});
+
+/**
+ * #30348 — `SeedLoadResult.insertedIds`: which of the landed rows THIS load
+ * created. A landed id is either a row an insert created or a pre-existing
+ * row a record's key matched (updated, left as it was, or refused an update);
+ * the publish receipt splits them so a reader clears only the seed's own rows,
+ * never a customer's row that happens to share the seed's natural key.
+ */
+describe('SeedLoadResult.insertedIds — the landed rows this load created (#30348)', () => {
+  const inserted = (result: { results: Array<{ object: string; insertedIds?: string[] }> }, object: string): string[] =>
+    result.results.filter((r) => r.object === object).flatMap((r) => r.insertedIds ?? []);
+
+  it('a fresh load created every row it landed on: insertedIds equals landedIds, and the spec parse keeps it', async () => {
+    const { engine, store } = createFaithfulEngine();
+    const result = await new SeedLoaderService(engine, createMetadata(), createLogger()).load({ seeds: SEEDS, config: CONFIG });
+
+    expect(result.success).toBe(true);
+    for (const object of ['lid_team', 'lid_case', 'lid_membership']) {
+      expect(inserted(result, object)).toEqual(idsOf(store[object]));
+      expect(inserted(result, object)).toEqual(landed(result, object));
+    }
+    for (const r of result.results) expect(SeedLoadResultSchema.parse(r).insertedIds).toEqual(r.insertedIds);
+  });
+
+  it('a replay that skips or updates created nothing: every landed id is matched, none inserted', async () => {
+    const { engine, store } = createFaithfulEngine();
+    const metadata = createMetadata();
+    await new SeedLoaderService(engine, metadata, createLogger()).load({ seeds: SEEDS, config: CONFIG });
+    for (const row of store.lid_case) row.status = 'edited at runtime';
+
+    const replay = await new SeedLoaderService(engine, metadata, createLogger()).load({ seeds: SEEDS, config: CONFIG });
+
+    // Positive control: both paths ran — cases updated, teams skipped.
+    expect(replay.results.find((r) => r.object === 'lid_case')!.updated).toBe(2);
+    expect(replay.results.find((r) => r.object === 'lid_team')!.skipped).toBe(2);
+    expect(landed(replay, 'lid_case')).toEqual(idsOf(store.lid_case));
+    expect(landed(replay, 'lid_team')).toEqual(idsOf(store.lid_team));
+    for (const r of replay.results) expect(r.insertedIds).toEqual([]);
+  });
+
+  it('under `ignore`, a pre-existing row the key matched is landed but NOT inserted; a fresh record is inserted', async () => {
+    const { engine, store } = createFaithfulEngine();
+    // A customer's own row, written before any seed, sharing the seed's key.
+    store.lid_case = [{ id: 'customer-row', name: 'CASE-1', status: 'customer edit' }];
+    const seeds = [{
+      object: 'lid_case',
+      externalId: 'name',
+      mode: 'ignore',
+      records: [{ name: 'CASE-1', status: 'open' }, { name: 'CASE-2', status: 'open' }],
+    }] as any[];
+
+    const result = await new SeedLoaderService(engine, createMetadata(), createLogger()).load({ seeds, config: CONFIG });
+
+    const case2 = store.lid_case.find((r) => r.name === 'CASE-2')!.id;
+    // Positive control: `ignore` left the customer's row as it was.
+    expect(store.lid_case.find((r) => r.id === 'customer-row')!.status).toBe('customer edit');
+    expect(landed(result, 'lid_case')).toEqual(['customer-row', case2]);
+    expect(inserted(result, 'lid_case')).toEqual([case2]);
+  });
+
+  it('a matched row whose update the engine refused is landed but not inserted', async () => {
+    const { engine, store } = createFaithfulEngine();
+    const metadata = createMetadata();
+    await new SeedLoaderService(engine, metadata, createLogger()).load({ seeds: SEEDS, config: CONFIG });
+    for (const row of store.lid_case) row.status = 'edited at runtime';
+    (engine.update as any).mockImplementation(async () => {
+      throw Object.assign(new Error('Validation failed: transition refused'), { code: 'VALIDATION_FAILED', status: 400 });
+    });
+
+    const replay = await new SeedLoaderService(engine, metadata, createLogger()).load({ seeds: SEEDS, config: CONFIG });
+
+    expect(replay.results.find((r) => r.object === 'lid_case')!.errored).toBe(2);
+    expect(landed(replay, 'lid_case')).toEqual(idsOf(store.lid_case));
+    expect(inserted(replay, 'lid_case')).toEqual([]);
+  });
+
+  it('the self-referencing (sequential) write path reports its inserts too', async () => {
+    const { engine, store } = createFaithfulEngine();
+    const metadata = createMetadata({
+      lid_node: { name: 'lid_node', fields: { name: { type: 'text' }, parent: { type: 'lookup', reference: 'lid_node' } } },
+    });
+    const seeds = [{
+      object: 'lid_node',
+      externalId: 'name',
+      mode: 'upsert',
+      records: [{ name: 'root' }, { name: 'leaf', parent: 'root' }],
+    }] as any[];
+
+    const first = await new SeedLoaderService(engine, metadata, createLogger()).load({ seeds, config: CONFIG });
+    expect(first.success).toBe(true);
+    expect(inserted(first, 'lid_node')).toEqual(idsOf(store.lid_node));
+    expect(inserted(first, 'lid_node')).toHaveLength(2);
+
+    const replay = await new SeedLoaderService(engine, metadata, createLogger()).load({ seeds, config: CONFIG });
+    expect(landed(replay, 'lid_node')).toEqual(idsOf(store.lid_node));
+    expect(inserted(replay, 'lid_node')).toEqual([]);
+  });
+
+  it('a refused insert and a dry run create nothing', async () => {
+    const { engine, store } = createFaithfulEngine({ refuseInsert: (o, row) => o === 'lid_case' && row.name === 'CASE-2' });
+    const result = await new SeedLoaderService(engine, createMetadata(), createLogger()).load({ seeds: SEEDS, config: CONFIG });
+    expect(inserted(result, 'lid_case')).toEqual(idsOf(store.lid_case));
+    expect(inserted(result, 'lid_case')).toHaveLength(1);
+
+    const dry = createFaithfulEngine();
+    const dryRun = await new SeedLoaderService(dry.engine, createMetadata(), createLogger()).load({
+      seeds: SEEDS,
+      config: { ...CONFIG, dryRun: true },
+    });
+    for (const r of dryRun.results) expect(r.insertedIds).toEqual([]);
   });
 });
