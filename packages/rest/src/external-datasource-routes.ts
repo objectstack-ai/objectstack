@@ -8,15 +8,24 @@ import {
   ANONYMOUS_DENY_STATUS,
   ANONYMOUS_DENY_CODE,
   ANONYMOUS_DENY_MESSAGE,
+  AuthzStoreUnavailableError,
+  classifyAdmissionTenancyPosture,
+  effectiveTenancyPosture,
+  isAuthzStoreUnavailableError,
   type AuthGate,
   type PluginContext,
+  type TenancyPostureSource,
 } from '@objectstack/core';
+// [ADR-0131 D3 · D12 items 7–8 · D11] The walled refusal every door that writes
+// the environment's metadata asks, the metadata save door among them.
+import { walledCatalogWriteVerdict } from '@objectstack/metadata-core';
 import type { ErrorCode } from '@objectstack/spec/api';
 import type {
   IExternalDatasourceService,
   IHttpServer,
   SchemaValidationReport,
 } from '@objectstack/spec/contracts';
+import type { TenancyPosture } from '@objectstack/spec/security';
 // The declared envelope is written in ONE place for the whole platform (#3973).
 // [#22719] …and so is the read of a sandboxed hook's refusal sentence.
 import { sendOk, sendError, sandboxBusinessMessage } from '@objectstack/types';
@@ -133,6 +142,14 @@ export interface ExternalDatasourceRoutesOptions {
      * only for a session the policy holds; the floor refuses on it.
      */
     authGate?: AuthGate;
+    /**
+     * [ADR-0131 D3 · D12 items 7–8] The caller's ADR-0095 posture rung
+     * (`ExecutionContext.posture`), the field the metadata save door hands the
+     * walled refusal. Read by the import route only: under a walled tenancy
+     * posture the platform operator rung is what admits a write to the
+     * environment's catalog.
+     */
+    posture?: unknown;
   } | undefined>;
 }
 
@@ -267,6 +284,34 @@ export function registerExternalDatasourceRoutes(
   const ext = `${basePath}/datasources/:name/external`;
 
   /**
+   * [ADR-0131 D3 · D12 items 7–8 · D11] The deployment's EFFECTIVE tenancy
+   * posture, for the walled refusal {@link refuseFederationRequest} asks of a
+   * route that saves a catalog item. Read per request, off this registrar's own
+   * kernel: the one its `external-datasource` lookup reads, so the posture
+   * judged and the service that writes come from the same kernel. Through the
+   * shared classification (`classifyAdmissionTenancyPosture`): no `tenancy`
+   * service is the supported composition and answers `undefined`, inert as
+   * `single` is, while one that is registered and cannot answer raises
+   * `AuthzStoreUnavailableError`, never a permit. A host with no async
+   * accessor (`KernelBase`-shaped) supports no service factories, so "not
+   * registered" is the only fault its synchronous lookup reports, and it is
+   * read as that same composition.
+   */
+  const tenancyPostureInForce = async (): Promise<TenancyPosture | undefined> => {
+    const kernel = (typeof ctx.getKernel === 'function' ? ctx.getKernel() : undefined) as
+      | { getServiceAsync?: <T>(name: string) => Promise<T> }
+      | undefined;
+    if (kernel && typeof kernel.getServiceAsync === 'function') {
+      return classifyAdmissionTenancyPosture(() => kernel.getServiceAsync!<TenancyPostureSource>('tenancy'));
+    }
+    try {
+      return effectiveTenancyPosture(ctx.getService<TenancyPostureSource>('tenancy'));
+    } catch {
+      return undefined;
+    }
+  };
+
+  /**
    * [#9686 authentication, #9901 capability] The admission floor for this whole
    * family. Answers `401 UNAUTHENTICATED`, `403 PERMISSION_DENIED` or, for a
    * session the ADR-0069 policy holds, `403` with the gate's own code, and
@@ -380,14 +425,36 @@ export function registerExternalDatasourceRoutes(
    * be a door no route walks through, so it is REMOVED rather than kept — a
    * spare lower gate is exactly what a future un-ruled route could silently
    * adopt.
+   *
+   * ## [ADR-0131 D3 · D12 items 7–8 · D11] …and the walled refusal on a call that saves a catalog item
+   *
+   * Under a walled tenancy posture (`isolated`, `group`) every organization
+   * shares the environment's metadata catalog, and every write to it is the
+   * platform operator's: an organization's administrator holding both
+   * federation capabilities is still below that rung. A route that SAVES an item
+   * into the catalog names the item's type in `catalogWrite`, and this guard
+   * then asks `walledCatalogWriteVerdict` (`@objectstack/metadata-core`) after
+   * the capability rule, with the caller's posture rung and `isSystem` off the
+   * same resolution: the verdict the metadata save door asks, never restated
+   * here. Inert under `single` and with no `tenancy` service. The import names
+   * `'object'`, the type it saves. Asked before the service lookup like
+   * everything above, so the refusal precedes the remote introspection and the
+   * write. Answered `403 PERMISSION_DENIED`, this family's spelling of a 403,
+   * with the verdict's sentence; a posture that could not be read answers the
+   * outage's `503`, never a permit.
+   *
+   * `isSystem` reaches the verdict as it reaches it at every walled door: it is
+   * the verdict's own admission, and it is never resolved from inbound HTTP, so
+   * no wire caller takes it.
    */
   const refuseFederationRequest = async (
     req: any,
     res: any,
     kind: FederationCallKind,
+    catalog: { catalogWrite?: string } = {},
   ): Promise<boolean> => {
     let authz:
-      | { userId?: string | null; isSystem?: boolean; systemPermissions?: string[]; authGate?: AuthGate }
+      | { userId?: string | null; isSystem?: boolean; systemPermissions?: string[]; authGate?: AuthGate; posture?: unknown }
       | undefined;
     try {
       authz = await options.resolveExecutionContext?.(req);
@@ -429,6 +496,26 @@ export function registerExternalDatasourceRoutes(
     if (refusal !== undefined) {
       sendError(res, 403, 'PERMISSION_DENIED', refusal);
       return true;
+    }
+    if (catalog.catalogWrite !== undefined) {
+      let posture: TenancyPosture | undefined;
+      try {
+        posture = await tenancyPostureInForce();
+      } catch (err) {
+        const outage = isAuthzStoreUnavailableError(err) ? err : new AuthzStoreUnavailableError('tenancy', err);
+        sendError(res, outage.status, outage.code, outage.message);
+        return true;
+      }
+      const walled = walledCatalogWriteVerdict({
+        type: catalog.catalogWrite,
+        tenancyPosture: posture,
+        isSystem: authz?.isSystem === true,
+        callerPosture: authz?.posture,
+      });
+      if (!walled.allowed) {
+        sendError(res, 403, 'PERMISSION_DENIED', walled.message);
+        return true;
+      }
     }
     return false;
   };
@@ -629,12 +716,17 @@ export function registerExternalDatasourceRoutes(
     // A 'write' that answers with the generated definition — the remote table's
     // structure — so it requires the read capability as well as the write one
     // (2026-11-03 ruling; `federationCapabilityRefusal`).
+    //
+    // [ADR-0131 D3 · D12 items 7–8 · D11] …and it saves an `object` into the
+    // environment's metadata catalog, so under a walled tenancy posture it is
+    // the platform operator's, refused as the metadata save door refuses any
+    // other catalog write (`refuseFederationRequest`'s `catalogWrite`).
     {
       method: 'POST',
       path: `${ext}/tables/:remote/import`,
       metadata: { summary: 'Import a remote table as a federated object', tags: ['datasources'] },
       handler: async (req: any, res: any) => {
-        if (await refuseFederationRequest(req, res, 'write')) return;
+        if (await refuseFederationRequest(req, res, 'write', { catalogWrite: 'object' })) return;
         const svc = externalService();
         if (!svc?.importObject) return unavailable(res);
         try {

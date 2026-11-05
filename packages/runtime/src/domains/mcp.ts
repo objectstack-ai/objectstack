@@ -19,6 +19,10 @@ import {
     federationCapabilityRefusal,
     type FederationCallKind,
 } from '@objectstack/rest';
+// [ADR-0131 D3 · D12 items 7–8 · D11] The walled refusal every door that writes
+// the environment's metadata asks, read through this transport's one posture read.
+import { walledCatalogWriteVerdict } from '@objectstack/metadata-core';
+import { readEffectiveTenancyPosture } from './activation-gate.js';
 import { buildApiError } from '../error-envelope.js';
 import * as actionExec from '../action-execution.js';
 import { actionInvocationFailure, recordActionInvocation, withActionSurface } from '../action-invocation-audit.js';
@@ -948,12 +952,18 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
         // need the read capability, and an envelope holding only the write one
         // can pass neither — it is carried neither, as a `metadata:write`-only
         // grant is.
+        //
+        // [ADR-0131 D3 · D12 items 7–8 · D11] The import saves an `object` into
+        // the environment's metadata catalog, so it names that type and
+        // {@link federationService} asks the walled refusal for it, as the REST
+        // route does. The listing stays a pure capability decision: the posture
+        // read is per call, and the pair is listed where a call of it can pass.
         ...(federationPairCallable(ec)
             ? {
                 listRemoteTables: async (datasource: string, opts: { schema?: string }) =>
                     (await federationService(deps, context, ec, 'read')).listRemoteTables(datasource, opts),
                 importObject: async (datasource: string, remoteName: string, opts: { name?: string; writable?: boolean }) =>
-                    (await federationService(deps, context, ec, 'write')).importObject(datasource, remoteName, opts),
+                    (await federationService(deps, context, ec, 'write', { catalogWrite: 'object' })).importObject(datasource, remoteName, opts),
             }
             : {}),
     };
@@ -998,16 +1008,41 @@ function federationPairCallable(ec: any): boolean {
  * so `import_object` — which answers with the generated definition — needs
  * the read capability as well as the write one, and its refusal is the
  * route's sentence.
+ *
+ * [ADR-0131 D3 · D12 items 7–8 · D11] A call that saves an item into the
+ * environment's metadata catalog names its type in `catalogWrite`, and is then
+ * asked the walled refusal after the capability rule and before the service
+ * lookup, as the REST import route asks it: `walledCatalogWriteVerdict`
+ * (`@objectstack/metadata-core`), the verdict the metadata save door asks,
+ * never restated. Under a walled tenancy posture only the platform operator
+ * rung (or `isSystem`) is admitted, whatever the caller holds; inert under
+ * `single` and with no `tenancy` service. The posture is this transport's one
+ * read ({@link readEffectiveTenancyPosture}, which every walled door of the
+ * dispatcher reads), so a `tenancy` service that cannot answer raises the
+ * outage's `503`, never a permit. Refused `403 PERMISSION_DENIED` with the
+ * verdict's sentence, the route's answer.
  */
 async function federationService(
     deps: DomainHandlerDeps,
     context: HttpProtocolContext,
     ec: any,
     kind: FederationCallKind,
+    catalog: { catalogWrite?: string } = {},
 ): Promise<IExternalDatasourceService> {
     const refusal = federationCapabilityRefusal(kind, heldFederationCapabilities(ec));
     if (refusal !== undefined) {
         throw Object.assign(new Error(refusal), { code: 'PERMISSION_DENIED', status: 403 });
+    }
+    if (catalog.catalogWrite !== undefined) {
+        const walled = walledCatalogWriteVerdict({
+            type: catalog.catalogWrite,
+            tenancyPosture: await readEffectiveTenancyPosture(deps, context),
+            isSystem: ec?.isSystem === true,
+            callerPosture: ec?.posture,
+        });
+        if (!walled.allowed) {
+            throw Object.assign(new Error(walled.message), { code: 'PERMISSION_DENIED', status: 403 });
+        }
     }
     let service: IExternalDatasourceService | undefined;
     try {
