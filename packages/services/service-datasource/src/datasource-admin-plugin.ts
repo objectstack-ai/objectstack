@@ -1008,9 +1008,20 @@ export class DatasourceAdminServicePlugin implements Plugin {
       if (typeof driver?.connect === 'function') await driver.connect();
       // Prefer a cheap ping; fall back to the engine driver's health check, then
       // a schema introspection round-trip — whichever the handle exposes.
-      if (typeof driver?.ping === 'function') await driver.ping();
-      else if (typeof driver?.checkHealth === 'function') await driver.checkHealth();
+      //
+      // [#30407] The answer is read, not only awaited: the shared factory's
+      // `toHandle` (and `createPrebuiltDriverFactory`) map `ping` to the
+      // driver's own `checkHealth()`, which reports an unhealthy connection by
+      // answering `false` rather than throwing. A connect that only warns and
+      // then reports itself unhealthy answered Test connection `ok: true`.
+      // Only a literal `false` refuses: `ping` is `Promise<unknown>` on the
+      // contract, and a host-built handle's ping that answers nothing (or any
+      // other value) keeps meaning "the round-trip succeeded".
+      let health: unknown;
+      if (typeof driver?.ping === 'function') health = await driver.ping();
+      else if (typeof driver?.checkHealth === 'function') health = await driver.checkHealth();
       else if (typeof driver?.introspectSchema === 'function') await driver.introspectSchema();
+      if (health === false) return { ok: false, error: UNHEALTHY_PROBE_REFUSAL };
       const latencyMs = elapsedSince(startedAt);
       let serverVersion: string | undefined;
       try {
@@ -1030,6 +1041,16 @@ export class DatasourceAdminServicePlugin implements Plugin {
     }
   }
 }
+
+/**
+ * [#30407] What Test connection answers when the driver connected but its own
+ * health check answered `false`. The thrown-error path keeps answering the
+ * driver's message; this is the one answer for a health check that reports
+ * failure without throwing.
+ */
+const UNHEALTHY_PROBE_REFUSAL =
+  'The driver connected, but its health check reported the database as unhealthy, so this '
+  + 'connection is not usable. Check that the database exists and accepts these settings, then test again.';
 
 function safeGetService<T>(ctx: PluginContext, name: string): T | undefined {
   try {
