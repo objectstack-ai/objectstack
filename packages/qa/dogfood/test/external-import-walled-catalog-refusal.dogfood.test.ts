@@ -26,7 +26,12 @@
 // not endorse the spelling for new code.
 //
 // The verify harness does not mount the federation service or the MCP server,
-// so this file mounts both, as `objectstack dev` and `serve` do. The showcase's
+// so this file mounts both, as `objectstack dev` and `serve` do. The MCP pair is
+// registered only for an OAuth agent granted `metadata:write`, and an agent holds
+// its user's system capabilities only under `actions:execute`, so each MCP call
+// below presents a REAL access token with both scopes (DCR → authorize with the
+// MCP resource → consent → token), consented from a session active in the
+// organization the agent then acts in. The showcase's
 // external datasource names a cwd-relative SQLite file, and every dogfood file
 // runs in its own temporary working directory (`per-file-cwd.setup.ts`), so the
 // remote tables `onEnable` provisions here are this file's own. The
@@ -34,6 +39,7 @@
 // package, which under a wall only the platform operator creates: the operator
 // ensures it first, so a refusal below is the wall's and never the landing's.
 
+import { createHash, randomBytes } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { onEnable } from '@objectstack/example-showcase';
 import { resolveUserAuthzGrants } from '@objectstack/core';
@@ -55,6 +61,14 @@ const importPath = (remote: string) => `/datasources/${DATASOURCE}/external/tabl
 const IMPORTER_SET = 'federation_importer';
 const IMPORTER_CAPABILITIES = ['manage_metadata', 'manage_platform_settings'];
 
+/** The operator's dev credentials and A's password. */
+const OPERATOR = { email: 'admin@objectos.ai', password: 'admin123' };
+const PASSWORD_A = 'Fed-Import-Pass-123';
+
+/** An agent that may author metadata and holds its user's system capabilities. */
+const AGENT_SCOPE = 'openid profile email offline_access metadata:write actions:execute';
+const REDIRECT_URI = 'http://127.0.0.1:33419/callback';
+
 /** A JSON-RPC MCP request over Streamable-HTTP (JSON response mode). */
 const mcpBody = (method: string, params?: unknown, id = 1) =>
   ({ jsonrpc: '2.0', id, method, ...(params !== undefined ? { params } : {}) });
@@ -66,12 +80,82 @@ interface Harness {
   tokA: string;
   userA: string;
   orgA?: string;
+  /** OAuth access tokens for the MCP door, scoped {@link AGENT_SCOPE}. */
+  agentOperator: string;
+  agentA: string;
+}
+
+/**
+ * A real OAuth access token for the MCP resource: DCR, a password sign-in, the
+ * organization made active on that session when one is named (the consent binds
+ * the session's active organization), authorize, consent, token.
+ */
+async function mintAgentToken(
+  stack: VerifyStack,
+  who: { email: string; password: string },
+  organizationSlug?: string,
+): Promise<string> {
+  const authSvc: any = await stack.kernel.getServiceAsync('auth');
+  const resource = authSvc.getMcpResourceUrl();
+  const reg = await stack.api('/auth/oauth2/register', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      client_name: 'federation import probe', redirect_uris: [REDIRECT_URI], grant_types: ['authorization_code', 'refresh_token'],
+      response_types: ['code'], token_endpoint_auth_method: 'none', application_type: 'native', scope: AGENT_SCOPE,
+    }),
+  });
+  const regBody: any = await reg.json();
+  expect(reg.status, JSON.stringify(regBody)).toBe(201);
+  const signin = await stack.api('/auth/sign-in/email', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(who),
+  });
+  expect(signin.status, await signin.clone().text()).toBe(200);
+  const cookie = ((signin.headers as any).getSetCookie() as string[]).map((c) => c.split(';')[0]).join('; ');
+  if (organizationSlug) {
+    const active = await stack.api('/auth/organization/set-active', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie, origin: 'http://localhost:3000' },
+      body: JSON.stringify({ organizationSlug }),
+    });
+    expect(active.status, await active.clone().text()).toBe(200);
+  }
+  const verifier = randomBytes(32).toString('base64url');
+  const challenge = createHash('sha256').update(verifier).digest('base64url');
+  const qs = new URLSearchParams({
+    client_id: regBody.client_id, redirect_uri: REDIRECT_URI, response_type: 'code', scope: AGENT_SCOPE, state: 'st',
+    code_challenge: challenge, code_challenge_method: 'S256', resource,
+  });
+  const az = await stack.api(`/auth/oauth2/authorize?${qs}`, { headers: { cookie }, redirect: 'manual' });
+  const loc = az.headers.get('location') ?? '';
+  let code = new URL(loc, 'http://localhost:3000').searchParams.get('code');
+  if (!code) {
+    const consent = await stack.api('/auth/oauth2/consent', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie, origin: 'http://localhost:3000' },
+      body: JSON.stringify({ accept: true, oauth_query: loc.slice(loc.indexOf('?')) }),
+    });
+    const cb: any = await consent.json().catch(() => null);
+    code = new URL(cb?.redirect_uri ?? cb?.url).searchParams.get('code');
+  }
+  const tok = await stack.api('/auth/oauth2/token', {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code', code: code!, redirect_uri: REDIRECT_URI, client_id: regBody.client_id, code_verifier: verifier, resource,
+    }).toString(),
+  });
+  const tj: any = await tok.json();
+  expect(tok.status, JSON.stringify(tj)).toBe(200);
+  return String(tj.access_token);
 }
 
 async function boot(posture: 'group' | 'single'): Promise<Harness> {
   const walled = posture !== 'single';
   if (walled) process.env.OS_TENANCY_POSTURE = posture;
   else delete process.env.OS_TENANCY_POSTURE;
+  // The OAuth authorization server the MCP door's access tokens come from.
+  process.env.OS_OIDC_PROVIDER_ENABLED = 'true';
   // Provision the remote tables, exactly as `os dev` does at boot (the harness
   // imports only the stack's default export, so `onEnable` never runs on its own).
   await onEnable({ logger: { info() {}, warn() {} } } as never);
@@ -82,10 +166,10 @@ async function boot(posture: 'group' | 'single'): Promise<Harness> {
   const ql: any = await stack.kernel.getServiceAsync('objectql');
   const operator = await stack.signIn();
   const email = `fed-import-a-${posture}@wall.test`;
-  const tokA = await stack.signUp(email);
-  const h: Harness = { stack, ql, operator, tokA, userA: '' };
+  const tokA = await stack.signUp(email, PASSWORD_A);
+  const h: Harness = { stack, ql, operator, tokA, userA: '', agentOperator: '', agentA: '' };
+  const slug = `fed-import-a-${posture}`;
   if (walled) {
-    const slug = `fed-import-a-${posture}`;
     const created = await stack.apiAs(tokA, 'POST', '/auth/organization/create', { name: slug, slug });
     expect(created.status, await created.clone().text()).toBe(200);
     h.orgA = ((await created.json()) as { id: string }).id;
@@ -105,6 +189,8 @@ async function boot(posture: 'group' | 'single'): Promise<Harness> {
     { user_id: h.userA, permission_set: IMPORTER_SET, ...(h.orgA ? { organization_id: h.orgA } : {}) },
     { context: { ...SYS, ...(h.orgA ? { tenantId: h.orgA } : {}) } },
   );
+  h.agentOperator = await mintAgentToken(stack, OPERATOR);
+  h.agentA = await mintAgentToken(stack, { email, password: PASSWORD_A }, walled ? slug : undefined);
   return h;
 }
 
@@ -132,8 +218,24 @@ async function importOverMcp(h: Harness, token: string, remote: string, name: st
   expect(rpc.error, `tools/call import_object JSON-RPC error: ${JSON.stringify(rpc.error)}`).toBeUndefined();
   const text = rpc.result?.content?.[0]?.text;
   expect(typeof text, 'the tool result carries text content').toBe('string');
-  const parsed = JSON.parse(text);
+  let parsed: any;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    parsed = undefined;
+  }
+  expect(parsed, `the tool result is a JSON envelope: ${text}`).toBeTypeOf('object');
   return { isError: rpc.result?.isError === true, error: parsed?.error, object: parsed?.object };
+}
+
+/** The process environment this file sets, read before a boot and put back after it. */
+const ENV_KEYS = ['OS_TENANCY_POSTURE', 'OS_OIDC_PROVIDER_ENABLED'] as const;
+const snapshotEnv = () => Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]])) as Record<string, string | undefined>;
+function restoreEnv(snapshot: Record<string, string | undefined>): void {
+  for (const k of ENV_KEYS) {
+    if (snapshot[k] === undefined) delete process.env[k];
+    else process.env[k] = snapshot[k];
+  }
 }
 
 /** What the platform operator reads at `GET /meta/object/:name`. */
@@ -143,13 +245,12 @@ async function storedStatus(h: Harness, name: string): Promise<number> {
 
 describe('[ADR-0131 D12 items 7–8] group: an import is a write to the environment\'s catalog, and it is the platform operator\'s at both import doors', () => {
   let h: Harness;
-  const previous = process.env.OS_TENANCY_POSTURE;
+  const previous = snapshotEnv();
 
   beforeAll(async () => { h = await boot('group'); }, 180_000);
   afterAll(async () => {
     await h?.stack?.stop?.();
-    if (previous === undefined) delete process.env.OS_TENANCY_POSTURE;
-    else process.env.OS_TENANCY_POSTURE = previous;
+    restoreEnv(previous);
   });
 
   it('guard the guard: a real walled posture; A holds both federation capabilities in org A and is not the platform operator', async () => {
@@ -184,7 +285,7 @@ describe('[ADR-0131 D12 items 7–8] group: an import is a write to the environm
   it('MCP: A\'s `import_object` is refused with the same code and sentence, and nothing is saved', async () => {
     const name = 'showcase_custom_wall_mcp_cust';
     const rest = await importOverRest(h, h.tokA, 'customers', 'showcase_custom_wall_rest_probe');
-    const imported = await importOverMcp(h, h.tokA, 'customers', name);
+    const imported = await importOverMcp(h, h.agentA, 'customers', name);
     expect(imported.isError, JSON.stringify(imported)).toBe(true);
     expect({ code: imported.error?.code, status: imported.error?.status }).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
     expect(imported.error?.message).toBe(rest.message);
@@ -200,7 +301,7 @@ describe('[ADR-0131 D12 items 7–8] group: an import is a write to the environm
     expect(await storedStatus(h, restName)).toBe(200);
 
     const mcpName = 'showcase_custom_wall_op_mcp';
-    const mcp = await importOverMcp(h, h.operator, 'orders', mcpName);
+    const mcp = await importOverMcp(h, h.agentOperator, 'orders', mcpName);
     expect(mcp.isError, JSON.stringify(mcp)).toBe(false);
     expect(mcp.object?.name).toBe(mcpName);
     expect(await storedStatus(h, mcpName)).toBe(200);
@@ -209,13 +310,12 @@ describe('[ADR-0131 D12 items 7–8] group: an import is a write to the environm
 
 describe('[ADR-0131 D11] single: the wall is not enforced, and an administrator below the platform operator imports at both doors as before', () => {
   let h: Harness;
-  const previous = process.env.OS_TENANCY_POSTURE;
+  const previous = snapshotEnv();
 
   beforeAll(async () => { h = await boot('single'); }, 180_000);
   afterAll(async () => {
     await h?.stack?.stop?.();
-    if (previous === undefined) delete process.env.OS_TENANCY_POSTURE;
-    else process.env.OS_TENANCY_POSTURE = previous;
+    restoreEnv(previous);
   });
 
   it('guard the guard: no wall, and A holds both federation capabilities and is not the platform operator', async () => {
@@ -235,7 +335,7 @@ describe('[ADR-0131 D11] single: the wall is not enforced, and an administrator 
     expect(await storedStatus(h, restName)).toBe(200);
 
     const mcpName = 'showcase_custom_open_mcp';
-    const mcp = await importOverMcp(h, h.tokA, 'orders', mcpName);
+    const mcp = await importOverMcp(h, h.agentA, 'orders', mcpName);
     expect(mcp.isError, JSON.stringify(mcp)).toBe(false);
     expect(mcp.object?.name).toBe(mcpName);
     expect(await storedStatus(h, mcpName)).toBe(200);
