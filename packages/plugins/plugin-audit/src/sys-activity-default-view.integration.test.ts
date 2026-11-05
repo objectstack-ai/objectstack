@@ -152,7 +152,7 @@ describe('sys_activity default list view — the rows it serves', () => {
 
   it('a system write on a business object leaves actor_id null; a person\'s carries the person', async () => {
     const mirrored = (await engine.find(ACTIVITY, {
-      where: { object_name: DEAL, record_id: { $nin: ['d1', 'd2'] } },
+      where: { object_name: DEAL, record_id: { $nin: ['d1', 'd2', 'd3'] } },
       context: SYS,
     })) as Row[];
     const byActor = mirrored.map((r) => r.actor_id ?? null).sort();
