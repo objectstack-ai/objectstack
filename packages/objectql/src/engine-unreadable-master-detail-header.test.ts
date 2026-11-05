@@ -45,8 +45,9 @@
  *  the mechanism: the read door first, then the elevated read;
  *  CONTROLS: a readable header unchanged (its stored values judged, a masked
  *  column included); a nonexistent id; a `controlled_by_parent` detail
- *  unchanged; a system caller unchanged (no read door asked); a plain `lookup`
- *  to the same object keeps its elevated probe (not this rule's).
+ *  unchanged; a system caller unchanged (no read door asked). [#29029] A plain
+ *  `lookup` to the same object takes the same rule since ruling record
+ *  6573561091 (its own pins: `engine-unreadable-reference-target.test.ts`).
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -119,7 +120,7 @@ const CBP_LINE_OBJECT = {
   fields: { ...REQ_LINE_OBJECT.fields, invoice: { ...invoiceField, required: true } },
 };
 
-/** A plain `lookup` to the same object: its probe is not this rule's. */
+/** [#29029] A plain `lookup` to the same object: the same rule since ruling record 6573561091. */
 const LOOKUP_NOTE_OBJECT = {
   name: LOOKUP_NOTE,
   label: 'Lookup note',
@@ -338,13 +339,14 @@ describe('[#22519] an unreadable master-detail header answers what a nonexistent
       expect([...storeFor(PLAIN_LINE).values()].some((r) => r.invoice === 'h_mine_locked')).toBe(true);
     });
 
-    it('control: a plain lookup to the same object keeps its elevated probe — not this rule\'s', async () => {
-      await engine.insert(LOOKUP_NOTE, { invoice_ref: 'h_other_open' }, { context: ALICE } as any);
-      expect([...storeFor(LOOKUP_NOTE).values()].map((r) => r.invoice_ref)).toEqual(['h_other_open']);
+    it('[#29029] a plain lookup to the same object takes the same rule: an unreadable target is refused as a nonexistent one is', async () => {
       const nowhere = await refusalOf(() => engine.insert(LOOKUP_NOTE, { invoice_ref: NOWHERE }, { context: ALICE } as any));
       expect(envelopeOf(nowhere)).toEqual({ ...NOT_FOUND, fields: [{ field: 'invoice_ref', code: 'reference_not_found' }] });
-      // No read door was asked for it.
-      expect(headerReads.filter((r) => !r.elevated)).toEqual([]);
+      const unreadable = await refusalOf(() => engine.insert(LOOKUP_NOTE, { invoice_ref: 'h_other_open' }, { context: ALICE } as any));
+      expect(envelopeOf(unreadable)).toEqual(envelopeOf(nowhere));
+      expect(storeFor(LOOKUP_NOTE).size).toBe(0);
+      // The caller's read door was asked for it.
+      expect(headerReads.some((r) => !r.elevated)).toBe(true);
     });
   });
 

@@ -24,7 +24,7 @@
  * that call a module helper `engine.ts` still needs elsewhere
  * (`settleMasterDetailLanding`, `resolvePreviewParents`,
  * `resolvePredicateRelated`, `resolveOneHopRelated`); and
- * `masterDetailHeaderExists`, `materializeParentHeader` and
+ * `callerReadableReferenceExists`, `materializeParentHeader` and
  * `masterDeclaredFields`, whose bodies are no longer than the host literal
  * moving them would cost.
  *
@@ -36,7 +36,7 @@
  * literal of exactly the {@link ReferentialIntegrityHost} members that method
  * reads, plus a `.call`. The one field a body reads (`logger`) goes as a
  * GETTER, so the read happens when the body makes it, as it did. The methods
- * they call (`find`, `masterDetailHeaderExists`, `referenceExists`) go as
+ * they call (`find`, `callerReadableReferenceExists`, `referenceExists`) go as
  * late-bound closures over the instance, so a double or spy set on the engine
  * is still the one a call reaches.
  *
@@ -67,7 +67,7 @@ import type { ObjectQL } from './engine.js';
 export interface ReferentialIntegrityHost {
   readonly logger: ObjectQL['logger'];
   find: ObjectQL['find'];
-  masterDetailHeaderExists: ObjectQL['masterDetailHeaderExists'];
+  callerReadableReferenceExists: ObjectQL['callerReadableReferenceExists'];
   referenceExists: ObjectQL['referenceExists'];
 }
 
@@ -83,6 +83,17 @@ function isEmptyReferenceValue(v: unknown): boolean {
   if (Array.isArray(v)) return v.length === 0 || v.every((e) => e === null || e === undefined || e === '');
   return false;
 }
+
+/**
+ * [#29029] The reference types whose target a non-system write may name only
+ * when the caller's own read door returns it: `master_detail` (#22519), and
+ * `lookup` and `user` with it. A target the caller cannot read answers
+ * `reference_not_found`, exactly as a target that exists nowhere. `tree`, the
+ * one other reference type, keeps the elevated existence probe: the rulings
+ * that tightened this set (records 6573561091 and 6663849489) name `lookup`
+ * and `user` only.
+ */
+const CALLER_READ_REFERENCE_TYPES: ReadonlySet<string> = new Set(['master_detail', 'lookup', 'user']);
 
 /**
  * [#4441] Referential integrity on the WRITE path: a `lookup` (or any
@@ -140,15 +151,14 @@ function isEmptyReferenceValue(v: unknown): boolean {
  *   to answer for. A value new to any of the rows is refused as before, and
  *   an insert has no stored rows, so every value it supplies is judged.
  *
- * ## Why the probe bypasses RLS — and why it keeps the tenant wall
+ * ## Why the existence probe bypasses RLS — and why it keeps the tenant wall
  *
  * Existence is a fact about the database, not about the caller's ROW-LEVEL
- * visibility — the same distinction the #4435 existence probe turns on. A
- * probe under the caller's own context would refuse a link to a permission
- * set the caller cannot READ, which is ordinary in an RLS-scoped deployment
- * and would make the platform's own admin flows fail. Whether the caller may
- * create the binding at all is the RBAC/RLS layer's decision, made where it
- * already is. So the probe is elevated: `isSystem` bypasses RBAC, RLS and FLS.
+ * visibility — the same distinction the #4435 existence probe turns on. So
+ * the existence probe ({@link referenceExists}) is elevated: `isSystem`
+ * bypasses RBAC, RLS and FLS. Whether a NON-system caller may name the row is
+ * the separate question the next section answers, and it is asked first, of
+ * the caller's own read door, for every reference type but `tree`.
  *
  * That argument is about visibility, never about TENANCY, and the elevation
  * is therefore `sudo()`-shaped — `{ ...context, isSystem: true }`, see
@@ -167,28 +177,37 @@ function isEmptyReferenceValue(v: unknown): boolean {
  * tenant's (ADR-0131 D1): the driver's scope is the organization equality,
  * with no `IS NULL` arm, so an org-bound caller's probe does not find one.
  *
- * ## …except a master-detail header, which the caller must be able to read (#22519)
+ * ## A non-system caller may name only a row its own read door returns (#22519, #29029)
  *
- * A `master_detail` field names the detail's HEADER, and a write of a detail
- * whose header the caller cannot read answers exactly what a write naming a
- * header that exists nowhere answers. Nothing upstream of this check settles
- * that: ADR-0055 §3 gates a detail write on its header (master edit) only for
- * a `controlled_by_parent` detail, so an elevated probe alone would tell such
- * a caller "exists" apart from "exists nowhere". So for a `master_detail`
- * field the caller's read door is asked first ({@link masterDetailHeaderExists}),
- * and a header it does not return is `reference_not_found`. ⛔ A plain
- * `lookup` keeps the elevated probe above, unchanged.
+ * A `master_detail`, `lookup` or `user` value a non-system caller supplies
+ * must name a row the caller's own read door returns; a write naming a row
+ * the caller cannot read answers exactly what a write naming a row that
+ * exists nowhere answers: `reference_not_found`. So for those three types the
+ * caller's read door is asked first ({@link callerReadableReferenceExists}),
+ * then the elevated, tenant-kept existence probe for a row it returned. A
+ * multi-valued field is judged per member: one unreadable member refuses the
+ * write. Nothing upstream of this check settles it: ADR-0055 §3 gates a
+ * detail write on its header (master edit) only for a `controlled_by_parent`
+ * detail, and nothing gates a lookup on its target, so an elevated probe
+ * alone would let a caller bind its row to a row it has no access to, and
+ * tell "exists" apart from "exists nowhere". #22519 (ruling A) set the rule
+ * for `master_detail`; ruling records 6573561091 and 6663849489 extended it
+ * to `lookup` and `user` as the default, with no field-level opt-out. A
+ * system caller keeps the exemption above (its read door returns every row),
+ * and a value the row already stores is not judged again (#29062). `tree`
+ * keeps the elevated probe alone.
  *
  * Fails OPEN when the target cannot be checked (unregistered object, no
  * driver, a probe that throws): an integrity check that cannot run must not
  * invent a rejection, and the alternative — refusing every write to an object
  * whose target lives on an unreachable datasource — converts a connectivity
- * problem into data loss. A master-detail header's read door that fails is
- * the exception: it did not return the header, so the header is missing
+ * problem into data loss. A caller's read door that fails is the exception:
+ * it did not return the row, so the row is missing for that caller, for a
+ * `master_detail`, `lookup` or `user` value alike
  * (see {@link masterDetailHeadersCallerReads}).
  */
 export async function assertReferencesResolve(
-  this: Pick<ReferentialIntegrityHost, 'masterDetailHeaderExists' | 'referenceExists'>,
+  this: Pick<ReferentialIntegrityHost, 'callerReadableReferenceExists' | 'referenceExists'>,
   schema: any,
   data: Record<string, unknown> | null | undefined,
   supplied: Record<string, unknown> | null | undefined,
@@ -259,9 +278,10 @@ export async function assertReferencesResolve(
     for (const v of values) {
       if (v === null || v === undefined || v === '') continue;
       if (typeof v === 'object') continue;
-      // [#22519] A master-detail header must also be one the caller can read.
-      const resolved = def?.type === 'master_detail'
-        ? await this.masterDetailHeaderExists(target, v, context)
+      // [#22519, #29029] A master-detail header, a lookup target and a user
+      // must also be one the caller can read.
+      const resolved = CALLER_READ_REFERENCE_TYPES.has(def?.type)
+        ? await this.callerReadableReferenceExists(target, v, context)
         : await this.referenceExists(target, v, context);
       if (resolved === false) refused.push({ name, def, value: v, target });
     }
@@ -316,7 +336,7 @@ function storedReferenceIds(value: unknown): ReadonlySet<string> {
  *
  * A header it does not return binds as a header that exists nowhere binds:
  * the reference check answers `reference_not_found` for it
- * ({@link masterDetailHeaderExists}), and the write's header resolution
+ * ({@link callerReadableReferenceExists}), and the write's header resolution
  * leaves `parent` unbound for it ({@link resolveMasterDetailParent},
  * {@link resolveMasterDetailParents}). A read that fails — a refusal of the
  * read itself included — returned no header, so every header binds as

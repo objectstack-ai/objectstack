@@ -3023,7 +3023,7 @@ export class ObjectQL implements IObjectQLEngine {
   ): Promise<void> {
     // [#25522 cut 10] The body moved to `engine-referential-integrity.ts`, its docblock with it (see `ReferentialIntegrityHost`).
     const host: ThisParameterType<typeof assertReferencesResolve> = {
-      masterDetailHeaderExists: (...a) => this.masterDetailHeaderExists(...a),
+      callerReadableReferenceExists: (...a) => this.callerReadableReferenceExists(...a),
       referenceExists: (...a) => this.referenceExists(...a),
     };
     return assertReferencesResolve.call(host, schema, data, supplied, context, msgCtx, storedRows);
@@ -3034,13 +3034,13 @@ export class ObjectQL implements IObjectQLEngine {
     return ReferencesAndMasterDetailFacet.referenceExists.call(referencesAndMasterDetailHost.of(this), target, id, context);
   }
 
-  private masterDetailHeaderExists(
+  private callerReadableReferenceExists(
     target: string,
     id: unknown,
     context: ExecutionContext | undefined,
   ): Promise<boolean | null> {
     // [#29986 codemod] The body moved to `engine-references-and-master-detail.ts`, its docblock with it (see `ReferencesAndMasterDetailHost`).
-    return ReferencesAndMasterDetailFacet.masterDetailHeaderExists.call(referencesAndMasterDetailHost.of(this), target, id, context);
+    return ReferencesAndMasterDetailFacet.callerReadableReferenceExists.call(referencesAndMasterDetailHost.of(this), target, id, context);
   }
 
   private async masterDetailHeadersCallerReads(

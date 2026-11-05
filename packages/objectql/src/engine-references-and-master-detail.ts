@@ -6,7 +6,7 @@
  * section of `ObjectQL`: the bodies of `setRealtimeService`, `setI18nService`,
  * `setHomeLocalizationResolver`, `homeAmountOrganizationOf`,
  * `previewHomeAmounts`, `projectHomeAmountsOntoPatch`, `referenceExists`,
- * `masterDetailHeaderExists`, `resolveMasterDetailParent`,
+ * `callerReadableReferenceExists`, `resolveMasterDetailParent`,
  * `resolveMasterDetailParents`, `materializeParentHeader`,
  * `masterDeclaredFields`, `inspectDanglingReferences`, `inspectCascadeDelete`,
  * `getCascadeDeleteObjects` moved out of `engine.ts` whole by
@@ -204,25 +204,33 @@ export class ReferencesAndMasterDetailFacet {
   }
 
   /**
-   * [#22519] The write's reference check for a `master_detail` field: does `id`
-   * name a header THIS CALLER can read? The write's two header reads, as
-   * {@link resolveMasterDetailParent} reads them: the caller's read door
-   * ({@link masterDetailHeadersCallerReads}), then the elevated, tenant-kept
-   * {@link referenceExists} for a header it returned. A header the read door
-   * does not return is `false` — `reference_not_found`, exactly as a header
-   * that exists nowhere.
+   * [#22519, #29029] The write's reference check for a `master_detail`,
+   * `lookup` or `user` field: does `id` name a row THIS CALLER can read? The
+   * two reads {@link resolveMasterDetailParent} reads a header with: the
+   * caller's read door ({@link masterDetailHeadersCallerReads}), then the
+   * elevated, tenant-kept {@link referenceExists} for a row it returned. A row
+   * the read door does not return is `false` — `reference_not_found`, exactly
+   * as a row that exists nowhere.
    *
    * `null` (fail-open) only where {@link referenceExists} answers it, and for
-   * an unregistered master, which has no read door to ask either. A SYSTEM
-   * caller reaches it only as a flow run's elevated write, or a write that
-   * write sets off (#28881): its read door returns every header
-   * ({@link masterDetailHeadersCallerReads}), so the header's existence in the
+   * an unresolvable or unregistered target, which has no read door to ask
+   * either. A SYSTEM caller reaches it only as a flow run's elevated write, or
+   * a write that write sets off (#28881): its read door returns every row
+   * ({@link masterDetailHeadersCallerReads}), so the row's existence in the
    * caller's tenant is what is asked.
    *
-   * ⛔ `master_detail` only — the plain `lookup` probe is not this rule's.
+   * ⛔ Not `tree` — its value keeps the elevated existence probe alone.
    */
-  static async masterDetailHeaderExists(this: Pick<ReferencesAndMasterDetailHost, '_registry' | 'masterDetailHeadersCallerReads' | 'referenceExists' | 'resolveObjectName'>, target: string, id: unknown, context: ExecutionContext | undefined): Promise<boolean | null> {
-    const master = this.resolveObjectName(target);
+  static async callerReadableReferenceExists(this: Pick<ReferencesAndMasterDetailHost, '_registry' | 'masterDetailHeadersCallerReads' | 'referenceExists' | 'resolveObjectName'>, target: string, id: unknown, context: ExecutionContext | undefined): Promise<boolean | null> {
+    // [#29029] An unresolvable target fails open here exactly as it does in
+    // {@link referenceExists}: an integrity check that cannot run invents no
+    // rejection.
+    let master: string;
+    try {
+      master = this.resolveObjectName(target);
+    } catch {
+      return null;
+    }
     if (!this._registry.getObject(master)) return null;
     const readable = await this.masterDetailHeadersCallerReads(master, [id], context);
     if (!readable.has(String(id))) return false;
@@ -261,7 +269,7 @@ export class ReferencesAndMasterDetailFacet {
    *     not return binds as a missing header binds: `null`, so a parent-scoped
    *     `requiredWhen` / `readonlyWhen` meets an unbound `parent`, and the
    *     reference check answers `reference_not_found` for it
-   *     ({@link masterDetailHeaderExists}).
+   *     ({@link callerReadableReferenceExists}).
    *  2. WHAT THE HEADER HOLDS — the write's own ELEVATED read below, for a
    *     header read 1 returned only. The lock is a data-integrity property of
    *     the header's state, so a header the caller can read is judged on its
