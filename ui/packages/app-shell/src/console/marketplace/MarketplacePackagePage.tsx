@@ -324,7 +324,14 @@ export function MarketplacePackagePage() {
     let cancelled = false;
     (async () => {
       const items = await listLocalInstalls();
-      if (!cancelled) setLocalInstalls(items);
+      if (cancelled) return;
+      setLocalInstalls(items);
+      // objectstack#30323 — the app's sample-data banner brought the installer
+      // here to clear: its action asks for the confirm of the package whose
+      // page it opens, so the confirm opens once the listing says that
+      // package's sample data is still there.
+      const requested = items.find((i) => i.withSampleData && !i.notLoaded && takeClearConfirmRequest(i.manifestId));
+      if (requested) setPurgeConfirm({ target: 'local', count: sampleDataNotice(requested.manifestId)?.count ?? null });
     })();
     return () => { cancelled = true; };
   }, [packageId, localResult, isAdmin]);
@@ -897,16 +904,6 @@ export function MarketplacePackagePage() {
     if (!localInstall) return;
     setPurgeConfirm({ target: 'local', count: sampleDataNotice(localInstall.manifestId)?.count ?? null });
   };
-  // The app's banner brought the installer here to clear: the confirm opens
-  // once the listing says the sample data is still there.
-  const localInstallId = localInstall?.manifestId;
-  const localHasSampleData = !!localInstall?.withSampleData && !localInstall.notLoaded;
-  useEffect(() => {
-    if (!localInstallId || !localHasSampleData) return;
-    if (takeClearConfirmRequest(localInstallId)) {
-      setPurgeConfirm({ target: 'local', count: sampleDataNotice(localInstallId)?.count ?? null });
-    }
-  }, [localInstallId, localHasSampleData]);
 
   // The local-install menu and the two status banners, drawn by both the
   // catalog view and the marketplace-off local view below (objectui#11627).

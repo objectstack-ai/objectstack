@@ -32,7 +32,9 @@ export function SampleDataLeaveBanner({ manifestId }: { manifestId: string | nul
   // The cleanup below runs once the page is gone, so it reads the functions
   // of the last render rather than those of the render that set it up.
   const latest = useRef({ notify, dismiss, t, navigate });
-  latest.current = { notify, dismiss, t, navigate };
+  useEffect(() => {
+    latest.current = { notify, dismiss, t, navigate };
+  });
 
   useEffect(() => {
     if (!manifestId) return;
