@@ -3794,6 +3794,30 @@ const ko = {
   cloudWorkspaceTimezoneNotice: {
     seeded: "환경 시간대는 생성 시 브라우저에 맞춰 {{zone}}(으)로 설정되었습니다. 설정 → 현지화에서 변경할 수 있습니다.",
   },
+  deploymentNotice: {
+    title: "이 서버는 데이터와 시크릿을 자체 디스크에 보관하고 있습니다",
+    titleLow: "이 배포의 설정을 완료하세요",
+    intro: "이 프로덕션 배포에서는 이것들을 어디에 보관할지 아무도 지정하지 않았습니다. 아래 설정을 서버를 운영하는 담당자에게 전달하면 서버를 교체해도 아무것도 잃지 않습니다.",
+    finding: {
+      databaseLocalFile: "업무 데이터가 이 서버의 파일({{file}})입니다. 서버나 디스크를 교체하면 잃게 됩니다.",
+      authSecretGenerated: "로그인 시크릿이 이 서버에서 생성되었습니다. 잃어버리면 모든 사용자가 로그아웃됩니다.",
+      dataKeyFile: "저장된 비밀번호와 API 키를 암호화하는 키가 이 서버의 파일({{file}})입니다. 잃어버리면 더 이상 읽을 수 없습니다.",
+      fileStorageLocal: "업로드된 파일이 이 서버의 디스크에 보관됩니다.",
+      emailNotConfigured: "이메일 서비스가 설정되지 않아 초대와 비밀번호 재설정이 이메일로 전송되지 않습니다.",
+    },
+    copy: {
+      button: "설정 복사",
+      database: "데이터베이스. 예: postgres://user:pass@db-host:5432/app 또는 file:/path/on/a/kept/volume/app.db. 현재 데이터는 {{file}}에 있습니다. 전환하기 전에 옮기세요.",
+      carryOver: "현재 값 이어서 사용: {{file}}의 내용",
+      newValue: "재시작해도 동일하게 유지되는 긴 임의 값. 예: openssl rand -hex 32의 출력",
+    },
+    copied: "복사됨",
+    hide: "숨기기",
+    hideNoAuditLog: "이 배포에는 감사 로그가 없어 알림을 숨길 수 없습니다.",
+    hideFailed: "알림을 숨기지 못했습니다. 다시 시도하세요.",
+    hiddenLine: "배포 알림이 숨겨져 있습니다. 알림의 내용은 여전히 해당됩니다.",
+    showAgain: "다시 표시",
+  },
   aiApprovals: {
     title: "AI 승인",
     description: "AI 에이전트가 제안한 작업으로, 실행 전에 사람의 검토가 필요합니다.",

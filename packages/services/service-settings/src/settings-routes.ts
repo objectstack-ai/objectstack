@@ -535,7 +535,9 @@ export function registerSettingsRoutes(
         case 'no-ledger':
           // The ruling makes the audit row part of a hide, so a hide this
           // deployment cannot record is not one: the notice stays.
-          sendError(res, 409, 'RESOURCE_CONFLICT', 'This deployment keeps no audit log (@objectstack/plugin-audit is not mounted), so a hide cannot be recorded and the notice stays.');
+          sendError(res, 409, 'RESOURCE_CONFLICT', 'This deployment keeps no audit log (@objectstack/plugin-audit is not mounted), so a hide cannot be recorded and the notice stays.', {
+            details: { reason: 'no_audit_log' },
+          });
           return;
       }
     },

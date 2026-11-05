@@ -3797,6 +3797,30 @@ const ja = {
   cloudWorkspaceTimezoneNotice: {
     seeded: "環境のタイムゾーンは、作成時にブラウザーに合わせて {{zone}} に設定されました。「設定 → ローカリゼーション」で変更できます。",
   },
+  deploymentNotice: {
+    title: "このサーバーは、データとシークレットを自身のディスクに保存しています",
+    titleLow: "このデプロイの設定を完了してください",
+    intro: "この本番デプロイでは、それらの保存先が誰にも設定されていません。下の設定をサーバーの運用担当者に渡してください。そうすれば、サーバーを置き換えても何も失われません。",
+    finding: {
+      databaseLocalFile: "業務データはこのサーバー上のファイル（{{file}}）です。サーバーやそのディスクを置き換えると失われます。",
+      authSecretGenerated: "サインイン用のシークレットはこのサーバー上で生成されました。失われると、全員がサインアウトされます。",
+      dataKeyFile: "保存されたパスワードと API キーを暗号化するキーは、このサーバー上のファイル（{{file}}）です。失われると、それらは読み取れなくなります。",
+      fileStorageLocal: "アップロードされたファイルはこのサーバーのディスクに保存されています。",
+      emailNotConfigured: "メールサービスが設定されていないため、招待やパスワードリセットはメールで送信されません。",
+    },
+    copy: {
+      button: "設定をコピー",
+      database: "データベース。例: postgres://user:pass@db-host:5432/app、または file:/path/on/a/kept/volume/app.db。現在データは {{file}} にあります。切り替える前に移行してください。",
+      carryOver: "現在の値を引き継ぐ: {{file}} の内容",
+      newValue: "再起動しても変わらない長いランダムな値。例: openssl rand -hex 32 の出力",
+    },
+    copied: "コピーしました",
+    hide: "非表示",
+    hideNoAuditLog: "このデプロイには監査ログがないため、この通知を非表示にできません。",
+    hideFailed: "通知を非表示にできませんでした。もう一度お試しください。",
+    hiddenLine: "デプロイの通知は非表示です。記載の内容は引き続き当てはまります。",
+    showAgain: "再表示",
+  },
   aiApprovals: {
     title: "AI 承認",
     description: "AI エージェントが提案した操作です。実行前に人による確認が必要です。",

@@ -37,6 +37,8 @@ import { useAdapter } from '../providers/AdapterProvider.js';
 import { useBundledItem } from '../providers/bundledReads.js';
 import { readDashboardWidgetObjects } from '../console/appObjectScope.js';
 import { useObjectTranslation, useSafeTranslate } from '@object-ui/i18n';
+import { DeploymentNotice } from '../console/deployment-notice/DeploymentNotice.js';
+import { useInSetupApp } from '../console/setupApp.js';
 
 /**
  * One refresh of this dashboard's data: the `onRefresh` handed to
@@ -99,6 +101,8 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
   // Drill "escape hatch": lets the drill drawers open an object's full list page.
   const openRecordList = useOpenRecordList();
   const { dashboardName } = useParams<{ dashboardName: string }>();
+  // Setup's own System Overview (`platform-objects`' `system_overview`).
+  const isSystemOverview = useInSetupApp() && dashboardName === 'system_overview';
   const { showDebug } = useMetadataInspector();
   const adapter = useAdapter();
   const { t } = useObjectTranslation();
@@ -376,6 +380,10 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
           </Button>
         )}
       />
+
+      {/* objectstack#30120 — Setup's System Overview opens on the deployment
+          notice: administrators, production only. */}
+      {isSystemOverview && <DeploymentNotice placement="system-overview" />}
 
       {/* ── Main area ────────────────────────────────────────────── */}
       <div className="flex-1 overflow-hidden flex flex-col sm:flex-row relative">

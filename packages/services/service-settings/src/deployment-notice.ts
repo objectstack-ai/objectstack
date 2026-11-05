@@ -30,8 +30,11 @@
  *   (`packages/cli/src/commands/start.ts`). A boot that did not come through
  *   `os start` sets no channel and states neither.
  * - `data_key_file` — this package's own fact: no `OS_SECRET_KEY` (nor a usable
- *   dev key) answers, so the provider reads its key from a file on this
- *   server ({@link resolvePersistedKeyFile}).
+ *   dev key) answers, so the local provider reads its key from a file on this
+ *   server ({@link resolvePersistedKeyFile}; the file is the CLI's
+ *   `OS_INTERNAL_CRYPTO_KEY_FILE` channel when set). Read off the local
+ *   provider's own tiers: a host composing another `ICryptoProvider` (none
+ *   ships) is not told apart.
  * - `file_storage_local` (lower severity) — the live `storage.adapter` setting
  *   is `local`, on a composition that mounts the storage service.
  * - `email_not_configured` (lower severity) — `IEmailService.isConfigured()`
@@ -44,7 +47,7 @@
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import { recordDeploymentConfigChange } from './config-change-audit.js';
-import { resolvePersistedKeyFile } from './local-crypto-provider.js';
+import { KEY_FILE_CHANNEL_ENV, resolvePersistedKeyFile } from './local-crypto-provider.js';
 import type { SettingsContext } from './settings-service.types.js';
 
 /**
@@ -145,9 +148,12 @@ export async function readDeploymentNotice(sources: DeploymentNoticeSources): Pr
       ...(boot.authSecretFile ? { file: boot.authSecretFile } : {}),
     });
   }
+  // The file the provider's file tier reads: the CLI's channel when it named
+  // one (`os start` and `os dev` always do), else the canonical file.
   const keyFile = resolvePersistedKeyFile({ env });
   if (keyFile) {
-    findings.push({ id: 'data_key_file', severity: 'high', variable: 'OS_SECRET_KEY', file: keyFile.path });
+    const file = env[KEY_FILE_CHANNEL_ENV]?.trim() || keyFile.path;
+    findings.push({ id: 'data_key_file', severity: 'high', variable: 'OS_SECRET_KEY', file });
   }
   if ((await sources.storageAdapter()) === 'local') {
     findings.push({ id: 'file_storage_local', severity: 'low' });
