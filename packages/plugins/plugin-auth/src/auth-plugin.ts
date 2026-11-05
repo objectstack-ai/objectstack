@@ -3659,6 +3659,30 @@ export class AuthPlugin implements Plugin {
     });
 
     // ────────────────────────────────────────────────────────────────────
+    // [#30398] ADR-0069 D5 — admin: the caller's own address as the
+    // `auth.allowed_ip_ranges` save check and the sign-in gate judge it, so
+    // Setup can show it before a save rather than the save refusal naming it
+    // after. The shared gate first, then the read, which takes the address from
+    // the save check's own call on this request's headers and transport peer
+    // (client-address-read.ts). Closed, empty query set; no body is read.
+    rawApp.get(`${basePath}/admin/client-address`, async (c: any) => {
+      try {
+        const actor = await gateAdmin(c);
+        if (actor instanceof Response) return actor;
+        const { runClientAddressRead } = await import('./client-address-read.js');
+        const answer = runClientAddressRead(this.authManager!, {
+          queries: (c.req.queries() ?? {}) as Record<string, string[]>,
+          transport: { headers: (c.req.header() ?? {}) as Record<string, string>, ...transportOf(c) },
+        });
+        return c.json(answer.body, answer.status as any, answer.headers);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] admin/client-address failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
     // #2766 V1 — admin direct user management. `sys_user` CRUD is suppressed
     // (managedBy better-auth), and until now the only add-a-teammate path was
     // the email-dependent invite flow. These routes let a platform admin

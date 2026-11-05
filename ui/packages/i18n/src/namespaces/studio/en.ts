@@ -2043,6 +2043,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.datasource.syncedOne': 'Synced 1 object from {name}.',
   'engine.datasource.synced': 'Synced {count} objects from {name}.',
   'engine.datasource.syncFailed': 'Failed: {failures}',
+  'engine.datasource.syncNextStepsOne': 'Two steps are left before people can use it:',
+  'engine.datasource.syncNextSteps': 'Two steps are left before people can use them:',
+  'engine.datasource.syncNextStepApp': 'Add to an app. Until then no app’s navigation lists a synced object, and only the link above opens it.',
+  'engine.datasource.syncNextStepAccess': 'Grant access in a permission set. Until then only administrators can read a synced object’s records.',
   'engine.datasourcePreview.empty': 'Set a name and at least a driver to see the datasource preview.',
   'engine.datasourcePreview.unknownDriver': 'unknown',
   'engine.datasourcePreview.active': 'Active',
@@ -2413,6 +2417,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.if.offNav.dashboard': 'Dashboards',
   'engine.studio.if.offNav.report': 'Reports',
   'engine.studio.if.offNav.view': 'Views',
+  'engine.studio.if.offNav.viewForms': 'Form views',
+  'engine.studio.if.offNav.viewMixed': 'Form and list views',
+  'engine.studio.if.offNav.formName': '{object} form',
   'engine.studio.if.openInData': 'Open in Data',
   // objectui#12725 — the status line above the canvas, and the item's ⋯ menu.
   'engine.studio.if.status.design': 'Design',
@@ -3682,6 +3689,7 @@ const STUDIO_EN: Record<string, string> = {
   // objectstack ADR-0146 D3 (#28568) — the customization marks, counts and
   // filter of the All metadata area, from a base's customization read.
   'engine.customizationMark.customized': 'Customized ({baseName})',
+  'engine.customizationMark.customizedShort': 'Custom',
   'engine.customizationMark.customizedTitle': 'The customization package {pair} overrides this item of {baseName}',
   'engine.customizationMark.added': 'Added',
   'engine.customizationMark.addedTitle': 'Added to {baseName} by its customization package {pair}',

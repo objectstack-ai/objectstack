@@ -22,7 +22,9 @@
  * booted in the language under test (the `RecordFormPage.i18n` harness; the
  * form itself is a stand-in that fires `onSuccess`). The `zh-CN` plural differs
  * from the `zh-CN` label on purpose, so each assertion can tell which key was
- * read; the no-plural object is the control.
+ * read; the no-plural object is the control. The definitions are served per
+ * language, as the server serves them: a `zh-CN` session holds the `zh-CN`
+ * answer (objectstack#30390).
  *
  * Direction, written before the run: with the link put back to the singular,
  * the two plural link cells RED (`Project` / `项目`); every title, toast and
@@ -39,7 +41,10 @@ import { createI18n, I18nProvider } from '@object-ui/i18n';
 import { en, zh } from '@object-ui/i18n/locales';
 import { RecordFormPage } from './RecordFormPage';
 
-const { toastSuccess } = vi.hoisted(() => ({ toastSuccess: vi.fn() }));
+const { toastSuccess, served } = vi.hoisted(() => ({
+  toastSuccess: vi.fn(),
+  served: { objects: [] as Array<Record<string, unknown>> },
+}));
 
 vi.mock('sonner', () => ({
   toast: Object.assign(vi.fn(), {
@@ -72,19 +77,28 @@ vi.mock('@object-ui/plugin-form', async (importOriginal) => ({
   ),
 }));
 
-const OBJECTS = [
-  { name: 'showcase_project', label: 'Project', pluralLabel: 'Projects', fields: { name: { type: 'text' } } },
-  { name: 'showcase_note', label: 'Note', fields: { name: { type: 'text' } } },
-];
-
 vi.mock('../providers/MetadataProvider', () => ({
-  useMetadata: () => ({ objects: OBJECTS, loading: false }),
+  useMetadata: () => ({ objects: served.objects, loading: false }),
 }));
 vi.mock('../providers/AdapterProvider', () => ({
   useAdapter: () => null,
 }));
 
 type Lang = 'en' | 'zh-CN';
+
+const FIELDS = { name: { type: 'text' } };
+
+/** The object definitions as the server serves them in each language. */
+const OBJECTS: Record<Lang, Array<Record<string, unknown>>> = {
+  en: [
+    { name: 'showcase_project', label: 'Project', pluralLabel: 'Projects', fields: FIELDS },
+    { name: 'showcase_note', label: 'Note', fields: FIELDS },
+  ],
+  'zh-CN': [
+    { name: 'showcase_project', label: '项目', pluralLabel: '项目清单', fields: FIELDS },
+    { name: 'showcase_note', label: 'Note', fields: FIELDS },
+  ],
+};
 
 /** The breadcrumb landmark's name in each language under test, read from the pack. */
 const CRUMB_NAME: Record<Lang, string> = { en: en.common.breadcrumb, 'zh-CN': zh.common.breadcrumb };
@@ -106,7 +120,13 @@ interface PageText {
   toast: string;
 }
 
-async function pageText(lang: Lang, mode: 'create' | 'edit', objectName: string): Promise<PageText> {
+async function pageText(
+  lang: Lang,
+  mode: 'create' | 'edit',
+  objectName: string,
+  objects = OBJECTS[lang],
+): Promise<PageText> {
+  served.objects = objects;
   const i18n = createI18n({ defaultLanguage: lang, detectBrowserLanguage: false });
   // The instance really booted in the language under test.
   expect(i18n.language).toBe(lang);
@@ -165,6 +185,31 @@ describe('RecordFormPage — the list link reads the plural, the record copy the
       link: 'Note',
       title: 'Create Note',
       toast: 'Note created successfully',
+    });
+  });
+});
+
+/**
+ * objectstack#30390 — a served object's form page names it as served: the
+ * title, the toast and the list link all draw the served label, already
+ * translated by the server, never the packaged catalog string under a rename.
+ * Directions, written before the run: the renamed cell RED before the change
+ * (`新建项目` / `项目清单`), GREEN after; the control GREEN on both sides.
+ */
+describe('RecordFormPage — a served object is named as served (objectstack#30390)', () => {
+  const renamed = (extra: Record<string, unknown>) => [{ name: 'showcase_project', fields: FIELDS, ...extra }];
+
+  it('zh-CN: a renamed object titles the form, the toast and the list link with the served labels', async () => {
+    expect(
+      await pageText('zh-CN', 'create', 'showcase_project', renamed({ label: '风险投资', pluralLabel: '风险投资清单' })),
+    ).toEqual({ link: '风险投资清单', title: '新建风险投资', toast: '风险投资创建成功' });
+  });
+
+  it('zh-CN: control — an object served with no label is named by the bundle', async () => {
+    expect(await pageText('zh-CN', 'create', 'showcase_project', renamed({}))).toEqual({
+      link: '项目清单',
+      title: '新建项目',
+      toast: '项目创建成功',
     });
   });
 });

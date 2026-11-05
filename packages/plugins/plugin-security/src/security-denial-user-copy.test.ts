@@ -131,8 +131,9 @@ const THEIRS = { id: 'opp_theirs', name: 'Theirs', stage: 'open', owner_id: 'u_o
  *     exactly what the first draft of #7449's harness did, 12 green assertions
  *     all measuring an admission.
  *  2. A double with a HAND-WRITTEN matcher is the mirror failure. The row-level
- *     pre-image gate re-reads with `where: { $and: [{ id }, <rls filter>] }`;
- *     a matcher that does not understand `$and` matches nothing, every by-id
+ *     pre-image gate re-reads with `where: { $and: [{ id }, { $and: <rls parts> }] }`
+ *     (the RLS parts as one nested `$and`, the platform's own predicate);
+ *     a matcher that does not understand nested `$and` matches nothing, every by-id
  *     write "is denied", and the denial cases below would pass while measuring
  *     the double's blindness instead of the gate's verdict. The positive
  *     controls in each describe exist to make that failure impossible to miss.

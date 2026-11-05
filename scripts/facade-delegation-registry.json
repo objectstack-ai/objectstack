@@ -350,48 +350,6 @@
     {
       "file": "packages/objectql/src/engine.ts",
       "class": "ObjectQL",
-      "member": "seedAutonumber",
-      "card": "#30055",
-      "reason": "query-options erasure pin, baseline keyed by path (#29986 report: moves once the #4918 sites are typed)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "probeReferencingRows",
-      "card": "#30055",
-      "reason": "query-options erasure pin, baseline keyed by path (#29986 report: moves once the #4918 sites are typed)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "resolveMasterDetailParent",
-      "card": "#30055",
-      "reason": "query-options erasure pin, baseline keyed by path (#29986 report: moves once the #4918 sites are typed)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "resolveMasterDetailParents",
-      "card": "#30055",
-      "reason": "query-options erasure pin, baseline keyed by path (#29986 report: moves once the #4918 sites are typed)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "inspectDanglingReferences",
-      "card": "#30055",
-      "reason": "query-options erasure pin, baseline keyed by path (#29986 report: moves once the #4918 sites are typed)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "referenceExists",
-      "card": "#30055",
-      "reason": "query-options erasure pin, baseline keyed by path (#29986 report: moves once the #4918 sites are typed)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
       "member": "homeAmountServing",
       "card": "#30147",
       "reason": "codemod limit: field-call, it calls a field or accessor as a function (#29986 report)"

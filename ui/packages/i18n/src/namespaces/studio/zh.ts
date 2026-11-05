@@ -1849,6 +1849,10 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.datasource.syncedOne': '已从 {name} 同步 1 个对象。',
   'engine.datasource.synced': '已从 {name} 同步 {count} 个对象。',
   'engine.datasource.syncFailed': '失败：{failures}',
+  'engine.datasource.syncNextStepsOne': '还剩两步，其他人才能使用它：',
+  'engine.datasource.syncNextSteps': '还剩两步，其他人才能使用它们：',
+  'engine.datasource.syncNextStepApp': '加入某个应用。在此之前，任何应用的导航里都没有同步来的对象，只能通过上面的链接打开。',
+  'engine.datasource.syncNextStepAccess': '在权限集中授予访问权限。在此之前，只有管理员能读取同步来的对象的记录。',
   'engine.datasourcePreview.empty': '设置名称并至少指定一个驱动，即可查看数据源预览。',
   'engine.datasourcePreview.unknownDriver': '未知',
   'engine.datasourcePreview.active': '已启用',
@@ -2164,6 +2168,9 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.if.offNav.dashboard': '仪表盘',
   'engine.studio.if.offNav.report': '报表',
   'engine.studio.if.offNav.view': '视图',
+  'engine.studio.if.offNav.viewForms': '表单视图',
+  'engine.studio.if.offNav.viewMixed': '表单视图与列表视图',
+  'engine.studio.if.offNav.formName': '{object}表单',
   'engine.studio.if.openInData': '在「数据」中打开',
   // objectui#12725 — 画布上方的状态行，以及条目的 ⋯ 菜单。
   'engine.studio.if.status.design': '设计态',
@@ -3257,6 +3264,7 @@ const STUDIO_ZH: Record<string, string> = {
   // objectstack ADR-0146 D3 (#28568) — the customization marks, counts and
   // filter of the All metadata area, from a base's customization read.
   'engine.customizationMark.customized': '已定制（{baseName}）',
+  'engine.customizationMark.customizedShort': '定制',
   'engine.customizationMark.customizedTitle': '定制包 {pair} 覆盖了 {baseName} 的此项',
   'engine.customizationMark.added': '新增',
   'engine.customizationMark.addedTitle': '由 {baseName} 的定制包 {pair} 新增',

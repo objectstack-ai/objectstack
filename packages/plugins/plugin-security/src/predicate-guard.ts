@@ -21,9 +21,20 @@
  * Ordering contract: this guard MUST run against the CALLER-supplied AST,
  * before RLS filter injection — RLS policies legitimately reference fields
  * the caller cannot read (e.g. `owner_id`), and must not be rejected.
+ *
+ * Provenance contract: where a predicate the platform composed reaches a read
+ * INSIDE the caller's own `where` — the security middleware's by-id write
+ * re-read carries the tenancy wall and the row-level write predicates that
+ * way — the composing code marks that subtree `'policy'` with the spec's
+ * filter-subtree provenance mark (`markFilterSubtreeProvenance`, the mark the
+ * read-scope merge boundaries already stamp on every scope they inject), and
+ * this guard does not judge a subtree so marked: it is not the caller's
+ * predicate. The fail direction is closed: a subtree that carries no mark, or
+ * any other mark, is judged as the caller's — the mark never survives a copy,
+ * a serialization or the wire, so a request cannot carry one in.
  */
 
-import { FieldReferenceSchema } from '@objectstack/spec/data';
+import { FieldReferenceSchema, filterSubtreeProvenanceOf } from '@objectstack/spec/data';
 import { PermissionDeniedError } from './errors.js';
 
 interface FieldPermissionLike {
@@ -43,9 +54,14 @@ const LOGICAL_KEYS = new Set(['$and', '$or', '$not']);
  * column of the same row"): the comparison reads the named field's value, so
  * row presence discloses it exactly as a filter on the field itself would.
  * Both are collected here, into the one set the one field rule judges.
+ *
+ * A subtree the platform composed and marked `'policy'` is not collected,
+ * nor anything beneath it (see the provenance contract above): its fields
+ * are the platform's predicate, not the caller's.
  */
 export function collectConditionFields(condition: unknown, out: Set<string> = new Set()): Set<string> {
   if (!condition || typeof condition !== 'object' || Array.isArray(condition)) return out;
+  if (filterSubtreeProvenanceOf(condition) === 'policy') return out;
   for (const [key, value] of Object.entries(condition as Record<string, unknown>)) {
     if (LOGICAL_KEYS.has(key)) {
       if (Array.isArray(value)) for (const sub of value) collectConditionFields(sub, out);

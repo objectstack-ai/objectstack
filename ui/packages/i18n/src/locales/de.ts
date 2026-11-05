@@ -148,6 +148,7 @@ const de = {
     notAvailableHere: '„{{action}}“ ist auf der aktuellen Seite nicht verfügbar.',
     notAvailableForRecord: 'Für diesen Datensatz nicht verfügbar',
     completedSuccessfully: 'Aktion erfolgreich abgeschlossen',
+    completedNamed: 'Aktion abgeschlossen: {{action}}',
     failed: 'Aktion fehlgeschlagen',
     parallelFailed: 'Eine oder mehrere parallele Aktionen sind fehlgeschlagen',
     selectExactlyOneRow: 'Diese Aktion gilt für einen einzelnen Datensatz – wählen Sie genau eine Zeile aus.',
@@ -887,12 +888,12 @@ const de = {
   },
   managedByBadge: {
     systemWritable: {
-      short: "Plattform-Schema",
+      short: "Integriert · bearbeitbar",
       title: "Plattformdefiniert, für Admins beschreibbar",
       body: "Das Schema dieses Objekts wird von der Plattform definiert, seine Zeilen können Sie hier jedoch selbst anlegen und bearbeiten. Wer schreiben darf, regeln die delegierte Administration und die Datensatzsicherheit — nicht dieses Abzeichen.",
     },
     config: {
-      short: "Admin-Konfiguration",
+      short: "Hier konfiguriert",
       title: "Administrator-Konfiguration",
       body: "Diese Zeilen definieren das Laufzeitverhalten der Plattform. Erstellen Sie sie hier; die erzeugten Laufzeitdaten liegen in einer separaten Tabelle.",
     },
@@ -907,7 +908,7 @@ const de = {
       body: "Unveränderliches Audit-Log. Zeilen können in der UI nicht erstellt, bearbeitet oder gelöscht werden – die Plattform schreibt sie bei Ereignissen. Nutzen Sie Export für Compliance-Prüfungen.",
     },
     betterAuth: {
-      short: "Identität",
+      short: "Über den Identitätsdienst",
       title: "Über den integrierten Identitätsdienst geschrieben",
       body: "Das Schema dieses Objekts gehört {{provider}}, dem integrierten Identitätsdienst der Plattform. Legen Sie diese Datensätze mit den Aktionen auf dieser Seite oder über Anmelde-, Einladungs- und Sicherheitsabläufe an und ändern Sie sie dort; alle laufen über diesen Dienst. Direkte Änderungen an der Tabelle würden Passwort-Hashing, Sitzungsvalidierung, Zwei-Faktor-Prüfungen und Audit-Hooks umgehen.",
     },
@@ -4215,6 +4216,10 @@ const de = {
         unreadableRange: "{{packageId}} deklariert {{dependency}} mit dem Versionsbereich {{range}}, der nicht gelesen werden kann. Korrigieren Sie den Bereich und veröffentlichen Sie das Paket erneut.",
         unreadableVersion: "Installieren Sie eine Release-Version von {{dependency}} innerhalb von {{range}}. Die installierte Version {{installedVersion}} hat nicht das Format MAJOR.MINOR.PATCH.",
         unreadableDeclaration: "{{packageId}} deklariert seine Abhängigkeiten in einer Form, die die Installation nicht lesen kann. Schreiben Sie sie als Zuordnung von Paket-ID zu Versionsbereich und veröffentlichen Sie das Paket erneut.",
+      },
+      protocolCheckSkipped: {
+        noRange: "{{packageId}} gibt nicht an, welches Plattformprotokoll es unterstützt. Es wurde daher ohne Kompatibilitätsprüfung unter Protokoll {{protocolVersion}} installiert und funktioniert auf dieser Plattformversion möglicherweise nicht. Ein Build des Pakets, der sein unterstütztes Protokoll (engines.protocol) angibt, wird bei der Installation geprüft.",
+        unparsedRange: "{{packageId}} gibt sein Plattformprotokoll als {{requiredRange}} an, was diese Laufzeitumgebung nicht lesen kann. Es wurde daher ohne Kompatibilitätsprüfung unter Protokoll {{protocolVersion}} installiert und funktioniert auf dieser Plattformversion möglicherweise nicht. Ein Build des Pakets mit lesbarem Bereich (engines.protocol) wird bei der Installation geprüft.",
       },
       localUnauthorized: "Melden Sie sich zuerst in diesem Laufzeitsystem an.",
       localMarketplaceUnavailable: "Dieses Laufzeitsystem hat keine OS_CLOUD_URL konfiguriert.",

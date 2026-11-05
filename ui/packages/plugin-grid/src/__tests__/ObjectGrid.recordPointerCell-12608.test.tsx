@@ -144,3 +144,95 @@ describe('ObjectGrid — a referenceVia pointer cell draws the record it names (
     expect(document.querySelector('[data-record-pointer]')).toBeNull();
   });
 });
+
+/**
+ * objectstack#30209 row 3 — a record whose name field is a REFERENCE reads as
+ * the referenced record's name. `sys_session` is named by `user_id`, a lookup
+ * that stores a user id: read without `$expand` the name ladder printed that
+ * id, so every sign-in row of the audit list read `05bdsJ9C…` where its update
+ * rows read "Dev Admin". The read now expands that one field, and only it.
+ */
+describe('ObjectGrid — a pointer cell names a record whose name field is a lookup (objectstack#30209)', () => {
+  const AUDIT_DEF = {
+    name: 'sys_audit_log',
+    label: 'Audit Log',
+    fields: {
+      action: { name: 'action', type: 'text', label: 'Action' },
+      object_name: { name: 'object_name', type: 'text', label: 'Object' },
+      record_id: { name: 'record_id', type: 'text', label: 'Record', referenceVia: 'object_name' },
+    },
+  };
+  const SESSION_DEF = {
+    name: 'sys_session',
+    label: 'Session',
+    nameField: 'user_id',
+    fields: {
+      user_id: { name: 'user_id', type: 'lookup', reference: 'sys_user', label: 'User' },
+      ip_address: { name: 'ip_address', type: 'text', label: 'IP' },
+      device: { name: 'device', type: 'lookup', reference: 'sys_device', label: 'Device' },
+    },
+  };
+
+  function sessionSource() {
+    const find = vi.fn(async (objectName: string, params?: any) => {
+      if (objectName !== 'sys_session') return { data: [] };
+      const expanded = Array.isArray(params?.$expand) && params.$expand.includes('user_id');
+      return {
+        data: [{ id: 'ses-1', user_id: expanded ? { id: 'u-1', name: 'Dev Admin' } : 'u-1', ip_address: '10.0.0.1' }],
+      };
+    });
+    const getObjectSchema = vi.fn(async (objectName: string) => {
+      if (objectName === 'sys_audit_log') return AUDIT_DEF;
+      if (objectName === 'sys_session') return SESSION_DEF;
+      if (objectName === 'crm_opportunity') return OPPORTUNITY_DEF;
+      throw new Error('unknown object');
+    });
+    return { find, getObjectSchema, findOne: vi.fn() } as any;
+  }
+
+  function renderAudit(rows: Array<Record<string, unknown>>, dataSource: any) {
+    const schema: any = {
+      type: 'object-grid' as const,
+      objectName: 'sys_audit_log',
+      columns: ['action', 'object_name', 'record_id'],
+      data: { provider: 'value', items: rows },
+    };
+    return render(
+      <ActionProvider>
+        <RelatedRecordActionsProvider value={makeHost()}>
+          <ObjectGrid schema={schema} dataSource={dataSource} />
+        </RelatedRecordActionsProvider>
+      </ActionProvider>,
+    );
+  }
+
+  it("draws the session's user name, not the user id it stores, and expands only the name field", async () => {
+    const dataSource = sessionSource();
+    renderAudit([{ id: 'a-1', action: 'login', object_name: 'sys_session', record_id: 'ses-1' }], dataSource);
+
+    expect(await screen.findByRole('link', { name: 'Dev Admin' })).toHaveAttribute(
+      'href',
+      '/apps/crm/sys_session/record/ses-1',
+    );
+    expect(screen.queryByText('u-1')).toBeNull();
+    const reads = dataSource.find.mock.calls.filter(([name]: [string]) => name === 'sys_session');
+    expect(reads).toHaveLength(1);
+    // The other lookup on the object is not expanded: no cell shows it.
+    expect(reads[0][1].$expand).toEqual(['user_id']);
+  });
+
+  it('a record named by a text field is read without an `$expand` (control)', async () => {
+    const dataSource = sessionSource();
+    dataSource.find.mockImplementation(async (objectName: string, params?: any) =>
+      objectName === 'crm_opportunity'
+        ? { data: OPPORTUNITIES.filter((r) => (params?.$filter?.id?.$in ?? []).includes(r.id)) }
+        : { data: [] },
+    );
+    renderAudit([{ id: 'a-2', action: 'update', object_name: 'crm_opportunity', record_id: 'opp-1' }], dataSource);
+
+    await screen.findByRole('link', { name: 'Acme renewal' });
+    const reads = dataSource.find.mock.calls.filter(([name]: [string]) => name === 'crm_opportunity');
+    expect(reads).toHaveLength(1);
+    expect(reads[0][1]).not.toHaveProperty('$expand');
+  });
+});
