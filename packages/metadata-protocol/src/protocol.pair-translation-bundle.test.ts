@@ -18,6 +18,7 @@
  * edges a real boot does not reach.
  */
 import { describe, expect, it } from 'vitest';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const BASE = 'com.acme.crm';
@@ -28,18 +29,37 @@ const translationRow = (id: string, packageId: string | null, data: Record<strin
     metadata: JSON.stringify({ name: id, ...data }), ...extra,
 });
 
-function protocolOver(rows: Record<string, unknown>[], opts: { failRead?: boolean } = {}) {
-    const asked: Record<string, unknown>[] = [];
-    const matches = (row: Record<string, unknown>, where: Record<string, unknown>) =>
-        Object.entries(where ?? {}).every(([k, v]) => (row[k] ?? null) === (v ?? null));
+type Row = Record<string, unknown>;
+
+/** Plain equality and `null`; any operator or combinator is refused, so a matcher that ignored one cannot prove anything. */
+function matches(row: Row, where: Record<string, unknown> = {}): boolean {
+    for (const [key, want] of Object.entries(where)) {
+        if (want === undefined) continue;
+        if (key.startsWith('$')) throw new Error(`stub engine: unsupported combinator ${key}`);
+        if (want !== null && typeof want === 'object') throw new Error(`stub engine: unsupported operator on ${key}`);
+        if ((row[key] ?? null) !== want) return false;
+    }
+    return true;
+}
+
+function protocolOver(rows: Row[], opts: { failRead?: boolean } = {}) {
+    const asked: Row[] = [];
+    const read = async (table: string, q?: { where?: Record<string, unknown>; limit?: number }) => {
+        const found = table === 'sys_metadata' ? rows.filter((r) => matches(r, q?.where)) : [];
+        // The caller's bound, after the filter, by presence — as the engine applies it.
+        return typeof q?.limit === 'number' ? found.slice(0, q.limit) : found;
+    };
     const engine = {
         registry: {},
-        async find(table: string, q: { where: Record<string, unknown> }) {
-            asked.push({ table, where: q.where });
+        async find(table: string, q?: { where?: Record<string, unknown>; limit?: number }) {
+            asked.push({ table, where: q?.where });
             if (opts.failRead) throw new Error('store unreachable');
-            return table === 'sys_metadata' ? rows.filter((r) => matches(r, q.where)) : [];
+            return read(table, q);
         },
-        async findOne() { return null; },
+        async findOne(table: string, q: { where: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(table, q);
+            return (await read(table, q))[0] ?? null;
+        },
     };
     return { protocol: new ObjectStackProtocolImplementation(engine as never, undefined, 'env_test'), asked };
 }
