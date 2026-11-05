@@ -858,7 +858,7 @@ describe('a banned user\'s OAuth credentials resolve to no principal while the b
     request: { headers: { authorization: 'Bearer a.b.c' } },
   });
   /** The envelope a bearer that does not verify gets at this door — what a banned subject must get. */
-  const notVerified = () => resolveExecutionContext(oauthOpts(banQl(undefined).ql, undefined));
+  const notVerified = () => resolveExecutionContext(oauthOpts(banQl(undefined).ql, null));
 
   it('a token whose subject is banned resolves exactly as a token that does not verify', async () => {
     const { ql } = banQl({ id: 'u_ban', banned: true, ban_expires: null });
@@ -914,7 +914,7 @@ describe('a banned user\'s OAuth credentials resolve to no principal while the b
     ]);
     // A bearer that does not verify reads no ban at all.
     const unverified = banQl({ id: 'u_ban' });
-    await resolveExecutionContext(oauthOpts(unverified.ql, undefined));
+    await resolveExecutionContext(oauthOpts(unverified.ql, null));
     expect(unverified.userReads.filter((q) => q?.fields?.includes?.('banned'))).toEqual([]);
   });
 
