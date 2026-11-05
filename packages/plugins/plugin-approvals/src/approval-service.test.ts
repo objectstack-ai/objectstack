@@ -4330,7 +4330,7 @@ describe('ApprovalService — a team, position or queue approver whose directory
     const req = await svc.openNodeRequest(
       node([{ type: 'user', value: 'u2' }, { type: 'team', value: 't_ops' }], { behavior: 'unanimous' }), CTX,
     ) as any;
-    const row = engine._tables['sys_approval_request'].find((r: any) => r.id === req.id);
+    const row = engine._tables['sys_approval_request'].find((r: any) => r.id === req.id)!;
     const config = JSON.parse(row.node_config_json);
     delete config.__approverGroups;
     row.node_config_json = JSON.stringify(config);
