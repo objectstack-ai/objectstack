@@ -243,6 +243,16 @@ export function clonePermissionSetDefinition(
 }
 
 /**
+ * [#30255] The grant keys of a copy's `objects` map — what the save is told the
+ * copy inherits ({@link handlePermissionSetCloneWrite} step 7). Every one is the
+ * source's own key, carried by {@link clonePermissionSetDefinition} unchanged.
+ */
+export function inheritedGrantObjectsOf(copy: Readonly<Record<string, unknown>>): string[] {
+    const objects = copy.objects;
+    return objects && typeof objects === 'object' && !Array.isArray(objects) ? Object.keys(objects) : [];
+}
+
+/**
  * Every object a permission set grants on: the keys of its `objects` map, the
  * object half of each `fields` key (`object.field`), and each row-level rule's
  * `object` — the three places `PermissionSetSchema` names an object. These are
@@ -392,7 +402,9 @@ function readCloneBody(body: unknown): { name: string; label: string; package?: 
  *     `packageId` (none for environment-wide): the same save the `/meta` door
  *     makes, so the same schema, publish gates and hooks judge it. A save that
  *     loses the race for the name (a row written under it after step 5's read)
- *     is step 5's 409, in step 5's words.
+ *     is step 5's 409, in step 5's words. [#30255] The copy's grant keys go
+ *     with it as `inheritedGrantObjects`: they are the source's grants, so the
+ *     save's unknown-grant refusal does not judge them as this write's.
  */
 export async function handlePermissionSetCloneWrite(
     deps: DomainHandlerDeps,
@@ -537,6 +549,12 @@ export async function handlePermissionSetCloneWrite(
                 item: clone,
                 parentVersion: null,
                 ...(landing.packageId !== null ? { packageId: landing.packageId } : {}),
+                // [#30255] The copy's grants are the source's, so the save's
+                // unknown-grant refusal does not judge them as this write's: a
+                // platform set may grant on an object of a platform plugin this
+                // deployment does not install (`member_default` on
+                // `sys_comment` / `sys_activity`, `@objectstack/plugin-audit`).
+                inheritedGrantObjects: inheritedGrantObjectsOf(clone),
             });
         } catch (err: unknown) {
             // [#23577] The create-only pin refused: a row was written under the
