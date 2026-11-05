@@ -3280,6 +3280,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // the conditions are typed against the start node's `objectName`, while
     // each run's `record` is a row of the swept object. Said once per flow, at
     // the key that makes it so, and only where a warning it explains was served.
+    // [#30283] The contradiction itself is the readiness rule's verdict
+    // (`flow-time-relative-object-mismatch`, at the same key); this note
+    // explains the softened verdict only, and names that rule for the fix.
     if (startObject !== undefined && sweepObject !== undefined && startObject !== sweepObject
       && runMayFailServed > runMayFailBefore) {
       const startIndex = flowIndex >= 0 && startNode && Array.isArray(flow.nodes) ? flow.nodes.indexOf(startNode) : -1;
@@ -3290,7 +3293,8 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           `row of '${sweepObject}', while its conditions are checked against the fields of '${startObject}' (the ` +
           `start node's config.objectName). That is why a type mismatch in its conditions is a warning here and ` +
           `not a refusal: the names hold a '${sweepObject}' row, not the '${startObject}' fields they were checked ` +
-          `against. Set config.objectName to '${sweepObject}', or remove it: the conditions are then checked ` +
+          `against. Set config.objectName to '${sweepObject}', or remove it, as flow-time-relative-object-mismatch ` +
+          `asks of this start: the conditions are then checked ` +
           `against the swept object, and a type mismatch in them is refused, as on a record-triggered flow.`,
         source: startObject,
         severity: 'warning',

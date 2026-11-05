@@ -95,7 +95,148 @@
       "verifiedAt": "2026-09-15",
       "evidenceScope": "cross-repo",
       "evidence": "cloud @cb8ee7ff: packages/service-ai/src/tools/action-tools.ts#buildParametersSchema — each declared param becomes one JSON Schema property on the exposed tool.",
-      "note": "field/objectOverride/defaultFromRow/options/placeholder/helpText/defaultValue/required all consumed."
+      "note": "field/objectOverride/defaultFromRow/options/placeholder/helpText/defaultValue/required all consumed. DRILLED 2026-11-05 (#30259): each member now carries its own verdict and in-repo evidence (the console resolver, the param dialog, paramToField, and the dispatcher's ADR-0104 D2 check), and the container left the undrilled-containers baseline. The container's own row keeps its cross-repo AI-tool evidence. `widget` is this type's planned member, with authorWarn, until #30260 gives it a reader.",
+      "children": {
+        "name": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (the request-body key of the resolved param, `param.name ?? ''` inline, falling back to the field name); ui/packages/app-shell/src/views/ActionParamDialog.tsx#ActionParamDialog (keys the collected values and each control's error by `param.name`); packages/runtime/src/action-execution.ts#resolveDeclaredActionParams (the dispatcher's ADR-0104 D2 descriptor is keyed by `p?.name ?? fieldRef`)"
+        },
+        "field": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (a param with `field` takes the field-backed branch: label, type, options, placeholder, help, default and the picker group inherited from `owner.fields[param.field]`); packages/runtime/src/action-execution.ts#resolveDeclaredActionParams (inherits type / multiple / required / options from the referenced field before validating the submitted value)"
+        },
+        "objectOverride": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (`const ownerName = param.objectOverride ?? ctx.objectName` picks the object whose field a field-backed param resolves against)",
+          "note": "Console only: the dispatcher's resolveDeclaredActionParams resolves a field-backed param against the action's own object and does not read this key, so its inherited value check is the own object's field (or open, when that object has no such field)."
+        },
+        "label": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (`resolveInlineI18nLabel(param.label, ctx.locale)`, else the field's label or the name); ui/packages/app-shell/src/views/ActionParamDialog.tsx#ActionParamDialog (draws the control's label); packages/runtime/src/action-execution.ts#summarizeActionParams (the MCP action summary carries a string label)"
+        },
+        "type": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (`param.type ?? 'text'` inline, `param.type ?? field.type` field-backed); ui/packages/app-shell/src/utils/paramToField.ts#paramToField (folds the type to the widget that draws it); packages/runtime/src/action-execution.ts#resolveDeclaredActionParams and packages/spec/src/ui/action-params.zod.ts#validateActionParams (the submitted value is checked against `valueSchemaFor` of this type, ADR-0104 D2)"
+        },
+        "widget": {
+          "status": "planned",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "authorWarn": true,
+          "authorHint": "Keep it, but nothing reads it yet: the console's action dialog draws the param with its `type` widget until the dialog passes `widget` through, so a param naming `permission-ref` is a text box for now.",
+          "note": "PLANNED RECORD (#30259, ADR-0131 D4): the widget override, the same key, vocabulary and meaning as FieldSchema.widget, declared spec-first so a param can ask for the `permission-ref` picker the grant column uses. Accepted by the parse door and carried in the parsed param; read by nothing yet, measured: the console's resolveActionParam builds an ActionParamDef from named members and copies no `widget`, paramToField sets a field widget only for `boolean`, and the dispatcher's resolveDeclaredActionParams copies five named members and validates by `type`, so the value contract is unchanged. The reader is #30260 (the resolveActionParams / paramToField pass-through); flip this row to live there. Create User's permissionSet param switches to it in #30117's server PR."
+        },
+        "required": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (`param.required ?? false`, field-backed `?? field.required`); ui/packages/app-shell/src/views/ActionParamDialog.tsx#ActionParamDialog (a required param with no value blocks submit); packages/runtime/src/action-execution.ts#resolveDeclaredActionParams and packages/spec/src/ui/action-params.zod.ts#validateActionParams (an absent required value is refused `required`)"
+        },
+        "options": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (an authored list wins over the field's, its labels resolved by resolveOptionLabels); ui/packages/app-shell/src/utils/paramToField.ts#paramToField (passes the list into the widget's field metadata); packages/runtime/src/action-execution.ts#resolveDeclaredActionParams and packages/spec/src/ui/action-params.zod.ts#validateActionParams (a submitted value must be one of the option values, ADR-0104 D2)",
+          "children": {
+            "label": {
+              "status": "live",
+              "verifiedAt": "2026-11-05",
+              "evidenceScope": "in-repo",
+              "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveOptionLabels (resolves an inline per-locale map to the string the dialog shows, falling back to the value); ui/packages/app-shell/src/views/ActionParamDialog.tsx#ActionParamDialog (re-localises each entry's label with pickLocalized before drawing it)"
+            },
+            "value": {
+              "status": "live",
+              "verifiedAt": "2026-11-05",
+              "evidenceScope": "in-repo",
+              "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveOptionLabels (the fallback label of an unresolved entry); packages/spec/src/ui/action-params.zod.ts#validateActionParams (membership is judged over the option values through valueSchemaFor); ui/packages/core/src/evaluator/optionRules.ts#resolveCascadingOptions (filters the offered set by entry)"
+            },
+            "visibleWhen": {
+              "status": "live",
+              "verifiedAt": "2026-11-05",
+              "evidenceScope": "in-repo",
+              "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveOptionLabels (an inline list reaches the dialog verbatim, `visibleWhen` included, the pinned fast path); ui/packages/core/src/evaluator/optionRules.ts#resolveCascadingOptions (the select, multiselect, radio and checkboxes widgets narrow the offered set by evaluating it)",
+              "note": "Client-side only: the dispatcher checks the submitted value against the option values and does not evaluate visibleWhen, so hiding an option is not authorization (the key's TSDoc says so)."
+            }
+          }
+        },
+        "placeholder": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (`param.placeholder`, field-backed `?? field.placeholder`); ui/packages/app-shell/src/utils/paramToField.ts#paramToField (copied onto the widget's field metadata)"
+        },
+        "helpText": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (`actionCopySource(param.helpText)`, field-backed falling back to the field's help); ui/packages/app-shell/src/views/ActionParamDialog.tsx#ActionParamDialog (fills its holes and draws it under the control); packages/runtime/src/action-execution.ts#summarizeActionParams (the MCP summary's help, falling back to the field description)"
+        },
+        "defaultValue": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (`rowDefault ?? param.defaultValue`); ui/packages/app-shell/src/views/ActionParamDialog.tsx#ActionParamDialog (seeds the dialog state with it, so an untouched control submits it verbatim)"
+        },
+        "multiple": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (`param.multiple`, field-backed `?? field.multiple`); ui/packages/app-shell/src/utils/paramToField.ts#paramToField (copied onto the widget's field metadata); packages/runtime/src/action-execution.ts#resolveDeclaredActionParams and packages/spec/src/ui/action-params.zod.ts#validateActionParams (an array value shape when multi-valued)"
+        },
+        "accept": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (`param.accept`, field-backed `?? field.accept`); ui/packages/app-shell/src/utils/paramToField.ts#paramToField (copied onto the upload widget's field metadata)"
+        },
+        "maxSize": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (`param.maxSize`, field-backed `?? field.maxSize`); ui/packages/app-shell/src/utils/paramToField.ts#paramToField (copied onto the upload widget's field metadata)"
+        },
+        "reference": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (`referenceTo: param.reference` inline, `param.reference ?? field.reference` field-backed); ui/packages/app-shell/src/utils/paramToField.ts#paramToField (a lookup param with no target degrades to a text input, paramDegradesWithoutTarget)"
+        },
+        "defaultFromRow": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (`param.defaultFromRow && ctx.row …` seeds the default from the current row's stored value)"
+        },
+        "carryOver": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (copied onto ActionParamDef.carryOver on every branch); ui/packages/app-shell/src/views/ActionParamDialog.tsx#CarryOverParam (draws it as a read-only summary) and ui/packages/app-shell/src/views/ActionParamDialog.tsx#serializeParamValues (submits it verbatim, skipping the upload rewrite)"
+        },
+        "visible": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (normaliseVisible); ui/packages/app-shell/src/views/ActionParamDialog.tsx#filterVisibleParams (evaluates the predicate and omits the param when it is false)"
+        },
+        "requiresFeature": {
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/spec/src/kernel/public-auth-features.ts#lowerRequiresFeature, wired as the param schema's .transform() in packages/spec/src/ui/action.zod.ts",
+          "note": "Author-facing sugar consumed AT PARSE TIME, as on the action itself: lowered into this param's `visible` predicate and stripped from the output, so no downstream reader sees it."
+        }
+      }
     },
     "variant": {
       "status": "live",

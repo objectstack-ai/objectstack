@@ -158,6 +158,7 @@
     "ui/ActionParam:requiresFeature",
     "ui/ActionParam:type",
     "ui/ActionParam:visible",
+    "ui/ActionParam:widget",
     "ui/ActionSession:organizationId",
     "ui/ActionSession:positions",
     "ui/ActionSession:roles",

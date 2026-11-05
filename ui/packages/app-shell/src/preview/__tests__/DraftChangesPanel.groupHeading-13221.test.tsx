@@ -115,3 +115,43 @@ describe('an object extension group reads its translated name (objectstack#29704
     expect(headingTexts(list)).toEqual(['2 object extensions']);
   });
 });
+
+/*
+ * objectstack#29902 — hooks (an object's Hooks tab) and translations (the
+ * "All metadata" form editor) are types Studio authors itself, yet a batch of
+ * three hooks read "3 items · 3 hook" (zh 「hook 3」): no count family, so the
+ * raw-name fallback. Both now read their pack's own word.
+ */
+describe('a hook or translation group reads its translated name (objectstack#29902)', () => {
+  const hooks = [
+    { type: 'hook', name: 'h_a' },
+    { type: 'hook', name: 'h_b' },
+    { type: 'hook', name: 'h_c' },
+  ];
+
+  it('en: three hooks head their group "3 hooks"', async () => {
+    const list = await headingsFor(hooks);
+    expect(headingTexts(list)).toEqual(['3 hooks']);
+  });
+
+  it('zh: three hooks head their group 「钩子 3」', async () => {
+    const list = await headingsFor(hooks, 'zh');
+    await waitFor(() => expect(headingTexts(list)).toEqual(['钩子 3']));
+  });
+
+  it('en: one translation heads its group "1 translation"', async () => {
+    const list = await headingsFor([{ type: 'translation', name: 'zh-CN' }]);
+    expect(headingTexts(list)).toEqual(['1 translation']);
+  });
+
+  it('zh: two translations head their group 「翻译 2」', async () => {
+    const list = await headingsFor(
+      [
+        { type: 'translation', name: 'zh-CN' },
+        { type: 'translation', name: 'ja-JP' },
+      ],
+      'zh',
+    );
+    await waitFor(() => expect(headingTexts(list)).toEqual(['翻译 2']));
+  });
+});

@@ -1756,6 +1756,9 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "params.type": {
         label: "Tipo"
       },
+      "params.widget": {
+        label: "Control del campo"
+      },
       "params.required": {
         label: "Obligatorio"
       },
