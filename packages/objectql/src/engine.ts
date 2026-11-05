@@ -150,6 +150,7 @@ import {
   withoutDeletedSelfParents,
   type SummaryDescriptor,
 } from './summary-aggregate.js';
+import { refreshSummariesExtendedBy, startSummaryRefreshOnEnable, summaryRefreshesSettled, type SummaryEnableRefreshReport } from './summary-enable-refresh.js';
 import { ReadonlyFieldRejectedError } from './readonly-strict-errors.js';
 import { HookTargetRebindError } from './hook-target-rebind-errors.js';
 import { FindHookResultNotArrayError } from './find-hook-result-shape.js';
@@ -730,6 +731,10 @@ export class ObjectQL implements IObjectQLEngine {
     // (which reads this map first) kept an uninstalled package read-only until
     // a restart.
     this._registry.onPackageUninstalled((packageId) => { this.manifests.delete(packageId); });
+    // [#30377] A roll-up a package adds by extension is withheld with it, so
+    // the child writes made during a disable recompute nothing: an enable
+    // recomputes it (`summary-enable-refresh.ts`), on every enable door.
+    this._registry.onPackageEnabled((packageId) => startSummaryRefreshOnEnable(this, this.logger, packageId));
     // Pick up production hardening switches from env so deployers can
     // enforce strict-body without code changes:
     //   OBJECTQL_STRICT_HOOKS=1 → unresolved hooks throw at bind time
@@ -4398,6 +4403,25 @@ export class ObjectQL implements IObjectQLEngine {
   getOwnedSummaryDescriptors(parentObject: string): SummaryDescriptor[] {
     // [#29986 codemod] The body moved to `engine-summaries-and-expansion.ts` (see `SummariesAndExpansionHost`).
     return SummariesAndExpansionFacet.getOwnedSummaryDescriptors.call(summariesAndExpansionHost.of(this), parentObject);
+  }
+
+  /**
+   * [#30377] Recompute, on every parent row, the roll-up `summary` fields
+   * `packageId` adds to other packages' objects by extension, writing a row
+   * only where its stored value differs. An enable of a disabled package runs
+   * this by itself ({@link SchemaRegistry.onPackageEnabled}): while the
+   * package was disabled those fields were withheld from the roll-up index, so
+   * the child writes made then recomputed nothing. Public so an operator can
+   * re-run it after a failure the enable logged. Never throws on a row: each
+   * failure is in the report, and logged at `error`.
+   */
+  refreshSummariesEnabledBy(packageId: string): Promise<SummaryEnableRefreshReport> {
+    return refreshSummariesExtendedBy(this, this.logger, packageId);
+  }
+
+  /** [#30377] Resolves once the summary recomputes the enables so far started ({@link refreshSummariesEnabledBy}) have settled, so a door can answer after them. */
+  summaryRefreshSettled(): Promise<void> {
+    return summaryRefreshesSettled(this);
   }
 
   private initializeSummaryFields(object: string, record: any): any {
