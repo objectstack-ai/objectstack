@@ -306,6 +306,26 @@ operator's job — to switch locales cleanly, start from a fresh database.
   the seed loader, so declaring a locale on a dataset takes effect with no extra
   wiring. Declare no `i18n` block and no locale is sent at all — which is the
   unrestricted setting, not a filter.
+
+  **Installs and new organizations load for the organization's language.** A
+  marketplace install, a sample-data reseed, the restart heal of an installed
+  package, and the replay that seeds each new organization pick the locale for
+  the organization the rows land in. The first of these that answers wins:
+
+  1. the organization's **Setup → Localization → Default language**, when
+     somebody set it, for that organization or for the whole deployment (the
+     built-in `en-US` default does not count as set);
+  2. the language of the person installing, reseeding or creating the
+     organization;
+  3. the app's `i18n.defaultLocale`.
+
+  So one package can ship a Chinese and an English demo catalogue side by side,
+  and a Chinese organization gets the Chinese one. A new organization has no
+  Localization setting of its own yet, so its creator's language decides, and
+  one created with no person behind it takes the app's default. On a runtime
+  whose seed data comes only from marketplace packages, a new organization's
+  replay skips the third step: it replays every installed package at once, and
+  no one package's default speaks for all of them.
 </Callout>
 
 <Callout type="warn">
@@ -316,15 +336,15 @@ operator's job — to switch locales cleanly, start from a fresh database.
   scope that is not taking effect is one log line to diagnose rather than a
   silent no-op.
 
-  **Publishing and installing are locale-neutral acts, by decision.** Applying
-  a package, publishing a draft and installing from the marketplace each build
-  their own seed-load request and pass no locale, so a `locale`-scoped dataset
-  reaching one of those paths loads for every market and is named in that
-  warning. This is the declared bound of the axis rather than an unfinished
-  path — a package is assembled once for every market, and selecting a market
-  is what happens when it is opened, on the boot path above. Ruled
-  2026-09-10 on
-  [#17011](https://github.com/objectstack-ai/objectstack/issues/17011#issuecomment-5615361502).
+  **Applying a package and publishing a draft are locale-neutral.** Those two
+  build their own seed-load request and pass no locale, so a `locale`-scoped
+  dataset reaching one of them loads for every market and is named in that
+  warning. Installing from the marketplace was locale-neutral too until the
+  install paths started picking by the organization's language, above (ruled
+  2026-11-05 on
+  [#30281](https://github.com/objectstack-ai/objectstack/issues/30281), which
+  reverses the install half of
+  [#17011](https://github.com/objectstack-ai/objectstack/issues/17011#issuecomment-5615361502)).
 </Callout>
 
 ---
