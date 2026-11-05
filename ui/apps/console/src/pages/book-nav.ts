@@ -109,7 +109,28 @@ export interface ResolvedBook {
   groups: ResolvedGroup[];
 }
 
+/**
+ * The key of the synthetic Uncategorized group. Its `label` is the framework's
+ * English default (the spec's `resolveBookTree` answers the same); a reader
+ * names the group in the session language by this key, never by the label
+ * (see {@link labelUncategorized}).
+ */
 const UNCATEGORIZED_KEY = 'uncategorized';
+
+/**
+ * The resolved book with its synthetic Uncategorized group titled `label` —
+ * the reader's own word for it. Authored groups keep their served labels,
+ * which the server already answers in the request locale; an authored group
+ * that happens to use the key `uncategorized` is not synthetic and is left
+ * as authored.
+ */
+export function labelUncategorized(book: ResolvedBook, label: string): ResolvedBook {
+  if (!book.groups.some((g) => g.synthetic && g.key === UNCATEGORIZED_KEY)) return book;
+  return {
+    ...book,
+    groups: book.groups.map((g) => (g.synthetic && g.key === UNCATEGORIZED_KEY ? { ...g, label } : g)),
+  };
+}
 
 /** The namespace prefix of a metadata name (everything before the first `_`). */
 export function namePrefix(name: string): string {

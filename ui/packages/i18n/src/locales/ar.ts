@@ -3355,6 +3355,8 @@ const ar = {
     allDocs: 'كل الوثائق',
     onlineDocs: 'الوثائق عبر الإنترنت',
     loadingDocumentation: 'جارٍ تحميل الوثائق',
+    documentation: 'الوثائق',
+    uncategorized: 'غير مصنف',
     about: 'حول',
     aboutTitle: 'حول وحدة التحكم هذه',
     aboutDescription: 'الإصدار الذي بُنيت منه وحدة التحكم هذه.',

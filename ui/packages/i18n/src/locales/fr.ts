@@ -3162,6 +3162,8 @@ const fr = {
     allDocs: 'Toute la documentation',
     onlineDocs: 'Documentation en ligne',
     loadingDocumentation: 'Chargement de la documentation',
+    documentation: 'Documentation',
+    uncategorized: 'Non classé',
     about: 'À propos',
     aboutTitle: 'À propos de cette console',
     aboutDescription: 'Le build à partir duquel cette console a été compilée.',

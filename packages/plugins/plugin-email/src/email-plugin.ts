@@ -35,7 +35,7 @@ import type {
 import { bindEmailTemplateDoor, unbindEmailTemplateDoor } from './email-template-door.js';
 import { sweepStrandedOutbox, type OutboxSweepResult } from './outbox-sweep.js';
 import { readInternalHeadersJson } from './internal-header-readback.js';
-import { describeLiveMailTransport, type LiveMailTransportStatus } from './live-transport-status.js';
+import { describeLiveMailTransport, mailDeliveryCopy, type LiveMailTransportStatus } from './live-transport-status.js';
 import {
   EMAIL_LOG_OBJECTS,
   TENANT_EMAIL_OBJECT,
@@ -159,12 +159,17 @@ interface MailSettingsSurface {
       payload?: Record<string, unknown>;
       /** The caller's settings context; `userId` is the signed-in admin who pressed the button. */
       ctx?: { userId?: string };
+      /** The caller's display language, which the answer is written in. Absent: English. */
+      locale?: string;
     }) => Promise<unknown>,
   ): void;
   /** State the live transport at the top of Setup → Email (service-settings' `registerLiveStatus`). */
   registerLiveStatus?(
     namespace: string,
-    provider: () => Promise<LiveMailTransportStatus | undefined>,
+    provider: (input?: {
+      /** The caller's display language, which the statement is written in. Absent: English. */
+      locale?: string;
+    }) => Promise<LiveMailTransportStatus | undefined>,
   ): void;
 }
 
@@ -777,9 +782,9 @@ export class EmailServicePlugin implements Plugin {
           // each page read, after any re-apply still running, so it follows a
           // transport swap made from the same page.
           if (typeof settings.registerLiveStatus === 'function') {
-            settings.registerLiveStatus('mail', async () => {
+            settings.registerLiveStatus('mail', async (input) => {
               await Promise.allSettled([...applying]);
-              return this.service ? describeLiveMailTransport(this.service) : undefined;
+              return this.service ? describeLiveMailTransport(this.service, input?.locale) : undefined;
             });
           }
 
@@ -800,7 +805,11 @@ export class EmailServicePlugin implements Plugin {
           // `from_email`.
           if (typeof settings.registerAction === 'function') {
             const svc = this.service;
-            settings.registerAction('mail', 'test', async ({ values, payload, ctx: actionCtx }: any) => {
+            settings.registerAction('mail', 'test', async ({ values, payload, ctx: actionCtx, locale }: any) => {
+              // The answer is the toast the administrator reads: written in
+              // the caller's display language (English when none is given).
+              const callerLocale = typeof locale === 'string' ? locale : undefined;
+              const copy = mailDeliveryCopy(callerLocale);
               const overrides = extractOverrides(payload);
               const merged: Record<string, unknown> = { ...(values ?? {}), ...overrides };
               const recipient = await resolveMailTestRecipient(payload, actionCtx?.userId, engine);
@@ -818,7 +827,8 @@ export class EmailServicePlugin implements Plugin {
               // (#5087 — this action used to report success for SMTP
               // while the live transport was still the LogTransport).
               let target: EmailService = svc;
-              let tempDescription = '';
+              /** The form's transport the test used, when not the live one — named in the answer. */
+              let testedVia: string | undefined;
               /** One-shot SMTP transport built for this test — closed below. */
               let tempSmtp: SmtpTransport | undefined;
               const provider = String(merged.provider ?? 'smtp');
@@ -843,7 +853,7 @@ export class EmailServicePlugin implements Plugin {
                     ...(svc.options.persistence ? { persistence: svc.options.persistence } : {}),
                     logger: ctx.logger,
                   });
-                  tempDescription = ` via smtp (${smtp.host}:${smtp.port ?? 587})`;
+                  testedVia = `smtp (${smtp.host}:${smtp.port ?? 587})`;
                 } catch (err: any) {
                   return { ok: false, severity: 'error', message: `Failed to build SMTP transport: ${err?.message ?? String(err)}` };
                 }
@@ -901,7 +911,7 @@ export class EmailServicePlugin implements Plugin {
                     ...(svc.options.persistence ? { persistence: svc.options.persistence } : {}),
                     logger: ctx.logger,
                   });
-                  tempDescription = ` via ${provider}`;
+                  testedVia = provider;
                 } catch (err: any) {
                   return { ok: false, severity: 'error', message: `Failed to build ${provider} transport: ${err?.message ?? String(err)}` };
                 }
@@ -927,7 +937,7 @@ export class EmailServicePlugin implements Plugin {
                   return {
                     ok: false,
                     severity: 'error',
-                    message: `Test send failed${tempDescription}: ${result.error ?? 'unknown transport error'}`,
+                    message: copy.testFailed(testedVia, result.error ?? 'unknown transport error'),
                   };
                 }
                 // A LogTransport "send" is not a delivery. Say so instead of
@@ -936,8 +946,7 @@ export class EmailServicePlugin implements Plugin {
                   return {
                     ok: false,
                     severity: 'warning',
-                    message: 'No delivery transport is active — the message was only logged and kept in the email log. '
-                      + 'Configure an SMTP host (or an API provider) and save before testing.',
+                    message: copy.testLoggedLive,
                   };
                 }
                 // The form's unsaved "None (log only)": the same severity and
@@ -947,15 +956,13 @@ export class EmailServicePlugin implements Plugin {
                   return {
                     ok: false,
                     severity: 'warning',
-                    message: 'Nothing was delivered — the provider on the form is "None (log only)", so the test message '
-                      + 'was only logged and kept in the email log; no mail left this machine. The live transport was '
-                      + `not used (${describeLiveMailTransport(svc).label}); save the form to stop delivery.`,
+                    message: copy.testLoggedForm(describeLiveMailTransport(svc, callerLocale).label),
                   };
                 }
                 return {
                   ok: true,
                   severity: 'info',
-                  message: `Sent test email to ${to}${tempDescription} (id=${result.id}).`,
+                  message: copy.testSent(to, testedVia, String(result.id)),
                 };
               } catch (err: any) {
                 return { ok: false, severity: 'error', message: err?.message ?? String(err) };

@@ -19,7 +19,7 @@ import {
   Ban,
   RefreshCw,
 } from 'lucide-react';
-import { createObjectStackUploadAdapter } from '@object-ui/providers';
+import { createObjectStackUploadAdapter } from '@object-ui/data-objectstack';
 import { createAuthenticatedFetch } from '@object-ui/auth';
 import { useObjectTranslation, isPermissionError, classifyLoadError } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
@@ -45,7 +45,7 @@ import { RECORD_PAGE_ATTACHMENT_ROWS, recordAttachmentsCountField } from './reco
  * and the enforcement seam always agree).
  *
  * Storage model: one `sys_file` row per uploaded blob (three-step
- * presigned upload via @object-ui/providers' ObjectStack adapter), one
+ * presigned upload via @object-ui/data-objectstack's ObjectStack adapter), one
  * `sys_attachment` join row linking it to `(parent_object, parent_id)`.
  * Downloads fetch a short-lived signed URL from `/storage/files/:fileId/url`
  * with the console's Bearer token (the endpoint requires an authenticated

@@ -493,6 +493,10 @@ export type {
   ExportDownloadRequest,
 } from './data.js';
 
+// The upload adapter contract: `UploadProvider` (`@object-ui/fields`) reads it,
+// `createObjectStackUploadAdapter` (`@object-ui/data-objectstack`) implements it.
+export type { UploadResult, UploadOptions, UploadAdapter } from './upload.js';
+
 // ============================================================================
 // CRUD Components - Create, Read, Update, Delete Operations
 // ============================================================================

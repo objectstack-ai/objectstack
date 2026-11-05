@@ -3103,6 +3103,8 @@ const ja = {
     allDocs: 'すべてのドキュメント',
     onlineDocs: 'オンラインドキュメント',
     loadingDocumentation: 'ドキュメントを読み込み中',
+    documentation: 'ドキュメント',
+    uncategorized: '未分類',
     about: 'バージョン情報',
     aboutTitle: 'このコンソールについて',
     aboutDescription: 'このコンソールのコンパイル元となったビルドです。',

@@ -50,6 +50,7 @@ import { useFavorites } from '../hooks/useFavorites.js';
 import { useNavPins } from '../hooks/useNavPins.js';
 import { useNavActionDispatch } from '../hooks/useNavActionDispatch.js';
 import { useNavTargetLabel } from '../hooks/useNavTargetLabel.js';
+import { useNavTargetIcon } from '../hooks/useNavTargetIcon.js';
 import { useNavDocTargetCheck } from '../hooks/useNavDocTargetCheck.js';
 import { useNavMemberGates } from '../hooks/useNavMemberGates.js';
 import { matchAppBySegment } from '../utils/index.js';
@@ -186,6 +187,7 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
   // metadata cache at render time (objectui#9868). `nav:menu` wires the same
   // hook, so the two surfaces cannot name one entry two ways.
   const resolveNavTargetLabel = useNavTargetLabel({ byName: true });
+  const resolveNavTargetIcon = useNavTargetIcon();
   // Below the fold width the sidebar is the icon rail and expands over the
   // content (objectstack#27593); `useResponsiveSidebar` folds and unfolds it.
   const rail = useConsoleSidebarRail({ enabled: railOverlay });
@@ -663,6 +665,7 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
              pinnedOrder={pinnedIds}
              onPinnedReorder={reorderPins}
              resolveTargetLabel={resolveNavTargetLabel}
+             resolveTargetIcon={resolveNavTargetIcon}
              locale={language}
              onAction={dispatchNavAction}
              t={t}
