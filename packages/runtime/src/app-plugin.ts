@@ -27,6 +27,7 @@ import { recordSeedOutcome } from './seed-summary.js';
 import { contributeCodeDatasourceNames } from './code-datasource-names.js';
 import { connectPackageDatasources } from './declared-datasources.js';
 import { mergeSeedDatasets, readSeedDatasets, registerSeedReplayerOnce } from './seed-datasets.js';
+import { describeSeedLocale, resolveSeedLocaleForLoad } from './seed-locale.js';
 import { declareSeedSource, recordOrganizationReplay, type SeedLandingReport } from './seed-settlement.js';
 import { loadDisabledPackageIds } from './package-state-store.js';
 import type { IFieldFileService, IMetadataService, IObjectQLEngine, II18nService } from '@objectstack/spec/contracts';
@@ -1788,12 +1789,15 @@ export class AppPlugin implements Plugin {
                  const sharedDatasets = mergeSeedDatasets(ctx, normalizedDatasets);
 
                  const loggerRef = ctx.logger;
-                 // [#16595] Same capture posture as `loggerRef`: the replayer
-                 // outlives `start()` and is invoked by SecurityPlugin's
-                 // sys_organization hook, so the locale is resolved once, here,
-                 // from the boot bundle rather than re-read per replay.
-                 const seedLocale = this.resolveSeedLocale();
-                 const replayer = async (organizationId: string) => {
+                 // [#16595] The boot bundle's declared `i18n.defaultLocale`,
+                 // captured once: it is the LAST rung of the per-organization
+                 // locale below, not the answer (ruling A, 2026-11-05).
+                 const appSeedLocale = this.resolveSeedLocale();
+                 // `options.userId` is the person founding the organization,
+                 // when the org-scoping middleware knows one (the insert's
+                 // attributed user). The callable stays `(organizationId)` for
+                 // every caller that has none.
+                 const replayer = async (organizationId: string, options?: { userId?: string }) => {
                      if (!organizationId) return { inserted: 0, updated: 0, skipped: 0, errors: [] as any[] };
                      const md = ctx.getService('metadata') as IMetadataService | undefined;
                      if (!md) {
@@ -1809,6 +1813,22 @@ export class AppPlugin implements Plugin {
                      if (!Array.isArray(datasetsNow) || datasetsNow.length === 0) {
                          return { inserted: 0, updated: 0, skipped: 0, errors: [] as any[] };
                      }
+                     // [#30281] Resolved PER ORGANIZATION, at replay time: two
+                     // organizations founded in one process can speak different
+                     // languages, so a locale captured at boot would give every
+                     // one of them the boot's. The organization's Localization
+                     // setting, then the founder's language, then the app's
+                     // declared default (`resolveSeedLocaleForLoad`). At founding
+                     // the organization has no row of its own yet, so the
+                     // founder's language decides unless an env or `global`
+                     // value is set; no founder ⇒ the app's default.
+                     const seedLocale = await resolveSeedLocaleForLoad(ctx, {
+                         seeds: datasetsNow,
+                         organizationId,
+                         userId: options?.userId,
+                         appDefaultLocale: appSeedLocale,
+                     });
+                     loggerRef.info(`[seed-replayer] organization ${organizationId} seeds for locale ${describeSeedLocale(seedLocale)}`);
                      const seedLoader = new SeedLoaderService(ql, md, loggerRef, seedLoaderOptionsFor(ctx));
                      const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
                      const request = SeedLoaderRequestSchema.parse({
@@ -1825,12 +1845,12 @@ export class AppPlugin implements Plugin {
                              // lazy guard where it is resolved.
                              identity: seedIdentity,
                              // [#16595] `Seed.locale`'s producer. Spread rather
-                             // than written as `locale: seedLocale` so an app
-                             // with no `i18n.defaultLocale` sends NO key at all
-                             // — `undefined` and absent parse the same here, but
-                             // absence is what the loader's unresolved-scope
-                             // warning is keyed on.
-                             ...(seedLocale ? { locale: seedLocale } : {}),
+                             // than written as `locale: seedLocale` so a load no
+                             // rung answers sends NO key at all — `undefined`
+                             // and absent parse the same here, but absence is
+                             // what the loader's unresolved-scope warning is
+                             // keyed on.
+                             ...(seedLocale ? { locale: seedLocale.locale } : {}),
                          },
                      });
                      const result = await seedLoader.load(request);
@@ -2249,9 +2269,11 @@ export class AppPlugin implements Plugin {
     }
 
     /**
-     * The producer half of `Seed.locale` (#16595) — the BCP-47 tag every seed
-     * load started by this plugin filters on, read off the app's declared
-     * `i18n.defaultLocale`.
+     * The producer half of `Seed.locale` (#16595) — the BCP-47 tag the boot
+     * seed and the dev hot-reload seeder filter on, read off the app's declared
+     * `i18n.defaultLocale`. The per-organization replay uses it as its LAST
+     * rung only, after the organization's Localization setting and the
+     * founder's language (`resolveSeedLocaleForLoad`, #30281).
      *
      * Same source, same spelling and the same envelope-vs-collection posture as
      * {@link loadTranslations}' `setDefaultLocale` call: `i18n` is an ENVELOPE

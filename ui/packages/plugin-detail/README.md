@@ -819,7 +819,9 @@ newest entries and 「查看全部 N 条 →」, which opens the stream in full 
 All / Activity / Discussion chips, a Changes chip while the record shows its
 field history (the host's `RecordFieldHistoryContext`; it holds the audit's
 field changes with their before and after values, and every activity event,
-`created` and `updated` included, sits under Activity), and paging
+`created` and `updated` included, sits under Activity; one action that wrote
+both an activity row and an audit entry is one row, its before and after values
+on it), and paging
 (`?related=timeline`) — then each related list in the reader's arrangement, then Approvals and
 Attachments. The reader's ⊟ (`rightColumn`) takes the right column out of the
 two-column tiers; there is no tabbed tier.

@@ -113,9 +113,11 @@ describe('#14397 — `os dev` over a HOST config composes ONE registrar for stac
         expect(source, 'the door decision must be a single named value').toContain(
             'let devArtifactDoor: any;',
         );
-        // The gate is the same one the composition has always used.
+        // The gate asks the one `hasMetadataPlugin` predicate the host-config
+        // door asks too (#29936: a class-name-only spelling missed the
+        // published bundle's `_MetadataPlugin` and composed a second door).
         expect(source).toContain(
-            "if (isDev && flags.server && !plugins.some((p: any) => p?.constructor?.name === 'MetadataPlugin')) {",
+            'if (isDev && flags.server && !hasMetadataPlugin(plugins)) {',
         );
         // Exactly one ARTIFACT door is constructed in this file, and it is that
         // value — a second artifact-door construction site is a second

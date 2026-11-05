@@ -320,8 +320,9 @@ export function useAppReportEntries(
     .filter((report) => shownByNavigation(report.name as string) && mayOpenReport(report, datasetObjects, can))
     .map((report): AppReportEntry => {
       const name = report.name as string;
-      const text = metadataText(report.label, language);
-      const label = reportLabel({ name, label: text ?? '' });
+      // A served report's label is already translated (objectstack#30244):
+      // drawn as given, the bundle asked only when it carries none.
+      const label = metadataText(report.label, language) ?? reportLabel({ name, label: '' });
       const description = metadataText(report.description, language);
       const object = reportPrimaryObject(report, datasetObjects);
       return {
