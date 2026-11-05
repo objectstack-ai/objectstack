@@ -3,8 +3,8 @@ export * from './PreviewModeContext.js';
 export * from './ActionContext.js';
 export { ThemeProvider, useTheme } from './ThemeContext.js';
 export type { ThemeContextValue, ThemeProviderProps } from './ThemeContext.js';
-// resolveNotificationPresentation and the three SUPPORTED_NOTIFICATION_* sets
-// stay module-level: the provider and its pins read them; no host does.
+// resolveNotificationPresentation and the three SUPPORTED_NOTIFICATION_* sets stay
+// module-level for the provider and the spec-parity test; no host imports them.
 export {
   resolveNotificationConfig,
   useNotifications,
