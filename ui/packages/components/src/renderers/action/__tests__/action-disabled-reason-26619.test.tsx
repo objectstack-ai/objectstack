@@ -138,6 +138,17 @@ describe.each(BUTTON_SITES)('$id — the declared reason is the one it gives (ob
     expect(tooltip).not.toHaveTextContent(DEFAULT_EN);
   });
 
+  it('the tooltip is width-bounded so a long reason wraps inside a phone viewport', async () => {
+    const user = userEvent.setup();
+    mount(site.node({ ...ARCHIVE, disabledReason: DECLARED_EN }, OPEN_TASK));
+    await user.hover(archiveButton().parentElement as HTMLElement);
+    // Radix puts role=tooltip on a visually-hidden copy; the painted box is an
+    // ancestor of it and the one carrying the bound.
+    const tip = await screen.findByRole('tooltip');
+    expect(tip).toHaveTextContent(DECLARED_EN);
+    expect(tip.closest('.max-w-xs')).not.toBeNull();
+  });
+
   it('an inline locale map collapses to the active language — zh', () => {
     mount(site.node({ ...ARCHIVE, disabledReason: { en: DECLARED_EN, 'zh-CN': DECLARED_ZH } }, OPEN_TASK), { zh: true });
     expect(description(archiveButton())).toBe(DECLARED_ZH);

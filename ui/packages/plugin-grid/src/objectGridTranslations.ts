@@ -13,6 +13,9 @@ const GRID_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'grid.delete': 'Delete',
   'grid.export': 'Export',
   'grid.exportAs': 'Export as {{format}}',
+  // The export doors' refusal sentence, shared with `ListView` and
+  // `RelatedList`. Byte-identical to the `en` pack.
+  'view.exportNotPermitted': 'You don’t have permission to export these records. Contact your administrator if you think you should be able to.',
   'grid.loading': 'Loading grid…',
   'grid.errorLoading': 'Error loading grid',
   // objectui#9050 — the malformed-filter state, shared with `RelatedList`

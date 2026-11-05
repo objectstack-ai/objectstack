@@ -1135,6 +1135,7 @@ const de = {
     readonlyAriaLabel: "Schreibgeschützte Ansicht",
     readonlyTooltip: "Systemansicht — im Code definiert, schreibgeschützt.",
     malformedFilter: "Der Filter dieser Ansicht ist fehlerhaft, daher werden keine Datensätze angezeigt: Die Bedingung {{subject}} kann nicht angewendet werden.",
+    exportNotPermitted: "Sie haben keine Berechtigung, diese Datensätze zu exportieren. Wenden Sie sich an Ihren Administrator, wenn Sie sie exportieren müssen.",
     noObject: "Kein Objekt angegeben: Legen Sie {{property}} oder dataSource.object fest.",
   },
   designer: {
@@ -4599,6 +4600,9 @@ const de = {
         object_extension: '{{count}} Objekterweiterungen',
         object_extension_one: '{{count}} Objekterweiterung',
         object_extension_other: '{{count}} Objekterweiterungen',
+        dataset: '{{count}} Datensätze',
+        dataset_one: '{{count}} Datensatz',
+        dataset_other: '{{count}} Datensätze',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

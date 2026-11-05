@@ -245,6 +245,7 @@ import {
   type DraftOnlyObjects,
   type ListViewCustomization,
 } from './ObjectListViewInspector.js';
+import { ObjectListViewTitle } from './ObjectListViewTitle.js';
 import {
   DEFAULT_PAGE_SOURCE_KIND,
   NO_REPORT_BINDING,
@@ -327,7 +328,13 @@ import { useMetadataRefreshNonce } from './useMetadataRefreshNonce.js';
 import { resolveSurface, findSurfaceInTree, type NavNode, type Surface } from './navSurface.js';
 import { servedNavTextOf, displayNavTree, displayAppLabel, type ServedNavText } from './servedNavText.js';
 import { ServedWidgetTextContext, servedWidgetTextOf } from './servedDashboardText.js';
-import { useSurfaceDeepLink, resolveSurfaceDeepLink, type SurfaceTarget } from './useSurfaceDeepLink.js';
+import {
+  useSurfaceDeepLink,
+  useSurfaceDeepLinkCapture,
+  useSurfaceDeepLinkMirror,
+  resolveSurfaceDeepLink,
+  type SurfaceTarget,
+} from './useSurfaceDeepLink.js';
 import { SurfaceDeepLinkProvider, useRequestedSurface, useSurfaceNavigator } from './surfaceDeepLinkChannel.js';
 import { buildObjectSkeleton, buildFlowSkeleton, buildAppSkeleton, buildPermissionSkeleton, type AppNavSeed } from './skeletons.js';
 import { OWD_CREATE_MODELS, OWD_DEFAULT, type OwdCreateModel } from './owd-sharing.js';
@@ -2237,8 +2244,10 @@ export function InterfacesPillar({
   React.useEffect(() => {
     targetLabelRef.current = targetLabel;
   });
-  // `?surface=` capture + mirror — shared plumbing (see useSurfaceDeepLink).
-  const initialSurface = useSurfaceDeepLink(current);
+  // `?surface=` capture — shared plumbing (see useSurfaceDeepLink). The mirror
+  // runs below the list-view buffer: it writes the open view beside the leaf
+  // (objectstack#30046).
+  const initialSurface = useSurfaceDeepLinkCapture();
   // objectstack#28561 — a deep link to a page, dashboard, report or view that
   // no nav entry opens: the "All metadata" area opens such an item here by
   // URL. The app load below finds no entry for it, so it holds its first-leaf
@@ -3208,7 +3217,12 @@ export function InterfacesPillar({
     draftOnlyObjects,
     onDraftSaved,
     customization: listViewCustomization,
+    // objectstack#30046 — the view a link names, shown once its leaf opens.
+    initialView: initialSurface?.viewId ? { surface: initialSurface, viewId: initialSurface.viewId } : null,
   });
+  // `?surface=` mirror (see useSurfaceDeepLink), with the view an `object`
+  // leaf shows when it is not the one its entry opens (objectstack#30046).
+  useSurfaceDeepLinkMirror(current, current?.type === 'object' && listView.entryTarget ? (listView.target?.viewId ?? null) : null);
   const listViewTargetId = listView.target?.viewId ?? null;
   const listViewCustomizable = customizing && listViewTargetId !== null;
   const listViewServed = useServedOverride(
@@ -4077,7 +4091,24 @@ export function InterfacesPillar({
       title={
         current ? (
           <>
-            {ifTitleText}
+            {/* objectstack#30046 — an object entry's title is object / view ▾, as the running list's is. */}
+            {isObjectLeaf && listView.target ? (
+              <ObjectListViewTitle
+                listView={listView}
+                objectText={ifTitleText}
+                locale={locale}
+                // objectstack#28562 — a new view is an item of the base, which takes none.
+                canCreate={!readOnly}
+                // The pending edit goes first, or the author is asked.
+                onSwitchView={switchListView}
+                // New view opens another view here: the pending edit goes first.
+                onAddViewOpen={flushListView}
+                // The selection named a column of the view shown before.
+                onViewCreated={() => setSelection(null)}
+              />
+            ) : (
+              ifTitleText
+            )}
             <span className="sr-only"> · {ifKindName}</span>
           </>
         ) : (
@@ -4144,11 +4175,15 @@ export function InterfacesPillar({
             <button
               type="button"
               data-testid="if-open-in-data"
+              title={t('engine.studio.if.openInData', locale)}
               onClick={() => openSurface({ type: 'object', name: current.name })}
               className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border bg-background px-2.5 text-xs text-foreground hover:bg-muted"
             >
               <Database className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-              {t('engine.studio.if.openInData', locale)}
+              {/* objectstack#30046 — on a narrow header it keeps its glyph, so the title keeps the view's name. */}
+              <span data-studio-fold-label="" className={STUDIO_FOLD_LABEL}>
+                {t('engine.studio.if.openInData', locale)}
+              </span>
             </button>
           )}
           {/* objectstack#28239 — the item tools Setup's item page opens. An
@@ -4430,18 +4465,12 @@ export function InterfacesPillar({
         <div className="min-h-0 flex-1 overflow-hidden">
           <ObjectListViewInspector
             listView={listView}
-            // objectstack#28562 — a customized view is edited; a new one is
-            // an item of the base, which takes none.
+            // objectstack#28562 — a customized view is edited.
             readOnly={listViewReadOnly}
-            canCreate={!readOnly}
             locale={locale}
             // objectui#12725 — the pillar's selection, which a canvas header click also makes.
             selection={selection}
             onSelectionChange={setSelection}
-            // objectstack#27836 — "Add view" opens another view here: the pending edit goes first.
-            onAddViewOpen={flushListView}
-            // objectstack#27896 — another view of the object: the pending edit goes first, or the author is asked.
-            onSwitchView={switchListView}
           />
         </div>
       ) : (
@@ -9182,9 +9211,12 @@ export function AutomationsPillar({
                   </label>
                   {newChoice === p && startTrigger.object?.showWhen?.equals.includes(p.triggerType) && (
                     <div className="ml-6 mt-1.5">
+                      {/* objectstack#30038 — no expression is legal here: a typed
+                          prefix is never saved as the trigger object. */}
                       <ObjectPicker
                         label={startTrigger.object.label}
                         value={newTriggerObject}
+                        objectsOnly
                         onCommit={(v) => {
                           setNewTriggerObject(v);
                           setNewNeeds(null);
@@ -9239,6 +9271,7 @@ export function AutomationsPillar({
                       <ObjectPicker
                         label={startTrigger.object.label}
                         value={newTriggerObject}
+                        objectsOnly
                         onCommit={setNewTriggerObject}
                         locale={locale}
                       />
