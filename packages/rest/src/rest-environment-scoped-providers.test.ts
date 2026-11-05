@@ -38,6 +38,16 @@
  * environment whose kernel carries none of the five answers each door's own
  * "not configured" reply, and still records nothing: the host's occupant is
  * not a fallback.
+ *
+ * ## [#30192] The sixth door, and the audited seams
+ *
+ * The `security` seam joined the five: the suggested-binding list and confirm
+ * (ADR-0090 D5/D9) and `security/explain` (D6) are driven through the same
+ * matrix as DOORS rows, so a hosted owner can accept an installed app's default
+ * permission set. The last describe pins the seams #30192 audited on the same
+ * shape — `auth`, `settings`, `i18n`, `metadata`, and `security` as the record
+ * and meta doors reach it — with the host carrying its own occupant of each,
+ * so an answer from the host is seen.
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
@@ -73,12 +83,15 @@ const ENV_A = 'env_alpha';
 const ENV_B = 'env_beta';
 /** An environment whose kernel carries NONE of the five services. */
 const ENV_BARE = 'env_bare';
+/** [#30192] An environment whose kernel carries no `auth` service either. */
+const ENV_NOAUTH = 'env_noauth';
 
 /** Which hostname the host's resolver maps to which environment. */
 const HOSTS: Record<string, string> = {
     'alpha.example.test': ENV_A,
     'beta.example.test': ENV_B,
     'bare.example.test': ENV_BARE,
+    'noauth.example.test': ENV_NOAUTH,
 };
 const HOST_OF: Record<string, string> = Object.fromEntries(Object.entries(HOSTS).map(([h, e]) => [e, h]));
 
@@ -102,6 +115,24 @@ function occupants(env: string, reached: Reached[]): Record<string, unknown> {
         sharingRules: { listRules: rec('sharingRules.listRules', [{ name: `rule_${env}` }]) },
         email: { send: rec('email.send', { status: 'sent', messageId: `mail_${env}` }) },
         analytics: { queryDataset: rec('analytics.queryDataset', { rows: [{ env }], fields: [] }) },
+        // [#30192] plugin-security's `security` service, as the three doors
+        // below call it: a suggestion is confirmable only where it was made.
+        security: {
+            listAudienceBindingSuggestions: rec('security.listAudienceBindingSuggestions', [
+                { id: `sugg_${env}`, permissionSet: 'crm_user', packageId: 'app.objectstack.hotcrm', status: 'pending' },
+            ]),
+            confirmAudienceBindingSuggestion: async (_ctx: unknown, id: string) => {
+                reached.push({ env, op: 'security.confirmAudienceBindingSuggestion' });
+                if (id !== `sugg_${env}`) {
+                    throw Object.assign(new Error(`No audience-binding suggestion '${id}'.`), {
+                        statusCode: 404, code: 'SUGGESTION_NOT_FOUND',
+                    });
+                }
+                return { id, status: 'accepted' };
+            },
+            dismissAudienceBindingSuggestion: rec('security.dismissAudienceBindingSuggestion', {}),
+            explain: rec('security.explain', { env, allowed: true }),
+        },
     };
 }
 
@@ -214,18 +245,26 @@ interface Hosted {
     kernels: ObjectKernel[];
 }
 
-async function bootHosted(): Promise<Hosted> {
+interface HostedOptions {
+    /** [#30192] More occupants for the host and for each serving environment. */
+    extra?: (env: string) => Record<string, unknown>;
+    /** [#30192] The host carries an `auth` of its own (a `u_host` session). */
+    hostAuth?: boolean;
+}
+
+async function bootHosted(opts: HostedOptions = {}): Promise<Hosted> {
     const reached: Reached[] = [];
-    const envKernel = (env: string, withServices: boolean) => bootKernel(`test.env.${env}`, {
-        auth: authServiceFor(`u_${env}`),
+    const envKernel = (env: string, withServices: boolean, withAuth = true) => bootKernel(`test.env.${env}`, {
+        ...(withAuth ? { auth: authServiceFor(`u_${env}`) } : {}),
         objectql: emptyQl(),
         protocol: envProtocol(env),
-        ...(withServices ? occupants(env, reached) : {}),
+        ...(withServices ? { ...occupants(env, reached), ...opts.extra?.(env) } : {}),
     });
     const kernelsById: Record<string, ObjectKernel> = {
         [ENV_A]: await envKernel(ENV_A, true),
         [ENV_B]: await envKernel(ENV_B, true),
         [ENV_BARE]: await envKernel(ENV_BARE, false),
+        [ENV_NOAUTH]: await envKernel(ENV_NOAUTH, false, false),
     };
     const km = hostKernelManager(kernelsById);
     const resolver = hostKernelResolver();
@@ -239,6 +278,8 @@ async function bootHosted(): Promise<Hosted> {
         // The host's OWN occupants of all five slots: a request answered here
         // records `host`, which no case below may ever see.
         ...occupants('host', reached),
+        ...opts.extra?.('host'),
+        ...(opts.hostAuth ? { auth: authServiceFor('u_host') } : {}),
     }, [createRestApiPlugin({ api: { api: { enableProjectScoping: true, projectResolution: 'auto' } } } as any)]);
     expect(captured.servers, 'the plugin must construct exactly one RestServer').toHaveLength(1);
     return {
@@ -259,6 +300,8 @@ interface Door {
     /** Path below the base, scoped or unscoped. */
     path: string;
     params: (env: string) => Record<string, string>;
+    /** The query string, for a door that reads one. */
+    query?: Record<string, string>;
     body?: unknown;
     /** The downstream call serving the request makes. */
     op: string;
@@ -318,6 +361,26 @@ const DOORS: Door[] = [
         op: 'approvals.listRequests', answeredBy: (b) => b?.data?.approvals?.requests?.[0]?.id,
         absent: { status: 200 },
     },
+    {
+        // [#30192] The ADR-0090 D5/D9 suggestion list an owner reviews.
+        provider: 'security', method: 'GET', path: '/security/suggested-bindings', params: () => ({}),
+        op: 'security.listAudienceBindingSuggestions', answeredBy: (b) => b?.data?.[0]?.id,
+        absent: { status: 501 },
+    },
+    {
+        // [#30192] …and the accept that gives every member the app's set.
+        provider: 'security', method: 'POST', path: '/security/suggested-bindings/:id/confirm',
+        params: (env) => ({ id: `sugg_${env}` }),
+        op: 'security.confirmAudienceBindingSuggestion', answeredBy: (b) => b?.data?.id,
+        absent: { status: 501 },
+    },
+    {
+        // [#30192] The D6 access explanation the list row menu reads.
+        provider: 'security', method: 'GET', path: '/security/explain', params: () => ({}),
+        query: { object: 'account', operation: 'read' },
+        op: 'security.explain', answeredBy: (b) => b?.env,
+        absent: { status: 501 },
+    },
 ];
 
 /** What a served door's body names, per environment. */
@@ -328,6 +391,9 @@ const EXPECTED_ANSWER: Record<string, (env: string) => unknown> = {
     'sharingRules.listRules': (env) => `rule_${env}`,
     'email.send': (env) => `mail_${env}`,
     'analytics.queryDataset': (env) => env,
+    'security.listAudienceBindingSuggestions': (env) => `sugg_${env}`,
+    'security.confirmAudienceBindingSuggestion': (env) => `sugg_${env}`,
+    'security.explain': (env) => env,
 };
 
 async function drive(h: Hosted, door: Door, mount: Mount, env: string) {
@@ -342,7 +408,7 @@ async function drive(h: Hosted, door: Door, mount: Mount, env: string) {
         path: url,
         url,
         params: { ...params, ...(mount === 'scoped' ? { environmentId: env } : {}) },
-        query: {},
+        query: { ...door.query },
         body: door.body,
         headers: {
             // A scoped request comes from a hostname no environment binds, so
@@ -434,6 +500,32 @@ describe('[#30011] hosted shape: two environment kernels behind one host REST pl
         ]);
     }, 60_000);
 
+    it('[#30192] security: environment A\'s suggestion cannot be confirmed through environment B', async () => {
+        h.reached.length = 0;
+        const door = DOORS.find((d) => d.op === 'security.confirmAudienceBindingSuggestion')!;
+        for (const mount of ['scoped', 'hostname'] as const) {
+            const handler = h.table.get(`POST ${mount === 'scoped' ? SCOPED : BASE}${door.path}`)!;
+            let status = 0; let body: any;
+            const res: any = {
+                status(c: number) { status = c; return res; },
+                json(b: any) { body = b; return res; },
+                setHeader() { return res; },
+            };
+            await handler({
+                method: 'POST', url: '', path: '', query: {}, body: {},
+                params: { id: `sugg_${ENV_A}`, ...(mount === 'scoped' ? { environmentId: ENV_B } : {}) },
+                headers: { host: mount === 'scoped' ? 'unbound.example.test' : HOST_OF[ENV_B], cookie: 'session=whatever' },
+            }, res);
+            // B's service was asked, and B made no such suggestion.
+            expect(status, JSON.stringify(body)).toBe(404);
+            expect(body?.error?.code).toBe('SUGGESTION_NOT_FOUND');
+        }
+        expect(h.reached).toEqual([
+            { env: ENV_B, op: 'security.confirmAudienceBindingSuggestion' },
+            { env: ENV_B, op: 'security.confirmAudienceBindingSuggestion' },
+        ]);
+    }, 60_000);
+
     it('no kernel is bought to learn an environment id, and a cold environment is built once per request', async () => {
         h.resolver.resolveKernel.mockClear();
         h.resolver.resolveEnvironment.mockClear();
@@ -498,4 +590,111 @@ describe('[#30011] single kernel: the same doors read the plugin\'s own kernel, 
             }, 60_000);
         }
     }
+});
+
+/**
+ * [#30192] The seams #30192 audited, on the hosted shape, each pinned at the
+ * `RestServer` seam its routes call. The host carries its OWN occupant of every
+ * one of them — its own `auth` (a `u_host` session), `settings` (its own time
+ * zone), `i18n` and `metadata` — so an answer from the host is seen, not merely
+ * absent. `ENV_BARE` carries none of the four but `auth`; `ENV_NOAUTH` carries
+ * no `auth` either.
+ */
+const TIME_ZONES: Record<string, string> = {
+    [ENV_A]: 'Asia/Tokyo',
+    [ENV_B]: 'Europe/Paris',
+    host: 'America/New_York',
+};
+
+function auditedOccupants(env: string): Record<string, unknown> {
+    return {
+        settings: {
+            get: async (namespace: string, key: string) => ({
+                value: namespace === 'localization' && key === 'timezone' ? TIME_ZONES[env] : undefined,
+            }),
+        },
+        i18n: { __env: env, t: (key: string) => key },
+        metadata: { __env: env },
+    };
+}
+
+/** A request routed by hostname alone, as a hosted environment's browser sends it. */
+function hostnameRequest(env: string): any {
+    return {
+        method: 'GET', url: `${BASE}/probe`, path: `${BASE}/probe`, params: {}, query: {},
+        headers: { host: HOST_OF[env], cookie: 'session=whatever' },
+    };
+}
+
+/** The same request on the scoped mount, from a hostname no environment binds. */
+function scopedRequest(env: string): any {
+    return {
+        method: 'GET', url: `${BASE}/environments/${env}/probe`, path: `${BASE}/environments/${env}/probe`,
+        params: { environmentId: env }, query: {},
+        headers: { host: 'unbound.example.test', cookie: 'session=whatever' },
+    };
+}
+
+describe('[#30192] hosted shape: the audited seams answer from the request\'s environment, never the host', () => {
+    let h: Hosted;
+    beforeAll(async () => { h = await bootHosted({ extra: auditedOccupants, hostAuth: true }); }, 60_000);
+    afterAll(async () => { for (const k of h?.kernels ?? []) await k.shutdown(); });
+
+    it('auth: an environment whose kernel carries no auth authenticates nobody — the host\'s session is not its identity', async () => {
+        // The control: an environment with its own auth is the identity that answers.
+        const served = await h.server.resolveExecCtx(undefined, hostnameRequest(ENV_A));
+        expect(served?.userId).toBe(`u_${ENV_A}`);
+        for (const req of [hostnameRequest(ENV_NOAUTH), scopedRequest(ENV_NOAUTH)]) {
+            const ctx = await h.server.resolveExecCtx(req.params.environmentId, req);
+            expect(ctx?.userId, 'the host\'s identity store answered for the environment').toBeUndefined();
+            expect(ctx).toBeUndefined();
+        }
+    }, 60_000);
+
+    it('settings: the execution context localizes from the request\'s environment\'s settings, never the host\'s', async () => {
+        for (const env of [ENV_A, ENV_B]) {
+            for (const req of [hostnameRequest(env), scopedRequest(env)]) {
+                const ctx = await h.server.resolveExecCtx(req.params.environmentId, req);
+                expect(ctx?.userId).toBe(`u_${env}`);
+                expect(ctx?.timezone, `${env} (${req.params.environmentId ? 'scoped' : 'hostname'})`).toBe(TIME_ZONES[env]);
+            }
+        }
+        // An environment with no settings service of its own reads the default,
+        // not the host's reference time zone.
+        const bare = await h.server.resolveExecCtx(undefined, hostnameRequest(ENV_BARE));
+        expect(bare?.userId).toBe(`u_${ENV_BARE}`);
+        expect(bare?.timezone).not.toBe(TIME_ZONES.host);
+    }, 60_000);
+
+    it('i18n and metadata: an environment\'s own occupant answers, and the host\'s is not a fallback', async () => {
+        for (const env of [ENV_A, ENV_B]) {
+            for (const req of [hostnameRequest(env), scopedRequest(env)]) {
+                expect((await h.server.resolveI18nService(req.params.environmentId, req))?.__env).toBe(env);
+                expect((await h.server.resolveMetadataService(req.params.environmentId, req) as any)?.__env).toBe(env);
+            }
+        }
+        for (const req of [hostnameRequest(ENV_BARE), scopedRequest(ENV_BARE)]) {
+            expect(await h.server.resolveI18nService(req.params.environmentId, req)).toBeUndefined();
+            expect(await h.server.resolveMetadataService(req.params.environmentId, req)).toBeUndefined();
+        }
+    }, 60_000);
+
+    it('security: the record, export and meta doors reach the request\'s environment\'s service, and the host\'s is not a fallback', async () => {
+        for (const env of [ENV_A, ENV_B]) {
+            for (const req of [hostnameRequest(env), scopedRequest(env)]) {
+                const id = req.params.environmentId;
+                const viaServer = await h.server.resolveSecurityService(id, req);
+                const viaMetaGate = await h.server.metaReadAudienceSources(id, req).resolveSecurityService();
+                h.reached.length = 0;
+                await viaServer?.explain?.({}, {});
+                await viaMetaGate?.explain?.({}, {});
+                expect(h.reached).toEqual([{ env, op: 'security.explain' }, { env, op: 'security.explain' }]);
+            }
+        }
+        for (const req of [hostnameRequest(ENV_BARE), scopedRequest(ENV_BARE)]) {
+            const id = req.params.environmentId;
+            expect(await h.server.resolveSecurityService(id, req)).toBeUndefined();
+            expect(await h.server.metaReadAudienceSources(id, req).resolveSecurityService()).toBeUndefined();
+        }
+    }, 60_000);
 });
