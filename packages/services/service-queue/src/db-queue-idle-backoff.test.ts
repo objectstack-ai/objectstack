@@ -479,7 +479,9 @@ describe('#30228 DbQueueAdapter — a running row whose lease ran out is reclaim
         expect(runs).toEqual(['a']);
         b.start();
 
-        await vi.advanceTimersByTimeAsync(3 * LEASE + 5 * BASE);
+        // Past A's run and past any second run a reclaim would have started, so
+        // `stop()` — which waits out an in-flight tick — has nothing left to wait for.
+        await vi.advanceTimersByTimeAsync(7 * LEASE + 5 * BASE);
         await a.stop();
         await b.stop();
 
