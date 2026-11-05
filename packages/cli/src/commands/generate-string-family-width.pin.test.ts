@@ -251,6 +251,7 @@ import {
   MULTI_OPTION_TYPES,
   STRUCTURED_JSON_TYPES,
 } from '@objectstack/spec/data';
+import { readSqlDriverSource } from '../../../../scripts/sql-driver-split-source.mjs';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { generateMigrationSql, generateMigrationTs } from './generate.js';
@@ -260,7 +261,9 @@ const GENERATE_SOURCE = fs.readFileSync(path.resolve(HERE, 'generate.ts'), 'utf8
 
 /** The authority, read where it lives — never transcribed here. */
 const DRIVER_SQL_SRC = path.resolve(HERE, '../../../drivers/driver-sql/src');
-const SQL_DRIVER_SOURCE = fs.readFileSync(path.join(DRIVER_SQL_SRC, 'sql-driver.ts'), 'utf8');
+// `SqlDriver` as one text: `sql-driver.ts` with each codemod stub's body read
+// from the facet module it moved to, and the leaf ahead of the class (#30147).
+const SQL_DRIVER_SOURCE = readSqlDriverSource(DRIVER_SQL_SRC).text;
 const SCHEMA_DRIFT_SOURCE = fs.readFileSync(path.join(DRIVER_SQL_SRC, 'schema-drift.ts'), 'utf8');
 
 /** The authority for which types exist at all. Imported, never listed here. */

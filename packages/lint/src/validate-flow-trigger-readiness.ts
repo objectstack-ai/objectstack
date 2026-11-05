@@ -46,6 +46,13 @@
 //      ADR-0018, so the scalar parses fine), not `os validate`, and not even
 //      the one bind-time warn rule 3's case gets.
 //
+//   4b. A time-relative start whose `config.objectName` is not the object its
+//      descriptor sweeps (#30283). Not a dead flow: the sweep binds and runs.
+//      It is a start that names two objects, and the run binds only the swept
+//      one, while the expression checks type the flow's conditions against
+//      `objectName`. So a condition the run cannot evaluate passes every check,
+//      and one it can is refused (1b-iii).
+//
 //   5. A `type: 'record_change'` flow whose start-node `triggerType` the engine
 //      routes NOWHERE — present but off-grammar (`triggerType: 'onCreate'`,
 //      #6637's original specimen) or absent entirely (the omission shape,
@@ -123,6 +130,16 @@
 //     reaches the point of asking that trigger. The rule speaks only for flows
 //     whose binding the ENGINE resolves to `api` (see 1h), so every flow it
 //     names is one the engine refuses.
+//   - `error` — `flow-time-relative-object-mismatch` (#30283) is not a
+//     never-fire verdict, and sits here on the same question all the same: is
+//     THIS STACK enough to know? Both names are on the one start node, and which
+//     one the run binds is a hardcoded read in the engine's binding resolver
+//     (`timeRelative.object` first), so nothing installed changes the answer.
+//     What it costs when left standing was measured, not assumed: a condition
+//     typed against `objectName` reading a field the swept object lacks passed
+//     every check and failed every run (`No such key`), while a correct read of
+//     the swept object's field was refused as unknown on `objectName`. Removing
+//     `objectName` changes nothing the run does, so refusing loses nothing.
 //   ⚠️ `flow-schedule-organization-missing` was the family's one measured
 //     exception — `error` on the criterion, held at `warning` by the shipped
 //     corpus — and it is retired (#17396) rather than re-severitied. The
@@ -246,6 +263,25 @@ export const FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID = 'flow-time-relative-descrip
  *     there is no runtime channel at all for it to be moved earlier from.
  */
 export const FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE = 'flow-time-relative-descriptor-unroutable';
+/**
+ * #30283 — a time-relative start whose `config.objectName` names an object
+ * other than the one its descriptor sweeps (`config.timeRelative.object`).
+ *
+ * The run binds the swept object and nothing else: the engine's binding
+ * resolver reads `timeRelative.object` first, and the trigger launches each run
+ * with a row of that object as `record` and that object as the run's object.
+ * `objectName` is read by no part of a time-relative run — but the expression
+ * checks type the flow's conditions against it whenever it is set, so the start
+ * names an object for its checks that its run never binds. Measured: a
+ * condition reading a field only the named object declares passes every check
+ * and faults every run; a correct read of the swept object's field is refused
+ * as unknown on the named one (see 1b-iii).
+ *
+ * The third id of the `flow-<descriptor>-<verdict>` family, on a different key
+ * from the other two (`config.objectName`, beside the descriptor), so it can
+ * fire together with either of them: two keys, two facts.
+ */
+export const FLOW_TIME_RELATIVE_OBJECT_MISMATCH = 'flow-time-relative-object-mismatch';
 /**
  * #6637 — a `type: 'record_change'` flow whose start-node `triggerType` the
  * engine routes to NO trigger at all, so the flow is silently demoted to a
@@ -676,6 +712,46 @@ export function validateFlowTriggerReadiness(
           hint:
             'Correct config.timeRelative to TimeRelativeTriggerSchema, starting with the key the verdict names, ' +
             'and re-run until the schema accepts it: a descriptor the schema accepts binds',
+        });
+      }
+
+      // 1b-iii. #30283 — the start names one object in `config.objectName` and
+      //     sweeps another in `timeRelative.object`. Only a flow the ENGINE binds
+      //     to the time-relative trigger is judged: the spec's kind resolver
+      //     says `time_relative`, and the start carries no array-form record
+      //     token (the engine's binding pre-check routes that shape to the
+      //     record-change trigger, which DOES bind `objectName`, ahead of the
+      //     resolver). A `record-*` token outranks the descriptor in the
+      //     resolver itself, so that flow is not judged either.
+      //
+      //     `error`, on the family's criterion: the stack alone settles it. Both
+      //     names sit on the one start node, and which of them the run binds is
+      //     a hardcoded read in the engine's binding resolver, so no installed
+      //     package changes the answer. The fix loses nothing: removing
+      //     `objectName` changes nothing the run does.
+      const sweptObject = typeof tr.object === 'string' ? tr.object : undefined;
+      const namedObject = typeof config.objectName === 'string' ? config.objectName : undefined;
+      if (
+        sweptObject &&
+        namedObject !== undefined &&
+        namedObject !== sweptObject &&
+        resolveFlowTriggerKind(flow) === 'time_relative' &&
+        !isArrayRecordTriggered
+      ) {
+        findings.push({
+          severity: 'error',
+          rule: FLOW_TIME_RELATIVE_OBJECT_MISMATCH,
+          where: `flow "${flowName}" › start node`,
+          path: `flows[${flowIndex}].nodes[${start.index}].config.objectName`,
+          // One verdict sentence; what the run binds, what the checks type
+          // against, and the measured outcome are
+          // `os explain flow-time-relative-object-mismatch`.
+          message:
+            `config.objectName '${namedObject}' is not the object this time-relative start sweeps ` +
+            `('${sweptObject}'): each run's record is a '${sweptObject}' row, and '${namedObject}' is never bound`,
+          hint:
+            `Remove config.objectName (the sweep never reads it), or set it to '${sweptObject}': conditions are then ` +
+            `checked against the record each run holds`,
         });
       }
     }

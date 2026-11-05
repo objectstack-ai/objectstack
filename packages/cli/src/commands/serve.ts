@@ -125,6 +125,7 @@ import {
   resolveStackCollection,
   stackDeclaredCapabilities,
   stackBootPlugins,
+  hasMetadataPlugin,
 } from '../utils/stack-collections.js';
 import { redactConnectionUrl, describeDriverConnection, describeDriverSqliteFile } from '../utils/connection-display.js';
 import { captureServedDatabaseFile, watchServedDatabaseFile } from '../utils/served-database-file.js';
@@ -3511,7 +3512,7 @@ export default class Serve extends Command {
       // points except by the AppPlugin append below, and an AppPlugin is not a
       // MetadataPlugin.
       let devArtifactDoor: any;
-      if (isDev && flags.server && !plugins.some((p: any) => p?.constructor?.name === 'MetadataPlugin')) {
+      if (isDev && flags.server && !hasMetadataPlugin(plugins)) {
         try {
           const { resolveDefaultArtifactPath } = await import('@objectstack/runtime');
           // `os dev` is the only caller that reaches here, and it is a
@@ -3652,7 +3653,7 @@ export default class Serve extends Command {
       if (
         !devArtifactDoor
         && isHostConfig(config)
-        && !plugins.some((p: any) => p?.name === 'com.objectstack.metadata' || p?.constructor?.name === 'MetadataPlugin')
+        && !hasMetadataPlugin(plugins)
       ) {
         const { MetadataPlugin } = await import('@objectstack/metadata');
         hostConfigMetadataDoor = new MetadataPlugin({

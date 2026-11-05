@@ -2337,6 +2337,13 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.if.tabCanvas': 'Canvas',
   'engine.studio.if.noAppTitle': 'This package has no app yet',
   'engine.studio.if.noAppHint': 'Create an app to design its navigation and interfaces.',
+  // objectstack#29851 — a package with no app of its own that adds navigation
+  // to another package's app, as that app's owner serves it.
+  'engine.studio.if.noOwnApp': 'This package has no app of its own.',
+  'engine.studio.if.noOwnAppTitle': 'This package has no app of its own',
+  'engine.studio.if.contributesOne': 'It adds {count} navigation entry to {package}’s app.',
+  'engine.studio.if.contributesOther': 'It adds {count} navigation entries to {package}’s app.',
+  'engine.studio.if.openOwner': 'Open {package}',
   // objectui#12508 — the canvas of an object that has only a draft: no runtime yet.
   'engine.studio.if.objectUnpublishedTitle': 'This object is not published yet',
   'engine.studio.if.objectUnpublishedHint': 'Publish the package to see its records here.',
@@ -3582,6 +3589,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.actions.presets': 'Common actions',
   'engine.studio.actions.notSaved': 'Not saved — needs “{input}”',
   'engine.studio.actions.heldNeeds': 'the action “{action}” needs “{input}”',
+  'engine.studio.actions.renameHeld': 'Not saved yet: an action added to an installed app keeps the name it was created with. Change the name back to {name} to save your changes.',
   'engine.studio.actions.preset.change': 'Change a picklist field',
   'engine.studio.actions.preset.changeHint': 'Asks for a new “{field}”, then saves it.',
   'engine.studio.actions.preset.changeNeeds': 'Needs a picklist field on this object.',
