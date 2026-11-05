@@ -141,6 +141,7 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 | **objectOverride** | `string` | optional | Snake case identifier (lowercase with underscores only) |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>` | optional |  |
+| **widget** | `string` | optional | Widget override for this param — names a registered field component (resolved as `field:<widget>`) to draw it instead of the `type` default; same key and vocabulary as FieldSchema.widget, and `type` stays the value's type. e.g. "permission-ref" on a text param picks a permission set by name (ADR-0131 D4). Degrades to the `type` renderer when unregistered. |
 | **required** | `boolean` | optional (default: `false`) |  |
 | **options** | `{ label: string \| Record<string, string>; value: string; visibleWhen?: string \| object }[]` | optional |  |
 | **placeholder** | `string` | optional |  |
@@ -234,6 +235,7 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 | **objectOverride** | `string` | optional | Snake case identifier (lowercase with underscores only) |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| … +35 more>` | optional |  |
+| **widget** | `string` | optional | Widget override for this param — names a registered field component (resolved as `field:<widget>`) to draw it instead of the `type` default; same key and vocabulary as FieldSchema.widget, and `type` stays the value's type. e.g. "permission-ref" on a text param picks a permission set by name (ADR-0131 D4). Degrades to the `type` renderer when unregistered. |
 | **required** | `boolean` | optional (default: `false`) |  |
 | **options** | `{ label: string \| Record<string, string>; value: string; visibleWhen?: string \| object }[]` | optional |  |
 | **placeholder** | `string` | optional |  |
@@ -370,6 +372,7 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 | **objectOverride** | `string` | optional | Snake case identifier (lowercase with underscores only) |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>` | optional |  |
+| **widget** | `string` | optional | Widget override for this param — names a registered field component (resolved as `field:<widget>`) to draw it instead of the `type` default; same key and vocabulary as FieldSchema.widget, and `type` stays the value's type. e.g. "permission-ref" on a text param picks a permission set by name (ADR-0131 D4). Degrades to the `type` renderer when unregistered. |
 | **required** | `boolean` | optional (default: `false`) |  |
 | **options** | `{ label: string \| Record<string, string>; value: string; visibleWhen?: string \| object }[]` | optional |  |
 | **placeholder** | `string` | optional |  |
