@@ -26,13 +26,16 @@
  * - [#28737] the timeline part is a count of each source the body names, by
  *   that source's own read as the caller, summed as the spec's timeline table
  *   spells it.
+ * - [#30343] one action written to both the activity and the ledger is one
+ *   entry of that count: every update steps aside, and a create (a delete) as
+ *   often as both sources hold one.
  *
  * The end-to-end half, under row-level and field-level security as a member who
  * is not an admin, is `record-page.dogfood.test.ts`.
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES, RecordPageResponseSchema } from '@objectstack/spec/api';
+import { RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES, RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES, RecordPageResponseSchema } from '@objectstack/spec/api';
 import { RestServer } from './rest-server.js';
 import { RECORD_PAGE_PARAMS } from './record-page-routes.js';
 import { unknownQueryParamMessage } from './query-allowlist.js';
@@ -601,8 +604,10 @@ describe('[#28737] the timeline part is the 动态 stream\'s size, counted by th
     const countOf = (req: any) => {
         const where = req.query?.where ?? {};
         if (req.object === 'sys_comment') return { records: [], total: 3 };
-        if (req.object === 'sys_audit_log') return { records: [], total: 40 };
-        if (req.object === 'sys_activity') return { records: [], total: where.type === 'updated' ? 30 : 250 };
+        if (req.object === 'sys_audit_log') return { records: [], total: where.action === 'create' ? 1 : where.action === 'delete' ? 0 : 40 };
+        if (req.object === 'sys_activity') {
+            return { records: [], total: where.type === 'updated' ? 30 : where.type === 'created' ? 1 : where.type === 'deleted' ? 2 : 250 };
+        }
         return { records: [], total: 0 };
     };
     const ofRecord = { object_name: 'account', record_id: 'a1' };
@@ -612,8 +617,9 @@ describe('[#28737] the timeline part is the 动态 stream\'s size, counted by th
         const answer = await call({ timeline: { discussion: true, activity: true, fieldChanges: true } });
         expect(answer.status).toBe(200);
         const data = RecordPageResponseSchema.parse(answer.body.data);
-        // 3 comments + 40 field changes + 250 drawn activity rows − their 30 updates.
-        expect(data.timeline).toEqual({ total: 263 });
+        // 3 comments + 40 field changes + 250 drawn activity rows − their 30
+        // updates − min(1 created, 1 create) − min(2 deleted, 0 delete) [#30343].
+        expect(data.timeline).toEqual({ total: 262 });
         const reads = findData.mock.calls.map(([req]) => req);
         expect(reads).toEqual(expect.arrayContaining([
             { object: 'sys_comment', query: { object: 'sys_comment', where: { thread_id: 'account:a1' }, limit: 0, count: true }, context: CTX },
@@ -637,8 +643,20 @@ describe('[#28737] the timeline part is the 动态 stream\'s size, counted by th
                 query: { object: 'sys_activity', where: { ...ofRecord, type: 'updated' }, limit: 0, count: true },
                 context: CTX,
             },
+            ...(['create', 'delete'] as const).flatMap((action) => [
+                {
+                    object: 'sys_activity',
+                    query: { object: 'sys_activity', where: { ...ofRecord, type: RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES[action] }, limit: 0, count: true },
+                    context: CTX,
+                },
+                {
+                    object: 'sys_audit_log',
+                    query: { object: 'sys_audit_log', where: { ...ofRecord, action }, limit: 0, count: true },
+                    context: CTX,
+                },
+            ]),
         ]));
-        expect(reads).toHaveLength(4);
+        expect(reads).toHaveLength(8);
     });
 
     it('counts only the sources named, and no update steps aside without a field change', async () => {
@@ -775,6 +793,21 @@ describe('[#30343] one action is one entry in the timeline count, as the 动态 
         const { call } = rowsBoot(createThenEdit, ['sys_audit_log']);
         const data = RecordPageResponseSchema.parse((await call(BOTH)).body.data);
         expect(data.timeline).toEqual({ total: 2 });
+    });
+
+    it('a record created before its history was kept counts its create row: one create and one edit are still 2', async () => {
+        const { call } = rowsBoot({ ...createThenEdit, sys_audit_log: [{ ...ofRecord, action: 'update' }] });
+        const data = RecordPageResponseSchema.parse((await call(BOTH)).body.data);
+        expect(data.timeline).toEqual({ total: 2 });
+    });
+
+    it('a delete written to both sources is one entry too: create, edit and delete count 3', async () => {
+        const { call } = rowsBoot({
+            sys_activity: [...createThenEdit.sys_activity, { ...ofRecord, type: 'deleted' }],
+            sys_audit_log: [...createThenEdit.sys_audit_log, { ...ofRecord, action: 'delete' }],
+        });
+        const data = RecordPageResponseSchema.parse((await call(BOTH)).body.data);
+        expect(data.timeline).toEqual({ total: 3 });
     });
 
     it('a comment still adds one', async () => {
