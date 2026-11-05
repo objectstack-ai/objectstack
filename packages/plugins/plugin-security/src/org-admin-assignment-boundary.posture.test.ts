@@ -745,9 +745,7 @@ describe('[ADR-0090 D12; ruling of record 5985885287] an administrator\'s refuse
       // stored row too: an organization administrator whose field rules hide
       // the column a removal is judged on is refused a row outside the
       // boundary by the boundary itself, without the value, and removes a row
-      // inside it; one who reads the column is told the value. (Before the
-      // stored-row verdict the organization branch judged its read of the row,
-      // and refused both rows as naming no position or set.)
+      // inside it; one who reads the column is told the value.
       const orgAdminHiding = { userId: 'u_org_admin_hiding', positions: [] as string[], permissions: ['organization_admin', ORG_ADMIN_FIELDS_HIDDEN.name], tenantId: ORG_A, accessible_org_ids: [ORG_A] };
       await h.engine.insert('sys_member', { id: 'm_u_org_admin_hiding', user_id: orgAdminHiding.userId, organization_id: ORG_A, role: 'admin' },
         { context: { isSystem: true, tenantId: ORG_A } } as any);
