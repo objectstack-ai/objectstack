@@ -2,9 +2,9 @@
   "number": 30528,
   "kind": "pull_request",
   "title": "fix(plugin-list): offer the In a queue filter only where the platform provisions the storage",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -19,11 +19,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T14:11:43Z",
-  "updated_at": "2026-11-05T14:14:09Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 0,
+  "updated_at": "2026-11-05T15:41:18Z",
+  "closed_at": "2026-11-05T15:41:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-05T15:41:16Z",
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/30528",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuXpPPZiBKyj1HzrdQ6La3ZH)_\ndomain:ui#6 · os-sales · session_01L6bhgUR8Nu4M7tbtgES7q2\nFixes #30372\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：外部（联邦）对象的列表不再显示「在队列中」筛选；普通的 `ownership: user` 对象照旧显示。\n- 为什么改：外部对象虽然被注入了平台的 `queue` 列，但表结构归远端数据库，该列没有存储，任何一行都不可能进入队列，这个筛选只是噪音。\n- 风险与回滚：风险低，只多了一个前置判断，读的是 spec 已有的 `platformProvisionsStorage`；回滚即还原 `ListView.tsx` 中那一行。\n- 先看：`ui/packages/plugin-list/src/ListView.tsx` 的 `objectHasOwnershipQueue`（新增首行判断），再看同目录测试文件末尾新增的 describe 块。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/plugin-list/src/__tests__/ListView.queueSittingFilter-25769.test.tsx`，预期 15 个测试全部通过。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `objectHasOwnershipQueue` (plugin-list `ListView.tsx`) now also requires `platformProvisionsStorage(objectDef)` from `@objectstack/spec/data`. On an ADR-0015 `external` object the remote database owns the schema, so the injected `queue` column has no storage and no row can ever sit in a queue (assignment rules skip such objects through `carriesQueueColumn` already). The toggle `queueFilterOffered` therefore stays hidden there.\n- The import joins the module's existing static `@objectstack/spec/data` import (`resolveInjectedSystemColumns`, `resolveSearchFieldResolution`), so it opens no new subpath in the Console's eager closure. `check:eager-closure` is CI's (Build and E2E UI); not measured locally.\n- No `packages/**` change: per the server seat's measurement on the card, `/meta/object/...` already serves the `external` block, so the console can read the signal.\n\n## Tests\n\nThree pins as a new top-level `describe` in the existing harness `ListView.queueSittingFilter-25769.test.tsx`:\n- `objectHasOwnershipQueue` is false on an external object carrying the injected column, in map and array `fields` form;\n- a mounted list of an external object with the injected `queue` column and `hasAnyQueue: true` renders no toggle;\n- an ordinary `ownership: 'user'` object still renders it.\n\nThe external fixture is spec-shaped (`datasource: 'legacy_erp'`, `external: { remoteName, writable: false }`).\n\n## Acceptance notes\n\n- The fix covers every federated object, not only read-only ones: the injected column is unprovisioned on all of them (server seat's reading on the card).\n\n## Verification\n\nAll readings at head `9a22376034`, worktree on `origin/main` `a1d0b1ee9e`.\n\n<details><summary>Positive control (ablation of the new guard)</summary>\n\nFix committed first; `node scripts/ablation-replace.mjs --delete` on the anchor `if (!platformProvisionsStorage(objectDef)) return false;` (anchor 1 to 0, blob 24b6311333fc to 1945b6c6c1e4). plugin-list resolves to `src` through the ui vitest alias, so no build is between the edit and the run.\n- Mutated: `Tests 2 failed | 13 passed (15)`; the two external pins red, the ordinary-object pin green.\n- Restored: blob equals HEAD (24b6311333fc), `git diff HEAD` empty; `Tests 15 passed (15)`.\n- A first attempt never acquired the verification lock (`queue-timeout (exit 99)`), restored by the tool, and counts as not run.\n</details>\n\n<details><summary>Package tests and type-check</summary>\n\n- `pnpm --filter '@object-ui/plugin-list^...' build`: lock VERDICT command-exit 0.\n- `pnpm --dir ui exec vitest run packages/plugin-list/`: `Test Files 189 passed (189)`, `Tests 1816 passed (1816)`, exit 0.\n- `pnpm --filter @object-ui/plugin-list type-check` (`tsc --noEmit && tsc -p tsconfig.test.json`): exit 0.\n</details>\n\n<details><summary>Derived gates</summary>\n\n`node scripts/pm/dispatch-gates.mjs --ran`: 35 derived families accounted for, 35 run, 0 NOT-MEASURED (all with an exit code recorded, all 0). Includes `pnpm --dir ui exec vitest run scripts/` (`Tests 4985 passed | 2 skipped`). Also run: `pnpm check:changeset-fixed` exit 0 (roster under `.changeset`), `pnpm check:new-line-citations` 0 new citations.\n\nType-check lanes and repo-wide families are CI's.\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgUR8Nu4M7tbtgES7q2\n<!-- signed: domain:ui#6 · os-sales · session_01L6bhgUR8Nu4M7tbtgES7q2 -->"

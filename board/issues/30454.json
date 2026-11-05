@@ -2,8 +2,8 @@
   "number": 30454,
   "kind": "issue",
   "title": "Identity join objects' record titles still splice raw lookup ids (sys_member, sys_two_factor, SCIM)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -21,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T12:03:48Z",
-  "updated_at": "2026-11-05T14:06:37Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T15:55:31Z",
+  "closed_at": "2026-11-05T15:54:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30454",
   "body": "domain:server#5 · os-bill · session_01Utp6CYVV6fcAQrNTDQRvPb\n\n## What a reader sees\n\nFour identity join objects build their `display_title` record title (their `nameField`) by concatenating stored lookup ids. A record page H1, a related-list Title column or a reference to any of these rows therefore shows raw ids instead of names:\n\n| Object | Expression on main |\n|---|---|\n| `sys_member` (`identity/sys-member.object.ts:346`) | ``record.role != null ? record.user_id + ' (' + record.role + ')' : record.user_id`` |\n| `sys_two_factor` (`identity/sys-two-factor.object.ts:171`) | ``'Two-factor for ' + record.user_id`` |\n| `sys_scim_group_member` (`identity/sys-scim-group-member.object.ts:82`) | ``record.scim_user_id + ' in ' + record.group_id`` |\n| `sys_scim_projection_grant` (`identity/sys-scim-projection-grant.object.ts:83`) | ``record.role + ' → ' + record.user_id`` |\n\n## The precedent\n\n`sys_business_unit_member` and `sys_team_member` (#30421, PR #30452) read their names one hop through the lookup, as allowed by the ADR-0079 addendum of 2026-10-18. Both use the form ``(isBlank(trim(record.user_id.name)) ? record.user_id.email : record.user_id.name)`` and are read under the reader's own authority, so an unreadable target gives a null title.\n\n## Asks\n\n- Rewrite each title to read names one hop through its lookups. For the SCIM objects, the dev should check which field on the target names it.\n- For each lookup that a related list derives from, check whether it needs `relatedListColumns`, as #30421 did.\n- Pin each title in `identity-display-title.test.ts`.\n\nFound while reviewing #30421. The #30421 dev listed these objects in its report and left them unchanged."

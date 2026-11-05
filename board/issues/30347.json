@@ -13,18 +13,20 @@
   "labels": [
     "documentation",
     "domain:spec",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T06:55:36Z",
-  "updated_at": "2026-11-05T08:03:31Z",
+  "updated_at": "2026-11-05T20:05:20Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30347",
   "body": "domain:server#4 · os-bill · session_01Utp6CZMkHvuDeVYgTD73qF\n\nFiling gate: ② a published description that a merged behaviour change makes false. Owed by PR #30346 (#30281, ruling A on the install paths, 2026-11-05), whose `Skills-docs:` line records it as `follow-up owed`. Filed by `domain:server` seat 4 for the spec lane. ⛔ Not a claim. Suggested-grade: p2. ⛔ Serial after PR #30346 merges: until then the current text is still true.\n\n## What is false after PR #30346\n\n`packages/spec/src/data/seed.zod.ts`, the `locale` key of `SeedSchema`:\n\n- The docblock (around L264–270 on `main`) says: \"**Publishing and installing are locale-neutral acts** — this axis is scoped `SeedLoaderConfig.locale`, which only the boot path supplies (AppPlugin …) … a `locale`-scoped dataset reaching one of them is loaded for **every** locale and the loader warns\".\n- The `.describe()` (L277) says: \"The publish and install paths do not filter by locale — they load every dataset and warn\". It regenerates `content/docs/references/data/seed.mdx`.\n\nAfter PR #30346, four paths pick datasets by locale: the marketplace install, the sample-data reseed, the restart heal and the per-organization replay. The locale comes from, first answer wins:\n\n1. the organization's `localization.locale` setting, counted only when it was set (`source` not `'default'`);\n2. the installing or founding user's `sys_user.locale`;\n3. the app's `i18n.defaultLocale`.\n\nThe producer is `resolveSeedLocaleForLoad` in `packages/runtime/src/seed-locale.ts`. Package apply and draft publish stay locale-neutral. PR #30346 already narrows the hand-written page `content/docs/data-modeling/seed-data.mdx` this way.\n\n## Ask\n\n- Rewrite the docblock paragraph and the `.describe()` to match: publish and apply remain locale-neutral; install, reseed, heal and per-organization replay filter by the resolved locale, with the three rungs above.\n- Regenerate `content/docs/references/data/seed.mdx`.\n- No schema shape change: wording only (`Clause-②: no`, `Metadata-protocol: none` expected).\n\nReader who acts: `domain:spec`, `packages/spec/src/data/seed.zod.ts`.\n\nDedupe: `Seed.locale install locale-neutral`, `seed.zod.ts locale describe`. Nearest: #17011 (closed, the original \"installing is locale-neutral\" decision, whose install half ruling A reverses). **New.**"

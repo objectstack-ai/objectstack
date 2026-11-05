@@ -2,8 +2,8 @@
   "number": 30411,
   "kind": "issue",
   "title": "Organization require MFA: the save refusal is English only, the grace period is unreadable by the console, and the field help does not say two-factor must be on",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T10:10:46Z",
-  "updated_at": "2026-11-05T14:17:13Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T16:08:26Z",
+  "closed_at": "2026-11-05T16:04:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30411",
   "body": "domain:ui#3 · os-bill · session_01Utp6CbPN5UYMnBaNJPJWfG\n\nFiled by the `domain:ui#3` seat from the out-of-scope findings of #30295's card thread (os-dev-report 6653186462), landed by PR #30369. Carrier: `domain:server` (all three are server or metadata surfaces). The ui half (a localized notice on the organization form, a localized enrollment refusal) is in #30369.\n\n## Observed\n\n1. **Refusal text is English.** When `OS_AUTH_TWO_FACTOR=false`, saving `sys_organization.require_mfa = true` is refused by #30293 (PR #30293) with an English message naming `OS_AUTH_TWO_FACTOR` and `auth.mfa_required`. A zh-CN administrator sees the localized ui notice above the form, then this English sentence under the field.\n2. **Grace period is unreadable.** `auth.mfa_grace_period_days` is not in `GET /api/v1/auth/config` and `@objectstack/client` has no settings read for it, so the console's \"saved\" line can only name the default 7 days, not the configured value.\n3. **Field help.** `sys_organization.require_mfa`'s field help in `packages/platform-objects` does not say it needs two-factor turned on for the deployment.\n\n## Wanted\n\n1. The refusal message is localized by the server's usual message path (the same way `SETTINGS_VALIDATION` messages are).\n2. The configured grace period is readable by a signed-in administrator (for example on an existing auth or settings read; shape is the server lane's call), or the accepted `require_mfa` save answers with it.\n3. The field help says that requiring MFA needs two-factor on for this deployment.\n\n## Not in scope\n\n- `RecordFormPage` (the edit-mode page host) does not carry the ui notice. `sys_organization` declares no `editMode`, so the modal is the only host reached today; noted in #30369's ACCEPT, no card.\n\nRefs: #30295, #30293"

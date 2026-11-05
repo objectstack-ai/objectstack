@@ -1,0 +1,35 @@
+{
+  "number": 30569,
+  "kind": "pull_request",
+  "title": "fix(rest): the approvals list's non-string status refusal says what the parameter takes, and the approvals docs list all six statuses",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T16:19:54Z",
+  "updated_at": "2026-11-05T17:06:38Z",
+  "closed_at": "2026-11-05T17:06:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-05T17:06:36Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30569",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgMwxPY5sbyTBJiFwuYyp3nB)_\n\ndomain:server#4 · os-bill · session_01Utp6CZMkHvuDeVYgTD73qF\n\nFixes #30525\n\nClause-②: no — the same requests are refused with the same status and envelope; only the message for a non-string `status` and a docs list change\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：审批列表接口收到格式不对的 `status`（比如 `?status[$ne]=pending` 这种被解析成对象的写法）时，报错文字改成说明正确写法，并列出六个允许的状态。\n- 为什么改：之前的报错会写成 `\"[object Object]\" 不是审批状态`，对接方看不懂错在哪。\n- 文档：审批文档里的状态列表原来只写了五个，现在补上 `cancelled`（平台作废的请求，比如记录被删了）。\n- 风险：很低。被拒的请求和以前完全一样，状态码和返回结构都没变，只是文字更清楚。\n- 先看：`packages/rest/src/approvals-routes.ts` 里 `readApprovalStatusFilter` 新加的非字符串分支。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- **`readApprovalStatusFilter`** (`packages/rest/src/approvals-routes.ts`) answers a non-string `status` from its own arm: `The \"status\" query parameter must be one status, or several separated by commas, given as plain text. Allowed values: pending, approved, rejected, recalled, returned, cancelled.` It used to quote `String(raw)`, so `?status[$ne]=pending` read `\"[object Object]\"` as if that were the value sent. Still `400 VALIDATION_ERROR` in the nested envelope, and the service is still not asked. String values take the same path as before.\n- **`content/docs/automation/approvals.mdx`**: \"Statuses in full\" lists all six `APPROVAL_STATUSES`, with one clause on what `cancelled` means and where its reason lives (`cancel_reason`).\n\n## Why\n\nContract review record 6659996154 on PR #30491 (should-fixes 1 and 2), filed as #30525.\n\n## Verification\n\nAll at head `b6b000c5` (`origin/main` merged once, before the gates).\n\n- **Test.** The nested-object case in `rest-server-approvals-status-value.test.ts` now asserts the exact message, that it never contains `[object Object]`, no `data` beside the error, and that neither `listRequests` nor `countRequests` ran. File: 16/16.\n- **Ablation.** `scripts/ablation-replace.mjs` made the new arm unreachable (`typeof raw !== 'string'` → `typeof raw === 'symbol'`, blob `8fecd091` → `9dde4c15`): the nested-object case fails (the string path then throws on the object and the route answers 500); 15 others pass. Restored, `git diff HEAD` empty.\n- **Suites.** `@objectstack/rest` vitest: 393 files, 7,641 passed, 352 skipped. `pnpm --filter @objectstack/rest run typecheck`: exit 0.\n- **Lint.** `pnpm lint`: exit 0.\n- **Gates.** `node scripts/pm/dispatch-gates.mjs --commands` derived 88 commands; all 88 exit 0 after a full `turbo run build --filter='!@objectstack/docs'`. `--ran`: 88 derived, 88 run, 0 NOT-MEASURED, 0 UNRUN.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request. (the designated thread branch, restarted from `main` after #30491 merged, as the Claim records)\n- [x] 5. A change that publishes carries a changeset (`patch`, `@objectstack/rest`), and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English (the maintainer's quick-read section is in Chinese by the seat's order).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CbAccy76jpUtQ9ZZX9\n"
+}

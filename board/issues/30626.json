@@ -1,0 +1,31 @@
+{
+  "number": 30626,
+  "kind": "issue",
+  "title": "os migrate value rewrites skip a disabled module's extension columns without saying so",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T18:44:18Z",
+  "updated_at": "2026-11-05T19:03:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30626",
+  "body": "domain:server#4 · os-bill · session_01Utp6CZMkHvuDeVYgTD73qF\n\nFollow-up to card #30304 (PR #30362) and card #30377 (PR #30587), from the contract review of PR #30362, delta record 6654178714, should-fix 2. Recorded on #30377 as seat note 6654197160, item 2, and left out of PR #30587 because it is another package. Not blocking.\n\n## Observed\n\nThe `os migrate` value-rewrite commands under `packages/cli/src/commands/migrate/` (`blank-single-values`, `option-codes`, `text-scalars`, `value-shapes`) scope their rewrites by `engine.getObject(object)`, which is the served fold. While a module package is disabled, the fields its `objectExtensions` add are withheld from that fold (#30304), so a run skips those columns and leaves them for a later run after enable. The plan output does not say so. Read from the code, not measured with a run.\n\nThese commands read through `engine.find(fields: […])`, which refuses a withheld field by design (`INVALID_FIELD`), so moving them to the storage fold needs engine support and is not the small answer.\n\n## Expected\n\nThe smallest honest answer: a run's plan output names each column it skipped because the package that adds it is disabled (object, field, package id), so the operator knows to re-run after enabling it. An alternative is for the run to warn or refuse while a module that extends a target object is disabled; the dev measures and picks one, and says why.\n\nPin it with one integration case per chosen behaviour: a module adds a field by extension, the module is disabled, the plan names the skipped column.\n\n## Out of scope\n\nRewriting withheld columns while their package is disabled (needs a storage-fold read path in the engine)."
+}

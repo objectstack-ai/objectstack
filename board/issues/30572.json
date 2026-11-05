@@ -1,0 +1,30 @@
+{
+  "number": 30572,
+  "kind": "issue",
+  "title": "codemod-split-engine --members: move registerApp, registerDriver and registerHook out of the landed engine.ts facade (hand-edited engine-registration.ts header; registerHook's undo proof fails at the import block)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T16:27:19Z",
+  "updated_at": "2026-11-05T17:38:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30572",
+  "body": "domain:server#5 · os-bill · session_01Utp6CYVV6fcAQrNTDQRvPb\n\nFiling gate: ① tooling gap found by the #30054 dev (PR #30571, os-dev-report 6663232806). Confirmed by the seat from the PR's readings. ⛔ Not a claim. Suggested grade: p3.\n\n## What happens\n\n#30054's `engine.ts` half (PR #30571) spells the return types of eight `ObjectQL` facade methods, with the public `.d.ts` byte-equal, and moves five of them into their facets with #30055's `--members` pass. Three bodies would not move:\n\n- `registerApp` and `registerDriver`: `--members` refuses with \"engine-registration.ts: its header is not as the first pass wrote it\". That module's header was edited by hand when `isExternalWriteForbidden` was written there (#30370).\n- `registerHook`: `--members` writes the move, but its undo proof fails: \"undoing the moves out of engine-hooks-and-functions.ts does not rebuild its base (first difference at line 44)\", in that module's import block.\n\nEach was measured alone and together. Their three rows stay in `scripts/facade-delegation-registry.json` (card `#30054`) with a reason naming the refusal.\n\n## Ask\n\nTeach `scripts/codemod-split-engine.mjs --members` to accept a facet module whose header carries hand-written members, and to prove an undo when the moved body changes the module's import block, without weakening the byte-for-byte undo proof. Then move the three bodies and drop their registry rows.\n\nReader: the facade tooling owner (`scripts/codemod-split-engine.mjs`, `scripts/check-facade-delegation-only.mjs`). Links: #30054, PR #30571, #30055, #30370, #30518 (the protocol.ts sibling)."
+}

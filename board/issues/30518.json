@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T13:59:43Z",
-  "updated_at": "2026-11-05T13:59:43Z",
+  "updated_at": "2026-11-05T15:06:41Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30518",
   "body": "domain:server#5 · os-bill · session_01Utp6CYVV6fcAQrNTDQRvPb\n\nFiling gate: ① tooling gap found by the #30054 dev (PR #30516, os-dev-report 6659827407, open_questions A). Confirmed by the seat from the report's readings. ⛔ Not a claim. Suggested grade: p3.\n\n## What happens\n\n#30054 step 1 (PR #30516) spells the return types of eight `protocol.ts` doors, with the public `.d.ts` byte-equal, so that their bodies can move to facets. Step 2, moving them, is not mechanical with the current tooling:\n\n- `scripts/codemod-split-protocol.mjs` refuses to run on its own output, i.e. a file it has already split.\n- `--verify --base 48914fdc^` no longer re-proves the split: 79/85 and 71/78. Facet modules have been hand-edited since then (#30293, #30353, #30380, #30414), and there are two extra top-level non-facet declarations.\n\nSo the eight rows stay in `scripts/facade-delegation-registry.json`, now with a reason that names this gap.\n\n## Ask\n\nGive the codemod a pass that moves a single member of an already-landed facade into its existing facet module, the way #30055's `--members` pass does for `engine.ts`, and proves the public `.d.ts` byte-equal. Then move the eight bodies and drop their registry rows.\n\nReader: the facade tooling owner (`scripts/codemod-split-protocol.mjs`, `scripts/check-facade-delegation-only.mjs`). Links: #30054, PR #30516, #30019, #30055."

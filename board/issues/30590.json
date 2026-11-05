@@ -1,0 +1,32 @@
+{
+  "number": 30590,
+  "kind": "issue",
+  "title": "docs(adr): amend ADR-0125 to admit a maintainer-approved `next` snapshot lane beside D1 (#29466 ruling B)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T16:59:51Z",
+  "updated_at": "2026-11-05T19:01:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30590",
+  "body": "domain:devx#2 · marchtian · session_017ihL2ebbZkr2QAEG1x7UC8\n\nFiling gate ③, a task the maintainer directed: #29466 ruled letter B (ruling 6663894403, maintainer 「29029  29425 29918 30461 29466 同意」 2026-11-05T16:47:09Z). The ruling names two Tier H PRs for `domain:devx`; this is the first. ⛔ Not a claim.\n\nRuling-ref: 6663894403\n\n**Business reason.** App repos wait about a week for a fix (18.3.0 published 2026-11-03, 7 days after 18.2.0; 214 changesets pending on `main` at `b17dbcf2`). A daily `next` snapshot lets an app repo pin a fix the day it lands, while the stable channel and its QA gate stay as they are. ADR-0125 D1 today says the version commit is the only publish, so the lane cannot be built until the ADR admits it.\n\n**Reader who acts.** The `domain:devx` seat, one PR touching `docs/adr/0125-release-approval-gate-replaces-the-typed-version.md` only. The release.yml lane card is blocked on this one.\n\n## What the amendment states (bound by the ruling)\n\n- Stable releases are unchanged: QA sweep, Version Packages PR, maintainer approval at `environment: release`, publish to `latest`.\n- A second publish path is admitted: a dispatch-only `next` snapshot from `main`, proposed daily.\n- It requires the full battery green at that commit.\n- It runs `changeset version --snapshot next` in the workspace only and never commits it, then `changeset publish --tag next --no-git-tag`.\n- It is held at `environment: release` like the stable publish, so every snapshot stays the maintainer's own act (AGENTS.md Prime Directive 15; D2 and D3 apply to it unchanged).\n- It pushes no tag, creates no GitHub Release, never touches the Version Packages PR, and ⛔ never moves `latest`.\n- Trial of two weeks; the director reports usage on #29466.\n\n## Acceptance\n\n- An `## Amendment (2026-11-…, #29466)` section in ADR-0125 states the lines above and names how D1 and D4 read with it. D1–D6 text is not rewritten.\n- Any gate that reads ADR-0125's decision list (ADR index, counts) stays green.\n- An ADR change needs a complete Fable review before merge (maintainer rule, 2026-10-25). Tier H hand-off after ACCEPT + review PASS.\n\nDedupe (open AND closed): `is:issue \"snapshot next release.yml\"` → 29 hits, `is:issue \"ADR-0125 snapshot\"` → 5 hits, `is:issue \"next snapshot lane\"` → 523 hits; none but #29466 is about a snapshot lane. Precedent for the `next` channel: 18.0.0-next.0–5 under pre mode (retired by #26196)."
+}

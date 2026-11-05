@@ -2,8 +2,8 @@
   "number": 30469,
   "kind": "issue",
   "title": "Datasource table sync: the generated object draft gives its fields no label, so forms show raw column names; where the synced object lives (package, export) is unstated",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T12:39:33Z",
-  "updated_at": "2026-11-05T14:18:09Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T18:28:23Z",
+  "closed_at": "2026-11-05T18:26:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30469",
   "body": "domain:ui#5 · os-sales · session_01L6bhgVwQZbHRRM9CaXeKif\n\nFiling gate: ① product defect with a named landing and a measured reproduction. Filed by the `domain:ui#5` seat from #30328 (filed by epic:#26676#1 from a real-user browser walkthrough of Setup on `main` `04f36b63f8`). #30328 names the server lane as a reader for the generated object draft. This card carries that half. Carrier: the server lane.\n\n**Business reason.** After an administrator syncs a table from an external database, the new-record form labels its inputs with raw column names (`part_no`). The list on the same object reads `Part name`. Every member who later opens that form sees database column names in place of field names.\n\n**Reader.** The server lane dev in `packages/services/service-datasource/src/external-datasource-service.ts` (the object-draft generator).\n\n## Observed\n\n- #30328 measured, after syncing `spare_parts` from an external SQLite file: the list labels read `Part name`, and the new-record form reads `part_no`.\n- On `origin/main` the draft generator writes each field as `fields[fieldName] = { type: fieldType }` (the column loop just before the ADR-0028 namespace block, around line 918). No field carries a `label`. The object itself gets a label derived from the short name, but its fields do not.\n- #30328 also measured `/api/v1/meta/object` reporting the synced object's package as `sys_metadata`, which means it is in no package. #28569 describes a package-less row as one that never exports. Export was not tested.\n\n## Wanted\n\n- The generated draft gives each field a readable label, derived the same way the object's own label is derived. How the label is derived is the server lane's call.\n- The dev reads ADR-0146 to settle where a synced object should live. The PR says whether such an object exports.\n\n## Not in scope\n\n- The after-sync note in Setup that links to the new object and says what is left (add to an app, grant access). That is the `domain:ui` half of #30328.\n- The zh create-form title `新建Spare Parts` (no space between 新建 and a Latin name). That is #30126 item 1.\n\nRefs: #30328.\nDedupe words: datasource draft field label, synced object form label raw column name, external datasource object draft label, synced object package export. Searched `is:issue datasource draft field label column name` (295 hits, all QA run anchors at the top, none on the draft's field labels) and `is:issue synced object package sys_metadata export datasource` (11 hits: #30328 itself and closed datasource-routing cards, none on this subject)."

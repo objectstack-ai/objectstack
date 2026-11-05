@@ -1,0 +1,34 @@
+{
+  "number": 30582,
+  "kind": "pull_request",
+  "title": "docs(authentication): say Setup shows the address the server judges before an allowed IP ranges save",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T16:39:44Z",
+  "updated_at": "2026-11-05T17:28:30Z",
+  "closed_at": "2026-11-05T17:28:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-05T17:28:28Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30582",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgAN5RsxTefC5pvUfxZKt8ai)_\n\ndomain:server#2 · os-bill · session_01Utp6CZhiLoN3MZGp7ZnqCg\n\nFixes #30570\n\nClause-②: no — docs only\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：`authentication.mdx` 的「Saving, clearing and lockout recovery」加一条，写明 Setup → Authentication 在「允许的 IP 段」字段下显示服务器判定的本次请求地址，数据来自 `GET /api/v1/auth/admin/client-address`（仅平台管理员），并说明三种提示各指什么。\n- 为什么改：#30398（接口）和 #30313（控制台提示，PR #30540）都已落地，文档却只讲了保存被拒时才告诉你地址，没说保存前在哪能看到。\n- 风险与回滚：纯文档，一个文件加 8 行，不动任何代码或发布面；措辞逐句对过 `main` 上控制台的英文文案。回滚即撤本 PR。\n- 先看：`content/docs/permissions/authentication.mdx` 新增的「Setup shows your address before you save.」一条。\n- 两分钟验证：打开 PR 的 Files changed，对照 `ui/packages/i18n/src/locales/en.ts` 的 `clientAddressDirect` / `clientAddressViaProxy` / `clientAddressUnknown` 三句，预期文档描述与三句一一对应、无多说。\n- 需要你做的：无，席位落地。\n\n## What changes\n\nOne new bullet in **Saving, clearing and lockout recovery** (chosen over the `allowed_ip_ranges` table row: the row already defers the save behaviour to that section, and the note is about what you see before a save, so it sits next to the save rule it previews):\n\n> **Setup shows your address before you save.** Under the field, **Setup → Authentication** shows the address the server judges for your request, read from `GET /api/v1/auth/admin/client-address` (platform administrators only), which answers `{ clientAddress, trustProxy }`: the note says whether that address came from the forwarded headers of a proxy the server trusts (`server.trustProxy`) or from the connection itself, which behind a proxy it does not trust is the proxy's own address, and when `clientAddress` is `null` it says instead that no non-empty list can be saved.\n\nChecked against `main` at `db04e5ce`, which carries PR #30540 (`b6f4c0e8b7`):\n\n- `ui/apps/console/src/pages/settings/SettingsView.tsx` `clientAddressNote`: three states, `clientAddress === null` → `clientAddressUnknown`, `trustProxy` → `clientAddressViaProxy`, else `clientAddressDirect`; drawn only on the `auth` namespace under `allowed_ip_ranges`.\n- `ui/packages/i18n/src/locales/en.ts`: `clientAddressDirect` (\"…This server does not trust proxy headers, so behind a proxy this is the proxy's address.\"), `clientAddressViaProxy` (\"…read from the forwarded headers of the proxy this server trusts…\"), `clientAddressUnknown` (\"The server cannot establish your address, so a non-empty list cannot be saved from here.\").\n- `packages/plugins/plugin-auth/src/client-address-read.ts`: `200 { success: true, data: { clientAddress, trustProxy } }`, `clientAddress` `null` when no address can be established, `gateAdmin` (platform admin), `Cache-Control: no-store`.\n\nNot said, because the console does not do it: no note is drawn when the read fails (non-admin, older server); the page does not claim one. No other sentence on the page is made false by the read: the `allowed_ip_ranges` row and the refusal bullet stay true as written.\n\nChangeset: none. Followed AGENTS.md Post-Task Checklist step 3 and os-dev's rule: `skip-changeset` is for a diff that publishes nothing from any released package; `content/docs/**` is in no package's `files[]` (the repo's own negative control in `scripts/check-changeset-no-major.mjs` names `content/docs/**` as publishing nothing). Label `skip-changeset` rides this create.\n\n## Verification\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack content/docs/permissions/authentication.mdx`: 45 commands. All 45 exit 0 at head `115efa0e`; five first exited 3 (prerequisite: `@objectstack/spec`, `@objectstack/lint`, `@objectstack/formula`, `@objectstack/client-react` not built) and were re-run green after `turbo run build` of those closures. `--ran` reconciliation: 45 derived, 45 run, 0 NOT-MEASURED, 0 UNRUN.\n- Not run locally, left to CI: the `Build Docs` job and the type-check lanes `dispatch-gates` lists as CI-only.\n- Dogfood: not run (docs only, no `!`, no narrowing arm).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CZhiLoN3MZGp7ZnqCg\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CZhiLoN3MZGp7ZnqCg)_"
+}

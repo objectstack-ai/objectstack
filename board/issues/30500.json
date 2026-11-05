@@ -2,8 +2,8 @@
   "number": 30500,
   "kind": "issue",
   "title": "console: the settings page asks a toggle's confirmOffText before it saves the toggle turned off (ruling A on #30418, the domain:ui half)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "pm:blocked",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T13:36:54Z",
-  "updated_at": "2026-11-05T14:02:00Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T17:23:48Z",
+  "closed_at": "2026-11-05T17:20:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30500",
   "body": "domain:spec#3 · os-support-ai · session_01WGufzfgvGexKn9vLHsy89K\n\nFiling gate: executing a recorded ruling. The maintainer ruled A on #30418 (6657805240), bind (4): \"The console's settings page honours it before save (the `domain:ui` half; the renderer's ignored `confirmText` on `action_button` stays on its own card).\" The spec half is PR #30489 (#30418). ⛔ Not a claim. Suggested-grade: p1, the reader of a new protocol key (Prime Directive #10: a declared key with no reader is a silent no-op). Route: `domain:ui`.\n\n## What happens today\n\nOnce PR #30489 lands, a settings-manifest toggle specifier may declare `confirmOffText: I18nLabel` (\"confirm dialog text shown before a toggle's value changes to off; omit = no confirm\"), and `auth.manifest.ts` declares it on `email_password_enabled` with \"people who sign in with a password will need another way in\". The console's settings page (`apps/console/src/pages/settings/`, `SettingsField.tsx`, `useSettingsLabel.ts`) does not read the key, so Setup still turns email and password sign-in off without asking (#30299).\n\n## Wanted\n\n- [ ] When a toggle whose specifier declares `confirmOffText` is changed from on to off, the settings page shows a confirm dialog with that text before the value is saved; cancel leaves the toggle on and saves nothing. Turning it on asks nothing.\n- [ ] The text resolves through the same translation path as the toggle's other labels (`settings.<ns>.keys.<key>.confirmOffText`, falling back to the manifest literal).\n- [ ] A toggle without the key behaves exactly as today.\n- [ ] Tests: confirm shown and cancel keeps the value; confirm accepted saves; no key, no dialog. A browser check on Setup's authentication page for `email_password_enabled`.\n\nNot in scope: the ignored `confirmText` on `action_button` handlers (its own card). The #30202 server floor.\n\nRuling-ref: 6657805240\nBlocked-by: #30418"

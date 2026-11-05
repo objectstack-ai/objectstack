@@ -2,8 +2,8 @@
   "number": 30430,
   "kind": "issue",
   "title": "spec: the blueprint dashboard widget has no aggregation slot, so an AI-built 「平均面试评分」 metric sums (908 instead of an average); add an optional aggregate (objectstack-ai/cloud#3607 row 2 ruling A)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:spec",
-    "pm:dispatched",
     "priority:p1",
     "repo:cloud"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T11:01:26Z",
-  "updated_at": "2026-11-05T14:16:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T15:48:22Z",
+  "closed_at": "2026-11-05T15:36:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30430",
   "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **executing a recorded ruling**. The maintainer ruled objectstack-ai/cloud#3607 row 2 **A** (record 6656298548; their selection, verbatim: 「A spec 加聚合字段（推荐）」). This card is the spec half. objectstack-ai/cloud#3607 keeps the cloud half (the designer emits it, the compile requires it), `pm:blocked` on this card.\n\n**Owner.** The `repo:cloud` lane (`repo:cloud#3`, objectstack-ai/objectstack#30278) follows it to close. It widens a published schema (`Clause-②: yes (widening)`), so it is spec-lane work; triage routes it. Priority p2, inherited from objectstack-ai/cloud#3607.\n\n## 维护者速读\n\nAI 通过 MCP 搭建的仪表盘里，标题写着「平均面试评分」的组件显示的是 12 个分数的总和 908。原因是蓝图的仪表盘组件只有 `measure`，没有「聚合方式」字段，平台按字段类型自动选（数值字段求和），AI 想要平均值也无处可写。按裁决，给组件加一个可选的 `aggregate`。\n\n## Measured\n\n- On staging `bd085bb0` (objectstack-ai/cloud#3607 row 2, app `app.nnf5` 招聘管理), the server's own `propose_blueprint` wrote `{chart:'metric', measure:'score'}` for a widget titled 「平均面试评分」, and the dashboard summed 12 scores (908).\n- The seat read `packages/spec/src/ai/solution-blueprint.zod.ts:202-216` at objectstack `origin/main`. `BlueprintDashboardSchema` widgets declare `id`, `title`, `object`, `chart`, `measure`, `groupBy` and `condition`, and nothing else. `measure`'s describe says: \"The aggregation is chosen automatically from the field type — a money field SUMs, a percentage/rate AVERAGEs\".\n- The cloud#3607 dev also measured that cloud's `defaultAggregateFor` averages only `percent`. So a plain number field can never be averaged through a blueprint (report: objectstack-ai/cloud#3607 comment 6652310415).\n\n## The ruled design\n\n1. An optional `aggregate: 'sum' | 'avg' | 'min' | 'max' | 'count'` on the blueprint widget, in the lenient schema and in the strict mirror the dev named. Its describe states what each value means and that `count` needs no `measure` field.\n2. The `measure` describe is rewritten so it no longer tells the author the aggregation is automatic: the aggregation is what `aggregate` says.\n3. ⛔ No title heuristics anywhere (option C was rejected).\n\n## Acceptance\n\n- Schema tests: each value is accepted; an unknown value is refused by the strict mirror; an absent value still parses (it is optional).\n- The liveness ledger row for the new key, with its consumer named: objectstack-ai/cloud#3607's cloud half reads it. It is `planned` until that lands.\n- `Clause-②: yes (widening)`, with the spec-lane contract review on record.\n\nDedupe (issues, open and closed, 2026-11-05): `repo:objectstack-ai/objectstack blueprint widget aggregate is:issue` returned 13 hits (#14302, #15449, #14298, …), none on this slot.\n\n## Added 2026-11-05: the calendar date key (objectstack-ai/cloud#3607 row 1 residue, ruling B)\n\nThe maintainer ruled **B** on the calendar date key; the record is on objectstack-ai/cloud#3607, and their selection, verbatim, is 「B 现在加 spec 键」. It belongs to the same spec PR as the widget `aggregate`.\n\n- **Today** (`packages/spec/src/ai/solution-blueprint.zod.ts:163`): `BlueprintViewSchema` declares `object`, `name`, `label`, `type`, `columns`, `groupBy`, `filters`, …, and has no date key. A `calendar` view therefore cannot say which date field it schedules on. Cloud binds the first declared date or datetime field and names it in the success envelope (objectstack-ai/cloud PR #3616).\n- **Add:** an optional date-field key on the blueprint view, in the lenient schema and the strict mirror, meaningful for `type: 'calendar'`. Name it after the target the spec already uses, `calendar.startDateField`; the spec lane decides the exact key. Its describe states that it is ignored for other view types, or refused for them; the spec lane chooses, and the choice is stated.\n- **Acceptance:** schema tests for the key on a calendar view, a strict-mirror refusal of a wrong type, and a liveness ledger row whose consumer is the objectstack-ai/cloud#3607 cloud half (`planned` until it lands).\n"

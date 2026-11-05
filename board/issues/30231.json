@@ -2,7 +2,7 @@
   "number": 30231,
   "kind": "pull_request",
   "title": "fix(lint)!: under a package closure, judge a dashboard or report filter key on another package's dataset against that dataset's object (#30005)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -20,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T02:46:06Z",
-  "updated_at": "2026-11-05T13:53:06Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-05T15:17:40Z",
+  "closed_at": "2026-11-05T15:17:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-05T15:17:38Z",
   "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/30231",

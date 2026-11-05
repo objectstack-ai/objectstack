@@ -14,18 +14,20 @@
     "area:records",
     "domain:spec",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T13:46:38Z",
-  "updated_at": "2026-11-04T13:58:32Z",
+  "updated_at": "2026-11-05T20:11:32Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30103",
   "body": "epic:#8345#1 · os-bill · session_01Utp6CZWjnSeed8H4dMjt9d\n\nPart of #8345. Filed by the epic PM into the `domain:spec` seat's queue (spec children of the epic go to the spec seat; seat-lifecycle 〈Epic 子树车道〉). Owed by the predecessor's sign-off ledger (brief 6540325320). ⛔ Not a claim.\n\nRuling-ref: 6469382727\n\n## 维护者速读\n\n- **改了什么：** 两件 spec 事：① `homeAmount.rateField` 指向的数字字段若声明了小于 12 的 `scale`，建模时就拒收（裁决 6469382727 定了汇率 scale 12）；② 写明 `CURRENCY_FRACTION_DIGITS` 是 CLDR 小数位，不是 ISO 4217 最小单位，并列出两者不同的币种。\n- **为什么改：** 引擎存汇率全精度，声明 scale 4 只影响显示，作者看到的汇率与实际折算用的不一致；文档写 ISO 4217，实际查的是 CLDR，约 17 个币种（如 IQD、HUF、COP、IDR、PKR）小数位不同。\n- **风险与回滚：** ① 收窄了 18.3.0 已发布的接受集，已声明 scale<12 的应用会在校验时报错，changeset 须写收窄说明；② 纯文档。\n- **先看：** PR #28302 正文「Hand-off points」第二条；评审 6539117549 S2；#27192 open question 3。\n- **两分钟验证：** 声明 `rateField` 为 `scale: 4` 的对象校验被拒，错误点名字段与下限 12；`scale: 12` 通过。\n- **需要您做的：** 无（收窄须一次契约级复审）。\n\n## Task\n\n- [ ] In the object-level judge of `homeAmount` pointers (`packages/spec/src/data/object.zod.ts#refuseDishonestHomeAmount`), refuse a `rateField` whose declared `scale` is below 12; the message names the field and the floor. Decide and state what an undeclared `scale` means.\n- [ ] TSDoc on `CURRENCY_FRACTION_DIGITS` and `content/docs/data-modeling/currency.mdx`: CLDR fraction digits; list each code where CLDR differs from ISO 4217 minor units, measured from the table, not recalled.\n- [ ] Tests: scale 4 refused, 12 and 14 accepted, undeclared per the decision.\n\nLane: spec · Size: S · Review: CONTRACT_REVIEW_TIER (narrowing a published accept set). `Clause-②: no` (narrowing) · `Metadata-protocol: none`.\n\nEvidence: PR #28302 pins `0.138912345678` stored in full under a declared `scale: 4` (home 71987.84); the engine never rounds the rate.\n\nDedupe: #8345 body ledger; open `domain:spec` cards searched, none carries this."

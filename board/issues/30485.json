@@ -2,7 +2,7 @@
   "number": 30485,
   "kind": "pull_request",
   "title": "fix(platform-objects): zh-CN metadata forms say 仪表盘 for dashboard",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -20,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T13:16:33Z",
-  "updated_at": "2026-11-05T14:17:44Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 5,
+  "updated_at": "2026-11-05T15:30:05Z",
+  "closed_at": "2026-11-05T15:30:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-05T15:30:03Z",
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/30485",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgJQPdf6eHTz3X8GTdydYyJY)_\n\ndomain:server#6 · os-bill · session_01Utp6CXCS98uhsFQYk64epE\n\nFixes #30164\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none (`git grep -n 仪表板 -- skills/` on the final tree: 0 hits)\n\n## 维护者速读\n\n- 改了什么：平台下发的中文仪表盘编辑表单里 6 处“仪表板”改为“仪表盘”（表单标题、基础信息说明、页眉及其显示标题/显示描述、组件的帮助文字）。\n- 为什么改：控制台和 Studio 已统一叫“仪表盘”，只有平台下发的这张表单还叫“仪表板”，同一对象一个流程里两个名字。\n- 风险与回滚：只改中文显示文字，不动任何键、结构或其他语言；回滚即还原这一个文件。\n- 先看：`packages/platform-objects/src/apps/translations/zh-CN.metadata-forms.generated.ts`（6 行文字），再看新测试 `zh-cn-dashboard-word.test.ts`。\n- 两分钟验证：`pnpm --filter @objectstack/platform-objects exec vitest run src/metadata-translations/zh-cn-dashboard-word.test.ts`，预期 2 条通过。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n`zh-CN.metadata-forms.generated.ts` is the `os i18n extract` merge baseline (`scripts/i18n-extract.config.ts` pins `metadataForms` to the committed file, and `--merge` only fills gaps), and both its own header and `metadata-translations/index.ts` say its leaves are edited in place. So the six `dashboard` leaves were corrected there, then the bundle regenerated: `pnpm i18n:extract` reproduces the committed tree byte for byte (no diff after the run) and `pnpm check:i18n` is green. No other source under `packages/` carries the zh-CN form text. The source-hash tables are untouched: these leaves are translations, not source copies, so the generated provenance table never recorded them.\n\n## Tests\n\nNew `packages/platform-objects/src/metadata-translations/zh-cn-dashboard-word.test.ts` reads the SERVED bundle (`MetadataFormsTranslations['zh-CN']`, after `withSourceFallback`, the bundle `rest-server.ts` localizes `/api/v1/meta/types` forms with): the dashboard form title is 仪表盘, and no served zh-CN metadata-form string contains 仪表板.\n\n- Red on main's bundle: both tests fail, the second listing the six strings.\n- Green after the fix; ablation (one leaf put back via `scripts/ablation-replace.mjs`): the class test goes red naming 仪表板标识与描述, restored to the HEAD blob with `git diff HEAD` empty.\n- `pnpm --filter @objectstack/platform-objects test`: 112 files, 1523 tests passed. `typecheck` (includes `check:test-typecheck`): exit 0.\n\n## Acceptance notes\n\n- `packages/rest/src/meta-types-schema-titles.test.ts` and `packages/runtime/src/domains/i18n-translations-served-groups.test.ts` name 仪表板 only inside their own inline fixture bundles and assert the fixture back; they do not read the platform bundle, so they were left as they are.\n- `packages/spec/src/marketplace/package-l10n.test.ts` and `packages/spec/src/system/i18n-resolver.test.ts` likewise use their own fixtures and do not pin served form text (out of this card's surface, untouched).\n\n## Verification\n\nAll local readings on head `df4de5fb` (after merging `origin/main`).\n\n- `pnpm check:i18n`: exit 0, `check-i18n-bundles: OK (10 package(s) — all bundles in sync, no undeclared authoring keys)`.\n- `pnpm i18n:extract`: exit 0, 11 files written, `git status` clean afterwards.\n- `pnpm --filter @objectstack/platform-objects test`: exit 0 (112 files, 1523 tests). `typecheck`: exit 0.\n- `pnpm lint`: exit 0.\n- `dispatch-gates --commands`: 58 derived; `--ran` reconciliation: 58 accounted, 56 exit 0, 2 NOT MEASURED (exit 3, PREREQUISITE NOT MET):\n  - `node scripts/check-plugin-teardown-shape.mjs --self-test`: shallow clone cannot reach its pinned positive-control commit (checker-health only, judges no diff).\n  - `pnpm check:dual-build-cjs-loads`: needs every workspace package's `dist/`; only the i18n build closure was built here. CI runs both.\n\n<details><summary>Red on main, ablation</summary>\n\nRed (main's bundle): `expected '仪表板' to be '仪表盘'`; offenders listed 仪表板, 仪表板标识与描述, 仪表板页眉配置（title、subtitle、actions）, 在页眉中显示仪表板标题, 在页眉中显示仪表板描述, 包含位置和尺寸的仪表板组件. `Tests 2 failed (2)`.\n\nAblation: `ablation-replace: ok mutation landed: anchor 1 -> 0`, then `× no served zh-CN metadata-form string carries the retired spelling 仪表板`, `Tests 1 failed | 1 passed (2)`; `ablation-replace: ok restored: blob == HEAD (ab03233a6fe0) and git diff HEAD is empty`.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CZNuVoLVGgYU36KdYe)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CZNuVoLVGgYU36KdYe\n"

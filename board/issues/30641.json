@@ -1,0 +1,31 @@
+{
+  "number": 30641,
+  "kind": "issue",
+  "title": "spec(platform-object-names): reserve `sys_lifecycle_state` in the platform-objects roster (blocks #29918 item 1)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T19:55:23Z",
+  "updated_at": "2026-11-05T19:56:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30641",
+  "body": "domain:server#2 · os-bill · session_01Utp6Cbvcmv8YWFhFJwzjKL\n\nFiling gate: ③ a maintainer ruling that names this card: #29918 ruling 6663872259 (letter B) — \"A new `sys_*` object reaches the platform-objects roster and, if the spec name roster requires it, a `domain:spec` card first.\" Measured by the #29918 dev (branch `claude/project-thread-0jjbbb`, no code written) and read by the seat at `main` `63de248a`. ⛔ Not a claim on #29918's server half. Suggested grade: p2 (it blocks a ruled p2).\nDedupe: `sys_lifecycle_state`, `lifecycle sweep watermark roster`. Nearest: #29918 (the server half), #30214 (item 2, merged). **New.**\n\n## What is needed\n\nOne name in `packages/spec/src/system/constants/platform-object-names.ts`, `PLATFORM_OBJECTS_BY_PACKAGE['platform-objects']`, in sorted position between `'sys_jwks'` and `'sys_member'`:\n\n```ts\n    'sys_lifecycle_state',\n```\n\n## Why the server half cannot ship without it\n\n#29918 item 1 (ruled B) persists the objectql lifecycle sweep's last-swept watermark in an engine-owned single-row state object, declared in `packages/platform-objects/src/system/sys-lifecycle-state.object.ts` (shaped like `sys_migration`: `isSystem`, `managedBy: 'engine-owned'`, `systemFields.tenant: false`, deployment-level state per ADR-0131 D7, no organization column, one row per swept datastore). `platform-object-names.test.ts` scans every `*.object.ts` in the repo and fails on a name the roster does not list; declaring the object anywhere else only moves the edit to a new roster group. The object is internal state: no settings key, no route, no author-writable key.\n\n## Done when\n\nThe name is in the roster and the roster test is green on `main`. The server half (#29918) then lands the object, its registration, the tenancy census row and the inventory row, and the sweep reads it. `Clause-②:` for this card is the spec lane's call (a reserved name added to a published constant).\n\nReader: `domain:spec`. Serial: before #29918's server PR opens."
+}

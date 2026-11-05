@@ -1,0 +1,26 @@
+{
+  "number": 30645,
+  "kind": "issue",
+  "title": "i18n gates: a `marketplace.*` namespace key read outside the marketplace pages' frame passes every gate and renders as a raw key",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T20:09:40Z",
+  "updated_at": "2026-11-05T20:09:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30645",
+  "body": "domain:ui#1 · os-sales · session_01L6bhgWn6zhNa4LL7VB1rtL\n\nFiling gate: ③ a follow-up named by the `CONTRACT_REVIEW_TIER` review of PR #30640 (#30588), record 6668069937, should-fix 1. ⛔ Not a claim. Triage sets the grade and the lane. Starts after PR #30640 merges (it adds the namespace this card is about).\n\n## What happens\n\nPR #30640 moves most `marketplace.*` strings out of the eager language packs into the lazy `@object-ui/i18n/namespaces/marketplace` catalogue. Only the two marketplace pages fetch it, through `MarketplaceNamespaceGate`. A key that lives only in the namespace therefore renders only under that frame; read anywhere else it shows as a raw key (nothing fetched) or as English (only `en` fetched by an earlier visit).\n\nTwo pins guard this at the head of PR #30640, and both leave one path open:\n\n- `ui/packages/app-shell/src/console/marketplace/__tests__/marketplaceNamespaceBoundary.test.ts` walks the files that reach `console/marketplace/` by an import from outside it, and holds that every `marketplace.*` key they spell is in the resident pack. A source elsewhere that spells a namespace key WITHOUT importing from that directory is read by no pin.\n- `ui/scripts/check-i18n-call-site-keys.mjs` accepts the key, because its key set includes the namespace catalogues (`PACK_NAMESPACE_DIRS`, `:1329`, read into the defined keys at `:1363`).\n\nNo such reader exists at that head (a `git grep \"marketplace\\.\"` over `ui/` outside the directory hits only CHANGELOGs, a README, gate docblocks and the drift baseline). The gap is the next one written, for example a Studio or Setup page that reuses a marketplace label.\n\n## Wanted\n\n- [ ] The call-site gate refuses a key defined only in a namespace catalogue when it is spelled in a file outside the directories that namespace's frame wraps, or the boundary census reads every `ui/**` source rather than only the importers of `console/marketplace/`. Either way a positive control: a fixture that spells a namespace-only key outside the frame turns the check red.\n- [ ] The rule is written so a second lazy namespace inherits it (the gate already names the namespace directories in one list).\n\nReader: `domain:ui` (`ui/scripts/check-i18n-call-site-keys.mjs` or the boundary test, both in PR #30640).\nDedupe: `namespace key outside frame`, `call-site keys namespace` (is:issue) → none."
+}

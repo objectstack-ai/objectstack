@@ -2,8 +2,8 @@
   "number": 30286,
   "kind": "issue",
   "title": "Default language in Setup offers the languages the deployment supports, instead of four hard-coded ones",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,20 +13,21 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-bill"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T04:56:31Z",
-  "updated_at": "2026-11-05T11:45:45Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T15:22:31Z",
+  "closed_at": "2026-11-05T15:17:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30286",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiled on the maintainer's word, verbatim: 「立卡」 (2026-11-05), answering their question 「如果元数据app中只有10种语言，系统管理员可以增加新的语言并且处理国际化吗？」 and the proposal below. Measured on `main` `04f36b63f8`.\n\n## What a customer sees\n\nA French company sets up the platform. The console has a complete French pack and a user can pick 法语 from their language menu. In Setup, 默认语言 offers only English, 简体中文, 日本語 and Español. Writing `fr-FR` is refused. So is `vi-VN`, even after the administrator has added a Vietnamese translation and the language menu offers it. Every new user in that company therefore starts in a language the company did not choose.\n\n## Why\n\n`packages/services/service-settings/src/manifests/localization.manifest.ts:84`: the `locale` setting's options are a literal list of four, and the option list is the enforcement boundary. Three lists answer the same question differently:\n\n| List | Contents on the test deployment |\n|:--|:--|\n| 默认语言 options | 4, hard-coded |\n| Console's built-in packs | 10 (`ar de en es fr ja ko pt ru zh`) |\n| User's language menu, `/api/v1/i18n/locales` plus what the renderer can resolve | Grows with translation items, so it gained `vi-VN` and `fr-FR` |\n\n## Expected\n\n- 默认语言 offers what the deployment supports, from the same source the language menu reads, and the server accepts exactly those values. Adding a translation item makes the language available here too.\n- A previously saved value that is no longer offered stays readable and is shown as such, not silently replaced.\n- An option's name reads in its own language, as the language menu does.\n\n## Question for the dev to settle in the PR\n\nSome consumers read this setting for things other than console text: the description says number and date formatting, and auth email templates read a locale too. A language with a translation item but no console pack, such as Vietnamese, then shows an English console while dates format in Vietnamese. I think that is acceptable and matches what the user menu already does, but I did not check every reader. List them in the PR, and if one breaks on a locale outside the four, stop and report.\n\n#30206 (first-run checklist) has a row for language. It should use the list this card produces."

@@ -1,0 +1,34 @@
+{
+  "number": 30532,
+  "kind": "pull_request",
+  "title": "fix(plugin-kanban): a card move on a read-only external object says the table is read-only, not that you lack permission",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T14:23:25Z",
+  "updated_at": "2026-11-05T15:54:34Z",
+  "closed_at": "2026-11-05T15:54:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-05T15:54:32Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30532",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuVWpRnE3E33m6sXj7FL8vXA)_\n\nFixes #30410\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：看板拖动卡片被服务端以 EXTERNAL_WRITE_FORBIDDEN（外部数据源只读表）拒绝时，提示改为「这张表是只读的：它的记录来自外部数据源，不接受修改。」，与表单、删除、行内编辑、日历等七处一致。\n- 为什么改：以前提示「您无权执行此操作」，管理员会去翻权限集，而任何权限集都解不开这张表。\n- 风险与回滚：只按错误码 EXTERNAL_WRITE_FORBIDDEN 换文案；作者标注的 userMessage 仍优先，其他 403 与其他错误一字不变；回滚即撤本 PR。\n- 先看：ui/packages/plugin-kanban/src/ObjectKanban.tsx 卡片移动 catch 里的 refusal 三元式；ui/packages/plugin-kanban/src/ObjectKanban.markedRefusalToast.test.tsx 末尾新增的 describe。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/plugin-kanban/src/ObjectKanban.markedRefusalToast.test.tsx`，预期 8 个测试全绿。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n`ui/packages/plugin-kanban/src/ObjectKanban.tsx`, the card-move `catch` (the `const refusal =` expression): `isExternalWriteRefusal(err)` (`@object-ui/react`, added by #30403) is now asked after `declaredUserMessage(err)` and before `isPermissionError(err)`, and answers `form.readOnlyExternalSource`. This is byte-for-byte the order of the calendar reschedule door in `ObjectCalendar.tsx`, the closest sibling.\n\nOrder measured across #30403's seven doors (merge commit `a91409c42`): every door that reads `declaredUserMessage` asks it FIRST, before `isExternalWriteRefusal` (form page `refusalText`, record dialog in `form.tsx`, stage change `stageRefusalLines`, calendar reschedule); the three doors that ask `isExternalWriteRefusal` without a `declaredUserMessage` (record header delete, list row delete, inline edit) never read the marking at all. So an author-marked `userMessage` still wins here too. Every other 403 keeps `errors.unauthorized`.\n\nOut of scope, untouched (claim fence): the lane-refusal paths and every other kanban refusal.\n\n## Tests\n\nNew top-level `describe` in the existing harness `ObjectKanban.markedRefusalToast.test.tsx` (real `onDragEnd`, error built through `normaliseClientError`):\n\n- an unmarked `403 EXTERNAL_WRITE_FORBIDDEN` (`code` plus `details.code`) toasts the read-only line, and not the gate's diagnostic;\n- a marked one still toasts the marking.\n\nThe plain-403 control is the file's existing \"keeps the localized substitution for an UNMARKED 403\", still green.\n\n## Acceptance notes\n\n- None beyond the fence above.\n\n## Verification\n\n<details><summary>Targeted tests and type-check at d9ca156fe</summary>\n\n```\nturbo run build --filter='@object-ui/plugin-kanban^...' : Tasks 52 successful, 52 total · VERDICT command-exit 0\npnpm --dir ui exec vitest run --maxWorkers=2 packages/plugin-kanban/ : Test Files 85 passed (85) · Tests 551 passed (551) · VERDICT command-exit 0\npnpm --dir ui --filter @object-ui/plugin-kanban run type-check : VERDICT command-exit 0\n```\n</details>\n\n<details><summary>Ablation at d9ca156fe</summary>\n\n`node scripts/ablation-replace.mjs` replaced the anchor `(isExternalWriteRefusal(err)` with `(false` (anchor x1 to x0, blob 618d26adcfeb to b7edb7d6b008), ran the harness file: `Tests 1 failed | 7 passed (8)`, the new read-only pin red with `Received: \"You are not authorized to perform this action.\"`. Restored: blob equals HEAD (618d26adcfeb), `git diff HEAD` empty.\n</details>\n\n<details><summary>Gates</summary>\n\nAt d9ca156fe, `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 35 families; each was run with its exit code recorded before any pipe:\n\n```\nnode scripts/check-adr-0087-registration.mjs --base origin/main :: exit 0\nnode scripts/check-adr-0087-registration.mjs --self-test :: exit 0\nnode scripts/check-changeset-no-major.mjs --base origin/main :: exit 0\nnode scripts/check-closing-keyword-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-corpus.mjs :: exit 0\nnode scripts/check-empty-changeset.mjs --base origin/main :: exit 0\nnode scripts/check-empty-changeset.mjs --self-test :: exit 0\nnode scripts/check-sdui-manifest.mjs :: exit 0\nnode scripts/check-sdui-manifest.mjs --self-test :: exit 0\nnode scripts/pm/release-rehearsal-clone.mjs --self-test :: exit 0\nnode scripts/release-pending-publish.mjs --self-test :: exit 0\npnpm --filter @objectstack/spec run check:duration-unit-keys :: exit 0\npnpm check:changeset-gate-self-tests :: exit 0\npnpm check:closed-ceremony-text :: exit 0\npnpm check:cross-package-test-inputs :: exit 0\npnpm check:dispatcher-error-vocabulary :: exit 0\npnpm check:driver-memory-census :: exit 0\npnpm check:engine-double-contract :: exit 0\npnpm check:gitlink-declared :: exit 0\npnpm check:nul-bytes :: exit 0\npnpm check:published-files :: exit 0\npnpm check:query-options-erasure :: exit 0\npnpm check:refd-timer-probe :: exit 0\npnpm check:registry-log-declared :: exit 0\npnpm check:rest-log-spy-declared :: exit 0\npnpm check:skill-identifier-liveness :: exit 0\npnpm check:test-source-alias :: exit 0\npnpm check:tier-file-adoption :: exit 0\npnpm check:type-check-coverage :: exit 0\npnpm check:type-check-debt :: exit 0 (first run exit 124 = my 300s timeout wrapper, rerun uncapped)\npnpm check:undeclared-dep-imports :: exit 0\npnpm check:watch-hint-literal :: exit 0\npnpm check:where-matcher :: exit 0\npnpm --dir ui exec vitest run scripts/ :: exit 0\n```\n\n`dispatch-gates --ran`: 35 derived, 35 run, 0 NOT-MEASURED, 0 UNRUN. Also: `pnpm --dir ui run check:spec-symbols` exit 0; `pnpm --dir ui run check:new-line-citations` exit 0 (0 new citations).\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgWn6zhNa4LL7VB1rtL\n"
+}

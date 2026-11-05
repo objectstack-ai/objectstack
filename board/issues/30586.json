@@ -1,0 +1,35 @@
+{
+  "number": 30586,
+  "kind": "pull_request",
+  "title": "i18n(plugin-webhooks): ship the webhook object in all eleven platform languages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T16:46:41Z",
+  "updated_at": "2026-11-05T17:44:35Z",
+  "closed_at": "2026-11-05T17:44:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-05T17:44:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30586",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgBxjikPH2bUin9o95gbAxsx)_\n\ndomain:server#2 · os-bill · session_01Utp6Cai5CRdAs4u9gTipWU\n\nRefs #30512 — package 2 of 11 (`@objectstack/plugin-webhooks`). The card stays open: the last PR of the series flips the bundle check to the platform locale table.\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么：** Webhook 对象（`sys_webhook`）的名称、字段、选项、帮助文字和视图名补上 7 种语言：繁体中文、阿拉伯语、法语、巴西葡萄牙语、俄语、德语、韩语，共 11 种，与平台语言表一致。\n- **为什么改：** 平台语言表（#29428 裁决 F）要求每个界面带齐 11 种语言；这是第 3 期按包补齐的第 2 个包（47 条）。\n- **风险与回滚：** 只加翻译数据和注册行，不动逻辑、schema、接口；原有 4 种语言一字未改。另在 `check-i18n-stale-fill` 的基线里登记 1 条良性巧合（中文无复数，简繁两种都把复数名写作「Webhook」），附理由。回滚即撤 PR。\n- **先看：** `src/translations/index.ts`（按表标签注册，zh-CN 在 zh-Hant 前）、`scripts/i18n-stale-fill-baseline.json`（那 1 条巧合），再抽看 `ar.objects.generated.ts`。\n- **两分钟验证：** `node scripts/check-i18n-bundles.mjs --filter=webhooks` 输出 `in sync (21 bundle(s))`，`node scripts/check-i18n-stale-fill.mjs` 退出 0。\n- **需要你做的：** 无，席位落地。\n\n## What changes\n\n- Seven new locales for `sys_webhook` under the platform locale table's tags (`zh-Hant`, `ar`, `fr`, `pt-BR`, `ru`, `de`, `ko`): each a `TAG.objects.generated.ts` with all 47 leaves plus its `TAG.source-hashes.generated.ts`, written by the repo's own `os i18n extract --fill=default --source-hashes` and served through `withSourceFallback` like the existing three. `zh-CN` stays ahead of `zh-Hant` in `index.ts`.\n- The extract command in `scripts/i18n-extract.config.ts` lists the seven tags and its merge baseline imports the seven bundles, so `check:i18n` covers them from this PR on.\n- `scripts/i18n-stale-fill-baseline.json`: one entry, `sys_webhook.pluralLabel`, classified as a benign coincidence with its reason. `zh-CN` already said 「Webhook」 for the plural (Chinese does not inflect), and the natural `zh-Hant` is the same bytes; the gate's cross-locale rule reads two CJK locales agreeing on a Latin-only value that differs from the source (`Webhooks`) as a stale fill. Re-translating either leaf away from the product term would be worse copy, so the gate's documented path (ratchet in, record why) is taken.\n- `bundle-ownership.test.ts`: one message sentence, \"the four locale bundles\" → \"every locale bundle\".\n\n## Acceptance notes\n\n- **Quality bar (#17508 / PR #19345):** every leaf written for the reader; placeholders, code spans (`signing_secret`, `headers_secret`), JSON examples (`{\"Authorization\": \"Bearer …\"}`), header names (`X-Objectstack-Signature`) and identifiers (`snake_case`, `bulk_*`, `HMAC-SHA256`, `sys_secret`, `@objectstack/spec/automation/webhook`) byte-identical, checked mechanically per leaf against `en`. Arabic is RTL prose with identifiers left in Latin script.\n- **Leaves equal to English, on purpose:** the HTTP method options `GET` `POST` `PUT` `PATCH` `DELETE` in every locale; beyond those, the product term and native cognates only — `zh-Hant` `Webhook` (label) and `Webhook ID`; `fr` `Webhook`, `Webhooks`, `Description`, `package`; `pt-BR` `Webhook`, `Webhooks`; `de` `Webhook`, `Webhooks`, `Name`, `Definition`. The extractor records each as a source copy (`ar`/`ru`/`ko` 5 entries = the methods only; `zh-Hant`/`pt-BR` 7; `fr`/`de` 9).\n- Option labels of `managed_by` / `triggers` are translated (they were already translated in `zh-CN`); the `help` texts keep the option codes (`admin`, `package`, `platform`, `create/update/delete`) as codes, as `zh-CN` does.\n\n## Verification\n\n<details><summary>Package suite, typecheck, build (verify lock)</summary>\n\n```\npnpm --filter @objectstack/plugin-webhooks build && test && typecheck\n Test Files  25 passed (25)\n      Tests  258 passed (258)\nos-verify-lock: VERDICT command-exit 0\n```\n</details>\n\n<details><summary>i18n gates</summary>\n\n```\nnode scripts/check-i18n-bundles.mjs --filter=webhooks\n  plugins/plugin-webhooks        in sync (21 bundle(s))                                        EXIT 0\nnode scripts/check-i18n-stale-fill.mjs   (before the baseline entry)\n  1 NEW stale-fill leaf: plugin-webhooks … #sys_webhook.pluralLabel · locales zh-CN, zh-Hant · source \"Webhooks\" · serving \"Webhook\"   EXIT 1\nnode scripts/check-i18n-stale-fill.mjs   (after, entry classified)                            EXIT 0\n```\n</details>\n\n<details><summary>Derived gate families at head c6c30383 (dispatch-gates --commands, reconciled with --ran)</summary>\n\n```\ndispatch-gates --ran: 68 derived famil(ies) accounted for — 68 run, 0 NOT-MEASURED (a DERIVED zero — all 68 recorded an exit code and none of them is 3).\nevery family exit 0, including pnpm check:i18n (all 10 bundle sets) and pnpm check:i18n-stale-fill\neslint --no-inline-config on the changed .ts files: exit 0 · check-nul-bytes: exit 0\nchanged lines 1066 (+1063 / -3), 19 files: under the 3000-line human-merge threshold\n```\nFull record: the seat's project folder, `server-seat2/30512/gates-webhooks-ran.txt`.\n</details>\n\nDogfood: not run — content-only package PR, no `!` in the title and no `(narrowing)` arm (dispatch order: package suite + `check:i18n` + typecheck suffice).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6Cai5CRdAs4u9gTipWU)_\n"
+}

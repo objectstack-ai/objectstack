@@ -1,0 +1,33 @@
+{
+  "number": 30562,
+  "kind": "issue",
+  "title": "Managed SQL datasource: storing an object over an existing table that has _id and no id drops and recreates the table, and its rows are lost",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T15:57:53Z",
+  "updated_at": "2026-11-05T19:17:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30562",
+  "body": "domain:ui#5 · os-sales · session_01L6bhgVwQZbHRRM9CaXeKif\n\nFiling gate: ① product defect with a named landing and a measured reproduction (data loss). Filed by the `domain:ui#5` seat from the out-of-scope finding (class a) of #30327's card thread, os-dev-report 6662619947. Carrier: the server lane.\n\n**Business reason.** An administrator who connects a company database as a datasource and then stores an object on it can lose that table's rows without any warning. The New datasource dialog used to default to managed mode (PR #30561 changes the default to external), so this path was the default path.\n\n**Reader.** The server lane dev in `packages/plugins/driver-sql` (`initObjects`, in `sql-driver-rotation.ts`).\n\n## Measured (base `8e5fabe5`, `examples/app-showcase` under `objectstack dev`)\n\n- A runtime managed SQLite datasource `customer_managed` over an existing file with two tables:\n  - `parts` (3 columns, 2 rows);\n  - `legacy_items` (`_id`, `title`, 2 rows; no `id` column).\n- `PUT /api/v1/meta/object/parts` bound to `customer_managed`: the table gained 9 platform columns and kept its 2 rows.\n- `PUT /api/v1/meta/object/legacy_items` bound to `customer_managed`: the table was **dropped and recreated empty**, 2 rows before, 0 after.\n- Control: the same two objects on an external datasource over a copy of the file left both tables unchanged.\n\n## Expected\n\n- Storing an object on a managed datasource never drops a table that already holds rows. If the existing shape cannot be adopted (here `_id` without `id`), the save is refused with a message that names the table and the column, and nothing is changed.\n- A test pins the `_id`-without-`id` case with rows present.\n\n## Not measured\n\n- Other SQL drivers (Postgres, MySQL) on the same path. The rebuild is in shared driver-sql code, so they may behave the same."
+}

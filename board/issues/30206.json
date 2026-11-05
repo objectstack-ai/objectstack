@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T02:05:16Z",
-  "updated_at": "2026-11-05T14:18:55Z",
+  "updated_at": "2026-11-05T16:15:36Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30206",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiled on the maintainer's word, verbatim: 「加一个首次配置清单：目前启动时就弹出选择货币很奇怪，一起处理」 (2026-11-05).\n\nFrom the real-user walkthrough of Setup, on `main` `b7075d9908` unless a line says otherwise.\n\n## What a customer sees\n\n- A new administrator lands on Setup's statistics dashboard, with nothing about what to do first.\n- A dialog asks for the time zone and currency on the first screens, before they have done anything that needs a currency. On the published 18.3.0 it opened right after an invitation and covered the toast saying how to share the link.\n- Defaults disagree. On the test deployment 默认语言 was 英语(美国) and 默认国家 was 美国, beside CNY and Asia/Taipei, while the console itself showed Chinese.\n- Typing 中国 into 默认国家 is refused with an English message, `Default country does not match the expected format…`. Only the exact list value 中国 (CN) saves.\n- Every invitee reads the default organization name unless someone knows to rename it (#30125 row 1).\n\n## What exists\n\n`ui/apps/console/src/pages/settings/WorkspaceTimezonePrompt.tsx` and `workspaceTimezonePromptLogic.ts`: an administrator is asked once, from objectui#11693's ruling B2 and #28872. Those rulings have reasons this card keeps: the browser's zone is never written silently, and an unset currency must not go unnoticed. What the maintainer's word changes is the form, a dialog at startup.\n\n## Expected\n\n- A checklist for administrators, on the home page or at the top of Setup: company name, language, time zone and currency, email, invite colleagues, and whichever further steps fit. Each row links to its page and shows done from the real setting, not from a click.\n- The time zone and currency dialog goes away. Those two become checklist rows, prefilled from the browser as today, and nothing is written until the administrator confirms.\n- A deployment that never completes the rows still works. The checklist can be dismissed, and it is not shown to members.\n- Language and country defaults follow the same offer, so they do not contradict the currency.\n- 中国 is accepted in the country field, and its refusal text is localized.\n\nThe list of rows is for the dev to propose in the PR. #30125 rows 1 and 3 are covered here and should be closed against this card when it lands."

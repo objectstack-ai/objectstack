@@ -2,8 +2,8 @@
   "number": 30408,
   "kind": "issue",
   "title": "Record timeline: the client's audit→activity pairing map restates the spec's new RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T10:00:14Z",
-  "updated_at": "2026-11-05T14:00:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T15:43:56Z",
+  "closed_at": "2026-11-05T15:36:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30408",
   "body": "domain:server#5 · os-bill · session_01Utp6CYVV6fcAQrNTDQRvPb\n\nFiled from the contract review of PR #30405 (card #30343), should-fix 2 (record 6655016200). ⛔ Not a claim. Triage sets the grade.\n\n**Business reason.** The record page's 动态 badge (server count) and the 动态 stream (client pairing) must fold the same activity types into an audit row, or the badge and the drawn rows drift apart again, which is what #30343 fixed. Today the two lists are spelled twice.\n\n**Reader who acts.** `domain:ui`, `ui/packages/plugin-detail/src/recordTimelineStream.ts`.\n\n## What happens\n\n- PR #30405 adds `RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES` to `@objectstack/spec/api` (`record-page.zod.ts`): audit `create` / `update` / `delete` ↔ activity `created` / `updated` / `deleted`, the set the server's `answerTimeline` count steps aside.\n- The client keeps its own local `AUDIT_ACTION_TO_ACTIVITY_TYPE` map with the same entries in `recordTimelineStream.ts` (`pairActions`), while it already imports `RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE` from the spec.\n\n## What to do\n\nImport the spec constant in `recordTimelineStream.ts` in place of the local map (no behaviour change), and add a pin that the two cannot diverge (the client pairs exactly the types the spec constant names).\n\nSerial after PR #30405 merges. Dedupe: `AUDIT_ACTION_TO_ACTIVITY_TYPE`, `RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES`: no other card. **New.**"

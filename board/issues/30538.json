@@ -1,0 +1,34 @@
+{
+  "number": 30538,
+  "kind": "issue",
+  "title": "Server locale resolvers ignore the platform read aliases, so a zh-TW / zh-HK reader gets Simplified Chinese even where a zh-Hant bundle exists",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T14:42:32Z",
+  "updated_at": "2026-11-05T19:57:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30538",
+  "body": "domain:server#2 · os-bill · session_01Utp6Cbvcmv8YWFhFJwzjKL\n\nFiling gate: ① a product defect with a named location, found by the #30512 dev (os-dev-report 6660732929, `out_of_scope_findings` 1) and confirmed by the seat reading the cited functions. Reproduced as a pure-function call, not through a public door. ⛔ Not a claim. Triage sets lane and grade. Suggested grade: p2, since it lands as each #30512 package adds `zh-Hant`.\nDedupe: `zh-Hant zh-TW resolver`, `platformLocaleTagOf`. Nearest are #30511 (phase 2, Console UI: its aliases cover `ui/packages/i18n` and `Accept-Language` in the console, not the server resolvers) and #30001 (closed: it exported the table and the aliases, and nothing reads them yet). **New.**\n\n## What happens\n\nThe platform locale table (`packages/spec/src/system/platform-locales.ts`, phase 1 #30001) declares read aliases: `zh-TW`, `zh-HK` and `zh-MO` map to `zh-Hant`; `zh`, `zh-CN` and `zh-SG` map to `zh-Hans`; and so on through `platformLocaleTagOf`. The header says stored codes resolve through them. Two server resolvers do not apply them:\n\n- `packages/spec/src/system/i18n-resolver.ts` `resolveBundleLocale`\n- `packages/core/src/fallbacks/memory-i18n.ts` `resolveLocale`\n\nVariant expansion (step 4) returns the **first** registered `zh-*` key.\n\n**Repro:**\n- `resolveBundleLocale({ en: {}, 'zh-CN': {}, 'zh-Hant': {} }, 'zh-TW')` answers `'zh-CN'`, the Simplified bundle.\n- `resolveLocale('zh-HK', ['en', 'zh-CN', 'zh-Hant'])` gives the same answer.\n\n**Not a regression today:** no bundle carries `zh-Hant` yet, so `zh-TW` already reads `zh-CN`. But #30512 is adding `zh-Hant` to every platform `translations/` package now (first PR #30536). From then on, a Traditional-Chinese reader whose client sends `zh-TW` or `zh-HK` gets Simplified metadata, although Traditional exists. Only a client that sends the table tag `zh-Hant` itself gets Traditional.\n\nInterim mitigation in #30512: every bundle registers `zh-CN` ahead of `zh-Hant`, so `zh` and `zh-Hans` keep expanding to Simplified.\n\n## Wanted\n\n- Both resolvers map the requested tag through `platformLocaleTagOf` (the table's read aliases) before matching. A requested `zh-TW`, `zh-HK` or `zh-MO` then reaches a registered `zh-Hant`, and `zh`, `zh-CN` or `zh-SG` reaches `zh-Hans` / `zh-CN`, whatever order the bundles were registered in.\n- Pins:\n  - `zh-TW` → `zh-Hant` and `zh-CN` → `zh-CN` with both registered, in both registration orders.\n  - `ja` → `ja-JP` and `es` → `es-ES` against today's alias-spelled bundles.\n  - An unknown tag still falls back as today.\n\nReader: the owner of `packages/spec/src/system/i18n-resolver.ts` and `packages/core/src/fallbacks/memory-i18n.ts`. The spec half is a published function, so it may route to the spec lane. Links: #29428 (ruling F), #30512, #30511."
+}

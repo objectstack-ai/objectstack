@@ -11,22 +11,20 @@
     "type": "Bot"
   },
   "labels": [
-    "domain:ui",
+    "domain:server",
     "enhancement",
-    "pm:dispatched",
+    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [
-    "os-sales"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T15:01:58Z",
-  "updated_at": "2026-11-05T13:30:59Z",
+  "updated_at": "2026-11-05T17:38:40Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 5,
+  "comments": 12,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30126",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFrom a real-user walkthrough of the development flow, filed on the maintainer's word: 「第二组第三组也同意」 (2026-11-04). Measured on `main` `987ff33b88` unless a line says otherwise. Test project scaffolded with `create-objectstack@18.3.0`.\n\nEach row works today but could be clearer. Rows marked 18.3.0 were seen on the published release and not re-run on `main`.\n\n## Console\n\n| # | Observed | Where | Suggestion |\n|:--|:--|:--|:--|\n| 1 | Dialog title `新建Repair Ticket`, with no space between Chinese and Latin | `main`; `ui/packages/i18n/src/locales/zh.ts:229` `新建{{object}}` | Space when the object name starts with a Latin letter |\n| 2 | The create dialog opened from a lookup has no title; it starts at the section name \"Details\" | `main`, by DOM: no `h2` | Title it 新建 and the object label |\n| 3 | An action with no `successMessage` toasts 「操作已成功完成」, which does not say what happened | `main` code, `ui/packages/core/src/actions/ActionRunner.ts:643`; seen on 18.3.0 | Name the action: \"Resolve 已完成\" |\n| 4 | Every entry in an app's sidebar has the same icon; navigation does not take the object's icon | `main` | Inherit the object's icon when an entry names none |\n| 5 | Setup's collapsed sidebar is 20+ icons with no text | `main` | Tooltips at least, or keep it expanded by default |\n| 6 | Field labels on the record page differ in style: `REPAIR COST` beside 负责人 | `main` | One label style |\n| 7 | Money differs by surface: record `¥1,280.50`, dashboard `¥1,280.5` (18.3.0) and `¥1,293` for 1293.00 (`main`). #27520 row 16 asked for one format per column; this is the metric card | Both | Metric cards keep the currency's decimals, unless the author sets otherwise |\n| 8 | Notification list shows the raw topic `notify` | 18.3.0 | Hide it or give it a label |\n| 9 | A mention title reads 「李四 mentioned you」 in a Chinese console. The zh text exists (`plugin-audit/src/translations/messages.ts:37`); the title follows the recipient's `sys_user.locale`, then the deployment default, and a new user has no locale | 18.3.0, code read on `main` | Give new users a locale, or use the language they last used |\n| 10 | The success toast covers the Assignee in the record header for a few seconds | 18.3.0 | Move it, or shorten it |\n| 11 | A chart with one bar of value 1 has an axis to 4 and a bar filling the width | 18.3.0 | Axis fits the data |\n| 12 | Opening the Setup app without access answers `You do not have permission to open the 'com.objectstack.setup' app.` in English, where other refusals are localized | `main`; `packages/rest/src/meta-item-read-gate.ts:797,1693` | Localize |\n\n## CLI and MCP\n\n| # | Observed | Where | Suggestion |\n|:--|:--|:--|:--|\n| 13 | `os package export` takes `-u` and `-t`; `os package install` takes `-r`, `--email` and `--password` | `main`, both `--help` | One way to name the server and the credential |\n| 14 | A page opened while `os dev` restarts stays on the splash with an empty root, and does not retry or say anything | 18.3.0, console served by the server | Retry, or show a message |\n| 15 | An MCP argument error tells the reader the fix, then adds history for internal developers: \"This argument used to be dropped silently…\" | `main`; `packages/mcp/src/mcp-http-tools.ts:706` | Drop the history sentence |\n| 16 | `list_actions` gives a plain member all 36 actions, including `ban_user` and `set_user_manager`, and `invite_user` four times, on four objects. **Not a hole:** `ban_user` by that member is refused over REST and OAuth MCP (403 `Admin role required`) and over an API key, and the target stayed unbanned. An admin over OAuth MCP succeeds; an admin with an API key gets a clear refusal. #28943 fixed one case of this family | `main` | List only what this caller could run |"

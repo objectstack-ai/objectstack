@@ -1,0 +1,34 @@
+{
+  "number": 30576,
+  "kind": "pull_request",
+  "title": "refactor(plugin-chatbot)!: retire eight zero-consumer entry exports",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T16:33:27Z",
+  "updated_at": "2026-11-05T17:22:49Z",
+  "closed_at": "2026-11-05T17:22:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-05T17:22:46Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30576",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuDadpmv8nuw2HbLjjF77YBK)_\n\nPart of #25921. The umbrella stays open; this is the second barrel batch of claim 6660204183 (amendment 6661865751, seat `domain:ui#6`). The first batch was #30541.\n\nClause-②: no (narrowing)\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:`@object-ui/plugin-chatbot` 的包入口不再导出 8 个名字:浮动聊天的上下文钩子 `useFloatingChatbot` 及其三个状态/动作/上下文类型、内部消息行的 `ChatMessageProps`、一个工具调用转换函数、两个工具结果展示辅助函数。模块全部保留,行为不变。\n- 为什么改:这 8 个名字在仓内(包外)与 hotcrm 均零引用;本卡逐包收窄无人使用的公开导出。\n- 风险与回滚:对外是 breaking 收窄,只影响直接从包入口 import 这些名字的外部宿主;控制台与所有 `@object-ui/*` 包不受影响。回滚即 revert 本 PR。\n- 先看:`ui/packages/plugin-chatbot/src/index.tsx`(四处导出改写)、`.changeset/25921-plugin-chatbot-zero-consumer-exports.md`(迁移说明)。\n- 两分钟验证:`git grep -l -w -e useFloatingChatbot -e unwrapToolResult -e summarizeChatError -e toRuntimeToolInvocation -- ':!ui/packages/plugin-chatbot' ':!**/CHANGELOG.md'` 应只命中本 PR 的 changeset。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `ui/packages/plugin-chatbot/src/index.tsx`:\n  - the entry stops exporting `useFloatingChatbot` and the types `FloatingChatbotState`, `FloatingChatbotActions`, `FloatingChatbotContextValue` (`FloatingChatbotProvider` and `FloatingChatbotProviderProps` stay);\n  - `ChatMessageProps`, the props of the internal `ChatMessageItem` row, becomes a local interface;\n  - `toRuntimeToolInvocation` leaves the adapter export list (`toRuntimeMessages`, `authoredToRuntimeMessage`, `toRuntimeRole`, `toRuntimeTimestamp`, `toRuntimeToolState` stay; the README teaches the last three and `toRuntimeMessages`);\n  - `unwrapToolResult` and `summarizeChatError` leave the display-helper export (`humanizeToolName` stays).\n- One new changeset, `.changeset/25921-plugin-chatbot-zero-consumer-exports.md`: patch level, `!` title, BREAKING paragraph, FROM/TO lines for every retired name, ADR-0087 marker `not-required (runtime-export-retired …)` naming all eight operands.\n- No module file is deleted and no test moves: no test imported a retired name from the entry. `FloatingChatbotTrigger` and `FloatingChatbotPanel` read the hook from its module, `toRuntimeMessages` calls `toRuntimeToolInvocation`, and `ChatbotEnhanced` calls the two display helpers.\n\n## Tests\n\nCensus on `origin/main` 75bbebb2, re-read at this head on top of 48b3ae6e (same counts), with batch 1's method: the entry's 102 export names from the TypeScript checker; per name `git grep -o -w -F` outside `ui/packages/plugin-chatbot`, minus `**/CHANGELOG.md`, lockfiles and `.changeset/**`; the package README; keep rule 3 (a kept export's declared type reaches it, by a checker walk); hotcrm `6961ab1`. 44 names had zero outside hits: 2 are README-taught, 29 are reached by a kept export's declared type, 8 are retired here, and 5 are kept for a reason:\n\n| Name | Outside hits | hotcrm | Verdict |\n|:--|--:|--:|:--|\n| `useFloatingChatbot`, `FloatingChatbotState`, `FloatingChatbotActions`, `FloatingChatbotContextValue` | 0 each | 0 | retired |\n| `ChatMessageProps` | 0 | 0 | retired (now a local interface) |\n| `toRuntimeToolInvocation` | 0 | 0 | retired |\n| `unwrapToolResult`, `summarizeChatError` | 0 each | 0 | retired |\n| `TypingIndicator` | 0 | | kept: `TypingIndicatorProps` is named in a `plugin-dashboard` comment (prose counts), and the component and its props go together |\n| `emitAiUsageRefresh`, `AGENT_ALIAS_GROUPS` | 0 each | | kept: also published on the `./core` subpath entry, outside this claim's surface |\n| `authoredToRuntimeMessage`, `toRuntimeTimestamp` | 0 each | | kept: README-taught |\n| controls | `ChatbotEnhanced` 51, `humanizeToolName` 10, `FloatingChatbot` 8, `toRuntimeMessages` 3, `FloatingChatbotProvider` 1; hotcrm `ListView` 7 | | |\n\nReadings on the batch commit 94dc257f (cut from 75bbebb2), before the move onto this branch:\n\n- `turbo run type-check` for `@object-ui/plugin-chatbot`, `@object-ui/app-shell`, `@object-ui/console` with their `^build` closure: 76 of 76 tasks; `vitest run packages/plugin-chatbot/`: Test Files 95 passed (95), Tests 880 passed (880); one lock VERDICT command-exit 0.\n- `vitest run scripts/` (ui): Test Files 170 passed, 2 skipped (172); Tests 4985 passed, 2 skipped (4987); VERDICT command-exit 0.\n- Reverse check on the rebuilt `.d.ts`: a temporary app-shell probe importing the eight retired names plus `FloatingChatbotProvider`, `FloatingChatbotProviderProps`, `toRuntimeMessages`, `humanizeToolName` and `TypingIndicator` gave exactly eight errors (`TS2305` / `TS2724 … has no exported member`), one per retired name; the controls resolved. Probe deleted; `git status` clean.\n- `check:readme-exports`: `0 fabricated, 0 stale omission(s)`; exit 1 only on the known `packages/cli` unbuilt prerequisite. `check-platform-checklist --changed-from origin/main`: exit 0, 0 anchored files.\n- Dogfood battery (closure plus `pnpm --filter @objectstack/dogfood test` under the lock): Test Files 420 passed, 3 skipped (423); Tests 3496 passed, 36 skipped (3532); VERDICT command-exit 0.\n- No ablation: export lines removed, no tested behaviour changed.\n\nThe re-run on this branch's head 59fd4bfb (the cherry-pick onto 48b3ae6e) is recorded in the os-dev-report on #25921.\n\n## Acceptance notes\n\n- `emitAiUsageRefresh` and `AGENT_ALIAS_GROUPS` have zero outside hits on both entries; retiring them means editing `src/core.ts` (the `./core` subpath), which a later batch can take.\n- Branch name is the platform-assigned `claude/project-thread-h719zv` (batch 1's branch, restarted from `main` after #30541 merged), not `claude/issue-25921-*`.\n- A contract-review-tier review is owed before the queue (narrowing batch); the seat runs it.\n\n## Verification\n\nDerived gates and the head re-run are in the os-dev-report on #25921; CI check-runs on this PR are the record for every family CI runs.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgTj6bWX8Rq5fpUGNv7)_\n"
+}

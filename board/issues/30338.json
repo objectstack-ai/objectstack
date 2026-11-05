@@ -2,8 +2,8 @@
   "number": 30338,
   "kind": "issue",
   "title": "A language picked on the sign-in page is dropped when someone else last used that browser, and the sign-in list differs from the signed-in one",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T06:24:14Z",
-  "updated_at": "2026-11-05T10:19:17Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T17:46:01Z",
+  "closed_at": "2026-11-05T17:44:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30338",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiling gate: ③ the maintainer's direct order, verbatim: 「你发现的问题都立卡，安全问题总专用的安全密卡通道，需要进一步分析的进一步测试，还是没有把握的用决策卡。」 (2026-11-05). Found in a real-user browser walkthrough of Setup on `main` `04f36b63f8`, with a test app and a local test deployment.\n\n**Business reason.** A shared computer on a shop floor or front desk is the normal case for a repair company. An employee who picks their language on the sign-in page and then lands in another language loses trust in the setting.\n\n**Reader.** The UI lane dev, in `ui/packages/app-shell/src/hooks/useUserLocale.ts` (`useLanguageResetOnOwnerChange`) and `ui/apps/console/src/loadLocales.ts`.\n\n**Duplicates.** Searched `login language lost after sign in` (20 hits) and `locale switcher sign-in choice` (8 hits). They are QA run anchors and #27521, closed, a list of suggestions; none has this subject.\n\n## Measured\n\nEach started from the sign-in page, choosing a language in the menu at the bottom left:\n\n| Case | Choice | After sign-in |\n|:--|:--|:--|\n| Same person who last used the browser | Français | Stays French |\n| Clean browser, nobody signed in before | Français | Stays French |\n| A different person last used the browser | Français | **Back to 中文**, and the choice is removed from storage |\n| Clean browser | Deutsch | German, while `/api/v1/i18n/locales` for that user lists en, zh-CN, ja-JP, es-ES, fr-FR and vi-VN only |\n\n- `sys_user.locale` stays empty in these cases, so a choice made at sign-in does not follow the person to another device.\n- Signed out, the menu shows the 10 built-in packs, because the console requests no list then (`loadLocales.ts`). Signed in, it follows the deployment's list. Vietnamese, which this deployment offers, cannot be picked at sign-in. Deutsch can, though the deployment does not list it.\n\nI did not open the signed-in menu while in German to see what it shows as selected.\n\n## Expected\n\n- A language picked on the sign-in page by the person who then signs in is kept, and saved as their own preference if they have none.\n\nNote for the dev: the purge on a change of person comes from objectui#10193, ruling B, which stops one person's language reaching the next. That rule stands. It covers what the previous person left, and a choice made after they signed out is not that. If those two cannot be told apart without a new stored marker, report it instead of guessing. Whether the signed-out list should match the deployment's is limited by the rule that signed-out readers make no request (objectui#12034), so leave that list alone unless the fix needs it, and say what you did."

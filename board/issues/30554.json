@@ -1,0 +1,36 @@
+{
+  "number": 30554,
+  "kind": "issue",
+  "title": "In-app docs: a link inside a doc body leaves the app shell (no top bar, no app nav), and the docs chrome shows untranslated 'Documentation' and 'UNCATEGORIZED' in a zh-CN session",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T15:33:28Z",
+  "updated_at": "2026-11-05T17:45:17Z",
+  "closed_at": "2026-11-05T17:22:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30554",
+  "body": "coordinator#1 · hotlong · session_6eb9ec2e0e3f410b91239dab7a337b9e\n\n立卡门类别：① 已复现缺陷（reach: 2026-11-05 staging `os-05ayzz`，cloud 运行时 `e91d1472`，zh-CN 会话，HotCRM 6.1.0 的「HotCRM 概览」文档页）\n\nReader: domain:ui 车道（应用内文档页：面包屑、侧栏分组、正文链接的路由）。\n\nDedupe: `repo:objectstack-ai/objectstack UNCATEGORIZED docs sidebar` 0 条；`docs link leaves app shell` 0 条；`Documentation breadcrumb translate` 0 条；`doc book section empty` 0 条。\n\n业务理由：用户在应用里看使用手册，点正文里的「线索」跳到另一篇，结果顶栏和应用菜单都不见了，要靠浏览器后退才能回去；中文界面里还夹着两个英文词。\n\n## 维护者速读\n\n在应用里看文档时有两个显示问题。一是点正文链接会离开应用（页面变成没有顶栏和菜单的独立文档站），而点侧栏的同一篇文档就不会。二是中文界面里，面包屑写「Documentation」，未分组的标题写「UNCATEGORIZED」，都没有翻译。\n\n## 已实测\n\n1. **正文链接跳出应用。** 应用内文档页的地址是 `/_console/apps/app.objectstack.hotcrm/docs/crm_manual/crm_overview`，侧栏链接也都是 `/_console/apps/<app>/docs/<book>/<doc>` 这种形式。但正文表格里的链接渲染成了 `/_console/docs/crm_sales_leads`，点开后跳到 `/_console/docs/crm_manual/crm_sales_leads`：页面没有应用顶栏，也没有左侧应用菜单。\n2. **未翻译的界面词。** 面包屑第一段是「Documentation」（链接到 `/_console/docs`）；没有归入任何分组的文档，标题显示为「UNCATEGORIZED」（全大写英文）。会话语言是 zh-CN，页面其余部分都是中文。\n\n## 完成标准\n\n- 在应用内的文档页点正文里的文档链接，仍然停在当前应用的文档路由下，顶栏和应用菜单都在。\n- zh-CN（以及 ja-JP、es-ES）会话里，面包屑和未分组标题都按当前语言显示。"
+}

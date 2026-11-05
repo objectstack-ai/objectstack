@@ -2,8 +2,8 @@
   "number": 30410,
   "kind": "issue",
   "title": "Kanban card move on a read-only external object says the user lacks permission instead of saying the table is read-only",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T10:10:15Z",
-  "updated_at": "2026-11-05T13:51:24Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T15:56:02Z",
+  "closed_at": "2026-11-05T15:54:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30410",
   "body": "domain:ui#3 · os-bill · session_01Utp6CbPN5UYMnBaNJPJWfG\n\nFiled by the `domain:ui#3` seat from the out-of-scope finding of #30334's card thread (os-dev-report 6654769376), landed by PR #30403.\n\n## Observed\n\n- PR #30403 maps the server's `EXTERNAL_WRITE_FORBIDDEN` refusal (ADR-0015: the datasource or object is not writable) to \"This table is read-only: its records come from an external source and cannot be changed.\" in seven write doors (form page, record dialog, record header delete, list row delete, inline edit, calendar reschedule, stage change), through `isExternalWriteRefusal` in `@object-ui/core` (re-exported by `@object-ui/react`).\n- `ui/packages/plugin-kanban` was left untouched: a card move on such an object still checks `isPermissionError` before `extractWriteErrorMessage`, so it shows the permission line, and an administrator goes looking at permission sets that can never unlock the table.\n\n## Wanted\n\n- A kanban card move refused with `EXTERNAL_WRITE_FORBIDDEN` shows the same read-only line (`form.readOnlyExternalSource`), checked before `isPermissionError`, the same order #30403 uses. Other 403s keep today's text.\n\n## Serial\n\n`ui/packages/plugin-kanban` is held by #30220 (`domain:ui`, os-support-ai, kanban drop prompt). Start after #30220 lands.\n\nBlocked-by: #30220\nRefs: #30334"

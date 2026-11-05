@@ -2,8 +2,8 @@
   "number": 30334,
   "kind": "issue",
   "title": "A read-only external object offers New and Import, then refuses with a permission message that blames the wrong thing",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T06:22:45Z",
-  "updated_at": "2026-11-05T10:36:39Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T16:44:27Z",
+  "closed_at": "2026-11-05T16:44:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30334",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiling gate: ③ the maintainer's direct order, verbatim: 「你发现的问题都立卡，安全问题总专用的安全密卡通道，需要进一步分析的进一步测试，还是没有把握的用决策卡。」 (2026-11-05). Found in a real-user browser walkthrough of Setup on `main` `04f36b63f8`, with a test app and a local test deployment.\n\n**Business reason.** An administrator who is told 您没有权限 goes looking through permission sets, and no permission set can fix a table that is read-only by design. The buttons should not be offered in the first place.\n\n**Reader.** The UI lane dev for the object list and form, reading what the server already knows about the object.\n\n**Duplicates.** Searched `external object read-only create button` (46 hits) and `external read only import button` (45 hits). They are QA run anchors and epic #27314; none has this subject.\n\n## Measured\n\nOn object `spare_parts`, synced from a datasource in external mode:\n\n- The list shows 新建 and 导入, and the form opens normally.\n- Submitting shows 「您没有权限保存这条记录。」\n- The server's own answer is exact: `Write 'insert' blocked on object 'spare_parts': datasource 'parts_db' is external (schemaMode=external). Requires datasource.external.allowWrites=true (got false) AND object.external.writable=true (got false).` The form drops that reason.\n- The source table was not changed, so the protection itself is correct.\n- The list also shows a 在队列中 filter, though this object has no queue.\n\nI did not click 导入, and did not check whether a record's edit and delete are offered.\n\n## Expected\n\n- A read-only external object does not offer create, import, edit or delete, or shows them disabled with the real reason.\n- If a write still reaches the server, the message says the table is read-only, not that the user lacks permission.\n- The queue filter appears only on objects that can be in a queue."

@@ -2,8 +2,8 @@
   "number": 30377,
   "kind": "issue",
   "title": "objectql: the roll-up summary index is built from the served fold, so a disabled package's summary over a child in an enabled package is stale after re-enable",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T08:27:24Z",
-  "updated_at": "2026-11-05T09:14:04Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T18:41:54Z",
+  "closed_at": "2026-11-05T18:04:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30377",
   "body": "domain:server#4 · os-bill · session_01Utp6CZMkHvuDeVYgTD73qF\n\nFiling gate: ① a product defect with a named location, found by the contract review of PR #30362 (#30304), record 6653307077, should-fix 2. Filed by `domain:server` seat 4. ⛔ Not a claim. Suggested-grade: p3. ⛔ Serial after PR #30362 merges: it introduces the served/storage split this card depends on.\n\n## What happens\n\nPR #30362 withholds a disabled package's `objectExtensions` fields from the served object fold (`SchemaRegistry.getObject` / `getAllObjects`) and adds the full fold for storage readers (`getStorageObject` / `getAllStorageObjects`). The roll-up index, `ObjectQL.buildSummaryIndex` (`packages/objectql/src/engine-summaries-and-expansion.ts`, around L134 on the PR head), still reads `getAllObjects()`. It is memoised against `objectRevision`, which enable and disable bump, so the index is rebuilt correctly at each switch.\n\nWhile a package is disabled, a `summary` field it contributes by extension is missing from the index. If that summary's child object belongs to an **enabled** package, child writes during the disable do not recompute the stored summary column. After re-enable the summary serves a stale value until the next child write.\n\nThe card's own shape (#30304: the summary's child is in the same disabled module, whose data plane is refused) is not affected, and PR #30362 pins it (the summary reads 2000 again after re-enable).\n\n## Ask\n\nThe stored summary column is storage state, so keep it current regardless of disable. Choose one:\n\n- build the summary index from the storage fold where the child object is readable; or\n- recompute withheld summaries on enable.\n\nPin it: a summary contributed by package B over a child of enabled package A; disable B; write A's child rows; re-enable B; the summary is current without another child write.\n\nReader who acts: `domain:server`, `packages/objectql`.\n\nDedupe: `buildSummaryIndex disabled package`, `summary stale re-enable`. **New.**"

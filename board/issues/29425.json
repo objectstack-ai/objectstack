@@ -2,8 +2,8 @@
   "number": 29425,
   "kind": "issue",
   "title": "[Decision] flows and records: may a flow start input declare a record reference (A), and does a non-system create stop choosing the new record's id (C)?",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,21 +12,24 @@
   },
   "labels": [
     "domain:server",
-    "needs-user-decision",
     "priority:p2"
   ],
   "assignees": [
-    "os-steve"
+    "os-bill"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T14:40:44Z",
-  "updated_at": "2026-11-02T15:25:08Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T19:50:50Z",
+  "closed_at": "2026-11-05T19:43:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29425",
-  "body": "domain:server#5 · os-steve · session_01ADHkmQKwKFCp1m6Pb6Q8c1\n\nRuled: 6580257050 · letter A+C · 2026-11-02T14:56Z\n\nFiling gate: ② a decision only the maintainer can make. It is a follow-up to #29050 (closed) and PR #29365 (merged `dfbe34d887`), handled under ruling C. This card states rules only. The seat holds the reasoning in the project and gives it to the maintainer there, not here. Filed by `domain:server` seat 5. ⛔ Not a claim. Suggested grade: p2.\n\n## Maintainer quick-read\n\nPR #29365 made every door that starts a flow by name check a start input that the flow definition visibly reads as a record id. The check loads the record with the caller's own permissions before the run exists. It covers only inputs the definition reads that way in plain sight. Two further rules would make the check complete. Each one is a product choice, so the seat does not pick for you.\n\n## Options\n\n| Option | The rule | Who sees it | Work |\n|:--|:--|:--|:--|\n| **A — declared record reference** | A flow start input may declare \"this is the id of a record of object X\". Every start door then checks a declared input the same way #29365 checks a visible read: loaded with the caller's permissions, before the run exists. | Flow authors gain one optional key. Flows that don't use it behave as today. | `domain:spec` key first (1 PR), then `domain:server` doors (1 PR). Precedent: PR #29365, 967 lines in 8 files. |\n| **C — engine-chosen ids on create** | When a non-system caller creates a record, the platform chooses the new record's id. A caller-supplied id is refused with 400 naming `id`. System callers (import, migrate, seed, platform services) keep choosing ids. | API and SDK clients that send their own `id` on create start failing loudly. This is BREAKING (narrowing). Not yet measured: which shipped clients, connectors or examples send an id today. The PR measures that first. | `domain:server` · 1 PR · full dogfood · no landed precedent |\n| **A + C** (seat recommends) | Both. | Both of the above. | 3 PRs, spec first. |\n| **Neither** | Keep #29365's rule as shipped: only visibly read inputs are checked. | Nobody. | None. |\n\n**Why A + C:** A extends the shipped rule to every input an author declares. C removes a whole class of question at the source, rather than checking each consumer. Both are rules a reader can state in one sentence.\n\n**Protocol:** A adds a key (`Clause-②: yes (widening)`, `Metadata-protocol: added`, spec lane). C narrows an accept set (`Clause-②: no (narrowing)`, BREAKING, ADR-0087 marker).\n\nState: `needs-user-decision`. The seat dispatches the ruled letter privately under ruling C. Public PRs state the rule only.\n"
+  "body": "domain:server#5 · os-steve · session_01ADHkmQKwKFCp1m6Pb6Q8c1\n\nRuled: 6663860762 · letter A + C0 (C withdrawn) · 2026-11-05T16:47Z (supersedes 6580257050)\n\nFiling gate: ② a decision only the maintainer can make. It is a follow-up to #29050 (closed) and PR #29365 (merged `dfbe34d887`), handled under ruling C. This card states rules only. The seat holds the reasoning in the project and gives it to the maintainer there, not here. Filed by `domain:server` seat 5. ⛔ Not a claim. Suggested grade: p2.\n\n## Maintainer quick-read\n\nPR #29365 made every door that starts a flow by name check a start input that the flow definition visibly reads as a record id. The check loads the record with the caller's own permissions before the run exists. It covers only inputs the definition reads that way in plain sight. Two further rules would make the check complete. Each one is a product choice, so the seat does not pick for you.\n\n## Options\n\n| Option | The rule | Who sees it | Work |\n|:--|:--|:--|:--|\n| **A — declared record reference** | A flow start input may declare \"this is the id of a record of object X\". Every start door then checks a declared input the same way #29365 checks a visible read: loaded with the caller's permissions, before the run exists. | Flow authors gain one optional key. Flows that don't use it behave as today. | `domain:spec` key first (1 PR), then `domain:server` doors (1 PR). Precedent: PR #29365, 967 lines in 8 files. |\n| **C — engine-chosen ids on create** | When a non-system caller creates a record, the platform chooses the new record's id. A caller-supplied id is refused with 400 naming `id`. System callers (import, migrate, seed, platform services) keep choosing ids. | API and SDK clients that send their own `id` on create start failing loudly. This is BREAKING (narrowing). Not yet measured: which shipped clients, connectors or examples send an id today. The PR measures that first. | `domain:server` · 1 PR · full dogfood · no landed precedent |\n| **A + C** (seat recommends) | Both. | Both of the above. | 3 PRs, spec first. |\n| **Neither** | Keep #29365's rule as shipped: only visibly read inputs are checked. | Nobody. | None. |\n\n**Why A + C:** A extends the shipped rule to every input an author declares. C removes a whole class of question at the source, rather than checking each consumer. Both are rules a reader can state in one sentence.\n\n**Protocol:** A adds a key (`Clause-②: yes (widening)`, `Metadata-protocol: added`, spec lane). C narrows an accept set (`Clause-②: no (narrowing)`, BREAKING, ADR-0087 marker).\n\nState: `needs-user-decision`. The seat dispatches the ruled letter privately under ruling C. Public PRs state the rule only.\n\n"
 }

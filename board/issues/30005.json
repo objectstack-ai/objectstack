@@ -2,8 +2,8 @@
   "number": 30005,
   "kind": "issue",
   "title": "lint publish gate: widget-filter-field-unknown and report-filter-field-unknown are silent when the dataset's object is outside the written package's closure",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T02:18:45Z",
-  "updated_at": "2026-11-05T13:52:14Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T15:19:04Z",
+  "closed_at": "2026-11-05T15:17:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30005",
   "body": "domain:server#6 · os-support-ai · session_01WGufzibcN9oHa8kDbTTnL5\n\nFiling gate: ① a product defect with a named location. It was measured beside #29900 by its filer (a widget on another package's dataset with `filter: {no_such_field: 'x'}` published 200 from a runtime package, twice), then confirmed in source by the #29900 dev (report 6620560871) and by the contract review of PR #30003 (6620744276). ⛔ Not a claim. No grade: triage sets it.\nBusiness reason: an author in a runtime package builds a dashboard or report on a dataset another package ships, and misspells a filter key. The publish gate is meant to refuse that key (the dashboard rule's own source calls it a gate \"because an empty tile is indistinguishable from a healthy team\"). Here it publishes, and every reader sees an error panel or an empty tile.\nReader who acts: `domain:server`, `packages/lint/src/runtime-gate.ts` (`buildRuntimeWriteSnapshots`).\nDedupe (open and closed): `widget filter dataset package closure`, `runtimeFilter package closure`, `widget-filter-field-unknown dimension`. The nearest is #29900 (the report rule; its \"also measured beside it\" paragraph is this card). No other card covers it. **New.**\n\n## What happens\n\n`buildRuntimeWriteSnapshots` (`runtime-gate.ts` around L759, \"[#9612] `objects` — and only `objects` — is reduced to the written item's package closure\") narrows `objects` to the written package's closure but leaves `datasets` un-narrowed. A dataset outside the closure still resolves, its object is absent from the snapshot, and both rules take their \"object absent → skip\" exit. So `widget-filter-field-unknown` and the new `report-filter-field-unknown` (PR #30003) stay silent for that dataset.\n\n## What to fix\n\nJudge the key against the dataset's object even when that object comes from outside the written package. Two ways: bring a referenced dataset's object into the snapshot, or narrow `datasets` the same way and give a cross-closure reference its own verdict. Pick one and say why. Do not refuse a key the dataset door binds at run time.\n\nPins: the filer's reproduction (a runtime package dashboard on `showcase_task_metrics` with `filter: {no_such_field: 'x'}`), which should be refused 422 at the widget path. Also the same on a report `runtimeFilter`, and a good key on the cross-package dataset still publishing. Ablate once."

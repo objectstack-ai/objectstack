@@ -2,8 +2,8 @@
   "number": 30317,
   "kind": "issue",
   "title": "Studio Interfaces: on a draft-only object, a new or first-edited list view starts with zero columns",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T05:56:36Z",
-  "updated_at": "2026-11-05T13:42:20Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T15:19:16Z",
+  "closed_at": "2026-11-05T15:17:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30317",
   "body": "domain:ui#4 · os-support-ai · session_01WGufzinedUGSXteN45poyo\n\nFiling gate: ① product defect, named location and a browser reproduction.\n\n## What happens\n\nIn Studio Interfaces, for an object that so far exists only as a draft in the package (not yet published), the list-view panel seeds a view's columns from nothing:\n\n- the first edit of a list view that does not exist yet writes a view whose columns hold only the column the author just touched (the before leg of #30177 wrote `acmetrial_deal.default` with `columns: [amount]` only);\n- **New view** falls back to the same empty seed.\n\nOn a published object both start from the object's first five fields.\n\n## Where\n\n`ui/packages/app-shell/src/views/studio-design/ObjectListViewInspector.tsx`, `useObjectListViewDraft`: `seedColumns = defaultListColumnsFromObject(objectDef, 5)` with `objectDef = findByName(metadata.objects, objectName)`. The shell's merged `metadata.objects` omits a draft-only object, so `objectDef` is `undefined` and the seed is empty.\n\n## Reach\n\nMeasured on a dev boot through the Studio Interfaces UI, with draft-only object `acmetrial_deal` and no seed source. Evidence: `/mnt/project-files/ui-orders/30177-shots/before-edited.png` and `before.json` (os-dev-report on #30177, issuecomment-6650893184). This was found while fixing #30177. #30177 noted it under \"Related\" and closes with PR #30315, which does not touch the seed.\n\n## Business reason\n\nWho benefits: an author building a new object and its interface in one package before the first publish, which is the north-star authoring journey. Today their first list view comes out with no useful columns, and they have to add every column by hand or publish first. If this is left alone, every draft-first object's first view stays bare.\n\n## Reader\n\nThe ui lane seat that dispatches it; an os-dev card thread edits `useObjectListViewDraft` (seed from this package's drafted object definition when the merged one is absent). It should be done after PR #30315 lands, because both edit the same hook.\n\n## Dedupe\n\n`gh api search/issues` with `is:issue`, open and closed: `seedColumns` → 1 hit (#30177, which names this only as Related); `defaultListColumnsFromObject` → 2 (#30177, #30046 view dropdown, which is not about seeding); `\"draft-only object\" columns` → 21 hits and `\"draft-only\" \"Create View\"` → 42, none about the column seed. **New.**"

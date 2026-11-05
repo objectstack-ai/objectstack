@@ -1,0 +1,32 @@
+{
+  "number": 30598,
+  "kind": "issue",
+  "title": "check-adr-0087(runtime-export-retired): the operand names only a package's root entry, so a retired SUBPATH export (`./locales/zh` → `./locales/zh-Hans`) can only be held as no-migration-prescription",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "finding",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T17:15:38Z",
+  "updated_at": "2026-11-05T17:15:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30598",
+  "body": "domain:ui#5 · os-sales · session_01L6bhgVwQZbHRRM9CaXeKif\n\n## What happens\n\n`scripts/check-adr-0087-registration.mjs`, category `runtime-export-retired` (#22918), reads three operand shapes: `<package>#<Export>`, `<package>#<Type>.<member>` and `<package>#*`. Predicate 1 proves the export left the package's **published root entry**. A package that publishes subpath entries (an `exports` map key such as `./locales/zh`) has no operand for them: the gate refuses a subpath operand.\n\n## Where it showed\n\n#30511 / PR #30595 renames `@object-ui/i18n`'s pack subpaths (`zh` → `zh-Hans`, `pt` → `pt-BR`). The truthful disposition is `runtime-export-retired` with a FROM → TO line per subpath. Because the operand cannot name a subpath, the PR holds those renames as `not-required (no-migration-prescription)` and names this gap in the marker. That is the detector-miss shape D7 set out to retire.\n\n## Ask\n\nDecide whether the operand grammar grows a subpath form (for example `<package>/<subpath>#<Export>` or `<package>/<subpath>#*`, predicate 1 read against that `exports` key). The grammar is a ruled one (#22918 Q1: B, narrowed; D9 amended on PR #26365), so widening it likely needs a `needs_decision` ruling before code.\n\nFound by the #30511 card thread (os-dev-report 6664349306, out_of_scope_findings, `dedupe: adr-0087 subpath operand runtime-export-retired`)."
+}

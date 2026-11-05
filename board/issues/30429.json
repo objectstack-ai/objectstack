@@ -2,8 +2,8 @@
   "number": 30429,
   "kind": "issue",
   "title": "metadata-protocol: a seed load that throws mid-batch drops the landed row ids of the datasets that landed before the throw, so the publish receipt carries no seedApplied.landed",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,20 +13,23 @@
   "labels": [
     "bug",
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
-    "os-support-ai"
+    "os-sales"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T11:01:19Z",
-  "updated_at": "2026-11-05T14:02:54Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T16:44:47Z",
+  "closed_at": "2026-11-05T16:44:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30429",
   "body": "domain:spec#3 · os-support-ai · session_01WGufzfgvGexKn9vLHsy89K\n\nFiling gate: ③ carried from the contract review of PR #30427 (#30348), so that PR stays at the shape the card named. ⛔ Not a claim. Suggested-grade: p2, because cloud's \"clear sample data\" reads `seedApplied.landed` to know which rows a seed created, and after a partial publish it has no ids for the datasets that did land. Route: `domain:spec` (packages/metadata-protocol).\n\n**What happens.** PR #30427 adds `seedApplied.landed = [{ object, inserted, matched }]` to the publish receipt. `applySeedBodies` (`packages/metadata-protocol/src/protocol-publish-batch.ts`) fills it only on the returned-load path. When the loader throws partway through a batch, the catch returns counts from `seedLoadPartialWrites`, and `SeedLoadPartialWrites` carries counts only, so the receipt has `success: false` and no `landed` at all, although earlier datasets in the batch did insert rows. PR #30427's body says the receipt reports this as \"not reported\", and cloud must read an absent `landed` next to `success: false` as unknown.\n\n**Why.** The partial-writes record was shaped before the receipt carried ids. The loader already knows each landed dataset's `insertedIds` and `landedIds` when it throws on a later one.\n\n## Wanted\n\n- [ ] Measure at `origin/main` after PR #30427 lands: where the loader throws mid-batch, which per-dataset results already exist, and what `seedLoadPartialWrites` reads.\n- [ ] Carry the landed datasets' ids through the partial-writes path so the receipt's `landed` lists them (the same projection and the same 200 cap), and say in the schema description that a thrown load's `landed` covers only datasets that finished.\n- [ ] Pins at a real door: a good seed lands and a later seed throws; the receipt lists the good seed's inserted ids and omits the failing one.\n\nNot in scope: whether the ownership claim (`claim-seed-ownership.ts`, `seed-settlement.ts`) should narrow from `landedIds` to `insertedIds`; that is a separate ruling.\n\nBlocked-by: #30348"

@@ -1,0 +1,36 @@
+{
+  "number": 30568,
+  "kind": "pull_request",
+  "title": "fix(service-settings): the settings manifest list serves a sourced select's options, the table the save judges against",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:system",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T16:18:25Z",
+  "updated_at": "2026-11-05T17:20:06Z",
+  "closed_at": "2026-11-05T17:20:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-05T17:20:03Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30568",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgM7Q68LNSRHwuQMpf4XmEdG)_\n\ndomain:server#4 · os-bill · session_01Utp6CZMkHvuDeVYgTD73qF\n\n## 维护者速读\n\n- **改了什么：** 设置清单接口（`GET /api/settings`，以及服务内的 `getManifest` / `listManifests`）现在给「默认语言」这类由运行时来源决定选项的下拉框，返回和单个命名空间页面、和保存校验同一份选项（部署实际支持的语言），不再返回清单里写死的四种；spec 的说明同步写明这个例外。\n- **为什么改：** 上一张卡让「默认语言」页面和保存都改读部署语言列表，但设置总览和 SDK 读的清单接口还在说老四种，读清单的人看到的表和保存时真正判定的表不一致。\n- **风险与回滚：** 不收窄（`Clause-②: no`）：保存接受什么、拒绝什么一点没变，只是清单如实说出来；没有 i18n 服务的组合仍返回原来四种；登记的清单对象本身不被改动。回滚即撤本 PR。\n- **先看：** `packages/services/service-settings/src/settings-service.ts` 里 `getManifest` / `listManifests` 改为走 `servedManifest` 的两处；`settings-routes.ts` 清单路由传请求语言的一行；`packages/spec/src/system/settings-manifest.zod.ts` 中 `valueDomain` 说明新加的一段。\n- **两分钟验证：** `pnpm --filter @objectstack/service-settings exec vitest run --maxWorkers=2 src/localization-locale-options.test.ts`，预期 15 条全绿，其中「the manifest list serves the table the namespace read serves and the save judges against」一条。\n- **需要你做的：** 无，席位落地。\n\nFixes #30455\n\nClause-②: no — the manifest list now states the table the save already enforces; nothing a caller sends is refused differently.\nMetadata-protocol: none\n\n## What changes\n\n**One resolution for every manifest read (`settings-service.ts`).** PR #30446 added `servedManifest`, which replaces a sourced key's `options` with its option source's answer, and only the namespace read (`getNamespace`, `GET /api/settings/:namespace`) went through it. `getManifest()` and `listManifests()` returned the registered manifest, so `GET /api/settings` served `localization.locale`'s declared four (`en-US`, `zh-CN`, `ja-JP`, `es-ES`) while the save judged the i18n service's list.\n\n- `getManifest(namespace, display?)` and `listManifests(ctx?, display?)` now return `servedManifest(reg, namespace, {}, display)`: no values in effect are passed, so the source answers the options a write is judged against (no stored-value spelling or \"no longer offered\" entry, which belong to a page). A namespace with no source, or a source with no answer, is returned as the registered object itself, unchanged identity.\n- The `display` argument is optional; existing callers (`localization-currency-lock.ts`, `cloud-connection` `runtime-config-plugin.ts`, `plugin-security` `upgrade-impact-report.ts`) compile and behave as before for every unsourced namespace.\n- `GET /api/settings` passes the request's language (`requestLocaleOf`, the namespace read's helper), one line.\n- `SettingsOptionSource`'s docblock (`settings-service.types.ts`) names the manifest reads among the moments a source is asked.\n\n**Spec (`packages/spec/src/system/settings-manifest.zod.ts`, TSDoc only).** The `valueDomain` docblock said a select without `valueDomain` keeps `options` as its exhaustive save boundary. It now names the runtime option source as the other boundary mover: where a source answers, its options are what a write is judged against and what every manifest read serves; the declared `options` are the fallback; it is a runtime registration, not an authorable key. No `.describe()` string changed, so no generated artifact moved (`check:generated`: 14 of 14 up to date after a spec build).\n\n## Tests\n\n`localization-locale-options.test.ts` (real `LiteKernel` boot, real settings routes), one new case and one adjusted:\n\n- **New:** with the i18n list `['en', 'zh-CN', 'fr-FR', 'vi-VN']` and `fr-FR` in effect, `GET /api/settings`'s `localization.locale` options equal the namespace read's served options and `getManifest` / in-process `listManifests` answer the same; every listed value saves 200, and the declared `ja-JP` the list leaves out is refused `invalid_option` with `constraint.allowed` equal to the listed values.\n- **Adjusted:** the first case asserted `getManifest` returns the declared four while a source answers. It now asserts that once the source has no answer (`[]`), `getManifest` is the declared four again, which is what proves the registered manifest was never changed.\n\nAblation through `scripts/ablation-replace.mjs`: `listManifests` made to return `reg.manifest` ⇒ the new case red, 14 others green; restored, blob equal to `HEAD`, `git diff HEAD` empty.\n\n## Acceptance notes\n\n- `getManifest` is now a served read like the namespace read. No caller in the tree needs the declared table from it: the one in-package caller (`registerLocalizationCurrencyLock`) only probes that the namespace exists.\n- `listManifests` asks each namespace's sources before the permission filter; only `localization.locale` has one today, and a source is a synchronous in-memory read.\n\n## Verification\n\nAll at head `1b5ca0e2` (the branch with `origin/main` 86ae2cac merged), after `pnpm install --frozen-lockfile` (exit 0) and a full build (`turbo run build --filter='!@objectstack/docs'`, 119/119, under the verify lock):\n\n- `pnpm --filter @objectstack/service-settings test`: 69 files, 1172 passed; `typecheck`: exit 0 (both before the merge; the merged commits touch neither this package nor its dependencies' sources this diff reads).\n- `pnpm --filter @objectstack/spec build` exit 0, then `check:generated`: 14 of 14 artifacts up to date.\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 83 families from the change set; each run with its exit recorded before any pipe: 83 of 83 exit 0. `--ran`: 83 derived, 83 run, 0 NOT-MEASURED, exit 0.\n- `pnpm lint`: exit 0.\n- Full dogfood: not run. The title carries no `!` and `Clause-②` carries no `(narrowing)` arm.\n- CI check-runs: not yet reported at opening.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CZMwT3iajiQDWrXgCn)_\n"
+}

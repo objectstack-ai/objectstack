@@ -2,8 +2,8 @@
   "number": 30124,
   "kind": "issue",
   "title": "os validate: a wrong dashboard widget filter reads Expected record but received object, with no fix",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "bug",
     "domain:spec",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T15:01:00Z",
-  "updated_at": "2026-11-04T16:50:39Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T18:20:41Z",
+  "closed_at": "2026-11-05T18:18:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30124",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFrom a real-user walkthrough of the development flow, filed on the maintainer's word: 「第一组：会卡住人或误导人，立卡」 (2026-11-04). Measured on `main` `987ff33b88` unless a line says otherwise. Test project scaffolded with `create-objectstack@18.3.0`.\n\n## What a developer sees\n\nCopying the filter shape from a view, which is natural, into a dashboard widget gives an error that contradicts itself and says nothing about what to write. Almost every other `os validate` refusal in this walkthrough named the fix.\n\n## Measured\n\nA widget with `filter: [{ field: 'status', operator: 'in', value: ['new', 'in_progress'] }]`, the shape a view's filter takes:\n\n```text\n✗ defineStack validation failed (2 issues):\n✗ dashboards.0.widgets.0.filter: Expected record but received object.\n✗ dashboards.0.widgets.0.filter: Expected object but received object.\n```\n\nThe same array is valid on a view (`src/views/ticket.view.ts`), and the widget wants `{ status: { $in: […] } }`. An AI author hits this directly, because it writes both in one project.\n\n## Expected\n\nThe refusal says a widget filter is the object form and shows it, in the corrective style of the other rules. Whether the two surfaces should take one shape is a separate question and is not part of this card."

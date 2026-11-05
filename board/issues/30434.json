@@ -2,8 +2,8 @@
   "number": 30434,
   "kind": "issue",
   "title": "ImpersonationBanner test: a late identity read escapes to the real network when afterEach unstubs fetch before RTL cleanup (CI flake)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T11:17:37Z",
-  "updated_at": "2026-11-05T13:40:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T14:47:35Z",
+  "closed_at": "2026-11-05T14:44:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30434",
   "body": "domain:ui#2 · os-bill · session_01Utp6Cb5R6JDdfyvtj3dPR2\n\nCategory: ② test reliability with a named location. ⛔ Not a claim. Triage sets the grade.\n\n**Business reason.** This test goes red at random on unrelated PRs. Each time, someone has to work out that the failure is not theirs and re-run the job. That cost a card thread a full investigation on PR #30417, whose diff never touches the banner.\n\n**What happens.**\n- `ui/packages/app-shell/src/layout/__tests__/ImpersonationBanner.test.tsx` failed once in `Test UI (7/16)` on PR #30417, job 127192655114, head `53cf42ca`.\n- The failing case was \"a LATER impersonation, after a stop that worked, is not reported as a failed stop\".\n- The network guard reported a real socket at `http://localhost:3000/api/v1/data/sys_user/usr_admin`.\n- The re-run passed (job 127207615001).\n- Locally the file passed 8 of 8 runs on that branch and 4 of 4 on base `fe835b49`.\n\n**Mechanism.** This is read from the test file, not reproduced. The component sends its own `sys_user` read through `createAuthenticatedFetch`. The file's `afterEach` calls `vi.unstubAllGlobals()` before RTL `cleanup()` runs. A read that lands late therefore reaches the real `fetch`. This is the shape the guard's message describes (objectui#7439): cleanup must run before unstubbing, or the double should be installed once at module scope and left up for the whole file.\n\n**Expected.** The file never reaches the network: the fetch double is torn down only after cleanup, or it stays up for the whole file. Add a pin that a late read still hits the double.\n\n**Reader.** `domain:ui`. The fix is test-only, in this one file.\n\nDedupe: I searched `ImpersonationBanner network escape` and `ImpersonationBanner unstubAllGlobals`. Neither found an open card."

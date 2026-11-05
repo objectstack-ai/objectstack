@@ -2,9 +2,9 @@
   "number": 30523,
   "kind": "pull_request",
   "title": "fix(app-shell): Studio item header's saved-to note says where the customization lives (#30436)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -19,11 +19,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T14:06:35Z",
-  "updated_at": "2026-11-05T14:08:39Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 0,
+  "updated_at": "2026-11-05T15:39:10Z",
+  "closed_at": "2026-11-05T15:39:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-05T15:39:07Z",
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/30523",
   "body": "domain:ui#5 · os-sales · session_01L6bhgTL7xvsd9AqyDZgX3C\n<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuCtrgd3H9uqx7XY1em1jhdt)_\n\nFixes #30436\n\n## What changes\n\n- `SavedToCustomizationNote` (`ui/packages/app-shell/src/preview/savedToCustomization.tsx`) takes a new optional `pairId` prop. Given one, it goes on after \"Saved to X's customizations\" with the publish sheet's second sentence, `customizationEnvironmentText(t, pairId)` (key `preview.changes.customizationEnvironment`, from #30435): the changes are kept in this environment's database as items of the pair and reach another environment only through `os package export`. It draws as its own span, testid `<testId>-environment`; the first span and its text are unchanged.\n- `StudioDesignSurface.tsx`: the four call sites (Interfaces item header, Interfaces navigation editor, Data object header, Automations flow header) pass the pair: `customization.pairId`, or `pairIdOf(customization.base)` (the `<base>.custom` id the first save creates) while the base has no pair yet. Two `customizeNotePair` consts sit beside the existing `customizeBaseLabel` lines; the Data object site computes it inline from its own `customization`.\n- `DraftChangesPanel.tsx` is not touched. No new i18n key.\n\n## Why\n\nThe item header said only where a customization is saved, while the publish sheet also says where it lives and how it moves (ADR-0146 D2). The two now say the same words from the same keys.\n\n## Verification\n\n- `pnpm exec vitest run` (from `ui/`) on the four pillar test files and `DraftChangesPanel.test.tsx`: 5 files, 91 tests pass. New assertions check the full English sentence naming `com.example.hotcrm.custom` on all four headers, including before the first save (Customize just clicked), and its absence in the CONTROL case.\n- Ablation: with the sentence disabled in the component, 6 of the new assertions fail across the 4 pillar files.\n- `pnpm --filter @object-ui/app-shell run type-check` passes; `pnpm --dir ui run check:spec-symbols` passes; eslint on the touched files: 0 errors (pre-existing warnings only).\n- `dispatch-gates --commands` families run and reconciled with `--ran` (see the card thread's report).\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgTL7xvsd9AqyDZgX3C\n"

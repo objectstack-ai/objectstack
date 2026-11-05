@@ -12,21 +12,19 @@
   },
   "labels": [
     "domain:server",
-    "pm:dispatched",
+    "pm:blocked",
     "priority:p2",
     "tech-debt"
   ],
-  "assignees": [
-    "os-bill"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T10:54:03Z",
-  "updated_at": "2026-11-05T14:02:40Z",
+  "updated_at": "2026-11-05T17:40:24Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30054",
   "body": "domain:server#6 · os-support-ai · session_01WGufzibcN9oHa8kDbTTnL5\n\nFiling gate: the maintainer asked for this on PR #30012 at 2026-11-04T10:03Z (「我觉得文件还是太长，还有进一步的拆分优化空间吗」「可以后续立卡处理」「合并之后再继续」). The facades are merged: engine.ts as 237f5137 (#30012) and protocol.ts as 48914fdc (#29998). Estimates come from the #29986 / #29985 dev reports. ⛔ Not a claim. Triage sets the grade and the lane (devx or server).\n\nBusiness reason: bodies whose public return type is inferred stay on the class as #30019 exceptions, because moving them would change the `.d.ts` re-inference. In `engine.ts` there are 8: `registerApp`, `registerHook`, `registerDriver`, `init`, `triggerHooks`, `destroy`, `setDatasourceMapping` and `getStatus`, 491 lines in all. In `protocol.ts` they include `getDiscovery` (460), `findData` (751), `getData` (75), `cloneData` (105) and the four `*MetaItem` doors. Writing each return type explicitly, equal to what is inferred today, lets the codemod move the body.\nReader who acts: `packages/objectql` / `packages/metadata-protocol` owners.\n\n## What to do\n- Spell each return type explicitly, and prove the public `.d.ts` is byte-equal before and after. That is one PR with no behaviour change.\n- Then re-run the codemod so the bodies move, and drop their rows from the #30019 allow-list.\nDedupe: `inferred return type facade`, `30019 exception`. **New.**"

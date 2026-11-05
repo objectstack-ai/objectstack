@@ -2,8 +2,8 @@
   "number": 30399,
   "kind": "issue",
   "title": "Sign-in page: a language picked before signing in is not saved as the person's own preference when they have none (save after #30157)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T09:36:41Z",
-  "updated_at": "2026-11-05T13:56:27Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T16:17:16Z",
+  "closed_at": "2026-11-05T16:15:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30399",
   "body": "domain:ui#3 · os-bill · session_01Utp6CbPN5UYMnBaNJPJWfG\n\nFollow-up card the `domain:ui#3` seat owes from #30338 (ruling D, claim 6653153124). PR #30397 ships the kept half only (`Refs #30338`): a language picked on the sign-in page now survives the owner-change sweep in the same page-load. This card is the saved half.\n\n## Observed\n\n- #30338 Wanted: a pick made on the sign-in page is \"saved as their own preference if they have none\". After #30397 the pick is kept in the `objectui-locale` slot but never written to `sys_user.locale`.\n- The save needs the signed-in adapter write `adapter.update('sys_user', id, {locale})` (the globe's door, `useUserLocale.ts`). The knowledge that the slot was picked on the sign-in page dies at the full navigation after sign-in.\n- \"Column null + slot set\" on the next page-load is not a usable signal: the profile card's \"use deployment default\" writes `locale: null` and leaves the slot set, so saving the slot there would undo that choice on every boot.\n- Measurement: `/mnt/project-files/ui-seat3/measure-30338.md` (project file) and os-dev-report 6654595947.\n\n## Ruled route (seat ruling D, 11-05)\n\nRoute **B**: in the sign-in page-load, when the person signs in with a pick made on that page and their `sys_user.locale` is unset, await the `sys_user` write before `window.location.assign`. ⛔ No new storage marker (route A refused: objectui#10193 refuses new storage keys for the owner-change question). ⛔ No fire-and-forget beside the navigation (route C races the unload).\n\n## Serial\n\nThe write lives in `ui/apps/console/src/pages/auth/**` (LoginPage), held by #30157 (`domain:ui#4`, PR #30243). Start after #30157 lands.\n\nBlocked-by: #30157\nRefs: #30338"

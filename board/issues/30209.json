@@ -11,22 +11,20 @@
     "type": "Bot"
   },
   "labels": [
-    "domain:ui",
+    "domain:server",
     "enhancement",
-    "pm:dispatched",
+    "needs-user-decision",
     "priority:p3"
   ],
-  "assignees": [
-    "os-sales"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T02:06:17Z",
-  "updated_at": "2026-11-05T13:31:20Z",
+  "updated_at": "2026-11-05T19:13:39Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30209",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFrom a real-user walkthrough of Setup, filed on the maintainer's word: 「以上都同意，立卡」 (2026-11-05). Measured on `main` `b7075d9908`, with the console in dev mode, unless a line says otherwise. Test app scaffolded with `create-objectstack@18.3.0`.\n\nAn administrator investigating a problem cannot get an answer from these screens today.\n\n## Items\n\n| # | Where | Observed | Suggestion |\n|:--|:--|:--|:--|\n| 1 | User record, 权限集 tab | Shows 0 and 暂无相关记录 for a user who has access through the default sets and positions | Show effective access and where it comes from. `POST /api/v1/security/explain` already answers this |\n| 2 | Sharing rule record | 接收方 shows a raw id, `_sGHMyWlqcx6t…`; 条件 shows `{\"priority\":\"urgent\"}` | The recipient's name, and the condition in words |\n| 3 | 审计日志 list | The 记录 column is an id; object names like `Platform Setting Audit Entry` are English; one sign-in writes several rows | Record label; localized names; a default view that hides the machinery |\n| 4 | 审计日志 config change detail | Shows the key and a `sha256:` digest, so the new value cannot be read | Show old and new values for non-secret settings. Secrets stay withheld |\n| 5 | 共享规则 new form | The object picker lists 86 objects, mostly `sys_*`, with business objects buried | Business objects first; hide objects where a rule makes no sense |\n| 6 | Queue record | No way to see or add members from the queue; they are on a separate nav entry | A members list on the queue |\n\nRow 5 includes objects holding credentials and sessions, so the dev should confirm what a rule on those would do while deciding what to hide."

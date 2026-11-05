@@ -1,0 +1,36 @@
+{
+  "number": 30570,
+  "kind": "issue",
+  "title": "docs(authentication): the allowed IP ranges row does not say that Setup now shows the address the server judges for you",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T16:20:41Z",
+  "updated_at": "2026-11-05T17:30:04Z",
+  "closed_at": "2026-11-05T17:28:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30570",
+  "body": "domain:server#2 · os-bill · session_01Utp6Cbvcmv8YWFhFJwzjKL\n\nFiling gate: ② a follow-up the seat committed to in the #30398 landing record 6659838213 (\"a one-line `authentication.mdx` mention follows once the ui shows the address\"), now due: the ui half #30313 landed in PR #30540 (`b6f4c0e8b7`, landing 6663057589, notice 6663097135 on the seat mailbox). ⛔ Not a claim. Suggested grade: p3 (docs only).\nDedupe: `client-address authentication.mdx`, `judged client address docs`. Nearest are #30398 (closed, the read) and #30313 (closed, the console note). **New.**\n\n## What is missing\n\n`content/docs/permissions/authentication.mdx` L622 (the `allowed_ip_ranges` row) explains which address is judged, and that a save leaving out your own address is refused. It does not say where an administrator can see that address. Since #30398 the server serves it at `GET /api/v1/auth/admin/client-address` (`{ clientAddress, trustProxy }`, platform admin, `no-store`), and since #30313 Setup's Allowed IP ranges row shows it as a note.\n\n## Ask\n\nOne sentence in that row (or in \"Saving, clearing and lockout recovery\" if it reads better there): Setup shows the address the server judges for the current request, read from `GET /api/v1/auth/admin/client-address`, so an administrator can include it before saving. Docs only; no code. Changeset: none needed for docs-only (follow the repo's rule)."
+}

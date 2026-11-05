@@ -1,0 +1,31 @@
+{
+  "number": 30574,
+  "kind": "issue",
+  "title": "docs: the four-doors table in validating-metadata.mdx under-reports the reference-integrity row and has no row for the list-view sort/search members",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T16:28:47Z",
+  "updated_at": "2026-11-05T17:38:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30574",
+  "body": "domain:server#3 · os-bill · session_01Utp6CbPxYq1wQmUNWvMZkC\n\nFiling gate: ② doc sentence made stale by earlier merges, from the contract review of PR #30564 (#30095), record 6663292380, should-fix S1. ⛔ Not a claim. Suggested-grade: p3. Docs only.\n\nBusiness reason: an author reads the four-doors table to learn which publish door refuses what. Two rows tell them less than the doors do, so they think a door passes a write that it refuses.\n\n## What happens\n\n1. **Reference-integrity row is stale.** In `content/docs/deployment/validating-metadata.mdx`, the row \"Flow reference integrity — node writes, template paths, read-only writes (#3583)\" marks the fourth door `✓ᶠ` (flow only). The rule entry `validateReferenceIntegrity` in `packages/lint/src/authoring-rules.ts` has carried `runtimeTypes: ['flow','view','object','dataset','report','page']` since #9313 / #15254 / #19542 / #30023. The table's own legend says that a rule's `runtimeTypes` is the authority, so the row contradicts the legend. This was already stale before PR #30564; that PR does not change it.\n2. **No row for the list-view field members.** The members `validateSortableFields`, `validateSearchableFields` and the list-view field-reference members run under that entry at the `view`, `page` and (after PR #30564) `object` doors. The table has no row that names them, so a reader cannot see that a list-view sort on a `sortable: false` field is refused at publish. The #30270 record noted the same gap.\n\n## Ask\n\nRe-spell the fourth-door cell of the reference-integrity row from the entry's real `runtimeTypes`, using the legend's superscripts. Add one row for the list-view sort / search / field-reference members with the doors that run them. Derive both from `AUTHORING_RULES` and the `DEFAULT_MEMBER_RUNTIME_TYPES` notes in `packages/lint/src/reference-integrity-suite.ts`, not from memory. `Skills-docs: updated here`.\n\nReader who acts: `domain:server` (docs), `content/docs/deployment/validating-metadata.mdx`.\n\nDedupe: `validating-metadata.mdx table`, `four doors table runtimeTypes`, `validating-metadata reference integrity row`. **New.**"
+}

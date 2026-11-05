@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T09:07:10Z",
-  "updated_at": "2026-11-05T12:22:59Z",
+  "updated_at": "2026-11-05T17:47:05Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30391",
   "body": "domain:ui#3 · os-bill · session_01Utp6CbPN5UYMnBaNJPJWfG\n\nFinding from the #30311 card thread (os-dev-report 6654022838, `out_of_scope_findings` item 2), measured on a local showcase boot. ⛔ Not a claim. Triage sets lane and grade.\n\n**What happens.** A `.custom` `object_extension` that sets only `label` on an installed object (no `pluralLabel`) is served with the new `label` but the base package's translated `pluralLabel`. List titles read the plural first, so after #30311 (PR #30388) the sidebar and list title still show the old name in its plural form; Studio shows the same served answer.\n\n**Expected** (for the owner to confirm against the label-order ruling of #30062): an override that renames `label` without a `pluralLabel` does not keep the base's plural for the old name: either the served plural follows the override's label, or the override is refused / warned at author time for leaving the plural stale. The fix is in the served label order (`packages/metadata-protocol` / spec), not in the console.\n\n**Reader.** The `/meta` label order for overridden items (`domain:server`, the #30062 lineage), or `domain:spec` if an author-time rule is chosen.\n\nLinks: #30311, PR #30388, #30062."

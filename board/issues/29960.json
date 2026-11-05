@@ -13,18 +13,20 @@
   "labels": [
     "documentation",
     "domain:spec",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T17:51:03Z",
-  "updated_at": "2026-11-03T17:59:38Z",
+  "updated_at": "2026-11-05T19:56:22Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29960",
   "body": "domain:spec#3 · os-support-ai · session_01WGufzfgvGexKn9vLHsy89K\n\nFiling gate: ① a defect at named locations. The contract review of PR #29952 (#29817, the ADR-0012 amendment), records 6610988758 and 6611334981, found it and escalated it. ⛔ Not a claim. Suggested-grade: p3 (comment text only, nothing an author writes changes).\n\nBlocked-by: #29952\n\n**Business reason.** Once PR #29952 lands, ADR-0012 §6 says the hosted relay fronts the domestic Android vendors (HMS/Honor, Xiaomi, OPPO, vivo), and that `vendor` on a device row is a token type the relay routes on, not a plugin boundary. The spec docblocks that cite §6 would then send a reader to the ADR for the opposite reading. A future card that widens `PushVendorSchema` would be told, by the schema's own comment, that the vendors belong in channel plugins. Reader: the `domain:spec` seat (`packages/spec/src/system/`).\n\n## What the code says (at `origin/main` `6a4737ab`)\n\n- `packages/spec/src/system/push-config.zod.ts` ≈:76: \"Out of scope here: the other vendors ADR-0012 §6 routes to alternate channel plugins (HMS, Xiaomi, OPPO, vivo).\"\n- the same file ≈:83, the `PushVendorSchema` docblock: \"ADR-0012 §6 plugs the domestic Android vendors in as alternate channel implementations, not as transports of this channel\".\n- `packages/spec/src/system/push-device.zod.ts` ≈:12 \"(ADR-0012 §6, narrowed to what core ships)\" and ≈:49 \"Narrowed from ADR-0012 §6: … the domestic Android vendors plug in as alternate channel implementations\".\n- `packages/spec/src/api/register-device-request.test.ts` ≈:8: \"alternate channel plugins (ADR-0012 §6)\".\n\n## Wanted\n\n- Rewrite those comments to the amended §6 / §6.1 reading. Core ships `apns | fcm`. The relay fronts the domestic vendors in phase 2, and `vendor` is the token type it routes on. Widening `PushVendorSchema` remains a spec change made together with the relay's vendor support.\n- Comment text only: no schema, `.describe()`, export or default moves. Measure whether any generated reference page carries these docblocks; if one does, regenerate it.\n- `Clause-②: no`, `Metadata-protocol: none`, and a changeset only if the gate asks for one.\n\nSerial: after PR #29952 merges (Tier H; the maintainer merges it), so the comments never cite a §6 that main does not have. Seat 2's #29820 also edits push-config.zod.ts (the transport-selection docblock and markers). Expect a trivial merge at most.\n\nDedupe: searched `PushVendorSchema`, `push vendor relay`, `alternate channel`. Found #29817 (the ADR, which carries no code), #29820 (scope: token, key, reader), and #29920 (the relay sender). **New.**"

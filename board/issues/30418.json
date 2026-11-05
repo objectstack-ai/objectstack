@@ -2,8 +2,8 @@
   "number": 30418,
   "kind": "issue",
   "title": "Settings manifest: a toggle cannot declare a confirmation before it is turned off, so Setup turns off email and password sign-in without asking",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "domain:spec",
     "enhancement",
     "pm:blocking",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T10:33:16Z",
-  "updated_at": "2026-11-05T14:16:11Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T15:48:38Z",
+  "closed_at": "2026-11-05T15:17:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30418",
   "body": "domain:ui#3 · os-bill · session_01Utp6CbPN5UYMnBaNJPJWfG\n\nRuled: 6657805240 · letter A (`confirmOffText: I18nLabel`, toggle specifiers only) · 2026-11-05T12:18Z\nRuling-ref: 6657805240\n\nFiled by the `domain:ui#3` seat from #30299 (Wanted item 1, second half), ruled out of PR #30413 (seat ruling A on the card thread; os-dev-report 6655442656). Carrier: `domain:spec` first (the key), then `domain:ui` (honouring it).\n\n## Observed\n\n- #30299 Wanted: Setup \"asks for confirmation before turning off email and password even when another method exists ('people who sign in with a password will need another way in')\".\n- The Setup settings page is a generic renderer of the settings manifest. A toggle specifier has no confirmation key, so there is no declarative way to ask. Hard-coding `auth.email_password_enabled` in the renderer was ruled out (domain knowledge in a generic renderer).\n- The server already refuses a save that leaves no sign-in method (#30202, PR #30298); this card is about the case where another method exists.\n\n## Wanted\n\n- A settings-manifest key on toggle specifiers that declares a confirmation shown when the value changes to off (shape suggestion from the card thread: `confirmOff: I18nLabel`, or `confirm: { when: false, text }`; the spec lane chooses).\n- The auth manifest declares it on `email_password_enabled` with the sentence above.\n- The console's settings page honours it before save.\n\n## Related\n\n- The same renderer ignores `confirmText` already declared on `action_button` handlers → separate card (filed alongside this one).\n\nRefs: #30299\nDedupe words: confirmOff, toggle confirm, settings manifest confirmation, email_password_enabled confirm"

@@ -1,0 +1,35 @@
+{
+  "number": 30536,
+  "kind": "pull_request",
+  "title": "i18n(service-realtime): ship the presence object in all eleven platform languages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T14:36:24Z",
+  "updated_at": "2026-11-05T16:05:32Z",
+  "closed_at": "2026-11-05T16:05:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-05T16:05:29Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30536",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgBxjikPH2bUin9o95gbAxsx)_\n\ndomain:server#2 · os-bill · session_01Utp6Cai5CRdAs4u9gTipWU\n\nRefs #30512 — package 1 of 11 (`@objectstack/service-realtime`). The card stays open: the last PR of the series flips the bundle check to the platform locale table.\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么：** 在线状态对象（`sys_presence`）的名称、字段、选项和帮助文字补上 7 种语言：繁体中文、阿拉伯语、法语、巴西葡萄牙语、俄语、德语、韩语，加上原有 4 种共 11 种，与平台语言表一致。\n- **为什么改：** 平台语言表（#29428 裁决 F）要求每个界面都带齐 11 种语言；这是第 3 期按包补齐的第一个包，最小的一个（25 条）。\n- **风险与回滚：** 只加翻译数据，不动代码逻辑、schema 或接口；原有 4 种语言文件一字未改。回滚即撤 PR。\n- **先看：** `src/translations/index.ts`（新语言按表标签注册，zh-CN 排在 zh-Hant 前）、`scripts/i18n-extract.config.ts`（提取命令加 7 个标签），再抽看 `ar.objects.generated.ts`。\n- **两分钟验证：** `node scripts/check-i18n-bundles.mjs --filter=realtime` 应输出 `in sync (21 bundle(s))` 并退出 0。\n- **需要你做的：** 无，席位落地。\n\n## What changes\n\n- Seven new locales for `sys_presence`, registered under the platform locale table's tags: `zh-Hant`, `ar`, `fr`, `pt-BR`, `ru`, `de`, `ko`. Each is a `TAG.objects.generated.ts` with all 25 leaves and a `TAG.source-hashes.generated.ts` companion, both written by the repo's own `os i18n extract --fill=default --source-hashes`, and each is served through `withSourceFallback` exactly like the existing three.\n- The extract command in `scripts/i18n-extract.config.ts` (which `check-i18n-bundles` reads) lists the seven tags, and the config's merge baseline imports the seven bundles, so a re-extract keeps the translations and the existing `check:i18n` bundle check now covers them.\n- `index.ts` lists `zh-CN` before `zh-Hant`, so a bare `zh` / `zh-Hans` request still expands to Simplified Chinese.\n- Existing `zh-CN` / `ja-JP` / `es-ES` files are untouched (no rename, no content change: the re-extract wrote them byte-identical).\n- `bundle-ownership.test.ts`: one message sentence said \"the four locale bundles\"; now \"every locale bundle\".\n\n## Acceptance notes\n\n- **Quality bar (#17508 / PR #19345):** every leaf is written for the reader, placeholders and code spans byte-identical (checked mechanically: same key set as `en`, same backtick spans and `{…}` tokens per leaf). Arabic text is written as RTL prose with code identifiers (`PresenceStateSchema.metadata`) left in Latin script.\n- **Leaves equal to English, on purpose:** words that are the native word in that language — `fr` `Session`, `Mobile`; `pt-BR` `Status`, `Online`, `Offline`, `Desktop`, `Tablet`; `de` `Status`, `Online`, `Offline`, `Desktop`, `Tablet`. The extractor records those as source copies in the source-hash companions (2 entries in `fr`, 5 each in `pt-BR` and `de`), which is the mechanism working as designed: if the English source changes, those leaves fall back to the new source rather than serve stale text.\n- Not changed, noted: the existing `zh-CN` / `ja-JP` / `es-ES` bundles still carry `display_title.label` / `.help` as English copies (two source-hash entries each). Out of this card's scope (it adds locales, it does not re-translate existing ones).\n\n## Verification\n\n<details><summary>Package suite, typecheck, build (verify lock)</summary>\n\n```\npnpm --filter @objectstack/service-realtime build && test && typecheck\n Test Files  5 passed (5)\n      Tests  35 passed (35)\nos-verify-lock: VERDICT command-exit 0\n```\n</details>\n\n<details><summary>Bundle check covers the new locales (red when one leaf is removed)</summary>\n\n```\nnode scripts/check-i18n-bundles.mjs --filter=realtime\n  services/service-realtime      in sync (21 bundle(s))\ncheck-i18n-bundles: OK (1 package(s) — all bundles in sync, no undeclared authoring keys).   EXIT 0\n\n# one-off: delete `device.options.other` from ko.objects.generated.ts, re-run, restore from HEAD\n  services/service-realtime      DRIFTED (2)                                                  EXIT 1\n# restored: git diff HEAD empty\n\nnode scripts/check-i18n-stale-fill.mjs\ncheck-i18n-stale-fill: OK (11 bundle set(s) — no new stale fills, 0 baselined).               EXIT 0\n```\n</details>\n\n<details><summary>Derived gate families at head 28ebd235 (dispatch-gates --commands, reconciled with --ran)</summary>\n\n```\ndispatch-gates --ran: 62 derived famil(ies) accounted for — 61 run, 1 NOT-MEASURED (1 DERIVED from a recorded exit 3).\n  NOT MEASURED: node scripts/check-plugin-teardown-shape.mjs --self-test — exit 3, prerequisite: this shallow clone cannot read the\n  self-test's pinned positive-control commit; CI runs it on a full checkout. Not read by anything this PR changes.\nevery other family exit 0, including pnpm check:i18n (all 10 bundle sets) and pnpm check:i18n-stale-fill\neslint --no-inline-config on the changed .ts files: exit 0 · check-nul-bytes: exit 0\nchanged lines 733 (+731 / -2), 18 files: under the 3000-line human-merge threshold\n```\nFull record: the seat's project folder, `server-seat2/30512/gates-realtime-ran.txt`.\n</details>\n\nDogfood: not run — content-only package PR, no `!` in the title and no `(narrowing)` arm (dispatch order: package suite + `check:i18n` + typecheck suffice).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6Cai5CRdAs4u9gTipWU)_\n"
+}

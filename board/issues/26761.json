@@ -1,7 +1,7 @@
 {
   "number": 26761,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 3 — 🟢 os-bill · 由 os-bill 账户的项目负责",
+  "title": "[PM seat] domain:server · seat 3 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -19,12 +19,12 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T14:46:52Z",
-  "updated_at": "2026-11-05T00:44:09Z",
+  "updated_at": "2026-11-05T19:49:28Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 15,
+  "comments": 16,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26761",
-  "body": "domain:server#3 · os-bill · session_01Utp6CbPxYq1wQmUNWvMZkC\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 3**. Seat 1 is #6367, seat 2 is #20966, seat 4 is #27737, seat 5 is #28677 and seat 6 is #29908 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-05T00:43Z at seating.</sub>\n\n## Current PM — 🟢 os-bill\n\n- **Holder:** `os-bill` · `session_01Utp6CbPxYq1wQmUNWvMZkC` (the os-bill account's project, thread \"运行 server 车道席位 B 派发\") · seated 2026-11-05T00:38Z (opening mark 6646294079) on the maintainer's summons 「开两个 server 车道」. 由 os-bill 账户的项目负责.\n- **Mailbox:** PR #30187 (`Mailbox-of: domain:server#3 · os-bill`), subscribed by the seated session.\n- **Patrol:** `trig_015PH9AQjktuW8u2ifZYJVTu · 41 * * * *` (hourly, bound to the seated session).\n- **Pointer:** posture, ledger and round reports live in the project. Lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#3` + `head:claude/` PRs.\n- **Previous holder:** `os-warren` · `session_01JQwxbYyp6wSRcywGFK2L4A`, signed off 2026-11-03T14:16Z (brief 6606155810, the previous body revision holds that ledger).\n\n## Ledger\n\n- **In flight:** none at seating.\n- **Split:** seat 2 (#20966) is the same account's project; seat 6 (#29908, `os-support-ai`) takes p1 only. Before every claim this seat re-reads the card for any `Claim:`; the earlier claim stamp wins.\n\n## Hot-file serial queue\n\n- None held by this seat. No `protocol.ts` freeze is active.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- Session effort: project default, not verified `high`.\n"
+  "body": "domain:server#3 · os-bill · session_01Utp6CbPxYq1wQmUNWvMZkC\n\n⚠️ **Seat stub.** The job description is `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 3**. The other seats are seat 1 #6367, seat 2 #20966, seat 4 #27737, seat 5 #28677 and seat 6 #29908 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-05T19:48Z at sign-off.</sub>\n\n## Current PM — ⏳ vacant\n\n- **Previous holder:** `os-bill` · `session_01Utp6CbPxYq1wQmUNWvMZkC`, signed off 2026-11-05T19:48Z (brief 6667628011). The lane went down to one seat on the maintainer's order (2026-11-05T16:41Z), and seat 2 (#20966) holds the lane.\n- **`check-handover`:** exit 0, clear.\n- **In flight:** none. **Stay-behind:** none.\n- **Mailbox:** PR #30187 closed. **Patrol:** deleted.\n\n## Ledger\n\n- The queue snapshot and decision box at sign-off are in brief 6667628011.\n\n## Hot-file serial queue\n\n- None.\n"
 }

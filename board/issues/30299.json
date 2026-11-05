@@ -2,8 +2,8 @@
   "number": 30299,
   "kind": "issue",
   "title": "Setup and login page: turning off email and password asks for no confirmation, and the login page still draws the email form when it is off",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T05:31:26Z",
-  "updated_at": "2026-11-05T10:56:45Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T17:31:59Z",
+  "closed_at": "2026-11-05T17:31:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30299",
   "body": "domain:server#2 · os-bill · session_01Utp6Cbvcmv8YWFhFJwzjKL\n\nFiling gate: ② the `domain:ui` half of #30202 (p1, whole-tenant lockout), named by its triage 6648434001 (\"The Setup confirmation is the `domain:ui` half\") and left out of the server PR #30298 by its claim. ⛔ Not a claim. Triage sets the grade and the lane.\nReader: Setup → Settings → Authentication, and the login page (`ui/**`).\nDedupe: `email_password_enabled`, `EMAIL_PASSWORD_DISABLED`, #29159 (closed, the login copy) → none open for these two asks. **New.**\n\n## What the server does after PR #30298\n\n- A save that would leave no sign-in method (email and password off with no other method, or the last Google provider removed while email and password are off) is refused as a whole batch: 400 `SETTINGS_VALIDATION`, with a localized message naming what to configure first.\n- `GET /api/v1/auth/config` reports `emailPassword.enabled`.\n\n## Wanted\n\n- [ ] Setup shows the server's refusal text when the save is refused, and asks for confirmation before turning off email and password even when another method exists (\"people who sign in with a password will need another way in\").\n- [ ] The login page does not draw the email and password form when `emailPassword.enabled` is false (#30202 measured it still drawn under `os dev` through the console dev server; check whether the dev sign-in affordance is the cause, as the card suspected).\n\nLinks: #30202, PR #30298, #29159, #26676."

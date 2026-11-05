@@ -1,0 +1,34 @@
+{
+  "number": 30606,
+  "kind": "pull_request",
+  "title": "i18n(service-mailbox): ship the mailbox objects in all eleven platform languages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T17:47:41Z",
+  "updated_at": "2026-11-05T18:32:35Z",
+  "closed_at": "2026-11-05T18:32:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-05T18:32:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30606",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgBxjikPH2bUin9o95gbAxsx)_\n\ndomain:server#2 · os-bill · session_01Utp6Cai5CRdAs4u9gTipWU\n\nRefs #30512 — package 3 of 11 (`@objectstack/service-mailbox`). The card stays open: the last PR of the series flips the bundle check to the platform locale table.\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么：** 邮箱三个对象（`sys_mailbox`、`sys_mail_message`、`sys_mail_association`）的名称、字段、选项、帮助文字和视图名补上 7 种语言：繁体中文、阿拉伯语、法语、巴西葡萄牙语、俄语、德语、韩语，共 11 种，与平台语言表一致。\n- **为什么改：** 平台语言表（#29428 裁决 F）要求每个界面带齐 11 种语言；这是第 3 期按包补齐的第 3 个包（75 条）。\n- **风险与回滚：** 只加翻译数据和注册行，不动逻辑、schema、接口；原有 4 种语言一字未改；无新的 stale-fill 巧合，基线未动。回滚即撤 PR。\n- **先看：** `src/translations/index.ts`（按表标签注册，zh-CN 在 zh-Hant 前），再抽看 `ar.objects.generated.ts`。\n- **两分钟验证：** `node scripts/check-i18n-bundles.mjs` 输出 `services/service-mailbox in sync`，`node scripts/check-i18n-stale-fill.mjs` 退出 0。\n- **需要你做的：** 无，席位落地。\n\n## What changes\n\n- Seven new locales for the mailbox objects under the platform locale table's tags (`zh-Hant`, `ar`, `fr`, `pt-BR`, `ru`, `de`, `ko`): each a `TAG.objects.generated.ts` with all 75 leaves plus its `TAG.source-hashes.generated.ts`, written by the repo's own `os i18n extract --fill=default --source-hashes` and served through `withSourceFallback` like the existing three. `zh-CN` stays ahead of `zh-Hant` in `index.ts`.\n- The extract command in `scripts/i18n-extract.config.ts` lists the seven tags and its merge baseline imports the seven bundles, so `check:i18n` covers them from this PR on.\n\n## Acceptance notes\n\n- **Quality bar (#17508 / PR #19345):** every leaf written for the reader; placeholders, code spans and identifiers byte-identical, checked mechanically per leaf against `en`. Arabic is RTL prose with identifiers left in Latin script.\n- **Leaves equal to English, on purpose:** the RFC 5322 header names `Message-ID`, `In-Reply-To`, `References`, `Sender`, `Reply-To` and the IMAP term `UIDVALIDITY`, in every locale, exactly as `zh-CN` already keeps them (a user matching a raw header needs the header's own name). Beyond those, native cognates only: `fr` `Cc`, `Association`, `Message`; `pt-BR` `Cc`; `de` `Cc`, `Name`. The extractor records each as a source copy (`zh-Hant`/`ar`/`ru`/`ko` 6 entries; `pt-BR` 7; `de` 8; `fr` 9).\n- No cross-locale coincidence: `check:i18n-stale-fill` passes with the baseline untouched.\n\n## Verification\n\n<details><summary>Package suite, typecheck, build (verify lock)</summary>\n\n```\nturbo build (12-package i18n closure incl. @objectstack/service-mailbox): 63 tasks successful, exit 0\npnpm --filter @objectstack/service-mailbox test && typecheck\n Test Files  10 passed (10)\n      Tests  152 passed (152)\nos-verify-lock: VERDICT command-exit 0\n```\n</details>\n\n<details><summary>i18n gates</summary>\n\n```\nnode scripts/check-i18n-bundles.mjs\n  services/service-mailbox       in sync\ncheck-i18n-bundles: OK (10 package(s) — all bundles in sync, no undeclared authoring keys).   EXIT 0\nnode scripts/check-i18n-stale-fill.mjs\ncheck-i18n-stale-fill: OK (11 bundle set(s) — no new stale fills, 1 baselined).               EXIT 0\n  (the 1 baselined entry is #30586's webhooks plural, already on main; none added here)\n```\n</details>\n\n<details><summary>Derived gate families at head 34c094b3 (dispatch-gates --commands, reconciled with --ran)</summary>\n\n```\ndispatch-gates --ran: 56 derived famil(ies) accounted for — 56 run, 0 NOT-MEASURED (a DERIVED zero). Every family exit 0,\nincluding pnpm check:i18n and pnpm check:i18n-stale-fill. Run at 1c191347 (base 2ffdb649); the head 34c094b3 is the same\ntree re-based onto main 4831d500 after #30586 merged, re-checked there: check:i18n in sync, check:i18n-stale-fill OK.\neslint on the changed .ts files: exit 0 · check-nul-bytes: exit 0\nchanged lines 1481 (+1480 / -1), 17 files: under the 3000-line human-merge threshold\n```\nFull record: the seat's project folder, `server-seat2/30512/gates-mailbox-ran.txt`.\n</details>\n\nDogfood: not run — content-only package PR, no `!` in the title and no `(narrowing)` arm (dispatch order: package suite + `check:i18n` + typecheck suffice).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6Cai5CRdAs4u9gTipWU)_\n"
+}

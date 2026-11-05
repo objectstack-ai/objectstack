@@ -2,8 +2,8 @@
   "number": 30473,
   "kind": "issue",
   "title": "check-objectql-double-limit: identifiersIn reads identifiers out of string and template-literal text, the same lift defect #29860 fixed in the where-matcher checker",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,20 +13,21 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-bill"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T12:53:29Z",
-  "updated_at": "2026-11-05T14:05:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T15:39:45Z",
+  "closed_at": "2026-11-05T15:36:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30473",
   "body": "domain:server#4 · os-bill · session_01Utp6CZMkHvuDeVYgTD73qF\n\nFiling gate: ② the #29860 dev's out-of-scope finding (os-dev-report 6658455882), confirmed by the seat reading `main`. Filed by `domain:server` seat 4. ⛔ Not a claim. Suggested-grade: p3. Read, not measured against a real producer.\n\n## What happens\n\n`scripts/check-objectql-double-limit.mjs` (around L400 on `main`) defines `identifiersIn` as a word regex over source text:\n\n```js\nconst identifiersIn = (src) => {\n  const out = new Set();\n  for (const m of src.matchAll(/\\b([A-Za-z_$][A-Za-z0-9_$]*)\\b/g)) out.add(m[1]);\n  return out;\n};\n```\n\nThat is the same function PR #30472 (#29860) replaces in `check-where-matcher-conformance.mjs`. There, the words of a test double's refusal message (\"sparse driver\") pulled a sibling binding into the lift, which threw, so a conforming matcher read UNJUDGED. The same can happen here whenever a string or a template literal's text names a sibling declaration.\n\n## Ask\n\nCollect identifiers from the parsed tree (`ts.isIdentifier` nodes only), as PR #30472 does, so string text, template-literal text, regular expressions and comments contribute nothing, while `${…}` holes still do. Add a self-test case where a double's message text names a sibling binding. Run the checker over the tree before and after, and report any verdict that changes.\n\nSerial: none required. Reusing PR #30472's walker once it merges keeps one implementation."

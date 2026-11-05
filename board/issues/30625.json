@@ -1,0 +1,35 @@
+{
+  "number": 30625,
+  "kind": "pull_request",
+  "title": "i18n(plugin-audit): ship the audit objects and activity sentences in all eleven platform languages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T18:44:12Z",
+  "updated_at": "2026-11-05T19:32:16Z",
+  "closed_at": "2026-11-05T19:32:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-05T19:32:14Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30625",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgBxjikPH2bUin9o95gbAxsx)_\n\n\ndomain:server#2 · os-bill · session_01Utp6Cai5CRdAs4u9gTipWU\n\nRefs #30512 — package 4 of 11 (`@objectstack/plugin-audit`). The card stays open: the last PR of the series flips the bundle check to the platform locale table.\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么：** 审计、动态、评论四个对象（`sys_audit_log`、`sys_activity`、`sys_comment`、`sys_comment_reaction`）的名称、字段、选项、帮助和视图名，以及动态流的句子（「创建了…」「更新了…」「…提到了你」），补上繁中、阿语、法语、巴葡、俄语、德语、韩语 7 种，与平台语言表的 11 种一致。\n- **为什么改：** 平台语言表（#29428 裁决 F）要求每个界面带齐 11 种语言；这是第 3 期按包补齐的第 4 个包（对象 128 条 + 句子 8 条）。\n- **风险与回滚：** 只加翻译数据和注册行，不动逻辑、schema、接口；原有 4 种语言一字未改。改了一条测试：它原来用 `fr-FR` 当「没有语言包」的例子，现在法语包已有，**是测试的前提变了、不是放宽断言**——「没有语言包时保留原句」改用 `it-IT` 验证，另加一条钉住 `fr-FR` 读到 `fr` 包。回滚即撤 PR。\n- **先看：** `src/translations/index.ts`（按表标签注册，zh-CN 在 zh-Hant 前）、`messages.ts`，再看 `activity-summary-reader-locale.integration.test.ts` 的那处改动。\n- **两分钟验证：** `node scripts/check-i18n-bundles.mjs --filter=audit` 输出 `plugins/plugin-audit in sync`；`pnpm --filter @objectstack/plugin-audit test` 全绿。\n- **需要你做的：** 无，席位落地。\n\n## What changes\n\n- Seven new locales for the audit package under the platform locale table's tags (`zh-Hant`, `ar`, `fr`, `pt-BR`, `ru`, `de`, `ko`): each a `TAG.objects.generated.ts` with all 128 object leaves plus its `TAG.source-hashes.generated.ts`, written by the repo's own `os i18n extract --fill=default --source-hashes` and served through `withSourceFallback` like the existing three. `zh-CN` stays ahead of `zh-Hant` in `index.ts`.\n- `messages.ts` gains the seven locales' activity-feed sentences (8 ids each, the same `{{holes}}` as `en`), registered as each locale's `messages`.\n- The extract command in `scripts/i18n-extract.config.ts` lists the seven tags and its merge baseline imports the seven bundles, so `check:i18n` covers them from this PR on.\n\n## The one test change — the premise moved, the assertion did not loosen\n\n`activity-summary-reader-locale.integration.test.ts` used `fr-FR` as its example of a reader locale with no pack (\"a reader locale with no template keeps the stored sentence\"). Once `fr` ships, `fr-FR` resolves to it, so that premise is no longer true of French. The no-pack case now uses `it-IT` (Italian is not a platform-table language) and still asserts the stored English sentence byte for byte; a new case pins that `fr-FR` reads the `fr` pack (`A créé Contract « NDA »`). Nothing is asserted less strictly than before.\n\n## Acceptance notes\n\n- **Quality bar (#17508 / PR #19345):** every leaf written for the reader; placeholders, code spans and identifiers byte-identical, checked mechanically per leaf against `en`. Arabic is RTL prose with identifiers left in Latin script. `t()` has no plural selection, so the `ru`/`ar` \"{{count}} more\" sentence uses a counting form that reads correctly for every number.\n- **Leaves equal to English, on purpose:** `URL` in every locale; beyond that native words only: `fr` `Action`, `Emoji`, `Import`, `Mentions`, `Type`; `pt-BR` `Emoji`; `de` `Emoji`, `Import`, `Thread`. The extractor records each as a source copy. `pt-BR` writes sign-in/sign-out as `Acesso` / `Encerramento de sessão` rather than the English loanwords.\n- No cross-locale coincidence: `check:i18n-stale-fill` passes with the baseline untouched.\n\n## Verification\n\n<details><summary>Package suite, typecheck, build (verify lock)</summary>\n\n```\nturbo build --filter=@objectstack/plugin-audit...: 16 tasks successful, exit 0\npnpm --filter @objectstack/plugin-audit test && typecheck   (at head fedf6bfd)\n Test Files  71 passed (71)\n      Tests  1138 passed (1138)\nos-verify-lock: VERDICT command-exit 0\n```\n</details>\n\n<details><summary>i18n gates</summary>\n\n```\nnode scripts/check-i18n-bundles.mjs --filter=audit\n  plugins/plugin-audit           in sync (21 bundle(s))                                          EXIT 0\nnode scripts/check-i18n-stale-fill.mjs\ncheck-i18n-stale-fill: OK (11 bundle set(s) — no new stale fills, 1 baselined).                   EXIT 0\neslint --no-inline-config on the changed .ts files: exit 0\nchanged lines 2331 (+2328 / -3), 19 files: under the 3000-line human-merge threshold\n```\n</details>\n\nDerived gate families (dispatch-gates --commands, reconciled with --ran) are recorded in the os-dev-report on #30512.\n\nDogfood: not run — content-only package PR, no `!` in the title and no `(narrowing)` arm.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6Cai5CRdAs4u9gTipWU\n"
+}

@@ -13,20 +13,18 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:dispatched",
+    "needs-user-decision",
     "priority:p3"
   ],
-  "assignees": [
-    "os-bill"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T10:11:31Z",
-  "updated_at": "2026-11-05T12:33:43Z",
+  "updated_at": "2026-11-05T18:52:31Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30412",
   "body": "domain:server#5 · os-bill · session_01Utp6CYVV6fcAQrNTDQRvPb\n\nFiled from PR #30409 (card #30326, server half), the dev's acceptance note \"not covered\" and the seat ACCEPT 6655279987. ⛔ Not a claim. Triage sets the grade.\n\n**Business reason.** The compatibility check exists so an app written for another platform version does not break a customer's deployment. After PR #30409 the marketplace install door (`POST /api/v1/marketplace/install-local`) tells the installer when the check was skipped. The package install door `POST /api/v1/packages` still does not: the administrator who installs a package with no `engines.protocol` there reads only success, and only the server log says it was not checked.\n\n**Reader who acts.** `domain:server`, `packages/runtime/src/domains/packages.ts` (~L1750, `assertProtocolCompat(manifest)`, its verdict dropped).\n\n## What to do\n\nAnswer the same optional notice the install-local door answers (`protocolCheckSkipped`: `reason`, `packageId`, `protocolVersion`, `message`, plus `requiredRange` / `rangeSource` for `unparsed-range`), read from the verdict `assertProtocolCompat` now returns (`ProtocolCompatAdmitted`, PR #30409), never a second reading of the range. Omit it for a checked range. One spelling with the install-local door: share the mapping (`protocolCheckSkippedOf`) rather than restating it. Pin a no-range install, an unparsed range and a satisfied-range control.\n\nSerial after PR #30409 merges. If the answer is a published `packages/spec` schema, report it rather than deciding in the PR (#30326's own rule). Dedupe: `packages install protocolCheckSkipped`, `POST /api/v1/packages engines.protocol`: none. **New.**"

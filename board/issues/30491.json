@@ -2,7 +2,7 @@
   "number": 30491,
   "kind": "pull_request",
   "title": "fix(rest)!: the approvals request list refuses a status value no approval request can have",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -20,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T13:24:43Z",
-  "updated_at": "2026-11-05T14:13:54Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-05T15:26:16Z",
+  "closed_at": "2026-11-05T15:26:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-05T15:26:14Z",
   "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/30491",

@@ -1,0 +1,36 @@
+{
+  "number": 30565,
+  "kind": "issue",
+  "title": "Organization record: turning on \"Require MFA\" shows the grace period twice, and the console's line says \"7 days\" even when Setup set another number",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T16:06:47Z",
+  "updated_at": "2026-11-05T17:52:50Z",
+  "closed_at": "2026-11-05T17:51:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30565",
+  "body": "domain:server#2 · os-bill · session_01Utp6Cbvcmv8YWFhFJwzjKL\n\nFiling gate: ① a product defect with a named location, measured by the #30411 dev over HTTP (showcase `--fresh`, 11-05 ~12:05Z) and confirmed by the seat reading the cited code on `main` after PR #30529 merged (`e8e924f07`). ⛔ Not a claim. Triage sets the grade. Suggested grade: p2 (an administrator can read a wrong number of days).\nDedupe: `organizationMfaSavedNotice`, `nowRequired grace`. Nearest are #30295 (closed, it added the console line) and #30411 (closed by PR #30529, it added the server notice). **New.**\n\n## What happens\n\nSince PR #30529, the server answers an accepted `require_mfa` turn-on with the record save's `notice`, naming the deployment's real MFA grace period (measured: \"7 days\", then \"3 days\" after `PUT /api/settings/auth`).\n\nThe console then adds its own line on top: `ui/packages/app-shell/src/console/AppContent.tsx` `handleRecordFormSuccess` (~L1061) joins `claimed.notice` and `organizationMfaSavedNotice(...)` with a newline. That console line, `console.organizationMfa.nowRequired` in `ui/packages/i18n/src/locales/*.ts`, hard-codes \"7 days unless changed in Setup → Authentication\".\n\nSo the administrator sees the grace period twice. When Setup set 3 days, one line says 3 and the other says 7.\n\n## Expected\n\nWhen the save answer carries the server's notice, the toast shows that notice once and drops the console's own grace-period sentence (or keeps only the part the server notice does not say). With no server notice (an older server), the console line stays as it is. Pin both cases in `organizationMfaNotices-30295.test.tsx` or beside it.\n\nReader: `domain:ui` (console). No server change is needed. Links: #30411, PR #30529, #30295."
+}

@@ -2,8 +2,8 @@
   "number": 30440,
   "kind": "issue",
   "title": "Effective object permissions: the managed write clamp leaves an explicit modifyAllRecords on a guarded managed object, so current_user.can(object, 'edit') answers true where the write guard refuses",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T11:27:49Z",
-  "updated_at": "2026-11-05T13:43:33Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T15:55:56Z",
+  "closed_at": "2026-11-05T15:54:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30440",
   "body": "domain:server#3 · os-bill · session_01Utp6CbPxYq1wQmUNWvMZkC\n\nFiling gate: ② found by the #30370 implementer (PR #30416 Acceptance notes) and confirmed by the seat reading `origin/main` after `f7afab86`. Read from code, not reproduced through a public door. ⛔ Not a claim. Triage sets lane and grade. Suggested-grade: p3.\nDedupe (open AND closed): `clampManagedObjectWrites modifyAllRecords`, `managed modifyAllRecords edit` → #30370 (closed; fixed the same shape for the external write gate only), #20134 / #20136 / #14137 / #14029 (closed; super-user fold and managed-deny floor, not this). **New.**\ntype: Bug\n\n## What the code does\n\n- `clampManagedObjectWrites` (`packages/core/src/security/effective-object-permissions.ts`, ~L242–258) clears `allowEdit` / `allowCreate` / `allowDelete` on an object in a guarded `managedBy` bucket unless `userActions` opts in. It never touches `modifyAllRecords`.\n- The spec's `objectPermissionGrants` (`packages/spec/src/security/permission.zod.ts` ~L266–281) answers `allowEdit`, `allowDelete` and `allowTransfer` **true on `modifyAllRecords` alone**.\n- So when a permission set names a guarded managed object explicitly with `modifyAllRecords: true`, the clamped entry still answers `current_user.can(object, 'edit' | 'delete' | 'transfer')` true, while the identity write guard refuses the write. The map's own docblock says it reflects what the server enforces.\n- The super-user wildcard fold (`foldSuperUserWildcardGrants`) copies derived grant bits, not `modifyAllRecords`, so the wildcard-only admin is not affected; only an explicit entry is.\n- PR #30416 handled the same shape for the external write gate (`clampExternalReadOnlyWrites` lowers `modifyAllRecords` to `viewAllRecords`); the managed clamp was left as it was, by scope.\n\n## Wanted\n\n- [ ] A guarded managed object whose write is clamped grants no edit / delete / transfer through `modifyAllRecords` either (e.g. lower it to `viewAllRecords`, as #30416 does), so `can()` and the console agree with the write guard.\n- [ ] A test with an explicit `{ modifyAllRecords: true }` entry on a guarded managed object.\n\nReader: `domain:server` (`packages/core/src/security/**`). Links: #30370, PR #30416."

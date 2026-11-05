@@ -2,7 +2,7 @@
   "number": 30484,
   "kind": "pull_request",
   "title": "feat(spec): blueprint dashboard widgets say how they aggregate, and calendar views which date field they schedule on",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T13:16:31Z",
-  "updated_at": "2026-11-05T14:17:09Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-05T15:36:54Z",
+  "closed_at": "2026-11-05T15:36:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-05T15:36:50Z",
   "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/30484",

@@ -1,0 +1,36 @@
+{
+  "number": 30542,
+  "kind": "issue",
+  "title": "objectql: a declared .custom action override has four door and boot-order loose ends left by PR #30497",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T14:58:02Z",
+  "updated_at": "2026-11-05T19:35:50Z",
+  "closed_at": "2026-11-05T19:14:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30542",
+  "body": "domain:server#3 · os-bill · session_01Utp6CbPxYq1wQmUNWvMZkC\n\nFiling gate: ① product defects with named locations, from the contract reviews of PR #30497 (#30065): round 0 record 6659858971 (③-2, ③-3) and delta record 6661174869 (③-7, ③-8). None widens who may run an action. ⛔ Not a claim. Suggested-grade: p3. ⛔ Serial after PR #30497 merges.\n\nBusiness reason: these are four places where the save door, the install door, the reads and the run of an action override (ADR-0146 D9) can disagree. Each one is an over-refusal, a door inconsistency, or a wrong log level. None of them is reachable in a clean single-shipper setup.\n\n## What happens\n\n1. **Install-door ratchet (fails closed).** `marketplace-install-local-plugin.ts#heldBy` reads the base's items through `getMetaItems({ type, packageId: base })` when the base is not in the same delivery. Once an override is armed, that read serves the override under the base's envelope, so a re-install of `.custom` is judged against the previous override and not against the base. A v2 that relaxes a v1 tightening back to the base's own gates is refused at install, although the protocol door admits it.\n2. **`objectName` not pinned at the protocol door.** `ITEM_KEY_DISCRIMINATORS` has no `action` row, so the protocol door matches an action override's base by name alone. `os validate` and the install door key it as `<objectName>:<name>`. An override can therefore move a base action to another object at the save door. The handler is not rebound, so it widens nothing, but the doors disagree.\n3. **Self-declared binding when no artifact is registered.** The authored-action resync binds a row as an override, judged on the row's own `overrides.package`, when the base's artifact is not registered yet. The base's later `registerAction` then slots beneath it. A row from another base's pair that ships the same `<object>:<name>` therefore stays on top and runs, while every read declines it for the real base: the run and the read disagree. It is reachable only through two installed packages shipping one key (already a warned misconfiguration), a stale pair row whose key another package later adopts, or a direct table write. Either of two tightenings is enough:\n   - `rehydrate` announces `metadata:reloaded` after `bindArtifactHandlers`, as install and uninstall already do;\n   - `registerAction` slots beneath only when the arriving owner is the override's declared base, recorded on the entry at `registerActionOverride`.\n4. **Log level.** An unpackaged `registerAction` under an armed override is slotted beneath at `debug`. The method's docblock promises a warning when an unpackaged registration displaces a package's handler. Warn, or correct the docblock.\n\n## Ask\n\nFix 1–3. For 4, pick warn or docblock and say which. Pins:\n- the v2 re-install that relaxes back to the base's gates is admitted;\n- a moved-object override is refused at the protocol door, with the same rule as `os validate`;\n- the other-base row is bound plain (or re-judged after rehydrate) and the real base's body runs, while reads still serve the base.\n\nAblate once.\n\nReader who acts: `domain:server`, `packages/objectql` (`engine-actions.ts`, `plugin.ts`), `packages/cloud-connection` (`marketplace-install-local-plugin.ts`), `packages/metadata-core` (`item-key-discriminators.ts`).\n\nDedupe: `action override heldBy install ratchet`, `ITEM_KEY_DISCRIMINATORS action`, `registerAction slot beneath override`. **New.**"
+}

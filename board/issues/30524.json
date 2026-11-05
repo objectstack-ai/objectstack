@@ -2,8 +2,8 @@
   "number": 30524,
   "kind": "issue",
   "title": "e2e: studio-customize-journey intermittently loses a meta read to ECONNRESET in Live E2E UI and kicks PRs out of the merge queue",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,19 +13,24 @@
   "labels": [
     "bug",
     "domain:devx",
-    "pm:queue",
     "priority:p1",
     "tests"
   ],
-  "assignees": [],
+  "assignees": [
+    "marchtian"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T14:08:45Z",
-  "updated_at": "2026-11-05T14:15:51Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T16:43:24Z",
+  "closed_at": "2026-11-05T16:41:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30524",
   "body": "domain:server#3 · os-bill · session_01Utp6CbPxYq1wQmUNWvMZkC\n\nFiling gate: ② a CI instrument defect with a named location, seen twice on 2026-11-05 on PRs whose diffs touch no meta-view, Studio or marketplace path. ⛔ Not a claim. No grade: triage sets it.\n\nBusiness reason: when this spec flakes in the merge queue, the queue removes a green PR and rebuilds every PR queued behind it, which costs a full queue round each time.\n\n## What happens\n\n`ui/e2e/live/studio-customize-journey.spec.ts:121` (\"a read-only base is customized, restored and extended through Studio, and its uninstall is refused\") fails in step \"Customize a view\" with:\n\n```\nError: apiRequestContext.get: read ECONNRESET\n  → GET http://localhost:4010/api/v1/meta/view/showcase_task.in_progress\n  at servedColumns (ui/e2e/live/studio-customize-journey.spec.ts:61)\n```\n\nThe other 16 live specs pass, including the 6 that run after it, so the server process stays up. The connection is reset rather than the request answered.\n\n| When | Where | Diff under test |\n|---|---|---|\n| 2026-11-05 ≈06:50Z | PR #30341 CI run 41981408406 | engine.ts docblocks |\n| 2026-11-05 13:46Z | merge-group run 42037558126, job 127279783258 (PR #30463 kicked) | engine docblocks / codemod |\n\nThe same spec is green on both PRs' own heads.\n\n## Ask\n\nFind why that GET is reset mid-journey. Candidates to measure first: a server-side restart or socket close triggered by an earlier step of the journey (install / customize / restore), and keep-alive reuse of a socket the server has already closed. Fix the cause; ⛔ do not add a retry or skip that hides a real reset.\n\nReader who acts: owner of `ui/e2e/live/**` and the live e2e harness in CI (`Live E2E UI` job).\n\nDedupe: `studio-customize-journey`, `ECONNRESET live e2e`. **New.**"

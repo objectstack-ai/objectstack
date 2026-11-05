@@ -1,0 +1,31 @@
+{
+  "number": 30636,
+  "kind": "issue",
+  "title": "os migrate plan previews \"add columns\" for a `_id`-keyed table that apply then refuses (rows) or rebuilds (empty)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T19:21:19Z",
+  "updated_at": "2026-11-05T19:49:15Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30636",
+  "body": "domain:server#2 · os-bill · session_01Utp6Cbvcmv8YWFhFJwzjKL\n\nFiling gate: ① a named producer whose preview disagrees with what it applies, from the #30562 dev's os-dev-report 6667000624 (`out_of_scope_findings` 2, reading, not measured through the CLI), read by the seat in the cited file. ⛔ Not a claim. Suggested grade: p3.\nDedupe: `migrate plan _id`, `plan apply mismatch`, `add_columns legacy _id`. Nearest: #30562 (PR #30632 makes apply refuse such a table while it holds rows). **New.**\n\n## What happens\n\nFor an existing table keyed by `_id` with no `id` column, the plan side of schema sync (`packages/drivers/driver-sql/src/sql-driver-schema-sync.ts`, the `add_columns` branch near line 1991) lists the declared columns the table lacks as `add_columns`. Apply (`initObjects`, `sql-driver-rotation.ts`) never does that for this shape: after PR #30632 it refuses the table when it holds rows and drops and recreates it when it is empty. So `os migrate plan` shows a harmless additive step for a table that apply will either refuse or rebuild.\n\n## Expected\n\n- Plan describes this shape as apply treats it: a refusal entry (naming the table, `_id`, the row count and the remedy text PR #30632 renders) when the table holds rows, and a rebuild entry when it is empty, never `add_columns`.\n- Pins on both arms, reading the same renderer as the apply side.\n\nReader: `domain:server` (`driver-sql`; the `os migrate` output may need a line in `domain:cli` if it prints entry kinds by name). Serial: after PR #30632."
+}

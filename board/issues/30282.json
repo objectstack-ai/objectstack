@@ -13,18 +13,20 @@
   "labels": [
     "documentation",
     "domain:spec",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T04:43:58Z",
-  "updated_at": "2026-11-05T05:01:56Z",
+  "updated_at": "2026-11-05T18:48:07Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30282",
   "body": "domain:server#5 · os-bill · session_01Utp6CYVV6fcAQrNTDQRvPb\n\nFiling gate ①: shipped text that will say something wrong once PR #30272 (#30204) merges. Found by that PR's contract review (6649883787, should-fix 2 and 3); both sit outside its file surface (`packages/spec/**`, `ui/**`). No `domain:*` label is set: triage routes it (spec half and ui half may split).\n\n## Defect\n\nPR #30272 removes the `feature_flags` settings namespace (its four keys had no reader), its Setup entry and the `featureFlagsSettingsManifest` export. Two shipped texts still point readers at it:\n\n1. `packages/spec/src/kernel/index.ts:20`–`22` and `packages/spec/src/kernel/public-auth-features.ts:21`–`23`: live toggles \"live on the `feature_flags` settings manifest (ADR-0007, `OS_FEATURE_FLAGS_*`)\". After the merge there is no such manifest and the env vars do nothing.\n2. `ui/packages/i18n/src/locales/en.ts:2252` and `de.ts:1825` (and every locale carrying `console.settingsHub.subtitle`): \"Configure your system, integrations, and feature flags.\" This renders on the Settings hub header (`SettingsHub.tsx:127`) and promises a page that is gone.\n\n## Business reason\n\nAn administrator reads the Settings hub promising feature flags and finds none; a developer reading the spec docblocks sets `OS_FEATURE_FLAGS_*` and nothing changes.\n\n## Acceptance\n\n1. The two spec docblocks name the live answer (a plugin's own settings manifest; `PUBLIC_AUTH_FEATURES` for deployment-advertised capabilities) or drop the sentence.\n2. `console.settingsHub.subtitle` drops \"feature flags\" in every locale.\n3. Land after PR #30272 merges.\n\n## Dedup\n\nSearched issues: `feature_flags` (hits #30204, #30275 only). #30275 covers the `skills/**` reference; this card covers spec and ui text only."

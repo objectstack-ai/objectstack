@@ -2,8 +2,8 @@
   "number": 29042,
   "kind": "issue",
   "title": "Console: register the mobile shell's native push token after sign-in, unregister it on sign-out",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "hotlong",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T06:22:11Z",
-  "updated_at": "2026-11-05T14:00:03Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T16:07:15Z",
+  "closed_at": "2026-11-05T16:05:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29042",
   "body": "Blocked-by: objectstack-ai/objectstack#29039\nBlocked-by: objectstack-ai/objectstack#29041\n\n## Context\n\nThe mobile shell (objectstack-ai/mobile#144) exposes `ObjectStackNative.getPushToken()`. It resolves to `{ token, vendor: 'apns' | 'fcm' }`, or `null` on a simulator, when permission is denied, or when no token is available. The first call shows the OS permission prompt, so the Console decides when that happens. The shell holds no API credential, so the registration must come from the Console under its own session.\n\n## Ask\n\n1. After sign-in in shell mode (`useNativeHost()` from #29039, with `has('getPushToken')` true), call `getPushToken()` and register the token with the device registry from #29041.\n2. Unregister the token on sign-out and on account switch.\n3. Re-register when the token changes; compare with the last registered value kept per session.\n4. Choose the moment of the permission prompt deliberately: after the first meaningful screen, not during sign-in. Do nothing when the call resolves `null`.\n\n## Acceptance\n\n- With a fake bridge, sign-in registers the token, sign-out unregisters it, and `null` leads to no request.\n- An end-to-end check on a device build receives a push and opens the payload's `route`. This is recorded as a manual run if no device lab exists."

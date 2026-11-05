@@ -11,22 +11,20 @@
     "type": "Bot"
   },
   "labels": [
-    "domain:ui",
+    "domain:devx",
     "enhancement",
-    "pm:dispatched",
+    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [
-    "os-sales"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T15:01:29Z",
-  "updated_at": "2026-11-05T13:25:26Z",
+  "updated_at": "2026-11-05T17:38:31Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30125",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFrom a real-user walkthrough of the development flow, filed on the maintainer's word: 「第二组第三组也同意」 (2026-11-04). Measured on `main` `987ff33b88` unless a line says otherwise. Test project scaffolded with `create-objectstack@18.3.0`.\n\n## Items\n\n| # | What a person meets | Where measured | Suggestion |\n|:--|:--|:--|:--|\n| 1 | Nothing asks the company name. Every invitee reads 「王总 邀请你加入 Default Organization」 | `main` | Ask at first sign-in, or let the first admin rename it from the home page |\n| 2 | Joining by invitation takes three screens: register, then 「接受邀请」, then 「邀请已接受 … 继续」 | Published 18.3.0 | Registering from an invitation link accepts it; end on the app |\n| 3 | The time zone dialog opened right after an unrelated action, on top of the toast saying what to do next (the invitation link). The toast expired behind it | Published 18.3.0 production mode. Not reproduced under `os dev` on `main` | Ask at a calm moment, or do not cover a toast |\n| 4 | After a sign-out, the next person lands on the previous person's page. A new member first sees 「你没有访问此应用的权限」 for the Setup page the admin had open | `main`: `/login?redirect=%2Fapps%2Fcom.objectstack.setup%2F…`. #29174 removed filter, search and sort from this redirect and kept the path | An explicit sign-out goes to home |\n| 5 | The scaffold's sample `note` object stays in the project and is listed by `list_objects` over MCP. A developer building a repair app may never notice it | `main`: `templates/blank/src/objects/note.object.ts` | Say in the generated docs that it is a sample to delete, or have `os g object` offer to remove it |\n\n## Left out on purpose\n\n- Prefilling the email on the invitation form: `packages/plugins/plugin-auth/src/invitation-preview.ts:34-38` records a ruling that refused the unmasked variant, so the seat does not suggest it.\n- Admin-side honesty about email: the invitation toast already says no mail was sent. The password reset half is #30107.\n\nTake these rows one by one. They do not depend on each other."
