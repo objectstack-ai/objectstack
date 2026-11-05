@@ -114,7 +114,6 @@
       "@object-ui/plugin-timeline",
       "@object-ui/plugin-tree",
       "@object-ui/plugin-view",
-      "@object-ui/providers",
       "@object-ui/react",
       "@object-ui/react-runtime",
       "@object-ui/types"
