@@ -512,7 +512,7 @@ export function judgeHoleFormatter(
     return {
       rule: 'option-field-shape',
       message:
-        `the hole ${hole} ${arg === undefined || arg === '' ? 'names no object and field after `option`' : `gives the option formatter the argument '${formatterPart.slice(formatterPart.indexOf(':') + 1).trim()}'`}, `
+        `the hole ${hole} ${arg === undefined || arg === '' ? 'names no object and field after `option`' : `gives the option formatter the argument \`${formatterPart.slice(formatterPart.indexOf(':') + 1).trim()}\``}, `
         + 'so no option list is named to label the value with: the argument is one object name and one field '
         + `name joined by a dot, written bare, with no quotes and no \`@\`. ${OPTION_ARGUMENT_RULE}`,
     };

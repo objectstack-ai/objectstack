@@ -77,10 +77,10 @@ describe('the mail dialect', () => {
   it.each([
     ['no argument', '{{ stage | option }}', 'names no object and field after `option`'],
     ['an empty argument', '{{ stage | option: }}', 'names no object and field after `option`'],
-    ['a field with no object', '{{ stage | option:stage }}', "the argument 'stage'"],
-    ['a quoted reference', "{{ stage | option:'opportunity.stage' }}", "the argument ''opportunity.stage''"],
-    ['a marked path', '{{ stage | option:@stage_ref }}', "the argument '@stage_ref'"],
-    ['a second dot', '{{ stage | option:crm.opportunity.stage }}', "the argument 'crm.opportunity.stage'"],
+    ['a field with no object', '{{ stage | option:stage }}', 'the argument `stage`'],
+    ['a quoted reference', "{{ stage | option:'opportunity.stage' }}", "the argument `'opportunity.stage'`"],
+    ['a marked path', '{{ stage | option:@stage_ref }}', 'the argument `@stage_ref`'],
+    ['a second dot', '{{ stage | option:crm.opportunity.stage }}', 'the argument `crm.opportunity.stage`'],
   ])('⭐ refuses %s, naming the hole, the argument and the rule', (_label, hole, says) => {
     const findings = judgeMailHoleGrammar(`Stalled at ${hole}`);
     expect(findings).toHaveLength(1);
