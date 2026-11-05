@@ -742,6 +742,125 @@ const ${toCamelCase(name)}Picklist = definePicklist({
 export default ${toCamelCase(name)}Picklist;
 `,
   },
+
+  permission: {
+    description: 'Permission set (what a signed-in user may do with an object)',
+    /**
+     * `src/security`, not `src/permissions`: the directory a project keeps its
+     * access rules in, the name the example apps use for it. The type key is
+     * the registry's, `permission` (`*.permission.ts`), and its stack key is
+     * `singularToPlural('permission')`, `permissions` — the collection half of
+     * that key (ADR-0090), where a permission set is the only capability
+     * container.
+     */
+    defaultDir: 'src/security',
+    /**
+     * A permission set whose `objects` map grants nothing gives a signed-in
+     * user nothing, so the scaffold grants one object: the object from
+     * `--object`, or the stack's only object, one the stack declares. The grant
+     * is read, create and edit without delete, the shape the example apps
+     * start a user's set from; the emitted comments name the bits to change.
+     *
+     * Declared through `definePermissionSet`, so the set is parsed the moment
+     * this module loads: an unknown key (`roles`, `profiles`, `users` — none is
+     * a field of a set) is a startup error that names where that rule lives.
+     *
+     * `isDefault` is left at its default (`false`) and explained instead of
+     * written: an app-level set marked `isDefault` is bound to every signed-in
+     * user at boot, which is a decision the author takes, not one a scaffold
+     * takes for them.
+     */
+    namesObject: true,
+    binds: { object: 'flag' },
+    itemName: (name: string) => toSnakeCase(name),
+    generate: (name: string, _namespace?: string, bindings?: ScaffoldBindings) => {
+      const object = requireBinding('permission', bindings, 'object');
+      return `import { definePermissionSet } from '@objectstack/spec/security';
+
+/**
+ * ${toTitleCase(name)} Permission Set
+ *
+ * What a user holding this set may do. A user is given it by a position
+ * that lists it in \`permissionSets\`, or by an administrator in Setup; the
+ * set itself never names users. Sets a user holds are merged: a bit granted
+ * by any one of them is granted.
+ */
+const ${toCamelCase(name)}PermissionSet = definePermissionSet({
+  name: '${toSnakeCase(name)}',
+  label: '${toTitleCase(name)}',
+
+  // One entry per object, keyed by its machine name. Also: viewAllRecords and
+  // modifyAllRecords, which reach past the object's sharing model.
+  objects: {
+    ${tsString(object.name)}: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
+  },
+
+  // isDefault: true binds this set to every signed-in user when the app
+  // boots. Leave it off unless that is what you mean.
+});
+
+export default ${toCamelCase(name)}PermissionSet;
+`;
+    },
+  },
+
+  dataset: {
+    description: 'Analytics dataset (dimensions and measures dashboards bind to)',
+    defaultDir: 'src/datasets',
+    /**
+     * The analytics semantic layer (`ui/dataset.zod.ts`, ADR-0021): a
+     * dashboard or report widget names a dataset and picks its dimensions and
+     * measures by name, instead of carrying its own object, field and
+     * aggregate. Not seed data — that is the stack's `data` key.
+     *
+     * `object` is a BINDING (#21325): the object from `--object`, or the
+     * stack's only object, one the stack declares. The scaffold declares the
+     * one measure every object can answer, a record count, and groups it by
+     * the record's title field when the object has one, so a widget has a
+     * dimension and a measure to bind from the first build.
+     *
+     * Declared through `defineDataset`, which types the literal as a
+     * `Dataset`: a bare object literal handed to the stack's `datasets` key
+     * widens `aggregate` to `string` and fails the type check without
+     * `as const`.
+     */
+    namesObject: true,
+    binds: { object: 'flag' },
+    itemName: (name: string) => toSnakeCase(name),
+    generate: (name: string, _namespace?: string, bindings?: ScaffoldBindings) => {
+      const object = requireBinding('dataset', bindings, 'object');
+      const dimension = object.displayField
+        ? `\n    { name: ${tsString(object.displayField)}, field: ${tsString(object.displayField)} },\n  `
+        : '';
+      return `import { defineDataset } from '@objectstack/spec/ui';
+
+/**
+ * ${toTitleCase(name)} Dataset
+ *
+ * The numbers a dashboard or report shows for ${tsString(object.name)}, defined once.
+ * A widget names this dataset and picks a dimension and a measure from it by
+ * name; it declares no object, field or aggregate of its own.
+ */
+const ${toCamelCase(name)}Dataset = defineDataset({
+  name: '${toSnakeCase(name)}',
+  label: '${toTitleCase(name)}',
+  object: ${tsString(object.name)},
+
+  // The axes a widget groups by: a field on the object, or a path through a
+  // lookup (\`account.region\`). Declare the fields people group by.
+  dimensions: [${dimension}],
+
+  // The values a widget shows. Also: sum, avg, min and max over a numeric
+  // field (\`{ name: 'total', aggregate: 'sum', field: 'amount' }\`).
+  measures: [
+    { name: 'record_count', label: 'Records', aggregate: 'count' },
+  ],
+});
+
+export default ${toCamelCase(name)}Dataset;
+`;
+    },
+  },
 };
 
 /**
