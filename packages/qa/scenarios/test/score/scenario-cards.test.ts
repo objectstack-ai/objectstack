@@ -17,12 +17,12 @@
  *     readings are pinned, and one card is completed with what it asks of the
  *     build beyond shape, then degraded, to show the score separates the two.
  *
- * The cards are read as plain JSON, not through the card loader: this package
- * takes no dependency on the private `@objectstack/scenarios`
- * (`scenario-score.ts` says why). The loader's own suite validates the cards.
+ * The cards are loaded through this package's loader; the corpus is the CLI's
+ * (`packages/cli/src/lint/corpus.ts`, the `os lint --eval` golden set), read
+ * by a relative import declared as this suite's cross-package input.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -30,25 +30,37 @@ import { describe, expect, it } from 'vitest';
 
 import { ObjectStackDefinitionSchema, normalizeStackInput } from '@objectstack/spec';
 
-import { DEFAULT_METADATA_EVAL_CORPUS } from './corpus.js';
-import type { ScenarioExpectation } from './scenario-score.js';
-import { scoreScenarioArtifact, type ScenarioArtifactCard } from './scenario-tags.js';
+import { DEFAULT_METADATA_EVAL_CORPUS } from '../../../../cli/src/lint/corpus.js';
+import type { ScenarioExpect } from '../../src/schema.js';
+import { formatRefusal, loadScenarioFile, readCapabilityAreas } from '../../src/loader.js';
+import type { ScenarioCard } from '../../src/schema.js';
+import { scoreScenarioArtifact } from '../../src/score/scenario-tags.js';
 
 type Bag = Record<string, any>;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const SCENARIOS_DIR = resolve(HERE, '../../../../docs/qa/scenarios');
+const SCENARIOS_DIR = resolve(HERE, '../../../../../docs/qa/scenarios');
 
 const corpusById = new Map(DEFAULT_METADATA_EVAL_CORPUS.map((c) => [c.id, c]));
 
-/** The control cards: the library's cards named for a golden corpus case (a card's basename is its id). */
-const controls: Bag[] = DEFAULT_METADATA_EVAL_CORPUS.map((c) => resolve(SCENARIOS_DIR, `${c.id}.json`))
+const AREAS = readCapabilityAreas(resolve(HERE, '../../../../../docs/qa/platform-checklist/areas'));
+
+/**
+ * The control cards: the library's cards named for a golden corpus case (a
+ * card's basename is its id), loaded through the card loader — a card it
+ * refuses is a red here, never a card scored half-valid.
+ */
+const controls: ScenarioCard[] = DEFAULT_METADATA_EVAL_CORPUS.map((c) => resolve(SCENARIOS_DIR, `${c.id}.json`))
   .filter((file) => existsSync(file))
-  .map((file) => JSON.parse(readFileSync(file, 'utf8')) as Bag)
+  .map((file) => {
+    const { card, refusals } = loadScenarioFile(file, { areas: AREAS });
+    if (!card) throw new Error(refusals.map(formatRefusal).join('\n'));
+    return card.card;
+  })
   .sort((a, b) => (a.id < b.id ? -1 : 1));
 
 /** The derivation the control cards' `provenance` states, applied to a corpus fixture. */
-function deriveExpect(fixture: unknown): ScenarioExpectation {
+function deriveExpect(fixture: unknown): ScenarioExpect {
   const objects = (fixture as Bag).objects as Bag[];
   const fields = (o: Bag) => Object.entries(o.fields as Bag) as Array<[string, Bag]>;
   const selectFields = objects.flatMap((o) =>
@@ -67,13 +79,6 @@ function deriveExpect(fixture: unknown): ScenarioExpectation {
   };
 }
 
-/** The slice of a card the artifact scorer reads. */
-const cardSlice = (card: Bag): ScenarioArtifactCard => ({
-  expect: card.expect,
-  capabilities: card.capabilities,
-  personas: card.run.personas,
-  agentActions: card.run.agentActions,
-});
 
 function parsedBuild(stack: unknown): Bag {
   const parsed = ObjectStackDefinitionSchema.safeParse(normalizeStackInput(structuredClone(stack) as Bag));
@@ -143,7 +148,7 @@ describe('control cards — scored end to end against their golden builds', () =
 
   for (const card of controls) {
     it(`${card.id}: shape passes, the table judges each tag, every declared action fails`, () => {
-      const s = scoreScenarioArtifact(parsedBuild(corpusById.get(card.id)!.fixture), cardSlice(card));
+      const s = scoreScenarioArtifact(parsedBuild(corpusById.get(card.id)!.fixture), card);
       const reading = READINGS[card.id]!;
       expect(s.expect.passed).toBe(s.expect.total);
       expect(Object.fromEntries(s.tags.map((t) => [t.tag, t.status]))).toEqual(reading.tags);
@@ -162,7 +167,7 @@ describe('control cards — scored end to end against their golden builds', () =
       objects: { account: { allowRead: true }, contact: { allowRead: true, allowCreate: true, allowEdit: true } },
       fields: { 'contact.email': { readable: false, editable: false } },
     }];
-    stack.actions = (card.run.agentActions as Bag[]).map((a) => ({
+    stack.actions = (card.run.agentActions ?? []).map((a) => ({
       name: a.name,
       label: a.name,
       objectName: a.object,
@@ -171,7 +176,7 @@ describe('control cards — scored end to end against their golden builds', () =
       ai: { exposed: true, description: `${a.summary} Callable by an agent on behalf of the user.`, ...(a.confirm ? { requiresConfirmation: true } : {}) },
     }));
     const complete = parsedBuild(stack);
-    const full = scoreScenarioArtifact(complete, cardSlice(card));
+    const full = scoreScenarioArtifact(complete, card);
     expect(full.score).toBe(1);
     expect(full.unscored).toEqual([{ tag: 'ai.ask-data', reason: 'no check in the closed tag table' }]);
 
@@ -183,7 +188,7 @@ describe('control cards — scored end to end against their golden builds', () =
     ]) {
       const a = structuredClone(complete);
       degrade(a);
-      expect(scoreScenarioArtifact(a, cardSlice(card)).score!).toBeLessThan(1);
+      expect(scoreScenarioArtifact(a, card).score!).toBeLessThan(1);
     }
   });
 });

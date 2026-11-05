@@ -29,6 +29,8 @@
  * out an LLM judge, so every axis is decided by code.
  */
 
+import type { Truth } from '../truth.js';
+
 /** One number the answer must state. */
 export interface TruthFigure {
   label: string;
@@ -249,22 +251,9 @@ export function gradeRun(truth: RunTruth, hidden: HiddenScope, turn: RunTranscri
 // the persona must not see (`personaTruths`). The grader below judges one
 // persona's turn against that persona's truth, never the all-rows one.
 
-/**
- * A computed truth as the card loader returns it.
- *
- * ⛔ Mirrors `Truth` in `packages/qa/scenarios/src/truth.ts` field for field,
- * for the reason `scenario-score.ts` gives for `expect`: no dependency on the
- * private package that loads cards. A change there is a change here.
- */
-export type ScenarioTruth =
-  | { kind: 'scalar'; value: number }
-  | { kind: 'groups'; groups: ReadonlyArray<{ key: string | number | boolean | null; value: number }> }
-  | { kind: 'ranking'; rows: ReadonlyArray<{ key: string | number | boolean | null; value: number }> }
-  | { kind: 'unanswerable' }
-  | { kind: 'withheld' };
 
 /** The figures a truth states: one for a scalar, one per group or ranked row, none otherwise. */
-export function truthFigures(truth: ScenarioTruth, object: string, label: string, tol?: number): TruthFigure[] {
+export function truthFigures(truth: Truth, object: string, label: string, tol?: number): TruthFigure[] {
   const figure = (l: string, value: number): TruthFigure => (tol === undefined ? { label: l, value, object } : { label: l, value, object, tol });
   if (truth.kind === 'scalar') return [figure(label, truth.value)];
   if (truth.kind === 'groups') return truth.groups.map((g) => figure(`${label}[${String(g.key)}]`, g.value));
@@ -288,9 +277,9 @@ export interface PersonaRunInput {
   /** The question's object — what a correct reply's citation names. */
   object: string;
   /** The question's truth over every row (`truths[questionId]`). */
-  truth: ScenarioTruth;
+  truth: Truth;
   /** The truth AS this persona (`personaTruths[questionId][personaId]`). */
-  personaTruth: ScenarioTruth;
+  personaTruth: Truth;
   /** What the persona may not receive; the caller computes hidden VALUES (see {@link HiddenScope}). */
   hidden: HiddenScope;
   objectLabels?: RunTruth['objectLabels'];

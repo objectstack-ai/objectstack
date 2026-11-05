@@ -18,19 +18,19 @@ import { describe, expect, it } from 'vitest';
 
 import { ObjectStackDefinitionSchema, normalizeStackInput } from '@objectstack/spec';
 
-import { DEFAULT_METADATA_EVAL_CORPUS } from './corpus.js';
+import { DEFAULT_METADATA_EVAL_CORPUS } from '../../../../cli/src/lint/corpus.js';
 import {
   CAPABILITY_TAG_CHECKS,
   gradeCapabilityTags,
   readArtifactFacts,
   scoreScenarioArtifact,
   type ScenarioArtifactCard,
-} from './scenario-tags.js';
+} from '../../src/score/scenario-tags.js';
 
 type Bag = Record<string, any>;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const AREAS_DIR = resolve(HERE, '../../../../docs/qa/platform-checklist/areas');
+const AREAS_DIR = resolve(HERE, '../../../../../docs/qa/platform-checklist/areas');
 
 const MEASURE = 'task_count';
 
@@ -106,14 +106,21 @@ const ALL_TAGS = Object.keys(CAPABILITY_TAG_CHECKS);
 const CARD: ScenarioArtifactCard = {
   expect: { objects: ['project', 'task'], minFieldsPerObject: 2, lookups: [{ object: 'task', field: 'project', to: 'project' }] },
   capabilities: ALL_TAGS,
-  personas: [
-    { id: 'contractor', hidden: { fields: [{ object: 'task', field: 'estimate_hours' }] }, scope: [{ object: 'project' }] },
-    { id: 'manager', hidden: { objects: ['project'] } },
-  ],
-  agentActions: [
-    { name: 'set_task_status', object: 'task', confirm: false },
-    { name: 'delete_task', object: 'task', confirm: true },
-  ],
+  run: {
+    personas: [
+      {
+        id: 'contractor',
+        role: 'Contractor',
+        hidden: { fields: [{ object: 'task', field: 'estimate_hours' }] },
+        scope: [{ object: 'project', field: 'owner', value: 'u_kim' }],
+      },
+      { id: 'manager', role: 'Manager', hidden: { objects: ['project'] } },
+    ],
+    agentActions: [
+      { name: 'set_task_status', object: 'task', summary: 'Move a task to another status.', confirm: false },
+      { name: 'delete_task', object: 'task', summary: 'Delete a task; irreversible.', confirm: true },
+    ],
+  },
 };
 
 const field = (a: Bag, object: string, name: string): Bag => (a.objects as Bag[]).find((o) => o.name === object)!.fields[name];
@@ -205,7 +212,7 @@ describe('the closed tag table', () => {
     const verdicts = gradeCapabilityTags(readArtifactFacts(richArtifact()), {
       ...CARD,
       capabilities: ['access-security.field-permissions', 'access-security.row-scope'],
-      personas: [{ id: 'p', hidden: { objects: ['project'] } }],
+      run: { ...CARD.run, personas: [{ id: 'p', role: 'Partner', hidden: { objects: ['project'] } }] },
     });
     expect(verdicts.map((v) => [v.status, v.checks.length])).toEqual([['unscored', 0], ['unscored', 0]]);
   });

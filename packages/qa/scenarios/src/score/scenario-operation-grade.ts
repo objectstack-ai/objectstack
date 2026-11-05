@@ -24,30 +24,20 @@
  * carry FAILS its check with "not observed" — an unobserved fact is never a
  * pass (a runner that forgot to read the audit trail must not grade green).
  *
- * ⛔ {@link DeclaredOutcome} mirrors the card's `OutcomeSchema`
- * (`packages/qa/scenarios/src/schema.ts`) field for field, for the reason
- * `scenario-score.ts` gives for `expect`: no dependency on the private package
- * that parses cards. A change there is a change here, in the same shape.
+ * The declared side is the card schema's own type (`OutcomeSchema`), never a
+ * copy of it.
  */
 
+import type { z } from 'zod';
+
+import type { OutcomeSchema, PostStateSchema, Scalar } from '../schema.js';
 import type { CheckResult } from './scenario-score.js';
 
-type Scalar = string | number | boolean | null;
+/** A record as the data API should read it after an applied write (`PostStateSchema`). */
+export type DeclaredPostState = z.infer<typeof PostStateSchema>;
 
-/** A record as the data API should read it after an applied write. */
-export interface DeclaredPostState {
-  object: string;
-  id?: string;
-  where?: Readonly<Record<string, Scalar>>;
-  values?: Readonly<Record<string, Scalar>>;
-  absent?: true;
-}
-
-/** The card's declared outcome of one write. */
-export type DeclaredOutcome =
-  | { kind: 'applied'; state: readonly DeclaredPostState[]; auditActor?: string }
-  | { kind: 'refused'; code: string }
-  | { kind: 'pending_confirmation' };
+/** The card's declared outcome of one write (`run.operations[].outcome`). */
+export type DeclaredOutcome = z.infer<typeof OutcomeSchema>;
 
 /** How the write door answered the agent's write. */
 export type ObservedAnswer =

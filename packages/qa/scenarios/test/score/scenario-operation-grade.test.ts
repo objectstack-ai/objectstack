@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { gradeOperation, type DeclaredOutcome, type OperationObservation } from './scenario-operation-grade.js';
+import { gradeOperation, type DeclaredOutcome, type OperationObservation } from '../../src/score/scenario-operation-grade.js';
 
 const APPLIED: DeclaredOutcome = {
   kind: 'applied',

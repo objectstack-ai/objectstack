@@ -35,7 +35,7 @@
 
 import { REFERENCE_VALUE_TYPES, referenceTargetOf } from '@objectstack/spec/data';
 
-import { resolveStackCollection } from '../utils/stack-collections.js';
+import { resolveStackCollection } from '@objectstack/core';
 import { PLATFORM_OBJECT_PREFIX, type EvalGraph, type EvalGraphField, type EvalGraphNavEntry } from './scenario-score.js';
 
 type Bag = Record<string, unknown>;

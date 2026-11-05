@@ -38,25 +38,22 @@
  * automation service, and the caller's permissions are the session's. Those
  * are observed by the scenario runner, not judged here.
  *
- * ## The card slice these checks read
+ * ## What of the card the checks read
  *
- * ⛔ The inputs below are the slice of a loaded card (`@objectstack/scenarios`,
- * `packages/qa/scenarios/src/schema.ts`) the checks read — `expect` (the
- * {@link ScenarioExpectation} mirror), `capabilities`, `run.personas`' hidden
- * fields and row scope, and `run.agentActions`. They are named here, not
- * imported, for the reason `scenario-score.ts` gives for `expect`: this module
- * takes no dependency on the private package that parses cards. A change to
- * any of those card keys is a change here, in the same shape.
+ * `expect`, `capabilities`, `run.personas` (hidden fields and row scope) and
+ * `run.agentActions` — picked from the card schema's own type
+ * ({@link ScenarioArtifactCard}), never a copy of it.
  *
  * Deterministic: no model call, no network (the cost ruling on cloud#3600).
  */
 
+import { resolveStackCollection } from '@objectstack/core';
 import { standaloneActionOwnerKey } from '@objectstack/objectql';
 import { effectiveSharingModel } from '@objectstack/plugin-sharing';
 import { APPROVAL_NODE_TYPE, resolveFlowTriggerKind } from '@objectstack/spec/automation';
 import { SINGLE_OPTION_TYPES, summaryFunctionReadsField } from '@objectstack/spec/data';
 
-import { resolveStackCollection } from '../utils/stack-collections.js';
+import type { ScenarioCard } from '../schema.js';
 import { artifactToEvalGraph } from './scenario-graph.js';
 import {
   PLATFORM_OBJECT_PREFIX,
@@ -67,7 +64,6 @@ import {
   type CheckResult,
   type EvalGraph,
   type EvalGraphField,
-  type ScenarioExpectation,
   type ScoreResult,
 } from './scenario-score.js';
 
@@ -76,33 +72,15 @@ type Bag = Record<string, unknown>;
 const isBag = (value: unknown): value is Bag => !!value && typeof value === 'object' && !Array.isArray(value);
 const norm = (s: string): string => s.trim().toLowerCase();
 
-// ── The card slice ──────────────────────────────────────────────────────────
+// ── What of the card the checks read ────────────────────────────────────────
 
-/** A card persona as these checks read it: what it must not see, and its row scope. */
-export interface ScenarioPersonaSlice {
-  id: string;
-  hidden: {
-    objects?: readonly string[];
-    fields?: ReadonlyArray<{ object: string; field: string }>;
-  };
-  scope?: ReadonlyArray<{ object: string }>;
-}
+/** What {@link scoreScenarioArtifact} reads of one card: a pick of the card schema's type. */
+export type ScenarioArtifactCard = Pick<ScenarioCard, 'expect' | 'capabilities'> & {
+  run: Pick<ScenarioCard['run'], 'personas' | 'agentActions'>;
+};
 
-/** A business action the card declares an agent must be able to call. */
-export interface ScenarioAgentAction {
-  name: string;
-  object: string;
-  /** The card says the action asks before acting. */
-  confirm: boolean;
-}
-
-/** What {@link scoreScenarioArtifact} reads of one card. */
-export interface ScenarioArtifactCard {
-  expect: ScenarioExpectation;
-  capabilities: readonly string[];
-  personas?: readonly ScenarioPersonaSlice[];
-  agentActions?: readonly ScenarioAgentAction[];
-}
+/** A business action the card declares an agent must be able to call (`run.agentActions[]`). */
+export type ScenarioAgentAction = NonNullable<ScenarioCard['run']['agentActions']>[number];
 
 // ── The artifact facts the checks read ──────────────────────────────────────
 
@@ -329,7 +307,7 @@ export const CAPABILITY_TAG_CHECKS: Readonly<Record<string, TagCheck>> = Object.
     asserts: 'every field a card persona must not see exists and is denied (`readable: false`) by a permission set',
     run(f, card) {
       const hidden = uniqueBy(
-        (card.personas ?? []).flatMap((p) => p.hidden.fields ?? []),
+        card.run.personas.flatMap((p) => p.hidden.fields ?? []),
         (h) => `${h.object}.${h.field}`,
       );
       if (hidden.length === 0) return { unscored: "the card's personas hide no field, so no field permission has anything to deny" };
@@ -353,7 +331,7 @@ export const CAPABILITY_TAG_CHECKS: Readonly<Record<string, TagCheck>> = Object.
   'access-security.row-scope': {
     asserts: "every object a card persona sees only part of keeps its records private (owner-scoped) or derives access from its master",
     run(f, card) {
-      const scoped = [...new Set((card.personas ?? []).flatMap((p) => (p.scope ?? []).map((s) => s.object)))];
+      const scoped = [...new Set(card.run.personas.flatMap((p) => (p.scope ?? []).map((s) => s.object)))];
       if (scoped.length === 0) return { unscored: "the card's personas scope no rows, so no object has a row scope to keep" };
       return {
         checks: scoped.map((object) => {
@@ -502,7 +480,7 @@ export function scoreScenarioArtifact(artifact: unknown, card: ScenarioArtifactC
   const expect = scoreGraph(facts.graph, card.expect);
   const shape = scoreGraphShape(facts.graph, deriveShape(card.expect));
   const tags = gradeCapabilityTags(facts, card);
-  const agentActions = gradeAgentActions(facts, card.agentActions ?? []);
+  const agentActions = gradeAgentActions(facts, card.run.agentActions ?? []);
   const all = [...expect.checks, ...tags.flatMap((t) => t.checks), ...agentActions];
   const passed = all.filter((c) => c.pass).length;
   return {

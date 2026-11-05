@@ -19,7 +19,7 @@ import {
   type PersonaRunInput,
   type RunTranscript,
   type RunTruth,
-} from './scenario-run-grade.js';
+} from '../../src/score/scenario-run-grade.js';
 
 const truth: RunTruth = {
   figures: [{ label: 'open tasks', value: 42, object: 'task' }],
