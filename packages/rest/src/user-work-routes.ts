@@ -30,7 +30,7 @@
  * closures and the `objectQLProvider` field as a getter, read at request time.
  */
 
-import { sendError, sendServerFault } from '@objectstack/types';
+import { sendError, sendOk, sendServerFault } from '@objectstack/types';
 import {
     countUserAssignedWork,
     transferUserAssignedWork,
@@ -108,7 +108,7 @@ export function registerUserWorkEndpoints(this: UserWorkRouteHost, basePath: str
                 const engine = await resolveEngine(environmentId, req);
                 if (!engine) return sendError(res, 501, 'NOT_IMPLEMENTED', 'No data engine is configured on this deployment');
                 const summary = await countUserAssignedWork(engine, userId, context);
-                return res.json({ success: true, data: summary });
+                return sendOk(res, summary);
             } catch (err) {
                 return sendServerFault(res, 500, 'INTERNAL_ERROR', 'Counting the user\'s assigned work failed', err);
             }
@@ -151,7 +151,7 @@ export function registerUserWorkEndpoints(this: UserWorkRouteHost, basePath: str
                         objects,
                         describeFailure: rowFailureAnswer,
                     });
-                    return res.json({ success: true, data: report });
+                    return sendOk(res, report);
                 } catch (err) {
                     if (!(err instanceof UserWorkTransferRefusal)) throw err;
                     return sendError(res, err.status, err.code, err.message, err.field ? {

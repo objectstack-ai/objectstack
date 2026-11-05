@@ -66,7 +66,8 @@ function makeStubDriver() {
     async connect() {}, async disconnect() {}, async checkHealth() { return true; },
     async execute() { return null; },
     async find(object: string, ast: any) {
-      return Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where));
+      const rows = Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where));
+      return typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
     },
     async findOne(object: string, ast: any) {
       for (const r of storeFor(object).values()) if (matches(r, ast?.where)) return r;
@@ -191,7 +192,7 @@ describe('[#30205] a new assignment to a banned user is refused', () => {
     const row: any = await engine.insert('ban_ticket', { title: 'T', assignee: 'u_alice' }, { context: ALICE } as any);
     const err = await refusalOf(() => engine.update('ban_ticket', { assignee: 'u_bob' }, { where: { id: row.id }, context: ALICE } as any));
     expect(err.fields[0]).toMatchObject({ field: 'assignee', code: 'reference_user_banned' });
-    const after: any = await engine.findOne('ban_ticket', { where: { id: row.id }, context: { isSystem: true } } as any);
+    const after: any = await engine.findOne('ban_ticket', { where: { id: row.id }, context: { isSystem: true } });
     expect(after.assignee).toBe('u_alice');
   });
 

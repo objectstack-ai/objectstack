@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import {
   countUserAssignedWork,
   isUserBanInForce,
@@ -69,12 +70,16 @@ describe('[#30205] userAssignedWorkFields', () => {
 
 type Row = Record<string, any>;
 
+/** Equality and `$contains`; a logical operator is refused, never read as a field. */
+const match = (row: Row, where: Record<string, any>) => Object.entries(where).every(([k, v]) => {
+  if (k.startsWith('$')) throw new Error('fake engine: unsupported logical operator ' + k);
+  return v && typeof v === 'object' && '$contains' in v ? Array.isArray(row[k]) && row[k].includes(v.$contains) : row[k] === v;
+});
+
 /** An in-memory engine: equality and `$contains` filters, a per-object read/write refusal. */
 function fakeEngine(seed: Record<string, Row[]>, opts: { unreadable?: string[]; refuseUpdate?: (object: string, id: string) => boolean; disabled?: string[] } = {}) {
   const tables = new Map(Object.entries(seed).map(([k, rows]) => [k, rows.map((r) => ({ ...r }))]));
   const calls: Array<{ op: string; object: string; context: any; where?: any }> = [];
-  const match = (row: Row, where: Record<string, any>) => Object.entries(where).every(([k, v]) =>
-    v && typeof v === 'object' && '$contains' in v ? Array.isArray(row[k]) && row[k].includes(v.$contains) : row[k] === v);
   const guard = (object: string, context: any) => {
     if (opts.unreadable?.includes(object) && !context?.isSystem) throw Object.assign(new Error('denied'), { code: 'PERMISSION_DENIED' });
   };
@@ -95,6 +100,7 @@ function fakeEngine(seed: Record<string, Row[]>, opts: { unreadable?: string[]; 
       return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
     },
     async update(object, data, o) {
+      assertEngineUpdateDispatch(data, o);
       calls.push({ op: 'update', object, context: o?.context, where: o?.where });
       const row = (tables.get(object) ?? []).find((r) => match(r, o?.where ?? {}));
       if (!row) return null;

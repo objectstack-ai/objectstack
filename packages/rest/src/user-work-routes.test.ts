@@ -2,6 +2,7 @@
 // [#30205] The REST face of a user's assigned work: the counts and the hand-over.
 
 import { describe, it, expect, vi } from 'vitest';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { RestServer } from './rest-server';
 
 function mockServer() {
@@ -35,8 +36,12 @@ function mockEngine() {
     getConfigs: () => ({ ticket: { name: 'ticket', fields: { owner_id: { type: 'lookup', reference: 'sys_user' } } } }),
     count: vi.fn(async (_o: string, q: any) => rows.filter((r) => r.owner_id === q.where.owner_id).length),
     find: vi.fn(async (o: string, q: any) => (o === 'sys_user' ? users : rows).filter((r: any) =>
-      Object.entries(q.where).every(([k, v]) => r[k] === v)).slice(0, q.limit ?? Infinity)),
+      Object.entries(q.where).every(([k, v]) => {
+        if (k.startsWith('$')) throw new Error('fake engine: unsupported logical operator ' + k);
+        return r[k] === v;
+      })).slice(0, q.limit ?? Infinity)),
     update: vi.fn(async (_o: string, data: any, opts: any) => {
+      assertEngineUpdateDispatch(data, opts);
       const row = rows.find((r) => r.id === opts.where.id)!;
       Object.assign(row, data);
       return row;
