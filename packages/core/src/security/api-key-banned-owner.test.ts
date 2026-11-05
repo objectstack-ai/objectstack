@@ -22,6 +22,7 @@ import { resolveAuthzContext } from './resolve-authz-context.js';
 import { hashApiKey, resolveApiKeyAdmission, resolveApiKeyPrincipal } from './api-key.js';
 import { isAuthzStoreUnavailableError } from './authz-store-unavailable.js';
 import { isUserBanInForce } from './user-ban.js';
+import { bindStaticSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 const KEY = 'osk_banned_owner_pin_key';
 const MADE_UP_KEY = 'osk_no_row_holds_this_key';
@@ -229,5 +230,67 @@ describe('resolveAuthzContext — a banned owner\'s key resolves as a key that d
     });
     expect(authz.userId).toBe(COOKIE_USER);
     expect(authz.credential).toBe('session');
+  });
+});
+
+describe('a refused key gets the anonymous entry an unknown key gets, on a face that serves the guest', () => {
+  const GUEST_SET = 'public_catalog_reader';
+  const ORG = 'org_only';
+
+  /** A guest anchor that grants something, in the one organization the guest entry derives. */
+  function guestServingQl(keyRow: Record<string, unknown>, owner: Record<string, unknown>) {
+    const tables: Record<string, any[]> = {
+      sys_api_key: [{ id: 'key_1', key: hashApiKey(KEY), user_id: OWNER, revoked: false, scopes: '[]', ...keyRow }],
+      sys_user: [owner],
+      sys_member: [],
+      sys_organization: [{ id: ORG }],
+      sys_metadata_activation: [],
+    };
+    const registered = new Set(Object.keys(tables));
+    const ql = {
+      registry: { getObject: (name: string) => (registered.has(name) ? { name } : undefined) },
+      async find(object: string, opts: any) {
+        const where = opts?.where ?? {};
+        const rows = (tables[object] ?? []).filter((r) =>
+          Object.entries(where).every(([k, v]) => {
+            if (k.startsWith('$')) throw new Error(`fake engine: unsupported combinator ${k}`);
+            return v && typeof v === 'object' && '$in' in (v as any) ? (v as any).$in.includes(r[k]) : r[k] === v;
+          }),
+        );
+        return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
+      },
+    };
+    bindStaticSecurityCatalog(ql, {
+      positions: [{ name: 'guest', permissionSets: [GUEST_SET] }],
+      permissions: [{ name: GUEST_SET, tabPermissions: { storefront: 'visible' } }],
+    });
+    return ql;
+  }
+
+  const onGuestFace = (ql: any, key: string) =>
+    resolveAuthzContext({
+      ql,
+      headers: headers(key),
+      nowMs: NOW,
+      guestEntry: true,
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
+      getSession: async () => undefined,
+    });
+
+  const quietly = async <T>(fn: () => Promise<T>): Promise<T> => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try { return await fn(); } finally { warn.mockRestore(); }
+  };
+
+  it('a banned owner\'s key and an unknown key get the same guest entry', async () => {
+    const ql = guestServingQl({}, { id: OWNER, banned: true });
+    const banned = await quietly(() => onGuestFace(ql, KEY));
+    const unknown = await onGuestFace(ql, MADE_UP_KEY);
+    // Non-vacuous: the guest anchor really grants something here.
+    expect(unknown.permissions).toEqual([GUEST_SET]);
+    expect(unknown.tenantId).toBe(ORG);
+    expect(banned.userId).toBeUndefined();
+    expect(banned).toEqual(unknown);
   });
 });
