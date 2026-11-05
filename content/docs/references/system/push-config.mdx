@@ -82,10 +82,10 @@ constructor instead. No `OS_PUSH_*` environment variable carries any of
 it: the vendor blocks hold no secret to override, and each `credentialRef`
 already names one.
 
-Out of scope here: the domestic Android vendors (HMS / Honor, Xiaomi, OPPO,
-vivo). ADR-0012 §6.1 has the hosted relay front them in phase 2, as further
-values of `vendor`, the token type the relay routes on; there is no
-per-vendor plugin and no per-vendor channel.
+Out of scope here: the domestic Android vendors (HMS / Honor / Xiaomi /
+OPPO / vivo). ADR-0012 §6.1 has the hosted relay front them in phase 2, as
+further values of `vendor`, the token type the sender routes on; there is
+no per-vendor plugin and no per-vendor channel.
 
 <Callout type="info">
 **Source:** `packages/spec/src/system/push-config.zod.ts`
