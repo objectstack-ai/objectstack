@@ -25,7 +25,14 @@ import { useRecentItemLabel } from '../useRecentItemLabel';
 import type { RecentItem } from '../../context/RecentItemsProvider';
 import { recentViewId } from '../useTrackRouteAsRecent';
 
-function metadata() {
+/**
+ * The served lists, per language: the server translates what it serves under
+ * the request's language, so a zh-CN session holds the zh-CN answer
+ * (`MetadataProvider` remounts on a language switch and reads again).
+ */
+const SERVED_REPORT = { en: 'Q3 Results', 'zh-CN': '第三季度结果' } as const;
+
+function metadata(language = 'en', served: { reports?: unknown[]; pages?: unknown[]; dashboards?: unknown[] } = {}) {
   return {
     apps: [],
     objects: [
@@ -37,9 +44,9 @@ function metadata() {
         listViews: { 'showcase_task.open_tasks': { name: 'showcase_task.open_tasks', label: 'Open tasks' } },
       },
     ],
-    dashboards: [],
-    reports: [{ name: 'q3_results', label: 'Q3 Results' }],
-    pages: [],
+    dashboards: served.dashboards ?? [],
+    reports: served.reports ?? [{ name: 'q3_results', label: SERVED_REPORT[language as keyof typeof SERVED_REPORT] ?? 'Q3 Results' }],
+    pages: served.pages ?? [],
     loading: false,
     error: null,
     refresh: async () => {},
@@ -51,15 +58,22 @@ function metadata() {
   };
 }
 
-function wrapper(language: string) {
-  const i18n = createI18n({
-    defaultLanguage: language,
-    detectBrowserLanguage: false,
-    resources: { 'zh-CN': { showcase: { reports: { q3_results: { label: '第三季度结果' } } } } },
-  });
+/** The packaged catalog, as the console loads it from `/i18n/translations`. */
+const CATALOG = {
+  'zh-CN': {
+    showcase: {
+      reports: { q3_results: { label: '第三季度结果' } },
+      pages: { welcome_tour: { label: '欢迎' } },
+      dashboards: { ops_board: { label: '运营看板' } },
+    },
+  },
+};
+
+function wrapper(language: string, served?: Parameters<typeof metadata>[1]) {
+  const i18n = createI18n({ defaultLanguage: language, detectBrowserLanguage: false, resources: CATALOG });
   return ({ children }: { children: ReactNode }) => (
     <I18nProvider instance={i18n} persistLanguage={false}>
-      <MetadataCtx.Provider value={metadata() as never}>{children}</MetadataCtx.Provider>
+      <MetadataCtx.Provider value={metadata(language, served) as never}>{children}</MetadataCtx.Provider>
     </I18nProvider>
   );
 }
@@ -68,7 +82,7 @@ const at = '2026-10-06T09:00:00.000Z';
 const REPORT: RecentItem = { id: 'report:q3_results', type: 'report', name: 'q3_results', href: '/r', visitedAt: at };
 
 describe('useRecentItemLabel (objectui#11678)', () => {
-  it('a report: its metadata label in en, its bundle label in zh-CN', () => {
+  it('a report: its served label, in each language the server served it in', () => {
     const en = renderHook(() => useRecentItemLabel(), { wrapper: wrapper('en') });
     expect(en.result.current(REPORT)).toBe('Q3 Results');
     const zh = renderHook(() => useRecentItemLabel(), { wrapper: wrapper('zh-CN') });
@@ -142,5 +156,57 @@ describe('useRecentItemLabel — a list view (objectui#12604)', () => {
   it('a view the cache does not hold (one a user saved) is drawn as the list it opens: the object’s', () => {
     const { result } = renderHook(() => useRecentItemLabel(), { wrapper: wrapper('en') });
     expect(result.current(view('my_saved_view'))).toBe('Tasks');
+  });
+});
+
+/**
+ * objectstack#30244 — a served report, page or dashboard is named as served.
+ *
+ * An override (a `.custom` package's, or a published edit) renamed each one,
+ * and the `/meta` read serves the new name by the server's label order for an
+ * overridden item. The entry re-applied the packaged catalog's translation of
+ * the old name over it, because the served label reached the catalog lookup
+ * only as its fallback.
+ *
+ * Directions, written before the run: the renamed cells RED before the change
+ * (the packaged zh-CN string), GREEN after; the not-served controls GREEN on
+ * both sides.
+ */
+describe('useRecentItemLabel — a served report, page or dashboard is named as served (objectstack#30244)', () => {
+  const item = (type: 'report' | 'page' | 'dashboard', name: string): RecentItem => ({
+    id: `${type}:${name}`,
+    type,
+    name,
+    href: `/${type}/${name}`,
+    visitedAt: at,
+  });
+  const RENAMED = {
+    reports: [{ name: 'q3_results', label: 'Quarter Review (renamed-30244)' }],
+    pages: [{ name: 'welcome_tour', label: 'Getting Started (renamed-30244)' }],
+    dashboards: [{ name: 'ops_board', label: 'Ops Cockpit (renamed-30244)', widgets: [] }],
+  };
+
+  it('zh-CN: a renamed report, page and dashboard show the served label, not the packaged translation', () => {
+    const { result } = renderHook(() => useRecentItemLabel(), { wrapper: wrapper('zh-CN', RENAMED) });
+    expect(result.current(item('report', 'q3_results'))).toBe('Quarter Review (renamed-30244)');
+    expect(result.current(item('page', 'welcome_tour'))).toBe('Getting Started (renamed-30244)');
+    expect(result.current(item('dashboard', 'ops_board'))).toBe('Ops Cockpit (renamed-30244)');
+  });
+
+  it('zh-CN: control — an item the read did not serve, or served with no label, is named by the bundle', () => {
+    const { result } = renderHook(() => useRecentItemLabel(), {
+      wrapper: wrapper('zh-CN', { reports: [{ name: 'q3_results' }], pages: [], dashboards: [] }),
+    });
+    expect(result.current(item('report', 'q3_results'))).toBe('第三季度结果');
+    expect(result.current(item('page', 'welcome_tour'))).toBe('欢迎');
+    expect(result.current(item('dashboard', 'ops_board'))).toBe('运营看板');
+  });
+
+  it('en: control — no served label and no catalogue entry shows the machine name', () => {
+    const { result } = renderHook(() => useRecentItemLabel(), {
+      wrapper: wrapper('en', { reports: [], pages: [], dashboards: [] }),
+    });
+    expect(result.current(item('report', 'q3_results'))).toBe('q3_results');
+    expect(result.current(item('dashboard', 'ops_board'))).toBe('ops_board');
   });
 });
