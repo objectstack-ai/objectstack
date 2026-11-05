@@ -30,7 +30,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec';
 import { resetPlatformAdminEmailMemo } from './platform-admin.js';
-import { resolveUserAuthzGrants } from './resolve-authz-context.js';
+import { countPositionHolders, resolveUserAuthzGrants } from './resolve-authz-context.js';
 import { FIXTURES, T0, makeRecordingQl } from './__tests__/resolve-authz-context.batch-equivalence.testkit.js';
 import { bindStaticSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
@@ -173,13 +173,14 @@ async function resolveBoth(
 }
 
 describe('the prelude\'s grant read names the columns the resolver decides on', () => {
-  it('the grant read names exactly permission_set, organization_id, valid_from and valid_until — no other read names any', async () => {
+  it('the grant read names exactly permission_set, organization_id, valid_from and valid_until — no other read but the memberships names any', async () => {
     const { projections } = await resolveBoth('u1', tablesFor(GRANT_FIXTURES.at(-1)!.grants), { tenantId: ORG_A, nowMs: T0 }, definitions);
     const grantReads = projections.filter((p) => p.object === 'sys_user_permission_set');
     expect(grantReads).toHaveLength(1);
     expect([...(grantReads[0]!.fields as string[])].sort()).toEqual(['organization_id', 'permission_set', 'valid_from', 'valid_until']);
-    // No other read in the prelude changes.
-    expect(projections.filter((p) => p.object !== 'sys_user_permission_set' && p.fields !== undefined)).toEqual([]);
+    // No other read in the prelude changes; the membership reads name theirs
+    // (pinned below).
+    expect(projections.filter((p) => !['sys_user_permission_set', 'sys_member'].includes(p.object) && p.fields !== undefined)).toEqual([]);
   });
 
   describe.each(GRANT_FIXTURES)('$name', ({ grants, tenantId }) => {
@@ -207,5 +208,88 @@ describe('the prelude\'s grant read names the columns the resolver decides on', 
       const { full, projected } = await resolveBoth(fixture.userId, fixture.tables, fixture.opts as Record<string, unknown>);
       expect(projected).toEqual(full);
     });
+  });
+});
+
+/**
+ * [#30454] The prelude's `sys_member` reads name the columns the resolver
+ * decides on, for the same reason as the grant read: the membership's record
+ * title reads the person one hop through `user_id`, which a read naming no
+ * columns pays for with a `sys_user` read and a round trip in every request.
+ * The user's own memberships carry the organization, the role and the ADR-0091
+ * validity window; the active organization's first page carries the one value
+ * §5 keeps, as its completion pages do. Pinned the same way: the envelope over
+ * projected rows equals the envelope over full rows, per membership state the
+ * resolver discriminates, and so does the position-holder count.
+ */
+describe('[#30454] the prelude\'s membership reads name the columns the resolver decides on', () => {
+  /** A membership row as stored: every column the object declares, and the title a full read computes. */
+  const memberRow = (id: string, cols: Record<string, unknown>) => ({
+    id,
+    user_id: 'u1',
+    organization_id: ORG_A,
+    role: 'member',
+    created_at: past,
+    ...cols,
+    display_title: `Ursula (${String(cols.role ?? 'member')})`,
+  });
+
+  const tablesWith = (members: Array<Record<string, unknown>>): Record<string, unknown[]> => ({
+    ...tablesFor([]),
+    sys_member: [
+      ...members,
+      // A fellow member of the active organization (§5's `org_user_ids`).
+      { id: 'm_peer', user_id: 'u2', organization_id: ORG_A, role: 'admin', created_at: past, display_title: 'Vera (admin)' },
+    ],
+  });
+
+  const MEMBER_FIXTURES: Array<{ name: string; members: Array<Record<string, unknown>>; tenantId?: string }> = [
+    { name: 'an owner of the active organization', tenantId: ORG_A, members: [memberRow('m_owner', { role: 'owner' })] },
+    { name: 'an admin of another organization', tenantId: ORG_A, members: [memberRow('m_b', { role: 'admin', organization_id: ORG_B })] },
+    { name: 'an external member', tenantId: ORG_A, members: [memberRow('m_ext', { role: 'external' })] },
+    { name: 'two roles in one membership', tenantId: ORG_A, members: [memberRow('m_two', { role: 'admin,member' })] },
+    { name: 'a lapsed membership (valid_until past)', tenantId: ORG_A, members: [memberRow('m_lapsed', { role: 'owner', valid_until: past })] },
+    { name: 'a membership not yet valid (valid_from future)', tenantId: ORG_A, members: [memberRow('m_pending', { role: 'owner', valid_from: future })] },
+    { name: 'memberships in two organizations, none active', members: [memberRow('m_a', { role: 'admin' }), memberRow('m_b', { role: 'member', organization_id: ORG_B })] },
+  ];
+
+  it('the user\'s membership read names organization_id, role, valid_from and valid_until; the organization\'s names id and user_id', async () => {
+    const { projections } = await resolveBoth('u1', tablesWith([memberRow('m_owner', { role: 'owner' })]), { tenantId: ORG_A, nowMs: T0 }, definitions);
+    const memberReads = projections.filter((p) => p.object === 'sys_member').map((p) => [...(p.fields as string[])].sort());
+    expect(memberReads).toHaveLength(2);
+    expect(memberReads).toEqual(expect.arrayContaining([
+      ['organization_id', 'role', 'valid_from', 'valid_until'],
+      ['id', 'user_id'],
+    ]));
+  });
+
+  describe.each(MEMBER_FIXTURES)('$name', ({ members, tenantId }) => {
+    it('resolves the identical envelope from the projected rows as from the full rows', async () => {
+      const opts = { ...(tenantId ? { tenantId } : {}), nowMs: T0 };
+      const { full, projected } = await resolveBoth('u1', tablesWith(members), opts, definitions);
+      expect(projected).toEqual(full);
+    });
+  });
+
+  it('the fixtures discriminate: they resolve distinct envelopes', async () => {
+    const seen = new Set<string>();
+    for (const { members, tenantId } of MEMBER_FIXTURES) {
+      const { projected } = await resolveBoth('u1', tablesWith(members), { ...(tenantId ? { tenantId } : {}), nowMs: T0 }, definitions);
+      seen.add(JSON.stringify(projected));
+    }
+    expect(seen.size).toBeGreaterThanOrEqual(5);
+  });
+
+  it('the position-holder count reads user_id beside those columns, and counts the same from projected rows', async () => {
+    const tables = tablesWith([memberRow('m_owner', { role: 'owner' }), memberRow('m_lapsed', { user_id: 'u3', role: 'owner', valid_until: past })]);
+    const positions = ['org_owner', 'org_admin', 'everyone'];
+    const full = engineOver(tables, false);
+    const projected = engineOver(tables, true);
+    const fullCounts = await countPositionHolders(full.ql, ORG_A, positions, { nowMs: T0 });
+    const projectedCounts = await countPositionHolders(projected.ql, ORG_A, positions, { nowMs: T0 });
+    expect([...projectedCounts]).toEqual([...fullCounts]);
+    expect(projectedCounts.get('org_owner')).toBe(1);
+    const memberRead = projected.projections.find((p) => p.object === 'sys_member');
+    expect([...(memberRead!.fields as string[])].sort()).toEqual(['organization_id', 'role', 'user_id', 'valid_from', 'valid_until']);
   });
 });
