@@ -12458,13 +12458,14 @@ export class ObjectStackProtocolImplementation implements
             // discipline every advisory-carrying door follows: an advisory-free
             // element's bytes are unchanged, and absence means "nothing to
             // report", never "the gate did not run".
-            published.push({
+            const element: (typeof published)[number] = {
                 // [#21207] Each element's version token is keyed, like the
                 // single-item doors' (`receiptVersion`); `p.version` stays the
                 // stored hash for everything internal.
                 type: p.d.type, name: p.d.name, version: await this.receiptVersion(p.version),
-                ...(p.advisories.length > 0 ? { advisories: p.advisories } : {}),
-            });
+                ...(p.advisories.length > 0 ? { advisories: [...p.advisories] } : {}),
+            };
+            published.push(element);
             try {
                 const eff = await this.runPublishSideEffects({
                     singularType: p.singularType,
@@ -12474,6 +12475,16 @@ export class ObjectStackProtocolImplementation implements
                     ...(request.actor ? { actor: request.actor } : {}),
                     skipSeedApply: true,
                 });
+                // [#30693] A refused object-storage sync rides THIS element's
+                // `advisories`, the same `object-storage-sync-refused` warning
+                // `publishMetaItem` and a publish-mode save answer (#30635).
+                // The metadata is live and the element stays published; before
+                // this, only the server log said the table was not created or
+                // altered. Appended after the gate's findings, still
+                // omitted-when-empty: a clean sync adds no key.
+                if (eff.storageRefused) {
+                    element.advisories = [...(element.advisories ?? []), eff.storageRefused];
+                }
                 if (eff.materializeApplied) {
                     materialize.any = true;
                     materialize.inserted += eff.materializeApplied.inserted;
