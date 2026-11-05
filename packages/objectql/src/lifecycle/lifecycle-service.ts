@@ -719,19 +719,13 @@ export class LifecycleService {
         });
         present = Boolean(row);
       }
-      const now = new Date(this.now()).toISOString();
+      // Only the clock's own columns: the audit family (`created_at`,
+      // `updated_at`) is the engine's to stamp on its write path.
+      const row = { id: LIFECYCLE_STATE_ROW_ID, last_swept_at: at };
       if (present) {
-        await engine.update(
-          LIFECYCLE_STATE_OBJECT,
-          { id: LIFECYCLE_STATE_ROW_ID, last_swept_at: at, updated_at: now },
-          { context: { ...SYSTEM_CTX } },
-        );
+        await engine.update(LIFECYCLE_STATE_OBJECT, row, { context: { ...SYSTEM_CTX } });
       } else {
-        await engine.insert(
-          LIFECYCLE_STATE_OBJECT,
-          { id: LIFECYCLE_STATE_ROW_ID, last_swept_at: at, created_at: now, updated_at: now },
-          { context: { ...SYSTEM_CTX } },
-        );
+        await engine.insert(LIFECYCLE_STATE_OBJECT, row, { context: { ...SYSTEM_CTX } });
       }
       this.watermarkRowExists = true;
     } catch (err) {
