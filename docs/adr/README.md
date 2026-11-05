@@ -215,7 +215,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0145](./0145-ui-deprecation-tombstones-retire-on-the-spec-window.md) | A `?: never` tombstone on the ui authoring face retires on the spec's own window — one major after the retire… | Accepted — 2026-10-28, #27251 · Amended (2026-10-28, #27291 — one clause e… | 2026-10-28 | — | — |
 | [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md) | Package-level override — every customization of an installed package lives in its paired `.custom` package, t… | Accepted — 2026-10-31 — rewritten in place from the Proposed draft of 2026… | 2026-10-31 | ADR-0126, ADR-0131, ADR-0005, ADR-0048, ADR-0141, ADR-0070 | — |
 | [ADR-0147](./0147-membership-scoped-rls-lowers-to-an-engine-internal-org-member-semi-join-leaf.md) | Membership-scoped RLS (`FIELD in currentuser.orguserids`) lowers to an engine-internal organization-member se… | Proposed — 2026-11-02. `docs/adr/` is Tier H (Prime Directive #14): the re… | 2026-11-02 | — | — |
-| [ADR-0148](./0148-recycle-bin-separate-store-restore-under-original-ids-retention-in-days.md) | The recycle bin is a separate store — one entry per delete operation, restore under the original ids, retenti… | Accepted — 2026-11-05, recording the maintainer's ruling of 2026-11-04 on | 2026-11-05 | — | — |
+| [ADR-0148](./0148-recycle-bin-separate-store-restore-under-original-ids-retention-in-days.md) | The recycle bin is a separate store — one entry per delete operation, restore under the original ids, retenti… | Accepted — 2026-11-05, recording the maintainer's ruling of 2026-11-04 on… | 2026-11-05 | — | — |
 
 ## ObjectUI registry — `ui/docs/adr/` (`ui-` prefix)
 

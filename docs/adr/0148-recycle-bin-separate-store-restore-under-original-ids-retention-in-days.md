@@ -1,16 +1,6 @@
 # ADR-0148: The recycle bin is a separate store — one entry per delete operation, restore under the original ids, retention in days through a host hook
 
-**Status**: Accepted — 2026-11-05, recording the maintainer's ruling of 2026-11-04 on
-[#3146](https://github.com/objectstack-ai/objectstack/issues/3146) (ruling record
-[`6629858351`](https://github.com/objectstack-ai/objectstack/issues/3146#issuecomment-6629858351), verbatim:
-「同意，企业版功能在 cloud 中立卡后续开发」). **This record declares; it implements nothing.** Nothing below ships on
-`main` today: every delete is a physical delete, and each mechanism here is cut as a child of #3146 that triage filed
-([`6648418282`](https://github.com/objectstack-ai/objectstack/issues/3146#issuecomment-6648418282)) —
-[#30235](https://github.com/objectstack-ai/objectstack/issues/30235) (spec),
-[#30237](https://github.com/objectstack-ai/objectstack/issues/30237) (engine),
-[#30239](https://github.com/objectstack-ai/objectstack/issues/30239) (Console) — each landing after this record and
-citing it. `docs/adr/` is Tier H (Prime Directive #14): the record lands by the maintainer's hand (merge or enqueue),
-and that act is its acceptance.
+**Status**: Accepted — 2026-11-05, recording the maintainer's ruling of 2026-11-04 on [#3146](https://github.com/objectstack-ai/objectstack/issues/3146) (ruling record [`6629858351`](https://github.com/objectstack-ai/objectstack/issues/3146#issuecomment-6629858351), verbatim: 「同意，企业版功能在 cloud 中立卡后续开发」). **This record declares; it implements nothing.** Nothing below ships on `main` today: every delete is a physical delete, and each mechanism here is cut as a child of #3146 that triage filed ([`6648418282`](https://github.com/objectstack-ai/objectstack/issues/3146#issuecomment-6648418282)) — [#30235](https://github.com/objectstack-ai/objectstack/issues/30235) (spec), [#30237](https://github.com/objectstack-ai/objectstack/issues/30237) (engine), [#30239](https://github.com/objectstack-ai/objectstack/issues/30239) (Console) — each landing after this record and citing it. `docs/adr/` is Tier H (Prime Directive #14): the record lands by the maintainer's hand (merge or enqueue), and that act is its acceptance.
 - **Date**: 2026-11-05
 - **Card**: [#30234](https://github.com/objectstack-ai/objectstack/issues/30234) (#3146 slice 1), the first of the
   four children. The card restates the ruling; where the two differ in words, the ruling binds.
@@ -18,7 +8,9 @@ and that act is its acceptance.
   「记录删除回收站的功能还没有开发」, 「其他主流类似系统是怎么处理的」, 「保留期按『Free 7 天 / 团队版及以上 30
   天』开源项目怎么办呢？这个功能可以放在企业版吗？建议放在企业版吗？」, and on the proposal the coordinator put back,
   「同意，企业版功能在 cloud 中立卡后续开发」. The proposal's text is the ruling record; [Decision](#decision) restates
-  each of its items in the ruling's own terms and adds no mechanism of its own.
+  each of its items in the ruling's own terms. Where the record fixes something the ruling offered as an example or
+  left open, it says so at the point it does it and lists it once in
+  [D7](#d7--what-this-record-fixes-that-the-ruling-left-open); those are the record's choices, not the ruling's.
 - **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove — the gate that removed
   the old keys and the gate every new key below passes, with its reader in the same change),
   [ADR-0057-system-data-lifecycle-and-retention](./0057-system-data-lifecycle-and-retention.md) (the one platform
@@ -26,8 +18,9 @@ and that act is its acceptance.
   cascade a delete removes and a restore brings back together),
   [ADR-0132](./0132-multi-organization-runtime-is-open-core.md) D2 (mechanism open, entitlement commercial),
   [ADR-0112](./0112-error-code-vocabulary-and-ledger.md) (the envelope every restore refusal answers in),
-  [ADR-0087](./0087-metadata-protocol-upgrade-contract.md) (the retired keys' conversions stand; the new keys arrive
-  as a protocol addition), [ADR-0120](./0120-unique-scope-vocabulary-and-null-safe-tenant-uniqueness.md) (why the
+  [ADR-0087](./0087-metadata-protocol-upgrade-contract.md) (the retired keys' tombstones stand, and their conversions
+  age out on its schedule — [D5](#d5--the-readers-that-will-exist-and-the-keys-that-stay-retired) says which one is
+  still carried; the new keys arrive as a protocol addition), [ADR-0120](./0120-unique-scope-vocabulary-and-null-safe-tenant-uniqueness.md) (why the
   shape frees a unique value at delete, and why a restore can find it taken),
   [ADR-0100](./0100-credential-field-channels.md) (the `secret` channel the snapshot keeps out),
   [ADR-0041](./0041-flow-trigger-family.md) (record triggers — why a restore is its own event, never a create).
@@ -36,14 +29,17 @@ and that act is its acceptance.
   ([D5](#d5--the-readers-that-will-exist-and-the-keys-that-stay-retired)).
 - **Leaves unchanged**: every read path (query, aggregate, REST, the analytics engine's SQL, rollups, lookup pickers,
   search, AI tools, MCP and export); the physical delete the engine performs today and its cascade order; the
-  tombstones of `enable.trash`, `softDelete`, `allowRestore` and `allowPurge` and their ADR-0087 conversions; the
-  `sys_file` tombstone and its reap; the release of `sys_secret` handles on a committed delete.
-- **Consumers**: `@objectstack/spec` (the recycle-bin object, the retention hook's contract, the refusal codes, the
-  restored event — #30235), `@objectstack/objectql` (snapshot, restore, purge, empty, the TTL reap on the
-  LifecycleService — #30237), `@objectstack/plugin-security` (the restore and bin-admin grants, the fail-closed
-  destructive backstop — #30235 / #30237), `@objectstack/rest` (the doors the Console calls — #30237), the Console under
-  `ui/` (the admin page and the toast — #30239), and `objectstack-ai/cloud` as the one caller of the retention hook
-  (its own card, per the ruling).
+  tombstones of `enable.trash`, `softDelete`, `allowRestore` and `allowPurge`, and the one ADR-0087 conversion `main`
+  still carries for them (`allowRestore` / `allowPurge`); the `sys_file` tombstone and its reap; the release of
+  `sys_secret` handles on a committed delete.
+- **Consumers**: `@objectstack/spec` (what #30235's body lists — the recycle-bin object, the retention hook's contract,
+  the refusal codes — and what this record adds to that card, the `restored` event's name and the two grant keys, both
+  spec surfaces; see [D5](#d5--the-readers-that-will-exist-and-the-keys-that-stay-retired)), `@objectstack/objectql`
+  (snapshot, restore, purge, empty, the TTL reap on the LifecycleService, the operation vocabulary pin — #30237),
+  `@objectstack/plugin-security` (the restore and bin-admin grants enforced, the fail-closed destructive backstop
+  mapped — #30237), `@objectstack/rest` (the doors the Console calls — #30237), the Console under `ui/` (the admin page
+  and the toast — #30239), and `objectstack-ai/cloud` as the one caller of the retention hook (its own card, per the
+  ruling).
 
 ---
 
@@ -89,8 +85,8 @@ lands it, so the ADR-0049 gate the old keys failed is the gate the new ones pass
 **The delete path.** `ObjectQL.delete` collects the rows a delete removes before it removes any
 (`packages/objectql/src/engine-delete-cascade.ts#collectCascadeDeleteSet`), refuses a `restrict` relation inside its own
 cascade with `409 DELETE_RESTRICTED` (`packages/objectql/src/engine-delete-cascade.ts#refuseRestrictsInsideOwnCascade`),
-clears the `set_null` lookups that pointed at the removed rows (the `onDelete` vocabulary of
-`packages/spec/src/data/field.zod.ts`: `cascade` / `restrict` / `set_null`), and removes the rows at the driver. A
+clears the `set_null` lookups that pointed at the removed rows (a reference field's `deleteBehavior` in
+`packages/spec/src/data/field.zod.ts`: `set_null` / `cascade` / `restrict`), and removes the rows at the driver. A
 committed delete then releases the `sys_secret` handles the removed rows held
 (`packages/objectql/src/engine-secret-internal-fields.ts#releaseSecretHandles`, #27581). Nothing is kept: the rows
 are gone, their unique values are free, and their ids are not reused.
@@ -115,7 +111,11 @@ affordance: authors wrote `trash: false` believing they were opting out of a sof
 removed in the 16.x line (#2377) and tombstoned — `enable.trash` in
 `packages/spec/src/data/object.zod.ts#CAPABILITIES_RETIRED_KEY_GUIDANCE`, `softDelete` in the same file's top-level
 unknown-key guidance, whose text is the standing fact: 「there is no soft-delete/recycle-bin runtime … Deletes are hard
-deletes」. The permission lifecycle bits `allowRestore` / `allowPurge` claimed to gate `restore` / `purge` operations
+deletes」. What `main` carries for them under ADR-0087: the 16.x conversion `object-enable-trash-mru-removed` has aged
+out — it is retired from the load path (listed as such in `packages/spec/src/conversions/retired-after.census.json`)
+and no entry file remains, which is why the `enable.trash` tombstone tells an author to apply the edit by hand or run
+the tool on a release that still carries it; `softDelete` never had a conversion entry, only the tombstone. The
+permission lifecycle bits `allowRestore` / `allowPurge` claimed to gate `restore` / `purge` operations
 that never entered the engine's dispatch vocabulary (pinned by
 `packages/objectql/src/engine-middleware-operation-vocabulary.test.ts`); they were removed with #12497 (the maintainer
 accepting #1883's recommendation B, 2026-08-26), conversion
@@ -143,10 +143,13 @@ pitfall that loses `created_by` / `created_at`.
 On delete, the engine **snapshots the rows the delete removes** — the cascade set
 `packages/objectql/src/engine-delete-cascade.ts#collectCascadeDeleteSet` already computes, master and details in cascade
 order — into **one system object, `sys_recycle_bin`**, as **one entry per delete operation**, and then **deletes
-physically as today**. An entry records what was removed (the objects and ids, the rows as they stood), who deleted
-and when, and the retention window it was given. Restore writes the rows back under their original ids
+physically as today**. The ruling offered `sys_recycle_bin` as an example (「for example `sys_recycle_bin`」); this record
+fixes it as the name. An entry records what was removed (the objects and ids, the rows as they stood), who deleted and
+when, and **the purge deadline, stamped on the entry at delete time** from the days the retention resolver answers
+([D3](#d3--retention-in-days-default-30-through-a-host-resolver-hook-open-source-owns-the-mechanism) says why stamping,
+and that it is the record's choice). Restore writes the rows back under their original ids
 ([D2](#d2--restore-under-the-original-ids-with-reasons-for-refusal)); purge removes the entry; empty purges every entry
-the caller may see.
+and is an admin's verb ([D2](#d2--restore-under-the-original-ids-with-reasons-for-refusal), Permissions).
 
 **Chosen over an `IsDeleted` / `deleted_at` column, for the reasons the ruling gives:**
 
@@ -159,10 +162,11 @@ the caller may see.
 - **It is the mainstream shape** for a platform that restores under the same id (Dataverse's bin data source,
   ServiceNow's `sys_audit_delete`). Salesforce's `IsDeleted` column is the other shape, and it is not chosen.
 
-The entry is a row of a system object, so it is organization-owned like every other row (ADR-0131), stored by the
-default datasource, and counted toward storage — [D4](#d4--v1-scope-forward-only-later-items-and-the-privacy-rules)
-says it is shown separately. The object's field list is #30235's to declare; its name and the one-entry-per-operation
-rule are decided here.
+The entry is a row of a system object, so it is organization-owned like every other row (ADR-0131) and counted toward
+storage — [D4](#d4--v1-scope-forward-only-later-items-and-the-privacy-rules) says it is shown separately. The record
+fixes, and nothing ruled, that it is stored by the default datasource, as every `sys_*` object is. The object's name,
+the one-entry-per-operation rule and the stamped deadline are decided here; the rest of the field list is #30235's to
+declare.
 
 ### D2 — Restore under the original ids, with reasons for refusal
 
@@ -198,17 +202,27 @@ this record keeps.
 
 **Open source owns the mechanism**: snapshot, restore, empty, permanent delete, TTL purge, and the permissions above.
 
-**Retention is a number of days.** The default is **30**, read from **`OS_RECYCLE_BIN_RETENTION_DAYS`** (a config
-value under the `OS_{DOMAIN}_{NAME}` rule of Prime Directive #9). **A host may inject retention through a resolver
-hook, the same pattern as `resolveFeatures`**: the hook receives an opaque token (the cloud distribution passes its plan
-string, exactly as it does to `resolveFeatures`) and answers a number of days, or nothing to keep the default. The
-framework validates a positive whole number and **knows days, never plans**: no plan name, no catalog, no entitlement
-appears in this repository. The hook's contract is #30235's to declare; the rule that it answers days is decided here.
+**Retention is a number of days.** The default is **30**, read from **`OS_RECYCLE_BIN_RETENTION_DAYS`** — the ruling
+offered that name as an example (「for example `OS_RECYCLE_BIN_RETENTION_DAYS`」); this record fixes it, under the
+`OS_{DOMAIN}_{NAME}` rule of Prime Directive #9. **A host may inject retention through a resolver hook, the same pattern
+as `resolveFeatures`**, and the framework **knows days, never plans**: no plan name, no catalog, no entitlement appears
+in this repository. That much is the ruling. The hook's shape is this record's choice, made so that #30235 has a
+contract to declare: it receives the same opaque token `resolveFeatures` receives (the cloud distribution passes its
+plan string), it answers a number of days or nothing, nothing keeps the default, and a day count is a positive whole
+number — zero and anything that is not such a number are refused as a configuration defect and never read as "now" or
+"forever". #30235 spells the signature and the refusal.
+
+**When the days become a deadline — stamped at delete time.** The ruling decided days-through-a-hook and no more; this
+record decides that the resolver is asked once, at delete, and its answer is written on the entry as the purge
+deadline. Reasons: the toast and the admin page show the person a date, and a later change of the host's answer (a plan
+change, a new default) must not shorten a window a person was already shown; the sweep then reads one stored column,
+as the `sys_file` reap reads `deleted_at`, and calls no resolver per entry. The consequence is accepted: a longer window
+applies to deletes made after the change, not before. No entry is purged before its stamped deadline.
 
 **The TTL purge runs on the existing LifecycleService** (ADR-0057 §3.3: one sweeper, never a bespoke one), following
-the `sys_file` tombstone pattern: an entry is purged at the end of its resolved window by the platform sweep, under the
-system context, in bounded batches, with a reap guard where the engine needs one. **Permanent delete stays available
-for privacy erasure and never enters the bin** (HubSpot).
+the `sys_file` tombstone pattern: an entry is purged once its stamped deadline has passed, by the platform sweep, under
+the system context, in bounded batches, with a reap guard where the engine needs one. **Permanent delete stays
+available for privacy erasure and never enters the bin** (HubSpot).
 
 **Cloud sets per-plan retention through that hook — Free 7 days, Team and above 30 days** — and the enterprise value
 layer (per-object retention, legal hold, longer retention, delete and restore audit reports, bulk restore, erasure
@@ -242,9 +256,11 @@ slice say so.
 
 - **FLS applies when listing.** A snapshot holds every field; the bin shows a caller a field only where the caller may
   read it on the live object.
-- **Secret fields stay out of the snapshot, or are encrypted.** In v1 they stay out: the `secret` channel's values
-  (ADR-0100) are not written into the entry, the committed delete still releases their handles, and a restored record's
-  secret fields come back empty, to be re-entered. Holding them until purge is a later item.
+- **Secret fields stay out of the snapshot, or are encrypted.** The ruling allows either; this record chooses **out**
+  for v1, because the ruling's later item (holding attachments and `sys_secret` rows until purge) leaves the committed delete
+  releasing the handles in v1, so an encrypted copy of a value would point at a handle that no longer exists. So the
+  `secret` channel's values (ADR-0100) are not written into the entry, and a restored record's secret fields come back
+  empty, to be re-entered. Holding them until purge is the later item, and it may revisit this choice.
 - **Purge on organization or environment deletion.** An organization's or environment's entries go with it.
 - **Bin storage counts toward quota and is shown separately.**
 
@@ -260,21 +276,26 @@ with the card that lands it. Every row below is new; none is a tombstoned spelli
 
 | New surface | The reader that enforces it | Card |
 |---|---|---|
-| `sys_recycle_bin` — one entry per delete operation; the cascade set snapshotted; who, when, and the resolved window | written by the engine's delete path; read by restore, purge, empty and the TTL reap; listed by the admin page under FLS | #30235 declares; #30237 writes and reads; #30239 lists |
+| `sys_recycle_bin` — one entry per delete operation; the cascade set snapshotted; who, when, and the purge deadline stamped at delete time | written by the engine's delete path, which asks the retention resolver once and stamps the deadline; read by restore, purge, empty and the TTL reap; listed by the admin page under FLS | #30235 declares (its body lists the object); #30237 writes and reads; #30239 lists |
 | `OS_RECYCLE_BIN_RETENTION_DAYS` (default 30) | the retention resolver's default, when the host hook answers nothing | #30237 |
-| the host retention resolver hook — answers days, never a plan | the TTL reap, which purges an entry at the end of its resolved window; the cloud distribution is its caller | #30235 (contract); #30237 (reader); the cloud card (caller) |
-| the `restore`, `purge` and `empty` operations and the REST doors the Console calls | the engine; `packages/plugins/plugin-security/src/permission-evaluator.ts#DESTRUCTIVE_OPERATIONS` already lists `restore` and `purge`, and `packages/plugins/plugin-security/src/permission-evaluator.ts#OPERATION_TO_PERMISSION` must map them to the new grants, or the fail-closed backstop denies them; the operation vocabulary pin gains the verbs | #30235 (vocabulary); #30237 (engine, doors, mapping) |
-| the restore and bin-admin grants — new permission keys: a person restores what they deleted, an admin sees all | the permission evaluator in `@objectstack/plugin-security` | #30235 declares; #30237 enforces |
-| the restore refusal codes — unique value taken, parent purged, package uninstalled | the engine answers them in the ADR-0112 envelope; the Console reads them in its language | #30235 names; #30237 answers; #30239 shows |
-| the `restored` event | automation (a record-created trigger does not fire; enrollments are not restored), audit, rollups | #30235 names; #30237 emits |
+| the host retention resolver hook — answers days, never a plan | the engine's delete path, which stamps the deadline from the answer; the cloud distribution is its caller | #30235 (contract; its body lists the hook); #30237 (reader); the cloud card (caller) |
+| the `restore`, `purge` and `empty` operations and the REST doors the Console calls | the engine; `packages/plugins/plugin-security/src/permission-evaluator.ts#DESTRUCTIVE_OPERATIONS` already lists `restore` and `purge`, and `packages/plugins/plugin-security/src/permission-evaluator.ts#OPERATION_TO_PERMISSION` must map them to the new grants, or the fail-closed backstop denies them; the operation vocabulary pin (an objectql test) gains the verbs | #30237 (engine, doors, mapping, the vocabulary pin) |
+| the restore and bin-admin grants — new permission keys: a person restores what they deleted, an admin sees all | the permission evaluator in `@objectstack/plugin-security` | #30235 declares — this record adds the grant keys to that card, whose body does not list them, because the permission shape is a spec surface; #30237 enforces |
+| the restore refusal codes — unique value taken, parent purged, package uninstalled | the engine answers them in the ADR-0112 envelope; the Console reads them in its language | #30235 names (its body lists the codes); #30237 answers; #30239 shows |
+| the `restored` event | automation (a record-created trigger does not fire; enrollments are not restored), audit, rollups | #30235 names — this record adds the event's name to that card, whose body does not list it, because the event vocabulary is a spec surface; #30237 emits |
 | the admin recycle-bin page and the 「已删除 · 撤销」 toast | the Console | #30239 |
 
-**The old keys stay retired.** `enable.trash`, `softDelete`, `allowRestore` and `allowPurge` are tombstones, their
-ADR-0087 conversions stand, and none of them returns: an author who writes one is refused with the prescription the
-tombstone carries, and a stored artifact from before 16.x never silently re-enables anything. The new surface uses new
-spellings on purpose, so that a key which once meant "nothing happens" never comes to mean "a snapshot is kept". The
-retired `apiMethods` values `restore` and `purge` (`packages/spec/src/data/api-derivation.ts`) are likewise unchanged.
-ADR-0049's Status line carries the dated note.
+**The old keys stay retired.** `enable.trash`, `softDelete`, `allowRestore` and `allowPurge` are tombstones and none of
+them returns: an author who writes one is refused with the prescription the tombstone carries. What `main` carries for
+them under ADR-0087 is exactly this: the `allowRestore` / `allowPurge` conversion
+(`packages/spec/src/conversions/entries/18/permission-allow-restore-purge-removed.ts`) stands; the 16.x conversion
+`object-enable-trash-mru-removed` has aged out of the load path as ADR-0087 provides (retired in
+`packages/spec/src/conversions/retired-after.census.json`, no entry file), so a 15.x artifact that still writes
+`enable.trash` is refused by the tombstone and migrated by hand or on a release that still carries it; `softDelete` never
+had a conversion. This record changes none of that. The new surface uses new spellings on purpose, so that a key which
+once meant "nothing happens" never comes to mean "a snapshot is kept". The retired `apiMethods` values `restore` and
+`purge` (`packages/spec/src/data/api-derivation.ts`) are likewise unchanged. ADR-0049's Status line carries the dated
+note.
 
 **No object-level authoring key is named by this record.** v1 applies to every business object and to no `sys_*`
 object by rule, not by a flag. Per-object retention is enterprise and lives in cloud; if an open per-object key is
@@ -282,14 +303,33 @@ ever ruled, it arrives with its reader in the same change, as ADR-0049 requires.
 
 ### D6 — What this record does not decide
 
-- **The spellings**: the entry's field list, the hook's signature, the refusal code names, the event name and the
-  grant names. #30235 fixes them, citing this record, under the rules already in force (snake_case machine names,
-  the ADR-0112 ledger, ADR-0049's reader-in-the-same-change).
-- **When the window is resolved**: stamped on the entry at delete time, or resolved by the sweep. Either satisfies
-  this record, which requires only that the days come from the resolver, that one sweeper purges, and that no entry is
-  purged before its window ends. #30237 chooses and says why; a window shown to the person on the toast or the page
-  argues for stamping it.
+- **The spellings**: the entry's remaining fields (beyond the deleting principal, the delete time, the stamped
+  deadline and the snapshot), the hook's signature and its refusal text, the refusal code names, the `restored`
+  event's name and the two grant keys' names. #30235 fixes them, citing this record, under the rules already in force
+  (snake_case machine names, the ADR-0112 ledger, ADR-0049's reader-in-the-same-change). The event name and the grant
+  keys are this record's addition to #30235's scope ([D5](#d5--the-readers-that-will-exist-and-the-keys-that-stay-retired)).
 - **The bulk cap's number**, the Console's wording, and the cloud card's shape.
+
+### D7 — What this record fixes that the ruling left open
+
+Each of these is the record's choice, not the ruling's, and is marked as such where it is made:
+
+- the object's name `sys_recycle_bin` and the variable's name `OS_RECYCLE_BIN_RETENTION_DAYS` — the ruling's examples,
+  fixed here ([D1](#d1--shape-a-separate-recycle-bin-store-one-entry-per-delete-operation-the-delete-stays-physical),
+  [D3](#d3--retention-in-days-default-30-through-a-host-resolver-hook-open-source-owns-the-mechanism));
+- the hook's input, output and validation — the `resolveFeatures` token in, days or nothing out, a positive whole number
+  or a refused configuration defect ([D3](#d3--retention-in-days-default-30-through-a-host-resolver-hook-open-source-owns-the-mechanism));
+- the purge deadline stamped on the entry at delete time, not resolved by the sweep
+  ([D1](#d1--shape-a-separate-recycle-bin-store-one-entry-per-delete-operation-the-delete-stays-physical),
+  [D3](#d3--retention-in-days-default-30-through-a-host-resolver-hook-open-source-owns-the-mechanism));
+- the entry stored by the default datasource ([D1](#d1--shape-a-separate-recycle-bin-store-one-entry-per-delete-operation-the-delete-stays-physical));
+- secret fields kept out of the snapshot in v1, of the two the ruling allowed
+  ([D4](#d4--v1-scope-forward-only-later-items-and-the-privacy-rules));
+- the `restored` event's name and the grant keys declared by #30235, whose body lists neither
+  ([D5](#d5--the-readers-that-will-exist-and-the-keys-that-stay-retired)).
+
+The ruling itself gives a person the restore of what they deleted and gives an admin everything (list, restore, empty);
+this record adds no permission beyond that.
 
 ---
 
@@ -355,12 +395,13 @@ of days and a default; the plan that maps to those days lives in the host that c
 ## Rollout — the cards, in order
 
 1. **This record** (#30234, Tier H) lands by the maintainer's hand. The ADR-0049 Status note lands with it.
-2. **#30235 — spec**: `sys_recycle_bin`, the retention hook's contract (days only), the refusal codes, the restored
-   event and the grants, each with its liveness row naming the reader in #30237 or #30239. A protocol addition
-   (`Metadata-protocol: added`).
-3. **#30237 — engine**: snapshot on delete, restore under the original ids with the refusals, purge and empty, the TTL
-   reap on the LifecycleService, the permission mapping, the REST doors, a test per refusal, and release notes that say
-   the bin is forward-only.
+2. **#30235 — spec**: what its body lists — `sys_recycle_bin`, the retention hook's contract (days only), the refusal
+   codes — plus what this record adds to it, the `restored` event's name and the two grant keys; each with its liveness
+   row naming the reader in #30237 or #30239. A protocol addition (`Metadata-protocol: added`).
+3. **#30237 — engine**: snapshot on delete with the deadline stamped from the resolver's answer, restore under the
+   original ids with the refusals, purge and empty, the TTL reap on the LifecycleService, the permission mapping and
+   the operation vocabulary pin, the REST doors, a test per refusal, and release notes that say the bin is
+   forward-only.
 4. **#30239 — Console**: the admin recycle-bin page (list, restore, empty) and the 「已删除 · 撤销」 toast, reading the
    refusals in the Console's language.
 5. **The cloud card**: per-plan retention through the hook, and the enterprise layer. Not tracked here.
