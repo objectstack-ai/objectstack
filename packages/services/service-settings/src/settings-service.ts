@@ -2669,6 +2669,9 @@ export class SettingsService {
   /**
    * Ask each patched key's {@link SettingsWritePredicate}, when the patch
    * changes the key, and refuse the whole batch with every refusal at once.
+   * Each is handed the whole patch as `batch`, so a rule over several keys
+   * judges the state after the write rather than one key against the rest
+   * as they stand.
    *
    * "Changes" compares the submitted value (`null` / `undefined` read as a
    * clear) with the value the caller's cascade resolves today, so re-saving
@@ -2685,6 +2688,10 @@ export class SettingsService {
   ): Promise<void> {
     const byKey = this.writePredicates.get(namespace);
     if (!byKey) return;
+    // The whole write, so a rule over several keys judges the state after it.
+    const batch: Readonly<Record<string, unknown>> = Object.freeze(
+      Object.fromEntries(Object.entries(patch).map(([key, submitted]) => [key, submitted ?? null])),
+    );
     const refusals: FieldError[] = [];
     for (const [key, submitted] of Object.entries(patch)) {
       const registered = byKey.get(key);
@@ -2703,6 +2710,9 @@ export class SettingsService {
         organizationId,
         ctx,
         locale: display.locale,
+        // The whole write as built once above, never narrowed: `transport`
+        // is narrowed to what this predicate declared, `batch` is the write.
+        batch,
         ...(display.transport ? { transport: narrowTransport(display.transport, registered.requestHeaders) } : {}),
       });
       if (!refusal) continue;
