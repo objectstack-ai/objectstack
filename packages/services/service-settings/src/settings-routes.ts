@@ -59,6 +59,7 @@ import { SettingsService } from './settings-service.js';
 // nothing that leaves over HTTP may carry it. See the module header for the
 // mask shape and why it mirrors ADR-0100's encrypted-field convention.
 import { dropEchoedSecretMasks, redactSecretValues } from './settings-secret-redaction.js';
+import { DEPLOYMENT_NOTICE_CAPABILITY, type DeploymentNoticeDoor } from './deployment-notice.js';
 import {
   SettingsCryptoUnavailableError,
   SettingsForbiddenError,
@@ -88,7 +89,16 @@ export interface SettingsRoutesOptions {
    * D2): a context with no `userId` is anonymous, whatever else it carries.
    */
   contextFromRequest?: (req: IHttpRequest) => SettingsContext | Promise<SettingsContext>;
+  /**
+   * The deployment notice's work (`deployment-notice.ts`), served to
+   * administrators at `GET {base}/deployment/notice` and hidden through
+   * `POST {base}/deployment/notice/hide`. `SettingsServicePlugin` wires it;
+   * a host that mounts the family without it answers both routes `503`,
+   * naming what is missing.
+   */
+  deploymentNotice?: DeploymentNoticeDoor;
 }
+
 
 // [Finding-1] Secure default: anonymous + enforced. No identity is read from
 // request headers — a deployment that wants authenticated settings access must
@@ -447,5 +457,88 @@ export function registerSettingsRoutes(
         sendServerFault(res, 500, 'INTERNAL_ERROR', 'Action failed', err);
       }
     },
+  });
+
+  // ── The deployment notice (ruling A3, record 6634240777) ─────────────────
+  // What a production deployment keeps on its own disk because nobody set it,
+  // for administrators alone: the state names server paths, so it is served
+  // behind this family's door and the infrastructure capability, ⛔ never on
+  // the public auth config. Two segments under the base, so neither route
+  // shares a shape with a same-method `/:namespace` route above.
+  const noticeDoor = opts.deploymentNotice;
+  /**
+   * `true` when the caller was refused: no door wired, or an enforced caller
+   * without the capability. An un-enforced (trusted in-process) context is
+   * not gated, as no manifest gate of the service gates one.
+   */
+  const refuseNoticeCaller = (res: IHttpResponse, ctx: SettingsContext): boolean => {
+    if (!noticeDoor) {
+      sendError(
+        res,
+        503,
+        'SERVICE_UNAVAILABLE',
+        'The deployment notice is not composed on this host: SettingsServicePlugin wires it when it mounts these routes.',
+      );
+      return true;
+    }
+    if (ctx.enforced && !(ctx.permissions ?? []).includes(DEPLOYMENT_NOTICE_CAPABILITY)) {
+      sendError(
+        res,
+        403,
+        'PERMISSION_DENIED',
+        `The deployment notice is for administrators: it needs the ${DEPLOYMENT_NOTICE_CAPABILITY} capability.`,
+      );
+      return true;
+    }
+    return false;
+  };
+  /** The family's arm for a refusal the context resolver raised, then the route's fault tail. */
+  const refuseNotice = (message: string) => (res: IHttpResponse, err: any): void => {
+    if (err instanceof SettingsForbiddenError) {
+      sendError(res, 403, 'SETTINGS_FORBIDDEN', err.message, { details: { namespace: err.namespace } });
+    } else {
+      sendServerFault(res, 500, 'INTERNAL_ERROR', message, err);
+    }
+  };
+
+  mountFamilyRoute('get', `${base}/deployment/notice`, {
+    async serve(_req, res, ctx) {
+      if (refuseNoticeCaller(res, ctx)) return;
+      sendOk(res, await noticeDoor!.read(ctx));
+    },
+    refuse: refuseNotice('Failed to read the deployment notice'),
+  });
+
+  mountFamilyRoute('post', `${base}/deployment/notice/hide`, {
+    async serve(req, res, ctx) {
+      if (refuseNoticeCaller(res, ctx)) return;
+      const fingerprint = (req.body as { fingerprint?: unknown } | undefined)?.fingerprint;
+      if (typeof fingerprint !== 'string' || fingerprint.length === 0) {
+        sendError(res, 400, 'VALIDATION_ERROR', 'Name the notice you hide: send { "fingerprint": "<the fingerprint the notice was read with>" }.');
+        return;
+      }
+      const answer = await noticeDoor!.hide({ context: ctx, fingerprint });
+      switch (answer.outcome) {
+        case 'recorded':
+          sendOk(res, { hidden: true, fingerprint: answer.state.fingerprint });
+          return;
+        case 'nothing-to-hide':
+          sendError(res, 409, 'RESOURCE_CONFLICT', 'There is no deployment notice to hide: this deployment keeps nothing on its own disk by default.', {
+            details: answer.state,
+          });
+          return;
+        case 'changed':
+          sendError(res, 409, 'RESOURCE_CONFLICT', 'The deployment notice changed since it was read: read it again and hide what it says now.', {
+            details: answer.state,
+          });
+          return;
+        case 'no-ledger':
+          // The ruling makes the audit row part of a hide, so a hide this
+          // deployment cannot record is not one: the notice stays.
+          sendError(res, 409, 'RESOURCE_CONFLICT', 'This deployment keeps no audit log (@objectstack/plugin-audit is not mounted), so a hide cannot be recorded and the notice stays.');
+          return;
+      }
+    },
+    refuse: refuseNotice('Failed to record the deployment notice hide'),
   });
 }

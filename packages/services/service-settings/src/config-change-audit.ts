@@ -191,7 +191,7 @@ type ConfigChangeLogger = SettingsDiagnosticsLogger & {
  * no (AGENTS.md → *Startup registry reads*). A settings write is an admin-rate
  * operation, so the per-call registry lookup costs nothing worth memoizing.
  */
-function ledgerIsMounted(engine: IDataEngine): boolean | undefined {
+export function ledgerIsMounted(engine: IDataEngine): boolean | undefined {
   const getSchema = (engine as any)?.getSchema;
   if (typeof getSchema !== 'function') return undefined;
   try {
@@ -202,6 +202,33 @@ function ledgerIsMounted(engine: IDataEngine): boolean | undefined {
     // is absent — it has told us nothing.
     return undefined;
   }
+}
+
+/**
+ * The ONE insert this module makes onto the platform audit ledger, shared by
+ * the settings write sink below and the deployment notice's hide
+ * ({@link recordDeploymentConfigChange}), so both rows are written the same
+ * way, under the same system context.
+ */
+async function insertLedgerRow(eng: any, row: Record<string, unknown>): Promise<void> {
+  await eng.insert('sys_audit_log', row, { context: SYSTEM_CTX });
+}
+
+/**
+ * Record one deployment-level `config_change` row whose caller must KNOW it
+ * landed: the deployment notice's hide (ruling A3, record 6634240777), where
+ * the row is part of the act. Unlike the settings sink below it is not
+ * best-effort: `no-ledger` when this deployment mounts no `sys_audit_log`
+ * (asked first, exactly as the sink asks), and a failed insert throws to the
+ * caller instead of being reported once and swallowed.
+ */
+export async function recordDeploymentConfigChange(
+  engine: IDataEngine,
+  row: Record<string, unknown>,
+): Promise<'recorded' | 'no-ledger'> {
+  if (ledgerIsMounted(engine) === false) return 'no-ledger';
+  await insertLedgerRow(engine, { ...row, action: CONFIG_CHANGE_ACTION });
+  return 'recorded';
 }
 
 function safeStringify(value: unknown): string {
@@ -297,7 +324,7 @@ export function buildConfigChangeAuditSink(
           }),
         };
 
-        await eng.insert('sys_audit_log', row, { context: SYSTEM_CTX });
+        await insertLedgerRow(eng, row);
       } catch (err: any) {
         // Reported once per process, not once per settings write: a failure here
         // is systemic (the ledger is mounted but unreachable — DDL never ran,

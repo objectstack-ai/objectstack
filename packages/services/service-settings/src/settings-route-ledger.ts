@@ -80,4 +80,8 @@ export const SETTINGS_ROUTE_LEDGER: readonly SettingsRouteLedgerEntry[] = [
     note: 'batch upsert of one namespace, validated against its manifest; refuses locked keys' },
   { route: 'POST /api/settings/:namespace/:actionId', family: 'settings', disposition: 'server-only',
     note: 'invoke an action the namespace manifest declares (test-connection probes and the like), not a data write' },
+  { route: 'GET /api/settings/deployment/notice', family: 'settings', disposition: 'server-only',
+    note: '[#30120] what a production deployment keeps on its own disk by default, for administrators (manage_platform_settings) — the Console home and System Overview notice' },
+  { route: 'POST /api/settings/deployment/notice/hide', family: 'settings', disposition: 'server-only',
+    note: '[#30120] an administrator acknowledges the current notice; writes a config_change row to sys_audit_log, refused where no audit log is mounted' },
 ];
