@@ -116,6 +116,7 @@ export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly strin
   /** `@objectstack/plugin-sharing` — record shares & share links; ownership queues and the assignment cursor (ADR-0142). */
   'plugin-sharing': [
     'sys_assignment_cursor',
+    'sys_assignment_rule',
     'sys_queue',
     'sys_queue_member',
     'sys_record_share',
