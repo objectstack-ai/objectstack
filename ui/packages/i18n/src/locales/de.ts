@@ -2860,6 +2860,7 @@ const de = {
       verifyingDescription: "Wir bestätigen Ihre E-Mail. Bitte warten.",
       successTitle: "E-Mail bestätigt",
       successDescription: "Ihre E-Mail wurde bestätigt. Sie können sich jetzt anmelden.",
+      handoffSuccessDescription: "Ihre E-Mail wurde bestätigt. Kehren Sie zur App zurück, bei der Sie sich anmelden wollten, und melden Sie sich dort an.",
       errorTitle: "Bestätigung fehlgeschlagen",
       errorDescription: "Bestätigung fehlgeschlagen. Bitte fordern Sie einen neuen Link an.",
       missingToken: "Im Bestätigungslink fehlt ein Token.",
