@@ -26,8 +26,9 @@
  *  8. A write from a caller the read door refuses is refused, whatever rows it
  *     addresses: the predicate update and delete that caller addresses are
  *     answered the read door's own refusal before the write runs, with
- *     row-level policies and without, and nothing changes — the answer the
- *     by-id leg gives the same caller. A caller who reads keeps its scoped
+ *     row-level policies and without, and nothing changes. The by-id leg
+ *     refuses the same caller too; with no row-level policy it gives the same
+ *     answer. A caller who reads keeps its scoped
  *     write, and a write the platform issues under the caller's context, or a
  *     system write, keeps the answer it had. (The read here is refused by a
  *     capability the object requires for a read and not for a write, ADR-0066

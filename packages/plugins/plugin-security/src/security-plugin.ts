@@ -819,8 +819,8 @@ export async function unreadableUnderCallerRead(read: () => Promise<unknown>): P
  *  - an answer: whatever the read door returned (no row, a row, a row set);
  *  - `refused`: a declared 4xx — the read itself was refused (the object's read
  *    grant withheld, a predicate the driver will not compile). Not a hidden
- *    row: the by-id and the predicate write doors answer it as the read door's
- *    refusal to this caller, carried in `error`;
+ *    row: a write door that asks this question throws it, carried in `error`,
+ *    and the write is refused;
  *  - anything else is a store fault and propagates as raised (#7505): an outage
  *    is neither an answer nor a refusal, and reporting it as either would
  *    relabel it.
@@ -4033,8 +4033,8 @@ export class SecurityPlugin implements Plugin {
    *    refusal is THROWN, so the write is answered the read door's own refusal
    *    before it runs and changes nothing ([#21829] ruling B). A caller the
    *    read door refuses writes none of the object's records, whatever its
-   *    predicate addresses — the answer the by-id leg gives the same caller
-   *    ({@link callerCannotReadAddressedRow});
+   *    predicate addresses; the by-id leg refuses the same caller too (step
+   *    2.7);
    *  - a store fault propagates as raised.
    *
    * The id list is bounded by {@link PREDICATE_WRITE_READABLE_ID_CAP}; see

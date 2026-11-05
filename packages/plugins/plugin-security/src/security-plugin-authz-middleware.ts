@@ -2382,8 +2382,8 @@ export function registerAuthzMiddleware(
       // alike — a hidden row is not written, not counted and not refused.
       // [#21829, ruling B] A caller the read door REFUSES is answered that
       // refusal here, thrown by the read question itself before `next()`: it
-      // writes none of the object's records, whatever its predicate addresses,
-      // as on the by-id leg (step 2.7).
+      // writes none of the object's records, whatever its predicate addresses.
+      // The by-id leg (step 2.7) refuses the same caller too.
       if (this.addressedPredicateWrite(opCtx, nestedInOperation, referentialFieldClearWrite)) {
         extra.push(await this.readableRowsScopeForPredicateWrite(opCtx));
       }

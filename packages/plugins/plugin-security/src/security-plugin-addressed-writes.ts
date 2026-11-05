@@ -161,8 +161,8 @@ export async function readableRowsScopeForPredicateWrite(
   );
   // [#21829, ruling B] A caller the read door refuses writes none of the
   // object's records: the read door's refusal is the predicate write's answer,
-  // before the write runs — the answer the by-id leg gives the same caller
-  // (`callerCannotReadAddressedRow`).
+  // before the write runs. The by-id leg refuses the same caller too (step
+  // 2.7).
   if (answer.refused) throw answer.error;
   const rows: unknown[] = Array.isArray(answer.value) ? answer.value : [];
   if (rows.length > PREDICATE_WRITE_READABLE_ID_CAP) {

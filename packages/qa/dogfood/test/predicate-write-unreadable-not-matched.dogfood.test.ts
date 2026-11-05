@@ -464,7 +464,7 @@ describe('predicate write door: a row the caller cannot read is not matched', ()
 // [#21829, ruling B] A caller the read door REFUSES writes none of the
 // object's records, whatever its write addresses: the predicate update and
 // delete it addresses are answered the read door's own refusal before the
-// write runs, as its by-id update and delete are.
+// write runs, and its by-id update and delete are refused too.
 //
 // The HTTP door: a `runAs: 'user'` flow started at
 // `POST /automation/:name/trigger`, whose `update_record` / `delete_record`
