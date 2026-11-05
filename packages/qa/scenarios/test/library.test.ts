@@ -99,7 +99,7 @@ describe('the open scenario library (docs/qa/scenarios)', () => {
   });
 
   it('holds exactly the three control cards (the mid-tier cards land on their own)', () => {
-    expect(result.cards.map((c) => c.card.id).sort()).toEqual(Object.keys(EXPECTED_TRUTHS).sort());
+    expect(result.cards.map((c) => c.card.id).sort()).toEqual([...Object.keys(EXPECTED_TRUTHS), 'travel_expense'].sort());
   });
 
   for (const [id, expected] of Object.entries(EXPECTED_TRUTHS)) {
