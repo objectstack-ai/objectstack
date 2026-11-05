@@ -45,7 +45,7 @@ export const zhCN: PlatformTranslationData = {
         smtp_password: { label: '密码' },
         api_key: { label: 'API 密钥' },
         from_email: { label: '发件地址', help: '示例:no-reply@example.com' },
-        from_name: { label: '发件人名称' },
+        from_name: { label: '发件人名称', help: '留空则使用产品名称(品牌设置),未设置时使用本部署配置的名称。' },
         queue_delivery: {
           label: '持久化队列投递',
           help: '把每封邮件交给任务队列而不是内联发送:投递失败由 worker 按退避重试,进程重启也不会丢失。'
@@ -188,12 +188,8 @@ export const zhCN: PlatformTranslationData = {
         locale: {
           label: '默认语言',
           help: '用于消息文案和数字/日期格式的 BCP-47 语言。',
-          options: {
-            'en-US': '英语(美国)',
-            'zh-CN': '简体中文',
-            'ja-JP': '日语',
-            'es-ES': '西班牙语(西班牙)',
-          },
+          // No `options`: each language is named in its own language, as the
+          // server serves it (`localization-locale-options.ts`).
         },
         default_country: {
           label: '默认国家/地区',
@@ -282,7 +278,10 @@ export const zhCN: PlatformTranslationData = {
         },
       },
       keys: {
-        email_password_enabled: { label: '启用邮箱/密码登录' },
+        email_password_enabled: {
+          label: '启用邮箱/密码登录',
+          confirmOffText: '使用密码登录的用户将需要其他登录方式。',
+        },
         signup_enabled: {
           label: '允许邮箱注册',
           help: '开启邮箱与密码注册表单。它接纳谁由下方的「自助注册受众」决定:「仅限邀请」下只接纳持有待处理邀请的地址;「邮箱域名」下接纳允许列表中的域名与受邀地址;「开放」下接纳任何人。关闭后,在任何受众下该表单都会关闭,受邀者也不例外。',

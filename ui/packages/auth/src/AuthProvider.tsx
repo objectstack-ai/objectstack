@@ -8,6 +8,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { authGateEvents } from './auth-gate-events.js';
+import { runBeforeSignOut } from './beforeSignOut.js';
 import type { AuthUser, AuthClient, AuthProviderOptions, PreviewModeOptions, AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthInvitationPreview, AuthPublicConfig, SignInWithProviderOptions, SignInTwoFactorCodeKind, TwoFactorChallenge } from './types.js';
 import { TWO_FACTOR_CHALLENGE_ENDED_CODES } from './two-factor-codes.js';
 import { AuthCtx, type AuthContextValue } from './AuthContext.js';
@@ -191,6 +192,13 @@ export function AuthProvider({
   // finds anything else drops it for good, so every later run loads as before.
   const bootSessionFor = useRef<string | null>(bootSession ? authUrl : null);
   const [error, setError] = useState<Error | null>(null);
+  // objectstack#30125 — the session in this tab was ended by `signOut()`, and
+  // nobody has signed in since. Raised in the same batch that clears `user`, so
+  // the first render without a session already reads it; lowered as soon as a
+  // session exists again (below), whoever it belongs to. A session
+  // that ends any other way (expired, revoked, signed out in another tab)
+  // leaves it `false`.
+  const [sessionEndedBySignOut, setSessionEndedBySignOut] = useState(false);
   const [remediationRequired, setRemediationRequired] = useState<{ code: string; message: string } | null>(null);
   // objectstack#29105 — a password sign-in waiting for its second factor.
   const [twoFactorChallenge, setTwoFactorChallenge] = useState<TwoFactorChallenge | null>(null);
@@ -214,6 +222,11 @@ export function AuthProvider({
   const isAuthenticated = (enabled && !isPreviewMode)
     ? user !== null && session !== null
     : true;
+
+  // Any session, a new sign-in or a re-resolved one, ends "signed out".
+  // Adjusted during render (React's "storing information from previous
+  // renders"), so no render ever pairs a session with a raised flag.
+  if (sessionEndedBySignOut && user !== null) setSessionEndedBySignOut(false);
 
   // True while `loadSession` is awaiting the server. Read by the rotation
   // subscription below: a rotation the server performs INSIDE our own
@@ -479,9 +492,13 @@ export function AuthProvider({
   const signOut = useCallback(async () => {
     setIsLoading(true);
     try {
+      // Steps that need the session (a push device's unregister) run while it
+      // still exists. Bounded, and never rejects: it cannot hold sign-out back.
+      await runBeforeSignOut();
       await client.signOut();
       setUser(null);
       setSession(null);
+      setSessionEndedBySignOut(true);
       setError(null);
       setTwoFactorChallenge(null);
       // The organization block is the previous principal's data too: the list
@@ -1141,6 +1158,7 @@ export function AuthProvider({
       user,
       session,
       isAuthenticated,
+      sessionEndedBySignOut,
       isAuthEnabled,
       isLoading,
       error,
@@ -1196,7 +1214,7 @@ export function AuthProvider({
       listUserInvitations,
     }),
     [
-      user, session, isAuthenticated, isAuthEnabled, isLoading, error, isPreviewMode, previewMode,
+      user, session, isAuthenticated, sessionEndedBySignOut, isAuthEnabled, isLoading, error, isPreviewMode, previewMode,
       signIn, twoFactorChallenge, verifySignInTwoFactor, cancelTwoFactorChallenge, signUp, signOut, refreshSession, updateUser, forgotPassword, sendVerificationEmail, resetPassword, changePassword, setInitialPassword, hasLocalPassword, getAuthConfig, signInWithProvider,
       sendPhoneOtp, signInWithPhoneOtp, signInWithPhonePassword, requestPhonePasswordReset, resetPasswordWithPhoneOtp,
       remediationRequired, enrollTotp, verifyTotp,

@@ -148,6 +148,7 @@ const de = {
     notAvailableHere: '„{{action}}“ ist auf der aktuellen Seite nicht verfügbar.',
     notAvailableForRecord: 'Für diesen Datensatz nicht verfügbar',
     completedSuccessfully: 'Aktion erfolgreich abgeschlossen',
+    completedNamed: 'Aktion abgeschlossen: {{action}}',
     failed: 'Aktion fehlgeschlagen',
     parallelFailed: 'Eine oder mehrere parallele Aktionen sind fehlgeschlagen',
     selectExactlyOneRow: 'Diese Aktion gilt für einen einzelnen Datensatz – wählen Sie genau eine Zeile aus.',
@@ -887,12 +888,12 @@ const de = {
   },
   managedByBadge: {
     systemWritable: {
-      short: "Plattform-Schema",
+      short: "Integriert · bearbeitbar",
       title: "Plattformdefiniert, für Admins beschreibbar",
       body: "Das Schema dieses Objekts wird von der Plattform definiert, seine Zeilen können Sie hier jedoch selbst anlegen und bearbeiten. Wer schreiben darf, regeln die delegierte Administration und die Datensatzsicherheit — nicht dieses Abzeichen.",
     },
     config: {
-      short: "Admin-Konfiguration",
+      short: "Hier konfiguriert",
       title: "Administrator-Konfiguration",
       body: "Diese Zeilen definieren das Laufzeitverhalten der Plattform. Erstellen Sie sie hier; die erzeugten Laufzeitdaten liegen in einer separaten Tabelle.",
     },
@@ -907,7 +908,7 @@ const de = {
       body: "Unveränderliches Audit-Log. Zeilen können in der UI nicht erstellt, bearbeitet oder gelöscht werden – die Plattform schreibt sie bei Ereignissen. Nutzen Sie Export für Compliance-Prüfungen.",
     },
     betterAuth: {
-      short: "Identität",
+      short: "Über den Identitätsdienst",
       title: "Über den integrierten Identitätsdienst geschrieben",
       body: "Das Schema dieses Objekts gehört {{provider}}, dem integrierten Identitätsdienst der Plattform. Legen Sie diese Datensätze mit den Aktionen auf dieser Seite oder über Anmelde-, Einladungs- und Sicherheitsabläufe an und ändern Sie sie dort; alle laufen über diesen Dienst. Direkte Änderungen an der Tabelle würden Passwort-Hashing, Sitzungsvalidierung, Zwei-Faktor-Prüfungen und Audit-Hooks umgehen.",
     },
@@ -2203,6 +2204,9 @@ const de = {
       unsupportedSpecifierType: "Nicht unterstützter Einstellungstyp: {{type}}",
       invalidPhone: "Geben Sie eine Telefonnummer nur mit Ziffern, Leerzeichen und + ( ) - . ein",
       invalidColor: "Geben Sie eine Hex-Farbe ein, z. B. #1a2b3c",
+      clientAddressDirect: "Ihre Adresse, wie der Server sie beurteilt: {{address}}. Eine Liste ohne diese Adresse kann von hier aus nicht gespeichert werden. Dieser Server vertraut keinen Proxy-Headern, hinter einem Proxy ist dies also die Adresse des Proxys.",
+      clientAddressViaProxy: "Ihre Adresse, wie der Server sie beurteilt: {{address}}, gelesen aus den Weiterleitungs-Headern des Proxys, dem dieser Server vertraut. Eine Liste ohne diese Adresse kann von hier aus nicht gespeichert werden.",
+      clientAddressUnknown: "Der Server kann Ihre Adresse nicht ermitteln, daher kann von hier aus keine nicht leere Liste gespeichert werden.",
     },
     workspaceTimezonePrompt: {
       title: "Zeitzone des Systems festlegen",
@@ -4168,6 +4172,16 @@ const de = {
       purgeSuccess_one: '{{count}} Beispieldatensatz entfernt.',
       purgeSuccess_other: '{{count}} Beispieldatensätze entfernt.',
       purgeNoData: 'Keine Beispieldatensätze zum Löschen gefunden.',
+      // objectstack#30323 — the install note's sample-data count, its clear and the app banner.
+      sampleDataLoaded: 'Diese Installation hat {{count}} Beispieldatensatz/-sätze geladen, damit Sie die App in Aktion sehen. Löschen Sie sie, sobald Sie die App wirklich nutzen.',
+      sampleDataLoaded_one: 'Diese Installation hat {{count}} Beispieldatensatz geladen, damit Sie die App in Aktion sehen. Löschen Sie ihn, sobald Sie die App wirklich nutzen.',
+      sampleDataLoaded_other: 'Diese Installation hat {{count}} Beispieldatensätze geladen, damit Sie die App in Aktion sehen. Löschen Sie sie, sobald Sie die App wirklich nutzen.',
+      sampleDataReloaded: 'Eine erneute Installation lädt die Beispieldaten wieder, auch die bereits gelöschten.',
+      purgeConfirmAtMost: 'Höchstens {{count}} Beispieldatensatz/-sätze werden gelöscht: so viele, wie diese Installation geladen hat.',
+      purgeConfirmAtMost_one: 'Höchstens {{count}} Beispieldatensatz wird gelöscht: so viele, wie diese Installation geladen hat.',
+      purgeConfirmAtMost_other: 'Höchstens {{count}} Beispieldatensätze werden gelöscht: so viele, wie diese Installation geladen hat.',
+      sampleDataBannerTitle: '„{{name}}“ enthält Beispieldaten.',
+      sampleDataBannerMessage: 'Sie zeigen, wie die App arbeitet. Löschen Sie sie, sobald Sie die App wirklich nutzen.',
       reseedQueued: 'Beispieldaten werden beim nächsten Zugriff auf die Umgebung neu geladen.',
       reseedLocalSuccess: 'Beispieldaten neu geladen: {{inserted}} hinzugefügt, {{updated}} aktualisiert.',
       reseedPartialErrors: '({{count}} Datensatz/-sätze konnten nicht geschrieben werden)',
@@ -4204,7 +4218,7 @@ const de = {
       noPermission: "Sie haben keine Berechtigung, Apps in einer Umgebung zu installieren. Nur Organisationsinhaber und Administratoren können installieren — wenden Sie sich an den Administrator Ihrer Organisation.",
       signInFirst: "Sie müssen sich zuerst bei ObjectOS Cloud anmelden.",
       success: "Erfolgreich installiert. Öffnen Sie die Umgebung, um die neue App zu sehen.",
-      localSuccess: "v{{version}} in diesem Laufzeitsystem installiert. „{{name}}“ sollte jetzt im App-Wechsler erscheinen.",
+      localSuccess: 'v{{version}} in diesem Laufzeitsystem installiert. „{{name}}“ ist jetzt im App-Wechsler.',
       localLoadsAtRestart: "v{{version}} in diesem Laufzeitsystem installiert. „{{name}}“ wird beim nächsten Neustart des Laufzeitsystems geladen und erscheint erst dann im App-Wechsler.",
       localManifestConflict: "{{message}}\nHinweis: Eine lokale App besitzt bereits diese manifest_id. Entfernen Sie sie zuerst aus objectstack.config.ts.",
       // ADR-0141 D2 — the install refusal DEPENDENCY_MISSING, one line per unmet entry.

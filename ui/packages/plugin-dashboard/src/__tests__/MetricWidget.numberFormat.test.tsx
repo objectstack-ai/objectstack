@@ -51,7 +51,8 @@ describe('MetricWidget — grouping stays load-bearing (objectui#4033 exception)
 
   it('keeps grouping for a currency metric', () => {
     renderMetric({ value: 1930000, currency: 'USD' }, 'en-US');
-    expect(screen.getByText('$1,930,000')).toBeInTheDocument();
+    // At the currency's own width (#30126 item 7): no pattern states another.
+    expect(screen.getByText('$1,930,000.00')).toBeInTheDocument();
   });
 });
 
@@ -68,8 +69,8 @@ describe('MetricWidget — active display locale (objectui#4033 fix 3)', () => {
 
   it('localizes a currency metric too', () => {
     renderMetric({ value: 1930000, currency: 'EUR' }, 'de-DE');
-    // de-DE puts the symbol last; en-US would have produced "€1,930,000".
-    expect(screen.getByText(/^1\.930\.000\s*€$/)).toBeInTheDocument();
+    // de-DE puts the symbol last; en-US would have produced "€1,930,000.00".
+    expect(screen.getByText(/^1\.930\.000,00\s*€$/)).toBeInTheDocument();
   });
 
   it('localizes the compact notation path', () => {
@@ -77,5 +78,27 @@ describe('MetricWidget — active display locale (objectui#4033 fix 3)', () => {
     // produce — this is the pin that the compact branch took the locale too.
     renderMetric({ value: 1930000, format: '0.0a' }, 'de-DE');
     expect(screen.getByText(/Mio/)).toBeInTheDocument();
+  });
+});
+
+describe('MetricWidget — a currency card with no pattern keeps the currency width (#30126 item 7)', () => {
+  it('a whole CNY amount keeps its cents', () => {
+    renderMetric({ value: 1293, currency: 'CNY' }, 'zh-CN');
+    expect(screen.getByText('¥1,293.00')).toBeInTheDocument();
+  });
+
+  it('cents are not rounded away', () => {
+    renderMetric({ value: 1280.5, currency: 'CNY' }, 'zh-CN');
+    expect(screen.getByText('¥1,280.50')).toBeInTheDocument();
+  });
+
+  it('JPY has no minor unit, so none is drawn', () => {
+    renderMetric({ value: 1293, currency: 'JPY' }, 'en-US');
+    expect(screen.getByText('¥1,293')).toBeInTheDocument();
+  });
+
+  it("an authored pattern is the author's width", () => {
+    renderMetric({ value: 1280.5, currency: 'CNY', format: '0,0' }, 'zh-CN');
+    expect(screen.getByText('¥1,281')).toBeInTheDocument();
   });
 });

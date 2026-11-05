@@ -59,6 +59,16 @@ describe('describeUndeclaredActionNames', () => {
     expect(line).not.toContain('matches no action');
   });
 
+  it('heads the message with ObjectGrid unless the address names another component (objectstack#30394)', () => {
+    const grid = describeUndeclaredActionNames('bulkActions', ['create_campaign'], ADDRESS);
+    expect(grid?.startsWith('[ObjectUI] ObjectGrid bulkActions: object-grid (')).toBe(true);
+    const list = describeUndeclaredActionNames('bulkActions', ['create_campaign'], {
+      component: 'ListView', blockType: 'kanban', objectName: 'lead',
+    });
+    expect(list?.startsWith("[ObjectUI] ListView bulkActions: kanban (objectName: 'lead')")).toBe(true);
+    expect(list).toContain('the selection bar draws no button');
+  });
+
   it('says nothing for no names', () => {
     expect(describeUndeclaredActionNames('bulkActions', [], ADDRESS)).toBeNull();
   });

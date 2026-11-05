@@ -513,3 +513,96 @@ describe('resolveActionParams — field-inherited option keys (objectui#3559)', 
     expect([noValue, noLabel]).toHaveLength(2);
   });
 });
+
+describe('resolveActionParams — the param `widget` reaches the resolved param (#30260)', () => {
+  // `ActionParamSchema.widget` shares `FieldSchema.widget`'s key and meaning.
+  // The resolver builds its output key by key, so a key it does not copy never
+  // reaches the dialog — the state before this card, measured: every branch
+  // below answered `widget: undefined`.
+  const grantCtx = (): ResolveActionParamsContext =>
+    ctx({
+      objects: [
+        {
+          name: 'sys_user',
+          fields: {
+            permission_set: { type: 'text', label: 'Permission set', widget: 'permission-ref' } as any,
+            plain: { type: 'text', label: 'Plain' },
+            account: { type: 'lookup', label: 'Account', reference: 'account', widget: 'record-ref' } as any,
+          },
+        },
+      ],
+    });
+
+  it('copies an inline param widget onto the resolved param', () => {
+    const [out] = resolveActionParams(
+      [{ name: 'permissionSet', type: 'text', widget: 'permission-ref' }],
+      grantCtx(),
+    );
+    expect(out.widget).toBe('permission-ref');
+    // `type` stays the value's type: the widget only changes how it is picked.
+    expect(out.type).toBe('text');
+  });
+
+  it('inherits the field widget on a field-backed param that inherits the type', () => {
+    const [out] = resolveActionParams([{ field: 'permission_set' }], grantCtx());
+    expect(out.widget).toBe('permission-ref');
+    expect(out.type).toBe('text');
+  });
+
+  it('inherits it too when the param restates the field type', () => {
+    const [out] = resolveActionParams([{ field: 'permission_set', type: 'text' }], grantCtx());
+    expect(out.widget).toBe('permission-ref');
+  });
+
+  it('inherits it when the param restates the field type in an alias spelling', () => {
+    // `reference` is the param dialect's alias of `lookup` (PARAM_TYPE_ALIASES).
+    const [out] = resolveActionParams([{ field: 'account', type: 'reference' }], grantCtx());
+    expect(out.widget).toBe('record-ref');
+    // CONTROL: a genuinely different type still does not inherit it.
+    const [other] = resolveActionParams([{ field: 'account', type: 'text' }], grantCtx());
+    expect(other.widget).toBeUndefined();
+  });
+
+  it('does NOT inherit the field widget onto a param that overrides the type', () => {
+    const [out] = resolveActionParams([{ field: 'permission_set', type: 'textarea' }], grantCtx());
+    expect(out.widget).toBeUndefined();
+    expect(out.type).toBe('textarea');
+  });
+
+  it('lets the param widget win over the field widget', () => {
+    const [out] = resolveActionParams(
+      [{ field: 'permission_set', widget: 'position-ref' }],
+      grantCtx(),
+    );
+    expect(out.widget).toBe('position-ref');
+  });
+
+  it('CONTROL: a param and field that declare no widget resolve none', () => {
+    const [inline, backed] = resolveActionParams(
+      [{ name: 'note', type: 'text' }, { field: 'plain' }],
+      grantCtx(),
+    );
+    expect(inline.widget).toBeUndefined();
+    expect(backed.widget).toBeUndefined();
+  });
+
+  it('keeps the param widget on the missing-field fallback branch', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const [out] = resolveActionParams(
+        [{ field: 'no_such_field', widget: 'permission-ref' }],
+        grantCtx(),
+      );
+      expect(out.unresolvedField).toBe('sys_user.no_such_field');
+      expect(out.widget).toBe('permission-ref');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('accepts the widget through the public ActionParam authoring type', () => {
+    const authored: ActionParam[] = [{ name: 'permissionSet', type: 'text', widget: 'permission-ref' }];
+    const [out] = resolveActionParams(authored as RawActionParam[], grantCtx());
+    expect(paramToField(out).type).toBe('permission-ref');
+  });
+});

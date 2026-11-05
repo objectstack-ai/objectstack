@@ -143,6 +143,12 @@ interface MailSettingsSurface {
   ): Promise<{ values: Record<string, { value?: unknown; source?: string } | undefined> }>;
   /** Rebuild the transport when the namespace changes. Optional: no change bus → the boot read stands. */
   subscribe?(namespace: string | undefined, handler: SettingsChangeHandler): SettingsUnsubscribe;
+  /**
+   * The namespaces this service offers. Read once, to bind `branding` only
+   * where it is offered: a walled posture withholds it. Optional: a service
+   * with no listing binds no branding.
+   */
+  listManifests?(): ReadonlyArray<{ namespace?: unknown } | undefined>;
   /** Override service-settings' validate-only `mail/test` fallback with a real send. */
   registerAction?(
     namespace: string,
@@ -428,6 +434,21 @@ export class EmailServicePlugin implements Plugin {
    */
   private queueDeliveryFromSettings?: boolean;
   /**
+   * The Setup → Branding product name an administrator SET
+   * (`branding.workspace_name`), bound on `kernel:ready` where the settings
+   * service offers that namespace. `undefined` ⇒ none is set, and the
+   * deployment's own name applies ({@link senderBrandName}).
+   */
+  private brandingProductName?: string;
+  /**
+   * The default sender as DECLARED — the constructor's `defaultFrom`, then the
+   * `mail` settings' From email with the From name somebody set, if any —
+   * before {@link applyDefaultSender} names it. Kept apart from the live
+   * sender so a later Branding save can rename a sender that has no name of
+   * its own, and never one that has.
+   */
+  private declaredSender?: EmailAddress;
+  /**
    * Settles when the boot outbox sweep (#5161) has finished — with its counts,
    * or `undefined` when the sweep itself failed (already reported at `error`).
    *
@@ -438,6 +459,57 @@ export class EmailServicePlugin implements Plugin {
 
   constructor(options: EmailServicePluginOptions = {}) {
     this.options = options;
+  }
+
+  /**
+   * The product name a sender with no display name of its own goes out under:
+   * the Setup → Branding product name when an administrator set one, else the
+   * deployment's name (`defaultTemplateContext.appName`, which `os serve`
+   * resolves from `OS_APP_NAME` > `config.email.appName` > … > top-level
+   * `config.appName`), else `'ObjectStack'`. It is the chain the auth mails'
+   * `{{appName}}` reads (plugin-auth binds the same `workspace_name` over the
+   * same deployment name), so the sender and the subject name one product.
+   * A From name somebody set always wins over it ({@link namedSender}).
+   */
+  private senderBrandName(): string {
+    const deployment = this.options.defaultTemplateContext?.appName;
+    return this.brandingProductName
+      ?? (typeof deployment === 'string' && deployment.trim() ? deployment.trim() : undefined)
+      ?? 'ObjectStack';
+  }
+
+  /**
+   * `sender` as it goes out: a sender with a display name of its own keeps it;
+   * one without — a bare address, or `{ address }` alone — takes
+   * {@link senderBrandName}, so mail an administrator configured with an
+   * address alone does not reach the recipient unbranded.
+   */
+  private namedSender(sender: EmailAddress | undefined): EmailAddress | undefined {
+    if (!sender) return sender;
+    // The string form is a bare address: it carries no display name.
+    const declared = typeof sender === 'string' ? { address: sender } : sender;
+    if (declared.name?.trim()) return sender;
+    return { ...declared, name: this.senderBrandName() };
+  }
+
+  /**
+   * Install the declared sender, named ({@link namedSender}), as the live
+   * service's default `from` — after a `mail` save changes the declaration and
+   * after a Branding save changes the name. A sender a caller passes as
+   * `input.from` is the caller's and is never renamed.
+   */
+  private applyDefaultSender(): void {
+    this.service?.setDefaultFrom(this.namedSender(this.declaredSender));
+  }
+
+  /**
+   * The display name a `mail/test` send carries: the form's From name when it
+   * has one, else the product name real mail without one goes out under — so
+   * the test mail shows what the recipients will see.
+   */
+  private testSenderName(merged: Record<string, unknown>): string {
+    const typed = typeof merged.from_name === 'string' ? merged.from_name.trim() : '';
+    return typed || this.senderBrandName();
   }
 
   /**
@@ -501,11 +573,12 @@ export class EmailServicePlugin implements Plugin {
 
     this.service = new EmailService({
       transport,
-      defaultFrom: this.options.defaultFrom,
+      defaultFrom: this.namedSender(this.options.defaultFrom),
       retries: this.options.retries,
       defaultTemplateContext: this.options.defaultTemplateContext,
       logger: ctx.logger,
     });
+    this.declaredSender = this.options.defaultFrom;
 
     // [#28880] The stack's declared fallback locale joins a named-locale
     // template ladder (after the recipient's own tag, before en-US). Read
@@ -652,6 +725,52 @@ export class EmailServicePlugin implements Plugin {
             ctx.logger.info('EmailServicePlugin: bound to settings:changed for namespace=mail');
           }
 
+          // A sender with no display name of its own goes out under the
+          // product name (`senderBrandName`), and the Setup → Branding
+          // product name is its first rung: read here, and again on every
+          // Branding save, so a rename reaches the next mail with no restart.
+          // Only an explicitly SET value counts — a manifest default is no
+          // decision anybody made — exactly as plugin-auth binds the same key
+          // to the auth mails' `{{appName}}`. Bound only where the settings
+          // service LISTS `branding`: a walled posture withholds the
+          // namespace, so there is nothing to bind and the deployment's name
+          // stays in force.
+          let brandingOffered = false;
+          try {
+            brandingOffered = typeof settings.listManifests === 'function'
+              && settings.listManifests().some((m) => m?.namespace === 'branding');
+          } catch (err: any) {
+            ctx.logger.warn(
+              'EmailServicePlugin: could not list settings namespaces, so the sender name does not follow '
+              + 'Setup → Branding: ' + (err?.message ?? err),
+            );
+          }
+          if (brandingOffered) {
+            const applyBrand = async () => {
+              try {
+                const payload = await settings.getNamespace('branding', {});
+                const resolved = payload.values.workspace_name;
+                const explicit = resolved && (resolved.source ?? 'default') !== 'default'
+                  && typeof resolved.value === 'string'
+                  ? resolved.value.trim()
+                  : '';
+                this.brandingProductName = explicit || undefined;
+                this.applyDefaultSender();
+              } catch (err: any) {
+                ctx.logger.warn(
+                  'EmailServicePlugin: failed to apply branding.workspace_name to the sender name: '
+                  + (err?.message ?? err),
+                );
+              }
+            };
+            await applyBrand();
+            if (typeof settings.subscribe === 'function') {
+              settings.subscribe('branding', () => {
+                void applyBrand();
+              });
+            }
+          }
+
           // Setup → Email states which transport is LIVE. The form shows what
           // is stored, and the stored default (provider `smtp`, no host) reads
           // as SMTP while every message goes to the development log. Asked on
@@ -716,7 +835,7 @@ export class EmailServicePlugin implements Plugin {
                     defaultFrom: merged.from_email
                       ? {
                           address: String(merged.from_email),
-                          name: merged.from_name ? String(merged.from_name) : undefined,
+                          name: this.testSenderName(merged),
                         }
                       : undefined,
                     // Same sys_email audit trail as any other delivery —
@@ -741,7 +860,7 @@ export class EmailServicePlugin implements Plugin {
                     defaultFrom: merged.from_email
                       ? {
                           address: String(merged.from_email),
-                          name: merged.from_name ? String(merged.from_name) : undefined,
+                          name: this.testSenderName(merged),
                         }
                       : undefined,
                     // Same sys_email audit trail as the smtp test above.
@@ -776,7 +895,7 @@ export class EmailServicePlugin implements Plugin {
                     defaultFrom: merged.from_email
                       ? {
                           address: String(merged.from_email),
-                          name: merged.from_name ? String(merged.from_name) : undefined,
+                          name: this.testSenderName(merged),
                         }
                       : undefined,
                     ...(svc.options.persistence ? { persistence: svc.options.persistence } : {}),
@@ -796,7 +915,7 @@ export class EmailServicePlugin implements Plugin {
                   to,
                   from: merged.from_email ? {
                     address: String(merged.from_email),
-                    name: merged.from_name ? String(merged.from_name) : undefined,
+                    name: this.testSenderName(merged),
                   } : undefined,
                   subject: 'ObjectStack mail test',
                   text: 'This is a test email from the ObjectStack settings page.',
@@ -1370,7 +1489,14 @@ export class EmailServicePlugin implements Plugin {
     }
 
     const fromEmail = typeof values.from_email === 'string' ? values.from_email : undefined;
-    const fromName = typeof values.from_name === 'string' ? values.from_name : undefined;
+    // Only a From name somebody SET names the sender. One left empty — or a
+    // value the resolver answers as a manifest default, a decision nobody
+    // made — leaves the sender nameless here, and the service names it with
+    // the product name ({@link namedSender}).
+    const fromName = (sources.from_name ?? 'default') !== 'default'
+      && typeof values.from_name === 'string' && values.from_name.trim()
+      ? values.from_name
+      : undefined;
     let appliedFrom: string | undefined;
     if (fromEmail && !isSendableAddress({ address: fromEmail, name: fromName })) {
       // #14318 — the settings twin of the constructor assertion, taking this
@@ -1385,7 +1511,8 @@ export class EmailServicePlugin implements Plugin {
         + `before reaching the transport, silently on the sign-up path. ${DEFAULT_FROM_FIX}`,
       );
     } else if (fromEmail) {
-      this.service.setDefaultFrom({ address: fromEmail, name: fromName });
+      this.declaredSender = fromName ? { address: fromEmail, name: fromName } : { address: fromEmail };
+      this.applyDefaultSender();
       appliedFrom = fromEmail;
     }
 

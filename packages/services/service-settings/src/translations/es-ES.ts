@@ -46,7 +46,10 @@ export const esES: PlatformTranslationData = {
         smtp_password: { label: 'Contraseña' },
         api_key: { label: 'Clave de API' },
         from_email: { label: 'Correo del remitente', help: 'Ejemplo: no-reply@example.com' },
-        from_name: { label: 'Nombre del remitente' },
+        from_name: {
+          label: 'Nombre del remitente',
+          help: 'Déjelo vacío para usar el nombre del producto (Marca) o, si no hay, el nombre con el que se configuró esta implantación.',
+        },
         queue_delivery: {
           label: 'Entrega mediante cola duradera',
           help: 'Entrega cada mensaje a la cola de trabajos en lugar de enviarlo en línea, de modo que una '
@@ -135,7 +138,10 @@ export const esES: PlatformTranslationData = {
         },
       },
       keys: {
-        email_password_enabled: { label: 'Habilitar inicio de sesión con correo/contraseña' },
+        email_password_enabled: {
+          label: 'Habilitar inicio de sesión con correo/contraseña',
+          confirmOffText: 'Las personas que inician sesión con contraseña necesitarán otra forma de acceder.',
+        },
         signup_enabled: {
           label: 'Permitir el registro por correo',
           help: 'Abre el formulario de registro con correo y contraseña. A quién admite lo decide la «Audiencia de autorregistro» inferior: con «Solo por invitación», solo a una dirección con una invitación pendiente; con «Dominios de correo», a los dominios de la lista y a las direcciones invitadas; con «Abierto», a cualquiera. Desactivado, cierra el formulario con cualquier audiencia, invitaciones incluidas.',

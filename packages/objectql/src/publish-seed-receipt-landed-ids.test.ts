@@ -284,20 +284,46 @@ describe('seedApplied.landed — the rows a published seed landed on (#30348)', 
         expect('seedApplied' in res).toBe(false);
     });
 
-    it('a load that threw reports no ids: `landed` absent means "not reported", never "nothing landed"', async () => {
+    // [#30429] A load that THREW part-way reports `landed` for the datasets
+    // that FINISHED before the throw — the same projection, the same two
+    // lists — and leaves the dataset that threw out: its ids are only partly
+    // known when it throws (`SeedLoadPartialWrites.finished`), while its rows
+    // stay in the counts and its object in `error`.
+    it('a load that threw: `landed` lists the seeds that finished, created vs matched, and not the one that threw', async () => {
         const { p, engine } = await makeProtocol();
+        // A customer's own row sharing a seed key, so both lists are exercised.
+        const customer: any = await engine.insert(ITEM, { name: 'R1' }, { context: { isSystem: true } } as any);
         await stage(p, [
-            { type: 'seed', name: 'a_good', item: seed(['R1']) },
+            { type: 'seed', name: 'a_good', item: seed(['R1', 'R2', 'R3']) },
             { type: 'seed', name: 'z_missing', item: { object: MISSING, mode: 'ignore', records: [{ name: 'Z' }] } },
         ]);
 
         const res: any = await p.publishPackageDrafts({ packageId: PKG });
 
-        // Positive control: the good seed's row DID land; only the ids are unreported.
-        expect((await rowsOf(engine)).map((r) => r.name)).toEqual(['R1']);
+        const rows = await rowsOf(engine);
+        // Positive control: the good seed's rows DID land before the throw.
+        expect(rows.map((r) => r.name)).toEqual(['R1', 'R2', 'R3']);
         expect(res.seedApplied.success).toBe(false);
-        expect(res.seedApplied.inserted).toBe(1);
-        expect('landed' in res.seedApplied).toBe(false);
+        expect(res.seedApplied.error).toContain(`'${MISSING}'`);
+        expect(res.seedApplied.inserted).toBe(2);
+        const created = rows.filter((r) => r.name !== 'R1').map((r) => r.id);
+        // One entry, for the seed that finished; none for the object that threw.
+        expect(res.seedApplied.landed).toEqual([{ object: ITEM, inserted: list(created), matched: list([customer.id]) }]);
+        // The wire contract keeps it on a failed apply too.
+        expect(PublishPackageDraftsResponseSchema.parse(res).seedApplied?.landed).toEqual(res.seedApplied.landed);
+    });
+
+    it('a load that threw before any seed finished: `landed` is reported and empty, not absent', async () => {
+        const { p, engine } = await makeProtocol();
+        await stage(p, [{ type: 'seed', name: 'z_missing', item: { object: MISSING, mode: 'ignore', records: [{ name: 'Z' }] } }]);
+
+        const res: any = await p.publishPackageDrafts({ packageId: PKG });
+
+        expect(await rowsOf(engine)).toEqual([]);
+        expect(res.seedApplied.success).toBe(false);
+        expect(res.seedApplied.inserted).toBe(0);
+        expect(res.seedApplied.error).toContain(`'${MISSING}'`);
+        expect(res.seedApplied.landed).toEqual([]);
     });
 
     it('the single-item door (`publishMetaItem`) carries the same `landed`, and its schema keeps it', async () => {

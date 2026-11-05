@@ -349,9 +349,10 @@ const BORROWED_ENVELOPE_DECLINED_TYPES: ReadonlySet<string> = new Set([
  * `import-mapping.ts`, included) answered the base's body, so a published
  * override did nothing.
  *
- * ⛔ A closed list, judged on the canonical type. `action` and `flow` wait for
- * ADR-0146 D9's conditions (`flow` has its own admission,
- * `declinesStoredRow`'s first branch). Every type here is also in
+ * ⛔ A closed list, judged on the canonical type. `flow` and [#30065] `action`
+ * are not here: ADR-0146 D9 admits their declared override in
+ * `declinesStoredRow` on its own, and their override row keeps its bare
+ * registry entry, which the engine's readers arm from. Every type here is also in
  * {@link BORROWED_ENVELOPE_DECLINED_TYPES}: the bare entry served no reader
  * the row does not serve now.
  */

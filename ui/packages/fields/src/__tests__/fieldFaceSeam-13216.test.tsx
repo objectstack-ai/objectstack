@@ -99,8 +99,9 @@ describe('objectui#13216 — the field-face seam answers the registry face of a 
 
     // No widget.
     expect(resolveFieldReadFace({ name: 'subject', type: 'text' } as any)).toBeUndefined();
-    // A widget with no read face of its own draws as its type.
-    expect(resolveFieldReadFace({ name: 'criteria', type: 'textarea', widget: 'filter-condition' } as any)).toBeUndefined();
+    // A widget with no read face of its own draws as its type. (`code`: since
+    // objectstack#30209 `filter-condition` has a face of its own.)
+    expect(resolveFieldReadFace({ name: 'snippet', type: 'textarea', widget: 'code' } as any)).toBeUndefined();
     // A non-textual base type keeps its own key, so the widget does not promote.
     expect(resolveFieldReadFace({ name: 'kind', type: 'select', widget: 'object-ref' } as any)).toBeUndefined();
     // A `format` hint promotes to a richer cell, but it is not a widget's face.

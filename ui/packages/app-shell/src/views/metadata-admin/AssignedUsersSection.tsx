@@ -158,7 +158,7 @@ function useCopy() {
             countOf: (n: number) => n + ' 人',
             direct: '直授',
             viaPosition: (p: string) => '经岗位 ' + p,
-            everyoneNote: '已绑定到 everyone 锚点 — 所有登录成员都持有此权限集。',
+            everyoneNote: '所有登录成员都持有此权限集。',
             positionHeldHint: '经岗位持有 — 在岗位的指派中移除。',
           }
         : {
@@ -186,7 +186,7 @@ function useCopy() {
             countOf: (n: number) => String(n),
             direct: 'direct',
             viaPosition: (p: string) => 'via position ' + p,
-            everyoneNote: 'Bound to the everyone anchor — every signed-in member holds this set.',
+            everyoneNote: 'Every signed-in member holds this set.',
             positionHeldHint: 'Held via a position — remove it on the position’s assignments.',
           },
     [zh],

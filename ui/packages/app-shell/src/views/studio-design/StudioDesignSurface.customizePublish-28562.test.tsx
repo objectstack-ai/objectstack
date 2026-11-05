@@ -355,12 +355,18 @@ describe('the wall is read from what the server publishes (objectstack#28562)', 
 describe('the item header says where the customization is saved (objectstack#29691)', () => {
   const SAVED_TO = 'Saved to HotCRM’s customizations';
   const savedTo = () => within(header()).queryByTestId('if-item-saved-to');
+  // objectstack#30436 — and the sheet's second sentence, naming the real pair.
+  const ENVIRONMENT =
+    'These changes are kept in this environment’s database as items of com.example.hotcrm.custom, not in your project’s source. They reach another environment only through os package export.';
+  const environment = () => within(header()).queryByTestId('if-item-saved-to-environment');
 
   it('after Customize the header says it, and after the first edit it still does, in the sheet’s own words', async () => {
     renderWorkbench();
     await openPipeline();
     fireEvent.click(await within(header()).findByTestId('studio-customize', undefined, { timeout: 8000 }));
     await waitFor(() => expect(savedTo()).toHaveTextContent(SAVED_TO), { timeout: 8000 });
+    // Before the first save the pair is the `<base>.custom` id that save creates.
+    expect(environment()).toHaveTextContent(ENVIRONMENT);
     // On its own line under the title row, never in it (the fold measures the row).
     expect(savedTo()!.closest('[data-slot="item-note"]')).not.toBeNull();
     expect(within(header()).getByRole('heading', { level: 1 }).parentElement).not.toContainElement(savedTo());
@@ -369,6 +375,7 @@ describe('the item header says where the customization is saved (objectstack#296
     await waitFor(() => expect(srv.saves).toHaveLength(1), { timeout: 8000 });
     await waitFor(() => expect(panelPackage()).toBe(PAIR), { timeout: 8000 });
     expect(savedTo()).toHaveTextContent(SAVED_TO);
+    expect(environment()).toHaveTextContent(ENVIRONMENT);
     // The header line and the sheet line read the same.
     expect(screen.getByTestId('sheet-saved-to').textContent).toBe(savedTo()!.textContent);
   });
@@ -378,6 +385,7 @@ describe('the item header says where the customization is saved (objectstack#296
     await openPipeline();
     await within(header()).findByTestId('studio-customize', undefined, { timeout: 8000 });
     expect(savedTo()).toBeNull();
+    expect(environment()).toBeNull();
     expect(header().querySelector('[data-slot="item-note"]')).toBeNull();
     expect(screen.queryByTestId('sheet-saved-to')).toBeNull();
   });

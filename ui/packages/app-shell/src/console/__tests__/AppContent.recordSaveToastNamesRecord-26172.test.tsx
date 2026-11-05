@@ -90,11 +90,12 @@ vi.mock('../../providers/AdapterProvider', async (importOriginal) => ({
   useAdapter: () => dataSourceStub,
 }));
 
-const OBJECTS = [
+/** The object definitions in `lang`, as the server serves them (`taskLabel` is the task's served label). */
+const objectsOf = (taskLabel: string) => [
   // Declares its name field: a saved task is named by `subject`.
   {
     name: 'showcase_task',
-    label: 'Task',
+    label: taskLabel,
     nameField: 'subject',
     fields: { subject: { type: 'text', label: 'Subject' }, done: { type: 'boolean', label: 'Done' } },
   },
@@ -104,18 +105,21 @@ const OBJECTS = [
 
 const APPS = [{ name: 'crm', label: 'CRM', isDefault: true, navigation: [] }];
 
-// One value for the whole run: the route's effects key on these members.
-const METADATA = {
+// One value per language for the whole run: the route's effects key on these
+// members. A `zh-CN` session holds the `zh-CN` answer (objectstack#30390).
+const metadataOf = (objects: unknown[]) => ({
   apps: APPS,
-  objects: OBJECTS,
+  objects,
   loading: false,
   ensureType: undefined,
   error: null,
   refresh: async () => {},
-};
+});
+const METADATA = { en: metadataOf(objectsOf('Task')), 'zh-CN': metadataOf(objectsOf('任务')) };
+const session = { lang: 'en' as keyof typeof METADATA };
 vi.mock('../../providers/MetadataProvider', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  useMetadata: () => METADATA,
+  useMetadata: () => METADATA[session.lang],
 }));
 
 const ACTION_RUNNER = { execute, runner: { registerHandler: () => {}, getContext: () => ({}) } };
@@ -164,6 +168,7 @@ afterEach(() => {
 
 /** Mount at `url`, save `saved` through the record-form modal, and wait for its toast. */
 async function saveFrom(url: string, saved: Record<string, unknown>, lang: Lang = 'en'): Promise<void> {
+  session.lang = lang;
   const i18n = createI18n({ defaultLanguage: lang, detectBrowserLanguage: false });
   expect(i18n.language).toBe(lang);
   i18n.addResourceBundle(lang, 'translation', BUNDLE[lang], true, true);
