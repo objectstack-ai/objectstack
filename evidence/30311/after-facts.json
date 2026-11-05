@@ -1,0 +1,12 @@
+{
+  "appSwitcherPill": "Showcase Hub (renamed-30311)",
+  "appPageHas": {
+    "renamed": 1,
+    "packaged": 0
+  },
+  "homeHas": {
+    "renamed": 2,
+    "packaged": 0
+  },
+  "homeUrl": "http://localhost:5311/home"
+}

@@ -1,0 +1,12 @@
+{
+  "appSwitcherPill": "功能展示",
+  "appPageHas": {
+    "renamed": 0,
+    "packaged": 1
+  },
+  "homeHas": {
+    "renamed": 0,
+    "packaged": 1
+  },
+  "homeUrl": "http://localhost:5311/home"
+}
