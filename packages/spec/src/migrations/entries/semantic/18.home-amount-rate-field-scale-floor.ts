@@ -20,10 +20,19 @@ export const entry: SemanticMigration = {
     + 'fields.AMOUNT.currencyConfig.homeAmount.rateField, naming the field, its scale and the floor 12. An undeclared '
     + 'scale is accepted: on a number field it declares no fixed width, so the rate shows its stored digits. NOT '
     + 'mechanically converted: raising the scale or deleting it are both right, and which one is the author\'s '
-    + 'display choice. Stored rows are unaffected; the engine already kept every digit.',
+    + 'display choice. OLDER BUILT ARTIFACTS: an artifact whose object declares such a rate field fails its '
+    + 'ObjectStackDefinitionSchema parse at load, before anything in it registers, so the whole artifact is refused '
+    + 'and the metadata plugin\'s start fails with the Zod issue at that path; rebuild the artifact after fixing the '
+    + 'source. STORED sys_metadata OBJECT ROWS are kept as authored and nothing converts one: such a row still loads '
+    + 'and registers unchanged, boot logs it with a [metadata_spec_invalid] line at '
+    + 'fields.AMOUNT.currencyConfig.homeAmount.rateField, and its next save is refused with 422 INVALID_METADATA '
+    + 'until the scale is raised to 12 or more or deleted. Stored DATA rows (record values) are unaffected; the '
+    + 'engine already kept every digit of the rate.',
   acceptanceCriteria:
     'objectstack validate (ObjectStackDefinitionSchema.safeParse) reports no issue at '
     + 'fields.AMOUNT.currencyConfig.homeAmount.rateField for any amount declaring homeAmount, and the rate field '
     + 'either declares no scale or declares scale 12 or more; a record written afterwards shows its stored rate with '
-    + 'all of its decimals.',
+    + 'all of its decimals. Rebuild every built artifact after the fix. For stored sys_metadata object rows, look '
+    + 'for the [metadata_spec_invalid] boot line at fields.AMOUNT.currencyConfig.homeAmount.rateField: raise that '
+    + 'rate field\'s scale to 12 or more, or delete it, and save the object.',
 };
