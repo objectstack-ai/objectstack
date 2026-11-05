@@ -121,9 +121,11 @@ describe('a disabled package\'s objectExtensions', () => {
   it('a base that already carries the withheld members (a folded metadata-service body) has them taken off', () => {
     const folded = registry.getObject(OBJECT);
     registry.disablePackage(MODULE_PKG);
+    expect(indexedOf(folded), 'precondition: the folded base carries the withheld index').toContain('qe_credit');
     const body = registry.foldObjectExtendersOnto(OBJECT, structuredClone(folded));
     expect(fieldsOf(body)).toEqual(['name', 'qe_score', 'qe_shared']);
     expect(rulesOf(body)).toEqual(['qe_name_required']);
+    expect(indexedOf(body)).not.toContain('qe_credit');
   });
 
   it('a tenant overlay saved from a served read does not keep a disabled package\'s field on the served object', () => {
@@ -134,6 +136,7 @@ describe('a disabled package\'s objectExtensions', () => {
     const body = registry.getObject(OBJECT) as any;
     expect(body.label).toBe('Customer');
     expect(fieldsOf(body)).toEqual(['name', 'qe_score', 'qe_shared']);
+    expect(indexedOf(body)).not.toContain('qe_credit');
     expect(fieldsOf(registry.getStorageObject(OBJECT))).toContain('qe_credit');
   });
 

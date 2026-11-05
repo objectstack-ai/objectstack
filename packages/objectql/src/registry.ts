@@ -759,6 +759,8 @@ interface WithheldExtensions {
   kept: ObjectContributor[];
   withheldFields: ReadonlySet<string>;
   withheldRules: ReadonlySet<string>;
+  /** Each withheld index by its structural key ({@link indexKeysOf}). */
+  withheldIndexes: ReadonlySet<string>;
 }
 
 /** The field names a body declares in the record spelling the merge reads. */
@@ -776,8 +778,14 @@ function ruleNamesOf(body: unknown): string[] {
     .filter((name): name is string => typeof name === 'string' && name !== '');
 }
 
+/** The indexes a body declares, each by its structural key (the key the fold's index subtraction compares by). */
+function indexKeysOf(body: unknown): string[] {
+  const indexes = isPlainRecord(body) ? body.indexes : undefined;
+  return Array.isArray(indexes) ? indexes.map((index) => stableStringify(index)) : [];
+}
+
 /**
- * `base` without the fields and rules a withheld extension alone adds. By
+ * `base` without the fields, rules and indexes a withheld extension alone adds. By
  * reference when it carries none of them, which is the ordinary case (a base
  * that was never folded).
  */
@@ -787,7 +795,9 @@ function withoutWithheldMembers(base: ServiceObject, withheld: WithheldExtension
   const dropFields = fields !== undefined && Object.keys(fields).some((name) => withheld.withheldFields.has(name));
   const dropRules = Array.isArray(rules)
     && rules.some((rule) => isPlainRecord(rule) && typeof rule.name === 'string' && withheld.withheldRules.has(rule.name));
-  if (!dropFields && !dropRules) return base;
+  const indexes = (base as { indexes?: unknown }).indexes;
+  const dropIndexes = Array.isArray(indexes) && indexes.some((index) => withheld.withheldIndexes.has(stableStringify(index)));
+  if (!dropFields && !dropRules && !dropIndexes) return base;
   const out = { ...base } as ServiceObject & Record<string, unknown>;
   if (dropFields) {
     out.fields = Object.fromEntries(Object.entries(fields!).filter(([name]) => !withheld.withheldFields.has(name))) as ServiceObject['fields'];
@@ -796,6 +806,9 @@ function withoutWithheldMembers(base: ServiceObject, withheld: WithheldExtension
     out.validations = (rules as unknown[]).filter(
       (rule) => !(isPlainRecord(rule) && typeof rule.name === 'string' && withheld.withheldRules.has(rule.name)),
     ) as ServiceObject['validations'];
+  }
+  if (dropIndexes) {
+    out.indexes = (indexes as unknown[]).filter((index) => !withheld.withheldIndexes.has(stableStringify(index))) as ServiceObject['indexes'];
   }
   return out;
 }
@@ -4849,9 +4862,10 @@ export class SchemaRegistry {
    * plane's field map (its default projection and its unknown-field refusal)
    * loses them too; the storage layer keeps them ({@link getStorageObject}).
    *
-   * `withheldFields` / `withheldRules` are the names a withheld extension
-   * adds that neither the owner's own declaration nor a kept extension also
-   * declares. A base body that already carries them (a tenant overlay saved
+   * `withheldFields` / `withheldRules` / `withheldIndexes` are the members a
+   * withheld extension adds that neither the owner's own declaration nor a
+   * kept extension also declares (indexes compared structurally, as the fold's
+   * own index subtraction compares them). A base body that already carries them (a tenant overlay saved
    * from a served read, a metadata-service copy seeded from a resolved body)
    * has them taken off ({@link withoutWithheldMembers}), so where the base
    * came from does not decide what a disable hides.
@@ -4866,18 +4880,22 @@ export class SchemaRegistry {
     const owner = contributors.find((c) => c.ownership === 'own')?.definition;
     const keptFields = new Set<string>(ownFieldNamesOf(owner) ?? []);
     const keptRules = new Set<string>(ruleNamesOf(owner));
+    const keptIndexes = new Set<string>(indexKeysOf(owner));
     for (const c of kept) {
       if (c.ownership !== 'extend') continue;
       for (const name of fieldNamesOf(c.definition)) keptFields.add(name);
       for (const name of ruleNamesOf(c.definition)) keptRules.add(name);
+      for (const key of indexKeysOf(c.definition)) keptIndexes.add(key);
     }
     const withheldFields = new Set<string>();
     const withheldRules = new Set<string>();
+    const withheldIndexes = new Set<string>();
     for (const c of withheld) {
       for (const name of fieldNamesOf(c.definition)) if (!keptFields.has(name)) withheldFields.add(name);
       for (const name of ruleNamesOf(c.definition)) if (!keptRules.has(name)) withheldRules.add(name);
+      for (const key of indexKeysOf(c.definition)) if (!keptIndexes.has(key)) withheldIndexes.add(key);
     }
-    return { kept, withheldFields, withheldRules };
+    return { kept, withheldFields, withheldRules, withheldIndexes };
   }
 
   /**
