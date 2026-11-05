@@ -1139,6 +1139,12 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     },
     [listedPublishRefusals, locale],
   );
+  // objectstack#30064 — the same kept refusal, for the All metadata area's
+  // editor of the item it refused (a customized dataset), shown at the item.
+  const publishRefusalFor = React.useCallback(
+    (type: string, name: string): StudioRefusal | null => listedPublishRefusals.get(publishRefusalKey(type, name)) ?? null,
+    [listedPublishRefusals],
+  );
   const shownPendingCount = behindSave ? Math.max(pendingCount ?? 0, 1) : pendingCount;
   const hasPending = (shownPendingCount ?? 0) > 0;
   // objectui#12725 — the same ledger and number, for the pillars' item headers
@@ -1745,6 +1751,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 customization={customization}
                 publishNonce={publishNonce}
                 onDraftSaved={onDraftSaved}
+                publishRefusalFor={publishRefusalFor}
               />
             ) : !pillarKnown ? (
               <StudioEmptyState
