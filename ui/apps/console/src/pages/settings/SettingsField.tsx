@@ -6,7 +6,7 @@
  * (which carries provenance and lock state).
  */
 
-import { cloneElement, isValidElement, lazy, Suspense, useId, useState, type ReactElement } from 'react';
+import { cloneElement, isValidElement, lazy, Suspense, useId, useRef, useState, type ReactElement } from 'react';
 import {
   Input,
   Textarea,
@@ -39,7 +39,7 @@ import {
   cn,
   getLazyIcon,
 } from '@object-ui/components';
-import { useObjectTranslation } from '@object-ui/i18n';
+import { pickLocalized, useObjectTranslation } from '@object-ui/i18n';
 import { AlertTriangle, ChevronRight, Info, RotateCcw } from 'lucide-react';
 import { EnvLockBadge } from './EnvLockBadge';
 import {
@@ -394,11 +394,91 @@ function DomainCombobox({
   );
 }
 
+/**
+ * <ToggleSwitch> — a `toggle` row's control.
+ *
+ * A specifier that declares `confirmOffText` (`SpecifierSchema`: "Confirm
+ * dialog text shown before a toggle's value changes to off (omit = no
+ * confirm)") asks before the switch goes from on to off. Cancel leaves the
+ * switch on and hands nothing to `onChange`, so the page's draft never holds
+ * the off and no Save can send it; Continue hands `false` to `onChange`, and
+ * the page's Save sends it like any other edit. Turning the switch on asks
+ * nothing, and a toggle without the key changes at once, as before.
+ *
+ * Judged on the DECLARATION (`confirmText != null`), as the `action_button`
+ * arm judges a handler's `confirmText`. The dialog is opened by state, never by
+ * an `AlertDialogTrigger`, since only one of the switch's two directions asks;
+ * so focus is handed back to the switch by hand when it closes.
+ *
+ * Props beyond its own reach the `<Switch>`, so the row's `aria-invalid` /
+ * `aria-describedby` land on the focusable control.
+ */
+function ToggleSwitch({
+  id,
+  checked,
+  disabled,
+  confirmOffText,
+  onChange,
+  ...switchProps
+}: {
+  id: string;
+  checked: boolean;
+  disabled?: boolean;
+  /** The resolved question, or `undefined` when the specifier declares none. */
+  confirmOffText?: string;
+  onChange: (next: boolean) => void;
+  'aria-invalid'?: boolean;
+  'aria-describedby'?: string;
+}) {
+  const { t } = useObjectTranslation();
+  const [asking, setAsking] = useState(false);
+  const switchRef = useRef<HTMLButtonElement>(null);
+  return (
+    <>
+      <Switch
+        ref={switchRef}
+        id={id}
+        checked={checked}
+        disabled={disabled}
+        onCheckedChange={(next) => {
+          if (checked && !next && confirmOffText !== undefined) {
+            setAsking(true);
+            return;
+          }
+          onChange(next);
+        }}
+        {...switchProps}
+      />
+      {confirmOffText !== undefined ? (
+        <AlertDialog open={asking} onOpenChange={setAsking}>
+          <AlertDialogContent
+            onCloseAutoFocus={(e) => {
+              e.preventDefault();
+              switchRef.current?.focus();
+            }}
+          >
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t('actionConfirm.title')}</AlertDialogTitle>
+              <AlertDialogDescription>{confirmOffText}</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>{t('actionConfirm.cancel')}</AlertDialogCancel>
+              <AlertDialogAction onClick={() => onChange(false)}>
+                {t('actionConfirm.confirm')}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      ) : null}
+    </>
+  );
+}
+
 export function SettingsField(props: SettingsFieldProps) {
   const { spec, resolved, value, onChange, onAction, locked, saving, labels, error, writeScope } =
     props;
   const id = useId();
-  const { t } = useObjectTranslation();
+  const { t, language } = useObjectTranslation();
   const disabled = Boolean(locked || saving);
   const literalLabel = resolveLabel(spec.label);
   // Field-scoped label/help/placeholder/option resolution. Falls back to the
@@ -668,7 +748,17 @@ export function SettingsField(props: SettingsFieldProps) {
           onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
         />,
       );
-    case 'toggle':
+    case 'toggle': {
+      // The question a declared `confirmOffText` asks, through the
+      // `keys.<key>.confirmOffText` slot beside the row's label; a miss is the
+      // manifest literal, an inline locale map picked for the page's language.
+      const declaredConfirmOff = spec.confirmOffText;
+      const literalConfirmOff =
+        declaredConfirmOff != null ? pickLocalized(declaredConfirmOff, language) : undefined;
+      const confirmOffText =
+        literalConfirmOff !== undefined && spec.key && labels
+          ? labels.fieldConfirmOff(spec.key, literalConfirmOff)
+          : literalConfirmOff;
       return (
         <div className="flex items-center justify-between py-3" data-settings-key={spec.key}>
           <div>
@@ -690,16 +780,18 @@ export function SettingsField(props: SettingsFieldProps) {
               <FieldDescription description={fieldHelp} />
             )}
           </div>
-          <Switch
+          <ToggleSwitch
             id={id}
             aria-invalid={error ? true : undefined}
             aria-describedby={error ? errorId : undefined}
             checked={Boolean(value)}
             disabled={disabled}
-            onCheckedChange={(checked) => onChange(checked)}
+            confirmOffText={confirmOffText}
+            onChange={(checked) => onChange(checked)}
           />
         </div>
       );
+    }
     case 'select': {
       // Keyed off the DECLARATION, never off the key: a key that gains a
       // domain server-side gets the right control here with no edit.
