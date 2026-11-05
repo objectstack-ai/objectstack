@@ -416,6 +416,16 @@ export const SeedLoadResultSchema = lazySchema(() => z.object({
    * and left as it was. Each id appears once, in record order. Empty on a
    * dry run, which writes nothing and matches nothing.
    *
+   * [#30348] Exactly what the loader fills, per mode: `insert` / `replace` —
+   * each row an insert created; `ignore` (the default since #30081) — each row
+   * an insert created AND each existing row a record's key matched, which the
+   * mode then leaves as it was; `upsert` — created, updated, and matched-but-
+   * unchanged rows; `update` — updated and matched-but-unchanged rows (an
+   * unmatched record writes nothing and lands nowhere). A matched row whose
+   * update the engine REFUSED is listed too: the row exists and its key
+   * resolved. A record whose insert failed lands nowhere and is not listed.
+   * {@link insertedIds} says which of these ids this load created.
+   *
    * It is the loader's own answer to "which rows did this seed write?" — the
    * reference and key resolution behind it (natural keys, references resolved
    * to the target's id, per-organization re-identification) is the loader's,
@@ -430,6 +440,24 @@ export const SeedLoadResultSchema = lazySchema(() => z.object({
    */
   landedIds: z.array(z.string()).default([])
     .describe('Ids of the stored rows this dataset landed on: inserted, updated, or matched on replay'),
+
+  /**
+   * [#30348] The ids among {@link landedIds} whose row THIS load created — an
+   * insert that succeeded, in record order, each once. Every other landed id
+   * is a row that already existed and that a record's key matched: updated,
+   * left as it was (`ignore`, the create-only default since #30081, or a no-op
+   * replay), or matched for an update the engine refused. Such a row may be
+   * one no seed ever wrote — a customer's record that shares the seed's
+   * natural key — so only this list answers "which rows did this seed
+   * create?". Empty on a dry run.
+   *
+   * Per load, not per lifetime: a row an earlier load inserted is MATCHED on a
+   * replay, so a reader that tracks the seed's rows across loads (a publish
+   * receipt's ledger, objectstack-ai/cloud#3598) accumulates these ids over
+   * every load rather than reading the latest one alone.
+   */
+  insertedIds: z.array(z.string()).default([])
+    .describe('Ids among landedIds whose row this load created (a successful insert); every other landed id was a pre-existing row a record key matched'),
 
   /** Reference resolution errors for this object */
   errors: z.array(ReferenceResolutionErrorSchema).default([])
