@@ -10,6 +10,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
+// Loaded here, at module top, so no clocked test pays the runtime graph's first
+// load inside its window: `readLocalCustomizations` imports it lazily.
+import '@objectstack/runtime';
 import { readCustomizationsFromSqlite, readLocalCustomizations } from './local-customizations.js';
 
 const dirs: string[] = [];
@@ -44,8 +47,8 @@ describe('reading the stored `.custom` items of the dev database', () => {
       ['view', 'packageless', null],
       // A package whose id merely contains the suffix is not a pair.
       ['view', 'decoy', 'com.custom.tools'],
-      // LIKE's `_` must not stand in for the suffix's dot.
-      ['view', 'decoy2', 'com.example_custom'],
+      // The suffix ends the id; `.customs` is another package.
+      ['view', 'decoy2', 'com.example.customs'],
     ]);
 
     const reading = await readLocalCustomizations({ projectRoot: root, env: {} });

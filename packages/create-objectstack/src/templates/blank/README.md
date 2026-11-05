@@ -165,7 +165,8 @@ database (locally, `.objectstack/data/`) as an item of the package
   validated, reviewed and deployed. Ask your coding agent to do it in code, not
   in Studio.
 - To keep it as a customization, take it out as a package while `pnpm dev`
-  runs: `npx os package export` writes every package the database holds that
+  runs: `npx os login --url http://localhost:3000` once, then
+  `npx os package export --url http://localhost:3000`, writes every package the database holds that
   `src/` does not register, the `.custom` package among them, to
   `objectstack-export/NN-ID/objectstack.json`. Commit that directory, and once
   the deployment is up install each file into it in the numbered order with

@@ -176,7 +176,9 @@ export function localCustomizationNotice(reading: LocalCustomizationReading): st
     const list = reading.packages.map((p) => `${p.id} (${p.items})`).join(', ');
     return [
       `This build does not carry ${total} Studio customization${total === 1 ? '' : 's'} stored in your dev database: ${list}.`,
-      `They live in ${reading.filename}, not in src/, so a deployment of this artifact (or the Dockerfile) does not have them.`,
+      total === 1
+        ? `It lives in ${reading.filename}, not in src/, so a deployment of this artifact (or the Dockerfile) does not have it.`
+        : `They live in ${reading.filename}, not in src/, so a deployment of this artifact (or the Dockerfile) does not have them.`,
       'Make the change in src/ to ship it with the app, or take it out as a package while `os dev` runs: `os package export`.',
     ];
   }

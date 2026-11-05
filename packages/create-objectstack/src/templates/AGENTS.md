@@ -95,7 +95,8 @@ deployment.
   deployed. When a person tried something in Studio and wants it in the app,
   make the same change in `src/`.
 - **A customization that should stay one moves as a package.** With the dev
-  server running, `npx os package export` writes every package the database
+  server running, `npx os login --url http://localhost:3000` once, then
+  `npx os package export --url http://localhost:3000`, writes every package the database
   holds that `src/` does not register, the `.custom` package among them, to
   `objectstack-export/NN-ID/objectstack.json`. Commit that directory. After
   the deployment is up, install each file into it, in the numbered order:
