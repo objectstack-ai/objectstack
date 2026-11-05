@@ -2,13 +2,15 @@
 '@objectstack/plugin-auth': patch
 ---
 
-fix(plugin-auth): saving the auth settings refuses to turn off the last way to sign in (#30202)
+fix(plugin-auth)!: saving the auth settings refuses to turn off the last way to sign in (#30202)
 
 Clause-②: no (narrowing) — a save an administrator could make before is now refused at the settings save door with the existing `SETTINGS_VALIDATION` / `invalid_value` field error: email and password off while nothing else signs anyone in, and, while email and password is already off, the Google change that removes the last provider. No new error code, export or settings key. Nothing is widened.
 Metadata-protocol: none
 Skills-docs: none — no file under `skills/**` teaches `auth.email_password_enabled`; `content/docs/deployment/environment-variables.mdx` already names the `OS_AUTH_EMAIL_PASSWORD_ENABLED` override used for recovery below.
 
 <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: auth.email_password_enabled and the auth.google_* keys keep their declarations, and the save door now refuses only the change that leaves no way to sign in. A value stored before is not rewritten (the existing OS_AUTH_EMAIL_PASSWORD_ENABLED override recovers it), so there is nothing at rest for a migration to rewrite. -->
+
+**BREAKING** accept-set narrowing at the auth settings save door (`PUT /api/settings/auth`, `SettingsService.setMany('auth', …)`): a change that would leave no way to sign in is refused, where it was saved before.
 
 - **Before.** Setup → Settings → Authentication, "Enable email/password login" off, save: "Settings saved", with no social provider and SSO off. After the next sign-out nobody could sign in, the administrator included.
 - **Now.** `PUT /api/settings/auth` with `email_password_enabled: false` answers `400 SETTINGS_VALIDATION`, with a field error at `email_password_enabled` (`code: invalid_value`, `constraint.lastSignInMethod: email_password`) whose message, in the caller's language (en, zh-CN, ja-JP, es-ES), says to set up and save another sign-in method first. Nothing in that batch is written, and email and password stays on.
