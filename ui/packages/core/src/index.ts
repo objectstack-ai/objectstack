@@ -185,6 +185,17 @@ export * from './utils/dataset-format.js';
 // (objectstack#5473 / objectstack#5665).
 export * from './utils/dataset-pivot.js';
 export * from './utils/record-title.js';
+// The served-object-label rule (objectstack#30311, objectstack#30390): a label
+// the server served is drawn as given, and the client bundle is asked only
+// when none is served. Homed here by objectstack#30486 so `plugin-detail`'s
+// related list and reference rail read the same rule as app-shell's surfaces.
+export {
+  metadataText,
+  servedObjectLabel,
+  servedObjectPluralLabel,
+  type ObjectLabelLookup,
+  type ObjectPluralLabelLookup,
+} from './utils/served-object-label.js';
 // The one `colorField` ladder every record view shares (objectui#7243) — the
 // gantt, calendar and timeline all resolve an authored option colour here
 // instead of each guessing at the raw stored value.

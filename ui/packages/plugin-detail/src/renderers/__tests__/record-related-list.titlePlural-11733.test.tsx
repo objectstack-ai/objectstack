@@ -104,3 +104,61 @@ describe('record:related_list heads an untitled list with the plural (objectui#1
     expect(await screen.findByText('Showcase Note')).toBeInTheDocument();
   });
 });
+
+/**
+ * objectstack#30486 — the related object's SERVED name wins over the bundle.
+ *
+ * The heading's object rung reads the served-object-label rule
+ * (`servedObjectPluralLabel`, `@object-ui/core`): the related object's served
+ * `pluralLabel`, else its served `label`, drawn as given, because the server
+ * already translated both for the session, a `.custom` rename included. The
+ * bundle's plural (the cases above, whose data source serves no label) is the
+ * answer only when nothing is served. The fixtures serve a RENAME the bundle
+ * does not know, in each language, so a heading that still reads the bundle
+ * shows the base package's `任务清单` / `Tasks` instead.
+ *
+ * Direction, written before the run: with the object rung put back to the
+ * bundle alone, the two rename cells and the label-only cell RED (`Tasks`,
+ * `任务清单`, `任务清单`); the bundle cases above stay GREEN on both sides.
+ */
+describe('record:related_list heads an untitled list with the served name (objectstack#30486)', () => {
+  const servedIn = (served: Record<string, unknown>) => ({
+    find: vi.fn(async () => ({ data: [], total: 0 })),
+    getObjectSchema: vi.fn(async (name: string) => ({
+      name,
+      ...served,
+      fields: { name: { type: 'text', label: 'Name' } },
+    })),
+  });
+
+  function mountServed(lang: Lang, served: Record<string, unknown>) {
+    const i18n = createI18n({ defaultLanguage: lang, detectBrowserLanguage: false });
+    expect(i18n.language).toBe(lang);
+    i18n.addResourceBundle(lang, 'translation', BUNDLE[lang], true, true);
+    return render(
+      <I18nProvider instance={i18n}>
+        <RecordContextProvider objectName="showcase_project" recordId="P-1" dataSource={servedIn(served) as never}>
+          <SchemaRenderer schema={doc('showcase_task') as never} />
+        </RecordContextProvider>
+      </I18nProvider>,
+    );
+  }
+
+  it('en: a served rename heads the list, not the bundle plural', async () => {
+    mountServed('en', { label: 'Work item', pluralLabel: 'Work items' });
+    expect(await screen.findByText('Work items')).toBeInTheDocument();
+    expect(screen.queryByText('Tasks')).toBeNull();
+  });
+
+  it('zh-CN: the served translation of the rename heads the list', async () => {
+    mountServed('zh-CN', { label: '工作项', pluralLabel: '工作事项' });
+    expect(await screen.findByText('工作事项')).toBeInTheDocument();
+    expect(screen.queryByText('任务清单')).toBeNull();
+  });
+
+  it('a served label with no served plural is drawn as given', async () => {
+    mountServed('zh-CN', { label: '工作项' });
+    expect(await screen.findByText('工作项')).toBeInTheDocument();
+    expect(screen.queryByText('任务清单')).toBeNull();
+  });
+});

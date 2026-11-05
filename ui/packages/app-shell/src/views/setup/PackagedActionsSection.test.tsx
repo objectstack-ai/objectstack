@@ -537,3 +537,77 @@ describe('the switch confirms off, says what happened, and names the object', ()
     expect(within(row).getByText('account')).toBeInTheDocument();
   });
 });
+
+/* -------------------------------------------------------------------------- */
+/* 7) The object list is read in the session's language, and its served       */
+/*    object label is drawn as given (objectstack#30486)                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The server translates each served object `label` for the request's
+ * `Accept-Language`, a `.custom` rename included, so the object read carries
+ * the SESSION's language and the column draws that label as given (the
+ * served-object-label rule, `servedObjectLabel`), never through the bundle's
+ * translation of the base package's name. An object served without a label
+ * shows its machine name alone, as before.
+ *
+ * Direction, written before the run: with the read's header dropped and the
+ * column put back to the bundle-first lookup, the header cell and the rename
+ * cell RED (no header; `客户`); the control GREEN on both sides.
+ */
+describe('the object column draws the served label, read in the session language (objectstack#30486)', () => {
+  async function renderIn(lang: 'en' | 'zh-CN') {
+    const { createI18n, I18nProvider } = await import('@object-ui/i18n');
+    const i18n = createI18n({ defaultLanguage: lang, detectBrowserLanguage: false });
+    expect(i18n.language).toBe(lang);
+    // The base package's translation, which a rename must win over.
+    i18n.addResourceBundle(lang, 'translation', {
+      crm: { objects: { account: { label: lang === 'zh-CN' ? '客户' : 'Account' } } },
+    }, true, true);
+    render(
+      <I18nProvider instance={i18n}>
+        <PackagedActionsSection />
+      </I18nProvider>,
+    );
+    return screen.findByTestId('packaged-action-account-send_invoice');
+  }
+
+  const objectReadHeaders = () =>
+    vi
+      .mocked(fetch)
+      .mock.calls.filter(([input]) => String(input).includes('/meta/object'))
+      .map(([, init]) => new Headers((init as RequestInit | undefined)?.headers));
+
+  it('asks for the object list in the session language', async () => {
+    await renderIn('zh-CN');
+    const headers = objectReadHeaders();
+    expect(headers.length).toBeGreaterThan(0);
+    for (const h of headers) expect(h.get('Accept-Language')).toBe('zh-CN');
+  });
+
+  it('zh-CN: a served rename is drawn as given, not the bundle translation', async () => {
+    fixture.objects = [
+      { ...packagedObject('account', [{ name: 'send_invoice', label: 'Send invoice' }]), label: '往来单位' },
+    ];
+    const row = await renderIn('zh-CN');
+    expect(within(row).getByTestId('packaged-action-object-label')).toHaveTextContent('往来单位');
+    expect(within(row).queryByText('客户')).toBeNull();
+  });
+
+  it('en: a served rename is drawn as given', async () => {
+    fixture.objects = [
+      { ...packagedObject('account', [{ name: 'send_invoice', label: 'Send invoice' }]), label: 'Counterparty' },
+    ];
+    const row = await renderIn('en');
+    expect(within(row).getByTestId('packaged-action-object-label')).toHaveTextContent('Counterparty');
+  });
+
+  it('CONTROL: an object served without a label shows only its machine name', async () => {
+    fixture.objects = [
+      { name: 'account', actions: [{ name: 'send_invoice', label: 'Send invoice' }], _packageId: 'com.objectstack.crm', _provenance: 'package' },
+    ];
+    const row = await renderIn('zh-CN');
+    expect(within(row).queryByTestId('packaged-action-object-label')).toBeNull();
+    expect(within(row).getByText('account')).toBeInTheDocument();
+  });
+});
