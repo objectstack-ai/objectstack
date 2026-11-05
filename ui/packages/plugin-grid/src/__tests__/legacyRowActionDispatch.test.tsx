@@ -160,19 +160,31 @@ describe('legacy string rowActions dispatch (objectui#2960)', () => {
     expect(screen.getAllByTestId('row-action-convert_lead')).toHaveLength(1);
   });
 
-  it('leaves a name with no declared action to the by-name handler path', async () => {
-    // Consumers may register a runner handler under exactly this name, so the
-    // entry must still render and still dispatch.
-    await openRowMenu({
-      objectActions: [CONVERT_LEAD],
-      schema: { rowActions: ['crm_only_handler'] },
-    });
+  it('draws no entry for a name the object does not declare, and warns once naming it (objectstack#30169)', async () => {
+    // Trigger objectstack#30169: an action a disabled package withholds is
+    // absent from the served object, so its bare name matched nothing and the
+    // menu drew a humanized entry that toasted "not executable". The spec says
+    // a bare name "names an action the object declares"; one that does not
+    // draws nothing, and development says which name it dropped.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await openRowMenu({
+        objectActions: [CONVERT_LEAD],
+        schema: { rowActions: ['convert_lead', 'crm_only_handler'] },
+      });
 
-    expect(screen.getByTestId('row-action-crm_only_handler')).toBeInTheDocument();
-    // Nothing resolvable to call — and with the runner's fallback now failing
-    // loudly, no request and no success are reported.
-    await userEvent.click(screen.getByTestId('row-action-crm_only_handler'));
-    await waitFor(() => expect(fetchMock).not.toHaveBeenCalled());
+      // The declared sibling still draws, so the menu is open and populated.
+      expect(screen.getByTestId('row-action-convert_lead')).toBeInTheDocument();
+      expect(screen.queryByTestId('row-action-crm_only_handler')).not.toBeInTheDocument();
+      const lines = warn.mock.calls
+        .map((args) => String(args[0]))
+        .filter((line) => line.includes('ObjectGrid rowActions'));
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain("'crm_only_handler'");
+      expect(lines[0]).not.toContain("'convert_lead'");
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

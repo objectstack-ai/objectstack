@@ -210,10 +210,11 @@ describe('view-declared bulk actions (objectui#3002)', () => {
     await waitFor(() => expect(screen.getAllByTestId('bulk-action-push_down')).toHaveLength(1));
   });
 
-  it('keeps an unresolvable name alongside the promoted defs', async () => {
-    // A name the object never declared may still have a runner handler
-    // registered under it; hiding it because some OTHER def exists dropped
-    // half the bar's buttons.
+  it('draws no button for a name the object does not declare, even with a runner handler under it (objectstack#30169)', async () => {
+    // Trigger objectstack#30169. The spec says a bare `bulkActions` name "names
+    // an action the object declares", and lint `action-name-undefined` refuses
+    // any other. A runner handler registered under the name is client code,
+    // not a declaration, so it does not bring the button back.
     const handler = vi.fn(async () => ({ success: true }));
     await renderAndSelectAll({
       objectActions: [PUSH_DOWN],
@@ -222,9 +223,63 @@ describe('view-declared bulk actions (objectui#3002)', () => {
     });
 
     expect(await screen.findByTestId('bulk-action-push_down')).toBeInTheDocument();
-    const legacy = await screen.findByTestId('bulk-action-crm_only_handler');
-    fireEvent.click(legacy);
-    await waitFor(() => expect(handler).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId('bulk-action-crm_only_handler')).not.toBeInTheDocument();
+    expect(handler).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * objectstack#30169 — the selection bar and a disabled package. With the
+ * package disabled the server withholds its actions: they leave the served
+ * object's `actions`, exactly as if never declared. The view still names one
+ * in `bulkActions` as a bare string (the spec accepts it). Before the fix the
+ * bar drew it anyway, under its humanized name ("Create Campaign"), and the
+ * click toasted "not executable". Now the bar draws only what the object
+ * declares: withheld, no button and one development warning naming it;
+ * served, the button under the action's own label.
+ */
+describe('a bulk action a disabled package withholds (objectstack#30169)', () => {
+  /** The package's action. Its label is NOT the humanized name, on purpose. */
+  const CREATE_CAMPAIGN = {
+    name: 'create_campaign',
+    label: 'Add to Campaign',
+    type: 'api',
+    target: '/api/v1/campaigns/add',
+  };
+  const VIEW = { bulkActions: ['push_down', 'create_campaign'] };
+
+  const bulkActionWarnings = (warn: { mock: { calls: unknown[][] } }) =>
+    warn.mock.calls
+      .map((args) => String(args[0]))
+      .filter((line) => line.includes('ObjectGrid bulkActions'));
+
+  it('withheld: the served object lacks it, so the bar draws no button and warns once naming it', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await renderAndSelectAll({ objectActions: [PUSH_DOWN], schema: VIEW });
+
+      // The declared sibling is drawn, so the bar is up and populated.
+      expect(await screen.findByTestId('bulk-action-push_down')).toBeInTheDocument();
+      expect(screen.queryByTestId('bulk-action-create_campaign')).not.toBeInTheDocument();
+      expect(screen.queryByText('Create Campaign')).not.toBeInTheDocument();
+      await waitFor(() => expect(bulkActionWarnings(warn)).toHaveLength(1));
+      expect(bulkActionWarnings(warn)[0]).toContain("'create_campaign'");
+      expect(bulkActionWarnings(warn)[0]).not.toContain("'push_down'");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('served: the same view draws it under the action label, and stays quiet', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await renderAndSelectAll({ objectActions: [PUSH_DOWN, CREATE_CAMPAIGN], schema: VIEW });
+
+      expect(await screen.findByTestId('bulk-action-create_campaign')).toHaveTextContent('Add to Campaign');
+      expect(bulkActionWarnings(warn)).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

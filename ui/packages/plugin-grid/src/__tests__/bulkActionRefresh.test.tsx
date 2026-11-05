@@ -71,12 +71,16 @@ function makeDataSource() {
   } as any;
 }
 
-function renderGrid(dataSource: any, handlers: Record<string, any>) {
+function renderGrid(dataSource: any, handlers: { approve: (...args: any[]) => unknown }) {
   const schema: any = {
     type: 'object-grid',
     objectName: OBJECT,
-    // String bulk action — the path 下推 / 派工 travels.
-    batchActions: ['approve'],
+    // String bulk action. Since objectstack#30169 a bare name the object does
+    // not declare draws nothing, and a declared one is promoted to a def and
+    // runs through the dialog — so the one name still dispatched by string is
+    // the canonical `'delete'` with no `onBulkDelete` wired, which reaches the
+    // runner by name (the `delete` handler each test registers).
+    batchActions: ['delete'],
     columns: [
       { field: 'name', label: 'Name' },
       { field: 'status', label: 'Status' },
@@ -84,7 +88,7 @@ function renderGrid(dataSource: any, handlers: Record<string, any>) {
     pagination: { pageSize: 50 },
   };
   return render(
-    <ActionProvider handlers={handlers}>
+    <ActionProvider handlers={{ delete: handlers.approve }}>
       <ObjectGrid schema={schema} dataSource={dataSource} />
     </ActionProvider>,
   );
@@ -110,7 +114,7 @@ describe('ObjectGrid — string bulk action refreshes the list on success', () =
     expect(headerCheckbox).toBeTruthy();
     fireEvent.click(headerCheckbox);
 
-    const approveBtn = await screen.findByTestId('bulk-action-approve');
+    const approveBtn = await screen.findByTestId('bulk-action-delete');
     fireEvent.click(approveBtn);
 
     // The handler ran against the selected records.
@@ -140,7 +144,7 @@ describe('ObjectGrid — string bulk action refreshes the list on success', () =
 
     const headerCheckbox = document.querySelector('thead [role="checkbox"]') as HTMLElement;
     fireEvent.click(headerCheckbox);
-    const approveBtn = await screen.findByTestId('bulk-action-approve');
+    const approveBtn = await screen.findByTestId('bulk-action-delete');
     fireEvent.click(approveBtn);
 
     await waitFor(() => expect(approve).toHaveBeenCalledTimes(1));
@@ -301,8 +305,10 @@ describe('ObjectGrid — bulk dialog Done keeps selection in sync', () => {
  *
  * Both survive objectui#3002: a name that resolves to a declared object action
  * is now promoted to a def and routes through the dialog instead, so what still
- * reaches `dispatchBulkAction` is a consumer-registered runner handler
- * (`approve` here) and the canonical `'delete'`.
+ * reaches `dispatchBulkAction` is the canonical `'delete'`: through
+ * `onBulkDelete` when it is wired, and to the runner by name when it is not
+ * (the `delete` handler `renderGrid` registers). A bare name the object does
+ * not declare no longer reaches it at all (objectstack#30169).
  */
 describe('ObjectGrid — dispatchBulkAction keeps selection in sync (#3056)', () => {
   const headerChecked = () =>
@@ -317,7 +323,7 @@ describe('ObjectGrid — dispatchBulkAction keeps selection in sync (#3056)', ()
     fireEvent.click(document.querySelector('thead [role="checkbox"]') as HTMLElement);
     await waitFor(() => expect(headerChecked()).toBe('checked'));
 
-    fireEvent.click(await screen.findByTestId('bulk-action-approve'));
+    fireEvent.click(await screen.findByTestId('bulk-action-delete'));
     await waitFor(() => expect(approve).toHaveBeenCalledTimes(1));
 
     await waitFor(() =>
@@ -335,7 +341,7 @@ describe('ObjectGrid — dispatchBulkAction keeps selection in sync (#3056)', ()
     fireEvent.click(document.querySelector('thead [role="checkbox"]') as HTMLElement);
     await waitFor(() => expect(headerChecked()).toBe('checked'));
 
-    fireEvent.click(await screen.findByTestId('bulk-action-approve'));
+    fireEvent.click(await screen.findByTestId('bulk-action-delete'));
     await waitFor(() => expect(approve).toHaveBeenCalledTimes(1));
 
     // Failure keeps BOTH sources, so the user can retry the same rows.
