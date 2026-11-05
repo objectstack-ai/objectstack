@@ -148,9 +148,9 @@ afterAll(async () => {
   for (const engine of engines) await (engine as any).destroy?.().catch?.(() => undefined);
 });
 
-const SYSTEM = { context: { isSystem: true, positions: [], permissions: [] } } as const;
+const SYSTEM = { context: { isSystem: true, positions: [] as string[], permissions: [] as string[] } };
 /** A user-context write: the administrator saving the organization's edit form. */
-const ADMIN = { context: { userId: 'usr_admin', positions: [], permissions: [] } } as const;
+const ADMIN = { context: { userId: 'usr_admin', positions: [] as string[], permissions: [] as string[] } };
 
 /** A real sqlite engine with the real organization object and the production hook composition. */
 async function bootOrganizationEngine(enrollable: { value: boolean }): Promise<ObjectQL> {
