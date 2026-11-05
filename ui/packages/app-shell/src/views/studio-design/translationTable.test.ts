@@ -145,7 +145,12 @@ describe('referencedObjects', () => {
 });
 
 describe('readDeclaredStack', () => {
-  function fakeClient(byType: Record<string, Array<Record<string, unknown>>>, platform: Record<string, Record<string, unknown>>) {
+  type Doc = Record<string, unknown>;
+  /** `byPackage[pkg][type]` holds `{ code, effective }` layers; `platform[name]` a platform object's. */
+  function fakeClient(
+    byPackage: Record<string, Record<string, Array<{ code: Doc | null; effective: Doc }>>>,
+    platform: Record<string, { code: Doc | null; effective: Doc }>,
+  ) {
     const calls: string[] = [];
     let inFlight = 0;
     let peak = 0;
@@ -158,40 +163,63 @@ describe('readDeclaredStack', () => {
     };
     const client: DeclaredStackClient = {
       list: (type, options) => {
-        calls.push(`list ${type} ${options?.packageId ?? ''}`);
+        const pkg = options?.packageId ?? '';
+        calls.push(`list ${type} ${pkg}`);
         // The list read is translated and decorated: the table must not take its text.
-        return slow((byType[type] ?? []).map((doc) => ({ ...doc, label: `served ${String(doc.label)}`, _packageId: options?.packageId })));
+        return slow((byPackage[pkg]?.[type] ?? []).map(({ effective }) => ({ ...effective, label: `served ${String(effective.label)}`, _packageId: pkg })));
       },
       layered: (type, name, options) => {
-        calls.push(`layered ${type} ${name} ${options?.packageId ?? ''}`);
-        const doc = options?.packageId ? (byType[type] ?? []).find((d) => d.name === name) : platform[name];
-        return slow({ code: doc ?? null, effective: doc ?? null });
+        const pkg = options?.packageId ?? '';
+        calls.push(`layered ${type} ${name} ${pkg}`);
+        const lay = pkg ? (byPackage[pkg]?.[type] ?? []).find((l) => l.effective.name === name) : platform[name];
+        return slow(lay ?? { code: null, effective: null });
       },
     };
     return { client, calls, peak: () => peak };
   }
+  const OWNER = { type: 'lookup', label: 'Owner', reference: 'sys_user', system: true };
 
-  it('reads each item as declared, a view by its bare key, plus the platform objects it points at, within the bound', async () => {
-    const byType = {
+  it("reads each item's declared layer, a view by its bare key, within the bound", async () => {
+    const declared = { name: 'repair_ticket', label: 'Repair Ticket', fields: { status: { type: 'text', label: 'Status' } } };
+    const crm = {
       object: [
-        { name: 'repair_ticket', label: 'Repair Ticket', fields: { owner: { type: 'lookup', label: 'Owner', reference: 'sys_user' } } },
-        ...Array.from({ length: 9 }, (_, i) => ({ name: `obj_${i}`, label: `Object ${i}`, fields: {} })),
+        { code: declared, effective: { ...declared, fields: { ...declared.fields, owner_id: OWNER } } },
+        ...Array.from({ length: 9 }, (_, i) => {
+          const doc = { name: `obj_${i}`, label: `Object ${i}`, fields: {} };
+          return { code: doc, effective: doc };
+        }),
       ],
-      view: [{ name: 'repair_ticket.all_open', object: 'repair_ticket', label: 'All open' }],
+      view: [{ code: { name: 'repair_ticket.all_open', object: 'repair_ticket', label: 'All open' }, effective: { name: 'repair_ticket.all_open', object: 'repair_ticket', label: 'All open' } }],
     };
-    const fake = fakeClient(byType, { sys_user: { name: 'sys_user', label: 'User', fields: {} } });
+    const fake = fakeClient({ 'com.example.crm': crm }, { sys_user: { code: { name: 'sys_user', label: 'User', fields: {} }, effective: { name: 'sys_user', label: 'User', fields: {} } } });
     const progress: Array<[number, number]> = [];
-    const { stack, requests } = await readDeclaredStack(fake.client, 'com.example.crm', (done, total) => progress.push([done, total]));
+    const { stack, requests } = await readDeclaredStack(fake.client, ['com.example.crm'], (done, total) => progress.push([done, total]));
 
-    const objects = stack.objects as Array<Record<string, unknown>>;
-    expect(objects.map((o) => o.name)).toEqual([...byType.object.map((o) => o.name), 'sys_user']);
-    expect(objects[0]!.label).toBe('Repair Ticket');
-    expect((stack.views as Array<Record<string, unknown>>)[0]).toMatchObject({ name: 'all_open', object: 'repair_ticket' });
+    const objects = stack.objects as Doc[];
+    expect(objects[0]).toEqual(declared);
+    expect((stack.views as Doc[])[0]).toMatchObject({ name: 'all_open', object: 'repair_ticket' });
+    // The owner the platform injects points at the user object, which is walked too.
+    expect(objects.map((o) => o.name).at(-1)).toBe('sys_user');
     // 14 list reads, 11 item reads, 1 platform object.
     expect(requests).toBe(14 + 11 + 1);
     expect(fake.calls).toHaveLength(requests);
     expect(fake.calls).toContain('layered object sys_user ');
     expect(fake.peak()).toBeLessThanOrEqual(DECLARED_STACK_READ_CONCURRENCY);
     expect(progress.at(-1)).toEqual([requests, requests]);
+  });
+
+  it('reads a database-authored object without the fields the platform injects, and a pair with its base', async () => {
+    const custom = { name: 'acme_note', label: 'Note', fields: { body: { type: 'text', label: 'Body' }, owner_id: OWNER } };
+    const fake = fakeClient(
+      {
+        'com.example.crm': { object: [{ code: { name: 'crm_account', label: 'Account', fields: {} }, effective: { name: 'crm_account', label: 'Account', fields: {} } }] },
+        'com.example.crm.custom': { object: [{ code: null, effective: custom }] },
+      },
+      { sys_user: { code: { name: 'sys_user', label: 'User', fields: {} }, effective: { name: 'sys_user', label: 'User', fields: {} } } },
+    );
+    const { stack } = await readDeclaredStack(fake.client, ['com.example.crm', 'com.example.crm.custom']);
+    const objects = stack.objects as Doc[];
+    expect(objects.map((o) => o.name)).toEqual(['crm_account', 'acme_note', 'sys_user']);
+    expect(objects[1]!.fields).toEqual({ body: { type: 'text', label: 'Body' } });
   });
 });

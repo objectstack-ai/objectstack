@@ -15,7 +15,8 @@
 import * as React from 'react';
 import { Input, Switch, Textarea, cn } from '@object-ui/components';
 import { useAdapter } from '@object-ui/react';
-import { collectExpectedEntries, type ExpectedEntry } from '@objectstack/lint';
+import { customizationBasePackageId } from '@objectstack/spec/kernel';
+import type { ExpectedEntry } from '@objectstack/lint';
 import { useMetadataClient } from '../metadata-admin/useMetadata.js';
 import { t, tFormat } from '../metadata-admin/i18n.js';
 import {
@@ -81,7 +82,14 @@ function useDefaultReaders(packageId: string) {
   const adapter = useAdapter() as { getClient?: () => { i18n?: { getTranslations?: (l: string) => Promise<unknown> } } } | null;
   const readEntries = React.useCallback(
     async (onProgress: (done: number, total: number) => void) => {
-      const { stack } = await readDeclaredStack(client as unknown as DeclaredStackClient, packageId, onProgress);
+      // A `.custom` pair is read with the code package it customizes, whose declarations it translates.
+      const base = customizationBasePackageId(packageId);
+      const packageIds = base ? [base, packageId] : [packageId];
+      const { stack } = await readDeclaredStack(client as unknown as DeclaredStackClient, packageIds, onProgress);
+      // The linter stays out of the console's eager closure (the console build
+      // asserts it): it loads when a translation item is opened, as
+      // `capabilityLint.ts` loads it on publish.
+      const { collectExpectedEntries } = await import('@objectstack/lint');
       return collectExpectedEntries(stack);
     },
     [client, packageId],
