@@ -2413,6 +2413,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.if.offNav.dashboard': 'Dashboards',
   'engine.studio.if.offNav.report': 'Reports',
   'engine.studio.if.offNav.view': 'Views',
+  'engine.studio.if.offNav.viewForms': 'Form views',
+  'engine.studio.if.offNav.viewMixed': 'Form and list views',
+  'engine.studio.if.offNav.formName': '{object} form',
   'engine.studio.if.openInData': 'Open in Data',
   // objectui#12725 — the status line above the canvas, and the item's ⋯ menu.
   'engine.studio.if.status.design': 'Design',

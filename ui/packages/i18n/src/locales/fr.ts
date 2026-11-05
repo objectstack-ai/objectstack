@@ -4299,6 +4299,10 @@ const fr = {
         unreadableVersion: "Installez une version publiée de {{dependency}} comprise dans {{range}}. La version installée {{installedVersion}} n’est pas au format MAJOR.MINOR.PATCH.",
         unreadableDeclaration: "{{packageId}} déclare ses dépendances sous une forme que l’installation ne peut pas lire. Écrivez-les sous forme de correspondance entre ID de paquet et plage de versions, puis republiez le paquet.",
       },
+      protocolCheckSkipped: {
+        noRange: "{{packageId}} n’indique pas quel protocole de plateforme il prend en charge : il a donc été installé sous le protocole {{protocolVersion}} sans vérification de compatibilité et risque de ne pas fonctionner sur cette version de la plateforme. Une version du paquet qui déclare le protocole pris en charge (engines.protocol) est vérifiée à l’installation.",
+        unparsedRange: "{{packageId}} déclare son protocole de plateforme comme {{requiredRange}}, que ce runtime ne sait pas lire : il a donc été installé sous le protocole {{protocolVersion}} sans vérification de compatibilité et risque de ne pas fonctionner sur cette version de la plateforme. Une version du paquet qui déclare une plage lisible (engines.protocol) est vérifiée à l’installation.",
+      },
       localUnauthorized: "Connectez-vous d'abord à ce runtime.",
       localMarketplaceUnavailable: "Ce runtime n'a pas de OS_CLOUD_URL configuré.",
       updateTo: "Mettre à jour → v{{version}}",
