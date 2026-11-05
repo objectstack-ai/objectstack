@@ -74,6 +74,8 @@ export interface SeedOwnerStampEngine {
         data: Record<string, unknown>,
         options: { where: Record<string, unknown>; multi: true; context: typeof SEED_OWNER_STAMP_CTX },
     ): Promise<unknown>;
+    /** `IObjectQLEngine.getSchema`; the registry's `getObject` is read when it is absent. */
+    getSchema?(name: string): unknown;
     registry?: { getObject?(name: string): unknown };
 }
 
@@ -175,7 +177,9 @@ export async function stampSeedOwner(
         objects.push(row);
 
         let schema: any;
-        try { schema = engine.registry?.getObject?.(object); } catch { schema = undefined; }
+        try {
+            schema = typeof engine.getSchema === 'function' ? engine.getSchema(object) : engine.registry?.getObject?.(object);
+        } catch { schema = undefined; }
         // The claim's skips: a platform table's or a managed object's owner is
         // the platform's, and a federated object's columns are a remote's.
         if (!schema) { row.skipped = 'no-schema'; continue; }
