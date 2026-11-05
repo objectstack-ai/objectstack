@@ -25,7 +25,8 @@
  */
 
 import { resolve as resolvePath } from 'node:path';
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import { createStandaloneStack, resolveObjectStackHome, type StandaloneStackConfig, type StandaloneStackResult } from './standalone-stack.js';
 import { isHttpUrl } from './load-artifact-bundle.js';
 import { makeDirectorySync } from './make-directory.js';
@@ -133,33 +134,7 @@ export async function createDefaultHostConfig(
     if (!resolvedArtifact && !requireArtifact) {
         const home = resolveObjectStackHome();
         const stubPath = resolvePath(home, 'dist/objectstack.json');
-        if (!existsSync(stubPath)) {
-            // Bounded (#23858): an `OS_HOME` that cannot be made is refused
-            // here, at once, with the OS's code and the path — never a loop.
-            makeDirectorySync(resolvePath(stubPath, '..'));
-            writeFileSync(
-                stubPath,
-                JSON.stringify(
-                    {
-                        manifest: {
-                            id: 'com.objectstack.empty',
-                            name: 'empty',
-                            version: '0.0.0',
-                            type: 'app',
-                            description: 'Empty starter kernel — install apps via the Studio marketplace.',
-                        },
-                        objects: [],
-                        views: [],
-                        apps: [],
-                        flows: [],
-                        requires: [],
-                    },
-                    null,
-                    2,
-                ),
-                'utf8',
-            );
-        }
+        ensureEmptyBootStub(stubPath);
         resolvedArtifact = stubPath;
     }
 
@@ -167,4 +142,84 @@ export async function createDefaultHostConfig(
         ...standaloneOpts,
         artifactPath: resolvedArtifact,
     });
+}
+
+/** The manifest id of the stub {@link ensureEmptyBootStub} writes. */
+export const EMPTY_BOOT_STUB_ID = 'com.objectstack.empty';
+
+/**
+ * The protocol range the empty-boot stub declares: this runtime's own major.
+ *
+ * The stub is the platform's own package, written by the runtime that boots
+ * it, so it is compatible by construction. Without a range the ADR-0087
+ * handshake answered `no-range` and the boot diagnostics of `os start` in an
+ * empty directory (the docs' one-line Community quickstart) warned the
+ * newcomer about a package they never wrote and cannot find (#29937).
+ */
+function emptyBootStubProtocolRange(): string {
+    return `^${PROTOCOL_MAJOR}`;
+}
+
+/**
+ * Make sure the empty-boot stub artifact at `stubPath` exists and declares
+ * this runtime's protocol range.
+ *
+ * - Absent → written, with `engines.protocol`.
+ * - Present, still the stub (`manifest.id` is {@link EMPTY_BOOT_STUB_ID}),
+ *   but its range is missing or names another major → only
+ *   `manifest.engines.protocol` is rewritten; every other byte of meaning is
+ *   kept. That covers the stub an older CLI wrote with no `engines` at all,
+ *   and the one a CLI of the previous major stamped: left alone, that range
+ *   would be refused as `OS_PROTOCOL_INCOMPATIBLE` the day the runtime moves
+ *   to the next major, failing the very boot that has nothing in it.
+ * - Present and not the stub, or not readable as JSON → left alone. This
+ *   function owns only what it wrote; the loader reports anything else.
+ */
+export function ensureEmptyBootStub(stubPath: string): void {
+    const range = emptyBootStubProtocolRange();
+    if (!existsSync(stubPath)) {
+        // Bounded (#23858): an `OS_HOME` that cannot be made is refused
+        // here, at once, with the OS's code and the path — never a loop.
+        makeDirectorySync(resolvePath(stubPath, '..'));
+        writeFileSync(
+            stubPath,
+            JSON.stringify(
+                {
+                    manifest: {
+                        id: EMPTY_BOOT_STUB_ID,
+                        name: 'empty',
+                        version: '0.0.0',
+                        type: 'app',
+                        description: 'Empty starter kernel — install apps via the Studio marketplace.',
+                        engines: { protocol: range },
+                    },
+                    objects: [],
+                    views: [],
+                    apps: [],
+                    flows: [],
+                    requires: [],
+                },
+                null,
+                2,
+            ),
+            'utf8',
+        );
+        return;
+    }
+
+    let stub: unknown;
+    try {
+        stub = JSON.parse(readFileSync(stubPath, 'utf8'));
+    } catch {
+        return;
+    }
+    const manifest = (stub as { manifest?: unknown } | null)?.manifest;
+    if (!manifest || typeof manifest !== 'object' || (manifest as { id?: unknown }).id !== EMPTY_BOOT_STUB_ID) return;
+    const engines = (manifest as { engines?: unknown }).engines;
+    const engineBag = engines && typeof engines === 'object' && !Array.isArray(engines)
+        ? engines as Record<string, unknown>
+        : {};
+    if (engineBag.protocol === range) return;
+    (manifest as Record<string, unknown>).engines = { ...engineBag, protocol: range };
+    writeFileSync(stubPath, JSON.stringify(stub, null, 2), 'utf8');
 }
