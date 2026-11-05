@@ -294,27 +294,6 @@
     {
       "file": "packages/objectql/src/engine.ts",
       "class": "ObjectQL",
-      "member": "registerApp",
-      "card": "#30054",
-      "reason": "return type spelled on the signature (#30054, public .d.ts byte-equal); the codemod --members pass refuses to move it: engine-registration.ts's header is no longer as the first pass wrote it (a hand-written member was added there)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "registerHook",
-      "card": "#30054",
-      "reason": "return type spelled on the signature (#30054, public .d.ts byte-equal); the codemod --members pass cannot prove its move: undoing it does not rebuild engine-hooks-and-functions.ts byte for byte (first difference at line 44, in its import block)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "registerDriver",
-      "card": "#30054",
-      "reason": "return type spelled on the signature (#30054, public .d.ts byte-equal); the codemod --members pass refuses to move it: engine-registration.ts's header is no longer as the first pass wrote it (a hand-written member was added there)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
       "member": "homeAmountServing",
       "card": "#30147",
       "reason": "codemod limit: field-call, it calls a field or accessor as a function (#29986 report)"

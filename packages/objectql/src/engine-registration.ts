@@ -3,14 +3,15 @@
 /**
  * [#29986 codemod] The
  * "Package, app, plugin, driver and datasource registration" section of
- * `ObjectQL`: the bodies of `registerPackageBody`,
- * `registerMetadataCollections`, `supplyFileColumnsMovedResolver`,
- * `unregisterDriver`, `registerDatasourceDef`, `applyExternalDriverFloor`,
- * `listDatasourceDefs`, `markDatasourceUnavailable`,
- * `clearDatasourceUnavailable`, `getDefaultDriverName`,
- * `listUnavailableDatasources`, `assertWriteAllowed` moved out of `engine.ts`
- * whole by `scripts/codemod-split-engine.mjs`. `isExternalWriteForbidden`
- * (#30370) was written here, beside the gate whose verdict it answers.
+ * `ObjectQL`: the bodies of `registerApp`, `registerPackageBody`,
+ * `registerMetadataCollections`, `registerDriver`,
+ * `supplyFileColumnsMovedResolver`, `unregisterDriver`,
+ * `registerDatasourceDef`, `applyExternalDriverFloor`, `listDatasourceDefs`,
+ * `markDatasourceUnavailable`, `clearDatasourceUnavailable`,
+ * `getDefaultDriverName`, `listUnavailableDatasources`, `assertWriteAllowed`
+ * moved out of `engine.ts` whole by `scripts/codemod-split-engine.mjs`.
+ * `isExternalWriteForbidden` (#30370) was written here, beside the gate whose
+ * verdict it answers.
  *
  * A MOVE, not a redesign. {@link RegistrationFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
@@ -44,7 +45,8 @@ import type { ArtifactInstallScope } from './registry.js';
 import { ASSEMBLED_VIEW_ITEMS_KEY, AssembledViewArtifactSchema, expandViewContainer, isAggregatedViewContainer } from '@objectstack/spec';
 import { createExternalDriverFloor, isExternalDriverFloor, needsExternalDriverFloor, unwrapExternalDriverFloor } from './external-driver-floor.js';
 import {
-  METADATA_ARRAY_KEYS, assembledViewItemRefusal, noteRegistrationStamp, registerAppNotingStamp,
+  METADATA_ARRAY_KEYS, assembledViewItemRefusal, noteRegistrationStamp, packageBodyCollectionRefusal,
+  packageBodyObjectAndAppOwnerStampRefusal, packageBodySeedDataRefusal, registerAppNotingStamp,
   resolveMetadataItemName, stampObjectPackage, stampPackage,
 } from './engine-top-level.js';
 import type { DatasourceDef } from './engine-top-level.js';
@@ -60,19 +62,157 @@ import type { ObjectQL } from './engine.js';
 export interface RegistrationHost {
   readonly _registry: ObjectQL['_registry'];
   applyExternalDriverFloor: ObjectQL['applyExternalDriverFloor'];
+  convertPackageBodyForward: ObjectQL['convertPackageBodyForward'];
   readonly datasourceDefs: ObjectQL['datasourceDefs'];
   defaultDriver: ObjectQL['defaultDriver'];
   readonly drivers: ObjectQL['drivers'];
   haveFileColumnsMoved: ObjectQL['haveFileColumnsMoved'];
+  invalidateSummaryIndex: ObjectQL['invalidateSummaryIndex'];
   readonly logger: ObjectQL['logger'];
+  readonly manifests: ObjectQL['manifests'];
+  registerDatasourceDef: ObjectQL['registerDatasourceDef'];
   registerMetadataCollections: ObjectQL['registerMetadataCollections'];
+  registerPackageBody: ObjectQL['registerPackageBody'];
   registerPlugin: ObjectQL['registerPlugin'];
   resolveNavObjectNames: ObjectQL['resolveNavObjectNames'];
+  supplyFileColumnsMovedResolver: ObjectQL['supplyFileColumnsMovedResolver'];
+  supplyTenantKeyCertifiedResolver: ObjectQL['supplyTenantKeyCertifiedResolver'];
   readonly unavailableDatasources: ObjectQL['unavailableDatasources'];
 }
 
 /** The bodies of the "Package, app, plugin, driver and datasource registration" section of `ObjectQL`: a stateless facet, called by the class's stubs. */
 export class RegistrationFacet {
+  /** The body of `ObjectQL#registerApp`; the method's docblock there is its contract. */
+  static registerApp(this: Pick<RegistrationHost, '_registry' | 'convertPackageBodyForward' | 'invalidateSummaryIndex' | 'logger' | 'manifests' | 'registerDatasourceDef' | 'registerPackageBody'>, registeredBody: any, scope?: ArtifactInstallScope, source: Exclude<InstalledPackageSource, 'authored'> = 'code'): void {
+      // The CONVERTED body, for everything below — the package record, the
+      // live manifest, every item it registers (see {@link convertPackageBodyForward}).
+      // [#23972] Refused before anything registers — see the docblock: an
+      // untyped caller handing this door `'authored'` (or any other value)
+      // would record a row whose origin contradicts the read-only verdict
+      // this door's `manifests` entry produces.
+      if (source !== 'code' && source !== 'marketplace') {
+          throw new TypeError(
+              `[ObjectQL] registerApp: source must be 'code' or 'marketplace'; received ${JSON.stringify(source)}. `
+              + `An authored package is installed through the protocol's installPackage, not registered here.`,
+          );
+      }
+      const manifest = this.convertPackageBodyForward(registeredBody);
+      const id = manifest.id || manifest.name;
+      const namespace = manifest.namespace as string | undefined;
+      // Stamped beside `id` on every item below ({@link stampPackage}), so an
+      // item served from this path tells an upgrade's new item from its old one.
+      const version = manifest.version as string | undefined;
+      // [#28697] The owner-stamp refusal for the objects and apps below, which
+      // file through verbs of their own (steps 2-4), asked before anything of
+      // this body registers. See {@link packageBodyObjectAndAppOwnerStampRefusal}.
+      {
+          const refusal = packageBodyObjectAndAppOwnerStampRefusal(manifest, id, {
+              apps: true,
+              selfAsApp: Boolean(manifest.name && manifest.navigation && !manifest.apps?.length),
+          });
+          if (refusal) throw refusal;
+          // …and each nested plugin's objects and plugin-as-app (step 7, which
+          // registers them under this package after everything above), so a
+          // nested plugin's stamp is refused before this body registers too.
+          // `registerPlugin` asks the same of the plugin it is handed.
+          if (Array.isArray(manifest.plugins)) {
+              for (const plugin of manifest.plugins) {
+                  if (!plugin || typeof plugin !== 'object') continue;
+                  const nested = packageBodyObjectAndAppOwnerStampRefusal(plugin, id, {
+                      apps: false,
+                      selfAsApp: Boolean(plugin.name && plugin.navigation),
+                  });
+                  if (nested) throw nested;
+              }
+          }
+          // [#28697] …and every refusal the collection seam (steps 5 and 7)
+          // and the seed step (step 6) can judge from the body alone, so a
+          // body refused there leaves nothing of itself behind either, and a
+          // refused re-register of an installed id leaves that install as it
+          // was. See {@link packageBodyCollectionRefusal}.
+          const collections = packageBodyCollectionRefusal(manifest, id, 'manifest');
+          if (collections) throw collections;
+          const seed = packageBodySeedDataRefusal(manifest, id);
+          if (seed) throw seed;
+          if (Array.isArray(manifest.plugins)) {
+              for (const plugin of manifest.plugins) {
+                  if (!plugin || typeof plugin !== 'object') continue;
+                  const nested = packageBodyCollectionRefusal(plugin, id, 'nested plugin');
+                  if (nested) throw nested;
+              }
+          }
+      }
+      this.invalidateSummaryIndex(); // new objects may add/change summary fields
+      this.logger.debug('Registering package manifest', { id, namespace });
+
+      // [#28697] What remains can only be refused part-way, by the registry's
+      // own verbs (an object another package owns, a field with no `type`, a
+      // picklist value already added, …). Refused, the registry puts back
+      // exactly the entries this registration wrote: a first install leaves no
+      // package record, object, app, item or namespace of itself, and a
+      // re-register of an installed id (an upgrade) leaves the installed
+      // version serving whole. Whatever sat there before — a tenant's object
+      // or overlay this package layers over (ADR-0029 D9 §6.1), another
+      // package's extension of its objects — reads as it did. Never through
+      // uninstall, which refuses an extended object and drops a tenant's
+      // overlay with its owner (D9.7). See {@link SchemaRegistry.restoringOnRefusal}.
+      this._registry.restoringOnRefusal(() => this.registerPackageBody(manifest, id, namespace, version, source, scope));
+
+      // [#28697] Written only once nothing above threw, so a refused body
+      // leaves none of them. Nothing above reads any of them.
+
+      // Store manifest for defaultDatasource lookup
+      if (id) {
+        this.manifests.set(id, manifest);
+      }
+
+      // Index datasource definitions (ADR-0015) so the write gate can read
+      // schemaMode + external.allowWrites. Manifests may carry `datasources`
+      // as an array or a name-keyed map.
+      if (manifest.datasources) {
+        const dsList = Array.isArray(manifest.datasources)
+          ? manifest.datasources
+          : Object.entries(manifest.datasources).map(([name, def]) => ({ name, ...(def as any) }));
+        for (const ds of dsList) {
+          if (ds?.name) this.registerDatasourceDef(ds);
+        }
+      }
+
+      // Register navigation contributions (ADR-0029 D7) — nav items this
+      // package injects into apps owned by other packages (e.g. a capability
+      // plugin adding its menu into the `setup` app). Merged into the target
+      // app's navigation on read by group id + priority, so registration order
+      // does not matter.
+      if (Array.isArray((manifest as any).navigationContributions) && (manifest as any).navigationContributions.length > 0) {
+          for (const contribution of (manifest as any).navigationContributions) {
+              this._registry.registerAppNavContribution(contribution, id);
+          }
+          this.logger.debug('Registered navigation contributions', {
+              from: id,
+              count: (manifest as any).navigationContributions.length,
+          });
+      }
+
+      // Register contributed kinds (owned by no package, so written last).
+      if (manifest.contributes?.kinds) {
+          this.logger.debug('Registering kinds from manifest', { id, kindCount: manifest.contributes.kinds.length });
+          for (const kind of manifest.contributes.kinds) {
+            this._registry.registerKind(kind);
+            // [commit 10485009a] Name the kind by its declared `id`. `contributes.kinds`
+            // items are `{ id, description? }` (`manifest.zod.ts`; `globs` was
+            // retired unread, #11169) and
+            // `registerKind` keys the item on `id` (`registerItem('kind', kind, 'id')`),
+            // so `id` is BOTH the only identifying field the schema declares and the
+            // exact key the item is stored under — a reader of this line can look the
+            // item straight back up. The previous `kind.name || kind.type` reached for
+            // two fields NEITHER shape declares, so every conforming manifest logged
+            // `kind: undefined`. Do not re-add those as a fallback: reading undeclared
+            // aliases here is the consumer-side tolerance Prime Directive #12 rejects.
+            this.logger.debug('Registered Kind', { kind: kind.id, from: id });
+          }
+      }
+  }
+
   /**
    * [#28697] The part of {@link registerApp} a registry verb can refuse
    * part-way: the package record, its objects, extensions, apps, collections,
@@ -329,6 +469,54 @@ export class RegistrationFacet {
               this._registry.registerItem('view', stampPackage(toRegister, ownerId, ownerVersion), 'name' as any, ownerId);
           }
       }
+  }
+
+  /** The body of `ObjectQL#registerDriver`; the method's docblock there is its contract. */
+  static registerDriver(this: Pick<RegistrationHost, 'applyExternalDriverFloor' | 'defaultDriver' | 'drivers' | 'logger' | 'supplyFileColumnsMovedResolver' | 'supplyTenantKeyCertifiedResolver'>, driver: IDataDriver, isDefault: boolean = false): void {
+    const existing = this.drivers.get(driver.name);
+    if (existing) {
+      // [#27277] The entry may be the floored instance of this very driver.
+      if (unwrapExternalDriverFloor(existing) !== unwrapExternalDriverFloor(driver)) {
+        this.logger.warn(
+          'Driver name collision — KEEPING the already-registered driver and DISCARDING the one just supplied. ' +
+            'Two different driver instances claim one name, so whatever configuration the discarded instance carried ' +
+            '(connection string, pool, capabilities) is NOT in force, while queries routed to this name keep working ' +
+            'against the one that was kept. Fix the caller: give the second datasource a name of its own.',
+          {
+            driverName: driver.name,
+            keptVersion: existing.version,
+            discardedVersion: driver.version,
+          },
+        );
+      } else if (isDefault && this.defaultDriver !== driver.name) {
+        this.logger.warn(
+          'Driver re-registered as DEFAULT but another driver already holds that role — the request is IGNORED and ' +
+            'the existing default stands. Unregister the current default first if the switch was intended.',
+          { driverName: driver.name, currentDefault: this.defaultDriver },
+        );
+      } else {
+        // The by-design round trip documented above — expected on every boot,
+        // so it must not reach the boot-diagnostics warning list.
+        this.logger.debug('Driver already registered — re-registering the same instance is a no-op', {
+          driverName: driver.name,
+        });
+      }
+      return;
+    }
+
+    this.drivers.set(driver.name, driver);
+    this.supplyFileColumnsMovedResolver(driver);
+    this.supplyTenantKeyCertifiedResolver(driver);
+    this.applyExternalDriverFloor(driver.name);
+    this.logger.info('Registered driver', {
+      driverName: driver.name,
+      version: driver.version
+    });
+
+    if (isDefault || this.drivers.size === 1) {
+      this.defaultDriver = driver.name;
+      this.logger.info('Set default driver', { driverName: driver.name });
+    }
   }
 
   /**
