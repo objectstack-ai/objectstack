@@ -1,6 +1,66 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { SystemObjectName } from '@objectstack/spec/system';
+import {
+  SysMigration,
+  SysMigrationJournal,
+  SysPlatformSetting,
+  SysPlatformSettingAudit,
+  SysSecret,
+  SysSetting,
+  SysSettingAudit,
+} from '@objectstack/platform-objects/system';
+import { SIGN_IN_STAMP_EVENT } from '../sign-in-stamp.js';
+
+/**
+ * The platform objects whose rows the default `recent` view leaves out: the
+ * rows one act writes beside the row that records it. Measured on a fresh
+ * showcase boot:
+ *
+ *  - a settings write records `config_change`, and ALSO writes the stored
+ *    setting (`sys_setting`, the global rung's `sys_platform_setting`, a
+ *    secret's ciphertext in `sys_secret`) and the settings trail's own entry
+ *    (`sys_setting_audit` / `sys_platform_setting_audit`), each mirrored here;
+ *  - the first sign-in through the console mints the token-signing key
+ *    (`sys_jwks`) under the signing-in person's id, beside its `login` row;
+ *  - a boot writes the data-migration ledger (`sys_migration`,
+ *    `sys_migration_journal`).
+ *
+ * The two settings stores are listed apart, in
+ * {@link AUDIT_LOG_SETTINGS_STORE_OBJECTS}: the `config_change` row itself
+ * names one of them as its object, so the view leaves out their other rows and
+ * keeps that one.
+ *
+ * The sign-in stamp on `sys_user` is the third such row, and it is left out by
+ * its mark instead (`sign-in-stamp.ts`): `sys_user` itself stays in, because an
+ * administrator's edit of a user is an act.
+ *
+ * Read from the definitions and the protocol's name constants. Deliberately not
+ * a name prefix and not the identity domain: `sys_*` also names objects whose
+ * writes are acts (a member's role, a sharing rule, a user's ban).
+ * `sys-audit-log-default-view.integration.test.ts` holds the view to it on a
+ * real engine and driver.
+ */
+export const AUDIT_LOG_DEFAULT_VIEW_EXCLUDED_OBJECTS: readonly string[] = Object.freeze([
+  SysSecret.name,
+  SysSettingAudit.name,
+  SysPlatformSettingAudit.name,
+  SystemObjectName.JWKS,
+  SysMigration.name,
+  SysMigrationJournal.name,
+]);
+
+/**
+ * The settings stores a `config_change` row names as its object
+ * (`config-change-audit.ts` in service-settings): `sys_setting` for a tenant or
+ * user value, `sys_platform_setting` for a global one. The default view keeps
+ * the `config_change` row and leaves out the store's own mirrored write.
+ */
+export const AUDIT_LOG_SETTINGS_STORE_OBJECTS: readonly string[] = Object.freeze([
+  SysSetting.name,
+  SysPlatformSetting.name,
+]);
 
 /**
  * sys_audit_log — System Audit Log Object
@@ -59,6 +119,16 @@ export const SysAuditLog = ObjectSchema.create({
   // `object_name` for that cell without a column (objectui#13036). A list
   // view never shows the type half, which would draw the stored API name as
   // text (`sys-audit-log-pointer-pair.test.ts`).
+  //
+  // `recent` is the FIRST declared view, so it is the list Setup's 审计日志
+  // opens with no view named. It keeps every act and leaves out the rows an act
+  // writes beside it (`AUDIT_LOG_DEFAULT_VIEW_EXCLUDED_OBJECTS`, the settings
+  // stores' rows other than `config_change`, and the sign-in stamp by its
+  // `metadata.event`). `metadata` is not a value-bearing column
+  // (`parent-field-query-guard.ts` names only `old_value` / `new_value`), so
+  // every reader may run the filter; the `or` keeps the rows with no metadata,
+  // which a bare `not_contains` would drop. Nothing changes in what is written:
+  // `all_events` lists every row.
   listViews: {
     recent: {
       type: 'grid',
@@ -66,6 +136,21 @@ export const SysAuditLog = ObjectSchema.create({
       label: 'Recent',
       data: { provider: 'object', object: 'sys_audit_log' },
       columns: ['created_at', 'action', 'record_id', 'user_id'],
+      filter: [
+        { field: 'object_name', operator: 'not_in', value: [...AUDIT_LOG_DEFAULT_VIEW_EXCLUDED_OBJECTS] },
+        {
+          or: [
+            { field: 'object_name', operator: 'not_in', value: [...AUDIT_LOG_SETTINGS_STORE_OBJECTS] },
+            { field: 'action', operator: 'equals', value: 'config_change' },
+          ],
+        },
+        {
+          or: [
+            { field: 'metadata', operator: 'is_null' },
+            { field: 'metadata', operator: 'not_contains', value: SIGN_IN_STAMP_EVENT },
+          ],
+        },
+      ],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
       emptyState: { title: 'No audit events', message: 'Activity will appear here as users interact with the platform.' },

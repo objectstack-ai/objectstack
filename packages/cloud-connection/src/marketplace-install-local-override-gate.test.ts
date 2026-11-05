@@ -44,6 +44,8 @@ const deps = (...ids: string[]) => Object.fromEntries(ids.map((id) => [id, '*'])
 
 /** What each installed package holds, as the protocol's per-package listing answers it. */
 type Holdings = Record<string, Record<string, Array<Record<string, unknown>>>>;
+/** [#30542] The registry's code artifacts (`getArtifactItem`), each under its package's `_packageId`. */
+type Artifacts = Array<{ type: string; item: Record<string, unknown> }>;
 
 function makeRawApp() {
     const routes = new Map<string, Handler>();
@@ -59,7 +61,7 @@ function makeRawApp() {
  * A kernel whose registry holds `installed` (BASE read-only — a code or
  * marketplace package is in `manifests`) and whose protocol lists `holdings`.
  */
-function makeCtx(rawApp: any, installed: Array<{ id: string; dependencies?: Record<string, string> }>, holdings: Holdings) {
+function makeCtx(rawApp: any, installed: Array<{ id: string; dependencies?: Record<string, string> }>, holdings: Holdings, artifacts?: Artifacts) {
     const hooks = new Map<string, any>();
     const registered: any[] = [];
     const saved: Array<[string, string]> = [];
@@ -77,6 +79,11 @@ function makeCtx(rawApp: any, installed: Array<{ id: string; dependencies?: Reco
             registry: {
                 getAllPackages: () => [...records, ...registered],
                 getPackage: (id: string) => records.find((r) => r.manifest.id === id),
+                // [#30542] The registry's code artifacts, when the case gives them.
+                ...(artifacts ? {
+                    getArtifactItem: (type: string, name: string, packageId?: string) => artifacts
+                        .find((a) => a.type === type && a.item.name === name && a.item._packageId === packageId)?.item,
+                } : {}),
             },
         }),
         protocol: {
@@ -132,9 +139,10 @@ async function install(
     manifest: Record<string, unknown>,
     installed: Array<{ id: string; dependencies?: Record<string, string> }> = [{ id: BASE }],
     holdings: Holdings = BASE_HOLDINGS,
+    artifacts?: Artifacts,
 ) {
     const rawApp = makeRawApp();
-    const k = makeCtx(rawApp, installed, holdings);
+    const k = makeCtx(rawApp, installed, holdings, artifacts);
     const plugin = new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: dir });
     await plugin.start(k.ctx as any);
     await k.fire();
@@ -297,5 +305,39 @@ describe('install-local 2d — the override write gate at the managed install (A
         expect(res.status, JSON.stringify(res.payload)).toBe(200);
         expect(registered).toEqual([]);
         expect(saved).toEqual([['email_template', 'crm_welcome'], ['email_template', 'crm_welcome']]);
+    });
+});
+
+/**
+ * [#30542] A re-install of the pair is judged against the base's code
+ * artifact, as the protocol door judges the save. Once the pair's declared
+ * action override is armed, the protocol's listing of the base serves that
+ * override under the base's envelope (measured on the real engine and
+ * protocol); the registry still holds the base's own action.
+ */
+describe('[#30542] the install door judges a declared action override against the base\'s code artifact', () => {
+    const overrides = { package: BASE, basedOn: '1.0.0' };
+    const BASE_GATES = { requiredPermissions: ['crm_admin'], ai: { requiresConfirmation: true } };
+    // v1, armed: it added a capability to the base's.
+    const armed: Holdings = {
+        [BASE]: { action: [{ name: 'crm_call', label: 'V1', overrides, ...BASE_GATES, requiredPermissions: ['crm_admin', 'crm_auditor'] }] },
+    };
+    const artifacts: Artifacts = [{ type: 'action', item: { name: 'crm_call', label: 'Call', ...BASE_GATES, _packageId: BASE } }];
+    const pairOf = (action: Record<string, unknown>) =>
+        ({ id: PAIR, version: '2.0.0', namespace: 'crm_custom', dependencies: deps(BASE), actions: [action] });
+
+    it('a v2 that relaxes the v1 tightening back to the base\'s own gates installs', async () => {
+        const { res, saved } = await install(pairOf({ name: 'crm_call', label: 'V2', overrides, ...BASE_GATES }), [{ id: BASE }], armed, artifacts);
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(saved).toEqual([['action', 'crm_call']]);
+    });
+
+    it('a v2 that drops a gate the base\'s own action carries is still refused 403, and nothing is written', async () => {
+        const wider = { name: 'crm_call', label: 'V2', overrides, ...BASE_GATES, ai: {} };
+        const { res, saved, ledger } = await install(pairOf(wider), [{ id: BASE }], armed, artifacts);
+        expect(res.status, JSON.stringify(res.payload)).toBe(403);
+        expect(res.payload?.error?.code).toBe('NOT_OVERRIDABLE');
+        expect(refusedOf(res)).toEqual([['action', 'crm_call', 'declared_action_widens_access']]);
+        expect([saved, ledger]).toEqual([[], []]);
     });
 });

@@ -13,7 +13,7 @@
  *    eight doors refuse on it; `/status` reads it only to decide what it
  *    serves (#24148) and refuses no one.
  *  - `MarketplaceInstallLocalPlugin` reads it in ONE place
- *    (`resolveInstallPrincipal`), and all five doors answer a held session
+ *    (`resolveInstallPrincipal`), and all six doors answer a held session
  *    through the same refusal (`refuseHeldSession`).
  *
  * Each consults `evaluateAuthGate` (`@objectstack/core`) once, with no request
@@ -384,13 +384,14 @@ async function mountInstallLocal(storageDir: string) {
     };
 }
 
-/** The five doors, addressed with what each needs to act. */
+/** The six doors, addressed with what each needs to act. */
 const IL_DOORS = [
     { route: `POST ${IL}`, body: { manifest: APP } },
     { route: `GET ${IL}`, body: {} },
     { route: `DELETE ${IL}/:manifestId`, body: {} },
     { route: `POST ${IL}/:manifestId/reseed-sample-data`, body: {} },
     { route: `POST ${IL}/:manifestId/purge-sample-data`, body: {} },
+    { route: `GET ${IL}/:manifestId/sample-data`, body: {} },
 ] as const;
 
 /** Install the app as the un-held operator, so the follow-on doors have a target. */
@@ -402,7 +403,7 @@ async function seedInstall(storageDir: string) {
 }
 
 describe('ADR-0069 at MarketplaceInstallLocalPlugin', () => {
-    it('census: five routes, none allow-listed, all five covered below', async () => {
+    it('census: six routes, none allow-listed, all six covered below', async () => {
         const { rawApp } = await mountInstallLocal(dir);
         const keys = [...rawApp.routes.keys()].sort();
         expect(keys).toEqual(IL_DOORS.map((d) => d.route).sort());
@@ -410,7 +411,7 @@ describe('ADR-0069 at MarketplaceInstallLocalPlugin', () => {
     });
 
     for (const { user, gate } of HELD) {
-        it(`HELD (${gate.code}): all five doors answer 403 with the gate's code, before any effect and before the ledger is touched`, async () => {
+        it(`HELD (${gate.code}): all six doors answer 403 with the gate's code, before any effect and before the ledger is touched`, async () => {
             await seedInstall(dir);
             const ledgerBefore = existsSync(join(dir, LEDGER_FILE));
             const { rawApp, effects } = await mountInstallLocal(dir);
@@ -430,6 +431,9 @@ describe('ADR-0069 at MarketplaceInstallLocalPlugin', () => {
         const list = await rawApp.routes.get(`GET ${IL}`)!(makeC(`http://localhost${IL}`, 'u_member'));
         expect(list.status).toBe(200);
         expect(list.payload.success).toBe(true);
+        const counted = await rawApp.routes.get(`GET ${IL}/:manifestId/sample-data`)!(makeC(`http://localhost${IL}`, 'u_member', {}, APP.id));
+        expect(counted.status, JSON.stringify(counted.payload)).toBe(200);
+        expect(counted.payload.success).toBe(true);
         for (const route of [`POST ${IL}/:manifestId/reseed-sample-data`, `POST ${IL}/:manifestId/purge-sample-data`, `DELETE ${IL}/:manifestId`]) {
             const res = await rawApp.routes.get(route)!(makeC(`http://localhost${IL}`, 'u_member', {}, APP.id));
             expect(res.status, `${route}: ${JSON.stringify(res.payload)}`).toBe(200);

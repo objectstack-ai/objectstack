@@ -3782,7 +3782,9 @@ export class ObjectQLPlugin implements Plugin {
    * the boot's resync. Bound as an override then, the row's handler stays on
    * top when the base's arrives, which slots beneath it
    * (`ObjectQL#registerAction`), so the reads and the run agree from the
-   * first request.
+   * first request. [#30542] Only the base the row declares slots beneath:
+   * a row of another base's pair that ships the same key is replaced by the
+   * real base's handler when it arrives, as the reads decline it.
    */
   private isDeclaredArtifactActionOverride(row: unknown, action: any): boolean {
     const registry: any = this.ql?.registry;
@@ -4203,7 +4205,7 @@ export class ObjectQLPlugin implements Plugin {
       // the teardown above restores when the override is gone: one resync
       // rebinds the name, in either direction, with no window between.
       if (this.declaredActionOverrides.has(action) && typeof ql.registerActionOverride === 'function') {
-        ql.registerActionOverride(standaloneActionOwnerKey(action), action.name, handler, 'metadata-service');
+        ql.registerActionOverride(standaloneActionOwnerKey(action), action.name, handler, 'metadata-service', action.overrides?.package);
       } else {
         ql.registerAction(standaloneActionOwnerKey(action), action.name, handler, 'metadata-service');
       }

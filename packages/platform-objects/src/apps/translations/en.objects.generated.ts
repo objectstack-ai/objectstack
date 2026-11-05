@@ -984,7 +984,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_business_unit: {
     label: "Business Unit",
     pluralLabel: "Business Units",
-    description: "Your company structure — divisions, departments, regions and offices — used to scope data and reports.",
+    description: "Your company structure — divisions, departments, regions and offices. Sharing rules can share records with a unit, or a unit and the units under it: members get that access, and lose it when they leave. Letting a permission set read every record of a unit (read scope 'unit') needs the enterprise edition.",
     fields: {
       name: {
         label: "Name"
@@ -1010,7 +1010,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       timezone: {
         label: "Timezone",
-        help: "IANA time zone (e.g. Asia/Shanghai) date boundaries are computed in for this unit. Leave unset to inherit the parent unit's zone, then the organization's, then UTC."
+        help: "IANA time zone (e.g. Asia/Shanghai) kept for this unit; leave it empty to take the parent unit's, then the organization's. It does not change any date calculation today: formulas, reports and displayed dates use Settings → Localization → Default timezone."
       },
       organization_id: {
         label: "Organization",
@@ -3446,6 +3446,54 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_platform_setting: {
+    label: "Platform Setting",
+    pluralLabel: "Platform Settings",
+    description: "Deployment-wide settings values: the global rung of the settings cascade.",
+    fields: {
+      id: {
+        label: "Setting ID"
+      },
+      created_at: {
+        label: "Created At"
+      },
+      updated_at: {
+        label: "Updated At"
+      },
+      namespace: {
+        label: "Namespace",
+        help: "Manifest namespace (e.g. mail, storage, ai)."
+      },
+      key: {
+        label: "Key",
+        help: "Specifier key inside the namespace (snake_case)."
+      },
+      value: {
+        label: "Value",
+        help: "JSON-encoded value. Null when encrypted=true (see value_enc)."
+      },
+      encrypted: {
+        label: "Encrypted",
+        help: "When true, the value is stored encrypted-at-rest in value_enc; value column is null."
+      },
+      locked: {
+        label: "Locked",
+        help: "When true, tenant and user rows cannot override this value; writes against those scopes return 409."
+      },
+      locked_reason: {
+        label: "Lock Reason",
+        help: "Human-readable explanation surfaced in the UI tooltip when locked=true."
+      },
+      value_enc: {
+        label: "Encrypted Value",
+        help: "Handle of the sys_secret row holding the ciphertext. Set only when encrypted=true."
+      },
+      updated_by: {
+        label: "Updated By",
+        help: "Last actor who wrote this row through the settings service."
+      }
+    }
+  },
   sys_secret: {
     label: "Secret",
     pluralLabel: "Secrets",
@@ -3518,6 +3566,84 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         options: {
           tenant: "Tenant",
           user: "User"
+        }
+      },
+      action: {
+        label: "Action",
+        help: "Mutation kind.",
+        options: {
+          set: "Set",
+          reset: "Reset",
+          lock: "Lock",
+          unlock: "Unlock",
+          rotate: "Rotate"
+        }
+      },
+      actor_id: {
+        label: "Actor",
+        help: "User who performed the mutation; null for system jobs."
+      },
+      source: {
+        label: "Source",
+        help: "Mutation entry-point.",
+        options: {
+          ui: "UI",
+          api: "API",
+          migration: "Migration",
+          import: "Import",
+          system: "System"
+        }
+      },
+      reason: {
+        label: "Reason",
+        help: "Free-text justification provided by the actor (optional)."
+      },
+      old_hash: {
+        label: "Old Hash",
+        help: "Digest of the previous value, never the plaintext: sha256: hex for a plain value, the keyed hmac-sha256: digest for a secret. Null when previously unset, or for a secret with no keyed digest."
+      },
+      new_hash: {
+        label: "New Hash",
+        help: "Digest of the new value, never the plaintext: sha256: hex for a plain value, the keyed hmac-sha256: digest for a secret. Null on reset, or for a secret with no keyed digest."
+      },
+      encrypted: {
+        label: "Encrypted",
+        help: "True when the field carries secret material (rotation is interesting)."
+      },
+      request_id: {
+        label: "Request ID",
+        help: "Correlates with sys_audit_log / tracing."
+      }
+    },
+    _views: {
+      recent: {
+        label: "Recent"
+      }
+    }
+  },
+  sys_platform_setting_audit: {
+    label: "Platform Setting Audit Entry",
+    pluralLabel: "Platform Setting Audit",
+    description: "Append-only audit trail for SettingsService mutations of global-scope keys.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      created_at: {
+        label: "Created At",
+        help: "When the mutation was recorded."
+      },
+      namespace: {
+        label: "Namespace"
+      },
+      key: {
+        label: "Key"
+      },
+      scope: {
+        label: "Scope",
+        help: "Cascade layer the row was written to — always the global rung here.",
+        options: {
+          global: "Global"
         }
       },
       action: {
