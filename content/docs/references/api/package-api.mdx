@@ -461,7 +461,7 @@ Install package response
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
-| **data** | `{ package: object; dependencyResolution?: object; namespaceConflicts?: object[]; message?: string }` | ✅ |  |
+| **data** | `{ manifest: object; source: Enum<'code' \| 'marketplace' \| 'authored'>; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; … }` | ✅ | The installed package row, served bare as `data`: the row the registry recorded, at the authoring stage |
 
 ### Nested Shape: `PackageInstallResponse.error`
 
@@ -490,10 +490,19 @@ Install package response
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **package** | `{ manifest: object; source: Enum<'code' \| 'marketplace' \| 'authored'>; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; … }` | ✅ | Installed package details |
-| **dependencyResolution** | `{ dependencies: object[]; canProceed: boolean; requiredActions: object[]; installOrder: string[]; … }` | optional | Dependency resolution result |
-| **namespaceConflicts** | `{ type: 'namespace_conflict'; requestedNamespace: string; conflictingPackageId: string; conflictingPackageName: string; … }[]` | optional | Namespace conflicts detected |
-| **message** | `string` | optional | Installation status message |
+| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Package manifest at the AUTHORING stage; a row installed by a `defineStack()` host carries the assembled body instead — see `AssembledInstalledPackageSchema` / `InstalledPackageAtEitherStageSchema` |
+| **source** | `Enum<'code' \| 'marketplace' \| 'authored'>` | ✅ | Where the installed package came from: code (registered by the deployment's own code), marketplace (installed from the marketplace), or authored (a database-authored package) |
+| **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
+| **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
+| **installedAt** | `string` | optional | Installation timestamp |
+| **updatedAt** | `string` | optional | Last update timestamp |
+| **installedVersion** | `string` | optional | Currently installed version for quick access |
+| **previousVersion** | `string` | optional | Version before the last upgrade |
+| **statusChangedAt** | `string` | optional | Status change timestamp |
+| **errorMessage** | `string` | optional | Error message when status is error |
+| **settings** | `Record<string, any>` | optional | User-provided configuration settings |
+| **upgradeHistory** | `{ fromVersion: string; toVersion: string; upgradedAt: string; status: Enum<'success' \| 'failed' \| 'rolled_back'>; … }[]` | optional | Version upgrade history |
+| **registeredNamespaces** | `string[]` | optional | Namespace prefixes registered by this package |
 
 
 ---

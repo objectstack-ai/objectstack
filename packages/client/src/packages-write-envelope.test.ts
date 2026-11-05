@@ -266,10 +266,13 @@ describe('#30464 — PackageApiContracts.installPackage.output parses the instal
         const parsed = PackageApiContracts.installPackage.output.safeParse(body);
         expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
 
-        // The declared `data` IS the row the registry recorded — nothing the
-        // door sent was stripped by the parse, and nothing was invented by it.
-        expect(parsed.data!.data).toEqual(body.data);
-        expect(parsed.data!.data).toEqual(registry.getPackage(MANIFEST.id));
+        // The declared `data` IS the row the registry recorded, and no key the
+        // door sent is stripped by the parse. (`toMatchObject`, not `toEqual`:
+        // the parsed value also carries the manifest defaults the declaration
+        // applies — `scope`, `defaultDatasource` — which is the ADR-0122
+        // `Parsed` shape, not a residue.)
+        expect(body.data).toEqual(registry.getPackage(MANIFEST.id));
+        expect(parsed.data!.data).toMatchObject(body.data);
         expect(parsed.data!.data.manifest.id).toBe(MANIFEST.id);
     });
 
