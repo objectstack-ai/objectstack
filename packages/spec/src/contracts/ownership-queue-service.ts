@@ -57,9 +57,13 @@ export type QueueExpansionPurpose = 'access' | 'addressing';
  * The tables behind a queue are its own row (`sys_queue`, through which an
  * authored queue resolves), its member rows (`sys_queue_member`), and the
  * member tables a specification reads: `sys_team_member`, `sys_user_position`,
- * `sys_member` (through the position transition limb), and the business-unit
- * membership and tree. A table the composition does not carry is absence, not
- * failure.
+ * `sys_member` (through the position transition limb), `sys_business_unit_member`
+ * and the business-unit tree (`sys_business_unit`). A table the composition
+ * does not carry is absence, not failure. The activation-ledger read
+ * (`sys_metadata_activation`, which says whether a declared queue or a position
+ * is switched off) is NOT a failed read in this sense: under either answer its
+ * failure reads "switched on", as it did before the key existed; whether that
+ * posture moves is #29604's code half to decide.
  *
  * - `'nobody'` — the default and the answer every caller had before the key
  *   existed. A failed read is logged at `warn`, and what sat behind it
@@ -70,7 +74,10 @@ export type QueueExpansionPurpose = 'access' | 'addressing';
  *   read, never `[]`, a partial set or `false`. The recompute consumers take
  *   it, because they turn the member set into routed work or materialised
  *   grants and "nobody" there revokes: the approver slate (D6) and the
- *   sharing-recipient grant recompute (D7).
+ *   sharing-recipient grant recompute (D7). An implementation written before
+ *   this key existed ignores it and answers `'nobody'`; the registered one,
+ *   `@objectstack/plugin-sharing`'s, honours `'refuse'` from #29604's code half
+ *   on, so until then a caller passing `'refuse'` still gets `'nobody'`.
  *
  * Under either answer an EMPTY queue — every read succeeded and reached
  * nobody — is still `[]`, and a name that resolves nowhere is still `[]` /
