@@ -17,4 +17,6 @@ Metadata-protocol: none
 - **The namespace.** `feature_flags` is no longer registered, so `GET` and `PUT /api/settings/feature_flags` answer `404 UNKNOWN_NAMESPACE`, and `SettingsService.getManifest('feature_flags')` throws `UnknownNamespaceError` (`SETTINGS_UNKNOWN_NAMESPACE`). Setup's Configuration group no longer lists Feature Flags (`@objectstack/platform-objects`, entry `nav_settings_feature_flags` and its four locale labels).
 - **Stored values.** A `sys_setting` row saved under `feature_flags` and an `OS_FEATURE_FLAGS_*` environment variable are left in place and become inert: nothing registers the namespace, so nothing resolves them. They are not cleaned up; delete them at will.
 
-**FROM → TO.** `featureFlagsSettingsManifest` → removed, with no replacement: drop it from the host's `SettingsServicePlugin({ manifests })` list; `builtinSettingsManifests` no longer carries it.
+The one-line fix for a host:
+
+- FROM `featureFlagsSettingsManifest` TO nothing: drop it from the host's `SettingsServicePlugin({ manifests })` list; `builtinSettingsManifests` no longer carries it.
