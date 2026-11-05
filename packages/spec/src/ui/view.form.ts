@@ -206,12 +206,16 @@ export const viewForm = defineForm({
             {
               field: 'fields',
               type: 'repeater',
+              // `grid`: the inline table this array of objects rendered as
+              // before it was enumerated (the panel's auto-detected
+              // master-detail table), now with translatable column heads.
+              widget: 'grid',
               helpText: 'Fields exposed as quick filters (dropdown/toggle elements)',
               // Row-property names: every authorable row property, `label`
               // equal to the item schema's `.meta({ title })`, as `columns`
               // above does.
               fields: [
-                { field: 'field', label: 'Field' },
+                { field: 'field', label: 'Field', required: true },
                 { field: 'label', label: 'Label' },
                 { field: 'type', label: 'Type' },
                 { field: 'options', label: 'Options' },

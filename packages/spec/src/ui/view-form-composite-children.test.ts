@@ -103,6 +103,8 @@ describe('#30267 — view form composites declare their children', () => {
   it('userFilters.fields is a repeater whose row labels are the item schema titles', () => {
     const repeater = (formField('userFilters').fields ?? []).find((c) => c.field === 'fields');
     expect(repeater?.type).toBe('repeater');
+    // The inline table it rendered as before it was enumerated.
+    expect((repeater as { widget?: string } | undefined)?.widget).toBe('grid');
     const items = LIST.properties.userFilters.properties.fields.items.properties as Record<string, Node>;
     const rows = repeater?.fields ?? [];
     expect(rows.map((r) => r.field).sort()).toEqual(liveKeys(items).sort());
