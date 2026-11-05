@@ -1259,7 +1259,11 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // 701 since #29442: the flow form's variables repeater offers
       // `objectName` (a start input declared a record id) — one row label,
       // authored in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(701);
+      // 731 since #30267: the view form spells out the children of its
+      // `selection` / `pagination` / `userFilters` (with the `fields` repeater's
+      // six row properties) / `appearance` / `userActions` / `navigation` /
+      // `sharing` composites — thirty row labels, authored in all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(731);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

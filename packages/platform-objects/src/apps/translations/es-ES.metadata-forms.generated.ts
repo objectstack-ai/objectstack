@@ -1155,35 +1155,35 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       resizable: {
         label: "Redimensionable",
-        helpText: "Enable column resizing"
+        helpText: "Permite cambiar el ancho de las columnas"
       },
       compactToolbar: {
         label: "Barra compacta",
-        helpText: "Collapse Group/Color/Density/Hide-fields into a single View settings popover"
+        helpText: "Agrupa Grupo / Color / Densidad / Ocultar campos en un único menú emergente de «Configuración de la vista»"
       },
       rowHeight: {
         label: "Altura de fila",
-        helpText: "Row height / density setting"
+        helpText: "Ajuste de altura / densidad de las filas"
       },
       selection: {
         label: "Selección",
-        helpText: "Row selection configuration"
+        helpText: "Configuración de la selección de filas"
       },
       "selection.type": {
-        label: "Type",
-        helpText: "Selection mode"
+        label: "Tipo de selección",
+        helpText: "Modo de selección"
       },
       pagination: {
         label: "Paginación",
-        helpText: "Pagination configuration"
+        helpText: "Configuración de la paginación"
       },
       "pagination.pageSize": {
-        label: "Page Size",
-        helpText: "Number of records per page. On a view with no pager (kanban, gallery, timeline) it is the fetch ceiling, and the renderer owes two things: bound its fetch at this number, and, when the filtered set is larger than it, show a visible truncation signal saying what is on screen is not the whole set"
+        label: "Tamaño de página",
+        helpText: "Número de registros por página. En una vista sin paginador (kanban, galería, línea de tiempo) es el límite de carga, y el renderizador debe hacer dos cosas: limitar la carga a este número y, cuando el conjunto filtrado sea mayor, mostrar un aviso visible de truncamiento que indique que lo que hay en pantalla no es el conjunto completo"
       },
       "pagination.pageSizeOptions": {
-        label: "Page Size Options",
-        helpText: "Available page size options"
+        label: "Opciones de tamaño de página",
+        helpText: "Tamaños de página disponibles"
       },
       kanban: {
         label: "Configuración Kanban"
@@ -1208,12 +1208,12 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Barra de filtros rápidos: estilo de elemento (dropdown / tabs / toggle) + campos expuestos o preajustes de pestañas"
       },
       "userFilters.element": {
-        label: "Element",
-        helpText: "Filter control style on object views: \"dropdown\" (per-field value chips). \"toggle\" is deprecated. \"tabs\" is page-only — use `listViews` for named presets."
+        label: "Estilo del control",
+        helpText: "Estilo del control de filtro en vistas de objeto: \"dropdown\" (chips de valores por campo). \"toggle\" está obsoleto. \"tabs\" es solo para páginas: usa `listViews` para los preajustes con nombre."
       },
       "userFilters.fields": {
-        label: "Fields",
-        helpText: "Fields exposed as quick filters (dropdown/toggle elements)"
+        label: "Campos de filtro",
+        helpText: "Campos expuestos como filtros rápidos (controles dropdown / toggle)"
       },
       "userFilters.fields.field": {
         label: "Campo"
@@ -1238,107 +1238,107 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "allowedVisualizations: qué renderizadores pueden alternar los usuarios"
       },
       "appearance.showDescription": {
-        label: "Show Description",
-        helpText: "Show the view description text"
+        label: "Mostrar descripción",
+        helpText: "Muestra el texto de descripción de la vista"
       },
       "appearance.allowedVisualizations": {
-        label: "Allowed Visualizations",
-        helpText: "Whitelist of visualization types users can switch between (e.g. [\"grid\", \"gallery\", \"kanban\"])"
+        label: "Visualizaciones permitidas",
+        helpText: "Lista de tipos de visualización entre los que los usuarios pueden cambiar (p. ej. [\"grid\", \"gallery\", \"kanban\"])"
       },
       userActions: {
         label: "Acciones de usuario",
         helpText: "Conmutadores de la barra de herramientas: ordenar / buscar / filtrar / altura de fila"
       },
       "userActions.sort": {
-        label: "Sort",
-        helpText: "Allow users to sort records"
+        label: "Ordenar",
+        helpText: "Permite a los usuarios ordenar los registros"
       },
       "userActions.search": {
-        label: "Search",
-        helpText: "Allow users to search records"
+        label: "Buscar",
+        helpText: "Permite a los usuarios buscar registros"
       },
       "userActions.filter": {
-        label: "Filter",
-        helpText: "Allow users to filter records"
+        label: "Filtrar",
+        helpText: "Permite a los usuarios filtrar los registros"
       },
       "userActions.refresh": {
-        label: "Refresh",
-        helpText: "Allow users to reload the view data from the backend without a full page reload"
+        label: "Actualizar",
+        helpText: "Permite a los usuarios volver a cargar los datos de la vista desde el servidor sin recargar toda la página"
       },
       "userActions.rowHeight": {
-        label: "Row Height",
-        helpText: "Allow users to toggle row height/density"
+        label: "Altura de fila",
+        helpText: "Permite a los usuarios cambiar la altura / densidad de las filas"
       },
       "userActions.group": {
-        label: "Group",
-        helpText: "Allow users to change record grouping from the toolbar. Toggle only — the grouping itself is configured in the view-level `grouping` block."
+        label: "Agrupar",
+        helpText: "Permite a los usuarios cambiar la agrupación de registros desde la barra de herramientas. Solo es un interruptor: la agrupación en sí se configura en el bloque `grouping` de la vista."
       },
       "userActions.addRecordForm": {
-        label: "Add Record Form",
-        helpText: "Add records through a form instead of inline"
+        label: "Agregar registro con formulario",
+        helpText: "Agrega registros mediante un formulario en lugar de en línea"
       },
       "userActions.editInline": {
-        label: "Edit Inline",
-        helpText: "Allow users to edit records inline. On by default: a user who may update the object edits a cell in place with the field's type-aware widget (the same control the form uses), under the permission gate that already decides whether the object is editable at all. Declare `editInline: false` to make the list read-only in place."
+        label: "Edición en línea",
+        helpText: "Permite a los usuarios editar registros en línea. Activado por defecto: un usuario que puede actualizar el objeto edita una celda en su sitio con el control adecuado al tipo del campo (el mismo que usa el formulario), bajo la misma comprobación de permisos que ya decide si el objeto es editable. Declara `editInline: false` para que la lista sea de solo lectura en su sitio."
       },
       "userActions.hideFields": {
-        label: "Hide Fields",
-        helpText: "Allow users to hide/show fields from the toolbar (the affordance behind the view-level `hiddenFields` list). Boolean toggle — distinct from the record-details component's `hideFields`, which is an array of field names to omit. On by default: a reader hides and shows columns for themselves; declare `hideFields: false` to withhold the control."
+        label: "Ocultar campos",
+        helpText: "Permite a los usuarios ocultar / mostrar campos desde la barra de herramientas (la función detrás de la lista `hiddenFields` de la vista). Interruptor booleano, distinto del `hideFields` del componente de detalles del registro, que es un array de nombres de campo que se omiten. Activado por defecto: cada lector oculta y muestra columnas para sí mismo; declara `hideFields: false` para retirar el control."
       },
       "userActions.rowColor": {
-        label: "Row Color",
-        helpText: "Allow users to configure row colouring from the toolbar. Boolean toggle — the colour rules themselves live in the view-level `rowColor` block. Off by default: row colouring is opt-in."
+        label: "Color de fila",
+        helpText: "Permite a los usuarios configurar el coloreado de filas desde la barra de herramientas. Interruptor booleano: las reglas de color están en el bloque `rowColor` de la vista. Desactivado por defecto: el coloreado de filas es opcional."
       },
       "userActions.buttons": {
-        label: "Buttons",
-        helpText: "Custom action button IDs to show in the toolbar"
+        label: "Botones",
+        helpText: "ID de los botones de acción personalizados que se muestran en la barra de herramientas"
       },
       addRecord: {
         label: "Agregar registro",
-        helpText: "Add record entry point configuration"
+        helpText: "Configuración del punto de entrada para agregar registros"
       },
       "addRecord.enabled": {
         label: "Habilitado",
-        helpText: "Show the add record entry point — REQUIRED: `true` draws the Add button, `false` declares it off"
+        helpText: "Muestra el punto de entrada para agregar registros. OBLIGATORIO: `true` dibuja el botón Agregar y `false` lo declara desactivado"
       },
       "addRecord.position": {
         label: "Posición",
-        helpText: "Position of the add record button: `top` (the toolbar, the default), `bottom` (under the list) or `both`"
+        helpText: "Posición del botón para agregar registros: `top` (la barra de herramientas, por defecto), `bottom` (debajo de la lista) o `both`"
       },
       showRecordCount: {
         label: "Mostrar recuento de registros",
-        helpText: "Show record count at the bottom of the list"
+        helpText: "Muestra el recuento de registros al pie de la lista"
       },
       navigation: {
         label: "Navegación",
-        helpText: "Configuration for item click navigation (drawer by default, page, new_window or none)"
+        helpText: "Configuración de la navegación al hacer clic en un elemento (panel lateral por defecto; también page, new_window o none)"
       },
       "navigation.mode": {
-        label: "Mode"
+        label: "Modo"
       },
       "navigation.preventNavigation": {
-        label: "Prevent Navigation",
-        helpText: "Disable standard navigation entirely"
+        label: "Impedir navegación",
+        helpText: "Desactiva por completo la navegación estándar"
       },
       "navigation.openNewTab": {
-        label: "Open New Tab",
-        helpText: "Force open in new tab (applies to page mode)"
+        label: "Abrir en pestaña nueva",
+        helpText: "Fuerza la apertura en una pestaña nueva (se aplica al modo page)"
       },
       "navigation.size": {
-        label: "Size",
-        helpText: "Overlay size bucket for the drawer detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it."
+        label: "Tamaño",
+        helpText: "Categoría de tamaño del panel de detalle: 'auto' (por defecto: el renderizador lo deriva del número de campos y del área visible; la IA no escribe nada) o un ajuste aproximado sm/md/lg/xl/full. Prefiérelo al `width` en píxeles; el modo page lo ignora."
       },
       "navigation.width": {
-        label: "Width",
-        helpText: "[DEPRECATED → size] Pixel/percent width of the drawer (e.g. \"600px\"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket."
+        label: "Ancho",
+        helpText: "[OBSOLETO → size] Ancho en píxeles / porcentaje del panel lateral (p. ej. \"600px\"). Al crear la vista no se conoce el área visible del cliente, así que no se puede elegir un ancho en píxeles: usa la categoría `size`."
       },
       sharing: {
         label: "Compartición",
-        helpText: "View sharing configuration: who locked the view configuration"
+        helpText: "Configuración de uso compartido de la vista: quién bloqueó su configuración"
       },
       "sharing.lockedBy": {
-        label: "Locked By",
-        helpText: "User who locked the view configuration"
+        label: "Bloqueado por",
+        helpText: "Usuario que bloqueó la configuración de la vista"
       }
     }
   },

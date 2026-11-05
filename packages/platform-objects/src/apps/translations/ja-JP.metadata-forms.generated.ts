@@ -1155,35 +1155,35 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       resizable: {
         label: "サイズ変更可",
-        helpText: "Enable column resizing"
+        helpText: "列幅の変更を許可します"
       },
       compactToolbar: {
         label: "コンパクトツールバー",
-        helpText: "Collapse Group/Color/Density/Hide-fields into a single View settings popover"
+        helpText: "グループ / 色 / 密度 / フィールド非表示を 1 つの「ビュー設定」ポップオーバーにまとめます"
       },
       rowHeight: {
         label: "行の高さ",
-        helpText: "Row height / density setting"
+        helpText: "行の高さ / 密度の設定"
       },
       selection: {
         label: "選択",
-        helpText: "Row selection configuration"
+        helpText: "行選択の設定"
       },
       "selection.type": {
-        label: "Type",
-        helpText: "Selection mode"
+        label: "種類",
+        helpText: "選択モード"
       },
       pagination: {
         label: "ページネーション",
-        helpText: "Pagination configuration"
+        helpText: "ページネーションの設定"
       },
       "pagination.pageSize": {
-        label: "Page Size",
-        helpText: "Number of records per page. On a view with no pager (kanban, gallery, timeline) it is the fetch ceiling, and the renderer owes two things: bound its fetch at this number, and, when the filtered set is larger than it, show a visible truncation signal saying what is on screen is not the whole set"
+        label: "ページサイズ",
+        helpText: "1 ページあたりのレコード数。ページャーのないビュー（カンバン、ギャラリー、タイムライン）では取得の上限となり、レンダラーは 2 つのことを行う必要があります：この数で取得を制限すること、そして絞り込み結果がこの数を超える場合は、画面に表示されているのが全件ではないことを示す切り捨て表示を目に見える形で出すこと"
       },
       "pagination.pageSizeOptions": {
-        label: "Page Size Options",
-        helpText: "Available page size options"
+        label: "ページサイズの選択肢",
+        helpText: "選択できるページサイズ"
       },
       kanban: {
         label: "カンバン"
@@ -1208,12 +1208,12 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "クイックフィルターバー：要素スタイル（dropdown / tabs / toggle）+ 公開フィールドまたはタブプリセット"
       },
       "userFilters.element": {
-        label: "Element",
-        helpText: "Filter control style on object views: \"dropdown\" (per-field value chips). \"toggle\" is deprecated. \"tabs\" is page-only — use `listViews` for named presets."
+        label: "コントロールの種類",
+        helpText: "オブジェクトビューでのフィルターコントロールの種類：\"dropdown\"（フィールドごとの値チップ）。\"toggle\" は非推奨です。\"tabs\" はページ専用です——名前付きプリセットには `listViews` を使用してください。"
       },
       "userFilters.fields": {
-        label: "Fields",
-        helpText: "Fields exposed as quick filters (dropdown/toggle elements)"
+        label: "フィルター項目",
+        helpText: "クイックフィルターとして公開するフィールド（dropdown / toggle コントロール）"
       },
       "userFilters.fields.field": {
         label: "フィールド"
@@ -1238,107 +1238,107 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "allowedVisualizations：ユーザーが切り替え可能なレンダラー"
       },
       "appearance.showDescription": {
-        label: "Show Description",
-        helpText: "Show the view description text"
+        label: "説明を表示",
+        helpText: "ビューの説明文を表示します"
       },
       "appearance.allowedVisualizations": {
-        label: "Allowed Visualizations",
-        helpText: "Whitelist of visualization types users can switch between (e.g. [\"grid\", \"gallery\", \"kanban\"])"
+        label: "許可する表示形式",
+        helpText: "ユーザーが切り替えられる表示形式の許可リスト（例：[\"grid\", \"gallery\", \"kanban\"]）"
       },
       userActions: {
         label: "ユーザーアクション",
         helpText: "ツールバーの切り替え：並べ替え / 検索 / フィルター / 行の高さ"
       },
       "userActions.sort": {
-        label: "Sort",
-        helpText: "Allow users to sort records"
+        label: "並び替え",
+        helpText: "ユーザーにレコードの並び替えを許可します"
       },
       "userActions.search": {
-        label: "Search",
-        helpText: "Allow users to search records"
+        label: "検索",
+        helpText: "ユーザーにレコードの検索を許可します"
       },
       "userActions.filter": {
-        label: "Filter",
-        helpText: "Allow users to filter records"
+        label: "フィルター",
+        helpText: "ユーザーにレコードの絞り込みを許可します"
       },
       "userActions.refresh": {
-        label: "Refresh",
-        helpText: "Allow users to reload the view data from the backend without a full page reload"
+        label: "再読み込み",
+        helpText: "ページ全体を再読み込みせずに、バックエンドからビューのデータを再取得することをユーザーに許可します"
       },
       "userActions.rowHeight": {
-        label: "Row Height",
-        helpText: "Allow users to toggle row height/density"
+        label: "行の高さ",
+        helpText: "ユーザーに行の高さ / 密度の切り替えを許可します"
       },
       "userActions.group": {
-        label: "Group",
-        helpText: "Allow users to change record grouping from the toolbar. Toggle only — the grouping itself is configured in the view-level `grouping` block."
+        label: "グループ化",
+        helpText: "ツールバーからレコードのグループ化を変更することをユーザーに許可します。切り替えのみです——グループ化そのものはビュー単位の `grouping` ブロックで設定します。"
       },
       "userActions.addRecordForm": {
-        label: "Add Record Form",
-        helpText: "Add records through a form instead of inline"
+        label: "フォームでレコードを追加",
+        helpText: "インラインではなくフォームでレコードを追加します"
       },
       "userActions.editInline": {
-        label: "Edit Inline",
-        helpText: "Allow users to edit records inline. On by default: a user who may update the object edits a cell in place with the field's type-aware widget (the same control the form uses), under the permission gate that already decides whether the object is editable at all. Declare `editInline: false` to make the list read-only in place."
+        label: "インライン編集",
+        helpText: "ユーザーにレコードのインライン編集を許可します。既定でオン：オブジェクトを更新できるユーザーは、そのフィールドの型に合ったウィジェット（フォームと同じコントロール）でセルをその場で編集でき、オブジェクトが編集可能かどうかを決める同じ権限ゲートが適用されます。`editInline: false` を宣言すると、一覧はその場では読み取り専用になります。"
       },
       "userActions.hideFields": {
-        label: "Hide Fields",
-        helpText: "Allow users to hide/show fields from the toolbar (the affordance behind the view-level `hiddenFields` list). Boolean toggle — distinct from the record-details component's `hideFields`, which is an array of field names to omit. On by default: a reader hides and shows columns for themselves; declare `hideFields: false` to withhold the control."
+        label: "フィールドを非表示",
+        helpText: "ツールバーからフィールドの表示 / 非表示を切り替えることをユーザーに許可します（ビュー単位の `hiddenFields` リストを操作する機能）。ブール値の切り替えです——レコード詳細コンポーネントの `hideFields`（省略するフィールド名の配列）とは別物です。既定でオン：閲覧者が自分で列を表示・非表示にできます。`hideFields: false` を宣言するとこのコントロールを出しません。"
       },
       "userActions.rowColor": {
-        label: "Row Color",
-        helpText: "Allow users to configure row colouring from the toolbar. Boolean toggle — the colour rules themselves live in the view-level `rowColor` block. Off by default: row colouring is opt-in."
+        label: "行の色",
+        helpText: "ツールバーから行の色分けを設定することをユーザーに許可します。ブール値の切り替えです——色分けのルール自体はビュー単位の `rowColor` ブロックにあります。既定でオフ：行の色分けはオプトインです。"
       },
       "userActions.buttons": {
-        label: "Buttons",
-        helpText: "Custom action button IDs to show in the toolbar"
+        label: "ボタン",
+        helpText: "ツールバーに表示するカスタムアクションボタンの ID"
       },
       addRecord: {
         label: "レコードを追加",
-        helpText: "Add record entry point configuration"
+        helpText: "レコード追加の入口の設定"
       },
       "addRecord.enabled": {
         label: "有効",
-        helpText: "Show the add record entry point — REQUIRED: `true` draws the Add button, `false` declares it off"
+        helpText: "レコード追加の入口を表示します——必須：`true` で追加ボタンを表示し、`false` でオフを宣言します"
       },
       "addRecord.position": {
         label: "位置",
-        helpText: "Position of the add record button: `top` (the toolbar, the default), `bottom` (under the list) or `both`"
+        helpText: "レコード追加ボタンの位置：`top`（ツールバー、既定）、`bottom`（一覧の下）、または `both`"
       },
       showRecordCount: {
         label: "レコード数を表示",
-        helpText: "Show record count at the bottom of the list"
+        helpText: "一覧の下部にレコード件数を表示します"
       },
       navigation: {
         label: "ナビゲーション",
-        helpText: "Configuration for item click navigation (drawer by default, page, new_window or none)"
+        helpText: "項目をクリックしたときのナビゲーション設定（既定はドロワー。page、new_window、none も指定可）"
       },
       "navigation.mode": {
-        label: "Mode"
+        label: "モード"
       },
       "navigation.preventNavigation": {
-        label: "Prevent Navigation",
-        helpText: "Disable standard navigation entirely"
+        label: "ナビゲーションを無効化",
+        helpText: "標準のナビゲーションを完全に無効にします"
       },
       "navigation.openNewTab": {
-        label: "Open New Tab",
-        helpText: "Force open in new tab (applies to page mode)"
+        label: "新しいタブで開く",
+        helpText: "常に新しいタブで開きます（page モードに適用）"
       },
       "navigation.size": {
-        label: "Size",
-        helpText: "Overlay size bucket for the drawer detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it."
+        label: "サイズ",
+        helpText: "ドロワー詳細のオーバーレイサイズ区分：'auto'（既定——レンダラーがフィールド数とビューポートから決定し、AI は何も書きません）、または大まかな指定 sm/md/lg/xl/full。ピクセル指定の `width` よりこちらを優先してください。page モードでは無視されます。"
       },
       "navigation.width": {
-        label: "Width",
-        helpText: "[DEPRECATED → size] Pixel/percent width of the drawer (e.g. \"600px\"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket."
+        label: "幅",
+        helpText: "[非推奨 → size] ドロワーのピクセル / パーセント幅（例：\"600px\"）。作成時にはクライアントのビューポートが分からないため、ピクセル幅は決められません——`size` 区分を使用してください。"
       },
       sharing: {
         label: "共有",
-        helpText: "View sharing configuration: who locked the view configuration"
+        helpText: "ビューの共有設定：誰がビューの設定をロックしたか"
       },
       "sharing.lockedBy": {
-        label: "Locked By",
-        helpText: "User who locked the view configuration"
+        label: "ロックしたユーザー",
+        helpText: "ビューの設定をロックしたユーザー"
       }
     }
   },
