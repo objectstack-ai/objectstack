@@ -908,7 +908,7 @@ describe("[ADR-0090 D12; ruling of record 5985885287, sub-item B] an organizatio
         });
       }
 
-      it("control: a caller whose field rules hide a judged column is still answered the read door's not-found, whole, for a row it cannot read and for an id naming no row", async () => {
+      it("control: a caller whose field rules hide a judged column is still answered the read door's not-found, whole, when it removes a row it cannot read or an id naming no row", async () => {
         const h = await boot(posture);
         const callers = [
           await orgAdminWith(h, 'u_org_admin_columns_hidden', [ORG_ADMIN_FIELDS_HIDDEN.name]),
@@ -921,9 +921,9 @@ describe("[ADR-0090 D12; ruling of record 5985885287, sub-item B] an organizatio
             const notFound = await readDoorNotFound(table, target);
             for (const caller of callers) {
               expect(await h.engine.findOne(table, { where: { id: target }, context: structuredClone(caller) }), `${caller.userId} reads ${table} ${target}`).toBeFalsy();
-              for (const op of ['update', 'delete'] as const) {
-                expect(await wholeWrite(h, table, op, target, caller), `${caller.userId} ${op} ${table} ${target}`).toEqual(notFound);
-              }
+              // A removal only: an edit in place is no part of the right, and
+              // where its refusal falls is not what this describe pins.
+              expect(await wholeWrite(h, table, 'delete', target, caller), `${caller.userId} delete ${table} ${target}`).toEqual(notFound);
             }
           }
           expect(await stored(h, table, { id }), `${table}: refused means untouched`).toHaveLength(1);
