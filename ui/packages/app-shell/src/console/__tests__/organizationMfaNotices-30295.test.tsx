@@ -63,10 +63,11 @@ describe('organizationMfaSavedNotice — after an accepted save', () => {
 describe('useStoredRequireMfa — the stored value while the form is open', () => {
   it('an edit reads the row once; a create is off; a closed form or another object reads nothing', async () => {
     const findOne = vi.fn(async () => ({ id: 'org_1', require_mfa: true }));
+    type Props = { objectName: string; recordId: string | undefined; open: boolean };
+    const initialProps: Props = { objectName: 'sys_organization', recordId: 'org_1', open: true };
     const { result, rerender } = renderHook(
-      (p: { objectName: string; recordId?: string; open: boolean }) =>
-        useStoredRequireMfa(p.objectName, p.recordId, p.open, { findOne }),
-      { initialProps: { objectName: 'sys_organization', recordId: 'org_1', open: true } },
+      (p: Props) => useStoredRequireMfa(p.objectName, p.recordId, p.open, { findOne }),
+      { initialProps },
     );
     await waitFor(() => expect(result.current).toBe(true));
     rerender({ objectName: 'sys_organization', recordId: 'org_1', open: true });
