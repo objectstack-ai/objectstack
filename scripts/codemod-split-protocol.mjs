@@ -1826,9 +1826,11 @@ function importDeclsOf(ts, file, text) {
  * declaration's own layout (sorted in when its elements are sorted, last
  * otherwise; one line stays one line within 120 columns), else into a new
  * declaration: before `ProtocolHost`'s import, or, for `./protocol.js`, after
- * the last import. Pure.
+ * the last import. New declarations go in `order` (`protocol.ts`'s import
+ * order), a specifier's values before its types, as the first pass writes
+ * them. Pure.
  */
-function addModuleImports(ts, file, text, wanted) {
+function addModuleImports(ts, file, text, wanted, order = () => 0) {
   const { decls, locals } = importDeclsOf(ts, file, text);
   const edits = [];
   const fresh = new Map(); // `${specifier}\0${value}` -> [local]
@@ -1855,9 +1857,9 @@ function addModuleImports(ts, file, text, wanted) {
   const host = decls.find((d) => d.specifier === './protocol-host.js');
   const last = decls.at(-1);
   if (!last) refuse(`${file}: has no import declaration`);
-  for (const [key, adds] of fresh) {
-    const [specifier, valueText] = key.split('\0');
-    const value = valueText === 'true';
+  const ranked = [...fresh].map(([key, adds]) => { const [specifier, v] = key.split('\0'); return { specifier, value: v === 'true', adds }; })
+    .sort((a, b) => order(a.specifier) - order(b.specifier) || Number(b.value) - Number(a.value) || (a.specifier < b.specifier ? -1 : a.specifier > b.specifier ? 1 : 0));
+  for (const { specifier, value, adds } of ranked) {
     const spell = (a) => (a.imported === a.local ? a.local : `${a.imported} as ${a.local}`);
     const d = decls.find((x) => x.specifier === specifier && x.nb && !x.defaultName && x.typeOnly === !value && x.named.every((e) => !e.typeOnly));
     if (d) {
@@ -2025,7 +2027,8 @@ function generateMembers(T, text, hostText, moduleTexts, names, { anchors = SECT
       for (const [n, use] of r.moduleRefs) want(n, { specifier: './protocol.js', form: 'named', imported: n, value: use.value });
       want('ProtocolHost', { specifier: './protocol-host.js', form: 'named', imported: 'ProtocolHost', value: false });
     }
-    moduleOut.set(file, addModuleImports(ts, file, applyEdits(mod, modEdits), wanted));
+    const order = (s) => (ctx.scope.importOrder.has(s) ? ctx.scope.importOrder.get(s) : Number.MAX_SAFE_INTEGER);
+    moduleOut.set(file, addModuleImports(ts, file, applyEdits(mod, modEdits), wanted, order));
   }
   return { host: pruned.text, hostModule: inserted.host, modules: moduleOut, records, pruned: pruned.removed };
 }
