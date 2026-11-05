@@ -5112,16 +5112,18 @@ describe('AuthManager', () => {
       expect(ipMatchesRange('::ffff:203.0.113.5', '::/0')).toBe(false);
       // The IPv4-mapped form, dotted or hex, is still the IPv4 address it maps.
       expect(ipMatchesRange('::ffff:cb00:7105', '203.0.113.0/24')).toBe(true);
-      expect(ipMatchesRange('203.0.113.5', '::ffff:203.0.113.0/120')).toBe(true);
-      expect(ipMatchesRange('203.0.114.5', '::ffff:203.0.113.0/120')).toBe(false);
+      expect(ipMatchesRange('203.0.113.5', '::ffff:203.0.113.0/24')).toBe(true);
+      expect(ipMatchesRange('203.0.114.5', '::ffff:203.0.113.0/24')).toBe(false);
     });
 
-    it('ipMatchesRange never matches a malformed IPv6 range', () => {
+    it('ipMatchesRange never widens a malformed IPv6 range past its base address', () => {
       expect(ipMatchesRange('2001:db8::5', '2001:db8::/129')).toBe(false);
       expect(ipMatchesRange('2001:db8::5', '2001:db8::/')).toBe(false);
       expect(ipMatchesRange('2001:db8::5', '2001:db8::/3x')).toBe(false);
       expect(ipMatchesRange('2001:db8::5', '2001:db8:::/32')).toBe(false);
       expect(ipMatchesRange('2001:db8::5', 'zz01:db8::/32')).toBe(false);
+      // A prefix the family does not read leaves the base address alone, as before.
+      expect(ipMatchesRange('2001:db8::', '2001:db8::/129')).toBe(true);
     });
 
     it('isClientIpAllowed admits an IPv6 client inside an allowed IPv6 range', () => {
