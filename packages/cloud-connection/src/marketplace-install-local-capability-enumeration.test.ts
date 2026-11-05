@@ -83,6 +83,11 @@ vi.mock('@objectstack/runtime', () => ({
         }
     },
     recordSeedOutcome: vi.fn(),
+    // [#30281] The seed-locale producer, answering "no locale": this suite's
+    // subject is not the locale (pinned in marketplace-install-local-seed-replayer.test.ts).
+    resolveSeedLocaleForLoad: async () => undefined,
+    appDefaultSeedLocale: () => undefined,
+    describeSeedLocale: () => 'none',
 }));
 
 import { assertEngineDeleteDispatch } from '@objectstack/metadata-core';
