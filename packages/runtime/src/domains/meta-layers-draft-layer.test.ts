@@ -144,9 +144,9 @@ async function bootStore() {
     await engine.syncSchemas();
 
     const protocol = new ObjectStackProtocolImplementation(engine as any);
-    const save = (mode: 'draft' | 'publish', type: string, item: { name: string }, packageId?: string) =>
+    const save = (mode: 'draft' | 'publish', type: string, item: { name: string; [key: string]: unknown }, packageId?: string) =>
         protocol.saveMetaItem({ type, name: item.name, item: clone(item), mode, ...(packageId ? { packageId } : {}) } as any);
-    const draft = (type: string, item: { name: string }, packageId?: string) => save('draft', type, item, packageId);
+    const draft = (type: string, item: { name: string; [key: string]: unknown }, packageId?: string) => save('draft', type, item, packageId);
     // Tenant-authored objects, as Studio edits them: published, then edited.
     await save('publish', 'object', TASK, CRM);
     await save('publish', 'object', NOTE, CRM);
