@@ -7,17 +7,21 @@
 //   - `POST /api/v1/datasources/:name/external/tables/:remote/import`, and
 //   - the MCP `import_object` tool.
 //
-// Both doors read the walled-catalog verdict (`walledCatalogWriteVerdict`,
+// The catalog refresh, `POST /api/v1/datasources/:name/external/refresh-catalog`,
+// rewrites the datasource's cached `external_catalog` snapshot, an item of the
+// same catalog, so it is the platform operator's there too.
+//
+// Each door reads the walled-catalog verdict (`walledCatalogWriteVerdict`,
 // `@objectstack/metadata-core`) the metadata save door reads, after the
 // federation family's capability rule and before the federation service is
 // looked up. Pinned here under `group`, the posture where every organization
 // shares the environment's catalog: an organization's administrator, holding
 // both federation capabilities inside that organization and below the platform
 // operator, is refused at each door with `403 PERMISSION_DENIED` and the save
-// door's own sentence for an object, and nothing is saved. CONTROLS: the
-// platform operator imports at both doors under the same wall; and under
-// `single` the same kind of administrator, who is not the platform operator,
-// imports at both doors as before.
+// door's own sentence for the type written, and nothing is saved. CONTROLS: the
+// platform operator imports at both doors and refreshes the catalog under the
+// same wall; and under `single` the same kind of administrator, who is not the
+// platform operator, does each as before.
 //
 // The status and the sentence are the save door's. The code is this family's
 // spelling of a 403, `PERMISSION_DENIED`, the standard-catalog member; the REST
@@ -56,6 +60,9 @@ const DATASOURCE = 'showcase_external';
 const BASE = 'com.example.showcase';
 
 const importPath = (remote: string) => `/datasources/${DATASOURCE}/external/tables/${remote}/import`;
+const REFRESH_PATH = `/datasources/${DATASOURCE}/external/refresh-catalog`;
+/** The `external_catalog` item a refresh of the datasource stores (`<datasource>_catalog`). */
+const CATALOG = `${DATASOURCE}_catalog`;
 
 /** A runtime-authored set carrying both federation capabilities. */
 const IMPORTER_SET = 'federation_importer';
@@ -238,12 +245,28 @@ function restoreEnv(snapshot: Record<string, string | undefined>): void {
   }
 }
 
+/** The catalog refresh's answer: status, `error.code`, `error.message` and the snapshot when one came back. */
+async function refreshOverRest(h: Harness, token: string) {
+  const res = await h.stack.apiAs(token, 'POST', REFRESH_PATH, {});
+  const json: any = await res.json().catch(() => ({}));
+  return { status: res.status, code: json?.error?.code, message: String(json?.error?.message ?? ''), data: json?.data, json };
+}
+
+/** Whether the datasource's catalog snapshot is stored: in the metadata registry, and as a `sys_metadata` row. */
+async function catalogStored(h: Harness): Promise<{ registry: boolean; rows: number }> {
+  const metadata: any = await h.stack.kernel.getServiceAsync('metadata');
+  const item = await metadata.get('external_catalog', CATALOG);
+  const found: any = await h.ql.find('sys_metadata', { where: { type: 'external_catalog', name: CATALOG }, context: SYS });
+  const rows = Array.isArray(found) ? found : Array.isArray(found?.records) ? found.records : [];
+  return { registry: item !== undefined && item !== null, rows: rows.length };
+}
+
 /** What the platform operator reads at `GET /meta/object/:name`. */
 async function storedStatus(h: Harness, name: string): Promise<number> {
   return (await h.stack.apiAs(h.operator, 'GET', `/meta/object/${name}`)).status;
 }
 
-describe('[ADR-0131 D12 items 7–8] group: an import is a write to the environment\'s catalog, and it is the platform operator\'s at both import doors', () => {
+describe('[ADR-0131 D12 items 7–8] group: an import and a catalog refresh are writes to the environment\'s catalog, and they are the platform operator\'s at every door', () => {
   let h: Harness;
   const previous = snapshotEnv();
 
@@ -293,6 +316,34 @@ describe('[ADR-0131 D12 items 7–8] group: an import is a write to the environm
     expect(await storedStatus(h, name)).toBe(404);
   });
 
+  it('REST: A\'s catalog refresh is refused with the save door\'s status and sentence for an external catalog, and nothing is stored', async () => {
+    expect(await catalogStored(h), 'no snapshot is stored before the refresh').toEqual({ registry: false, rows: 0 });
+
+    const refreshed = await refreshOverRest(h, h.tokA);
+    expect({ status: refreshed.status, code: refreshed.code }, JSON.stringify(refreshed.json)).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
+    expect(refreshed.message).toContain('\'group\' tenancy posture');
+    expect(refreshed.message).toContain('ADR-0131 D3, D12 items 7–8, D11');
+    expect(refreshed.data, 'a refused refresh answers no snapshot').toBeUndefined();
+
+    // The metadata save door refuses A the same item with the same status and
+    // the same sentence: one verdict.
+    const savedByA = await h.stack.apiAs(h.tokA, 'PUT', `/meta/external_catalog/${CATALOG}`, {
+      name: CATALOG, datasource: DATASOURCE, snapshotAt: new Date().toISOString(), tables: [],
+    });
+    const saveBody: any = await savedByA.json().catch(() => ({}));
+    expect(savedByA.status, JSON.stringify(saveBody)).toBe(refreshed.status);
+    expect(saveBody?.error?.message).toBe(refreshed.message);
+
+    expect(await catalogStored(h)).toEqual({ registry: false, rows: 0 });
+  });
+
+  it('control: the platform operator refreshes the catalog under the same wall, and the snapshot is stored', async () => {
+    const refreshed = await refreshOverRest(h, h.operator);
+    expect(refreshed.status, JSON.stringify(refreshed.json)).toBe(200);
+    expect(refreshed.data?.catalog?.name).toBe(CATALOG);
+    expect(await catalogStored(h)).toEqual({ registry: true, rows: 1 });
+  });
+
   it('control: the platform operator imports at both doors under the same wall, and each object is saved', async () => {
     const restName = 'showcase_custom_wall_op_rest';
     const rest = await importOverRest(h, h.operator, 'customers', restName);
@@ -308,7 +359,7 @@ describe('[ADR-0131 D12 items 7–8] group: an import is a write to the environm
   });
 });
 
-describe('[ADR-0131 D11] single: the wall is not enforced, and an administrator below the platform operator imports at both doors as before', () => {
+describe('[ADR-0131 D11] single: the wall is not enforced, and an administrator below the platform operator imports at both doors and refreshes the catalog as before', () => {
   let h: Harness;
   const previous = snapshotEnv();
 
@@ -339,5 +390,12 @@ describe('[ADR-0131 D11] single: the wall is not enforced, and an administrator 
     expect(mcp.isError, JSON.stringify(mcp)).toBe(false);
     expect(mcp.object?.name).toBe(mcpName);
     expect(await storedStatus(h, mcpName)).toBe(200);
+  });
+
+  it('control: A refreshes the catalog, and the snapshot is stored', async () => {
+    const refreshed = await refreshOverRest(h, h.tokA);
+    expect(refreshed.status, JSON.stringify(refreshed.json)).toBe(200);
+    expect(refreshed.data?.catalog?.name).toBe(CATALOG);
+    expect(await catalogStored(h)).toEqual({ registry: true, rows: 1 });
   });
 });

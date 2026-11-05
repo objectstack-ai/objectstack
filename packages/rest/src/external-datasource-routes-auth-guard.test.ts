@@ -757,3 +757,85 @@ describe('[ADR-0131 D12 items 7–8] under a walled tenancy posture the import i
     expect(service.importObject).not.toHaveBeenCalled();
   });
 });
+
+// The catalog refresh is the family's other write: it rewrites the datasource's
+// cached `external_catalog` snapshot, an item of the same environment-wide
+// catalog, so it answers to the same walled verdict for that type, in the same
+// order of checks.
+
+const REFRESH_ROUTE = FAMILY.find((r) => r.call === 'refreshCatalog')!;
+
+describe('[ADR-0131 D12 items 7–8] under a walled tenancy posture the catalog refresh is the platform operator\'s, like every write to the environment\'s catalog', () => {
+  for (const posture of ['group', 'isolated'] as const) {
+    it(`${posture}: an organization administrator holding both federation capabilities is refused the refresh 403 PERMISSION_DENIED, before the service is looked up`, async () => {
+      const { table, service, lookups } = mountWithTenancy({ tenancy: { posture }, posture: 'TENANT_ADMIN' });
+
+      const { statusCode, body } = await call(table, REFRESH_ROUTE, {});
+
+      expect(statusCode).toBe(403);
+      expect(body?.success).toBe(false);
+      expect(body?.error?.code).toBe('PERMISSION_DENIED');
+      expect(body?.error?.message).toContain(`'${posture}' tenancy posture`);
+      expect(body?.error?.message).toContain('ADR-0131 D3, D12 items 7–8, D11');
+      expect(service.refreshCatalog).not.toHaveBeenCalled();
+      expect(lookups).not.toContain('external-datasource');
+    });
+  }
+
+  it('the refusal is the walled verdict the metadata save door answers for an external catalog', async () => {
+    const { table } = mountWithTenancy({ tenancy: { posture: 'group' }, posture: 'TENANT_ADMIN' });
+
+    const { body } = await call(table, REFRESH_ROUTE, {});
+
+    const verdict = walledCatalogWriteVerdict({ type: 'external_catalog', tenancyPosture: 'group', callerPosture: 'TENANT_ADMIN' });
+    expect(verdict.allowed).toBe(false);
+    expect(body?.error?.message).toBe(verdict.allowed ? undefined : verdict.message);
+  });
+
+  it('the capability gate still answers first: a caller lacking the write capability is told which capability, not the posture', async () => {
+    const { table, service } = mountWithTenancy({
+      tenancy: { posture: 'group' }, posture: 'TENANT_ADMIN', grants: [READ_CAPABILITY],
+    });
+
+    const { statusCode, body } = await call(table, REFRESH_ROUTE, {});
+
+    expect(statusCode).toBe(403);
+    expect(body?.error?.code).toBe('PERMISSION_DENIED');
+    expect(body?.error?.message).toContain(WRITE_CAPABILITY);
+    expect(body?.error?.message).not.toContain('tenancy posture');
+    expect(service.refreshCatalog).not.toHaveBeenCalled();
+  });
+
+  it('control: the platform operator refreshes under a wall', async () => {
+    const { table, service } = mountWithTenancy({ tenancy: { posture: 'group' }, posture: 'PLATFORM_ADMIN' });
+
+    const { statusCode, body } = await call(table, REFRESH_ROUTE, {});
+
+    expect(statusCode).toBe(REFRESH_ROUTE.ok);
+    expect(body?.success).toBe(true);
+    expect(service.refreshCatalog).toHaveBeenCalledWith(DS);
+  });
+
+  it('control: under `single`, and with no tenancy service at all, the same organization administrator refreshes as before', async () => {
+    for (const tenancy of [{ posture: 'single' }, 'none'] as const) {
+      const { table, service } = mountWithTenancy({ tenancy, posture: 'TENANT_ADMIN' });
+
+      const { statusCode, body } = await call(table, REFRESH_ROUTE, {});
+
+      expect(statusCode, JSON.stringify(tenancy)).toBe(REFRESH_ROUTE.ok);
+      expect(body?.success, JSON.stringify(tenancy)).toBe(true);
+      expect(service.refreshCatalog, JSON.stringify(tenancy)).toHaveBeenCalledWith(DS);
+    }
+  });
+
+  it('a tenancy service that is registered and cannot answer refuses the refresh 503 SERVICE_UNAVAILABLE, never a permit', async () => {
+    const { table, service } = mountWithTenancy({ tenancy: 'failing', posture: 'TENANT_ADMIN' });
+
+    const { statusCode, body } = await call(table, REFRESH_ROUTE, {});
+
+    expect(statusCode).toBe(503);
+    expect(body?.success).toBe(false);
+    expect(body?.error?.code).toBe('SERVICE_UNAVAILABLE');
+    expect(service.refreshCatalog).not.toHaveBeenCalled();
+  });
+});
