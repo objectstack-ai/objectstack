@@ -18,6 +18,7 @@ import { objectPermissionGrants } from '@objectstack/spec/security';
 import {
   buildEffectiveFieldPermissions,
   buildEffectiveObjectPermissions,
+  engineExternalWriteForbidden,
   fieldPermissionVote,
   holdsSuperuserBypass,
   registryObjectPackageDisabled,
@@ -471,6 +472,86 @@ describe('[#20135] apiOperations says what the REST door serves', () => {
       source,
     );
     expect(map.crm_lead.apiOperations).toEqual(['get', 'list', 'aggregate', 'search', 'export']);
+  });
+});
+
+describe('[#30370] an object whose external write gate is closed grants no write', () => {
+  const SCHEMAS: Record<string, any> = {
+    customer: { name: 'customer', datasource: 'showcase_external' },
+    order: { name: 'order', datasource: 'showcase_external', enable: { apiMethods: ['get', 'list', 'create', 'update'] } },
+    lead: { name: 'lead' },
+  };
+  const source = (forbidden: (name: string) => boolean = (name) => name === 'customer' || name === 'order') => ({
+    allSchemas: () => Object.values(SCHEMAS),
+    schemaOf: (name: string) => SCHEMAS[name],
+    isExternalWriteForbidden: forbidden,
+  });
+  const WRITE_OPERATIONS = ['create', 'update', 'delete', 'upsert', 'bulk', 'import', 'restore', 'purge'];
+  const VERBS = ['allowCreate', 'allowEdit', 'allowDelete', 'allowTransfer'] as const;
+
+  it('an explicit grant, a plain wildcard and a super-user wildcard all lose every write verb, and keep read and export', () => {
+    for (const sets of [
+      [{ objects: { customer: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, allowTransfer: true, allowExport: true }, lead: { allowRead: true, allowCreate: true } } }],
+      [{ objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, allowExport: true } } }],
+      [{ objects: { '*': { allowRead: true, allowExport: true, viewAllRecords: true, modifyAllRecords: true } } }],
+    ]) {
+      const map: any = buildEffectiveObjectPermissions(sets, source());
+      const label = JSON.stringify(sets);
+      for (const verb of VERBS) expect(objectPermissionGrants(map.customer, verb), `${label} ${verb}`).toBe(false);
+      expect(objectPermissionGrants(map.customer, 'allowRead'), label).toBe(true);
+      expect(objectPermissionGrants(map.customer, 'allowExport'), label).toBe(true);
+      // The read operations stay served, export included; no write operation is.
+      expect(map.customer.apiOperations, label).toEqual(['get', 'list', 'aggregate', 'search', 'export']);
+      // An object on a managed datasource keeps exactly what it was granted.
+      const { isExternalWriteForbidden: _drop, ...without } = source();
+      expect(map.lead, label).toEqual((buildEffectiveObjectPermissions(sets, without) as any).lead);
+      expect(objectPermissionGrants(map.lead, 'allowCreate') || objectPermissionGrants(map.lead, 'allowEdit'), label).toBe(true);
+    }
+  });
+
+  it('modifyAllRecords on the object is lowered to the read it implies, so can() answers no write and the same read', () => {
+    const map: any = buildEffectiveObjectPermissions(
+      [{ objects: { customer: { modifyAllRecords: true } } }],
+      source(),
+    );
+    expect(map.customer.modifyAllRecords).toBe(false);
+    expect(map.customer.viewAllRecords).toBe(true);
+    expect(objectPermissionGrants(map.customer, 'allowRead')).toBe(true);
+    for (const verb of VERBS) expect(objectPermissionGrants(map.customer, verb), verb).toBe(false);
+  });
+
+  it('an object that already narrows its operations is served its narrowed reads only', () => {
+    const map: any = buildEffectiveObjectPermissions([{ objects: { order: { allowRead: true, allowCreate: true } } }], source());
+    expect(map.order.apiOperations).toEqual(['get', 'list', 'aggregate', 'search']);
+    for (const op of WRITE_OPERATIONS) expect(map.order.apiOperations).not.toContain(op);
+  });
+
+  it('an open gate, or no accessor, leaves the map exactly as before', () => {
+    const sets = [{ objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, allowExport: true } } }];
+    const { isExternalWriteForbidden: _drop, ...without } = source();
+    const before = JSON.stringify(buildEffectiveObjectPermissions(sets, without));
+    expect(JSON.stringify(buildEffectiveObjectPermissions(sets, source(() => false)))).toBe(before);
+    expect((JSON.parse(before) as any).customer).toMatchObject({ allowCreate: true, allowEdit: true, allowDelete: true });
+  });
+
+  it('a predicate that throws is reported and clamps nothing — never half the map', () => {
+    const sets = [{ objects: { customer: { allowRead: true, allowEdit: true }, order: { allowRead: true, allowEdit: true } } }];
+    const warnings: string[] = [];
+    const map: any = buildEffectiveObjectPermissions(sets, {
+      ...source((name) => { if (name === 'order') throw new Error('registry offline'); return true; }),
+      logger: { warn: (message) => warnings.push(message) },
+    });
+    expect(map.customer.allowEdit).toBe(true);
+    expect(map.order.allowEdit).toBe(true);
+    expect(warnings).toEqual(['[effective-permissions] external write gate read failed']);
+  });
+
+  it('engineExternalWriteForbidden asks the engine\'s own verdict, and an engine without it forbids nothing', () => {
+    const engine = { isExternalWriteForbidden(name: string) { return this === engine && name === 'customer'; } };
+    expect(engineExternalWriteForbidden(engine)('customer')).toBe(true);
+    expect(engineExternalWriteForbidden(engine)('lead')).toBe(false);
+    expect(engineExternalWriteForbidden({})('customer')).toBe(false);
+    expect(engineExternalWriteForbidden(undefined)('customer')).toBe(false);
   });
 });
 
