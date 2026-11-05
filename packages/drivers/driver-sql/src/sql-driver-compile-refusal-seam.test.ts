@@ -32,6 +32,8 @@
  *    fault module `sql-driver-read-exit-fault.ts` (#25521 cut 15) and the
  *    predicate-emitter module `sql-driver-predicate-emitters.ts` (#25521 cut 16)
  *    and the generated top-level leaf `sql-driver-top-level.ts` (#29520 codemod),
+ *    and, since #30147, every other `sql-driver-*.ts` module beside it (a
+ *    facet member is named as the `SqlDriver` method whose body it is),
  *    and lists every function that builds an `INVALID_FILTER` error. Only three may call
  *    `unsupportedFilterError` directly (the seam itself, the `'author'`
  *    re-issue, and the column refusal raised from a dialect error AFTER the
@@ -48,7 +50,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { SqlDriver } from './index.js';
 import { markFilterSubtreeProvenance, type FilterCondition } from '@objectstack/spec/data';
@@ -275,12 +277,12 @@ const DOORS: readonly Door[] = [
 // ── Half 1: the enumeration ───────────────────────────────────────────────────
 
 /**
- * Every function in `sql-driver.ts`, `sql-driver-cross-field-comparison.ts`,
- * `sql-driver-read-exit-fault.ts` and `sql-driver-predicate-emitters.ts` that builds an `INVALID_FILTER` error, by the route it takes. Read with the TypeScript parser, not a regex, so a call
+ * Every function in `sql-driver.ts` and every `sql-driver-*.ts` module beside it that builds an `INVALID_FILTER` error, by the route it takes. Read with the TypeScript parser, not a regex, so a call
  * split across lines, an inline `throw`, or a builder written as a method or an
  * arrow cannot slip past the count.
  */
 function enumerateRefusalBuilders(): {
+  files: string[];
   directCallers: Set<string>;
   seamCallers: Set<string>;
   codeWriters: Set<string>;
@@ -293,13 +295,14 @@ function enumerateRefusalBuilders(): {
   // `$empty` refusals; the scan reads it too.
   // [#29520 codemod] The top-level declarations ahead of the class moved to a
   // generated leaf, with the refusal builders among them; the scan reads it too.
-  const sources = [
-    ['sql-driver.ts', readFileSync(new URL('./sql-driver.ts', import.meta.url), 'utf8')],
-    ['sql-driver-cross-field-comparison.ts', readFileSync(new URL('./sql-driver-cross-field-comparison.ts', import.meta.url), 'utf8')],
-    ['sql-driver-read-exit-fault.ts', readFileSync(new URL('./sql-driver-read-exit-fault.ts', import.meta.url), 'utf8')],
-    ['sql-driver-predicate-emitters.ts', readFileSync(new URL('./sql-driver-predicate-emitters.ts', import.meta.url), 'utf8')],
-    ['sql-driver-top-level.ts', readFileSync(new URL('./sql-driver-top-level.ts', import.meta.url), 'utf8')],
-  ] as const;
+  // [#30147] The codemod moves a class method's body into a facet class
+  // (`export class <X>Facet`) in any section module, so the scan reads every
+  // `sql-driver-*.ts` module, not a list a move can outrun, and names a facet's
+  // static `x` as `SqlDriver.x`: it is that method's body.
+  const files = readdirSync(new URL('.', import.meta.url))
+    .filter((f) => /^sql-driver(-[a-z0-9-]+)?\.ts$/.test(f) && !f.endsWith('.test.ts'))
+    .sort();
+  const sources = files.map((f) => [f, readFileSync(new URL(`./${f}`, import.meta.url), 'utf8')] as const);
   const directCallers = new Set<string>();
   const seamCallers = new Set<string>();
   const codeWriters = new Set<string>();
@@ -310,7 +313,7 @@ function enumerateRefusalBuilders(): {
       if (ts.isMethodDeclaration(at) && ts.isIdentifier(at.name)) {
         const owner = at.parent;
         const cls = ts.isClassDeclaration(owner) && owner.name ? owner.name.text : '?';
-        return `${cls}.${at.name.text}`;
+        return `${/^[A-Z][A-Za-z0-9]*Facet$/.test(cls) ? 'SqlDriver' : cls}.${at.name.text}`;
       }
       if ((ts.isArrowFunction(at) || ts.isFunctionExpression(at)) && ts.isVariableDeclaration(at.parent)) {
         const decl = at.parent;
@@ -357,7 +360,7 @@ function enumerateRefusalBuilders(): {
     ts.forEachChild(node, visit);
   };
   for (const [name, source] of sources) visit(ts.createSourceFile(name, source, ts.ScriptTarget.Latest, true));
-  return { directCallers, seamCallers, codeWriters };
+  return { files, directCallers, seamCallers, codeWriters };
 }
 
 describe('[#20039] the filter-compile refusal class is closed — enumeration', () => {
@@ -376,6 +379,12 @@ describe('[#20039] the filter-compile refusal class is closed — enumeration', 
       expect(found.seamCallers, builder).toContain(builder);
     }
     expect(found.directCallers).toContain('unresolvableFilterColumnError');
+    // [#30147] The modules the builders were found in before the scan read
+    // every module, and one facet module, are among those it reads.
+    for (const f of ['sql-driver.ts', 'sql-driver-cross-field-comparison.ts', 'sql-driver-read-exit-fault.ts',
+      'sql-driver-predicate-emitters.ts', 'sql-driver-top-level.ts', 'sql-driver-filter-helpers.ts']) {
+      expect(found.files, `the scan lost ${f}`).toContain(f);
+    }
   });
 
   it('only three functions build the envelope WITHOUT the seam, none of them on the compile path', () => {
