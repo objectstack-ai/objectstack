@@ -4305,7 +4305,11 @@ export class AuthManager {
    * deliberately LOCAL, I/O-free verifier depend on the data engine and turn
    * a transient store error into a 401 for a legitimate human, and a row's
    * existence is not humanity anyway (`isHumanUserRow` exists because
-   * `usr_system` is a row and not a person).
+   * `usr_system` is a row and not a person). A banned user's token is
+   * refused by the door that resolves the principal, which reads the ban
+   * where it already reads the principal's grants and answers a store fault
+   * as the 503 it is (`@objectstack/runtime` `oauth-subject-ban.ts`); the
+   * token endpoint mints a banned user no token (`oauth-grant-ban-refusal.ts`).
    *
    * Revocation note: JWT access tokens are not server-tracked, so
    * revocation takes effect at expiry (≤1h default); refresh tokens ARE

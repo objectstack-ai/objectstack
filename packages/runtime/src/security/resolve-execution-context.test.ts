@@ -7,6 +7,7 @@ import { ObjectKernel, isAuthzStoreUnavailableError, isServiceNotRegisteredError
 import { resolveExecutionContext } from './resolve-execution-context.js';
 import { hashApiKey } from './api-key.js';
 import { bindCatalogFromTables } from './security-catalog.testkit.js';
+import { FORWARD_CREDENTIAL_HEADER, withForwardCredential, type ForwardCredentialBinding } from '@objectstack/rest';
 
 /**
  * Minimal ObjectQL stub. Only `sys_api_key` is populated; every other object
@@ -822,5 +823,121 @@ describe('[#13906 decision 1 A, runtime door] the tenancy posture seam tells "ne
     expect(err.code).toBe('SERVICE_UNAVAILABLE');
     expect(err.status).toBe(503);
     expect(err.object).toBe('tenancy');
+  });
+});
+
+describe('a banned user\'s OAuth credentials resolve to no principal while the ban holds', () => {
+  const NOW = Date.now();
+  const SOON = new Date(NOW + 3_600_000).toISOString();
+  const LAPSED = new Date(NOW - 60_000).toISOString();
+  const VERIFIED = { userId: 'u_ban', scopes: ['data:read', 'data:write'], clientId: 'agent-client-1' };
+
+  /**
+   * A table double for `sys_user` that records every read, and can be made to
+   * throw (a store fault) or to answer as a table that was never provisioned.
+   * Every other object is empty.
+   */
+  function banQl(user: Record<string, unknown> | undefined, fault?: 'throws' | 'missing-table') {
+    const userReads: any[] = [];
+    const ql = {
+      async find(object: string, opts: any) {
+        if (object !== 'sys_user') return [];
+        userReads.push(opts);
+        if (fault === 'throws') throw new Error('connection reset by peer');
+        if (fault === 'missing-table') throw Object.assign(new Error('no such table: sys_user'), { code: 'SQLITE_ERROR' });
+        const rows = user ? [user] : [];
+        return bounded(rows.filter((r) => r.id === opts?.where?.id), opts);
+      },
+    };
+    return { ql, userReads };
+  }
+  const oauthOpts = (ql: any, verified: any = VERIFIED) => ({
+    acceptOAuthAccessToken: true,
+    getService: async (name: string) => (name === 'auth' ? { verifyMcpAccessToken: async () => verified } : undefined),
+    getQl: async () => ql,
+    request: { headers: { authorization: 'Bearer a.b.c' } },
+  });
+  /** The envelope a bearer that does not verify gets at this door — what a banned subject must get. */
+  const notVerified = () => resolveExecutionContext(oauthOpts(banQl(undefined).ql, undefined));
+
+  it('a token whose subject is banned resolves exactly as a token that does not verify', async () => {
+    const { ql } = banQl({ id: 'u_ban', banned: true, ban_expires: null });
+    const ctx = await resolveExecutionContext(oauthOpts(ql));
+    const control = await notVerified();
+    expect(control.principalKind, 'control: an unverified bearer is the guest').toBe('guest');
+    expect(ctx).toEqual(control);
+    expect(ctx.userId).toBeUndefined();
+  });
+
+  it('a ban with an expiry still ahead binds; one whose expiry has passed does not', async () => {
+    const holding = await resolveExecutionContext(oauthOpts(banQl({ id: 'u_ban', banned: true, ban_expires: SOON }).ql));
+    expect(holding).toEqual(await notVerified());
+    const lapsed = await resolveExecutionContext(oauthOpts(banQl({ id: 'u_ban', banned: true, ban_expires: LAPSED }).ql));
+    expect(lapsed.principalKind).toBe('agent');
+    expect(lapsed.userId).toBe('u_ban');
+  });
+
+  it('control: a user who is not banned, or was unbanned, is the agent principal, as before', async () => {
+    for (const row of [{ id: 'u_ban' }, { id: 'u_ban', banned: false, ban_expires: null }]) {
+      const ctx = await resolveExecutionContext(oauthOpts(banQl(row).ql));
+      expect(ctx.principalKind, JSON.stringify(row)).toBe('agent');
+      expect(ctx.userId).toBe('u_ban');
+    }
+  });
+
+  it('control: a subject with no user row, or no provisioned user table, keeps today\'s answer', async () => {
+    const noRow = await resolveExecutionContext(oauthOpts(banQl(undefined).ql));
+    expect(noRow.principalKind).toBe('agent');
+    expect(noRow.userId).toBe('u_ban');
+    const noTable = await resolveExecutionContext(oauthOpts(banQl(undefined, 'missing-table').ql));
+    expect(noTable.principalKind).toBe('agent');
+  });
+
+  it('a ban read that throws is the store outage — 503 SERVICE_UNAVAILABLE naming sys_user, never a principal and never the guest', async () => {
+    const err: any = await resolveExecutionContext(oauthOpts(banQl(undefined, 'throws').ql)).then(
+      () => undefined,
+      (e) => e,
+    );
+    expect(err, 'the resolver resolved despite the store fault').toBeDefined();
+    expect(isAuthzStoreUnavailableError(err)).toBe(true);
+    expect(err.code).toBe('SERVICE_UNAVAILABLE');
+    expect(err.status).toBe(503);
+    expect(err.object).toBe('sys_user');
+  });
+
+  it('cost: one read of the ban columns, by primary key, as the system, per token resolved', async () => {
+    const { ql, userReads } = banQl({ id: 'u_ban' });
+    await resolveExecutionContext(oauthOpts(ql));
+    const banReads = userReads.filter((q) => Array.isArray(q?.fields) && q.fields.includes('banned'));
+    expect(banReads).toEqual([
+      { where: { id: 'u_ban' }, fields: ['id', 'banned', 'ban_expires'], limit: 1, context: { isSystem: true } },
+    ]);
+    // A bearer that does not verify reads no ban at all.
+    const unverified = banQl({ id: 'u_ban' });
+    await resolveExecutionContext(oauthOpts(unverified.ql, undefined));
+    expect(unverified.userReads.filter((q) => q?.fields?.includes?.('banned'))).toEqual([]);
+  });
+
+  it('a forward credential whose agent acts for a banned user resolves as one that does not redeem', async () => {
+    const forwardBinding: ForwardCredentialBinding = {
+      method: 'PATCH',
+      path: '/api/v1/data/crm_lead/r1',
+      run: { objectName: 'crm_lead', actionName: 'probe', recordId: 'r1' },
+      agent: { userId: 'u_ban', clientId: 'agent-client-1', scopes: ['actions:execute', 'data:write'] },
+    };
+    const forwardedAs = (ql: any) => (handle: string) => resolveExecutionContext({
+      getService: async () => undefined,
+      getQl: async () => ql,
+      request: { method: 'PATCH', path: '/api/v1/data/crm_lead/r1', headers: { [FORWARD_CREDENTIAL_HEADER]: handle } },
+    });
+    const control = await forwardedAs(banQl({ id: 'u_ban' }).ql)('not-a-minted-handle');
+    expect(control.principalKind, 'control: an unredeemable forward is the guest').toBe('guest');
+
+    const refused = await withForwardCredential(forwardBinding, forwardedAs(banQl({ id: 'u_ban', banned: true }).ql));
+    expect(refused).toEqual(control);
+
+    const served = await withForwardCredential(forwardBinding, forwardedAs(banQl({ id: 'u_ban' }).ql));
+    expect(served.principalKind).toBe('agent');
+    expect(served.userId).toBe('u_ban');
   });
 });

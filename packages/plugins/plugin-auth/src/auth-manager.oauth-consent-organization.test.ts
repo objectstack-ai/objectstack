@@ -94,14 +94,15 @@ async function captureProviderOptions(): Promise<any> {
  * derived from each plugin's own resolved schema, so they are the platform's
  * `sys_*` names whenever a plugin resolves to them.
  */
-async function bootServer(opts: any) {
-  const [{ betterAuth }, { memoryAdapter }, { jwt }, { organization }, { oauthProvider: realOauthProvider }] =
+async function bootServer(opts: any, { admin = false }: { admin?: boolean } = {}) {
+  const [{ betterAuth }, { memoryAdapter }, { jwt }, { organization }, { oauthProvider: realOauthProvider }, adminPlugins] =
     await Promise.all([
       vi.importActual<typeof import('better-auth')>('better-auth'),
       import('better-auth/adapters/memory'),
       import('better-auth/plugins'),
       import('better-auth/plugins/organization'),
       vi.importActual<typeof import('@better-auth/oauth-provider')>('@better-auth/oauth-provider'),
+      import('better-auth/plugins/admin'),
     ]);
 
   const provider = realOauthProvider(opts);
@@ -110,6 +111,9 @@ async function bootServer(opts: any) {
   // mapped to `sys_jwks` anyway once AuthManager has built one in this process
   // (see auth-manager.mcp-oauth-resource.test.ts).
   const jwtPlugin = jwt({ schema: buildJwtPluginSchema() as any });
+  // The admin plugin, when a leg asks for it, gives the user model its ban
+  // columns (`banned` / `banExpires`), as the platform's admin plugin does.
+  const extra: any[] = admin ? [adminPlugins.admin()] : [];
 
   const db: Record<string, any[]> = {};
   for (const m of ['user', 'session', 'account', 'verification']) db[m] = [];
@@ -125,7 +129,7 @@ async function bootServer(opts: any) {
     secret: SECRET,
     database: memoryAdapter(db),
     emailAndPassword: { enabled: true },
-    plugins: [jwtPlugin, orgPlugin as any, provider as any],
+    plugins: [jwtPlugin, orgPlugin as any, provider as any, ...extra],
   });
   await auth.$context;
 
@@ -139,6 +143,8 @@ async function bootServer(opts: any) {
     /** The stored rows, by the platform's column name. */
     consentRows: () => db[consentModel] ?? [],
     refreshRows: () => db[refreshModel] ?? [],
+    /** The stored user rows — a leg that bans writes the ban columns here, as the admin route does. */
+    userRows: () => db.user ?? [],
   };
 }
 
@@ -411,5 +417,65 @@ describe('existing consents re-confirm once (ruling 6232069920, item 4)', () => 
     const oldFamily = await refresh(server, clientId, old.refresh_token!);
     expect(Object.keys(claimsOf(oldFamily.access_token))).not.toContain('organization_id');
     expect((await verifier(server).verifyMcpAccessToken(oldFamily.access_token))?.organizationId).toBeUndefined();
+  });
+});
+
+describe('a banned user is minted no token at the token endpoint while the ban holds (`oauth-grant-ban-refusal.ts`)', () => {
+  /** The token endpoint's answer, as a caller can tell it apart. */
+  async function tokenAnswer(server: Server, params: Record<string, string>) {
+    const res = await server.auth.handler(
+      new Request(`${ISSUER}/oauth2/token`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams(params).toString(),
+      }),
+    );
+    return {
+      status: res.status,
+      body: (await res.json().catch(() => null)) as any,
+      cacheControl: res.headers.get('cache-control'),
+      wwwAuthenticate: res.headers.get('www-authenticate'),
+    };
+  }
+  const refreshAnswer = (server: Server, clientId: string, refreshToken: string) =>
+    tokenAnswer(server, { grant_type: 'refresh_token', refresh_token: refreshToken, client_id: clientId, resource: MCP_RESOURCE });
+
+  it('the refresh grant of a banned user answers as an invalid refresh token, writes nothing, and renews again once the ban lapses', async () => {
+    const server = await bootServer(await captureProviderOptions(), { admin: true });
+    const clientId = await registerClient(server);
+    const otherClientId = await registerClient(server);
+    const cookie = await signUp(server, 'banned.subject@acme.example.com');
+    const tokens = await consentedGrant(server, clientId, cookie);
+    const [row] = server.userRows();
+    expect(row, 'the user row the leg bans').toBeDefined();
+
+    // The answer an invalid refresh token gets: a real one presented by a client it was not issued to.
+    const control = await refreshAnswer(server, otherClientId, tokens.refresh_token!);
+    expect(control.status).toBe(400);
+    expect(control.body).toEqual({ error_description: 'invalid refresh token', error: 'invalid_grant' });
+
+    row.banned = true;
+    row.banExpires = new Date(Date.now() + 3_600_000);
+    const before = JSON.stringify(server.refreshRows());
+
+    const refused = await refreshAnswer(server, clientId, tokens.refresh_token!);
+
+    expect(refused).toEqual(control);
+    expect(JSON.stringify(server.refreshRows()), 'the refused grant rotated or revoked nothing').toBe(before);
+
+    // The ban's expiry passes: the SAME refresh token renews, nothing reissued in between.
+    row.banExpires = new Date(Date.now() - 1_000);
+    const renewed = await refresh(server, clientId, tokens.refresh_token!);
+    expect(renewed.access_token).toBeTruthy();
+  });
+
+  it('control: a user who is not banned renews as before', async () => {
+    const server = await bootServer(await captureProviderOptions(), { admin: true });
+    const clientId = await registerClient(server);
+    const cookie = await signUp(server, 'not.banned@acme.example.com');
+    const tokens = await consentedGrant(server, clientId, cookie);
+    server.userRows()[0].banned = false;
+    const renewed = await refresh(server, clientId, tokens.refresh_token!);
+    expect(renewed.access_token).toBeTruthy();
   });
 });
