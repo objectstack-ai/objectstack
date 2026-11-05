@@ -359,6 +359,16 @@ export interface FlowRuntimeRow {
    * ⛔ do not parse it").
    */
   reason?: string;
+  /**
+   * The engine's machine value for why the flow is not armed
+   * (`FlowRuntimeState.unboundCause`, one of the contract's
+   * `FLOW_UNBOUND_CAUSES`), present exactly on the rows that carry `reason`.
+   * The contract's own split: a consumer CLASSIFIES on this code and renders
+   * the sentence without branching on it, so the run note words a known cause
+   * in the console's language and keeps the platform's sentence as the
+   * engineer's detail.
+   */
+  unboundCause?: string;
 }
 
 /**
@@ -393,7 +403,7 @@ export interface FlowRuntimeRow {
 export type FlowRunStatus =
   | { kind: 'on' }
   | { kind: 'manual' }
-  | { kind: 'not-running'; reason?: string }
+  | { kind: 'not-running'; reason?: string; cause?: string }
   | { kind: 'refused'; message: string }
   | { kind: 'unregistered' }
   | { kind: 'off' }
@@ -430,7 +440,31 @@ export function deriveFlowRunStatus(
   if (!runtime.enabled) return { kind: 'off' };
   if (runtime.bound) return { kind: 'on' };
   if (!runtime.triggerType) return { kind: 'manual' };
-  return runtime.reason ? { kind: 'not-running', reason: runtime.reason } : { kind: 'not-running' };
+  return {
+    kind: 'not-running',
+    ...(runtime.reason ? { reason: runtime.reason } : {}),
+    ...(runtime.unboundCause ? { cause: runtime.unboundCause } : {}),
+  };
+}
+
+/**
+ * The contract's `FLOW_UNBOUND_CAUSES`, each with a designer-table row that
+ * says in plain words what this deployment does not do and who can change it.
+ * Spelled out rather than built from the code, so a cause the engine adds later
+ * reads as the platform's sentence instead of a missing key.
+ */
+const UNBOUND_CAUSE_KEYS: Readonly<Record<string, string>> = {
+  deployment_policy: 'engine.studio.auto.unboundCause.deployment_policy',
+  disabled_subflow: 'engine.studio.auto.unboundCause.disabled_subflow',
+  notice_after_suspending_subflow: 'engine.studio.auto.unboundCause.notice_after_suspending_subflow',
+  suspending_subflow_in_region: 'engine.studio.auto.unboundCause.suspending_subflow_in_region',
+  missing_trigger: 'engine.studio.auto.unboundCause.missing_trigger',
+  binding_failure: 'engine.studio.auto.unboundCause.binding_failure',
+};
+
+function unboundCauseLine(cause: string | undefined, locale?: string): string | undefined {
+  const key = cause && Object.prototype.hasOwnProperty.call(UNBOUND_CAUSE_KEYS, cause) ? UNBOUND_CAUSE_KEYS[cause] : undefined;
+  return key ? t(key, locale) : undefined;
 }
 
 /**
@@ -465,6 +499,13 @@ export interface FlowRunStatusView {
   label: string;
   title?: string;
   /**
+   * The platform's own sentence, kept beside a `title` the console worded from
+   * the engine's cause code (a `not-running` flow whose cause is known), for
+   * the engineer who needs the exact remedy. Absent whenever `title` already
+   * IS the platform's sentence, or there is none.
+   */
+  detail?: string;
+  /**
    * `plain` is ordinary foreground text; nothing here is styled as an error.
    * A refused flow reads `amber`, a warning to act on, as an unpublished one.
    */
@@ -483,12 +524,15 @@ export function describeFlowRunStatus(status: FlowRunStatus, locale?: string): F
       return { label: t('engine.studio.auto.on', locale), title: t('engine.studio.auto.onBound', locale), tone: 'green' };
     case 'manual':
       return { label: t('engine.studio.auto.on', locale), title: t('engine.studio.auto.onUnbound', locale), tone: 'green' };
-    case 'not-running':
+    case 'not-running': {
+      const worded = unboundCauseLine(status.cause, locale);
       return {
         label: t('engine.studio.auto.notRunning', locale),
-        title: status.reason ?? t('engine.studio.auto.notRunningTitle', locale),
+        title: worded ?? status.reason ?? t('engine.studio.auto.notRunningTitle', locale),
+        ...(worded && status.reason ? { detail: status.reason } : {}),
         tone: 'muted',
       };
+    }
     case 'refused':
       return { label: t('engine.studio.auto.refused', locale), title: status.message, tone: 'amber' };
     case 'unregistered':
