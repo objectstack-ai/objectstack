@@ -3858,9 +3858,9 @@ export type FlowStartRecordKeys = ReadonlyArray<readonly [key: string, value: un
  *
  * The object the start names is not always the object the run reads. A flow's
  * own definition can state that it reads a start input as the id of a row of
- * a fixed object ({@link flowDeclaredRecordReads}: a CRUD node's `filter.id`,
- * a screen edit form's `recordId`, handed on through `subflow` and `map`
- * inputs). Every such input the start hands the run (`start.inputs`, the
+ * a fixed object ({@link flowDeclaredRecordReads}: the input's own
+ * `objectName` declaration, a CRUD node's `filter.id`, a screen edit form's
+ * `recordId`, handed on through `subflow` and `map` inputs). Every such input the start hands the run (`start.inputs`, the
  * `params` the run's input variables are bound from, row slots included) is
  * judged against THAT object too, by the same load and the same refusals: the
  * value must be one record id (a list of ids where the flow reads a list), or
