@@ -72,10 +72,10 @@
  * shape: ten literal loaders, no static catalogue import, no key in both
  * places.
  */
-import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { useCallback, useContext, useEffect, useSyncExternalStore } from 'react';
 import type { i18n as I18nInstance } from 'i18next';
+import { I18nContext, getI18n } from 'react-i18next';
 import { DEFAULT_BUILT_IN_LANGUAGE, getLoadedBuiltInLocales, matchLanguageTag } from '../../locales/registry.js';
-import { useObjectTranslation } from '../../provider.js';
 
 /** One language's catalogue: a partial pack holding the `marketplace` group. */
 export type MarketplaceCatalogue = Readonly<Record<string, unknown>>;
@@ -294,12 +294,27 @@ const readVersion = (): number => version;
  * anyway, so it answers `ready`.
  */
 export function useMarketplaceNamespace(): MarketplaceNamespaceState {
-  const { i18n } = useObjectTranslation();
+  // The instance react-i18next hands `t()`: the provider's, else the one
+  // `initReactI18next` installed. Read directly rather than through
+  // `useTranslation`, which warns (NO_I18NEXT_INSTANCE) where there is none —
+  // a host or a test that renders a marketplace component bare.
+  const instance = (useContext(I18nContext)?.i18n ?? getI18n()) as I18nInstance | undefined;
   // Re-render when a catalogue lands or fails — the store write this hook
   // makes is silent, so react-i18next's own subscription never hears of it.
   useSyncExternalStore(subscribe, readVersion, readVersion);
-  const instance = i18n as I18nInstance | undefined;
-  const lang = instance?.language || DEFAULT_BUILT_IN_LANGUAGE;
+  // …and when the instance switches language.
+  const subscribeLanguage = useCallback(
+    (listener: () => void) => {
+      if (typeof instance?.on !== 'function') return () => undefined;
+      instance.on('languageChanged', listener);
+      return () => {
+        instance.off('languageChanged', listener);
+      };
+    },
+    [instance],
+  );
+  const readLanguage = (): string => instance?.language || DEFAULT_BUILT_IN_LANGUAGE;
+  const lang = useSyncExternalStore(subscribeLanguage, readLanguage, readLanguage);
 
   const retry = useCallback(() => {
     let started = false;
