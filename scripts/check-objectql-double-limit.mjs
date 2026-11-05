@@ -384,24 +384,46 @@ function visibleDeclarations(node, sf) {
               ts.isArrowFunction(d.initializer) || ts.isFunctionExpression(d.initializer);
             decls.set(d.name.text, {
               text: `let ${d.name.text} = ${d.initializer.getText(sf)};`,
+              identifiers: identifiersIn(d.initializer),
               literal,
               fnLike,
             });
           }
         }
       } else if (ts.isFunctionDeclaration(s) && s.name && !decls.has(s.name.text)) {
-        decls.set(s.name.text, { text: s.getText(sf), literal: false, fnLike: true });
+        decls.set(s.name.text, {
+          text: s.getText(sf), identifiers: identifiersIn(s), literal: false, fnLike: true,
+        });
       }
     }
   }
   return decls;
 }
 
-const identifiersIn = (src) => {
+/**
+ * Every identifier the CODE under `nodes` names — and nothing its TEXT says
+ * (#30473, the twin of #29860 in `check-where-matcher-conformance`, hand-copied
+ * for the independence reason above). Walked off the parsed tree, so a string
+ * literal, a template literal's text between its `${…}` holes, a regular
+ * expression and a comment contribute nothing, while an identifier inside a
+ * `${…}` hole is code and is collected. Over-inclusive in one direction only: a
+ * property name (`row.name`) is still an identifier node, and a name that
+ * resolves to no same-file declaration is skipped by the lift.
+ *
+ * It used to be a word regex over the source text, so a double's refusal
+ * message naming a sibling binding pulled that binding into the lift — and a
+ * binding that closes over a factory parameter makes the lift throw, filing a
+ * drivable double under whatever the retry loop can salvage.
+ */
+function identifiersIn(...nodes) {
   const out = new Set();
-  for (const m of src.matchAll(/\b([A-Za-z_$][A-Za-z0-9_$]*)\b/g)) out.add(m[1]);
+  const visit = (n) => {
+    if (ts.isIdentifier(n)) out.add(n.text);
+    ts.forEachChild(n, visit);
+  };
+  for (const n of nodes) visit(n);
   return out;
-};
+}
 
 /** String literals in the body -- the object names a double may branch on. */
 function stringLiteralsIn(fnNode, sf) {
@@ -468,6 +490,12 @@ export function discoverInSource(text, label) {
         line: line + 1,
         queryShaped: looksQueryShaped(fn.body.getText(sf)),
         source: expressionSourceOf(fn, sf),
+        // What the lift follows: the code of exactly the text `source` carries.
+        // A method lifts as `function (params) body`, so its own name is not in
+        // it; an expression lifts whole.
+        sourceIdentifiers: ts.isMethodDeclaration(fn)
+          ? identifiersIn(...fn.parameters, fn.body)
+          : identifiersIn(fn),
         declarations: visibleDeclarations(fn, sf),
         objectNames: [SYNTHETIC_OBJECT, ...stringLiteralsIn(fn, sf)],
       });
@@ -506,7 +534,7 @@ function buildCallable(candidate, stubbed, stubClass) {
   const self = '__os_find';
   const skip = new Set(stubbed);
   const included = new Map();
-  let frontier = identifiersIn(candidate.source);
+  let frontier = candidate.sourceIdentifiers;
   for (let depth = 0; depth < 6; depth++) {
     const next = new Set();
     for (const id of frontier) {
@@ -516,7 +544,7 @@ function buildCallable(candidate, stubbed, stubClass) {
       if (stubClass >= 1 && decl.literal) { skip.add(id); continue; }
       if (stubClass >= 2 && !decl.fnLike) { skip.add(id); continue; }
       included.set(id, decl.text);
-      for (const x of identifiersIn(decl.text)) next.add(x);
+      for (const x of decl.identifiers) next.add(x);
     }
     if (next.size === 0) break;
     frontier = next;
@@ -1113,6 +1141,49 @@ const ql = {
   },
 };`;
 
+/**
+ * #30473: the lift reads identifiers from code, never from text. The refusal
+ * message names the sibling `openDriver`, an EXPORTED function: its source
+ * cannot sit inside the lift's function body (`export` is a syntax error there)
+ * and a function-like declaration is never stubbed, so a lift that follows the
+ * words of a template literal or a string cannot be built at any stub class and
+ * a conforming double reads UNJUDGED. The double never calls it.
+ */
+const FIXTURE_TEXT_NAMES_SIBLING = `
+export function openDriver(name: string) { return { name, version: '0.0.0' }; }
+function makeQl(rows: any[]) {
+  return {
+    async find(object: string, opts: any) {
+      const where = opts?.where ?? {};
+      for (const k of Object.keys(where)) {
+        if (k.startsWith('$')) throw new Error(\`no openDriver here: operator \${k} is not implemented\`);
+        if (k === '') throw new Error('openDriver: an empty field name is not implemented');
+      }
+      const matched = rows.filter((r: any) => ${MATCHER});
+      return typeof opts?.limit === 'number' ? matched.slice(0, opts.limit) : matched;
+    },
+  };
+}`;
+
+/**
+ * The other direction: a `${…}` hole IS code. The same-file helper `key` is
+ * named only inside a hole on the answering path, so a lift that stopped
+ * reading holes would leave it to the row stub and the control probe could not
+ * seat the double.
+ */
+const FIXTURE_HOLE_NAMES_HELPER = `
+const key = (k: string) => k;
+function makeQl(rows: any[]) {
+  return {
+    async find(object: string, opts: any) {
+      const where = opts?.where ?? {};
+      const matched = rows.filter((r: any) =>
+        Object.entries(where).every(([k, v]) => (r as any)[\`\${key(k)}\`] === v));
+      return typeof opts?.limit === 'number' ? matched.slice(0, opts.limit) : matched;
+    },
+  };
+}`;
+
 async function judgeFixture(src) {
   const found = discoverInSource(src, 'fixture.test.ts');
   const results = [];
@@ -1147,7 +1218,7 @@ const SELF_TEST_VERDICT = 'check-objectql-double-limit self-test reached its ver
 // not red. A battery BELOW its floor means cases stopped running; the remedy is
 // to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'check-objectql-double-limit self-test': 56,
+  'check-objectql-double-limit self-test': 63,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1266,6 +1337,22 @@ async function selfTest() {
   expect('binding strategy 2 reaches a module-scope fixture array', moduleFixture.n === 1);
   expect('a module-scope-fixture double is judged, not dropped',
     moduleFixture.r?.verdict === 'BLIND');
+
+  // #30473: the lift reads identifiers from code, never from text.
+  const textNames = await one(FIXTURE_TEXT_NAMES_SIBLING);
+  expect('a double beside text naming a sibling binding is discovered', textNames.n === 1);
+  expect('template-literal TEXT names no identifier: "openDriver" in the message is not collected',
+    textNames.found[0]?.sourceIdentifiers?.has('openDriver') === false);
+  expect('nor does a plain string literal: its "implemented" is not collected either',
+    textNames.found[0]?.sourceIdentifiers?.has('implemented') === false);
+  expect('a double beside text naming a sibling binding lifts and is CONFORMING, not UNJUDGED',
+    textNames.r?.verdict === 'CONFORMING');
+  const holeNames = await one(FIXTURE_HOLE_NAMES_HELPER);
+  expect('a double calling a helper inside a `${…}` hole is discovered', holeNames.n === 1);
+  expect('the helper named only inside the hole is collected',
+    holeNames.found[0]?.sourceIdentifiers?.has('key') === true);
+  expect('so the hole-reading double lifts with its helper and is CONFORMING',
+    holeNames.r?.verdict === 'CONFORMING');
 
   // Reconciliation, ONE-SIDED (#26444): an increase is an error, a decrease is a report.
   const fake = new Map([['a.test.ts', { blind: 1, wrong: 0, unjudged: 0, details: [{ line: 1, result: { verdict: 'BLIND' } }] }]]);
@@ -1394,7 +1481,8 @@ async function selfTest() {
     '    prove; the control probe drops a non-query `find`, one that never filters, and\n' +
     '    one answering with rows of its own that it could read no evidence from;\n' +
     '    a SHARED helper and a per-file copy grade identically; rows reached through a\n' +
-    '    table map and through a module-scope fixture are both driven; the ledger\n' +
+    '    table map and through a module-scope fixture are both driven; the lift follows\n' +
+    '    identifiers its code names, never the words of its text; the ledger\n' +
     '    reconciles one-sided (a decrease passes and is reported).',
   );
 
