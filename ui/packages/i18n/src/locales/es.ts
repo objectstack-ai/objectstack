@@ -917,12 +917,12 @@ const es = {
   },
   managedByBadge: {
     systemWritable: {
-      short: "Esquema de la plataforma",
+      short: "Integrado · editable",
       title: "Definido por la plataforma, editable por el administrador",
       body: "El esquema de este objeto lo define la plataforma, pero sus filas son suyas: puede crearlas y editarlas aquí. Quién puede escribir lo determinan la administración delegada y la seguridad a nivel de registro, no esta insignia.",
     },
     config: {
-      short: "Configuración",
+      short: "Se configura aquí",
       title: "Configuración del administrador",
       body: "Estas filas definen el comportamiento de la plataforma en tiempo de ejecución. Créelas aquí; los datos de tiempo de ejecución que producen viven en una tabla separada.",
     },
@@ -937,7 +937,7 @@ const es = {
       body: "Registro de auditoría inmutable. Las filas no se pueden crear, editar ni eliminar desde la interfaz: las escribe la plataforma cuando ocurren eventos. Use Exportar para descargarlas para revisión de cumplimiento.",
     },
     betterAuth: {
-      short: "Identidad",
+      short: "Vía el servicio de identidad",
       title: "Escrito a través del servicio de identidad integrado",
       body: "El esquema de este objeto pertenece a {{provider}}, el servicio de identidad integrado de la plataforma. Cree y modifique estos registros con las acciones de esta página o mediante los flujos de inicio de sesión, invitación y seguridad; todos pasan por ese servicio. Editar la tabla directamente omitiría el hash de contraseñas, la validación de sesiones, las comprobaciones de dos factores y los hooks de auditoría.",
     },
