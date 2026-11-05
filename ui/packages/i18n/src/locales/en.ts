@@ -1173,8 +1173,8 @@ const en = {
     },
     betterAuth: {
       short: 'Identity',
-      title: 'Managed by the identity provider',
-      body: "This object's schema is owned by {{provider}}. Direct edits bypass password hashing, session validation, two-factor checks, and audit hooks. Manage these records through your authentication provider's sign-in, invitation, and security flows instead.",
+      title: 'Written through the built-in identity service',
+      body: "This object's schema belongs to {{provider}}, the platform's built-in identity service. Create and change these records with the actions on this page, or through sign-in, invitation and security flows; every one of them goes through that service. Editing the table directly would bypass password hashing, session validation, two-factor checks and audit hooks.",
     },
   },
   kanban: {

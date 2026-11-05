@@ -907,8 +907,8 @@ const de = {
     },
     betterAuth: {
       short: "Identität",
-      title: "Vom Identitätsanbieter verwaltet",
-      body: "Das Schema dieses Objekts gehört {{provider}}. Direkte Änderungen umgehen Passwort-Hashing, Sitzungsvalidierung, Zwei-Faktor-Prüfungen und Audit-Hooks. Verwalten Sie diese Datensätze über die Anmelde-, Einladungs- und Sicherheitsabläufe Ihres Authentifizierungsanbieters.",
+      title: "Über den integrierten Identitätsdienst geschrieben",
+      body: "Das Schema dieses Objekts gehört {{provider}}, dem integrierten Identitätsdienst der Plattform. Legen Sie diese Datensätze mit den Aktionen auf dieser Seite oder über Anmelde-, Einladungs- und Sicherheitsabläufe an und ändern Sie sie dort; alle laufen über diesen Dienst. Direkte Änderungen an der Tabelle würden Passwort-Hashing, Sitzungsvalidierung, Zwei-Faktor-Prüfungen und Audit-Hooks umgehen.",
     },
   },
   kanban: {

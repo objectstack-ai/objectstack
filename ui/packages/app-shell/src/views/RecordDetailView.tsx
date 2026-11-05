@@ -982,6 +982,22 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const notifyRecordChanged = useCallback(() => {
     if (objectName) notifyDataChanged({ objectName, recordId: pureRecordId || undefined });
   }, [objectName, pureRecordId]);
+  // objectstack#30337 — what `refreshAfter: true` refreshes: the spec's "refresh
+  // the view after execution", and on this page the view is the record AND its
+  // related lists. An action's target may write the CHILDREN (a team's Add
+  // Member writes a membership row), and the client cannot know which objects
+  // it wrote, so the page refreshes every child object it lists as well: their
+  // lists refetch and their counts (keyed on the child) re-count. Read through
+  // a ref because the child set is derived further down this component; one
+  // synchronous dispatch batch, so the record is still read once (the
+  // child-write subscription below and this record's own nonce bump together).
+  const pageChildObjectsRef = useRef<string[]>([]);
+  const notifyViewChanged = useCallback(() => {
+    notifyRecordChanged();
+    for (const child of pageChildObjectsRef.current) {
+      if (child !== objectName) notifyDataChanged({ objectName: child });
+    }
+  }, [notifyRecordChanged, objectName]);
   // Manual refresh (objectui#3460) — the producer for `RecordContext.refresh`,
   // which `page:header` turns into the ⟳ button at the end of the header row.
   //
@@ -1686,7 +1702,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           if (!door.res.ok) return apiActionRefusalResult(door.res, door.json, `HTTP ${door.res.status}`, language);
           const answer = readApiActionDoorSuccess(door, `Action "${action.name}"`);
           if (!answer.ok) return { success: false, error: answer.error };
-          if (action.refreshAfter === true) notifyRecordChanged();
+          if (action.refreshAfter === true) notifyViewChanged();
           return { success: true, data: answer.data, reload: action.refreshAfter === true };
         }
 
@@ -1793,7 +1809,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           return apiActionRefusalResult(res, errBody, `HTTP ${res.status}`, language);
         }
         const data = await res.json().catch(() => ({}));
-        if (action.refreshAfter === true) notifyRecordChanged();
+        if (action.refreshAfter === true) notifyViewChanged();
         return { success: true, data, reload: action.refreshAfter === true };
       }
 
@@ -1889,7 +1905,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
 
       const shouldRefresh = action.refreshAfter === true;
       if (shouldRefresh) {
-        notifyRecordChanged();
+        notifyViewChanged();
       } else if (undo) {
         // Even when refreshAfter isn't set, reflect the change so the user sees
         // it (and the subsequent Undo) on the open record.
@@ -1988,7 +2004,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       if (judged.followUp?.kind === 'refusal') {
         setFlowRefusal({ open: true, title: action.label, message: judged.followUp.message });
       }
-      if (judged.refresh) notifyRecordChanged();
+      if (judged.refresh) notifyViewChanged();
       return judged.result;
     } catch (error) {
       return { success: false, error: (error as Error).message };
@@ -2009,8 +2025,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // `action.recordId`; header/more actions carry none and use this page's id.
   // The env ref keeps the handler instance stable across renders (authFetch is
   // memoized once) while the thunks read the live record/object.
-  const serverActionEnvRef = useRef({ objectName, pureRecordId, notifyRecordChanged, t, navigate });
-  serverActionEnvRef.current = { objectName, pureRecordId, notifyRecordChanged, t, navigate };
+  const serverActionEnvRef = useRef({ objectName, pureRecordId, notifyViewChanged, t, navigate });
+  serverActionEnvRef.current = { objectName, pureRecordId, notifyViewChanged, t, navigate };
   const serverActionHandler = useMemo(
     () => createConsoleServerActionHandler({
       fetch: authFetch,
@@ -2019,7 +2035,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       resolveRecordId: (action) => ({
         recordId: (action as { recordId?: unknown }).recordId ?? serverActionEnvRef.current.pureRecordId ?? undefined,
       }),
-      onRefresh: () => serverActionEnvRef.current.notifyRecordChanged(),
+      onRefresh: () => serverActionEnvRef.current.notifyViewChanged(),
       // SPA route hop for a handler-returned `openIn: 'self'` — react-router's
       // own `navigate`, matching the shared console runtime.
       navigate: (url: string) => serverActionEnvRef.current.navigate(url),
@@ -2296,6 +2312,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const relatedChildObjectsKey = JSON.stringify(
     Array.from(new Set([...childRelations.map((r) => r.childObject), ...authoredChildObjects])).sort(),
   );
+  pageChildObjectsRef.current = JSON.parse(relatedChildObjectsKey) as string[];
   useEffect(() => {
     const childObjects = JSON.parse(relatedChildObjectsKey) as string[];
     if (childObjects.length === 0) return;
