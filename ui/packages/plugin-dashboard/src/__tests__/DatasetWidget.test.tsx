@@ -1061,3 +1061,25 @@ describe('DatasetWidget — dimension metadata probe (objectui#5280)', () => {
     expect(screen.queryByText('in_progress')).not.toBeInTheDocument();
   });
 });
+
+// ── The KPI tile's click (ADR-0021 D2) ───────────────────────────────────────
+// A tile drills only when the answer states its measure's own scope; an answer
+// that names the object and nothing more leaves the tile with no click.
+describe('DatasetWidget metric tile drill', () => {
+  it('offers no click when the answer does not state the measure scope', async () => {
+    const src = makeSource(async () => ({
+      rows: [{ total_amount: 814400 }],
+      fields: [{ name: 'total_amount', type: 'number', label: 'Total Amount', aggregate: 'sum' }],
+      object: 'crm_opportunity',
+    }));
+    render(
+      <DatasetWidget
+        widget={{ type: 'metric', dataset: 'opportunity_metrics', values: ['total_amount'], filter: { stage: { $nin: ['closed_won', 'closed_lost'] } } }}
+        dataSource={src}
+      />,
+    );
+    await screen.findByText('814400');
+    expect(screen.queryByTestId('dataset-metric-drill')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+});

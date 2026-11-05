@@ -33,7 +33,7 @@
  * objectui bumps its `@objectstack/spec` dependency (cross-repo spec skew).
  */
 
-import { useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useEffect, useMemo, useState, type ReactElement, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 // `useDatasetDimensionMeta` is the analytics label net's SHARED React glue
 // (objectui#4389): the locale-free metadata read this widget and the dataset
 // report block both take, lifted out of the two longhand copies PR #4388 left
@@ -105,6 +105,7 @@ import {
   metricTileValueTitle,
 } from './metricTile';
 import { DrillDownDrawer } from './DrillDownDrawer';
+import { metricDrillFilter, readMeasureDrillScope } from './metricDrill';
 import { specDefaultWidgetType } from './widgetDispatch';
 import { DASHBOARD_WIDGET_MULTI_MEASURE_TYPES } from '@objectstack/spec/ui';
 
@@ -898,7 +899,7 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
 
   // `signature` is the query an `ok` answer was read for, and `refreshing` marks
   // a re-read of that same query in flight (objectui#10815, see the effect).
-  const [state, setState] = useState<{ status: 'idle' | 'loading' | 'ok' | 'error'; rows: Row[]; fields?: DatasetResultField[]; object?: string; dimensionFields?: Record<string, string>; drillRawRows?: Array<Record<string, unknown>>; drillRanges?: Array<Record<string, DatasetDrillRange>>; totals?: DatasetResultTotals[]; error?: string; forbidden?: boolean; signature?: string; refreshing?: boolean }>({ status: 'idle', rows: [] });
+  const [state, setState] = useState<{ status: 'idle' | 'loading' | 'ok' | 'error'; rows: Row[]; fields?: DatasetResultField[]; object?: string; dimensionFields?: Record<string, string>; drillRawRows?: Array<Record<string, unknown>>; drillRanges?: Array<Record<string, DatasetDrillRange>>; totals?: DatasetResultTotals[]; measureDrillScope?: Record<string, unknown> | null; error?: string; forbidden?: boolean; signature?: string; refreshing?: boolean }>({ status: 'idle', rows: [] });
   // Drill-through (ADR-0021 D2): the clicked bucket's record-list filter + title.
   const [drill, setDrill] = useState<{ filter: Record<string, unknown>; title: string } | null>(null);
   // ── The flat table's client-side sort (objectui#5827) ────────────────────
@@ -967,7 +968,7 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
     })
       .then((res) => {
         if (cancelled) return;
-        setState({ status: 'ok', rows: Array.isArray(res?.rows) ? res.rows : [], fields: Array.isArray(res?.fields) ? res.fields : [], object: res?.object, dimensionFields: res?.dimensionFields, drillRawRows: Array.isArray(res?.drillRawRows) ? res.drillRawRows : undefined, drillRanges: Array.isArray(res?.drillRanges) ? res.drillRanges : undefined, totals: Array.isArray(res?.totals) ? res.totals : undefined, signature });
+        setState({ status: 'ok', rows: Array.isArray(res?.rows) ? res.rows : [], fields: Array.isArray(res?.fields) ? res.fields : [], object: res?.object, dimensionFields: res?.dimensionFields, drillRawRows: Array.isArray(res?.drillRawRows) ? res.drillRawRows : undefined, drillRanges: Array.isArray(res?.drillRanges) ? res.drillRanges : undefined, totals: Array.isArray(res?.totals) ? res.totals : undefined, measureDrillScope: readMeasureDrillScope(res, values[0]), signature });
         if (typeof res?.object === 'string' && res.object) setDatasetObject(res.object);
       })
       .catch((e) => {
@@ -1392,12 +1393,41 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
     // the title's tooltip (objectstack#27430).
     const caption = heading?.description || measureLabel;
     const shownValue = formatMeasure(value, f?.format, f?.currency, f?.percentScale, displayLocale);
+    // ── The records behind the number (ADR-0021 D2) ────────────────────────
+    // The tile opens the list its number counts, through the same drawer the
+    // chart and table drills open. `null` means the list could not be proven
+    // to match the number (see `./metricDrill`), and the tile then offers no
+    // click at all: its markup stays exactly the no-click markup.
+    const tileDrillFilter = metricDrillFilter({
+      object: drillObject,
+      measureScope: state.measureDrillScope,
+      runtimeFilter,
+      ranges: drillRanges?.[0],
+    });
+    const openTileDrill = tileDrillFilter
+      ? () => setDrill({ filter: tileDrillFilter, title: String(widget?.title ?? '') })
+      : undefined;
+    const tileDrillProps = openTileDrill
+      ? {
+          role: 'button' as const,
+          tabIndex: 0,
+          'data-testid': 'dataset-metric-drill',
+          onClick: openTileDrill,
+          onKeyDown: (e: ReactKeyboardEvent) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openTileDrill(); }
+          },
+        }
+      : {};
     return (
       // Positioned only while a re-read is in flight, for the refresh bar: the
       // idle tile's markup is pinned byte-for-byte (`DatasetWidget.colorVariant`,
       // `.subCaption`, `.unrenderedMeasures-8894` tests), and it moves by nothing.
-      <div className={cn('flex h-full w-full flex-col items-start justify-center gap-1 p-2', heading && cn('min-w-0', METRIC_TILE_CONTAINER_CLASS), state.refreshing && 'relative')}>
+      <div
+        className={cn('flex h-full w-full flex-col items-start justify-center gap-1 p-2', heading && cn('min-w-0', METRIC_TILE_CONTAINER_CLASS), state.refreshing && 'relative', openTileDrill && 'cursor-pointer rounded-md transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring')}
+        {...tileDrillProps}
+      >
         {refreshBar}
+        {drillDrawer}
         {/* objectui#12623 — with a heading, the title owns the first line, the
             value never wraps, and the caption (the description, else the
             measure label) is a line under it (the shared rule in
