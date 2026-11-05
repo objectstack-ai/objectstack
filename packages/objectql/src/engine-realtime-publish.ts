@@ -37,6 +37,11 @@
  * This module imports the engine only as a TYPE, so there is no module cycle
  * at run time, and nothing re-exports it, so the published surface does not
  * move.
+ *
+ * [#30053 codemod] A PRIVATE method's docblock has since moved here,
+ * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
+ * and the class keeps none for it; a public or protected method's docblock
+ * stays on the class, the contract, and its function keeps the placeholder.
  */
 
 import type { RealtimeEventPayload } from '@objectstack/spec/contracts';
@@ -372,7 +377,37 @@ function eventMatchedCount(value: unknown): number | undefined {
   return value;
 }
 
-/** The body of `ObjectQL#publishDataEvent`; the method's docblock there is its contract. */
+/**
+ * Publish a realtime {@link DataEvent} for a record write (#4626 —
+ * contract-first, the data-side twin of #4602/#4628).
+ *
+ * What reaches a `subscribeData` callback must BE the spec's `DataEvent`
+ * (`@objectstack/spec/api`): top-level `id` (uuid), `type`, `object`,
+ * `recordId` (REQUIRED), plus `changes`/`after`/`userId` when they apply.
+ * The transport keeps its `RealtimeEventPayload` envelope — `payload`
+ * carries the complete `DataEvent`, and the client SDK unwraps + validates
+ * it at the boundary instead of double-casting the envelope.
+ *
+ * Only per-record writes reach here. A predicate (`multi: true`) write has
+ * its own contract — see {@link publishBulkDataEvent} (#4639) — and the
+ * multi branches of `update()`/`delete()` route to it directly, so they
+ * never arrive at the identity gate below.
+ *
+ * Two loud-by-design gates:
+ *  - **No record identity → no event.** `DataEvent.recordId` is required, so
+ *    a write that names no record has no truthful per-record event to
+ *    publish. It publishes NONE (warn log) instead of the pre-#4626
+ *    fabrication (`recordId: ''`, `after: <affected count>`) that every
+ *    schema-compliant consumer must reject. Reaching this gate now means a
+ *    single-id write whose driver returned no usable primary key — a driver
+ *    bug — because the bulk callers no longer come through here.
+ *  - The event body is `DataEventSchema.parse`d before publish, so a
+ *    malformed producer fails here (warn log, event not published) rather
+ *    than delivering a lie downstream.
+ *
+ * Never throws and never fails the write: a realtime transport problem must
+ * not roll back a committed record.
+ */
 export async function publishDataEvent(
   this: Pick<RealtimePublishHost, 'realtimeService' | 'logger' | '_registry'>,
   action: 'created' | 'updated' | 'deleted',
@@ -453,7 +488,41 @@ export async function publishDataEvent(
   }
 }
 
-/** The body of `ObjectQL#publishBulkDataEvent`; the method's docblock there is its contract. */
+/**
+ * Publish a realtime {@link BulkDataEvent} for a predicate write (#4639).
+ *
+ * The `multi: true` branches of `update()`/`delete()` reach
+ * `IDataDriver.updateMany`/`deleteMany`, which resolve an affected COUNT and
+ * nothing else. That is too little for the per-record `DataEvent` contract
+ * (`recordId` is required), so those writes were silent from #4626 until now
+ * — honest, but it meant webhooks and every other event consumer saw
+ * nothing at all when a predicate write emptied half a table.
+ *
+ * They now get their own event instead of impersonating a per-record one:
+ * `data.records.updated` / `data.records.deleted`, carrying the object and
+ * the count. A consumer reading the type knows immediately that no
+ * `recordId` is coming — the failure mode of the pre-#4626 fabrication,
+ * where `recordId: ''` looked like a record until you tried to use it.
+ *
+ * Deliberately NOT carried: the query predicate. The only one in hand here
+ * is the middleware-composed AST, whose `where` embeds the security layer's
+ * injected row scoping (RLS, sharing) — publishing it would ship tenant
+ * internals to whatever external URL a webhook points at. See
+ * `BulkDataEventSchema`'s TSDoc for the full reasoning.
+ *
+ * [#15225 / #15813] `organizationId` — the ONE organization the tenant
+ * wall named for this batch, read off the Layer 0 verdict the enforcement
+ * layer RECORDED on the operation context ({@link OperationContext.tenantLayer0Verdict})
+ * — ⛔ no second query on the publish path, and ⛔ no re-derivation of the
+ * wall from posture, context or schema (the #15706 mirror) — and OMITTED
+ * whenever the producer cannot assert one. See {@link bulkEventOrganizationId}
+ * for what is read, what is deliberately not, and for why `absent` here
+ * means "not asserted", not the per-record "belongs to no organization".
+ *
+ * Same two disciplines as the per-record twin: validate before publish, and
+ * never throw — a realtime transport problem must not roll back a committed
+ * write.
+ */
 export async function publishBulkDataEvent(
   this: Pick<RealtimePublishHost, 'realtimeService' | 'logger'>,
   action: 'updated' | 'deleted',

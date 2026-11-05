@@ -3164,6 +3164,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.actions.presets': '常用操作',
   'engine.studio.actions.notSaved': '未保存 —— 需要「{input}」',
   'engine.studio.actions.heldNeeds': '操作「{action}」需要「{input}」',
+  'engine.studio.actions.renameHeld': '尚未保存：给已安装应用新增的操作会保留创建时的名称。把名称改回 {name} 即可保存更改。',
   'engine.studio.actions.preset.change': '修改下拉选择字段',
   'engine.studio.actions.preset.changeHint': '询问新的「{field}」,然后保存。',
   'engine.studio.actions.preset.changeNeeds': '需要该对象有一个下拉选择字段。',
