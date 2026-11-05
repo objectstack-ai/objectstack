@@ -38,7 +38,7 @@ export {
   type PersistedKeyFile,
   KEY_FILE_CHANNEL_ENV,
   // When those two files hold different keys, the process that opens the
-  // database rules between them by trial-opening a stored secret, or refuses.
+  // database rules between them by trial-opening its newest stored secrets, or refuses.
   KEY_FILE_CANDIDATE_CHANNEL_ENV,
   chooseKeyFileByTrialOpen,
   settleKeyFileChannel,

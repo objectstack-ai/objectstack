@@ -6081,3 +6081,329 @@ describe('resolveMetadataFormSchemaTitles — bundle labels overlaid as JSON Sch
     expect(out.properties.fields.items.properties.label.title).toBe('行标签');
   });
 });
+
+// ────────────────────────────────────────────────────────────────────────────
+// #30193 — label precedence on an overridden item (ADR-0146 D2)
+// ────────────────────────────────────────────────────────────────────────────
+
+import { type TranslateDocumentOptions } from './i18n-resolver';
+import { ReportSchema } from '../ui/report.zod';
+import { BookSchema } from './book.zod';
+
+describe("label precedence on an overridden item — the pair's translation, then the override's label, then the base's translation (ADR-0146 D2)", () => {
+  /** One translatable string of a served document, and the bundle address that translates it. */
+  interface Slot {
+    readonly what: string;
+    readonly read: (doc: any) => unknown;
+    readonly write: (doc: any, text: string) => void;
+    /** The translation data addressing this string, holding `text`. */
+    readonly entry: (text: string) => Record<string, unknown>;
+    /** The base's `zh-CN` translation, as the deployment catalog carries it. */
+    readonly baseZh: string;
+  }
+
+  /** A type's packaged base and its strings: the top-level label first, then nested ones. */
+  interface PrecedenceCase {
+    readonly base: () => any;
+    readonly slots: readonly Slot[];
+  }
+
+  const isRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null && !Array.isArray(value);
+  const merge = (...parts: Record<string, unknown>[]): Record<string, unknown> => {
+    const out: Record<string, unknown> = {};
+    for (const part of parts) {
+      for (const [key, value] of Object.entries(part)) {
+        const prior = out[key];
+        out[key] = isRecord(prior) && isRecord(value) ? merge(prior, value) : value;
+      }
+    }
+    return out;
+  };
+  const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+  /** A slot builder: `path` addresses the string inside the translation data. */
+  const slot = (
+    what: string,
+    read: (doc: any) => unknown,
+    write: (doc: any, text: string) => void,
+    path: readonly string[],
+    baseZh: string,
+  ): Slot => ({
+    what,
+    read,
+    write,
+    baseZh,
+    entry: (text) => path.reduceRight<unknown>((inner, key) => ({ [key]: inner }), text) as Record<string, unknown>,
+  });
+
+  const viewContainer = {
+    listViews: {
+      in_progress: {
+        label: 'In Progress',
+        type: 'grid' as const,
+        data: { provider: 'object' as const, object: 'showcase_task' },
+        columns: [{ field: 'title' }],
+        bulkActionDefs: [{ name: 'mark_done', label: 'Mark done', operation: 'update' as const, patch: { status: 'done' } }],
+      },
+    },
+  };
+  const VIEW = ['objects', 'showcase_task', '_views', 'in_progress'];
+
+  const CASES: Record<string, PrecedenceCase> = {
+    view: {
+      base: () => expandViewContainer('showcase_task', viewContainer).find((v) => v.name === 'showcase_task.in_progress'),
+      slots: [
+        slot('label', (d) => d.label, (d, t) => { d.label = t; }, [...VIEW, 'label'], '进行中'),
+        slot('bulk action label', (d) => d.config.bulkActionDefs[0].label, (d, t) => { d.config.bulkActionDefs[0].label = t; },
+          [...VIEW, 'bulkActions', 'mark_done', 'label'], '标记完成'),
+      ],
+    },
+    dashboard: {
+      base: () => ({ name: 'system_overview', label: 'System Overview', widgets: [{ id: 'widget_total_users', title: 'Total Users' }] }),
+      slots: [
+        slot('label', (d) => d.label, (d, t) => { d.label = t; }, ['dashboards', 'system_overview', 'label'], '系统概览'),
+        slot('widget title', (d) => d.widgets[0].title, (d, t) => { d.widgets[0].title = t; },
+          ['dashboards', 'system_overview', 'widgets', 'widget_total_users', 'title'], '用户总数'),
+      ],
+    },
+    report: {
+      base: () => ReportSchema.parse({
+        name: 'task_overview',
+        label: 'Task Overview',
+        type: 'joined',
+        blocks: [{ name: 'open_block', label: 'Open Tasks', type: 'summary', dataset: 'tasks', rows: ['status'], values: ['n'] }],
+      }),
+      slots: [
+        slot('label', (d) => d.label, (d, t) => { d.label = t; }, ['reports', 'task_overview', 'label'], '任务概览'),
+        slot('block label', (d) => d.blocks[0].label, (d, t) => { d.blocks[0].label = t; },
+          ['reports', 'task_overview', 'blocks', 'open_block', 'label'], '未完成任务'),
+      ],
+    },
+    object: {
+      base: () => ({
+        name: 'showcase_task',
+        label: 'Task',
+        fields: {
+          title: { name: 'title', type: 'text', label: 'Title' },
+          status: { name: 'status', type: 'select', label: 'Status', options: [{ value: 'todo', label: 'To Do' }] },
+        },
+      }),
+      slots: [
+        slot('label', (d) => d.label, (d, t) => { d.label = t; }, ['objects', 'showcase_task', 'label'], '任务'),
+        slot('field label', (d) => d.fields.title.label, (d, t) => { d.fields.title.label = t; },
+          ['objects', 'showcase_task', 'fields', 'title', 'label'], '标题'),
+        slot('option label', (d) => d.fields.status.options[0].label, (d, t) => { d.fields.status.options[0].label = t; },
+          ['objects', 'showcase_task', 'fields', 'status', 'options', 'todo'], '待办'),
+      ],
+    },
+    page: {
+      base: () => ({
+        name: 'ops_home',
+        label: 'Ops Home',
+        regions: [{
+          name: 'main',
+          components: [
+            { type: 'page:card', id: 'open_work', properties: { title: 'Open Work' } },
+            { type: 'page:tabs', id: 'ops_tabs', properties: { items: [{ label: 'Mine', value: 'mine', children: [] }] } },
+          ],
+        }],
+      }),
+      slots: [
+        slot('label', (d) => d.label, (d, t) => { d.label = t; }, ['pages', 'ops_home', 'label'], '运营首页'),
+        slot('component copy', (d) => d.regions[0].components[0].properties.title,
+          (d, t) => { d.regions[0].components[0].properties.title = t; },
+          ['pages', 'ops_home', 'components', 'open_work', 'title'], '进行中的工作'),
+        slot('tab item label', (d) => d.regions[0].components[1].properties.items[0].label,
+          (d, t) => { d.regions[0].components[1].properties.items[0].label = t; },
+          ['pages', 'ops_home', 'components', 'ops_tabs', 'items', 'mine', 'label'], '我的'),
+      ],
+    },
+    dataset: {
+      base: () => DatasetSchema.parse({
+        name: 'duty_pulse',
+        label: 'Duty pulse',
+        object: 'duly_duty',
+        dimensions: [{ name: 'owner', field: 'owner_id', label: 'Owner' }],
+        measures: [{ name: 'untouched_14d', aggregate: 'count', label: 'Untouched > 14 days' }],
+      }),
+      slots: [
+        slot('label', (d) => d.label, (d, t) => { d.label = t; }, ['datasets', 'duty_pulse', 'label'], '任务脉搏'),
+        slot('measure label', (d) => d.measures[0].label, (d, t) => { d.measures[0].label = t; },
+          ['datasets', 'duty_pulse', 'measures', 'untouched_14d', 'label'], '停滞超过 14 天'),
+        slot('dimension label', (d) => d.dimensions[0].label, (d, t) => { d.dimensions[0].label = t; },
+          ['datasets', 'duty_pulse', 'dimensions', 'owner', 'label'], '负责人'),
+      ],
+    },
+    app: {
+      base: () => ({
+        name: 'setup',
+        label: 'Setup',
+        navigation: [{
+          id: 'group_overview',
+          type: 'group',
+          label: 'Overview',
+          children: [{ id: 'nav_users', type: 'object', label: 'Users' }],
+        }],
+      }),
+      slots: [
+        slot('label', (d) => d.label, (d, t) => { d.label = t; }, ['apps', 'setup', 'label'], '系统设置'),
+        slot('nested nav label', (d) => d.navigation[0].children[0].label, (d, t) => { d.navigation[0].children[0].label = t; },
+          ['apps', 'setup', 'navigation', 'nav_users', 'label'], '用户'),
+      ],
+    },
+    book: {
+      base: () => BookSchema.parse({
+        name: 'crm_manual',
+        label: 'User Manual',
+        groups: [{ key: 'start', label: 'Getting started', include: 'crm_start_*' }],
+      }),
+      slots: [
+        slot('label', (d) => d.label, (d, t) => { d.label = t; }, ['books', 'crm_manual', 'label'], '使用手册'),
+        slot('group label', (d) => d.groups[0].label, (d, t) => { d.groups[0].label = t; },
+          ['books', 'crm_manual', 'groups', 'start', 'label'], '快速上手'),
+      ],
+    },
+  };
+
+  it('covers every document translator the ruling names — all eight types', () => {
+    expect(Object.keys(CASES).sort()).toEqual(['app', 'book', 'dashboard', 'dataset', 'object', 'page', 'report', 'view']);
+    for (const type of Object.keys(CASES)) expect(TRANSLATABLE_METADATA_TYPES.has(type), type).toBe(true);
+  });
+
+  for (const [type, c] of Object.entries(CASES)) {
+    describe(type, () => {
+      const base = c.base();
+      const ownText = (s: Slot) => String(s.read(base));
+      const overrideText = (s: Slot) => `${ownText(s)} (ours)`;
+      const pairText = (s: Slot) => `${s.baseZh}(配对)`;
+      // The deployment catalog: the base's translations. `en` repeats the
+      // shipped strings, as an extracted source locale does, so the source
+      // locale is as able to overwrite an override as `zh-CN` is.
+      const bundle: TranslationBundle = {
+        en: merge(...c.slots.map((s) => s.entry(ownText(s)))) as any,
+        'zh-CN': merge(...c.slots.map((s) => s.entry(s.baseZh))) as any,
+      };
+      /** The override: the base with `which` strings re-authored. */
+      const overridden = (which: readonly Slot[] = c.slots) => {
+        const doc = clone(base);
+        for (const s of which) s.write(doc, overrideText(s));
+        return doc;
+      };
+      /** What the pair ships: a translation of each `which` string, in `locale`. */
+      const pairOf = (locale: string, which: readonly Slot[] = c.slots): TranslationBundle =>
+        ({ [locale]: merge(...which.map((s) => s.entry(pairText(s)))) }) as TranslationBundle;
+      const run = (doc: any, opts: TranslateDocumentOptions) =>
+        translateMetadataDocument(type, doc, bundle, { packagedBase: base, ...opts });
+
+      it('composes the fixture this block is pinned to — the catalog translates every string of the base', () => {
+        const out = run(clone(base), { locale: 'zh-CN' });
+        for (const s of c.slots) expect(s.read(out), s.what).toBe(s.baseZh);
+      });
+
+      it("the pair wins — its translation beats the override's own label, top-level and nested", () => {
+        const out = run(overridden(), { locale: 'zh-CN', pairBundle: pairOf('zh-CN') });
+        for (const s of c.slots) expect(s.read(out), s.what).toBe(pairText(s));
+      });
+
+      it("with no pair translation the override's own label beats the base's translation — in zh-CN and in the source locale", () => {
+        for (const locale of ['zh-CN', 'en']) {
+          // No pair at all (today's call), and a pair that ships nothing for this item.
+          for (const pairBundle of [undefined, { [locale]: {} } as TranslationBundle]) {
+            const out = run(overridden(), { locale, pairBundle });
+            for (const s of c.slots) expect(s.read(out), `${s.what} · ${locale} · pair ${pairBundle ? 'empty' : 'absent'}`).toBe(overrideText(s));
+          }
+        }
+      });
+
+      it("a label the override did not change keeps the base's translation, beside one it changed", () => {
+        for (const changed of c.slots) {
+          const out = run(overridden([changed]), { locale: 'zh-CN', pairBundle: pairOf('zh-CN', [changed]) });
+          for (const s of c.slots) {
+            expect(s.read(out), `${changed.what} changed · ${s.what}`).toBe(s === changed ? pairText(s) : s.baseZh);
+          }
+        }
+      });
+
+      it("an untouched label takes the pair's translation where the pair ships one", () => {
+        const out = run(clone(base), { locale: 'zh-CN', pairBundle: pairOf('zh-CN') });
+        for (const s of c.slots) expect(s.read(out), s.what).toBe(pairText(s));
+      });
+
+      it("per locale: a pair that ships only `en` leaves an untouched label on the base's zh-CN", () => {
+        const [changed, ...untouched] = c.slots;
+        const out = run(overridden([changed]), { locale: 'zh-CN', fallbackChain: ['en'], pairBundle: pairOf('en') });
+        for (const s of untouched) expect(s.read(out), s.what).toBe(s.baseZh);
+        // The changed one reads the pair alone, along the chain.
+        expect(changed.read(out), changed.what).toBe(pairText(changed));
+      });
+
+      it('no packaged base supplied — nothing counts as changed, so every string reads the pair, then the catalog', () => {
+        const [first, ...rest] = c.slots;
+        const out = run(overridden(), { locale: 'zh-CN', packagedBase: undefined, pairBundle: pairOf('zh-CN', [first]) });
+        expect(first.read(out), first.what).toBe(pairText(first));
+        for (const s of rest) expect(s.read(out), s.what).toBe(s.baseZh);
+      });
+
+      it('an empty pairBundle is the same answer as none — byte for byte, with and without a base, in every reading', () => {
+        const readings: TranslateDocumentOptions[] = [
+          { locale: 'zh-CN' }, { locale: 'en' }, { locale: 'zh-CN', fallbackChain: ['en'] }, { locale: 'fr-FR' },
+        ];
+        for (const doc of [clone(base), overridden(), overridden(c.slots.slice(0, 1))]) {
+          for (const reading of readings) {
+            for (const packagedBase of [base, undefined]) {
+              const opts = { ...reading, packagedBase };
+              const without = translateMetadataDocument(type, doc, bundle, opts);
+              for (const pairBundle of [{}, { 'de-DE': { apps: {} } }] as TranslationBundle[]) {
+                expect(JSON.stringify(translateMetadataDocument(type, doc, bundle, { ...opts, pairBundle }))).toBe(JSON.stringify(without));
+              }
+            }
+          }
+          // No catalog at all: the same answer, and the input reference back
+          // wherever the translator hands it back without a pair.
+          const bare = translateMetadataDocument(type, doc, undefined, { locale: 'zh-CN', packagedBase: base });
+          const withEmpty = translateMetadataDocument(type, doc, undefined, { locale: 'zh-CN', packagedBase: base, pairBundle: {} });
+          expect(withEmpty).toStrictEqual(bare);
+          if (bare === doc) expect(withEmpty).toBe(doc);
+        }
+      });
+
+      it('reads neither input: the served document, the base and the pair come back as they went in', () => {
+        const doc = overridden();
+        const pair = pairOf('zh-CN');
+        const before = JSON.stringify([doc, base, pair, bundle]);
+        run(doc, { locale: 'zh-CN', pairBundle: pair });
+        expect(JSON.stringify([doc, base, pair, bundle])).toBe(before);
+      });
+    });
+  }
+
+  describe('page — the header title restates the label it was written against', () => {
+    const base = {
+      name: 'ops_home',
+      label: 'Ops Home',
+      regions: [{ name: 'header', components: [{ type: 'page:header', properties: { title: 'Ops Home' } }] }],
+    };
+    const bundle: TranslationBundle = { 'zh-CN': { pages: { ops_home: { label: '运营首页' } } } as any };
+    const title = (doc: any) => doc.regions[0].components[0].properties.title;
+    const relabelled = (headerToo: boolean) => {
+      const doc = clone(base);
+      doc.label = 'Our Ops';
+      if (headerToo) doc.regions[0].components[0].properties.title = 'Our Ops';
+      return doc;
+    };
+
+    it("a header title the override left as the base wrote it translates as the base's label, though the label changed", () => {
+      const out: any = translatePage(relabelled(false), bundle, { locale: 'zh-CN', packagedBase: base });
+      expect(out.label).toBe('Our Ops');
+      expect(title(out)).toBe('运营首页');
+    });
+
+    it("a header title the override re-authored restates the override's label — its own text, or the pair's translation of it", () => {
+      expect(title(translatePage(relabelled(true), bundle, { locale: 'zh-CN', packagedBase: base }))).toBe('Our Ops');
+      const pairBundle: TranslationBundle = { 'zh-CN': { pages: { ops_home: { label: '我们的运营' } } } as any };
+      const out: any = translatePage(relabelled(true), bundle, { locale: 'zh-CN', packagedBase: base, pairBundle });
+      expect(out.label).toBe('我们的运营');
+      expect(title(out)).toBe('我们的运营');
+    });
+  });
+});

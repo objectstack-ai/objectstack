@@ -452,16 +452,39 @@ same partition — useful for in-order delivery and connection reuse. On a
 single-node runtime the lock is an always-grant stub.
 
 Each tick opens with **one** visibility-timeout reap for the whole table —
-`in_flight` rows claimed longer than `claimTtlMs` ago return to `pending` — and
-then claims partition by partition, so a tick over an empty outbox costs
-`1 + partitionCount` statements. The loop **backs off while idle**: every tick
-that claims nothing doubles the delay to the next, from `intervalMs` (default
-500 ms) up to `maxIdleIntervalMs` (default 30 s; `dispatchMaxIdleIntervalMs` on
-`MessagingServicePlugin`), and a tick that claims work snaps it back.
-`messaging.enqueueHttp()` and `messaging.redeliverHttp()` wake the dispatcher
-running in the same process, so a delivery written there goes out at once. Work
-nobody announces — a retry coming due, a row another process wrote — is noticed
-within one backed-off interval, never more than `maxIdleIntervalMs` late.
+`in_flight` rows claimed longer than `claimTtlMs` ago return to `pending` — then
+asks once, across every partition, whether any `pending` row is due. Only when
+one is does it claim partition by partition. A tick over an empty outbox
+therefore costs **two** statements, both reads, whatever `partitionCount` is:
+the reap's "anything expired?" read (its UPDATE runs only when that finds a
+row) and the "anything due?" read.
+
+The loop **backs off while idle**: every tick that claims nothing doubles the
+delay to the next, from `intervalMs` (default 500 ms) up to `maxIdleIntervalMs`
+(default 30 s; `dispatchMaxIdleIntervalMs` on `MessagingServicePlugin`), and a
+tick that claims work snaps it back. `messaging.enqueueHttp()` and
+`messaging.redeliverHttp()` wake the dispatcher running in the same process, so
+a delivery written there goes out at once.
+
+The loop also **wakes at the next due time**. After the first empty tick of an
+idle stretch it reads, once, the earliest instant a row becomes claimable
+without anyone writing: the soonest future `next_retry_at`, or the moment the
+oldest `in_flight` claim passes `claimTtlMs`. It never sleeps past that
+instant, so a retry is attempted when it comes due and a crashed node's claim is
+recovered when its TTL passes, whatever the ceiling. That costs two more reads
+at the start of each idle stretch, not one per tick. The backoff is left with
+one job: a row **another process** wrote, which is noticed within one
+backed-off interval, never more than `maxIdleIntervalMs` late.
+
+On a host where no other process writes these tables, that job is empty. Set
+`dispatchSoleWriter: true` on `MessagingServicePlugin` there, for example on a
+hosted tenant kernel with one kernel per tenant database. An empty tick then
+sleeps straight to the next due time or the ceiling, instead of re-running the
+ramp from `intervalMs` after every boot and every burst, and a fresh kernel's
+dispatchers tick once in their first minute. The job queue takes the same flag
+as `DbQueueAdapter`'s `soleWriter`, set through `QueueServicePlugin`'s
+`db.soleWriter`. Leave both off when a second node or a worker process writes
+the same database. Default: off.
 
 Within a held partition, the lock-holder claims a batch with an **atomic
 conditional UPDATE** rather than `SELECT … FOR UPDATE SKIP LOCKED`:
@@ -697,7 +720,7 @@ A precise table of what the runtime promises and what it does not.
 |------------------------------------------|-------------------------------------------------------------|
 | Producer node crashes mid-emit           | **Not durable today.** The realtime bus (`InMemoryRealtimeAdapter`) is an unpersisted, in-process pub/sub — an event lost before Stage 3's INSERT is gone, not redelivered (see §4.1). |
 | Subscriber node crashes after persist    | Row exists in `sys_http_delivery`, another node picks it up. |
-| Dispatcher node crashes mid-HTTP         | Row stays `in_flight` with `claimed_by`; the first dispatcher tick after the claim TTL reverts it to `pending` and it is re-posted. The TTL derives from the dispatcher tick (`intervalMs`, default 500ms): `lockTtlMs = 5 × intervalMs`, `claimTtlMs = 2 × lockTtlMs` (so ~5s at defaults), all configurable via `HttpDispatcherOptions`. An idle surviving dispatcher ticks at least every `maxIdleIntervalMs` (default 30s), so recovery takes at most `claimTtlMs + maxIdleIntervalMs` (~35s at defaults). |
+| Dispatcher node crashes mid-HTTP         | Row stays `in_flight` with `claimed_by`; the first dispatcher tick after the claim TTL reverts it to `pending` and it is re-posted. The TTL derives from the dispatcher tick (`intervalMs`, default 500ms): `lockTtlMs = 5 × intervalMs`, `claimTtlMs = 2 × lockTtlMs` (so ~5s at defaults), all configurable via `HttpDispatcherOptions`. An idle surviving dispatcher wakes when the oldest claim it read at the start of its idle stretch passes its TTL, and ticks at least every `maxIdleIntervalMs` (default 30s) in any case, so recovery takes about `claimTtlMs` for a claim it saw and at most `claimTtlMs + maxIdleIntervalMs` (~35s at defaults) for one made after that read. |
 | A send outlasts the claim TTL and another dispatcher re-claims the row | The re-claiming dispatcher posts the delivery again (at-least-once — the receiver can see it twice; see the last row). The first dispatcher's late outcome is **not** written over the live attempt: its ack carries the claim credential (`claimed_by`, `claimed_at`) its claim stamped, the conditional update matches nothing, and it logs `http-dispatcher: ack refused, claim no longer held`. The row records the outcome of the attempt that still holds it. |
 | Receiver returns 5xx                     | Retry per backoff schedule until the fixed 8-attempt budget is exhausted (§4.5). |
 | Receiver returns 4xx                     | Treated as terminal — no retry, status `dead` immediately. Exception: 408 / 429 are retried. |

@@ -71,13 +71,24 @@ export interface NotificationDispatcherOptions {
      * {@link NotificationDispatcher.wake} call, snaps it back to `intervalMs`.
      * A value at or below `intervalMs` disables the backoff.
      *
-     * While idle this bounds how late the loop notices work nobody woke it for:
-     * a deferred row coming due (retry schedule, quiet hours, a digest window),
-     * a row enqueued by a process this dispatcher does not serve, and a crashed
-     * node's `in_flight` rows — reaped at most `claimTtlMs` + this after their
-     * claim, where the fixed interval gave `claimTtlMs` + `intervalMs`.
+     * While idle this bounds how late the loop notices a row enqueued by a
+     * process this dispatcher does not serve. A deferred row coming due (retry
+     * schedule, quiet hours, a digest window) and a crashed node's `in_flight`
+     * rows passing `claimTtlMs` are not left to it: with an outbox that answers
+     * {@link INotificationOutbox.nextDueAt} the loop sleeps no later than the
+     * earliest of them (#29919), so each is taken within one tick of coming
+     * due. An outbox without it leaves both to this bound too.
      */
     maxIdleIntervalMs?: number;
+    /**
+     * [#29919] No other process writes this dispatcher's outbox — every row is
+     * enqueued in this process, which wakes the dispatcher (a hosted tenant
+     * kernel: one kernel per tenant database). An idle tick then sleeps straight
+     * to the next due time or the ceiling instead of re-running the backoff's
+     * ramp from `intervalMs`, which only ever bought latency on rows another
+     * process wrote. Default `false`.
+     */
+    soleWriter?: boolean;
     lockTtlMs?: number;
     claimTtlMs?: number;
     rng?: () => number;
@@ -127,7 +138,7 @@ export interface NotificationDispatcherOptions {
  */
 export class NotificationDispatcher {
     private readonly opts: Required<
-        Omit<NotificationDispatcherOptions, 'rng' | 'logger' | 'onAttempt' | 'cluster' | 'now' | 'maxIdleIntervalMs' | 'textRenderer'>
+        Omit<NotificationDispatcherOptions, 'rng' | 'logger' | 'onAttempt' | 'cluster' | 'now' | 'maxIdleIntervalMs' | 'soleWriter' | 'textRenderer'>
     > &
         Pick<NotificationDispatcherOptions, 'rng' | 'logger' | 'onAttempt' | 'now' | 'textRenderer'> & { cluster: DispatchCluster };
     /** [#17610, #17623] The timer loop — idle backoff, wake, stop — shared with `HttpDispatcher`. */
@@ -153,9 +164,21 @@ export class NotificationDispatcher {
             onAttempt: options.onAttempt,
             textRenderer: options.textRenderer,
         };
+        const { outbox } = options;
         this.loop = new DispatchLoop({
             intervalMs,
             maxIdleIntervalMs: options.maxIdleIntervalMs,
+            soleWriter: options.soleWriter,
+            // [#29919] Read once per idle streak; an outbox without the read
+            // leaves the loop on its backoff alone. An injected clock's answer
+            // is re-based onto the loop's (`Date.now()`).
+            nextDueAt: outbox.nextDueAt
+                ? async () => {
+                    const now = this.opts.now?.();
+                    const due = await outbox.nextDueAt!({ claimTtlMs: this.opts.claimTtlMs, now });
+                    return due === null || now === undefined ? due : Date.now() + (due - now);
+                }
+                : undefined,
             runTick: () => this.runTick(),
             onTickError: (err) => {
                 this.opts.logger?.warn?.('notification-dispatcher: tick failed', {

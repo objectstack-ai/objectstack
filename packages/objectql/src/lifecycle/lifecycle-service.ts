@@ -118,6 +118,15 @@ export interface LifecycleEngineLike {
   inspectDanglingReferences?(
     options?: DanglingReferenceAuditOptions,
   ): Promise<DanglingReferenceReport>;
+  /**
+   * [#29918] Did this process create the datastore it talks to, from empty?
+   * `ObjectQL.wasDatastoreCreatedFromEmpty()` answers it from every driver's
+   * schema-sync stats, in process and without a statement. The scheduler asks
+   * it once, at the initial delay, to decide whether the first sweep is due
+   * yet. Optional: an engine without it is never treated as fresh, so its
+   * first sweep runs at the initial delay exactly as before.
+   */
+  wasDatastoreCreatedFromEmpty?(): boolean;
 }
 
 export interface LifecycleObjectLike {
@@ -503,7 +512,11 @@ export class LifecycleService {
   }
 
   /** Arm the periodic sweep. Idempotent; timers are unref'ed so a kernel
-   * shutdown is never held open by the lifecycle schedule. */
+   * shutdown is never held open by the lifecycle schedule.
+   *
+   * [#29918] On a datastore this process created from empty, the first sweep
+   * is due one interval later instead of at the initial delay: see
+   * {@link firstSweepDueAtInitialDelay}. The interval is armed either way. */
   start(): void {
     if (!this.enabled || this.timer || this.initialTimer) return;
     // A fresh bit per armed run — the one a previous sweep captured stays
@@ -513,11 +526,49 @@ export class LifecycleService {
     const initial = this.opts.initialDelayMs ?? DEFAULT_LIFECYCLE_INITIAL_DELAY_MS;
     this.initialTimer = setTimeout(() => {
       this.initialTimer = undefined;
-      void this.sweep();
+      if (this.firstSweepDueAtInitialDelay()) void this.sweep();
       this.timer = setInterval(() => void this.sweep(), interval);
       this.timer.unref?.();
     }, initial);
     this.initialTimer.unref?.();
+  }
+
+  /**
+   * [#29918] Whether the scheduled first sweep runs at the initial delay.
+   *
+   * Not when this process created the datastore from empty
+   * ({@link LifecycleEngineLike.wasDatastoreCreatedFromEmpty}). Every row in
+   * such a store was written by this process, so none is older than the
+   * initial delay, and no declared window is that short: the duration grammar's
+   * smallest unit is an hour ({@link parseLifecycleDuration}). The sweep would
+   * read every declared object, the governance settings and every lookup the
+   * reference audit walks, and find nothing to do. On a hosted tenant kernel
+   * that was 130 statements in the first minute of every first boot. The first
+   * sweep then runs on the interval, so deferring it costs at most one interval
+   * of overstay, which the hourly cadence already allows any row.
+   *
+   * Asked here, at the initial delay, and nowhere else. Schema sync has run by
+   * now, so the answer is final. Only the SCHEDULER asks it: a direct
+   * {@link sweep} call (the dogfood growth gate, `db:clean`-style tooling, a
+   * test) always sweeps. The reference audit is a leg of that same sweep, so
+   * it is deferred with it.
+   *
+   * An engine that cannot answer, or whose answer throws, is not fresh. That
+   * keeps the sweep at the initial delay, as before this method existed.
+   */
+  private firstSweepDueAtInitialDelay(): boolean {
+    let fresh = false;
+    try {
+      fresh = this.opts.getEngine()?.wasDatastoreCreatedFromEmpty?.() === true;
+    } catch {
+      fresh = false;
+    }
+    if (fresh) {
+      this.opts.logger.debug?.(
+        '[lifecycle] this process created the datastore from empty; the first sweep runs one interval later',
+      );
+    }
+    return !fresh;
   }
 
   /**
