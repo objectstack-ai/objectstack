@@ -133,7 +133,66 @@ describe('shiftFilterByCompareTo', () => {
     });
   });
 
+  // objectstack#30197. A window that is already past (`{yesterday}`, `last_*`)
+  // kept its tokens and was compared with itself; a backward rolling window
+  // (`{N_days_ago}` … `{today}`, N + 1 days) moved only its end.
+  describe('previousPeriod on an already-past window', () => {
+    // Monday 2026-05-25.
+    const shift = (filter: unknown) => shiftFilterByCompareTo(filter, { kind: 'previousPeriod' }, now) as any;
+
+    it('yesterday compares with the day before it', () => {
+      expect(shift({ d: '{yesterday}' }).d).toBe('2026-05-23');
+    });
+
+    it('last week compares with the week before last', () => {
+      expect(shift({ d: { $gte: '{last_week_start}', $lte: '{last_week_end}' } }).d)
+        .toEqual({ $gte: '2026-05-11', $lte: '2026-05-17' });
+    });
+
+    it('last month compares with the month before last, whatever their lengths', () => {
+      expect(shift({ d: { $gte: '{last_month_start}', $lte: '{last_month_end}' } }).d)
+        .toEqual({ $gte: '2026-03-01', $lte: '2026-03-31' });
+      // From 2026-03-31: last month is February, the one before it January.
+      expect(
+        shiftFilterByCompareTo(
+          { d: { $gte: '{last_month_start}', $lte: '{last_month_end}' } },
+          { kind: 'previousPeriod' },
+          new Date(2026, 2, 31, 12, 0),
+        ).d,
+      ).toEqual({ $gte: '2026-01-01', $lte: '2026-01-31' });
+    });
+
+    it('last quarter and last year compare with the ones before them, across a year boundary', () => {
+      expect(shift({ d: { $gte: '{last_quarter_start}', $lte: '{last_quarter_end}' } }).d)
+        .toEqual({ $gte: '2025-10-01', $lte: '2025-12-31' });
+      expect(shift({ d: { $gte: '{last_year_start}', $lte: '{last_year_end}' } }).d)
+        .toEqual({ $gte: '2024-01-01', $lte: '2024-12-31' });
+    });
+
+    it('N days ago … today compares with the N + 1 days before it', () => {
+      // Current window: 2026-05-18 .. 2026-05-25, 8 days.
+      expect(shift({ d: { $gte: '{7_days_ago}', $lte: '{today}' } }).d)
+        .toEqual({ $gte: '2026-05-10', $lte: '2026-05-17' });
+      expect(shift({ d: { $between: ['{30_days_ago}', '{today}'] } }).d.$between)
+        .toEqual(['2026-03-25', '2026-04-24']);
+    });
+
+    it('moves a mixed window bound by bound, each once', () => {
+      // last month through this month → the month before last through last month.
+      expect(shift({ d: { $gte: '{last_month_start}', $lte: '{current_month_end}' } }).d)
+        .toEqual({ $gte: '2026-03-01', $lte: '2026-04-30' });
+    });
+  });
+
   describe('previousYear', () => {
+    it('keeps a leap-day window in February one year back (objectstack#30197)', () => {
+      const leap = new Date(2028, 1, 29, 8, 0);
+      expect(
+        shiftFilterByCompareTo({ d: { $gte: '{month_start}', $lte: '{month_end}' } }, { kind: 'previousYear' }, leap).d,
+      ).toEqual({ $gte: '2027-02-01', $lte: '2027-02-28' });
+      expect(shiftFilterByCompareTo({ d: '{today}' }, { kind: 'previousYear' }, leap).d).toBe('2027-02-28');
+    });
+
     it('re-resolves macros against now shifted back one year', () => {
       const filter = {
         d: { $gte: '{current_quarter_start}', $lte: '{current_quarter_end}' },
@@ -223,6 +282,20 @@ describe('compareToTrendLabelKey', () => {
       expect(
         compareToTrendLabelKey({ kind: 'previousPeriod' }, { d: { $between: ['{today}', '{30_days_from_now}'] } }),
       ).toBe('vsPreviousPeriod');
+    });
+    it('reads an already-past window as the previous period (objectstack#30197)', () => {
+      for (const filter of [
+        { d: '{yesterday}' },
+        { d: { $gte: '{last_week_start}', $lte: '{last_week_end}' } },
+        { d: { $gte: '{last_month_start}', $lte: '{last_month_end}' } },
+        { d: { $gte: '{last_quarter_start}', $lte: '{last_quarter_end}' } },
+        { d: { $gte: '{last_year_start}', $lte: '{last_year_end}' } },
+        { d: { $gte: '{7_days_ago}', $lte: '{today}' } },
+      ]) {
+        expect(compareToTrendLabelKey({ kind: 'previousPeriod' }, filter), JSON.stringify(filter)).toBe('vsPreviousPeriod');
+      }
+      // A lone {today} still reads yesterday.
+      expect(compareToTrendLabelKey({ kind: 'previousPeriod' }, { d: '{today}' })).toBe('vsYesterday');
     });
     it('falls back to vsPreviousPeriod when no token matches', () => {
       expect(compareToTrendLabelKey({ kind: 'previousPeriod' }, { status: 'open' })).toBe('vsPreviousPeriod');

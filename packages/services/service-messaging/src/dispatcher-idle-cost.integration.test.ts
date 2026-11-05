@@ -290,3 +290,43 @@ describe('#17610 #28383 NotificationDispatcher — idle tick cost', () => {
         expect(sent).toEqual(['u1']);
     });
 });
+
+describe('#29919 SqlNotificationOutbox.nextDueAt — the one read a sole-writer loop wakes by', () => {
+    it('an empty outbox answers null in TWO statements, both reads', async () => {
+        statements = [];
+        expect(await outbox.nextDueAt({ claimTtlMs: TTL })).toBeNull();
+        expect(statements).toHaveLength(2);
+        expect(statements.every((sql) => /^select /i.test(sql))).toBe(true);
+    });
+
+    it('answers the earliest deferred row — batched or not — and ignores a row already due', async () => {
+        const now = Date.now();
+        await outbox.enqueue({ notificationId: 'n_now', recipientId: 'u1', channel: 'inbox', payload: { title: 't' } });
+        await outbox.enqueue({
+            notificationId: 'n_later', recipientId: 'u2', channel: 'inbox', payload: { title: 't' },
+            notBefore: now + 60_000,
+        });
+        expect(await outbox.nextDueAt({ claimTtlMs: TTL, now })).toBe(now + 60_000);
+
+        // A digest window closing is a deferred row too.
+        await outbox.enqueue({
+            notificationId: 'n_digest', recipientId: 'u3', channel: 'inbox', payload: { title: 't' },
+            digestKey: 'u3|inbox|w1', notBefore: now + 30_000,
+        });
+        expect(await outbox.nextDueAt({ claimTtlMs: TTL, now })).toBe(now + 30_000);
+    });
+
+    it('answers when the oldest in-flight claim becomes reapable, when that is sooner', async () => {
+        const now = Date.now();
+        await outbox.enqueue({
+            notificationId: 'n_later', recipientId: 'u2', channel: 'inbox', payload: { title: 't' },
+            notBefore: now + 10 * TTL,
+        });
+        await outbox.enqueue({ notificationId: 'n_claimed', recipientId: 'u1', channel: 'inbox', payload: { title: 't' } });
+        const [claimed] = await outbox.claim({ nodeId: 'node-crashed', limit: 10, claimTtlMs: TTL, now: now - 1_000 });
+        expect(claimed?.recipientId).toBe('u1');
+
+        // `reapExpired` takes a claim strictly older than the TTL.
+        expect(await outbox.nextDueAt({ claimTtlMs: TTL, now })).toBe(now - 1_000 + TTL + 1);
+    });
+});

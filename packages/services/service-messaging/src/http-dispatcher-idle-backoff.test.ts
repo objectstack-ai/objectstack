@@ -88,7 +88,7 @@ function fetchProbe(hold?: { url: string; until: Promise<void> }): FetchProbe {
     };
 }
 
-function setup(options: { maxIdleIntervalMs?: number; probe?: FetchProbe } = {}) {
+function setup(options: { maxIdleIntervalMs?: number; probe?: FetchProbe; soleWriter?: boolean } = {}) {
     const outbox = new TickRecordingOutbox();
     const probe = options.probe ?? fetchProbe();
     const dispatcher = new HttpDispatcher({
@@ -98,6 +98,7 @@ function setup(options: { maxIdleIntervalMs?: number; probe?: FetchProbe } = {})
         partitionCount: 1,
         intervalMs: BASE,
         maxIdleIntervalMs: options.maxIdleIntervalMs,
+        soleWriter: options.soleWriter,
     });
     return { outbox, probe, dispatcher };
 }
@@ -312,5 +313,41 @@ describe('#17623 MessagingService wakes the HTTP dispatcher its outbox is wired 
         expect(outbox.tickStarts).toHaveLength(ticksBefore + 1);
         expect(last(outbox.tickStarts)).toBe(Date.now());
         await dispatcher.stop();
+    });
+});
+
+describe('#29919 HttpDispatcher — a sole writer wakes at the next due time', () => {
+    const FIVE_MINUTES = 5 * MINUTE;
+
+    it('a fresh sole-writer dispatcher on an empty outbox ticks ONCE in its first minute', async () => {
+        const { outbox, dispatcher } = setup({ soleWriter: true, maxIdleIntervalMs: FIVE_MINUTES });
+        dispatcher.start();
+        await vi.advanceTimersByTimeAsync(MINUTE);
+        await dispatcher.stop();
+        expect(outbox.tickStarts).toHaveLength(1);
+    });
+
+    it('every retry is attempted the moment it comes due, under a five-minute ceiling', async () => {
+        const outbox = new TickRecordingOutbox();
+        const attemptedAt: number[] = [];
+        const statuses = [500, 500, 500, 200];
+        const fetchImpl: FetchImpl = async () => {
+            const status = statuses[Math.min(attemptedAt.length, statuses.length - 1)];
+            attemptedAt.push(Date.now());
+            return { ok: status < 400, status, async text() { return ''; } };
+        };
+        const dispatcher = new HttpDispatcher({
+            nodeId: 'node-test', outbox, fetchImpl, partitionCount: 1, intervalMs: BASE,
+            maxIdleIntervalMs: FIVE_MINUTES, soleWriter: true,
+            rng: () => 0.5, // no jitter: the retry delays are exactly 1 s, 10 s, 60 s
+        });
+        await outbox.enqueue(delivery('r1'));
+        dispatcher.start();
+        await vi.advanceTimersByTimeAsync(3 * MINUTE);
+        await dispatcher.stop();
+
+        expect(attemptedAt).toHaveLength(4);
+        for (let i = 0; i < 3; i++) expect(attemptedAt[i + 1]! - outbox.retriesDueAt[i]!).toBe(0);
+        expect((await outbox.list())[0]).toMatchObject({ status: 'success', attempts: 4 });
     });
 });
