@@ -252,13 +252,18 @@ async function refreshOverRest(h: Harness, token: string) {
   return { status: res.status, code: json?.error?.code, message: String(json?.error?.message ?? ''), data: json?.data, json };
 }
 
-/** Whether the datasource's catalog snapshot is stored: in the metadata registry, and as a `sys_metadata` row. */
-async function catalogStored(h: Harness): Promise<{ registry: boolean; rows: number }> {
+/**
+ * Whether the datasource's catalog snapshot is stored anywhere the environment
+ * reads it: the metadata service's registry, or a `sys_metadata` row (the
+ * refresh persists through `metadata.register`, which writes the registry and
+ * every writable database loader the deployment has).
+ */
+async function catalogStored(h: Harness): Promise<boolean> {
   const metadata: any = await h.stack.kernel.getServiceAsync('metadata');
   const item = await metadata.get('external_catalog', CATALOG);
   const found: any = await h.ql.find('sys_metadata', { where: { type: 'external_catalog', name: CATALOG }, context: SYS });
   const rows = Array.isArray(found) ? found : Array.isArray(found?.records) ? found.records : [];
-  return { registry: item !== undefined && item !== null, rows: rows.length };
+  return (item !== undefined && item !== null) || rows.length > 0;
 }
 
 /** What the platform operator reads at `GET /meta/object/:name`. */
@@ -317,7 +322,7 @@ describe('[ADR-0131 D12 items 7–8] group: an import and a catalog refresh are 
   });
 
   it('REST: A\'s catalog refresh is refused with the save door\'s status and sentence for an external catalog, and nothing is stored', async () => {
-    expect(await catalogStored(h), 'no snapshot is stored before the refresh').toEqual({ registry: false, rows: 0 });
+    expect(await catalogStored(h), 'no snapshot is stored before the refresh').toBe(false);
 
     const refreshed = await refreshOverRest(h, h.tokA);
     expect({ status: refreshed.status, code: refreshed.code }, JSON.stringify(refreshed.json)).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
@@ -334,14 +339,14 @@ describe('[ADR-0131 D12 items 7–8] group: an import and a catalog refresh are 
     expect(savedByA.status, JSON.stringify(saveBody)).toBe(refreshed.status);
     expect(saveBody?.error?.message).toBe(refreshed.message);
 
-    expect(await catalogStored(h)).toEqual({ registry: false, rows: 0 });
+    expect(await catalogStored(h)).toBe(false);
   });
 
   it('control: the platform operator refreshes the catalog under the same wall, and the snapshot is stored', async () => {
     const refreshed = await refreshOverRest(h, h.operator);
     expect(refreshed.status, JSON.stringify(refreshed.json)).toBe(200);
     expect(refreshed.data?.catalog?.name).toBe(CATALOG);
-    expect(await catalogStored(h)).toEqual({ registry: true, rows: 1 });
+    expect(await catalogStored(h)).toBe(true);
   });
 
   it('control: the platform operator imports at both doors under the same wall, and each object is saved', async () => {
@@ -396,6 +401,6 @@ describe('[ADR-0131 D11] single: the wall is not enforced, and an administrator 
     const refreshed = await refreshOverRest(h, h.tokA);
     expect(refreshed.status, JSON.stringify(refreshed.json)).toBe(200);
     expect(refreshed.data?.catalog?.name).toBe(CATALOG);
-    expect(await catalogStored(h)).toEqual({ registry: true, rows: 1 });
+    expect(await catalogStored(h)).toBe(true);
   });
 });
