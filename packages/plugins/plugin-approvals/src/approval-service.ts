@@ -1164,6 +1164,73 @@ function holderReadRefusal(scope: string, err: unknown): Error {
 }
 
 /**
+ * [ADR-0142 D6 as amended; ruling record 6599731698 on #29604, letter B] The
+ * approver types whose failed directory read refuses the approval node. A
+ * `queue`, `team` or `position` approver names a SET of people read from the
+ * directory at node entry; when that read fails, the slate it would build is
+ * missing people nobody can name, and every `onEmptyApprovers` policy would act
+ * on that wrong slate — open on the rest of it, open on the administrators or on
+ * a fallback, or approve. So the node opens on none of them.
+ *
+ * An `expression` approver's `resolveAs: 'team' | 'position'` values are read
+ * through the same expanders, and refuse the same way ({@link
+ * ApprovalService.resolveExpressionApprovers}). The other graph kinds
+ * (`department` and its dialects, `org_membership_level`) are not named by the
+ * ruling and keep their literal slot.
+ */
+const DIRECTORY_REFUSING_APPROVER_TYPES: ReadonlySet<string> = new Set(['queue', 'team', 'position']);
+
+/**
+ * [ADR-0142 D6 as amended; ruling record 6599731698 on #29604, letter B] The
+ * approval node refuses to open because a directory read behind one of its
+ * approvers failed ({@link DIRECTORY_REFUSING_APPROVER_TYPES}).
+ *
+ * Its own class, and never `NO_APPROVERS` or "expanded to nobody": the slate
+ * was not found empty, it could not be read. The message names the approver
+ * and the read that failed, and starts with `APPROVER_DIRECTORY_UNREADABLE:` in
+ * the message-prefix family this service's refusals use. Retryable: nothing is
+ * written before it is thrown, so the run can be started again once the
+ * directory reads. No parked or auto-retry state is part of it.
+ */
+export class ApproverDirectoryUnreadableError extends Error {
+  override readonly name = 'ApproverDirectoryUnreadableError';
+  /** The run can be re-triggered once the directory reads again. */
+  readonly retryable = true;
+  /** The approver whose directory read failed: its type and value as authored. */
+  readonly approverType: string;
+  readonly approverValue: string;
+  /** What could not be read, as the read reported it. */
+  readonly failedRead: string;
+
+  constructor(input: {
+    type: string;
+    value: unknown;
+    organizationId: string | null | undefined;
+    failedRead: string;
+    /** The CEL source, when the approver is an `expression` resolved as `type`. */
+    expression?: string;
+    cause?: unknown;
+  }) {
+    const approver = input.expression === undefined
+      ? `approver '${input.type}:${input.value}'`
+      : `approver 'expression' (resolveAs '${input.type}', value '${input.value}')`;
+    const inOrg = input.organizationId ? ` in organization '${input.organizationId}'` : '';
+    const read = input.failedRead.trim();
+    super(
+      `APPROVER_DIRECTORY_UNREADABLE: ${approver} could not be expanded${inOrg}, because a read behind it failed: `
+      + `${read}${/[.!?]$/.test(read) ? '' : '.'} The approval node does not open: the people who could not be `
+      + `read would be routed past, so the request is not opened on the rest of the slate, on the declared `
+      + `fallbackApprovers or on the organization's administrators, and is not auto-approved, whatever the node's `
+      + `onEmptyApprovers says. Run the flow again once the directory can be read.`,
+    );
+    if (input.cause !== undefined) Object.assign(this, { cause: input.cause });
+    this.approverType = input.type;
+    this.approverValue = String(input.value);
+    this.failedRead = input.failedRead;
+  }
+}
+
+/**
  * Approver types resolved by QUERYING a graph rather than by taking `value`
  * literally (#3807). Each can legitimately come back empty — an unstaffed
  * position, an emptied team, a mis-pointed unit — and the caller then falls
@@ -2432,9 +2499,19 @@ export class ApprovalService implements IApprovalService {
        * as `__resolvedFrom` so "why these people" stays answerable later.
        */
       resolvedFrom?: Record<string, unknown>;
+      /**
+       * [ADR-0142 D6 as amended] What a failed directory read behind a
+       * `queue` / `team` / `position` approver does: `'refuse'` (the default)
+       * throws {@link ApproverDirectoryUnreadableError}, so a node never opens on
+       * a slate it could not read; `'literal'` keeps the slot's `type:value`
+       * literal, for the one reader that re-resolves a slate AFTER a decision
+       * was recorded and must not fail it (`decide`'s pre-snapshot tally).
+       */
+      onDirectoryFailure?: 'refuse' | 'literal';
     },
   ): Promise<string[]> {
     if (!step || !Array.isArray(step.approvers)) return [];
+    const onDirectoryFailure = opts?.onDirectoryFailure ?? 'refuse';
     const now = opts?.now ?? this.clock.now().getTime();
     const out: string[] = [];
     // A person is a member of a per_group group once (#28684): the tally sizes
@@ -2468,7 +2545,7 @@ export class ApprovalService implements IApprovalService {
       // contract of resolveApproverSpec cannot carry.
       if (canonicalApproverType(String(a.type)) === 'expression') {
         const resolved = await this.resolveExpressionApprovers(
-          a, record, organizationId, now, opts?.substitutions, opts?.exprCtx,
+          a, record, organizationId, now, opts?.substitutions, opts?.exprCtx, onDirectoryFailure,
         );
         if (opts?.resolvedFrom) opts.resolvedFrom[`expression#${idx}`] = resolved.raw;
         for (const entry of resolved.slots) {
@@ -2484,7 +2561,7 @@ export class ApprovalService implements IApprovalService {
       if (opts?.resolvedFrom && canonicalApproverType(String(a.type)) === 'field' && a.value != null) {
         opts.resolvedFrom[`field:${a.value}`] = (record as any)?.[a.value] ?? null;
       }
-      const ids = await this.resolveApproverSpec(a, record, organizationId, now, opts?.substitutions);
+      const ids = await this.resolveApproverSpec(a, record, organizationId, now, opts?.substitutions, onDirectoryFailure);
       // per_group (#3266): tag each resolved id with this spec's group.
       for (const u of ids) {
         if (!u) continue;
@@ -2513,6 +2590,7 @@ export class ApprovalService implements IApprovalService {
     organizationId: string | null | undefined,
     now: number,
     substitutions?: OooSubstitution[],
+    onDirectoryFailure: 'refuse' | 'literal' = 'refuse',
   ): Promise<string[]> {
     // ADR-0090 D3: `role` is the deprecated spelling of `org_membership_level`.
     // Resolve on the canonical type, and write the canonical type in the
@@ -2602,14 +2680,25 @@ export class ApprovalService implements IApprovalService {
     //
     // A cross-org slate is filtered to the people who can actually READ the
     // request (D2 union); same-org routing is untouched and does no extra read.
-    const bounded = async (users: string[]): Promise<string[]> => (
-      crossOrg
-        ? filterApproversWhoCanRead(this.orgScopeDeps, users, organizationId, {
+    //
+    // [#29604] A failure of the read filter itself is named as that read, not
+    // as the directory's, so the warning and the node's refusal below say which
+    // read could not be done.
+    const bounded = async (users: string[]): Promise<string[]> => {
+      if (!crossOrg) return users;
+      try {
+        return await filterApproversWhoCanRead(this.orgScopeDeps, users, organizationId, {
           approverType: type, value: a.value != null ? String(a.value) : undefined,
           directoryOrgId: directoryOrg,
-        })
-        : users
-    );
+        });
+      } catch (err) {
+        throw Object.assign(new Error(
+          `the cross-organization read filter (who among the people of organization '${directoryOrg}' can read `
+          + `this request of organization '${organizationId}') could not be read: `
+          + `${err instanceof Error ? err.message : String(err)}.`,
+        ), { cause: err });
+      }
+    };
 
     // The user a `manager` approver resolved FROM, kept for the warning below
     // when no manager comes back.
@@ -2659,6 +2748,17 @@ export class ApprovalService implements IApprovalService {
       // A directory lookup failed → handled below as resolving to nobody, and
       // the graph-type warning names the failure (#29362).
       directoryFailure = err instanceof Error ? err.message : String(err);
+      // [ADR-0142 D6 as amended; ruling record 6599731698, letter B] …unless
+      // the approver names a directory SET: then the node refuses to open,
+      // before any `onEmptyApprovers` policy can act on a slate missing the
+      // people who could not be read. Ahead of the `queue` branch's "expanded to
+      // nobody" return below, which would otherwise answer an unreadable queue
+      // as an empty one.
+      if (onDirectoryFailure === 'refuse' && DIRECTORY_REFUSING_APPROVER_TYPES.has(type)) {
+        throw new ApproverDirectoryUnreadableError({
+          type, value: a.value, organizationId: directoryOrg, failedRead: directoryFailure, cause: err,
+        });
+      }
     }
     // #22558: a PERSON type that resolved to nobody contributes NO slot — see
     // PERSON_APPROVER_TYPES for why its `type:value` literal could never be
@@ -2695,7 +2795,19 @@ export class ApprovalService implements IApprovalService {
     // are read at node entry, so a member who joins later is not owed this
     // request. A `queue:` slot a stored request already holds stays as stored,
     // decidable by the override (the ADR-0090 D3 `role:` precedent).
+    //
+    // A queue whose read FAILED reaches here only on the `'literal'` reader (a
+    // refusing one threw above); it still writes no slot, and its warning says
+    // the read failed rather than that the queue is empty.
     if (type === 'queue') {
+      if (directoryFailure !== undefined) {
+        this.logger?.warn?.(
+          `[approvals] approver 'queue:${a.value}' could not be expanded — a directory or read-filter lookup failed. `
+          + `It adds no slot to this slate, as an empty queue adds none; fix the read (see error).`,
+          { type, value: a.value ?? null, organizationId: directoryOrg ?? null, error: directoryFailure },
+        );
+        return [];
+      }
       this.logger?.warn?.(
         `[approvals] approver 'queue:${a.value}' expanded to nobody — `
         + (this.queueSource()
@@ -2797,6 +2909,7 @@ export class ApprovalService implements IApprovalService {
     now: number,
     substitutions?: OooSubstitution[],
     exprCtx?: ApproverExpressionContext,
+    onDirectoryFailure: 'refuse' | 'literal' = 'refuse',
   ): Promise<{ slots: Array<{ id: string; subGroup?: string }>; raw: string[] }> {
     const source = String(a.value ?? '').trim();
     if (!source) {
@@ -2916,6 +3029,15 @@ export class ApprovalService implements IApprovalService {
         }
       } catch (err: any) {
         if (String(err?.message ?? '').startsWith('VALIDATION_FAILED')) throw err;
+        // [ADR-0142 D6 as amended; ruling record 6599731698, letter B] A
+        // `team` or `position` value is read through the same expanders as the
+        // static types, and refuses the node the same way.
+        if (onDirectoryFailure === 'refuse' && DIRECTORY_REFUSING_APPROVER_TYPES.has(resolveAs)) {
+          throw new ApproverDirectoryUnreadableError({
+            type: resolveAs, value: key, organizationId: directoryOrg,
+            failedRead: err instanceof Error ? err.message : String(err), expression: source, cause: err,
+          });
+        }
         // [#29606] The literal slot below is the same fallback the static graph
         // types take, and it says why exactly as they do: a failed read is not
         // an unstaffed value, so an operator is pointed at the read rather than
@@ -4985,8 +5107,12 @@ export class ApprovalService implements IApprovalService {
         groupMap = snapshotGroups;
         original = Object.keys(snapshotGroups);
       } else {
+        // The decision is already recorded above, so a directory outage here
+        // must not fail it: the legacy re-resolution keeps the literal slot it
+        // always kept (ADR-0142 D6's refusal is the node's, at open time).
         original = await this.expandApprovers(
           { approvers: config.approvers }, parseJson(raw.payload_json, undefined), org,
+          { onDirectoryFailure: 'literal' },
         );
         groupMap = {};
       }

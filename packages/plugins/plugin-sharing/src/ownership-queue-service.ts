@@ -37,6 +37,18 @@
  * read of the activation ledger leaves the declared default — on — for that
  * call and is logged, the posture the sharing-rule service takes for the same
  * ledger.
+ *
+ * ## Read to completion
+ *
+ * [#29604] The authored reads — an organization's `sys_queue` rows and its
+ * `sys_queue_member` rows — are read to completion through the keyset walk the
+ * team, position and business-unit member reads share
+ * (`readMembershipToCompletion`), never cut at a row bound: a queue past the
+ * bound lost its later members, a member past it lost every queue it sits in,
+ * and nothing said so. A read that fails, or a walk that cannot vouch for
+ * completion, takes the failed-read answer above. ADR-0142 D2 as amended has
+ * the recompute consumers (D6, D7) refuse a failed read instead; that answer
+ * waits on the contract carrying the caller's call-time signal.
  */
 
 import type {
@@ -49,7 +61,7 @@ import { QueueMemberType } from '@objectstack/spec/security';
 import { METADATA_ACTIVATION_TABLE } from '@objectstack/core';
 import type { OptionalSharingLogger } from './logger-shapes.js';
 import type { SharingEngine } from './sharing-service.js';
-import { TeamGraphService, teamHasMember } from './team-graph.js';
+import { TeamGraphService, readMembershipToCompletion, teamHasMember } from './team-graph.js';
 import { PositionGraphService } from './position-graph.js';
 import { BusinessUnitGraphService } from './business-unit-graph.js';
 
@@ -61,9 +73,6 @@ export const QUEUE_OBJECT = 'sys_queue';
 export const QUEUE_MEMBER_OBJECT = 'sys_queue_member';
 /** The `sys_metadata_activation.metadata_type` a declared queue is switched by. */
 export const QUEUE_ACTIVATION_TYPE = 'queue';
-
-/** Upper bound on one organization's authored queues / member rows read in one call. */
-const QUEUE_READ_LIMIT = 10000;
 
 /** The member kinds a specification may carry, as a set for the row guard. */
 const MEMBER_KINDS: ReadonlySet<string> = new Set(QueueMemberType.options);
@@ -106,6 +115,19 @@ function str(v: unknown): string | null {
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+/**
+ * The reason behind a failed authored read, for a warning that answers nobody.
+ * A walk's refusal words its own consequence ("so the expansion refuses"),
+ * which is not this service's answer yet, so the driver's reason it carries as
+ * `cause` is logged instead; a walk that could not vouch for completion has no
+ * cause and logs its own sentence.
+ */
+function readFailureReason(err: unknown): string {
+  const cause = (err as { cause?: unknown } | null)?.cause;
+  if (cause instanceof Error) return cause.message;
+  return err instanceof Error ? err.message : String(err);
 }
 
 /**
@@ -268,22 +290,22 @@ export class OwnershipQueueService implements IOwnershipQueueService {
       }
     }
     try {
-      const rows = await engine.find(QUEUE_MEMBER_OBJECT, {
+      const rows = await readMembershipToCompletion(engine, {
+        object: QUEUE_MEMBER_OBJECT,
         where: {
           recipient_type: kind,
           ...(organizationId ? { organization_id: organizationId } : {}),
         },
         fields: ['queue', 'recipient_id'],
-        limit: QUEUE_READ_LIMIT,
-        context: SYSTEM_CTX,
+        subject: `the '${kind}' member rows of the queues${organizationId ? ` in organization '${organizationId}'` : ''}`,
       });
-      for (const r of (Array.isArray(rows) ? rows : []) as Array<Record<string, unknown>>) {
+      for (const r of rows ?? []) {
         const queue = str(r.queue);
         const value = str(r.recipient_id);
         if (queue && value && (BU_MEMBER_KINDS.has(kind) || values.has(value))) out.add(queue);
       }
     } catch (err: any) {
-      this.warnOnce(`naming::${kind}`, '[queue] member read failed while looking through queues — the rules naming those queues are re-evaluated on their next write', { kind, error: err?.message });
+      this.warnOnce(`naming::${kind}`, '[queue] member read failed while looking through queues — the rules naming those queues are re-evaluated on their next write', { kind, error: readFailureReason(err) });
     }
     return [...out].sort();
   }
@@ -388,8 +410,9 @@ export class OwnershipQueueService implements IOwnershipQueueService {
    *
    * The checks themselves (`teamHasMember`, `PositionGraphService.holdsPosition`)
    * now refuse a failed read instead of answering `false`; this keeps the
-   * queue's consumers where they were. Whether a queue should refuse too is not
-   * decided by ADR-0142 and is left to a ruling rather than narrowed here.
+   * queue's consumers where they were. ADR-0142 D2 as amended (#29604) has the
+   * recompute consumers refuse instead; the call-time signal they say so with
+   * is the contract's to carry, and until it does every caller gets this answer.
    */
   private async holderCheck(spec: QueueMemberSpec, check: () => Promise<boolean>): Promise<boolean> {
     try {
@@ -442,14 +465,14 @@ export class OwnershipQueueService implements IOwnershipQueueService {
     declaredNames: ReadonlySet<string>,
   ): Promise<string[]> {
     try {
-      const rows = await engine.find(QUEUE_OBJECT, {
+      const rows = await readMembershipToCompletion(engine, {
+        object: QUEUE_OBJECT,
         where: organizationId ? { organization_id: organizationId } : {},
         fields: ['name'],
-        limit: QUEUE_READ_LIMIT,
-        context: SYSTEM_CTX,
+        subject: `the authored queues${organizationId ? ` of organization '${organizationId}'` : ''}`,
       });
       const out: string[] = [];
-      for (const r of (Array.isArray(rows) ? rows : []) as Array<Record<string, unknown>>) {
+      for (const r of rows ?? []) {
         const name = str(r.name);
         // A row under a declared name is not a second queue (the guard refuses
         // the write; a row that predates the declaration is reported there).
@@ -457,7 +480,7 @@ export class OwnershipQueueService implements IOwnershipQueueService {
       }
       return out;
     } catch (err: any) {
-      this.warnOnce('read::sys_queue', '[queue] sys_queue read failed — authored queues resolve nowhere until it succeeds', { error: err?.message });
+      this.warnOnce('read::sys_queue', '[queue] sys_queue read failed — authored queues resolve nowhere until it succeeds', { error: readFailureReason(err) });
       return [];
     }
   }
@@ -471,16 +494,16 @@ export class OwnershipQueueService implements IOwnershipQueueService {
     const out = new Map<string, QueueMemberSpec[]>();
     if (names.length === 0) return out;
     try {
-      const rows = await engine.find(QUEUE_MEMBER_OBJECT, {
+      const rows = await readMembershipToCompletion(engine, {
+        object: QUEUE_MEMBER_OBJECT,
         where: {
           queue: names.length === 1 ? names[0] : { $in: [...names] },
           ...(organizationId ? { organization_id: organizationId } : {}),
         },
         fields: ['queue', 'recipient_type', 'recipient_id'],
-        limit: QUEUE_READ_LIMIT,
-        context: SYSTEM_CTX,
+        subject: `the member rows of ${names.length === 1 ? `queue '${names[0]}'` : `${names.length} queues`}${organizationId ? ` in organization '${organizationId}'` : ''}`,
       });
-      for (const r of (Array.isArray(rows) ? rows : []) as Array<Record<string, unknown>>) {
+      for (const r of rows ?? []) {
         const queue = str(r.queue);
         const type = str(r.recipient_type);
         const value = str(r.recipient_id);
@@ -490,7 +513,7 @@ export class OwnershipQueueService implements IOwnershipQueueService {
         out.set(queue, list);
       }
     } catch (err: any) {
-      this.warnOnce('read::sys_queue_member', '[queue] sys_queue_member read failed — authored members count as nobody until it succeeds', { error: err?.message });
+      this.warnOnce('read::sys_queue_member', '[queue] sys_queue_member read failed — authored members count as nobody until it succeeds', { error: readFailureReason(err) });
     }
     return out;
   }
