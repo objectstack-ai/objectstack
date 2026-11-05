@@ -69,6 +69,16 @@ describe('describeUndeclaredActionNames', () => {
     expect(list).toContain('the selection bar draws no button');
   });
 
+  it('names the component from the address in the unread prescription, not "the grid" (objectstack#30535)', () => {
+    const grid = describeUndeclaredActionNames('bulkActions', ['a'], ADDRESS, 'unread');
+    expect(grid).toContain('Give the ObjectGrid a data source that answers getObjectSchema');
+    const list = describeUndeclaredActionNames('bulkActions', ['a'], {
+      component: 'ListView', blockType: 'calendar', objectName: 'lead',
+    }, 'unread');
+    expect(list).toContain('Give the ListView a data source that answers getObjectSchema');
+    expect(list).not.toContain('the grid');
+  });
+
   it('says nothing for no names', () => {
     expect(describeUndeclaredActionNames('bulkActions', [], ADDRESS)).toBeNull();
   });
