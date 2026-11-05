@@ -9,7 +9,7 @@
  * row in that one respect.
  */
 import { describe, expect, it } from 'vitest';
-import { isServedOverrideRowOf } from './served-override.js';
+import { isServedOverrideRowOf, servedOverrideBaseOf } from './served-override.js';
 
 const BASE = 'com.acme.crm';
 const PAIR = 'com.acme.crm.custom';
@@ -79,5 +79,49 @@ describe('[#28409] isServedOverrideRowOf', () => {
         expect(isServedOverrideRowOf(row(), '')).toBe(false);
         expect(isServedOverrideRowOf(row(), undefined)).toBe(false);
         expect(isServedOverrideRowOf(row(), 42)).toBe(false);
+    });
+});
+
+/**
+ * [#30062] The read-side reading: which base a SERVED document is the declared
+ * override of. The reads stamp a served override with the base's envelope
+ * (`_packageId` = the base) and keep its declaration, so the two agree exactly
+ * on a document served as the base's item from its pair.
+ */
+describe('[#30062] servedOverrideBaseOf', () => {
+    const served = (extra: Record<string, unknown> = {}) => ({ name: 'crm_welcome', label: 'OVpage', _packageId: BASE, overrides: { package: BASE, basedOn: '1.0.0' }, ...extra });
+
+    it('names the base for a served override of every type a declared override replaces', () => {
+        for (const type of ['page', 'app', 'dataset', 'book', 'view', 'dashboard', 'report', 'email_template', 'doc', 'mapping', 'translation']) {
+            expect(servedOverrideBaseOf(type, served()), type).toBe(BASE);
+        }
+        // The plural spelling folds to the same type.
+        expect(servedOverrideBaseOf('pages', served())).toBe(BASE);
+    });
+
+    it('names none for a type that takes no declared override', () => {
+        for (const type of ['object', 'permission', 'position', 'datasource', 'not_a_type']) {
+            expect(servedOverrideBaseOf(type, served()), type).toBeUndefined();
+        }
+    });
+
+    it('names none when the envelope and the declaration disagree, or either is missing', () => {
+        // A pair row served under its own binding: not served as the base's item.
+        expect(servedOverrideBaseOf('page', served({ _packageId: PAIR }))).toBeUndefined();
+        // A package-less row.
+        const { _packageId: _dropped, ...unbound } = served();
+        expect(servedOverrideBaseOf('page', unbound)).toBeUndefined();
+        // The base's own item: no declaration.
+        expect(servedOverrideBaseOf('page', served({ overrides: undefined }))).toBeUndefined();
+        // A declaration naming another package than the envelope.
+        expect(servedOverrideBaseOf('page', served({ overrides: { package: 'com.other' } }))).toBeUndefined();
+        expect(servedOverrideBaseOf('page', served({ overrides: { package: '' }, _packageId: '' }))).toBeUndefined();
+    });
+
+    it('is total over inputs it cannot read', () => {
+        for (const document of [null, undefined, 'page', 42, [served()], served({ overrides: 'com.acme.crm' }), served({ overrides: [BASE] })]) {
+            expect(servedOverrideBaseOf('page', document), JSON.stringify(document)).toBeUndefined();
+        }
+        expect(servedOverrideBaseOf(undefined, served())).toBeUndefined();
     });
 });
