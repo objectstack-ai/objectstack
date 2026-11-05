@@ -32,6 +32,15 @@
  * "Source" and "mode" are two words for two questions on purpose: where the
  * package comes from, and how it is installed.
  *
+ * A base's paired customization package — `<base>.custom`, what
+ * `os package export` writes for the overrides an administrator authored
+ * (ADR-0146 D2 / D3) — is neither: the runtime writes its items into ITS OWN
+ * writable pair of that base, as Studio would, so the overrides are served,
+ * listed by the base's customization read, and stay editable there. Printed
+ * as such; a runtime that answers it as a managed install (one that predates
+ * the pair install, and registered it as read-only code) is printed as the
+ * failure it is, with the way back.
+ *
  * This complements `os package publish` (which uploads to the CLOUD): the
  * pairing is publish-to-cloud / install-into-runtime. The target runtime
  * authenticates the call with its own better-auth session — pass
@@ -337,8 +346,9 @@ export default class PackageInstall extends Command {
         const pairId = String(data.manifestId ?? label);
         printError(
           `The runtime at ${runtime} installed ${pairId} as code, not into its writable pair: it serves none of the `
-          + 'package\'s overrides and leaves the pair read-only. Upgrade the runtime, uninstall the package '
-          + `(\`DELETE ${runtime}/api/v1/marketplace/install-local/${pairId}\`), then install it again.`,
+          + 'package\'s overrides and leaves the pair read-only. Uninstall it '
+          + `(\`DELETE ${runtime}/api/v1/marketplace/install-local/${pairId}\`), upgrade and restart the runtime, `
+          + 'then install it again.',
         );
         this.exit(1);
         return;

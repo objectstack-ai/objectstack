@@ -57,6 +57,7 @@ import {
     unmanagedInstallValueCarries,
 } from '@objectstack/spec/kernel';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
+import { ITEM_KEY_DISCRIMINATORS, itemDiscriminator } from '@objectstack/metadata-core';
 import { ASSEMBLED_VIEW_ITEMS_KEY, deriveViewContainerObject, isAggregatedViewContainer } from '@objectstack/spec/ui';
 
 /**
@@ -163,9 +164,16 @@ export function planCustomizationPairInstall(body: Record<string, unknown>): Pai
             ranked.push({ type, name, item, path, rank: [loadOrderOf(type), keyIndex, index] });
         });
     });
+    // One item per identity: `name`, and for a type whose identity is a pair
+    // (`ITEM_KEY_DISCRIMINATORS` — an `email_template` is one item per
+    // `(name, locale)`) the member the save door keys its row by, read off
+    // the body as that door reads it. Two locales of one template are two
+    // items; two bodies of one locale would be one row written twice.
     const seen = new Map<string, string>();
     for (const entry of ranked) {
-        const slot = `${entry.type} '${entry.name}'`;
+        const member = itemDiscriminator(entry.type, entry.item);
+        const slot = `${entry.type} '${entry.name}'`
+            + (member !== undefined ? ` (${ITEM_KEY_DISCRIMINATORS[entry.type]!.field} '${member}')` : '');
         const first = seen.get(slot);
         if (first !== undefined) problems.push(`two items claim ${slot} (\`${first}\` and \`${entry.path}\`)`);
         else seen.set(slot, entry.path);
