@@ -234,18 +234,20 @@ for (const cell of CELLS) {
         for (const row of ROWS) expect((await stored(row.id)).home).toBeNull();
 
         const applied = await run(true);
-        expect(applied).toMatchObject({ amounts: 4, changed: 3, written: 3, skippedTotal: 1, failures: [] });
-        expect(applied.skipped).toEqual([
-          { recordId: 'up_sek', organizationId: DEFAULT_ORGANIZATION_ID, field: 'amount', reason: 'rate_missing', currency: 'SEK', date: '2026-03-15' },
-        ]);
-        expect(homeAmountRecomputeComplete(applied)).toBe(false);
-
-        // The ADR's own figures: USD 10,000 at 0.1389 is ¥71,994.24; the same currency is rate 1, rounded once.
+        // What the column holds, read back: the ADR's own figures (USD 10,000 at
+        // 0.1389 is ¥71,994.24; the same currency is rate 1, rounded once).
         expect(await stored('up_usd_march')).toMatchObject({ home: 71994.24, rate: 0.1389 });
         expect(await stored('up_usd_april')).toMatchObject({ home: 10000, rate: 0.15 });
         expect(await stored('up_cny')).toMatchObject({ home: 12.35, rate: 1 });
         // The skipped row keeps a blank home field, never a fallback.
         expect(await stored('up_sek')).toMatchObject({ home: null, rate: null });
+
+        // What the run reported.
+        expect(applied).toMatchObject({ amounts: 4, changed: 3, written: 3, skippedTotal: 1, failures: [] });
+        expect(applied.skipped).toEqual([
+          { recordId: 'up_sek', organizationId: DEFAULT_ORGANIZATION_ID, field: 'amount', reason: 'rate_missing', currency: 'SEK', date: '2026-03-15' },
+        ]);
+        expect(homeAmountRecomputeComplete(applied)).toBe(false);
 
         // Equal to a fresh write of the same row, after the upgrade.
         for (const row of ROWS.filter((r) => r.id !== 'up_sek')) {
