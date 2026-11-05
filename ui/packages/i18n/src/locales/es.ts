@@ -2909,6 +2909,8 @@ const es = {
       useEmailResetText: "Restablecer por correo electrónico en su lugar",
       phoneSuccessTitle: "Contraseña restablecida",
       phoneSuccessDescription: "Tu contraseña ha sido restablecida. Ahora puedes iniciar sesión con tu nueva contraseña.",
+      noDeliveryTitle: "Aquí no se puede enviar un enlace de restablecimiento por correo",
+      noDeliveryDescription: "Esta implementación no envía correos, así que ningún enlace para restablecer la contraseña puede llegarle. Pida ayuda a un administrador: puede establecerle una nueva contraseña en Configuración → Usuarios.",
     },
     resetPassword: {
       title: "Establecer nueva contraseña",
