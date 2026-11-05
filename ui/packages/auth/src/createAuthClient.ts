@@ -134,6 +134,31 @@ function toAuthError(
   return err;
 }
 
+/** The error half of a better-auth `twoFactor.*` answer. */
+type TwoFactorWireError = { message?: string; status?: number; code?: string };
+
+/**
+ * The error an enrollment call (`enrollTotp`, `verifyTotp`) rejects with: the
+ * server's `message` (`WHAT (STATUS)` when it sent none), plus the machine
+ * `code` and the HTTP `status`, so the console can say in the user's language
+ * what happened instead of echoing English text. A `404` is the answer that
+ * matters most: the `/two-factor/*` endpoints are mounted only while two-factor
+ * is on for the deployment, so it means enrollment does not exist there, not
+ * that the request was wrong.
+ */
+function twoFactorEnrollError(
+  error: TwoFactorWireError,
+  what: string,
+): Error & { code?: string; status?: number } {
+  const err = new Error(error.message ?? `${what} (${error.status ?? '?'})`) as Error & {
+    code?: string;
+    status?: number;
+  };
+  if (error.code) err.code = error.code;
+  if (typeof error.status === 'number') err.status = error.status;
+  return err;
+}
+
 /**
  * The wire boundary for invitations (objectui#3879).
  *
@@ -814,26 +839,26 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
     // plugin; cast through unknown to bridge loose better-auth client types.
     async enrollTotp(password: string) {
       type EnableFn = (opts: { password: string }) =>
-        Promise<{ data?: { totpURI?: string; backupCodes?: string[] } | null; error?: { message?: string; status?: number } | null }>;
+        Promise<{ data?: { totpURI?: string; backupCodes?: string[] } | null; error?: TwoFactorWireError | null }>;
       const tf = (betterAuth as unknown as { twoFactor?: { enable?: EnableFn } }).twoFactor;
       if (!tf || typeof tf.enable !== 'function') {
         throw new Error('two-factor enrollment is not available on this auth backend');
       }
       const { data, error } = await tf.enable({ password });
-      if (error) throw new Error(error.message ?? `Two-factor enable failed (${error.status ?? '?'})`);
+      if (error) throw twoFactorEnrollError(error, 'Two-factor enable failed');
       return { totpURI: data?.totpURI ?? '', backupCodes: data?.backupCodes ?? [] };
     },
 
     // ADR-0069 — verify the first TOTP code to activate enrollment.
     async verifyTotp(code: string) {
       type VerifyFn = (opts: { code: string }) =>
-        Promise<{ error?: { message?: string; status?: number } | null }>;
+        Promise<{ error?: TwoFactorWireError | null }>;
       const tf = (betterAuth as unknown as { twoFactor?: { verifyTotp?: VerifyFn } }).twoFactor;
       if (!tf || typeof tf.verifyTotp !== 'function') {
         throw new Error('two-factor verification is not available on this auth backend');
       }
       const { error } = await tf.verifyTotp({ code });
-      if (error) throw new Error(error.message ?? `Two-factor verification failed (${error.status ?? '?'})`);
+      if (error) throw twoFactorEnrollError(error, 'Two-factor verification failed');
     },
 
     async setInitialPassword(newPassword: string) {

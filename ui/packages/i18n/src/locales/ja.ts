@@ -171,6 +171,7 @@ const ja = {
   },
   form: {
     noPermissionToSave: "このレコードを保存する権限がありません。",
+    readOnlyExternalSource: "このテーブルは読み取り専用です。レコードは変更を受け付けない外部データソースから取得されています。",
     noPermissionToCreate: "{{object}}を作成する権限がありません。フィールドは読み取り専用です。",
     noPermissionToEdit: "{{object}}を編集する権限がありません。フィールドは読み取り専用です。",
     noPermissionToEditRecord: "このレコードを編集する権限がありません。フィールドは読み取り専用です。",
@@ -1804,6 +1805,10 @@ const ja = {
     },
   },
   console: {
+    organizationMfa: {
+      needsTwoFactor: "「多要素認証を必須化」には二要素認証が必要ですが、このデプロイではオフになっているため、チェックを入れて保存すると拒否されます。先に二要素認証をオンにしてください：「設定 → 認証」で「多要素認証を必須にする」をオンにする（すべての組織に適用されます）か、デプロイで OS_AUTH_TWO_FACTOR=true を設定します。",
+      nowRequired: "この組織で認証アプリをまだ登録していないメンバーは、全員登録が必要になりました。各メンバーは、この変更後に初めて利用した時点から MFA 猶予期間（変更しない限り 7 日、「設定 → 認証」で変更可能）が始まり、終了するとデータにアクセスできなくなります。すでに認証アプリを使っているメンバーには影響しません。",
+    },
     studio: {
       title: "Studio",
       accessRequired: "Studio を開くには Studio へのアクセス権限が必要です。管理者が「設定 → 権限セットの割り当て」で権限セットを使って付与できます。",
@@ -2956,6 +2961,7 @@ const ja = {
         continue: "続行",
         preparing: "準備しています…",
         enrollFailed: "登録を開始できませんでした。",
+        unavailable: "このデプロイでは二要素認証がオフになっているため、認証アプリをまだ登録できません。管理者に「設定 → 認証」でオンにしてもらってから、もう一度お試しください。",
         scanTitle: "認証アプリでスキャン",
         scanBody: "Google Authenticator、1Password、Authy などでこの QR コードをスキャンし、6 桁のコードを入力してください。",
         backupTitle: "バックアップコードを保存",
@@ -4611,6 +4617,12 @@ const ja = {
         dataset: 'データセット {{count}}',
         dataset_one: 'データセット {{count}}',
         dataset_other: 'データセット {{count}}',
+        hook: 'フック {{count}}',
+        hook_one: 'フック {{count}}',
+        hook_other: 'フック {{count}}',
+        translation: '翻訳 {{count}}',
+        translation_one: '翻訳 {{count}}',
+        translation_other: '翻訳 {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

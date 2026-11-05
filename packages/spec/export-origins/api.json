@@ -855,6 +855,7 @@
     "RECORD_PAGE_MAX_RELATED": "src/api/record-page.zod.ts#RECORD_PAGE_MAX_RELATED (const)",
     "RECORD_PAGE_MAX_RELATED_ROWS": "src/api/record-page.zod.ts#RECORD_PAGE_MAX_RELATED_ROWS (const)",
     "RECORD_PAGE_MAX_RELATED_SORT": "src/api/record-page.zod.ts#RECORD_PAGE_MAX_RELATED_SORT (const)",
+    "RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES": "src/api/record-page.zod.ts#RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES (const)",
     "RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES": "src/api/record-page.zod.ts#RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES (const)",
     "RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE": "src/api/record-page.zod.ts#RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE (const)",
     "REGISTERED_ERROR_CODES": "src/api/error-code-ledger.zod.ts#REGISTERED_ERROR_CODES (const)",

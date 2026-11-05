@@ -173,6 +173,7 @@ const pt = {
   },
   form: {
     noPermissionToSave: "Você não tem permissão para salvar este registro.",
+    readOnlyExternalSource: "Esta tabela é somente leitura. Os registros vêm de uma fonte de dados externa que não aceita alterações.",
     noPermissionToCreate: "Você não tem permissão para criar registros de {{object}}. Os campos são somente leitura.",
     noPermissionToEdit: "Você não tem permissão para editar registros de {{object}}. Os campos são somente leitura.",
     noPermissionToEditRecord: "Você não tem permissão para editar este registro. Os campos são somente leitura.",
@@ -1853,6 +1854,10 @@ const pt = {
     },
   },
   console: {
+    organizationMfa: {
+      needsTwoFactor: "Exigir autenticação multifator precisa da autenticação de dois fatores, que está desativada nesta implantação, então salvar com a opção marcada é recusado. Ative os dois fatores primeiro: ligue Exigir autenticação multifator em Configuração → Autenticação (vale para todas as organizações) ou defina OS_AUTH_TWO_FACTOR=true na implantação.",
+      nowRequired: "Todos os membros desta organização que ainda não configuraram um app autenticador precisam fazê-lo agora. Cada um perde o acesso aos dados quando termina o período de carência de MFA (7 dias, a menos que alterado em Configuração → Autenticação), contado a partir do primeiro uso após esta alteração. Membros que já usam um autenticador não são afetados.",
+    },
     studio: {
       title: "Studio",
       accessRequired: "Você precisa de acesso ao Studio para abrir o Studio. Um administrador pode concedê-lo com um conjunto de permissões em Configuração → Atribuição de conjuntos de permissões.",
@@ -3014,6 +3019,7 @@ const pt = {
         continue: "Continuar",
         preparing: "Preparando…",
         enrollFailed: "Não foi possível iniciar o registro.",
+        unavailable: "A autenticação de dois fatores está desativada nesta implantação, então ainda não é possível configurar um app autenticador. Peça a um administrador para ativá-la em Configuração → Autenticação e tente novamente.",
         scanTitle: "Escaneie com seu aplicativo autenticador",
         scanBody: "Escaneie este QR code com o Google Authenticator, 1Password, Authy etc. e digite o código de 6 dígitos.",
         backupTitle: "Salve seus códigos de backup",
@@ -4722,6 +4728,14 @@ const pt = {
         dataset_one: '{{count}} conjunto de dados',
         dataset_many: '{{count}} de conjuntos de dados',
         dataset_other: '{{count}} conjuntos de dados',
+        hook: '{{count}} hooks',
+        hook_one: '{{count}} hook',
+        hook_many: '{{count}} de hooks',
+        hook_other: '{{count}} hooks',
+        translation: '{{count}} traduções',
+        translation_one: '{{count}} tradução',
+        translation_many: '{{count}} de traduções',
+        translation_other: '{{count}} traduções',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.
