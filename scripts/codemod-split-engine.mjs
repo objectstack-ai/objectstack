@@ -3162,7 +3162,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'import prune': 4,
   'refusals': 6,
   'scoped classes (second pass)': 16,
-  'hand-series docblocks (third pass)': 18,
+  'hand-series docblocks (third pass)': 19,
 });
 const SELF_TEST_BATTERY_FLOOR = 5;
 
@@ -3780,6 +3780,7 @@ async function selfTest() {
     }
     const fails = (host, edited) => verifyHandDocs(tm, input, host, mods, new Map([...mods, ...out.modules, ...edited])).failures.length > 0;
     check('one edited character in a moved docblock fails', fails(out.host, [['engine-alpha.ts', alpha.replace('Second paragraph.', 'Second paragraph!')]]));
+    check('one edited character elsewhere in a hand module fails', fails(out.host, [['engine-alpha.ts', alpha.replace('return this.n + n;', 'return this.n - n;')]]));
     check('a moved docblock dropped from its function fails', fails(out.host, [['engine-alpha.ts', alpha.replace(/\/\*\*\n \* A private docblock[\s\S]*?\*\/\n/, '')]]));
     check('a staying docblock dropped from the class fails', fails(out.host.replace('  /** A public docblock: it stays. */\n', ''), []));
     check('a public docblock moved off the class fails', fails(
