@@ -21,7 +21,7 @@
  * real reason (e.g. a row-level-security denial) instead of swallowing it.
  */
 
-import { isApiAccessDeniedError } from '@object-ui/core';
+import { isApiAccessDeniedError, isExternalWriteRefusal } from '@object-ui/core';
 import { errorCodeIs } from '@object-ui/types';
 import type { ApiError } from '@objectstack/spec/api';
 
@@ -173,6 +173,13 @@ export function delegationScopeMessage(err: unknown): string | null {
   }
   return extractWriteErrorMessage(err);
 }
+
+/**
+ * `@object-ui/core`'s `isExternalWriteRefusal`, beside the other write-refusal
+ * readers: a write the object's external datasource does not admit
+ * (`EXTERNAL_WRITE_FORBIDDEN`). Ask it before {@link isPermissionError}.
+ */
+export { isExternalWriteRefusal };
 
 /** The ADR-0112 code a write answers (409) when a unique index refuses it. */
 const UNIQUE_VIOLATION = 'UNIQUE_VIOLATION';

@@ -103,8 +103,8 @@
     "groupBy": {
       "status": "live",
       "verifiedAt": "2026-08-28",
-      "evidence": "packages/objectql/src/in-memory-aggregation.ts#applyInMemoryAggregation (`const groupBy = (ast.groupBy ?? [])` then the bucketing loop — one bucket per type-preserving key tuple); packages/objectql/src/in-memory-aggregation.ts#projectGroupValue (each group key's value, including the dateGranularity lowering); packages/objectql/src/engine.ts#aggregate (forwards it to the driver or the fallback); packages/plugins/plugin-security/src/predicate-guard.ts#collectQueryFields (the FLS guard walks the string and object group forms alike)",
-      "note": "2026-08-28: RE-ANCHORED (commit 8cb96ec41) — both citations were PATH-ONLY, so this entry has never faced any check but file existence. Re-closed by hand against 93ea19bca."
+      "evidence": "packages/objectql/src/in-memory-aggregation.ts#applyInMemoryAggregation (`const groupBy = (ast.groupBy ?? [])` then the bucketing loop — one bucket per type-preserving key tuple); packages/objectql/src/in-memory-aggregation.ts#projectGroupValue (each group key's value, including the dateGranularity lowering); packages/objectql/src/engine-delete-and-aggregate.ts#aggregate (forwards it to the driver or the fallback); packages/plugins/plugin-security/src/predicate-guard.ts#collectQueryFields (the FLS guard walks the string and object group forms alike)",
+      "note": "2026-08-28: RE-ANCHORED (commit 8cb96ec41) — both citations were PATH-ONLY, so this entry has never faced any check but file existence. Re-closed by hand against 93ea19bca. 2026-11-05: REPOINTED to `engine-delete-and-aggregate.ts#aggregate`, where the body has lived since the engine.ts codemod split: the second slice of #30053 moved the private docblock that named `groupBy[]` out of engine.ts, which no longer names the key."
     },
     "having": {
       "status": "live",

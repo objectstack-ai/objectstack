@@ -41,6 +41,11 @@
  * This module imports the engine only as a TYPE, so there is no module cycle
  * at run time, and nothing re-exports it, so the published surface does not
  * move.
+ *
+ * [#30053 codemod] A PRIVATE method's docblock has since moved here,
+ * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
+ * and the class keeps none for it; a public or protected method's docblock
+ * stays on the class, the contract, and its function keeps the placeholder.
  */
 
 import { FILE_REFERENCE_TYPES, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY } from '@objectstack/spec/data';
@@ -119,7 +124,47 @@ function toFileValue(row: any): Record<string, unknown> {
  */
 const PARENT_DERIVED_FILE_COLUMNS = ['id', 'name', 'size', 'mime_type', 'status', 'ref_object', 'ref_id'];
 
-/** The body of `ObjectQL#resolveFileReferences`; the method's docblock there is its contract. */
+/**
+ * Resolve file-field id references to their expanded read form (ADR-0104 D3
+ * wave 2). A `file`/`image`/`avatar`/`video`/`audio` value stored as an
+ * opaque `sys_file` id string whose servable row this read finds (committed,
+ * or a tombstone still held) is enriched, in place, to the `FileValueSchema`
+ * object `{ id, name, size, mimeType, url }` — `url` derived from the stable
+ * `/files/:fileId` resolver, never stored. That is one of three expanded
+ * forms: an id nothing resolves stays the bare id (DUAL-MODE SAFE, and the
+ * fail-open `catch` below), and an id whose `sys_file` read is refused to the
+ * caller becomes `FileRefusedValueSchema` (REFUSED IS NOT ABSENT).
+ *
+ * DUAL-MODE SAFE: an inline-blob value (an object) and a string that does
+ * NOT match a committed `sys_file` row (e.g. an external url) pass through
+ * unchanged, so a field may hold either form during the pre-v17 window.
+ *
+ * REFUSED IS NOT ABSENT: when the caller's own `sys_file` read is refused,
+ * each id becomes `{ id, metadataRefused: true }` (`FileRefusedValueSchema`)
+ * rather than staying a bare id — see the `catch` below.
+ *
+ * PARENT-DERIVED (#22637, maintainer ruling B on #22624): that refusal is
+ * about `sys_file` as an object, not about the files a record owns. A file
+ * whose `ref_object` / `ref_id` name the record being read is judged by the
+ * download door's own field-owned verdict (ADR-0104 D3) — the declared
+ * `fileAccessDelegate` where the object names one, else the caller's read of
+ * that record — and hydrates when it allows. Every other id keeps the
+ * refused marker. See {@link readParentDerivedFiles}.
+ *
+ * ASKED BEFORE READ (#24335): the caller's `sys_file` read is issued only
+ * when the security service admits it — {@link callerMayReadSysFile}, the
+ * middleware's own object-level read gate. A caller it refuses goes
+ * straight to the refused arm, the answer that read's refusal produced, so
+ * the served value is the same and no access attempt is made: the security
+ * layer logs no denial for a read the reader never asked for. A direct
+ * `sys_file` read by that reader is refused, and logged, exactly as before.
+ *
+ * Batched: one admission ask and at most one `sys_file` `id $in […]` read
+ * per call (no N+1) — and, on the refused arm only, one more system read
+ * plus one verdict call; zero of each when no field holds a string value
+ * (the blob-only case), so the step is free for objects that have not
+ * adopted references.
+ */
 export async function resolveFileReferences(
   this: Pick<FileReferenceHydrationHost, '_registry' | 'callerMayReadSysFile' | 'serveRefusedFileHydration' | 'find' | 'logger' | 'servableFileRows'>,
   objectName: string,
@@ -278,7 +323,28 @@ export async function resolveFileReferences(
   return records;
 }
 
-/** The body of `ObjectQL#callerMayReadSysFile`; the method's docblock there is its contract. */
+/**
+ * [#24335] May this caller read `sys_file` at all? Asked of the registered
+ * security service's `canReadObject` BEFORE {@link resolveFileReferences}
+ * issues the caller's own `sys_file` read, as the parent-record read gate
+ * asks before it reads a parent object ("A skipped object is not an access
+ * attempt", plugin-audit). `canReadObject` is the security middleware's own
+ * object-level read gate, arm for arm, and answers without logging or
+ * throwing; the read it spares is one that gate would refuse, and
+ * plugin-security logs every refusal at WARN — a line on every ordinary
+ * record read by a reader without `sys_file` read, burying the real denials.
+ *
+ * Asked with the caller's envelope minus its operation-private `__` keys
+ * (`withoutOperationPrivateKeys`, as {@link readParentDerivedFiles} asks its
+ * verdict): no second derivation of authority, and no muting of the
+ * middleware's log — the reader's own `sys_file` read still logs its denial.
+ *
+ * It only ever NARROWS what is read: `true` still reads as the caller, and
+ * that read still decides. Unasked ⇒ `true`, the read goes to the middleware
+ * as it did before: no usable security service, one whose contract omits the
+ * optional `canReadObject`, or an ask that throws. Any other answer than
+ * `true` ⇒ the refused arm, which is what that read's refusal served.
+ */
 export async function callerMayReadSysFile(
   this: Pick<FileReferenceHydrationHost, 'resolveReadableIdsSecurity'>,
   execCtx?: ExecutionContext,
@@ -293,7 +359,15 @@ export async function callerMayReadSysFile(
   }
 }
 
-/** The body of `ObjectQL#serveRefusedFileHydration`; the method's docblock there is its contract. */
+/**
+ * The refused arm of {@link resolveFileReferences}: this caller may not read
+ * `sys_file`, whether its admission said so up front (#24335) or its read was
+ * refused. Each id a record of this result owns is put to the field-owned
+ * verdict ({@link readParentDerivedFiles}, #22637) and hydrates when it
+ * allows; every other id becomes `{ id, metadataRefused: true }`
+ * (`FileRefusedValueSchema`). Logged at `debug`: the answer is handed to
+ * the caller in the value.
+ */
 export async function serveRefusedFileHydration(
   this: Pick<FileReferenceHydrationHost, 'readParentDerivedFiles' | 'logger'>,
   objectName: string,
@@ -334,7 +408,11 @@ export async function serveRefusedFileHydration(
   return records;
 }
 
-/** The body of `ObjectQL#servableFileRows`; the method's docblock there is its contract. */
+/**
+ * The servable subset of some `sys_file` rows, keyed by id — the rule both
+ * arms of {@link resolveFileReferences} serve by, so a row hydrates under
+ * the same condition whichever read found it.
+ */
 export async function servableFileRows(
   this: Pick<FileReferenceHydrationHost, '_heldFileResolver' | 'logger'>,
   objectName: string,
@@ -391,7 +469,57 @@ export async function servableFileRows(
   return fileMap;
 }
 
-/** The body of `ObjectQL#readParentDerivedFiles`; the method's docblock there is its contract. */
+/**
+ * [#22637] The parent-derived half of a REFUSED `sys_file` hydration: which
+ * of the ids this result holds are field-owned by a record in it, and does
+ * the download door's verdict let this caller read them?
+ *
+ * Maintainer ruling B on #22624, verbatim as the card records it: "A file
+ * field's metadata follows the parent-derived verdict the download door
+ * already applies (ADR-0104 D3, `buildFileReadAuthorizer`): when the
+ * caller's `sys_file` read is refused, `resolveFileReferences` still
+ * hydrates a file whose `ref_object` / `ref_id` name the record being read
+ * (the delegate consulted where the owner object declares a
+ * `fileAccessDelegate`); a referenced id that does not point at that record
+ * keeps PR #22620's refused marker; direct `sys_file` queries and
+ * `public_read` are unchanged."
+ *
+ * Two reads, both narrow:
+ *
+ *  1. **Which ids does a record in this result own?** One `sys_file` read
+ *     under a `sudo()`-shaped context (`{ ...caller, isSystem: true }`: the
+ *     caller's tenant wall and transaction ride along). The `where` itself
+ *     asks for the ownership pair — `ref_object` this object, `ref_id` one
+ *     of these records — so a file that is not field-owned here is never
+ *     read at all, and only {@link PARENT_DERIVED_FILE_COLUMNS} leave the
+ *     driver. It is the same posture the download door reads a file in (by
+ *     id, under the system context, never the caller's `sys_file` grant).
+ *     `sys_file`'s own read rule is untouched: this read serves only the ids
+ *     a record the caller just read holds, and the caller's own `sys_file`
+ *     queries are refused exactly as before.
+ *  2. **May this caller read those owners' files?** The registered
+ *     {@link FieldOwnedFileReadAuthorizer} — the door's own field-owned arm,
+ *     handed over by the storage plugin, never re-derived here — asked ONCE
+ *     with every owner id, under the caller's envelope minus its
+ *     operation-private `__` keys (`withoutOperationPrivateKeys`: the
+ *     verdict judges the caller, not this sub-read). It consults the
+ *     owner object's `fileAccessDelegate` where one is declared, so a
+ *     delegate-governed object gets the delegate's answer and not the raw
+ *     record read.
+ *
+ * Narrower than the door, by the ruling: the door also serves a file's
+ * uploader and a file reachable through any `sys_attachment` parent; this
+ * serves only a file owned by the record it is read in.
+ *
+ * Returns, per allowed file id, the owning record's id and its servable row
+ * — `null` when the row is owned and allowed but not servable, which the
+ * caller reads as the bare id a `sys_file` reader would see. An id absent
+ * from the map keeps the refused marker. Unwired, no record ids, or a
+ * failure: an empty map — every id stays refused, the answer before this
+ * existed. [#26672] `find` / `findOne` read `id` for any projection that
+ * names a file field ({@link withFileOwnerKey}), so a caller's projection
+ * that leaves `id` out does not land here.
+ */
 export async function readParentDerivedFiles(
   this: Pick<FileReferenceHydrationHost, '_fieldOwnedFileReadAuthorizer' | 'find' | 'servableFileRows' | 'logger'>,
   objectName: string,

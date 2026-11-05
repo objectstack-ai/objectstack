@@ -11,7 +11,7 @@
 // re-exports, by name, every declaration here it exported before, so every
 // importer of `./sql-driver.js` reads what it read.
 
-import { ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE, AggregationFunction, NUMERIC_VALUE_TYPES, RETIRED_FILTER_OPERATORS, hasDanglingLikeEscape, hasNulInLikePattern, isAcceptedFilterComparand, isListComparandOperator, isMultiValueField, isNowDefaultToken, reduceFilterKeyVerdict, reduceFilterVerdict } from '@objectstack/spec/data';
+import { ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE, AggregationFunction, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES, RETIRED_FILTER_OPERATORS, STRUCTURED_JSON_TYPES, hasDanglingLikeEscape, hasNulInLikePattern, isAcceptedFilterComparand, isListComparandOperator, isMultiValueField, isNowDefaultToken, reduceFilterKeyVerdict, reduceFilterVerdict } from '@objectstack/spec/data';
 import type { FilterVerdictHooks, SchemaMode, FilterVerdict as SharedFilterVerdict, ValueShapeFieldDef } from '@objectstack/spec/data';
 import type { DriverQuery, IntrospectedColumn as SpecIntrospectedColumn, IntrospectedSchema as SpecIntrospectedSchema, IntrospectedTable as SpecIntrospectedTable } from '@objectstack/spec/contracts';
 import { jsonColumnOperatorRefusalText, temporalStorageForm } from '@objectstack/core';
@@ -163,6 +163,67 @@ export interface AutoNumberReservation {
   /** The rendered value written onto the row. */
   value: string;
 }
+
+// GLOBAL_TENANT ('__global__') — the sentinel for the NULL-organization
+// ("platform") bucket — is defined ONCE in schema-drift.ts and imported here:
+// since ADR-0120 D3 it names the same bucket in two subsystems (the autonumber
+// sequence table's tenant key, and the COALESCE organization key part of every
+// organization-scoped unique index), and #3696's root lesson was two
+// subsystems naming one concept differently. Storage stays NULL — see the
+// definition site.
+
+/**
+ * Field types whose value is an array or object and must be stored as a JSON
+ * column (and JSON-(de)serialized at the driver boundary). SINGLE SOURCE for
+ * both the DDL column-type switch and `isJsonField` so the two can't drift —
+ * the drift between them is exactly what let array-valued fields (multiselect/
+ * checkboxes/tags/repeater/vector) reach the SQLite binder un-serialized and
+ * crash with "SQLite3 can only bind numbers, strings, bigints, buffers, and
+ * null" (#field-zoo). `composite`/`address`/`location`/`record` are objects;
+ * the rest are arrays.
+ *
+ * ⚠️ The FILE family (`image`/`file`/`avatar`/`video`/`audio`) was a member
+ * until the ADR-0104 addendum ruled that its physical column holds the BARE
+ * `sys_file` id in a STRING column rather than a JSON-quoted id in a JSON
+ * column. Its membership is no longer a constant: a SINGLE-VALUE media field
+ * is a JSON column on a deployment that has not moved its columns and a string
+ * column on one that has, so the question is asked per driver instance through
+ * {@link SqlDriver.mediaColumnIsJson} rather than of this set. A
+ * `multiple: true` media field is unaffected — its value is a LIST of ids, it
+ * is a JSON column on every deployment, and `isMultiValueField` already says so
+ * above every type check (`file` / `image` are `MULTI_CAPABLE_TYPES` members;
+ * #17469 refuses `multiple: true` on `avatar` / `video` / `audio` at the
+ * authoring entrance rather than arrayifying their column).
+ *
+ * ⛔ Do not re-add the family here. Every reader of this set treats membership
+ * as deployment-independent, which is exactly what the family stopped being.
+ */
+export const JSON_COLUMN_TYPES = new Set<string>([
+  // Spec value-shape classes (ADR-0104 D1): structured JSON payloads and the
+  // inherently-array option types. Membership is owned by @objectstack/spec —
+  // a type added there becomes a JSON column here without touching this file.
+  ...STRUCTURED_JSON_TYPES, ...MULTI_OPTION_TYPES,
+  // Driver-internal aliases (external/introspected columns) — not authorable
+  // FieldTypes, so they stay a local extra.
+  'object', 'array',
+]);
+
+/**
+ * The `varchar(n)` width a moved single-value media column gets.
+ *
+ * ⚠️ NOT a taste: it is the width `os generate migration --format sql` already
+ * emits for the family (`VARCHAR(2048)` in `packages/cli/src/commands/
+ * generate.ts`), and the maintainer ruling in ADR-0104's 2026-09-05 addendum is that the GENERATOR
+ * states the ruled end-state and does not move — the driver is the side that
+ * moves to meet it. A driver that created knex's default `varchar(255)` here
+ * would open a fresh divergence between the two producers of the same column
+ * on the very change that closes the old one.
+ *
+ * Mirrored by {@link SqlDriver.varcharColumnChars}, which is what the drift
+ * detector asks rather than restating the width; the two are pinned equal by
+ * `sql-driver-11565-row-byte-budget.test.ts` for every declared `FieldType`.
+ */
+const MEDIA_ID_VARCHAR_CHARS = 2048;
 
 /**
  * Field types whose value is a numeric scalar. SINGLE SOURCE for the DDL
@@ -3984,13 +4045,13 @@ function reclaimBetterSqlite3(db: BetterSqlite3Connection): void {
 
 // [#29520 codemod] Declared above without `export`, and read by `sql-driver.ts` or a section module.
 export {
-  AUTONUMBER_COLLISION_RETRIES, CROSS_FIELD_COMPARISON_OPERATORS, DEFAULT_ID_LENGTH, RowWidthContribution,
-  SQL_AGGREGATE_FUNCTIONS, SQL_WINDOW_FUNCTIONS, SQL_WINDOW_SORT_DIRECTIONS, SqlAggregateLowering, TEXT_OPERATORS,
-  WITHHELD_FILTER_AUTHOR_TEXT, WITHHELD_FILTER_LOGGED, WITHHELD_FILTER_SUBTREE, assertCompilableComparand,
-  assertDefinedComparands, bareFieldReferenceError, betweenArityError, canonicalTimeOfDay, canonicalUtcDatetime,
-  declaresColumnNotNull, emptyFieldConstraintError, filterArrayReachedDriverError, insertedRowsNotReadBackError,
-  invalidWindowFunctionQueryError, isDeclaredFieldType, isDeferredDdlLockWaitRefusal, isEmptyFieldConstraint,
-  isUpsertFenceRefusal, jsonColumnOperatorError, normalizeSqliteDatetimeOutput, nowAnchorOf,
+  AUTONUMBER_COLLISION_RETRIES, CROSS_FIELD_COMPARISON_OPERATORS, DEFAULT_ID_LENGTH, MEDIA_ID_VARCHAR_CHARS,
+  RowWidthContribution, SQL_AGGREGATE_FUNCTIONS, SQL_WINDOW_FUNCTIONS, SQL_WINDOW_SORT_DIRECTIONS,
+  SqlAggregateLowering, TEXT_OPERATORS, WITHHELD_FILTER_AUTHOR_TEXT, WITHHELD_FILTER_LOGGED, WITHHELD_FILTER_SUBTREE,
+  assertCompilableComparand, assertDefinedComparands, bareFieldReferenceError, betweenArityError, canonicalTimeOfDay,
+  canonicalUtcDatetime, declaresColumnNotNull, emptyFieldConstraintError, filterArrayReachedDriverError,
+  insertedRowsNotReadBackError, invalidWindowFunctionQueryError, isDeclaredFieldType, isDeferredDdlLockWaitRefusal,
+  isEmptyFieldConstraint, isUpsertFenceRefusal, jsonColumnOperatorError, normalizeSqliteDatetimeOutput, nowAnchorOf,
   presentAuditTimestampOutput, reclaimBetterSqlite3, reduceFilterKey, reduceFilterNode, refusalSubtree,
   refuseAggregateFunction, refuseCrossRowIdentityMerge, refuseDateBucketedGroupBy,
   refuseDistinctAggregateWithoutField, refuseRejectedReferenceAlias, refuseUndeclaredFieldType,

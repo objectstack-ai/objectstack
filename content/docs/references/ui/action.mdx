@@ -55,7 +55,7 @@ const result = ActionSchema.parse(data);
 | **undoable** | `boolean` | optional | Offer an Undo affordance after this single-record update action succeeds. `operation: 'update'` is the one declared operation and the declared form of that action: what the undo captures is the prior value of EVERY field the action writes — the merged write bag, `patch` UNDER the collected `params`, not `patch` alone. An action with no `operation` declares no write set here, but `type: 'api'` is fulfilled by the console, which builds the undo envelope from `undoable` alone. Those two shapes — `operation: 'update'` and `type: 'api'` — are the whole fulfillable set; on a registered action `undoable` beside any other shape is refused, because nothing would anchor the capture. |
 | **resultDialog** | `{ title?: string \| Record<string, string>; description?: string \| Record<string, string>; acknowledge?: string \| Record<string, string>; format?: Enum<'qrcode' \| 'code-list' \| 'secret' \| 'text' \| 'json'>; … }` | optional | Render API response in a one-shot reveal dialog (suppresses successMessage when set). |
 | **visible** | `boolean \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate — `true`/`false` literal, CEL string, or `{dialect, source}` envelope. The action is offered when it evaluates TRUE. Omit = always visible. |
-| **requiresFeature** | `Enum<'twoFactor' \| 'organization' \| 'multiOrgEnabled' \| 'degradedTenancy' \| 'oidcProvider' \| 'sso' \| 'ssoEnforced' \| 'deviceAuthorization' \| 'admin' \| 'phoneNumber' \| … +2 more>` | optional | Public auth feature flag gating this action; lowered into `visible` at parse time. |
+| **requiresFeature** | `Enum<'twoFactor' \| 'organization' \| 'multiOrgEnabled' \| 'degradedTenancy' \| 'oidcProvider' \| 'sso' \| 'ssoEnforced' \| 'deviceAuthorization' \| 'admin' \| 'phoneNumber' \| … +3 more>` | optional | Public auth feature flag gating this action; lowered into `visible` at parse time. |
 | **requiresMembershipReach** | `Enum<'invite_member' \| 'cancel_invitation' \| 'update_member_role' \| 'transfer_ownership' \| 'remove_member' \| 'create_team' \| 'update_team' \| 'remove_team' \| … +4 more>` | optional | Organization endpoint (a MEMBERSHIP_REACH row) whose membership-grade gate this action follows; lowered into `visible` over current_user.positions at parse time. |
 | **disabled** | `boolean \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Disabled predicate — `true`/`false` literal, CEL string, or `{dialect, source}` envelope. The action is shown but refused when it evaluates TRUE. Omit = never disabled. |
 | **disabledReason** | `string \| Record<string, string>` | optional | Display-only reason a greyed action shows (its hover title and accessible description, or a menu item's second line) while `disabled` evaluates TRUE — the default-language string, or an inline locale map; translated at `objects.OBJECT._actions.ACTION.disabledReason` (`globalActions.ACTION.disabledReason` for an object-less action). Not a gate: the server refuses a call on its own rules (hooks, `requiredPermissions`), and nothing reads this as a condition. Omit = the default reason, "Not available for this record". A blank reason is refused. |
@@ -95,6 +95,7 @@ const result = ActionSchema.parse(data);
 * `phoneNumber`
 * `cloudManaged`
 * `phoneNumberOtp`
+* `emailDelivery`
 
 ### Allowed Values: `Action.requiresMembershipReach`
 
@@ -248,7 +249,7 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 | **defaultFromRow** | `boolean` | optional |  |
 | **carryOver** | `boolean` | optional | Carry-over param: seed the value from the current row (requires defaultFromRow: true), render it as a non-editable summary in the dialog, and submit it verbatim in the request body. Unlike `visible: false` (which omits the param from the submission entirely), a carry-over param is always sent. |
 | **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Param visibility predicate (CEL); omits the param when false. |
-| **requiresFeature** | `Enum<'twoFactor' \| 'organization' \| 'multiOrgEnabled' \| 'degradedTenancy' \| 'oidcProvider' \| 'sso' \| 'ssoEnforced' \| 'deviceAuthorization' \| 'admin' \| 'phoneNumber' \| … +2 more>` | optional | Public auth feature flag gating this param; lowered into `visible` at parse time. |
+| **requiresFeature** | `Enum<'twoFactor' \| 'organization' \| 'multiOrgEnabled' \| 'degradedTenancy' \| 'oidcProvider' \| 'sso' \| 'ssoEnforced' \| 'deviceAuthorization' \| 'admin' \| 'phoneNumber' \| … +3 more>` | optional | Public auth feature flag gating this param; lowered into `visible` at parse time. |
 
 ### Allowed Values: `ActionParam.type`
 
@@ -316,6 +317,7 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 * `phoneNumber`
 * `cloudManaged`
 * `phoneNumberOtp`
+* `emailDelivery`
 
 ### Nested Shape: `ActionParam.options[number]`
 

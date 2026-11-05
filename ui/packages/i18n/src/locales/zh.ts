@@ -176,6 +176,7 @@ const zh = {
   },
   form: {
     noPermissionToSave: '您没有权限保存这条记录。',
+    readOnlyExternalSource: '这张表是只读的：它的记录来自外部数据源，不接受修改。',
     noPermissionToCreate: '您没有创建{{object}}的权限，字段均为只读。',
     noPermissionToEdit: '您没有编辑{{object}}的权限，字段均为只读。',
     noPermissionToEditRecord: '您没有编辑此记录的权限，字段均为只读。',
@@ -1867,6 +1868,10 @@ const zh = {
     },
   },
   console: {
+    organizationMfa: {
+      needsTwoFactor: '“强制多因素认证”需要双重验证，而本部署未开启双重验证，因此勾选后保存会被拒绝。请先开启双重验证：在“设置 → 认证”中打开“要求多因素认证”（对所有组织生效），或在部署上设置 OS_AUTH_TWO_FACTOR=true。',
+      nowRequired: '本组织所有尚未绑定身份验证器的成员现在都必须绑定。每位成员从此次变更后第一次使用起开始计算 MFA 宽限期（默认 7 天，可在“设置 → 认证”中修改），宽限期结束后将无法访问数据，直到完成绑定。已使用身份验证器的成员不受影响。',
+    },
     studio: {
       title: 'Studio',
       accessRequired: '你需要 Studio 访问权限才能打开 Studio。管理员可以在“设置 → 权限集分配”中通过权限集授予。',
@@ -2903,6 +2908,8 @@ const zh = {
       useEmailResetText: '改用邮箱重置',
       phoneSuccessTitle: '密码已重置',
       phoneSuccessDescription: '您的密码已重置，现在可以使用新密码登录了。',
+      noDeliveryTitle: '此处无法通过邮件发送重置链接',
+      noDeliveryDescription: '此部署不发送邮件，因此密码重置链接无法送达。请联系管理员：管理员可以在“设置 → 用户”中为你设置新密码。',
     },
     setPassword: {
       title: '设置一个备用密码',
@@ -3032,6 +3039,7 @@ const zh = {
         continue: '继续',
         preparing: '正在准备…',
         enrollFailed: '无法开始绑定。',
+        unavailable: '此部署未开启双重验证，暂时无法绑定身份验证器。请联系管理员在“设置 → 认证”中开启后再试。',
         scanTitle: '使用身份验证器扫码',
         scanBody: '使用 Google Authenticator、1Password、Authy 等应用扫描此二维码，然后输入 6 位验证码。',
         backupTitle: '保存您的备用码',
@@ -3529,6 +3537,12 @@ const zh = {
         dataset: '数据集 {{count}}',
         dataset_one: '数据集 {{count}}',
         dataset_other: '数据集 {{count}}',
+        hook: '钩子 {{count}}',
+        hook_one: '钩子 {{count}}',
+        hook_other: '钩子 {{count}}',
+        translation: '翻译 {{count}}',
+        translation_one: '翻译 {{count}}',
+        translation_other: '翻译 {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

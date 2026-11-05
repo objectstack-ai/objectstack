@@ -30,7 +30,7 @@
 // their object.
 
 import { describe, it, expect } from 'vitest';
-import { collectExpectedEntries, extractTranslations } from '../src/utils/i18n-extract';
+import { collectExpectedEntries, extractTranslations } from '../src/utils/i18n-bundle-extract';
 import { computeI18nCoverage } from '../src/utils/i18n-coverage';
 import { ObjectTranslationDataSchema } from '@objectstack/spec/system';
 
