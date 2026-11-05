@@ -3,7 +3,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { mapDataError } from '@objectstack/types';
-import { DelegatedAdminGate } from './delegated-admin-gate';
+import { DelegatedAdminGate, isUnreadableAddressedRowRefusal } from './delegated-admin-gate';
 import { isPermissionDeniedError } from './errors.js';
 import { bindCatalogFromTables, bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
@@ -1387,6 +1387,98 @@ describe('DelegatedAdminGate — organization administrators (ADR-0090 D12 as am
       expect(await o.gate.organizationAdminCoversUser(await sets('org_admin'), 'u_member', o.ctxOf('org_admin', null))).toBe(false);
     });
   });
+});
+
+/**
+ * The organization harness's caller reads served through a field rule on
+ * `column`: absent from the row (`hidden`) or replaced by a partial mask
+ * (`masked`), as the read door serves them. System reads see the stored row.
+ * Returns the objects the gate read by the system, in order.
+ */
+function serveCallerReadsThrough(o: ReturnType<typeof makeOrganizationHarness>, column: string, how: 'hidden' | 'masked'): string[] {
+  const storedFindOne = o.ql.findOne.bind(o.ql);
+  const systemReads: string[] = [];
+  o.ql.findOne = async (object: string, opts: any) => {
+    const row = await storedFindOne(object, opts);
+    if (opts?.context?.isSystem) {
+      systemReads.push(object);
+      return row;
+    }
+    if (!row || !Object.prototype.hasOwnProperty.call(row, column)) return row;
+    const seen = { ...row };
+    if (how === 'hidden') delete seen[column];
+    else seen[column] = `${String(row[column]).slice(0, 2)}****`;
+    return seen;
+  };
+  return systemReads;
+}
+
+describe("[ADR-0090 D12; ruling of record 6649064874] an organization administrator's removal is judged on the stored row, and its refusal names only values the caller reads", () => {
+  let o: ReturnType<typeof makeOrganizationHarness>;
+  beforeEach(() => { o = makeOrganizationHarness(); });
+
+  const remove = (principal: string, object: string, id: string) =>
+    o.gate.assert({ object, operation: 'delete', options: { where: { id } }, context: o.ctxOf(principal) });
+
+  /** One refusal, serialized whole: its sentence and every detail it carries. */
+  const whole = (err: any) => JSON.stringify({ message: err.message, details: err.details });
+
+  /**
+   * Per column a removal is judged on: the in-boundary rows the stored-row
+   * verdict admits, the rows it refuses, the stored values each refusal
+   * leaves out, and the sentence it says instead.
+   */
+  const CASES = [
+    { column: 'position', object: 'sys_user_position', admitted: ['up_a'],
+      refused: [{ id: 'up_a_mixed', unnamed: ['mixed_pos', 'wild_set', 'in_set'], says: /the assignment's position is not inside the organization boundary/ }] },
+    { column: 'permission_set', object: 'sys_user_permission_set', admitted: ['ups_a'],
+      refused: [{ id: 'ups_a_wild', unnamed: ['wild_set'], says: /the grant's permission set is not inside the organization boundary/ }] },
+    { column: 'organization_id', object: 'sys_user_position', admitted: ['up_a'],
+      refused: [
+        { id: 'up_b', unnamed: ['org_b'], says: /the row does not belong to the organization you administer/ },
+        { id: 'up_orgless', unnamed: ['carries no organization'], says: /the row does not belong to the organization you administer/ },
+      ] },
+    { column: 'organization_id', object: 'sys_user_permission_set', admitted: ['ups_a'], refused: [] },
+  ] as const;
+
+  for (const principal of ['org_admin', 'org_admin_nb']) {
+    for (const how of ['hidden', 'masked'] as const) {
+      for (const c of CASES) {
+        it(`${principal}: with ${c.object}.${c.column} ${how} from its reads, an in-boundary row is removed, and a row outside is refused without the stored value`, async () => {
+          serveCallerReadsThrough(o, c.column, how);
+          for (const id of c.admitted) {
+            await expect(remove(principal, c.object, id), id).resolves.toBeUndefined();
+          }
+          for (const r of c.refused) {
+            const err = await deniedOf(() => remove(principal, c.object, r.id));
+            expect(err.message, r.id).toMatch(/organization boundary/);
+            expect(err.message, r.id).toMatch(r.says);
+            for (const value of r.unnamed) expect(whole(err), `${r.id}: '${value}'`).not.toContain(value);
+            expect(whole(err), `${r.id}: not the masked value either`).not.toContain('****');
+          }
+        });
+      }
+    }
+
+    it(`${principal}: a column it does read keeps the stored value in the guidance — the position and its set, beside an organization it does not read`, async () => {
+      serveCallerReadsThrough(o, 'organization_id', 'hidden');
+      const err = await deniedOf(() => remove(principal, 'sys_user_position', 'up_a_mixed'));
+      expect(err.message).toMatch(/position 'mixed_pos' carries permission set 'wild_set'.*condition \(a\)/);
+      expect(err.details).toMatchObject({ position: 'mixed_pos', permissionSet: 'wild_set' });
+    });
+
+    it(`${principal}: a row its own read does not return, and an id naming no row, are refused as no row — with no read of the stored row`, async () => {
+      const systemReads = serveCallerReadsThrough(o, 'position', 'hidden');
+      const servedFindOne = o.ql.findOne;
+      o.ql.findOne = async (object: string, opts: any) =>
+        (!opts?.context?.isSystem && opts?.where?.id === 'up_a') ? null : servedFindOne(object, opts);
+      for (const id of ['up_a', 'zz_no_such_row']) {
+        const err = await deniedOf(() => remove(principal, 'sys_user_position', id));
+        expect(isUnreadableAddressedRowRefusal(err), id).toBe(true);
+      }
+      expect(systemReads.filter((object) => object === 'sys_user_position'), 'no system read of the addressed row').toEqual([]);
+    });
+  }
 });
 
 // ---------------------------------------------------------------------------
