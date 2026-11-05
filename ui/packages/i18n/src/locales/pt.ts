@@ -2932,6 +2932,7 @@ const pt = {
       verifyingDescription: "Estamos verificando seu e-mail. Por favor, aguarde.",
       successTitle: "E-mail verificado",
       successDescription: "Seu e-mail foi verificado. Você pode fazer login agora.",
+      handoffSuccessDescription: "Seu e-mail foi verificado. Volte ao aplicativo em que você estava fazendo login e faça login lá.",
       errorTitle: "Falha na verificação",
       errorDescription: "A verificação falhou. Por favor, solicite um novo link.",
       missingToken: "Falta um token no link de verificação.",

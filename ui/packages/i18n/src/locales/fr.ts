@@ -2933,6 +2933,7 @@ const fr = {
       verifyingDescription: "Nous vérifions votre e-mail. Veuillez patienter.",
       successTitle: "E-mail vérifié",
       successDescription: "Votre e-mail a été vérifié. Vous pouvez maintenant vous connecter.",
+      handoffSuccessDescription: "Votre e-mail a été vérifié. Revenez à l'application dans laquelle vous vous connectiez, et connectez-vous là-bas.",
       errorTitle: "Échec de la vérification",
       errorDescription: "La vérification a échoué. Veuillez demander un nouveau lien.",
       missingToken: "Il manque un token dans le lien de vérification.",

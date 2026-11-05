@@ -2872,6 +2872,7 @@ const ko = {
       verifyingDescription: "이메일을 확인하고 있습니다. 잠시 기다리세요.",
       successTitle: "이메일 확인됨",
       successDescription: "이메일이 확인되었습니다. 이제 로그인할 수 있습니다.",
+      handoffSuccessDescription: "이메일이 확인되었습니다. 로그인하려던 앱으로 돌아가 그곳에서 로그인하세요.",
       errorTitle: "확인 실패",
       errorDescription: "확인에 실패했습니다. 새 링크를 요청하세요.",
       missingToken: "확인 링크에 토큰이 없습니다.",

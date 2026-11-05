@@ -48,11 +48,13 @@ import {
   type ActivityTimelineEntry,
 } from './renderers/recordActivityFeed';
 import {
+  RecordFieldHistoryContext,
   TIMELINE_STREAM_FILTERS,
   fieldHistoryEntriesOf,
   fieldHistoryOf,
   filterTimelineStream,
   isSystemStreamEntry,
+  timelineStreamFilters,
   type TimelineStreamFilter,
 } from './recordTimelineStream';
 
@@ -219,11 +221,21 @@ const FEED_TYPE_COLORS: Record<FeedItemType, string> = {
   approval: 'bg-violet-100 text-violet-600',
 };
 
-function getFilterOptions(t: (key: string) => string): { value: FeedFilterMode; label: string }[] {
+/**
+ * The dropdown's options, given whether the record's field history is shown
+ * (`RecordFieldHistoryContext`): `changes_only` is offered exactly when the
+ * stream offers its 变更 chip — the one rule, `timelineStreamFilters`
+ * (objectstack#30074, objectstack#30344).
+ */
+function getFilterOptions(
+  t: (key: string) => string,
+  fieldHistory: boolean,
+): { value: FeedFilterMode; label: string }[] {
+  const changesOffered = timelineStreamFilters(fieldHistory).includes('changes');
   return [
     { value: 'all', label: t('detail.allActivity') },
     { value: 'comments_only', label: t('detail.commentsOnly') },
-    { value: 'changes_only', label: t('detail.fieldChangesFilter') },
+    ...(changesOffered ? [{ value: 'changes_only' as const, label: t('detail.fieldChangesFilter') }] : []),
     { value: 'tasks_only', label: t('detail.tasksOnly') },
   ];
 }
@@ -464,7 +476,11 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
     </>
   ) : null;
 
-  const activeFilter = controlledFilter ?? internalFilter;
+  // A filter the dropdown does not offer filters nothing: it reads as `all`,
+  // as the stream's chips do.
+  const filterOptions = getFilterOptions(t, React.useContext(RecordFieldHistoryContext));
+  const chosenFilter = controlledFilter ?? internalFilter;
+  const activeFilter: FeedFilterMode = filterOptions.some((opt) => opt.value === chosenFilter) ? chosenFilter : 'all';
   const showFilter = config?.showFilterToggle !== false;
   const showCommentInput = config?.showCommentInput !== false && !!onAddComment;
   const enableReactions = config?.enableReactions ?? false;
@@ -1069,7 +1085,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {getFilterOptions(t).map((opt) => (
+                {filterOptions.map((opt) => (
                   <SelectItem key={opt.value} value={opt.value}>
                     {opt.label}
                   </SelectItem>
