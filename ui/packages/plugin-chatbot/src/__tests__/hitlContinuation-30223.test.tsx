@@ -13,12 +13,14 @@
  * Driven end to end on the REAL hooks: `useHitlInChat` decides over a mocked
  * pending-actions endpoint, its continuation goes through `useObjectChat`'s
  * real transport (the captured chat POST is the model-facing payload), and the
- * hook's resulting messages are drawn by `ChatbotEnhanced`.
+ * hook's resulting messages are drawn by `ChatbotEnhanced` through the same
+ * `toRuntimeMessages` seam the console page uses.
  */
 import '@testing-library/jest-dom/vitest';
 import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ChatbotEnhanced, type ChatbotEnhancedMessage } from '../ChatbotEnhanced';
+import { toRuntimeMessages } from '../chatMessageAdapter';
 import { hitlContinuationTag, isHitlContinuation } from '../hitlContinuation';
 import { useHitlInChat } from '../useHitlInChat';
 import { useObjectChat } from '../useObjectChat';
@@ -118,7 +120,7 @@ describe('objectstack#30223 — the HITL continuation is the model\'s, not the p
     expect(messages.some((m) => m.role === 'user' && m.content === sent)).toBe(true);
 
     // … and the transcript does not draw it, while the person's own ask stays.
-    render(<ChatbotEnhanced messages={messages} />);
+    render(<ChatbotEnhanced messages={toRuntimeMessages(messages)} />);
     expect(screen.getByText(ASK)).toBeInTheDocument();
     expect(screen.queryByText(/The operator approved/)).toBeNull();
     expect(screen.queryByText(/\[HITL pa_8cf4\]/)).toBeNull();
@@ -136,7 +138,7 @@ describe('objectstack#30223 — the HITL continuation is the model\'s, not the p
     expect(sent).toContain('The operator rejected the `update_record` call');
     expect(isHitlContinuation(sent)).toBe(true);
 
-    render(<ChatbotEnhanced messages={result.current.chat.messages} />);
+    render(<ChatbotEnhanced messages={toRuntimeMessages(result.current.chat.messages)} />);
     expect(screen.getByText(ASK)).toBeInTheDocument();
     expect(screen.queryByText(/The operator rejected/)).toBeNull();
   });
@@ -151,7 +153,7 @@ describe('objectstack#30223 — the HITL continuation is the model\'s, not the p
     await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u) === CHAT_API)).toBe(true));
 
     expect(lastUserTextSent(fetchMock)).toBe(typed);
-    render(<ChatbotEnhanced messages={result.current.chat.messages} />);
+    render(<ChatbotEnhanced messages={toRuntimeMessages(result.current.chat.messages)} />);
     expect(screen.getByText(ASK)).toBeInTheDocument();
     expect(screen.getByText(typed)).toBeInTheDocument();
   });
