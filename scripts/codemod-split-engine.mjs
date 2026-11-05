@@ -2760,6 +2760,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'byte-identity proof': 10,
   'import prune': 4,
   'refusals': 6,
+  'scoped classes (second pass)': 16,
 });
 const SELF_TEST_BATTERY_FLOOR = 5;
 
@@ -2933,6 +2934,80 @@ ${pad}
 
 function needleInMethod(n: number): number {
   return n;
+}
+`;
+}
+
+const FIXTURE_SCOPED_CLASSES = Object.freeze([
+  ['ObjectRepository', 'engine-object-repository.ts', 'Repository'],
+  ['ScopedContext', 'engine-scoped-context.ts', 'Context'],
+]);
+
+/** An `engine.ts` whose `ObjectQL` the first pass already split, ahead of two unsplit scoped classes. */
+function scopedFixtureSource() {
+  return `import { helperImported } from './other.js';
+import { onlyScopedReads } from './scoped-only.js';
+import { count } from './engine-count-aggregate.js';
+import { LifecycleFacet } from './engine-lifecycle.js';
+
+export class ObjectQL {
+  run(n: number): number {
+    // ${MARK} The body moved to \`engine-lifecycle.ts\`.
+    return LifecycleFacet.run(n);
+  }
+}
+
+export class ObjectRepository {
+  constructor(
+    private objectName: string,
+    private engine: { find(o: string): Promise<any[]>; count(o: string): Promise<number> },
+  ) {}
+
+  /** A public docblock: it stays on the class. */
+  async find(query: any = {}): Promise<any[]> {
+    return this.engine.find(this.objectName + String(query));
+  }
+
+  async count(): Promise<number> {
+    return this.engine.count(this.objectName);
+  }
+
+  inferred() {
+    return 1;
+  }
+}
+
+export class ScopedContext {
+  constructor(private ctx: { user?: string }, private engine: any) {}
+
+  private flag = false;
+
+  private derive(ctx: { user?: string }): ScopedContext {
+    const child = new ScopedContext(ctx, this.engine);
+    child.flag = this.flag;
+    return child;
+  }
+
+  /** A private docblock: it moves with the body. */
+  private readFlag(): boolean {
+    return this.flag && Boolean(helperImported());
+  }
+
+  object(name: string): ObjectRepository {
+    return new ObjectRepository(name, this.engine);
+  }
+
+  sudo(): ScopedContext {
+    this.flag = this.readFlag() || Boolean(onlyScopedReads());
+    return this.derive({ ...this.ctx });
+  }
+
+  handsSelf(): ScopedContext {
+    void count;
+    return this;
+  }
+
+  get user() { return this.ctx.user; }
 }
 `;
 }
@@ -3115,6 +3190,53 @@ async function selfTest() {
     // `--help` reads no tree: it answers before the "already split" guard, so
     // it exits 0 whether engine.ts on disk is split (as on a branch) or not.
     check('--help is answered, never refused, whatever engine.ts holds', (await main(['--help']).catch(() => 2)) === 0);
+  }
+
+  open('scoped classes (second pass)');
+  {
+    const input = scopedFixtureSource();
+    const planned = planScoped(tm, input, { classes: FIXTURE_SCOPED_CLASSES });
+    const record = (cls, name) => planned.targets.find((t) => t.className === cls)?.records.find((r) => r.name === name);
+    const why = (cls, name) => (record(cls, name)?.reasons ?? ['<absent>']).join('; ');
+    check('a forwarding method, an assigning one and one constructing a sibling class move',
+      ['find', 'count'].every((n) => why('ObjectRepository', n) === '') && ['object', 'sudo', 'readFlag'].every((n) => why('ScopedContext', n) === ''),
+      ['find', 'count'].map((n) => why('ObjectRepository', n)).concat(['object', 'sudo', 'readFlag'].map((n) => why('ScopedContext', n))).join(' | '));
+    check('a method that only shares a hand-series import\'s name is not a hand-series stub', why('ObjectRepository', 'count') === '', why('ObjectRepository', 'count'));
+    check('a body writing a private member of another instance stays (foreign-private)', why('ScopedContext', 'derive').startsWith('foreign-private'), why('ScopedContext', 'derive'));
+    check('a body handing the instance on stays (bare-this)', why('ScopedContext', 'handsSelf').startsWith('bare-this'), why('ScopedContext', 'handsSelf'));
+    check('a public method with an inferred return type stays (inferred-return-type)', why('ObjectRepository', 'inferred').startsWith('inferred-return-type'), why('ObjectRepository', 'inferred'));
+    const out = generateScoped(tm, input, planned);
+    const again = generateScoped(tm, input, planScoped(tm, input, { classes: FIXTURE_SCOPED_CLASSES }));
+    const v = verifyScoped(tm, input, out.host, out.modules, { classes: FIXTURE_SCOPED_CLASSES });
+    check('the generated scoped split proves against its base', v.failures.length === 0 && v.moved.length === 5,
+      [...v.failures, `moved: ${v.moved.map((m) => m.name).join()}`].join(' | '));
+    check('two runs on one input write byte-identical trees',
+      treeHash(new Map([['h', out.host], ...out.modules])) === treeHash(new Map([['h', again.host], ...again.modules])));
+    const ctxMod = out.modules.get('engine-scoped-context.ts') ?? '';
+    const hostsMod = out.modules.get(SCOPED_HOSTS_MODULE) ?? '';
+    check('each stub hands its body the one host of its own instance',
+      out.host.includes('return ScopedContextFacet.sudo.call(scopedContextHost.of(this));') &&
+      out.host.includes('return ObjectRepositoryFacet.find.call(objectRepositoryHost.of(this), query);'),
+      out.host.slice(out.host.indexOf('sudo(')));
+    check('the host module keeps one InstanceHost per class and imports types only',
+      hostsMod.includes("export const scopedContextHost = new InstanceHost<ScopedContext, ScopedContextHost>('ScopedContextFacet', 'ScopedContext');") &&
+      !/^import (?!type )/m.test(hostsMod));
+    check('a private docblock moves with its body; a public one stays on the class',
+      ctxMod.includes('  /** A private docblock: it moves with the body. */\n  static readFlag(') && !out.host.includes('A private docblock') &&
+      out.host.includes('  /** A public docblock: it stays on the class. */\n  find(query: any = {}): Promise<any[]> {'));
+    check('a field a body assigns gets a setter in its class\'s install block',
+      out.host.includes('      get flag() { return instance.flag; },\n      set flag(v) { instance.flag = v; },'));
+    check('the first pass\'s class is not touched', out.host.includes(`  run(n: number): number {\n    // ${MARK} The body moved to \`engine-lifecycle.ts\`.\n    return LifecycleFacet.run(n);\n  }`) &&
+      !out.host.slice(out.host.indexOf('export class ObjectQL'), out.host.indexOf('export class ObjectRepository')).includes(SCOPED_MARK));
+    const verifyWith = (host, mods) => verifyScoped(tm, input, host, mods, { classes: FIXTURE_SCOPED_CLASSES }).failures.length > 0;
+    check('one edited character in a moved body fails', verifyWith(out.host,
+      new Map([...out.modules, ['engine-scoped-context.ts', ctxMod.replace('{ ...this.ctx }', '{ ...this.ctx, x: 1 }')]])));
+    check('a stub handing the other class\'s host fails', verifyWith(out.host.replace('ScopedContextFacet.sudo.call(scopedContextHost.of(this))', 'ScopedContextFacet.sudo.call(objectRepositoryHost.of(this))'), out.modules));
+    check('a written field\'s setter left out of the install block fails', verifyWith(out.host.replace('      set flag(v) { instance.flag = v; },\n', ''), out.modules));
+    check('an edited host module fails', verifyWith(out.host, new Map([...out.modules, [SCOPED_HOSTS_MODULE, hostsMod.replace('this.hosts.set(instance, host);', '')]])));
+    check('an import only a moved body read is pruned, and the proof names it', out.pruned.includes('onlyScopedReads') && v.pruned.includes('onlyScopedReads'), out.pruned.join());
+    check('a scoped class the file does not declare refuses',
+      refused(() => planScoped(tm, input, { classes: [['Gone', 'engine-gone.ts', 'Gone']] })));
   }
 
   const declared = Object.keys(SELF_TEST_BATTERIES);
