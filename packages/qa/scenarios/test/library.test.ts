@@ -2,8 +2,8 @@
 
 /**
  * The open scenario library under `docs/qa/scenarios/` — every card in the
- * directory loads, and every question's COMPUTED truth is the one pinned
- * here. A broken card, or a seed edit that moves an answer, is red in CI.
+ * directory loads, and every question's COMPUTED truth (over all rows, and
+ * per persona) is the one pinned here. A broken card, or a seed edit that moves an answer, is red in CI.
  *
  * The expected values below were worked out by hand from each card's seed
  * rows, independently of the evaluator; they are the oracle the evaluator is
@@ -30,6 +30,9 @@ const ranking = (...r: Array<[string, number]>): Truth => ({
   rows: r.map(([key, value]) => ({ key, value })),
 });
 
+const UNANSWERABLE: Truth = { kind: 'unanswerable' };
+const WITHHELD: Truth = { kind: 'withheld' };
+
 const EXPECTED_TRUTHS: Record<string, Record<string, Truth>> = {
   invoice_with_line_items: {
     invoices_not_draft: scalar(2),
@@ -37,6 +40,12 @@ const EXPECTED_TRUTHS: Record<string, Record<string, Truth>> = {
     amount_per_invoice: groups(['i1', 100], ['i2', 120], ['i3', 75]),
     avg_quantity: scalar(4),
     top_products: ranking(['Gadget', 125], ['Service', 100]),
+    invoice_count: scalar(3),
+    // Cross-object: invoice_line rows filtered through `invoice.status`.
+    billed_amount: scalar(220),
+    // asOf 2026-10-31, calendar this_month: i2 (10-03) and i3 (10-28), not i1 (09-12).
+    issued_this_month: scalar(2),
+    tax_rate: UNANSWERABLE,
   },
   project_with_tasks: {
     open_tasks: scalar(3),
@@ -44,21 +53,9 @@ const EXPECTED_TRUTHS: Record<string, Record<string, Truth>> = {
     tasks_per_project: groups(['p1', 3], ['p2', 1], ['p3', 2]),
     largest_task: scalar(24),
     biggest_project: ranking(['p1', 38]),
-  },
-  blog_post_with_comments: {
-    comment_count: scalar(5),
-    ana_comments: scalar(2),
-    // A post no comment names (po3) has no group: groups come from the rows.
-    comments_per_post: groups(['po1', 2], ['po2', 3]),
-    most_discussed: ranking(['po2', 3]),
-  },
-  expense_report_with_lines: {
-    berlin_total: scalar(640),
-    spend_by_category: groups(['travel', 350], ['lodging', 280], ['meals', 200]),
-    avg_line: scalar(166),
-    cheapest_meal: scalar(40),
-    top_lines: ranking(['e1', 320], ['e2', 280]),
-    october_first_week: scalar(640),
+    tasks_in_active_projects: scalar(3),
+    open_by_project_status: groups(['active', 2], ['planned', 1]),
+    relaunch_sponsor: UNANSWERABLE,
   },
   crm_account_with_contacts: {
     tech_accounts: scalar(2),
@@ -66,34 +63,30 @@ const EXPECTED_TRUTHS: Record<string, Record<string, Truth>> = {
     contacts_per_account: groups([null, 1], ['ac1', 2], ['ac2', 1], ['ac3', 1]),
     unattached_contacts: scalar(1),
     best_covered_account: ranking(['ac1', 2]),
+    account_count: scalar(3),
+    tech_contacts: scalar(3),
+    contacts_by_industry: groups([null, 1], ['retail', 1], ['tech', 3]),
+    acme_revenue: UNANSWERABLE,
   },
-  book_library: {
-    books_available: scalar(2),
-    active_loans: scalar(2),
-    loans_per_member: groups(['m1', 3], ['m2', 1], ['m3', 1]),
-    top_borrower: ranking(['m1', 3]),
-    avg_returned_days: scalar(12),
+};
+
+/** The same questions answered AS a persona: row scope applied, hidden reads withheld. */
+const EXPECTED_PERSONA_TRUTHS: Record<string, Record<string, Record<string, Truth>>> = {
+  invoice_with_line_items: {
+    // sales_rep owns i1 and i3 (scope reaches lines through `invoice.owner`);
+    // warehouse_staff must not see `amount`.
+    amount_per_invoice: { sales_rep: groups(['i1', 100], ['i3', 75]), warehouse_staff: WITHHELD },
+    invoice_count: { sales_rep: scalar(2), warehouse_staff: scalar(3) },
   },
-  tickets_select_dense: {
-    open_tickets: scalar(3),
-    tickets_by_priority: groups(['high', 2], ['low', 2], ['medium', 1], ['urgent', 1]),
-    hot_tickets: scalar(3),
-    unclosed_hours: scalar(11),
-    top_requester: ranking(['ana', 2]),
+  project_with_tasks: {
+    // contractor is assigned t1, t3, t5 — only t3 is open; client_viewer hides `task`.
+    open_tasks: { contractor: scalar(1), client_viewer: WITHHELD },
+    relaunch_estimate: { contractor: WITHHELD },
   },
-  leave_system: {
-    requests_by_status: groups(['approved', 2], ['pending', 2], ['rejected', 1]),
-    approved_days: scalar(8),
-    days_per_employee: groups(['em1', 4], ['em2', 2], ['em3', 5.5]),
-    longest_request: scalar(5),
-    most_leave: ranking(['em3', 5.5]),
-  },
-  purchase_master_detail: {
-    po_1001_total: scalar(200),
-    total_per_order: groups(['po1', 200], ['po2', 400]),
-    line_count: scalar(4),
-    avg_unit_cost: scalar(42.25),
-    largest_lines: ranking(['ol3', 340], ['ol2', 120]),
+  crm_account_with_contacts: {
+    // sdr owns ac1 and ac3; the unattached contact resolves to no owner.
+    contacts_per_account: { sdr: groups(['ac1', 2], ['ac3', 1]) },
+    account_count: { sdr: scalar(2), partner_user: WITHHELD },
   },
 };
 
@@ -105,7 +98,7 @@ describe('the open scenario library (docs/qa/scenarios)', () => {
     expect(result.refusals.map(formatRefusal)).toEqual([]);
   });
 
-  it('holds exactly the nine seed cards', () => {
+  it('holds exactly the three control cards (the mid-tier cards land on their own)', () => {
     expect(result.cards.map((c) => c.card.id).sort()).toEqual(Object.keys(EXPECTED_TRUTHS).sort());
   });
 
@@ -114,8 +107,9 @@ describe('the open scenario library (docs/qa/scenarios)', () => {
       const loaded = result.cards.find((c) => c.card.id === id);
       expect(loaded, `${id} did not load`).toBeDefined();
       expect(loaded!.truths).toEqual(expected);
-      // The Run half is complete: ≥3 questions, ≥2 personas, all five guardrails.
-      expect(loaded!.card.run.questions.length).toBeGreaterThanOrEqual(3);
+      expect(loaded!.personaTruths).toEqual(EXPECTED_PERSONA_TRUTHS[id]);
+      // The Run half is complete: ≥5 questions, ≥2 personas, all five guardrails.
+      expect(loaded!.card.run.questions.length).toBeGreaterThanOrEqual(5);
       expect(loaded!.card.run.personas.length).toBeGreaterThanOrEqual(2);
       expect(new Set(loaded!.card.run.guardrails.map((g) => g.check)).size).toBe(5);
     });

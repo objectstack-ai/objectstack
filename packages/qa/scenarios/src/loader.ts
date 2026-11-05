@@ -311,6 +311,7 @@ function checkCard(
   // ── personas: hidden refs and row scope resolve ──
   duplicates(run.personas, (p) => p.id, ['run', 'personas'], 'persona id', refuse);
   const personas = new Set(run.personas.map((p) => p.id));
+  const unscoped = new Set<string>(); // personas whose row scope was refused: no per-persona truth from them
   run.personas.forEach((p, i) => {
     (p.hidden.objects ?? []).forEach((o, j) => {
       if (!objects.has(o)) refuse(['run', 'personas', i, 'hidden', 'objects', j], `\`${o}\` is not in expect.objects`);
@@ -324,7 +325,8 @@ function checkCard(
       const at: IssuePath = ['run', 'personas', i, 'scope', j];
       if (!objects.has(sc.object) || seed[sc.object] === undefined) {
         refuse([...at, 'object'], `\`${sc.object}\` is not a seeded expected object`);
-      } else checkPath(sc.object, sc.field, [...at, 'field']);
+        unscoped.add(p.id);
+      } else if (checkPath(sc.object, sc.field, [...at, 'field']) === null) unscoped.add(p.id);
     });
   });
 
@@ -377,6 +379,7 @@ function checkCard(
     if (q.personas === undefined) return;
     personaTruths[q.id] = {};
     q.personas.forEach((id, j) => {
+      if (unscoped.has(id)) return;
       const p = run.personas.find((x) => x.id === id)!;
       const hiddenFields = new Set((p.hidden.fields ?? []).map((f) => `${f.object}.${f.field}`));
       const hiddenObjects = new Set(p.hidden.objects ?? []);

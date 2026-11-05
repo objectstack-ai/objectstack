@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { evaluateTruth, TruthError, type SeedRow, type TruthSpec } from '../src/index.js';
+import { evaluateTruth, TruthError, windowRange, type SeedRow, type TruthSpec } from '../src/index.js';
 
 const rows: SeedRow[] = [
   { id: 'r1', team: 'a', size: 10, day: '2026-01-05', rank: 3 },
@@ -98,5 +98,28 @@ describe('evaluateTruth', () => {
 
   it('refuses a topN asking for more entries than exist', () => {
     expect(refusal({ kind: 'topN', n: 4, order: 'desc', field: 'size' }).message).toMatch(/only 3/);
+  });
+  it('answers unanswerable without reading a row', () => {
+    expect(evaluateTruth({ kind: 'unanswerable', reason: 'not seeded' }, [])).toEqual({ kind: 'unanswerable' });
+  });
+
+  it('filters and groups through the context resolver (relation paths)', () => {
+    const resolve = (row: SeedRow, path: string) => (path === 'team.lead' ? (row.team === 'a' ? 'ana' : null) : (row[path] ?? null));
+    expect(evaluateTruth({ kind: 'count', groupBy: 'team.lead' }, rows, { resolve })).toEqual({
+      kind: 'groups',
+      groups: [
+        { key: null, value: 2 },
+        { key: 'ana', value: 2 },
+      ],
+    });
+  });
+
+  it('computes windows against asOf, inclusive, across month and year edges', () => {
+    expect(windowRange({ kind: 'last_days', days: 7 }, '2026-03-02')).toEqual(['2026-02-24', '2026-03-02']);
+    expect(windowRange({ kind: 'calendar', period: 'this_month' }, '2024-02-10')).toEqual(['2024-02-01', '2024-02-29']);
+    expect(windowRange({ kind: 'calendar', period: 'previous_month' }, '2026-01-15')).toEqual(['2025-12-01', '2025-12-31']);
+    expect(windowRange({ kind: 'calendar', period: 'previous_year' }, '2026-01-15')).toEqual(['2025-01-01', '2025-12-31']);
+    const inMarch = { kind: 'count' as const, filter: [{ field: 'day', op: 'in_window' as const, value: { kind: 'calendar' as const, period: 'this_month' as const } }] };
+    expect(evaluateTruth(inMarch, rows, { asOf: '2026-03-31' })).toEqual({ kind: 'scalar', value: 2 });
   });
 });
