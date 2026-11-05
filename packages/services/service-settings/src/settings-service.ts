@@ -901,6 +901,13 @@ export class SettingsService {
   private readonly optionSources = new Map<string, Map<string, SettingsOptionSource>>();
   /** Option-source failures already said, `namespace.key:cause` — see {@link optionSourceAnswer}. */
   private readonly reportedOptionSourceFaults = new Set<string>();
+  /**
+   * Whether a sourced key's `OS_*` verdict is held until the boot seals the
+   * sources — see {@link holdOptionSourceVerdicts}.
+   */
+  private optionSourceVerdictsHeld = false;
+  /** Sourced keys whose `OS_*` override was taken in force while held, `[namespace, key]`. */
+  private readonly heldOptionSourceVerdicts = new Map<string, [string, string]>();
   /** Write predicates by namespace, then key — see {@link registerWritePredicate}. */
   private readonly writePredicates = new Map<
     string,
@@ -1408,7 +1415,7 @@ export class SettingsService {
       const { allowed, judge } = this.optionTableOf(namespace, key, reg.optionTables.get(key) ?? []);
       if (allowed.length > 0) {
         const rejected = judge(value);
-        if (rejected) {
+        if (rejected && !this.holdsOptionSourceVerdict(namespace, key)) {
           this.reportRejectedEnvOverride(reg, namespace, key, envName, rejected.value, {
             what: 'is not a declared option for',
             detail: `Allowed values: ${allowed.join(', ')}.`,
@@ -1696,6 +1703,59 @@ export class SettingsService {
     let byKey = this.optionSources.get(namespace);
     if (!byKey) this.optionSources.set(namespace, (byKey = new Map()));
     byKey.set(key, source);
+  }
+
+  /**
+   * Hold the `OS_*` verdict on every sourced key until {@link sealOptionSources}.
+   *
+   * A source answers from a list the boot is still filling: the i18n service
+   * reports the locales its plugins and the app's authored translations load,
+   * and the authored ones arrive at `kernel:ready`, so a `kernel:ready` reader
+   * of `localization.locale` can ask before the language its override names
+   * is in the list. Judged then, the override would be reported IGNORED and
+   * the reader would keep the next layer's value, though the boot goes on to
+   * offer that language (AGENTS.md, "Startup registry reads").
+   *
+   * So while held, an override the source (or the declared table it stands
+   * in for) does not admit is taken in force, unreported, and remembered.
+   * The other families (pattern, domain, bounds, format) are judged as ever:
+   * they do not depend on the list. A service nobody holds judges at once,
+   * as it always has.
+   */
+  holdOptionSourceVerdicts(): void {
+    this.optionSourceVerdictsHeld = true;
+  }
+
+  /**
+   * End the hold: the lists the sources read are whole (the plugin calls this
+   * at `kernel:bootstrapped`, after every `kernel:ready` handler). Each key
+   * whose override was taken in force while held is judged again, now for
+   * real: one its source still does not admit is reported IGNORED once, as at
+   * any read, and a change is emitted for its namespace and key so a reader
+   * that applied the held value reads the key again and drops it. One the
+   * source now admits stays in force, and nothing is said. Idempotent.
+   */
+  sealOptionSources(): void {
+    if (!this.optionSourceVerdictsHeld) return;
+    this.optionSourceVerdictsHeld = false;
+    const held = [...this.heldOptionSourceVerdicts.values()];
+    this.heldOptionSourceVerdicts.clear();
+    for (const [namespace, key] of held) {
+      const reg = this.registry.get(namespace);
+      if (!reg) continue;
+      if (this.effectiveEnvOverride(reg, namespace, key) !== null) continue;
+      this.emitChange({ namespace, key, scope: 'global', action: 'set', at: new Date().toISOString() });
+    }
+  }
+
+  /**
+   * Whether this key's option verdict is held (see {@link holdOptionSourceVerdicts}),
+   * remembering the key for {@link sealOptionSources} when it is.
+   */
+  private holdsOptionSourceVerdict(namespace: string, key: string): boolean {
+    if (!this.optionSourceVerdictsHeld || !this.optionSources.get(namespace)?.has(key)) return false;
+    this.heldOptionSourceVerdicts.set(`${namespace}.${key}`, [namespace, key]);
+    return true;
   }
 
   /**
