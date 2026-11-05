@@ -283,6 +283,19 @@ export const PUBLIC_AUTH_FEATURES = {
         'transport in production keeps it off.',
     },
   },
+  emailDelivery: {
+    surface: 'login',
+    semantics: 'opt-in',
+    exempt: {
+      reason:
+        'Login-surface only: tells the forgot-password page whether a reset ' +
+        'link can be emailed on this deployment, so its success screen does ' +
+        'not say a link was sent when no mail leaves. True only when the wired ' +
+        'email service reports itself configured; no email service and the ' +
+        'stock log transport keep it off. Describes the deployment, never an ' +
+        'address: the reset request answers known and unknown addresses alike.',
+    },
+  },
 } as const satisfies Record<string, PublicAuthFeatureEntry>;
 
 export type PublicAuthFeatureName = keyof typeof PUBLIC_AUTH_FEATURES;

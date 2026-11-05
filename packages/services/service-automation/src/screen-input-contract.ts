@@ -59,6 +59,11 @@ function isPresent(v: unknown): boolean {
   return v !== undefined && v !== null && !(typeof v === 'string' && v.trim() === '');
 }
 
+/** A finite JSON number: the one value the numeric screen-field kinds admit. */
+function isFiniteNumber(value: unknown): boolean {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
 /**
  * The closed set of screen-field `type` members that are VALUE domains, each
  * with the predicate a present value must meet and the sentence a value that
@@ -67,7 +72,13 @@ function isPresent(v: unknown): boolean {
  */
 const SCREEN_FIELD_VALUE_DOMAINS: ReadonlyMap<string, { admits: (value: unknown) => boolean; expected: string }> =
   new Map([
-    ['number', { admits: (value) => typeof value === 'number' && Number.isFinite(value), expected: 'a number' }],
+    // The three numeric kinds, on one predicate: the same group the object
+    // protocol names (`MEASURE_FIELD_TYPES`). `number` is ruling A′; `currency`
+    // and `percent` joined it by ruling (#30178). A finite JSON number only, ⛔
+    // never a numeric string read as one.
+    ['number', { admits: isFiniteNumber, expected: 'a number' }],
+    ['currency', { admits: isFiniteNumber, expected: 'a number' }],
+    ['percent', { admits: isFiniteNumber, expected: 'a number' }],
     // [#25801] The uploaded `sys_file` id — ADR-0104 D3's stored form — judged
     // by the spec's one arbiter, the predicate the record write's claim path
     // reads too, so an id this door admits is one a later write can claim.
@@ -111,8 +122,9 @@ export function screenDeclaresInputContract(screen: ScreenSpec | undefined): boo
  *
  * Enforced, and nothing beyond it:
  *  - `required` presence for every field the caller was actually asked for;
- *  - the VALUE SHAPE of a `type: 'number'` field (#17306) and of a
- *    `type: 'file'` field (#25801);
+ *  - the VALUE SHAPE of a numeric field — `type: 'number'` (#17306),
+ *    `'currency'` or `'percent'` (#30178) — and of a `type: 'file'` field
+ *    (#25801);
  *  - the declared numeric bound pair `min` / `max` (#17306);
  *  - no value at all under a `type: 'record_link'` field;
  *  - undeclared keys.
@@ -130,9 +142,12 @@ export function screenDeclaresInputContract(screen: ScreenSpec | undefined): boo
  * Value SHAPE (`type`) is out of scope here with ONE closed exception, and the
  * exception is the maintainer's (ruling A′, 2026-09-13): a screen field's
  * `type` is an open widget hint, so no member of it constrains a value —
- * EXCEPT `'number'`, whose meaning is not a rendering preference but a value
- * domain the bound pair beside it already assumes. A present value for a
- * `type: 'number'` field that is not a finite JSON number is refused with
+ * EXCEPT the numeric kinds, whose meaning is not a rendering preference but a
+ * value domain the bound pair beside it already assumes. Ruling A′ named
+ * `'number'`; `'currency'` and `'percent'` joined it under the same rule by a
+ * later ruling (#30178), so the three numeric kinds the object protocol groups
+ * (`MEASURE_FIELD_TYPES`) answer one question one way. A present value for a
+ * numeric field that is not a finite JSON number is refused with
  * `invalid_type`, the catalog's existing member for a value of the wrong
  * primitive type (ADR-0114 D2 — no new code, and deliberately not
  * `invalid_number`, which names a PARSE failure rather than a type mismatch).
@@ -143,9 +158,12 @@ export function screenDeclaresInputContract(screen: ScreenSpec | undefined): boo
  * That closes the gap the bound pass alone left open. The bound pass compares
  * numbers, so before this every non-number slipped past BOTH — under a `max`
  * of 20, `"25"` was conformant. The refusal now lands on the shape, and the
- * bound pass is left comparing numbers only, which is all it can do.
+ * bound pass is left comparing numbers only, which is all it can do. Until
+ * `percent` joined, the console posted it as a string, so a `percent` field's
+ * bound held for no console user at all; the console now gives it the numeric
+ * input `number` and `currency` have.
  *
- * ⚠️ Narrow on purpose in two directions. It keys off `type: 'number'`, not
+ * ⚠️ Narrow on purpose in two directions. It keys off the numeric `type`, not
  * off the presence of a bound: a bound declared on a non-numeric field still
  * constrains nothing (`FieldSchema.min`/`.max` are unconditioned on `type`
  * too). And it is a PRESENCE-conditioned check, like the bound: an absent
@@ -167,7 +185,8 @@ export function screenDeclaresInputContract(screen: ScreenSpec | undefined): boo
  * write's question, asked there under the write's own caller (#25692) — not
  * this door's, which holds no storage service.
  *
- * No other widget hint is read as a value domain: the set is
+ * No other widget hint is read as a value domain — `rating`, `slider` and
+ * `progress` included, which the console has no numeric input for: the set is
  * {@link SCREEN_FIELD_VALUE_DOMAINS}, and a member joins it by ruling.
  *
  * `'record_link'` is the one member that takes NO value (ruling B on the
@@ -206,8 +225,9 @@ export function validateScreenInputs(
     });
   }
 
-  // Value shape for a value-domain `type` — `'number'` (#17306, ruling A′) and
-  // `'file'` (#25801). Its own pass, BEFORE the bound: a value that is not a
+  // Value shape for a value-domain `type` — the numeric kinds (`'number'`,
+  // #17306 ruling A′; `'currency'` / `'percent'`, #30178) and `'file'`
+  // (#25801). Its own pass, BEFORE the bound: a value that is not a
   // number cannot be compared against one, so the shape is the first thing
   // true or false about it. A caller that posts `"25"` under a `max` of 20 gets
   // one issue naming the shape, not a silent pass and not a bound verdict

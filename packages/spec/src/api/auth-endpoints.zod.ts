@@ -262,6 +262,11 @@ export const AuthFeaturesConfigSchema = lazySchema(() => z.object({
   phoneNumberOtp: z.boolean().optional().describe(
     'Phone-number OTP sign-in and self-service password reset available — requires the phoneNumber plugin plus a deliverable SMS service',
   ),
+  emailDelivery: z.boolean().optional().describe(
+    'Email leaves this deployment: the wired email service reports itself configured with a real transport, so password-reset, verification and invitation mail is delivered. '
+    + 'False with no email service and with the stock log transport, which writes mail to the server console instead of sending it; the forgot-password page can then say a reset link cannot be emailed here and to ask an administrator. '
+    + 'A statement about the deployment, never about an address: the password-reset request answers known and unknown addresses alike either way. Absent means not live',
+  ),
   cloudManaged: z.boolean().optional().describe(
     'Managed (cloud-hosted, SSO-only) mode: people arrive through the identity provider, so the UI hides inviting, creating users and setting their passwords; absent means not managed',
   ),

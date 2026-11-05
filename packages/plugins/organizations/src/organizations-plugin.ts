@@ -407,7 +407,17 @@ export class OrganizationsPlugin implements Plugin {
       try {
         const replayer: any = await resolveKernelService(kernel, 'seed-replayer');
         if (typeof replayer === 'function') {
-          const summary = await replayer(newOrgId);
+          // [#30281] The founder, so the replay can seed in their language
+          // when the organization has no Localization setting yet (it has no
+          // row of its own at this moment). better-auth's create runs as
+          // SYSTEM with the signed-in creator as `attributedUserId`; a
+          // system insert with no person behind it names nobody, and the
+          // replay falls back to the app's declared default locale.
+          const founderId = opCtx?.context?.attributedUserId ?? opCtx?.context?.userId;
+          const summary =
+            typeof founderId === 'string' && founderId !== ''
+              ? await replayer(newOrgId, { userId: founderId })
+              : await replayer(newOrgId);
           const total = (summary?.inserted ?? 0) + (summary?.updated ?? 0);
           ctx.logger.info(
             `[org-scoping] per-org seed replay for ${newOrgId}: +${summary?.inserted ?? 0} inserted, ${summary?.updated ?? 0} updated, ${summary?.errors?.length ?? 0} error(s)`,
