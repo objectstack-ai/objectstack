@@ -380,3 +380,45 @@ describe('paramDegradesWithoutTarget — one answer to "did this param degrade?"
     }
   });
 });
+
+describe('paramToField — an authored `widget` draws the param (#30260)', () => {
+  // `ActionParamDef.widget` is the spec's `ActionParamSchema.widget`, which
+  // shares `FieldSchema.widget`'s meaning: a registered name wins over `type`,
+  // an unregistered one degrades to the `type` widget.
+
+  it('draws the registered widget a text param names, in place of the text widget', () => {
+    expect(paramToField(p({ type: 'text', widget: 'permission-ref' })).type).toBe('permission-ref');
+    expect(paramToField(p({ type: 'text', widget: 'position-ref' })).type).toBe('position-ref');
+  });
+
+  it('CONTROL: the same param without a widget is the text widget', () => {
+    expect(paramToField(p({ type: 'text' })).type).toBe('text');
+  });
+
+  it('falls back to the `type` widget when the name is not registered', () => {
+    expect(paramToField(p({ type: 'text', widget: 'no_such_widget' })).type).toBe('text');
+    // Not the text fallback: the param's OWN type widget.
+    expect(paramToField(p({ type: 'select', widget: 'no_such_widget' })).type).toBe('select');
+    expect(paramToField(p({ type: 'textarea', widget: 'no_such_widget' })).type).toBe('textarea');
+  });
+
+  it('an authored `text` widget is honoured as the text widget, not read as "unregistered"', () => {
+    expect(paramToField(p({ type: 'textarea', widget: 'text' })).type).toBe('text');
+  });
+
+  it('a registered widget on a targetless picker param is drawn, and the param does not degrade', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const param = p({ type: 'lookup', widget: 'permission-ref' });
+      expect(paramToField(param).type).toBe('permission-ref');
+      expect(paramDegradesWithoutTarget(param)).toBe(false);
+      expect(warn).not.toHaveBeenCalled();
+      // CONTROL: an unregistered widget leaves the degradation exactly as before.
+      const unregistered = p({ type: 'lookup', widget: 'no_such_widget' });
+      expect(paramToField(unregistered).type).toBe('text');
+      expect(paramDegradesWithoutTarget(unregistered)).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
