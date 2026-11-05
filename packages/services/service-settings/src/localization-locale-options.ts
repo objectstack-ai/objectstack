@@ -57,15 +57,17 @@ const TABLE_LABEL = new Map<string, string>(PLATFORM_LOCALES.map((row) => [row.t
  * the language the code means, else `Intl.DisplayNames` in the code itself,
  * capitalized as the table's names are, else the code. Every failure answers
  * the code, which is still an honest, selectable name: `Intl.DisplayNames`
- * may be absent, throws `RangeError` on a malformed tag, and answers the code
- * back for a language its ICU data does not name.
+ * may be absent, throws `RangeError` on a malformed tag, and names no language
+ * its ICU data does not have.
  */
 export function localeSelfName(code: string): string {
   const tag = platformLocaleTagOf(code);
   const fromTable = tag ? TABLE_LABEL.get(tag) : undefined;
   if (fromTable) return fromTable;
   try {
-    const name = new Intl.DisplayNames([code], { type: 'language' }).of(code);
+    // `fallback: 'none'`: a language the ICU data does not name answers
+    // `undefined`, not a made-up name built from the subtags (`Xx (YY)`).
+    const name = new Intl.DisplayNames([code], { type: 'language', fallback: 'none' }).of(code);
     if (!name || name === code) return code;
     return name.charAt(0).toLocaleUpperCase(code) + name.slice(1);
   } catch {
