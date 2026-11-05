@@ -111,7 +111,12 @@ export function collectRequiredWhenPromptFields(
         requiredWhen: def.requiredWhen as never,
       },
       next,
-      { required: def.required === true, readonly: def.readonly === true },
+      // `name` says which column of the pre-drop record is this field's stored
+      // value, so the drop is judged as the engine judges the write: a
+      // transition gate (objectstack#30220). A record already inside the gate
+      // without the value rests there, the engine lets the drop through, and
+      // the board asks for nothing.
+      { required: def.required === true, readonly: def.readonly === true, name },
       // The pre-drop record, so a predicate reading `previous.*` sees what the
       // form would show it.
       record,

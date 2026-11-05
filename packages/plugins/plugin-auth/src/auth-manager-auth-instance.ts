@@ -129,6 +129,7 @@ export interface AuthInstanceHost {
   assertPhoneOtpSendAllowed: AuthManager['assertPhoneOtpSendAllowed'];
   assertRemoveMemberPermitted: AuthManager['assertRemoveMemberPermitted'];
   assertRevokeSessionIdentifiesRecord: AuthManager['assertRevokeSessionIdentifiesRecord'];
+  assertSsoProviderDeletable: AuthManager['assertSsoProviderDeletable'];
   auditRefusedSignIn: AuthManager['auditRefusedSignIn'];
   buildPluginList: AuthManager['buildPluginList'];
   composeDatabaseHooks: AuthManager['composeDatabaseHooks'];
@@ -780,6 +781,7 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
           assertPhoneOtpSendAllowed: (...a) => this.assertPhoneOtpSendAllowed(...a),
           assertRemoveMemberPermitted: (...a) => this.assertRemoveMemberPermitted(...a),
           assertRevokeSessionIdentifiesRecord: (...a) => this.assertRevokeSessionIdentifiesRecord(...a),
+          assertSsoProviderDeletable: (...a) => this.assertSsoProviderDeletable(...a),
           get config() { return readConfig(); },
           existingAddressSignUpAnswersSuccess: (...a) => this.existingAddressSignUpAnswersSuccess(...a),
           hasExistingUserFor: (...a) => this.hasExistingUserFor(...a),

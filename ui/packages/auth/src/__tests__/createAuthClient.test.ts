@@ -558,6 +558,52 @@ describe('createAuthClient — getConfig single-flight / cache / retry (#2625)',
   });
 });
 
+describe('createAuthClient — getConfig is read fresh once the tab has no session (objectstack#30299)', () => {
+  // The settings page turns sign-in doors on and off while the server runs,
+  // so the copy cached during a signed-in stretch is not the sign-in page's.
+  function configServer(emailPasswordEnabled: { value: boolean }) {
+    return createMockFetch({
+      '/sign-out': { body: { success: true } },
+      '/get-session': { body: null },
+      get '/config'() {
+        return { body: { data: { emailPassword: { enabled: emailPasswordEnabled.value } } } };
+      },
+    });
+  }
+  const configReads = (calls: Array<{ url: string }>) => calls.filter((c) => c.url.includes('/config'));
+
+  it('keeps the cached config while the session lasts, and reads it again after sign-out', async () => {
+    const enabled = { value: true };
+    const { mockFn, calls } = configServer(enabled);
+    const client = createAuthClient({ baseURL: 'http://localhost/api/auth', fetchFn: mockFn });
+
+    expect((await client.getConfig()).emailPassword?.enabled).toBe(true);
+    // An administrator turns email and password off from the settings page.
+    enabled.value = false;
+    expect((await client.getConfig()).emailPassword?.enabled).toBe(true);
+    expect(configReads(calls)).toHaveLength(1);
+
+    await client.signOut();
+
+    expect((await client.getConfig()).emailPassword?.enabled).toBe(false);
+    expect(configReads(calls)).toHaveLength(2);
+  });
+
+  it('reads it again after a session read finds no session (an expired session never signs out)', async () => {
+    const enabled = { value: true };
+    const { mockFn, calls } = configServer(enabled);
+    const client = createAuthClient({ baseURL: 'http://localhost/api/auth', fetchFn: mockFn });
+
+    expect((await client.getConfig()).emailPassword?.enabled).toBe(true);
+    enabled.value = false;
+
+    expect(await client.getSession()).toBeNull();
+
+    expect((await client.getConfig()).emailPassword?.enabled).toBe(false);
+    expect(configReads(calls)).toHaveLength(2);
+  });
+});
+
 describe('createAuthClient — signInWithProvider watchdog (#2626)', () => {
   it('rejects with a timeout error when the sign-in request never returns', async () => {
     vi.useFakeTimers();
@@ -573,5 +619,46 @@ describe('createAuthClient — signInWithProvider watchdog (#2626)', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// objectstack#30295 — an enrollment refusal keeps its HTTP `status` and the
+// server's `code`, so the enrollment screen can say in the user's language that
+// two-factor is off (the `/two-factor/*` endpoints answer 404 then) instead of
+// echoing `Two-factor enable failed (404)`. The message is unchanged.
+describe('createAuthClient — enrollment rejections carry the status and the code', () => {
+  type Rejection = Error & { code?: string; status?: number };
+  const rejectionOf = (run: () => Promise<unknown>): Promise<Rejection> =>
+    run().then(
+      () => {
+        throw new Error('expected the call to reject, but it resolved');
+      },
+      (err: unknown) => err as Rejection,
+    );
+  const clientWith = (handlers: Record<string, { status?: number; body: unknown }>) =>
+    createAuthClient({ baseURL: 'http://localhost/api/auth', fetchFn: createMockFetch(handlers).mockFn });
+
+  it('enrollTotp against a deployment with two-factor off rejects with status 404', async () => {
+    const client = clientWith({ '/two-factor/enable': { status: 404, body: {} } });
+    const rejection = await rejectionOf(() => client.enrollTotp('admin123'));
+    expect(rejection.status).toBe(404);
+    expect(rejection.message).toBe('Two-factor enable failed (404)');
+  });
+
+  it('enrollTotp keeps a wrong password’s code beside its status', async () => {
+    const client = clientWith({
+      '/two-factor/enable': { status: 400, body: { message: 'Invalid password', code: 'INVALID_PASSWORD' } },
+    });
+    const rejection = await rejectionOf(() => client.enrollTotp('wrong'));
+    expect(rejection.code).toBe('INVALID_PASSWORD');
+    expect(rejection.status).toBe(400);
+    expect(rejection.message).toBe('Invalid password');
+  });
+
+  it('verifyTotp against a deployment with two-factor off rejects with status 404', async () => {
+    const client = clientWith({ '/two-factor/verify-totp': { status: 404, body: {} } });
+    const rejection = await rejectionOf(() => client.verifyTotp('123456'));
+    expect(rejection.status).toBe(404);
+    expect(rejection.message).toBe('Two-factor verification failed (404)');
   });
 });

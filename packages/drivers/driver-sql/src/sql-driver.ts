@@ -227,15 +227,7 @@ import {
 import { findMisplacedReadableIds, refuseReadableIdsOnce } from '@objectstack/core';
 import { isComposedReadableIds, type ComposedReadableIds } from '@objectstack/spec/data';
 // [#29520 codemod] The top-level declarations that moved whole to `sql-driver-top-level.ts`, as this file still reads them.
-import {
-  AUDIT_TIMESTAMP_COLUMNS, AUTONUMBER_COLLISION_RETRIES, CROSS_FIELD_COMPARISON_OPERATORS, MYSQL_DATETIME_PRECISION,
-  SEQUENCES_TABLE, TEXT_OPERATORS, WITHHELD_FILTER_AUTHOR_TEXT, WITHHELD_FILTER_SUBTREE, assertCompilableComparand,
-  bareFieldReferenceError, betweenArityError, declaresColumnNotNull, fieldReferenceOf, isDeclaredFieldType,
-  isDeferredDdlLockWaitRefusal, isFilterNode, isMultiValuedColumn, isNowDefaultValue, nowAnchorOf,
-  nowAnchorPositionError, reduceFilterKey, reduceFilterNode, refusalSubtree, refuseRejectedReferenceAlias,
-  refuseUndeclaredFieldType, retiredFilterOperatorError, unsupportedFilterError, unsupportedFilterOperatorError,
-  withheldFilterDiagnosticOf,
-} from './sql-driver-top-level.js';
+import { AUTONUMBER_COLLISION_RETRIES, SEQUENCES_TABLE } from './sql-driver-top-level.js';
 import type {
   AutoNumberReservation, ConflictTargetVerdict, IntrospectedColumn, IntrospectedForeignKey, IntrospectedSchema,
   NowAnchor, ReadPresentationKind, RowWidthContribution, SqlAggregateLowering, SqlDriverConfig,
@@ -245,13 +237,13 @@ import type {
 export {
   AUDIT_TIMESTAMP_COLUMNS, type AutoNumberReservation, CREATE_INDEX_DDL, type ConflictTargetVerdict, DROP_INDEX_DDL,
   INDEX_DDL_PREFIX, type IntrospectedColumn, type IntrospectedForeignKey, type IntrospectedSchema,
-  type IntrospectedTable, LIKE_ESCAPE_CHARACTER, LOCK_WAIT_REFUSAL, MYSQL_DATETIME_PRECISION, NUMERIC_SCALAR_TYPES,
-  type NowAnchor, OWN_STATEMENT_FAULT, PRE_DDL_QUESTION_SCOPE, type ReadPresentationKind, SEQUENCES_TABLE,
-  SQLITE_NON_TEMPORAL_TEXT_REFS, SQLITE_TIME_EXPR_REFS, type SqlDriverConfig, type SqlWindowFunctionQuery,
-  type SqlWindowFunctionSpec, type SqliteAbsentFileMode, type SqliteJournalMode, type TextMatchShape,
-  crossFieldComparisonError, declaredValueShapes, fieldReferenceOf, isFilterNode, isMultiValuedColumn,
-  isNowDefaultValue, isUnresolvableColumnError, lastIdentifierSegment, mysqlDatetimeLiteral, nowAnchorPositionError,
-  postgresTableNameCollisionError, rawStatementFaultError, refuseUnbackedConflictTarget,
+  type IntrospectedTable, JSON_COLUMN_TYPES, LIKE_ESCAPE_CHARACTER, LOCK_WAIT_REFUSAL, MYSQL_DATETIME_PRECISION,
+  NUMERIC_SCALAR_TYPES, type NowAnchor, OWN_STATEMENT_FAULT, PRE_DDL_QUESTION_SCOPE, type ReadPresentationKind,
+  SEQUENCES_TABLE, SQLITE_NON_TEMPORAL_TEXT_REFS, SQLITE_TIME_EXPR_REFS, type SqlDriverConfig,
+  type SqlWindowFunctionQuery, type SqlWindowFunctionSpec, type SqliteAbsentFileMode, type SqliteJournalMode,
+  type TextMatchShape, crossFieldComparisonError, declaredValueShapes, fieldReferenceOf, isFilterNode,
+  isMultiValuedColumn, isNowDefaultValue, isUnresolvableColumnError, lastIdentifierSegment, mysqlDatetimeLiteral,
+  nowAnchorPositionError, postgresTableNameCollisionError, rawStatementFaultError, refuseUnbackedConflictTarget,
   refuseUpsertConflictOutsideWrittenOrganization, resolveSqliteAbsentFileTarget, unquoteSqlIdentifier,
   unsupportedFilterError, withheldFilterDiagnosticOf, withheldFilterError,
 } from './sql-driver-top-level.js';
@@ -307,67 +299,6 @@ import {
   sequenceSemanticsHost, sqliteSerialisationHost, transactionsSectionHost, windowFunctionBuilderHost,
   windowFunctionsHost,
 } from './sql-driver-facet-hosts.js';
-
-// GLOBAL_TENANT ('__global__') — the sentinel for the NULL-organization
-// ("platform") bucket — is defined ONCE in schema-drift.ts and imported here:
-// since ADR-0120 D3 it names the same bucket in two subsystems (the autonumber
-// sequence table's tenant key, and the COALESCE organization key part of every
-// organization-scoped unique index), and #3696's root lesson was two
-// subsystems naming one concept differently. Storage stays NULL — see the
-// definition site.
-
-/**
- * Field types whose value is an array or object and must be stored as a JSON
- * column (and JSON-(de)serialized at the driver boundary). SINGLE SOURCE for
- * both the DDL column-type switch and `isJsonField` so the two can't drift —
- * the drift between them is exactly what let array-valued fields (multiselect/
- * checkboxes/tags/repeater/vector) reach the SQLite binder un-serialized and
- * crash with "SQLite3 can only bind numbers, strings, bigints, buffers, and
- * null" (#field-zoo). `composite`/`address`/`location`/`record` are objects;
- * the rest are arrays.
- *
- * ⚠️ The FILE family (`image`/`file`/`avatar`/`video`/`audio`) was a member
- * until the ADR-0104 addendum ruled that its physical column holds the BARE
- * `sys_file` id in a STRING column rather than a JSON-quoted id in a JSON
- * column. Its membership is no longer a constant: a SINGLE-VALUE media field
- * is a JSON column on a deployment that has not moved its columns and a string
- * column on one that has, so the question is asked per driver instance through
- * {@link SqlDriver.mediaColumnIsJson} rather than of this set. A
- * `multiple: true` media field is unaffected — its value is a LIST of ids, it
- * is a JSON column on every deployment, and `isMultiValueField` already says so
- * above every type check (`file` / `image` are `MULTI_CAPABLE_TYPES` members;
- * #17469 refuses `multiple: true` on `avatar` / `video` / `audio` at the
- * authoring entrance rather than arrayifying their column).
- *
- * ⛔ Do not re-add the family here. Every reader of this set treats membership
- * as deployment-independent, which is exactly what the family stopped being.
- */
-export const JSON_COLUMN_TYPES = new Set<string>([
-  // Spec value-shape classes (ADR-0104 D1): structured JSON payloads and the
-  // inherently-array option types. Membership is owned by @objectstack/spec —
-  // a type added there becomes a JSON column here without touching this file.
-  ...STRUCTURED_JSON_TYPES, ...MULTI_OPTION_TYPES,
-  // Driver-internal aliases (external/introspected columns) — not authorable
-  // FieldTypes, so they stay a local extra.
-  'object', 'array',
-]);
-
-/**
- * The `varchar(n)` width a moved single-value media column gets.
- *
- * ⚠️ NOT a taste: it is the width `os generate migration --format sql` already
- * emits for the family (`VARCHAR(2048)` in `packages/cli/src/commands/
- * generate.ts`), and the maintainer ruling in ADR-0104's 2026-09-05 addendum is that the GENERATOR
- * states the ruled end-state and does not move — the driver is the side that
- * moves to meet it. A driver that created knex's default `varchar(255)` here
- * would open a fresh divergence between the two producers of the same column
- * on the very change that closes the old one.
- *
- * Mirrored by {@link SqlDriver.varcharColumnChars}, which is what the drift
- * detector asks rather than restating the width; the two are pinned equal by
- * `sql-driver-11565-row-byte-budget.test.ts` for every declared `FieldType`.
- */
-const MEDIA_ID_VARCHAR_CHARS = 2048;
 
 // [#29520 codemod] The statics of `SqlDriver` its facet modules read, private ones included, as
 // the class declares them (an indexed access on the class). The static block at the end of
@@ -878,8 +809,8 @@ export class SqlDriver implements IDataDriver {
    * Reason ② is why this method exists; it is not what this conversion bought.
    */
   protected logDurabilityFailure(msg: string, meta?: any): void {
-    if (this.logger.error) this.logger.error(msg, meta);
-    else this.logger.warn(msg, meta);
+    // [#29520 codemod] The body moved to `sql-driver-class-head.ts` (see `ClassHeadHost`).
+    return ClassHeadFacet.logDurabilityFailure.call(classHeadHost.of(this), msg, meta);
   }
 
   /**
@@ -4173,87 +4104,13 @@ export class SqlDriver implements IDataDriver {
    * defaults to `shardName` so an existing override or external caller keeps
    * today's behaviour, and the one in-tree call site names the base.
    */
-  protected async ensureShardTable(
+  protected ensureShardTable(
     shardName: string,
     obj: { fields?: Record<string, any>; tenancy?: any; indexes?: any[] },
     baseTable: string = shardName,
   ): Promise<void> {
-    const builtinColumns = new Set(['id', 'created_at', 'updated_at']);
-    // [#12015] Both branches below drop a declared field named after a builtin
-    // column — the create branch skips it explicitly, the column-sync branch
-    // finds the column already present — so the shard path warns once here,
-    // ahead of either.
-    this.warnBuiltinColumnCollisions(shardName, obj.fields, builtinColumns, 'shard');
-    const exists = await this.knex.schema.hasTable(shardName);
-    // ADR-0131 D1: a shard is created from the BASE's declaration, so it takes
-    // the base's tenant column NOT NULL — asked of the base through the
-    // recording resolver, the same answer the declared-index sync below uses
-    // (the shard has no bookkeeping of its own until `aliasShardBookkeeping`).
-    // A shard that already exists keeps the nullability it has: the
-    // organization-ownership ceremony reports such a shard, it never rebuilds it.
-    const baseTenantField = this.computeAndRecordTenantField(baseTable, obj);
-    // Commit d0e3a885b: a shard carries the base table's declared indexes (below), so its
-    // columns need the same keyable-text decision the managed path makes.
-    const keyedColumns = indexedKeyColumns({
-      table: shardName,
-      fields: obj.fields ?? {},
-      tenantField: this.resolveTenantField(shardName),
-      declaredIndexes: obj.indexes,
-    });
-    if (!exists) {
-      await this.knex.schema.createTable(shardName, (table) => {
-        table.string('id').primary();
-        this.createAuditTimestampColumn(table, 'created_at');
-        this.createAuditTimestampColumn(table, 'updated_at');
-        for (const [name, field] of Object.entries(obj.fields ?? {})) {
-          if (builtinColumns.has(name)) continue;
-          this.createColumn(table, name, field, keyedColumns.get(name), name === baseTenantField);
-        }
-      });
-    } else {
-      const columnInfo = await this.knex(shardName).columnInfo();
-      const existingColumns = Object.keys(columnInfo);
-      await this.knex.schema.alterTable(shardName, (table) => {
-        for (const [name, field] of Object.entries(obj.fields ?? {})) {
-          if (!existingColumns.includes(name)) {
-            this.createColumn(table, name, field, keyedColumns.get(name));
-          }
-        }
-      });
-    }
-
-    // Declared indexes per shard. Auto-derived names already embed the shard
-    // name; explicit names get a shard prefix so they can't collide across
-    // shards in the same database.
-    const declared = obj.indexes;
-    if (Array.isArray(declared) && declared.length > 0) {
-      const colInfo = await this.knex(shardName).columnInfo();
-      const perShard = declared.map((idx: any) => ({
-        ...idx,
-        name: typeof idx?.name === 'string' && idx.name.trim() ? `${shardName}__${idx.name.trim()}` : undefined,
-      }));
-      // Shard bookkeeping is aliased AFTER this method runs, so `shardName` has
-      // no entry of its own yet — a declared `unique: 'organization'` index
-      // (ADR-0120 D1) must scope identically on every shard of the base table,
-      // so the answer has to come from the base.
-      //
-      // [commit 0f38ab084] Keyed by `baseTable`, and through the RECORDING resolver, not
-      // the bare `computeTenantField`. The bare one reads this call's schema
-      // alone, so a shard synced from a partial re-registration — one carrying
-      // no `tenancy` block — fell through to the implicit `organization_id`
-      // heuristic and gave the shard an organization key part the base table's
-      // own index does not have. `tenantOptOutByTable` already holds the base's
-      // explicit opt-out (`initObjects` recorded it under exactly this key, and
-      // `aliasShardBookkeeping` propagates it to the shard afterwards), so
-      // consulting it here is what makes the two paths answer the same.
-      await this.syncDeclaredIndexes(
-        shardName,
-        perShard,
-        new Set(Object.keys(colInfo)),
-        baseTenantField,
-        obj.fields ?? {},
-      );
-    }
+    // [#29520 codemod] The body moved to `sql-driver-rotation.ts` (see `RotationHost`).
+    return RotationFacet.ensureShardTable.call(rotationHost.of(this), shardName, obj, baseTable);
   }
 
   /** Quoted, deterministic column list for the rotation view. */
@@ -4490,243 +4347,11 @@ export class SqlDriver implements IDataDriver {
   // including the half no in-file gate could see: a SUBCLASS in another
   // published package overriding one of these methods with a narrower literal
   // (`TursoDriver.initObjects` shadowed #4311's `tenancy` fix for five weeks).
-  async initObjects(
+  initObjects(
     objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[]; lifecycle?: any }>,
   ): Promise<void> {
-    // The ADR-0104 media arm, resolved BEFORE registration because
-    // `registerObjectMetadata` below freezes `isJsonField`'s answer into
-    // `jsonFields` for every media column it sees. Memoized, and every failure
-    // path lands on the JSON arm — see {@link resolveFileColumnsMoved}.
-    await this.resolveFileColumnsMoved();
-
-    // In-memory registration FIRST, and deliberately ahead of the DDL gate
-    // below: being refused permission to alter a schema is not a reason to stay
-    // ignorant of the objects we were just told about. On a datasource we are a
-    // guest in (`schemaMode !== 'managed'`) the gate throws — and before this
-    // line ran here, it threw with every coercion registry still empty, so the
-    // very next write to a JSON field on that datasource was bound by the
-    // client's per-type defaults (see {@link registerObjectMetadata} for what
-    // node-postgres does with an array and with `[]`). Nothing in this call
-    // touches the database; the refusal it precedes is unchanged.
-    this.registerObjectMetadata(objects);
-
-    // DDL gate (ADR-0015 §5.1): createTable/alterTable below mutate schema.
-    // Also covers `syncSchema`, which delegates here.
-    this.assertSchemaMutable('initObjects');
-
-    // [#13028] …and NOT while DDL is deferred. Under {@link deferredDdl} every
-    // branch below is skipped in favour of recording the work, so there is no
-    // DDL for a database to exist FOR — while `ensureDatabaseExists()` is the
-    // one line here that can WRITE: it `mkdir -p`s a sqlite parent directory
-    // and, on Postgres/MySQL, issues `SELECT 1` and CREATEs THE DATABASE when
-    // that comes back `3D000` / `ER_BAD_DB_ERROR`.
-    //
-    // That made a declared dry run able to create a database (#6743 closed the
-    // sqlite half by opening an absent file in memory; this is the same
-    // promise, kept at the source and for every dialect), and it charged one
-    // round-trip per object to do it — on a control plane at ~300ms RTT × ~80
-    // objects, a `plan` that computes in seconds would have spent minutes
-    // asking a database it was never going to touch whether it existed.
-    //
-    // ⛔ NOT a relaxation of the guarantee for real DDL: `flushDeferredSchemaDdl`
-    // clears `deferredDdl` BEFORE re-entering this method with the deferred
-    // objects, so the confirmed `os migrate apply` still ensures the database
-    // ahead of the first `CREATE TABLE`.
-    if (!this.deferredDdl) await this.ensureDatabaseExists();
-
-    for (const obj of objects) {
-      // Re-read what the registration above recorded, rather than recomputing:
-      // `computeAndRecordTenantField` carries a sticky explicit-opt-out, so the
-      // recorded answer IS the answer.
-      const tableName = StorageNameMapping.resolveTableName(obj);
-      const tenantField = this.tenantFieldByTable[tableName] ?? null;
-
-      // Deferred-DDL mode (#3917): the call above is in-memory metadata
-      // registration — coercion maps, tenancy, and the `managedObjectFields`
-      // entry `detectManagedDrift()` diffs against. Everything below issues
-      // DDL. `os migrate plan` / `apply` boot with the deferral armed so the
-      // plan is computed against the database as it actually is, and nothing
-      // is created until the operator has seen (and confirmed) the plan.
-      if (this.deferredDdl) {
-        this.deferredSchemaObjects.set(tableName, { ...obj, name: tableName });
-        continue;
-      }
-
-      // ADR-0057 P2: rotation-declared telemetry is physically time-sharded —
-      // the Rotator owns its DDL (shard tables + a read view under the base
-      // name); the plain create/alter path below would collide with the view.
-      const rotationPolicy = obj.lifecycle?.storage;
-      if (rotationPolicy?.strategy === 'rotation' && this.supportsRotation) {
-        this.tablesWithTimestamps.add(tableName);
-        await this.ensureRotation(tableName, obj, rotationPolicy);
-        continue;
-      }
-
-      let exists = await this.knex.schema.hasTable(tableName);
-      // Recorded BEFORE the legacy-`_id` rebuild below can flip `exists`: a
-      // table that was here when we arrived stays "found" even if we then drop
-      // and recreate it. Re-syncing a table we made ourselves this boot — boot
-      // runs the sync more than once, and objects registered later sync on
-      // demand — is not evidence of anything preceding us, so it is ignored.
-      // See `getSchemaSyncStats`.
-      if (!exists) this.tablesCreatedHere.add(tableName);
-      else if (!this.tablesCreatedHere.has(tableName)) this.tablesFoundExisting.add(tableName);
-
-      if (exists) {
-        const columnInfo = await this.knex(tableName).columnInfo();
-        const existingColumns = Object.keys(columnInfo);
-
-        if (existingColumns.includes('_id') && !existingColumns.includes('id')) {
-          await this.knex.schema.dropTable(tableName);
-          exists = false;
-        }
-      }
-
-      // Columns created unconditionally by initObjects — skip them when
-      // iterating obj.fields to avoid duplicate-column errors (e.g. SQLite
-      // rejects CREATE TABLE with two columns of the same name).
-      const builtinColumns = new Set(['id', 'created_at', 'updated_at']);
-
-      // Commit d0e3a885b: which columns this object's indexes will KEY ON, resolved before
-      // any DDL runs. `createColumn` needs it to decide whether a bounded text
-      // field takes `varchar(maxLength)` (keyable) or TEXT — a decision that is
-      // only makeable at CREATE time, since no dialect turns a TEXT column into
-      // a keyable one afterwards.
-      const keyedColumns = indexedKeyColumns({
-        table: tableName,
-        fields: obj.fields ?? {},
-        tenantField,
-        declaredIndexes: obj.indexes,
-      });
-
-      if (!exists) {
-        // [#12015] The `continue` below drops a declared field that collides
-        // with a builtin column. Said BEFORE the DDL runs, so the author hears
-        // it even when the CREATE goes on to fail for an unrelated reason.
-        this.warnBuiltinColumnCollisions(tableName, obj.fields, builtinColumns, 'create');
-        try {
-          await this.knex.schema.createTable(tableName, (table) => {
-            table.string('id').primary();
-            this.createAuditTimestampColumn(table, 'created_at');
-            this.createAuditTimestampColumn(table, 'updated_at');
-            if (obj.fields) {
-              for (const [name, field] of Object.entries(obj.fields)) {
-                if (builtinColumns.has(name)) continue;
-                // ADR-0131 D1: a fresh table's tenant column is NOT NULL.
-                this.createColumn(table, name, field, keyedColumns.get(name), name === tenantField);
-              }
-            }
-          });
-        } catch (e: any) {
-          // #11565: MySQL charges every bounded column's DECLARED width against
-          // a per-ROW budget, and refuses the CREATE naming no column and no
-          // declaration — about a table its author described entirely in
-          // metadata. Re-throw the SAME failure carrying the field-level fix;
-          // anything that is not that refusal is re-thrown untouched.
-          await this.rethrowWithRowSizeExplanation(tableName, obj.fields, keyedColumns, null, e);
-        }
-        this.tablesWithTimestamps.add(tableName);
-      } else {
-        const columnInfo = await this.knex(tableName).columnInfo();
-        const existingColumns = Object.keys(columnInfo);
-
-        if (existingColumns.includes('updated_at')) {
-          this.tablesWithTimestamps.add(tableName);
-        }
-
-        // [#12015] The ADD COLUMN diff is keyed on "column not already there",
-        // so a declared `id`/`created_at`/`updated_at` is dropped on this path
-        // too — the builtin is already in `existingColumns`, so the diff below
-        // never proposes it and `addedColumns` excludes it by name. Silent on
-        // every boot of an existing table until now.
-        this.warnBuiltinColumnCollisions(tableName, obj.fields, builtinColumns, 'alter');
-
-        // #11565: the row budget is a property of the WHOLE row, so adding one
-        // ordinary column to a wide table is refused by the width of columns
-        // nobody is touching — with the same column-less server error. Named
-        // here so the ADD COLUMN path is not the one that keeps it.
-        const addedColumns = Object.keys(obj.fields ?? {}).filter(
-          (name) => !builtinColumns.has(name) && !existingColumns.includes(name),
-        );
-        try {
-          await this.knex.schema.alterTable(tableName, (table) => {
-            if (obj.fields) {
-              for (const [name, field] of Object.entries(obj.fields)) {
-                if (!existingColumns.includes(name)) {
-                  this.createColumn(table, name, field, keyedColumns.get(name));
-                }
-              }
-            }
-          });
-        } catch (e: any) {
-          await this.rethrowWithRowSizeExplanation(tableName, obj.fields, keyedColumns, addedColumns, e);
-        }
-      }
-
-      // Materialize the table's index set: field-level `unique` (tenancy-aware
-      // — #3696) plus object-level declared indexes (`indexes: [{ fields,
-      // unique }]`, carrying the multi-column UNIQUE guarantees dedup/
-      // convergence paths rely on, ADR-0030). Both go through one path so the
-      // create and alter branches above cannot produce different constraints
-      // for the same metadata. Done after the table is created/altered so every
-      // referenced column physically exists — which is also why field-level
-      // `unique` can no longer be emitted inline by `createColumn`: a composite
-      // needs the tenant column to already be there.
-      const declaredIndexes = obj.indexes;
-      const uniqueFields = Object.values<any>(obj.fields ?? {}).some((f) =>
-        isUniqueScopeDeclared(f?.unique),
-      );
-      if (uniqueFields || (Array.isArray(declaredIndexes) && declaredIndexes.length > 0)) {
-        const colInfo = await this.knex(tableName).columnInfo();
-        const physicalColumns = new Set(Object.keys(colInfo));
-        await this.syncTableIndexes(
-          tableName,
-          obj.fields ?? {},
-          declaredIndexes,
-          tenantField,
-          physicalColumns,
-        );
-      }
-
-      // #2186: the additive sync above only ever ADDs tables/columns/indexes.
-      // For a table that already existed, detect (and in dev, auto-reconcile)
-      // any non-additive divergence between metadata and the physical schema —
-      // relaxed NOT NULL, widened varchar, orphaned column, and since #3728 the
-      // index dimension too (a legacy global unique that is now tenant-scoped,
-      // a redefined or orphaned index).
-      if (exists) {
-        await this.reconcileAndWarnDrift(tableName, obj.fields ?? {}, declaredIndexes);
-      }
-
-      // #3912: converge this table's `Field.datetime` columns on the canonical
-      // UTC-text storage form. A table this call just CREATED has no rows, so it
-      // is canonical by construction — record that without touching the disk.
-      await this.backfillCanonicalDatetimes(tableName, exists);
-      // #3994: the `Field.time` twin of the line above.
-      await this.backfillCanonicalTimes(tableName, exists);
-      // Commit 4045b954d: converge this table's `Field.json` columns on the injective
-      // JSON-text storage form the rewritten `formatInput` now writes.
-      await this.backfillCanonicalJsonEncoding(tableName, exists);
-      // #3942: the MySQL twin — widen legacy `TIMESTAMP` columns to `DATETIME(3)`.
-      if (exists) await this.migrateMysqlDatetimeColumns(tableName, obj.fields ?? {});
-      // #3994: widen legacy MySQL `TIME` columns to `TIME(3)`.
-      if (exists) await this.migrateMysqlTimeColumns(tableName, obj.fields ?? {});
-    }
-
-    // Pre-create the auto_number counter table now, while we hold a fresh pooled
-    // connection and are NOT inside any data transaction. Creating it lazily on
-    // the first autonumber INSERT dead-locks a `/api/v1/batch` write on SQLite
-    // (pool max=1: the open batch transaction owns the only connection, so the
-    // lazy `ensureSequencesTable` blocks forever acquiring a second one) and
-    // risks the same pool exhaustion under concurrent first-writes on
-    // Postgres/MySQL. Idempotent and skipped entirely when nothing uses
-    // auto_number, so it costs one `hasTable` at boot in the common case.
-    const usesAutoNumber = Object.values(this.autoNumberFields).some(
-      (cols) => Array.isArray(cols) && cols.length > 0,
-    );
-    if (usesAutoNumber && !this.deferredDdl) {
-      await this.ensureSequencesTable();
-    }
+    // [#29520 codemod] The body moved to `sql-driver-rotation.ts` (see `RotationHost`).
+    return RotationFacet.initObjects.call(rotationHost.of(this), objects);
   }
 
   /**
@@ -5146,61 +4771,12 @@ export class SqlDriver implements IDataDriver {
     return (RotationFacet.withPinnedSession<T>).call(rotationHost.of(this), fn);
   }
 
-  protected async migrateMysqlDatetimeColumns(
+  protected migrateMysqlDatetimeColumns(
     table: string,
     fields: Record<string, any>,
   ): Promise<void> {
-    if (!this.isMysql) return;
-    try {
-      const legacy = await this.legacyMysqlTimestampColumns(table, fields);
-      if (legacy.length === 0) return;
-
-      // #9354: built as a list, then run as one unit, so the whole widening of a
-      // table shares the ONE pinned session the bounded lock wait needs.
-      const statements = legacy.map((col) => {
-        // The default is re-stated because MySQL drops a column's DEFAULT when
-        // MODIFY does not repeat it, and an audit column without
-        // `CURRENT_TIMESTAMP(3)` would start inserting NULL.
-        //
-        // A declared `defaultValue: 'NOW()'` column is the same case (#21241),
-        // and the TIME twin ({@link migrateMysqlTimeColumns}) already restates
-        // it. Measured on MySQL 8.0.46 before this line: a legacy
-        // `timestamp null default current_timestamp` NOW() column came out of
-        // the widening as `datetime(3)` with NO default, and an insert omitting
-        // it answered `null`. Both take the expression a fresh column gets,
-        // from {@link nowColumnDefault}, so the widening cannot spell a third.
-        const isAudit = (AUDIT_TIMESTAMP_COLUMNS as readonly string[]).includes(col.name);
-        const isNowDefault = isNowDefaultValue(fields[col.name]?.defaultValue);
-        const nullClause = col.nullable ? 'null' : 'not null';
-        const defaultClause = isAudit || isNowDefault ? ` default ${this.nowColumnDefault('datetime').toString()}` : '';
-        return {
-          sql: `alter table ?? modify column ?? datetime(${MYSQL_DATETIME_PRECISION}) ${nullClause}${defaultClause}`,
-          bindings: [table, col.name] as unknown[],
-        };
-      });
-      await this.runWideningAlters(table, statements);
-      this.logger.info?.(
-        `[sql-driver] widened MySQL TIMESTAMP → DATETIME(3) on ${table}: TIMESTAMP ends at 2038-01-19, ` +
-          `keeps no milliseconds and converts through the session timezone`,
-        { columns: legacy.map((c) => c.name) },
-      );
-    } catch (err) {
-      // #9354: the ONE failure that must not be swallowed. Everything else on
-      // this path keeps the policy the doc comment above describes; a metadata
-      // lock wait that the flush bounded is the operator's answer to a command
-      // they ran, and dropping it would report success for work not done.
-      if (isDeferredDdlLockWaitRefusal(err)) throw err;
-      this.logDurabilityFailure(
-        `[sql-driver] FAILED to widen MySQL datetime columns on ${table} — the DDL did not run and boot ` +
-        `continued: the columns are still legacy TIMESTAMP, so every write to them keeps truncating ` +
-        `milliseconds and keeps the 2038 ceiling, while reads return exactly what was stored and nothing ` +
-        `else reports the table as un-widened. Fix: identify the metadata-lock holder with ` +
-        '`SHOW PROCESSLIST` or `performance_schema.metadata_locks` (or resolve the error in this ' +
-        'record\'s meta), end it, then re-run `os migrate apply` or restart — the widening is ' +
-        're-detected from `information_schema` and is idempotent, so re-running is safe.',
-        { error: err instanceof Error ? err.message : String(err) },
-      );
-    }
+    // [#29520 codemod] The body moved to `sql-driver-rotation.ts` (see `RotationHost`).
+    return RotationFacet.migrateMysqlDatetimeColumns.call(rotationHost.of(this), table, fields);
   }
 
   /**
@@ -5249,53 +4825,12 @@ export class SqlDriver implements IDataDriver {
    * as un-widened, so the level IS the signal. Same reasoning, same level, on
    * {@link migrateMysqlDatetimeColumns}.
    */
-  protected async migrateMysqlTimeColumns(
+  protected migrateMysqlTimeColumns(
     table: string,
     fields: Record<string, any>,
   ): Promise<void> {
-    if (!this.isMysql) return;
-    try {
-      const legacy = await this.legacyMysqlTimeColumns(table, fields);
-      if (legacy.length === 0) return;
-
-      // #9354: the datetime twin's seam, for the same reason — this ALTER takes
-      // the same exclusive metadata lock and blocks on the same holder.
-      const statements = legacy.map((col) => {
-        // MODIFY drops a default it does not restate. A `defaultValue: 'NOW()'`
-        // column gets the canonical UTC expression default (`nowColumnDefault`);
-        // its legacy `current_timestamp()` default read the SESSION's zone, so
-        // dropping-and-replacing it is a fix, not collateral.
-        const isNowDefault = isNowDefaultValue(fields[col.name]?.defaultValue);
-        const defaultClause = isNowDefault ? ' default (cast(utc_timestamp(3) as time(3)))' : '';
-        return {
-          sql: `alter table ?? modify column ?? time(3) ${col.nullable ? 'null' : 'not null'}${defaultClause}`,
-          bindings: [table, col.name] as unknown[],
-        };
-      });
-      await this.runWideningAlters(table, statements);
-      this.logger.info?.(
-        `[sql-driver] widened MySQL TIME → TIME(3) on ${table}: a zero-precision TIME rounds the ` +
-          `canonical milliseconds to the nearest second, changing the stored wall clock`,
-        { columns: legacy.map((c) => c.name) },
-      );
-    } catch (err) {
-      // #9354: the ONE failure that must not be swallowed. Everything else on
-      // this path keeps the policy the doc comment above describes; a metadata
-      // lock wait that the flush bounded is the operator's answer to a command
-      // they ran, and dropping it would report success for work not done.
-      if (isDeferredDdlLockWaitRefusal(err)) throw err;
-      this.logDurabilityFailure(
-        `[sql-driver] FAILED to widen MySQL time columns on ${table} — the DDL did not run and boot ` +
-        `continued: the columns are still zero-precision TIME, so every fractional-second write to them ` +
-        `keeps being ROUNDED to whole seconds — the stored wall clock is not the one that was asked for — ` +
-        `while reads return exactly what was stored and nothing else reports the table as un-widened. ` +
-        'Fix: identify the metadata-lock holder with `SHOW PROCESSLIST` or ' +
-        '`performance_schema.metadata_locks` (or resolve the error in this record\'s meta), end it, then ' +
-        're-run `os migrate apply` or restart — the widening is re-detected from `information_schema` ' +
-        'and is idempotent, so re-running is safe.',
-        { error: err instanceof Error ? err.message : String(err) },
-      );
-    }
+    // [#29520 codemod] The body moved to `sql-driver-rotation.ts` (see `RotationHost`).
+    return RotationFacet.migrateMysqlTimeColumns.call(rotationHost.of(this), table, fields);
   }
 
   // ── Deferred schema DDL (#3917) ────────────────────────────────────────────
@@ -7285,18 +6820,8 @@ export class SqlDriver implements IDataDriver {
    * shape {@link SqlDriver.withWithheldFilterLog} exists for).
    */
   protected resolveWithheldFilterRefusal(err: unknown, rootFilter: unknown): unknown {
-    const diagnostic = withheldFilterDiagnosticOf(err);
-    if (diagnostic === null) return err;
-    const carrier = err as Record<symbol, unknown>;
-    const subtree = carrier[WITHHELD_FILTER_SUBTREE];
-    const provenance =
-      subtree === undefined ? null : resolveFilterSubtreeProvenance(rootFilter, subtree);
-    if (provenance === 'author') {
-      const authorText = carrier[WITHHELD_FILTER_AUTHOR_TEXT];
-      return unsupportedFilterError(typeof authorText === 'string' ? authorText : diagnostic);
-    }
-    this.logWithheldFilterDiagnostic(err);
-    return err;
+    // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts` (see `FilterHelpersHost`).
+    return FilterHelpersFacet.resolveWithheldFilterRefusal.call(filterHelpersHost.of(this), err, rootFilter);
   }
 
   /**
@@ -7588,403 +7113,9 @@ export class SqlDriver implements IDataDriver {
     // scoped with — captured by the lazily invoked group callbacks below,
     // never read from instance state.
     options?: DriverOptions,
-  ) {
-    if (!condition || typeof condition !== 'object') return;
-    const root = rootFilter ?? condition;
-    const table = tableHint ?? this.coercionKey(builder);
-
-    // #5134 — shape-validate the whole tree and decide its boolean value first.
-    // A malformed node throws here, before any identity is applied, so "compiled
-    // to empty" can only ever mean "genuinely empty".
-    const verdict = reduceFilterNode(condition as Record<string, unknown>, 'filter');
-    if (verdict === 'true') return;
-    if (verdict === 'false') {
-      this.applyFalseConstant(builder, logicalOp);
-      return;
-    }
-
-    for (const [key, value] of Object.entries(condition)) {
-      if (key === '$and' && Array.isArray(value)) {
-        // #5134 — an all-TRUE `$and` (including `$and: []`) IS the AND identity;
-        // emitting nothing for it is now a decision, not an accident. A FALSE
-        // member cannot reach here: it would have made the node FALSE above.
-        if (reduceFilterKey(key, value, 'filter', condition) === 'true') continue;
-        const branches = value.filter(
-          (sub) => reduceFilterNode(sub as Record<string, unknown>, 'filter') === 'clause',
-        );
-        // Attach this group to the parent the way `logicalOp` asks, matching
-        // `$or`/`$not` below. Nothing passes 'or' today (the sole caller uses
-        // 'and' and no branch propagates 'or' any more), but leaving one of the
-        // four combinators deaf to the flag is how the rules drift apart again.
-        const method = logicalOp === 'or' ? 'orWhere' : 'where';
-        // [#29888] A large group is regrouped into balanced halves, so the
-        // expression tree it parses to stays shallow (sql-driver-balanced-group.ts).
-        (builder as any)[method]((qb: any) => {
-          emitBalancedGroup(qb, branches, 'where', (subQb: any, sub) => {
-            this.withWithheldFilterLog(root, () => this.applyFilterCondition(subQb, sub, 'and', table, root, options));
-          });
-        });
-      } else if (key === '$or' && Array.isArray(value)) {
-        // #5134 — one TRUE disjunct makes the whole `$or` TRUE, so `{$or:[{a},{}]}`
-        // matches every row instead of quietly compiling to just `(a = ?)`.
-        if (reduceFilterKey(key, value, 'filter', condition) === 'true') continue;
-        // FALSE disjuncts are the OR identity — dropped. At least one `'clause'`
-        // member survives, or the key would have been TRUE/FALSE above.
-        const branches = value.filter(
-          (sub) => reduceFilterNode(sub as Record<string, unknown>, 'filter') === 'clause',
-        );
-        const method = logicalOp === 'or' ? 'orWhere' : 'where';
-        (builder as any)[method]((qb: any) => {
-          // The `'orWhere'` attach is what OR-s the branches together.
-          // The branch body is still compiled with 'and', because every key
-          // inside one filter object is AND-ed at every depth (Filter
-          // Protocol / Mongo). Passing 'or' down instead made a branch's own
-          // field keys OR each other, so `{$or:[{a,b}]}` compiled to
-          // `a = ? OR b = ?`. That widens the result set, so an RLS/sharing
-          // read scope of the shape `{$or:[{owner,status},{shared_with}]}`
-          // returned rows the scope excluded — see sql-driver-or-filter.test.ts.
-          // [#29888] A large group is regrouped into balanced halves, so the
-          // expression tree it parses to stays shallow: the parent-record read
-          // gates OR one branch per registered parent object, and a flat chain
-          // of them passed SQLite's expression-depth limit on hosted libSQL
-          // (sql-driver-balanced-group.ts).
-          emitBalancedGroup(qb, branches, 'orWhere', (subQb: any, sub) => {
-            this.withWithheldFilterLog(root, () => this.applyFilterCondition(subQb, sub, 'and', table, root, options));
-          });
-        });
-      } else if (key === '$not') {
-        // Spec LOGICAL_OPERATORS declares `$not` alongside `$and`/`$or`; both
-        // driver-mongodb and driver-memory implement it, and CEL `!expr` in a
-        // permission/scope rule compiles to `{ $not: {...} }` (cel-to-filter.ts).
-        // Without this branch `$not` fell through to the field handler, was
-        // treated as a column named "$not", and produced wrong SQL — the same
-        // class of silent filter-bypass this fix (issue #2704) closes.
-        //
-        // #5134 — `$not` of a FALSE group is TRUE: skip it. `$not` of a TRUE
-        // group is FALSE and never reaches here (the node reduced to FALSE), and
-        // a non-node operand was refused by the reduction, so `value` is a node.
-        if (reduceFilterKey(key, value, 'filter', condition) === 'true') continue;
-        // #5146 — the operand is negated as handed. On every seamed read it is
-        // already TOTAL: the shared lowering guarded each leaf in the direction
-        // its operator answers for a row with no value (ADR-0053 D-D1, amended;
-        // the lowering's rule 3), so `NOT (…)` is its exact complement. This
-        // driver's own copy of that rewrite is deleted (#20822, item 5): a
-        // caller that passes no seam gets the three-valued `NOT` it wrote.
-        const notMethod = logicalOp === 'or' ? 'orWhereNot' : 'whereNot';
-        (builder as any)[notMethod]((qb: any) => {
-          // [#8220] The operand is the caller's own node (a seam's lowering
-          // carries each rewritten node's provenance mark forward), so a
-          // refusal raised inside a `$not` resolves against `root` like any
-          // other; the walk-side refusals ran on the same nodes, eagerly.
-          this.withWithheldFilterLog(root, () =>
-            this.applyFilterCondition(qb, value as Record<string, unknown>, 'and', table, root, options),
-          );
-        });
-      } else if (isFilterNode(value)) {
-        // [#19885] An OPERATOR MAP is a plain object — the walk's own reading
-        // ({@link isFilterNode}, which {@link classifyFilterKey} and the
-        // top-level `{ field: value }` loop in `compileFilters` agree with). This
-        // test used to be "any non-array object", so a `Date` or binary comparand
-        // landed here and was read as an operator map, with a different wrong
-        // answer per shape:
-        //
-        // - a `Date` has no own entries, so its leaf was DROPPED:
-        //   `{ $and: [{ d: <Date> }] }` answered every row on SQLite and Postgres
-        //   while the same `{ d: <Date> }` at top level answered the one matching row;
-        // - a NON-EMPTY binary comparand (`Buffer` / `Uint8Array`) had its byte
-        //   indices read as operator names, so it was REFUSED — `INVALID_FILTER` /
-        //   400, `Unsupported filter operator "0"` — a comparand the top level binds;
-        // - an EMPTY binary comparand has no entries either, so it was dropped
-        //   like the `Date`.
-        //
-        // Each is a comparand, and it now takes the bare-value branch below, the
-        // same compilation the top-level loop gives it.
-        const localField = this.mapSortField(key);
-        const field = this.remoteColumn(table, key, localField);
-        // Non-null only for a SQLite `Field.datetime`, whose two stored forms
-        // (INTEGER epoch / ISO TEXT) must be unified before comparing (#3912).
-        const columnExpr = this.filterColumnExpr(table, localField, field);
-        for (const [rawOp, opValue] of Object.entries(value as Record<string, any>)) {
-          const method = logicalOp === 'or' ? 'orWhere' : 'where';
-          // [ADR-0139 D3] The composed `ReadableIds` leaf — the one non-list a
-          // `$in` may hold — compiles to the semi-join, ahead of every comparand
-          // gate below (none of which has a reading for it). Only `$in` reaches
-          // here: `applyFilters` refused it at every other position.
-          if (rawOp === '$in' && isComposedReadableIds(opValue)) {
-            const mIn = logicalOp === 'or' ? 'orWhereIn' : 'whereIn';
-            (builder as any)[mIn](field, this.readableIdsSubquery(opValue, options));
-            continue;
-          }
-          // #5222 — a `{ $field }` that is the WHOLE comparand of a scalar
-          // comparison compiles to a same-table column-to-column comparison
-          // (or refuses inside the emitter, with the specific boundary named).
-          // Checked before the #5041 gate below, which still answers every
-          // other `$field` position — list members, the LIKE family — and
-          // before coercion/rewrites, which expect a literal comparand.
-          // #5222 — the bare `{ field: { $field: 'other' } }` spelling reaches
-          // this loop as an OPERATOR named `$field`, because the whole field
-          // spec is its own operator map. Answered here, ahead of the generic
-          // unsupported-operator arm, so the message can name the supported
-          // spelling instead of listing fifteen operator names.
-          if (rawOp === '$field' && typeof opValue === 'string') {
-            // [#8220] `value` — the field-spec map carrying the bare `$field`
-            // key — is the node the provenance resolver can find in the tree;
-            // `opValue` is only the referenced column's name.
-            throw bareFieldReferenceError(field, opValue, value);
-          }
-          const crossFieldRef = fieldReferenceOf(opValue);
-          if (crossFieldRef !== null && CROSS_FIELD_COMPARISON_OPERATORS.has(rawOp)) {
-            this.applyCrossFieldComparison(builder, method, table, key, localField, field, rawOp, crossFieldRef, opValue);
-            continue;
-          }
-          // [#25808] The bare `{ field: { $now: true, addDays } }` spelling reaches
-          // this loop as an operator named `$now`, as the bare `$field` does.
-          if (rawOp === '$now') throw nowAnchorPositionError(field, rawOp, value);
-          // [#25808] A `{ $now, addDays }` anchor that is the WHOLE comparand of a
-          // scalar comparison compiles to `column <op> <instant + days>` (or
-          // refuses inside the emitter, with the boundary named). Same slot as
-          // the `{ $field }` arm above, for the same reasons.
-          const nowAnchor = nowAnchorOf(opValue);
-          if (nowAnchor !== null && CROSS_FIELD_COMPARISON_OPERATORS.has(rawOp)) {
-            this.applyNowAnchorComparison(builder, method, table, key, localField, field, rawOp, nowAnchor, opValue);
-            continue;
-          }
-          // #5041 — reject a comparand that cannot become a bind parameter
-          // BEFORE any rewrite or coercion touches it, so the message names the
-          // shape the caller actually sent.
-          // [#8197] `value` — this field's operator map — is the enclosing node
-          // for both gates below: the nearest node to the constraint that is
-          // guaranteed to be an object, and therefore markable.
-          assertCompilableComparand(field, rawOp, opValue, value);
-          // #7398 — the column-type gate, on the operator AS WRITTEN and ahead
-          // of every rewrite and both emitters, so a JSON column cannot reach
-          // the plain `whereIn` arms below NOR the normalised `whereRaw` arms
-          // an external multi-value datetime column is routed to.
-          this.assertOperatorAppliesToColumn(table, localField, field, rawOp, false, value);
-          // [#14079] The type-gated answer for a text operator over a column
-          // whose stored value is never text — AFTER every refusal above (a
-          // filter the contract refuses is still refused) and BEFORE both
-          // emitters, so neither a `GLOB` nor a `LIKE` is ever built against a
-          // number. See {@link SqlDriver.applyTextOperatorOverNonTextColumn}.
-          if (TEXT_OPERATORS.has(rawOp) && this.isNonTextColumn(table, localField)) {
-            this.applyTextOperatorOverNonTextColumn(builder, logicalOp, rawOp);
-            continue;
-          }
-          // [#20444] `$empty` — answered by the field's DECLARED row of the
-          // ruled table, AFTER every refusal above (its non-boolean comparand
-          // was refused on the walk) and BEFORE the comparand coercion and the
-          // normalised-column emitter: its flag is not a value of the column,
-          // so neither applies.
-          if (rawOp === '$empty') {
-            this.applyEmptyOperator(builder, logicalOp, table, localField, field, opValue === true, value);
-            continue;
-          }
-          // [ADR-0053 D-D1 items 5 and 9, as amended — #20822] No calendar-day
-          // rewrite here: a bare-day `$lte` / `$between` max is widened to the
-          // whole day ONCE, by the shared lowering (`lowerFilterCondition`,
-          // `@objectstack/spec/data`) at the seams, before this driver sees the
-          // filter — every seamed read hands this emitter `$lt` the next day in
-          // the calendar-string domain, which it converts to storage form like
-          // any comparand (D-A1, D-E3), and the last supported day as
-          // `{ $null: false }`. The copy this emitter kept (#3777, #20600) is
-          // deleted: a caller that passes no seam compiles the comparison it
-          // wrote, `<=` / BETWEEN against midnight.
-          const op = rawOp;
-          const coerced = this.coerceFilterValue(table, localField, opValue);
-          if (columnExpr && this.applyNormalizedComparison(builder, logicalOp, columnExpr, op, coerced)) continue;
-          switch (op) {
-            case '$eq':
-              (builder as any)[method](field, coerced);
-              break;
-            case '$ne':
-              // `<> NULL` matches nothing; a null comparand means "has any value".
-              // UNCHANGED by #5298: `IS NOT NULL` is already total, and both
-              // sides of the ruling agree a row with no value does NOT have
-              // "any value". Only the value COMPARISON below becomes NULL-safe.
-              //
-              // [#6050] The test was `coerced == null` — LOOSE, so it also
-              // caught `undefined`, while the two polarity tables that must
-              // pin THIS emitter's spelling (`operatorIsNullTotal`,
-              // `nullValueSatisfiesOperator` then; since #20822 the shared
-              // lowering's) read `=== null`. That split was
-              // defect B: `{ $not: { d: { $ne: undefined } } }` compiled a
-              // guarded tautology and answered `[]` where remote answered
-              // `['3','4']`. Now that `undefined` is refused upstream the two
-              // spellings cover the same domain, and the strict one is written
-              // for the reason #5347 gave when it tightened the `$null` arm:
-              // a lenient test keeps compiling if the gate is ever moved, and
-              // silently resumes answering for a value nobody ruled on. Note
-              // `coerceFilterValue` is total (every arm returns its input on a
-              // shape it cannot canonicalise), so it cannot manufacture an
-              // `undefined` the gate never saw.
-              if (coerced === null) (builder as any)[logicalOp === 'or' ? 'orWhereNotNull' : 'whereNotNull'](field);
-              else this.applyNullSafeNegative(builder, method, field, (qb) => qb.orWhere(field, '<>', coerced));
-              break;
-            case '$gt':
-              (builder as any)[method](field, '>', coerced);
-              break;
-            case '$gte':
-              (builder as any)[method](field, '>=', coerced);
-              break;
-            case '$lt':
-              (builder as any)[method](field, '<', coerced);
-              break;
-            case '$lte':
-              (builder as any)[method](field, '<=', coerced);
-              break;
-            case '$in': {
-              const mIn = logicalOp === 'or' ? 'orWhereIn' : 'whereIn';
-              (builder as any)[mIn](field, coerced as any[]);
-              break;
-            }
-            case '$nin': {
-              // [#5298] NULL-safe: "not among this list" holds vacuously for a
-              // value that is not there, which is what every JS backend answers.
-              this.applyNullSafeNegative(builder, method, field, (qb) =>
-                qb.orWhereNotIn(field, coerced as any[]),
-              );
-              break;
-            }
-            // [commit e04a0aff2] The MEMBERSHIP reading first: on a JSON column this
-            // operator asks whether the comparand is an ELEMENT of the stored
-            // array, not whether it is a substring of the serialization. Falls
-            // through to the substring emitter for every scalar string column,
-            // which is the other half of the sentence the spec now states.
-            case '$contains':
-              if (!this.applyJsonMembership(builder, method, table, localField, field, opValue, false)) {
-                this.applyContainsLike(builder, method, field, opValue);
-              }
-              break;
-            // [#5702] The case-INSENSITIVE twin of `$contains`, and the
-            // replacement `RETIRED_FILTER_OPERATORS` prescribes for `$regex`.
-            // Same `applyLike` — same escaped character class, same bound
-            // `ESCAPE` — with the fold applied to BOTH sides, because folding
-            // only the comparand compares a folded needle against a raw column
-            // and matches just the rows that were already lower-case.
-            case '$icontains':
-              this.applyLike(builder, method, field, opValue, 'contains', false, true);
-              break;
-            case '$notContains':
-              // [commit e04a0aff2] The exact complement of the arm above, on the same
-              // population and the same construct. It moves WITH `$contains`
-              // and cannot be deferred: this operator is declared "the negation
-              // of $contains, on the same comparand contract", so leaving it on
-              // the substring emitter would make the pair non-complementary on
-              // every JSON column — `['redwood']` would answer neither
-              // `$contains: 'red'` nor `$notContains: 'red'`.
-              if (!this.applyJsonMembership(builder, method, table, localField, field, opValue, true)) {
-                // [#5298] NULL-safe: `NOT LIKE` is UNKNOWN for a NULL column, and
-                // "does not contain" is true of a value that is not there.
-                this.applyNullSafeNegative(builder, method, field, (qb) =>
-                  this.applyLike(qb, 'orWhere', field, opValue, 'contains', true),
-                );
-              }
-              break;
-            case '$startsWith':
-              this.applyLike(builder, method, field, opValue, 'starts');
-              break;
-            case '$endsWith':
-              this.applyLike(builder, method, field, opValue, 'ends');
-              break;
-            // [#7536] The pattern pair. NOT `applyLike`: that method escapes the
-            // comparand and wraps it in the shape's wildcards, which is the
-            // exact rewrite these two operators exist to avoid. The wildcards
-            // are the CALLER's, the match is against the WHOLE value, and
-            // `reduceFilterKey` has already refused a non-string pattern and a
-            // dangling trailing escape — so `opValue` is a compilable pattern
-            // by the time it reaches here.
-            //
-            // `opValue` rather than `coerced`: `coerceFilterValue` canonicalises
-            // a comparand against the column's TYPE (dates, booleans, numbers),
-            // and a pattern is not a value of that type — coercing it would
-            // rewrite the pattern text.
-            case '$like':
-              this.applyLikePattern(builder, method, field, opValue as string, false);
-              break;
-            case '$ilike':
-              this.applyLikePattern(builder, method, field, opValue as string, true);
-              break;
-            case '$between': {
-              const arr = Array.isArray(coerced) ? coerced : [];
-              if (arr.length !== 2) {
-                // [#8197] `opValue`, never `coerced`: coercion can return a NEW
-                // array, and a node the resolver cannot find under the query's
-                // own `where` root resolves to `null` — withheld — for every
-                // caller including an author who really did write it.
-                throw betweenArityError(field, refusalSubtree(opValue, value));
-              }
-              (builder as any)[logicalOp === 'or' ? 'orWhereBetween' : 'whereBetween'](field, arr as [any, any]);
-              break;
-            }
-            // `{ $null: true }` → IS NULL, `{ $null: false }` → IS NOT NULL.
-            // Also the SQL rendering of the AST `is_null`/`is_not_null` operators
-            // (spec `parseFilterAST` maps those to `$null`). Previously this fell
-            // to the equality default and compiled `field = true`, silently
-            // returning the wrong rows (issue #2704).
-            //
-            // [#5347] `opValue` is a boolean here — `reduceFilterKey` refused
-            // anything else while validating the tree, which happens before this
-            // emitter runs. The `=== false` test is therefore an exhaustive
-            // two-way choice, not the "anything but false is IS NULL" rule it
-            // used to be; that rule was this driver's half of a three-way split
-            // across the backends. See {@link nonBooleanNullComparandError}.
-            case '$null':
-              (builder as any)[opValue === false
-                ? (logicalOp === 'or' ? 'orWhereNotNull' : 'whereNotNull')
-                : (logicalOp === 'or' ? 'orWhereNull' : 'whereNull')](field);
-              break;
-            // Mongo `$exists`: a present field is a non-null column in SQL.
-            case '$exists':
-              (builder as any)[opValue === false
-                ? (logicalOp === 'or' ? 'orWhereNull' : 'whereNull')
-                : (logicalOp === 'or' ? 'orWhereNotNull' : 'whereNotNull')](field);
-              break;
-            default: {
-              // [#5702] A RETIRED spelling gets the prescription, not the
-              // vocabulary list: the author who wrote `$regex` needs
-              // `$icontains`, and a list of fifteen names does not say so.
-              //
-              // [#20020] `value` — this field's operator map — is the node both
-              // refusals hand the provenance seam: an object, so markable, and
-              // held by reference under the query's `where` root.
-              const retired = retiredFilterOperatorError(op, field, Object.keys(value as object), value);
-              if (retired) throw retired;
-              throw unsupportedFilterOperatorError(op, field, value);
-            }
-          }
-        }
-      } else {
-        const localField = this.mapSortField(key);
-        const field = this.remoteColumn(table, key, localField);
-        const method = logicalOp === 'or' ? 'orWhere' : 'where';
-        // #7398 — the bare `{ field: value }` spelling again, reached when the
-        // condition carries an operator SOMEWHERE (so `applyFilters` routed the
-        // whole node here) but not on this key. Same compilation, same gate:
-        // one condition must not have two verdicts depending on its siblings.
-        // [#8197] A bare comparand is usually a primitive, so `condition` — this
-        // node, an ARM of the merge when one happened — is what carries the mark.
-        //
-        // [#19885] The comparand gate first, in the order the top-level loop
-        // runs its two: this branch is the third of the three positions
-        // {@link SqlDriver.assertOperatorAppliesToColumn}'s docblock names, and
-        // it carried the column gate without the comparand one. So an array in
-        // the equality slot passed here unrefused whenever the leaf sat under
-        // `$and` / `$or` / `$not` — or beside a sibling key that carries an
-        // operator, which routes the whole node here too. SQLite then refused
-        // the bind (a 500 `DATABASE_ERROR` for a filter the caller can fix) and
-        // Postgres bound the array as its array-literal text (`{"a"}`) and
-        // silently answered the wrong rows. Same gate, same `INVALID_FILTER` /
-        // 400, as the same leaf gets at top level.
-        assertCompilableComparand(field, '=', value, condition);
-        this.assertOperatorAppliesToColumn(
-          table, localField, field, '=', true, refusalSubtree(value, condition),
-        );
-        const coerced = this.coerceFilterValue(table, localField, value);
-        const columnExpr = this.filterColumnExpr(table, localField, field);
-        if (columnExpr && this.applyNormalizedComparison(builder, logicalOp, columnExpr, '=', coerced)) continue;
-        (builder as any)[method](field, coerced as any);
-      }
-    }
+  ): void {
+    // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts` (see `FilterHelpersHost`).
+    return FilterHelpersFacet.applyFilterCondition.call(filterHelpersHost.of(this), builder, condition, logicalOp, tableHint, rootFilter, options);
   }
 
   /**
@@ -8478,15 +7609,8 @@ export class SqlDriver implements IDataDriver {
    * `default_mismatch` producer is the #4560 runtime-token check.
    */
   protected createAuditTimestampColumn(table: Knex.CreateTableBuilder, name: string): void {
-    if (this.isMysql) {
-      table.datetime(name, { precision: MYSQL_DATETIME_PRECISION }).defaultTo(this.nowColumnDefault('datetime'));
-      return;
-    }
-    if (this.isSqlite) {
-      table.timestamp(name).defaultTo(this.nowColumnDefault('datetime'));
-      return;
-    }
-    table.timestamp(name).defaultTo(this.knex.fn.now());
+    // [#29520 codemod] The body moved to `sql-driver-column-creation.ts` (see `ColumnCreationHost`).
+    return ColumnCreationFacet.createAuditTimestampColumn.call(columnCreationHost.of(this), table, name);
   }
 
   /**
@@ -9012,70 +8136,8 @@ export class SqlDriver implements IDataDriver {
    * to the spec enters that pin automatically.
    */
   protected varcharColumnChars(field: any, keyed?: { unique: boolean }): number | null {
-    // Multi-value is decided before the type switch in `createColumn` — a JSON
-    // column, whatever the element type would have been. [#17469] The question
-    // is {@link isMultiValuedColumn}'s, exactly as it is there, so this mirror
-    // cannot answer a different one.
-    const type = field?.type || 'string';
-    if (isMultiValuedColumn(String(type), field)) return null;
-    switch (type) {
-      case 'string':
-      case 'email':
-      case 'url':
-      case 'phone':
-      case 'password':
-        return this.declaredVarcharLength(field);
-      case 'text':
-      case 'textarea':
-      case 'html':
-      case 'markdown':
-      case 'richtext':
-      case 'code':
-      // #11875 — moved out of the catch-all together with `createColumn`'s
-      // text-family case: the write seam now enforces their declared bound.
-      case 'signature':
-      case 'qrcode':
-        return keyed ? this.keyableTextLength(field) : null;
-      // Virtual — `createColumn` returns without emitting anything.
-      case 'formula':
-        return null;
-      // The non-string primitives: INTEGER / REAL / DECIMAL / BOOLEAN / DATE /
-      // DATETIME / TIME columns. None of them is a varchar, so none is sized
-      // from `maxLength` — which is the only question this mirror answers.
-      // ⚠️ Since #16318 the numeric members ARE sized, by `numericColumnFor`,
-      // but from the field's TYPE and not from any declaration; `null` here
-      // stays the correct answer to the question actually asked.
-      case 'integer':
-      case 'int':
-      case 'float':
-      case 'number':
-      case 'currency':
-      case 'percent':
-      case 'rating':
-      case 'slider':
-      case 'progress':
-      case 'summary':
-      case 'boolean':
-      case 'toggle':
-      case 'date':
-      case 'datetime':
-      case 'time':
-        return null;
-      default:
-        // `createColumn`'s catch-all, spelled the same way so the two cannot
-        // disagree about which types are JSON: everything else is
-        // `table.string(name)` at knex's default width.
-        //
-        // ⚠️ The FILE family first, and by the same deployment question the
-        // emitter asks — this mirror is what the drift detector consults
-        // INSTEAD of restating the emitter's cases, so a mirror that answered
-        // `null` for a moved media column would tell the detector no varchar
-        // exists where the emitter had just built one.
-        if (FILE_REFERENCE_TYPES.has(type)) {
-          return this.mediaColumnIsJson() ? null : MEDIA_ID_VARCHAR_CHARS;
-        }
-        return JSON_COLUMN_TYPES.has(type) ? null : SqlDriver.DEFAULT_STRING_VARCHAR_CHARS;
-    }
+    // [#29520 codemod] The body moved to `sql-driver-column-creation.ts` (see `ColumnCreationHost`).
+    return ColumnCreationFacet.varcharColumnChars.call(columnCreationHost.of(this), field, keyed);
   }
 
   /**
@@ -9277,481 +8339,9 @@ export class SqlDriver implements IDataDriver {
     field: any,
     keyed?: { unique: boolean },
     tenantColumn: boolean = false,
-  ) {
-    // [#11567] Stated BEFORE the `multiple` short-circuit and before the type
-    // switch, because the spec's refusal is gated on neither: `FieldSchema`
-    // answers `unrecognized_keys` for `reference_to` on ANY field, whatever its
-    // type, and a multi-value lookup (a JSON column, returning immediately
-    // below) used to carry the key straight past this seam. One key, one
-    // answer, wherever it appears.
-    //
-    // `!== undefined` rather than `'reference_to' in field`: it refuses every
-    // value the key can actually carry — including the `null` and `''` the old
-    // truthy gate ignored — while staying immune to a producer that spreads an
-    // explicit `{ reference_to: undefined }`. Measured: `FieldSchema`'s own
-    // canonical output does NOT carry `reference_to` as an own key, so key
-    // presence would have been correct too; this is the narrower of two
-    // correct predicates.
-    if (field.reference_to !== undefined) refuseRejectedReferenceAlias(name);
-
-    // [#17469] Was `if (field.multiple)`. The DDL writer and {@link isJsonField}
-    // are one source by the {@link JSON_COLUMN_TYPES} header's own contract
-    // ("so the two can't drift"), so the writer asks the same predicate the
-    // reader now asks. A field whose `multiple` the spec does not recognise on
-    // its type no longer gets a JSON column here — and `FieldSchema` refuses
-    // that declaration at the authoring entrance in the same ruling.
-    //
-    // [#17231] The short-circuit decides the column TYPE; it does not decide
-    // the column's CONSTRAINTS, and returning here used to mean it silently
-    // did. ADR-0113 P0 names this site verbatim — 「the physical constraint now
-    // keys off the explicitly-authored `storage.notNull` at that same
-    // `#createColumn` site」 — and carves out no field type: `storage.notNull`'s
-    // only declared exclusivity is `requiredWhen` (`FieldSchema.superRefine`),
-    // so `multiple: true` + `storage: { notNull: true }` is an authorable
-    // declaration this site was dropping on the floor. The differ, ADR-0113's
-    // other named consumer in this package, never had the gap — `fieldHasColumn`
-    // answers multi-value first and the nullability comparison then runs — so
-    // the platform reported DESTRUCTIVE `tighten_not_null` drift against tables
-    // it had itself just created, with no rows in them.
-    //
-    // ⚠️ NOT the drift ceremony this ADR routes around: `createColumn` runs on
-    // `CREATE TABLE` and on `ALTER TABLE ADD COLUMN`, so the column constrained
-    // here is always EMPTY — the same reason the string family's #11431 note
-    // below gives for narrowing a varchar here. Imposing `NOT NULL` over
-    // possibly-null data stays `tighten_not_null`, destructive, behind
-    // `os migrate apply --allow-destructive`, untouched.
-    //
-    // The column DEFAULT is deliberately still NOT emitted on this path: the
-    // multi-value shape has no scalar DDL form, and `os generate migration`
-    // skips it for the same reason (`declaredColumnDefault`), so the two
-    // producers already agree.
-    if (isMultiValuedColumn(String(field.type ?? ''), field)) {
-      const jsonCol = this.jsonColumn(table, name);
-      if (declaresColumnNotNull(field) || tenantColumn) jsonCol.notNullable();
-      return;
-    }
-
-    // [#16319] ⛔ Was `const type = field.type || 'string'`. See
-    // {@link refuseUndeclaredFieldType} for what that default cost and why the
-    // answer here is a refusal rather than a different guess. Asked after the
-    // multi-value short-circuit, exactly where the default stood — and a field
-    // with NO type is now refused rather than silently made a JSON column,
-    // which is this ruling's own direction: a type the spec never saw cannot
-    // carry a `multiple` the spec recognises.
-    if (!isDeclaredFieldType(field)) refuseUndeclaredFieldType(name);
-    const type: string = field.type;
-    let col: any;
-    switch (type) {
-      case 'string':
-      case 'email':
-      case 'url':
-      case 'phone':
-      case 'password': {
-        // #11431: the string family takes its declared `maxLength`, instead of
-        // knex's invented default of 255.
-        //
-        // The bound is the field's OWN — nothing is guessed. `schema-drift.ts`
-        // has always treated `varchar(field.maxLength)` as the EXPECTED
-        // physical shape of a bounded field (`widen_varchar` /
-        // `narrow_varchar` say so in as many words), so before this branch the
-        // differ and the emitter disagreed about every column the driver
-        // itself had just created. Measured on live MySQL 8.0.46 and Postgres
-        // 16 on the pre-fix tree: a `maxLength: 400` email, a `maxLength: 1024`
-        // url and a `maxLength: 20` phone all landed as `varchar(255)`, and the
-        // same table reported two `widen_varchar` (warning/safe) plus one
-        // `narrow_varchar` (error/DESTRUCTIVE) findings against itself, on a
-        // table with no rows in it.
-        //
-        // The write half is the reported defect. A 300-character value —
-        // legal under the declaration, and accepted by the record validator's
-        // own `max_length` check — was refused by BOTH enforcing dialects:
-        // MySQL `ER_DATA_TOO_LONG` under `STRICT_TRANS_TABLES`, Postgres
-        // `22001 value too long for type character varying(255)`.
-        //
-        // ⚠️ Both directions, and the narrowing one is NOT a destructive
-        // migration — a point worth stating because it reads like one:
-        // `createColumn` runs on `CREATE TABLE` and on `ALTER TABLE ADD
-        // COLUMN`, so the column it sizes is always EMPTY. Narrowing an
-        // EXISTING `varchar(255)` that holds rows stays exactly where it was
-        // before this change: the `narrow_varchar` drift op, category
-        // `destructive`, behind `os migrate apply --allow-destructive`.
-        // Nothing here plans an ALTER on an existing column, and the differ is
-        // untouched. What this removes is the permanent, self-inflicted drift
-        // report a fresh table used to raise against itself.
-        const declared = this.declaredVarcharLength(field);
-        col = declared === null ? table.text(name) : table.string(name, declared);
-        break;
-      }
-      case 'text':
-      case 'textarea':
-      case 'html':
-      case 'markdown':
-      // #11794: `richtext` and `code` join the text family, and membership is
-      // decided by a MEASURED test rather than by "this type's values look
-      // long".
-      //
-      // ## What makes an unbounded TEXT column correct for a type
-      //
-      // That the WRITE SEAM enforces the type's declared `maxLength` — the
-      // invariant the rest of this driver already rests on, stated in
-      // `schema-drift.ts` in as many words: "A TEXT column refuses nothing a
-      // `maxLength` allows … the bound is enforced at the write seam." So the
-      // question is not whether a value can be long, it is whether the
-      // declaration still binds once the column stops binding.
-      //
-      // objectql's record-validator applies its `max_length` / `min_length`
-      // branch to exactly the spec's BOUNDED_STRING_FIELD_TYPES — measured,
-      // not read off it: a `maxLength: 64` field of each member refuses a
-      // 100-character value with a field-named ADR-0112 envelope, before any
-      // column is reached. So membership here RESTORES the declared contract
-      // (any string, as `valueSchemaFor` says) instead of widening past it.
-      //
-      // `richtext` is the headline member: the spec groups `markdown` / `html`
-      // / `richtext` together as "Rich Content" (`field.zod.ts`) and two of
-      // the three already landed here — the third fell through to the
-      // catch-all's `table.string(name)`, knex's varchar(255), so an ordinary
-      // rich-text body over 255 characters was refused by both enforcing
-      // dialects while the same body in a `markdown` field on the same table
-      // was accepted. Measured at 1000 characters on live MySQL 8.0.46
-      // (`ER_DATA_TOO_LONG` under `STRICT_TRANS_TABLES`) and Postgres 16
-      // (`22001`). `code` is the same defect on the same evidence — a code
-      // editor's contents, refused identically on both dialects.
-      case 'richtext':
-      case 'code':
-      // #11875 (maintainer ruling 2026-08-25, option 1): `signature` and
-      // `qrcode` join under exactly the invariant above. #11794 measured them
-      // (same live refusal: a 1000-char data-URI landed varchar(255) and was
-      // refused `22001` on PG, `ER_DATA_TOO_LONG` on MySQL) and deliberately
-      // left them in the catch-all, because at that point NOTHING enforced
-      // their declared `maxLength` — an unbounded TEXT would have accepted
-      // values the declaration forbids. That gap is now closed at both seams:
-      // `FieldSchema` admits `maxLength` on them (BOUNDED_STRING_FIELD_TYPES)
-      // and the record-validator's `max_length` branch reads the same set, so
-      // a TEXT column here refuses nothing the declaration allows — the bound
-      // is enforced at the write seam, and the data-URI refusal goes away.
-      case 'signature':
-      case 'qrcode': {
-        // Commit d0e3a885b: a text-family column that some declared index KEYS ON is
-        // emitted as `varchar(maxLength)` rather than TEXT, whenever the field
-        // declared a bound this dialect can key on.
-        //
-        // MySQL refuses a TEXT/BLOB column in a key without a prefix length
-        // (`ER_BLOB_KEY_WITHOUT_LENGTH`), so an unbounded TEXT is not merely a
-        // slower key there — it is not a key at all: `CREATE TABLE` succeeds and
-        // the following `ALTER TABLE … ADD [UNIQUE] INDEX` fails, leaving the
-        // table on disk WITHOUT the constraint it declared. Measured on MySQL
-        // 8.0.46 before this branch existed: 36 of the 44 platform objects
-        // failed schema-sync that way, so an auth stack could not stand up its
-        // own schema on a driver `createDefaultDatasourceDriverFactory` maps
-        // `mysql`/`mysql2` onto.
-        //
-        // The bound is the field's OWN `maxLength` — nothing is invented here.
-        // `schema-drift.ts` already treats `varchar(field.maxLength)` as the
-        // expected physical shape of a bounded field (its `widen_varchar` /
-        // `narrow_varchar` ops say so in as many words); this is the emitter
-        // finally agreeing with the differ. There is no `Field.string`
-        // builder: none of `Field`'s keys is named `string`, `FieldType.options`
-        // omits it too, and `FieldSchema.safeParse({ type: 'string', … })`
-        // fails at `[type]` (#12593). What IS true of knex: its bare
-        // `table.string(name)` call (no length argument) is `varchar(255)`.
-        // This branch never calls it bare — `table.string(name, keyable)`,
-        // where `keyable` is the field's own declared `maxLength`, up to
-        // `MAX_KEYABLE_VARCHAR_CHARS` (768 chars, wider than knex's
-        // 255-char default).
-        //
-        // Applied on every dialect rather than under `isMysql`, deliberately:
-        // the alternative is one declaration with two enforcement answers, so
-        // the same app would refuse an over-length write on MySQL and accept it
-        // on Postgres. Dialect-divergent enforcement of one declared bound is
-        // the defect class this repo's conformance matrices exist to close, and
-        // a `varchar(n)` is exactly what the SQLite and Postgres columns land
-        // as for a field declared `Field.text({ maxLength: n })` on a keyed
-        // column — the nearest authorable spelling to this shape; there is no
-        // `Field.string` (#12593).
-        //
-        // ⚠️ Scope, both halves load-bearing:
-        //   - KEYED only. A non-indexed `Field.text({ maxLength: 65000 })` stays
-        //     TEXT: `varchar(65000)` on utf8mb4 is 260000 bytes and blows MySQL's
-        //     65535-byte ROW limit, which would turn a working table into an
-        //     un-creatable one. Off-page TEXT has no such cost, and a column no
-        //     index keys on has nothing to gain from a bound.
-        //   - BOUNDED only. `maxLength` absent, or wider than a key part can be
-        //     ({@link keyableTextLength}), leaves the column TEXT — see
-        //     {@link explainUnkeyableTextColumn} for what happens next, which is
-        //     a named refusal and never a silently weaker constraint.
-        const keyable = keyed ? this.keyableTextLength(field) : null;
-        col = keyable === null ? table.text(name) : table.string(name, keyable);
-        break;
-      }
-      case 'integer':
-      case 'int':
-        col = table.integer(name);
-        break;
-      // `float` is a DRIVER-SIDE ALIAS, not a `FieldType`: there is no
-      // `Field.float` builder and `NUMERIC_VALUE_TYPES` does not carry it, so
-      // #16318's table has no opinion about it and it keeps the column it has
-      // always had.
-      case 'float':
-        col = table.float(name);
-        break;
-      // [#16318] The seven members of `NUMERIC_VALUE_TYPES` take the physical
-      // representation `packages/spec` states for them ({@link
-      // numericColumnFor}) — the same table both `os generate migration`
-      // formats read, so one declaration can no longer produce three different
-      // columns (measured on live PostgreSQL 16.13: this arm's `real`, the sql
-      // format's `numeric(18,2)`/`numeric(5,2)`, and the typescript format's
-      // `numeric(8,2)`). The spec module carries the measurements, the ruling
-      // and the residual bound; ⛔ do not restate its numbers here.
-      //
-      // What this arm still owes its reader is the SQLite half, because that is
-      // why three of these types were put in a float arm in the first place:
-      //
-      // `rating`/`slider`/`progress` are authored as numeric scalars (a star
-      // count, a slider position, a percent-of-completion). Without an explicit
-      // case they fell to `default → table.string`, giving the column TEXT
-      // affinity so SQLite coerced the written number to a string ('4' not 4) —
-      // a silent type-fidelity leak the value-loss tests didn't catch. REAL
-      // affinity round-trips them as JS numbers (#field-zoo).
-      //
-      // That leak stays defeated, and MEASURED rather than argued: knex
-      // compiles `table.decimal(name, p, s)` and `table.float(name)` to the
-      // IDENTICAL `float` column on SQLite
-      // (`ColumnCompiler_SQLite3.prototype.decimal` is the literal `'float'`),
-      // so the six exact-decimal members emit byte-identical SQLite DDL to what
-      // this arm emitted before and keep REAL affinity. `rating` moves to
-      // INTEGER affinity, where SQLite stores `4` as an integer and still
-      // accepts `4.5` as a REAL — it refuses no fractional value — so nothing
-      // this dialect accepts today stops being accepted.
-      //
-      // ⚠️ The read path is what makes the move safe on the server dialects:
-      // node-postgres parses `numeric` to a STRING and `real` to a number, and
-      // it is `NUMERIC_SCALAR_TYPES`' existing `numericFields` coercion —
-      // already registered for all seven of these types — that turns it back
-      // into a JS number on the way out.
-      case 'number':
-      case 'currency':
-      case 'percent':
-      case 'rating':
-      case 'slider':
-      case 'progress':
-      case 'summary': {
-        const numeric = numericColumnFor(type);
-        // ⛔ Not `?? table.float(name)`: an undefined answer for a type named
-        // in these very case labels would mean the labels and
-        // `NUMERIC_VALUE_TYPES` have parted, and a silent fallback is exactly
-        // the drift #16318 exists to close. The spec-side pin
-        // (`numeric-column-representation.test.ts`) holds the two equal, and
-        // `NUMERIC_VALUE_TYPES` is the single membership authority both read.
-        col =
-          numeric === undefined || numeric.kind === 'integer'
-            ? table.integer(name)
-            : table.decimal(name, numeric.precision, numeric.scale);
-        break;
-      }
-      // `toggle` is a boolean rendered as a switch. Same leak as above (TEXT
-      // affinity stored '1'); a boolean column gives NUMERIC affinity and the
-      // `booleanFields` read-coercion below converts the stored 1/0 back to a
-      // real JS boolean.
-      case 'boolean':
-      case 'toggle':
-        col = table.boolean(name);
-        break;
-      case 'date':
-        col = table.date(name);
-        break;
-      case 'datetime':
-        // MySQL's `TIMESTAMP` is a 32-bit epoch: it cannot represent an instant
-        // outside 1970-01-01..2038-01-19 (a contract end date, a subscription
-        // expiry, a retention horizon — all rejected outright), it carries no
-        // fractional seconds by default so the canonical form's milliseconds are
-        // silently truncated, and it CONVERTS on read/write using the session
-        // timezone, which makes the stored instant depend on server config.
-        // `DATETIME(3)` has none of those properties: 1000..9999, milliseconds
-        // kept, and stored verbatim — so the column holds the UTC wall clock the
-        // driver writes, exactly as ServiceNow stores its MySQL timestamps
-        // (#3942). Postgres deliberately keeps `table.timestamp` → `timestamptz`:
-        // asking for precision 3 there would REDUCE it from microseconds.
-        col = this.isMysql ? table.datetime(name, { precision: MYSQL_DATETIME_PRECISION }) : table.timestamp(name);
-        break;
-      case 'time':
-        // MySQL's bare `TIME` is zero-precision and ROUNDS a fractional literal
-        // (`'14:30:00.500'` → `14:30:01`), so the canonical form's milliseconds
-        // would change the stored wall clock. `TIME(3)` keeps them — the
-        // `DATETIME(3)` precedent (#3942) applied to time-of-day (#3994). Knex's
-        // `time()` takes no precision, hence the explicit type.
-        col = this.isMysql ? table.specificType(name, 'time(3)') : table.time(name);
-        break;
-      // `user` is a lookup specialized to sys_user (ADR: lookup → sys_user). Same
-      // physical storage as any lookup: a string column holding the related row id
-      // (multiple ⇒ JSON, handled at the top of createColumn). No bespoke storage
-      // primitive — it shares this exact DDL path so reads/$expand/FK stay uniform.
-      case 'lookup':
-      case 'user':
-        // ⛔ #11431 deliberately STOPS at the string family and does not reach
-        // here, even though these branches spell the same `table.string(name)`.
-        // A lookup column does not hold the declared value — it holds the
-        // REFERENCED ROW'S ID, whose width is the parent table's `id` column,
-        // not anything this field declared. Measured on MySQL 8.0.46: the FK
-        // itself is content with mismatched widths (`varchar(20)` child →
-        // `varchar(255)` parent `id` creates cleanly, and Postgres 16 accepts
-        // it too), so the type system gives no warning — the refusal arrives on
-        // the first write too wide for the child, as `ERROR 1406 Data too long`.
-        //
-        // [#15522] ⛔ An id's width is NOT a fixed number, and it is NOT this
-        // field's to declare. Both halves are this driver's own behaviour: when
-        // the caller supplies no id it mints `nanoid(DEFAULT_ID_LENGTH)` — 16
-        // characters, from the constant above and the three mint sites it feeds
-        // — and when the caller DOES supply one it is stored verbatim at
-        // whatever width the caller chose (measured on this arm's own driver:
-        // 10-, 17- and 18-character ids all landed unaltered). Nothing on this
-        // path bounds an id's width at all, so `maxLength: 20` already cannot
-        // hold a 24-character supplied id, and any `maxLength` under 16 cannot
-        // hold even a minted one. Honouring it here would make the column
-        // structurally incapable of holding ids it will be asked to hold — a
-        // strictly worse defect than the one #11431 fixes.
-        //
-        // ⛔ Do not restore the number this sentence used to carry. It called a
-        // platform id 26 characters long and spelled out a ULID
-        // (`01JQ8XKZ9M4N7P2R5T6V8W0Y3B`). `DEFAULT_ID_LENGTH` has been 16 for the
-        // whole life of this file and no ULID is minted anywhere in this repo, so
-        // at the real numbers the worked example did not hold either — 16
-        // characters FIT in `varchar(20)`. Four `packages/cli` sites still cite
-        // this arm BY NAME for that number; they are filed as #16114, not fixed
-        // here.
-        //
-        // [#11567] ⛔ This arm emits NO `FOREIGN KEY`, and that is the ruled
-        // contract rather than an omission. It used to carry
-        // `if (field.reference_to) table.foreign(name)...` — gated on a key
-        // the spec REFUSES (see {@link refuseRejectedReferenceAlias}), so it
-        // could not fire for any spec-conformant lookup and never had: zero FK
-        // constraints existed across all 44 exported platform objects on live
-        // Postgres 16.13 and MySQL 8.0.46. Retiring it is therefore a no-op for
-        // every authored deployment, and it is pinned in the retiring direction
-        // by `sql-driver-11567-lookup-no-foreign-key.test.ts`.
-        //
-        // ⛔ Do NOT "restore" this by re-reading the canonical `reference`.
-        // Measured on a PRISTINE EMPTY database: doing so takes Postgres from
-        // 44/44 objects synced to 18/44 and MySQL from 37/44 to 15/44, with
-        // `relation "sys_user" does not exist` — no data involved. Two
-        // structural causes: `syncSchema` has no topological ordering, so a
-        // child reaches DDL before its parent; and three of the ten FK targets
-        // (`sys_file`, `sys_environment`, `sys_package_version`) are not among
-        // the platform objects at all (ADR-0003 puts them in `service-tenant` /
-        // `service-storage`). Referential integrity is the ENGINE's, via
-        // `deleteBehavior` — which is what `content/docs/protocol/objectql/
-        // types.mdx` has told authors since 2026-07-30.
-        col = table.string(name);
-        break;
-      case 'auto_number':
-      case 'autonumber':
-        // ⛔ Also out of #11431's scope, for a different reason than `lookup`
-        // above: the value is issued by the RUNTIME from its sequence, not
-        // supplied by a caller. `maxLength` has no write-time counterpart on
-        // this type — the record validator's `max_length` check covers the
-        // textual types only, and an autonumber never reaches it at all
-        // (runtime-owned types are excluded from its door) — so binding the
-        // DDL to it would create a refusal with nothing declaring it: the
-        // platform's own generated record number rejected by a column, with no
-        // author to hand the error to. Widening `maxLength` to a second
-        // meaning ("how wide is the generated number") is a spec decision, not
-        // a driver one.
-        col = table.string(name);
-        break;
-      case 'formula':
-        return; // Virtual — no column
-      default:
-        // Array/object-valued types are stored as a JSON column. Driven by the
-        // single `JSON_COLUMN_TYPES` source so this DDL switch and `isJsonField`
-        // (the read-side deserializer) can never drift — the drift between them
-        // is exactly what let array-valued fields reach the binder un-serialized
-        // (#field-zoo). Everything else is a plain string.
-        //
-        // ⛔ The third branch #11431 leaves alone. This is the CATCH-ALL, and
-        // MOST of what lands in it is the set of types whose stored value is
-        // NOT the declared value, or is short by construction: `secret`
-        // persists an opaque `sys_secret` ref rather than the credential it was
-        // given (ADR-0100), `select` / `radio` / `checkboxes` / `tree` store
-        // option machine names or ids, and `color` holds a color code. Sizing
-        // any of those from the author's `maxLength` would size the wrong
-        // string. (`code` used to be mis-listed here among the option-valued
-        // ones — measured in field-zoo it stores the editor's contents
-        // verbatim, which is why #11794 moved it to the text family above.
-        // `signature` / `qrcode` sat here as a measured OPEN DEFECT — their
-        // stored value IS the declared value, routinely a data-URI far past
-        // 255 chars, refused by both enforcing dialects — until #11875 gave
-        // the write seam their bound and moved them to the text family too.)
-        //
-        // A type that genuinely wants the bound belongs in the string-family
-        // case above, named — never acquired by falling through to here.
-        //
-        // ⚠️ The FILE family is asked separately, because its answer is a
-        // DEPLOYMENT fact rather than a property of the type (ADR-0104
-        // addendum): a json column until this deployment's columns have moved,
-        // and then a `varchar` at the width the SQL generator already emits for
-        // it ({@link MEDIA_ID_VARCHAR_CHARS}) — not knex's default 255, which
-        // would be a new divergence between the two producers of this column.
-        // `multiple: true` media never reaches here: `createColumn`
-        // short-circuits on `multiple` above the type switch.
-        if (FILE_REFERENCE_TYPES.has(type)) {
-          col = this.mediaColumnIsJson()
-            ? this.jsonColumn(table, name)
-            : table.string(name, MEDIA_ID_VARCHAR_CHARS);
-          break;
-        }
-        col = JSON_COLUMN_TYPES.has(type) ? this.jsonColumn(table, name) : table.string(name);
-    }
-
-    if (col) {
-      // NOTE: field-level `unique` is deliberately NOT emitted here (#3696).
-      // A column builder can only express a SINGLE-column constraint, but on a
-      // tenant-scoped object `unique: true` means unique *within the tenant* —
-      // a composite `(tenantField, field)` index. Emitting `col.unique()` here
-      // is what made every tenant share one global namespace, which collided
-      // head-on with the per-tenant autonumber sequence (each tenant counts
-      // from 1, so the second tenant's `PROD-00001` was rejected by an index it
-      // could not see). All unique materialization now goes through the single
-      // tenancy-aware path — {@link uniqueIndexesFromFields} +
-      // {@link syncDeclaredIndexes} — which runs after the table exists and can
-      // therefore build composites. `createColumn` owns type/nullability/
-      // defaults only.
-      //
-      // ADR-0113: the physical NOT NULL comes from the EXPLICIT storage
-      // constraint, not from `required` — `required` is the write-time
-      // contract enforced by the record validator at the engine seam, and
-      // binding the DDL to it made every post-deploy tightening a
-      // destructive migration.
-      //
-      // ⚠️ NOTHING supplies `storage.notNull` on an author's behalf. The
-      // sentence that used to close this block said the opposite — that
-      // pre-17 sources "carry `storage.notNull` explicitly via the
-      // `field-required-notnull-explicit` conversion, so their columns come
-      // out exactly as they always did" — and it was measured false from both
-      // ends (#16693): a real `^17.0.0` app logged that conversion and got
-      // NULLABLE columns anyway, and the conversion itself has since been
-      // WITHDRAWN (maintainer ruling 2026-09-08), because stamping the
-      // constraint wherever `required: true` appears is the implication
-      // ADR-0113 abolished. So a column reaches `notNullable()` here because
-      // its author wrote `storage: { notNull: true }`, and for no other
-      // reason; a `required: true` field with no `storage` block gets a
-      // nullable column, at every protocol floor, on every dialect.
-      //
-      // [#17231] Asked through {@link declaresColumnNotNull} — the same
-      // question the multi-value short-circuit above now asks, stated once so
-      // this method's two exits cannot answer it differently again.
-      //
-      // ADR-0131 D1 (execution record 6285122667 on the v18 step 7 card): the
-      // table's tenant column is the one column NOT NULL WITHOUT a declaration
-      // — "there is no nullable tenant column anywhere". `tenantColumn` is
-      // passed only by the two CREATE TABLE sites ({@link initObjects}' create
-      // branch, {@link ensureShardTable}'s), never by an ADD COLUMN: a column
-      // added to a table that already holds rows is the organization-ownership
-      // ceremony's to tighten (ruling ② A, 6269955919), and no metadata says
-      // it — the injected tenant field stays `required: false` with no
-      // `storage`, and the differ's `ceremonyOwnedNullability` reads the
-      // difference as no drift.
-      if (declaresColumnNotNull(field) || tenantColumn) col.notNullable();
-      this.applyDeclaredColumnDefault(col, field, type);
-    }
+  ): void {
+    // [#29520 codemod] The body moved to `sql-driver-column-creation.ts` (see `ColumnCreationHost`).
+    return ColumnCreationFacet.createColumn.call(columnCreationHost.of(this), table, name, field, keyed, tenantColumn);
   }
 
   /**
@@ -10307,22 +8897,28 @@ export class SqlDriver implements IDataDriver {
       get isPostgres() { return driver.isPostgres; },
       get isSqlite() { return driver.isSqlite; },
       get knex() { return driver.knex; },
+      get logger() { return driver.logger; },
       get openedEmptyInMemory() { return driver.openedEmptyInMemory; },
       set openedEmptyInMemory(v) { driver.openedEmptyInMemory = v; },
       get schemaMode() { return driver.schemaMode; },
     }));
     columnCreationHost.install((driver) => ({
+      applyDeclaredColumnDefault: (...a) => driver.applyDeclaredColumnDefault(...a),
       declaredFieldsFor: (...a) => driver.declaredFieldsFor(...a),
+      declaredVarcharLength: (...a) => driver.declaredVarcharLength(...a),
       explainHashShadowDuplicate: (...a) => driver.explainHashShadowDuplicate(...a),
       explainRowSizeOverflow: (...a) => driver.explainRowSizeOverflow(...a),
       hashShadowColumnState: (...a) => driver.hashShadowColumnState(...a),
       hashShadowSourceColumns: (...a) => driver.hashShadowSourceColumns(...a),
       get isMysql() { return driver.isMysql; },
       get isSqlite() { return driver.isSqlite; },
+      jsonColumn: (...a) => driver.jsonColumn(...a),
       keyableTextLength: (...a) => driver.keyableTextLength(...a),
       get knex() { return driver.knex; },
       logDurabilityFailure: (...a) => driver.logDurabilityFailure(...a),
       get logger() { return driver.logger; },
+      mediaColumnIsJson: (...a) => driver.mediaColumnIsJson(...a),
+      nowColumnDefault: (...a) => driver.nowColumnDefault(...a),
       rowWidthProfile: (...a) => driver.rowWidthProfile(...a),
       schemaBytesPerChar: (...a) => driver.schemaBytesPerChar(...a),
       varcharColumnChars: (...a) => driver.varcharColumnChars(...a),
@@ -10416,10 +9012,18 @@ export class SqlDriver implements IDataDriver {
       paginationTieBreaker: (...a) => driver.paginationTieBreaker(...a),
     }));
     filterHelpersHost.install((driver) => ({
+      applyContainsLike: (...a) => driver.applyContainsLike(...a),
+      applyCrossFieldComparison: (...a) => driver.applyCrossFieldComparison(...a),
+      applyEmptyOperator: (...a) => driver.applyEmptyOperator(...a),
       applyFalseConstant: (...a) => driver.applyFalseConstant(...a),
       applyFilterCondition: (...a) => driver.applyFilterCondition(...a),
+      applyJsonMembership: (...a) => driver.applyJsonMembership(...a),
       applyLike: (...a) => driver.applyLike(...a),
+      applyLikePattern: (...a) => driver.applyLikePattern(...a),
       applyNormalizedComparison: (...a) => driver.applyNormalizedComparison(...a),
+      applyNowAnchorComparison: (...a) => driver.applyNowAnchorComparison(...a),
+      applyNullSafeNegative: (...a) => driver.applyNullSafeNegative(...a),
+      applyTextOperatorOverNonTextColumn: (...a) => driver.applyTextOperatorOverNonTextColumn(...a),
       assertOperatorAppliesToColumn: (...a) => driver.assertOperatorAppliesToColumn(...a),
       get booleanFields() { return driver.booleanFields; },
       get canonicalDatetimeFields() { return driver.canonicalDatetimeFields; },
@@ -10432,11 +9036,14 @@ export class SqlDriver implements IDataDriver {
       filterColumnExpr: (...a) => driver.filterColumnExpr(...a),
       isJsonColumn: (...a) => driver.isJsonColumn(...a),
       get isMysql() { return driver.isMysql; },
+      isNonTextColumn: (...a) => driver.isNonTextColumn(...a),
       get isSqlite() { return driver.isSqlite; },
       jsonColumnFieldClass: (...a) => driver.jsonColumnFieldClass(...a),
       get jsonFields() { return driver.jsonFields; },
+      logWithheldFilterDiagnostic: (...a) => driver.logWithheldFilterDiagnostic(...a),
       get logger() { return driver.logger; },
       get managedObjectFields() { return driver.managedObjectFields; },
+      mapSortField: (...a) => driver.mapSortField(...a),
       get mediaFields() { return driver.mediaFields; },
       needsLegacyDatetimeRepair: (...a) => driver.needsLegacyDatetimeRepair(...a),
       needsLegacyTimeRepair: (...a) => driver.needsLegacyTimeRepair(...a),
@@ -10445,6 +9052,7 @@ export class SqlDriver implements IDataDriver {
       presentReadValue: (...a) => driver.presentReadValue(...a),
       get readableIdsDriverName() { return driver.readableIdsDriverName; },
       get readableIdsRefusalLog() { return driver.readableIdsRefusalLog; },
+      readableIdsSubquery: (...a) => driver.readableIdsSubquery(...a),
       remoteColumn: (...a) => driver.remoteColumn(...a),
       resolveWithheldFilterRefusal: (...a) => driver.resolveWithheldFilterRefusal(...a),
       sqliteCanonicalDatetimeSql: (...a) => driver.sqliteCanonicalDatetimeSql(...a),
@@ -10456,6 +9064,7 @@ export class SqlDriver implements IDataDriver {
       toDateOnly: (...a) => driver.toDateOnly(...a),
       toTimeOnly: (...a) => driver.toTimeOnly(...a),
       get valueShapeFields() { return driver.valueShapeFields; },
+      withWithheldFilterLog: (...a) => driver.withWithheldFilterLog(...a),
     }));
     internalHelpersHost.install((driver) => ({
       applyFilters: (...a) => driver.applyFilters(...a),
@@ -10510,28 +9119,55 @@ export class SqlDriver implements IDataDriver {
     rotationHost.install((driver) => ({
       assertSchemaMutable: (...a) => driver.assertSchemaMutable(...a),
       get autoNumberFields() { return driver.autoNumberFields; },
+      backfillCanonicalDatetimes: (...a) => driver.backfillCanonicalDatetimes(...a),
+      backfillCanonicalJsonEncoding: (...a) => driver.backfillCanonicalJsonEncoding(...a),
+      backfillCanonicalTimes: (...a) => driver.backfillCanonicalTimes(...a),
       get booleanFields() { return driver.booleanFields; },
       computeAndRecordTenantField: (...a) => driver.computeAndRecordTenantField(...a),
       computeTenantField: (...a) => driver.computeTenantField(...a),
+      createAuditTimestampColumn: (...a) => driver.createAuditTimestampColumn(...a),
+      createColumn: (...a) => driver.createColumn(...a),
       get dateFields() { return driver.dateFields; },
       get datetimeFields() { return driver.datetimeFields; },
+      get deferredDdl() { return driver.deferredDdl; },
+      get deferredSchemaObjects() { return driver.deferredSchemaObjects; },
       get dialectName() { return driver.dialectName; },
+      ensureDatabaseExists: (...a) => driver.ensureDatabaseExists(...a),
       ensureRotation: (...a) => driver.ensureRotation(...a),
+      ensureSequencesTable: (...a) => driver.ensureSequencesTable(...a),
       get fractionalNumericFields() { return driver.fractionalNumericFields; },
       isJsonField: (...a) => driver.isJsonField(...a),
+      get isMysql() { return driver.isMysql; },
       get jsonFields() { return driver.jsonFields; },
       get knex() { return driver.knex; },
+      legacyMysqlTimeColumns: (...a) => driver.legacyMysqlTimeColumns(...a),
+      legacyMysqlTimestampColumns: (...a) => driver.legacyMysqlTimestampColumns(...a),
+      logDurabilityFailure: (...a) => driver.logDurabilityFailure(...a),
+      get logger() { return driver.logger; },
       get managedObjectFields() { return driver.managedObjectFields; },
       get managedObjectIndexes() { return driver.managedObjectIndexes; },
       get mediaFields() { return driver.mediaFields; },
+      migrateMysqlDatetimeColumns: (...a) => driver.migrateMysqlDatetimeColumns(...a),
+      migrateMysqlTimeColumns: (...a) => driver.migrateMysqlTimeColumns(...a),
+      nowColumnDefault: (...a) => driver.nowColumnDefault(...a),
       get numericFields() { return driver.numericFields; },
       get numericValueFields() { return driver.numericValueFields; },
       get organizationObjectRegistered() { return driver.organizationObjectRegistered; },
       set organizationObjectRegistered(v) { driver.organizationObjectRegistered = v; },
       get physicalKeyIndexes() { return driver.physicalKeyIndexes; },
+      reconcileAndWarnDrift: (...a) => driver.reconcileAndWarnDrift(...a),
       registerManagedObjectMetadata: (...a) => driver.registerManagedObjectMetadata(...a),
+      registerObjectMetadata: (...a) => driver.registerObjectMetadata(...a),
+      resolveFileColumnsMoved: (...a) => driver.resolveFileColumnsMoved(...a),
+      resolveTenantField: (...a) => driver.resolveTenantField(...a),
+      rethrowWithRowSizeExplanation: (...a) => driver.rethrowWithRowSizeExplanation(...a),
       get rotationStateByTable() { return driver.rotationStateByTable; },
+      runWideningAlters: (...a) => driver.runWideningAlters(...a),
       get supportsRotation() { return driver.supportsRotation; },
+      syncDeclaredIndexes: (...a) => driver.syncDeclaredIndexes(...a),
+      syncTableIndexes: (...a) => driver.syncTableIndexes(...a),
+      get tablesCreatedHere() { return driver.tablesCreatedHere; },
+      get tablesFoundExisting() { return driver.tablesFoundExisting; },
       get tablesWithTimestamps() { return driver.tablesWithTimestamps; },
       get tenantFieldByTable() { return driver.tenantFieldByTable; },
       get tenantOptOutByTable() { return driver.tenantOptOutByTable; },
@@ -10539,6 +9175,7 @@ export class SqlDriver implements IDataDriver {
       get undeclaredAuditTimestampFields() { return driver.undeclaredAuditTimestampFields; },
       get updatedAtColumnState() { return driver.updatedAtColumnState; },
       get valueShapeFields() { return driver.valueShapeFields; },
+      warnBuiltinColumnCollisions: (...a) => driver.warnBuiltinColumnCollisions(...a),
     }));
     schemaIntrospectionHost.install((driver) => ({
       get knex() { return driver.knex; },

@@ -644,9 +644,15 @@ const VALIDATE_SITE_MAP: Record<
      * [#29904, #29926, #29959] What the gate's runtime does on a fault at this
      * site, from the caller's optional `severity` / `triggerKind` — the two
      * facts `@objectstack/lint`'s `faultOutcomeOf` ledger reads off the rule
-     * and the flow. Absent: the site declares none.
+     * and the flow — and (#30026) `sweepsTypedObject`, the ledger's third: a
+     * time-relative sweep's object is `objectName` (no `sweepObject`, or the
+     * same one). Absent: the site declares none.
      */
-    faultOutcome?: (inputs: { severity: ValidationSeverity; triggerKind: FlowTriggerOrNone }) => ExprFaultOutcome | undefined;
+    faultOutcome?: (inputs: {
+      severity: ValidationSeverity;
+      triggerKind: FlowTriggerOrNone;
+      sweepsTypedObject: boolean;
+    }) => ExprFaultOutcome | undefined;
   }
 > = {
   formula: { role: 'value', scope: 'record', slot: EvaluatedExpressionInputSchema, optionLabels: true },
@@ -663,14 +669,15 @@ const VALIDATE_SITE_MAP: Record<
   // branch condition (the default `triggerKind`): the trigger record is
   // flattened into the run's variables, a fault fails the run while the write
   // that fired it lands, and the gate grades a text-vs-number comparison an
-  // error worded so. A time-relative sweep launches each run with the swept
-  // row of `objectName` as its record, so it is graded the same. Any other
-  // trigger kind declares no outcome: the gate's `type-mismatch-run-may-fail`
-  // warning.
+  // error worded so. A time-relative sweep launches each run with a row of
+  // the swept object as its record, so a sweep of `objectName` is graded the
+  // same; a sweep of another object (`sweepObject`, #30026) binds a row of
+  // THAT object, and like any other trigger kind declares no outcome: the
+  // gate's `type-mismatch-run-may-fail` warning.
   flow_condition: {
     role: 'predicate', scope: 'flattened', slot: EvaluatedExpressionInputSchema,
-    faultOutcome: ({ triggerKind }) =>
-      (triggerKind === 'record_change' || triggerKind === 'time_relative' ? 'run-fails' : undefined),
+    faultOutcome: ({ triggerKind, sweepsTypedObject }) =>
+      (triggerKind === 'record_change' || (triggerKind === 'time_relative' && sweepsTypedObject) ? 'run-fails' : undefined),
   },
   template: { role: 'template', scope: 'record', slot: TemplateExpressionInputSchema },
 };
@@ -1095,8 +1102,10 @@ export function registerObjectTools(
           'a warning on any other flow; date-equality pitfalls), plus the fields and stdlib ' +
           'functions in scope so you can self-correct. `site` says where the expression will live: a `formula` ' +
           'field, a `validation`/predicate, or a `flow_condition` (fields are bound bare in flow conditions). ' +
-          'Pass the rule\'s `severity` (validation) or the flow\'s `triggerKind` (flow_condition) so the verdict ' +
-          'is the one the publish gate gives that rule or flow.',
+          'Pass the rule\'s `severity` (validation) or the flow\'s `triggerKind` (flow_condition), so the verdict is ' +
+          'the one the publish gate gives that rule or flow. A time-relative flow\'s conditions read a row of the object ' +
+          'its sweep scans (`timeRelative.object`): pass that object as objectName. A start whose objectName names ' +
+          'another object is refused at publish (`flow-time-relative-object-mismatch`).',
         inputSchema: strictToolInput(
           {
             surface: 'this validate_expression call',
@@ -1133,11 +1142,21 @@ export function registerObjectTools(
                 'is an error on a record_change or time_relative flow (its record is a row of objectName) and a warning ' +
                 'on any other. Default: record_change.',
               ),
+            sweepObject: z
+              .string()
+              .optional()
+              .describe(
+                'site flow_condition with triggerKind time_relative only: the flow\'s `timeRelative.object`, the object ' +
+                'the sweep scans and whose rows it hands each run as its record. Its conditions are typed against that ' +
+                'object, so it is objectName too. A start whose objectName names another object is refused at publish ' +
+                '(`flow-time-relative-object-mismatch`); passed with another objectName, the verdict is the gate\'s ' +
+                'advisory one for such a flow, a type mismatch warning. Default: objectName.',
+              ),
           },
         ),
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
-      async ({ objectName, expression, site, severity, triggerKind }) => {
+      async ({ objectName, expression, site, severity, triggerKind, sweepObject }) => {
         const bad = guard(objectName);
         if (bad) return errorResult(bad);
         // [#29959] Each input describes one site; on another it would be
@@ -1147,6 +1166,13 @@ export function registerObjectTools(
         }
         if (triggerKind !== undefined && site !== 'flow_condition') {
           return errorResult(`\`triggerKind\` describes a flow; it applies only with site "flow_condition", not "${site ?? 'formula'}".`);
+        }
+        // [#30026] The swept object describes a time-relative flow alone.
+        if (sweepObject !== undefined && (site !== 'flow_condition' || triggerKind !== 'time_relative')) {
+          return errorResult(
+            `\`sweepObject\` describes a time-relative sweep; it applies only with site "flow_condition" and triggerKind ` +
+              `"time_relative", not site "${site ?? 'formula'}" with triggerKind "${triggerKind ?? 'record_change'}".`,
+          );
         }
         try {
           const def = (await bridge.describeObject(objectName)) as { fields?: unknown } | null;
@@ -1160,7 +1186,11 @@ export function registerObjectTools(
             if (typeof f?.type === 'string') fieldTypes[f.name] = f.type;
           }
           const { role, scope, slot, optionLabels, faultOutcome: outcomeOf } = VALIDATE_SITE_MAP[site ?? 'formula'];
-          const faultOutcome = outcomeOf?.({ severity: severity ?? 'error', triggerKind: triggerKind ?? 'record_change' });
+          const faultOutcome = outcomeOf?.({
+            severity: severity ?? 'error',
+            triggerKind: triggerKind ?? 'record_change',
+            sweepsTypedObject: sweepObject === undefined || sweepObject === objectName,
+          });
           // [#28715] The object's option-bearing fields, where the gate reads
           // them: `label(record.<field>)` on a declared field outside this list
           // is refused as `label-field-no-options` by the one validator.

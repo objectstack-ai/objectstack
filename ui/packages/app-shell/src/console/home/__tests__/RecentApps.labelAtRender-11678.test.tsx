@@ -27,8 +27,10 @@
  * label, so the three entries take three different roads to their zh-CN text:
  *
  *  - the dashboard: its served label, translated by the server;
- *  - Team Schedule: its served label is English, the client bundle's
- *    `pages.<name>.label` key translates it;
+ *  - Team Schedule: its `pages.<name>.label` key is in the bundle the console
+ *    loads from the server, so the server translated its served label with it,
+ *    and the row draws that as served (objectstack#30244: the bundle is asked
+ *    only for an item served with no label, never over a served one);
  *  - Capability Map: translated nowhere — it shows its own label, which is
  *    what its own page shows, and never the minted name.
  */
@@ -72,7 +74,7 @@ const SERVED = {
   'zh-CN': {
     dashboards: [{ name: 'showcase_ops_dashboard', label: '交付运营' }],
     pages: [
-      { name: 'showcase_task_schedule', label: 'Team Schedule (Gantt)' },
+      { name: 'showcase_task_schedule', label: '团队排期' },
       { name: 'showcase_capability_map', label: 'Capability Map' },
     ],
     objects: [{ name: 'showcase_task', label: '任务' }],

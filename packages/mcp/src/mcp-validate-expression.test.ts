@@ -163,24 +163,31 @@ describe('validate_expression MCP tool (#1928)', () => {
     }
 
     // The severity column is the ledger's own answer (`faultOutcomeOf`): a
-    // time-relative sweep binds a row of `objectName` as its record (#29959).
-    for (const [triggerKind, startConfig, flowType, severity] of [
-      [undefined, { triggerType: 'record-after-update' }, 'autolaunched', 'error'],
-      ['record_change', { triggerType: 'record-after-create' }, 'autolaunched', 'error'],
-      ['time_relative', { timeRelative: { object: 'crm_opportunity', field: 'close_date', offsetDays: 1 }, schedule: '0 * * * *' }, 'autolaunched', 'error'],
-      ['schedule', { schedule: '0 * * * *' }, 'autolaunched', 'warning'],
-      ['api', {}, 'api', 'warning'],
-      ['none', {}, 'autolaunched', 'warning'],
+    // time-relative sweep binds a row of the swept object as its record
+    // (#29959) — `objectName`'s, unless `sweepObject` names another (#30026).
+    // `startObject: null` is a start node naming no objectName: the gate then
+    // types the conditions against the swept object, the tool's `objectName`.
+    const sweep = (object: string) => ({ timeRelative: { object, field: 'close_date', offsetDays: 1 }, schedule: '0 * * * *' });
+    for (const [label, triggerKind, sweepObject, startObject, startConfig, flowType, severity] of [
+      ['(omitted)', undefined, undefined, 'crm_opportunity', { triggerType: 'record-after-update' }, 'autolaunched', 'error'],
+      ['record_change', 'record_change', undefined, 'crm_opportunity', { triggerType: 'record-after-create' }, 'autolaunched', 'error'],
+      ['time_relative', 'time_relative', undefined, 'crm_opportunity', sweep('crm_opportunity'), 'autolaunched', 'error'],
+      ['time_relative, sweepObject objectName', 'time_relative', 'crm_opportunity', 'crm_opportunity', sweep('crm_opportunity'), 'autolaunched', 'error'],
+      ['time_relative, start names no objectName', 'time_relative', undefined, null, sweep('crm_opportunity'), 'autolaunched', 'error'],
+      ['time_relative, sweepObject another object', 'time_relative', 'crm_task', 'crm_opportunity', sweep('crm_task'), 'autolaunched', 'warning'],
+      ['schedule', 'schedule', undefined, 'crm_opportunity', { schedule: '0 * * * *' }, 'autolaunched', 'warning'],
+      ['api', 'api', undefined, 'crm_opportunity', {}, 'api', 'warning'],
+      ['none', 'none', undefined, 'crm_opportunity', {}, 'autolaunched', 'warning'],
     ] as const) {
-      it(`site flow_condition, triggerKind ${triggerKind ?? '(omitted)'}`, async () => {
+      it(`site flow_condition, triggerKind ${label}`, async () => {
         const expression = 'title * 2 > 10';
         const gate = typeVerdicts(validateStackExpressions({
-          objects: [{ name: 'crm_opportunity', fields }],
+          objects: [{ name: 'crm_opportunity', fields }, { name: 'crm_task', fields: { close_date: { type: 'date' } } }],
           flows: [{
             name: 'f',
             type: flowType,
             nodes: [
-              { id: 'start', type: 'start', config: { objectName: 'crm_opportunity', condition: expression, ...startConfig } },
+              { id: 'start', type: 'start', config: { ...(startObject ? { objectName: startObject } : {}), condition: expression, ...startConfig } },
               { id: 'end', type: 'end' },
             ],
             edges: [{ id: 'e1', source: 'start', target: 'end' }],
@@ -188,7 +195,10 @@ describe('validate_expression MCP tool (#1928)', () => {
         }));
         expect(gate).toHaveLength(1);
         expect(gate[0]![0]).toBe(severity);
-        const r = await validate(runtime, bridge, { objectName: 'crm_opportunity', expression, site: 'flow_condition', ...(triggerKind ? { triggerKind } : {}) });
+        const r = await validate(runtime, bridge, {
+          objectName: 'crm_opportunity', expression, site: 'flow_condition',
+          ...(triggerKind ? { triggerKind } : {}), ...(sweepObject ? { sweepObject } : {}),
+        });
         expect(toolVerdicts(r)).toEqual(gate);
       });
     }
@@ -200,6 +210,11 @@ describe('validate_expression MCP tool (#1928)', () => {
         { severity: 'info' },
         { site: 'validation', triggerKind: 'api' },
         { triggerKind: 'record_change' },
+        // [#30026] The swept object describes a time-relative flow alone.
+        { site: 'flow_condition', sweepObject: 'crm_task' },
+        { site: 'flow_condition', triggerKind: 'record_change', sweepObject: 'crm_task' },
+        { site: 'validation', sweepObject: 'crm_task' },
+        { sweepObject: 'crm_task' },
       ]) {
         const { json } = await call(runtime, toolsCall(1, 'validate_expression', { objectName: 'crm_opportunity', expression: 'record.title > 5', ...args }), bridge);
         const { result } = json as { result: { isError?: boolean; content: { text: string }[] } };

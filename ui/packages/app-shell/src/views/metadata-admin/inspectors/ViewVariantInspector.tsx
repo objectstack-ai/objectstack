@@ -88,6 +88,7 @@ import {
 import { isFormFamilyKey } from '../view-variant-model.js';
 import { mergeServerFields } from '../mergeServerFields.js';
 import { t, tFormat } from '../i18n.js';
+import { viewTypeLabel as typeLabel } from '../viewTypeLabels.js';
 import { useRequiredInGatedSectionIssues } from './requiredInGatedSection.js';
 
 /**
@@ -139,27 +140,6 @@ export interface ViewVariantInspectorProps extends MetadataDefaultInspectorProps
   objectFieldsOverride?: ObjectFieldInfo[];
 }
 
-/** English fallback labels for the spec `type` enum (used when the i18n
- * catalog has no entry for a view type the spec introduces later). */
-const TYPE_LABELS: Record<string, string> = {
-  grid: 'Table / List',
-  kanban: 'Kanban',
-  calendar: 'Calendar',
-  gallery: 'Gallery',
-  gantt: 'Gantt',
-  timeline: 'Timeline',
-  map: 'Map',
-  chart: 'Chart',
-};
-
-/** Localized label for a view `type`, falling back to the English map (and
- * then the raw value) when the i18n catalog has no entry. */
-function typeLabel(value: string, locale?: string): string {
-  const key = `engine.inspector.view.type.${value}`;
-  const translated = t(key, locale);
-  return translated === key ? (TYPE_LABELS[value] ?? value) : translated;
-}
-
 /** Keys re-pinned from the live draft after every spec-form edit. */
 const PRESERVED_KEYS = ['columns', 'data', 'name'] as const;
 
@@ -203,7 +183,7 @@ function useTypeOptions(locale?: string) {
     // here UNFLAGGED, so an off-spec view type read exactly like an offered
     // one. `InspectorSelectField` synthesises and flags it now; `typeLabel`
     // still gets its say through `unknownValueLabel` at the call site, since a
-    // retired type can still have a human name in `TYPE_LABELS`.
+    // retired type can still have a human name in `viewTypeLabels.ts`.
     return opts;
   }, [locale]);
 }

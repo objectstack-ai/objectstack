@@ -57,6 +57,11 @@
  * declarations, and `engine.ts` imports this module after every module this one
  * imports, so the engine's evaluation order is what it was. The published build
  * bundles both files into one, where the cycle does not exist.
+ *
+ * [#30053 codemod] A PRIVATE method's docblock has since moved here,
+ * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
+ * and the class keeps none for it; a public or protected method's docblock
+ * stays on the class, the contract, and its function keeps the placeholder.
  */
 
 import { ReadableIds, RLS_DENY_FILTER, isControlledByParentMasterField, markFilterSubtreeProvenance } from '@objectstack/spec/data';
@@ -111,7 +116,43 @@ export interface ReadableIdsPermissionFormulaHost {
  */
 export const READABLE_IDS_MAX_CHAIN_DEPTH = 8;
 
-/** The body of `ObjectQL#composeReadableIdsChain`; the method's docblock there is its contract. */
+/**
+ * [ADR-0139 D2, D6 as amended] Compose the leaves at `sites` in `node` —
+ * the read's `where` at the top level, a parent's composed scope below it —
+ * and, first, every leaf a scope answered for one of their parents carries,
+ * recursively. Returns `node` rewritten copy-on-write, every leaf replaced
+ * by its composed form or `[]`.
+ *
+ * `ancestors` are the parents whose scopes enclose `node`, outermost first:
+ * empty for the read's own `where`, `[P]` inside P's scope, `[P, G]` inside
+ * the scope G answered within it. Per distinct parent of `sites`, in walk
+ * order:
+ *
+ *  1. D5's two classes are refused by name, exactly as at the top level
+ *     ({@link refuseUncomposableReadableIdsClasses}): a nested parent an
+ *     object-scoped middleware narrows, or one bound to another datasource
+ *     than the read's object, is refused — the whole chain compiles into the
+ *     read's one statement, on the read's datasource.
+ *  2. A parent already answered on this read — at any level — is not asked
+ *     again: its composed scope is reused by reference.
+ *  3. A parent already on `ancestors` is a cycle (its own scope, or a scope
+ *     inside it, reaches back to it); a parent whose scope would be the
+ *     chain's scope number {@link READABLE_IDS_MAX_CHAIN_DEPTH} + 1 is past
+ *     the bound. Both are refused by name, `INTERNAL_ERROR` / 500, before
+ *     the service is asked about that parent: a chain the engine cannot
+ *     compose whole is not composed partway, and ⛔ never answered "no
+ *     restriction".
+ *  4. The parent is asked both halves ({@link readableIdsScopeOf}) with the
+ *     read's context as it stands; a scope that carries leaves is composed
+ *     through this method first, under `[...ancestors, parent]`, and the
+ *     rewritten scope is what the parent's leaf is composed with. The
+ *     provenance mark the scope carries (`'policy'`) survives the rewrite.
+ *
+ * A nested leaf outside a `$in` comparand, or a composed leaf the engine did
+ * not compose, inside an answered scope is refused by the same walk that
+ * refuses it in a caller's `where` ({@link collectComposableReadableIds}):
+ * the scope is the `where` of a read of its parent and is judged as one.
+ */
 export async function composeReadableIdsChain<N>(
   this: Pick<ReadableIdsPermissionFormulaHost, 'refuseUncomposableReadableIdsClasses' | 'readableIdsScopeOf' | 'composeReadableIdsChain'>,
   chain: ReadableIdsChain,
@@ -185,7 +226,11 @@ export function findUnservableControlledByParentMasters(
   return found;
 }
 
-/** The body of `ObjectQL#readableIdsScopeOf`; the method's docblock there is its contract. */
+/**
+ * [ADR-0139 D2 steps 1-2] The scope a leaf over `parent` is composed with,
+ * or `null` for `$in: []`. Fails closed on every answer that is not a
+ * positive one, and on every throw.
+ */
 export async function readableIdsScopeOf(
   this: Pick<ReadableIdsPermissionFormulaHost, 'logger'>,
   object: string,
@@ -225,7 +270,35 @@ export async function readableIdsScopeOf(
   return { scope: markFilterSubtreeProvenance(scope as FilterCondition, 'policy') };
 }
 
-/** The body of `ObjectQL#resolveOptionPermissions`; the method's docblock there is its contract. */
+/**
+ * [#18783] The permission map one write's option gates are evaluated with —
+ * resolved at most ONCE for the whole write (a batch insert, a by-id update,
+ * an N-row bulk update, a `validate()` preview), never per row and never per
+ * predicate, and never kept past the call: the contract member is
+ * request-scoped, and a map held across writes would serve a grant that may
+ * since have been revoked.
+ *
+ * Asked ONLY when the write can need it — a resolver is registered, the write
+ * has an acting user (`current_user` is otherwise unbound and `can` asks
+ * about nobody), and some payload PICKS an option whose `visibleWhen` calls
+ * `can` ({@link optionVisibilityReadsPermissions}, the evaluator's own
+ * picker). Every other write pays nothing, and cannot be refused by a
+ * resolution it never depended on.
+ *
+ * The answer goes through `toEvalPermissions`, formula's one door into
+ * `EvalContext.permissions`, so a map that is not the published shape is
+ * refused here rather than answering `can()` confidently wrong.
+ *
+ * Returns a per-payload accessor, the shape {@link resolvePredicateRelated}
+ * hands back:
+ *
+ *  - a payload that picks no `can`-gated option gets `undefined`;
+ *  - one that does gets the map;
+ *  - when the resolution THREW (or the map was refused), one that does gets
+ *    the throw, re-raised untouched: the write fails CLOSED, with the
+ *    resolution's own error. ⛔ It is never read as "no grants", which would
+ *    publish a failure as a measured denial of everything.
+ */
 export async function resolveOptionPermissions(
   schema: unknown,
   payloads: ReadonlyArray<Record<string, unknown> | null | undefined>,
@@ -252,7 +325,30 @@ export async function resolveOptionPermissions(
   return (payload) => (needs(payload) ? permissions : undefined);
 }
 
-/** The body of `ObjectQL#permissionResolution`; the method's docblock there is its contract. */
+/**
+ * [#20082] ONE operation's effective-permission resolution — the single
+ * resolver ask every consumer inside that operation shares. On a write those
+ * are its CEL `defaultValue`s ({@link resolveDefaultPermissions}), its option
+ * gates ({@link resolveOptionPermissions}) and the formula fields on its
+ * response ({@link resolveFormulaPermissions}); on a read, its formula fields.
+ * The contract member's "resolve it ONCE per request" is kept per engine
+ * operation: a write that carries a `can` default, a `can` option gate and a
+ * `can` formula asks the resolver once, not three times.
+ *
+ * `undefined` when there is nothing to ask — no resolver registered, or no
+ * acting user (`current_user` is then unbound, and `can` asks about nobody).
+ * Every consumer then passes NO permission data: ⛔ never an empty map, which
+ * is a real answer ("holds nothing") and would deny confidently.
+ *
+ * Lazy and memoised for the operation: the ask happens when the first consumer
+ * NEEDS the map, never earlier, and a later consumer awaits the same promise —
+ * its rejection included, so one failed resolution is the same failure
+ * everywhere in the operation rather than a second, possibly different, ask.
+ * The answer goes through `toEvalPermissions`, formula's one door into
+ * `EvalContext.permissions`, so an off-shape map fails here like a throw.
+ * ⛔ Never kept past the operation: each operation mints its own, because a map
+ * held across operations would serve a grant that may since have been revoked.
+ */
 export function permissionResolution(
   this: Pick<ReadableIdsPermissionFormulaHost, '_effectiveObjectPermissionsResolver' | 'buildEvalUser'>,
   context: ExecutionContext | undefined,
@@ -270,7 +366,33 @@ export function permissionResolution(
   };
 }
 
-/** The body of `ObjectQL#resolveFormulaPermissions`; the method's docblock there is its contract. */
+/**
+ * [#20082] The permission map a batch of `formula` fields is evaluated with —
+ * a read's (`find`, `findOne`) or a write response's
+ * ({@link hydrateWriteFormulas}).
+ *
+ * Asked only when it can change an answer: the context binds an acting user
+ * (the way {@link applyFormulaPlan} binds `current_user` — a truthy `userId`),
+ * some planned formula CALLS `can` ({@link readsPermissionPredicate}, the same
+ * reading the option gate uses), and there is a record to evaluate. Every
+ * other read pays nothing, and a whole `find` asks at most once, never per row.
+ *
+ * A read cannot refuse a row because one computed field lacks data, so when
+ * the map cannot be had the formula keeps the rule every formula that does not
+ * evaluate follows on this path — it reads `null` — and this method says so,
+ * once per operation, at `warn`, naming the object, the fields and the reason:
+ *
+ *  - `no-permission-source`: no resolver is registered. NO map is passed (the
+ *    contract member's rule for an absent method), so `can()` keeps its own
+ *    loud refusal and the field reads `null`.
+ *  - `permission-resolution-failed`: the resolution threw, or answered a map
+ *    that is not the published shape. Fail CLOSED: ⛔ never read as "no
+ *    grants" (an empty map would publish a confident `false`) and ⛔ never a
+ *    grant — the field reads `null`, with the resolution's error in the line.
+ *
+ * `warn`, not `error`: a formula is computed on read and nothing is persisted
+ * from it, so the degradation is visible to whoever reads the field.
+ */
 export async function resolveFormulaPermissions(
   this: Pick<ReadableIdsPermissionFormulaHost, 'logger'>,
   object: string,
@@ -306,7 +428,33 @@ export async function resolveFormulaPermissions(
   }
 }
 
-/** The body of `ObjectQL#reportFormulaFault`; the method's docblock there is its contract. */
+/**
+ * [#22019] A formula field that did not evaluate, reported ONCE per
+ * (object, field) per engine instance.
+ *
+ * ## What it closes
+ *
+ * {@link applyFormulaPlan} answers `null` for a formula it cannot evaluate,
+ * and said nothing. A formula calling an unregistered function
+ * (`sqrt(record.amount)`) therefore read `null` on every row of every read
+ * and every write response, with no line anywhere to say why — the silent
+ * swallow ADR-0032 forbids at a call site. The answer stays `null` (what a
+ * read returns is protocol); the fault is now said.
+ *
+ * ## Level and rate
+ *
+ * `warn`, on AGENTS.md's one question: a formula is computed on read and
+ * nothing is persisted from it, so the degradation is a field reading `null`
+ * — visible to whoever reads it — never a write that claims to land and does
+ * not. That is the reading {@link resolveFormulaPermissions} makes for the
+ * same `null`.
+ *
+ * Once per pair per engine instance, as {@link warnCascadeNotAtomic} says its
+ * piece once per object: a list read evaluates a faulting formula once per
+ * row, and a line per row is the volume that gets a log skimmed. A later
+ * fault on the same pair is not re-reported, even with a different error —
+ * the first line already names the field to fix.
+ */
 export function reportFormulaFault(
   this: Pick<ReadableIdsPermissionFormulaHost, 'formulaFaultReported' | 'logger'>,
   object: string,
@@ -329,7 +477,28 @@ export function reportFormulaFault(
   );
 }
 
-/** The body of `ObjectQL#resolveDefaultPermissions`; the method's docblock there is its contract. */
+/**
+ * [#20082] The permission map a write's CEL `defaultValue`s are evaluated with
+ * — a per-row accessor, the shape {@link resolveOptionPermissions} hands back,
+ * over the write's ONE {@link permissionResolution}.
+ *
+ * Asked only when a row will really be defaulted by an expression that calls
+ * `can`: the write has an acting user (the way {@link applyFieldDefaults}
+ * binds `current_user` — a truthy `userId`), and the row leaves such a field
+ * without a value (`applyFieldDefaults`' own `!= null` test). A row that
+ * supplies the field, and an object whose defaults never call `can`, pay
+ * nothing and cannot be refused by a resolution they never depended on.
+ *
+ *  - no resolution (no resolver registered): every row gets `undefined` — NO
+ *    map. The default then does not evaluate and is left unset with
+ *    `applyFieldDefaults`' existing warn, which carries formula's own "carries
+ *    no permission data" refusal; a `required` field so defaulted is refused
+ *    by required-validation, exactly as before this seam existed.
+ *  - the resolution threw (or its map was refused): a row that needs it gets
+ *    the throw, re-raised untouched — the write fails CLOSED with the
+ *    resolution's own error, as an option gate's does. ⛔ Never read as "no
+ *    grants", which would STORE `false` as though it had been measured.
+ */
 export async function resolveDefaultPermissions(
   this: Pick<ReadableIdsPermissionFormulaHost, 'defaultFieldEntries'>,
   object: string,

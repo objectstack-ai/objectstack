@@ -155,13 +155,17 @@ const VARIANTS: Record<VariantKey, Variant> = {
       "Immutable audit log. Rows cannot be created, edited, or deleted from the UI — they're written by the platform when events occur. Use Export to download for compliance review.",
     tone: 'border-zinc-300/60 bg-zinc-50 text-zinc-900 hover:bg-zinc-100 dark:border-zinc-500/40 dark:bg-zinc-950/40 dark:text-zinc-100',
   },
+  // objectstack#30337 — the note holds for every row of the bucket, a team an
+  // admin made in Setup included: the built-in identity service writes the
+  // rows, and the page's own actions are how to change them. It names no
+  // outside provider: nothing here says the row came from elsewhere.
   'better-auth': {
     icon: ShieldAlert,
     i18nKey: 'betterAuth',
     short: 'Identity',
-    title: 'Managed by the identity provider',
+    title: 'Written through the built-in identity service',
     body: (display) =>
-      `This object's schema is owned by ${display}. Direct edits bypass password hashing, session validation, two-factor checks, and audit hooks. Manage these records through your authentication provider's sign-in, invitation, and security flows instead.`,
+      `This object's schema belongs to ${display}, the platform's built-in identity service. Create and change these records with the actions on this page, or through sign-in, invitation and security flows; every one of them goes through that service. Editing the table directly would bypass password hashing, session validation, two-factor checks and audit hooks.`,
     tone: 'border-amber-300/60 bg-amber-50 text-amber-900 hover:bg-amber-100 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-100',
   },
 };

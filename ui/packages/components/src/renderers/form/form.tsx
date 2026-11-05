@@ -42,7 +42,7 @@ import { FullscreenEditor } from '../../custom/fullscreen-editor';
 import { CharacterCount } from '../../custom/character-count';
 import { cn } from '../../lib/utils';
 import React from 'react';
-import { SchemaRendererContext, usePredicateScope, useCapabilityGate, isPermissionError, extractWriteErrorMessage, extractFieldErrors, declaredUserMessage, delegationScopeMessage, unmarkedRefusalLines } from '@object-ui/react';
+import { SchemaRendererContext, usePredicateScope, useCapabilityGate, isPermissionError, extractWriteErrorMessage, extractFieldErrors, declaredUserMessage, delegationScopeMessage, isExternalWriteRefusal, unmarkedRefusalLines } from '@object-ui/react';
 import { createSafeTranslation } from '@object-ui/i18n';
 import type { RendererHostProps } from '../../lib/renderer-host-props';
 import { currencyCodeFieldNames, useUsedCurrencyCodes, withUsedCurrencyCodes } from './usedCurrencyCodes';
@@ -500,6 +500,8 @@ const useSafeFormTranslation = createSafeTranslation(
     'validation.formInvalidJoiner': ', ',
     'errors.forbidden': 'Access denied.',
     'form.noPermissionToSave': "You don't have permission to save this record.",
+    // objectstack#30334 — a write the external datasource does not admit. Byte-identical to the `en` pack.
+    'form.readOnlyExternalSource': 'This table is read-only. Its records come from an external data source that does not accept changes.',
     'form.submitFailed': 'Could not save. Please try again.',
     'form.clearedOnHide': 'Cleared — no longer applicable given the current values: {{fields}}',
     // objectui#8069 — the submit refusal for a field `visibleWhen` that could
@@ -3218,6 +3220,9 @@ ComponentRegistry.register('form',
         // boundary to fix (objectstack#26059, Q3). It is read before
         // `isPermissionError`, which answers true for any 403; every other
         // denial keeps the fixed line (objectstack#24914 B′).
+        // A write the object's external datasource does not admit (`403
+        // EXTERNAL_WRITE_FORBIDDEN`, ADR-0015) says the table is read-only:
+        // no permission lifts it, so the permission line would mislead.
         // A refusal listing one entry per failed rule is said one line per
         // entry left unmarked above, not as the envelope's `; `-joined
         // summary, which would also repeat the reasons already under inputs.
@@ -3225,7 +3230,9 @@ ComponentRegistry.register('form',
         const errorMessage: string | string[] =
           declaredUserMessage(error) ??
           delegationScopeMessage(error) ??
-          (isPermissionError(error)
+          (isExternalWriteRefusal(error)
+            ? t('form.readOnlyExternalSource')
+            : isPermissionError(error)
             ? t('form.noPermissionToSave')
             : unmarked && unmarked.length > 1
               ? unmarked

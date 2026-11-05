@@ -171,6 +171,7 @@ const ja = {
   },
   form: {
     noPermissionToSave: "このレコードを保存する権限がありません。",
+    readOnlyExternalSource: "このテーブルは読み取り専用です。レコードは変更を受け付けない外部データソースから取得されています。",
     noPermissionToCreate: "{{object}}を作成する権限がありません。フィールドは読み取り専用です。",
     noPermissionToEdit: "{{object}}を編集する権限がありません。フィールドは読み取り専用です。",
     noPermissionToEditRecord: "このレコードを編集する権限がありません。フィールドは読み取り専用です。",
@@ -907,8 +908,8 @@ const ja = {
     },
     betterAuth: {
       short: "アイデンティティ",
-      title: "ID プロバイダーが管理",
-      body: "このオブジェクトのスキーマは {{provider}} が所有しています。直接編集するとパスワードハッシュ、セッション検証、二要素チェック、監査フックがバイパスされます。認証プロバイダーのサインイン、招待、セキュリティフローで管理してください。",
+      title: "組み込みの ID サービス経由で書き込み",
+      body: "このオブジェクトのスキーマは、プラットフォーム組み込みの ID サービス {{provider}} に属します。レコードはこのページの操作、またはサインイン・招待・セキュリティのフローで作成・変更してください。いずれもこのサービスを経由します。テーブルを直接編集すると、パスワードハッシュ、セッション検証、二要素チェック、監査フックがバイパスされます。",
     },
   },
   kanban: {
@@ -1804,6 +1805,10 @@ const ja = {
     },
   },
   console: {
+    organizationMfa: {
+      needsTwoFactor: "「多要素認証を必須化」には二要素認証が必要ですが、このデプロイではオフになっているため、チェックを入れて保存すると拒否されます。先に二要素認証をオンにしてください：「設定 → 認証」で「多要素認証を必須にする」をオンにする（すべての組織に適用されます）か、デプロイで OS_AUTH_TWO_FACTOR=true を設定します。",
+      nowRequired: "この組織で認証アプリをまだ登録していないメンバーは、全員登録が必要になりました。各メンバーは、この変更後に初めて利用した時点から MFA 猶予期間（変更しない限り 7 日、「設定 → 認証」で変更可能）が始まり、終了するとデータにアクセスできなくなります。すでに認証アプリを使っているメンバーには影響しません。",
+    },
     studio: {
       title: "Studio",
       accessRequired: "Studio を開くには Studio へのアクセス権限が必要です。管理者が「設定 → 権限セットの割り当て」で権限セットを使って付与できます。",
@@ -2191,6 +2196,8 @@ const ja = {
       sourceBadgeInherited: "{{source}}から継承",
       sourceBadgeOverrides: "{{source}}を上書き",
       resetToDefault: "デフォルトに戻す",
+      sourceBadgeModified: "変更済み",
+      defaultValueHint: "デフォルト: {{value}}",
       envLockBadge: "環境変数でロック",
       envLockBadgeTitle: "環境変数で固定されているため、画面から編集できません。",
       deprecatedBadge: "非推奨",
@@ -2841,6 +2848,8 @@ const ja = {
       useEmailResetText: "メールでリセットする",
       phoneSuccessTitle: "パスワードをリセットしました",
       phoneSuccessDescription: "パスワードをリセットしました。新しいパスワードでサインインできます。",
+      noDeliveryTitle: "ここではリセットリンクをメールで送信できません",
+      noDeliveryDescription: "このデプロイはメールを送信しないため、パスワードリセットリンクは届きません。管理者にお問い合わせください。管理者が「設定 → ユーザー」で新しいパスワードを設定できます。",
     },
     resetPassword: {
       title: "新しいパスワードを設定",
@@ -2864,6 +2873,7 @@ const ja = {
       verifyingDescription: "メールを確認中です。少々お待ちください。",
       successTitle: "メールが確認されました",
       successDescription: "メールが確認されました。サインインできます。",
+      handoffSuccessDescription: "メールが確認されました。サインインしようとしていたアプリに戻り、そこでサインインしてください。",
       errorTitle: "確認に失敗しました",
       errorDescription: "確認に失敗しました。新しいリンクをリクエストしてください。",
       missingToken: "確認リンクにトークンがありません。",
@@ -2956,6 +2966,7 @@ const ja = {
         continue: "続行",
         preparing: "準備しています…",
         enrollFailed: "登録を開始できませんでした。",
+        unavailable: "このデプロイでは二要素認証がオフになっているため、認証アプリをまだ登録できません。管理者に「設定 → 認証」でオンにしてもらってから、もう一度お試しください。",
         scanTitle: "認証アプリでスキャン",
         scanBody: "Google Authenticator、1Password、Authy などでこの QR コードをスキャンし、6 桁のコードを入力してください。",
         backupTitle: "バックアップコードを保存",
@@ -4538,6 +4549,7 @@ const ja = {
       title: '保留中の変更',
       description: '公開で何が変わるか。新規項目は追加され、更新は公開中のバージョンを上書きします。',
       savedToCustomization: '{{package}} のカスタマイズに保存',
+      customizationEnvironment: 'これらの変更はこの環境のデータベースに {{pair}} の項目として保存され、プロジェクトのソースには含まれません。別の環境へは {{command}} でのみ移せます。',
       loading: '保留中の変更を読み込み中…',
       loadFailed: '保留中の変更を読み込めませんでした:',
       empty: '保留中の変更はありません — すべてのドラフトが公開済みです。',
@@ -4610,6 +4622,12 @@ const ja = {
         dataset: 'データセット {{count}}',
         dataset_one: 'データセット {{count}}',
         dataset_other: 'データセット {{count}}',
+        hook: 'フック {{count}}',
+        hook_one: 'フック {{count}}',
+        hook_other: 'フック {{count}}',
+        translation: '翻訳 {{count}}',
+        translation_one: '翻訳 {{count}}',
+        translation_other: '翻訳 {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

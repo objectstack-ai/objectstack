@@ -93,8 +93,8 @@ function ok(body: unknown): Response {
  * and stores them, so a later GET answers the same: the page reads the
  * namespace again after a save (objectui#13382).
  */
-function serve(putValues: Record<string, unknown> = {}) {
-  const stored = structuredClone(PAYLOAD) as { values: Record<string, unknown> };
+function serve(putValues: Record<string, unknown> = {}, payload: unknown = PAYLOAD) {
+  const stored = structuredClone(payload) as { values: Record<string, unknown> };
   fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
     if (init?.method === 'PUT') {
       Object.assign(stored.values, structuredClone(putValues));
@@ -111,10 +111,10 @@ function sentBody(): string {
   return String((puts[0][1] as RequestInit).body);
 }
 
-function renderView() {
+function renderView(namespace = 'mail') {
   return render(
     <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}>
-      <MemoryRouter initialEntries={['/settings/mail']}>
+      <MemoryRouter initialEntries={[`/settings/${namespace}`]}>
         <Routes>
           <Route path="/settings/:namespace" element={<SettingsView />} />
         </Routes>
@@ -227,5 +227,172 @@ describe('Reset to default beside an Overrides badge (objectui#13145)', () => {
     expect(within(rowOf('SMTP Host')).queryByRole('button', { name: /reset to default/i })).toBeNull();
     // Exactly one reset on the page: the Overrides row's.
     expect(screen.getAllByRole('button', { name: /reset to default/i })).toHaveLength(1);
+  });
+});
+
+/**
+ * A page whose manifest declares `scope: 'global'` writes the deployment's
+ * row: the server resolves each key's write scope as the specifier's `scope`,
+ * else the manifest's, else the spec default `tenant`. A value at that scope
+ * was set on this page, so it is not "inherited", and Reset to default is the
+ * way back (objectstack#30329).
+ */
+const DEPLOYMENT_PAYLOAD = {
+  manifest: {
+    namespace: 'auth',
+    version: 1,
+    label: 'Authentication',
+    scope: 'global',
+    specifiers: [
+      { type: 'number', key: 'password_min_length', label: 'Minimum password length', default: 8 },
+      { type: 'toggle', key: 'require_mfa', label: 'Require MFA', default: false },
+      {
+        type: 'select',
+        key: 'session_policy',
+        label: 'Session policy',
+        default: 'lax',
+        options: [
+          { value: 'strict', label: 'Strict' },
+          { value: 'lax', label: 'Lax' },
+        ],
+      },
+      { type: 'number', key: 'max_sessions', label: 'Maximum sessions', default: 5 },
+      { type: 'text', key: 'sign_in_message', label: 'Sign-in message', default: 'Welcome' },
+      { type: 'text', key: 'org_note', label: 'Organization note', scope: 'tenant' },
+    ],
+  },
+  values: {
+    password_min_length: {
+      value: 12,
+      source: 'global',
+      locked: false,
+      cascadeChain: [
+        { scope: 'global', value: 12, effective: true },
+        { scope: 'default', value: 8 },
+      ],
+    },
+    require_mfa: {
+      value: true,
+      source: 'global',
+      locked: false,
+      cascadeChain: [
+        { scope: 'global', value: true, effective: true },
+        { scope: 'default', value: false },
+      ],
+    },
+    session_policy: {
+      value: 'strict',
+      source: 'global',
+      locked: false,
+      cascadeChain: [
+        { scope: 'global', value: 'strict', effective: true },
+        { scope: 'default', value: 'lax' },
+      ],
+    },
+    max_sessions: {
+      value: 3,
+      source: 'env',
+      locked: true,
+      lockedReason: 'OS_AUTH_MAX_SESSIONS',
+      cascadeChain: [
+        { scope: 'env', value: 3, locked: true, effective: true },
+        { scope: 'global', value: 4 },
+        { scope: 'default', value: 5 },
+      ],
+    },
+    sign_in_message: {
+      value: 'Welcome',
+      source: 'default',
+      locked: false,
+      cascadeChain: [{ scope: 'default', value: 'Welcome', effective: true }],
+    },
+    org_note: {
+      value: 'Platform note',
+      source: 'global',
+      locked: false,
+      cascadeChain: [
+        { scope: 'global', value: 'Platform note', effective: true },
+        { scope: 'tenant', value: null },
+        { scope: 'default', value: null },
+      ],
+    },
+  },
+};
+
+/** The server's answer once the deployment row is cleared: the default shows. */
+const MIN_LENGTH_DEFAULT = {
+  value: 8,
+  source: 'default',
+  locked: false,
+  cascadeChain: [{ scope: 'default', value: 8, effective: true }],
+};
+
+describe('a value set on a deployment-level page (objectstack#30329)', () => {
+  it('reads as changed here, names the default, and Reset sends null', async () => {
+    serve({ password_min_length: MIN_LENGTH_DEFAULT }, DEPLOYMENT_PAYLOAD);
+    renderView('auth');
+    await screen.findByText('Minimum password length');
+
+    const row = rowOf('Minimum password length');
+    expect(within(row).queryByText(/^Inherited from/)).toBeNull();
+    expect(within(row).getByText('Modified')).toBeTruthy();
+    expect(within(row).getByText('Default: 8')).toBeTruthy();
+    fireEvent.click(within(row).getByRole('button', { name: /reset to default/i }));
+
+    // The draft holds the clear; Save confirms it like any other change.
+    expect((row.querySelector('input') as HTMLInputElement).value).toBe('');
+    expect(screen.getByTestId('settings-unsaved-count')).toBeTruthy();
+    expect(within(row).queryByRole('button', { name: /reset to default/i })).toBeNull();
+
+    await save();
+    expect(sentBody()).toBe('{"password_min_length":null}');
+
+    // After the save the row is the server's answer: the default, no badge.
+    await waitFor(() =>
+      expect((rowOf('Minimum password length').querySelector('input') as HTMLInputElement).value).toBe('8'),
+    );
+    const after = rowOf('Minimum password length');
+    expect(within(after).queryByText('Modified')).toBeNull();
+    expect(within(after).queryByRole('button', { name: /reset to default/i })).toBeNull();
+  });
+
+  it('names a toggle default and an option default in words', async () => {
+    serve({}, DEPLOYMENT_PAYLOAD);
+    renderView('auth');
+    await screen.findByText('Require MFA');
+
+    const toggle = screen.getByText('Require MFA').closest('[data-settings-key]') as HTMLElement;
+    expect(within(toggle).getByText('Modified')).toBeTruthy();
+    expect(within(toggle).getByText('Default: No')).toBeTruthy();
+    expect(within(toggle).getByRole('button', { name: /reset to default/i })).toBeTruthy();
+
+    const select = rowOf('Session policy');
+    expect(within(select).getByText('Modified')).toBeTruthy();
+    expect(within(select).getByText('Default: Lax')).toBeTruthy();
+    expect(within(select).getByRole('button', { name: /reset to default/i })).toBeTruthy();
+  });
+
+  it('CONTROL: an env-locked value, a default value and a tenant-scoped key offer no reset', async () => {
+    serve({}, DEPLOYMENT_PAYLOAD);
+    renderView('auth');
+    await screen.findByText('Maximum sessions');
+
+    const locked = rowOf('Maximum sessions');
+    expect(within(locked).queryByText('Modified')).toBeNull();
+    expect(within(locked).queryByRole('button', { name: /reset to default/i })).toBeNull();
+
+    const unset = rowOf('Sign-in message');
+    expect(within(unset).queryByText('Modified')).toBeNull();
+    expect(within(unset).queryByRole('button', { name: /reset to default/i })).toBeNull();
+
+    // The specifier's own `scope: 'tenant'` outranks the manifest's: this page
+    // writes the organization's row, so the deployment value stays inherited.
+    const orgNote = rowOf('Organization note');
+    expect(within(orgNote).getByText(/^Inherited from/)).toBeTruthy();
+    expect(within(orgNote).queryByText('Modified')).toBeNull();
+    expect(within(orgNote).queryByRole('button', { name: /reset to default/i })).toBeNull();
+
+    // The three rows set on this page carry the page's only resets.
+    expect(screen.getAllByRole('button', { name: /reset to default/i })).toHaveLength(3);
   });
 });

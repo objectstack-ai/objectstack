@@ -42,6 +42,11 @@ vi.mock('@objectstack/runtime', () => ({
     },
     // #3430 — the heal path records a per-source outcome for the boot banner.
     recordSeedOutcome: vi.fn(),
+    // [#30281] The seed-locale producer, answering "no locale": this suite's
+    // subject is not the locale (pinned in marketplace-install-local-seed-replayer.test.ts).
+    resolveSeedLocaleForLoad: async () => undefined,
+    appDefaultSeedLocale: () => undefined,
+    describeSeedLocale: () => 'none',
 }));
 // Only the seed-request parse is stubbed; every other export stays the real one,
 // because `@objectstack/core` reads `@objectstack/spec/data` values at module load

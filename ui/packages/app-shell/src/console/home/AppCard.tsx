@@ -8,8 +8,9 @@
 
 import { Star, StarOff, ArrowUpRight } from 'lucide-react';
 import { Card, CardContent, Button, Badge } from '@object-ui/components';
-import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
-import { resolveKeyedI18nLabel, appRouteSegment } from '../../utils/index.js';
+import { useObjectTranslation } from '@object-ui/i18n';
+import { useServedAppLabel } from '../../hooks/useServedAppLabel.js';
+import { appRouteSegment } from '../../utils/index.js';
 import { useFavorites } from '../../hooks/useFavorites.js';
 import { getIcon } from '../../utils/getIcon.js';
 import { cn } from '@object-ui/components';
@@ -40,12 +41,12 @@ function hashStr(s: string): number {
 
 export function AppCard({ app, onClick, isFavorite, index = 0 }: AppCardProps) {
   const { t } = useObjectTranslation();
-  const { appLabel, appDescription } = useObjectLabel();
+  const { appLabel, appDescription } = useServedAppLabel();
   const { toggleFavorite } = useFavorites();
 
   const Icon = getIcon(app.icon);
-  const label = appLabel({ name: app.name, label: resolveKeyedI18nLabel(app.label, t) });
-  const description = appDescription({ name: app.name, description: resolveKeyedI18nLabel(app.description, t) });
+  const label = appLabel(app);
+  const description = appDescription(app);
   const accent = ACCENTS[(hashStr(app.name) + index) % ACCENTS.length];
 
   const handleToggleFavorite = (e: React.MouseEvent) => {

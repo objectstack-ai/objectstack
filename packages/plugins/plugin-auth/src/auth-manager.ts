@@ -82,6 +82,7 @@ import type { TenancyService } from './tenancy-service.js';
 import { OtpSendGuard, assertOtpCooldownSeconds } from './otp-send-guard.js';
 import { assertPasswordResetEndsSessions } from './password-reset-ends-sessions.js';
 import type { CounterStore } from './rate-limit-storage.js';
+import type { SsoProviderDeleteRefusal } from './sign-in-method-floor.js';
 import {
   applyUserBan,
   applyUserUnban,
@@ -430,6 +431,23 @@ export function resolveDcrEnabled(pluginConfig?: Partial<AuthPluginConfig>): boo
  */
 export function resolveScimEnabled(pluginConfig?: Partial<AuthPluginConfig>): boolean {
   return pluginConfig?.scim ?? readBooleanEnv('OS_SCIM_ENABLED') ?? false;
+}
+
+/**
+ * [#30201] SINGLE decision point for "can a user enroll a second factor
+ * here?" — whether better-auth's `twoFactor` plugin is wired, whose
+ * `/two-factor/*` endpoints are the only enrollment path. Shared by
+ * `buildPluginList()` (what is wired), the `/auth/config` features block (what
+ * is advertised), the per-user MFA gate (ADR-0069 D3 holds a user only while
+ * they can enroll) and the `sys_organization.require_mfa` write guard
+ * (`organization-mfa-enrollment-guard.ts`), so the four can never disagree.
+ *
+ * Resolution order: `OS_AUTH_TWO_FACTOR` env (operator override, wins) →
+ * config (`plugins.twoFactor`, which the `auth.mfa_required` setting turns on
+ * together with the requirement) → off.
+ */
+export function resolveTwoFactorEnabled(pluginConfig?: Partial<AuthPluginConfig>): boolean {
+  return readBooleanEnv('OS_AUTH_TWO_FACTOR') ?? pluginConfig?.twoFactor ?? false;
 }
 
 /**
@@ -1157,40 +1175,76 @@ function ipv4ToInt(ip: string): number | null {
 }
 
 /**
- * `::ffff:203.0.113.7` → `203.0.113.7`; anything else is returned trimmed.
- *
- * A dual-stack listener reports an IPv4 peer in this IPv4-mapped IPv6 form, and
- * the ADR-0069 D5 allow-list judges the transport's peer address when no proxy
- * is trusted. So both sides of a comparison are read as the IPv4 address they
- * denote, or an IPv4 range could never admit an IPv4 client on such a socket.
+ * An address as the ADR-0069 D5 matcher compares it: an IPv4 address as a
+ * uint32, any other IPv6 address as its eight 16-bit groups, or `null` when
+ * the text is neither. An IPv4-mapped IPv6 address (`::ffff:0:0/96`, dotted
+ * or hex) is the IPv4 address it maps: a dual-stack listener reports an IPv4
+ * peer in that form, and the allow-list judges the transport's peer address
+ * when no proxy is trusted, so an IPv4 range must admit an IPv4 client on such
+ * a socket. An IPv6 zone identifier (`%eth0`) is dropped: it names the
+ * interface the address was reached on, not the address.
  */
-function unmapIpv4(address: string): string {
-  const trimmed = address.trim();
-  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(trimmed);
-  return mapped ? mapped[1] : trimmed;
+type MatchedAddress = { v4: number } | { v6: number[] };
+
+function readMatchedAddress(text: string): MatchedAddress | null {
+  const trimmed = text.trim();
+  const v4 = ipv4ToInt(trimmed);
+  if (v4 !== null) return { v4 };
+  const zoneAt = trimmed.indexOf('%');
+  const groups = parseIpv6Literal((zoneAt === -1 ? trimmed : trimmed.slice(0, zoneAt)).toLowerCase());
+  if (!groups) return null;
+  if (groups.slice(0, 5).every((g) => g === 0) && groups[5] === 0xffff) {
+    return { v4: ((groups[6]! << 16) >>> 0) + groups[7]! };
+  }
+  return { v6: groups };
+}
+
+/** Do the first `bits` bits of two eight-group IPv6 addresses agree? */
+function ipv6PrefixEqual(a: readonly number[], b: readonly number[], bits: number): boolean {
+  for (let i = 0; i < 8 && bits > 0; i++, bits -= 16) {
+    const mask = bits >= 16 ? 0xffff : (0xffff << (16 - bits)) & 0xffff;
+    if ((a[i]! & mask) !== (b[i]! & mask)) return false;
+  }
+  return true;
 }
 
 /**
- * ADR-0069 D5 — does `ip` match `range` (IPv4 CIDR `a.b.c.d/n`, or exact IP)?
- * An IPv4-mapped IPv6 address on either side compares as its IPv4 address.
+ * ADR-0069 D5 — does `ip` match `range`? A range is an IPv4 CIDR
+ * (`a.b.c.d/n`), an IPv6 CIDR (`2001:db8::/32`: the first `n` of 128 bits),
+ * or one exact address. Both sides are read as the address they denote
+ * ({@link readMatchedAddress}), so an IPv4-mapped IPv6 address on either side
+ * compares as its IPv4 address, and an exact IPv6 entry matches however it is
+ * spelled. An address is matched only against a range of its own family: an
+ * IPv4 range never admits a pure IPv6 address, nor an IPv6 range an IPv4 one.
+ *
+ * A CIDR whose prefix is not one the family reads (an IPv6 prefix must be a
+ * whole number from 0 to 128) is read as its base address alone, and any
+ * other entry that is not an address is compared as text, which an address
+ * the server established never equals. The IPv4 prefix keeps its earlier
+ * reading (`Number`, 0 to 32).
+ *
+ * One matcher for every door that judges the list: the sign-in gate
+ * ({@link AuthManager.isClientIpAllowed}) and the settings save check
+ * (`allowed-ip-ranges.ts`) must judge the same address the same way.
  */
 export function ipMatchesRange(ip: string, range: string): boolean {
-  const r = unmapIpv4(range || '');
+  const r = (range || '').trim();
   if (!r) return false;
-  const address = unmapIpv4(ip);
-  if (r.includes('/')) {
-    const [rawBase, bitsStr] = r.split('/');
-    const base = unmapIpv4(rawBase);
-    const bits = Number(bitsStr);
-    const ipInt = ipv4ToInt(address);
-    const baseInt = ipv4ToInt(base);
-    if (ipInt === null || baseInt === null || !(bits >= 0 && bits <= 32)) {
-      return address === base; // non-IPv4-CIDR → exact-match fallback
-    }
+  const address = readMatchedAddress(ip);
+  const [rawBase, bitsStr] = r.split('/');
+  const base = readMatchedAddress(rawBase!);
+  if (!base || !address) return ip.trim() === rawBase!.trim();
+  if ('v4' in base) {
+    if (!('v4' in address)) return false;
+    const bits = bitsStr === undefined ? 32 : Number(bitsStr);
+    if (!(bits >= 0 && bits <= 32)) return address.v4 === base.v4; // not an IPv4 prefix → exact base
     const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
-    return ((ipInt & mask) >>> 0) === ((baseInt & mask) >>> 0);
+    return ((address.v4 & mask) >>> 0) === ((base.v4 & mask) >>> 0);
   }
-  return address === r;
+  if (!('v6' in address)) return false;
+  const prefix = bitsStr === undefined ? '128' : bitsStr.trim();
+  const bits = /^\d{1,3}$/.test(prefix) && Number(prefix) <= 128 ? Number(prefix) : 128; // not an IPv6 prefix → exact base
+  return ipv6PrefixEqual(address.v6, base.v6, bits);
 }
 
 /**
@@ -1535,6 +1589,22 @@ export class AuthManager {
   setOrganizationDeleteStandingJudge(judge: (organizationId: string) => Promise<void>): void {
     this.organizationDeleteStandingJudge = judge;
   }
+
+  /**
+   * [#30300] The sign-in method floor's question about an identity-provider
+   * delete (`sign-in-method-floor.ts` `ssoProviderDeleteRefusal`), handed over
+   * by `AuthPlugin`, which holds what the floor reads beyond this manager (the
+   * host's sign-in handoff, the boot's provider credentials). Absent on a
+   * manager no plugin composed, where nothing judges the delete.
+   */
+  private ssoProviderDeleteFloor?: (providerId: string, locale?: string) => Promise<SsoProviderDeleteRefusal | undefined>;
+
+  /** @internal [#30300] See {@link ssoProviderDeleteFloor}; called by `AuthPlugin`. */
+  setSsoProviderDeleteFloor(
+    judge: (providerId: string, locale?: string) => Promise<SsoProviderDeleteRefusal | undefined>,
+  ): void {
+    this.ssoProviderDeleteFloor = judge;
+  }
   // ADR-0069 — cached "does any org require MFA" flag (per-org tightening).
   // Refreshed lazily with a TTL so isAuthGateActive() stays synchronous + cheap.
   private _orgMfaCache: { value: boolean; at: number } = { value: false, at: 0 };
@@ -1547,6 +1617,10 @@ export class AuthManager {
   // the node that issues a flag (other nodes catch up within the TTL).
   private _mustChangeCache: { value: boolean; at: number } = { value: false, at: 0 };
   private _mustChangeRefreshing = false;
+  // [#30201] Set the first time the MFA gate meets a requirement it does not
+  // enforce because no one can enroll (see `noteMfaRequirementWithoutEnrollment`),
+  // so the warning is said once per manager, not once per request.
+  private _mfaWithoutEnrollmentNoted = false;
   // Optional auth features whose better-auth plugin failed to initialize and
   // was skipped so core auth stays up (feature key → error message). Rebuilt
   // by every buildPluginList() run; see addOptionalPlugin().
@@ -1687,6 +1761,7 @@ export class AuthManager {
       assertPhoneOtpSendAllowed: (...a) => this.assertPhoneOtpSendAllowed(...a),
       assertRemoveMemberPermitted: (...a) => this.assertRemoveMemberPermitted(...a),
       assertRevokeSessionIdentifiesRecord: (...a) => this.assertRevokeSessionIdentifiesRecord(...a),
+      assertSsoProviderDeletable: (...a) => this.assertSsoProviderDeletable(...a),
       auditRefusedSignIn: (...a) => this.auditRefusedSignIn(...a),
       buildPluginList: (...a) => this.buildPluginList(...a),
       composeDatabaseHooks: (...a) => this.composeDatabaseHooks(...a),
@@ -2733,7 +2808,9 @@ export class AuthManager {
    * transport swapped from the mail settings at runtime). Read at call time,
    * never cached at boot. [#27843] invite-member's `outcome` asks it too
    * (`invitation-delivery-outcome.ts`), so an invite answers `link_only` on
-   * exactly the deployments where sign-up would not mail either.
+   * exactly the deployments where sign-up would not mail either. [#30107]
+   * `getPublicConfig()`'s `features.emailDelivery` serves the same answer, so
+   * the forgot-password page stops saying a reset link was sent where none is.
    *
    * ⛔ An implementation WITHOUT the member is NOT live: the contract says an
    * absent member is unknown, and the flow asking — a success answer that only
@@ -4584,7 +4661,6 @@ export class AuthManager {
     const termsUrl = resolveLegalUrl(rawTermsUrl, DEFAULT_TERMS_URL);
     const privacyUrl = resolveLegalUrl(rawPrivacyUrl, DEFAULT_PRIVACY_URL);
 
-    const twoFactorFromEnv = readBooleanEnv('OS_AUTH_TWO_FACTOR');
     const turnstileKeys = resolveTurnstileKeys();
 
     // [#7481, maintainer ruling 2026-08-11] `passkeys` / `magicLink` are
@@ -4595,7 +4671,7 @@ export class AuthManager {
     // `magicLink`'s server endpoints are unaffected: `plugins.magicLink` still
     // wires better-auth's magic-link plugin in buildPluginList().
     const features = {
-      twoFactor: twoFactorFromEnv ?? pluginConfig.twoFactor ?? false,
+      twoFactor: resolveTwoFactorEnabled(pluginConfig),
       organization: pluginConfig.organization ?? true,
       multiOrgEnabled,
       // ADR-0105 D1 — WHICH posture is in force. `multiOrgEnabled` stays the
@@ -4645,6 +4721,14 @@ export class AuthManager {
       // SMS path can actually deliver (plugin on + deliverable SMS service),
       // so the login UI never shows a dead "sign in with code" option.
       phoneNumberOtp: ((pluginConfig as any).phoneNumber ?? false) && this.isPhoneOtpDeliverable(),
+      // [#30107] Does mail leave this deployment? The one deliverability rule
+      // (`isEmailDeliveryLive()`: the wired service's own `isConfigured()`),
+      // read per request — so no email service and the stock `log` transport
+      // both answer false, and a transport configured later answers true
+      // without a restart. ⛔ Not `isEmailServiceAvailable()`: that is true on
+      // every default boot. The reset request answers known and unknown
+      // addresses alike either way; this describes the deployment, not one.
+      emailDelivery: this.isEmailDeliveryLive(),
       // The managed (cloud-hosted, SSO-only) mode, from the one accessor every
       // judgement site reads (ruling 6341690661 on #25083, Q2 D / Q3 A). A
       // hide-when-on flag: the console hides the doors that add people.
@@ -4978,6 +5062,35 @@ export class AuthManager {
     return assertOrganizationDeletable.call(host, ctx);
   }
 
+  /**
+   * [#30300] `/sso/delete-provider` admission: refuse the delete that would
+   * remove the last way to sign in, before the vendor deletes anything
+   * ({@link ssoProviderDeleteFloor} decides; `409 DELETE_RESTRICTED`, or `503
+   * SERVICE_UNAVAILABLE` when the provider list cannot be read). Asked only of
+   * an authenticated caller with a `providerId`: what the vendor itself answers
+   * (no session, a malformed body) falls through to it. The refusal states a
+   * deployment-wide fact `/auth/config` already publishes (email and password
+   * off, what else signs anyone in), so it is not held back for a caller the
+   * vendor would refuse as not the provider's owner.
+   */
+  private async assertSsoProviderDeletable(ctx: any): Promise<void> {
+    const judge = this.ssoProviderDeleteFloor;
+    if (!judge) return;
+    const providerId = typeof ctx?.body?.providerId === 'string' ? ctx.body.providerId : '';
+    if (!providerId) return;
+    const actor = await this.resolveActor(ctx);
+    if (!actor?.userId) return;
+    const header = acceptLanguageHeader(ctx);
+    const refusal = await judge(providerId, header ? preferredLocaleFromHeader(header) : undefined);
+    if (!refusal) return;
+    const { APIError } = await import('better-auth/api');
+    throw new APIError(refusal.status, {
+      code: refusal.code,
+      message: refusal.message,
+      lastSignInMethod: refusal.lastSignInMethod,
+    });
+  }
+
   private assertRemoveMemberPermitted(ctx: any): Promise<void> {
     // [#25224 cut 1] The body moved to `auth-manager-actor-guards.ts` (see `ActorGuardHost`).
     const readOrgRolesMap = () => this.orgRolesMap;
@@ -5234,6 +5347,41 @@ export class AuthManager {
   }
 
   /**
+   * @internal Package-internal: read by the MFA gate and by the organization
+   * MFA enrollment guard `AuthPlugin` registers; not a supported entry point.
+   *
+   * [#30201] Can a user enroll a second factor on this deployment right now —
+   * is the twoFactor plugin wired? {@link resolveTwoFactorEnabled} over the
+   * live config, the one answer `buildPluginList()` and `features.twoFactor`
+   * give too. Read per call, so a settings pass that turns the plugin on is
+   * seen at once.
+   */
+  public isTwoFactorEnabled(): boolean {
+    return resolveTwoFactorEnabled(this.config.plugins);
+  }
+
+  /**
+   * [#30201] Called by the MFA gate when a user is under an MFA requirement
+   * (the global `mfaRequired` or their organization's `require_mfa`) that it
+   * does not enforce, because the twoFactor plugin is off and the user has no
+   * way to enroll. A functional degradation (AGENTS.md, degradation log
+   * levels): the requirement is visibly not in force, nothing stored is lost.
+   * Said once per manager, with the remedy.
+   */
+  private noteMfaRequirementWithoutEnrollment(): void {
+    if (this._mfaWithoutEnrollmentNoted) return;
+    this._mfaWithoutEnrollmentNoted = true;
+    this.config.logger?.warn(
+      '[auth] multi-factor authentication is required (the auth.mfa_required setting, or an organization\'s ' +
+        'require_mfa) but is NOT enforced: the two-factor feature is off, so nobody can enroll an authenticator ' +
+        'app, and holding them would lock every affected member out, the owner included. Remedy: set ' +
+        'OS_AUTH_TWO_FACTOR=true; or, unless OS_AUTH_TWO_FACTOR is set to false (it overrides the settings), turn ' +
+        'on the auth.mfa_required setting, which turns two-factor on with the requirement; or clear require_mfa on ' +
+        'the organization.',
+    );
+  }
+
+  /**
    * #2766 V2 — is an email transport wired? The identity import endpoint
    * rejects the invite password policy up front when it isn't, instead of
    * creating N accounts whose invitation emails all silently fail.
@@ -5441,11 +5589,13 @@ export class AuthManager {
     const readMustChangeCache = () => this._mustChangeCache;
     const readOrgMfaCache = () => this._orgMfaCache;
     const readConfig = () => this.config;
-    const host: Pick<PasswordSessionPolicyHost, '_mustChangeCache' | '_orgMfaCache' | 'config' | 'getDataEngine' | 'refreshMustChangeCacheIfStale' | 'refreshOrgMfaCacheIfStale'> = {
+    const host: Pick<PasswordSessionPolicyHost, '_mustChangeCache' | '_orgMfaCache' | 'config' | 'getDataEngine' | 'isTwoFactorEnabled' | 'noteMfaRequirementWithoutEnrollment' | 'refreshMustChangeCacheIfStale' | 'refreshOrgMfaCacheIfStale'> = {
       get _mustChangeCache() { return readMustChangeCache(); },
       get _orgMfaCache() { return readOrgMfaCache(); },
       get config() { return readConfig(); },
       getDataEngine: (...a) => this.getDataEngine(...a),
+      isTwoFactorEnabled: (...a) => this.isTwoFactorEnabled(...a),
+      noteMfaRequirementWithoutEnrollment: (...a) => this.noteMfaRequirementWithoutEnrollment(...a),
       refreshMustChangeCacheIfStale: (...a) => this.refreshMustChangeCacheIfStale(...a),
       refreshOrgMfaCacheIfStale: (...a) => this.refreshOrgMfaCacheIfStale(...a),
     };
@@ -5836,7 +5986,7 @@ export class AuthManager {
    * only for an address inside one of them, and FALSE for an undetermined
    * address (`undefined` / empty): an allow-list is a gate, and a gate that
    * opens for "unknown" is open to anyone who can make themselves unknown.
-   * Supports IPv4 CIDR + exact IPv4/IPv6 (IPv4-mapped IPv6 compares as IPv4).
+   * Supports IPv4 and IPv6 CIDR + exact IPv4/IPv6 ({@link ipMatchesRange}).
    *
    * `ip` must be the address the server established
    * ({@link resolveClientAddress}), never a header read by the caller.

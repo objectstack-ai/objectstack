@@ -14,7 +14,7 @@
 // metadata-forms module is written at all.
 
 import { describe, it, expect } from 'vitest';
-import { extractTranslations } from '../src/utils/i18n-extract';
+import { extractTranslations } from '../src/utils/i18n-bundle-extract';
 
 /**
  * Mirror of the emit rule in `src/commands/i18n/extract.ts`.

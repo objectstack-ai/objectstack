@@ -173,6 +173,7 @@ const pt = {
   },
   form: {
     noPermissionToSave: "Você não tem permissão para salvar este registro.",
+    readOnlyExternalSource: "Esta tabela é somente leitura. Os registros vêm de uma fonte de dados externa que não aceita alterações.",
     noPermissionToCreate: "Você não tem permissão para criar registros de {{object}}. Os campos são somente leitura.",
     noPermissionToEdit: "Você não tem permissão para editar registros de {{object}}. Os campos são somente leitura.",
     noPermissionToEditRecord: "Você não tem permissão para editar este registro. Os campos são somente leitura.",
@@ -932,8 +933,8 @@ const pt = {
     },
     betterAuth: {
       short: "Identidade",
-      title: "Gerenciado pelo provedor de identidade",
-      body: "O esquema deste objeto pertence a {{provider}}. Edições diretas ignoram o hash de senhas, a validação de sessões, as verificações de dois fatores e os hooks de auditoria. Gerencie esses registros pelos fluxos de login, convite e segurança do seu provedor de autenticação.",
+      title: "Gravado pelo serviço de identidade integrado",
+      body: "O esquema deste objeto pertence a {{provider}}, o serviço de identidade integrado da plataforma. Crie e altere esses registros com as ações desta página ou pelos fluxos de login, convite e segurança; todos passam por esse serviço. Editar a tabela diretamente ignoraria o hash de senhas, a validação de sessões, as verificações de dois fatores e os hooks de auditoria.",
     },
   },
   kanban: {
@@ -1853,6 +1854,10 @@ const pt = {
     },
   },
   console: {
+    organizationMfa: {
+      needsTwoFactor: "Exigir autenticação multifator precisa da autenticação de dois fatores, que está desativada nesta implantação, então salvar com a opção marcada é recusado. Ative os dois fatores primeiro: ligue Exigir autenticação multifator em Configuração → Autenticação (vale para todas as organizações) ou defina OS_AUTH_TWO_FACTOR=true na implantação.",
+      nowRequired: "Todos os membros desta organização que ainda não configuraram um app autenticador precisam fazê-lo agora. Cada um perde o acesso aos dados quando termina o período de carência de MFA (7 dias, a menos que alterado em Configuração → Autenticação), contado a partir do primeiro uso após esta alteração. Membros que já usam um autenticador não são afetados.",
+    },
     studio: {
       title: "Studio",
       accessRequired: "Você precisa de acesso ao Studio para abrir o Studio. Um administrador pode concedê-lo com um conjunto de permissões em Configuração → Atribuição de conjuntos de permissões.",
@@ -2246,6 +2251,8 @@ const pt = {
       sourceBadgeInherited: "Herdado de {{source}}",
       sourceBadgeOverrides: "Substitui {{source}}",
       resetToDefault: "Restaurar padrão",
+      sourceBadgeModified: "Modificado",
+      defaultValueHint: "Padrão: {{value}}",
       envLockBadge: "Bloqueado pelo ambiente",
       envLockBadgeTitle: "Fixado por uma variável de ambiente — não pode ser editado pela interface.",
       deprecatedBadge: "Obsoleto",
@@ -2899,6 +2906,8 @@ const pt = {
       useEmailResetText: "Redefinir por e-mail em vez disso",
       phoneSuccessTitle: "Senha redefinida",
       phoneSuccessDescription: "Sua senha foi redefinida. Agora você pode entrar com a nova senha.",
+      noDeliveryTitle: "Não é possível enviar um link de redefinição por e-mail aqui",
+      noDeliveryDescription: "Esta implantação não envia e-mails, então nenhum link de redefinição de senha pode chegar até você. Peça a um administrador: ele pode definir uma nova senha para você em Configuração → Usuários.",
     },
     resetPassword: {
       title: "Definir nova senha",
@@ -2922,6 +2931,7 @@ const pt = {
       verifyingDescription: "Estamos verificando seu e-mail. Por favor, aguarde.",
       successTitle: "E-mail verificado",
       successDescription: "Seu e-mail foi verificado. Você pode fazer login agora.",
+      handoffSuccessDescription: "Seu e-mail foi verificado. Volte ao aplicativo em que você estava fazendo login e faça login lá.",
       errorTitle: "Falha na verificação",
       errorDescription: "A verificação falhou. Por favor, solicite um novo link.",
       missingToken: "Falta um token no link de verificação.",
@@ -3014,6 +3024,7 @@ const pt = {
         continue: "Continuar",
         preparing: "Preparando…",
         enrollFailed: "Não foi possível iniciar o registro.",
+        unavailable: "A autenticação de dois fatores está desativada nesta implantação, então ainda não é possível configurar um app autenticador. Peça a um administrador para ativá-la em Configuração → Autenticação e tente novamente.",
         scanTitle: "Escaneie com seu aplicativo autenticador",
         scanBody: "Escaneie este QR code com o Google Authenticator, 1Password, Authy etc. e digite o código de 6 dígitos.",
         backupTitle: "Salve seus códigos de backup",
@@ -4633,6 +4644,7 @@ const pt = {
       title: 'Alterações pendentes',
       description: 'O que a publicação vai mudar. Itens novos são adicionados; atualizações sobrescrevem a versão publicada.',
       savedToCustomization: 'Salvo nas personalizações de {{package}}',
+      customizationEnvironment: 'Estas alterações ficam no banco de dados deste ambiente, como itens de {{pair}}, e não no código-fonte do seu projeto. Só chegam a outro ambiente por meio de {{command}}.',
       loading: 'Carregando alterações pendentes…',
       loadFailed: 'Não foi possível carregar as alterações pendentes:',
       empty: 'Nada pendente — todos os rascunhos foram publicados.',
@@ -4721,6 +4733,14 @@ const pt = {
         dataset_one: '{{count}} conjunto de dados',
         dataset_many: '{{count}} de conjuntos de dados',
         dataset_other: '{{count}} conjuntos de dados',
+        hook: '{{count}} hooks',
+        hook_one: '{{count}} hook',
+        hook_many: '{{count}} de hooks',
+        hook_other: '{{count}} hooks',
+        translation: '{{count}} traduções',
+        translation_one: '{{count}} tradução',
+        translation_many: '{{count}} de traduções',
+        translation_other: '{{count}} traduções',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

@@ -77,6 +77,11 @@
 
 import type { ActionResult } from './ActionRunner.js';
 import { getRecordDisplayName } from '../utils/record-title.js';
+import { isExternalWriteRefusal } from '../utils/external-write-refusal.js';
+
+/** The `en` pack's `form.readOnlyExternalSource`, for a host with no translation. */
+const READ_ONLY_EXTERNAL_SOURCE_EN =
+  'This table is read-only. Its records come from an external data source that does not accept changes.';
 
 type Row = Record<string, unknown>;
 
@@ -272,8 +277,13 @@ export const recordDelete = Object.freeze({
       toast.success(recordDelete.successText(deps, record));
       return { success: true, reload: true, silent: true };
     } catch (err) {
+      // A delete the object's external datasource does not admit (ADR-0015,
+      // `EXTERNAL_WRITE_FORBIDDEN`) says the table is read-only, not the
+      // gate's diagnostic, which names datasource flags and machine names.
       toast.error(t('objectActions.deleteFailed', { label }), {
-        description: (err as Error).message,
+        description: isExternalWriteRefusal(err)
+          ? t('form.readOnlyExternalSource', { defaultValue: READ_ONLY_EXTERNAL_SOURCE_EN })
+          : (err as Error).message,
       });
       // The toast above (label + error message) is the feedback; returning
       // WITHOUT `error` keeps the runner from toasting the raw message again.

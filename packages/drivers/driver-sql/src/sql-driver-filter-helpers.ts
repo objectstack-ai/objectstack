@@ -11,9 +11,10 @@
  * `temporalFilterColumnSql`, `isJsonColumn`, `jsonColumnFieldClass`,
  * `isNonTextColumn`, `applyTextOperatorOverNonTextColumn`,
  * `declaredValueShape`, `assertOperatorAppliesToColumn`, `applyFilters`,
- * `logWithheldFilterDiagnostic`, `withWithheldFilterLog`, `compileFilters`,
- * `applyContainsLike`, `declaredFieldsFor`, `applyFalseConstant` moved out of
- * `sql-driver.ts` whole by `scripts/codemod-split-sql-driver.mjs`.
+ * `resolveWithheldFilterRefusal`, `logWithheldFilterDiagnostic`,
+ * `withWithheldFilterLog`, `compileFilters`, `applyContainsLike`,
+ * `applyFilterCondition`, `declaredFieldsFor`, `applyFalseConstant` moved out
+ * of `sql-driver.ts` whole by `scripts/codemod-split-sql-driver.mjs`.
  *
  * A MOVE, not a redesign. {@link FilterHelpersFacet} is a stateless facet of `SqlDriver`
  * (ruling 6624345766): each static method of it is the body of the `SqlDriver`
@@ -38,16 +39,21 @@
  * evaluation cycle. `index.ts` re-exports nothing from this module.
  */
 
+import { isComposedReadableIds, resolveFilterSubtreeProvenance } from '@objectstack/spec/data';
 import type { DriverOptions, ValueShapeFieldDef } from '@objectstack/spec/data';
 import { JSON_COLUMN_INCOMPATIBLE_OPERATORS, findMisplacedReadableIds, presentAsNumber, refuseReadableIdsOnce, temporalStorageForm } from '@objectstack/core';
 import type { JsonColumnFieldClass } from '@objectstack/core';
 import { StorageNameMapping } from '@objectstack/spec/system';
+import { emitBalancedGroup } from './sql-driver-balanced-group.js';
 import type { Knex } from 'knex';
 import {
-  AUDIT_TIMESTAMP_COLUMNS, SQLITE_TIME_EXPR_REFS, WITHHELD_FILTER_LOGGED, assertCompilableComparand,
-  assertDefinedComparands, canonicalTimeOfDay, canonicalUtcDatetime, emptyFieldConstraintError,
-  filterArrayReachedDriverError, isEmptyFieldConstraint, jsonColumnOperatorError, mysqlDatetimeLiteral,
-  normalizeSqliteDatetimeOutput, presentAuditTimestampOutput, refusalSubtree, withheldFilterDiagnosticOf,
+  AUDIT_TIMESTAMP_COLUMNS, CROSS_FIELD_COMPARISON_OPERATORS, SQLITE_TIME_EXPR_REFS, TEXT_OPERATORS,
+  WITHHELD_FILTER_AUTHOR_TEXT, WITHHELD_FILTER_LOGGED, WITHHELD_FILTER_SUBTREE, assertCompilableComparand,
+  assertDefinedComparands, bareFieldReferenceError, betweenArityError, canonicalTimeOfDay, canonicalUtcDatetime,
+  emptyFieldConstraintError, fieldReferenceOf, filterArrayReachedDriverError, isEmptyFieldConstraint, isFilterNode,
+  jsonColumnOperatorError, mysqlDatetimeLiteral, normalizeSqliteDatetimeOutput, nowAnchorOf, nowAnchorPositionError,
+  presentAuditTimestampOutput, reduceFilterKey, reduceFilterNode, refusalSubtree, retiredFilterOperatorError,
+  unsupportedFilterError, unsupportedFilterOperatorError, withheldFilterDiagnosticOf,
 } from './sql-driver-top-level.js';
 import type { ReadPresentationKind } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
@@ -60,10 +66,18 @@ import type { SqlDriver } from './sql-driver.js';
  * assigns.
  */
 export interface FilterHelpersHost {
+  applyContainsLike: SqlDriver['applyContainsLike'];
+  applyCrossFieldComparison: SqlDriver['applyCrossFieldComparison'];
+  applyEmptyOperator: SqlDriver['applyEmptyOperator'];
   applyFalseConstant: SqlDriver['applyFalseConstant'];
   applyFilterCondition: SqlDriver['applyFilterCondition'];
+  applyJsonMembership: SqlDriver['applyJsonMembership'];
   applyLike: SqlDriver['applyLike'];
+  applyLikePattern: SqlDriver['applyLikePattern'];
   applyNormalizedComparison: SqlDriver['applyNormalizedComparison'];
+  applyNowAnchorComparison: SqlDriver['applyNowAnchorComparison'];
+  applyNullSafeNegative: SqlDriver['applyNullSafeNegative'];
+  applyTextOperatorOverNonTextColumn: SqlDriver['applyTextOperatorOverNonTextColumn'];
   assertOperatorAppliesToColumn: SqlDriver['assertOperatorAppliesToColumn'];
   readonly booleanFields: SqlDriver['booleanFields'];
   readonly canonicalDatetimeFields: SqlDriver['canonicalDatetimeFields'];
@@ -76,11 +90,14 @@ export interface FilterHelpersHost {
   filterColumnExpr: SqlDriver['filterColumnExpr'];
   isJsonColumn: SqlDriver['isJsonColumn'];
   readonly isMysql: SqlDriver['isMysql'];
+  isNonTextColumn: SqlDriver['isNonTextColumn'];
   readonly isSqlite: SqlDriver['isSqlite'];
   jsonColumnFieldClass: SqlDriver['jsonColumnFieldClass'];
   readonly jsonFields: SqlDriver['jsonFields'];
+  logWithheldFilterDiagnostic: SqlDriver['logWithheldFilterDiagnostic'];
   readonly logger: SqlDriver['logger'];
   readonly managedObjectFields: SqlDriver['managedObjectFields'];
+  mapSortField: SqlDriver['mapSortField'];
   readonly mediaFields: SqlDriver['mediaFields'];
   needsLegacyDatetimeRepair: SqlDriver['needsLegacyDatetimeRepair'];
   needsLegacyTimeRepair: SqlDriver['needsLegacyTimeRepair'];
@@ -89,6 +106,7 @@ export interface FilterHelpersHost {
   presentReadValue: SqlDriver['presentReadValue'];
   readonly readableIdsDriverName: SqlDriver['readableIdsDriverName'];
   readonly readableIdsRefusalLog: SqlDriver['readableIdsRefusalLog'];
+  readableIdsSubquery: SqlDriver['readableIdsSubquery'];
   remoteColumn: SqlDriver['remoteColumn'];
   resolveWithheldFilterRefusal: SqlDriver['resolveWithheldFilterRefusal'];
   sqliteCanonicalDatetimeSql: SqlDriver['sqliteCanonicalDatetimeSql'];
@@ -100,6 +118,7 @@ export interface FilterHelpersHost {
   toDateOnly: SqlDriver['toDateOnly'];
   toTimeOnly: SqlDriver['toTimeOnly'];
   readonly valueShapeFields: SqlDriver['valueShapeFields'];
+  withWithheldFilterLog: SqlDriver['withWithheldFilterLog'];
 }
 
 /** The bodies of the "Filter helpers" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
@@ -430,6 +449,22 @@ export class FilterHelpersFacet {
     }
   }
 
+  /** The body of `SqlDriver#resolveWithheldFilterRefusal`; the method's docblock there is its contract. */
+  static resolveWithheldFilterRefusal(this: Pick<FilterHelpersHost, 'logWithheldFilterDiagnostic'>, err: unknown, rootFilter: unknown): unknown {
+    const diagnostic = withheldFilterDiagnosticOf(err);
+    if (diagnostic === null) return err;
+    const carrier = err as Record<symbol, unknown>;
+    const subtree = carrier[WITHHELD_FILTER_SUBTREE];
+    const provenance =
+      subtree === undefined ? null : resolveFilterSubtreeProvenance(rootFilter, subtree);
+    if (provenance === 'author') {
+      const authorText = carrier[WITHHELD_FILTER_AUTHOR_TEXT];
+      return unsupportedFilterError(typeof authorText === 'string' ? authorText : diagnostic);
+    }
+    this.logWithheldFilterDiagnostic(err);
+    return err;
+  }
+
   /** The body of `SqlDriver#logWithheldFilterDiagnostic`; the method's docblock there is its contract. */
   static logWithheldFilterDiagnostic(this: Pick<FilterHelpersHost, 'logger'>, err: unknown): void {
     const diagnostic = withheldFilterDiagnosticOf(err);
@@ -565,6 +600,422 @@ export class FilterHelpersFacet {
    */
   static applyContainsLike(this: Pick<FilterHelpersHost, 'applyLike'>, builder: any, method: string, field: string, value: unknown): void {
     this.applyLike(builder, method, field, value, 'contains');
+  }
+
+  /** The body of `SqlDriver#applyFilterCondition`; the method's docblock there is its contract. */
+  static applyFilterCondition(this: Pick<FilterHelpersHost, 'applyContainsLike' | 'applyCrossFieldComparison' | 'applyEmptyOperator' | 'applyFalseConstant' | 'applyFilterCondition' | 'applyJsonMembership' | 'applyLike' | 'applyLikePattern' | 'applyNormalizedComparison' | 'applyNowAnchorComparison' | 'applyNullSafeNegative' | 'applyTextOperatorOverNonTextColumn' | 'assertOperatorAppliesToColumn' | 'coerceFilterValue' | 'coercionKey' | 'filterColumnExpr' | 'isNonTextColumn' | 'mapSortField' | 'readableIdsSubquery' | 'remoteColumn' | 'withWithheldFilterLog'>,
+    builder: Knex.QueryBuilder,
+    condition: any,
+    logicalOp: 'and' | 'or' = 'and',
+    tableHint?: string | null,
+    // [#8220] The query's `where` ROOT, threaded so the lazily invoked group
+    // callbacks below can resolve a refusal's provenance against the tree the
+    // merge boundaries actually marked. Defaults to this frame's own
+    // `condition` for any direct caller compiling a standalone tree.
+    rootFilter?: unknown,
+    // [ADR-0139 D3] The OUTER read's options, threaded down every combinator so
+    // a composed `ReadableIds` leaf's subquery is tenant-walled by
+    // {@link applyTenantScope} with exactly the options the outer read was
+    // scoped with — captured by the lazily invoked group callbacks below,
+    // never read from instance state.
+    options?: DriverOptions,
+  ) {
+    if (!condition || typeof condition !== 'object') return;
+    const root = rootFilter ?? condition;
+    const table = tableHint ?? this.coercionKey(builder);
+
+    // #5134 — shape-validate the whole tree and decide its boolean value first.
+    // A malformed node throws here, before any identity is applied, so "compiled
+    // to empty" can only ever mean "genuinely empty".
+    const verdict = reduceFilterNode(condition as Record<string, unknown>, 'filter');
+    if (verdict === 'true') return;
+    if (verdict === 'false') {
+      this.applyFalseConstant(builder, logicalOp);
+      return;
+    }
+
+    for (const [key, value] of Object.entries(condition)) {
+      if (key === '$and' && Array.isArray(value)) {
+        // #5134 — an all-TRUE `$and` (including `$and: []`) IS the AND identity;
+        // emitting nothing for it is now a decision, not an accident. A FALSE
+        // member cannot reach here: it would have made the node FALSE above.
+        if (reduceFilterKey(key, value, 'filter', condition) === 'true') continue;
+        const branches = value.filter(
+          (sub) => reduceFilterNode(sub as Record<string, unknown>, 'filter') === 'clause',
+        );
+        // Attach this group to the parent the way `logicalOp` asks, matching
+        // `$or`/`$not` below. Nothing passes 'or' today (the sole caller uses
+        // 'and' and no branch propagates 'or' any more), but leaving one of the
+        // four combinators deaf to the flag is how the rules drift apart again.
+        const method = logicalOp === 'or' ? 'orWhere' : 'where';
+        // [#29888] A large group is regrouped into balanced halves, so the
+        // expression tree it parses to stays shallow (sql-driver-balanced-group.ts).
+        (builder as any)[method]((qb: any) => {
+          emitBalancedGroup(qb, branches, 'where', (subQb: any, sub) => {
+            this.withWithheldFilterLog(root, () => this.applyFilterCondition(subQb, sub, 'and', table, root, options));
+          });
+        });
+      } else if (key === '$or' && Array.isArray(value)) {
+        // #5134 — one TRUE disjunct makes the whole `$or` TRUE, so `{$or:[{a},{}]}`
+        // matches every row instead of quietly compiling to just `(a = ?)`.
+        if (reduceFilterKey(key, value, 'filter', condition) === 'true') continue;
+        // FALSE disjuncts are the OR identity — dropped. At least one `'clause'`
+        // member survives, or the key would have been TRUE/FALSE above.
+        const branches = value.filter(
+          (sub) => reduceFilterNode(sub as Record<string, unknown>, 'filter') === 'clause',
+        );
+        const method = logicalOp === 'or' ? 'orWhere' : 'where';
+        (builder as any)[method]((qb: any) => {
+          // The `'orWhere'` attach is what OR-s the branches together.
+          // The branch body is still compiled with 'and', because every key
+          // inside one filter object is AND-ed at every depth (Filter
+          // Protocol / Mongo). Passing 'or' down instead made a branch's own
+          // field keys OR each other, so `{$or:[{a,b}]}` compiled to
+          // `a = ? OR b = ?`. That widens the result set, so an RLS/sharing
+          // read scope of the shape `{$or:[{owner,status},{shared_with}]}`
+          // returned rows the scope excluded — see sql-driver-or-filter.test.ts.
+          // [#29888] A large group is regrouped into balanced halves, so the
+          // expression tree it parses to stays shallow: the parent-record read
+          // gates OR one branch per registered parent object, and a flat chain
+          // of them passed SQLite's expression-depth limit on hosted libSQL
+          // (sql-driver-balanced-group.ts).
+          emitBalancedGroup(qb, branches, 'orWhere', (subQb: any, sub) => {
+            this.withWithheldFilterLog(root, () => this.applyFilterCondition(subQb, sub, 'and', table, root, options));
+          });
+        });
+      } else if (key === '$not') {
+        // Spec LOGICAL_OPERATORS declares `$not` alongside `$and`/`$or`; both
+        // driver-mongodb and driver-memory implement it, and CEL `!expr` in a
+        // permission/scope rule compiles to `{ $not: {...} }` (cel-to-filter.ts).
+        // Without this branch `$not` fell through to the field handler, was
+        // treated as a column named "$not", and produced wrong SQL — the same
+        // class of silent filter-bypass this fix (issue #2704) closes.
+        //
+        // #5134 — `$not` of a FALSE group is TRUE: skip it. `$not` of a TRUE
+        // group is FALSE and never reaches here (the node reduced to FALSE), and
+        // a non-node operand was refused by the reduction, so `value` is a node.
+        if (reduceFilterKey(key, value, 'filter', condition) === 'true') continue;
+        // #5146 — the operand is negated as handed. On every seamed read it is
+        // already TOTAL: the shared lowering guarded each leaf in the direction
+        // its operator answers for a row with no value (ADR-0053 D-D1, amended;
+        // the lowering's rule 3), so `NOT (…)` is its exact complement. This
+        // driver's own copy of that rewrite is deleted (#20822, item 5): a
+        // caller that passes no seam gets the three-valued `NOT` it wrote.
+        const notMethod = logicalOp === 'or' ? 'orWhereNot' : 'whereNot';
+        (builder as any)[notMethod]((qb: any) => {
+          // [#8220] The operand is the caller's own node (a seam's lowering
+          // carries each rewritten node's provenance mark forward), so a
+          // refusal raised inside a `$not` resolves against `root` like any
+          // other; the walk-side refusals ran on the same nodes, eagerly.
+          this.withWithheldFilterLog(root, () =>
+            this.applyFilterCondition(qb, value as Record<string, unknown>, 'and', table, root, options),
+          );
+        });
+      } else if (isFilterNode(value)) {
+        // [#19885] An OPERATOR MAP is a plain object — the walk's own reading
+        // ({@link isFilterNode}, which {@link classifyFilterKey} and the
+        // top-level `{ field: value }` loop in `compileFilters` agree with). This
+        // test used to be "any non-array object", so a `Date` or binary comparand
+        // landed here and was read as an operator map, with a different wrong
+        // answer per shape:
+        //
+        // - a `Date` has no own entries, so its leaf was DROPPED:
+        //   `{ $and: [{ d: <Date> }] }` answered every row on SQLite and Postgres
+        //   while the same `{ d: <Date> }` at top level answered the one matching row;
+        // - a NON-EMPTY binary comparand (`Buffer` / `Uint8Array`) had its byte
+        //   indices read as operator names, so it was REFUSED — `INVALID_FILTER` /
+        //   400, `Unsupported filter operator "0"` — a comparand the top level binds;
+        // - an EMPTY binary comparand has no entries either, so it was dropped
+        //   like the `Date`.
+        //
+        // Each is a comparand, and it now takes the bare-value branch below, the
+        // same compilation the top-level loop gives it.
+        const localField = this.mapSortField(key);
+        const field = this.remoteColumn(table, key, localField);
+        // Non-null only for a SQLite `Field.datetime`, whose two stored forms
+        // (INTEGER epoch / ISO TEXT) must be unified before comparing (#3912).
+        const columnExpr = this.filterColumnExpr(table, localField, field);
+        for (const [rawOp, opValue] of Object.entries(value as Record<string, any>)) {
+          const method = logicalOp === 'or' ? 'orWhere' : 'where';
+          // [ADR-0139 D3] The composed `ReadableIds` leaf — the one non-list a
+          // `$in` may hold — compiles to the semi-join, ahead of every comparand
+          // gate below (none of which has a reading for it). Only `$in` reaches
+          // here: `applyFilters` refused it at every other position.
+          if (rawOp === '$in' && isComposedReadableIds(opValue)) {
+            const mIn = logicalOp === 'or' ? 'orWhereIn' : 'whereIn';
+            (builder as any)[mIn](field, this.readableIdsSubquery(opValue, options));
+            continue;
+          }
+          // #5222 — a `{ $field }` that is the WHOLE comparand of a scalar
+          // comparison compiles to a same-table column-to-column comparison
+          // (or refuses inside the emitter, with the specific boundary named).
+          // Checked before the #5041 gate below, which still answers every
+          // other `$field` position — list members, the LIKE family — and
+          // before coercion/rewrites, which expect a literal comparand.
+          // #5222 — the bare `{ field: { $field: 'other' } }` spelling reaches
+          // this loop as an OPERATOR named `$field`, because the whole field
+          // spec is its own operator map. Answered here, ahead of the generic
+          // unsupported-operator arm, so the message can name the supported
+          // spelling instead of listing fifteen operator names.
+          if (rawOp === '$field' && typeof opValue === 'string') {
+            // [#8220] `value` — the field-spec map carrying the bare `$field`
+            // key — is the node the provenance resolver can find in the tree;
+            // `opValue` is only the referenced column's name.
+            throw bareFieldReferenceError(field, opValue, value);
+          }
+          const crossFieldRef = fieldReferenceOf(opValue);
+          if (crossFieldRef !== null && CROSS_FIELD_COMPARISON_OPERATORS.has(rawOp)) {
+            this.applyCrossFieldComparison(builder, method, table, key, localField, field, rawOp, crossFieldRef, opValue);
+            continue;
+          }
+          // [#25808] The bare `{ field: { $now: true, addDays } }` spelling reaches
+          // this loop as an operator named `$now`, as the bare `$field` does.
+          if (rawOp === '$now') throw nowAnchorPositionError(field, rawOp, value);
+          // [#25808] A `{ $now, addDays }` anchor that is the WHOLE comparand of a
+          // scalar comparison compiles to `column <op> <instant + days>` (or
+          // refuses inside the emitter, with the boundary named). Same slot as
+          // the `{ $field }` arm above, for the same reasons.
+          const nowAnchor = nowAnchorOf(opValue);
+          if (nowAnchor !== null && CROSS_FIELD_COMPARISON_OPERATORS.has(rawOp)) {
+            this.applyNowAnchorComparison(builder, method, table, key, localField, field, rawOp, nowAnchor, opValue);
+            continue;
+          }
+          // #5041 — reject a comparand that cannot become a bind parameter
+          // BEFORE any rewrite or coercion touches it, so the message names the
+          // shape the caller actually sent.
+          // [#8197] `value` — this field's operator map — is the enclosing node
+          // for both gates below: the nearest node to the constraint that is
+          // guaranteed to be an object, and therefore markable.
+          assertCompilableComparand(field, rawOp, opValue, value);
+          // #7398 — the column-type gate, on the operator AS WRITTEN and ahead
+          // of every rewrite and both emitters, so a JSON column cannot reach
+          // the plain `whereIn` arms below NOR the normalised `whereRaw` arms
+          // an external multi-value datetime column is routed to.
+          this.assertOperatorAppliesToColumn(table, localField, field, rawOp, false, value);
+          // [#14079] The type-gated answer for a text operator over a column
+          // whose stored value is never text — AFTER every refusal above (a
+          // filter the contract refuses is still refused) and BEFORE both
+          // emitters, so neither a `GLOB` nor a `LIKE` is ever built against a
+          // number. See {@link SqlDriver.applyTextOperatorOverNonTextColumn}.
+          if (TEXT_OPERATORS.has(rawOp) && this.isNonTextColumn(table, localField)) {
+            this.applyTextOperatorOverNonTextColumn(builder, logicalOp, rawOp);
+            continue;
+          }
+          // [#20444] `$empty` — answered by the field's DECLARED row of the
+          // ruled table, AFTER every refusal above (its non-boolean comparand
+          // was refused on the walk) and BEFORE the comparand coercion and the
+          // normalised-column emitter: its flag is not a value of the column,
+          // so neither applies.
+          if (rawOp === '$empty') {
+            this.applyEmptyOperator(builder, logicalOp, table, localField, field, opValue === true, value);
+            continue;
+          }
+          // [ADR-0053 D-D1 items 5 and 9, as amended — #20822] No calendar-day
+          // rewrite here: a bare-day `$lte` / `$between` max is widened to the
+          // whole day ONCE, by the shared lowering (`lowerFilterCondition`,
+          // `@objectstack/spec/data`) at the seams, before this driver sees the
+          // filter — every seamed read hands this emitter `$lt` the next day in
+          // the calendar-string domain, which it converts to storage form like
+          // any comparand (D-A1, D-E3), and the last supported day as
+          // `{ $null: false }`. The copy this emitter kept (#3777, #20600) is
+          // deleted: a caller that passes no seam compiles the comparison it
+          // wrote, `<=` / BETWEEN against midnight.
+          const op = rawOp;
+          const coerced = this.coerceFilterValue(table, localField, opValue);
+          if (columnExpr && this.applyNormalizedComparison(builder, logicalOp, columnExpr, op, coerced)) continue;
+          switch (op) {
+            case '$eq':
+              (builder as any)[method](field, coerced);
+              break;
+            case '$ne':
+              // `<> NULL` matches nothing; a null comparand means "has any value".
+              // UNCHANGED by #5298: `IS NOT NULL` is already total, and both
+              // sides of the ruling agree a row with no value does NOT have
+              // "any value". Only the value COMPARISON below becomes NULL-safe.
+              //
+              // [#6050] The test was `coerced == null` — LOOSE, so it also
+              // caught `undefined`, while the two polarity tables that must
+              // pin THIS emitter's spelling (`operatorIsNullTotal`,
+              // `nullValueSatisfiesOperator` then; since #20822 the shared
+              // lowering's) read `=== null`. That split was
+              // defect B: `{ $not: { d: { $ne: undefined } } }` compiled a
+              // guarded tautology and answered `[]` where remote answered
+              // `['3','4']`. Now that `undefined` is refused upstream the two
+              // spellings cover the same domain, and the strict one is written
+              // for the reason #5347 gave when it tightened the `$null` arm:
+              // a lenient test keeps compiling if the gate is ever moved, and
+              // silently resumes answering for a value nobody ruled on. Note
+              // `coerceFilterValue` is total (every arm returns its input on a
+              // shape it cannot canonicalise), so it cannot manufacture an
+              // `undefined` the gate never saw.
+              if (coerced === null) (builder as any)[logicalOp === 'or' ? 'orWhereNotNull' : 'whereNotNull'](field);
+              else this.applyNullSafeNegative(builder, method, field, (qb) => qb.orWhere(field, '<>', coerced));
+              break;
+            case '$gt':
+              (builder as any)[method](field, '>', coerced);
+              break;
+            case '$gte':
+              (builder as any)[method](field, '>=', coerced);
+              break;
+            case '$lt':
+              (builder as any)[method](field, '<', coerced);
+              break;
+            case '$lte':
+              (builder as any)[method](field, '<=', coerced);
+              break;
+            case '$in': {
+              const mIn = logicalOp === 'or' ? 'orWhereIn' : 'whereIn';
+              (builder as any)[mIn](field, coerced as any[]);
+              break;
+            }
+            case '$nin': {
+              // [#5298] NULL-safe: "not among this list" holds vacuously for a
+              // value that is not there, which is what every JS backend answers.
+              this.applyNullSafeNegative(builder, method, field, (qb) =>
+                qb.orWhereNotIn(field, coerced as any[]),
+              );
+              break;
+            }
+            // [commit e04a0aff2] The MEMBERSHIP reading first: on a JSON column this
+            // operator asks whether the comparand is an ELEMENT of the stored
+            // array, not whether it is a substring of the serialization. Falls
+            // through to the substring emitter for every scalar string column,
+            // which is the other half of the sentence the spec now states.
+            case '$contains':
+              if (!this.applyJsonMembership(builder, method, table, localField, field, opValue, false)) {
+                this.applyContainsLike(builder, method, field, opValue);
+              }
+              break;
+            // [#5702] The case-INSENSITIVE twin of `$contains`, and the
+            // replacement `RETIRED_FILTER_OPERATORS` prescribes for `$regex`.
+            // Same `applyLike` — same escaped character class, same bound
+            // `ESCAPE` — with the fold applied to BOTH sides, because folding
+            // only the comparand compares a folded needle against a raw column
+            // and matches just the rows that were already lower-case.
+            case '$icontains':
+              this.applyLike(builder, method, field, opValue, 'contains', false, true);
+              break;
+            case '$notContains':
+              // [commit e04a0aff2] The exact complement of the arm above, on the same
+              // population and the same construct. It moves WITH `$contains`
+              // and cannot be deferred: this operator is declared "the negation
+              // of $contains, on the same comparand contract", so leaving it on
+              // the substring emitter would make the pair non-complementary on
+              // every JSON column — `['redwood']` would answer neither
+              // `$contains: 'red'` nor `$notContains: 'red'`.
+              if (!this.applyJsonMembership(builder, method, table, localField, field, opValue, true)) {
+                // [#5298] NULL-safe: `NOT LIKE` is UNKNOWN for a NULL column, and
+                // "does not contain" is true of a value that is not there.
+                this.applyNullSafeNegative(builder, method, field, (qb) =>
+                  this.applyLike(qb, 'orWhere', field, opValue, 'contains', true),
+                );
+              }
+              break;
+            case '$startsWith':
+              this.applyLike(builder, method, field, opValue, 'starts');
+              break;
+            case '$endsWith':
+              this.applyLike(builder, method, field, opValue, 'ends');
+              break;
+            // [#7536] The pattern pair. NOT `applyLike`: that method escapes the
+            // comparand and wraps it in the shape's wildcards, which is the
+            // exact rewrite these two operators exist to avoid. The wildcards
+            // are the CALLER's, the match is against the WHOLE value, and
+            // `reduceFilterKey` has already refused a non-string pattern and a
+            // dangling trailing escape — so `opValue` is a compilable pattern
+            // by the time it reaches here.
+            //
+            // `opValue` rather than `coerced`: `coerceFilterValue` canonicalises
+            // a comparand against the column's TYPE (dates, booleans, numbers),
+            // and a pattern is not a value of that type — coercing it would
+            // rewrite the pattern text.
+            case '$like':
+              this.applyLikePattern(builder, method, field, opValue as string, false);
+              break;
+            case '$ilike':
+              this.applyLikePattern(builder, method, field, opValue as string, true);
+              break;
+            case '$between': {
+              const arr = Array.isArray(coerced) ? coerced : [];
+              if (arr.length !== 2) {
+                // [#8197] `opValue`, never `coerced`: coercion can return a NEW
+                // array, and a node the resolver cannot find under the query's
+                // own `where` root resolves to `null` — withheld — for every
+                // caller including an author who really did write it.
+                throw betweenArityError(field, refusalSubtree(opValue, value));
+              }
+              (builder as any)[logicalOp === 'or' ? 'orWhereBetween' : 'whereBetween'](field, arr as [any, any]);
+              break;
+            }
+            // `{ $null: true }` → IS NULL, `{ $null: false }` → IS NOT NULL.
+            // Also the SQL rendering of the AST `is_null`/`is_not_null` operators
+            // (spec `parseFilterAST` maps those to `$null`). Previously this fell
+            // to the equality default and compiled `field = true`, silently
+            // returning the wrong rows (issue #2704).
+            //
+            // [#5347] `opValue` is a boolean here — `reduceFilterKey` refused
+            // anything else while validating the tree, which happens before this
+            // emitter runs. The `=== false` test is therefore an exhaustive
+            // two-way choice, not the "anything but false is IS NULL" rule it
+            // used to be; that rule was this driver's half of a three-way split
+            // across the backends. See {@link nonBooleanNullComparandError}.
+            case '$null':
+              (builder as any)[opValue === false
+                ? (logicalOp === 'or' ? 'orWhereNotNull' : 'whereNotNull')
+                : (logicalOp === 'or' ? 'orWhereNull' : 'whereNull')](field);
+              break;
+            // Mongo `$exists`: a present field is a non-null column in SQL.
+            case '$exists':
+              (builder as any)[opValue === false
+                ? (logicalOp === 'or' ? 'orWhereNull' : 'whereNull')
+                : (logicalOp === 'or' ? 'orWhereNotNull' : 'whereNotNull')](field);
+              break;
+            default: {
+              // [#5702] A RETIRED spelling gets the prescription, not the
+              // vocabulary list: the author who wrote `$regex` needs
+              // `$icontains`, and a list of fifteen names does not say so.
+              //
+              // [#20020] `value` — this field's operator map — is the node both
+              // refusals hand the provenance seam: an object, so markable, and
+              // held by reference under the query's `where` root.
+              const retired = retiredFilterOperatorError(op, field, Object.keys(value as object), value);
+              if (retired) throw retired;
+              throw unsupportedFilterOperatorError(op, field, value);
+            }
+          }
+        }
+      } else {
+        const localField = this.mapSortField(key);
+        const field = this.remoteColumn(table, key, localField);
+        const method = logicalOp === 'or' ? 'orWhere' : 'where';
+        // #7398 — the bare `{ field: value }` spelling again, reached when the
+        // condition carries an operator SOMEWHERE (so `applyFilters` routed the
+        // whole node here) but not on this key. Same compilation, same gate:
+        // one condition must not have two verdicts depending on its siblings.
+        // [#8197] A bare comparand is usually a primitive, so `condition` — this
+        // node, an ARM of the merge when one happened — is what carries the mark.
+        //
+        // [#19885] The comparand gate first, in the order the top-level loop
+        // runs its two: this branch is the third of the three positions
+        // {@link SqlDriver.assertOperatorAppliesToColumn}'s docblock names, and
+        // it carried the column gate without the comparand one. So an array in
+        // the equality slot passed here unrefused whenever the leaf sat under
+        // `$and` / `$or` / `$not` — or beside a sibling key that carries an
+        // operator, which routes the whole node here too. SQLite then refused
+        // the bind (a 500 `DATABASE_ERROR` for a filter the caller can fix) and
+        // Postgres bound the array as its array-literal text (`{"a"}`) and
+        // silently answered the wrong rows. Same gate, same `INVALID_FILTER` /
+        // 400, as the same leaf gets at top level.
+        assertCompilableComparand(field, '=', value, condition);
+        this.assertOperatorAppliesToColumn(
+          table, localField, field, '=', true, refusalSubtree(value, condition),
+        );
+        const coerced = this.coerceFilterValue(table, localField, value);
+        const columnExpr = this.filterColumnExpr(table, localField, field);
+        if (columnExpr && this.applyNormalizedComparison(builder, logicalOp, columnExpr, '=', coerced)) continue;
+        (builder as any)[method](field, coerced as any);
+      }
+    }
   }
 
   /** The body of `SqlDriver#declaredFieldsFor`; the method's docblock there is its contract. */

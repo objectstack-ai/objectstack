@@ -41,9 +41,16 @@ import { CommentBody } from './CommentAuthorControls';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { useRecordContext, useSafeFieldLabel } from '@object-ui/react';
 import { useDetailTranslation } from './useDetailTranslation';
-import { foldFeedItems, type ActivityTimelineEntry } from './renderers/recordActivityFeed';
+import {
+  foldFeedItems,
+  readerRecordNameOf,
+  withReaderRecordName,
+  type ActivityTimelineEntry,
+} from './renderers/recordActivityFeed';
 import {
   TIMELINE_STREAM_FILTERS,
+  fieldHistoryEntriesOf,
+  fieldHistoryOf,
   filterTimelineStream,
   isSystemStreamEntry,
   type TimelineStreamFilter,
@@ -158,6 +165,8 @@ export interface RecordActivityTimelineProps {
   variant?: 'panel' | 'stream' | 'peek';
   /** The stream's chip (controlled); `all` when absent. */
   streamFilter?: TimelineStreamFilter;
+  /** The chips the stream offers, in order; all four when absent (objectstack#30074). */
+  streamFilters?: readonly TimelineStreamFilter[];
   onStreamFilterChange?: (filter: TimelineStreamFilter) => void;
   /** How many entries the whole stream holds, for the peek's 「查看全部 N 条 →」. */
   totalCount?: number;
@@ -282,8 +291,10 @@ function filterItems(items: FeedItem[], mode: FeedFilterMode): FeedItem[] {
   switch (mode) {
     case 'comments_only':
       return items.filter((i) => i.type === 'comment');
+    // The stream's 变更 rule (objectstack#30074, ruling C): the audit's field
+    // changes only, so the panel and the stream agree on what a change is.
     case 'changes_only':
-      return items.filter((i) => i.type === 'field_change');
+      return fieldHistoryEntriesOf(items);
     case 'tasks_only':
       return items.filter((i) => i.type === 'task');
     default:
@@ -312,7 +323,7 @@ const FOLD_FIELDS_SHOWN = 3;
  * Aligned with @objectstack/spec RecordActivityProps.
  */
 export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
-  items,
+  items: handedItems,
   config,
   filterMode: controlledFilter,
   onFilterChange,
@@ -339,6 +350,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
   onRetryFeed,
   variant = 'panel',
   streamFilter = 'all',
+  streamFilters = TIMELINE_STREAM_FILTERS,
   onStreamFilterChange,
   totalCount,
   onViewAll,
@@ -360,6 +372,28 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
   // ONE value for the visible heading's title AND the landmark's name — see the
   // `<section>` below (objectui#9998).
   const title = titleLabel ?? t('detail.activity');
+
+  // The page's record (`RecordContextProvider`): its object schema labels a
+  // changed field below, and its name is the one the summaries say.
+  const recordContext = useRecordContext();
+  // objectstack#29962 — an activity summary names the record as its WRITER
+  // read it, stored when the write happened. For an object whose name field is
+  // a formula (`label(record.FIELD)`) that is the writer's language, so each
+  // row of this record names it as this reader reads it: the H1's name. Every
+  // place below that draws a summary reads these items.
+  const readerName = readerRecordNameOf(recordContext?.objectSchema, recordContext?.data, recordContext?.recordId);
+  const readerRecordId = readerName?.recordId;
+  const readerRecordName = readerName?.name;
+  const items = React.useMemo(
+    () =>
+      withReaderRecordName(
+        handedItems,
+        readerRecordId !== undefined && readerRecordName !== undefined
+          ? { recordId: readerRecordId, name: readerRecordName }
+          : null,
+      ),
+    [handedItems, readerRecordId, readerRecordName],
+  );
 
   // objectui#11195: which of the feed's reads the server REFUSED, one line per
   // refused source. It renders in place of the empty state when there are no
@@ -496,7 +530,6 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
   // A changed field's label: the object's field label where the page has the
   // object schema (`RecordContextProvider`), through the same translated
   // `fieldLabel` the record's own sections use; the machine name otherwise.
-  const recordContext = useRecordContext();
   const { fieldLabel } = useSafeFieldLabel();
   const labelOfField = React.useCallback(
     (name: string): string => {
@@ -577,15 +610,21 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
   // same function when expanded (objectstack#25959).
   // objectstack#27055 — a system entry of the stream: ONE muted line, the
   // change itself, then who and when. 「状态 新建 → 已联系 · Dev Admin · 昨天」.
+  const changesText = (item: FeedItem): string =>
+    (item.fieldChanges ?? [])
+      .map((change) => {
+        const label = change.fieldLabel || labelOfField(change.field);
+        const from = change.oldDisplayValue ?? (change.oldValue == null ? '' : String(change.oldValue));
+        const to = change.newDisplayValue ?? (change.newValue == null ? '' : String(change.newValue));
+        return `${label} ${from || '—'} → ${to || '—'}`;
+      })
+      .join('; ');
+  // An activity row paired with its audit entry (objectstack#30122) reads as
+  // its own summary; the before and after values sit on the same row.
   const systemLineText = (item: FeedItem): string => {
-    const changes = (item.fieldChanges ?? []).map((change) => {
-      const label = change.fieldLabel || labelOfField(change.field);
-      const from = change.oldDisplayValue ?? (change.oldValue == null ? '' : String(change.oldValue));
-      const to = change.newDisplayValue ?? (change.newValue == null ? '' : String(change.newValue));
-      return `${label} ${from || '—'} → ${to || '—'}`;
-    });
-    return changes.length > 0
-      ? changes.join('; ')
+    const changes = fieldHistoryOf(item) ? '' : changesText(item);
+    return changes
+      ? changes
       : item.body && item.body.trim()
         ? item.body
         : item.changedFields && item.changedFields.length > 0
@@ -597,6 +636,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
   const renderSystemLine = (item: FeedItem): React.ReactNode => {
     const Icon = FEED_TYPE_ICONS[item.type] || Zap;
     const what = systemLineText(item);
+    const paired = fieldHistoryOf(item);
     return (
       <div key={item.id} className="flex items-start gap-2 py-0.5 text-xs text-muted-foreground" data-stream-system-row="">
         <span className="z-10 flex h-8 w-8 shrink-0 items-center justify-center">
@@ -608,6 +648,11 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
           <span>{item.actor}</span>
           <span aria-hidden>{' · '}</span>
           <span>{formatTimestamp(item.createdAt, t, displayLocale)}</span>
+          {paired && (
+            <span className="block text-foreground/70" data-stream-change-diff="">
+              {changesText(paired)}
+            </span>
+          )}
         </p>
       </div>
     );
@@ -871,6 +916,10 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
         >
           <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
           <span className="min-w-0 flex-1 truncate">{what}</span>
+          {/* Every row says who (objectstack#30122). */}
+          <span className="max-w-[40%] shrink-0 truncate text-[11.5px] text-muted-foreground" data-record-timeline-peek-actor="">
+            {item.actor}
+          </span>
           <span className="shrink-0 text-[11.5px] text-muted-foreground tabular-nums">{when}</span>
         </div>
       );
@@ -979,7 +1028,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
                 className="flex flex-wrap items-center gap-1"
                 data-stream-filters=""
               >
-                {TIMELINE_STREAM_FILTERS.map((chip) => (
+                {streamFilters.map((chip) => (
                   <button
                     key={chip}
                     type="button"

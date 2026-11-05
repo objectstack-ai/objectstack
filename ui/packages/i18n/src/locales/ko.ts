@@ -171,6 +171,7 @@ const ko = {
   },
   form: {
     noPermissionToSave: "이 레코드를 저장할 권한이 없습니다.",
+    readOnlyExternalSource: "이 테이블은 읽기 전용입니다. 레코드는 변경을 받지 않는 외부 데이터 소스에서 가져옵니다.",
     noPermissionToCreate: "{{object}} 생성 권한이 없습니다. 필드는 읽기 전용입니다.",
     noPermissionToEdit: "{{object}} 편집 권한이 없습니다. 필드는 읽기 전용입니다.",
     noPermissionToEditRecord: "이 레코드를 편집할 권한이 없습니다. 필드는 읽기 전용입니다.",
@@ -907,8 +908,8 @@ const ko = {
     },
     betterAuth: {
       short: "아이덴티티",
-      title: "ID 공급자가 관리",
-      body: "이 개체의 스키마는 {{provider}}가 소유합니다. 직접 편집하면 비밀번호 해싱, 세션 검증, 2단계 인증 확인 및 감사 후크를 우회하게 됩니다. 인증 공급자의 로그인, 초대, 보안 흐름을 통해 이 레코드를 관리하세요.",
+      title: "내장 ID 서비스를 통해 기록",
+      body: "이 개체의 스키마는 플랫폼 내장 ID 서비스인 {{provider}}에 속합니다. 이 페이지의 작업이나 로그인, 초대, 보안 흐름으로 레코드를 만들고 변경하세요. 모두 이 서비스를 거칩니다. 테이블을 직접 편집하면 비밀번호 해싱, 세션 검증, 2단계 인증 확인 및 감사 후크를 우회하게 됩니다.",
     },
   },
   kanban: {
@@ -1804,6 +1805,10 @@ const ko = {
     },
   },
   console: {
+    organizationMfa: {
+      needsTwoFactor: "다단계 인증 필수에는 2단계 인증이 필요하지만 이 배포에서는 꺼져 있으므로, 체크한 채로 저장하면 거부됩니다. 먼저 2단계 인증을 켜세요: 설정 → 인증에서 다단계 인증 필수를 켜거나(모든 조직에 적용됨), 배포에 OS_AUTH_TWO_FACTOR=true를 설정하세요.",
+      nowRequired: "인증 앱을 아직 설정하지 않은 이 조직의 모든 구성원은 이제 설정해야 합니다. 각 구성원은 이 변경 후 처음 앱을 사용할 때부터 MFA 유예 기간(변경하지 않으면 7일, 설정 → 인증에서 변경 가능)이 시작되며, 기간이 끝나면 데이터에 접근할 수 없습니다. 이미 인증 앱을 사용하는 구성원은 영향을 받지 않습니다.",
+    },
     studio: {
       title: "Studio",
       accessRequired: "Studio를 열려면 Studio 접근 권한이 필요합니다. 관리자가 '설정 → 권한 집합 할당'에서 권한 세트로 부여할 수 있습니다.",
@@ -2189,6 +2194,8 @@ const ko = {
       sourceBadgeInherited: "{{source}}에서 상속됨",
       sourceBadgeOverrides: "{{source}} 재정의",
       resetToDefault: "기본값으로 재설정",
+      sourceBadgeModified: "수정됨",
+      defaultValueHint: "기본값: {{value}}",
       envLockBadge: "환경 변수로 잠김",
       envLockBadgeTitle: "환경 변수로 고정되어 UI에서 편집할 수 없습니다.",
       deprecatedBadge: "지원 중단됨",
@@ -2839,6 +2846,8 @@ const ko = {
       useEmailResetText: "이메일로 재설정하기",
       phoneSuccessTitle: "비밀번호가 재설정되었습니다",
       phoneSuccessDescription: "비밀번호가 재설정되었습니다. 이제 새 비밀번호로 로그인할 수 있습니다.",
+      noDeliveryTitle: "여기서는 재설정 링크를 이메일로 보낼 수 없습니다",
+      noDeliveryDescription: "이 배포는 이메일을 보내지 않으므로 비밀번호 재설정 링크가 전달되지 않습니다. 관리자에게 문의하세요. 관리자가 '설정 → 사용자'에서 새 비밀번호를 설정해 줄 수 있습니다.",
     },
     resetPassword: {
       title: "새 비밀번호 설정",
@@ -2862,6 +2871,7 @@ const ko = {
       verifyingDescription: "이메일을 확인하고 있습니다. 잠시 기다리세요.",
       successTitle: "이메일 확인됨",
       successDescription: "이메일이 확인되었습니다. 이제 로그인할 수 있습니다.",
+      handoffSuccessDescription: "이메일이 확인되었습니다. 로그인하려던 앱으로 돌아가 그곳에서 로그인하세요.",
       errorTitle: "확인 실패",
       errorDescription: "확인에 실패했습니다. 새 링크를 요청하세요.",
       missingToken: "확인 링크에 토큰이 없습니다.",
@@ -2954,6 +2964,7 @@ const ko = {
         continue: "계속",
         preparing: "준비 중…",
         enrollFailed: "등록을 시작할 수 없습니다.",
+        unavailable: "이 배포에서는 2단계 인증이 꺼져 있어 아직 인증 앱을 등록할 수 없습니다. 관리자에게 설정 → 인증에서 켜 달라고 요청한 뒤 다시 시도하세요.",
         scanTitle: "인증 앱으로 스캔",
         scanBody: "Google Authenticator, 1Password, Authy 등으로 이 QR 코드를 스캔한 다음 6자리 코드를 입력하세요.",
         backupTitle: "백업 코드 저장",
@@ -4535,6 +4546,7 @@ const ko = {
       title: '대기 중인 변경 사항',
       description: '게시 시 변경되는 내용입니다. 새 항목은 추가되고 업데이트는 게시된 버전을 덮어씁니다.',
       savedToCustomization: '{{package}}의 사용자 지정에 저장됨',
+      customizationEnvironment: '이 변경 사항은 이 환경의 데이터베이스에 {{pair}}의 항목으로 저장되며 프로젝트 소스에는 없습니다. 다른 환경으로는 {{command}}로만 옮길 수 있습니다.',
       loading: '대기 중인 변경 사항 불러오는 중…',
       loadFailed: '대기 중인 변경 사항을 불러오지 못했습니다:',
       empty: '대기 중인 항목 없음 — 모든 드래프트가 게시되었습니다.',
@@ -4607,6 +4619,12 @@ const ko = {
         dataset: '데이터 세트 {{count}}',
         dataset_one: '데이터 세트 {{count}}',
         dataset_other: '데이터 세트 {{count}}',
+        hook: '후크 {{count}}',
+        hook_one: '후크 {{count}}',
+        hook_other: '후크 {{count}}',
+        translation: '번역 {{count}}',
+        translation_one: '번역 {{count}}',
+        translation_other: '번역 {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

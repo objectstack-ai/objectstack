@@ -172,13 +172,15 @@ const BUNDLE = {
  * item with no `label`), the `/meta/object` answer (its own `listViews`: one
  * with no `label`, one with a `label`, one with only a `title`), and the
  * object as `MetadataProvider` merges the two.
+ * The served object document carries the session language's text, as the
+ * server translates it (objectstack#30311: a served label is drawn as served),
+ * so a zh-CN session is served the zh-CN label and plural.
  */
-function world() {
+function world(language: 'en' | 'zh-CN' = 'en') {
   const viewItem = { name: DEFAULT_VIEW_ID, object: OBJECT_NAME, viewKind: 'list', config: { type: 'grid' } };
   const doc = {
     name: OBJECT_NAME,
-    label: 'QA Gate',
-    pluralLabel: 'QA Gates',
+    ...(language === 'en' ? { label: 'QA Gate', pluralLabel: PLURAL.en } : { label: '质检关', pluralLabel: PLURAL['zh-CN'] }),
     listViews: {
       pending: { type: 'grid' },
       open: { type: 'grid', label: AUTHORED_LABEL },
@@ -221,21 +223,21 @@ const LANGUAGES = ['en', 'zh-CN'] as const;
 
 describe('AppHeader — a label-less view is titled by its object\'s plural label (objectui#12805)', () => {
   it.each(LANGUAGES)('%s: a served view with no label, bare URL', (language) => {
-    renderAt(`/apps/showcase_app/${OBJECT_NAME}/view/default`, language, world());
+    renderAt(`/apps/showcase_app/${OBJECT_NAME}/view/default`, language, world(language));
 
     expect(screen.getAllByText(PLURAL[language]).length).toBeGreaterThan(0);
     expect(screen.queryAllByText('Default')).toHaveLength(0);
   });
 
   it.each(LANGUAGES)('%s: a served view with no label, qualified URL', (language) => {
-    renderAt(`/apps/showcase_app/${OBJECT_NAME}/view/${DEFAULT_VIEW_ID}`, language, world());
+    renderAt(`/apps/showcase_app/${OBJECT_NAME}/view/${DEFAULT_VIEW_ID}`, language, world(language));
 
     expect(screen.getAllByText(PLURAL[language]).length).toBeGreaterThan(0);
     expect(screen.queryAllByText('Recheck Gate.Default')).toHaveLength(0);
   });
 
   it.each(LANGUAGES)('%s: a view the object document embeds with no label', (language) => {
-    renderAt(`/apps/showcase_app/${OBJECT_NAME}/view/pending`, language, world());
+    renderAt(`/apps/showcase_app/${OBJECT_NAME}/view/pending`, language, world(language));
 
     expect(screen.getAllByText(PLURAL[language]).length).toBeGreaterThan(0);
     expect(screen.queryAllByText('Pending')).toHaveLength(0);

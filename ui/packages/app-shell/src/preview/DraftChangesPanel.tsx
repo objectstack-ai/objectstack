@@ -87,7 +87,7 @@ import {
 // spec-named local declaration is what `scripts/check-spec-symbol-derivation.mjs`
 // refuses, and a faithful copy is exactly the fork that guard exists to prevent.
 import { fetchPendingDrafts } from './usePendingDrafts.js';
-import { savedToCustomizationText } from './savedToCustomization.js';
+import { customizationEnvironmentText, savedToCustomizationText } from './savedToCustomization.js';
 import { canonicalMetaUrlType } from '@objectstack/spec/shared';
 import { resolveI18nLabel, type I18nLabel } from '@objectstack/spec/ui';
 import { MetadataProtectionFields, OverrideDeclarationFields, stripReadDecorations } from '@objectstack/spec/kernel';
@@ -870,6 +870,11 @@ const TYPE_COUNT: Readonly<Record<string, (t: Translate, count: number) => strin
   // A Studio-authored dataset publishes in the same batch as the report or
   // dashboard that reads it; without a row it read as the raw type name.
   dataset: (t, count) => t('preview.changes.typeCount.dataset', { count, defaultValue: '{{count}} datasets' }),
+  // objectstack#29902 — Studio authors both of these itself: a hook from an
+  // object's Hooks tab, a translation from the "All metadata" form editor.
+  hook: (t, count) => t('preview.changes.typeCount.hook', { count, defaultValue: '{{count}} hooks' }),
+  translation: (t, count) =>
+    t('preview.changes.typeCount.translation', { count, defaultValue: '{{count}} translations' }),
 };
 
 function summaryTypeSegment(t: Translate, type: string, count: number): string {
@@ -1401,7 +1406,9 @@ export interface DraftChangesPanelProps {
    * objectstack ADR-0146 D3 — the label of the read-only base whose
    * `<base>.custom` pair these drafts are saved to. When set, the sheet says
    * so under its title ({@link savedToCustomizationText}); the host passes it
-   * only while it reviews a pair's drafts.
+   * only while it reviews a pair's drafts, so `packageId` is then the pair, and
+   * the sheet names it in the line that says where the changes live
+   * ({@link customizationEnvironmentText}, objectstack#30119).
    */
   customizationOf?: string;
 }
@@ -1695,6 +1702,14 @@ export function DraftChangesPanel({
           {customizationOf ? (
             <p data-testid="draft-changes-saved-to" className="text-xs font-medium text-foreground">
               {savedToCustomizationText(t, customizationOf)}
+            </p>
+          ) : null}
+          {/* objectstack#30119 (ADR-0146 D2) — and where they live: this
+            * environment's database, as items of the pair (`packageId`, the
+            * pair the host reviews), moved only by `os package export`. */}
+          {customizationOf && packageId ? (
+            <p data-testid="draft-changes-environment" className="text-xs text-muted-foreground">
+              {customizationEnvironmentText(t, packageId)}
             </p>
           ) : null}
         </SheetHeader>

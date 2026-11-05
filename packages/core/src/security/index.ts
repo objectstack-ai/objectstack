@@ -324,6 +324,8 @@ export {
   buildEffectiveObjectPermissions,
   // [#28877] The map's disabled-package accessor over an engine registry.
   registryObjectPackageDisabled,
+  // [#30370] The map's external-write-gate accessor over an engine.
+  engineExternalWriteForbidden,
   foldWildcardSuperUser,
   clampManagedObjectWrites,
   seedSuperUserRestrictedObjects,

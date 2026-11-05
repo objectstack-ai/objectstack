@@ -10,12 +10,12 @@
 
 import { useState, useEffect, useLayoutEffect, useCallback, useContext, useMemo, useRef, type ReactElement } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
-import { activityRowToFeedItem, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RECORD_PAGE_TIMELINE_PANEL, RECORD_TIMELINE_PANEL_MAX_ENTRIES, RecordFieldChangesContext, RecordTimelineTotalContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageTierHasRightColumn, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
+import { activityRowToFeedItem, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RECORD_PAGE_TIMELINE_PANEL, RECORD_TIMELINE_PANEL_MAX_ENTRIES, RecordFieldChangesContext, RecordFieldHistoryContext, RecordTimelineTotalContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageTierHasRightColumn, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
 import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderPhoneContext, PageHeaderTrailingContext, PanelToggles, RecordTopBar, cn, useRecordStepKeys, type PanelToggleItem, type RecordTopBarStepper } from '@object-ui/components';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
 import { useDisplayLocale, useLocalization, pickLocalized } from '@object-ui/i18n';
-import { ActionProvider, useObjectTranslation, useObjectLabel, useActionTextLocalizer, usePageAssignment, isRecordPageOf, useMetadata, RecordContextProvider, SchemaRenderer, DiscussionContextProvider, HighlightFieldsProvider, InlineEditProvider, resolveApprovalLock, useGlobalUndo, useDataInvalidation, notifyDataChanged, subscribeDataChanges, dataChangeMatches, useRowPredicate, classifyLoadError, answeredLoadFailure, extractWriteErrorMessage } from '@object-ui/react';
+import { ActionProvider, useObjectTranslation, useObjectLabel, useActionTextLocalizer, usePageAssignment, isRecordPageOf, useMetadata, RecordContextProvider, SchemaRenderer, DiscussionContextProvider, HighlightFieldsProvider, InlineEditProvider, resolveApprovalLock, useGlobalUndo, useDataInvalidation, notifyDataChanged, subscribeDataChanges, dataChangeMatches, useRowPredicate, classifyLoadError, answeredLoadFailure, extractWriteErrorMessage, isExternalWriteRefusal } from '@object-ui/react';
 import type { AnsweredLoadFailure } from '@object-ui/react';
 import { buildExpandFields, captureUpdateUndoData, recordDelete, resolveAffordance, resolveRecordIdParamSeed, userActionPredicates, withoutDeniedFields, type AffordanceGrantPrincipal, type SchemaLike } from '@object-ui/core';
 import { toast } from 'sonner';
@@ -982,6 +982,22 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const notifyRecordChanged = useCallback(() => {
     if (objectName) notifyDataChanged({ objectName, recordId: pureRecordId || undefined });
   }, [objectName, pureRecordId]);
+  // objectstack#30337 — what `refreshAfter: true` refreshes: the spec's "refresh
+  // the view after execution", and on this page the view is the record AND its
+  // related lists. An action's target may write the CHILDREN (a team's Add
+  // Member writes a membership row), and the client cannot know which objects
+  // it wrote, so the page refreshes every child object it lists as well: their
+  // lists refetch and their counts (keyed on the child) re-count. Read through
+  // a ref because the child set is derived further down this component; one
+  // synchronous dispatch batch, so the record is still read once (the
+  // child-write subscription below and this record's own nonce bump together).
+  const pageChildObjectsRef = useRef<string[]>([]);
+  const notifyViewChanged = useCallback(() => {
+    notifyRecordChanged();
+    for (const child of pageChildObjectsRef.current) {
+      if (child !== objectName) notifyDataChanged({ objectName: child });
+    }
+  }, [notifyRecordChanged, objectName]);
   // Manual refresh (objectui#3460) — the producer for `RecordContext.refresh`,
   // which `page:header` turns into the ⟳ button at the end of the header row.
   //
@@ -1686,7 +1702,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           if (!door.res.ok) return apiActionRefusalResult(door.res, door.json, `HTTP ${door.res.status}`, language);
           const answer = readApiActionDoorSuccess(door, `Action "${action.name}"`);
           if (!answer.ok) return { success: false, error: answer.error };
-          if (action.refreshAfter === true) notifyRecordChanged();
+          if (action.refreshAfter === true) notifyViewChanged();
           return { success: true, data: answer.data, reload: action.refreshAfter === true };
         }
 
@@ -1793,7 +1809,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           return apiActionRefusalResult(res, errBody, `HTTP ${res.status}`, language);
         }
         const data = await res.json().catch(() => ({}));
-        if (action.refreshAfter === true) notifyRecordChanged();
+        if (action.refreshAfter === true) notifyViewChanged();
         return { success: true, data, reload: action.refreshAfter === true };
       }
 
@@ -1889,7 +1905,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
 
       const shouldRefresh = action.refreshAfter === true;
       if (shouldRefresh) {
-        notifyRecordChanged();
+        notifyViewChanged();
       } else if (undo) {
         // Even when refreshAfter isn't set, reflect the change so the user sees
         // it (and the subsequent Undo) on the open record.
@@ -1988,7 +2004,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       if (judged.followUp?.kind === 'refusal') {
         setFlowRefusal({ open: true, title: action.label, message: judged.followUp.message });
       }
-      if (judged.refresh) notifyRecordChanged();
+      if (judged.refresh) notifyViewChanged();
       return judged.result;
     } catch (error) {
       return { success: false, error: (error as Error).message };
@@ -2009,8 +2025,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // `action.recordId`; header/more actions carry none and use this page's id.
   // The env ref keeps the handler instance stable across renders (authFetch is
   // memoized once) while the thunks read the live record/object.
-  const serverActionEnvRef = useRef({ objectName, pureRecordId, notifyRecordChanged, t, navigate });
-  serverActionEnvRef.current = { objectName, pureRecordId, notifyRecordChanged, t, navigate };
+  const serverActionEnvRef = useRef({ objectName, pureRecordId, notifyViewChanged, t, navigate });
+  serverActionEnvRef.current = { objectName, pureRecordId, notifyViewChanged, t, navigate };
   const serverActionHandler = useMemo(
     () => createConsoleServerActionHandler({
       fetch: authFetch,
@@ -2019,7 +2035,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       resolveRecordId: (action) => ({
         recordId: (action as { recordId?: unknown }).recordId ?? serverActionEnvRef.current.pureRecordId ?? undefined,
       }),
-      onRefresh: () => serverActionEnvRef.current.notifyRecordChanged(),
+      onRefresh: () => serverActionEnvRef.current.notifyViewChanged(),
       // SPA route hop for a handler-returned `openIn: 'self'` — react-router's
       // own `navigate`, matching the shared console runtime.
       navigate: (url: string) => serverActionEnvRef.current.navigate(url),
@@ -2298,6 +2314,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   );
   useEffect(() => {
     const childObjects = JSON.parse(relatedChildObjectsKey) as string[];
+    // What `notifyViewChanged` refreshes besides this record (objectstack#30337).
+    pageChildObjectsRef.current = childObjects;
     if (childObjects.length === 0) return;
     return subscribeDataChanges((change) => {
       if (childObjects.some((child) => dataChangeMatches(change, child))) {
@@ -4641,7 +4659,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             const baseAppUrl = appName ? `/apps/${appName}` : '';
             navigate(`${baseAppUrl}/${objectName}`, { replace: true });
           } catch (err: any) {
-            toast.error(err?.message || 'Delete failed');
+            // A delete the object's external datasource does not admit
+            // (ADR-0015, `EXTERNAL_WRITE_FORBIDDEN`) says the table is
+            // read-only, never the gate's diagnostic.
+            toast.error(
+              isExternalWriteRefusal(err)
+                ? t('form.readOnlyExternalSource')
+                : err?.message || 'Delete failed',
+            );
           }
         },
       } as any);
@@ -5044,6 +5069,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         {/* objectstack#27055 — the field changes of the timeline stream,
             for the synthesized page's `record:activity`. */}
         <RecordFieldChangesContext.Provider value={assignedPage ? null : timelineFieldChanges}>
+        {/* objectstack#30074 — whether this record shows its field history:
+            the stream offers its 变更 chip only while it does. */}
+        <RecordFieldHistoryContext.Provider value={historyEnabled}>
         {/* objectstack#28737 — the whole stream's count, for the 动态 panel,
             its tab and the tab row's probe. */}
         <RecordTimelineTotalContext.Provider value={assignedPage ? null : timelineTotal}>
@@ -5321,6 +5349,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           {modalElement}
         </ActionProvider>
         </RecordTimelineTotalContext.Provider>
+        </RecordFieldHistoryContext.Provider>
         </RecordFieldChangesContext.Provider>
         </DiscussionContextProvider>
         </HighlightFieldsProvider>

@@ -579,6 +579,7 @@ export async function unknownGrantObjectSaveRefusal(
     pending?: 'drafts' | ReadonlySet<string>,
     writeFace?: MetadataWriteFace,
     door: 'save' | 'publish' = 'save',
+    inherited?: readonly string[],
 ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
     if (singularType !== 'permission') return undefined;
     if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
@@ -625,6 +626,14 @@ export async function unknownGrantObjectSaveRefusal(
         : new Set<string>();
     unknown = unknown.filter((key) => !held.has(key));
     if (unknown.length === 0) return undefined;
+    // [#30255] A grant this save copies from a set that already holds it (the
+    // clone door's copy) is the source's, not this save's — the rule above,
+    // for a copy: judged where the source introduced it.
+    if (inherited && inherited.length > 0) {
+        const copied = new Set(inherited);
+        unknown = unknown.filter((key) => !copied.has(key));
+        if (unknown.length === 0) return undefined;
+    }
     // [#29279] What was looked for, as this door looked: a save also counts an
     // object saved here; a draft's publish counts only what goes live with it.
     const looked = door === 'publish'

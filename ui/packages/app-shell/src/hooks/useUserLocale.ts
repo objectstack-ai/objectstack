@@ -60,9 +60,11 @@
  *
  * ## Signed out
  *
- * Nothing here applies: with no `sys_user` row there is nothing to read and
- * nothing to write. {@link useLanguageSelection} performs the local switch and
- * returns, so language selection for a visitor is exactly what it was.
+ * With no `sys_user` row there is nothing to read and nothing to write.
+ * {@link useLanguageSelection} performs the local switch, and it remembers the
+ * pick for this page-load only, so that the purge above does not take it from
+ * the person who signs in next (objectstack#30338, see
+ * {@link keepSignedOutPickThroughOwnerChange}).
  *
  * @module
  */
@@ -86,6 +88,78 @@ import { useAfterFirstPaint } from './sharedUserFeeds.js';
  * user has switched to since by resetting it a second time.
  */
 let ownerChangesHandled = 0;
+
+/**
+ * The language picked while signed out in THIS page-load and not yet handed to
+ * whoever signs in next, or `null` (objectstack#30338).
+ */
+let signedOutPick: string | null = null;
+let signedOutPickKeeperInstalled = false;
+
+/**
+ * Keep a language picked on the sign-in page through the purge that follows a
+ * sign-in by someone other than the browser's last owner (objectstack#30338).
+ *
+ * ## The drop this closes
+ *
+ * The sign-in page's language menu writes the pick to the device slot
+ * ({@link LOCALE_STORAGE_KEY}) like every switch. When the person who then
+ * signs in is not the one the browser last held, `SessionUserScope.adopt`
+ * sweeps that slot with the rest of the previous owner's state
+ * (objectui#5664), and the sign-in page then leaves by a full navigation. The
+ * next page-load boots with no choice stored, so the person lands in the
+ * browser's language, not the one they just picked. The reset in
+ * {@link useLanguageResetOnOwnerChange} is not on that path: the shell is not
+ * mounted on the sign-in page.
+ *
+ * ## Why this keeps objectui#10193 ruling B
+ *
+ * The purge removes what the PREVIOUS owner left, and still does. A language
+ * picked after they signed out is not that, and the two can be told apart
+ * without a stored marker: the pick and the purge happen in the same
+ * page-load, so the pick is known here, in memory. The owner-change event
+ * fires after the sweep, and this puts the pick back into the same slot,
+ * where the next boot reads it as it reads any choice.
+ *
+ * ⚠️ The bound, stated: memory lasts one page-load. A pick followed by a reload
+ * of the sign-in page, or a sign-in that leaves the page first (an identity
+ * provider's redirect), is still swept.
+ *
+ * Installed once, on the first signed-out pick, at module scope: the sign-in
+ * page's menu unmounts in the same commit that sets the user, before
+ * `AuthProvider`'s effect calls `adopt`, so a listener owned by a component
+ * would be gone when the event fires.
+ */
+function keepSignedOutPickThroughOwnerChange(code: string): void {
+  signedOutPick = code;
+  if (signedOutPickKeeperInstalled) return;
+  signedOutPickKeeperInstalled = true;
+  subscribeSessionOwnerChange(() => {
+    const pick = signedOutPick;
+    signedOutPick = null;
+    if (!pick) return;
+    try {
+      window.localStorage.setItem(LOCALE_STORAGE_KEY, pick);
+    } catch {
+      // Storage blocked — the live language still holds the pick for this
+      // page-load; nothing more can be kept.
+    }
+  });
+}
+
+/**
+ * The pick has reached a signed-in person, or a signed-in choice replaced it:
+ * either way it must not reach the NEXT owner change, which belongs to
+ * someone else.
+ */
+function forgetSignedOutPick(): void {
+  signedOutPick = null;
+}
+
+/** Test seam: forget this page-load's signed-out pick. Not public. */
+export function __resetSignedOutPickForTests(): void {
+  signedOutPick = null;
+}
 
 /**
  * Serialises every language switch this module makes, so they land in the
@@ -304,6 +378,9 @@ export function useSignedInUserLocale(): void {
         if (cancelled) return;
         const raw = (row as { locale?: unknown } | null)?.locale;
         const column = typeof raw === 'string' && raw.length > 0 ? raw : null;
+        // This person's session is established and read: a sign-in-page pick
+        // still held has reached them, and must not reach whoever is next.
+        forgetSignedOutPick();
         setRead((prev) => ({ seq: prev.seq + 1, column }));
       } catch (err) {
         // Cosmetic and never fail-closed, the same posture the rest of the
@@ -370,7 +447,9 @@ export function useSignedInUserLocale(): void {
  * is the divergence this card exists to end, one layer down.
  *
  * Signed out (or with no adapter): the local switch is the whole operation, no
- * request is attempted and nothing is reported.
+ * request is attempted and nothing is reported. Signed out, the pick is also
+ * remembered for this page-load, so that a sign-in by someone other than the
+ * browser's last owner keeps it ({@link keepSignedOutPickThroughOwnerChange}).
  */
 export function useLanguageSelection(): (code: string) => Promise<void> {
   const { user } = useAuth();
@@ -389,7 +468,12 @@ export function useLanguageSelection(): (code: string) => Promise<void> {
   return useCallback(
     async (code: string) => {
       await changeLanguageRef.current(code);
-      if (!adapter || !userId) return;
+      if (!userId) {
+        keepSignedOutPickThroughOwnerChange(code);
+        return;
+      }
+      forgetSignedOutPick();
+      if (!adapter) return;
       try {
         await adapter.update(USER_OBJECT, userId, { [LOCALE_FIELD]: code });
       } catch (err) {
