@@ -158,7 +158,7 @@ import {
   SEARCH_FLAG_EXCLUDED_TYPES,
   type SearchFieldMeta,
 } from '@objectstack/spec/data';
-import { objectsAsServed, objectsWithoutTiedFields, recordsOf, suggestName } from './object-graph.js';
+import { objectsAsServed, recordsOf, suggestName } from './object-graph.js';
 import {
   SYSTEM_FIELDS,
   indexUnprovisionedAnchors,
@@ -360,8 +360,8 @@ export function indexObjectSearchTargets(
  * replaces the owner's whole (the registry's `mergeObjectDefinitions`).
  *
  * - The type, `hidden` and `searchable` meta are the field's definition, so a
- *   field two packages tie on is left out of them
- *   (`objectsWithoutTiedFields`) and kept as a name with a stub meta (`{}`),
+ *   field two packages tie on keeps its name (read off the served objects,
+ *   ties kept) and gets a stub meta (`{}`),
  *   the way `resolveAllowedSet` stubs a system column: existence holds, the
  *   virtual and credential checks have no type to read, and the auto-default
  *   admissibility pass reads an unreadable type as unresolvable, not wrong.
@@ -376,14 +376,14 @@ export function indexServedSearchTargets(
 ): Map<string, ObjectSearchTarget | null> {
   if (!isRec(stack)) return new Map();
   const served = objectsAsServed(stack);
-  const out = indexObjectSearchTargets({ objects: objectsWithoutTiedFields(served) });
+  // Names from the served objects, ties kept, THEN the tied metas blanked: a
+  // target built from the tie-dropped objects is `null` when every served
+  // field is tied, which would turn the existence check off.
+  const out = indexObjectSearchTargets({ objects: served.objects });
   for (const [name, tiedKeys] of served.tied) {
     const target = out.get(name);
     if (!target) continue;
-    for (const key of tiedKeys) {
-      target.names.add(key);
-      target.fields[key] = {};
-    }
+    for (const key of tiedKeys) target.fields[key] = {};
   }
   for (const [name, target] of indexObjectSearchTargets(stack)) {
     if (target === null) out.set(name, null);

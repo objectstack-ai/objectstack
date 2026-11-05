@@ -1368,6 +1368,39 @@ describe('[#30608] the remaining field indexes read the objects as served', () =
     for (const s of onLegs(stack, [ext(drawing), ext({})], objects)) expect(run(s).map((f) => f.rule)).toEqual([id]);
   });
 
+  // Every served field tied (the owner declares only `title`, two packages
+  // re-declare it): the names still come from the served object, so an entry
+  // no body declares is refused as on `main`, in both registration orders,
+  // and the tied name itself is a served name with nothing judged on it.
+  it('searchable: an object whose every served field is tied still refuses an unknown entry', () => {
+    const titled = (more: Rec = {}) => ({ name: 'xs_deal', label: 'Deal', fields: { title: { type: 'text' } }, ...more });
+    const surfaces: Array<[string, (entry: string) => [Rec, unknown[]]]> = [
+      ['object', (entry) => [{}, [titled({ searchableFields: [entry] }), account]]],
+      ['list view', (entry) => [{
+        views: [{ name: 'vs', objectName: 'xs_deal', list: { type: 'grid', columns: ['title'], searchableFields: [entry] } }],
+      }, [titled(), account]]],
+    ];
+    const a = { title: { type: 'text' } };
+    const b = { title: { type: 'formula', expression: 'record.title' } };
+    for (const [surface, build] of surfaces) {
+      const [unknown, unknownObjects] = build('nowhere');
+      const [known, knownObjects] = build('title');
+      for (const packages of [[ext(a), ext(b)], [ext(b), ext(a)]]) {
+        for (const s of onLegs(unknown, packages, unknownObjects)) {
+          expect(verdicts(validateSearchableFields, s), surface).toEqual([[SEARCHABLE_FIELD_UNKNOWN, 'error']]);
+        }
+        for (const s of onLegs(known, packages, knownObjects)) expect(verdicts(validateSearchableFields, s), surface).toEqual([]);
+      }
+      // Controls: unextended, the same refusal; one writer alone, judged on its definition.
+      for (const s of onLegs(unknown, [[]], unknownObjects)) {
+        expect(verdicts(validateSearchableFields, s), surface).toEqual([[SEARCHABLE_FIELD_UNKNOWN, 'error']]);
+      }
+      for (const s of onLegs(known, [ext(b), ext({})], knownObjects)) {
+        expect(validateSearchableFields(s).map((f) => f.rule), surface).toEqual([SEARCHABLE_FIELD_UNSEARCHABLE]);
+      }
+    }
+  });
+
   // An object that declares no field (an introspected schema) is left
   // unjudged where `main` skipped it: an extension adding to it does not make
   // its other columns knowable, nor its added fields judgeable by these rules.
