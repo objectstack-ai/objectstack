@@ -479,7 +479,9 @@ describe('predicate write door: a row the caller cannot read is not matched', ()
 //      refusal (the run fails with the node's inner refusal), for a filter
 //      naming rows and a filter naming none alike, and no row changes;
 //   2. control: a principal holding the capability keeps its predicate write;
-//   3. control: the by-id doors give the writer the same refusal (unchanged).
+//   3. control: the by-id doors give the writer one refusal for a row and for
+//      an id naming none (unchanged; inside the ownership floor's domain it is
+//      the record-level refusal, the answer step 2.7 gives every id there).
 
 const GATED_READ_CAP = 'pw_gated_read';
 
@@ -612,10 +614,35 @@ describe('a write from a caller the read door refuses is refused, whatever rows 
     writerTok = await grant('pw-gated-writer@verify.test', [gatedWriterSet.name]);
     readerTok = await grant('pw-gated-reader@verify.test', [gatedWriterSet.name, gatedReaderSet.name]);
 
-    for (const [tag, n] of [['alpha', 2], ['beta', 1], ['gamma', 2], ['delta', 1], ['kappa', 1]] as const) {
+    // Each principal's rows are created under its own context, as the REST door
+    // resolves it for its bearer token, so the platform's ownership floor admits
+    // that principal's writes to them: what refuses the writer below is its
+    // read, never the floor.
+    const contextFor = async (token: string) => {
+      const authService: any = await stack.kernel.getServiceAsync('auth');
+      let api: any = authService?.api;
+      if (!api && typeof authService?.getApi === 'function') api = await authService.getApi();
+      return resolveAuthzContext({
+        userAuthGates: undefined,
+        apiKeyLifecycle: undefined,
+        ql,
+        headers: new Headers({ authorization: `Bearer ${token}` }),
+        getSession: async (h: any) => api?.getSession?.({ headers: h }),
+      });
+    };
+    const writerCtx = await contextFor(writerTok);
+    const readerCtx = await contextFor(readerTok);
+    const seeds = [
+      ['alpha', 2, writerCtx],
+      ['beta', 2, writerCtx],
+      ['gamma', 2, readerCtx],
+      ['delta', 1, readerCtx],
+      ['kappa', 1, SYS],
+    ] as const;
+    for (const [tag, n, context] of seeds) {
       ids[tag] = [];
       for (let i = 0; i < n; i++) {
-        ids[tag].push(String((await ql.insert('pw_gated', { name: `${tag} ${i}`, tag }, { context: { ...SYS } })).id));
+        ids[tag].push(String((await ql.insert('pw_gated', { name: `${tag} ${i}`, tag }, { context: { ...context } })).id));
       }
     }
 
@@ -688,15 +715,18 @@ describe('a write from a caller the read door refuses is refused, whatever rows 
     expect((await ql.findOne('pw_gated', { where: { id: ids.kappa[0] }, context: SYS }))?.name).toBe('kappa 0');
   });
 
-  it('control: the by-id doors give the writer the same refusal, and the row is untouched', async () => {
-    const readRefusal = refusalOf(await call(writerTok, 'GET', '/data/pw_gated'));
-    const id = ids.kappa[0];
-    const patched = await call(writerTok, 'PATCH', `/data/pw_gated/${id}`, { name: 'should not land' });
-    const removed = await call(writerTok, 'DELETE', `/data/pw_gated/${id}`);
-    for (const got of [patched, removed]) {
-      expect(got.status, JSON.stringify(got.body)).toBe(403);
-      expect(refusalOf(got)).toEqual(readRefusal);
+  it('control: the by-id doors give the writer one refusal for its own row and for an id naming none, and the row is untouched', async () => {
+    const id = ids.alpha[0];
+    const missing = 'pwgatedmissing0001';
+    /** The answer with the caller-supplied id written out, so two ids compare. */
+    const withoutId = (a: Answer, written: string) => JSON.stringify(a).split(written).join('ID');
+    for (const [method, body] of [['PATCH', { name: 'should not land' }], ['DELETE', undefined]] as const) {
+      const row = await call(writerTok, method, `/data/pw_gated/${id}`, body);
+      const none = await call(writerTok, method, `/data/pw_gated/${missing}`, body);
+      expect(row.status, JSON.stringify(row.body)).toBe(403);
+      expect(refusalOf(row).code, JSON.stringify(row.body)).toBe('PERMISSION_DENIED');
+      expect(withoutId(none, missing)).toBe(withoutId(row, id));
     }
-    expect((await ql.findOne('pw_gated', { where: { id }, context: SYS }))?.name).toBe('kappa 0');
+    expect((await ql.findOne('pw_gated', { where: { id }, context: SYS }))?.name).toBe('alpha 0');
   });
 });
