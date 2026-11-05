@@ -78,17 +78,23 @@ export interface HttpDispatcherOptions {
      * tick that claims anything, or a {@link HttpDispatcher.wake} call, snaps it
      * back to `intervalMs`. A value at or below `intervalMs` disables the backoff.
      *
-     * While idle this bounds how late the loop notices work nobody woke it for:
-     *  - a retry coming due — attempted less than `min(its delay + intervalMs,
-     *    maxIdleIntervalMs)` after it is due (plus the time ticks themselves
-     *    take), because the backoff restarts from `intervalMs` at the attempt
-     *    that scheduled the retry;
-     *  - a row enqueued by a process this dispatcher does not serve;
-     *  - a crashed node's `in_flight` rows — reaped at most `claimTtlMs` + this
-     *    after their claim, where the fixed interval gave `claimTtlMs` +
-     *    `intervalMs`.
+     * While idle this bounds how late the loop notices a row enqueued by a
+     * process this dispatcher does not serve. A retry coming due and a crashed
+     * node's `in_flight` rows passing `claimTtlMs` are not left to it: with an
+     * outbox that answers {@link IHttpOutbox.nextDueAt} the loop sleeps no
+     * later than the earliest of them (#29919), so each is taken within one
+     * tick of coming due. An outbox without it leaves both to this bound too.
      */
     maxIdleIntervalMs?: number;
+    /**
+     * [#29919] No other process writes this dispatcher's outbox — every row is
+     * enqueued in this process, which wakes the dispatcher (a hosted tenant
+     * kernel: one kernel per tenant database). An idle tick then sleeps straight
+     * to the next due time or the ceiling instead of re-running the backoff's
+     * ramp from `intervalMs`, which only ever bought latency on rows another
+     * process wrote. Default `false`.
+     */
+    soleWriter?: boolean;
     /** Per-partition lock TTL. Default = 5 × intervalMs. */
     lockTtlMs?: number;
     /** Visibility timeout for claimed rows. Default = 2 × lockTtlMs. */
@@ -107,7 +113,7 @@ export interface HttpDispatcherOptions {
 
 export class HttpDispatcher {
     private readonly opts: Required<
-        Omit<HttpDispatcherOptions, 'fetchImpl' | 'rng' | 'logger' | 'onAttempt' | 'cluster' | 'now' | 'maxIdleIntervalMs'>
+        Omit<HttpDispatcherOptions, 'fetchImpl' | 'rng' | 'logger' | 'onAttempt' | 'cluster' | 'now' | 'maxIdleIntervalMs' | 'soleWriter'>
     > &
         Pick<HttpDispatcherOptions, 'fetchImpl' | 'rng' | 'logger' | 'onAttempt' | 'now'> & {
             cluster: DispatchCluster;
@@ -133,9 +139,21 @@ export class HttpDispatcher {
             logger: options.logger,
             onAttempt: options.onAttempt,
         };
+        const { outbox } = options;
         this.loop = new DispatchLoop({
             intervalMs,
             maxIdleIntervalMs: options.maxIdleIntervalMs,
+            soleWriter: options.soleWriter,
+            // [#29919] Read once per idle streak; an outbox without the read
+            // leaves the loop on its backoff alone. An injected clock's answer
+            // is re-based onto the loop's (`Date.now()`).
+            nextDueAt: outbox.nextDueAt
+                ? async () => {
+                    const now = this.opts.now?.();
+                    const due = await outbox.nextDueAt!({ claimTtlMs: this.opts.claimTtlMs, now });
+                    return due === null || now === undefined ? due : Date.now() + (due - now);
+                }
+                : undefined,
             runTick: () => this.runTick(),
             onTickError: (err) => {
                 this.opts.logger?.warn?.('http-dispatcher: tick failed', {
