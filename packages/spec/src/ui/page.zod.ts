@@ -730,10 +730,11 @@ export const PageComponentSchema = lazySchema(() => strictObject({
    * Measured on the renderer (read points recorded in `liveness/page.json`,
    * row `regions`): `buildExpressionScope` builds the ambient scope —
    * `current_user`, `user`, `ctx.user`, `os.user`, `features`, and nothing
-   * else; `configEvaluationScope` composes this surface's evaluator from it,
-   * adding `record` (only when the page has a row — on an app page, once the
-   * renderer mounts the page's `record` binding) and `page`. The one root
-   * added beside those is the `api` data source's `data`, below.
+   * else; `buildNodeEvaluationScope` composes this surface's evaluator from it,
+   * adding `record` (the page's row: the record a record page opens, or the
+   * row an app page's `record` binding reads, `null` when that read finds no
+   * row or is refused as forbidden) and `page`. The one root added beside
+   * those is the `api` data source's `data`, below.
    *
    * ## `data` — only where an `api` data source binds it
    *
