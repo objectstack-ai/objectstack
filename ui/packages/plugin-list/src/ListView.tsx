@@ -50,7 +50,7 @@ import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLoc
 // (objectui#5134).
 import { resolveI18nLabel as resolveInlineI18nLabel, normalizeFilterOperator, PaginationConfigSchema } from '@objectstack/spec/ui';
 import type { GroupingConfig } from '@objectstack/spec/ui';
-import { resolveInjectedSystemColumns, resolveSearchFieldResolution, type SearchFieldMeta } from '@objectstack/spec/data';
+import { platformProvisionsStorage, resolveInjectedSystemColumns, resolveSearchFieldResolution, type SearchFieldMeta } from '@objectstack/spec/data';
 import { SystemFieldName } from '@objectstack/spec/system';
 import { usePermissions } from '@object-ui/permissions';
 import { RecordDetailPanel } from '@object-ui/plugin-detail';
@@ -999,8 +999,16 @@ const NO_QUEUE_SITTING_CONDITIONS: ReadonlyArray<QueueSittingCondition> = [];
  * records can sit in a queue (the `ownership: 'user'` tier) and refuses an
  * author's own `queue` field on. The filter is offered only there: anywhere
  * else it would name a column the object does not have.
+ *
+ * The column must also have storage behind it. On an ADR-0015 `external`
+ * (federated) object the remote database owns the schema, so the injected
+ * `queue` column exists in the registered definition and nowhere else, and no
+ * row of that table can ever sit in a queue (assignment rules skip such
+ * objects too). The spec's `platformProvisionsStorage` is the one spelling of
+ * that verdict, read here rather than re-derived.
  */
 export function objectHasOwnershipQueue(objectDef: unknown): boolean {
+  if (!platformProvisionsStorage(objectDef)) return false;
   const raw = (objectDef as { fields?: unknown } | null | undefined)?.fields;
   const queue = Array.isArray(raw)
     ? raw.find((f) => (f as { name?: unknown } | null)?.name === 'queue')

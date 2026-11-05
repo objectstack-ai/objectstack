@@ -41,11 +41,16 @@ import { useCanAuthorMetadata } from '../hooks/useCanAuthorMetadata.js';
  * via `resolveEffectiveCrudAffordances()`. This badge purely *labels* the bucket;
  * the detailed explanation lives in the tooltip.
  *
+ * The short label says what the bucket means to the administrator reading the
+ * page ("Configured here", "Built in · editable", "Via identity service"),
+ * never the engine's name for it ("config", "schema", the identity table):
+ * it is the one word they see without opening the tooltip (objectstack#30208).
+ *
  * ## An authoring aid: it draws for an authoring caller only (objectui#12194)
  *
  * The bucket is a fact about how the object is BUILT, so the label speaks to
  * whoever can author it. To an end user it is an implementation word — the
- * `better-auth` variant reads 「身份」 / "Identity" on a workspace page a host
+ * `better-auth` variant names the identity service on a workspace page a host
  * authored, with no meaning to them — and the record page draws it outside
  * the page tree, so no page could leave it out. Triage's ruling on
  * objectui#12194 (option a): the badge renders only for a caller who can
@@ -112,7 +117,7 @@ const VARIANTS: Record<VariantKey, Variant> = {
   config: {
     icon: Settings2,
     i18nKey: 'config',
-    short: 'Admin config',
+    short: 'Configured here',
     title: 'Administrator configuration',
     body: () =>
       'These rows define how the platform behaves at runtime. Author them here; the runtime data they produce lives in a separate table.',
@@ -140,7 +145,7 @@ const VARIANTS: Record<VariantKey, Variant> = {
   'system-data': {
     icon: Settings2,
     i18nKey: 'systemWritable',
-    short: 'Platform schema',
+    short: 'Built in · editable',
     title: 'Platform-defined, admin-writable',
     body: () =>
       "This object's schema is defined by the platform, but its rows are yours to create and edit here. Who may write is governed by delegated administration and record-level security, not by this badge.",
@@ -162,7 +167,7 @@ const VARIANTS: Record<VariantKey, Variant> = {
   'better-auth': {
     icon: ShieldAlert,
     i18nKey: 'betterAuth',
-    short: 'Identity',
+    short: 'Via identity service',
     title: 'Written through the built-in identity service',
     body: (display) =>
       `This object's schema belongs to ${display}, the platform's built-in identity service. Create and change these records with the actions on this page, or through sign-in, invitation and security flows; every one of them goes through that service. Editing the table directly would bypass password hashing, session validation, two-factor checks and audit hooks.`,

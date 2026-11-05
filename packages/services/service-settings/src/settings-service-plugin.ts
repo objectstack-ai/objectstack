@@ -39,6 +39,7 @@ import {
 } from './local-crypto-provider.js';
 import { buildConfigChangeAuditSink } from './config-change-audit.js';
 import { registerLocalizationCurrencyLock, type CurrencyUsageEngine } from './localization-currency-lock.js';
+import { registerLocalizationLocaleOptions, type LocaleListService } from './localization-locale-options.js';
 import { USER_OBJECT, assertUserReferenceResolves, registeredLabel } from './actor-reference.js';
 import { registerSettingsRoutes } from './settings-routes.js';
 import { registerSettingsReadDoor } from './settings-read-door.js';
@@ -230,6 +231,18 @@ export class SettingsServicePlugin implements Plugin {
       // without the logger first would send the boot-time report to the
       // `console.error` fallback instead.
       logger: ctx.logger,
+    });
+    // Setup's default language offers the languages the deployment supports:
+    // the i18n service's locale list, the one the language menu reads, asked
+    // at each use (the i18n service registers after this `init`). Registered
+    // before the manifests, so `localization`'s registration-time audit of
+    // `OS_LOCALIZATION_LOCALE` leaves that key to be judged when it is read.
+    registerLocalizationLocaleOptions(this.service, () => {
+      try {
+        return ctx.getService<LocaleListService>('i18n');
+      } catch {
+        return undefined;
+      }
     });
     for (const m of this.opts.manifests ?? []) {
       if (UNWALLED_ONLY_NAMESPACES.has(m.namespace)) {
