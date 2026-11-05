@@ -14,14 +14,16 @@
 //   invoice against each (acceptance[0], acceptance[1], negative[0],
 //   negative[1]) and repoints a stored invoice at a churned account with a
 //   patch that carries no status (acceptance[2]).
-// - A scratch pair for the persona the rule exists to constrain, which no
-//   stock showcase persona is (the item's fixtures.knownGaps): a member with
-//   create/edit on the child object and NO grant at all on the lookup's
-//   parent. The member writes against a non-tripping and a tripping parent
-//   (acceptance[3], negative[2]); a read of the parent as that member is the
-//   control that the persona really cannot read it.
+// - A scratch pair for a member with create/edit on the child object and NO
+//   grant at all on the lookup's parent, which no stock showcase persona is
+//   (the item's fixtures.knownGaps). Such a member may not name the parent at
+//   all (#29029, revision 7): a write naming a parent the caller's own read
+//   door does not return answers `reference_not_found` on the lookup, before
+//   the record's rules, whether or not the parent trips one (acceptance[3],
+//   negative[2]). A read of the parent as that member is the control that the
+//   member really cannot read it.
 //
-// The refusal is scored on the envelope — 400 VALIDATION_FAILED, the
+// The rule's refusal is scored on the envelope — 400 VALIDATION_FAILED, the
 // `_record` / `rule_violation` entry — and on the AUTHORED message, which is
 // the one place the item names wording as the contract. A refusal that reads
 // "could not be evaluated" is the pre-capability fault, and every case below
@@ -51,6 +53,14 @@ function expectRuleRefusal(answer: Answer, message: string) {
   expect(answer.status, JSON.stringify(answer.json)).toBe(400);
   expect(answer.json?.code, JSON.stringify(answer.json)).toBe('VALIDATION_FAILED');
   expect(ruleEntries(answer.json)).toEqual([{ field: '_record', code: 'rule_violation', message }]);
+  expect(JSON.stringify(answer.json)).not.toContain(UNEVALUABLE);
+}
+
+/** The refusal acceptance[3] names: the lookup's own `reference_not_found`, and no rule entry. */
+function expectReferenceRefusal(answer: Answer, field: string) {
+  expect(answer.status, JSON.stringify(answer.json)).toBe(400);
+  expect(answer.json?.code, JSON.stringify(answer.json)).toBe('VALIDATION_FAILED');
+  expect(ruleEntries(answer.json).map((f) => ({ field: f.field, code: f.code }))).toEqual([{ field, code: 'reference_not_found' }]);
   expect(JSON.stringify(answer.json)).not.toContain(UNEVALUABLE);
 }
 
@@ -122,7 +132,7 @@ describe('records-forms.predicate-relationship-traversal — the showcase invoic
   });
 });
 
-// ── The persona the rule exists to constrain ───────────────────────────────
+// ── A member who cannot read the parent ────────────────────────────────────
 
 const PARENT = 'prt_parent';
 const CHILD = 'prt_child';
@@ -162,7 +172,7 @@ const prtStack = defineStack({
   ],
 } as never);
 
-describe('records-forms.predicate-relationship-traversal — a member who cannot read the parent', () => {
+describe('records-forms.predicate-relationship-traversal — a member who cannot read the parent cannot name it', () => {
   let stack: VerifyStack;
   let member = '';
   let openId = '';
@@ -196,14 +206,15 @@ describe('records-forms.predicate-relationship-traversal — a member who cannot
     expect(read.json.code).toBe('PERMISSION_DENIED');
   });
 
-  it('acceptance[3]: a legitimate write against a non-tripping parent goes through', async () => {
-    const created = await call('POST', `/data/${CHILD}`, { name: 'prt-open', parent: openId });
-    expectAdmitted(created);
-    expect(await stack.rows(CHILD, { name: 'prt-open' })).toHaveLength(1);
+  it('acceptance[3]: a write naming a non-tripping parent the member cannot read answers reference_not_found, and stores nothing', async () => {
+    expectReferenceRefusal(await call('POST', `/data/${CHILD}`, { name: 'prt-open', parent: openId }), 'parent');
+    expect(await stack.rows(CHILD, { name: 'prt-open' })).toHaveLength(0);
   });
 
-  it('acceptance[3], negative[2]: a write against a tripping parent is refused with the authored message, never the unevaluable fault', async () => {
-    expectRuleRefusal(await call('POST', `/data/${CHILD}`, { name: 'prt-blocked', parent: blockedId }), BLOCKED_MESSAGE);
+  it('acceptance[3], negative[2]: a write naming a tripping parent the member cannot read answers the same, never the rule\'s message', async () => {
+    const answer = await call('POST', `/data/${CHILD}`, { name: 'prt-blocked', parent: blockedId });
+    expectReferenceRefusal(answer, 'parent');
+    expect(JSON.stringify(answer.json)).not.toContain(BLOCKED_MESSAGE);
     expect(await stack.rows(CHILD, { name: 'prt-blocked' })).toHaveLength(0);
   });
 });
