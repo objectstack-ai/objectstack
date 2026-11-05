@@ -353,17 +353,26 @@ describe('[#30065] a declared .custom action override rebinds the body, and rest
   const ACT = 'showcase_task_close';
   const declared = { overrides: { package: BASE, basedOn: '1.0.0' } };
 
-  function harness() {
+  function harness(opts: { baseBound?: boolean } = {}) {
     const ql = new ObjectQL();
     const artifact = {
       name: ACT, objectName: OBJ, type: 'script', label: 'SHIPPED',
       body: { language: 'js', source: 'return 1;' }, _packageId: BASE,
     };
+    let registered = opts.baseBound !== false;
     vi.spyOn(ql.registry, 'getArtifactItem').mockImplementation(((type: string, name: string) =>
-      type === 'action' && name === ACT ? artifact : undefined) as any);
+      registered && type === 'action' && name === ACT ? artifact : undefined) as any);
     ql.setDefaultActionRunner((action: AnyRecord) =>
       action?.body ? async () => `ran:${action.label}` : undefined);
-    ql.registerAction(OBJ, ACT, async () => 'ran:BASE BODY', `app:${BASE}`);
+    // What `bindAppArtifactHandlers` does for the base (AppPlugin at start, a
+    // marketplace base's rehydrate at `kernel:ready`): register the manifest,
+    // tear down its owner's handlers, and bind them again.
+    const bindBase = (body = 'BASE BODY') => {
+      registered = true;
+      ql.removeActionsByPackage(`app:${BASE}`);
+      ql.registerAction(OBJ, ACT, async () => `ran:${body}`, `app:${BASE}`);
+    };
+    if (registered) bindBase();
     let rows: AnyRecord[] = [];
     vi.spyOn(ql, 'find').mockImplementation((async (_obj: string, q: AnyRecord) =>
       q?.where?.type === 'action' ? rows : []) as any);
@@ -373,7 +382,7 @@ describe('[#30065] a declared .custom action override rebinds the body, and rest
       await (plugin as any).resyncAuthoredActions(makeCtx());
     };
     const run = () => ql.executeAction(OBJ, ACT, {});
-    return { ql, resync, run };
+    return { ql, resync, run, bindBase };
   }
   const overrideRow = (packageId: string, label: string, payload: AnyRecord = declared) =>
     actionRow(ACT, { package_id: packageId }, { label, ...payload });
@@ -387,6 +396,39 @@ describe('[#30065] a declared .custom action override rebinds the body, and rest
 
     await resync([]);
     await expect(run()).resolves.toBe('ran:BASE BODY');
+  });
+
+  it('a base bound AFTER the override\'s resync (a marketplace base\'s rehydrate) slots beneath it: the override runs, and a restore runs the base body', async () => {
+    // Boot order for an installed base: ObjectQLPlugin's `kernel:ready`
+    // resync runs before the install plugin's rehydrate registers the base
+    // and binds its handlers, and the rehydrate announces no reload.
+    const { resync, run, bindBase } = harness({ baseBound: false });
+    await resync([overrideRow(PAIR, 'OVERRIDE')]);
+    await expect(run()).resolves.toBe('ran:OVERRIDE');
+    bindBase();
+    await expect(run()).resolves.toBe('ran:OVERRIDE');
+    await resync([]);
+    await expect(run()).resolves.toBe('ran:BASE BODY');
+  });
+
+  it('the base\'s handlers re-bound while the override is armed keep the override on top, and the restore runs the newly bound base body', async () => {
+    const { resync, run, bindBase } = harness();
+    await resync([overrideRow(PAIR, 'OVERRIDE')]);
+    bindBase('REBOUND BASE BODY');
+    await expect(run()).resolves.toBe('ran:OVERRIDE');
+    await resync([overrideRow(PAIR, 'OVERRIDE')]);
+    await expect(run()).resolves.toBe('ran:OVERRIDE');
+    await resync([]);
+    await expect(run()).resolves.toBe('ran:REBOUND BASE BODY');
+  });
+
+  it('before the base is registered, a pair row without the declaration, or a dependent\'s declaration, is no override: the base bound later replaces it', async () => {
+    for (const row of [overrideRow(PAIR, 'UNDECLARED', {}), overrideRow(DEPENDENT, 'DEPENDENT')]) {
+      const { resync, run, bindBase } = harness({ baseBound: false });
+      await resync([row]);
+      bindBase();
+      await expect(run()).resolves.toBe('ran:BASE BODY');
+    }
   });
 
   it('re-binding the armed override keeps the base beneath it, so a later restore still runs the base body', async () => {

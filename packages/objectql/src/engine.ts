@@ -1187,6 +1187,14 @@ export class ObjectQL implements IObjectQLEngine {
    * reload, the authored-action resync, which tears its set down first) is
    * not. A registration with no `packageName` is its own owner here, so it
    * replacing a package's handler, or the reverse, is warned too.
+   *
+   * [#30065, ADR-0146 D9 `action`] The one exception: a key a declared
+   * action override holds ({@link registerActionOverride}) keeps the
+   * override on top, and another package's registration takes the place
+   * beneath it, the handler a removal of the override binds again. A
+   * marketplace base's handlers are bound by its rehydrate after the
+   * authored-action resync bound the override, so the base's body arrives
+   * second and must not replace the override's.
    */
   registerAction(objectName: string, actionName: string, handler: (ctx: any) => Promise<any> | any, packageName?: string): void {
     // [#29986 codemod] The body moved to `engine-actions.ts` (see `ActionsHost`).
@@ -1204,7 +1212,9 @@ export class ObjectQL implements IObjectQLEngine {
    * of the override's package puts it back. So "Restore package original"
    * runs the base's handler again, in the same step that removes the
    * override's, and no window has both or neither bound. No collision is
-   * warned: the replacement is the declared one.
+   * warned: the replacement is the declared one. The entry is marked as an
+   * override, so the base's handler registered after it (by
+   * {@link registerAction}) slots beneath it instead of replacing it.
    */
   registerActionOverride(objectName: string, actionName: string, handler: (ctx: any) => Promise<any> | any, packageName: string): void {
     return ActionsFacet.registerActionOverride.call(actionsHost.of(this), objectName, actionName, handler, packageName);

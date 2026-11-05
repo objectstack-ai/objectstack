@@ -3767,11 +3767,22 @@ export class ObjectQLPlugin implements Plugin {
    * served-override predicate the reads serve it by
    * (`isServedOverrideRowOf`, on the row's own `package_id` and body), so the
    * handler bound is the declaration every read serves.
+   *
+   * A base the registry does not hold yet is judged by the row's own
+   * declaration: a marketplace-installed base is registered, and its
+   * handlers bound, by the install plugin's `kernel:ready` rehydrate, after
+   * the boot's resync. Bound as an override then, the row's handler stays on
+   * top when the base's arrives, which slots beneath it
+   * (`ObjectQL#registerAction`), so the reads and the run agree from the
+   * first request.
    */
   private isDeclaredArtifactActionOverride(row: unknown, action: any): boolean {
     const registry: any = this.ql?.registry;
     if (!registry || typeof registry.getArtifactItem !== 'function') return false;
     const artifact: any = registry.getArtifactItem('action', action.name);
+    if (artifact === undefined || artifact === null) {
+      return isServedOverrideRowOf(row as any, action?.overrides?.package);
+    }
     const base = artifact?._packageId;
     if (typeof base !== 'string' || base === '') return false;
     if (standaloneActionOwnerKey(artifact) !== standaloneActionOwnerKey(action)) return false;
