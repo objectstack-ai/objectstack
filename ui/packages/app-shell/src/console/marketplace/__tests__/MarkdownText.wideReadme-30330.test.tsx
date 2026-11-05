@@ -28,11 +28,11 @@ function renderMd(source: string, size?: 'base' | 'compact') {
   return render(<MarkdownText source={source} size={size} />).container;
 }
 
-/** HotCRM's badge row, as its README writes it. */
+/** HotCRM's badge row, as its README writes it, with the changelog's path spelled without its extension. */
 const BADGES = [
   '[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)',
   '[![Manifest](https://img.shields.io/badge/manifest-app.objectstack.hotcrm-blueviolet)](src/sales/index.ts)',
-  '[![Version](https://img.shields.io/badge/version-6.1.0-brightgreen)](CHANGELOG.md)',
+  '[![Version](https://img.shields.io/badge/version-6.1.0-brightgreen)](CHANGELOG)',
   '[![Marketplace](https://img.shields.io/badge/marketplace-cloud.objectos.app-orange)](https://cloud.objectos.app)',
 ].join('\n');
 
@@ -55,7 +55,7 @@ describe('README images', () => {
 
   it('keeps a linked image’s anchor only for an absolute http(s) destination', () => {
     const anchors = [...renderMd(BADGES).querySelectorAll('a')];
-    // `LICENSE`, `src/sales/index.ts` and `CHANGELOG.md` would resolve against the console, not the repository.
+    // `LICENSE`, `src/sales/index.ts` and `CHANGELOG` would resolve against the console, not the repository.
     expect(anchors).toHaveLength(1);
     expect(anchors[0].getAttribute('href')).toBe('https://cloud.objectos.app');
     expect(anchors[0].getAttribute('target')).toBe('_blank');
@@ -219,7 +219,7 @@ describe('CONTROL — what a README rendered before still renders the same', () 
   });
 
   it('keeps a text link to a relative path as before', () => {
-    expect(renderMd('Read [the changelog](CHANGELOG.md).').querySelector('a')?.getAttribute('href')).toBe('CHANGELOG.md');
+    expect(renderMd('Read [the guide](docs/guide).').querySelector('a')?.getAttribute('href')).toBe('docs/guide');
   });
 
 });
