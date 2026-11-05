@@ -793,7 +793,7 @@
         ]
       },
       "steps": [
-        "as admin, GET /api/settings — capture the visible manifests (the 11 open-framework namespaces above; the route is the SettingsService REST surface in settings-routes.ts)",
+        "as admin, GET /api/settings — capture the visible manifests (the 10 open-framework namespaces above; the route is the SettingsService REST surface in settings-routes.ts)",
         "pick localization (an OBSERVABLE-CONSUMER namespace — packages/core/src/security/resolve-authz-context.ts reads localization.timezone/locale/currency onto ExecutionContext). GET /api/settings/localization — capture {manifest, values}; note the timezone value and its source. On an `os dev --seed-admin` boot the dev seed has ALREADY written the host's zone (UTC in these containers) at tenant scope (packages/plugins/plugin-auth/src/auth-plugin.ts, #23175), so source reads 'tenant' before any PUT; only a boot without the dev seed starts at 'default'",
         "change it: PUT /api/settings/localization { timezone: 'Asia/Tokyo' }; re-read GET /api/settings/localization and confirm the value persists and source is the scope, 'tenant' (localization scope is 'tenant'): on a dev-seeded boot the source already read 'tenant', so the value is what round-trips; on an unseeded boot the source flips from 'default'. For the console badge (steps[5]) pick a localization key the dev seed did NOT write (e.g. default_country), so its source starts at 'default'",
         "prove EFFECT (not just the saved form): re-derive an ExecutionContext-dependent output and confirm it now resolves against the saved zone, not UTC. Two stock consumers serve: GET /api/v1/auth/me/localization (the resolved timezone the session carries), and a datetime the console renders — e.g. showcase_field_zoo's f_datetime on its record page, which shifts by exactly the zone offset. ⛔ The analytics date bucket has no stock observable (the only date-typed time dimension is due_date, and the seeded admin holds no export grant), so do not reach for it. If no localization effect is observable at all, fall back to branding.workspace_name visible in the console shell — but never tick effect off the form alone",
@@ -882,7 +882,7 @@
           "evidence": "the two 401 bodies"
         },
         {
-          "clause": "each of the 11 open-framework namespaces resolves GET /api/settings/:ns with its manifest + values — no namespace 500s or serves an empty manifest",
+          "clause": "each of the 10 open-framework namespaces resolves GET /api/settings/:ns with its manifest + values — no namespace 500s or serves an empty manifest",
           "oracle": "api",
           "verify": "one GET per variant in variants[]; each returns {manifest, values} with the manifest's specifiers",
           "evidence": "the per-namespace responses"
