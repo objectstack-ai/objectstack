@@ -251,8 +251,8 @@ export const ORGANIZATION_MFA_REFUSAL_COPY: Readonly<Record<CopyLocale, string>>
   ko:
     '이 조직은 아직 다단계 인증을 필수로 설정할 수 없습니다. 이 배포에서는 2단계 인증 등록이 꺼져 있으므로, 유예 ' +
     '기간이 끝나면 소유자를 포함한 모든 구성원이 인증 앱을 등록할 방법 없이 차단됩니다. 먼저 2단계 인증을 켠 다음 ' +
-    '여기에서 필수로 설정하세요. 배포에서 OS_AUTH_TWO_FACTOR=true로 설정하면 됩니다. 배포에서 OS_AUTH_TWO_FACTOR가 ' +
-    'false로 설정되어 있지 않다면(이 값은 설정보다 우선합니다) auth.mfa_required 설정을 켜는 방법도 있습니다. 이 ' +
+    '여기에서 필수로 설정하세요. 배포에서 OS_AUTH_TWO_FACTOR=true로 설정하면 됩니다. 배포에서 OS_AUTH_TWO_FACTOR ' +
+    '값이 false로 설정되어 있지 않다면(이 값은 설정보다 우선합니다) auth.mfa_required 설정을 켜는 방법도 있습니다. 이 ' +
     '설정은 모든 조직에 다단계 인증을 요구하고 등록도 함께 켭니다.',
 };
 

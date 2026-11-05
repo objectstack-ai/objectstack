@@ -112,7 +112,7 @@ export interface AllowedIpRangesWriteRefusal {
   constraint: { clientAddress: string | null };
 }
 
-interface RefusalCopy {
+export interface AllowedIpRangesRefusalCopy {
   outside(address: string): string;
   undetermined: string;
   recovery: string;
@@ -123,7 +123,7 @@ interface RefusalCopy {
  * under their older codes; `resolveLocale` reads a caller's code through that
  * table (`zh-TW` → `zh-Hant`).
  */
-const COPY: Record<SettingsCopyLocale, RefusalCopy> = {
+export const ALLOWED_IP_RANGES_REFUSAL_COPY: Record<SettingsCopyLocale, AllowedIpRangesRefusalCopy> = {
   en: {
     outside: (address) =>
       `No entry in this list matches ${address}, the address you are connected from, so saving it would refuse your `
@@ -236,11 +236,12 @@ const COPY: Record<SettingsCopyLocale, RefusalCopy> = {
   },
 };
 
-const COPY_LOCALES = Object.keys(COPY);
+const COPY_LOCALES = Object.keys(ALLOWED_IP_RANGES_REFUSAL_COPY);
 
-function copyFor(locale: string | undefined): RefusalCopy {
+/** The refusal copy for a caller's locale: through the platform locale table, else English. */
+export function allowedIpRangesRefusalCopy(locale: string | undefined): AllowedIpRangesRefusalCopy {
   const picked = locale ? resolveLocale(locale, COPY_LOCALES) : undefined;
-  return COPY[(picked ?? 'en') as keyof typeof COPY];
+  return ALLOWED_IP_RANGES_REFUSAL_COPY[(picked ?? 'en') as SettingsCopyLocale];
 }
 
 /**
@@ -260,7 +261,7 @@ export function allowedIpRangesWritePredicate(
     if (!mgr) return undefined;
     const address = judgedClientAddress(mgr, transport);
     if (address && ranges.some((range) => ipMatchesRange(address, range))) return undefined;
-    const copy = copyFor(locale);
+    const copy = allowedIpRangesRefusalCopy(locale);
     return {
       message: (address ? copy.outside(address) : copy.undetermined) + copy.recovery,
       constraint: { clientAddress: address ?? null },
