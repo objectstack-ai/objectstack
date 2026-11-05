@@ -139,7 +139,7 @@
         "ask": {"en": "Add Gil Ray to Acme with email 'gil at acme'."},
         "values": {"full_name": "Gil Ray", "email": "gil at acme", "account": "ac1"},
         "actingAs": "sdr",
-        "outcome": {"kind": "refused", "code": "VALIDATION_ERROR"}
+        "outcome": {"kind": "refused", "code": "VALIDATION_FAILED"}
       },
       {
         "id": "partner_edits_account",

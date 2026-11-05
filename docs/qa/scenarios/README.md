@@ -107,8 +107,9 @@ acts for (`actingAs`) and declares its `outcome`, so grading reads it with code 
 - `{ kind: "applied", state: [...], auditActor? }` — each state entry names a row by `id`
   (seeded) or `where` (a row the write creates) and carries the `values` the data API must
   read back, or `absent: true`; `auditActor` is the persona the audit trail must name;
-- `{ kind: "refused", code }` — an ADR-0112 error code such as `VALIDATION_ERROR` or
-  `PERMISSION_DENIED`;
+- `{ kind: "refused", code }` — a code the platform answers, from the spec's closed
+  `ErrorCode` catalogue (ADR-0112), such as `VALIDATION_FAILED` (a record-level field
+  refusal) or `PERMISSION_DENIED`; any other spelling is refused;
 - `{ kind: "pending_confirmation" }` — the agent asks first and writes nothing.
 
 `run.agentActions` (optional) lists at least three business actions an agent may call,

@@ -2,6 +2,7 @@
 
 // No `projects`: a single project leaves no narrowing for a positional filter
 // to fall outside of, so vitest's own `printNoTestFound()` covers it.
+import path from 'path';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
@@ -14,5 +15,18 @@ export default defineConfig({
     // Enforced repo-wide by scripts/check-console-intercept-disarm.mjs.
     disableConsoleIntercept: true,
     environment: 'node',
+  },
+  resolve: {
+    // Resolve `@objectstack/spec` to its SOURCE, not `dist` (`pnpm
+    // check:test-source-alias`): the refusal-code catalogue a card is judged
+    // against must be the one in this checkout. Anchored array form, so the
+    // bare rule cannot swallow a subpath (see packages/metadata/vitest.config.ts).
+    alias: [
+      {
+        find: /^@objectstack\/spec\/([a-z-]+)$/,
+        replacement: path.join(path.resolve(__dirname, '..', '..'), 'spec/src/$1/index.ts'),
+      },
+      { find: /^@objectstack\/spec$/, replacement: path.resolve(__dirname, '../../spec/src/index.ts') },
+    ],
   },
 });

@@ -165,7 +165,7 @@
         "ask": {"en": "Add a line of 2 at 5 to INV-001, no product."},
         "values": {"invoice": "i1", "quantity": 2, "unit_price": 5, "amount": 10},
         "actingAs": "sales_rep",
-        "outcome": {"kind": "refused", "code": "VALIDATION_ERROR"}
+        "outcome": {"kind": "refused", "code": "VALIDATION_FAILED"}
       },
       {
         "id": "warehouse_reopens",

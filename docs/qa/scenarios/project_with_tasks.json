@@ -148,7 +148,7 @@
         "ask": {"en": "Add a 2-hour task to the Mobile app, with no title."},
         "values": {"project": "p2", "status": "todo", "estimate_hours": 2, "assignee": "u_kim"},
         "actingAs": "contractor",
-        "outcome": {"kind": "refused", "code": "VALIDATION_ERROR"}
+        "outcome": {"kind": "refused", "code": "VALIDATION_FAILED"}
       },
       {
         "id": "client_closes_task",

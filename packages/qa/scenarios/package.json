@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@objectstack/spec": "workspace:*",
     "zod": "^4.6.6"
   },
   "devDependencies": {

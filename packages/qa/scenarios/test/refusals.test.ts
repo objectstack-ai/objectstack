@@ -80,7 +80,7 @@ const CASES: Array<[string, (c: RawCard) => void, string, RegExp]> = [
   ['an operation on a row the seed does not hold', (c) => (op(c, 'attach_dee').target = 'ct99'), 'run.operations[1].target', /no seeded `contact` row has id `ct99`/],
   ['an operation with no declared outcome', (c) => delete op(c, 'add_contact').outcome, 'run.operations[0].outcome', /expected object|invalid/i],
   ['an operation acting as an unknown persona', (c) => (op(c, 'add_contact').actingAs = 'ghost'), 'run.operations[0].actingAs', /no persona `ghost`/],
-  ['a refusal code that is not SCREAMING_SNAKE', (c) => (op(c, 'contact_bad_email').outcome.code = 'validation_error'), 'run.operations[3].outcome.code', /SCREAMING_SNAKE/],
+  ['a refusal code outside the platform error-code catalogue', (c) => (op(c, 'contact_bad_email').outcome.code = 'VALIDATION_BROKEN'), 'run.operations[3].outcome.code', /expected one of/],
   ['a post-state naming a created row by an id the seed lacks', (c) => (op(c, 'add_contact').outcome.state[0] = { object: 'contact', id: 'ct9', values: { full_name: 'Fay Wu' } }), 'run.operations[0].outcome.state[0].id', /matched by `where`/],
   ['a post-state naming its row twice', (c) => (op(c, 'attach_dee').outcome.state[0].where = { full_name: 'Dee' }), 'run.operations[1].outcome.state[0].id', /exactly one of `id` or `where`/],
   // ── guardrails ──

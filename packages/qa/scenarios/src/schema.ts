@@ -17,6 +17,7 @@
  * `packages/spec` carries no obligation for it.
  */
 
+import { ErrorCode } from '@objectstack/spec/api';
 import { z } from 'zod';
 
 /** A machine name: snake_case, the convention for data values in this repo. */
@@ -316,7 +317,9 @@ export const OutcomeSchema = z.discriminatedUnion('kind', [
   }),
   z.strictObject({
     kind: z.literal('refused'),
-    code: z.string().regex(/^[A-Z][A-Z0-9_]*$/, 'an error code is SCREAMING_SNAKE (ADR-0112)'),
+    // A code the platform really answers: the spec's closed catalogue
+    // (StandardErrorCode + the registered ledger, ADR-0112), never restated here.
+    code: ErrorCode,
   }),
   /** The agent asks first and writes nothing until confirmed. */
   z.strictObject({ kind: z.literal('pending_confirmation') }),
