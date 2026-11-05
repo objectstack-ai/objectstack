@@ -410,7 +410,7 @@ export {
 // [#29986 codemod] Class head: units, hooks, functions, body runners, hook dispatch: the methods of the same names below hand the bodies what they read (`HooksAndFunctionsHost`).
 import { HooksAndFunctionsFacet } from './engine-hooks-and-functions.js';
 // [#29986 codemod] Action system and packaged-action activation: the methods of the same names below hand the bodies what they read (`ActionsHost`).
-import { ActionsFacet } from './engine-actions.js';
+import { ActionsFacet, type ActionHandlerEntry } from './engine-actions.js';
 // [#29986 codemod] Registration seams, readable-ids security, formula and default permissions: the methods of the same names below hand the bodies what they read (`SecurityResolversHost`).
 import { SecurityResolversFacet } from './engine-security-resolvers.js';
 // [#29986 codemod] Authz invalidation, middleware, session, driver options, posture, organization probe: the methods of the same names below hand the bodies what they read (`MiddlewareAndContextHost`).
@@ -649,7 +649,7 @@ export class ObjectQL implements IObjectQLEngine {
   }> = [];
 
   // Action registry: key = "objectName:actionName"
-  private actions = new Map<string, { handler: (ctx: any) => Promise<any> | any; package?: string }>();
+  private actions = new Map<string, ActionHandlerEntry>();
 
   /**
    * [ADR-0126 §8] The packaged-ACTION activation ledger's local projection —
@@ -1194,6 +1194,23 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#30065, ADR-0146 D9 `action`] Bind a declared action override's handler
+   * over the key the base's handler holds, keeping the base's underneath.
+   *
+   * The `.custom` pair's declared override of a base's action keeps the
+   * base's name, so its body registers under the base's `<object>:<name>`
+   * key. Unlike {@link registerAction}, the replaced handler is not dropped:
+   * it is kept beneath the override's, and {@link removeActionsByPackage}
+   * of the override's package puts it back. So "Restore package original"
+   * runs the base's handler again, in the same step that removes the
+   * override's, and no window has both or neither bound. No collision is
+   * warned: the replacement is the declared one.
+   */
+  registerActionOverride(objectName: string, actionName: string, handler: (ctx: any) => Promise<any> | any, packageName: string): void {
+    return ActionsFacet.registerActionOverride.call(actionsHost.of(this), objectName, actionName, handler, packageName);
+  }
+
+  /**
    * Execute a named action on an object.
    */
   executeAction(objectName: string, actionName: string, ctx: any): Promise<any> {
@@ -1219,6 +1236,11 @@ export class ObjectQL implements IObjectQLEngine {
 
   /**
    * Remove all actions registered by a specific package.
+   *
+   * [#30065] A handler {@link registerActionOverride} bound over another
+   * package's is replaced by that package's again, rather than leaving the
+   * key empty; a package removed from beneath an override leaves the
+   * override bound, with nothing beneath it to restore.
    */
   removeActionsByPackage(packageName: string): void {
     // [#29986 codemod] The body moved to `engine-actions.ts` (see `ActionsHost`).

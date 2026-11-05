@@ -3688,10 +3688,16 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             const bases = closure.filter(isBase);
             for (const item of pkg.items) {
                 const shippers: string[] = [];
-                for (const base of bases) if ((await heldBy(item.type, base)).has(item.identity)) shippers.push(base);
+                // [#30065] …and each shipper's own item, what a declared
+                // action override is judged against.
+                const shipped = new Map<string, unknown>();
+                for (const base of bases) {
+                    const held = (await heldBy(item.type, base)).get(item.identity);
+                    if (held !== undefined) { shippers.push(base); shipped.set(base, held); }
+                }
                 const verdict = judgeOverrideWrite(
                     { type: item.type, name: item.name, packageId, item: item.item },
-                    { dependencies: closure, shippers },
+                    { dependencies: closure, shippers, baseItemOf: (base) => shipped.get(base) },
                 );
                 if (verdict.verdict === 'refuse') {
                     refusals.push({
