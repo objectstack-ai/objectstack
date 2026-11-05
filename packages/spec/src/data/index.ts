@@ -235,7 +235,7 @@ export * from './hook-refusal-codes';
 // [ADR-0148 D5] The recycle bin's spec half: the `sys_recycle_bin` name, the
 // host retention resolver hook's contract, the snapshot shape, the restore
 // refusal codes, the `restored` event name and the two grant keys.
-export * from './recycle-bin';
+export * from './recycle-bin.zod';
 // [#18163] The TYPED AUTHORING FACE of `HookContext.api` — `HookApi`,
 // `HookObjectApi` and the query / count / update / delete option shapes the
 // engine actually accepts. `contracts/scoped-context.ts` declares the CHECKED

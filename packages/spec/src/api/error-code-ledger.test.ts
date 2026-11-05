@@ -12,7 +12,7 @@ import {
   standardSynonymViolations,
   type StandardSynonymWaiver,
 } from './error-code-ledger.zod';
-import { RECYCLE_BIN_RESTORE_REFUSAL_CODES } from '../data/recycle-bin';
+import { RECYCLE_BIN_RESTORE_REFUSAL_CODES } from '../data/recycle-bin.zod';
 
 /**
  * Ledger admission rules (ADR-0112 D3). These are the invariants that make a

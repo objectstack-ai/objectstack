@@ -98,6 +98,7 @@ export const RecycleBinRetentionDaysSchema = z.number({
 }).positive({
   error: (issue) => recycleBinRetentionRefusal('resolver', issue.input),
 }).describe('Recycle-bin retention in days: a positive whole number');
+export type RecycleBinRetentionDays = z.input<typeof RecycleBinRetentionDaysSchema>;
 
 /**
  * The value {@link RECYCLE_BIN_RETENTION_DAYS_ENV} may hold: the decimal
@@ -107,6 +108,7 @@ export const RecycleBinRetentionDaysSchema = z.number({
 export const RecycleBinRetentionDaysEnvSchema = z.string().regex(/^[1-9][0-9]*$/, {
   error: (issue) => recycleBinRetentionRefusal('env', issue.input),
 }).describe(`${RECYCLE_BIN_RETENTION_DAYS_ENV}: the decimal digits of a positive whole number of days`);
+export type RecycleBinRetentionDaysEnv = z.input<typeof RecycleBinRetentionDaysEnvSchema>;
 
 /**
  * One snapshotted row of a recycle-bin entry: the object, the id it is
@@ -120,6 +122,7 @@ export const RecycleBinSnapshotRowSchema = z.object({
   values: z.record(z.string(), z.unknown())
     .describe('The row as it stood at delete time, secret-channel refs left out'),
 }).describe('One snapshotted row of a recycle-bin entry');
+export type RecycleBinSnapshotRow = z.input<typeof RecycleBinSnapshotRowSchema>;
 
 /**
  * A reference the delete cleared (a `set_null` lookup pointing at a removed
@@ -132,6 +135,7 @@ export const RecycleBinClearedReferenceSchema = z.object({
   field: z.string().min(1).describe('The lookup field the delete cleared'),
   value: z.string().min(1).describe('The id the field held, a row in this entry'),
 }).describe('A set_null reference the delete cleared, re-linked on restore when still empty');
+export type RecycleBinClearedReference = z.input<typeof RecycleBinClearedReferenceSchema>;
 
 /**
  * The snapshot a recycle-bin entry holds (ADR-0148 D1): the cascade set, the
@@ -145,6 +149,7 @@ export const RecycleBinSnapshotSchema = z.object({
   clearedReferences: z.array(RecycleBinClearedReferenceSchema)
     .describe('The set_null references the delete cleared'),
 }).describe('The cascade set a recycle-bin entry holds');
+export type RecycleBinSnapshot = z.input<typeof RecycleBinSnapshotSchema>;
 
 /**
  * The fields of a `sys_recycle_bin` entry (ADR-0148 D1): the one field list
@@ -227,6 +232,7 @@ export const RecycleBinEntrySchema = z.object({
   retention_days: z.number().int().positive().describe('The retention in days applied at delete time'),
   purge_after: z.string().datetime({ offset: true }).describe('The purge deadline, stamped at delete time'),
 }).describe('One recycle-bin entry: one delete operation');
+export type RecycleBinEntry = z.input<typeof RecycleBinEntrySchema>;
 
 /**
  * The three reasons a restore refuses (ADR-0148 D2), each a code in the

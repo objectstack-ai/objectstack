@@ -136,6 +136,7 @@
     "data/QueryWithTransport",
     "data/RangeOperator",
     "data/RecycleBinClearedReference",
+    "data/RecycleBinEntry",
     "data/RecycleBinRetentionDays",
     "data/RecycleBinRetentionDaysEnv",
     "data/RecycleBinSnapshot",

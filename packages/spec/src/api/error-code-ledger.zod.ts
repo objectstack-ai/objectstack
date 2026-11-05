@@ -1055,7 +1055,7 @@ export const ERROR_CODE_LEDGER = {
     // in its own language. `status: 409` for all three — the entry is intact
     // and the live state conflicts with writing it back; a restore refuses
     // with the reason and never forces a write. The spec spells them once, in
-    // `RECYCLE_BIN_RESTORE_REFUSAL_CODES` (`data/recycle-bin.ts`). RESTORE is
+    // `RECYCLE_BIN_RESTORE_REFUSAL_CODES` (`data/recycle-bin.zod.ts`). RESTORE is
     // a token no standard member carries, so none needs a waiver.
     // A unique value of a snapshotted row is held by a live row now.
     'RESTORE_UNIQUE_VALUE_TAKEN',

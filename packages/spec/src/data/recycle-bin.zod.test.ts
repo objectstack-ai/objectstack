@@ -20,7 +20,7 @@ import {
   RecycleBinSnapshotSchema,
   recycleBinRetentionRefusal,
   type RecycleBinRetentionResolver,
-} from './recycle-bin';
+} from './recycle-bin.zod';
 import { DataEventType } from '../api/events.zod';
 import { RealtimeEventType } from '../api/realtime.zod';
 import { REGISTERED_ERROR_CODES } from '../api/error-code-ledger.zod';
