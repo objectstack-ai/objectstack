@@ -217,9 +217,13 @@ describe('useObjectListViewDraft — a draft-only object opens its drafted defau
   const dealsKnown: DraftOnlyObjects = { publishNonce: 0, names: new Set([DEAL]) };
 
   let latest: ObjectListViewDraft | null = null;
+  const report = (d: ObjectListViewDraft) => {
+    latest = d;
+  };
   function HookProbe({ object, known }: { object: string; known: DraftOnlyObjects | null }) {
     const leaf: Surface = { type: 'object', name: object, label: object };
-    latest = useObjectListViewDraft({ client, packageId: PKG, leaf, publishNonce: 0, draftOnlyObjects: known });
+    const d = useObjectListViewDraft({ client, packageId: PKG, leaf, publishNonce: 0, draftOnlyObjects: known });
+    React.useLayoutEffect(() => report(d));
     return null;
   }
 
