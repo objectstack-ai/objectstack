@@ -102,7 +102,7 @@ import type { II18nService, IMetadataService, IObjectQLEngine, SharingWriteVerdi
 import { crossFieldClassRefusalCarriedBy, findCrossFieldClassRefusal } from '@objectstack/formula';
 import { declaredHttpStatus } from '@objectstack/types';
 import type { SecurityPlugin } from './security-plugin.js';
-import { isGuestEnvelope, requiredCapsForOperation } from './security-plugin.js';
+import { isGuestEnvelope, readUnlessRefused, requiredCapsForOperation } from './security-plugin.js';
 import { assertFlowSystemIdentityWriteAllowed } from './flow-system-identity-write-refusal.js';
 import { isUnreadableAddressedRowRefusal } from './delegated-admin-gate.js';
 import { isRowWriteProbe, logGateRefusal, type AuthzMiddlewareFn } from './record-row-write-probe.js';
@@ -1161,24 +1161,32 @@ export function registerAuthzMiddleware(
         // may not write it keeps the 403 below; nothing is disclosed to them.
         const addressedId = this.addressedByIdWriteId(opCtx, nestedInOperation, referentialFieldClearWrite);
         if (writeParts.length > 0) {
-          let visible: unknown = null;
-          // A re-read that THREW is not an absent row: a store fault or a
-          // read-time policy refusal keeps today's denial below (#7505).
-          let reReadThrew = false;
-          try {
-            visible = await this.ql.findOne(opCtx.object, {
-              where: { $and: [{ id: targetId }, ...writeParts] },
+          // The write predicates are the PLATFORM's, composed here — never the
+          // caller's own predicate. They ride into the caller-context re-read
+          // under one fresh `$and` marked `'policy'` (the filter-subtree
+          // provenance mark step 3 stamps on every scope it injects), so the
+          // re-read's caller-predicate guard (step 2.9) judges the caller's
+          // part, `{ id }`, and not a wall or row-level predicate on a field
+          // the caller cannot read. The mark goes on a node built here, so a
+          // frozen or shared filter object cannot leave it unmarked.
+          const platformWritePredicate = markFilterSubtreeProvenance({ $and: writeParts }, 'policy');
+          // Three outcomes of the re-read, classified by `readUnlessRefused`
+          // (#7505): a row or no row; a declared 4xx refusal (the read door
+          // refuses this caller), which keeps the record-level denial below,
+          // one answer for every id; anything else is a store fault and
+          // propagates as raised — an outage is neither a hidden row nor a
+          // refusal, and answering it as either would relabel it.
+          const reRead = await readUnlessRefused(() =>
+            this.ql.findOne(opCtx.object, {
+              where: { $and: [{ id: targetId }, platformWritePredicate] },
               context: opCtx.context,
-            });
-          } catch {
-            // A read denial (e.g. no read permission) is itself a "cannot
-            // touch this row" signal — fall through to the deny below.
-            visible = null;
-            reReadThrew = true;
-          }
+            }),
+          );
+          const reReadRefused = reRead.refused;
+          const visible: unknown = reRead.refused ? null : reRead.value;
           if (
             !visible &&
-            !reReadThrew &&
+            !reReadRefused &&
             addressedId !== undefined &&
             (await this.callerCannotReadAddressedRow(opCtx, addressedId))
           ) {

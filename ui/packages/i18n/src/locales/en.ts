@@ -5017,6 +5017,11 @@ const en = {
           unreadableVersion: 'Install a release version of {{dependency}} inside {{range}}. The installed version {{installedVersion}} is not MAJOR.MINOR.PATCH.',
           unreadableDeclaration: '{{packageId}} declares its dependencies in a shape install cannot read. Write them as a map from package ID to version range and republish the package.',
         },
+        // objectstack#30326 — the install answer's data.protocolCheckSkipped: installed, the protocol range unchecked.
+        protocolCheckSkipped: {
+          noRange: '{{packageId}} does not state which platform protocol it supports, so it was installed under protocol {{protocolVersion}} without a compatibility check and may not work on this platform version. A build of the package that declares the protocol it supports (engines.protocol) is checked at install.',
+          unparsedRange: '{{packageId}} states its platform protocol as {{requiredRange}}, which this runtime cannot read, so it was installed under protocol {{protocolVersion}} without a compatibility check and may not work on this platform version. A build of the package that declares a range this runtime reads (engines.protocol) is checked at install.',
+        },
         localUnauthorized: 'Sign in to this runtime first, then try again.',
         localMarketplaceUnavailable: 'This runtime has no OS_CLOUD_URL configured, so the marketplace catalog is unreachable.',
         updateTo: 'Update → v{{version}}',

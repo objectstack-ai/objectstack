@@ -207,7 +207,7 @@ export const SysUser = ObjectSchema.create({
       // and nothing is POSTed until that one dialog's own Confirm.
       // NB: the top-level `description` (#7367), never `ai.description` — that
       // one is the LLM-facing tool contract and is shown to no user.
-      description: 'Ban this user? They will be signed out and unable to sign in until unbanned.',
+      description: 'Ban this user? They will be signed out, unable to sign in, and their API keys refused until unbanned. The keys work again after the unban.',
       params: [
         { name: 'banReason', label: 'Ban Reason', type: 'text', required: false },
       ],
@@ -216,7 +216,7 @@ export const SysUser = ObjectSchema.create({
       ai: {
         exposed: true,
         description:
-          'Ban a user (the record; optionally banReason): they are signed out and cannot sign in until unbanned. Platform administrators only. Ask the human to confirm before calling.',
+          'Ban a user (the record; optionally banReason): they are signed out, cannot sign in, and their API keys are refused until unbanned; the keys work again after the unban. Platform administrators only. Ask the human to confirm before calling.',
         requiresConfirmation: true,
       },
     },
