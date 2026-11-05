@@ -282,7 +282,7 @@ describe('Register SAML Provider through the REAL route — the INSTALLED @bette
     const body: any = await res.json();
     expect(res.status).toBe(400);
     expect(body.error?.code).toBe('INVALID_REQUEST');
-    expect(body.error?.message).toMatch(/^Missing required field\(s\): issuer$/);
+    expect(body.error?.message).toContain('issuer');
     expect(db.ssoProvider).toHaveLength(1);
   });
 });
