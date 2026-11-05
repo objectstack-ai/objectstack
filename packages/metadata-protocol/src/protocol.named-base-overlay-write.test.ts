@@ -25,7 +25,8 @@
  *    draft stays a draft and no active row is written;
  *  - the rollback of a row bound to the base: refused, the row unchanged;
  *  - CONTROLS, open as on `main`: a delete naming the base removes such a row
- *    (the one way to clear it: the ceremony moves package-less rows only), a
+ *    (one way to clear it; [#29392] `os migrate packageless-overlays` moves it
+ *    into the pair, and the sentence names both), a
  *    draft discard naming it, the pair's declared save (served over a row
  *    bound to the base), a server-stated rewrite (`source` set), a writable
  *    package's same name, a name the base does not ship (ADR-0070 D1's own
@@ -105,7 +106,12 @@ function matches(row: Row, where: Record<string, unknown> = {}): boolean {
     });
 }
 
-function makeProtocol() {
+/**
+ * `pairInstalled: false` boots the base with no pair yet: a fresh install,
+ * before anything ensured `<base>.custom` (the ensure door, or the ceremony's
+ * step 1, creates it on the first write that needs it).
+ */
+function makeProtocol({ pairInstalled = true }: { pairInstalled?: boolean } = {}) {
     const tables = new Map<string, Row[]>();
     const table = (n: string) => {
         if (!tables.has(n)) tables.set(n, []);
@@ -116,7 +122,8 @@ function makeProtocol() {
         const hit = SHIPPED.find((i) => i.type === type && i.name === name);
         return hit ? { ...ITEMS.find((i) => i.type === type && i.name === name)?.body(PACKAGED), name, label: PACKAGED, _packageId: hit.pkg, _provenance: 'package' } : undefined;
     };
-    const packageRecord = (id: string) => (MANIFESTS[id] ? { manifest: { id, ...MANIFESTS[id] } } : undefined);
+    const installed = (id: string) => MANIFESTS[id] !== undefined && (pairInstalled || id !== PAIR);
+    const packageRecord = (id: string) => (installed(id) ? { manifest: { id, ...MANIFESTS[id] } } : undefined);
     const engine: any = {
         // A booted code package is read-only (`isWritablePackage` reads `manifests` first).
         manifests: new Map([[BASE, {}], [NO_PAIR_BASE, {}], [NO_PAIR_ID_BASE, {}], [NO_VERSION_BASE, {}]]),
@@ -161,7 +168,7 @@ function makeProtocol() {
             getItem: (type: string, name: string) => artifact(type, name),
             getObject: () => undefined,
             getPackage: packageRecord,
-            getAllPackages: () => Object.keys(MANIFESTS).map(packageRecord),
+            getAllPackages: () => Object.keys(MANIFESTS).filter(installed).map(packageRecord),
             isPackageDisabled: () => false,
             getArtifactItem: artifact,
             applyNavContributions: (a: unknown) => a,
@@ -205,6 +212,10 @@ function expectClosedSentence(message: string, type: string, name: string, verb:
     expect(message).toContain('ADR-0146 D1, D11');
     if (verb === 'rollback') expect(message).toContain('a rollback of its row bound to the read-only base is closed');
     else expect(message).toContain(`${verb} it into '${PAIR}'`);
+    // [#29392] The ceremony moves a row bound to the base into the pair: the
+    // sentence points an operator holding one to it, beside the other two doors.
+    expect(message).toContain('is served until moved by `os migrate packageless-overlays`, overridden by the pair, '
+        + 'or deleted naming the base.');
     // The REST door cuts a refusal's text at 500 characters
     // (`CLIENT_MESSAGE_MAX`, `@objectstack/types`): the whole sentence fits.
     expect(message.length).toBeLessThan(500);
@@ -430,6 +441,45 @@ describe('CONTROLS: every step the fix takes, failing, leaves the write naming t
 
         expect(saved).toMatchObject({ success: true });
         expect(rows(email.type, email.name)).toEqual([{ package_id: BASE, state: 'active', label: 'Bienvenue' }]);
+    });
+});
+
+describe('a fresh install, the pair not yet ensured: an email template at a locale the base does not ship stays open (ADR-0146 D11)', () => {
+    // The close asks the override write gate about the declared body written
+    // into the pair. Before the pair exists, that question is the one the
+    // ensured pair would meet (its closure: the base and what the base
+    // reaches), never "no such package, not concerned" read as "admitted".
+    const email = ITEMS.find((i) => i.type === 'email_template')!;
+    const unshipped = (label: string) => ({ ...email.body(label), locale: 'fr-FR' });
+
+    it('the package-less save is accepted and served as the environment\'s own member', async () => {
+        const { protocol, rows } = makeProtocol({ pairInstalled: false });
+
+        const saved = await protocol.saveMetaItem({ type: email.type, name: email.name, item: unshipped('Bienvenue') });
+
+        expect(saved).toMatchObject({ success: true });
+        expect(rows(email.type, email.name)).toEqual([{ package_id: null, state: 'active', label: 'Bienvenue' }]);
+    });
+
+    it('the save naming the base is accepted, as it is with the pair installed', async () => {
+        const { protocol, rows } = makeProtocol({ pairInstalled: false });
+
+        const saved = await protocol.saveMetaItem({ type: email.type, name: email.name, item: unshipped('Bienvenue'), packageId: BASE });
+
+        expect(saved).toMatchObject({ success: true });
+        expect(rows(email.type, email.name)).toEqual([{ package_id: BASE, state: 'active', label: 'Bienvenue' }]);
+    });
+
+    it('CONTROL: a member the base ships is still closed onto the pair, naming it, with the pair not yet ensured', async () => {
+        const { protocol, rows } = makeProtocol({ pairInstalled: false });
+
+        const packageless = await thrown(() => protocol.saveMetaItem({ type: email.type, name: email.name, item: email.body('Mine') }));
+        const namedBase = await thrown(() => protocol.saveMetaItem({ type: email.type, name: email.name, item: email.body('Mine'), packageId: BASE }));
+
+        expect(resolveThrownHttpError(packageless)).toMatchObject({ status: 403, code: 'NOT_OVERRIDABLE' });
+        expect(String(packageless.message)).toContain(`'${PAIR}' (?package=${PAIR})`);
+        expectClosed(namedBase, email.type, email.name, 'save');
+        expect(rows(email.type, email.name)).toEqual([]);
     });
 });
 
