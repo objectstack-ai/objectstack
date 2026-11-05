@@ -635,19 +635,21 @@ export interface StoredSecretSample {
 }
 
 /**
- * Reads ONE stored ciphertext to judge a key by, or `undefined` when the
+ * Reads the stored ciphertexts to judge a key by, NEWEST FIRST: the page
+ * {@link chooseKeyFileByTrialOpen} scores both keys over. Empty when the
  * database holds none. A failed read rejects: it is not an empty table.
  */
-export type StoredSecretReader = () => Promise<StoredSecretSample | undefined>;
+export type StoredSecretReader = () => Promise<readonly StoredSecretSample[]>;
 
-/** The newest rows a reader looks through for one whose marker this provider knows. */
+/** How many of the newest rows the trial reads; it judges those of them whose marker this provider knows. */
 const TRIAL_SAMPLE_PAGE = 10;
 
 /**
- * The {@link StoredSecretReader} over a data engine: the NEWEST `sys_secret`
- * row (by `created_at`) whose ciphertext records a derivation this provider
- * knows, read as the system, outside any tenant. The newest row is the one the
- * deployment sealed last, so the key that opens it is the key in use.
+ * The {@link StoredSecretReader} over a data engine: the newest
+ * {@link TRIAL_SAMPLE_PAGE} `sys_secret` rows (by `created_at`), read as the
+ * system, outside any tenant, less every row whose ciphertext records a
+ * derivation this provider does not know (no key could open it, so it says
+ * nothing about the keys).
  *
  * A table that does not exist yet (a database that has never booted) holds no
  * row. ⛔ Any other failed read rejects: it says nothing about the keys.
@@ -665,19 +667,20 @@ export function storedSecretReaderOverEngine(engine: {
         context: { isSystem: true },
       });
     } catch (error) {
-      if (isMissingTableError(error, 'sys_secret')) return undefined;
+      if (isMissingTableError(error, 'sys_secret')) return [];
       throw error;
     }
     const rows = (Array.isArray(answer) ? answer : (answer as { data?: unknown[] } | null)?.data) ?? [];
+    const page: StoredSecretSample[] = [];
     for (const row of rows as Array<Record<string, unknown>>) {
       if (ciphertextDerivationStatus(row?.ciphertext) === 'unknown') continue;
-      return {
+      page.push({
         namespace: String(row.namespace ?? ''),
         key: String(row.key ?? ''),
         ciphertext: row.ciphertext as string,
-      };
+      });
     }
-    return undefined;
+    return page;
   };
 }
 
@@ -713,6 +716,25 @@ async function keyOpensSample(key: Buffer, sample: StoredSecretSample): Promise<
 }
 
 /**
+ * Which rows of the page `key` opens, newest first: their count, and the
+ * position of the newest one it opens (`-1` for none, or no key).
+ */
+async function scoreKeyOverPage(
+  key: Buffer | undefined,
+  page: readonly StoredSecretSample[],
+): Promise<{ opens: number; newest: number }> {
+  let opens = 0;
+  let newest = -1;
+  if (!key) return { opens, newest };
+  for (const [index, sample] of page.entries()) {
+    if (!(await keyOpensSample(key, sample))) continue;
+    opens += 1;
+    if (newest < 0) newest = index;
+  }
+  return { opens, newest };
+}
+
+/**
  * Which key file a boot reads, and why — {@link chooseKeyFileByTrialOpen}'s
  * answer.
  *
@@ -720,22 +742,39 @@ async function keyOpensSample(key: Buffer, sample: StoredSecretSample): Promise<
  *    second key to rule out.
  *  - `no-stored-secret` — two keys, but the database holds no ciphertext to
  *    judge them by: the canonical file, as before.
- *  - `opens` — the chosen file's key opens the newest stored ciphertext and the
- *    other's does not.
- *  - `opens-nothing` — neither key opens it (development: the canonical file,
- *    with a boot error; production refuses instead, see
+ *  - `opens` — the chosen file's key opens at least one row of the judged page
+ *    and the other's opens none.
+ *  - `mixed` — each key opens at least one row of the page: the database holds
+ *    secrets under both. The chosen file opens more of them (on a tie, the
+ *    newest of them); the rows under the other read as unset, and the boot
+ *    says so as an error naming both paths.
+ *  - `opens-nothing` — neither key opens any row of the page (development: the
+ *    canonical file, with a boot error; production refuses instead, see
  *    {@link DataKeyOpensNothingError}).
  *  - `not-judged` — the stored ciphertext could not be read: the canonical
  *    file, with a boot error naming the read.
  */
 export interface KeyFileChoice {
   path: string;
-  reason: 'single' | 'no-stored-secret' | 'opens' | 'opens-nothing' | 'not-judged';
+  reason: 'single' | 'no-stored-secret' | 'opens' | 'mixed' | 'opens-nothing' | 'not-judged';
   /** The file not chosen, when there were two. */
   other?: string;
+  /**
+   * What the trial measured, when it opened rows: the page it judged, and how
+   * many rows of it each file's key opens. Absent when nothing was judged.
+   */
+  tally?: { judged: number; chosen: number; other: number };
   /** What the boot prints, and at which level; absent for `single`. */
   notice?: { level: 'warn' | 'error'; message: string };
 }
+
+/** `the newest stored secret` / `the N newest stored secrets`: the page the trial judged, as the notices name it. */
+const newestStored = (judged: number): string =>
+  judged === 1 ? 'the newest stored secret' : `the ${judged} newest stored secrets`;
+
+/** `opens the newest stored secret` / `opens 3 of the 10 newest stored secrets`: what a key was measured to open. */
+const opensOf = (opens: number, judged: number): string =>
+  opens === judged ? `opens ${newestStored(judged)}` : `opens ${opens} of ${newestStored(judged)}`;
 
 const OPENS_NOTHING_CONSEQUENCE =
   `Every stored secret (encrypted settings, secret fields, datasource credentials) reads back as unset under either key.`;
@@ -745,20 +784,22 @@ const opensNothingRemedy = (canonical: string): string =>
   `files first), or set ${SECRET_KEY_ENV} to it.`;
 
 /**
- * A production boot whose two candidate key files both fail to open the
- * database's newest stored secret. The fail-loud contract this provider keeps
- * (see "Fail-loud guarantee" above): production refuses to run under a key it
- * cannot vouch for, because every secret would read as unset while the server
- * looks healthy.
+ * A production boot whose two candidate key files both fail to open every
+ * stored secret the trial judged (the newest rows). The fail-loud contract
+ * this provider keeps (see "Fail-loud guarantee" above): production refuses to
+ * run under a key it cannot vouch for, because every secret would read as
+ * unset while the server looks healthy.
  */
 export class DataKeyOpensNothingError extends Error {
   constructor(
     readonly canonical: string,
     readonly legacy: string,
+    /** How many stored secrets the trial judged (the newest rows). */
+    readonly judged = 1,
   ) {
     super(
-      `[LocalCryptoProvider] Refusing to start in production: neither data key opens this database's ` +
-        `stored secrets.\n` +
+      `[LocalCryptoProvider] Refusing to start in production: neither data key opens any of ` +
+        `${newestStored(judged)}.\n` +
         `  Tried:\n    ${canonical}\n    ${legacy}\n` +
         `  ${OPENS_NOTHING_CONSEQUENCE}\n` +
         `  ${opensNothingRemedy(canonical)}`,
@@ -769,19 +810,29 @@ export class DataKeyOpensNothingError extends Error {
 
 /**
  * Rule between the two key files of a `both-differ` answer by the database
- * itself: trial-open one stored `sys_secret` ciphertext (the newest one
- * `readStoredSecret` returns) under each file's key, and take the file whose
- * key opens it. The canonical file is tried first, so a ciphertext both keys
- * open (impossible for two different AES keys, short of a forgery) keeps it.
+ * itself: trial-open the newest stored `sys_secret` ciphertexts (the page
+ * `readStoredSecret` returns) under each file's key, count the rows each key
+ * opens, and take the file whose key opens more of them.
+ *
+ *  - One key opens rows, the other none: that key's file (`opens`). A row that
+ *    opens under neither (a corrupt or foreign row) does not change that, so a
+ *    corrupt newest row no longer decides the boot when an older row settles it.
+ *  - Both keys open rows (`mixed`): the file whose key opens more, on a tie the
+ *    one that opens the newest of them (the key sealed with last). The rows
+ *    under the other key read as unset under either choice, so the notice is an
+ *    `error` naming both paths, both counts and the fix, in every posture: the
+ *    boot is measured, not guessed, and refusing it would leave the operator no
+ *    running server to re-save the minority's secrets through.
+ *  - Neither key opens any row: production throws
+ *    {@link DataKeyOpensNothingError}; development and test keep the canonical
+ *    file and return an `error` notice, the posture split of the provider's own
+ *    fail-loud contract.
  *
  * Every other answer of {@link resolvePersistedKeyFile} names one file and is
  * returned as it is (`single`). With no stored ciphertext there is nothing to
- * judge, and the canonical file stands (`no-stored-secret`).
- *
- * Neither key opens it: production throws {@link DataKeyOpensNothingError};
- * development and test keep the canonical file and return an `error` notice,
- * the posture split of the provider's own fail-loud contract. ⛔ Never a
- * silent choice: every answer between two files carries its notice.
+ * judge, and the canonical file stands (`no-stored-secret`). ⛔ Never a silent
+ * choice: every answer between two files carries its notice, and each notice
+ * says what was measured (how many of the newest rows), never more.
  */
 export async function chooseKeyFileByTrialOpen(opts: {
   answer: PersistedKeyFile;
@@ -796,9 +847,9 @@ export async function chooseKeyFileByTrialOpen(opts: {
   const legacy = answer.legacy;
   const mode = opts.mode ?? detectMode(opts.env ?? processEnv());
 
-  let sample: StoredSecretSample | undefined;
+  let page: readonly StoredSecretSample[];
   try {
-    sample = await opts.readStoredSecret();
+    page = await opts.readStoredSecret();
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error);
     return {
@@ -816,7 +867,7 @@ export async function chooseKeyFileByTrialOpen(opts: {
     };
   }
 
-  if (!sample) {
+  if (page.length === 0) {
     return {
       path: canonical,
       reason: 'no-stored-secret',
@@ -830,47 +881,70 @@ export async function chooseKeyFileByTrialOpen(opts: {
     };
   }
 
-  const canonicalKey = loadExistingKey(canonical);
-  const legacyKey = loadExistingKey(legacy);
-  if (canonicalKey && (await keyOpensSample(canonicalKey, sample))) {
+  const judged = page.length;
+  const c = await scoreKeyOverPage(loadExistingKey(canonical), page);
+  const l = await scoreKeyOverPage(loadExistingKey(legacy), page);
+  const neither = judged - c.opens - l.opens;
+  const neitherNote = neither > 0 ? ` ${neither} of them open under neither key.` : '';
+
+  if (c.opens === 0 && l.opens === 0) {
+    if (mode === 'production') throw new DataKeyOpensNothingError(canonical, legacy, judged);
     return {
       path: canonical,
-      reason: 'opens',
+      reason: 'opens-nothing',
       other: legacy,
+      tally: { judged, chosen: 0, other: 0 },
       notice: {
-        level: 'warn',
+        level: 'error',
         message:
-          `[LocalCryptoProvider] Data key: using ${canonical}, which opens this database's stored secrets. ` +
-          `${legacy} holds a different key that does not, and is not used.`,
-      },
-    };
-  }
-  if (legacyKey && (await keyOpensSample(legacyKey, sample))) {
-    return {
-      path: legacy,
-      reason: 'opens',
-      other: canonical,
-      notice: {
-        level: 'warn',
-        message:
-          `[LocalCryptoProvider] Data key: using ${legacy}, which opens this database's stored secrets ` +
-          `(an earlier \`os start\` kept it). ${canonical} holds a different key that does not, and is not ` +
-          `used. \`os dev\` and \`os start\` share ${canonical}: keep a copy of it, then move ${legacy} over ` +
-          `it to converge.`,
+          `[LocalCryptoProvider] Neither data key opens any of ${newestStored(judged)}. Tried ${canonical} ` +
+          `(used) and ${legacy}. ${OPENS_NOTHING_CONSEQUENCE} ${opensNothingRemedy(canonical)}`,
       },
     };
   }
 
-  if (mode === 'production') throw new DataKeyOpensNothingError(canonical, legacy);
+  // The canonical file keeps a tie only when it also opens the newest of the
+  // rows either key opens; `newest` is a position, lower is newer.
+  const legacyWins =
+    l.opens > c.opens || (l.opens === c.opens && l.newest >= 0 && (c.newest < 0 || l.newest < c.newest));
+  const [path, other, chosen, rejected] = legacyWins
+    ? [legacy, canonical, l, c]
+    : [canonical, legacy, c, l];
+  const tally = { judged, chosen: chosen.opens, other: rejected.opens };
+  const converge =
+    path === legacy
+      ? ` \`os dev\` and \`os start\` share ${canonical}: keep a copy of it, then move ${legacy} over it to converge.`
+      : '';
+
+  if (rejected.opens === 0) {
+    return {
+      path,
+      reason: 'opens',
+      other,
+      tally,
+      notice: {
+        level: 'warn',
+        message:
+          `[LocalCryptoProvider] Data key: using ${path}, which ${opensOf(chosen.opens, judged)}` +
+          `${path === legacy ? ' (an earlier `os start` kept it)' : ''}. ${other} holds a different key that ` +
+          `opens none of them, and is not used.${neitherNote}${converge}`,
+      },
+    };
+  }
+
   return {
-    path: canonical,
-    reason: 'opens-nothing',
-    other: legacy,
+    path,
+    reason: 'mixed',
+    other,
+    tally,
     notice: {
       level: 'error',
       message:
-        `[LocalCryptoProvider] Neither data key opens this database's stored secrets. Tried ${canonical} ` +
-        `(used) and ${legacy}. ${OPENS_NOTHING_CONSEQUENCE} ${opensNothingRemedy(canonical)}`,
+        `[LocalCryptoProvider] Data key: this database holds secrets sealed under two different keys. Of ` +
+        `${newestStored(judged)}, ${chosen.opens} open under ${path} (used) and ${rejected.opens} under ` +
+        `${other} (not used).${neitherNote} Every secret sealed under ${other} reads back as unset while the ` +
+        `server looks healthy. Fix: keep a copy of both files, then save each secret that reads as unset again, ` +
+        `which seals it under ${path}.${converge}`,
     },
   };
 }

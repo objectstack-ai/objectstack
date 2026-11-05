@@ -255,7 +255,7 @@ describe('[#30042] one-shot commands take the same key file, by the same resolut
     // What the boot's settings service does at start(), the database open.
     await settleKeyFileChannel({
       env,
-      readStoredSecret: async () => ({ namespace: ctx.namespace, key: ctx.key, ciphertext: handle.ciphertext }),
+      readStoredSecret: async () => [{ namespace: ctx.namespace, key: ctx.key, ciphertext: handle.ciphertext }],
     });
     expect(await key.provider!.decrypt(handle, ctx)).toBe('sk-start');
     expect(key.provider!.keySource).toBe('file');
