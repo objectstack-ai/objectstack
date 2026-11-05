@@ -4472,9 +4472,10 @@ export const BUILTIN_SYSTEM_FIELD_LABEL_LOCALES: readonly string[] = Object.free
 
 /**
  * Fallback label for a platform-injected system field, honouring the same
- * locale-matching rules as bundle lookup (exact → case-insensitive → base
- * language → variant). Applied only when the field still carries its injected
- * English default — an author's custom label is never overridden.
+ * locale-matching rules as bundle lookup (exact → case-insensitive → platform
+ * table language → base language → variant). Applied only when the field
+ * still carries its injected English default — an author's custom label is
+ * never overridden.
  */
 function builtinSystemFieldLabel(
   fieldName: string,
