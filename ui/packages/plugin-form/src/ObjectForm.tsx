@@ -33,6 +33,7 @@ import {
   warnSectionMemberExcludedByFields,
   buildSectionFields,
   sectionEntryName,
+  fieldNameLabel,
   type SectionFieldsContext,
 } from './sectionFields';
 import { TabbedForm } from './TabbedForm';
@@ -970,7 +971,7 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
         // Auto-generate field from schema
         const formField: FormFieldWithGroup = {
           name: name,
-          label: fieldLabel(schema.objectName, name, field.label || fieldName),
+          label: fieldLabel(schema.objectName, name, field.label || fieldNameLabel(fieldName)),
           // (type, multiple) decides the widget, not the type alone: a `select`
           // declared `multiple: true` renders the multi-value chip picker, whose
           // label must be associated by IDREF — a fact declared per WIDGET, so
