@@ -981,7 +981,7 @@ export const SysUser = ObjectSchema.create({
       defaultValue: false,
       readonly: true, // ADR-0092 — toggled via Ban/Unban actions (session side effects)
       group: 'Account',
-      description: 'When true, the user cannot sign in. Toggle via Ban User / Unban User actions.',
+      description: 'When on, the user cannot sign in. Use the Ban User / Unban User actions to change it.',
     }),
 
     ban_reason: Field.text({
@@ -1085,8 +1085,8 @@ export const SysUser = ObjectSchema.create({
       readonly: true,
       group: 'Admin',
       description:
-        'When true, the user is blocked (403 PASSWORD_RESET_REQUIRED) until they change ' +
-        'their password. Stamped by the admin user-management routes; system-managed.',
+        'When on, the user must change their password before they can continue. ' +
+        'Turned on when an administrator creates or imports the account, or resets its password; system-managed.',
     }),
 
     // ADR-0069 D3 — when enforced MFA first applied to this user; starts the

@@ -2862,6 +2862,9 @@ export function InterfacesPillar({
   const customizeBase = customizing && customization ? customization.base : null;
   const customizePair = customizing && customization ? customization.pairId : null;
   const customizeBaseLabel = customization?.baseLabel ?? packageId;
+  // objectstack#30436 — the pair the "saved to" note names: the served one, or
+  // the `<base>.custom` id the first save creates.
+  const customizeNotePair = customization ? (customization.pairId ?? pairIdOf(customization.base)) : null;
   const customizeWalled = customizing && customization?.walled === true;
   const customizeBlock: CustomizeBlock = customizeWalled
     ? 'walled'
@@ -4235,7 +4238,7 @@ export function InterfacesPillar({
       // objectstack#29693 — on a narrow row the chips and the item tools fold
       // into the ⋯ menu before the title drops below its readable width.
       foldMenu={itemMoreEl ? 'pillar' : { label: t('engine.studio.if.more', locale), testId: 'if-item-header-more' }}
-      note={ifSavedTo ? <SavedToCustomizationNote baseLabel={customizeBaseLabel} testId="if-item-saved-to" /> : undefined}
+      note={ifSavedTo ? <SavedToCustomizationNote baseLabel={customizeBaseLabel} pairId={customizeNotePair} testId="if-item-saved-to" /> : undefined}
       leading={
         <button
           type="button"
@@ -5139,7 +5142,7 @@ export function InterfacesPillar({
           {/* objectstack#30059 — where a read-only base's navigation edit is saved. */}
           {editNav && readOnly && (
             <p className="mt-1 text-[10px] text-muted-foreground">
-              <SavedToCustomizationNote baseLabel={customizeBaseLabel} testId="if-nav-saved-to" />
+              <SavedToCustomizationNote baseLabel={customizeBaseLabel} pairId={customizeNotePair} testId="if-nav-saved-to" />
             </p>
           )}
             {listOnlyCustomized && !editNav && !navMarked ? null : appStatus === 'missing' && !error ? (
@@ -7003,6 +7006,7 @@ export function DataPillar({
                 (extOpen !== null && (extOpen.published.size > 0 || extHasDraft || extDirty))) ? (
                 <SavedToCustomizationNote
                   baseLabel={customization.baseLabel}
+                  pairId={customization.pairId ?? pairIdOf(customization.base)}
                   testId="data-object-saved-to"
                 />
               ) : undefined
@@ -7807,6 +7811,8 @@ export function AutomationsPillar({
   const customizeBase = flowCustomizing && customization ? customization.base : null;
   const customizePair = flowCustomizing && customization ? customization.pairId : null;
   const customizeBaseLabel = customization?.baseLabel ?? railPackageId ?? '';
+  // objectstack#30436 — the pair the "saved to" note names.
+  const customizeNotePair = customization ? (customization.pairId ?? pairIdOf(customization.base)) : null;
   const customizeWalled = flowCustomizing && customization?.walled === true;
   const customizeBlock: CustomizeBlock = customizeWalled
     ? 'walled'
@@ -9053,7 +9059,7 @@ export function AutomationsPillar({
             // or is unlocked to customize saves to the base's pair.
             note={
               customization !== null && (!!current?.addedIn || flowInPair || flowUnlocked) ? (
-                <SavedToCustomizationNote baseLabel={customizeBaseLabel} testId="auto-flow-saved-to" />
+                <SavedToCustomizationNote baseLabel={customizeBaseLabel} pairId={customizeNotePair} testId="auto-flow-saved-to" />
               ) : undefined
             }
             leading={

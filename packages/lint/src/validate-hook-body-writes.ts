@@ -103,7 +103,7 @@ import {
   unprovisionedAnchorFix,
   unprovisionedAnchorVerdict,
 } from './system-fields.js';
-import { recordsOf } from './object-graph.js';
+import { objectsAsServed, recordsOf } from './object-graph.js';
 
 // The TypeScript compiler must NOT be imported at module top level: it is
 // ~9 MB of CJS, and @objectstack/lint sits on the kernel boot path — while
@@ -497,22 +497,46 @@ export function hookBodyFindingLocation(
 }
 
 /**
- * object name → its declared field names (both `fields` authoring shapes).
+ * object name → its field names as the registry SERVES the object (both
+ * `fields` authoring shapes).
  *
- * Exported for `validate-action-body-writes.ts` only (see
- * {@link IMPLICIT_FIELDS} for why the two rules share rather than copy).
+ * Exported for `validate-action-body-writes.ts` and
+ * `validate-flow-node-writes.ts` (see {@link IMPLICIT_FIELDS} for why the
+ * rules share rather than copy).
+ *
+ * [#30471] Read through the package's one extension fold
+ * ({@link objectsAsServed}): a write naming a field a sibling package adds
+ * through `objectExtensions` lands, as it does at runtime, and a field no body
+ * declares or extends is still unknown. A tied field is a served name, so it
+ * is kept: these rules ask whether the name exists, never its definition.
+ * Whether the column is WRITABLE (`readonly`) is the readonly rules' question,
+ * not this index's.
+ *
+ * Judgeability stays the declaration's ({@link judgeableFieldsOf}) for the
+ * stack this is handed: an object that declares no field at all (external,
+ * datasource-introspected) keeps an empty set even when an extension adds to
+ * it, because the fields it does serve are still unknown here. The guard reads
+ * the declaration from `stack.objects`, so a caller that hands it objects
+ * already served (`{ objects: objectsAsServed(stack).objects }`, as the react
+ * page rule does with the page rule's own index) bypasses it by construction.
  */
 export function indexObjectFields(stack: AnyRec): Map<string, Set<string>> {
   const out = new Map<string, Set<string>>();
-  for (const obj of recordsOf(stack.objects)) {
-    const name = typeof obj.name === 'string' ? obj.name : undefined;
-    if (!name) continue;
+  const namesOf = (obj: AnyRec | undefined): Set<string> => {
     const names = new Set<string>();
-    for (const f of recordsOf(obj.fields)) {
+    for (const f of recordsOf(obj?.fields)) {
       if (typeof f.name === 'string' && f.name) names.add(f.name);
     }
-    out.set(name, names);
-  }
+    return names;
+  };
+  const declared = recordsOf(stack.objects);
+  // `objectsAsServed` returns the declared objects in order, one per entry.
+  objectsAsServed(stack).objects.forEach((obj, i) => {
+    const name = typeof obj.name === 'string' ? obj.name : undefined;
+    if (!name) return;
+    const own = namesOf(declared[i]);
+    out.set(name, own.size > 0 ? namesOf(obj) : own);
+  });
   return out;
 }
 

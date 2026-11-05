@@ -43,6 +43,10 @@
 import { describe, it, expect } from 'vitest';
 import { checkManagedApiMethodAffordances } from '@objectstack/spec/data';
 import { SysOrganization } from './sys-organization.object';
+import { enObjects } from '../apps/translations/en.objects.generated.js';
+import { esESObjects } from '../apps/translations/es-ES.objects.generated.js';
+import { jaJPObjects } from '../apps/translations/ja-JP.objects.generated.js';
+import { zhCNObjects } from '../apps/translations/zh-CN.objects.generated.js';
 
 describe('#15873 — sys_organization.enable.apiMethods admits `update`, and only `update`', () => {
   it('declares exactly get / list / update — no create, no delete, no bulk', () => {
@@ -87,5 +91,25 @@ describe('#15873 — better-auth keeps its own door for its own columns', () => 
     const create = action('create_organization');
     expect(create, 'create_organization must stay declared').toBeTruthy();
     expect(create.target).toBe('/api/v1/auth/organization/create');
+  });
+});
+
+describe('#30411 — require_mfa\'s help says it needs two-factor on, in the source and in every locale', () => {
+  const bundles = { en: enObjects, 'zh-CN': zhCNObjects, 'ja-JP': jaJPObjects, 'es-ES': esESObjects };
+
+  it('the source description names the deployment switch the save is refused without', () => {
+    const description = SysOrganization.fields.require_mfa?.description;
+    expect(description).toMatch(/two-factor authentication on for this deployment/);
+    expect(description).toMatch(/OS_AUTH_TWO_FACTOR=true/);
+  });
+
+  it.each(Object.entries(bundles))('%s: the generated help carries the condition', (_locale, bundle) => {
+    const help = (bundle as any).sys_organization?.fields?.require_mfa?.help;
+    expect(help).toEqual(expect.any(String));
+    expect(help).toMatch(/OS_AUTH_TWO_FACTOR=true/);
+  });
+
+  it('the en bundle is the source, verbatim (the generator writes it)', () => {
+    expect((enObjects as any).sys_organization.fields.require_mfa.help).toBe(SysOrganization.fields.require_mfa?.description);
   });
 });

@@ -87,6 +87,7 @@ import { mayActIrreversibly } from '@objectstack/platform-objects/system';
 import { FILE_REFERENCES_MIGRATION_ID } from '@objectstack/spec/system';
 import { inProcessSessionReadInput } from '@objectstack/types';
 import { SwappableStorageService } from './swappable-storage-service.js';
+import { S3SettingsIncompleteError, storageTestCopy } from './storage-test-copy.js';
 import {
   resolveStorageTarget,
   needsStorageSwap,
@@ -286,7 +287,7 @@ export class StorageServicePlugin implements Plugin {
       const bucket = values.s3_bucket as string | undefined;
       const region = values.s3_region as string | undefined;
       if (!bucket || !region) {
-        throw new Error('StorageServicePlugin: S3 adapter requires s3_bucket and s3_region');
+        throw new S3SettingsIncompleteError();
       }
       const opts: S3StorageAdapterOptions = {
         bucket,
@@ -814,7 +815,11 @@ export class StorageServicePlugin implements Plugin {
         // Register the live `storage/test` probe handler.
         if (typeof settings.registerAction === 'function' && this.storage) {
           const proxy = this.storage;
-          settings.registerAction('storage', 'test', async ({ values, payload }: any) => {
+          settings.registerAction('storage', 'test', async ({ values, payload, locale }: any) => {
+            // [#30335] The answer is the toast the administrator reads: written
+            // in the caller's display language, which the settings action
+            // route hands over as `locale` (English when none is given).
+            const copy = storageTestCopy(typeof locale === 'string' ? locale : undefined);
             // Merge the (possibly unsaved) form state posted as
             // `payload.values` over the persisted snapshot so an operator
             // can validate edits before hitting "Save". Matches the
@@ -851,7 +856,10 @@ export class StorageServicePlugin implements Plugin {
               try {
                 target = await this.buildAdapterFromValues(merged);
               } catch (err: any) {
-                return { ok: false, severity: 'error', message: err?.message ?? String(err) };
+                const message = err instanceof S3SettingsIncompleteError
+                  ? copy.s3SettingsIncomplete
+                  : copy.failed(err?.message ?? String(err));
+                return { ok: false, severity: 'error', message };
               }
             }
 
@@ -900,18 +908,18 @@ export class StorageServicePlugin implements Plugin {
                 // unguarded delete, whose failure IS a probe failure the
                 // operator must be told about, and no path deletes twice.
                 await removeProbeObject();
-                return { ok: false, severity: 'error', message: 'Probe download did not match upload.' };
+                return { ok: false, severity: 'error', message: copy.downloadMismatch };
               }
               await target.delete(probeKey);
               const adapter = String(merged.adapter ?? this.options.adapter ?? 'local');
               return {
                 ok: true,
                 severity: 'info',
-                message: `Storage round-trip succeeded (adapter=${adapter}).`,
+                message: copy.succeeded(adapter),
               };
             } catch (err: any) {
               await removeProbeObject();
-              return { ok: false, severity: 'error', message: err?.message ?? String(err) };
+              return { ok: false, severity: 'error', message: copy.failed(err?.message ?? String(err)) };
             }
           });
           ctx.logger.info('StorageServicePlugin: registered settings action storage/test');

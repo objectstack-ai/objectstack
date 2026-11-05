@@ -188,7 +188,9 @@ export interface IDatasourceAdminService {
 
   /**
    * Remove a runtime datasource. Rejects for code-defined ones and while
-   * objects are still bound to it.
+   * objects are still bound to it; that refusal carries `details`
+   * `{ reason: 'objects_bound', count, objects? }`, `objects` being the bound
+   * objects' names, sorted.
    */
   removeDatasource(name: string): Promise<void>;
 

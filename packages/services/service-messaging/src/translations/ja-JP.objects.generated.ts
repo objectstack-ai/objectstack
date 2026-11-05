@@ -460,7 +460,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       locale: {
         label: "ロケール",
-        help: "このデバイスへのプッシュ通知の表示に使うデバイスのロケール。"
+        help: "登録時に指定されたデバイスのロケール。デバイスに保存されますが、プッシュ通知の表示には使われません。プッシュ通知は受信者の言語（ユーザーのロケール、次にデプロイメントの既定）で届きます。"
       },
       name: {
         label: "デバイス名"

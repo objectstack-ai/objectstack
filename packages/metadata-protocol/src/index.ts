@@ -281,7 +281,14 @@ export {
 } from './migrations/recorded-by-sentinel.js';
 export type { SentinelHistoryRow } from './migrations/recorded-by-sentinel.js';
 
-export { SeedLoaderService, type SeedLoaderServiceOptions } from './seed-loader.js';
+export {
+  SeedLoaderService,
+  type SeedLoaderServiceOptions,
+  // [#30429] The runtime's fallback seed apply reads a thrown load's finished
+  // datasets through it, so its receipt reports `landed` as this package's does.
+  seedLoadPartialWrites,
+  type SeedLoadPartialWrites,
+} from './seed-loader.js';
 export { runBuildProbes } from './build-probes.js';
 export type {
   RuntimeBuildIssue,

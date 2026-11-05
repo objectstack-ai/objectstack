@@ -153,6 +153,8 @@ const SLOT_FILES = [
     'batch-routes.ts',
     'meta-object-state-routes.ts',
     'meta-item-history-routes.ts',
+    // [#30205] A user's assigned work: the counts and the hand-over (the SIXTH consumer).
+    'user-work-routes.ts',
 ] as const;
 const SOURCES = new Map<string, string>(SLOT_FILES.map((file) => [
     file, file === 'rest-server.ts' ? SOURCE : readFileSync(resolve(HERE, file), 'utf8'),
@@ -228,12 +230,13 @@ describe('[#18546] §1 the `objectQLProvider` consumer census is mechanical', ()
         // 5 UNCHANGED, over four files: 2 in `rest-server.ts` (the class head's
         // two), the batch door's 1, the state-machine read's 1 in
         // `meta-object-state-routes.ts` and `/published`'s 1 in
-        // `meta-item-history-routes.ts`.
+        // `meta-item-history-routes.ts`. [#30205] 6: a user's assigned work, its
+        // one site in `user-work-routes.ts`, shared by both of its routes.
         const sites = censusInvocationSites('objectQLProvider');
         // The message carries the sites, so a failure here hands the next
         // reader the new census instead of a bare number.
         expect(sites.map((s) => `${s.file}:${s.line}: ${s.text}`).join('\n')).toBeTruthy();
-        expect(sites).toHaveLength(5);
+        expect(sites).toHaveLength(6);
     });
 
     it('⭐ [#18559] ALL FIVE consumers reach the slot through `wiredEngineOrLoud` — none reads it directly', () => {
@@ -249,7 +252,7 @@ describe('[#18546] §1 the `objectQLProvider` consumer census is mechanical', ()
         // the site rather than a bare number.
         expect(direct.map((s) => `${s.file}:${s.line}: ${s.text}`).join('\n')).toBe('');
         expect(direct).toHaveLength(0);
-        expect(viaSeam).toHaveLength(5);
+        expect(viaSeam).toHaveLength(6);
 
         // ⭐ CONTROL for the window predicate itself, on BOTH axes. It reads a
         // WINDOW of source text, so "3 of 3" is only a reading if the same

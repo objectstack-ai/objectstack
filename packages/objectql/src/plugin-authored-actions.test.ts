@@ -17,7 +17,8 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ObjectQLPlugin } from './plugin.js';
-import type { ObjectQL } from './engine.js';
+import { ObjectQL } from './engine.js';
+import { isServedOverrideRowOf } from '@objectstack/metadata-protocol';
 
 type AnyRecord = Record<string, any>;
 
@@ -333,5 +334,178 @@ describe('ObjectQLPlugin protocol-mutation subscription (#2605)', () => {
     // Deletes re-sync (teardown).
     (protocol as any).emitMetadataMutation({ type: 'action', name: 'a1', state: 'deleted' });
     expect(resyncActions).toHaveBeenCalledTimes(3);
+  });
+});
+
+/**
+ * [#30065, ADR-0146 D9 `action`] The handler half of conditions 1 and 2 for a
+ * script action, on a real engine: a declared `.custom` override's body is
+ * bound over the code package's handler, and removing the override binds the
+ * code package's body again — in one resync each way. The base handler is
+ * registered as AppPlugin registers a bundle's (`app:<id>`), and is never
+ * re-registered by the test: what runs after the restore is the handler the
+ * override was bound over.
+ */
+describe('[#30065] a declared .custom action override rebinds the body, and restoring it runs the base body', () => {
+  const BASE = 'com.example.showcase';
+  const PAIR = 'com.example.showcase.custom';
+  const DEPENDENT = 'com.default.acme-custom';
+  const OBJ = 'showcase_task';
+  const ACT = 'showcase_task_close';
+  const declared = { overrides: { package: BASE, basedOn: '1.0.0' } };
+
+  function harness(opts: { baseBound?: boolean } = {}) {
+    const ql = new ObjectQL();
+    const artifact = {
+      name: ACT, objectName: OBJ, type: 'script', label: 'SHIPPED',
+      body: { language: 'js', source: 'return 1;' }, _packageId: BASE,
+    };
+    let registered = opts.baseBound !== false;
+    vi.spyOn(ql.registry, 'getArtifactItem').mockImplementation(((type: string, name: string) =>
+      registered && type === 'action' && name === ACT ? artifact : undefined) as any);
+    ql.setDefaultActionRunner((action: AnyRecord) =>
+      action?.body ? async () => `ran:${action.label}` : undefined);
+    // What `bindAppArtifactHandlers` does for the base (AppPlugin at start, a
+    // marketplace base's rehydrate at `kernel:ready`): register the manifest,
+    // tear down its owner's handlers, and bind them again.
+    const bindBase = (body = 'BASE BODY') => {
+      registered = true;
+      ql.removeActionsByPackage(`app:${BASE}`);
+      ql.registerAction(OBJ, ACT, async () => `ran:${body}`, `app:${BASE}`);
+    };
+    if (registered) bindBase();
+    let rows: AnyRecord[] = [];
+    vi.spyOn(ql, 'find').mockImplementation((async (_obj: string, q: AnyRecord) =>
+      q?.where?.type === 'action' ? rows : []) as any);
+    const plugin = makePlugin(ql as unknown as AnyRecord);
+    const resync = async (next: AnyRecord[]) => {
+      rows = next;
+      await (plugin as any).resyncAuthoredActions(makeCtx());
+    };
+    const run = () => ql.executeAction(OBJ, ACT, {});
+    return { ql, resync, run, bindBase };
+  }
+  const overrideRow = (packageId: string, label: string, payload: AnyRecord = declared) =>
+    actionRow(ACT, { package_id: packageId }, { label, ...payload });
+
+  it('override, restore, run again: the base package body runs', async () => {
+    const { resync, run } = harness();
+    await expect(run()).resolves.toBe('ran:BASE BODY');
+
+    await resync([overrideRow(PAIR, 'OVERRIDE')]);
+    await expect(run()).resolves.toBe('ran:OVERRIDE');
+
+    await resync([]);
+    await expect(run()).resolves.toBe('ran:BASE BODY');
+  });
+
+  it('a base bound AFTER the override\'s resync (a marketplace base\'s rehydrate) slots beneath it: the override runs, and a restore runs the base body', async () => {
+    // Boot order for an installed base: ObjectQLPlugin's `kernel:ready`
+    // resync runs before the install plugin's rehydrate registers the base
+    // and binds its handlers, and the rehydrate announces no reload.
+    const { resync, run, bindBase } = harness({ baseBound: false });
+    await resync([overrideRow(PAIR, 'OVERRIDE')]);
+    await expect(run()).resolves.toBe('ran:OVERRIDE');
+    bindBase();
+    await expect(run()).resolves.toBe('ran:OVERRIDE');
+    await resync([]);
+    await expect(run()).resolves.toBe('ran:BASE BODY');
+  });
+
+  it('the base\'s handlers re-bound while the override is armed keep the override on top, and the restore runs the newly bound base body', async () => {
+    const { resync, run, bindBase } = harness();
+    await resync([overrideRow(PAIR, 'OVERRIDE')]);
+    bindBase('REBOUND BASE BODY');
+    await expect(run()).resolves.toBe('ran:OVERRIDE');
+    await resync([overrideRow(PAIR, 'OVERRIDE')]);
+    await expect(run()).resolves.toBe('ran:OVERRIDE');
+    await resync([]);
+    await expect(run()).resolves.toBe('ran:REBOUND BASE BODY');
+  });
+
+  it('before the base is registered, a pair row without the declaration, or a dependent\'s declaration, is no override: the base bound later replaces it', async () => {
+    for (const row of [overrideRow(PAIR, 'UNDECLARED', {}), overrideRow(DEPENDENT, 'DEPENDENT')]) {
+      const { resync, run, bindBase } = harness({ baseBound: false });
+      await resync([row]);
+      bindBase();
+      await expect(run()).resolves.toBe('ran:BASE BODY');
+    }
+  });
+
+  it('[#30542] before the base is registered, another base\'s declared override of the same key is replaced by the real base\'s handler, as every read declines it', async () => {
+    // A row of `com.example.other`'s pair declaring that package, for the key
+    // the real base ships: bound on its own declaration while no artifact is
+    // registered, it is not the real base's override.
+    const OTHER = 'com.example.other';
+    const row = overrideRow(`${OTHER}.custom`, 'OTHER BASE', { overrides: { package: OTHER, basedOn: '1.0.0' } });
+    const { ql, resync, run, bindBase } = harness({ baseBound: false });
+    await resync([row]);
+    await expect(run()).resolves.toBe('ran:OTHER BASE');
+    const warn = vi.spyOn((ql as any).logger, 'warn');
+    bindBase();
+    await expect(run()).resolves.toBe('ran:BASE BODY');
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][1]).toMatchObject({ package: `app:${BASE}`, replacedPackage: 'metadata-service' });
+    // The reads judge the row against the real base by the one served-override
+    // predicate, and decline it: the run now agrees with them.
+    expect([isServedOverrideRowOf(row as any, BASE), isServedOverrideRowOf(row as any, OTHER)]).toEqual([false, true]);
+    // The next resync judges the row against the registered artifact and
+    // leaves the base's handler bound.
+    await resync([row]);
+    await expect(run()).resolves.toBe('ran:BASE BODY');
+  });
+
+  it('re-binding the armed override keeps the base beneath it, so a later restore still runs the base body', async () => {
+    const { resync, run } = harness();
+    await resync([overrideRow(PAIR, 'FIRST')]);
+    await resync([overrideRow(PAIR, 'SECOND')]);
+    await expect(run()).resolves.toBe('ran:SECOND');
+    await resync([]);
+    await expect(run()).resolves.toBe('ran:BASE BODY');
+    await resync([overrideRow(PAIR, 'AGAIN')]);
+    await expect(run()).resolves.toBe('ran:AGAIN');
+  });
+
+  it('a pair row without the declaration, and a dependent package\'s declaration, never bind over the base', async () => {
+    const { resync, run } = harness();
+    await resync([overrideRow(PAIR, 'UNDECLARED', {})]);
+    await expect(run()).resolves.toBe('ran:BASE BODY');
+    await resync([overrideRow(DEPENDENT, 'DEPENDENT')]);
+    await expect(run()).resolves.toBe('ran:BASE BODY');
+    await resync([overrideRow(PAIR, 'OTHER BASE', { overrides: { package: 'com.example.other', basedOn: '1.0.0' } })]);
+    await expect(run()).resolves.toBe('ran:BASE BODY');
+  });
+
+  it('an override without a body leaves the base handler bound, and the resync counts it as handler-less', async () => {
+    const { resync, run } = harness();
+    await resync([overrideRow(PAIR, 'FLOW', { ...declared, type: 'flow', target: 'close_flow', body: undefined })]);
+    await expect(run()).resolves.toBe('ran:BASE BODY');
+  });
+
+  it('[#30542] a registration with no package under an armed override replaces it and is warned, naming both owners', async () => {
+    const ql = new ObjectQL();
+    ql.registerAction(OBJ, ACT, async () => 'base', `app:${BASE}`);
+    ql.registerActionOverride(OBJ, ACT, async () => 'override', 'metadata-service', BASE);
+    const warn = vi.spyOn((ql as any).logger, 'warn');
+    ql.registerAction(OBJ, ACT, async () => 'unpackaged');
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][1]).toMatchObject({ objectName: OBJ, actionName: ACT, package: undefined, replacedPackage: 'metadata-service' });
+    await expect(ql.executeAction(OBJ, ACT, {})).resolves.toBe('unpackaged');
+  });
+
+  it('the handler stack: removing the base under an armed override keeps the override, and removing both unbinds the name', async () => {
+    const ql = new ObjectQL();
+    ql.registerAction(OBJ, ACT, async () => 'base', `app:${BASE}`);
+    ql.registerActionOverride(OBJ, ACT, async () => 'override', 'metadata-service');
+    await expect(ql.executeAction(OBJ, ACT, {})).resolves.toBe('override');
+    ql.removeActionsByPackage(`app:${BASE}`);
+    await expect(ql.executeAction(OBJ, ACT, {})).resolves.toBe('override');
+    ql.removeActionsByPackage('metadata-service');
+    await expect(ql.executeAction(OBJ, ACT, {})).rejects.toThrow(/not found/);
+    // An override bound where no handler is registered stands alone.
+    ql.registerActionOverride(OBJ, ACT, async () => 'alone', 'metadata-service');
+    await expect(ql.executeAction(OBJ, ACT, {})).resolves.toBe('alone');
+    ql.removeActionsByPackage('metadata-service');
+    await expect(ql.executeAction(OBJ, ACT, {})).rejects.toThrow(/not found/);
   });
 });

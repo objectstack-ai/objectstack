@@ -558,7 +558,15 @@ describe('seedLoadPartialWrites: the rows a thrown load had written', () => {
     expect((err as Error).message).toBe('the storage service is down');
     expect((store.pw_tag ?? []).map((r) => r.name).sort()).toEqual(['T1', 'T2']);
     expect((store.pw_doc ?? []).map((r) => r.code)).toEqual(['D1']);
-    expect(seedLoadPartialWrites(err)).toEqual({ inserted: 3, updated: 0, failedObject: 'pw_doc' });
+    // [#30429] The finished dataset (`pw_tag`) carries its landed ids — the
+    // store's own; the dataset that threw (`pw_doc`) is in the counts but not
+    // in `finished`, although its row D1 was written before the throw.
+    const tagIds = (store.pw_tag ?? []).map((r) => String(r.id));
+    expect(tagIds).toHaveLength(2);
+    expect(seedLoadPartialWrites(err)).toEqual({
+      inserted: 3, updated: 0, failedObject: 'pw_doc',
+      finished: [{ object: 'pw_tag', landedIds: tagIds, insertedIds: tagIds }],
+    });
   });
 
   it('a load that throws before any dataset wrote: zero, and no object named', async () => {
@@ -569,7 +577,7 @@ describe('seedLoadPartialWrites: the rows a thrown load had written', () => {
 
     expect((err as Error).message).toBe('metadata store unavailable');
     expect(store).toEqual({});
-    expect(seedLoadPartialWrites(err)).toEqual({ inserted: 0, updated: 0 });
+    expect(seedLoadPartialWrites(err)).toEqual({ inserted: 0, updated: 0, finished: [] });
   });
 
   it('an error that did not come out of a load carries no reading', () => {

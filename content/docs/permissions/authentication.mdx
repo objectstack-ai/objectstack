@@ -669,6 +669,14 @@ These rules apply to `allowed_ip_ranges`.
   because the gate would refuse you too. Only a change is checked: saving the list
   already in force again is not refused. Writes made inside the server (boot, seed,
   migrations) carry no request and are not checked.
+- **Setup shows your address before you save.** Under the field, **Setup →
+  Authentication** shows the address the server judges for your request, read from
+  `GET /api/v1/auth/admin/client-address` (platform administrators only), which
+  answers `{ clientAddress, trustProxy }`: the note says whether that address came
+  from the forwarded headers of a proxy the server trusts (`server.trustProxy`) or
+  from the connection itself, which behind a proxy it does not trust is the proxy's
+  own address, and when `clientAddress` is `null` it says instead that no non-empty
+  list can be saved.
 - **Clearing takes effect at once.** Empty the field and save. No restart is needed:
   the gate goes back to the list the deployment itself declares (`allowedIpRanges` in
   its auth configuration, for example set by an `auth:configure` handler), or to no

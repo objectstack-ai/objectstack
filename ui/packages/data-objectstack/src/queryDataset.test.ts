@@ -832,3 +832,65 @@ describe('queryDataset passes the server drillRanges sidecar through (#1752)', (
     expect(true).toBe(true);
   });
 });
+
+/* -------------------------------------------------------------------------- */
+/* objectstack-ai/objectstack#30526 — the per-measure drill scope. A dataset    */
+/* number is computed under the dataset's own `filter` and the measure's own    */
+/* `filter`, which a host never reads; the server states them per measure in    */
+/* `drillScopes`. The return here is hand-picked, so an unlisted key is dropped */
+/* (measured: before this section the sidecar never reached a consumer).        */
+/* -------------------------------------------------------------------------- */
+
+describe('queryDataset passes the server drillScopes sidecar through (#30526)', () => {
+  beforeEach(() => clearSharedDiscoveryCache());
+
+  const scopes = {
+    paid_count: { $and: [{ kind: 'sale' }, { status: 'paid' }] },
+    invoice_count: {},
+  };
+
+  async function answer(body: Record<string, unknown>) {
+    const { fetchImpl } = makeFetch({
+      ok: true,
+      body: {
+        rows: [{ region: 'NA', paid_count: 2, invoice_count: 4 }],
+        fields: [{ name: 'paid_count', type: 'number' }, { name: 'invoice_count', type: 'number' }],
+        object: 'invoice',
+        dimensionFields: { region: 'region' },
+        drillRawRows: [{ region: 'NA' }],
+        ...body,
+      },
+    });
+    const adapter = new ObjectStackAdapter({ baseUrl: 'http://localhost:3000', autoReconnect: false, fetch: fetchImpl as any });
+    return adapter.queryDataset(inlineDataset as any, { dimensions: ['region'], measures: ['paid_count', 'invoice_count'] } as any);
+  }
+
+  it('keeps every scope verbatim, an empty `{}` scope included', async () => {
+    const result = await answer({ drillScopes: scopes });
+    expect(result.drillScopes).toEqual(scopes);
+    // `{}` is "drillable, no extra condition", distinct from an absent key
+    // ("offers no drill"): the passthrough must not drop or collapse it.
+    expect(Object.keys(result.drillScopes ?? {})).toEqual(['paid_count', 'invoice_count']);
+  });
+
+  it('leaves drillScopes undefined when the server sends none', async () => {
+    const result = await answer({});
+    expect(result.drillScopes).toBeUndefined();
+  });
+
+  it.each([
+    ['an array', [scopes.paid_count]],
+    ['a string', 'kind = sale'],
+    ['null', null],
+  ])('drops %s in the drillScopes slot rather than handing it on', async (_label, value) => {
+    const result = await answer({ drillScopes: value });
+    expect(result.drillScopes).toBeUndefined();
+  });
+
+  it('is pinned at compile time as the spec AnalyticsResult drillScopes', () => {
+    type _Declared = Assert<HasKey<DatasetEnvelope, 'drillScopes'>>;
+    type _IsTheSpecSlot = Assert<Equal<DatasetEnvelope['drillScopes'], SpecAnalyticsResult['drillScopes']>>;
+    type _SpecSlotNotAny = Assert<Equal<IsAny<SpecAnalyticsResult['drillScopes']>, false>>;
+    expect(true).toBe(true);
+  });
+});

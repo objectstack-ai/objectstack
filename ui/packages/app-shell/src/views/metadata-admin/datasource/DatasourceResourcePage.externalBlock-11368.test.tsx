@@ -285,7 +285,8 @@ async function createThroughThePage(
   if (opts.database !== '') type('Database', opts.database ?? 'wh');
   type('Username', 'reader');
   if (opts.secret) type('Password', opts.secret);
-  if (opts.mode !== 'managed') await chooseMode(opts.mode);
+  // A new datasource starts on External (objectstack#30327); every other mode is chosen.
+  if (opts.mode !== 'external') await chooseMode(opts.mode);
   return saveAndSettle(door, 'POST', /Create datasource/);
 }
 

@@ -91,10 +91,10 @@ export interface SettingsContext {
 export interface SettingsDisplayOptions {
   /**
    * The caller's display language (BCP-47), for prose a
-   * {@link SettingsWritePredicate} refusal or a {@link SettingsLiveStatusProvider}
-   * statement composes. The settings routes pass it from the request
-   * (`Accept-Language`, else `?locale`). Absent, such prose is written in
-   * English.
+   * {@link SettingsWritePredicate} refusal, a {@link SettingsLiveStatusProvider}
+   * statement or a {@link SettingsActionHandler} answer composes. The settings
+   * routes pass it from the request (`Accept-Language`, else `?locale`).
+   * Absent, such prose is written in English.
    */
   locale?: string;
 }
@@ -356,6 +356,11 @@ export type SettingsActionHandler = (input: {
   values: Record<string, unknown>;
   payload?: unknown;
   ctx: SettingsContext;
+  /**
+   * The language the answer's `message` is written in — the caller sees it as
+   * the action's toast. {@link SettingsDisplayOptions.locale}.
+   */
+  locale?: string;
 }) => Promise<SettingsActionResult> | SettingsActionResult;
 
 /**
@@ -473,6 +478,52 @@ export type SettingsLiveStatusProvider = (input: {
   /** The language the statement is written in — {@link SettingsDisplayOptions.locale}. */
   locale?: string;
 }) => Promise<SettingsLiveStatus | undefined> | SettingsLiveStatus | undefined;
+
+/** One option a {@link SettingsOptionSource} serves: the stored value and its name. */
+export interface SettingsServedOption {
+  value: string;
+  label: string;
+}
+
+/** What a {@link SettingsOptionSource} answers for one select key. */
+export interface SettingsOptionSourceAnswer {
+  /** The options the page offers, in order. */
+  options: SettingsServedOption[];
+  /**
+   * Whether a write of `value` is accepted. Holds for every offered value, and
+   * may hold for a second spelling of one (a stored `en-US` where `en` is
+   * offered). A value it refuses is answered `invalid_option`, as a value
+   * outside a declared table is.
+   */
+  admits(value: string): boolean;
+}
+
+/**
+ * Serves the options of one option-bearing key from the running system, in
+ * place of the manifest's declared `options`. The declared table stays the
+ * answer whenever the source answers `undefined` (the service it reads is
+ * absent from the composition).
+ *
+ * Asked at the moment it is used, never recorded: on each save (the write's
+ * acceptance), on each read of an `OS_*` override, on each page read, and on
+ * each manifest read (`getManifest`, `listManifests`, `GET /api/settings`),
+ * so every reader of the key's options is told the table a save judges. It
+ * is not asked when the manifest registers, because what it reads registers
+ * later in the boot, so an `OS_*` override of such a key is judged when it is
+ * read.
+ */
+export type SettingsOptionSource = (input: {
+  /**
+   * The key's value in effect on the page being served, so the answer can
+   * offer it as stored: under its own spelling when it is a second spelling
+   * of an offered value, and named as no longer offered when it is not
+   * admitted. Absent when a write or an override is judged, and when a
+   * manifest is read outside a page (`getManifest`, `listManifests`).
+   */
+  current?: unknown;
+  /** The language the page is read in, {@link SettingsDisplayOptions.locale}. */
+  locale?: string;
+}) => SettingsOptionSourceAnswer | undefined;
 
 /**
  * The `info_banner` id that carries a namespace's live status. Reserved: a

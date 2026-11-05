@@ -19,6 +19,11 @@
  * stored row it judges, and does not decline a shipped flow name's row that
  * the one served-override predicate (`isServedOverrideRowOf`) admits for the
  * shipping package — its declared `.custom` override, the packaged flow.
+ * [#30065] The same admission holds for an `action` name's declared
+ * override (ADR-0146 D9's `action` paragraph). Unlike the sealed row-served
+ * types, an action's override row keeps its bare registry entry, as a flow's
+ * does: the object read's `actions`, the run doors' first rung and the
+ * authored-action handler resync read the registry, not the row.
  *
  * ## How the moved bodies reach the class
  *
@@ -155,7 +160,11 @@ export function declinesStoredRow(
     // above, on the row's own `package_id` and body, against the package
     // that ships the name. The reads then serve it from its row, as they
     // serve a dashboard's. Every other sealed row of the name stays declined.
-    return !(servesSealedOverrideRow(type)
+    // [#30065, ADR-0146 D9 `action`] …and for an `action`, judged the same
+    // way: its declared override is served over the base's name from its
+    // row, so the layered read's `effective` and a by-name read answered by
+    // the metadata service see it as the registry's readers do.
+    return !((servesSealedOverrideRow(type) || canonicalMetaType(type) === 'action')
         && isServedOverrideRowOf(row, this.packagedArtifactOwner({ type, name })));
 }
 

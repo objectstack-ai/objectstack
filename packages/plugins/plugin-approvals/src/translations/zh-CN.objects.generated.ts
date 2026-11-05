@@ -366,7 +366,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       valid_until: {
         label: "失效时间",
-        help: "此刻（含）及之后规则不生效（半开区间 [from, until)，UTC）。留空 = 永不过期。"
+        help: "规则到此时间即失效（按 UTC 计）。留空 = 永不过期。"
       },
       reason: {
         label: "原因",

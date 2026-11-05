@@ -97,7 +97,7 @@ import type { MetadataProtocol, PackageProtocol } from '@objectstack/spec/api';
 // a second copy of `metadata-protocol`'s `applySeedBodies`, and a second
 // private restatement of "when may a caught sentence be quoted" is where the
 // two copies start answering differently.
-import { clientFacingFailureText, seedAppliedLanded, seedRequestValidationError } from '@objectstack/metadata-protocol';
+import { clientFacingFailureText, seedAppliedLanded, seedLoadPartialWrites, seedRequestValidationError } from '@objectstack/metadata-protocol';
 import type { SeedAppliedLandedParsed } from '@objectstack/spec/api';
 // [#15591] The DECLARED removal of our OWN read-time annotations, imported
 // from the list that defines them (`METADATA_READ_DECORATIONS`) rather than
@@ -750,6 +750,19 @@ interface PackageRowRegistryHost {
     registry?: {
         getPackage?(id: string): { manifest?: { type?: unknown; scope?: unknown; dependencies?: unknown } } | undefined;
     };
+}
+
+/**
+ * [#30377] An enable of a disabled package recomputes the roll-up summaries the
+ * package adds to other packages' objects by extension (`ObjectQL`'s
+ * `onPackageEnabled` listener; the child writes made during the disable
+ * recomputed nothing). The enable doors answer once that recompute has
+ * settled, so the first read after the answer serves current values. An
+ * engine without the member (a test double) answers at once, as before.
+ */
+async function summaryRefreshSettled(engine: unknown): Promise<void> {
+    const host = engine as { summaryRefreshSettled?: () => Promise<void> } | null | undefined;
+    if (typeof host?.summaryRefreshSettled === 'function') await host.summaryRefreshSettled();
 }
 
 /**
@@ -1847,6 +1860,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             if (requestedEnabled === true) {
                 const enabled = registry.enablePackage(pkgId);
                 if (enabled) pkg = enabled;
+                await summaryRefreshSettled(qlService);
             } else if (requestedEnabled === false) {
                 const disabled = registry.disablePackage(pkgId);
                 if (disabled) pkg = disabled;
@@ -1912,6 +1926,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             const pkg = registry.enablePackage(id);
             if (!pkg) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
+            await summaryRefreshSettled(qlService);
             try {
                 setPackageDisabled(_context?.environmentId, id, false);
             } catch (err) {
@@ -2126,9 +2141,24 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                             (deps.logger ?? console).warn(
                                 `[handlePackages] seed apply failed: ${e?.message ?? e}`,
                             );
+                            // [#30429] A load that threw mid-batch still reports
+                            // what it wrote, read off the error exactly as
+                            // `metadata-protocol`'s catch reads it: the counts
+                            // (finished datasets plus the one that threw), the
+                            // object that stopped it, and `landed` for the
+                            // datasets that finished, through the same
+                            // projection. No reading (no load ran) means nothing
+                            // was written: zero counts, `landed` absent.
+                            const written = seedLoadPartialWrites(e);
+                            const failure = clientFacingFailureText(e, 'seed apply failed');
                             (result as any).seedApplied = {
                                 success: false,
-                                error: clientFacingFailureText(e, 'seed apply failed'),
+                                inserted: written?.inserted ?? 0,
+                                updated: written?.updated ?? 0,
+                                error: written?.failedObject
+                                    ? `seed apply stopped at the seed for object '${written.failedObject}': ${failure}`
+                                    : failure,
+                                ...(written ? { landed: seedAppliedLanded(written.finished) } : {}),
                                 // [#10524] The declared 422's structured
                                 // findings ride beside the headline `error` —
                                 // `seedRequestValidationError`'s message is a
@@ -3292,7 +3322,8 @@ async function readPackageCustomizations(
  *    `definition` is its extension body as declared, so its `fields` keys ARE
  *    the fields it adds, and its `packageId` is the package that declared it.
  *    One entry per contributor and field, so two packages adding a field of
- *    one name are two entries.
+ *    one name are two entries. A disabled package's contributor is skipped
+ *    (`isPackageDisabled`), as the served object's fold withholds it.
  *  - **flow** — the metadata registry's flows (`listItems('flow')`, which
  *    already leaves a disabled package's out), whose `start` node's
  *    `config.objectName` is a base-owned object, attributed to the package
@@ -3349,6 +3380,10 @@ function readBaseContributions(
     for (const name of owned) {
         for (const contributor of registry.getObjectContributors(name) as Array<{ packageId?: unknown; ownership?: unknown; definition?: any }>) {
             if (contributor.ownership !== 'extend') continue;
+            // A disabled package's extension is withheld from the served object
+            // (`SchemaRegistry.resolveObject`), so its fields are not listed:
+            // the fold's own predicate, asked as the `nav` loop below asks it.
+            if (typeof registry.isPackageDisabled === 'function' && registry.isPackageDisabled(contributor.packageId)) continue;
             const packageId = codePackageOf(contributor.packageId, contributor.definition);
             if (packageId === undefined) continue;
             for (const field of Object.keys(contributor.definition?.fields ?? {})) {

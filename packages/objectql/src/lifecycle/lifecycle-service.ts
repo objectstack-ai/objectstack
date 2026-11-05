@@ -100,6 +100,14 @@ export interface LifecycleEngineLike {
      * exactly as it did before this member existed. Every real engine has it.
      */
     getObject?(name: string): unknown;
+    /**
+     * The objects as the storage layer sees them: a disabled package's
+     * `objectExtensions` folded in (`SchemaRegistry.getAllStorageObjects`).
+     * The sweep reads these, so the archive datasource's schema keeps every
+     * column the hot rows it copies carry. Optional, as `getObject` is: a
+     * double modelling only `getAllObjects` is read through that.
+     */
+    getAllStorageObjects?(): LifecycleObjectLike[];
   };
   delete(
     object: string,
@@ -733,8 +741,9 @@ export class LifecycleService {
 
     this.sweeping = true;
     try {
-      const declared = engine.registry
-        .getAllObjects()
+      const declared = (typeof engine.registry.getAllStorageObjects === 'function'
+        ? engine.registry.getAllStorageObjects()
+        : engine.registry.getAllObjects())
         .filter((o) => o?.lifecycle && o.lifecycle.class !== 'record');
 
       // Governance snapshot (P4): settings-driven overrides / quotas.

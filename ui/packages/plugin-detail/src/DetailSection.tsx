@@ -653,6 +653,9 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
             <CellRenderer
               value={value}
               field={enrichedField as unknown as FieldMetadata}
+              // The record, as a grid cell gets its row (see the highlights
+              // strip): a sibling-scoped face reads its sibling from it.
+              dependentValues={data}
               deadlineSettled={isDeadlineSettled(enrichedField, data, { scope: predicateScope, fields: objectSchema?.fields })}
               // A record page writes every date one way. The highlights strip
               // above writes the year on a current-year date (objectui#13331),
@@ -728,7 +731,10 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
     // (objectui#2578). Allowing the item to shrink lets the value wrap.
     return (
       <div key={field.name} className={cn("space-y-1.5 group min-w-0", spanClass)}>
-        <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+        {/* The label as authored, in the header highlights' style: no case
+            transform, which only Latin text takes, so a translated label and
+            an untranslated one beside it read in one style. */}
+        <div className="text-xs font-medium text-muted-foreground">
           {fieldLabel(objectName || '', field.name, field.label || field.name)}
         </div>
         {isEditing && fieldEditable ? (

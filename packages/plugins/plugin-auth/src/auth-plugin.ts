@@ -1238,10 +1238,12 @@ export class AuthPlugin implements Plugin {
         //    `setDefaultLocale`; the CLI passes `config.i18n.defaultLocale`),
         //    and is the bare `en` when the app declares nothing.
         //  - `localization.locale` (ADR-0053) is the workspace's RUNTIME
-        //    language — Setup, Localization, tenant-scoped — whose four
-        //    options are exactly `AUTH_EMAIL_TEMPLATE_LOCALES`. It is
-        //    already the authority for auth SMS (#2815) and for audit
-        //    activity summaries (framework#3039).
+        //    language — Setup, Localization, tenant-scoped — whose options
+        //    are the deployment's locale list (#30286), so it may name a
+        //    language the auth mail rows do not ship (see
+        //    `AUTH_EMAIL_TEMPLATE_LOCALES`). It is already the authority for
+        //    auth SMS (#2815) and for audit activity summaries
+        //    (framework#3039).
         //
         // A workspace that declared Chinese therefore received Chinese SMS
         // and ENGLISH mail. The workspace setting now outranks the
@@ -1944,6 +1946,9 @@ export class AuthPlugin implements Plugin {
         registerOrganizationMfaEnrollmentGuard(engine, {
           packageId: 'com.objectstack.plugin-auth.organization-mfa-enrollment-guard',
           isTwoFactorEnabled: () => this.authManager?.isTwoFactorEnabled() ?? false,
+          // [#30411] The grace period an admitted turn-on's save notice names.
+          // No manager means two-factor reads off above, so nothing is admitted.
+          mfaGracePeriodDays: () => this.authManager?.getMfaGracePeriodDays() ?? Number.NaN,
         });
         // A reader's own named list views: the body is judged on every save as
         // a ListView for the row's own object. See personal-view-hooks.ts.
@@ -3654,6 +3659,30 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] list-platform-admins failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
+    // [#30398] ADR-0069 D5 — admin: the caller's own address as the
+    // `auth.allowed_ip_ranges` save check and the sign-in gate judge it, so
+    // Setup can show it before a save rather than the save refusal naming it
+    // after. The shared gate first, then the read, which takes the address from
+    // the save check's own call on this request's headers and transport peer
+    // (client-address-read.ts). Closed, empty query set; no body is read.
+    rawApp.get(`${basePath}/admin/client-address`, async (c: any) => {
+      try {
+        const actor = await gateAdmin(c);
+        if (actor instanceof Response) return actor;
+        const { runClientAddressRead } = await import('./client-address-read.js');
+        const answer = runClientAddressRead(this.authManager!, {
+          queries: (c.req.queries() ?? {}) as Record<string, string[]>,
+          transport: { headers: (c.req.header() ?? {}) as Record<string, string>, ...transportOf(c) },
+        });
+        return c.json(answer.body, answer.status as any, answer.headers);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] admin/client-address failed', err);
         return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
       }
     });

@@ -51,7 +51,8 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import { StandardErrorCode } from '../api/errors.zod';
-import { analyticsCarrierFilter } from '../ui/analytics-carrier-filter';
+import { formatZodError, objectStackErrorMap } from '../shared/error-map.zod';
+import { ANALYTICS_FILTER_ARRAY_MESSAGE, analyticsCarrierFilter } from '../ui/analytics-carrier-filter';
 import { DashboardSchema } from '../ui/dashboard.zod';
 import { DatasetMeasureSchema, DatasetSchema } from '../ui/dataset.zod';
 import { ReportSchema } from '../ui/report.zod';
@@ -816,5 +817,101 @@ describe('§7 — the analytics carrier filter publishes exactly the bare condit
   it('the report runtimeFilter keeps its published description', () => {
     const report = z.toJSONSchema(ReportSchema) as { properties?: { runtimeFilter?: { description?: string } } };
     expect(report.properties?.runtimeFilter?.description).toBe('Render-time scope filter');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §8 An array in the slot: one refusal that names the object form (#30124)
+// ---------------------------------------------------------------------------
+
+describe('§8 — an array where an analytics filter belongs is refused once, with the object form shown', () => {
+  // The card's repro: a list view's rule array copied into a widget `filter`.
+  // Measured on `origin/main` `2ffdb649` before the change: two issues at the
+  // slot, `invalid_type` / `expected: 'record'` and `expected: 'object'`, read
+  // through the ObjectStack error map as `Expected record but received
+  // object.` and `Expected object but received object.`.
+  const VIEW_RULES = [{ field: 'status', operator: 'in', value: ['new', 'in_progress'] }];
+  const OBJECT_FORM = { status: { $in: ['new', 'in_progress'] } };
+
+  const dashboard = (filter: unknown) => ({
+    name: 'support',
+    label: 'Support',
+    widgets: [{ id: 'open_tickets', type: 'metric', dataset: 'tickets', values: ['ticket_count'], filter }],
+  });
+  const dataset = (extra: Record<string, unknown>) => ({
+    name: 'tickets_ds',
+    label: 'Tickets',
+    object: 'ticket',
+    dimensions: [{ name: 'status', field: 'status', type: 'string' }],
+    measures: [{ name: 'ticket_count', aggregate: 'count' }],
+    ...extra,
+  });
+  const report = (runtimeFilter: unknown) => ({
+    name: 'tickets', label: 'Tickets', type: 'summary',
+    dataset: 'tickets', rows: ['status'], values: ['ticket_count'], runtimeFilter,
+  });
+  const joinedReport = (runtimeFilter: unknown) => ({
+    name: 'tickets_joined', label: 'Tickets', type: 'joined',
+    blocks: [{ name: 'open', label: 'Open', type: 'summary', dataset: 'tickets', rows: ['status'], values: ['ticket_count'], runtimeFilter }],
+  });
+
+  type Parse = (filter: unknown) => { success: boolean; error?: z.ZodError };
+  const CARRIERS: ReadonlyArray<readonly [label: string, parse: Parse, slot: string]> = [
+    ['dashboard widget filter', (f) => DashboardSchema.safeParse(dashboard(f), { error: objectStackErrorMap }), 'widgets.0.filter'],
+    ['dataset filter', (f) => DatasetSchema.safeParse(dataset({ filter: f }), { error: objectStackErrorMap }), 'filter'],
+    ['measure filter', (f) => DatasetSchema.safeParse(dataset({ measures: [{ name: 'ticket_count', aggregate: 'count', filter: f }] }), { error: objectStackErrorMap }), 'measures.0.filter'],
+    ['report runtimeFilter', (f) => ReportSchema.safeParse(report(f), { error: objectStackErrorMap }), 'runtimeFilter'],
+    ['joined block runtimeFilter', (f) => ReportSchema.safeParse(joinedReport(f), { error: objectStackErrorMap }), 'blocks.0.runtimeFilter'],
+  ];
+
+  it.each(CARRIERS)('%s — the view rule array is ONE invalid_type at the slot, carrying the object form', (_label, parse, slot) => {
+    const parsed = parse(VIEW_RULES);
+    expect(parsed.success).toBe(false);
+    const atSlot = parsed.error!.issues.filter((issue) => issue.path.join('.') === slot);
+    expect(atSlot).toHaveLength(1);
+    expect(atSlot[0]!.code).toBe('invalid_type');
+    expect(atSlot[0]!.message).toBe(ANALYTICS_FILTER_ARRAY_MESSAGE);
+    expect(atSlot[0]!.message).toContain("`{ status: { $in: ['new', 'in_progress'] } }`");
+    // Nothing else is said about the slot or below it.
+    expect(parsed.error!.issues.filter((issue) => issue.path.join('.').startsWith(slot))).toHaveLength(1);
+  });
+
+  it.each(CARRIERS)('%s — the object form is accepted', (_label, parse) => {
+    expect(parse(OBJECT_FORM).success).toBe(true);
+  });
+
+  it('the widget refusal prints as one line naming the fix, with no contradictory twin', () => {
+    const parsed = DashboardSchema.safeParse(dashboard(VIEW_RULES), { error: objectStackErrorMap });
+    expect(parsed.success).toBe(false);
+    const printed = formatZodError(parsed.error!, 'defineStack validation failed');
+    expect(printed).toContain('(1 issue)');
+    expect(printed).toContain(`✗ widgets.0.filter: ${ANALYTICS_FILTER_ARRAY_MESSAGE}`);
+    expect(printed).not.toContain('but received object');
+  });
+
+  it('the message is the same with no error map: it is the issue\'s own, not the map\'s', () => {
+    const parsed = analyticsCarrierFilter().safeParse([]);
+    expect(parsed.success).toBe(false);
+    expect(parsed.error!.issues).toHaveLength(1);
+    expect(parsed.error!.issues[0]!.message).toBe(ANALYTICS_FILTER_ARRAY_MESSAGE);
+    expect(parsed.error!.issues[0]!.path).toEqual([]);
+  });
+
+  // The accept set is unchanged: on values with no nested relation (where the
+  // walk adds nothing) the carrier answers exactly as the bare optional
+  // condition does, and every non-array refusal keeps its own issues.
+  const BATTERY: readonly unknown[] = [
+    undefined, null, 0, 'status', true, [], [{}], VIEW_RULES, [['status', '=', 'open']],
+    {}, { status: 'open' }, OBJECT_FORM, { $or: [{ status: 'open' }, { priority: 'high' }] },
+    { $and: [] }, { $not: { status: 'closed' } }, { $or: 'x' }, { status: { $in: 'new' } },
+  ];
+
+  it.each(BATTERY.map((value) => [show(value), value] as const))('%s — same verdict as the bare condition', (_label, value) => {
+    const bare = FilterConditionSchema.optional().safeParse(value);
+    const carrier = analyticsCarrierFilter().safeParse(value);
+    expect(carrier.success).toBe(bare.success);
+    if (!bare.success && !Array.isArray(value)) {
+      expect(carrier.error!.issues).toEqual(bare.error.issues);
+    }
   });
 });

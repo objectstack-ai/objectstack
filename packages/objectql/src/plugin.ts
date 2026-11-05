@@ -10,7 +10,7 @@ import {
 } from './engine.js';
 import { OWNERSHIP_QUEUE_SOURCE_SLOT, describeMissingOwnershipQueueService } from './assignment-rules.js';
 import { OWNERSHIP_QUEUE_SERVICE } from '@objectstack/spec/contracts';
-import { assembleMetadataProtocol } from '@objectstack/metadata-protocol';
+import { assembleMetadataProtocol, isServedOverrideRowOf } from '@objectstack/metadata-protocol';
 import { isTenantAuthored, readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import type { MetadataAuthoringChannel } from '@objectstack/metadata-protocol';
 import { Plugin, PluginContext } from '@objectstack/core';
@@ -2099,8 +2099,9 @@ export class ObjectQLPlugin implements Plugin {
    * exactly the incomplete test double #9154 measured.
    *
    * @param seam - the calling method, named in the thrown message.
+   * @param layer - `storage` for a DDL / binding reader, `served` otherwise.
    */
-  private readRegisteredObjects(seam: string): ServiceObject[] {
+  private readRegisteredObjects(seam: string, layer: 'served' | 'storage' = 'served'): ServiceObject[] {
     const registry: any = (this.ql as any)?.registry;
     const read: unknown = registry?.getAllObjects;
     if (registry == null || typeof read !== 'function') {
@@ -2114,6 +2115,13 @@ export class ObjectQLPlugin implements Plugin {
           '`getAllObjects()` — a duck-typed engine or an incomplete test double is the only way to reach this line.',
       );
     }
+    // A STORAGE reader (DDL, the federated binding) reads the objects with
+    // every extension folded in, a disabled package's included: a disable must
+    // not take a column away from the data it keeps
+    // (`SchemaRegistry.getAllStorageObjects`). A registry without that read
+    // answers its served fold, as before.
+    const storage: unknown = registry.getAllStorageObjects;
+    if (layer === 'storage' && typeof storage === 'function') return (storage as () => ServiceObject[]).call(registry);
     return (read as () => ServiceObject[]).call(registry);
   }
 
@@ -2186,7 +2194,7 @@ export class ObjectQLPlugin implements Plugin {
     // looks healthy while declared data is simply not reachable.
     let allObjects: ServiceObject[];
     try {
-      allObjects = this.readRegisteredObjects('reconcileFederatedBindings');
+      allObjects = this.readRegisteredObjects('reconcileFederatedBindings', 'storage');
     } catch (e: unknown) {
       ctx.logger.error(
         'Federated (external) object reconciliation did NOT run — the object registry could not be read, so this boot ' +
@@ -2338,7 +2346,7 @@ export class ObjectQLPlugin implements Plugin {
     // [#9285] Same propagation contract as the sync pass: "the registry holds
     // nothing" and "the registry could not be read" have opposite consequences
     // and only the first is a truthful reason to register nothing.
-    const allObjects = this.readRegisteredObjects('registerSchemasWithoutDdl');
+    const allObjects = this.readRegisteredObjects('registerSchemasWithoutDdl', 'storage');
     if (allObjects.length === 0) return;
 
     const groups = new Map<any, ServiceObject[]>();
@@ -2423,7 +2431,7 @@ export class ObjectQLPlugin implements Plugin {
     // against a store whose DDL was never run. On the `metadata:reloaded` path
     // the caller already catches this and reports it at `error` (#4632), so
     // propagation there is a loud durability report, not a dead kernel.
-    const allObjects = this.readRegisteredObjects('syncRegisteredSchemas');
+    const allObjects = this.readRegisteredObjects('syncRegisteredSchemas', 'storage');
     if (allObjects.length === 0) return;
 
     let synced = 0;
@@ -3713,7 +3721,10 @@ export class ObjectQLPlugin implements Plugin {
       for (const row of rows) {
         if (legacy.has(String(row.id))) continue;
         const data = parseRow(row, 'action');
-        if (data && typeof data.name === 'string') actions.push(data);
+        if (data && typeof data.name === 'string') {
+          actions.push(data);
+          if (this.isDeclaredArtifactActionOverride(row, data)) this.declaredActionOverrides.add(data);
+        }
       }
 
       // Embedded shape: authored object rows may carry their own actions.
@@ -3744,6 +3755,48 @@ export class ObjectQLPlugin implements Plugin {
       });
       return null;
     }
+  }
+
+  /**
+   * [#30065, ADR-0146 D9 `action`] The parsed rows {@link readAuthoredActionRows}
+   * read that are the declared `.custom` override of an action a code package
+   * ships ({@link isDeclaredArtifactActionOverride}): the authored rows the
+   * resync binds over the base's handler although the name is
+   * artifact-shipped. Keyed on the parsed body, so a row read by an older
+   * resync is never mistaken for one of this read.
+   */
+  private readonly declaredActionOverrides = new WeakSet<object>();
+
+  /**
+   * [#30065, ADR-0146 D9 `action`] Whether a stored `action` row is the
+   * declared override of the action a code package ships under its name, on
+   * the same object: the row is bound to that package's `.custom` pair and
+   * declares `overrides.package` = that package — judged by the one
+   * served-override predicate the reads serve it by
+   * (`isServedOverrideRowOf`, on the row's own `package_id` and body), so the
+   * handler bound is the declaration every read serves.
+   *
+   * A base the registry does not hold yet is judged by the row's own
+   * declaration: a marketplace-installed base is registered, and its
+   * handlers bound, by the install plugin's `kernel:ready` rehydrate, after
+   * the boot's resync. Bound as an override then, the row's handler stays on
+   * top when the base's arrives, which slots beneath it
+   * (`ObjectQL#registerAction`), so the reads and the run agree from the
+   * first request. [#30542] Only the base the row declares slots beneath:
+   * a row of another base's pair that ships the same key is replaced by the
+   * real base's handler when it arrives, as the reads decline it.
+   */
+  private isDeclaredArtifactActionOverride(row: unknown, action: any): boolean {
+    const registry: any = this.ql?.registry;
+    if (!registry || typeof registry.getArtifactItem !== 'function') return false;
+    const artifact: any = registry.getArtifactItem('action', action.name);
+    if (artifact === undefined || artifact === null) {
+      return isServedOverrideRowOf(row as any, action?.overrides?.package);
+    }
+    const base = artifact?._packageId;
+    if (typeof base !== 'string' || base === '') return false;
+    if (standaloneActionOwnerKey(artifact) !== standaloneActionOwnerKey(action)) return false;
+    return isServedOverrideRowOf(row as any, base);
   }
 
   /**
@@ -4111,8 +4164,10 @@ export class ObjectQLPlugin implements Plugin {
       if (a && typeof a.name === 'string') byKey.set(`${standaloneActionOwnerKey(a)}:${a.name}`, a);
     }
 
+    // [#30065, ADR-0146 D9 `action`] …save a declared `.custom` override of
+    // a shipped action, whose body is bound over the base's handler.
     const bindable = Array.from(byKey.values()).filter(
-      (a) => !this.isArtifactShippedAction(a),
+      (a) => !this.isArtifactShippedAction(a) || this.declaredActionOverrides.has(a),
     );
 
     // Full replace: tear down the package set, then re-register survivors —
@@ -4146,7 +4201,14 @@ export class ObjectQLPlugin implements Plugin {
         skippedNoHandler++; // no body (target/flow/url action) or invalid body shape
         continue;
       }
-      ql.registerAction(standaloneActionOwnerKey(action), action.name, handler, 'metadata-service');
+      // [#30065] A declared override is bound OVER the base's handler, which
+      // the teardown above restores when the override is gone: one resync
+      // rebinds the name, in either direction, with no window between.
+      if (this.declaredActionOverrides.has(action) && typeof ql.registerActionOverride === 'function') {
+        ql.registerActionOverride(standaloneActionOwnerKey(action), action.name, handler, 'metadata-service', action.overrides?.package);
+      } else {
+        ql.registerAction(standaloneActionOwnerKey(action), action.name, handler, 'metadata-service');
+      }
       registered++;
     }
     if (typeof runner !== 'function' && bindable.length > 0) {
