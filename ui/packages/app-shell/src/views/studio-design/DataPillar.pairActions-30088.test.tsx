@@ -96,7 +96,8 @@ const mockClient = {
   layered: vi.fn(async () => ({ effective: servedObject(), code: servedObject() })),
   getDraft: vi.fn(async (type: string, name: string, opts?: { packageId?: string }) =>
     type === 'action' && opts?.packageId === PAIR && srv.pairDrafts[name]
-      ? { type, name, item: srv.pairDrafts[name], version: 'v1' }
+      ? // Served decorated, as the draft read serves it.
+        { type, name, item: { ...srv.pairDrafts[name], _packageId: PAIR }, version: 'v1' }
       : null,
   ),
   get: vi.fn(async () => null),
@@ -278,6 +279,8 @@ describe('Studio adds an action to an installed app’s object, in its customiza
     const [, name, body, opts] = actionSaves()[0]!;
     expect(name).toBe(KEPT.name);
     expect(body).toMatchObject({ name: KEPT.name, label: 'Mark qualified', objectName: OBJECT });
+    // The read's decorations are not written back.
+    expect(body).not.toHaveProperty('_packageId');
     expect(opts).toMatchObject({ mode: 'draft', packageId: PAIR });
     expect(saves().filter(([type]) => type === 'object')).toHaveLength(0);
 

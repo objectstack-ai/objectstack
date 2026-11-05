@@ -96,6 +96,19 @@ export interface PairObjectActions {
 const NO_ROWS: readonly PairActionRow[] = [];
 
 /**
+ * The item's own document: `raw` without its top-level `_` keys. A served row
+ * (and a served draft) carries the read's decorations, `_packageId` among
+ * them; they are the read's, never sent back in a save.
+ */
+function ownBody(raw: unknown): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries((stripReadDecorations(raw) ?? {}) as Record<string, unknown>)) {
+    if (!key.startsWith('_')) body[key] = value;
+  }
+  return body;
+}
+
+/**
  * The pair's actions on `objectName`. `door` null (a writable package, an
  * object the pair adds, a base whose list has not answered) reads nothing and
  * offers nothing; the Actions view then edits `draft.actions` as before.
@@ -169,7 +182,7 @@ export function usePairObjectActions(
         const byName = new Map<string, PairActionRow>();
         const pins = new Map<string, DraftPin | null>();
         for (const raw of pub || []) {
-          const body = stripReadDecorations(raw) as Record<string, unknown>;
+          const body = ownBody(raw);
           const name = typeof body.name === 'string' ? body.name : '';
           if (!name || body.objectName !== objectName) continue;
           byName.set(name, { name, body, published: true, draft: false });
@@ -184,7 +197,8 @@ export function usePairObjectActions(
             if (byName.has(name)) pins.set(name, null);
             return;
           }
-          const body = extractDraftBody(read.answer);
+          const served = extractDraftBody(read.answer);
+          const body = served ? ownBody(served) : null;
           if (!body || body.objectName !== objectName) return;
           byName.set(name, { name, body, published: byName.has(name), draft: true });
           pins.set(name, read.pin);
