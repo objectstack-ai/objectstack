@@ -81,6 +81,7 @@ import MigrateRecordCurrencyCodes from '../commands/migrate/record-currency-code
 import MigrateRecordedBy from '../commands/migrate/recorded-by.js';
 import MigrateResume from '../commands/migrate/resume.js';
 import MigrateSecurityCatalogOverlays from '../commands/migrate/security-catalog-overlays.js';
+import MigrateStoredExpressions from '../commands/migrate/stored-expressions.js';
 import MigrateSummaryNulls from '../commands/migrate/summary-nulls.js';
 import MigrateUnmappedColumns from '../commands/migrate/unmapped-columns.js';
 import MigrateValueShapes from '../commands/migrate/value-shapes.js';
@@ -343,6 +344,13 @@ const CALLERS: Record<string, Caller> = {
       label: 'migrate security-catalog-overlays --apply',
       argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'],
     }],
+  },
+  'commands/migrate/stored-expressions.ts': {
+    run: invoke(MigrateStoredExpressions),
+    // The fixture's app declares no stored computed field, so the walk finds
+    // nothing and `--apply` writes nothing — the boot is what these cases are about.
+    noWrite: [{ label: 'migrate stored-expressions', argv: ['--database-url', '@DB@', '--json'] }],
+    write: [{ label: 'migrate stored-expressions --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
   },
   'commands/migrate/summary-nulls.ts': {
     run: invoke(MigrateSummaryNulls),

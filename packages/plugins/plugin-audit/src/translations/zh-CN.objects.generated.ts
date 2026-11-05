@@ -113,9 +113,9 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     }
   },
   sys_activity: {
-    label: "活动",
-    pluralLabel: "活动",
-    description: "最近活动流条目（轻量、去规范化）",
+    label: "动态",
+    pluralLabel: "动态",
+    description: "最近大家对记录做了什么，按时间从新到旧：谁新建、修改或删除了什么。条目保留 14 天。",
     fields: {
       id: {
         label: "活动 ID"
@@ -192,6 +192,18 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       milestone_key: {
         label: "里程碑键",
         help: "对于已触发的活动里程碑,为该对象 activityMilestones 声明在触发时所监视的全部字段的排序、逗号连接的键;其他行为 NULL。由平台在写入时标记且从不返回:读取规则会将其与当前声明进行比较。"
+      }
+    },
+    _views: {
+      recent: {
+        label: "最近动态",
+        emptyState: {
+          title: "暂无最近动态",
+          message: "大家对记录所做的更改会按时间从新到旧显示在这里。"
+        }
+      },
+      all: {
+        label: "全部条目"
       }
     }
   },
