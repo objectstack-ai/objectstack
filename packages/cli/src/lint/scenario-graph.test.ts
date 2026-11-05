@@ -17,7 +17,8 @@ const objects = [
     label: 'Loan',
     fields: {
       book: { type: 'lookup', label: 'Book', reference: 'book' },
-      borrower: { type: 'user', label: 'Borrower' },
+      // As `Field.user()` writes it: the carrier states the type's fixed target.
+      borrower: { type: 'user', label: 'Borrower', reference: 'sys_user' },
       status: {
         type: 'select',
         label: 'Status',
@@ -96,7 +97,7 @@ function parsedArtifact(stack: Bag): Bag {
 describe('artifactToEvalGraph', () => {
   it('reads a single-package artifact: fields, options, authored references, nested nav, widget measures', () => {
     const artifact = parsedArtifact({ manifest, objects, datasets, dashboards, apps });
-    // The parse materializes `user`'s fixed target; the graph still leaves it out.
+    // The artifact carries `user`'s fixed target; the graph still leaves it out.
     expect(artifact.objects[0].fields.borrower.reference).toBe('sys_user');
     expect(artifactToEvalGraph(artifact)).toEqual(EXPECTED_GRAPH);
   });
