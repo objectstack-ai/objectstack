@@ -3807,6 +3807,9 @@ export class ObjectStackProtocolImplementation implements
             isWritablePackage: (...a) => this.isWritablePackage(...a),
             ensureCustomizationPackage: (...a) => this.ensureCustomizationPackage(...a),
             saveMetaItem: (...a) => this.saveMetaItem(...a),
+            getOverlayRepo: (...a) => this.getOverlayRepo(...a),
+            // [#30000] Awaited here too: the census of `sys_metadata` writes reads every call into the heal.
+            restoreArtifactRegistryView: async (...a) => { await this.restoreArtifactRegistryView(...a); },
         };
         return migratePackagelessOverlays.call(host, request);
     }

@@ -30,6 +30,9 @@
  *    close): listed and moved the same way, never merged over another row of
  *    its item; rows bound to a writable package or to a package that does not
  *    ship the name are not listed.
+ *  - [#30000] THE REGISTRY FOLLOWS THE MOVE: the unbound row's registration
+ *    leaves with the row, so the process holds what a restart holds, with no
+ *    restart (the delete door's heal, run after step 4).
  *
  * Test-path resolution: the protocol is `@objectstack/metadata-protocol`'s
  * `dist/`, so a change there is read here after that package is rebuilt.
@@ -784,5 +787,36 @@ describe('[#28413] adopt-orphans leaves a shipped name to the ceremony', () => {
         expect(result.reassigned).toEqual([{ type: 'view', name: ENV_VIEW }]);
         expect(rows(VIEW)).toEqual([[null, 'active']]);
         expect(rows(ENV_VIEW)).toEqual([[WORKSPACE, 'active']]);
+    });
+});
+
+describe('[#30000] the registry follows the move at once: it holds what a restart holds', () => {
+    /** Every registry entry named `VIEW`, by the columns it serves. */
+    const registered = (engine: ObjectQL) => ((engine.registry as any).listItems('view') as any[])
+        .filter((item) => item?.name === VIEW)
+        .map((item) => columnsOf(item).join(','))
+        .sort();
+
+    it('the moved unbound row leaves no registration behind, and every read serves the same with no restart', async () => {
+        const { engine, protocol, stores } = await boot();
+        await storeRow(engine, VIEW, 'showcase_task', UNBOUND_COLUMNS);
+        expect(await (protocol as any).loadMetaFromDb()).toMatchObject({ errors: 0 });
+        expect(registered(engine)).toEqual([BASE_COLUMNS.join(','), UNBOUND_COLUMNS.join(',')].sort());
+
+        const result = await migrate(protocol);
+        expect(result.outcomes.map((o: any) => o.outcome)).toEqual(['moved']);
+
+        // A restart: a new engine and protocol over the same rows, the pair
+        // ensured, then the boot's hydration.
+        const next = await boot();
+        next.stores.set('sys_metadata', stores.get('sys_metadata')!);
+        await (next.protocol as any).ensureCustomizationPackage({ basePackageId: BASE });
+        expect(await (next.protocol as any).loadMetaFromDb()).toMatchObject({ errors: 0 });
+
+        // The unbound row's registration left with the row, in the same process.
+        expect(registered(engine)).toEqual(registered(next.engine));
+        expect(registered(engine)).not.toContain(UNBOUND_COLUMNS.join(','));
+        expect(await fiveReads(protocol)).toEqual(await fiveReads(next.protocol));
+        expect(await fiveReads(protocol)).toEqual([UNBOUND_COLUMNS, UNBOUND_COLUMNS, UNBOUND_COLUMNS, UNBOUND_COLUMNS, UNBOUND_COLUMNS]);
     });
 });
