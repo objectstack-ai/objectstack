@@ -1424,14 +1424,19 @@ export const SEED_APPLIED_LANDED_IDS_CAP = 200;
 /**
  * [#30348] One capped list of row ids on a `seedApplied` receipt.
  *
- * `ids` is the first {@link SEED_APPLIED_LANDED_IDS_CAP} ids in the order the
- * loader landed them, each once; `total` is how many ids the list holds before
+ * `ids` is the first {@link SEED_APPLIED_LANDED_IDS_CAP} ids in the loader's
+ * record order, each once (its first occurrence): datasets in the order the
+ * loader ran them, and within a dataset the order its records are authored
+ * (`SeedLoadResult.landedIds` / `insertedIds`). It is NOT the order the writes
+ * completed, since the loader buffers inserts and flushes them after the
+ * skips that follow them. `total` is how many ids the list holds before
  * the cap, and `truncated` is `true` exactly when `total` exceeds `ids.length`
  * — the receipt states a cut instead of making a reader count.
  */
 export const SeedAppliedIdListSchema = lazySchema(() => z.object({
   ids: z.array(z.string()).max(SEED_APPLIED_LANDED_IDS_CAP).describe(
-    'Row ids, first-landed first, each once — at most `SEED_APPLIED_LANDED_IDS_CAP` (200).',
+    'Row ids in the loader\'s record order (datasets in load order, records as authored), each once '
+    + '— at most `SEED_APPLIED_LANDED_IDS_CAP` (200).',
   ),
   total: z.number().int().min(0).describe(
     'How many ids the list holds before the cap. Equals `ids.length` unless `truncated`.',

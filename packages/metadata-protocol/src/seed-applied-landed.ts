@@ -37,7 +37,9 @@ function cappedList(ids: readonly string[]): SeedAppliedIdListParsed {
 
 /**
  * Fold the loader's per-dataset results into one entry per object, in the
- * order the objects first loaded. Several datasets of one object merge; an
+ * order the objects first loaded; ids keep the loader's record order (dataset
+ * order, then each dataset's own `landedIds` / `insertedIds` order), first
+ * occurrence kept. Several datasets of one object merge; an
  * id is listed once; an id some dataset of the object INSERTED is never also
  * listed as matched (a second dataset's key matching the row the first one
  * just created does not make it a customer's row). An object whose datasets

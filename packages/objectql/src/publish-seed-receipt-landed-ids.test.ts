@@ -257,6 +257,20 @@ describe('seedApplied.landed — the rows a published seed landed on (#30348)', 
         expect(res.seedApplied.landed[0].matched).toEqual(NONE);
     });
 
+    it('a seed with no records: the loader ran and reported, so one entry with two empty lists', async () => {
+        const { p, engine } = await makeProtocol();
+        await stage(p, [{ type: 'seed', name: 'l_empty', item: seed([]) }]);
+
+        const res: any = await p.publishPackageDrafts({ packageId: PKG });
+
+        expect(await rowsOf(engine)).toEqual([]);
+        expect(res.seedApplied.success).toBe(true);
+        expect(res.seedApplied.inserted).toBe(0);
+        // Reported-and-empty, which is a different answer from an absent key.
+        expect(res.seedApplied.landed).toEqual([{ object: ITEM, inserted: NONE, matched: NONE }]);
+        expect(PublishPackageDraftsResponseSchema.parse(res).seedApplied?.landed).toEqual(res.seedApplied.landed);
+    });
+
     it('a publish with no seed carries no `seedApplied` at all, so no `landed`', async () => {
         const { p } = await makeProtocol();
         await stage(p, [{ type: 'object', name: ITEM, item: {

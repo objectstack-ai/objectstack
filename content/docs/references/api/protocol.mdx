@@ -2975,7 +2975,7 @@ Answer to a device registration: the device id the client keeps
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **ids** | `string[]` | ✅ | Row ids, first-landed first, each once — at most `SEED_APPLIED_LANDED_IDS_CAP` (200). |
+| **ids** | `string[]` | ✅ | Row ids in the loader's record order (datasets in load order, records as authored), each once — at most `SEED_APPLIED_LANDED_IDS_CAP` (200). |
 | **total** | `integer` | ✅ | How many ids the list holds before the cap. Equals `ids.length` unless `truncated`. |
 | **truncated** | `boolean` | ✅ | True when the cap cut the list: `total` ids exist and only the first `ids.length` are carried. |
 
@@ -2996,7 +2996,7 @@ Answer to a device registration: the device id the client keeps
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **ids** | `string[]` | ✅ | Row ids, first-landed first, each once — at most `SEED_APPLIED_LANDED_IDS_CAP` (200). |
+| **ids** | `string[]` | ✅ | Row ids in the loader's record order (datasets in load order, records as authored), each once — at most `SEED_APPLIED_LANDED_IDS_CAP` (200). |
 | **total** | `integer` | ✅ | How many ids the list holds before the cap. Equals `ids.length` unless `truncated`. |
 | **truncated** | `boolean` | ✅ | True when the cap cut the list: `total` ids exist and only the first `ids.length` are carried. |
 
@@ -3004,7 +3004,7 @@ Answer to a device registration: the device id the client keeps
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **ids** | `string[]` | ✅ | Row ids, first-landed first, each once — at most `SEED_APPLIED_LANDED_IDS_CAP` (200). |
+| **ids** | `string[]` | ✅ | Row ids in the loader's record order (datasets in load order, records as authored), each once — at most `SEED_APPLIED_LANDED_IDS_CAP` (200). |
 | **total** | `integer` | ✅ | How many ids the list holds before the cap. Equals `ids.length` unless `truncated`. |
 | **truncated** | `boolean` | ✅ | True when the cap cut the list: `total` ids exist and only the first `ids.length` are carried. |
 
