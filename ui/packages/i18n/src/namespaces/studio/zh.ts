@@ -1424,6 +1424,9 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.objectPicker.showSystem': '显示系统对象（{count}）',
   'engine.inspector.objectPicker.hideSystem': '隐藏系统对象',
   'engine.inspector.objectPicker.noMatch': '没有匹配的对象。按 Enter 保留输入的内容。',
+  // 只接受对象的选择器(新建自动化的触发对象)。
+  'engine.inspector.objectPicker.noMatchObjectsOnly': '没有匹配的对象。请从列表中选择一个。',
+  'engine.inspector.objectPicker.notChosen': '未选择对象：\u201c{text}\u201d不是对象。请从列表中选择一个。',
   // objectstack#28240 — objects outside the edited package's closure.
   'engine.inspector.objectPicker.groupOutside': '不在本软件包的依赖范围内',
   'engine.inspector.objectPicker.showOutside': '显示不在本软件包依赖范围内的对象（{count}）',
@@ -1760,7 +1763,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.packages.detail.discardTitle': '丢弃全部待发布更改（{count}）？',
   'engine.packages.detail.discardDescription': '此应用的所有草稿都将被丢弃，应用回到上次发布的版本。已发布的元数据和数据不受影响。被丢弃的草稿无法恢复。',
   'engine.packages.detail.deleteTitle': '删除 "{name}"？',
-  'engine.packages.detail.deleteDescription': '这会移除此软件包中的所有对象、视图、仪表板和应用。请选择如何处理这些对象中的记录。此操作不可撤销。',
+  'engine.packages.detail.deleteDescription': '这会移除此软件包中的所有对象、视图、仪表盘和应用。请选择如何处理这些对象中的记录。此操作不可撤销。',
   'engine.packages.detail.deleteModeStructure': '仅删除结构，保留记录',
   'engine.packages.detail.deleteModeStructureHint': '移除软件包的元数据。其对象创建的数据库表及其中的所有记录均保留。',
   'engine.packages.detail.deleteModeAll': '删除结构和数据',
@@ -2149,7 +2152,7 @@ const STUDIO_ZH: Record<string, string> = {
   // objectstack#26889 — the rail's sections under the nav tree: the items no entry opens.
   'engine.studio.if.offNav.heading': '不在导航中',
   'engine.studio.if.offNav.page': '页面',
-  'engine.studio.if.offNav.dashboard': '仪表板',
+  'engine.studio.if.offNav.dashboard': '仪表盘',
   'engine.studio.if.offNav.report': '报表',
   'engine.studio.if.offNav.view': '视图',
   'engine.studio.if.openInData': '在「数据」中打开',
@@ -2269,6 +2272,18 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.auto.onUnbound': '已启用 · 无触发器(手动运行)',
   'engine.studio.auto.notRunning': '未在此运行',
   'engine.studio.auto.notRunningTitle': '已启用,但它的触发器在此部署中未生效',
+  'engine.studio.auto.unboundCause.deployment_policy':
+    '此部署关闭了软件包自带的定时任务。负责运维此部署的人可以开启它。',
+  'engine.studio.auto.unboundCause.disabled_subflow':
+    '该流程调用的软件包子流程已关闭，所以该流程不会启动。管理员可以开启那个子流程。',
+  'engine.studio.auto.unboundCause.notice_after_suspending_subflow':
+    '该流程中的保存提示位于一个可能暂停的子流程之后，所以该流程不会启动。把保存提示移到那一步之前，或改用通知步骤。',
+  'engine.studio.auto.unboundCause.suspending_subflow_in_region':
+    '循环、并行分支或异常处理里的子流程调用了一个可能暂停的流程，所以该流程不会启动。把这个调用移到流程的主路径上。',
+  'engine.studio.auto.unboundCause.missing_trigger':
+    '此部署不运行由这类触发器启动的流程。开发人员可以在应用中加入相应的触发器包，之后该流程就会运行。',
+  'engine.studio.auto.unboundCause.binding_failure':
+    '触发器已安装，但把该流程连接到触发器时失败了。开发人员可以在服务器启动警告中找到错误。',
   'engine.studio.auto.unpublishedTitle': '尚未部署 — 发布后才会部署',
   'engine.studio.auto.refused': '引擎拒绝注册',
   'engine.studio.auto.unregisteredTitle': '此部署的自动化引擎未注册该流程',
@@ -3452,6 +3467,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.flowNode.connector_action.hint': '执行集成动作',
   'engine.flowNode.notify.label': '通知',
   'engine.flowNode.notify.hint': '向用户发送外发通知',
+  'engine.flowNode.save_notice.label': '保存提示',
+  'engine.flowNode.save_notice.hint': '告诉保存记录的人，这次保存触发了什么；提示随保存结果一起显示',
   'engine.flowNode.script.label': '脚本',
   'engine.flowNode.script.hint': '运行自定义代码',
   'engine.flowNode.subflow.label': '子流程',
@@ -3775,6 +3792,7 @@ const STUDIO_ZH: Record<string, string> = {
   // 问题面板(ProblemsPanel)。
   'engine.flowProblems.title': '问题',
   'engine.flowProblems.empty': '没有问题 —— 该流程结构有效。',
+  'engine.flowProblems.emptyNotRunning': '结构检查没有发现需要修改的地方。该流程不在此运行的原因见上方说明。',
   'engine.flowProblems.sourceSchema': '架构',
   'engine.flowProblems.sourceExpression': '表达式',
   // objectui#11772 — one extra copy of a connection (see the en row).
@@ -3843,8 +3861,7 @@ const STUDIO_ZH: Record<string, string> = {
     '此画布渲染的是运行态应用，而不是积木树 —— 这里没有可选中的积木，也没有可在本面板编辑的内容。',
   'engine.studio.inspector.listView.kind': '列表视图',
   'engine.studio.inspector.listView.intro': '画布上的就是这个列表。它的列、筛选与排序保存到本包的草稿,并立即显示在画布上。',
-  'engine.studio.inspector.listView.defaultTitle': '{object} · 默认视图',
-  'engine.studio.inspector.listView.namedTitle': '{object} · {view}',
+  'engine.studio.inspector.listView.defaultView': '默认视图',
   'engine.studio.inspector.listView.notCreated': '还没有列表视图「{view}」。在这里做的第一次修改会在本包的草稿中创建它。',
   'engine.studio.inspector.listView.readOnly': '本包只读:这里展示列表视图,不能编辑。',
   'engine.studio.inspector.listView.notList': '「{view}」不是列表视图,因此不在这里编辑。',
@@ -3853,11 +3870,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.inspector.listView.addSort': '+ 添加排序…',
   'engine.studio.inspector.listView.sortAsc': '{field} 升序',
   'engine.studio.inspector.listView.sortDesc': '{field} 降序',
-  'engine.studio.inspector.listView.addView': '添加视图',
   'engine.studio.inspector.listView.addViewTaken': '已经有名为「{name}」的视图,请换一个键。',
-  'engine.studio.inspector.listView.backToEntry': '返回{view}',
-  'engine.studio.inspector.listView.switchView': '视图',
-  'engine.studio.inspector.listView.switchViewDraft': '草稿',
   'engine.studio.inspector.listView.kanbanCard': '看板卡片',
   'engine.studio.inspector.listView.kanbanCard.intro': '看板上每张卡片显示什么,点一张卡片时打开什么。',
   'engine.studio.inspector.listView.kanbanCard.groupByFirst': '先选分组字段:卡片设置随它一起保存。',

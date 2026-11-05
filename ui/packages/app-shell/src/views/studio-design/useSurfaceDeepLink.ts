@@ -62,13 +62,24 @@ import {
 export const DESIGNER_SURFACE_NAV_PARAM = 'nav';
 
 /**
+ * objectstack#30046 — the list view an Interfaces `object` entry shows, when
+ * the author switched it from the view the entry opens:
+ * `?surface=object:<object>&nav=<id>&view=<object>.<key>`. A key of its own,
+ * for the reason `nav` is one; absent while the entry's own view shows, so a
+ * link without it opens the entry as it always did.
+ */
+export const DESIGNER_SURFACE_VIEW_PARAM = 'view';
+
+/**
  * The surface identity carried in the URL: `?surface=` plus, on an Interfaces
- * nav entry, its id from `?nav=` (absent otherwise).
+ * nav entry, its id from `?nav=` and the list view it shows from `?view=`
+ * (each absent otherwise).
  */
 export interface SurfaceTarget {
   type: string;
   name: string;
   navId?: string;
+  viewId?: string;
 }
 
 /**
@@ -76,13 +87,33 @@ export interface SurfaceTarget {
  * back to the URL as it changes. Pass the pillar's open surface — `null`
  * while nothing is selected yet.
  */
-export function useSurfaceDeepLink(
-  current: SurfaceTarget | null | undefined,
-): SurfaceTarget | null {
-  const [searchParams, setSearchParams] = useSearchParams();
+export function useSurfaceDeepLink(current: SurfaceTarget | null | undefined): SurfaceTarget | null {
+  const initial = useSurfaceDeepLinkCapture();
+  useSurfaceDeepLinkMirror(current);
+  return initial;
+}
+
+/** The capture half of {@link useSurfaceDeepLink} alone: the mount-time target. */
+export function useSurfaceDeepLinkCapture(): SurfaceTarget | null {
+  const [searchParams] = useSearchParams();
   const initialRef = React.useRef(
-    parseSurfaceTarget(searchParams.get(DESIGNER_SURFACE_PARAM), searchParams.get(DESIGNER_SURFACE_NAV_PARAM)),
+    parseSurfaceTarget(
+      searchParams.get(DESIGNER_SURFACE_PARAM),
+      searchParams.get(DESIGNER_SURFACE_NAV_PARAM),
+      searchParams.get(DESIGNER_SURFACE_VIEW_PARAM),
+    ),
   );
+  return initialRef.current;
+}
+
+/**
+ * The mirror half of {@link useSurfaceDeepLink} alone. A pillar whose surface
+ * shows a list view passes it as `viewId` (`null` while the surface's own
+ * view shows), so one write carries the surface and its view; one that passes
+ * nothing leaves `?view=` as it is.
+ */
+export function useSurfaceDeepLinkMirror(current: SurfaceTarget | null | undefined, viewId?: string | null): void {
+  const [, setSearchParams] = useSearchParams();
   // Keyed on the identity, not the object — pillars recreate their Surface
   // objects on list reload, and a same-surface rewrite is a wasted render.
   const type = current?.type;
@@ -99,28 +130,33 @@ export function useSurfaceDeepLink(
         // never qualifies a target it was not written for.
         if (navId) next.set(DESIGNER_SURFACE_NAV_PARAM, navId);
         else next.delete(DESIGNER_SURFACE_NAV_PARAM);
+        // objectstack#30046 — the same for the view the surface shows.
+        if (viewId !== undefined) {
+          if (viewId) next.set(DESIGNER_SURFACE_VIEW_PARAM, viewId);
+          else next.delete(DESIGNER_SURFACE_VIEW_PARAM);
+        }
         return next;
       },
       { replace: true },
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [type, name, navId]);
-  return initialRef.current;
+  }, [type, name, navId, viewId]);
 }
 
 /**
- * The deep-link target in a `?surface=` value and a `?nav=` value — the
- * capture half's parse, pure for the tests. `nav` only ever qualifies a
- * surface: alone (no parsable `?surface=`) it names nothing, since the mirror
- * above never writes one without the other.
+ * The deep-link target in a `?surface=` value, a `?nav=` value and a
+ * `?view=` value — the capture half's parse, pure for the tests. `nav` and
+ * `view` only ever qualify a surface: alone (no parsable `?surface=`) they
+ * name nothing, since the mirror above never writes one without it.
  */
 export function parseSurfaceTarget(
   surface: string | null | undefined,
   nav: string | null | undefined,
+  view?: string | null,
 ): SurfaceTarget | null {
   const parsed = parseSurfaceParam(surface);
   if (!parsed) return null;
-  return nav ? { ...parsed, navId: nav } : parsed;
+  return { ...parsed, ...(nav ? { navId: nav } : {}), ...(view ? { viewId: view } : {}) };
 }
 
 /**

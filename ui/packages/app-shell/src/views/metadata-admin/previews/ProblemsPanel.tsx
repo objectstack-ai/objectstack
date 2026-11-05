@@ -28,8 +28,9 @@ export interface ProblemsPanelProps {
    * The flow's run status (objectui#11779), the one the header's Status pill
    * shows. A flow the deployment does not run on its trigger (`not-running`)
    * gets a note above the list: a deployment fact, not an authoring problem,
-   * so it is never counted, never styled as an error, and the structural
-   * verdict below it stands as it is.
+   * so it is never counted and never styled as an error. With no structural
+   * problem, the line below it says the checks found nothing to fix rather
+   * than "no problems", which beneath that note read as a contradiction.
    */
   runStatus?: FlowRunStatus;
   /**
@@ -94,14 +95,20 @@ export function ProblemsPanel({ problems, selectedKey, onSelectProblem, locale, 
           <CircleSlash className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span className="min-w-0 flex-1">
             <span className="block leading-snug text-foreground">{runNote.label}</span>
-            {runNote.title && <span className="mt-0.5 block text-[10px] leading-snug">{runNote.title}</span>}
+            {runNote.title && (
+              <span className="mt-0.5 block text-[10px] leading-snug" title={runNote.detail}>
+                {runNote.title}
+              </span>
+            )}
           </span>
         </div>
       )}
       {problems.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-1.5 p-4 text-center text-muted-foreground">
           <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-          <span>{tr('engine.flowProblems.empty', locale)}</span>
+          <span data-testid="flow-problems-empty">
+            {tr(runNote ? 'engine.flowProblems.emptyNotRunning' : 'engine.flowProblems.empty', locale)}
+          </span>
         </div>
       ) : (
         <ul className="flex-1 overflow-auto p-1.5">

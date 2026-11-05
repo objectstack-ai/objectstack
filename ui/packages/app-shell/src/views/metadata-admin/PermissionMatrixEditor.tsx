@@ -1328,6 +1328,18 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
       const nextObj: ObjectPerm = { ...cur, [action]: value };
       // Cascade: viewAllRecords implies allowRead.
       if (action === 'viewAllRecords' && value) nextObj.allowRead = true;
+      // An object permission that edits or deletes a record also reads it —
+      // the spec refuses Edit or Delete without read on the entry. So Edit or
+      // Delete on ticks Read, and unticking any bit that reads (Read, View
+      // All, Modify All) clears Edit and Delete once no bit that reads is left.
+      // While one still is, the entry stays valid as it is (and clearing
+      // Delete beside Modify All would author the refused #25575 pair).
+      if ((action === 'allowEdit' || action === 'allowDelete') && value) nextObj.allowRead = true;
+      const unticksARead = !value && (action === 'allowRead' || action === 'viewAllRecords' || action === 'modifyAllRecords');
+      if (unticksARead && !nextObj.allowRead && !nextObj.viewAllRecords && !nextObj.modifyAllRecords) {
+        if (nextObj.allowEdit) nextObj.allowEdit = false;
+        if (nextObj.allowDelete) nextObj.allowDelete = false;
+      }
       if (action === 'modifyAllRecords' && value) {
         nextObj.allowEdit = true;
         nextObj.allowRead = true;

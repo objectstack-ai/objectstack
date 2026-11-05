@@ -9,7 +9,8 @@
  * through, and serves the ADR-0056 public-form grant. It then runs the
  * engine-owned write guard and the ADR-0090 D12 delegated-administration gate
  * (whose refusal of a by-id write answers a caller the read door refuses with
- * that read refusal, `readDoorAnswerForGateRefusal`),
+ * that read refusal, and a row the caller's read does not return with the read
+ * door's not-found, `readDoorAnswerForGateRefusal`),
  * resolves the operation's principals and the object's posture, and runs the
  * numbered steps in the order they stand: the `requiredPermissions` AND-gate
  * (1.5), the CRUD check (2), the access depth and an external principal's
@@ -103,6 +104,7 @@ import { declaredHttpStatus } from '@objectstack/types';
 import type { SecurityPlugin } from './security-plugin.js';
 import { isGuestEnvelope, requiredCapsForOperation } from './security-plugin.js';
 import { assertFlowSystemIdentityWriteAllowed } from './flow-system-identity-write-refusal.js';
+import { isUnreadableAddressedRowRefusal } from './delegated-admin-gate.js';
 import { isRowWriteProbe, logGateRefusal, type AuthzMiddlewareFn } from './record-row-write-probe.js';
 import {
   intersectDelegatedScope,
@@ -234,7 +236,8 @@ function userFacingDenialMessage(
 /**
  * [ADR-0090 D12; ruling of record 5985885287] What a by-id write the
  * delegated-administration gate refused answers a caller the read door
- * refuses: that door's refusal.
+ * refuses — that door's refusal — and a caller whose read returns no row for
+ * a write the gate refused for that reason: that door's not-found.
  *
  * The gate judges the caller and the object before any grant is read and
  * before any row is, and words its refusal for the write. The by-id write
@@ -251,8 +254,15 @@ function userFacingDenialMessage(
  *  - the read is REFUSED (a declared 4xx): that refusal is the answer. It is
  *    the read door's answer to this caller for any id, so the row and an id
  *    naming none answer alike, with a version token and without;
- *  - the read ANSWERS (a row, or none): the caller reads the object, and the
- *    gate's own refusal stands, its guidance intact;
+ *  - the read answers NO ROW, and the gate refused because its own read of
+ *    the row returned none (`isUnreadableAddressedRowRefusal`: the
+ *    organization administrator's branch and the delegated branch): the read
+ *    door's not-found, `recordNotFoundError` for this object and id — the
+ *    answer step 2.7 gives every other object, so a row the caller cannot read
+ *    and an id naming none answer alike here too, and as they do everywhere;
+ *  - the read ANSWERS otherwise (a row; or none, under any other refusal of
+ *    the gate): the caller reads the object, and the gate's own refusal
+ *    stands, its guidance intact;
  *  - the read FAULTS: the fault propagates as raised (#7505) — an outage is
  *    neither an answer nor a refusal.
  *
@@ -273,12 +283,16 @@ async function readDoorAnswerForGateRefusal(
   const referentialFieldClear = opCtx.operation === 'update' && opCtx.context?.__referentialFieldClear === true;
   const addressedId = this.addressedByIdWriteId(opCtx, nestedInOperation, referentialFieldClear);
   if (addressedId === undefined) return refusal;
+  let row: Record<string, unknown> | null;
   try {
-    await this.getCallerPreImage(opCtx, addressedId);
+    row = await this.getCallerPreImage(opCtx, addressedId);
   } catch (readRefusal) {
     const readStatus = declaredHttpStatus(readRefusal);
     if (readStatus !== undefined && readStatus < 500) return readRefusal;
     throw readRefusal;
+  }
+  if (row == null && isUnreadableAddressedRowRefusal(refusal)) {
+    return recordNotFoundError(opCtx.object, addressedId as string | number);
   }
   return refusal;
 }
@@ -543,7 +557,8 @@ export function registerAuthzMiddleware(
     //
     // It judges before any grant is read, in its own words; on the by-id
     // update or delete the caller addressed, a caller the read door refuses
-    // is answered that read refusal instead — {@link readDoorAnswerForGateRefusal}.
+    // is answered that read refusal instead, and a row its read does not
+    // return the read door's not-found — {@link readDoorAnswerForGateRefusal}.
     if (this.delegatedAdminGate) {
       try {
         await this.delegatedAdminGate.assert(opCtx);
@@ -1214,7 +1229,14 @@ export function registerAuthzMiddleware(
           // question is the only row-level question asked here, so a row the
           // read door hides (a data middleware's parent-derived visibility
           // included) answers not-found before any later gate can tell it
-          // apart from a missing one.
+          // apart from a missing one. A caller the read door REFUSES (the read
+          // grant withheld, a capability the object requires for a read and
+          // not for a write) is answered that refusal, thrown by the question
+          // itself, for every id alike: a caller who cannot read the object
+          // writes none of its records by id. (The branch above needs no such
+          // step: a caller whose read is refused makes the caller-context
+          // re-read throw for every id, and the record-level 403 is one answer
+          // for all of them.)
           throw recordNotFoundError(opCtx.object, addressedId as string | number);
         }
       }

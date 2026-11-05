@@ -346,8 +346,8 @@ describe('allowDelete: false beside modifyAllRecords: true is REFUSED (Modify Al
   });
 
   it('allowDelete: false WITHOUT modifyAllRecords stays accepted and stays false', () => {
-    expect(ObjectPermissionSchema.parse({ allowEdit: true, allowDelete: false }).allowDelete).toBe(false);
-    expect(ObjectPermissionSchema.parse({ allowEdit: true, allowDelete: false, modifyAllRecords: false }).allowDelete)
+    expect(ObjectPermissionSchema.parse({ allowRead: true, allowEdit: true, allowDelete: false }).allowDelete).toBe(false);
+    expect(ObjectPermissionSchema.parse({ allowRead: true, allowEdit: true, allowDelete: false, modifyAllRecords: false }).allowDelete)
       .toBe(false);
     // viewAllRecords is the READ bypass only; it does not imply delete.
     expect(ObjectPermissionSchema.parse({ allowRead: true, allowDelete: false, viewAllRecords: true }).allowDelete)
@@ -355,7 +355,7 @@ describe('allowDelete: false beside modifyAllRecords: true is REFUSED (Modify Al
   });
 
   it('an entry without modifyAllRecords keeps the false default for allowDelete', () => {
-    expect(ObjectPermissionSchema.parse({ allowEdit: true }).allowDelete).toBe(false);
+    expect(ObjectPermissionSchema.parse({ allowRead: true, allowEdit: true }).allowDelete).toBe(false);
   });
 
   it('the WIRE surface stays tolerant and writes nothing in', () => {
@@ -368,6 +368,96 @@ describe('allowDelete: false beside modifyAllRecords: true is REFUSED (Modify Al
   it('the stage in front keeps the shape read-through the schema walkers read', () => {
     expect(Object.keys(ObjectPermissionSchema.shape)).toContain('allowDelete');
     expect(Object.keys(ObjectPermissionSchema.shape)).toContain('modifyAllRecords');
+  });
+});
+
+describe('an object permission that edits or deletes a record also reads it', () => {
+  // ── REFUSAL direction ────────────────────────────────────────────────
+  for (const bit of ['allowEdit', 'allowDelete'] as const) {
+    it(`${bit}: true without read on the same entry is refused, at the ${bit} path`, () => {
+      const r = ObjectPermissionSchema.safeParse({ [bit]: true });
+      expect(r.success).toBe(false);
+      const issues = r.error!.issues.filter((i) => i.path[i.path.length - 1] === bit);
+      expect(issues, 'exactly one issue, LOCATED on the key the author must change').toHaveLength(1);
+      expect(issues[0].code).toBe('custom');
+      // The prescription names both routes.
+      expect(issues[0].message).toContain('allowRead: true');
+      expect(issues[0].message).toContain(`delete ${bit}`);
+    });
+
+    it(`${bit}: true beside an explicit allowRead: false is refused too`, () => {
+      const r = ObjectPermissionSchema.safeParse({ allowRead: false, allowCreate: true, [bit]: true });
+      expect(r.success).toBe(false);
+      expect(r.error!.issues.map((i) => i.path.join('.'))).toEqual([bit]);
+    });
+  }
+
+  it('an entry granting both without read gets one issue per bit', () => {
+    const r = ObjectPermissionSchema.safeParse({ allowCreate: true, allowEdit: true, allowDelete: true });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues.map((i) => i.path.join('.')).sort()).toEqual(['allowDelete', 'allowEdit']);
+  });
+
+  it('the refusal reaches through a whole permission set, wildcard entry included', () => {
+    const r = PermissionSetSchema.safeParse({
+      name: 'writer_without_read',
+      objects: {
+        crm_lead: { allowCreate: true, allowEdit: true },
+        '*': { allowDelete: true },
+      },
+    });
+    expect(r.success).toBe(false);
+    const paths = r.error!.issues.map((i) => i.path.join('.'));
+    expect(paths).toContain('objects.crm_lead.allowEdit');
+    expect(paths).toContain('objects.*.allowDelete');
+  });
+
+  it('the refusal reaches through the stack schema a built artifact is read with', () => {
+    const stack = ObjectStackDefinitionSchema.safeParse({
+      manifest: { id: 'com.example.writer', name: 'writer', version: '1.0.0', type: 'app' },
+      permissions: [{ name: 'writer', objects: { crm_lead: { allowEdit: true } } }],
+    });
+    expect(stack.success).toBe(false);
+    expect(stack.error!.issues.map((i) => i.path.join('.'))).toContain('permissions.0.objects.crm_lead.allowEdit');
+  });
+
+  // ── COST direction: what the refusal must NOT cost ───────────────────
+  it('every bit that reads satisfies the rule: allowRead, viewAllRecords, modifyAllRecords', () => {
+    expect(ObjectPermissionSchema.safeParse({ allowRead: true, allowEdit: true, allowDelete: true }).success).toBe(true);
+    expect(ObjectPermissionSchema.safeParse({ viewAllRecords: true, allowEdit: true, allowDelete: true }).success).toBe(true);
+    // Modify All implies read, and parses to allowDelete: true (#25575).
+    const modifyAll = ObjectPermissionSchema.parse({ modifyAllRecords: true });
+    expect(modifyAll.allowDelete).toBe(true);
+    expect(modifyAll.allowRead).toBe(false);
+  });
+
+  it('read alone, create alone and an empty entry stay accepted', () => {
+    expect(ObjectPermissionSchema.safeParse({ allowRead: true }).success).toBe(true);
+    expect(ObjectPermissionSchema.safeParse({ allowCreate: true }).success).toBe(true);
+    expect(ObjectPermissionSchema.safeParse({}).success).toBe(true);
+    expect(ObjectPermissionSchema.safeParse({ allowEdit: false, allowDelete: false }).success).toBe(true);
+  });
+
+  it('the WIRE surface stays tolerant of an entry an older server stored', () => {
+    // #4001's authorable/wire split, as for the pairs above.
+    const parsed = EffectiveObjectPermissionSchema.parse({ allowEdit: true, allowDelete: true });
+    expect(parsed.allowEdit).toBe(true);
+    expect(parsed.allowDelete).toBe(true);
+  });
+
+  it('the fold grants neither verb to such an entry: read ∧ grant', () => {
+    // The runtime half: a row stored before the refusal existed edits nothing unread.
+    expect(objectPermissionGrants({ allowEdit: true }, 'allowEdit')).toBe(false);
+    expect(objectPermissionGrants({ allowDelete: true }, 'allowDelete')).toBe(false);
+    expect(objectPermissionGrants({ allowRead: true, allowEdit: true }, 'allowEdit')).toBe(true);
+    expect(objectPermissionGrants({ allowRead: true, allowDelete: true }, 'allowDelete')).toBe(true);
+    // Either read bypass satisfies the read half; only Modify All satisfies the grant half alone.
+    expect(objectPermissionGrants({ viewAllRecords: true, allowEdit: true }, 'allowEdit')).toBe(true);
+    expect(objectPermissionGrants({ viewAllRecords: true, allowDelete: true }, 'allowDelete')).toBe(true);
+    expect(objectPermissionGrants({ modifyAllRecords: true }, 'allowEdit')).toBe(true);
+    // Create and transfer are not part of this rule.
+    expect(objectPermissionGrants({ allowCreate: true }, 'allowCreate')).toBe(true);
+    expect(objectPermissionGrants({ allowTransfer: true }, 'allowTransfer')).toBe(true);
   });
 });
 
