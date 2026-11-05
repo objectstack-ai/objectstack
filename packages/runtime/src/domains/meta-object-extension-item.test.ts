@@ -382,7 +382,7 @@ describe('[ADR-0146 D10] a module\'s extension that re-declares the base\'s fiel
     it('a draft stored before the rule is refused at publish, and stays a draft', async () => {
         const rig = await bootWithModule();
         await rig.engine.insert('sys_metadata', {
-            type: TYPE, name: TARGET, package_id: MODULE, state: 'draft', organization_id: null,
+            type: TYPE, name: TARGET, package_id: MODULE, state: 'draft',
             metadata: JSON.stringify({ extend: TARGET, fields: { name: { type: 'textarea', label: 'Name' } } }),
         }, { context: { isSystem: true } });
         let caught: any;
