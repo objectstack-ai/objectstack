@@ -2653,6 +2653,9 @@ export class SettingsService {
   /**
    * Ask each patched key's {@link SettingsWritePredicate}, when the patch
    * changes the key, and refuse the whole batch with every refusal at once.
+   * Each is handed the whole patch as `batch`, so a rule over several keys
+   * judges the state after the write rather than one key against the rest
+   * as they stand.
    *
    * "Changes" compares the submitted value (`null` / `undefined` read as a
    * clear) with the value the caller's cascade resolves today, so re-saving
@@ -2669,6 +2672,10 @@ export class SettingsService {
   ): Promise<void> {
     const byKey = this.writePredicates.get(namespace);
     if (!byKey) return;
+    // The whole write, so a rule over several keys judges the state after it.
+    const batch: Readonly<Record<string, unknown>> = Object.freeze(
+      Object.fromEntries(Object.entries(patch).map(([key, submitted]) => [key, submitted ?? null])),
+    );
     const refusals: FieldError[] = [];
     for (const [key, submitted] of Object.entries(patch)) {
       const predicate = byKey.get(key);
@@ -2678,7 +2685,7 @@ export class SettingsService {
       if (stableStringify(next) === stableStringify(current)) continue;
       const scope = reg.scopes.get(key)!;
       const organizationId = scope === 'global' || !reach ? undefined : organizationReachRowOwner(reach) ?? null;
-      const refusal = await predicate({ namespace, key, next, current, organizationId, ctx, locale: display.locale });
+      const refusal = await predicate({ namespace, key, next, current, organizationId, ctx, locale: display.locale, batch });
       if (!refusal) continue;
       const spec = ((reg.manifest.specifiers ?? []) as Array<Record<string, unknown>>)
         .find((s) => s.key === key);

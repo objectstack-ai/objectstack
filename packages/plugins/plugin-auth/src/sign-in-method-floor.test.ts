@@ -22,7 +22,13 @@
  *      provider is refused, and the same change is accepted where something
  *      else keeps a way in;
  *   5. recovery: a stored `false` from before this check is overridden by
- *      `OS_AUTH_EMAIL_PASSWORD_ENABLED=true` (control: without it, it rules).
+ *      `OS_AUTH_EMAIL_PASSWORD_ENABLED=true` (control: without it, it rules);
+ *   6. the whole save is judged, not each key against the rest as they stand:
+ *      email and password off together with Google off (or its secret cleared)
+ *      is refused at both keys, and Google filled in, or switched on over a
+ *      stored credential pair, in the same save as email and password off is
+ *      accepted;
+ *   7. a provider listed without a credential pair is no way in.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -39,7 +45,7 @@ import {
 import { AuthPlugin } from './auth-plugin.js';
 import type { AuthManager } from './auth-manager.js';
 import { SSO_PROVIDER_OBJECT } from './sso-client-secret.js';
-import { SIGN_IN_FLOOR_COPY } from './sign-in-method-floor.js';
+import { SIGN_IN_FLOOR_COPY, providerCredentialIndex } from './sign-in-method-floor.js';
 
 const SECRET = 'test-secret-at-least-32-chars-long';
 
@@ -314,6 +320,85 @@ describe('the auth settings save keeps a way to sign in', () => {
     expect(await alone.settings.get('auth', 'google_client_secret')).toMatchObject({ source: 'default' });
     await new Promise((resolve) => setTimeout(resolve, 10)); // the pass re-runs on the change
     expect(googleOn(alone.manager)).toBe(true);
+  });
+
+  // ── 6. The whole save, not one key at a time ──────────────────────────────
+
+  it('refuses email and password off together with Google off, or its secret cleared, at both keys', async () => {
+    const { settings, manager } = await boot();
+    await saveGoogle(settings, manager);
+
+    for (const [googleKey, value] of [['google_enabled', false], ['google_client_secret', null]] as const) {
+      const refusal = await refusalOf(settings.setMany('auth', { email_password_enabled: false, [googleKey]: value }));
+      expect(refusal.fields).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: 'email_password_enabled', constraint: { lastSignInMethod: 'email_password' } }),
+          expect.objectContaining({ field: googleKey, constraint: { lastSignInMethod: 'google' } }),
+        ]),
+      );
+      expect(refusal.fields).toHaveLength(2);
+    }
+    expect(await settings.get('auth', 'email_password_enabled')).toMatchObject({ value: true, source: 'default' });
+    expect(await settings.get('auth', 'google_enabled')).toMatchObject({ value: true });
+    expect(await settings.get('auth', 'google_client_secret')).toMatchObject({ value: GOOGLE.google_client_secret });
+    expect(passwordOn(manager)).toBe(true);
+    expect(googleOn(manager)).toBe(true);
+  });
+
+  it('accepts Google filled in, in the same save that turns email and password off', async () => {
+    const { settings, manager } = await boot();
+
+    await settings.setMany('auth', { ...GOOGLE, email_password_enabled: false });
+    await vi.waitFor(() => expect(passwordOn(manager)).toBe(false));
+    expect(googleOn(manager)).toBe(true);
+  });
+
+  it('accepts Google switched on over a stored credential pair, in the same save', async () => {
+    const { settings, manager } = await boot();
+    await settings.setMany('auth', { ...GOOGLE, google_enabled: false });
+    await vi.waitFor(() => expect(googleOn(manager)).toBe(false));
+
+    // Only the switch rides in this save: the pair is read as stored.
+    await settings.setMany('auth', { google_enabled: true, email_password_enabled: false });
+    await vi.waitFor(() => expect(passwordOn(manager)).toBe(false));
+    expect(googleOn(manager)).toBe(true);
+  });
+
+  it('refuses Google switched on with half a credential pair, in the same save', async () => {
+    const { settings, manager } = await boot();
+    const refusal = await refusalOf(
+      settings.setMany('auth', { google_enabled: true, google_client_id: 'only-the-id', email_password_enabled: false }),
+    );
+    expect(refusal.fields).toEqual([
+      expect.objectContaining({ field: 'email_password_enabled', constraint: { lastSignInMethod: 'email_password' } }),
+    ]);
+    expect(passwordOn(manager)).toBe(true);
+  });
+
+  // ── 7. A provider without a credential pair ──────────────────────────────
+
+  it('a stack-config provider listed without a credential pair is no way in', async () => {
+    const { settings, manager } = await boot({
+      pluginOptions: { socialProviders: { github: { clientId: 'gh-id', clientSecret: ' ' } } },
+    });
+    expect(manager.getPublicConfig().socialProviders.map((p: { id: string }) => p.id)).toContain('github');
+
+    await refusalOf(settings.setMany('auth', { email_password_enabled: false }));
+    expect(passwordOn(manager)).toBe(true);
+  });
+
+  it('indexes each boot provider, social and OIDC, by whether it holds both credentials', () => {
+    const index = providerCredentialIndex(
+      { github: { clientId: 'id', clientSecret: 'secret' }, gitlab: { clientId: 'id', clientSecret: '' } },
+      [{ providerId: 'okta', clientId: 'id', clientSecret: 'secret' }, { providerId: 'azure', clientId: '', clientSecret: 's' }],
+    );
+    expect(Object.fromEntries(index)).toEqual({
+      'social:github': true,
+      'social:gitlab': false,
+      'oidc:okta': true,
+      'oidc:azure': false,
+    });
+    expect(providerCredentialIndex(undefined, undefined).size).toBe(0);
   });
 
   // ── 5. Recovery for a deployment that already stored the dead end ─────────

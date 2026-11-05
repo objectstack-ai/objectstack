@@ -108,7 +108,7 @@ import {
   reportIfNoSignInAccountExists,
   type SignInPathConfigView,
 } from './boot-sign-in-reachability.js';
-import { registerSignInMethodFloor } from './sign-in-method-floor.js';
+import { providerCredentialIndex, registerSignInMethodFloor } from './sign-in-method-floor.js';
 import { judgePlatformAdmin, isPlatformAdminUser, type PlatformAdminActor } from './platform-admin-gate.js';
 import {
   decideDemoStaffEnvironmentGate,
@@ -532,6 +532,8 @@ export class AuthPlugin implements Plugin {
   private allowListUndeterminedWarned = false;
   private allowListUntrustedHeaderWarned = false;
   private configuredSocialProviders: SocialProviderConfig | undefined;
+  /** Whether each provider declared at boot holds a credential pair (the sign-in floor's count). */
+  private bootProviderCredentials: ReadonlyMap<string, boolean> = new Map();
   // ADR-0092 D6 — the EFFECTIVE better-auth secondaryStorage (host-supplied or
   // the kernel-cache adapter wired in init). The identity write guard's
   // session-snapshot refresh reads through this; undefined = refresh no-ops.
@@ -729,6 +731,7 @@ export class AuthPlugin implements Plugin {
     this.configuredSocialProviders = authConfig.socialProviders
       ? { ...authConfig.socialProviders }
       : undefined;
+    this.bootProviderCredentials = providerCredentialIndex(authConfig.socialProviders, authConfig.oidcProviders);
 
     // [ADR-0105 D8] Lazy handle to plugin-security's `invitation-placement`
     // service. LAZY on purpose: plugin-security starts after plugin-auth, so
@@ -2064,6 +2067,9 @@ export class AuthPlugin implements Plugin {
         },
         hostSignInHandoff: this.options.hostSignInHandoff === true,
         stackConfiguredGoogle: () => !!this.configuredSocialProviders?.google,
+        // Not declared at boot = the Google the settings added, which the apply
+        // adds only with a client ID and secret.
+        providerHasCredentials: ({ id, type }) => this.bootProviderCredentials.get(`${type}:${id}`) ?? true,
         env: () => ((globalThis as any)?.process?.env ?? {}) as Record<string, string | undefined>,
       },
       ctx.logger,

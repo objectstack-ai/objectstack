@@ -357,6 +357,15 @@ export interface SettingsWritePredicateInput {
   ctx: SettingsContext;
   /** The language the refusal is written in — {@link SettingsDisplayOptions.locale}. */
   locale?: string;
+  /**
+   * Every key this write sets in the namespace, this one among them, with the
+   * value it would store (`null` clears; a secret as submitted, as `next`
+   * carries it). `setMany` always passes it. A rule that spans keys judges the
+   * state AFTER the whole write from it: asked one key at a time against the
+   * values in force, two changes can each pass while together they break the
+   * rule.
+   */
+  batch?: Readonly<Record<string, unknown>>;
 }
 
 /**
