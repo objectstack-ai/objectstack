@@ -4,6 +4,11 @@ import { describe, it, expect, vi } from 'vitest';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
 import { registerDatasourceAdminRoutes } from '../admin-routes.js';
 import {
+  DatasourceAdminService,
+  type DatasourceAdminServiceConfig,
+  type StoredDatasource,
+} from '../datasource-admin-service.js';
+import {
   ENTITLED_CREDENTIAL,
   createSessionAuthService,
   createGrantsEngine,
@@ -365,6 +370,119 @@ describe('registerDatasourceAdminRoutes (real HonoHttpServer)', () => {
     expect(await res.json()).toEqual({
       success: false,
       error: { code: 'DATASOURCE_ADMIN_ERROR', message: 'duplicate name' },
+    });
+  });
+});
+
+/**
+ * [#30444] The bound-object refusal of `DELETE /datasources/:name` names its
+ * reason and the bound objects in `error.details`, over the REAL admin service
+ * and the real routes, so a client can tell it from every other 400 of the
+ * family and name the objects in its own language. Status, code and message
+ * are unchanged.
+ */
+describe('DELETE /datasources/:name — the bound-object refusal carries details (#30444)', () => {
+  interface Opts {
+    /** The diagnosed read the host reports; omit for a host predating it. */
+    diagnosed?: { count: number; degraded: boolean; errors: string[]; objects?: string[] };
+    plainCount?: number;
+  }
+
+  function deleteHarness(opts: Opts = {}) {
+    const records: StoredDatasource[] = [
+      { name: 'parts_db', driver: 'sqlite', origin: 'runtime' } as StoredDatasource,
+      { name: 'code_db', driver: 'sqlite', origin: 'code' } as StoredDatasource,
+    ];
+    const config = {
+      probe: async () => ({ ok: true }),
+      listDatasourceRecords: async () => records,
+      getDatasourceRecord: async (n: string) => records.find((r) => r.name === n),
+      putDatasourceRecord: async () => {},
+      deleteDatasourceRecord: async (n: string) => {
+        const i = records.findIndex((r) => r.name === n);
+        if (i >= 0) records.splice(i, 1);
+      },
+      writeSecret: async () => 'sys_secret://unused',
+      countBoundObjects: async () => opts.plainCount ?? opts.diagnosed?.count ?? 0,
+      ...(opts.diagnosed ? { countBoundObjectsDiagnosed: async () => opts.diagnosed! } : {}),
+      // A DIFFERENT answer from the count's read, on purpose: the names must
+      // come from the read the count came from, never from a second scan.
+      listObjectsBoundTo: async () => [{ name: 'ghost' }],
+      unregisterPool: () => {},
+    } as unknown as DatasourceAdminServiceConfig;
+    const app = mountServices({ 'datasource-admin': new DatasourceAdminService(config) });
+    return {
+      del: (name: string) => app.fetch(json(`/api/v1/datasources/${name}`, { method: 'DELETE' })),
+      exists: (name: string) => records.some((r) => r.name === name),
+    };
+  }
+
+  it('two bound objects: 400 DATASOURCE_ADMIN_ERROR, the same message, and both names sorted in details', async () => {
+    const h = deleteHarness({
+      diagnosed: { count: 2, degraded: false, errors: [], objects: ['part', 'bin'] },
+    });
+
+    const res = await h.del('parts_db');
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      success: false,
+      error: {
+        code: 'DATASOURCE_ADMIN_ERROR',
+        message: "Cannot remove datasource 'parts_db': 2 object(s) are still bound to it.",
+        details: { reason: 'objects_bound', count: 2, objects: ['bin', 'part'] },
+      },
+    });
+    expect(h.exists('parts_db'), 'the refused datasource survives').toBe(true);
+  });
+
+  it('a host whose read reports only the number answers the count without names', async () => {
+    const h = deleteHarness({ plainCount: 3 });
+
+    const body = (await (await h.del('parts_db')).json()) as any;
+
+    expect(body.error.code).toBe('DATASOURCE_ADMIN_ERROR');
+    expect(body.error.details).toEqual({ reason: 'objects_bound', count: 3 });
+  });
+
+  it('a datasource with nothing bound deletes as before (204)', async () => {
+    const h = deleteHarness({ diagnosed: { count: 0, degraded: false, errors: [], objects: [] } });
+
+    const res = await h.del('parts_db');
+
+    expect(res.status).toBe(204);
+    expect(h.exists('parts_db')).toBe(false);
+  });
+
+  it('another 400 of the same door (a code-defined datasource) carries no details', async () => {
+    const h = deleteHarness({ diagnosed: { count: 2, degraded: false, errors: [], objects: ['bin', 'part'] } });
+
+    const res = await h.del('code_db');
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      success: false,
+      error: {
+        code: 'DATASOURCE_ADMIN_ERROR',
+        message: "Datasource 'code_db' is code-defined and cannot be removed at runtime.",
+      },
+    });
+  });
+
+  it('an error that carries a stray `details` but not the 400 envelope answers the bare message', async () => {
+    // A driver or library error may carry a field named `details`; only a
+    // refusal that declared the route's own `400` code relays it.
+    const thrown = Object.assign(new Error('backing store offline'), {
+      details: { host: 'db.internal', table: 'sys_datasource' },
+    });
+    const app = mountServices({ 'datasource-admin': { removeDatasource: async () => { throw thrown; } } });
+
+    const res = await app.fetch(json('/api/v1/datasources/parts_db', { method: 'DELETE' }));
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      success: false,
+      error: { code: 'DATASOURCE_ADMIN_ERROR', message: 'backing store offline' },
     });
   });
 });
