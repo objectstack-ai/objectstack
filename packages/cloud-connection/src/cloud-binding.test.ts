@@ -81,7 +81,7 @@ describe('CloudConnectionPlugin — registers the binding in init()', () => {
             getService: (name: string) => services.get(name),
             registerService: (name: string, service: unknown) => services.set(name, service),
             logger: { warn() {} },
-        });
+        } as never);
         expect(plugin.providesServices).toContain(CLOUD_BINDING_SERVICE);
         const binding = services.get(CLOUD_BINDING_SERVICE) as ICloudBindingService;
         expect(binding.bound()).toBe(false);

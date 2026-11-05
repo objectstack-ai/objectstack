@@ -204,13 +204,14 @@ describe('PushServiceConfigSchema — direct vendor blocks', () => {
 // (ADR-0049: a marker states a fact). The relay is refused at boot until its
 // sender ships (#29920), so its block keeps a marker that says so.
 describe('push transport configuration is read', () => {
-  it('marks the relay block not yet served, and says the push service refuses it', () => {
-    expect(PushRelayTransportConfigSchema.description).toMatch(/^\[PLANNED — not yet served\] /);
-    expect(PushRelayTransportConfigSchema.description).toMatch(/refuses it at boot/);
+  it('describes the relay block as served, sending once the server is bound (#29920)', () => {
+    expect(PushRelayTransportConfigSchema.description).not.toMatch(/PLANNED/);
+    expect(PushRelayTransportConfigSchema.description).toMatch(/once the server is bound to the cloud/);
   });
 
   it.each([
     ['PushServiceConfigSchema', PushServiceConfigSchema],
+    ['PushRelayTransportConfigSchema', PushRelayTransportConfigSchema],
     ['PushDirectTransportConfigSchema', PushDirectTransportConfigSchema],
     ['ApnsTransportConfigSchema', ApnsTransportConfigSchema],
     ['FcmTransportConfigSchema', FcmTransportConfigSchema],
