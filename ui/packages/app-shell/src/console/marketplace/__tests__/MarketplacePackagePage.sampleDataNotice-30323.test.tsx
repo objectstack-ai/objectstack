@@ -5,6 +5,9 @@
  * records the install loaded and offers the clear right there; the clear is
  * confirmed in the console's own dialog, with that count; and a banner
  * follows the installer to the app once they leave the page (objectstack#30323).
+ * After a reload, the runtime's own count of the sample rows a purge would
+ * delete (`GET …/sample-data`) fills the same count and banner on any visit
+ * (objectstack#30616).
  *
  * Sample data stays ON by default (the maintainer's ruling on the card): every
  * case installs WITH it, and what is pinned is how it is announced and cleared.
@@ -55,10 +58,17 @@ vi.mock('../ConnectorCredentialsStep', () => ({
 
 import { initRuntimeConfig, resetRuntimeConfigForTesting } from '../../../runtime-config';
 import { MarketplacePackagePage } from '../MarketplacePackagePage';
-import { resetSampleDataSessionForTesting } from '../sampleDataNotice';
+import {
+  noteServedSampleCount,
+  rememberSampleData,
+  resetSampleDataSessionForTesting,
+  sampleDataGeneration,
+  sampleDataNotice,
+} from '../sampleDataNotice';
 
 const LEDGER = '/api/v1/marketplace/install-local';
 const PURGE = `${LEDGER}/com.acme.crm/purge-sample-data`;
+const COUNT = `${LEDGER}/com.acme.crm/sample-data`;
 const CATALOG_PACKAGE = {
   package: { id: 'pkg_crm', manifest_id: 'com.acme.crm', display_name: 'Acme CRM', latest_version: { id: 'ver_1', version: '6.0.0' } },
   versions: [{ id: 'ver_1', version: '6.0.0' }],
@@ -78,8 +88,13 @@ const answer = (status: number, body: unknown) => ({
 
 let calls: Array<{ method: string; path: string }> = [];
 
-/** `installed`: the ledger before the install; the install puts the entry (with sample data) in it. */
-async function boot(installData: Record<string, unknown>, opts: { installed?: Record<string, unknown> } = {}) {
+/**
+ * `installed`: the ledger before the install; the install puts the entry (with sample data) in it.
+ * `served`: what `GET …/sample-data` answers, per call (the n-th read gets the n-th entry, the last
+ * repeats); a function is awaited, so a read can be held. Absent: the route answers 404.
+ */
+type Served = { count: number; unidentified?: number } | number | (() => Promise<{ count: number }>);
+async function boot(installData: Record<string, unknown>, opts: { installed?: Record<string, unknown>; served?: Served[] } = {}) {
   resetRuntimeConfigForTesting();
   calls = [];
   let ledger: Array<Record<string, unknown>> = opts.installed ? [opts.installed] : [];
@@ -98,6 +113,14 @@ async function boot(installData: Record<string, unknown>, opts: { installed?: Re
     if (path === LEDGER && method === 'POST') {
       ledger = [{ ...ENTRY, withSampleData: true }];
       return answer(200, { success: true, data: installData });
+    }
+    if (path === COUNT && method === 'GET' && opts.served) {
+      const reads = calls.filter((c) => c.path === COUNT).length;
+      const next = opts.served[Math.min(reads, opts.served.length) - 1];
+      const body = typeof next === 'function' ? await next() : next;
+      return typeof body === 'number'
+        ? answer(body, { success: false, error: { code: 'FORBIDDEN', message: 'refused' } })
+        : answer(200, { success: true, data: { manifestId: 'com.acme.crm', unidentified: 0, ...body } });
     }
     if (path === PURGE && method === 'POST') {
       ledger = ledger.map((e) => ({ ...e, withSampleData: false }));
@@ -280,5 +303,105 @@ describe('a banner follows the installer to the app\'s pages (objectstack#30323)
     view.rerender(<Shell page={false} />);
     await act(async () => {});
     expect(document.querySelector('[data-notification-surface="banner"]')).toBeNull();
+  });
+});
+
+describe('after a reload, the runtime\'s count fills the confirm and the banner (objectstack#30616)', () => {
+  const countReads = () => calls.filter((c) => c.path === COUNT);
+
+  async function openMenuPurge() {
+    fireEvent.pointerDown(await screen.findByRole('button', { name: '«marketplace.detail.moreOptions»' }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole('menuitem', { name: '«marketplace.detail.purgeSampleData»' }));
+    return screen.findByTestId('purge-sample-data-dialog');
+  }
+
+  it('a visit with no install this session reads the count, and the confirm says it', async () => {
+    await boot({ ...MANAGED }, { installed: { ...ENTRY, withSampleData: true }, served: [{ count: 42 }] });
+    render(<MarketplacePackagePage />);
+
+    await waitFor(() => expect(countReads()).toEqual([{ method: 'GET', path: COUNT }]));
+    const dialog = await openMenuPurge();
+    await waitFor(() => expect(dialog).toHaveTextContent('«marketplace.detail.purgeConfirmAtMost|count=42»'));
+    expect(dialog).toHaveTextContent('«marketplace.detail.purgeConfirm»');
+  });
+
+  it('the count raises the banner on leaving, as an install of this session does', async () => {
+    await boot({ ...MANAGED }, { installed: { ...ENTRY, withSampleData: true }, served: [{ count: 42 }] });
+    const view = render(<Shell page />);
+    await waitFor(() => expect(sampleDataNotice('com.acme.crm')?.count).toBe(42));
+
+    view.rerender(<Shell page={false} />);
+    expect(await screen.findByText('«marketplace.detail.sampleDataBannerTitle|name=Acme CRM»')).toBeInTheDocument();
+  });
+
+  it('`count: 0` drops the record this session held: no banner on leaving, no count in the confirm', async () => {
+    rememberSampleData({ manifestId: 'com.acme.crm', name: 'Acme CRM', count: 369, path: '/apps/setup/system/marketplace/pkg_crm' });
+    await boot({ ...MANAGED }, { installed: { ...ENTRY, withSampleData: true }, served: [{ count: 0 }] });
+    const view = render(<Shell page />);
+    await waitFor(() => expect(countReads()).toHaveLength(1));
+    await waitFor(() => expect(sampleDataNotice('com.acme.crm')).toBeUndefined());
+
+    const dialog = await openMenuPurge();
+    expect(dialog).toHaveTextContent('«marketplace.detail.purgeConfirm»');
+    expect(dialog).not.toHaveTextContent('purgeConfirmAtMost');
+    fireEvent.click(within(dialog).getByRole('button', { name: '«common.cancel»' }));
+
+    view.rerender(<Shell page={false} />);
+    await act(async () => {});
+    expect(screen.queryByText('«marketplace.detail.sampleDataBannerTitle|name=Acme CRM»')).not.toBeInTheDocument();
+  });
+
+  it('an install is read again: the runtime\'s count, read after the install answered, is the one drawn', async () => {
+    await boot({ ...MANAGED, seeded: SEEDED_369 }, { served: [{ count: 360 }] });
+    await install();
+    await screen.findByTestId('install-sample-data');
+    await waitFor(() => expect(countReads()).toHaveLength(1));
+
+    fireEvent.click(await screen.findByTestId('install-sample-data-clear'));
+    const dialog = await screen.findByTestId('purge-sample-data-dialog');
+    await waitFor(() => expect(dialog).toHaveTextContent('«marketplace.detail.purgeConfirmAtMost|count=360»'));
+    // The install note keeps what the install answered.
+    expect(screen.getByTestId('install-sample-data')).toHaveTextContent('«marketplace.detail.sampleDataLoaded|count=369»');
+  });
+
+  it('CONTROL: a refused or failed read keeps the count this session\'s install answered', async () => {
+    await boot({ ...MANAGED, seeded: SEEDED_369 }, { served: [403] });
+    await install();
+    await screen.findByTestId('install-sample-data');
+    await waitFor(() => expect(countReads()).toHaveLength(1));
+
+    fireEvent.click(await screen.findByTestId('install-sample-data-clear'));
+    const dialog = await screen.findByTestId('purge-sample-data-dialog');
+    expect(dialog).toHaveTextContent('«marketplace.detail.purgeConfirmAtMost|count=369»');
+  });
+
+  it('CONTROL: a package this runtime did not load is not counted', async () => {
+    await boot({ ...MANAGED }, {
+      installed: { ...ENTRY, notLoaded: { code: 'OS_PROTOCOL_INCOMPATIBLE', requiredRange: '^99.0.0' } },
+      served: [{ count: 42 }],
+    });
+    render(<MarketplacePackagePage />);
+    await screen.findByRole('button', { name: '«marketplace.detail.moreOptions»' });
+    await act(async () => {});
+    expect(countReads()).toEqual([]);
+  });
+});
+
+describe('a count read before an answer of this session is older than it (objectstack#30616)', () => {
+  const notice = { manifestId: 'com.acme.crm', name: 'Acme CRM', path: '/p' };
+
+  it('a read that began before an install answered does not replace that install\'s count', () => {
+    const generation = sampleDataGeneration('com.acme.crm');
+    rememberSampleData({ ...notice, count: 369 });
+    noteServedSampleCount({ ...notice, count: 0 }, generation);
+    expect(sampleDataNotice('com.acme.crm')?.count).toBe(369);
+  });
+
+  it('a read that began after it does', () => {
+    rememberSampleData({ ...notice, count: 369 });
+    noteServedSampleCount({ ...notice, count: 12 }, sampleDataGeneration('com.acme.crm'));
+    expect(sampleDataNotice('com.acme.crm')?.count).toBe(12);
+    noteServedSampleCount({ ...notice, count: 0 }, sampleDataGeneration('com.acme.crm'));
+    expect(sampleDataNotice('com.acme.crm')).toBeUndefined();
   });
 });
