@@ -101,7 +101,7 @@ import { buildEvalUser, buildProvenance, buildSession, buildUser } from './engin
 // [#25522 cut 10] The write path's reference check and the caller's read of a
 // master-detail header; the methods of the same names below hand each body the
 // members it reads (`ReferentialIntegrityHost`).
-import { assertReferencesResolve, masterDetailHeadersCallerReads, type StoredReferenceRows } from './engine-referential-integrity.js';
+import { assertReferencesResolve, masterDetailHeadersCallerReads, referencesCheckedBeforeRules, type StoredReferenceRows } from './engine-referential-integrity.js';
 // [#25522 cut 11] File-field hydration on read; the methods of the same names
 // below hand each body the members it reads (`FileReferenceHydrationHost`).
 import { callerMayReadSysFile, readParentDerivedFiles, resolveFileReferences, servableFileRows, serveRefusedFileHydration } from './engine-file-reference-hydration.js';
@@ -6492,13 +6492,18 @@ export class ObjectQL implements IObjectQLEngine {
             // [ADR-0144 D8 rule 4] A `record`-mode amount is stored with its
             // currency code, or the row is refused (`ERR_CURRENCY_CODE_REQUIRED`).
             assertRecordCurrencyCodes(object, (schemaForValidation as { fields?: unknown } | undefined)?.fields, rows[i], 'insert');
-            // [#29029] The reference check runs BEFORE the record's validation
-            // rules: a reference the caller cannot read answers
-            // `reference_not_found`, whatever a rule would answer.
-            await this.assertReferencesResolve(
+            // [#29029] A write that is not a system write has its references
+            // checked BEFORE the record's validation rules: a reference the
+            // caller cannot read answers `reference_not_found`, whatever a rule
+            // would answer. A system write keeps the rules first
+            // (`referencesCheckedBeforeRules`).
+            const referencesFirst = referencesCheckedBeforeRules(opCtx.context);
+            const checkReferences = () => this.assertReferencesResolve(
               schemaForValidation, rows[i], suppliedPerRow[i], opCtx.context, msgCtx,
             );
+            if (referencesFirst) await checkReferences();
             emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentForRow?.(rows[i]), related: batchSummaries ? batchSummaries.overlay(insertRelatedForRow(rows[i])) : insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]) }), this.logger, object);
+            if (!referencesFirst) await checkReferences();
             // [#25579] Admitted: a later row of this batch reads it in the summary.
             batchSummaries?.accept(rows[i]);
           } catch (e) {
@@ -8328,13 +8333,17 @@ export class ObjectQL implements IObjectQLEngine {
                // [#4441] A repoint is as capable of dangling as an initial link.
                // [#29062] …but a value the row already stores is not a repoint:
                // the prior row is what the check forgives a refused value against.
-               // [#29029] Before the record's validation rules, as on insert.
-               await this.assertReferencesResolve(
+               // [#29029] Before the record's validation rules unless this is a
+               // system write, as on insert (`referencesCheckedBeforeRules`).
+               const referencesFirst = referencesCheckedBeforeRules(opCtx.context);
+               const checkReferences = () => this.assertReferencesResolve(
                  updateSchema, hookContext.input.data as Record<string, unknown>,
                  opCtx.data as Record<string, unknown>, opCtx.context, updateMsgCtx,
                  async () => [priorRecord],
                );
+               if (referencesFirst) await checkReferences();
                emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: roWhenParent, previousParent: roWhenPreviousParent, related: relatedForUpdate, permissions: permissionsForUpdate }), this.logger, object);
+               if (!referencesFirst) await checkReferences();
                // [commit 9d7f7259f] The by-id driver exit — where a driver's refusal
                // leaves this door, and where a recognised unique violation
                // stops being the driver's error. `envelopeUniqueViolation`
@@ -8745,12 +8754,15 @@ export class ObjectQL implements IObjectQLEngine {
                // [#29062] A refused value is forgiven only when EVERY matched row
                // already stores it (the `readPriorRows` memo, read only then);
                // a row it is new to makes it this write's reference.
-               // [#29029] Before the record's validation rules, as on insert.
-               await this.assertReferencesResolve(
+               // [#29029] Before the record's validation rules unless this is a
+               // system write, as on insert (`referencesCheckedBeforeRules`).
+               const referencesFirst = referencesCheckedBeforeRules(opCtx.context);
+               const checkReferences = () => this.assertReferencesResolve(
                  updateSchema, hookContext.input.data as Record<string, unknown>,
                  opCtx.data as Record<string, unknown>, opCtx.context, updateMsgCtx,
                  readPriorRows,
                );
+               if (referencesFirst) await checkReferences();
                if (rulesNeedRows) {
                    for (const row of priorRows ?? []) {
                        try {
@@ -8772,6 +8784,7 @@ export class ObjectQL implements IObjectQLEngine {
                    // rule families that never read a header.
                    emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: null, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, permissions: bulkPermissions }), this.logger, object);
                }
+               if (!referencesFirst) await checkReferences();
                // `updateMany` presence is part of the ladder verdict resolved above.
                // [commit 9d7f7259f] The predicate driver exit, enveloped on the same
                // terms as the by-id exit above. A multi-row write names no

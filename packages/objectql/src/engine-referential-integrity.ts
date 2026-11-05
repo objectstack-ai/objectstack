@@ -96,6 +96,20 @@ function isEmptyReferenceValue(v: unknown): boolean {
 const CALLER_READ_REFERENCE_TYPES: ReadonlySet<string> = new Set(['master_detail', 'lookup', 'user']);
 
 /**
+ * [#29029] Whether this write's reference check ({@link assertReferencesResolve})
+ * runs BEFORE the record's validation rules. A write that is not a system
+ * write: yes — a reference its caller cannot read answers
+ * `reference_not_found`, whatever a rule would answer. A system write keeps
+ * the order it had, the rules first and then the check, so its answer is the
+ * one it gave before (ruling of record 6663849489). The one predicate every
+ * write door and the validate preview read, so the order cannot differ
+ * between them.
+ */
+export function referencesCheckedBeforeRules(context: unknown): boolean {
+  return !(context as { isSystem?: unknown } | null | undefined)?.isSystem;
+}
+
+/**
  * [#4441] Referential integrity on the WRITE path: a `lookup` (or any
  * reference-typed field) may not be given an id that exists in no row of the
  * object it declares.

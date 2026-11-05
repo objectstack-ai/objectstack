@@ -52,6 +52,7 @@ import { evaluateValidationRules, hasParentScopedRequiredWhen, stripReadonlyFiel
 import { createBatchSummaryAccumulator } from './summary-batch-accumulation.js';
 import { assertRecordCurrencyCodes, RecordCurrencyCodeRequiredError } from './validation/record-currency-code.js';
 import { isHomeAmountRefusal } from './home-amount-projection.js';
+import { referencesCheckedBeforeRules } from './engine-referential-integrity.js';
 import { resolveEngineUpdateDispatch, type EngineUpdateDispatchData } from './engine-update-dispatch.js';
 import {
   droppedFieldEvents,
@@ -575,14 +576,17 @@ export async function validate(
         );
       }
       // [#26684] The insert's admit step, run as `insert()` runs it: before
-      // the rules (#29029), the reference check on the ids the caller supplied
+      // the rules unless this is a system write (#29029,
+      // `referencesCheckedBeforeRules`), the reference check on the ids the caller supplied
       // (`rawRows`, before the defaults — the write's `suppliedPerRow`), so
       // a row the write refuses on a dangling or unreadable reference is
       // refused here with the same finding, and is not counted toward a later
       // row's parent summary. ⛔ Behind the same write-gate probe as the
       // related read above: a caller the probe refuses learns nothing about
       // which ids exist.
-      if (mode === 'insert' && mayWrite) {
+      const previewReferences = mode === 'insert' && mayWrite;
+      const referencesFirst = referencesCheckedBeforeRules(options?.context);
+      if (previewReferences && referencesFirst) {
         await this.assertReferencesResolve(schemaForValidation, row, rawRows[i], options?.context, messages);
       }
       warnings.push(...evaluateValidationRules(schemaForValidation as any, row, mode, {
@@ -598,6 +602,9 @@ export async function validate(
         related: batchSummaries ? batchSummaries.overlay(previewRelatedForRow(judgedViews[i])) : previewRelatedForRow(judgedViews[i]),
         permissions: previewPermissionsFor(row),
       }));
+      if (previewReferences && !referencesFirst) {
+        await this.assertReferencesResolve(schemaForValidation, row, rawRows[i], options?.context, messages);
+      }
     } catch (e) {
       if (e instanceof ValidationError) {
         return { valid: false, errors: e.fields.map((f) => ({ ...f })), warnings };
