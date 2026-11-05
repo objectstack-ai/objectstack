@@ -41,6 +41,16 @@
  * and a moved body reads the class as `host.` where the class reads `this.`
  * (`SELF` below). A member whose body moved is judged by that body; its stub in
  * `protocol.ts` only hands it the host.
+ *
+ * [#30000] ...and every other non-test `protocol-*.ts` module: the earlier hand
+ * series moved writers out of the class too, as module functions that read the
+ * class as `this` (a `this: Host` parameter), and a census of the codemod's
+ * modules alone missed them. The package-less overlay migration's delete of the
+ * unbound row (`migratePackagelessOverlays`) was one: it wrote through a second
+ * repository it built itself and reached no heal. It now takes the one
+ * repository and heals as the delete door does. A test or gate that reads a
+ * file by path reads the module a body moves to (ruling 6597555122 item 3), so
+ * a writer that lands in any `protocol-*.ts` module is in the population.
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -78,21 +88,21 @@ function scan(file: string, header: RegExp): Scanned {
     return { file, text, lines, members };
 }
 /**
- * [#29985] `protocol.ts`, then every module the codemod split moved a body to:
- * `protocol-*.ts` beside it (the census's own module pattern, `HOST_SPLIT.module`
- * in `scripts/check-durability-degradation-log-level.mjs`), tests excluded,
- * whose header names the codemod. The population is the one this census always
- * counted, wherever its bodies now sit; the modules of the earlier hand series
- * stay outside it as they were.
+ * [#29985] `protocol.ts`, then every module a body moved to: `protocol-*.ts`
+ * beside it (the census's own module pattern, `HOST_SPLIT.module` in
+ * `scripts/check-durability-degradation-log-level.mjs`), tests excluded.
+ * [#30000] Every such module, the codemod's and the earlier hand series' alike:
+ * a write is in the population wherever its body sits.
  */
 const CODEMOD_HEADER = '\n * [#29985 codemod] ';
 const HOST = scan('protocol.ts', MEMBER_HEADER);
 const MODULES = readdirSync(fileURLToPath(new URL('.', import.meta.url)))
     .filter((file) => /^protocol-[a-z0-9-]+\.ts$/.test(file))
     .sort()
-    .map((file) => scan(file, FUNCTION_HEADER))
-    .filter((scanned) => scanned.text.slice(0, 400).includes(CODEMOD_HEADER));
+    .map((file) => scan(file, FUNCTION_HEADER));
 const SCANNED: readonly Scanned[] = [HOST, ...MODULES];
+/** [#30000] Whether a module is the codemod's, by its header; every other one is the hand series'. */
+const isCodemodModule = (scanned: Scanned) => scanned.text.slice(0, 400).includes(CODEMOD_HEADER);
 
 const lineOf = (scanned: Scanned, offset: number) => scanned.text.slice(0, offset).split('\n').length - 1;
 const isCode = (scanned: Scanned, offset: number) => !COMMENT_LINE.test(scanned.lines[lineOf(scanned, offset)]);
@@ -155,12 +165,14 @@ const WRITES: ReadonlyArray<{ readonly member: string; readonly verb: string; re
     { member: 'deleteMetaItemUnaudited', verb: 'repo.delete(', route: { sameMember: 'restoreArtifactRegistryView' } },
     { member: 'deleteMetaItemUnaudited', verb: 'this.engine.delete(\'sys_metadata\'', route: { sameMember: 'restoreArtifactRegistryView' } },
     { member: 'reassignOrphanedMetadata', verb: 'this.engine.update(\'sys_metadata\'', route: { sameMember: 'applyRegistryWriteThrough' } },
+    // [#30000] `os migrate packageless-overlays --apply`: the unbound row, once its pair's row reads back.
+    { member: 'migratePackagelessOverlays', verb: 'repo.delete(', route: { sameMember: 'restoreArtifactRegistryView' } },
 ];
 
 /** The verb as `WRITES` spells it: no whitespace after its open paren, [#29985] the class as `this`. */
 const verbOf = (text: string) => text.replace(/\(\s*/, '(').replace(/^host\./, 'this.');
 
-describe('[#23198] every stored-row write in protocol.ts reaches the reconcile', () => {
+describe('[#23198] every stored-row write in protocol.ts and its modules reaches the reconcile', () => {
     const writes = codeMatches(STORED_ROW_WRITE).map((w) => ({ ...w, verb: verbOf(w.text) }));
 
     it('the writes in the source are exactly the recorded ones', () => {
@@ -221,8 +233,19 @@ describe('[#23198] every stored-row write in protocol.ts reaches the reconcile',
 describe('[#29985] the census reads the modules the split moved bodies to', () => {
     it('reads every codemod module, and the stored-row writes it records sit in them or in protocol.ts', () => {
         // Non-vacuity: a header filter that matched nothing would quietly shrink the census to protocol.ts.
-        expect(MODULES.length).toBeGreaterThan(0);
-        expect(codeMatches(STORED_ROW_WRITE).some(({ scanned }) => scanned !== HOST)).toBe(true);
+        expect(MODULES.filter(isCodemodModule).length).toBeGreaterThan(0);
+        expect(codeMatches(STORED_ROW_WRITE).some(({ scanned }) => isCodemodModule(scanned))).toBe(true);
+    });
+
+    it('[#30000] reads every other non-test protocol-*.ts module too, and a write the hand series moved is in it', () => {
+        const all = readdirSync(fileURLToPath(new URL('.', import.meta.url)))
+            .filter((file) => /^protocol-[a-z0-9-]+\.ts$/.test(file));
+        expect(MODULES.map((m) => m.file).sort()).toEqual(all.sort());
+        expect(MODULES.filter((m) => !isCodemodModule(m)).length).toBeGreaterThan(0);
+        expect(codeMatches(STORED_ROW_WRITE)
+            .filter(({ scanned }) => scanned !== HOST && !isCodemodModule(scanned))
+            .map(({ scanned, member }) => `${scanned.file}: ${member}`))
+            .toEqual(['protocol-packageless-overlay-migration.ts: migratePackagelessOverlays']);
     });
 });
 
