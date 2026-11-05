@@ -18,11 +18,18 @@
  * the authored book run through the spec's own translator with a translation
  * bundle, for the locale the "request" carries. So the chain pinned here is
  * bundle → served book → sidebar, with nothing hand-translated in between.
+ *
+ * objectstack#30554 adds the console's own words in that chrome: the header's
+ * "Documentation" home link and the synthetic Uncategorized group (which no
+ * bundle carries; the console titles it by its key). Those pins mount a real
+ * `I18nProvider` and read their expectations from the locale packs.
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { I18nProvider } from '@object-ui/i18n';
+import { builtInLocales } from '@object-ui/i18n/locales';
 // Paid at collection, not inside the adapter's clocked `getItems` call.
 import '@objectstack/spec/system';
 import type { TranslationBundle } from '@objectstack/spec/system';
@@ -32,6 +39,8 @@ const { ADAPTER, REQUEST } = vi.hoisted(() => {
   const DOCS = [
     { name: 'crm_start_login', label: 'Signing in', _packageId: 'com.example.crm', order: 1 },
     { name: 'crm_pipe_stages', label: 'Stages', _packageId: 'com.example.crm', order: 2 },
+    // Claimed by no group: the book's Uncategorized catch-all lists it.
+    { name: 'crm_loose_note', label: 'Loose note', _packageId: 'com.example.crm', order: 3 },
   ];
   const BOOK = {
     name: 'crm_manual',
@@ -79,18 +88,13 @@ vi.mock('@object-ui/plugin-markdown', async (importOriginal) => ({
   extractToc: () => [],
 }));
 
-vi.mock('@object-ui/i18n', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  useObjectTranslation: () => ({ t: (_k: string, o?: { defaultValue?: string }) => o?.defaultValue ?? _k }),
-}));
-
 // Imported AFTER the mocks so the pages pick up the mocked modules.
 import DocsLayout from './DocsLayout';
 import DocsSlug from './DocsSlug';
 import DocPage from './DocPage';
 
-function Portal({ entry }: { entry: string }) {
-  return (
+function Portal({ entry, language }: { entry: string; language?: string }) {
+  const routed = (
     <MemoryRouter initialEntries={[entry]}>
       <Routes>
         <Route path="/apps/:appName/docs" element={<DocsLayout />}>
@@ -99,6 +103,13 @@ function Portal({ entry }: { entry: string }) {
         </Route>
       </Routes>
     </MemoryRouter>
+  );
+  return language ? (
+    <I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false }} persistLanguage={false}>
+      {routed}
+    </I18nProvider>
+  ) : (
+    routed
   );
 }
 
@@ -138,5 +149,35 @@ describe('objectstack#26690 — the docs sidebar serves the request locale', () 
       expect(within(nav).getByText('Getting started')).toBeInTheDocument();
       expect(within(nav).getByText('Pipeline')).toBeInTheDocument();
     }
+  });
+});
+
+describe("objectstack#30554 — the docs chrome's own words follow the session language", () => {
+  const ENTRY = '/apps/com.example.crm/docs/manual/crm_start_login';
+
+  for (const language of ['zh', 'ja', 'es'] as const) {
+    it(`a ${language} reader sees the home link and the Uncategorized title in ${language}`, async () => {
+      const pack = builtInLocales[language].help;
+      // Guard: the expectations are real translations, not the English words.
+      expect(pack.documentation).not.toBe('Documentation');
+      expect(pack.uncategorized).not.toBe('Uncategorized');
+      render(<Portal entry={ENTRY} language={language} />);
+      const navs = await sidebars('User Manual');
+      for (const nav of navs) {
+        expect(within(nav).getByText(pack.uncategorized)).toBeInTheDocument();
+        expect(within(nav).queryByText('Uncategorized')).toBeNull();
+        expect(within(nav).getByText('Loose note')).toBeInTheDocument();
+      }
+      const home = screen.getByRole('link', { name: pack.documentation });
+      expect(home.getAttribute('href')).toBe('/apps/com.example.crm/docs');
+      expect(screen.queryByText('Documentation')).toBeNull();
+    });
+  }
+
+  it('CONTROL: with no provider the chrome reads its English', async () => {
+    render(<Portal entry={ENTRY} />);
+    const navs = await sidebars('User Manual');
+    for (const nav of navs) expect(within(nav).getByText('Uncategorized')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Documentation' }).getAttribute('href')).toBe('/apps/com.example.crm/docs');
   });
 });
