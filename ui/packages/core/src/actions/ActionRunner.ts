@@ -892,7 +892,7 @@ export interface ActionParamDef {
    * its machine name, ADR-0131 D4). `type` stays the VALUE's type.
    *
    * Set by `resolveActionParams()` — the param's own `widget`, else, for a
-   * field-backed param that also inherits its `type`, the field's. Read by
+   * field-backed param that also inherits or restates its `type`, the field's. Read by
    * app-shell's `paramToField()`, which draws the named widget when it is
    * registered and the `type` widget when it is not.
    */

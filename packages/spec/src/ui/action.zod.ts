@@ -254,8 +254,8 @@ export const ActionParamSchema = lazySchema(() => strictObject(
    * Like the field key it is an open string, not an enum: an unregistered name
    * is kept and the dialog draws the `type` renderer instead, so it degrades
    * safely. The console reads it (#30260): `resolveActionParams` carries it
-   * onto the resolved param — a field-backed param that inherits its `type`
-   * inherits the field's `widget` with it — and `paramToField` draws the named
+   * onto the resolved param — a field-backed param that inherits or restates
+   * its `type` inherits the field's `widget` with it — and `paramToField` draws the named
    * widget. The server still validates the submitted value by `type`.
    */
   widget: z.string().optional().describe(

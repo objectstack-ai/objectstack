@@ -527,6 +527,7 @@ describe('resolveActionParams — the param `widget` reaches the resolved param 
           fields: {
             permission_set: { type: 'text', label: 'Permission set', widget: 'permission-ref' } as any,
             plain: { type: 'text', label: 'Plain' },
+            account: { type: 'lookup', label: 'Account', reference: 'account', widget: 'record-ref' } as any,
           },
         },
       ],
@@ -551,6 +552,15 @@ describe('resolveActionParams — the param `widget` reaches the resolved param 
   it('inherits it too when the param restates the field type', () => {
     const [out] = resolveActionParams([{ field: 'permission_set', type: 'text' }], grantCtx());
     expect(out.widget).toBe('permission-ref');
+  });
+
+  it('inherits it when the param restates the field type in an alias spelling', () => {
+    // `reference` is the param dialect's alias of `lookup` (PARAM_TYPE_ALIASES).
+    const [out] = resolveActionParams([{ field: 'account', type: 'reference' }], grantCtx());
+    expect(out.widget).toBe('record-ref');
+    // CONTROL: a genuinely different type still does not inherit it.
+    const [other] = resolveActionParams([{ field: 'account', type: 'text' }], grantCtx());
+    expect(other.widget).toBeUndefined();
   });
 
   it('does NOT inherit the field widget onto a param that overrides the type', () => {

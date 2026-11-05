@@ -421,4 +421,22 @@ describe('paramToField — an authored `widget` draws the param (#30260)', () =>
       warn.mockRestore();
     }
   });
+
+  it('a widget that names a picker with no target degrades like the picker type does, and warns', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const param = p({ type: 'text', widget: 'lookup' });
+      expect(paramDegradesWithoutTarget(param)).toBe(true);
+      expect(paramToField(param).type).toBe('text');
+      expect(warn).toHaveBeenCalledTimes(1);
+      // CONTROL: with a target the named picker is drawn, and nothing warns.
+      warn.mockClear();
+      const targeted = p({ type: 'text', widget: 'lookup', referenceTo: 'accounts' });
+      expect(paramDegradesWithoutTarget(targeted)).toBe(false);
+      expect(paramToField(targeted).type).toBe('lookup');
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });

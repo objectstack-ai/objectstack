@@ -87,10 +87,13 @@ const LOOKUP_WIDGET_TYPES = new Set(['lookup', 'master_detail']);
  * for why `user` must never degrade.
  */
 export function paramDegradesWithoutTarget(param: ActionParamDef): boolean {
-  // A registered authored `widget` replaces the `type` widget before the
-  // fallback is ever considered, so such a param never degrades.
-  if (authoredWidgetKey(param) !== undefined) return false;
-  return LOOKUP_WIDGET_TYPES.has(resolveParamWidgetType(param.type)) && !param.referenceTo;
+  // Asked of the widget the param will actually DRAW: a registered authored
+  // `widget` replaces the `type` widget, so `{ type: 'lookup', widget:
+  // 'permission-ref' }` never degrades, while `{ type: 'text', widget:
+  // 'lookup' }` with no target does — it would otherwise mount a picker that
+  // has nothing to query.
+  const drawn = authoredWidgetKey(param) ?? resolveParamWidgetType(param.type);
+  return LOOKUP_WIDGET_TYPES.has(drawn) && !param.referenceTo;
 }
 
 /**

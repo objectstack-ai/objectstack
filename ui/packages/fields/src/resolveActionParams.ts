@@ -593,7 +593,8 @@ function storedRow(
  *
  * The spec resolves a field-backed param's "widget mapping from object
  * metadata" (`ActionParamSchema`), and the field's `widget` is that mapping.
- * (A param that restates the field's own `type` still inherits it.)
+ * (A param that restates the field's own `type`, in any spelling the param-type
+ * fold maps onto the same widget, still inherits it.)
  * It is a mapping FOR the field's type, though: the record form draws it over
  * a value of that type, and the server validates the param's value by the
  * param's `type` (ADR-0104 D2). A param that overrides `type` asks for a
@@ -602,7 +603,13 @@ function storedRow(
  */
 function inheritedWidget(param: RawActionParam, field: RuntimeField): string | undefined {
   if (param.widget !== undefined) return param.widget;
-  return param.type === undefined || param.type === field.type ? field.widget : undefined;
+  // Compared through the one param-type fold, so a param that restates the
+  // field's type in an alias spelling (`reference` on a `lookup` field) still
+  // restates it.
+  if (param.type === undefined) return field.widget;
+  const restated = field.type !== undefined
+    && resolveParamWidgetType(param.type) === resolveParamWidgetType(field.type);
+  return restated ? field.widget : undefined;
 }
 
 /**
