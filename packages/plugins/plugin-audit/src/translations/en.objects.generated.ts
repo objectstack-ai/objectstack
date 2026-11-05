@@ -113,9 +113,9 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     }
   },
   sys_activity: {
-    label: "Activity",
-    pluralLabel: "Activities",
-    description: "Recent activity stream entries (lightweight, denormalized)",
+    label: "Activity Feed",
+    pluralLabel: "Activity Feed",
+    description: "What people did to records recently, newest first: who created, changed or deleted what. Entries are kept for 14 days.",
     fields: {
       id: {
         label: "Activity ID"
@@ -192,6 +192,18 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       milestone_key: {
         label: "Milestone Key",
         help: "For a fired activity milestone, one sorted, comma-joined key of every field the object's activityMilestones declaration watched when it fired; NULL for every other row. Stamped by the platform at write time and never served: the read rule compares it with the current declaration."
+      }
+    },
+    _views: {
+      recent: {
+        label: "Recent activity",
+        emptyState: {
+          title: "No recent activity",
+          message: "Changes people make to records appear here, newest first."
+        }
+      },
+      all: {
+        label: "All entries"
       }
     }
   },
