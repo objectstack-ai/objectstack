@@ -8444,6 +8444,9 @@ export class SchemaRegistry {
     // …and the default record pages it declared, so the next package may
     // declare a default for those objects.
     this.forgetDefaultRecordPageClaims(id);
+    // [#30581] …and the navigation entries it put into other packages' apps:
+    // with no row left, the fold's disabled check cannot withhold them.
+    this.setPackageNavContributions(id, []);
 
     // [#18877] The boot seed forgets the id together with the row. A package
     // that no longer exists has no lifecycle state to preserve, so the next
@@ -8602,6 +8605,60 @@ export class SchemaRegistry {
         (contribution.group ? `/${contribution.group}` : '') +
         ` (${list[list.length - 1].items.length} items)`,
     );
+  }
+
+  /**
+   * [#30581] Make `contributions` the WHOLE set of navigation contributions
+   * `packageId` holds, in every app: what the package registered before is
+   * replaced, never added to. The door a package BODY takes (`registerApp`'s
+   * manifest step), so registering the same body again (an artifact reload,
+   * whose `metadata:reloaded` re-registers every package of the artifact, a
+   * manifest replay, an upgrade) leaves each entry once, instead of one more
+   * copy of every module's entries per registration until a restart.
+   *
+   * Replaced IN PLACE: an app's list keeps the package's entries where its
+   * first registration put them, so the fold's ties (equal priority, the
+   * common case at the default 200) resolve in the order a fresh boot gives.
+   * An app the package newly contributes to gets them at the end; an app it no
+   * longer names loses them. {@link registerAppNavContribution} stays the
+   * additive verb, for a caller adding one contribution at a time.
+   */
+  setPackageNavContributions(
+    packageId: string,
+    contributions: ReadonlyArray<{ app: string; group?: string; priority?: number; items?: any[] }>,
+  ): void {
+    const incoming = new Map<string, Array<{ packageId?: string; group?: string; priority: number; items: any[] }>>();
+    for (const contribution of contributions) {
+      if (!contribution || !contribution.app) continue;
+      const list = incoming.get(contribution.app) ?? [];
+      list.push({
+        packageId,
+        group: contribution.group,
+        priority: contribution.priority ?? 200,
+        items: Array.isArray(contribution.items) ? contribution.items : [],
+      });
+      incoming.set(contribution.app, list);
+    }
+    for (const [app, list] of [...this.appNavContributions]) {
+      const at = list.findIndex((c) => c.packageId === packageId);
+      if (at === -1) continue;
+      const kept = list.filter((c) => c.packageId !== packageId);
+      kept.splice(at, 0, ...(incoming.get(app) ?? []));
+      incoming.delete(app);
+      if (kept.length > 0) this.appNavContributions.set(app, kept);
+      else this.appNavContributions.delete(app);
+    }
+    for (const [app, list] of incoming) {
+      this.appNavContributions.set(app, [...(this.appNavContributions.get(app) ?? []), ...list]);
+    }
+    for (const c of contributions) {
+      if (!c || !c.app) continue;
+      this.log(
+        `[Registry] Navigation contribution: ${packageId} -> ${c.app}` +
+          (c.group ? `/${c.group}` : '') +
+          ` (${Array.isArray(c.items) ? c.items.length : 0} items)`,
+      );
+    }
   }
 
   /** Contributions registered for an app (empty array when none). */
