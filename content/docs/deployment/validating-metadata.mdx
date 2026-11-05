@@ -745,6 +745,12 @@ findings the item **added** (#4463). Its package dimension narrows that context 
 the written item's **package closure** — the written package, its declared
 dependencies, and unconditionally both platform/system objects and rows carrying
 no package provenance (#9612); a provenance it cannot read narrows nothing at all.
+A dashboard or report write also keeps the base object of each dataset it binds
+(a widget's `dataset`; a report's `dataset` and each joined block's), because the
+datasets are never narrowed and the dataset query resolves a filter against that
+object whichever package ships it: a filter key the object lacks is refused there
+just as it is on a dataset inside the closure (#30005). No other write type keeps
+it, so a flow or a list view never reaches an outside object through a dataset.
 That changes what a rule can **resolve**, never which rules run, and nothing at
 this door walks `packages[]`. Two rules are told the closure is in force. A flow
 whose trigger object is outside it is refused with `flow-trigger-unknown-object`

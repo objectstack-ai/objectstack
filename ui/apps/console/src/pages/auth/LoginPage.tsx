@@ -396,7 +396,12 @@ export function LoginPage() {
                 redirect={redirect}
               />
               <InvitationLinkHint offer={signUpOffer} />
-              {devSeedAdmin ? <DevAdminRow seed={devSeedAdmin} /> : null}
+              {/* The row signs in with email and password: with that sign-in
+                  off (the same answer `LoginForm` reads) the server refuses
+                  it, so the row is not drawn. */}
+              {devSeedAdmin && authConfig?.emailPassword?.enabled !== false ? (
+                <DevAdminRow seed={devSeedAdmin} />
+              ) : null}
             </>
           )}
         </Card>

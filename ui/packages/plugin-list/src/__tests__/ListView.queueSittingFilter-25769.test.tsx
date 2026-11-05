@@ -18,6 +18,9 @@
  *    the column, or with an author's own non-system `queue` field, gets no
  *    toggle, and neither does any object while `hasAnyQueue` is false or
  *    unknown (no permission provider, or an anonymous answer);
+ *  - storage: an ADR-0015 `external` (federated) object serves the injected
+ *    column too, but the remote database owns its schema, so no row can sit
+ *    in a queue and the toggle is not offered (`platformProvisionsStorage`);
  *  - the cost: the flag rides the permissions answer the session already
  *    holds, so a list mount makes the same data-source calls and no other
  *    request whether or not a queue exists;
@@ -43,14 +46,14 @@ const OBJECT = 'support_ticket';
 /** The injected column, as `/meta` serves it on an ownership-queue object. */
 const INJECTED_QUEUE = { name: 'queue', type: 'text', system: true, hidden: true };
 
-function dataSourceServing(fields: Record<string, unknown>) {
+function dataSourceServing(fields: Record<string, unknown>, extra: Record<string, unknown> = {}) {
   return {
     find: vi.fn().mockResolvedValue([]),
     findOne: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
-    getObjectSchema: vi.fn().mockResolvedValue({ name: OBJECT, fields: { subject: { name: 'subject', type: 'text' }, ...fields } }),
+    getObjectSchema: vi.fn().mockResolvedValue({ name: OBJECT, ...extra, fields: { subject: { name: 'subject', type: 'text' }, ...fields } }),
   };
 }
 
@@ -215,5 +218,29 @@ describe('ListView "In a queue" toggle — offered only when the organization ha
     } finally {
       fetchSpy.mockRestore();
     }
+  });
+});
+
+describe('ListView "In a queue" toggle — offered only where the platform provisions the storage', () => {
+  /** An ADR-0015 federated binding, as `/meta` serves it on an external object. */
+  const EXTERNAL = { ownership: 'user', datasource: 'legacy_erp', external: { remoteName: 'tickets', writable: false } };
+
+  it('objectHasOwnershipQueue is false on an external object, even with the injected column', () => {
+    expect(objectHasOwnershipQueue({ ...EXTERNAL, fields: { queue: INJECTED_QUEUE } })).toBe(false);
+    expect(objectHasOwnershipQueue({ ...EXTERNAL, fields: [INJECTED_QUEUE] })).toBe(false);
+  });
+
+  it('an external object with the injected queue column: no toggle, though the organization has a queue', async () => {
+    const ds = dataSourceServing({ queue: INJECTED_QUEUE }, EXTERNAL);
+    mount(ds, session(true));
+    await settled(ds);
+    expect(screen.queryByTestId('queue-sitting-filter')).toBeNull();
+    expect(JSON.stringify(lastFilter(ds) ?? null)).not.toContain('owner_id');
+  });
+
+  it('an ordinary ownership: user object still offers it', async () => {
+    const ds = dataSourceServing({ queue: INJECTED_QUEUE }, { ownership: 'user' });
+    mount(ds, session(true));
+    expect(await screen.findByTestId('queue-sitting-filter')).toBeTruthy();
   });
 });

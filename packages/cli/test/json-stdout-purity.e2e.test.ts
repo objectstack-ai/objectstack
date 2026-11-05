@@ -102,6 +102,8 @@ const FAMILY: Record<string, string[]> = {
   'migrate activity-changed-fields': [],
   // Its dry run takes the `summary-nulls` shape: a read-only boot, no row written.
   'migrate blank-single-values': [],
+  // Same shape as `blank-single-values`, whose walk it shares.
+  'migrate blank-multi-values': [],
   // Same shape as `blank-single-values`: a read-only boot, no row written.
   'migrate option-codes': [],
   // Same shape as `option-codes`: a read-only boot, no row written.
