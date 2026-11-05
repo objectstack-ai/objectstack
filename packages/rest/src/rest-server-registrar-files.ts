@@ -123,6 +123,9 @@ export const REST_SERVER_META_ROUTE_FILES: readonly RestServerRegistrarFile[] = 
     // moved slice; like the per-item writes it goes through the inner method's per-item
     // registrar, handed over in its scope.
     'meta-app-bundle-routes.ts',
+    // [#30205] A user's assigned work: the counts and the hand-over. New, not a moved
+    // slice; it registers on the route manager itself, from a host literal.
+    'user-work-routes.ts',
 ];
 
 /**

@@ -132,9 +132,20 @@ export function userAssignedWorkFields(
  */
 export interface UserWorkEngine {
   getConfigs(): Record<string, unknown>;
+  /** A disabled package's object serves no data door, so it holds no work to count. */
+  readonly registry?: { isObjectPackageDisabled?(name: string): boolean };
   count(object: string, query?: any): Promise<number>;
   find(object: string, query?: any): Promise<any[]>;
   update(object: string, data: any, options?: any): Promise<unknown>;
+}
+
+/** The registered objects a data door serves: a disabled package's are left out. */
+function servedObjects(engine: UserWorkEngine): unknown[] {
+  const disabled = engine.registry?.isObjectPackageDisabled?.bind(engine.registry);
+  return Object.values(engine.getConfigs() ?? {}).filter((obj) => {
+    const name = (obj as ObjectLike | undefined)?.name;
+    return !(disabled && typeof name === 'string' && disabled(name) === true);
+  });
 }
 
 /** The filter that matches the records a field holds `userId` in. */
@@ -169,7 +180,7 @@ export async function countUserAssignedWork(
   userId: string,
   context: unknown,
 ): Promise<UserAssignedWorkSummary> {
-  const { fields, truncated } = userAssignedWorkFields(Object.values(engine.getConfigs() ?? {}));
+  const { fields, truncated } = userAssignedWorkFields(servedObjects(engine));
   const objects: UserAssignedWorkCount[] = [];
   const unreadable = new Set<string>();
   let total = 0;
@@ -275,7 +286,7 @@ export async function transferUserAssignedWork(
   }
 
   const only = options.objects && options.objects.length > 0 ? new Set(options.objects) : undefined;
-  const { fields } = userAssignedWorkFields(Object.values(engine.getConfigs() ?? {}));
+  const { fields } = userAssignedWorkFields(servedObjects(engine));
   const refs = fields.filter((ref) => !ref.multiple && (!only || only.has(ref.object)));
   let budget = options.rowCap ?? USER_WORK_TRANSFER_ROW_CAP;
   const objects: UserWorkTransferOutcome[] = [];
