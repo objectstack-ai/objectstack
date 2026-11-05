@@ -93,6 +93,7 @@
  */
 
 import { resolveLocale } from '@objectstack/core';
+import type { SettingsCopyLocale } from './settings-copy-locale.js';
 import type { StandardErrorCode } from '@objectstack/spec/api';
 import {
   probeSsoProvidersPresence,
@@ -232,8 +233,11 @@ interface SignInFloorCopy {
   enterpriseSsoUnverified: string;
 }
 
-/** One entry per locale the settings bundle ships, as the currency lock's copy. */
-export const SIGN_IN_FLOOR_COPY: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', SignInFloorCopy> = {
+/**
+ * One entry per language on the platform locale table, the four served first
+ * under their older codes ({@link SettingsCopyLocale}).
+ */
+export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
   en: {
     emailPassword:
       'Turning email and password off would leave no way to sign in, so everyone would be locked out, ' +
@@ -306,6 +310,135 @@ export const SIGN_IN_FLOOR_COPY: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', Sign
       'El proveedor de identidad no se ha eliminado: no se pudo leer la lista de proveedores de identidad para ' +
       'confirmar que queda otra forma de iniciar sesión y, con el correo y la contraseña desactivados, este podría ' +
       'ser el último. Vuelva a intentarlo cuando la base de datos esté disponible.',
+  },
+  'zh-Hant': {
+    emailPassword:
+      '關閉電子郵件/密碼後將沒有任何登入方式，所有人（包括管理員）都將無法登入。請在本次儲存之前或同時保留或設定另一種登入方式：' +
+      '本頁的 Google 登入（用戶端 ID 和密鑰）、其他社群或 OIDC 登入、企業 SSO 身分提供者，或手機號碼登入。',
+    google:
+      '電子郵件/密碼登入關閉時，這項 Google 變更會導致沒有任何登入方式，所有人（包括管理員）都將無法登入。' +
+      '請保持電子郵件/密碼登入開啟，或在本次儲存之前或同時設定另一種登入方式。',
+    enterpriseSso:
+      '這是最後一個企業 SSO 身分提供者，電子郵件/密碼登入又已關閉，沒有其他登入方式，刪除後所有人（包括管理員）都將無法登入。' +
+      '請先重新開啟電子郵件/密碼登入，或登記另一個身分提供者、設定另一種登入方式，然後再刪除它。',
+    enterpriseSsoUnverified:
+      '身分提供者未刪除：無法讀取身分提供者清單來確認仍有其他登入方式，而電子郵件/密碼登入已關閉，它可能是最後一種。' +
+      '請在資料庫可以存取時重試。',
+  },
+  ar: {
+    emailPassword:
+      'إيقاف البريد الإلكتروني وكلمة المرور لن يترك أي طريقة لتسجيل الدخول، فيُمنع الجميع من الدخول بمن فيهم ' +
+      'المسؤولون. أبقِ طريقة أخرى لتسجيل الدخول أو اضبطها قبل هذا الحفظ أو ضمنه: تسجيل الدخول عبر Google في هذه ' +
+      'الصفحة (معرّف العميل والسر)، أو موفّر اجتماعي أو OIDC آخر، أو موفّر هوية SSO مؤسسي، أو تسجيل الدخول برقم الهاتف.',
+    google:
+      'مع إيقاف البريد الإلكتروني وكلمة المرور، لن يترك هذا التغيير على Google أي طريقة لتسجيل الدخول، فيُمنع الجميع ' +
+      'من الدخول بمن فيهم المسؤولون. أبقِ تسجيل الدخول بالبريد الإلكتروني وكلمة المرور مفعّلًا، أو اضبط طريقة أخرى ' +
+      'لتسجيل الدخول قبل هذا الحفظ أو ضمنه.',
+    enterpriseSso:
+      'هذا آخر موفّر هوية SSO مؤسسي، ومع إيقاف البريد الإلكتروني وكلمة المرور لا شيء غيره يتيح لأحد تسجيل الدخول، ' +
+      'لذا فإن حذفه سيمنع الجميع من الدخول بمن فيهم المسؤولون. أعد أولًا تفعيل تسجيل الدخول بالبريد الإلكتروني ' +
+      'وكلمة المرور، أو سجّل موفّر هوية آخر أو اضبط طريقة أخرى لتسجيل الدخول، ثم احذف هذا الموفّر.',
+    enterpriseSsoUnverified:
+      'لم يُحذف موفّر الهوية: تعذّرت قراءة قائمة موفّري الهوية للتأكد من بقاء طريقة أخرى لتسجيل الدخول، ومع إيقاف ' +
+      'البريد الإلكتروني وكلمة المرور قد يكون هذا آخرها. أعد المحاولة عندما تصبح قاعدة البيانات متاحة.',
+  },
+  fr: {
+    emailPassword:
+      'Désactiver l’e-mail et le mot de passe ne laisserait aucun moyen de se connecter : tout le monde serait ' +
+      'bloqué, administrateurs compris. Conservez ou configurez une autre méthode de connexion, avant ou dans cet ' +
+      'enregistrement : la connexion Google de cette page (ID client et secret), un autre fournisseur social ou ' +
+      'OIDC, un fournisseur d’identité SSO d’entreprise ou la connexion par numéro de téléphone.',
+    google:
+      'Avec l’e-mail et le mot de passe désactivés, cette modification de Google ne laisserait aucun moyen de se ' +
+      'connecter : tout le monde serait bloqué, administrateurs compris. Laissez la connexion par e-mail et mot de ' +
+      'passe activée, ou configurez une autre méthode de connexion, avant ou dans cet enregistrement.',
+    enterpriseSso:
+      'C’est le dernier fournisseur d’identité SSO d’entreprise et, avec l’e-mail et le mot de passe désactivés, ' +
+      'rien d’autre ne permet de se connecter : le supprimer bloquerait tout le monde, administrateurs compris. ' +
+      'Réactivez d’abord la connexion par e-mail et mot de passe, ou enregistrez un autre fournisseur d’identité ou ' +
+      'configurez une autre méthode de connexion, puis supprimez celui-ci.',
+    enterpriseSsoUnverified:
+      'Le fournisseur d’identité n’a pas été supprimé : la liste des fournisseurs d’identité n’a pas pu être lue ' +
+      'pour vérifier qu’un autre moyen de connexion subsiste et, avec l’e-mail et le mot de passe désactivés, ' +
+      'celui-ci est peut-être le dernier. Réessayez quand la base de données sera accessible.',
+  },
+  'pt-BR': {
+    emailPassword:
+      'Desativar o e-mail e a senha deixaria sem nenhuma forma de entrar, então todos ficariam bloqueados, inclusive ' +
+      'os administradores. Mantenha ou configure outro método de login, antes ou neste mesmo salvamento: o login com ' +
+      'Google desta página (ID e segredo do cliente), outro provedor social ou OIDC, um provedor de identidade de SSO ' +
+      'corporativo ou o login por número de telefone.',
+    google:
+      'Com o e-mail e a senha desativados, esta alteração no Google deixaria sem nenhuma forma de entrar, então todos ' +
+      'ficariam bloqueados, inclusive os administradores. Mantenha o login com e-mail e senha ativado ou configure ' +
+      'outro método de login, antes ou neste mesmo salvamento.',
+    enterpriseSso:
+      'Este é o último provedor de identidade de SSO corporativo e, com o e-mail e a senha desativados, nada mais ' +
+      'permite entrar, então excluí-lo bloquearia todos, inclusive os administradores. Primeiro reative o login com ' +
+      'e-mail e senha, ou cadastre outro provedor de identidade ou configure outro método de login, e depois exclua ' +
+      'este.',
+    enterpriseSsoUnverified:
+      'O provedor de identidade não foi excluído: não foi possível ler a lista de provedores de identidade para ' +
+      'confirmar que resta outra forma de entrar e, com o e-mail e a senha desativados, este pode ser o último. ' +
+      'Tente novamente quando o banco de dados estiver acessível.',
+  },
+  ru: {
+    emailPassword:
+      'Если отключить вход по электронной почте и паролю, не останется ни одного способа входа, и доступ потеряют ' +
+      'все, включая администраторов. Сохраните или настройте другой способ входа до этого сохранения или в нём же: ' +
+      'вход через Google на этой странице (идентификатор и секрет клиента), другой социальный или OIDC-провайдер, ' +
+      'корпоративный поставщик удостоверений SSO или вход по номеру телефона.',
+    google:
+      'При отключённом входе по электронной почте и паролю это изменение Google не оставит ни одного способа входа, ' +
+      'и доступ потеряют все, включая администраторов. Оставьте вход по электронной почте и паролю включённым или ' +
+      'настройте другой способ входа до этого сохранения или в нём же.',
+    enterpriseSso:
+      'Это последний корпоративный поставщик удостоверений SSO, а вход по электронной почте и паролю отключён, так ' +
+      'что войти больше нечем: его удаление лишит доступа всех, включая администраторов. Сначала снова включите вход ' +
+      'по электронной почте и паролю либо зарегистрируйте другого поставщика удостоверений или настройте другой ' +
+      'способ входа, а затем удалите этого.',
+    enterpriseSsoUnverified:
+      'Поставщик удостоверений не удалён: не удалось прочитать список поставщиков удостоверений, чтобы убедиться, ' +
+      'что останется другой способ входа, а при отключённом входе по электронной почте и паролю этот может быть ' +
+      'последним. Повторите попытку, когда база данных станет доступна.',
+  },
+  de: {
+    emailPassword:
+      'Wenn Sie E-Mail und Passwort ausschalten, bleibt keine Möglichkeit zur Anmeldung, und alle wären ' +
+      'ausgesperrt, Administratoren eingeschlossen. Behalten oder richten Sie eine andere Anmeldemethode ein, vor ' +
+      'oder in diesem Speichervorgang: die Google-Anmeldung auf dieser Seite (Client-ID und Secret), einen anderen ' +
+      'Social- oder OIDC-Anbieter, einen Enterprise-SSO-Identitätsanbieter oder die Anmeldung per Telefonnummer.',
+    google:
+      'Bei ausgeschalteter Anmeldung mit E-Mail und Passwort ließe diese Änderung an Google keine Möglichkeit zur ' +
+      'Anmeldung, und alle wären ausgesperrt, Administratoren eingeschlossen. Lassen Sie die Anmeldung mit E-Mail ' +
+      'und Passwort eingeschaltet oder richten Sie vor oder in diesem Speichervorgang eine andere Anmeldemethode ein.',
+    enterpriseSso:
+      'Dies ist der letzte Enterprise-SSO-Identitätsanbieter, und bei ausgeschalteter Anmeldung mit E-Mail und ' +
+      'Passwort meldet nichts anderes jemanden an. Ihn zu löschen würde daher alle aussperren, Administratoren ' +
+      'eingeschlossen. Schalten Sie zuerst die Anmeldung mit E-Mail und Passwort wieder ein oder registrieren Sie ' +
+      'einen anderen Identitätsanbieter bzw. richten Sie eine andere Anmeldemethode ein, und löschen Sie ihn dann.',
+    enterpriseSsoUnverified:
+      'Der Identitätsanbieter wurde nicht gelöscht: Die Liste der Identitätsanbieter konnte nicht gelesen werden, ' +
+      'um zu bestätigen, dass eine andere Anmeldemöglichkeit bleibt, und bei ausgeschalteter Anmeldung mit E-Mail ' +
+      'und Passwort ist dieser vielleicht der letzte. Versuchen Sie es erneut, sobald die Datenbank erreichbar ist.',
+  },
+  ko: {
+    emailPassword:
+      '이메일/비밀번호를 끄면 로그인할 방법이 전혀 남지 않아 관리자를 포함한 모든 사람이 로그인할 수 없게 됩니다. ' +
+      '이번 저장 전이나 이번 저장에서 다른 로그인 방법을 유지하거나 설정하세요. 이 페이지의 Google 로그인(클라이언트 ID와 ' +
+      '시크릿), 다른 소셜 또는 OIDC 공급자, 엔터프라이즈 SSO ID 공급자, 또는 전화번호 로그인을 사용할 수 있습니다.',
+    google:
+      '이메일/비밀번호 로그인이 꺼진 상태에서 이 Google 변경을 저장하면 로그인할 방법이 전혀 남지 않아 관리자를 포함한 ' +
+      '모든 사람이 로그인할 수 없게 됩니다. 이메일/비밀번호 로그인을 켜 두거나, 이번 저장 전이나 이번 저장에서 다른 ' +
+      '로그인 방법을 설정하세요.',
+    enterpriseSso:
+      '이것은 마지막 엔터프라이즈 SSO ID 공급자이며, 이메일/비밀번호 로그인도 꺼져 있어 다른 로그인 방법이 없습니다. ' +
+      '삭제하면 관리자를 포함한 모든 사람이 로그인할 수 없게 됩니다. 먼저 이메일/비밀번호 로그인을 다시 켜거나, 다른 ID ' +
+      '공급자를 등록하거나 다른 로그인 방법을 설정한 뒤 이 공급자를 삭제하세요.',
+    enterpriseSsoUnverified:
+      'ID 공급자를 삭제하지 않았습니다. 다른 로그인 방법이 남아 있는지 확인하기 위해 ID 공급자 목록을 읽을 수 없었고, ' +
+      '이메일/비밀번호 로그인이 꺼져 있어 이것이 마지막 방법일 수 있습니다. 데이터베이스에 연결할 수 있게 되면 다시 ' +
+      '시도하세요.',
   },
 };
 

@@ -45,6 +45,7 @@
  */
 
 import { resolveLocale, resolveOfferedLocale } from '@objectstack/core';
+import type { SettingsCopyLocale } from './settings-copy-locale.js';
 import { PLATFORM_LOCALES, platformLocaleTagOf } from '@objectstack/spec/system';
 import type { SettingsOptionSource, SettingsServedOption } from './settings-service.types.js';
 
@@ -78,12 +79,22 @@ export function localeSelfName(code: string): string {
   }
 }
 
-/** "no longer offered", in the reader's language. */
-export const NOT_OFFERED_COPY: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', string> = {
+/**
+ * "no longer offered", in the reader's language: one entry per language on the
+ * platform locale table ({@link SettingsCopyLocale}).
+ */
+export const NOT_OFFERED_COPY: Record<SettingsCopyLocale, string> = {
   en: 'no longer offered',
   'zh-CN': '已不再提供',
+  'zh-Hant': '已不再提供',
   'ja-JP': '現在は提供されていません',
   'es-ES': 'ya no disponible',
+  ar: 'لم تعد متاحة',
+  fr: 'plus disponible',
+  'pt-BR': 'não está mais disponível',
+  ru: 'больше не предлагается',
+  de: 'nicht mehr angeboten',
+  ko: '더 이상 제공되지 않음',
 };
 
 const COPY_LOCALES = Object.keys(NOT_OFFERED_COPY);

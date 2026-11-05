@@ -36,6 +36,7 @@
  */
 
 import { resolveLocale } from '@objectstack/core';
+import type { SettingsCopyLocale } from './settings-copy-locale.js';
 import { ipMatchesRange, type AuthManager } from './auth-manager.js';
 import { FORWARDED_CLIENT_ADDRESS_HEADERS } from './client-address-forwarding.js';
 
@@ -117,8 +118,12 @@ interface RefusalCopy {
   recovery: string;
 }
 
-/** One entry per locale the settings bundle ships. */
-const COPY: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', RefusalCopy> = {
+/**
+ * One entry per language on the platform locale table, the four served first
+ * under their older codes; `resolveLocale` reads a caller's code through that
+ * table (`zh-TW` → `zh-Hant`).
+ */
+const COPY: Record<SettingsCopyLocale, RefusalCopy> = {
   en: {
     outside: (address) =>
       `No entry in this list matches ${address}, the address you are connected from, so saving it would refuse your `
@@ -157,6 +162,77 @@ const COPY: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', RefusalCopy> = {
       + 'todas esas solicitudes, incluido su propio próximo inicio de sesión. Guarde la lista desde una conexión cuya '
       + 'dirección el servidor pueda determinar.',
     recovery: ` Si queda bloqueado, inicie el servidor con ${ALLOWED_IP_RANGES_ENV} con un valor vacío.`,
+  },
+  'zh-Hant': {
+    outside: (address) =>
+      `這份清單中沒有任何一項與你目前連線所用的位址 ${address} 相符，儲存後你自己下一次登入就會被拒絕。`
+      + '請把你的位址或所在網段加進清單，或在清單能相符的位址上儲存。',
+    undetermined:
+      '伺服器無法確定你目前連線所用的位址；只要設定了清單，這樣的請求都會被拒絕，你自己下一次登入也不例外。'
+      + '請在伺服器能確定位址的連線上儲存。',
+    recovery: `如果已被鎖在外面，可將環境變數 ${ALLOWED_IP_RANGES_ENV} 設為空值後重新啟動伺服器。`,
+  },
+  ar: {
+    outside: (address) =>
+      `لا يطابق أي إدخال في هذه القائمة العنوان ${address} الذي تتصل منه، لذا فإن حفظها سيرفض تسجيل دخولك التالي `
+      + 'أنت نفسك. أضف عنوانك أو نطاقه إلى القائمة، أو احفظ القائمة من عنوان تطابقه.',
+    undetermined:
+      'لا يستطيع الخادم تحديد العنوان الذي تتصل منه، وما دامت هناك قائمة مضبوطة فإنه يرفض كل طلب من هذا النوع، '
+      + 'بما في ذلك تسجيل دخولك التالي. احفظ القائمة من اتصال يستطيع الخادم تحديد عنوانه.',
+    recovery: ` إذا مُنعت من الدخول، فشغّل الخادم مع ضبط ${ALLOWED_IP_RANGES_ENV} على قيمة فارغة.`,
+  },
+  fr: {
+    outside: (address) =>
+      `Aucune entrée de cette liste ne correspond à ${address}, l’adresse depuis laquelle vous êtes connecté : `
+      + 'l’enregistrer refuserait votre propre prochaine connexion. Ajoutez votre adresse ou sa plage à la liste, ou '
+      + 'enregistrez la liste depuis une adresse qu’elle autorise.',
+    undetermined:
+      'Le serveur ne parvient pas à établir l’adresse depuis laquelle vous êtes connecté et, tant qu’une liste est '
+      + 'définie, il refuse toutes ces requêtes, y compris votre propre prochaine connexion. Enregistrez la liste '
+      + 'depuis une connexion dont le serveur peut établir l’adresse.',
+    recovery: ` Si vous êtes bloqué, démarrez le serveur avec ${ALLOWED_IP_RANGES_ENV} défini sur une valeur vide.`,
+  },
+  'pt-BR': {
+    outside: (address) =>
+      `Nenhuma entrada desta lista corresponde a ${address}, o endereço do qual você está conectado, então salvá-la `
+      + 'recusaria o seu próprio próximo login. Adicione o seu endereço ou a faixa dele à lista, ou salve a lista a '
+      + 'partir de um endereço que ela aceite.',
+    undetermined:
+      'O servidor não consegue determinar o endereço do qual você está conectado e, enquanto houver uma lista '
+      + 'definida, recusa todas essas solicitações, inclusive o seu próprio próximo login. Salve a lista a partir de '
+      + 'uma conexão cujo endereço o servidor consiga determinar.',
+    recovery: ` Se você ficar bloqueado, inicie o servidor com ${ALLOWED_IP_RANGES_ENV} definido como um valor vazio.`,
+  },
+  ru: {
+    outside: (address) =>
+      `Ни одна запись этого списка не соответствует адресу ${address}, с которого вы подключены, поэтому после `
+      + 'сохранения ваш собственный следующий вход будет отклонён. Добавьте в список свой адрес или его диапазон '
+      + 'либо сохраните список с адреса, который ему соответствует.',
+    undetermined:
+      'Сервер не может определить адрес, с которого вы подключены, и, пока задан любой список, отклоняет все такие '
+      + 'запросы, включая ваш собственный следующий вход. Сохраните список через подключение, адрес которого сервер '
+      + 'может определить.',
+    recovery: ` Если доступ уже потерян, запустите сервер с пустым значением ${ALLOWED_IP_RANGES_ENV}.`,
+  },
+  de: {
+    outside: (address) =>
+      `Kein Eintrag dieser Liste passt zu ${address}, der Adresse, von der aus Sie verbunden sind. Nach dem Speichern `
+      + 'würde daher Ihre eigene nächste Anmeldung abgewiesen. Fügen Sie Ihre Adresse oder deren Bereich der Liste '
+      + 'hinzu oder speichern Sie die Liste von einer Adresse aus, die sie zulässt.',
+    undetermined:
+      'Der Server kann die Adresse, von der aus Sie verbunden sind, nicht ermitteln, und solange eine Liste gesetzt '
+      + 'ist, weist er alle solchen Anfragen ab, auch Ihre eigene nächste Anmeldung. Speichern Sie die Liste über eine '
+      + 'Verbindung, deren Adresse der Server ermitteln kann.',
+    recovery: ` Wenn Sie ausgesperrt sind, starten Sie den Server mit ${ALLOWED_IP_RANGES_ENV} auf einem leeren Wert.`,
+  },
+  ko: {
+    outside: (address) =>
+      `이 목록에는 현재 접속한 주소 ${address}와 일치하는 항목이 없어, 저장하면 본인의 다음 로그인이 거부됩니다. `
+      + '본인의 주소나 그 대역을 목록에 추가하거나, 목록과 일치하는 주소에서 저장하세요.',
+    undetermined:
+      '서버가 현재 접속한 주소를 확인할 수 없으며, 목록이 설정되어 있는 동안에는 이러한 요청을 모두 거부합니다. '
+      + '본인의 다음 로그인도 마찬가지입니다. 서버가 주소를 확인할 수 있는 연결에서 목록을 저장하세요.',
+    recovery: ` 접속이 차단되었다면 ${ALLOWED_IP_RANGES_ENV}를 빈 값으로 설정한 채 서버를 시작하세요.`,
   },
 };
 

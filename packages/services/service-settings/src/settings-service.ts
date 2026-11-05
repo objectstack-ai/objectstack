@@ -64,6 +64,7 @@ import {
 } from '@objectstack/core';
 import { SETTINGS_SECRET_MASK } from './settings-secret-redaction.js';
 import { USER_OBJECT, assertUserReferenceResolves, registeredLabel } from './actor-reference.js';
+import { settingsActionCopy } from './settings-action-copy.js';
 import {
   firstRejectedDomainMember,
   knownValueDomain,
@@ -3365,20 +3366,22 @@ export class SettingsService {
       // clears persisted rows (back to env/defaults). Plugins may
       // override it via registerAction for richer behaviour (e.g. the
       // AI plugin re-runs env adapter detection after the clear).
+      //
+      // Both answers are written in the caller's language (`display.locale`,
+      // `settingsActionCopy`), as a handler's own answer is.
+      const copy = settingsActionCopy(display.locale);
       if (actionId === 'reset') {
         const cleared = await this.resetNamespace(namespace, ctx);
         return {
           ok: true,
           severity: 'info',
-          message: cleared > 0
-            ? `Cleared ${cleared} saved value(s); environment/default configuration is back in effect.`
-            : 'No saved values to clear — already using environment/default configuration.',
+          message: cleared > 0 ? copy.resetCleared(cleared) : copy.resetNothing,
         };
       }
       return {
         ok: false,
         severity: 'error',
-        message: `No handler registered for action '${actionId}' in '${namespace}'.`,
+        message: copy.noHandler(actionId, namespace),
       };
     }
     const values: Record<string, unknown> = {};
