@@ -851,7 +851,7 @@ describe("[ADR-0090 D12; ruling of record 5985885287, sub-item B] an organizatio
           const h = masked
             ? await boot(posture, { maskingRules: { sys_user_position: { position: MASK }, sys_user_permission_set: { permission_set: MASK } } })
             : await boot(posture);
-          const caller = masked ? CALLERS.orgAdmin : await orgAdminWith(h, 'u_org_admin_columns_hidden', [ORG_ADMIN_FIELDS_HIDDEN.name]);
+          const caller = await orgAdminWith(h, masked ? 'u_org_admin_reads_masked' : 'u_org_admin_columns_hidden', masked ? [] : [ORG_ADMIN_FIELDS_HIDDEN.name]);
           for (const table of Object.keys(TABLES) as Table[]) {
             const column = DISTRIBUTES[table];
             await seedPair(h, table, table);
@@ -882,7 +882,7 @@ describe("[ADR-0090 D12; ruling of record 5985885287, sub-item B] an organizatio
           const h = masked
             ? await boot(posture, { maskingRules: { sys_user_position: { organization_id: MASK }, sys_user_permission_set: { organization_id: MASK } } })
             : await boot(posture);
-          const caller = masked ? CALLERS.orgAdmin : await orgAdminWith(h, 'u_org_admin_organization_hidden', [ORG_ADMIN_ORGANIZATION_HIDDEN.name]);
+          const caller = await orgAdminWith(h, masked ? 'u_org_admin_reads_masked' : 'u_org_admin_organization_hidden', masked ? [] : [ORG_ADMIN_ORGANIZATION_HIDDEN.name]);
           const maskedOrganization = String(maskFieldValue(ORG_A, MASK));
           for (const table of Object.keys(TABLES) as Table[]) {
             await seedPair(h, table, table);
