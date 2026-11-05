@@ -2298,6 +2298,8 @@ ComponentRegistry.register('form',
             required: !!f.required,
             readonly: (f as any).readonly === true,
             serverOwnedValue: isServerOwnedValue(f, isCreateForm),
+            // The render path's required verdict, so the cleanup agrees with it.
+            name,
           },
           previousRecord,
           predicateScope,
@@ -3460,6 +3462,10 @@ ComponentRegistry.register('form',
           // live record, which used to re-require it here with nothing the user
           // could type to unblock the submit (#4085).
           serverOwnedValue: serverOwned,
+          // On an EDIT form `requiredWhen` is judged as the engine judges it, a
+          // transition gate against the stored row (`previousRecord`): a row
+          // already missing the value rests under the rule (objectstack#30184).
+          name,
         },
         previousRecord,
         // The host shell's predicate scope — `current_user` and friends (#6010).
@@ -4062,9 +4068,13 @@ ComponentRegistry.register('form',
                 // action leaves (`actionOutcomes`). Not while it is required
                 // already (the asterisk says so), nor on a control the person
                 // cannot fill. Faults answer `false` and stay quiet: the live
-                // evaluation above already reported a broken rule.
+                // evaluation above already reported a broken rule. Nor when the
+                // stored row already violates the rule: an action's write is
+                // judged against that same stored row, and it rests under the
+                // rule whatever the patch writes (objectstack#30184).
                 requiredWhen != null &&
                   !required &&
+                  !ruleState.requiredWhenAtRest &&
                   !readonly &&
                   !fieldDisabled &&
                   actionOutcomes.length > 0 &&
