@@ -97,7 +97,14 @@ const ORG_ADMIN_FIELDS_HIDDEN = {
   objects: {},
   fields: { 'sys_user_position.position': HIDDEN, 'sys_user_permission_set.permission_set': HIDDEN },
 };
-const PERMISSIONS = [...defaultPermissionSets, QA_IN_SET, ...DELEGATE_SETS, ORG_ADMIN_FIELDS_HIDDEN];
+/** The third column a removal is judged on — the row's organization — hidden the same way, on both tables. */
+const ORG_ADMIN_ORGANIZATION_HIDDEN = {
+  name: 'qa_org_admin_organization_hidden',
+  label: 'QA organization administrator, organization hidden',
+  objects: {},
+  fields: { 'sys_user_position.organization_id': HIDDEN, 'sys_user_permission_set.organization_id': HIDDEN },
+};
+const PERMISSIONS = [...defaultPermissionSets, QA_IN_SET, ...DELEGATE_SETS, ORG_ADMIN_FIELDS_HIDDEN, ORG_ADMIN_ORGANIZATION_HIDDEN];
 
 type Posture = 'single' | 'group' | 'isolated';
 const POSTURES: Posture[] = ['single', 'group', 'isolated'];
@@ -129,11 +136,20 @@ afterEach(async () => {
 });
 
 /**
- * `boot`'s one variation: a partial masking rule declared on
- * `sys_user_position.position` (a rule, not a field rule's `readable: false`),
- * which serves every non-system reader the masked value in place of the stored one.
+ * `boot`'s one variation: partial masking rules declared on columns of the two
+ * assignment tables (a rule, not a field rule's `readable: false`), which serve
+ * every non-system reader the masked value in place of the stored one.
  */
-type BootOptions = { positionMaskingRule?: { keepHead: number; keepTail: number } };
+type MaskingRule = { keepHead: number; keepTail: number };
+type BootOptions = { maskingRules?: Partial<Record<Table, Record<string, MaskingRule>>> };
+
+/** `object` with a partial masking rule declared on each column `rules` names. */
+function withMaskingRules(object: any, rules: Record<string, MaskingRule> | undefined) {
+  if (!rules) return object;
+  const fields = { ...object.fields };
+  for (const [column, maskingRule] of Object.entries(rules)) fields[column] = { ...fields[column], maskingRule };
+  return { ...object, fields };
+}
 
 async function boot(posture: Posture, options: BootOptions = {}) {
   const engine = new ObjectQL();
@@ -149,10 +165,9 @@ async function boot(posture: Posture, options: BootOptions = {}) {
     type: 'plugin',
     scope: 'system',
     objects: [
-      options.positionMaskingRule
-        ? { ...SysUserPosition, fields: { ...SysUserPosition.fields, position: { ...SysUserPosition.fields.position, maskingRule: options.positionMaskingRule } } }
-        : SysUserPosition,
-      SysUserPermissionSet, SysMember, SysBusinessUnit, SysBusinessUnitMember,
+      withMaskingRules(SysUserPosition, options.maskingRules?.sys_user_position),
+      withMaskingRules(SysUserPermissionSet, options.maskingRules?.sys_user_permission_set),
+      SysMember, SysBusinessUnit, SysBusinessUnitMember,
     ],
   } as any);
   await engine.syncSchemas();
@@ -692,7 +707,7 @@ describe("[ADR-0090 D12; ruling of record 5985885287] a delegated administrator'
   });
 });
 
-describe('[ADR-0090 D12; ruling of record 5985885287] an administrator\'s refused assignment write names a value only when the caller reads it, or wrote it', () => {
+describe('[ADR-0090 D12; ruling of record 6649064874] an administrator\'s refused assignment write names a value only when the caller reads it, or wrote it', () => {
   /**
    * One row of organization A per hidden column, each outside the `a_ops`
    * scope on the axis that column decides — the hidden values it carries, and
@@ -738,9 +753,11 @@ describe('[ADR-0090 D12; ruling of record 5985885287] an administrator\'s refuse
       expect([rewrote.status, rewrote.code], String(rewrote.message)).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
       expect(rewrote.message).toContain("'bu_a_other'");
 
-      // The organization branch holds the same rule: an organization
-      // administrator whose field rules hide the column a removal is judged
-      // on is refused without its value; one who reads it is told it.
+      // The organization branch holds the same rule, and is judged on the
+      // stored row too: an organization administrator whose field rules hide
+      // the column a removal is judged on is refused a row outside the
+      // boundary by the boundary itself, without the value, and removes a row
+      // inside it; one who reads the column is told the value.
       const orgAdminHiding = { userId: 'u_org_admin_hiding', positions: [] as string[], permissions: ['organization_admin', ORG_ADMIN_FIELDS_HIDDEN.name], tenantId: ORG_A, accessible_org_ids: [ORG_A] };
       await h.engine.insert('sys_member', { id: 'm_u_org_admin_hiding', user_id: orgAdminHiding.userId, organization_id: ORG_A, role: 'admin' },
         { context: { isSystem: true, tenantId: ORG_A } } as any);
@@ -750,18 +767,26 @@ describe('[ADR-0090 D12; ruling of record 5985885287] an administrator\'s refuse
           { context: { isSystem: true, tenantId: ORG_A } } as any);
         const hiddenTo = await write(h, table, 'delete', id, orgAdminHiding);
         expect([hiddenTo.status, hiddenTo.code], `${table}: ${hiddenTo.message}`).toEqual([403, 'PERMISSION_DENIED']);
-        expect(JSON.stringify(hiddenTo), `${table}: no hidden value in the refusal`).not.toMatch(/qa_out_pos|admin_full_access/);
+        expect(hiddenTo.message, `${table}: the boundary refuses it, on the stored row`).toMatch(/is not inside the organization boundary/);
+        expect(JSON.stringify(hiddenTo), `${table}: the refusal names no value the caller does not read`).not.toMatch(/qa_out_pos|admin_full_access/);
         const readTo = await write(h, table, 'delete', id, CALLERS.orgAdmin);
         expect([readTo.status, readTo.code], `${table}, read: ${readTo.message}`).toEqual([403, 'PERMISSION_DENIED']);
         expect(readTo.message, `${table}, read`).toContain("'admin_full_access'");
         expect(await stored(h, table, { id }), `${table}: refused means untouched`).toHaveLength(1);
+
+        const inId = `org_in_${table}`;
+        await h.engine.insert(table, { id: inId, user_id: 'u_target', ...TABLES[table].in, organization_id: ORG_A },
+          { context: { isSystem: true, tenantId: ORG_A } } as any);
+        const admitted = await write(h, table, 'delete', inId, orgAdminHiding);
+        expect(admitted, `${table}, inside the boundary: ${admitted.message}`).toEqual({ status: 200 });
+        expect(await stored(h, table, { id: inId }), `${table}: the removal landed`).toHaveLength(0);
       }
     });
   }
 
   it("a partially masked column is never named either — neither its masked nor its stored value — and the delegate is still judged on the stored value", async () => {
     const rule = { keepHead: 3, keepTail: 0 };
-    const h = await boot('isolated', { positionMaskingRule: rule });
+    const h = await boot('isolated', { maskingRules: { sys_user_position: { position: rule } } });
     await seedDelegation(h);
     const inA = { context: { isSystem: true, tenantId: ORG_A } } as any;
     // Outside the scope only by its position, whose stored value distributes a set off the allowlist.
@@ -792,5 +817,151 @@ describe('[ADR-0090 D12; ruling of record 5985885287] an administrator\'s refuse
       expect(r, `${op}: ${r.message}`).toEqual({ status: 200 });
     }
     expect(await stored(h, 'sys_user_position', { id: 'masked_in' }), 'the delete landed').toHaveLength(0);
+  });
+});
+
+// ── The organization branch: judged on the stored row ──────────────────────
+
+describe("[ADR-0090 D12; ruling of record 6649064874] an organization administrator's removal is judged on the stored row, and its refusal names only values the caller can read", () => {
+  const inA = { context: { isSystem: true, tenantId: ORG_A } } as any;
+  const MASK: MaskingRule = { keepHead: 3, keepTail: 0 };
+
+  /** An administrator of organization A holding `organization_admin` beside `fieldRules`, enrolled as an admin member. */
+  async function orgAdminWith(h: Harness, userId: string, fieldRules: string[]) {
+    await h.engine.insert('sys_member', { id: `m_${userId}`, user_id: userId, organization_id: ORG_A, role: 'admin' }, inA);
+    return { userId, positions: [] as string[], permissions: ['organization_admin', ...fieldRules], tenantId: ORG_A, accessible_org_ids: [ORG_A] };
+  }
+
+  /** The column of `table` that names the set its row distributes. */
+  const DISTRIBUTES: Record<Table, 'position' | 'permission_set'> = { sys_user_position: 'position', sys_user_permission_set: 'permission_set' };
+
+  /** An in-boundary and an out-of-boundary row of organization A in `table`. */
+  async function seedPair(h: Harness, table: Table, tag: string) {
+    await h.engine.insert(table, { id: `in_${tag}`, user_id: 'u_target', ...TABLES[table].in, organization_id: ORG_A }, inA);
+    await h.engine.insert(table, { id: `out_${tag}`, user_id: 'u_seeded', ...TABLES[table].out, organization_id: ORG_A }, inA);
+  }
+
+  /** What the security plugin's own delegated-administration gate answers a by-id removal, asked as the write door asks it. */
+  const gateAnswer = (h: Harness, table: Table, id: string, context: object) =>
+    answerOf(() => (h.plugin as any).delegatedAdminGate.assert({
+      object: table, operation: 'delete', options: { where: { id } }, context: structuredClone(context),
+    }));
+
+  /** Every value the stored out-of-boundary row of `table` distributes — the stored name and the sets behind it. */
+  const OUT_VALUES: Record<Table, string[]> = {
+    sys_user_position: ['qa_out_pos', 'admin_full_access', 'qa_in_set'],
+    sys_user_permission_set: ['admin_full_access'],
+  };
+
+  for (const posture of ['group', 'isolated'] as const) {
+    describe(`posture '${posture}'`, () => {
+      for (const how of ['hidden by a field rule', 'partially masked'] as const) {
+        it(`a position or a permission set ${how}: the removal of an in-boundary row is admitted, and of an out-of-boundary row refused by the boundary, naming neither the stored nor the masked value`, async () => {
+          const masked = how === 'partially masked';
+          const h = masked
+            ? await boot(posture, { maskingRules: { sys_user_position: { position: MASK }, sys_user_permission_set: { permission_set: MASK } } })
+            : await boot(posture);
+          const caller = await orgAdminWith(h, masked ? 'u_org_admin_reads_masked' : 'u_org_admin_columns_hidden', masked ? [] : [ORG_ADMIN_FIELDS_HIDDEN.name]);
+          for (const table of Object.keys(TABLES) as Table[]) {
+            const column = DISTRIBUTES[table];
+            await seedPair(h, table, table);
+            // The precondition, read off the read door: the caller reads the
+            // row, and not the stored value of the column it is judged on.
+            const seen = await h.engine.findOne(table, { where: { id: `out_${table}` }, context: structuredClone(caller) });
+            expect(seen, `${table}: the caller reads the row`).toBeTruthy();
+            const maskedValue = String(maskFieldValue((TABLES[table].out as Record<string, string>)[column], MASK));
+            if (masked) expect(seen?.[column], `${table}: read masked`).toBe(maskedValue);
+            else expect(seen, `${table}: read without the column`).not.toHaveProperty(column);
+
+            const out = await write(h, table, 'delete', `out_${table}`, caller);
+            expect([out.status, out.code], `${table}, outside: ${out.message}`).toEqual([403, 'PERMISSION_DENIED']);
+            expect(out.message, `${table}, outside`).toMatch(/is not inside the organization boundary/);
+            for (const value of [...OUT_VALUES[table], maskedValue]) {
+              expect(JSON.stringify(out), `${table}, outside: '${value}' is not in the refusal`).not.toContain(value);
+            }
+            expect(await stored(h, table, { id: `out_${table}` }), `${table}: refused means untouched`).toHaveLength(1);
+
+            const inside = await write(h, table, 'delete', `in_${table}`, caller);
+            expect(inside, `${table}, inside: ${inside.message}`).toEqual({ status: 200 });
+            expect(await stored(h, table, { id: `in_${table}` }), `${table}: the removal landed`).toHaveLength(0);
+          }
+        });
+
+        it(`the row's organization ${how}: the gate admits the removal of an in-boundary row on its stored organization, and refuses an out-of-boundary row naming only the values the caller reads`, async () => {
+          const masked = how === 'partially masked';
+          const h = masked
+            ? await boot(posture, { maskingRules: { sys_user_position: { organization_id: MASK }, sys_user_permission_set: { organization_id: MASK } } })
+            : await boot(posture);
+          const caller = await orgAdminWith(h, masked ? 'u_org_admin_reads_masked' : 'u_org_admin_organization_hidden', masked ? [] : [ORG_ADMIN_ORGANIZATION_HIDDEN.name]);
+          const maskedOrganization = String(maskFieldValue(ORG_A, MASK));
+          for (const table of Object.keys(TABLES) as Table[]) {
+            await seedPair(h, table, table);
+            const seen = await h.engine.findOne(table, { where: { id: `in_${table}` }, context: structuredClone(caller) });
+            expect(seen, `${table}: the caller reads the row`).toBeTruthy();
+            if (masked) expect(seen?.organization_id, `${table}: read masked`).toBe(maskedOrganization);
+            else expect(seen, `${table}: read without the column`).not.toHaveProperty('organization_id');
+
+            // The gate's own verdict, asked as the write door asks it. (The
+            // write door asks its other row-level questions of the same write
+            // separately; they are not this gate's.)
+            expect(await gateAnswer(h, table, `in_${table}`, caller), `${table}, inside`).toEqual({ status: 200 });
+
+            // Outside the boundary by the set it distributes, which the caller
+            // reads: the refusal names that, and nothing of the organization.
+            for (const out of [await gateAnswer(h, table, `out_${table}`, caller), await write(h, table, 'delete', `out_${table}`, caller)]) {
+              expect([out.status, out.code], `${table}, outside: ${out.message}`).toEqual([403, 'PERMISSION_DENIED']);
+              expect(out.message, `${table}, outside`).toMatch(/'admin_full_access'.*by name/);
+              expect(JSON.stringify(out), `${table}, outside: the organization is not in the refusal`).not.toContain(maskedOrganization);
+            }
+            expect(await stored(h, table, { id: `out_${table}` }), `${table}: refused means untouched`).toHaveLength(1);
+          }
+        });
+      }
+
+      it("control: a caller whose field rules hide a judged column is still answered the read door's not-found, whole, when it removes a row it cannot read or an id naming no row", async () => {
+        const h = await boot(posture);
+        const callers = [
+          await orgAdminWith(h, 'u_org_admin_columns_hidden', [ORG_ADMIN_FIELDS_HIDDEN.name]),
+          await orgAdminWith(h, 'u_org_admin_organization_hidden', [ORG_ADMIN_ORGANIZATION_HIDDEN.name]),
+        ];
+        for (const table of Object.keys(TABLES) as Table[]) {
+          const id = `unreadable_${table}`;
+          await seedIn(h, table, id, ORG_B, 'u_other_org');
+          for (const target of [id, NOWHERE]) {
+            const notFound = await readDoorNotFound(table, target);
+            for (const caller of callers) {
+              expect(await h.engine.findOne(table, { where: { id: target }, context: structuredClone(caller) }), `${caller.userId} reads ${table} ${target}`).toBeFalsy();
+              // A removal only: an edit in place is no part of the right, and
+              // where its refusal falls is not what this describe pins.
+              expect(await wholeWrite(h, table, 'delete', target, caller), `${caller.userId} delete ${table} ${target}`).toEqual(notFound);
+            }
+          }
+          expect(await stored(h, table, { id }), `${table}: refused means untouched`).toHaveLength(1);
+        }
+      });
+    });
+  }
+
+  it("control, 'single': an organization the caller's field rules hide is judged on the stored row too — its own organization's in-boundary row is removed, another organization's row is refused without naming that organization", async () => {
+    const h = await boot('single');
+    const caller = await orgAdminWith(h, 'u_org_admin_organization_hidden', [ORG_ADMIN_ORGANIZATION_HIDDEN.name]);
+    for (const table of Object.keys(TABLES) as Table[]) {
+      await seedPair(h, table, table);
+      const foreign = `foreign_${table}`;
+      await seedIn(h, table, foreign, ORG_B, 'u_other_org');
+      const seen = await h.engine.findOne(table, { where: { id: foreign }, context: structuredClone(caller) });
+      expect(seen, `${table}: the caller reads the other organization's row`).toBeTruthy();
+      expect(seen, `${table}: without its organization`).not.toHaveProperty('organization_id');
+
+      const refused = await write(h, table, 'delete', foreign, caller);
+      expect([refused.status, refused.code], `${table}: ${refused.message}`).toEqual([403, 'PERMISSION_DENIED']);
+      expect(refused.message, table).toMatch(/does not belong to the organization you administer/);
+      expect(JSON.stringify(refused), `${table}: the organization is not in the refusal`).not.toContain(ORG_B);
+      expect(await stored(h, table, { id: foreign }), `${table}: refused means untouched`).toHaveLength(1);
+
+      const inside = await write(h, table, 'delete', `in_${table}`, caller);
+      expect(inside, `${table}, inside: ${inside.message}`).toEqual({ status: 200 });
+      expect(await stored(h, table, { id: `in_${table}` }), `${table}: the removal landed`).toHaveLength(0);
+    }
   });
 });
