@@ -21,7 +21,9 @@ import { SystemObjectName } from '@objectstack/spec/system';
  *  - `sys_user`: every sign-in stamps `last_login_at` / `last_login_ip` on it
  *    under the signing-in person's own name, and the only column that tells
  *    that stamp from a profile edit is `changed_fields`, which a filter may
- *    not name for every reader (`parent-field-query-guard.ts`).
+ *    not name for every reader (`parent-field-query-guard.ts`);
+ *  - `sys_jwks`: the token-signing key pair, minted on first use under
+ *    whichever session first needs it (measured: the first sign-in's).
  *
  * Their writes are mirrored like any other object's, and those rows stay
  * stored and readable: the `all` view below lists them, and each one has its
@@ -39,6 +41,7 @@ export const ACTIVITY_FEED_EXCLUDED_OBJECTS: readonly string[] = Object.freeze([
   SysMigration.name,
   SysMigrationJournal.name,
   SystemObjectName.USER,
+  SystemObjectName.JWKS,
 ]);
 
 /**

@@ -91,6 +91,7 @@ describe('sys_activity default list view — the declaration', () => {
         SysMigration.name,
         SysMigrationJournal.name,
         SystemObjectName.USER,
+        SystemObjectName.JWKS,
       ].sort(),
     );
   });
@@ -139,6 +140,7 @@ describe('sys_activity default list view — the rows it serves', () => {
       { summary: 'sign-in stamp', object_name: 'sys_user', record_id: 'u_admin', actor_id: 'u_admin', timestamp: at(45) },
       { summary: 'metadata publish', object_name: SysMetadataObject.name, record_id: 'm1', actor_id: 'u_admin', timestamp: at(46) },
       { summary: 'metadata history', object_name: SysMetadataHistoryObject.name, record_id: 'h1', actor_id: 'u_admin', timestamp: at(47) },
+      { summary: 'signing key minted', object_name: SystemObjectName.JWKS, record_id: 'k1', actor_id: 'u_admin', timestamp: at(49) },
       { summary: 'migration', object_name: SysMigration.name, record_id: 'g1', actor_id: null, timestamp: at(48) },
     ];
     for (const row of rows) {
@@ -187,7 +189,7 @@ describe('sys_activity default list view — the rows it serves', () => {
       orderBy: views.all.sort,
       context: SYS,
     })) as Row[]);
-    for (const left of ['sign-in stamp', 'metadata publish', 'metadata history', 'migration']) {
+    for (const left of ['sign-in stamp', 'metadata publish', 'metadata history', 'signing key minted', 'migration']) {
       expect(all).toContain(left);
     }
   });
