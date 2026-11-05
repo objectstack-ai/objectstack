@@ -133,7 +133,7 @@
           "verifiedAt": "2026-11-05",
           "evidenceScope": "in-repo",
           "authorWarn": true,
-          "authorHint": "Keep it, but nothing reads it yet: the console's action dialog draws the param with its `type` widget until objectstack#30260 passes `widget` through, so a param naming `permission-ref` is a text box for now.",
+          "authorHint": "Keep it, but nothing reads it yet: the console's action dialog draws the param with its `type` widget until the dialog passes `widget` through, so a param naming `permission-ref` is a text box for now.",
           "note": "PLANNED RECORD (#30259, ADR-0131 D4): the widget override, the same key, vocabulary and meaning as FieldSchema.widget, declared spec-first so a param can ask for the `permission-ref` picker the grant column uses. Accepted by the parse door and carried in the parsed param; read by nothing yet, measured: the console's resolveActionParam builds an ActionParamDef from named members and copies no `widget`, paramToField sets a field widget only for `boolean`, and the dispatcher's resolveDeclaredActionParams copies five named members and validates by `type`, so the value contract is unchanged. The reader is #30260 (the resolveActionParams / paramToField pass-through); flip this row to live there. Create User's permissionSet param switches to it in #30117's server PR."
         },
         "required": {
