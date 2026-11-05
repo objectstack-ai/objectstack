@@ -95,7 +95,7 @@ describe('DeploymentNotice (objectstack#30120)', () => {
   });
 
   it('the copy button hands over every variable, saying which current value to carry over', async () => {
-    const writeText = vi.fn(async () => {});
+    const writeText = vi.fn(async (_text: string) => {});
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
     render(<DeploymentNotice placement="home" />);
     await settle();
@@ -103,7 +103,7 @@ describe('DeploymentNotice (objectstack#30120)', () => {
       fireEvent.click(screen.getByTestId('deployment-notice-copy'));
     });
     expect(writeText).toHaveBeenCalledTimes(1);
-    const text = writeText.mock.calls[0]![0] as string;
+    const text = writeText.mock.calls[0]![0];
     expect(text).toMatch(/^OS_DATABASE_URL=$/m);
     expect(text).toMatch(/^OS_AUTH_SECRET=$/m);
     expect(text).toMatch(/^OS_SECRET_KEY=$/m);
