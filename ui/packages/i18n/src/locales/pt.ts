@@ -1853,6 +1853,10 @@ const pt = {
     },
   },
   console: {
+    organizationMfa: {
+      needsTwoFactor: "Exigir autenticação multifator precisa da autenticação de dois fatores, que está desativada nesta implantação, então salvar com a opção marcada é recusado. Ative os dois fatores primeiro: ligue Exigir autenticação multifator em Configuração → Autenticação (vale para todas as organizações) ou defina OS_AUTH_TWO_FACTOR=true na implantação.",
+      nowRequired: "Todos os membros desta organização que ainda não configuraram um app autenticador precisam fazê-lo agora. Cada um perde o acesso aos dados quando termina o período de carência de MFA (7 dias, a menos que alterado em Configuração → Autenticação), contado a partir do primeiro uso após esta alteração. Membros que já usam um autenticador não são afetados.",
+    },
     studio: {
       title: "Studio",
       accessRequired: "Você precisa de acesso ao Studio para abrir o Studio. Um administrador pode concedê-lo com um conjunto de permissões em Configuração → Atribuição de conjuntos de permissões.",
@@ -3014,7 +3018,7 @@ const pt = {
         continue: "Continuar",
         preparing: "Preparando…",
         enrollFailed: "Não foi possível iniciar o registro.",
-        unavailable: "A autenticação de dois fatores está desativada nesta implantação, então ainda não é possível configurar um app autenticador. Peça a um administrador para ativá-la em Configurações → Autenticação e tente novamente.",
+        unavailable: "A autenticação de dois fatores está desativada nesta implantação, então ainda não é possível configurar um app autenticador. Peça a um administrador para ativá-la em Configuração → Autenticação e tente novamente.",
         scanTitle: "Escaneie com seu aplicativo autenticador",
         scanBody: "Escaneie este QR code com o Google Authenticator, 1Password, Authy etc. e digite o código de 6 dígitos.",
         backupTitle: "Salve seus códigos de backup",

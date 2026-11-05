@@ -2196,6 +2196,12 @@ const en = {
     },
   },
   console: {
+    // What the organization record form says around `require_mfa`: before
+    // saving while two-factor is off, and after a save that turned it on.
+    organizationMfa: {
+      needsTwoFactor: 'Require Multi-Factor Auth needs two-factor authentication, which is off on this deployment, so saving with it ticked is refused. Turn two-factor on first: switch on Require multi-factor authentication in Setup → Authentication (it applies to every organization), or set OS_AUTH_TWO_FACTOR=true on the deployment.',
+      nowRequired: 'Every member of this organization who has not set up an authenticator app must now do so. Each one is blocked from data once the MFA grace period ends (7 days unless changed in Setup → Authentication), counted from the first time they use the app after this change. Members who already use an authenticator are not affected.',
+    },
     // The fixed crumb `AppHeader`'s `studio` variant draws on the Studio front
     // door (objectui#11863), as `organizations.title` is the `orgs` variant's.
     // A product name, which every pack writes as is.
@@ -3525,7 +3531,7 @@ const en = {
         continue: 'Continue',
         preparing: 'Preparing…',
         enrollFailed: 'Could not start enrollment.',
-        unavailable: 'Two-factor authentication is turned off on this deployment, so an authenticator app cannot be set up yet. Ask an administrator to turn it on in Settings → Authentication, then try again.',
+        unavailable: 'Two-factor authentication is turned off on this deployment, so an authenticator app cannot be set up yet. Ask an administrator to turn it on in Setup → Authentication, then try again.',
         scanTitle: 'Scan with your authenticator',
         scanBody: 'Scan this QR code with Google Authenticator, 1Password, Authy, etc., then enter the 6-digit code.',
         backupTitle: 'Save your backup codes',

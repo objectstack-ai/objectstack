@@ -1858,6 +1858,10 @@ const es = {
     },
   },
   console: {
+    organizationMfa: {
+      needsTwoFactor: "Exigir autenticación multifactor necesita la autenticación de dos factores, que está desactivada en esta implementación, así que guardar con la casilla marcada se rechaza. Activa primero los dos factores: enciende Requerir autenticación multifactor en Configuración → Autenticación (se aplica a todas las organizaciones) o define OS_AUTH_TWO_FACTOR=true en la implementación.",
+      nowRequired: "Todos los miembros de esta organización que no hayan configurado una app de autenticación deben hacerlo ahora. A cada uno se le bloquea el acceso a los datos cuando termina el periodo de gracia de MFA (7 días salvo que se cambie en Configuración → Autenticación), contado desde la primera vez que usa la app después de este cambio. Los miembros que ya usan un autenticador no se ven afectados.",
+    },
     studio: {
       title: "Studio",
       accessRequired: "Necesita acceso a Studio para abrir Studio. Un administrador puede concedérselo con un conjunto de permisos en Configuración → Asignación de conjuntos de permisos.",
