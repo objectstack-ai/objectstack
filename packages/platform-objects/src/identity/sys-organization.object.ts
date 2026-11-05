@@ -401,7 +401,7 @@ export const SysOrganization = ObjectSchema.create({
       required: false,
       defaultValue: false,
       group: 'Configuration',
-      description: 'When true, every member of this organization must enroll an authenticator app to access data.',
+      description: 'Turn on to require every member of this organization to set up an authenticator app before they can access data.',
     }),
 
     // #14238 — maintainer ruling 2026-09-02, option A (verbatim 「同意」): the

@@ -290,5 +290,58 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Todos"
       }
     }
+  },
+  sys_queue: {
+    label: "Queue",
+    pluralLabel: "Queues",
+    description: "A named group of people that unassigned records can wait in until one of them takes the record.",
+    fields: {
+      name: {
+        label: "Name",
+        help: "Identifies the queue everywhere it is used — on records, in assignment rules, approvals and sharing rules. Lowercase letters, digits and underscores only."
+      },
+      label: {
+        label: "Display Label"
+      },
+      description: {
+        label: "Description"
+      }
+    },
+    _views: {
+      all_queues: {
+        label: "All"
+      }
+    }
+  },
+  sys_queue_member: {
+    label: "Queue Member",
+    pluralLabel: "Queue Members",
+    description: "Who belongs to a queue: a user, a team, a position or a business unit.",
+    fields: {
+      queue: {
+        label: "Queue",
+        help: "The name of the queue this member belongs to."
+      },
+      recipient_type: {
+        label: "Member Type",
+        help: "What kind of member this is. A team, position or business unit makes everyone in it a member. \"Business unit and subordinates\" also covers every unit below the one you pick.",
+        options: {
+          user: "User",
+          team: "Team",
+          position: "Position",
+          business_unit: "Business unit",
+          unit_and_subordinates: "Business unit and subordinates"
+        }
+      },
+      recipient_id: {
+        label: "Member",
+        help: "The specific user, team, position or business unit."
+      }
+    },
+    _views: {
+      by_queue: {
+        label: "By Queue"
+      }
+    }
   }
 };

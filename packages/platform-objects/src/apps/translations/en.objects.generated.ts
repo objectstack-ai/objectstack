@@ -39,7 +39,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       banned: {
         label: "Banned",
-        help: "When true, the user cannot sign in. Toggle via Ban User / Unban User actions."
+        help: "When on, the user cannot sign in. Use the Ban User / Unban User actions to change it."
       },
       ban_reason: {
         label: "Ban Reason"
@@ -70,7 +70,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       must_change_password: {
         label: "Must Change Password",
-        help: "When true, the user is blocked (403 PASSWORD_RESET_REQUIRED) until they change their password. Stamped by the admin user-management routes; system-managed."
+        help: "When on, the user must change their password before they can continue. Turned on when an administrator creates or imports the account, or resets its password; system-managed."
       },
       mfa_required_at: {
         label: "MFA Required At",
@@ -557,7 +557,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       require_mfa: {
         label: "Require Multi-Factor Auth",
-        help: "When true, every member of this organization must enroll an authenticator app to access data."
+        help: "Turn on to require every member of this organization to set up an authenticator app before they can access data."
       },
       timezone: {
         label: "Timezone",
@@ -995,7 +995,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       kind: {
         label: "Kind",
-        help: "Categorisation hint — does not change graph semantics.",
+        help: "For grouping and reporting only; it does not change where the unit sits in the organization or who it covers.",
         options: {
           company: "Company",
           division: "Division",
@@ -1006,7 +1006,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_business_unit_id: {
         label: "Parent Business Unit",
-        help: "Self-reference for the org tree. Null = root of tenant. A unit that still has child units cannot be deleted until they are re-parented or deleted."
+        help: "The unit this one sits under. Leave empty for a top-level unit. A unit that still has units under it cannot be deleted until they are moved under another unit or deleted."
       },
       timezone: {
         label: "Timezone",
@@ -1022,19 +1022,19 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       active: {
         label: "Active",
-        help: "When false, members are not expanded by graph queries."
+        help: "Turn off to retire the unit: sharing and other access given to this unit, or to a unit above it, no longer reaches its members or the units under it."
       },
       effective_from: {
         label: "Effective From",
-        help: "When this business unit came into existence (HRIS sync)."
+        help: "When this business unit came into existence. Usually filled in by a sync from your HR system."
       },
       effective_to: {
         label: "Effective To",
-        help: "When this business unit was retired (HRIS sync)."
+        help: "When this business unit was retired. Usually filled in by a sync from your HR system."
       },
       external_ref: {
         label: "External Reference",
-        help: "ID in upstream HRIS (Workday / SAP HR / 北森)."
+        help: "The unit's ID in your HR system (such as Workday, SAP HR or 北森), used to match it on each sync."
       },
       id: {
         label: "Business Unit ID"
