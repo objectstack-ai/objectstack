@@ -1792,6 +1792,30 @@ export function collectDriftApplyLimits(
 }
 
 /**
+ * [#30636] Mark every drift entry on a table the schema sync refuses
+ * (`refuse_table` in `work`) with that refusal as its apply limit, in place.
+ * `os migrate apply` applies no drift on a refused table — it is left exactly
+ * as it is — so the listing must not offer `--allow-destructive` for it (the
+ * `_id` column such a table carries reads as an orphaned column to drop).
+ * Read by `os migrate plan` and by the listing `os migrate apply` prints
+ * before its prompt; `apply` itself withholds those entries from the driver.
+ */
+export async function addRefusedTableLimits(
+  limits: Map<ManagedDriftEntry, string>,
+  drift: readonly ManagedDriftEntry[],
+  work: PendingSchemaWork[],
+): Promise<void> {
+  const { refused } = await splitRefusedSchemaWork(work);
+  if (refused.length === 0) return;
+  const tables = new Set(refused.map((p) => p.table));
+  for (const d of drift) {
+    if (tables.has(d.table)) {
+      limits.set(d, `the schema sync refuses the table '${d.table}' (listed under Refused) and leaves it exactly as it is`);
+    }
+  }
+}
+
+/**
  * [#23925] The {@link renderPlan} `describe` for those entries: the finding
  * without its `--allow-destructive` sentence, then the driver's limit, so the
  * listing never offers a remedy that database does not have. Every other
