@@ -121,7 +121,12 @@ export function loadScenarioFile(
   const parsed = ScenarioCardSchema.safeParse(raw);
   if (!parsed.success) {
     for (const issue of parsed.error.issues) {
-      refuse(issue.path as IssuePath, issue.message);
+      if (issue.code === 'unrecognized_keys') {
+        // Locate each unknown key itself, not just the object holding it.
+        for (const key of issue.keys) refuse([...(issue.path as IssuePath), key], `unknown key \`${key}\``);
+      } else {
+        refuse(issue.path as IssuePath, issue.message);
+      }
     }
     return { refusals };
   }
@@ -229,7 +234,9 @@ function checkCard(card: ScenarioCard, stem: string, options: LoadOptions, refus
   });
   const lookupFields = new Map<string, string>(); // `object.field` → target object
   (expect.lookups ?? []).forEach((l, i) => {
-    lookupFields.set(`${l.object}.${l.field}`, l.to);
+    // A lookup to an unexpected object is refused above; checking every
+    // value against it would only repeat that one fault per row.
+    if (objects.has(l.to)) lookupFields.set(`${l.object}.${l.field}`, l.to);
     if (seed[l.object] && !known(l.object).has(l.field)) {
       refuse(['expect', 'lookups', i, 'field'], `no seed row of \`${l.object}\` carries \`${l.field}\``);
     }
