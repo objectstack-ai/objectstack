@@ -763,7 +763,9 @@ function isLeftOutExtension(contributor: ObjectContributor, options: ObjectExten
  *     the tenant's `message` and `active`, never the tenant's condition.
  *   - The three {@link OBJECT_FOLD_SCALAR_KEYS} (`label`, `pluralLabel`,
  *     `description`) are overridden last-writer-wins, subject to the
- *     `tenantAuthored` yield rule below.
+ *     `tenantAuthored` yield rule below. [#30391] A `label` that renames the
+ *     object without a `pluralLabel` beside it also takes the running
+ *     `pluralLabel` off: the plural named the old label.
  *   - `fieldPatches` [ADR-0146 D10, second rule] is APPLIED, never carried:
  *     after the merges above, each patch writes its `BASE_FIELD_DISPLAY_WHITELIST`
  *     keys onto the named field and its option labels onto the options whose
@@ -843,7 +845,17 @@ function mergeObjectDefinitions(
   // Override scalar props (last writer wins) — [ADR-0029 D9.2a] unless the base has been
   // authored by the tenant, in which case the extender's packaged default yields.
   const yields = (key: ObjectFoldScalarKey): boolean => tenantAuthored?.has(key) === true;
-  if (extension.label !== undefined && !yields('label')) merged.label = extension.label;
+  if (extension.label !== undefined && !yields('label')) {
+    // [#30391] `pluralLabel` is the plural OF `label`: an extension that renames
+    // the object and declares no plural leaves the running plural naming the
+    // old label, so the object is served as one that declares no
+    // `pluralLabel`. A plural the tenant authored stays (the D9.2a yield), and
+    // an extension that repeats the label it extends renames nothing.
+    if (extension.pluralLabel === undefined && extension.label !== merged.label && !yields('pluralLabel')) {
+      delete merged.pluralLabel;
+    }
+    merged.label = extension.label;
+  }
   if (extension.pluralLabel !== undefined && !yields('pluralLabel')) {
     merged.pluralLabel = extension.pluralLabel;
   }
