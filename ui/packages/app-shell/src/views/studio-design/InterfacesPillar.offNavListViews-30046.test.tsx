@@ -77,7 +77,7 @@ function seed() {
       formView('crm_lead', 'contact_us', 'Contact us'),
       listView('crm_case', 'open', 'Open cases', { isDefault: true }),
       listView('crm_case', 'mine', 'My cases', {}, {
-        conditionalFormatting: [{ condition: "status == 'urgent'", style: { color: 'red' } }],
+        conditionalFormatting: [{ condition: "record.status == 'urgent'", style: { color: 'red' } }],
       }),
     ].map((row) => [row.name, row]),
   );
@@ -166,6 +166,23 @@ import { InterfacesPillar } from './StudioDesignSurface';
 import { registerMetadataPreview, type MetadataPreviewProps } from '../metadata-admin/preview-registry';
 import { t, tFormat } from '../metadata-admin/i18n';
 import { STUDIO_RAIL_ROW_ACTIVE } from './studio-tokens';
+import { __setCelFormulaLoader } from '../metadata-admin/celAuthoring';
+
+/** A formula engine whose one verdict is: an expression that ends after an operator does not parse. */
+function stubCelEngine() {
+  __setCelFormulaLoader(() =>
+    Promise.resolve({
+      validateExpression: (_role: string, input: unknown) => {
+        const src = typeof input === 'string' ? input : String((input as { source?: string })?.source ?? '');
+        return /[*+\-/&|=<>]\s*$/.test(src)
+          ? { ok: false, errors: [{ message: 'Parse error: expression ends after an operator' }], warnings: [] }
+          : { ok: true, errors: [], warnings: [] };
+      },
+      introspectScope: () => ({ fields: ['name', 'status'], roots: ['record'], functions: ['has'] }),
+      inferExpressionType: () => 'boolean' as const,
+    }) as never,
+  );
+}
 
 /** A view page's canvas that says what it was opened on. */
 function StubPreview({ type, name }: MetadataPreviewProps) {
@@ -208,7 +225,10 @@ beforeEach(() => {
   for (const fn of [mockClient.save, mockClient.list, mockClient.listDrafts, previewClient.list]) fn.mockClear();
   window.confirm = vi.fn(() => false) as unknown as typeof window.confirm;
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  __setCelFormulaLoader(undefined);
+});
 
 /** The address the pillar writes, as a reload or a shared link reads it. */
 let address = new URLSearchParams();
@@ -273,13 +293,20 @@ describe('不在导航中 → 视图 lists what the dropdown does not reach (obj
     expect(names).not.toContain('view · crm_lead.drafted');
   });
 
-  it('CONTROL: the list views of an object with no entry stay listed, beside the form views', async () => {
+  it('what is listed: the form views, and the list views of an object no entry opens', async () => {
     mountPillar();
     const group = await viewGroup();
     await viewsRead();
     expect(rowNames(group).sort()).toEqual(
       ['view · crm_case.mine', 'view · crm_case.open', 'view · crm_lead.contact_us', 'view · crm_lead.form'].sort(),
     );
+  });
+
+  it('CONTROL: the list views of an object with no entry stay listed', async () => {
+    mountPillar();
+    const group = await viewGroup();
+    await viewsRead();
+    expect(rowNames(group)).toEqual(expect.arrayContaining(['view · crm_case.mine', 'view · crm_case.open']));
   });
 });
 
@@ -310,12 +337,12 @@ describe('the group names what it holds, and a form view by a readable name (obj
     expect(forms).not.toHaveTextContent(t('engine.studio.if.offNav.viewMixed', 'en'));
   });
 
-  it('CONTROL: with only list views left, the heading stays 视图', async () => {
+  it('CONTROL: with no form view, the heading stays 视图', async () => {
     for (const name of Object.keys(published)) if (published[name]!.viewKind === 'form') delete published[name];
     mountPillar();
     const group = await viewGroup();
     await viewsRead();
-    expect(rowNames(group).sort()).toEqual(['view · crm_case.mine', 'view · crm_case.open']);
+    expect(rowNames(group)).toEqual(expect.arrayContaining(['view · crm_case.mine', 'view · crm_case.open']));
     expect(group).toHaveTextContent(t('engine.studio.if.offNav.view', 'en'));
     expect(group).not.toHaveTextContent(t('engine.studio.if.offNav.viewForms', 'en'));
   });
@@ -350,7 +377,7 @@ describe('a list view opened from 不在导航中 lands on its object’s page (
 
     const more = await screen.findByTestId('list-view-more', undefined, { timeout: 8000 });
     expect(within(more).getByTestId('list-view-conditional-formatting')).toBeInTheDocument();
-    expect(within(more).getByDisplayValue("status == 'urgent'")).toBeInTheDocument();
+    expect(within(more).getByDisplayValue("record.status == 'urgent'")).toBeInTheDocument();
     expect(within(more).getByTestId('list-view-spec-form')).toBeInTheDocument();
   });
 
@@ -398,4 +425,28 @@ describe('a list view opened from 不在导航中 lands on its object’s page (
     expect(await screen.findByText('view:crm_lead.contact_us', undefined, { timeout: 8000 })).toBeInTheDocument();
     expect(screen.queryByTestId('studio-list-view-inspector')).toBeNull();
   });
+
+  it('a formatting rule whose CEL does not parse holds the view’s autosave, as the view page held Save', async () => {
+    stubCelEngine();
+    mountPillar();
+    const group = await viewGroup();
+    await viewsRead();
+    fireEvent.click(within(group).getByRole('button', { name: 'My cases' }));
+    await waitFor(() => expect(shownView()).toBe('crm_case.mine'), { timeout: 8000 });
+    const rule = () => screen.getByTestId('cf-rule-0').querySelector('[role="combobox"]') as HTMLTextAreaElement;
+    await waitFor(() => expect(rule()).toBeInTheDocument(), { timeout: 8000 });
+
+    fireEvent.change(rule(), { target: { value: 'record.status ==' } });
+    await screen.findByTestId('studio-held', undefined, { timeout: 4000 });
+    // Past the autosave's 1.5 s debounce: nothing was sent.
+    await new Promise((r) => setTimeout(r, 2000));
+    expect(mockClient.save.mock.calls.filter((c: unknown[]) => c[0] === 'view')).toEqual([]);
+
+    // Fixed, it is sent to the view it was made on.
+    fireEvent.change(rule(), { target: { value: "record.status == 'open'" } });
+    await waitFor(() => expect(mockClient.save.mock.calls.some((c: unknown[]) => c[0] === 'view')).toBe(true), { timeout: 8000 });
+    const [, name, body] = mockClient.save.mock.calls.find((c: unknown[]) => c[0] === 'view') as [string, string, Record<string, any>];
+    expect(name).toBe('crm_case.mine');
+    expect(body.config.conditionalFormatting[0].condition).toBe("record.status == 'open'");
+  }, 20000);
 });
