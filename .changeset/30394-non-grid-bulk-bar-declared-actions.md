@@ -3,7 +3,7 @@
 '@object-ui/plugin-grid': minor
 ---
 
-fix(plugin-list): a list's selection bar over a non-grid view (kanban, calendar, gallery, …) draws only actions the object declares, by the grid's own rule; an undeclared bare `bulkActions` name draws nothing and warns once in development (#30394)
+fix(plugin-list)!: a list's selection bar over a non-grid view (kanban, calendar, gallery, …) draws only actions the object declares, by the grid's own rule; an undeclared bare `bulkActions` name draws nothing and warns once in development (#30394)
 
 Clause-②: yes (narrowing) — `@object-ui/plugin-grid` exports `resolveBulkActions` and `useUndeclaredActionNamesWarning` (with the `ActionLabelResolver`, `NamedActionDef`, `UndeclaredActionNameKey`, `UndeclaredActionNamesAddress` and `UndeclaredActionNamesBasis` types) so `@object-ui/plugin-list` reuses the grid's fold and warning instead of a second copy; the warning's address gains an optional `component`, defaulting to `ObjectGrid`, so the grid's message is byte-identical.
 Metadata-protocol: narrowed
