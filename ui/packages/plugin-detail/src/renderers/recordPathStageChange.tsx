@@ -57,6 +57,7 @@ import {
   delegationScopeMessage,
   extractFieldErrors,
   extractWriteErrorMessage,
+  isExternalWriteRefusal,
   isPermissionError,
   useInlineEdit,
   useRecordContext,
@@ -85,9 +86,12 @@ type Translate = (key: string, opts?: Record<string, unknown>) => string;
  *      arrive): one line per entry. An entry about `statusField` itself, or an
  *      object-level `_record` entry, reads alone; any other field is prefixed
  *      with its label, since the reader cannot see that field on the path.
- *   4. A permission refusal: the delegated-admin scope reason when there is
+ *   4. A write the object's external datasource does not admit
+ *      (`EXTERNAL_WRITE_FORBIDDEN`, ADR-0015): the read-only line. No
+ *      permission lifts it, so it is asked before the permission check.
+ *   5. A permission refusal: the delegated-admin scope reason when there is
  *      one, else a fixed line — a raw 403 string is never shown.
- *   5. Anything else: the server's message, else a fixed line.
+ *   6. Anything else: the server's message, else a fixed line.
  */
 export function stageRefusalLines(
   err: unknown,
@@ -104,6 +108,7 @@ export function stageRefusalLines(
       e.field === statusField || e.field === RECORD_LEVEL_FIELD ? e.message : `${labelOf(e.field)}: ${e.message}`,
     );
   if (fieldLines.length > 0) return fieldLines;
+  if (isExternalWriteRefusal(err)) return [t('form.readOnlyExternalSource')];
   if (isPermissionError(err)) return [delegationScopeMessage(err) ?? t('detail.pathStageChangeDenied')];
   return [extractWriteErrorMessage(err) ?? t('detail.pathStageChangeFailed')];
 }

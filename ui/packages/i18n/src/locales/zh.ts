@@ -176,6 +176,7 @@ const zh = {
   },
   form: {
     noPermissionToSave: '您没有权限保存这条记录。',
+    readOnlyExternalSource: '这张表是只读的：它的记录来自外部数据源，不接受修改。',
     noPermissionToCreate: '您没有创建{{object}}的权限，字段均为只读。',
     noPermissionToEdit: '您没有编辑{{object}}的权限，字段均为只读。',
     noPermissionToEditRecord: '您没有编辑此记录的权限，字段均为只读。',

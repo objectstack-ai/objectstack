@@ -223,6 +223,9 @@ const en = {
   },
   form: {
     noPermissionToSave: "You don't have permission to save this record.",
+    // A write the ADR-0015 external write gate refused (`EXTERNAL_WRITE_FORBIDDEN`, objectstack#30334):
+    // the object is read-only by design, so the line must not read as a missing permission.
+    readOnlyExternalSource: "This table is read-only. Its records come from an external data source that does not accept changes.",
     // The notice a record form shows when every field is locked because the
     // object's affordance for the form's mode is closed for this user
     // (objectui#11000). `{{object}}` is the object's label.

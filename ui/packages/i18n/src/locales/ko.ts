@@ -171,6 +171,7 @@ const ko = {
   },
   form: {
     noPermissionToSave: "이 레코드를 저장할 권한이 없습니다.",
+    readOnlyExternalSource: "이 테이블은 읽기 전용입니다. 레코드는 변경을 받지 않는 외부 데이터 소스에서 가져옵니다.",
     noPermissionToCreate: "{{object}} 생성 권한이 없습니다. 필드는 읽기 전용입니다.",
     noPermissionToEdit: "{{object}} 편집 권한이 없습니다. 필드는 읽기 전용입니다.",
     noPermissionToEditRecord: "이 레코드를 편집할 권한이 없습니다. 필드는 읽기 전용입니다.",

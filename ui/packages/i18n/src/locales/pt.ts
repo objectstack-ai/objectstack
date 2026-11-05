@@ -173,6 +173,7 @@ const pt = {
   },
   form: {
     noPermissionToSave: "Você não tem permissão para salvar este registro.",
+    readOnlyExternalSource: "Esta tabela é somente leitura. Os registros vêm de uma fonte de dados externa que não aceita alterações.",
     noPermissionToCreate: "Você não tem permissão para criar registros de {{object}}. Os campos são somente leitura.",
     noPermissionToEdit: "Você não tem permissão para editar registros de {{object}}. Os campos são somente leitura.",
     noPermissionToEditRecord: "Você não tem permissão para editar este registro. Os campos são somente leitura.",
