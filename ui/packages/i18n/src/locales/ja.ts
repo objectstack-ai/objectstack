@@ -1637,6 +1637,8 @@ const ja = {
       vsLastYear: "前年比",
       vsYesterday: "昨日比",
       vsPreviousPeriod: "前期比",
+      vsThisMonth: "今月比",
+      vsThisQuarter: "今四半期比",
     },
   },
   appDesigner: {

@@ -1674,6 +1674,8 @@ const zh = {
       vsLastYear: '较去年',
       vsYesterday: '较昨日',
       vsPreviousPeriod: '较上期',
+      vsThisMonth: '较本月',
+      vsThisQuarter: '较本季度',
     },
     filters: {
       label: '仪表盘过滤器',

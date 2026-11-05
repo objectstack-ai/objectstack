@@ -1686,6 +1686,8 @@ const pt = {
       vsLastYear: "vs. ano anterior",
       vsYesterday: "vs. ontem",
       vsPreviousPeriod: "vs. período anterior",
+      vsThisMonth: "vs. este mês",
+      vsThisQuarter: "vs. este trimestre",
     },
   },
   appDesigner: {

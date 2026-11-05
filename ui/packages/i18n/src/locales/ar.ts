@@ -1844,6 +1844,8 @@ const ar = {
       vsLastYear: "مقابل العام الماضي",
       vsYesterday: "مقابل أمس",
       vsPreviousPeriod: "مقابل الفترة السابقة",
+      vsThisMonth: "مقابل هذا الشهر",
+      vsThisQuarter: "مقابل هذا الربع",
     },
   },
   appDesigner: {

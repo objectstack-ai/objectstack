@@ -1637,6 +1637,8 @@ const ko = {
       vsLastYear: "전년 대비",
       vsYesterday: "어제 대비",
       vsPreviousPeriod: "이전 기간 대비",
+      vsThisMonth: "이번 달 대비",
+      vsThisQuarter: "이번 분기 대비",
     },
   },
   appDesigner: {

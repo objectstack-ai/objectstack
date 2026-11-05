@@ -66,10 +66,55 @@ const RETIRED_PRESET_RANGES: Record<string, { from: string; to: string }> = {
 
 /** The presets the spec added after the retired table, which never held them. */
 const FORWARD_PRESETS: readonly string[] = ['next_month', 'next_quarter', 'next_30_days'];
-// The compareTo case below runs on these only. A forward preset has no retired
-// spelling to compare against, and compareTo on a forward window compares the
-// window with itself, which #30140 tracks.
+// A forward preset has no retired spelling to compare against, so the
+// retired-spelling cases run on these only. The compareTo case runs on all 16.
 const RETIRED_PRESETS = [...DATE_RANGE_PRESETS].filter((p) => !FORWARD_PRESETS.includes(p));
+
+/**
+ * CONTROL for #30140: the previous-period and previous-year windows and the
+ * trend label of every retired preset at REFERENCE_NOWS[0] (2026-07-15), read
+ * off `compare-to.ts` at main b7075d99 before the forward fix. The fix must
+ * leave every one of them as it was.
+ */
+const RETIRED_COMPARE_AT_REFERENCE: Record<string, {
+  label: string;
+  previousPeriod: [string, string];
+  previousYear: [string, string];
+}> = {
+  today: { label: 'vsYesterday', previousPeriod: ['2026-07-14', '2026-07-14'], previousYear: ['2025-07-15', '2025-07-15'] },
+  yesterday: { label: 'vsPreviousPeriod', previousPeriod: ['2026-07-14', '2026-07-14'], previousYear: ['2025-07-14', '2025-07-14'] },
+  this_week: { label: 'vsLastWeek', previousPeriod: ['2026-07-06', '2026-07-12'], previousYear: ['2025-07-14', '2025-07-20'] },
+  last_week: { label: 'vsLastWeek', previousPeriod: ['2026-07-06', '2026-07-12'], previousYear: ['2025-07-07', '2025-07-13'] },
+  this_month: { label: 'vsLastMonth', previousPeriod: ['2026-06-01', '2026-06-30'], previousYear: ['2025-07-01', '2025-07-31'] },
+  last_month: { label: 'vsLastMonth', previousPeriod: ['2026-06-01', '2026-06-30'], previousYear: ['2025-06-01', '2025-06-30'] },
+  this_quarter: { label: 'vsLastQuarter', previousPeriod: ['2026-04-01', '2026-06-30'], previousYear: ['2025-07-01', '2025-09-30'] },
+  last_quarter: { label: 'vsLastQuarter', previousPeriod: ['2026-04-01', '2026-06-30'], previousYear: ['2025-04-01', '2025-06-30'] },
+  this_year: { label: 'vsLastYear', previousPeriod: ['2025-01-01', '2025-12-31'], previousYear: ['2025-01-01', '2025-12-31'] },
+  last_year: { label: 'vsLastYear', previousPeriod: ['2025-01-01', '2025-12-31'], previousYear: ['2024-01-01', '2024-12-31'] },
+  last_7_days: { label: 'vsYesterday', previousPeriod: ['2026-07-08', '2026-07-14'], previousYear: ['2025-07-08', '2025-07-15'] },
+  last_30_days: { label: 'vsYesterday', previousPeriod: ['2026-06-15', '2026-07-14'], previousYear: ['2025-06-15', '2025-07-15'] },
+  last_90_days: { label: 'vsYesterday', previousPeriod: ['2026-04-16', '2026-07-14'], previousYear: ['2025-04-16', '2025-07-15'] },
+};
+
+/**
+ * The forward presets' comparison at REFERENCE_NOWS[0], a Wednesday,
+ * 2026-07-15 (#30140). `previousPeriod` is the window immediately before the
+ * current one: July for August, Q3 for Q4, and for the 31 days from today
+ * through 2026-08-14 the 31 days that end yesterday.
+ */
+const FORWARD_COMPARE_AT_REFERENCE: Record<string, {
+  label: string;
+  previousPeriod: [string, string];
+  previousYear: [string, string];
+}> = {
+  next_month: { label: 'vsThisMonth', previousPeriod: ['2026-07-01', '2026-07-31'], previousYear: ['2025-08-01', '2025-08-31'] },
+  next_quarter: { label: 'vsThisQuarter', previousPeriod: ['2026-07-01', '2026-09-30'], previousYear: ['2025-10-01', '2025-12-31'] },
+  next_30_days: { label: 'vsPreviousPeriod', previousPeriod: ['2026-06-14', '2026-07-14'], previousYear: ['2025-07-15', '2025-08-14'] },
+};
+
+/** Whole calendar days from ISO day `a` to ISO day `b`. */
+const daysBetween = (a: string, b: string): number =>
+  Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
 
 /**
  * Reference instants (local time, which is what `resolveDateMacros` reads):
@@ -151,22 +196,64 @@ describe('dashboard date presets lower through the spec window table', () => {
     },
   );
 
-  it.each(RETIRED_PRESETS)(
-    '%s keeps its previous-period window and trend label for a compareTo widget',
+  it('pins a compareTo expectation for every one of the 16 presets', () => {
+    expect(
+      Object.keys({ ...RETIRED_COMPARE_AT_REFERENCE, ...FORWARD_COMPARE_AT_REFERENCE }).sort(),
+    ).toEqual([...DATE_RANGE_PRESETS].sort());
+  });
+
+  it.each([...DATE_RANGE_PRESETS])(
+    '%s compares with the right window and trend label for a compareTo widget',
     (preset) => {
-      const retired = RETIRED_PRESET_RANGES[preset];
-      const retiredFilter = { created_at: { $gte: retired.from, $lte: retired.to } };
       const filter = { created_at: buildFilterCondition(dateDef, { preset }) };
+      const expected = RETIRED_COMPARE_AT_REFERENCE[preset] ?? FORWARD_COMPARE_AT_REFERENCE[preset];
+      const at = REFERENCE_NOWS[0];
+      expect(shiftFilterByCompareTo(filter, { kind: 'previousPeriod' }, at).created_at).toEqual({
+        $gte: expected.previousPeriod[0],
+        $lte: expected.previousPeriod[1],
+      });
+      expect(shiftFilterByCompareTo(filter, { kind: 'previousYear' }, at).created_at).toEqual({
+        $gte: expected.previousYear[0],
+        $lte: expected.previousYear[1],
+      });
+      expect(compareToTrendLabelKey({ kind: 'previousPeriod' }, filter)).toBe(expected.label);
+      expect(compareToTrendLabelKey({ kind: 'previousYear' }, filter)).toBe('vsLastYear');
+
+      if (!FORWARD_PRESETS.includes(preset)) {
+        // A retired preset keeps the window and label its retired spelling had.
+        const retired = RETIRED_PRESET_RANGES[preset];
+        const retiredFilter = { created_at: { $gte: retired.from, $lte: retired.to } };
+        for (const now of REFERENCE_NOWS) {
+          for (const kind of ['previousPeriod', 'previousYear'] as const) {
+            expect(shiftFilterByCompareTo(filter, { kind }, now), `${preset} ${kind} @ ${now.toString()}`).toEqual(
+              shiftFilterByCompareTo(retiredFilter, { kind }, now),
+            );
+          }
+        }
+        expect(compareToTrendLabelKey({ kind: 'previousPeriod' }, filter)).toBe(
+          compareToTrendLabelKey({ kind: 'previousPeriod' }, retiredFilter),
+        );
+        return;
+      }
+
+      // A forward preset's previous period ends the day before its own window
+      // starts, on every reference date, so it never overlaps it.
       for (const now of REFERENCE_NOWS) {
-        for (const kind of ['previousPeriod', 'previousYear'] as const) {
-          expect(shiftFilterByCompareTo(filter, { kind }, now), `${preset} ${kind} @ ${now.toString()}`).toEqual(
-            shiftFilterByCompareTo(retiredFilter, { kind }, now),
-          );
+        const current = resolveDateMacros(filter, now).created_at as { $gte: string; $lte: string };
+        const previous = shiftFilterByCompareTo(filter, { kind: 'previousPeriod' }, now).created_at as {
+          $gte: string;
+          $lte: string;
+        };
+        const label = `${preset} @ ${now.toString()}`;
+        expect(daysBetween(previous.$lte, current.$gte), label).toBe(1);
+        if (preset === 'next_30_days') {
+          // Rolling: the same number of days as the current window.
+          expect(daysBetween(previous.$gte, previous.$lte), label).toBe(daysBetween(current.$gte, current.$lte));
+        } else {
+          // Calendar: the whole period just before, starting on its first day.
+          expect(previous.$gte.endsWith('-01'), label).toBe(true);
         }
       }
-      expect(compareToTrendLabelKey({ kind: 'previousPeriod' }, filter)).toBe(
-        compareToTrendLabelKey({ kind: 'previousPeriod' }, retiredFilter),
-      );
     },
   );
 
