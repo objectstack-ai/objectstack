@@ -558,6 +558,52 @@ describe('createAuthClient — getConfig single-flight / cache / retry (#2625)',
   });
 });
 
+describe('createAuthClient — getConfig is read fresh once the tab has no session (objectstack#30299)', () => {
+  // The settings page turns sign-in doors on and off while the server runs,
+  // so the copy cached during a signed-in stretch is not the sign-in page's.
+  function configServer(emailPasswordEnabled: { value: boolean }) {
+    return createMockFetch({
+      '/sign-out': { body: { success: true } },
+      '/get-session': { body: null },
+      get '/config'() {
+        return { body: { data: { emailPassword: { enabled: emailPasswordEnabled.value } } } };
+      },
+    });
+  }
+  const configReads = (calls: Array<{ url: string }>) => calls.filter((c) => c.url.includes('/config'));
+
+  it('keeps the cached config while the session lasts, and reads it again after sign-out', async () => {
+    const enabled = { value: true };
+    const { mockFn, calls } = configServer(enabled);
+    const client = createAuthClient({ baseURL: 'http://localhost/api/auth', fetchFn: mockFn });
+
+    expect((await client.getConfig()).emailPassword?.enabled).toBe(true);
+    // An administrator turns email and password off from the settings page.
+    enabled.value = false;
+    expect((await client.getConfig()).emailPassword?.enabled).toBe(true);
+    expect(configReads(calls)).toHaveLength(1);
+
+    await client.signOut();
+
+    expect((await client.getConfig()).emailPassword?.enabled).toBe(false);
+    expect(configReads(calls)).toHaveLength(2);
+  });
+
+  it('reads it again after a session read finds no session (an expired session never signs out)', async () => {
+    const enabled = { value: true };
+    const { mockFn, calls } = configServer(enabled);
+    const client = createAuthClient({ baseURL: 'http://localhost/api/auth', fetchFn: mockFn });
+
+    expect((await client.getConfig()).emailPassword?.enabled).toBe(true);
+    enabled.value = false;
+
+    expect(await client.getSession()).toBeNull();
+
+    expect((await client.getConfig()).emailPassword?.enabled).toBe(false);
+    expect(configReads(calls)).toHaveLength(2);
+  });
+});
+
 describe('createAuthClient — signInWithProvider watchdog (#2626)', () => {
   it('rejects with a timeout error when the sign-in request never returns', async () => {
     vi.useFakeTimers();
