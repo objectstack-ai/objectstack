@@ -1,0 +1,31 @@
+{
+  "number": 30337,
+  "kind": "issue",
+  "title": "Team page: a hand-made team reads as managed by the identity provider, member rows are titled with raw ids, and the count is stale",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T06:23:43Z",
+  "updated_at": "2026-11-05T07:17:14Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30337",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiling gate: ③ the maintainer's direct order, verbatim: 「你发现的问题都立卡，安全问题总专用的安全密卡通道，需要进一步分析的进一步测试，还是没有把握的用决策卡。」 (2026-11-05). Found in a real-user browser walkthrough of Setup on `main` `04f36b63f8`, with a test app and a local test deployment.\n\n**Business reason.** Teams are how a company groups people for sharing. A label that reads as \"not yours to change\" and a list of id strings make a working feature look unusable.\n\n**Reader.** The UI lane dev for the record page; the engine lane if the title comes from `sys_team_member`'s definition in `packages/platform-objects/src/identity/sys-team-member.object.ts`.\n\n**Duplicates.** Searched `team managed by identity provider label` (24 hits), `team member title raw id` (51 hits) and `related list tab count stale` (127 hits). They are QA run anchors; none has this subject.\n\n## Measured\n\nCreating a team, adding members and removing them all work, and a team used as a sharing rule's recipient grants and withdraws access at once. The problems are in how the page reads:\n\n- A team I created by hand in Setup is labelled 「由身份提供方管理」 (`ui/packages/i18n/src/locales/zh.ts:933`), though it can be edited there.\n- The member list's 标题 column shows `ZDGI1SW5JmHgaiu6reGuHodMbgPr4AiZ in gGjBm6s3gDy1TcjUpkAz0L4d4AkaMmjo`.\n- The tab read 团队成员 0 while the list said 2 条. After a removal it read 1 with 1 row, so it catches up late.\n\n## Expected\n\n- The label says something true of a team made here, or does not appear.\n- Member rows read as names. If the title column adds nothing beside 用户, it goes.\n- The tab count matches the list as soon as members change."
+}

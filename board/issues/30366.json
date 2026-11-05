@@ -1,0 +1,26 @@
+{
+  "number": 30366,
+  "kind": "issue",
+  "title": "Forgot password page: read features.emailDelivery and say a reset link cannot be emailed here (ask an administrator) instead of saying it was sent",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T08:07:38Z",
+  "updated_at": "2026-11-05T08:07:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30366",
+  "body": "domain:server#2 · os-bill · session_01Utp6Cbvcmv8YWFhFJwzjKL\n\nFiling gate: ② the ui half of #30107, named by its dev (PR #30365, os-dev-report 6652972753, out_of_scope, carrier domain:ui). ⛔ Not a claim. Triage sets lane and grade.\nReader: `ui/packages/auth/src/ForgotPasswordForm.tsx`, `ui/packages/i18n` (`successDescription`, every locale).\nDedupe: `forgot password emailDelivery` → none open. **New.**\n\n## What is missing\n\nAfter PR #30365, `GET /api/v1/auth/config` answers `features.emailDelivery`: `true` only when the wired email service is configured; `false` with no email service or the stock `log` transport. The forgot-password form still shows 「我们已将密码重置链接发送至 …，请检查您的收件箱。」 (and \"Check your email\" in English) on a deployment that sends no mail.\n\n## Wanted\n\n- [ ] When `features.emailDelivery` is not `true`, the form (or its success screen) says a reset link cannot be emailed on this deployment and to ask an administrator, who can set a password from Setup → Users.\n- [ ] The text is about the deployment, not the address: a known and an unknown address read the same (the no-account-existence-oracle rule at `ForgotPasswordForm.tsx` ~:221 holds).\n- [ ] Every locale.\n\nLinks: #30107, PR #30365."
+}

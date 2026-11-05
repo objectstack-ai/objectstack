@@ -1,0 +1,31 @@
+{
+  "number": 30271,
+  "kind": "issue",
+  "title": "pm-dispatch skills: say who confirms a pending-changeset correction (the seat's record, never a maintainer wait) everywhere a dev or the gate is told to \"get it confirmed\", and keep PR bodies from narrating pre-fix behaviour on security fixes",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T04:26:15Z",
+  "updated_at": "2026-11-05T05:02:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30271",
+  "body": "security#1 · os-justin · session_01QSeKYn5CmmdShCJifm6WYj\n\n## Why\n\n`references/landing-operations.md` already states the rule (#19970, #23257): a `check-empty-changeset` DELIBERATE CORRECTION red does not wait for the maintainer. The confirmation is the dispatching seat's own record:\n- For a text-only diff: the ACCEPT, quoting each note before and after.\n- Otherwise: the same-head at-tier contract-review PASS, which judges each corrected sentence.\n\nThe texts a dev and a seat actually meet do not say this.\n- **The gate's remedy line.** `FOREIGN_CORRECTION_REMEDY` in `scripts/check-empty-changeset.mjs` reads \"get it confirmed on the PR\". It does not say by whom.\n- **The os-dev side.** `.claude/agents/os-dev.md` and `references/execution-duties.md` do not say who confirms. On 2026-11-05 three security PRs carried \"please confirm\" asks addressed to the maintainer in their bodies (#30144, #30165, #30248). The security seat waited on the maintainer for each one and held the landings until the maintainer answered.\n\nThe maintainer has now said, in the security seat's session, verbatim: 「changeset 改写确认都同意」 (2026-11-05). This restates the existing rule. It does not create a new one.\n\n## Changes\n\n1. **Gate remedy text.** `FOREIGN_CORRECTION_REMEDY` (`scripts/check-empty-changeset.mjs`) names the confirmer by pointing at `landing-operations.md` (the seat's ACCEPT or its same-head at-tier PASS record). Keep the one-source / two-renderings construction and its self-test assertions in step. Keep the verdict unchanged: the class stays refused, and only the remedy wording moves.\n2. **The dev's side.** `references/execution-duties.md`, or `os-dev.md` if that is where PR-body duties live, says:\n   - A dev who corrects a pending note declares it on the PR as a DELIBERATE CORRECTION, naming each note and quoting the corrected sentences.\n   - ⛔ The dev does not ask the maintainer to confirm it. The dispatching seat's record confirms it.\n3. **Security PR bodies state the rule, never the pre-fix path.** This goes in `references/security-findings.md` §6, or in the os-dev pointer to it. Twice this week a security fix's PR body narrated what the code did before the fix (#30180, #30219), and the contract review failed it on §6. The rule to add: on a security fix, the PR body, its Verification section and its ablation notes describe the rule and the counts (\"red, then restored\"). ⛔ They never describe what the unguarded code does. That detail goes in the dev's private `security_findings` only.\n\n## Acceptance\n\n- Each rule lives in the one reference that owns it, with no restatement. The hot files' line ratchets are respected.\n- `check-empty-changeset`'s self-test is green, and its verdicts are unchanged.\n- The skills gates the diff derives are green.\n- `lanes/security.md` and `security-findings.md` still carry no finding, id, path, object or mechanism."
+}

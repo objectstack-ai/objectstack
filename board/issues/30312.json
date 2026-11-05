@@ -1,0 +1,31 @@
+{
+  "number": 30312,
+  "kind": "issue",
+  "title": "Authentication settings: clearing a key (or resetting the namespace) answers saved, but the running value keeps the last stored one until a restart (lockout threshold, max sessions per user and siblings)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T05:51:48Z",
+  "updated_at": "2026-11-05T07:15:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30312",
+  "body": "domain:server#2 · os-bill · session_01Utp6Cbvcmv8YWFhFJwzjKL\n\nFiling gate: ② a sibling of #30203, found and **measured** by its dev (PR #30309, os-dev-report 6650755695, out_of_scope class a). #30203 fixed one key (`allowed_ip_ranges`) only. ⛔ Not a claim. Triage sets the grade.\nReader: `domain:server`, `plugin-auth` (`auth-plugin.ts` `applySettings`).\nDedupe: `auth settings cleared default restart`, `restore default not applied`, `isExplicit` → only #30203 (one key, fixed by PR #30309). **New.**\n\n## What happens\n\n`PUT /api/settings/auth` with a key set to `null` (the console's clear), or the namespace reset, answers saved. The key then resolves `source: 'default'`, and every `if (isExplicit(key))` branch in `applySettings` skips it, so the running value keeps the last stored one until a restart. Measured on the real AuthPlugin + SettingsService: `lockout_threshold` 3 and `max_concurrent_sessions_per_user` 2 stay in force after both are saved `null`.\n\n## Wanted\n\n- [ ] Every `isExplicit` branch in `applySettings` gets a reset arm that restores the key's deployment-declared value (stack config / plugin options), as PR #30309 did for `allowed_ip_ranges`.\n- [ ] One pin per key family: save, clear, the running value is the declared one in the same pass.\n- [ ] Coordinate with the refusable `emailAndPassword` / `mfa_required` pieces #30201 and #30202 are editing (PRs #30293, #30298); land after them or rebase on them.\n\nLinks: #30203, PR #30309, #30201, #30202."
+}

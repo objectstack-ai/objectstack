@@ -2,8 +2,8 @@
   "number": 30073,
   "kind": "issue",
   "title": "[Decision] A personal view's own conditions are invisible and cannot be edited: how should a reader change a saved view?",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T12:36:50Z",
-  "updated_at": "2026-11-05T00:41:24Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T04:30:49Z",
+  "closed_at": "2026-11-05T04:29:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30073",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nThe maintainer: 「等我决定的都要立卡，并且从业务的角度给我具体解释和我沟通」 (2026-11-04). Measured by the seat on `main` `63b86b385d`, on the example CRM unless noted. No `domain:*` label is set: triage routes this card.\n\n## The question\n\nA rep saves 「本季度开放商机」 as My view: two conditions and a sort. Opening it later, the filter panel is empty, with no badge. The sort does show. To change one condition they must add filters on top and save a new view, then delete the old one. Separately, after saving, the source 全部商机 stays filtered and reads 已个性化, so the list they came from now shows fewer rows.\n\nGoverning text: #28971 (ruling C, personal views as a user-owned object) and `ui/packages/app-shell/src/views/personalViews.ts:159-183`. #28971's first-version exclusions do not name this case.\n\n## Measured\n\n- View `Eval 1104 本季度开放商机`: `config.filter` holds `stage not_in closed_won, closed_lost` and `close_date between {quarter_start}, {quarter_end}`. Five rows. The 筛选 panel reads 其中 / 添加筛选, with no conditions and no count.\n- Saving a personal view from a filtered 全部商机 left the source with the filter and 已个性化.\n\n## Options\n\n- **A. Show and edit in the panel:** a personal view's conditions appear as ordinary rows, and editing them offers 保存 to that view. Saving a view also clears the source's temporary conditions.\n- **B. Show read-only:** display the conditions and keep 另存为 as the only way to change them.\n- **C. Leave it.**\n\n## Recommendation: A\n\n## 四轴分析\n\n**实际业务需求。** 销售每周都可能调整「我的视图」：换季度、加一个阶段。今天要重建再删除，看不到条件也容易忘了它在筛什么。另存后原列表少了行，还可能让人以为数据丢了。\n\n**项目长远合理性。** 我的视图是用户自己的东西（#28971 裁决 C），应当能改。一份视图一份条件，也和 Studio 里编辑视图一致。\n\n**防 AI 写错。** 存的形状不变，没有新键。规则要写清楚：条件保存在视图里，没点保存的修改只是临时的，不能悄悄写回。\n\n**创业阶段不扩散。** 不新增能力面，只是把已上线的功能补完整。折叠不了的复杂条件仍按现有规则拒绝。\n\n| 棱 | A | B | C |\n|:--|:--|:--|:--|\n| 业务 | 强 | 中 | 弱 |\n| 长远 | 强 | 中 | 弱 |\n| 防错 | 中 | 强 | 中 |\n| 不扩散 | 中 | 强 | 强 |\n\n## Re-check\n\n`git grep -n \"foldFilterGroupToSpecRules(state.url.filters)\" origin/main -- ui/packages/app-shell/src/views/personalViews.ts`"

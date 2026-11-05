@@ -11,17 +11,22 @@
     "type": "Bot"
   },
   "labels": [
-    "bug"
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T02:03:16Z",
-  "updated_at": "2026-11-05T02:03:16Z",
+  "updated_at": "2026-11-05T07:09:04Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30202",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFrom a real-user walkthrough of Setup, filed on the maintainer's word: 「以上都同意，立卡」 (2026-11-05). Measured on `main` `b7075d9908`, with the console in dev mode, unless a line says otherwise. Test app scaffolded with `create-objectstack@18.3.0`.\n\n## What a customer sees\n\nAn administrator plans to move to single sign-on and turns off 启用邮箱/密码登录 before SSO is configured. It saves. As soon as people sign out, no one can sign back in, the administrator included, and the fix needs an environment variable or a database edit.\n\n## Measured\n\n- Setup → Settings → Authentication, switch off, 保存更改: toast 「设置已保存」, no warning or confirmation. `socialProviders` is empty and SSO is off.\n- `POST /api/v1/auth/sign-in/email`: 400 `EMAIL_PASSWORD_DISABLED`.\n- `GET /api/v1/auth/config`: `emailPassword.enabled: false`.\n- The login page still drew the email and password form, and submitting showed `Email and password is not enabled`, in English. #29159 changed this page's copy for the same state and is closed; this was read under `os dev` through the console dev server, so the dev sign-in affordance may have influenced what was drawn.\n\n## Expected\n\nThe save is refused while it would leave no sign-in method, and names what to configure first. When email and password really are off, the login page does not offer the form."

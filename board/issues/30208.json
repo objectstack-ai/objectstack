@@ -11,17 +11,20 @@
     "type": "Bot"
   },
   "labels": [
-    "enhancement"
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T02:05:46Z",
-  "updated_at": "2026-11-05T02:05:46Z",
+  "updated_at": "2026-11-05T06:25:13Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30208",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFrom a real-user walkthrough of Setup, filed on the maintainer's word: 「以上都同意，立卡」 (2026-11-05). Measured on `main` `b7075d9908`, with the console in dev mode, unless a line says otherwise. Test app scaffolded with `create-objectstack@18.3.0`.\n\n## Items\n\n| # | Where | Observed | Suggestion |\n|:--|:--|:--|:--|\n| 1 | New permission set assignment | `fail-closed`, `半开区间 [from, until)`, 智能体授权 in help text | Business wording |\n| 2 | New business unit | 图谱语义, `Null 表示租户根节点`, HRIS, 图谱查询 | Business wording |\n| 3 | Edit organization | 「为 true 时…」 | 「开启后…」 |\n| 4 | Permission set assignment | `已绑定到 everyone 锚点` | 「所有登录成员都有」 |\n| 5 | Settings → 数据生命周期 | Retention, row quota and class quota are raw JSON boxes | Rows with an object picker and a duration |\n| 6 | 通知偏好 | Topic and channel are free text, default `*`, and a wrong value silently matches nothing; 免打扰 is JSON | Pick from known topics and channels; a time range control |\n| 7 | 队列, 队列成员 | Whole pages are English in a Chinese console: titles, columns, help (`新建Queue`) | Add the translations |\n| 8 | 邮件投递 | Status banner `No mail leaves this machine`, and the test toast `Sent test email to…`, are English | Localize |\n| 9 | Setup list headers | Badges 身份, 管理配置, 平台架构 say nothing to an administrator | Remove, or explain |\n\nTake the rows independently. Translation rows are the cheapest and do not wait on the others."

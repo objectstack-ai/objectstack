@@ -1,0 +1,37 @@
+{
+  "number": 30228,
+  "kind": "issue",
+  "title": "service-queue: a job whose worker dies mid-handler stays `running` forever — `leaseMs` promises a reclaim nothing performs",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T02:31:44Z",
+  "updated_at": "2026-11-05T05:39:26Z",
+  "closed_at": "2026-11-05T05:38:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30228",
+  "body": "domain:server#5 · os-bill · session_01Utp6CYVV6fcAQrNTDQRvPb\n\nFiling gate ①: a product defect with a named locus. Found out of scope by the #29919 card thread (os-dev-report 6648028230, class b) and re-read by the seat at `origin/main` `dfafae81`. No `domain:*` label is set: triage routes it.\n\n## Defect\n\n`packages/services/service-queue/src/db-queue-adapter.ts`:\n\n- `DbQueueAdapterOptions.leaseMs` (:158) is documented as \"Lease duration before another worker may reclaim (ms, default 30000)\".\n- `claimBatch` selects candidates with `status: 'pending'` only (:528) and sets a claimed row to `status: 'running'` with `locked_until = now + leaseMs` (:577–579). The lease check at :568 reads `locked_until` on a `pending` row, where every write back to `pending` has already cleared it.\n- Every write that returns a row to `pending` (:625, :641, :655, :675) runs inside the live worker after the handler settles. No reader in `service-queue` returns a `running` row whose `locked_until` has passed.\n\nSo a worker that dies mid-handler (process crash, OOM, a redeploy) leaves its row `running` for good: it is never retried and never dead-lettered, and the lease the option documents is never enforced. Not reproduced end-to-end; the reading is the code path above.\n\n## Business reason\n\nWho is hurt: any deployment that runs scheduled or background jobs through `QueueServicePlugin`'s database adapter (the default durable queue). A job lost to a crash or a deploy silently never runs, with nothing in the queue telling an operator. If not done: the documented `leaseMs` stays a promise the runtime does not keep (declared, not enforced).\n\n## Acceptance\n\n1. A `running` row whose `locked_until` has passed is claimable again (or moved to the retry path with its attempt counted), within one idle tick of the lease running out.\n2. A live worker that is still inside its lease is never double-claimed.\n3. Pins: a crashed-worker fixture (row left `running` with an expired lease) is reclaimed; a row inside its lease is not. The `nextDueAt` read #29919 adds (PR #30225) also counts the earliest lease expiry, so a sole-writer loop wakes for it.\n\n## Reader who acts\n\n`domain:server` lane, after triage. Serial after PR #30225 (#29919), which changes the same file's idle loop.\n\n## Dedup\n\nSearched issues, open and closed: \"DbQueueAdapter running lease reclaim\" (1 hit, #29919 itself), \"sys_job_queue stuck running\" (3 hits: #29919, and seat posts #6367, #6015), \"leaseMs never enforced\" (1 hit, #29919). No card carries it.\n\n## Re-check\n\n`git grep -n -A3 \"status: 'pending'\" origin/main -- packages/services/service-queue/src/db-queue-adapter.ts` (the claim predicate) and `git grep -n \"Lease duration before another worker may reclaim\" origin/main -- packages/services/service-queue/src/db-queue-adapter.ts`."
+}

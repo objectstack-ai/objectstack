@@ -13,18 +13,20 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T14:02:12Z",
-  "updated_at": "2026-11-04T14:56:44Z",
+  "updated_at": "2026-11-05T08:08:31Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30107",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFound in a real-user walkthrough of the development flow, asked for by the maintainer: 「你站在真实用户实际使用的角度完整的走一遍具体的开发流程，再看一下还有什么问题」 (2026-11-04).\n\n## What a customer sees\n\nA fresh self-hosted deployment has no email service until someone configures one. A member who forgets their password enters their address and reads 「我们已将密码重置链接发送至 colleague@example.test，请检查您的收件箱。」 No mail is sent, and they wait for a message that never comes. The invitation path on the same server tells the truth: 「此服务器未配置邮件，因此没有发出任何邮件。」\n\n## Measured\n\n| Step | Result | Where |\n|:--|:--|:--|\n| Submit the forgot password form with no email service | The success screen above | Published 18.3.0, `os start` on a fresh database |\n| `POST /api/v1/auth/request-password-reset` | 200, `{\"status\":true,\"message\":\"If this email exists in our system, check your email for the reset link\"}` | `main` `63b86b385d` |\n| Server side with no transport | Throws `Password-reset email could not be sent…`, so it reaches the log only | `packages/plugins/plugin-auth/src/auth-manager-auth-instance.ts:462` |\n| The text | `successDescription`, an affirmative \"sent\" | `ui/packages/i18n/src/locales/zh.ts:2863` |\n| `GET /api/v1/auth/config` | Names no email delivery state, so the page cannot tell | `main` `63b86b385d` |\n\nThe console on `main` was not run in this check, because the review worktree has no console build. The form and the string were read at that commit.\n\n## Expected\n\nOn a deployment with no email transport the page says the reset cannot be sent here and to ask an administrator, who can already set a password from Setup → Users. That statement is about the deployment and not about the address, so the no-account-existence-oracle rule at `ui/packages/auth/src/ForgotPasswordForm.tsx:221` still holds: known and unknown addresses read the same.\n\nWith a transport configured the behavior stays as it is. The English default also says \"Check your email\", so the fix covers every locale."

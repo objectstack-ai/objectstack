@@ -1,0 +1,31 @@
+{
+  "number": 30325,
+  "kind": "issue",
+  "title": "Marketplace install starts on one click, with no view of what it will add",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T06:19:13Z",
+  "updated_at": "2026-11-05T07:16:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30325",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiling gate: ③ the maintainer's direct order, verbatim: 「你发现的问题都立卡，安全问题总专用的安全密卡通道，需要进一步分析的进一步测试，还是没有把握的用决策卡。」 (2026-11-05). Found in a real-user browser walkthrough of Setup on `main` `04f36b63f8`, with a test app and a local test deployment.\n\n**Business reason.** An administrator installing into a live deployment should see what they are adding before it happens. A CRM adds dozens of objects, permission sets, sharing rules and sample records in one click.\n\n**Reader.** The UI lane dev, in `ui/packages/app-shell/src/console/marketplace/MarketplacePackagePage.tsx:597`, which calls `installLocal` directly.\n\n**Duplicates.** Searched `marketplace install confirmation preview` (15 hits). They are a closed template install card, a seat card and a closed connector card; none has this subject.\n\n## Measured\n\nClicking 安装 on HotCRM's detail page starts at once: the button becomes 处理中… and there is no dialog. The result was registered objects, permission sets, sharing rules, hooks and 369 sample records. The log's uninstall later listed 382 items. The page says only that the app was installed, then suggests granting `crm_user` to Everyone.\n\nThe cloud install path has a dialog and a sample-data choice, which I read in the code (`seedSampleData`, line 227) and did not run.\n\n## Expected\n\nA short confirm before installing: how many objects, permission sets and sample records it adds, and what it will suggest granting. One click on Install then continues as today, so the trial stays easy. Sample data remains on by the maintainer's ruling on the sibling card. The languages line can follow #30284 when that lands."
+}

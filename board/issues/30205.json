@@ -11,17 +11,20 @@
     "type": "Bot"
   },
   "labels": [
-    "enhancement"
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T02:04:47Z",
-  "updated_at": "2026-11-05T02:04:47Z",
+  "updated_at": "2026-11-05T03:06:30Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30205",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFrom a real-user walkthrough of Setup, filed on the maintainer's word: 「以上都同意，立卡」 (2026-11-05). Measured on `main` `b7075d9908`, with the console in dev mode, unless a line says otherwise. Test app scaffolded with `create-objectstack@18.3.0`.\n\nThe maintainer agreed the seat's recommendation, so this is not a decision card.\n\n## What a customer sees\n\nAn employee leaves. An administrator bans the account. The tickets they own and the tickets assigned to them stay where they are, nobody is told, and customers' work stalls. The administrator has to find and reassign each one.\n\n## Measured\n\n- The ban dialog says only 「封禁后会立即登出，且在解除封禁前无法再次登录」.\n- After the ban: 3 tickets still owned, 3 still assigned.\n- The Console's person picker excludes the banned user (`banned != true`). `POST /api/v1/data/asset_repair_ticket` with `assignee` set to the banned user still answers 201.\n\n## Expected\n\n- The ban dialog states how many records the person owns and has assigned, across objects the administrator can read.\n- It offers one optional step to transfer them to someone, in bulk. It does not block the ban, because a ban can be urgent.\n- A new assignment to a banned user is refused at the server, not only hidden in the picker.\n\nOpen for the dev to report if it proves expensive: which objects count, given that \"assignee\" is an app's own user field and not a platform column."

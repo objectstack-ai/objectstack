@@ -1,0 +1,32 @@
+{
+  "number": 30284,
+  "kind": "issue",
+  "title": "Marketplace listing shows which languages an app actually supports, derived at publish with coverage, and can be filtered by language",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cloud",
+    "enhancement",
+    "pm:queue",
+    "priority:p2",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T04:56:16Z",
+  "updated_at": "2026-11-05T06:03:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30284",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiled on the maintainer's word, verbatim: 「立卡」 (2026-11-05), answering their question 「元数据软件包发布到应用市场的时候，有没有标记支持的语言。」 and the proposal below. Measured on `main` `04f36b63f8`.\n\n## What a customer sees\n\nA customer in a Chinese-speaking company opens the marketplace and picks an app. Nothing on the listing says whether the app has been translated into Chinese. They find out after installing it. They also cannot filter the catalog by language. The HotCRM card shows name, publisher, version, category and update time.\n\n## What exists\n\n| Surface | What it says | Why it does not answer the question |\n|:--|:--|:--|\n| Listing `translations` (`PackageTranslationsSchema`, `packages/spec/src/marketplace/package.zod.ts:146`) | Name, tagline, description, readme and screenshot captions per locale | It translates the shop window, not the app. A listing can read in Chinese while the installed app is entirely English |\n| `i18n.supportedLocales` on the stack | The languages the app declares | Measured: it does reach the build artifact (`dist/objectstack.json`, top-level `i18n`). `packages/cli/src/commands/package/publish.ts` does not read it or send it to the listing |\n| `computeI18nCoverage` (`packages/cli/src/utils/i18n-coverage.ts`), behind `os i18n check` | Missing translation keys per locale | It already measures the fact a listing needs, but it runs only when an author asks. Measured on the test app: 132 warnings across 3 locales, exit 0 |\n\nThe manifest has no language field.\n\n## Expected\n\n- `os package publish` derives the supported languages and the coverage per language from the artifact, using the existing coverage walker, and sends them with the listing. For example 中文 100%, 日本語 60%.\n- The author does not type this list. A hand-written list goes stale, and an AI author would declare languages the app does not have. A stack's `i18n.supportedLocales` still decides which locales are computed.\n- The marketplace card and detail page show the languages, and the catalog can be filtered by language.\n- A package published before this reads as \"no language information\", never as \"English only\".\n\n## Not verified\n\n- Where the listing is stored and served. `publish.ts` posts to the catalog host and #27364 shows the cloud side stores listing fields, so the store and the filter query probably need a matching change in the cloud repository. I did not read that side. The dev should confirm it first and split out a cloud card if so.\n- Whether an installed `.custom` translation should count. My recommendation is no: the listing describes what the publisher ships."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 30251,
+  "kind": "issue",
+  "title": "spec: IOwnershipQueueService lets the caller ask for a refusal on a failed member read (onFailedRead), which ADR-0142 D2 as amended needs for the D6 and D7 consumers",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T03:32:45Z",
+  "updated_at": "2026-11-05T07:10:15Z",
+  "closed_at": "2026-11-05T07:08:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30251",
+  "body": "domain:server#4 · os-bill · session_01Utp6CZMkHvuDeVYgTD73qF\n\nFiling gate: ① a governing record that names a call-time signal the published contract does not carry. Measured by the #29604 dev (os-dev-report 6648911579 on `origin/main` `6f095b9c`) and ruled by `domain:server` seat 4 (route A, recorded on #29604). Filed by `domain:server` seat 4 for the spec lane. ⛔ Not a claim. Suggested-grade: p2 (it blocks the code half of #29604, a p2 defect that revokes grants on an outage).\n\n## Why\n\nADR-0142 D2, as amended by PR #29865 (#29738), splits the queue expander's answer on a failed member read by consumer. The admission consumers (D3, D4, D5) keep \"nobody\". The D7 sharing-recipient grant recompute and the D6 approver slate refuse. D2 says the consumer declares which answer it is owed when it calls, and that how the call says so is left to the implementing PR.\n\nThe published contract `packages/spec/src/contracts/ownership-queue-service.ts` has one call-time signal on `expandMembers`, `purpose` (`'access' | 'addressing'`, the activation-ledger split). `isMember` takes none. `plugin-approvals` reaches the service only through this contract (it does not depend on `plugin-sharing`), so the D6 slate cannot ask for a refusal. Contract review 6600699486 (carried on #29604 in 6600766777) rules out overloading `purpose`: \"an independent axis; refuse-vs-nobody must not overload it.\"\n\n## Ask\n\n- Add an optional `onFailedRead?: 'nobody' | 'refuse'` to `expandMembers`' options, defaulting to `'nobody'` (today's answer).\n- Give `isMember` an optional options argument that carries the same key.\n- In the docblock, say that under `'refuse'` a failed read of any table behind the queue (`sys_queue`, `sys_queue_member`, `sys_team_member`, `sys_user_position`, and `sys_member` through the position transition limb) rejects with a failure that names the read. Say that an empty queue is still `[]`.\n- Regenerate the API surface. This is an optional key on an exported type, so it is `Clause-②: yes (widening)` (precedent PR #30015), with `Metadata-protocol: none`. There is no runtime change in this card: the producer in `plugin-sharing` and the D6/D7 callers are #29604's code half.\n\n## Acceptance\n\n- Callers that omit the key compile and behave as today.\n- The docblock states the two answers and which ADR-0142 consumers use each.\n\nBlocks: #29604 (part 2, D6 queue arm + D7), which is serial behind this card's merge. Part 1 of #29604 (the team/position half of ruling 6599731698 and the `QUEUE_READ_LIMIT` paging) does not wait.\n\nDedupe: searched `onFailedRead`, `ownership queue failed read refuse contract`; nearest #29738 (the ADR amendment, merged). **New.**\n\nLinks back: #29604, #29738, PR #29865."
+}

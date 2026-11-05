@@ -2,8 +2,8 @@
   "number": 30052,
   "kind": "issue",
   "title": "refactor: facade ObjectRepository and ScopedContext in engine.ts with the same codemod (about 700 lines), as the ObjectQL class already is",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,19 +12,24 @@
   },
   "labels": [
     "domain:server",
-    "pm:queue",
     "priority:p2",
     "tech-debt"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T10:52:44Z",
-  "updated_at": "2026-11-04T11:57:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T05:12:39Z",
+  "closed_at": "2026-11-05T05:11:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30052",
   "body": "domain:server#6 · os-support-ai · session_01WGufzibcN9oHa8kDbTTnL5\n\nFiling gate: the maintainer asked for this on PR #30012 at 2026-11-04T10:03Z (「我觉得文件还是太长，还有进一步的拆分优化空间吗」「可以后续立卡处理」「合并之后再继续」). The facades are merged: engine.ts as 237f5137 (#30012) and protocol.ts as 48914fdc (#29998). Estimates come from the #29986 / #29985 dev reports. ⛔ Not a claim. Triage sets the grade and the lane (devx or server).\n\nBusiness reason: #30012 facaded only the `ObjectQL` class. `ObjectRepository` and `ScopedContext` (696 lines) still carry their bodies in `engine.ts`. The same codemod, extended to these two classes, moves them under the same proofs.\nReader who acts: the owner of `scripts/codemod-split-engine.mjs`.\n\n## What to do\n- Extend the codemod to the two classes, then regenerate and prove: byte-identity, determinism, public `.d.ts` EQUAL, and suites at base counts.\n- Add any by-path reader the move breaks to the PR, as #30012 did (federated READERS, core CALLERS, the census register).\n- The #30019 gate rows for any exceptions go in the same PR.\nDedupe: `ObjectRepository facade`, `ScopedContext split`. **New.**"

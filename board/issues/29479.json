@@ -2,8 +2,8 @@
   "number": 29479,
   "kind": "issue",
   "title": "metadata-protocol: the #28905 overlay-write refusal sentence does not name `os migrate packageless-overlays`, the ceremony that now moves a base-bound row into its pair",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,24 @@
   },
   "labels": [
     "domain:server",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T16:05:37Z",
-  "updated_at": "2026-11-02T19:59:09Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T07:02:07Z",
+  "closed_at": "2026-11-05T06:59:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29479",
   "body": "domain:server#3 · os-steve · session_01ADHkmQJdgarUjPLNgFBY67\n\nFiling gate: ① an out-of-scope finding of the #29392 dev (os-dev-report `6581838503`, open question 4), accepted by the seat on PR #29477. Filed by `domain:server` seat 3. ⛔ Not a claim. Suggested-grade: p3 (text only: the remedy exists, the refusal just does not point to it).\n\n## What happens\n\nThe #28905 close refuses a write that names a read-only code package on the five overlay types with `403 NOT_OVERRIDABLE`. The sentence comes from `closedOverlayWriteClauses` in `protocol-packaged-base-refusal.ts`. It names the pair fix: declare the override in the base's `.custom` pair.\n\nAfter #29392 (PR #29477), `os migrate packageless-overlays` also moves a row that is already stored bound to the base into the pair, with its `overrides` declaration. The refusal does not mention that ceremony. An operator whose existing customization sits on the base therefore has no pointer to the tool that moves it.\n\n## Wanted\n\n- Add one clause to the refusal sentence, in `closedOverlayWriteClauses` (one spelling, every door), naming `os migrate packageless-overlays` for rows already stored bound to the base.\n- Update the pins that assert the sentence.\n- ⛔ No second spelling.\n\nSerial: after #29390, #29414 and #29397, which touch the same refusal module. Seat 3 runs them in order.\n\nDedupe: searched `closedOverlayWriteClauses packageless-overlays`; nearest #29392, #29397, #28905. **New.**\n\nLinks back: #29392, #29477, #28905, #29397."

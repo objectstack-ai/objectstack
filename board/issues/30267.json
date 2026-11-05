@@ -1,0 +1,34 @@
+{
+  "number": 30267,
+  "kind": "issue",
+  "title": "On a zh-CN console the view properties panel's expanded sections (表格选项, 分页, 终端用户控制, 导航与共享) still show about 60 English rows",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T04:15:41Z",
+  "updated_at": "2026-11-05T07:24:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30267",
+  "body": "domain:ui#1 · os-support-ai · session_01WGufzfE4V9fzZgJLrLDmMC\n\nCategory: ① product defect with a named location. ⛔ Not a claim. Found during #30039's item 5 browser verification (PR #30265), by its executor; recorded in the report on #30039 (comment 6649488202, `out_of_scope_findings`).\n\n**Business reason.** An administrator working in Chinese opens a list view in Studio and expands the grid, paging, end-user and sharing sections of its properties panel. The section headers read in Chinese, but nearly every row inside them reads English ('Page Size', 'Element', 'Allowed Visualizations' with its option names, 'Sort', 'Search', 'Enable column resizing', 'Row height / density setting', 'Pagination configuration' …). The panel #30039 just made Chinese turns English again as soon as a section is opened, and these are the settings an administrator changes most.\n\n**reach:** measured in the browser on `examples/app-crm` (dev boot at `6f095b9c`, Playwright locale zh-CN, dev admin), `/studio/com.example.crm/interfaces?surface=view:crm_lead.all`, 属性 panel with 表格选项 / 分页 / 终端用户控制 / 导航与共享 expanded: about 60 English rows. Screenshot: `/mnt/project-files/ui-orders/30039-shots/30039-p1b-view-panel-expanded-finding.png` (project files).\n\n**Where.** `packages/spec/src/ui/view.form.ts` lists `selection` (L102), `pagination` (L116), `userFilters` / `appearance` / `userActions` (L175-182), `navigation` / `sharing` (L204-205) as `type: 'composite'` with no declared sub-fields, and some rows (column resizing, row height, pagination) with no `helpText`. The renderer (`SchemaForm` field rows) then falls back to the Zod schema's own title and `.describe()` text, which is English. No catalogue can carry them today: the platform's generated zh-CN metadata-forms bundle holds only keys the spec form declares, and the console overlay (`ui/packages/app-shell/src/views/metadata-admin/metadata-form-zh-cn.ts`) may not name undeclared children of a composite. So the fix starts in the spec form (declare the composite sub-fields and the missing hints), then the key extractor emits them, the platform bundle translates them, and the overlay copies them. The executor read this from the code and the bundle; first touch should confirm which composites the extractor can already walk.\n\n**Expected.** With the console in zh-CN, every row label and hint inside the four expanded sections reads Chinese; en-US unchanged.\n\n**Reader.** Starts in `domain:spec` (view form declaration + extractor), then the platform zh-CN bundle, then a `ui/**` overlay copy and pin. Triage to split or route.\n\n**Duplicate search** (open): `\"Allowed Visualizations\"` 1 hit, `\"Page Size\" zh-CN` 6 hits, `view form composite sub-fields English` 2 hits, `metadata-forms composite undeclared` 4 hits. Only #30039 (and seat posts) come back; #30039's evidence names none of these rows, and its own position 1 is closed by PR #30265.\n\nAlso noted, not filed: the view canvas and properties-panel header show the authored label 'All Leads' while the Studio rail shows 全部线索 (same boot). Recorded in PR #30265's Acceptance notes."
+}

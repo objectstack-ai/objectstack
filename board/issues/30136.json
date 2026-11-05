@@ -13,19 +13,21 @@
   "labels": [
     "domain:cloud",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2",
     "repo:cloud"
   ],
-  "assignees": [],
+  "assignees": [
+    "hotlong"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T15:31:02Z",
-  "updated_at": "2026-11-04T16:50:56Z",
+  "updated_at": "2026-11-05T08:05:06Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30136",
   "body": "coordinator#1 · hotlong · session_6eb9ec2e0e3f410b91239dab7a337b9e\n\nFiling gate: executing a recorded ruling. The maintainer ruled objectstack-ai/cloud#3559 **A** on 2026-11-04 (「全按推荐」, ruling comment on that card): keep the naming step after cloud sign-up, but prefill a default name so the user continues with one click. Auto-creating the organization (option B) was not chosen.\n\n**Business reason.** On ObjectOS Cloud, a new user who has verified their e-mail must invent an organization name before seeing anything. It is the only step on the way to the first app that asks the user to think. On production, 1 of 20 recent sign-ups provably stopped there (cloud#3559 evidence).\n\n**Reader who acts.** The ui lane (`domain:ui`).\n\n**Dedupe.**\n- `repo:objectstack-ai/objectstack prefill organization name is:issue`: 21 hits, none carries this. The nearest, objectstack-ai/objectstack#30125 item 1, is the self-hosted first-run page (`SetupPage.tsx`, the 「Default Organization」 seen by invitees). It is a different surface from the cloud dialog below.\n- `repo:objectstack-ai/objectstack 组织 默认名 is:issue`: 17 hits, none carries this.\n\n## 维护者速读\n\n云端注册完自动弹出的「新建组织」对话框，名称是空的。改成预填一个默认名：企业邮箱用域名推出公司名，公共邮箱用「某某的组织」。用户可以改，也可以直接点创建。\n\n## Where (read at objectstack `origin/main` today)\n\n- `ui/packages/app-shell/src/console/organizations/CreateWorkspaceDialog.tsx:147`: `const [name, setName] = useState('');`. The slug is already derived from the name (objectui#11659).\n- `ui/packages/app-shell/src/console/organizations/OrganizationsPage.tsx` (~150) opens that dialog straight away for a zero-organization user.\n\n## The default name\n\n- **Work e-mail:** derive from the domain's registrable label, capitalised (`acme.com` → `Acme`).\n- **Public mailbox domain:** use the person's name, 「张三的组织」 in zh and \"Zhang San's organization\" in en. Keep the public domains as a **closed list** in code (gmail.com, outlook.com, hotmail.com, yahoo.com, icloud.com, qq.com, 163.com, 126.com, foxmail.com, proton.me, and similar). An unknown domain is treated as a work domain, and the user sees it before clicking.\n- The field stays editable. Renaming later in settings already exists.\n\n## Acceptance\n\n1. A gmail user, right after sign-up, sees the dialog with 「<name>的组织」 filled in. One click creates the organization, and its environment follows as today.\n2. An `@acme.com` user sees `Acme`.\n3. Both locales (en / zh) render the right default.\n4. A unit test covers the domain rule and the closed list.\n\nOut of scope here: cloud's stale comment in `packages/service-cloud/src/cloud-stack.ts` (281–296), which cloud#3559 carries for the cloud lane.\n\nPriority: p2, inherited from objectstack-ai/cloud#3559.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"

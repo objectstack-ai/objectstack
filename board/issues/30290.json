@@ -1,0 +1,38 @@
+{
+  "number": 30290,
+  "kind": "issue",
+  "title": "Scenario library T2a: port the deterministic scorer (shape score + Run-half grader) from the cloud eval harness into packages/cli, with a discrimination self-test",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "pm:blocking",
+    "pm:epic",
+    "priority:p2"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T05:12:14Z",
+  "updated_at": "2026-11-05T07:18:03Z",
+  "closed_at": "2026-11-05T07:17:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30290",
+  "body": "epic:#3600#1 · hotlong · session_01Q4EjjPXwX1YfHyKJUh4agu\n\nFiling-gate category: ④ coordination child of objectstack-ai/cloud#3600 (scenario-library epic), item T2a. Maintainer-directed (verbatim, Claude Code session 2026-11-05): 「都应该处理，具体立一个专题卡」 · 「相关卡片现在你负责派发，立卡之后就派发」.\n\nBusiness rationale: inherited from the parent. The scenario library needs a deterministic, open scorer. The maintainer cost rule 「目前阶段尽量不要用云端的token，api的更贵」 rules out LLM judges, so every score must come from code.\n\n## Ruling carried\n\nD2 on cloud#3600 (maintainer, verbatim): 「打分器可以迁移到开源项目」. This authorizes moving the deterministic scorer out of cloud's private `packages/service-ai-studio/src/evals/` into this repo under Apache-2.0.\n\n## Scope\n\n1. **Port the structural scorer** from cloud `packages/service-ai-studio/src/evals/structural-score.ts`. In the source it is self-contained apart from `REFERENCE_VALUE_TYPES` from `@objectstack/spec/data` and the `expect` type.\n   - Port: `EvalGraph`, `scoreGraph` (exact api-names), `ShapeExpectation`, `deriveShape`, and `scoreGraphShape` (name-agnostic).\n   - The `expect` input type is field-for-field the one sibling card T1a fixes:\n     ```ts\n     expect: {\n       objects: string[];\n       minFieldsPerObject?: number;\n       selectFields?: { object: string; field: string; minOptions: number }[];\n       lookups?: { object: string; field: string; to: string }[];\n       dashboards?: string[];\n       appNavTargets?: string[];\n     }\n     ```\n   - Read the source from the cloud checkout at `/home/user/cloud` if your container has it. If it does not, report `blocked` naming the file; do not reconstruct the code from memory.\n2. **An artifact → `EvalGraph` adapter.** The cloud scorer reads an environment's metadata over HTTP. Here the input is a locally built artifact (`dist/objectstack.json`). That includes the multi-package shape: collections inside `packages[]` (ADR-0130). Precedent for reading both shapes: `packages/verify/src/artifact-collections.ts`.\n3. **A generalized Run-half grader**, using cloud `packages/service-ai-studio/src/evals/ask-accuracy/scorer.ts` as the reference. That file is tied to its own dataset and to the hosted-chat transcript, so port the mechanism, not the dataset.\n   - Input: a question's computed truth, the persona's hidden objects and fields, and an agent turn transcript `{ replyText, toolCalls: [{ name, input, output }] }`.\n   - Output: `{ correct, cited, leaks[] }`. It is correct when the numbers in the reply match the truth; cited when every figure names its object; and leaks lists hidden fields or values found in the reply or in any tool output, aggregates included.\n4. **Discrimination self-test.**\n   - cloud#2146 measured the shape score at 1.00 on all 8 golden journeys, so it could not tell builds apart.\n   - Pin with tests that a deliberately degraded graph scores strictly lower than the intact one: a missing lookup, an optionless select, a dangling nav target, a dangling dashboard measure.\n   - Pin that a leaking answer, an uncited answer and a wrong-number answer each fail the matching Run axis.\n\n## Constraints\n\n- Home: inside `packages/cli` next to `src/lint/metadata-eval.ts` (the `os lint --eval` path). ⛔ **No new package-entry export** in this card, so the public surface is unchanged (`Clause-②: no`). If you measure that an export is unavoidable, stop and report it; do not add it.\n- No new CLI flag here. The CLI wiring (`os lint --eval` reading scenario cards) is a later sibling card.\n- Each ported file carries the Apache-2.0 header and a one-line provenance note (\"ported from the cloud eval harness under the cloud#3600 D2 ruling\"), with no cloud code comments that cite private issue content.\n\n## Acceptance\n\n- Tests cover the shape score, the exact score, the adapter on both a single-package and a multi-package artifact, and the Run grader's three axes.\n- The discrimination self-test is green, and each degraded variant scores strictly lower.\n- No `packages/spec` change, no public-surface change.\n\nReader: the epic PM of cloud#3600 dispatches this to an `os-dev` agent in the same round it is filed, in parallel with T1a (disjoint file surfaces).\n\nDedup: parent's dedup table. Searching \"scoreGraphShape\" in this repo returns 0 hits.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_\n\n"
+}

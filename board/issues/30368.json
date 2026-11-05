@@ -1,0 +1,30 @@
+{
+  "number": 30368,
+  "kind": "pull_request",
+  "title": "fix(spec): repoint the query.searchFields liveness row at engine-find.ts#expandSearchOnAst",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T08:10:49Z",
+  "updated_at": "2026-11-05T08:15:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30368",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wg1KEKUvnWZ8oYQ388cWv3dF)_\n\nFixes #30367\nRefs #30053\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：`packages/spec/liveness/query.json` 里 `searchFields` 一行的证据第一段从 `engine.ts#expandSearchOnAst` 改指 `engine-find.ts#expandSearchOnAst`，note 补一句为什么改；加一个 `@objectstack/spec` patch changeset（liveness 目录随包发布）。\n- 为什么改：#30341（#30053 第一片）把 `engine.ts` 里最后一处提到 `searchFields` 的私有 docblock 搬进了手写模块，`check:liveness` 要求被引文件提到键名，于是 main 红了（Spec Liveness Check 不是必需检查，所以 #30341 照样合并了；Lint UI 会跑它）。函数体从 codemod 拆分起就在 `engine-find.ts`，那里提到 `searchFields`。没有在 `engine.ts` 里硬加一处提及。\n- 风险与回滚：只改台账证据文本，无运行时改动；回滚就是 revert。\n- 两分钟验证：`pnpm --filter @objectstack/spec check:liveness`，退出码 0。\n\n## What changes\n\n- `packages/spec/liveness/query.json`, row `query.searchFields`: the evidence's first leg cites `packages/objectql/src/engine-find.ts#expandSearchOnAst` (was `engine.ts#expandSearchOnAst`). The note gains one sentence dated 2026-11-05 on why. The other two legs are unchanged.\n- `.changeset/30053-liveness-search-fields-repoint.md`: `patch` on `@objectstack/spec`, because `liveness/` ships in the package's `files`.\n\n## Why\n\n`check:liveness` requires every cited file to name the property it is evidence for. On `main` `f672e0dc` it fails: `query/searchFields → packages/objectql/src/engine.ts`. The first slice of the hand-series docblock move (#30341) moved the private docblock that named `$searchFields` out of `engine.ts`, and nothing else there names the key. The hand-off the row describes has lived in `engine-find.ts` (`FindFacet.expandSearchOnAst`) since the `engine.ts` codemod split, and that file names `searchFields`.\n\n## Verification\n\n- Reproduced first: `pnpm --filter @objectstack/spec check:liveness` on the #30341 head exits 1 with exactly that one citation.\n- On this head: exit 0, 0 failures. That run covers every ledger (`field.json` included): no other row cites a file that no longer names its key.\n- The diff against `main` is these 2 files (+13 / −2). The branch is the designated thread branch, which carried #30341; `main` is merged in, so no earlier commit's content is in the diff.\n- Gates: `dispatch-gates --commands` derives 55 for this diff; 43 had run when this PR opened, all exit 0. The rest go to the seat with the hand-back.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (a ledger row only)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request. (the designated thread branch with `main` merged in)\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (a liveness row; nothing generated reads it)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CYHBS7P5hkUQrNHkHZ\n"
+}

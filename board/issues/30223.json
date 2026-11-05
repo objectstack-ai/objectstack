@@ -1,0 +1,36 @@
+{
+  "number": 30223,
+  "kind": "issue",
+  "title": "Chat confirm card: after 确认 the transcript shows the internal continuation prompt as the user's own bubble (「[HITL pa_…] The operator approved the `create_record` call… Acknowledge the outcome…」)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T02:23:35Z",
+  "updated_at": "2026-11-05T05:50:01Z",
+  "closed_at": "2026-11-05T05:47:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30223",
+  "body": "coordinator#1 · hotlong · session_6eb9ec2e0e3f410b91239dab7a337b9e\n\nFiling gate: **① a defect measured on staging** (cloud#3342 acceptance reads for cloud#3565, maintainer-authorized 2026-11-05).\n\n**Business reason.** After a person clicks 确认 on the chat's confirm card, their own side of the conversation shows a long English message they never wrote. It carries internal ids and a JSON result, ending 「Acknowledge the outcome concisely and continue the user's task.」 It looks like a bug or a leak to a customer, on the very path cloud#3565 just shipped.\n\n**Reader who acts.** The ui lane (`domain:ui`).\n\n**Dedupe.**\n- `repo:objectstack-ai/objectstack useHitlInChat is:issue`: 1 hit, the triage seat post, which only mentions it.\n- `\"The operator approved\"`: 0 hits.\n\n## 维护者速读\n\n聊天里点「确认」之后，对话里会以用户自己的身份冒出一大段英文，内容是系统发给模型的续写指令，带记录 id 和 JSON。这段应该对用户隐藏，或者换成一行「已确认」。\n\n## Measured (staging `bd085bb0`, `os-4e4qa4`, every confirm in 10 runs)\n\n- After 确认, a user bubble appears: 「[HITL pa_2b60f90b-…] The operator approved the `create_record` call. It executed successfully with result: {\"status\":\"written\",\"operation\":\"create\",\"objectName\":\"jpph_customer\",\"recordId\":\"u_Vo_YLw7bmg9wuS\",\"link\":\"[验收客户 R5](/record/jpph_customer/u_Vo_YLw7bmg9wuS)\",…}. Acknowledge the outcome concisely and continue the user's task.」 The same happens for `update_record`.\n- Source: `ui/packages/plugin-chatbot/src/useHitlInChat.ts` ~333–344 builds this text and sends it with `sendMessage` (the comment at ~81 says so), so it renders as an ordinary user message and stays in the stored history.\n\n## Two smaller things seen on the same path\n\n- After an update, the assistant's reply sometimes names the record by its id: 「vhGuAdkNThenRvKh 的状态已改为 Active」 instead of 「验收客户 R2」. Other runs use the name.\n- After the chat writes the record, the record page behind the dock does not refresh. The stage bar still shows Prospect until a reload.\n\n## Acceptance\n\n- After 确认 or 取消, no continuation text appears as a user bubble: hide it, or show a one-line system note such as 「已确认」.\n- The model still receives the continuation.\n- A reloaded conversation does not show it either.\n\nRelated: cloud#3565, cloud#3342.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

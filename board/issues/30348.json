@@ -1,0 +1,33 @@
+{
+  "number": 30348,
+  "kind": "issue",
+  "title": "metadata-protocol: the publish receipt's seedApplied drops the landed row ids the seed loader computes, so cloud cannot tell which rows an AI build's seed landed on (objectstack-ai/cloud#3598 ruling A)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "enhancement",
+    "pm:queue",
+    "priority:p1",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T06:57:35Z",
+  "updated_at": "2026-11-05T08:03:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30348",
+  "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **executing a recorded ruling**. The maintainer ruled objectstack-ai/cloud#3598 **A** (record 6651768430; the maintainer's selection, verbatim: 「A 平台回执带行号（推荐）」). This card carries the platform half. objectstack-ai/cloud#3598 keeps the cloud half and waits on this card with `pm:blocked` + `Blocked-by:`.\n\n**Owner.** The `repo:cloud` lane (`repo:cloud#3`, objectstack-ai/objectstack#30278) follows it to close. The change widens a published response schema, so it is spec-lane work (`Clause-②: yes (widening)`), and triage routes it.\n\nPriority: **p1**, inherited from objectstack-ai/cloud#3598.\n\n## 维护者速读\n\nAI 搭建应用时，示例数据是在发布草稿那一刻由平台写进去的。种子加载器知道写了哪几行，但发布接口只回传「写了几行」，把具体行号丢了，于是 cloud 的「清理示例数据」永远找不到这些行。按已有裁决，发布回执 `seedApplied` 加一个可选、有上限的字段，按对象带回写入的行 id。\n\n## Measured\n\nProbe at framework pin `1a3ea0c0` on a real hosted kernel, by the objectstack-ai/cloud#3598 dev (report objectstack-ai/cloud#3598 comment 6650239213):\n- The real `apply_blueprint` published 6 rows (`seedApplied.inserted 6`). The cloud seed-replay ledger stayed unchanged.\n- After a kernel rebuild on the same database, the ledger was still unchanged.\n- A control artifact `data[]` seed was recorded normally, which proves the reading method.\n\nSeat re-read at objectstack `origin/main` `bfca0efb`:\n- `packages/metadata-protocol/src/protocol-publish-batch.ts:126-128`: `applySeedBodies` returns `success`, `inserted: r.summary.totalInserted` and `updated`, and no ids.\n- `packages/spec/src/data/seed-loader.zod.ts:431`: `landedIds: z.array(z.string()).default([])` is on the loader's per-dataset result.\n- `packages/spec/src/api/protocol.zod.ts:1480`: `seedApplied: z.object({…})` is the receipt schema, with no ids field.\n- `packages/spec/src/contracts/seed-settlement.ts:110`: `seededRecordIds` covers boot-time sources only.\n\n## The ruled design (option A of objectstack-ai/cloud#3598 comment 6650272370)\n\n1. `applySeedBodies` keeps the loader's `landedIds` per object and returns them on the receipt.\n2. `seedApplied` gains an **optional** per-object landed-ids field. Do it in both `seedApplied` schemas the dev named (`protocol.zod.ts`, both publish shapes), size-capped the way the cloud ledger caps `seeded_record_ids`. State the cap and what the receipt says when it truncates, rather than silently dropping ids.\n3. `publishPackageDrafts` and `publishMetaItem` both carry it.\n4. Additive and optional: existing callers keep working, and an absent field means \"not reported\".\n5. Accepted cost: row ids appear on the public `POST /packages/:id/publish-drafts` response, bounded by the cap.\n\n## Acceptance\n\n- A test publishes a seed draft and asserts the receipt lists exactly the ids the loader landed, per object.\n- An over-cap test asserts the declared truncation shape.\n- The protocol docblock names the field.\n- `Clause-②: yes (widening)`, with the spec-lane contract review on record.\n\nDedupe (issues, open and closed, 2026-11-05), none carrying this:\n- `repo:objectstack-ai/objectstack seedApplied landed ids is:issue`: 5 hits (#24459, #28952, #28942, #27377, …).\n- `applySeedBodies landedIds is:issue`: 0 hits, with control `seedApplied` → 18 hits.\n"
+}

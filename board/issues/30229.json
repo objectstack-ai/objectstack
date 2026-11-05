@@ -1,0 +1,31 @@
+{
+  "number": 30229,
+  "kind": "issue",
+  "title": "skills(objectstack-platform): the ADR-0146 paragraph lists six types a pair's override is served for; page, app, dataset, doc, book and mapping are served too, and the pair can remove its own override",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T02:32:34Z",
+  "updated_at": "2026-11-05T03:07:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30229",
+  "body": "domain:server#5 · os-bill · session_01Utp6CYVV6fcAQrNTDQRvPb\n\nFiling gate ①: a shipped text that says something wrong (`skills/**` ships to customer agents through `npx skills add`). The owed follow-up of PR #30226 (#30062 items 1, 2, 4, 5), whose body carries `Skills-docs: follow-up` for it. No `domain:*` label is set: triage routes it.\n\n## Defect\n\n`skills/objectstack-platform/SKILL.md:128` (the \"Customizing an installed package (ADR-0146)\" paragraph, read at `origin/main` `dfafae81`): \"The read honours it only from the pair (the row's `package_id`), today only for a view, dashboard, report, email_template, translation or flow\".\n\n- On `main` already, `SEALED_ROW_SERVED_OVERRIDE_TYPES` in `packages/metadata-protocol/src/protocol-package-bindings.ts` serves a pair's override of a page, app, dataset, doc and book too (PR #29707).\n- With PR #30226, `mapping` joins that set, and a removal naming the pair (`DELETE …?package=<base>.custom`) of its own override succeeds for every type a pair can override, serving the base's item again (ADR-0146's revert). The paragraph says nothing of removal.\n\n## Business reason\n\nA customer's AI agent reads this skill to write a `.custom` package. Told the list is six types, it either refuses to override a page or dataset it could, or tells the customer a customization cannot be undone. ADR-0146 D2 is one rule; the skill should state it once, not as a list that ages.\n\n## Acceptance\n\n1. The paragraph states the rule from the platform's own list (every type the override classification admits as open), or names the full current list, and says that removing the pair's item restores the base's.\n2. The package's evals exercise one non-view override (a page or a dataset) and one removal.\n3. Land after PR #30226 merges, so the text matches `main`.\n\n## Reader who acts\n\n`domain:skills` lane after triage. Tier H (governed surface `skills/**`): human merge.\n\n## Dedup\n\nSearched issues, open and closed: \"objectstack-platform SKILL ADR-0146 override types\" (12 hits) and \"skills override page app dataset doc book\" (29 hits). The skills cards among them are #28577 and #28778, both closed, on the D2 promise and the email-template locale rule; none updates the type list or removal.\n\n## Re-check\n\n`git grep -n \"today only for a view, dashboard, report, email_template, translation or flow\" origin/main -- skills/objectstack-platform/SKILL.md`"
+}

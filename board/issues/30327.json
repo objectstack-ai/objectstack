@@ -1,0 +1,31 @@
+{
+  "number": 30327,
+  "kind": "issue",
+  "title": "New datasource dialog defaults to managed, which cannot sync an existing database's tables, and does not say so",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T06:20:14Z",
+  "updated_at": "2026-11-05T07:16:59Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30327",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiling gate: ③ the maintainer's direct order, verbatim: 「你发现的问题都立卡，安全问题总专用的安全密卡通道，需要进一步分析的进一步测试，还是没有把握的用决策卡。」 (2026-11-05). Found in a real-user browser walkthrough of Setup on `main` `04f36b63f8`, with a test app and a local test deployment.\n\n**Business reason.** The page says 连接外部数据库，并将其中的表同步为对象. Someone following that with the defaults ends up with a datasource that has no sync button and no explanation.\n\n**Reader.** The UI lane dev for `ui/packages/app-shell/src/views/metadata-admin/datasource/DatasourceResourcePage.tsx:190`.\n\n**Duplicates.** Searched `datasource schemaMode default managed external dialog` (12 hits). #24837 and #24772, both closed, are about Sync and the default datasource's status. None covers this default.\n\n## Measured\n\n- The dialog's 结构模式 defaults to 托管（表结构由 ObjectStack 管理）.\n- A datasource saved in that mode shows only 测试. 同步对象 appears only on the external one. `GET …/remote-tables` answers 400 with an English message citing ADR-0015.\n- In my test the managed datasource left the source table unchanged, with the same tables and columns.\n- With 外部 selected, the flow works: sync offers the table, reads work and writes are refused.\n\nNot measured: what managed mode does to the source database when an object is later bound to it. Whether that can alter a customer's tables is what makes the default matter, so the dev should settle it first.\n\n## Expected\n\n- The modes are explained in business words where they are chosen, including which one to pick to read an existing database.\n- The default fits the page's stated purpose. I suggest 外部, unless the dev finds a reason that a new datasource needs managed. If so, say it in the PR.\n- A managed datasource says why it has no sync, rather than just having no button.\n- Driver form labels such as `Filename` and `Auto-migrate schema` read in the console's language."
+}

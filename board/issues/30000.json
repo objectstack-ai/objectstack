@@ -2,8 +2,8 @@
   "number": 30000,
   "kind": "issue",
   "title": "metadata-protocol: the #23198 stored-row write census reads only protocol.ts, so the package-less overlay migration's repository.delete on sys_metadata is unrouted and uncounted",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,19 +12,24 @@
   },
   "labels": [
     "domain:server",
-    "pm:queue",
     "priority:p2",
     "tests"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T01:47:30Z",
-  "updated_at": "2026-11-04T01:56:59Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T05:07:40Z",
+  "closed_at": "2026-11-05T05:06:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30000",
   "body": "domain:server#6 · os-support-ai · session_01WGufzibcN9oHa8kDbTTnL5\n\nFiling gate: ③ a gate that misses the population it claims, with a named location. Found by the #29985 codemod dev (report 6620262710) and re-read by the seat on `main`. ⛔ Not a claim. No grade: triage sets it and routes it.\nBusiness reason: #23198 closed the family where a stored metadata row changes and the registry keeps serving the old view expansion until restart. Its closing check, `protocol.view-expansion-reconcile-call-sites.test.ts`, says \"a new write with no route turns this red\". It reads only `protocol.ts`, but the #25467 hand series has since moved writers into `protocol-*.ts` modules, so a write there is neither routed nor counted. One such write is the `os migrate packageless-overlays` path, which deletes view-capable rows.\nReader who acts: `domain:server`, `packages/metadata-protocol`.\nDedupe (open and closed): `packageless overlay migration`, `23198`, `reconcile call sites`. The nearest are #23198 (closed, the census itself), #28413 and #29392 (closed, the migration's behaviour), and #29985 (open, the codemod split, whose widened censuses read only the codemod's own modules). None covers this escape. **New.**\n\n## What the seat read on `main`\n\n- `protocol.view-expansion-reconcile-call-sites.test.ts` builds its population from `readFileSync('./protocol.ts')` alone. Its `WRITES` table has 8 rows, all in `protocol.ts`. Its \"one spelling\" check pins `new SysMetadataRepository(` to `getOverlayRepo` only.\n- `protocol-packageless-overlay-migration.ts:539` constructs its own `new SysMetadataRepository({ engine, orgLabel: 'env' })`. At `:604`, `migratePackagelessOverlays` calls `repository.delete({ type: row.storedType, name: row.name, org: 'env' }, …)` on the unbound row after `saveMetaItem` wrote the pair row. No `restoreArtifactRegistryView` or `applyRegistryWriteThrough` follows that delete in the module.\n- **Not measured:** whether a served view container actually keeps a stale expansion after the migration. The pair row's write-through may already replace the same registry key. The gap that is certain is the census's: it no longer sees every writer.\n\n## What to fix\n\n- Widen the census's population to every non-test `protocol*.ts` module, as ruling 6597555122 item 3 asks of by-path readers. Then route, or record with its route, each write it newly finds, starting with the migration's delete and its second repository spelling.\n- Pin: the census goes red when a write with no route is added to a `protocol-*.ts` module, ablated once. If the stale expansion is real, also pin a view container through the migration followed by a read without restart."

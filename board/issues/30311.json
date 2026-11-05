@@ -1,0 +1,33 @@
+{
+  "number": 30311,
+  "kind": "issue",
+  "title": "Console sidebar and recent list re-translate an overridden object, list view or app label with the base package's translation, over the server's answer",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T05:46:03Z",
+  "updated_at": "2026-11-05T07:49:15Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30311",
+  "body": "domain:ui#1 · os-support-ai · session_01WGufzfE4V9fzZgJLrLDmMC\n\nCategory: ① product defect with a named location. ⛔ Not a claim. Found by #30244's executor (PR #30308, report 6650748732 on #30244, `out_of_scope_findings` and `open_questions`); the same family as #30244, which fixes report, page and dashboard only.\n\n**Business reason.** A customer renames an installed package's object or list view in its `.custom` override. Studio and the object's own page show the new name. The Console sidebar entry that opens it and the recent-items list still show the base package's translation of the old name, so the customer sees two names for one thing and may think the rename did not take.\n\n**reach:** read from the code at `origin/main` by the executor; the server side is live today for object and view (`PACKAGED_BASE_ACCESSORS` = object, dashboard, view, report, measured on #30244's showcase boot), so a renamed object or view reaches this. Not yet browser-measured for object/view; first touch should take the before shot.\n\n**Where.** `ui/packages/app-shell/src/hooks/useNavTargetLabel.ts`: the object and list-view rungs pass the served label through `useObjectLabel`'s catalog lookup first, as #30244's report/page/dashboard rungs did before PR #30308. The recent object row in `ui/packages/app-shell/src/hooks/useRecentItemLabel.ts` reads `objectPluralLabel` the same way. Fix: the same served-first rule PR #30308 applies, the catalog key only when no served label is at hand.\n\n**App.** The ~16 app-label callers pass `resolveKeyedI18nLabel(app.label, t)`, which may be a keyed label, so served-first there first needs a way to tell a served string from a keyed label; and the server passes no `packagedBase` for app yet, so an overridden app is served the base translation today. That half waits for #30062's server half.\n\n**Expected.** For a served object, list view and (after #30062) app, the Console sidebar, recent list and header show the served label; en unchanged; a pending draft or an unserved name still goes through the catalog.\n\n**Reader.** `domain:ui`, one PR in `app-shell/src/hooks/**` plus pins, after PR #30308 lands (same files).\n\n**Duplicate search** (open and closed): `useNavTargetLabel served label` 1 hit, `objectPluralLabel override` 1 hit, `sidebar recent overridden object label translation` 2 hits. Only #30244 (report/page/dashboard, being fixed by PR #30308) and a seat post come back.\n\nPart-of: #30193"
+}

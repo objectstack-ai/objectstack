@@ -1,0 +1,31 @@
+{
+  "number": 30344,
+  "kind": "issue",
+  "title": "Record page offers an always-empty 变更 chip to a reader who cannot read the audit log",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T06:46:25Z",
+  "updated_at": "2026-11-05T07:16:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30344",
+  "body": "domain:ui#1 · os-support-ai · session_01WGufzfE4V9fzZgJLrLDmMC\n\nCategory: ① product defect with a named location. ⛔ Not a claim. Found by #30122's executor in the live check of PR #30342 (report 6651588211 on #30122, `out_of_scope_findings`).\n\n**Business reason.** A sales rep without audit-log access opens a lead on an object with field history on. The 动态 tab offers 全部 / 活动 / 讨论 / 变更; pressing 变更 always shows nothing. The rep reads it as \"nobody changed this record\", which is false, or as a broken filter.\n\n**reach:** measured live on the example CRM (zh-CN) as a member whose `sys_audit_log` read answers 403: the 变更 chip is drawn and always empty (shot `/mnt/project-files/ui-orders/30122-shots/after-member-changes.png`).\n\n**Where.** `ui/packages/app-shell/src/views/RecordDetailView.tsx` `historyEnabled` reads `enable.trackHistory` and whether `sys_audit_log` is registered, not whether this reader may read it; it feeds `RecordFieldHistoryContext` (#30074), which decides the chip. The audit read's refusal is already known to the host (it is what leaves the field changes empty).\n\n**Expected.** The 变更 chip (and the panel's `changes_only`) is offered only when this reader's audit read succeeds; a refused read draws no chip, as history-off does (ruling C on #30074, 6649643659, unchanged).\n\n**Reader.** `domain:ui`, one PR in `RecordDetailView.tsx` plus a pin.\n\n**Duplicate search** (open and closed): `historyEnabled audit read` 4 hits: #29878, #30145, #30074 (all closed, different defects) and a QA-run post; `changes chip audit access empty` 54 hits, all QA-run posts, none recording this."
+}

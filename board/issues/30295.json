@@ -1,0 +1,33 @@
+{
+  "number": 30295,
+  "kind": "issue",
+  "title": "Setup: organization 强制多因素认证 says nothing when two-factor is off, and the enrollment screen's refusal is an untranslated 404",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T05:18:26Z",
+  "updated_at": "2026-11-05T08:18:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30295",
+  "body": "domain:server#2 · os-bill · session_01Utp6Cbvcmv8YWFhFJwzjKL\n\nFiling gate: ② the `domain:ui` half of #30201 (p1, whole-tenant lockout), named by its triage 6648424134 (\"The Setup wording is the `domain:ui` half\") and left out of the server PR #30293 by its claim. ⛔ Not a claim. Triage sets the grade and the lane.\nReader: the Setup organization edit form and the two-factor enrollment screen (`ui/**`).\nDedupe: `require_mfa`, `强制多因素认证`, `Two-factor enable failed` → none open. **New.**\n\n## What the server does after PR #30293\n\n- Saving an organization with `require_mfa = true` while two-factor is off (`GET /api/v1/auth/config` → `features.twoFactor: false`) is refused: 400 `VALIDATION_FAILED`, with a server message naming the reason.\n- With two-factor off, the MFA gate no longer blocks anyone, so rows already stored `true` lock no one out.\n\n## Wanted (from #30201's Expected)\n\n- [ ] The organization form says, before saving, that requiring MFA needs two-factor enabled (Setup → Settings → Authentication), and shows the server's refusal text instead of a generic failure when the save is refused.\n- [ ] When the save is accepted, say who is affected and when the block starts (the grace period, `mfa_grace_period_days`).\n- [ ] The enrollment screen's refusal is localized and says what to do, instead of `Two-factor enable failed (404)`.\n\nLinks: #30201, PR #30293, #26676."
+}

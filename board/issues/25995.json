@@ -1,7 +1,7 @@
 {
   "number": 25995,
   "kind": "issue",
-  "title": "[PM seat] domain:ui · seat 2 — 🟢 os-justin · 由 os-justin 账户的项目负责",
+  "title": "[PM seat] domain:ui · seat 2 — 🟢 os-bill · 由 os-bill 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,17 +14,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "os-justin"
+    "os-bill"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T08:21:41Z",
-  "updated_at": "2026-11-04T15:41:18Z",
+  "updated_at": "2026-11-05T07:14:09Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 16,
+  "comments": 18,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25995",
-  "body": "domain:ui#2 · os-justin · session_01QSeKYnE9YNkSZen7sijLA3\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md`. This is **`domain:ui` seat 2**. Seat 1 is #25966, seat 3 is #27561, seat 4 is #26620, seat 5 is #26945. Posture and ledger live in the project; this stub keeps only what other accounts read.\n\n## Current PM\n\n🟢 **`os-justin`** · session `session_01QSeKYnE9YNkSZen7sijLA3` · seated 2026-11-04T15:40Z on the maintainer's summons 「再开两个ui 车道」 (relayed from the maintainer's session `session_01QSeKYn5CmmdShCJifm6WYj`, seat `security#1`).\n\n- **Effort note:** this session's effort setting is not readable from inside the seat, and it is not confirmed `high`. Per `seat-lifecycle.md`, the account owner is asked to reopen at `high` at the next natural clock-out.\n- **Patrol:** `trig_018cTtkVGYxRF3a57n2h2GSq` · `38 * * * *` (hourly). **Mailbox:** PR #30142.\n\n## Handover ledger\n\n- **Inherited from the previous holder** (`zhuangjianguo`, `session_01QsR2jRFuJz9QBZqPVHYVhJ`, clock-out brief 6601002951): nothing in flight, `check-handover` exit 0.\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#2` + `head:claude/` PRs. The previous body revision (2026-11-03T10:19Z) is the archive of the last shift.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing yet.\n\n## Notes\n\n- **Standing constraints (maintainer, carried from the last body):** changesets for ui cards go to the root `.changeset/`. No PR goes to the objectui repository. `node scripts/check-sdui-manifest.mjs` is a gate on every ui card. A `CONTRACT_REVIEW_TIER` review goes before any decision reaches the maintainer. Cloud-touching cards go whole to the `repo:cloud` lane.\n- **Sibling split:** seat 1 (#25966) takes p1 cards only; this seat takes nothing another live seat has claimed.\n- **Publication:** a merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n"
+  "body": "domain:ui#2 · os-bill · session_01Utp6Cb5R6JDdfyvtj3dPR2\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md` (⛔ not copied here). This is **`domain:ui` seat 2**. Seat 1 is #25966, seat 3 is #27561, seat 4 is #26620, seat 5 is #26945 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-05T07:12Z at seating.</sub>\n\n## Current PM — 🟢 os-bill\n\n- **Holder:** `os-bill` · `session_01Utp6Cb5R6JDdfyvtj3dPR2` · seated at the opening mark 6652048142. 由 os-bill 账户的项目负责 (project \"Objectstack 多币种 server\", thread \"运行 ui 车道席位 2 派发\").\n- **Mailbox:** PR #30355 (`Mailbox-of: domain:ui#2 · os-bill`), subscribed by the seated session.\n- **Patrol:** `trig_01D4GCNRXL6wu67jh3m6vnKK · 12 * * * *` (hourly, bound to the seated session).\n- Posture, ledger and round reports live in the project. Scope: `domain:ui` p1 first, then p2; up to 5 card threads at once. The `pm:epic` subtrees and seat 1's PRs are excluded.\n\n## Ledger\n\n- **In flight:** none yet. Claims are on the cards.\n- **Decision box:** read live (`needs-user-decision` + `domain:ui`).\n- **Previous holder's inheritance (brief 6648818992):** decision inbox #30074, #30046 Scope 6–8, #30169; queue left for siblings #30177, #30220, #30122.\n\n## Hot-file serial queue\n\n- None held by this seat.\n\n## Notes\n\n- **Standing constraints (maintainer, carried):** ui changesets go to the root `.changeset/`. No PR goes to the objectui repository. `node scripts/check-sdui-manifest.mjs` gates every ui card. A `CONTRACT_REVIEW_TIER` review goes before any decision reaches the maintainer. Cloud-touching cards go whole to the `repo:cloud` lane.\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes. PRs open only through the relay `pr_create`.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n"
 }

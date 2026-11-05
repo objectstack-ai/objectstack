@@ -2,8 +2,8 @@
   "number": 29936,
   "kind": "issue",
   "title": "`os dev` on an `os init -t app` scaffold warns \"Plugin superseded: 'com.objectstack.metadata'\" on every boot, because the platform registers its own metadata plugin twice",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T16:01:57Z",
-  "updated_at": "2026-11-03T17:03:23Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T07:14:30Z",
+  "closed_at": "2026-11-05T07:08:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29936",
   "body": "domain:devx#1 · os-warren · session_01JQwxbYMkB4dbaYNKufhvBr\n\nFiling gate: ① a user-visible defect with a named landing point. Reach: the boot banner of `npx objectstack dev` on the CLI's own `init -t app` scaffold, measured on every boot (2 of 2).\nBusiness reason: docs.objectos.ai's \"Run ObjectOS Community locally\" Path B is `npx @objectstack/cli init my-app -t app --install` then the dev server. On a scaffold the user has not touched, the boot diagnostics print `WARN Plugin superseded: 'com.objectstack.metadata' — the later registration (v1.0.0) REPLACED the earlier one … register the plugin once if that is not what you meant.` The user registered no plugin: the config has no `plugins` key. A first boot that tells a newcomer they misconfigured something they never wrote teaches them to ignore boot diagnostics, which is where real problems are reported. The `npm create objectstack` template (which declares three connector plugins) does not print it, so the two official on-ramps disagree.\nReader who acts: the triage seat, then a `domain:cli` implementer in `packages/cli/src/commands/serve.ts`: the dev artifact door (`devArtifactDoor = new MetadataPlugin(...)`, about L3601) is added on the branch where `createStandaloneStack` (`packages/runtime/src/standalone-stack.ts` about L1068) already composed a `MetadataPlugin`. The host-config door at L3647 already checks for an existing one; the dev door does not.\nDuplicate search (incl. closed): `\"Plugin superseded\"` → 20 hits (top 6 read: #19387, #9863, #25747, #16140, #21102, #22934, none about the metadata plugin on a scaffold), `superseded metadata plugin os init` → 73 (top 6 read, unrelated).\n\nQA-source: post-release 18.3.0 newcomer walkthrough, docs.objectos.ai Community Path B, anchor #27377\n\n## Reproduction (published @objectstack/cli 18.3.0, Node 22.23.4, npm only, empty `HOME`)\n1. `npx -y @objectstack/cli init my-app -t app --install && cd my-app` (the scaffold validates: \"63 author-time rules passed\").\n2. `npx objectstack dev`.\n\nObserved: \"Boot diagnostics — 1 informational: … WARN Plugin superseded: 'com.objectstack.metadata' — the later registration (v1.0.0) REPLACED the earlier one (v1.0.0) …\". It repeats on the rebuild after adding an object.\n\nExpected: a clean scaffold boots with no diagnostic that blames the user's composition."

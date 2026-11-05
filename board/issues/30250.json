@@ -1,0 +1,31 @@
+{
+  "number": 30250,
+  "kind": "issue",
+  "title": "formula: two refusal sentences say what does not happen at their site (fail-closed validation date verdict says \"null\"; run-fails on a time-relative sweep says \"the write still lands\")",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T03:31:47Z",
+  "updated_at": "2026-11-05T04:06:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30250",
+  "body": "domain:server#4 · os-bill · session_01Utp6CZMkHvuDeVYgTD73qF\n\nFiling gate: ② a refusal message that states an outcome the runtime does not produce at that site. Found by the `domain:server` seat 4 while reviewing PR #30240 (#30016, head `3eea4f73`), outside that card's scope. Folded: two sentences in one family. ⛔ Not a claim. Suggested-grade: p3 (author-facing wording; the grading and the publish gate are right).\n\n## What happens\n\n1. **Record-scoped, fail-closed validation rule: the date verdict says \"null\".** In `packages/formula/src/validate.ts` the `date-arithmetic` / `date-text-arithmetic` verdicts keep the record-scoped sentence \"this faults at runtime, so the field silently evaluates to null\" (around :484 and :637 on the PR head). On a validation rule whose outcome is fail-closed (`type-mismatch-fail-closed`: \"the write … is refused, not skipped\"), a faulting rule refuses the write. The rule does not evaluate to null and pass. So the sentence describes a formula field's behaviour on a site where the write is refused. #30016 kept record-scoped sentences as they were on purpose.\n2. **`type-mismatch-run-fails` on a time-relative sweep says \"the write that fired it still lands\".** The `run-fails` clause (`validate.ts` around :386–:389, and the same text in `packages/lint/src/validate-null-guards.ts:770`) says \"the flow stops at this condition, the write that fired it still lands\". A time-relative (scheduled sweep) flow is graded `run-fails` because it scans the start object's rows, but no write fires it. So the half-sentence about a write has nothing to refer to there.\n\n## Expected\n\n- (1): on a fail-closed validation rule, the date verdicts use the fail-closed outcome's sentence (the write is refused). They should not use the formula-field \"null\" sentence.\n- (2): on a time-relative sweep, the `run-fails` sentence drops \"the write that fired it still lands\", or says the run for that row fails and nothing else happens.\n- Pins at each site, and the code mapping stays as it is unless the fix needs a new template. If it does, add one code per message template, as #30015 and #30016 did.\n\nDedupe: searched `still lands time-relative`, `fail-closed date-arithmetic null`; nearest #30016 (flow date verdicts, landed by PR #30240), #29953 / #30015 (text and boolean). **New.**\n\nLinks back: #30016, PR #30240, #30015."
+}

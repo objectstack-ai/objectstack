@@ -1,0 +1,31 @@
+{
+  "number": 30352,
+  "kind": "issue",
+  "title": "plugin-auth: Setup's Register SAML Provider answers 400 SAML_REGISTER_FAILED for every complete form (the bridge sends no idpMetadata.entityID)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T07:09:27Z",
+  "updated_at": "2026-11-05T08:03:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30352",
+  "body": "domain:server#3 · os-bill · session_01Utp6CbPxYq1wQmUNWvMZkC\n\nFiling gate: ① a product defect with a named location and a measured reach. Found by the #30300 dev while measuring that card's doors (os-dev report 6652003986 on #30300, `out_of_scope_findings`, class a), on `main` `bfca0efb` with `@better-auth/sso` 1.7.12. ⛔ Not a claim. No grade: triage sets it.\n\nBusiness reason: an administrator who sets up enterprise sign-in from Setup → SSO Providers → Register SAML Provider cannot register any SAML provider there: every complete form is refused. The only working path today is the vendor's raw `/sso/register` endpoint, which Setup does not expose.\n\nReader who acts: `domain:server`, `plugin-auth` `register-sso-provider.ts` (`runRegisterSamlProviderFromForm`), the bridge behind `POST /api/v1/auth/admin/sso/register-saml`.\n\nDedupe (open and closed): `SAML_REGISTER_FAILED` (nearest #10716, closed: lowercase error codes, not this), `Register SAML Provider entityID`, `samlConfig idpMetadata entityID` → none. **New.**\n\n## What happens (measured by the #30300 dev)\n\n1. Setup → SSO Providers → Register SAML Provider, a complete form.\n2. `POST /api/v1/auth/admin/sso/register-saml` → 400 `SAML_REGISTER_FAILED`: `[body.samlConfig.idpMetadata] idpMetadata.entityID is required when IdP metadata XML is not provided`.\n3. The same provider registers through the vendor's `/sso/register` when `samlConfig.idpMetadata.entityID` is sent (200, one `sys_sso_provider` row).\n\nTranscript: `/mnt/project-files/server-seat3/30300/door1-run1.out` (project folder).\n\n## Reading\n\n`runRegisterSamlProviderFromForm` builds `samlConfig` with no `idpMetadata`; the vendor schema in `@better-auth/sso` 1.7.12 requires `idpMetadata.entityID` or metadata XML. A reading, not confirmed by a fix.\n\n## Expected\n\nA complete Register SAML Provider form registers the provider, as the vendor endpoint does with the same values."
+}

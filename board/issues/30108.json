@@ -2,8 +2,8 @@
   "number": 30108,
   "kind": "issue",
   "title": "[Decision] Every non-admin member of a new app sees \"no permission\" for comments and activity on records they can read",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T14:02:18Z",
-  "updated_at": "2026-11-05T00:49:29Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T07:19:08Z",
+  "closed_at": "2026-11-05T07:17:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30108",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFound in a real-user walkthrough of the development flow, asked for by the maintainer: 「你站在真实用户实际使用的角度完整的走一遍具体的开发流程，再看一下还有什么问题」 (2026-11-04). Filed for decision under 「等我决定的都要立卡，并且从业务的角度给我具体解释和我沟通」.\n\n## The question\n\nComments and the activity timeline are on by default on every object. Should an ordinary member be able to use them on records they can read, with no extra grant from the app author?\n\nGoverning text:\n- `packages/plugins/plugin-audit/src/comment-access-hooks.ts` header: \"a comment's access is DERIVED FROM ITS PARENT RECORD\" and \"a user who may READ a record may discuss it\".\n- `packages/plugins/plugin-security/src/objects/default-permission-sets.ts`, `member_default`: names no `sys_comment`, and line 804 says \"`sys_activity` is deliberately NOT included… it is a separate question if it ever matters\".\n- `packages/spec` object `enable.feeds` and `enable.activities`: opt-out, default on.\n- ADR-0049 enforce-or-remove: a declared capability that the runtime does not honor is an implementation gap.\n\n## What a customer sees\n\nA requester opens their own repair ticket, and a technician opens a ticket assigned to them. Both read:\n\n> 您没有查看此记录活动的权限。\n> 您没有查看此记录评论的权限。\n\nThere is no comment box, so the two people cannot talk on the ticket, and nobody can see who changed what. Only an administrator sees the feed.\n\n## Measured\n\nProject from `create-objectstack@18.3.0`, permission sets covering only the app's own objects. Published 18.3.0.\n\n| Reader | `GET /api/v1/data/sys_comment` | `GET /api/v1/data/sys_activity` | Record page |\n|:--|:--|:--|:--|\n| Requester, own record | 403 | 403 | Both refusals above |\n| Technician, `viewAllRecords` on the object | 403 | 403 | Both refusals above |\n\n- **Author fix, measured:** adding `sys_comment: { allowRead, allowCreate, allowEdit }` and `sys_activity: { allowRead }` to the app's default set. After that, the timeline showed, a comment with a mention posted, the mention reached the other user's inbox, and that user could read the comment on the shared record.\n- **Author discoverability:** the scaffold's `objectstack-data` skill describes `feeds` and `activities` as default on and says nothing of the grant. `os validate` passes without a warning. No example under `examples/` names either object in a permission set (`main` `63b86b385d`, read). HotCRM grants them by hand (objectstack-ai/hotcrm#2043, per #22500).\n- **`main`:** the `member_default` source at `63b86b385d` has no such grant. The refusal was not re-run on `main`.\n\n## Options\n\n- **A. The platform baseline grants them.** Add `sys_comment` (read, create, edit) and `sys_activity` (read) to `member_default`. The parent-record gates (`comment-access-hooks.ts`, and the `sys_activity` gate of #20833) decide which rows, and they already exclude threads on records the caller cannot read.\n- **B. The app author grants them, and the tools say so.** Keep the baseline. `os validate` warns when an object has feeds on and no set grants `sys_comment`, and the scaffold's sample permission set and skill show the two lines.\n- **C. Leave it.** The refusal text stays as the only signal.\n\n## Recommendation: A\n\n四轴（中文）：\n\n- **实际业务需求：** 工单、审批、客户记录上的协作是日常高频动作。谁能看记录谁就该能讨论，这也是平台自己写在评论门禁里的规则。走查里提单人和技术员都被挡住，唯一绕法是作者手写两行系统对象授权，HotCRM 就是这么绕的。\n- **项目长远合理性：** A 让「默认开启」与「默认可用」一致，访问范围仍由父记录决定，不新增第二套规则。B 把平台内部对象名变成每个应用作者都要背的知识。\n- **防 AI 写元数据犯错：** A 下 AI 什么都不用写就对。B 靠门禁提醒，且 AI 写漏时运行时才暴露。「声明即强制」也指向 A：`feeds` 默认开就该能用。\n- **创业阶段不扩散：** A 只加两行授权，不加能力面；B 要加一条 lint 规则和脚手架内容。\n\nRisk in A, to verify before landing: `member_default` also reaches `everyone`, including external members. The dev checks that the parent gates hold for an external member, and that an app which explicitly turns feeds off (`enable.feeds: false`) still refuses, on both verbs. An app that wants comments closed for a role keeps `enable.feeds: false`; a per-role narrowing is not part of A. #23279 measured that a `sys_activity` read logs refusals for objects the caller cannot read, so the grant must not bring that log noise back for every member.\n\nBlocks nothing. Ordinary members stay without the feed until this is decided."

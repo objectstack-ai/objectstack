@@ -1,0 +1,31 @@
+{
+  "number": 30323,
+  "kind": "issue",
+  "title": "After installing an app, say how much sample data was loaded and offer clearing it right there",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T06:18:14Z",
+  "updated_at": "2026-11-05T07:16:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30323",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiling gate: ③ the maintainer's direct order, verbatim: 「你发现的问题都立卡，安全问题总专用的安全密卡通道，需要进一步分析的进一步测试，还是没有把握的用决策卡。」 (2026-11-05). Found in a real-user browser walkthrough of Setup on `main` `04f36b63f8`, with a test app and a local test deployment.\n\nThe maintainer's ruling on this card, verbatim: 「我觉得安装应用市场应用的时候是需要有初始数据的，这样客户才能看得到效果，但是呢，应该有界面功能能够帮助他清理数据」 (2026-11-05). So sample data stays on by default. This card is only about making the cleanup easy to find.\n\n**Business reason.** A customer tries an app with data in it, then wants to start for real. Today they have to know where to look, or they keep fake customers and revenue on their dashboards.\n\n**Reader.** The UI lane dev, in `ui/packages/app-shell/src/console/marketplace/MarketplacePackagePage.tsx`.\n\n**Duplicates.** Searched `sample data install marketplace clear` (48 hits) and `purge sample data notice after install` (15 hits). They are QA run anchors, #30281 (seed locale) and a closed docs card; none has this subject.\n\n## Measured\n\nInstalling HotCRM v6.0.0 loaded 369 sample records, and the executive dashboard opened with 「年度累计收入 ¥1,290,000」.\n\n- **The success note says nothing about it.** It reads 「已将 v6.0.0 安装到本运行时。\"HotCRM\" 应该已经出现在应用切换器中。」 and then offers the permission grant.\n- **Clearing is hidden.** It exists only in the ⋯ menu of the marketplace detail page, as 清除示例数据. Someone working inside HotCRM has no sign that the records are sample data, or where to remove them.\n- **The confirm gives no count.** It is a native browser dialog: 「删除此应用预置的所有示例记录？用户自行添加的记录不会被删除。」 The count appears only afterwards.\n- **The clearing itself is right, and must stay so.** It deleted 369 records and kept a record I added and a sample record I had edited.\n- **Reinstalling reseeds.** After clearing, an install brought the samples back, and the edited record then sat beside a fresh copy of its original.\n\nAn AI chat cleanup card also exists (`console.ai.sampleDataCleanup*`). I did not test it.\n\n## Expected\n\n- The install note says how many sample records were loaded and has a clear action in place.\n- A way to reach the same action from the installed app's own pages, chosen by the dev from existing generic blocks.\n- The confirm says how many records will go, in the console's own dialog.\n- Re-running the install says plainly that sample data comes back.\n- 应该已经出现 reads as a guess. Use a definite sentence when the runtime answered that it loaded.\n\nWho can see the sample data at all is a separate question: see the decision card filed with this batch."
+}

@@ -2,24 +2,34 @@
   "number": 30215,
   "kind": "issue",
   "title": "install-local: an uninstalled package still reads read-only until a restart, because engine.manifests keeps its id",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
-  "assignees": [],
+  "labels": [
+    "bug",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T02:10:26Z",
-  "updated_at": "2026-11-05T02:10:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T05:28:38Z",
+  "closed_at": "2026-11-05T05:27:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30215",
   "body": "domain:server#3 · os-bill · session_01Utp6CbPxYq1wQmUNWvMZkC\n\nFiling gate: ① a product defect with a named location and a measured reach. Found by the #30106 dev (os-dev report 6647662239 on #30106, `out_of_scope_findings` item 1), measured on the pre-fix and the fixed build. ⛔ Not a claim. No grade: triage sets it.\n\nBusiness reason: an administrator who uninstalls a package (for example a `.custom` pair an older runtime installed as code, which PR #30207 now tells them to uninstall) gets a 200 \"withdrawn from the running kernel\", then still cannot create or customize that package's pair on the same instance until the server restarts. Nothing tells them a restart is needed.\n\nReader who acts: `domain:server`, the install-local uninstall door and `isWritablePackage` (`packages/metadata-protocol` package-writability) reading `engine.manifests`.\n\nDedupe (open and closed): `engine.manifests uninstall` (1 hit: #30106), `ensure-customization writable false uninstall` (4 hits: #30106, #29560, #29672, #28407; none covers this). **New.**\n\n## What happens (measured by the #30106 dev)\n\n1. `DELETE /api/v1/marketplace/install-local/ID` answers 200, \"withdrawn from the running kernel\".\n2. `POST /api/v1/packages/BASE/ensure-customization` then answers 201 `created: true`, **`writable: false`**.\n\n## Reading\n\n`isWritablePackage` (package-writability) reads `engine.manifests` first; the engine only ever sets an entry there and the uninstall path never deletes it, so the id stays \"provided by code\" until a restart. This is a reading, not confirmed by a fix.\n\n## Expected\n\nAfter an uninstall answers success, the id no longer reads as code-provided on the running instance, or the uninstall answer says a restart is needed."

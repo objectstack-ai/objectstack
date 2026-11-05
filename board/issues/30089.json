@@ -13,18 +13,20 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T13:03:56Z",
-  "updated_at": "2026-11-04T13:59:19Z",
+  "updated_at": "2026-11-05T06:28:57Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30089",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nThe maintainer: 「studio没有操作类型的元数据吗？除了批量操作，别的也需要配置的呀。」 (2026-11-04). Measured by the seat on `main` `63b86b385d`. No `domain:*` label is set: triage routes this card.\n\n## The question\n\nThe platform needs no kernel work for bulk changes: a view's `bulkActionDefs` already produced 批量修改负责人 with no code (#30079). But that declaration can be written only in metadata. Should the person configuring a list in Studio be able to add one?\n\nGoverning text: `packages/spec/src/ui/view.zod.ts:3576-3593` (`rowActions`, `bulkActions`, `bulkActionDefs`). `ui/packages/app-shell/src/views/metadata-admin/inspectors/ActionDefaultInspector.tsx:1187-1190`: \"Selection placement is declared on the LIST VIEW\". #30079: no kernel feature.\n\n## Measured\n\n- An action's editor offers five placements and no selection-bar placement. An update action is not offered 列表工具栏, by design.\n- Neither Studio view panel shows `bulkActions`, `bulkActionDefs` or `rowActions`: no such section on `surface=view:…` (Basics, Columns & filters, Table options, End-user controls, Navigation & sharing) and none on the object leaf's panel. There are no such keys in `ObjectListViewInspector.tsx`.\n- So the action editor's note tells a person to declare it on the view, and the view editor has nowhere to do that.\n\n## Options\n\n- **A. A 批量操作 section in the view panel:** pick existing actions for the selection bar (`bulkActions`) and add a field update (`bulkActionDefs`: label, fields to ask, confirmation). The same section works on a customized view of an installed app.\n- **B. Picking existing actions only:** a field update still needs metadata.\n- **C. Leave it to metadata:** developers and AI only.\n\n## Recommendation: A\n\n## 四轴分析\n\n**实际业务需求。** 哪些字段值得批量改，每个业务不一样：销售改负责人，工单改优先级。这是实施和运营配应用时的常规工作，今天只能找开发。\n\n**项目长远合理性。** 这正符合你的意思：能力留在元数据，内核不写死任何业务字段。A 只是给已有的声明加编辑入口。动作编辑器已经在提示「到视图上声明」，补上后才前后一致。\n\n**防 AI 写错。** 不新增键。编辑器按 spec 校验，字段和选项可以选，比手写更不容易错；声明后默认的删除会不会消失这类隐含行为，也要在界面上讲清楚。\n\n**创业阶段不扩散。** 只加界面，服务端和 spec 不动。范围中等，可以排在 #30059 和页面、数据集入口之后。\n\n| 棱 | A | B | C |\n|:--|:--|:--|:--|\n| 业务 | 强 | 中 | 弱 |\n| 长远 | 强 | 中 | 中 |\n| 防错 | 强 | 中 | 弱 |\n| 不扩散 | 中 | 强 | 强 |\n\n## Not measured\n\nWhether the default 删除 leaving the bar when a view declares `bulkActionDefs` is intended, and how a customized view of an installed app merges these keys beyond the one case tested.\n\n## Re-check\n\n`git grep -n \"bulkActionDefs\" origin/main -- ui/packages/app-shell/src/views/studio-design/ObjectListViewInspector.tsx`"

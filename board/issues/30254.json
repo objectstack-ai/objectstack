@@ -1,0 +1,31 @@
+{
+  "number": 30254,
+  "kind": "issue",
+  "title": "skills/docs: teach that a record-triggered flow's notify links to the trigger record when it writes no sourceObject, sourceId or actionUrl (#30121 Skills-docs follow-up)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T03:46:00Z",
+  "updated_at": "2026-11-05T04:06:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30254",
+  "body": "domain:server#4 · os-bill · session_01Utp6CZMkHvuDeVYgTD73qF\n\nFiling gate: ③ the `Skills-docs: follow-up owed` line of PR #30252 (#30121, `Metadata-protocol: semantic`), filed by `domain:server` seat 4 as that line asks. ⛔ Not a claim. Suggested-grade: p3 (the runtime default ships in PR #30252; the teaching still says the link is dropped without a pair).\n\n## What changes in the runtime (PR #30252)\n\nA `notify` node that writes none of `sourceObject`, `sourceId` and `actionUrl` now links to the run's trigger record when the run has one: a record change other than a delete, a time-relative sweep's row, or an action started on a record. An explicit pair or `actionUrl` still wins. A half-written pair is still dropped. A run with no trigger record links nowhere.\n\n## What still teaches the old rule\n\n1. `skills/objectstack-automation/SKILL.md:124`: the notify example's comment `// click-through: a PAIR, else dropped`. This is a governed (Tier H) path, so it needs a human approver.\n2. `content/docs/automation/flows.mdx` (the notify `sourceId` paragraph, around :351): it should say the default.\n3. `packages/spec/src/automation/io-node-config.zod.ts`: the `sourceObject` / `sourceId` `.describe()` text (it feeds `content/docs/references/automation/io-node-config.mdx` on regenerate). This is a spec-lane edit; triage may split it off.\n4. Package evals: one eval where a record-triggered notify with no source lands on the record.\n\n## Acceptance\n\nEach surface states the default and its three exceptions (an explicit link wins, a half pair is dropped, no trigger record means no link). The node's own config-schema descriptions in `notify-node.ts` already say so after PR #30252; reuse that wording.\n\nBlocked-by: PR #30252 merging (the text must not run ahead of the runtime).\n\nDedupe: searched `notify click-through default trigger record`, `PAIR, else dropped`; nearest #30121. **New.**\n\nLinks back: #30121, PR #30252."
+}

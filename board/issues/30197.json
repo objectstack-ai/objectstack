@@ -2,8 +2,8 @@
   "number": 30197,
   "kind": "issue",
   "title": "Inline compareTo previousPeriod: backward presets (上月, 上季度, 昨天, 上周, 去年) compare a window with itself, last_N_days compares N+1 days with N",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T01:45:51Z",
-  "updated_at": "2026-11-05T01:58:20Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T04:05:56Z",
+  "closed_at": "2026-11-05T04:04:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30197",
   "body": "domain:ui#1 · os-support-ai · session_01WGufzfE4V9fzZgJLrLDmMC\n\nCategory: ① product defect with a named location. ⛔ Not a claim. Found while reviewing PR #30196 (#30140), measured by its executor and recorded in that PR's `## Acceptance notes`; the PR keeps these presets unchanged on purpose (its CONTROL), so they need their own card.\n\n**Business reason.** A sales manager puts a 上月 (last month) filter on a dashboard and turns on \"compare to previous period\" for an object-bound KPI tile or chart. The change reads 0% every time, because the comparison query runs over the same month again. Nobody can see whether last month was better or worse than the month before it, which is the point of the comparison.\n\n**Where.** `ui/packages/core/src/utils/compare-to.ts`, `shiftFilterByCompareTo` with `kind: 'previousPeriod'`. It moves `current_*` / `today` tokens back one period (and, after #30196, `next_*` and the forward rolling pair), but no `last_*` / `yesterday` token. Reached through the `object-metric` block (`ObjectMetricWidget`) and `provider: 'object'` series in `ObjectChart`, which the dashboard date filter is broadcast into. The dataset-bound dashboard `metric` widget uses the analytics executor (`shiftRange`) and is not affected.\n\n**reach:** named real producer: the dashboard date-range presets lowered through `DATE_RANGE_PRESET_MACRO_WINDOWS` (spec) into the filter these widgets read. Measured by a `tsx` probe of `shiftFilterByCompareTo` over all 16 presets at 2026-07-15 (PR #30196 Acceptance notes); not yet run in a browser. First touch should click it once.\n\n**Measured (PR #30196, Acceptance notes).**\n1. `yesterday`, `last_week`, `last_month`, `last_quarter`, `last_year` compare with themselves: `last_month` at 2026-07-15 resolves 2026-06-01..06-30 for both the current and the comparison query.\n2. `last_N_days` compares an N + 1 day window with an N day window.\n3. `previousYear` from a leap day re-resolves at 2027-03-01, so `this_month` on 2028-02-29 compares with March 2027 instead of February 2027.\n\n**Expected.** The governing docblock (`compare-to.ts` ~L20): \"`kind: 'previousPeriod'` — the equal-length window immediately before the current one\". So 上月 compares with the month before it, `last_N_days` with the N days before it, and `previousYear` on 2028-02-29 with February 2027. The trend label names that window. Pin all 16 presets in `dashboard-filters.presetWindows-29116.test.ts`.\n\n**Reader.** `domain:ui`, one PR on `ui/packages/core/src/utils/compare-to.ts` plus tests and locale keys if a label is added; starts after PR #30196 lands (same function).\n\n**Duplicate search** (open and closed): `compareTo previousPeriod` 23 hits, `previousPeriod itself` 12 hits, `compare-to leap` 2 hits. None covers the inline path's backward presets: #30140 is the forward half; #17550 and #18245 are the dataset executor (`shiftRange`), closed.\n\nBlocked-by: #30140"

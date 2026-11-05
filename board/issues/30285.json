@@ -1,0 +1,33 @@
+{
+  "number": 30285,
+  "kind": "issue",
+  "title": "Studio translation editor: a source-to-translation table with visible gaps, replacing the raw JSON boxes",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T04:56:24Z",
+  "updated_at": "2026-11-05T06:52:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30285",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiled on the maintainer's word, verbatim: 「立卡」 (2026-11-05), answering their question 「如果元数据app中只有10种语言，系统管理员可以增加新的语言并且处理国际化吗？」 and the proposal below. Measured in a browser on `main` `04f36b63f8`, with a `vi-VN` and a `fr-FR` translation item in an app's `.custom` package.\n\n## What a customer sees\n\nAn administrator adds Vietnamese for their branch. The result works: labels apply at once on publish, and the language menu gains Tiếng Việt. Getting there does not suit an administrator.\n\n- **New form.** It asks only for language, label and name.\n- **Item page.** It is about fifteen JSON boxes (Objects, Picklists, Apps, Messages, Global Actions and so on) with English help text. To change one label they must write `asset_repair_ticket` → `fields` → `priority` → `label` by hand, knowing the internal names.\n- **Developer text on screen.** Under every box: 「组件 object-fields 尚未注册自定义渲染器，暂时使用 JSON 编辑。」\n- **No source text.** The page does not show what is being translated.\n- **No gap view.** The page I opened shows nothing about what is left. `TranslationPreview.tsx` exists, but by its own header its coverage counts groups with at least one entry, not missing strings.\n- **Wrong source.** A translation the administrator wrote is listed with the source 「代码包」.\n\n#28569 delivered this editor's place in Studio and the customize path. This card is about what the editor is once you are in it.\n\n## Expected\n\n- A table for one language: source text, translation, and a filter for untranslated rows, grouped by object, field, option, app and so on. The rows come from what the package actually declares, using the same walk as `os i18n extract` and `computeI18nCoverage`, so a key cannot be misspelled.\n- A count of what is left, for example 37 of 120 untranslated.\n- Saving writes the same `translation` item in the same place, `.custom` on a read-only package (ADR-0146 D2). No new storage.\n- The internal-only notice no longer appears on this page. JSON stays available as an advanced view for what the table does not cover.\n- The list shows a customer-written translation as customer-written.\n\n## Measured nearby\n\nA `messages` entry for `common.create` and `common.new` in the `vi-VN` item did not change the console's 新建 button, which stayed English. I did not find out why. The table should not offer strings that cannot take effect, so the dev should settle this first: either these keys are overridable and this is a defect, or the table leaves console chrome out. Either way the card must say which.\n\n## Not verified\n\nHow expensive the walk is on a large app when it runs in the browser or on the server. I did not measure that."
+}

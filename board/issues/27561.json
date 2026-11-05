@@ -1,7 +1,7 @@
 {
   "number": 27561,
   "kind": "issue",
-  "title": "[PM seat] domain:ui · seat 3 — 🟢 os-justin",
+  "title": "[PM seat] domain:ui · seat 3 — 🟢 os-bill · 由 os-bill 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,17 +14,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "os-justin"
+    "os-bill"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T13:03:58Z",
-  "updated_at": "2026-11-04T15:39:44Z",
+  "updated_at": "2026-11-05T07:13:44Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 8,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27561",
-  "body": "domain:ui#3 · os-justin · session_01QSeKYpFBMr917PmVkG9up7\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md` (⛔ not copied here). This is **`domain:ui` seat 3**. Seat 1 is #25966, seat 2 is #25995, seat 4 is #26620, seat 5 is #26945.\n\n## Current PM\n\n🟢 **`os-justin`** · cloud session `session_01QSeKYpFBMr917PmVkG9up7` · seated 2026-11-04T15:37Z. Summoned by the maintainer's relay from session `session_01QSeKYn5CmmdShCJifm6WYj` (seat security#1), verbatim: 「再开两个ui 车道」. Posture, ledger and round reports live in the session and on the cards.\n\n- ⚠️ **Effort:** this session runs below the lane-seat floor `high` (seat-lifecycle.md). The account owner is asked to reopen the seat at `high`.\n\n## Handover ledger\n\n- Previous holder: `zhuangjianguo`, `session_01QsR2jV4dWohojjbTJTQq5m`, clock-out brief 6604993113 (`check-handover` exit 0, nothing in flight). That body is the prior revision of this post.\n- Canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#3` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing.\n- ⛔ Re-derive from the live `Claim:` comments of every `domain:ui` seat (seat 1 #25966, seat 2 #25995, seat 5 #26945) before any dispatch.\n\n## Notes\n\n- **Patrol:** `trig_014YVQENwp9W9seomYKjTGpv` (hourly, bound to this session).\n- **Mailbox:** #30141 (subscribed).\n- **Publication:** a merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n"
+  "body": "domain:ui#3 · os-bill · session_01Utp6CbPN5UYMnBaNJPJWfG\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md` (⛔ not copied here). This is **`domain:ui` seat 3**. Seat 1 is #25966, seat 2 is #25995, seat 4 is #26620, seat 5 is #26945.\n\n<sub>Refreshed 2026-11-05T07:11Z at seating.</sub>\n\n## Current PM — 🟢 os-bill\n\n- **Holder:** `os-bill` · `session_01Utp6CbPN5UYMnBaNJPJWfG` · project \"Objectstack 多币种 server\" (由 os-bill 账户的项目负责), seated at this refresh.\n- **Mailbox:** PR #30354.\n- **Patrol:** `trig_01DsieyazdvzAs4ak3UTnPtF` · hourly (:10).\n- **Pointer:** posture, ledger and round reports live in the project. Lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#3` + `head:claude/` PRs.\n\n## Ledger\n\n- Inherited from the previous holder's clock-out brief 6649800102: nothing in flight, no stay-behind.\n- Out of scope: every `pm:epic` subtree and anything under epic #28236.\n\n## Hot-file serial queue\n\n- None held by this seat. ⛔ Re-derive from the live `Claim:` comments of every `domain:ui` seat before any dispatch.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- Sibling seat in the same project: `domain:ui#2` (#25995). Each seat tells the other the card number before claiming; the earlier claim stamp wins.\n- Concurrency (maintainer): up to 5 card threads per seat; p1 first.\n"
 }

@@ -13,18 +13,20 @@
   "labels": [
     "bug",
     "domain:ui",
-    "needs-user-decision",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T18:55:46Z",
-  "updated_at": "2026-11-04T22:01:21Z",
+  "updated_at": "2026-11-05T07:24:09Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 5,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30169",
   "body": "## Source\n\nMeasured by HotCRM on platform **18.3.0** (hotcrm `main` `f98025c`, fresh dev boot, admin) while finishing hotcrm#2383. The implementer's report is [hotcrm#2383 comment 6638927959](https://github.com/objectstack-ai/hotcrm/issues/2383#issuecomment-6638927959). objectstack#28877 fixed the record header, the More actions menu and the row menu: with `app.objectstack.hotcrm.marketing` disabled, `create_campaign` leaves `/meta/action`, its by-name read answers 404, and none of those menus draws it. One surface still draws it.\n\n| # | Observed on 18.3.0 | Seam | Suggestion |\n|---|---|---|---|\n| 1 | Marketing disabled. **Leads → All Leads**, tick a row. The selection bar draws **Create Campaign** (on All Contacts, **Add Contact To Campaign**), a humanized name, not the action's label. Clicking it toasts: `Action \"create_campaign\" is not executable: no handler is registered under that name and it declares no api, endpoint, navigate, redirect or onClick.` With marketing on, the same bar draws **Add to Campaign**, which works. | `ListView.bulkActions` names the action as a bare string. In the renderer, `plugin-grid` `resolveBulkActions` keeps a name it cannot resolve (pinned in `ui/packages/plugin-grid/src/__tests__/bulkActionMembers-8071.test.tsx` row 3), and `ObjectGrid` draws it, while the server withholds the action (`isActionWithheldByDisabledPackage`, #28877). | The selection bar drops a bare-string bulk action the server does not serve, as the row menu already does. If keeping an unresolved name is deliberate for some other case, a name the server withholds for a disabled package is the case to drop. |\n\nHotCRM declares these bulk actions as bare strings, which the spec accepts, and has nothing to change on its side. hotcrm#2383 closes with its tests and docs. HotCRM re-measures the bar when its pin carries this fix.\n\nFiling gate **① a reproduced defect.** Filed by the `repo:hotcrm` seat (`huangyiirene`, session `session_01J8VVAnPkgK6CWrJa6t7Fk5`).\n\n**Grade: `priority:p3`.** A customer who turns a module off sees one dead button in a list's selection bar. Nothing is written. **Size: S.**\n\n**Dedupe:** searched open objectstack issues for `bulkActions unresolved`, `resolveBulkActions`, `not executable bulk` and `withheld action selection bar`. The hits are closed bulk-action cards on other questions (#26951, #27050, #22780, #17916) and QA run logs. #28877, now closed, covered the other menus and not the selection bar.\n\n<sub>Filed by the `repo:hotcrm` lane seat from hotcrm#2383's out-of-scope finding.</sub>"

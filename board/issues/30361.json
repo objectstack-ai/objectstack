@@ -1,0 +1,30 @@
+{
+  "number": 30361,
+  "kind": "pull_request",
+  "title": "fix(app-shell): the publish sheet names a batch of hooks or translations in words, not the raw type code (#29902)",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T07:56:15Z",
+  "updated_at": "2026-11-05T08:07:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30361",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wg4yKv6mvrKDXRuYdcBwp9hK)_\n\ndomain:ui#3 · os-bill · session_01Utp6CbPN5UYMnBaNJPJWfG\n\nFixes #29902\n\nClause-②: yes (widening) — two new count families in the public `@object-ui/i18n` packs: `preview.changes.typeCount.hook`, `preview.changes.typeCount.translation`.\nMetadata-protocol: none\n\n## 维护者速读\n- 改了什么：Studio 发布面板（待发布变更）的汇总行和分组标题，现在把一批钩子、翻译显示成「3 hooks」「钩子 3」「翻译 2」，不再是原始类型码「3 hook」「hook 3」。\n- 为什么改：钩子在对象的 Hooks 标签页、翻译在「全部元数据」表单编辑器里由 Studio 自己创作，作者每次发布都看到未翻译、未变复数的类型码，中文界面里还夹着英文。\n- 风险与回滚：只加两行计数文案和 10 个语言包的新键，其他类型和未知类型的显示不变；回滚即 revert 本 PR。\n- 先看：`ui/packages/app-shell/src/preview/DraftChangesPanel.tsx`（`TYPE_COUNT` 末尾两行）、`ui/packages/i18n/src/locales/zh.ts`（`typeCount.hook` / `typeCount.translation`）。\n- 两分钟验证：`cd ui && pnpm exec vitest run packages/app-shell/src/preview/__tests__/DraftChangesPanel.groupHeading-13221.test.tsx`，预期全绿，其中含「3 hooks」「钩子 3」「翻译 2」三条新断言。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `TYPE_COUNT` in `DraftChangesPanel.tsx` gains a `hook` and a `translation` row, so the summary line and the per-type group heading read the pack's count family instead of the raw `{{n}} {{type}}` fallback. The fallback stays for types with no row (objectui#13147 note above the table).\n- Every one of the ten packs under `ui/packages/i18n/src/locales/` gains both families, with each CLDR slot its language selects (`es`/`fr`/`pt` `_many`, `ru` `_few`/`_many`, `ar` `_zero`/`_two`/`_few`/`_many`), mirroring the `dataset` rows. zh-CN reads 「钩子 N」 (the platform nav's own word for hooks, `nav_hooks`) and 「翻译 N」.\n- One changeset: `@object-ui/app-shell` and `@object-ui/i18n`, patch.\n\n### Which types get a row: the enumeration\n\nThe publish door batches every draft the package holds, whatever its type (`publishPackageDrafts` in `packages/metadata-protocol/src/protocol.ts` reads `repo.listDrafts({ packageId })`, no type filter). A draft can exist only for a type the registry lets a runtime create or overlay: `allowRuntimeCreate` or `supportsOverlay` true in `DEFAULT_METADATA_TYPE_REGISTRY` (`packages/spec/src/kernel/metadata-plugin.zod.ts`). Those types, and who in Studio authors them:\n\n| Type | Studio authors it? | Row before |\n|---|---|---|\n| object, view, page, dashboard, report, app, flow, permission, action, email_template, object_extension, dataset | yes (pillars, object panels, nav, bundle editor) | yes |\n| **hook** | yes: `studio-design/ObjectHooksPanel.tsx` saves `hook` drafts | **no, added** |\n| **translation** | yes: `studio-design/StudioBundleItemEditor.tsx`, listed in `AREA_FORM_EDITOR_TYPES` (`metadataArea.ts`) | **no, added** |\n| seed, mapping, external_catalog, doc, book, position, tool, skill | no Studio editor of its own (only the generic metadata pages) | no, unchanged (raw fallback) |\n\n`picklist`, named on the card, has both flags false: no draft of it can exist, so the publish door never batches one and no row is added. (`agent` keeps its existing row.)\n\n## Acceptance notes\n\n- File surface deviation, agreed with the seat before the edit: the claim named the en and zh-CN packs; all ten packs are touched because `ui/packages/i18n/src/__tests__/all-locales-key-parity.test.ts` requires every pack to define every `en` key (and the per-language plural slots). The `dataset` row set the same precedent.\n\n## Verification\n\nHead `cf373b6e` (after merging `origin/main` once; the merge touched none of the changed files).\n\n<details><summary>Targeted tests (6 files, 79 tests)</summary>\n\n`cd ui && pnpm exec vitest run` on `DraftChangesPanel.summaryPlural-13147.test.tsx`, `DraftChangesPanel.groupHeading-13221.test.tsx`, and the i18n `all-locales-key-parity`, `en-zh-key-parity`, `count-families-11445`, `plural-categories-11432` tests: `Test Files 6 passed (6)`, `Tests 79 passed (79)`.\n\n</details>\n\n<details><summary>Ablation (one, on the tested behaviour)</summary>\n\n`node scripts/ablation-replace.mjs` deleted the `hook:` row (anchor 1 → 0, blob 4b7c507f → 9cc8f165): `Tests 3 failed | 11 passed (14)`, the three hook assertions red. Restored: blob back to 4b7c507f, `git diff HEAD` empty.\n\n</details>\n\n<details><summary>Type-check</summary>\n\n`pnpm exec turbo run type-check --filter=@object-ui/app-shell --filter=@object-ui/i18n --concurrency=2` under the verify lock: `Tasks: 69 successful, 69 total` (app-shell runs `tsc --noEmit` and `tsc -p tsconfig.test.json`).\n\n</details>\n\n<details><summary>Derived gates (35)</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 35 families; all 35 ran and exited 0, including `node scripts/check-sdui-manifest.mjs`, `pnpm check:type-check-debt` and `pnpm --dir ui exec vitest run scripts/` (170 files passed). `--ran` reconciliation: 35 derived, 35 run, 0 NOT-MEASURED, 0 UNRUN. Repo-wide families are CI's.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CZ2YeJynYaMx8rfBzM)_\n"
+}

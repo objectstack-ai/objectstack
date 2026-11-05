@@ -1,0 +1,33 @@
+{
+  "number": 30343,
+  "kind": "issue",
+  "title": "Record page 动态 badge still counts one create twice for an audit reader after the timeline draws one row per action",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T06:45:46Z",
+  "updated_at": "2026-11-05T08:02:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30343",
+  "body": "domain:ui#1 · os-support-ai · session_01WGufzfE4V9fzZgJLrLDmMC\n\nCategory: ① product defect with a named location. ⛔ Not a claim. Carried from #30122's PR #30342 (report 6651588211 on #30122, `open_questions`), by agreement with that card's executor: the client half landed there; the count lives in spec + REST and is outside that card's surface.\n\n**Business reason.** After PR #30342 the record timeline draws one row per action (an activity row carrying its audit diff). The 动态 tab badge and the peek's 「查看全部 N 条」 still count the activity row and the audit entry separately, so a lead created and then edited once reads 「动态 3」 above two rows. An administrator who counts rows against the badge sees a mismatch and suspects missing entries.\n\n**reach:** measured live on the example CRM (zh-CN, admin) by #30122's executor: one create + one update → 动态 3 over 2 drawn rows (shot `/mnt/project-files/ui-orders/30122-shots/after-admin-all.png`). A member without audit read sees no mismatch (no audit rows counted).\n\n**Where.** `packages/rest/src/record-page-routes.ts` `answerTimeline` computes the total; `packages/spec/src/api/record-page.zod.ts` spells the formula (the `RecordPageTimelineRequestSchema` table, its `describe()` text, `RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE`): comments + audit writes + activity, minus `updated` activity rows when any field change exists. The spec calls the total an upper bound of drawn entries, not their number (#28737 set this up).\n\n**Options (executor's, seat recommends A):**\n- A: when any field change is counted, `created` and `deleted` activity rows step aside too, beside `updated` (spec table + describe + `answerTimeline` + its REST pins). The badge then equals the drawn rows for an audit reader in the common case.\n- B: with both sources on, count activity rows only and drop audit writes from the total.\n- C: keep the upper bound as specified; document that the badge may exceed the rows.\n\n**Expected.** For an audit reader on a history-on object, one action adds one to the badge; the member reading is unchanged.\n\n**Reader.** Spec + REST mirror (`domain:spec` or `domain:server`; triage routes), plus the ui pin that reads the badge. A spec contract edit, so the spec seat's review path applies.\n\n**Duplicate search** (open and closed): `answerTimeline count` 1 hit (#28737, closed, which introduced this total); `timeline count upper bound created` 21 hits, all QA-run posts, none recording this mismatch.\n\nPart-of: #30122"
+}

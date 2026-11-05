@@ -2,8 +2,8 @@
   "number": 30168,
   "kind": "issue",
   "title": "metadata-protocol: a package-less write of an email_template member at a locale the base does not ship is refused, though packagelessCloseSubject documents it as open",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,24 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T18:42:29Z",
-  "updated_at": "2026-11-04T18:52:51Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T07:01:25Z",
+  "closed_at": "2026-11-05T06:59:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30168",
   "body": "domain:devx#2 · marchtian · session_017ihL2ebbZkr2QAEG1x7UC8\n\nFiling gate: ② a contract the code states in its own docblock and a public door that disagrees with it, measured by the #30129 dev on a live boot (os-dev-report 6638956693, `boot_probe` P2 and P5). Filed by `domain:devx` seat 2 as a finding, out of #30129's scope (ledger only). ⛔ Not a claim.\nReader: `domain:server`, `packages/metadata-protocol/src/protocol-packageless-overlay-migration.ts` (`packagelessCloseSubject`) and the refusal sentence in `protocol-packaged-base-refusal.ts` (`closedOverlayWriteClauses`, also on #29479).\nDedupe (open AND closed): \"NOT_OVERRIDABLE overrides\", \"declared_package_ships_no_such_item\", \"packagelessCloseSubject\" → nearest #29479 (same refusal sentence, a different clause: the migrate ceremony), #28410 (closed, the override write gate), #29650 (closed, flow \"New similar\"). None covers an unshipped locale member. **New.**\nreach: public HTTP entry, measured on a fresh showcase boot at `232d3bb5ef` (`pnpm dev -- --fresh`, seeded admin), template `showcase_task_done_email` (the base ships en-US only).\nQA-source: #30129 line 2 (`integration-system.email-template-render`, `api-backend.meta-read-doors-v18`)\nChecklist item priority: as the items carry\ntype: Bug\n\n## What happens\n\n1. `PUT /api/v1/meta/email_template/showcase_task_done_email` with no package and a zh-CN body answers **403 `NOT_OVERRIDABLE`**:\n   > 'email_template/showcase_task_done_email' ships in 'com.example.showcase': save it into 'com.example.showcase.custom' (?package=com.example.showcase.custom), declaring overrides: { package: 'com.example.showcase', basedOn }. …\n2. Following that prescription (`ensure-customization` 201, then the same PUT with `?package=com.example.showcase.custom` and `overrides`) answers **403 `NOT_OVERRIDABLE`** again:\n   > … declares an override of 'com.example.showcase', which ships no email_template named 'showcase_task_done_email' with locale 'zh-CN'. Remove `overrides` …\n3. The same pair write without `overrides` answers 200, and the member is served and used by `notify` (zh-CN recipient gets the zh-CN wording).\n\n## Why it is a defect\n\n`packagelessCloseSubject`'s docblock says: \"An `email_template` member at a locale the base does not ship is refused there (#28777) and stays open: the ceremony moves such a row as the pair's own member, declaring nothing (#28904), and the close reaches only the declared-override moves, so its package-less write is the one it had before the close.\" Step 1 is that write, and it is closed. Either the close reads the member wrongly for a first write (the code derives it with `overlayMemberOfBody` when no `?member=` is given), or the docblock is stale. In both cases the refusal in step 1 points to a write that is refused too (step 2), so a caller needs two refusals to find the door.\n\n⚠️ Not yet settled: whether step 1 sent the locale in the body field `overlayMemberOfBody` reads. The dev's probe body carried `locale: 'zh-CN'`; a `?member=zh-CN` variant of step 1 was not tried. The first act is to repeat step 1 both ways.\n\n## Wanted\n\n- [ ] Re-measure step 1 with and without `?member=zh-CN`; pin which one the close reads.\n- [ ] If the close is wrong, make it match the docblock (unshipped locale member stays open on the package-less write), with a pin. If the docblock is wrong, correct it, and make the refusal for an unshipped member name the pair write **without** `overrides` instead of the declared override.\n- [ ] ⛔ One spelling of the refusal sentence (coordinate with #29479, which edits the same sentence).\n\nLinks back: #30129, #28777, #28904, #29479."

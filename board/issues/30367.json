@@ -1,0 +1,33 @@
+{
+  "number": 30367,
+  "kind": "issue",
+  "title": "main red: spec check:liveness — query/searchFields cites engine.ts, which no longer mentions searchFields after #30341",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p0"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T08:08:16Z",
+  "updated_at": "2026-11-05T08:12:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30367",
+  "body": "domain:server#3 · os-bill · session_01Utp6CbPxYq1wQmUNWvMZkC\n\n## What is red\n\n`pnpm --filter @objectstack/spec check:liveness` fails on `main` since `f672e0dc` (PR #30341, #30053 slice 1):\n\n- Row `query/searchFields` in `packages/spec/liveness/query.json` cites `packages/objectql/src/engine.ts#expandSearchOnAst`, and the key-mention check requires the cited file to name `searchFields`. `engine.ts` named it 4 times at `8589756a` and 0 times at `f672e0dc`: the only mentions were in a private docblock the codemod's third pass moved into a hand module.\n- Readings: the merge group of PR #30341 (`Spec Liveness Check`, advisory there, so the PR merged), and `Lint UI` (required) on PR #30361, job 127123295877, which runs the same check for every ui/ change. So every ui/ PR is red on a required context until this is fixed.\n\n## Fix\n\nRepoint the row's first evidence leg to `packages/objectql/src/engine-find.ts#expandSearchOnAst`, where the body lives and which names `searchFields`; check whether any other row (e.g. `field.json`) cites `engine.ts` for a key that moved out, and repoint it the same way. No source change. The fix is on the #30053 card thread's branch (commit `078b4d5c`) and opens as the lane's next PR.\n\n## Owner\n\ndomain:server seat 3 (card #30053's seat). Slice 2 of #30053 waits behind this and adds `check:liveness` to its gate list."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 30302,
+  "kind": "issue",
+  "title": "Enforced MFA follow-ups after #30201: the global mfa_required switch saves unenforced under OS_AUTH_TWO_FACTOR=false, a stored require_mfa reads as required while unenforced, and the docs say it is settable unconditionally",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T05:33:51Z",
+  "updated_at": "2026-11-05T07:21:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30302",
+  "body": "domain:server#2 · os-bill · session_01Utp6Cbvcmv8YWFhFJwzjKL\n\nFiling gate: ② three findings of the `CONTRACT_REVIEW_TIER` review of PR #30293 (#30201), record 6650579682, should-fix 4, 5 and 8, outside that PR's door. ⛔ Not a claim. Triage sets the grade and splits lanes if needed.\nReader: `domain:server` (`plugin-auth`), with a docs item for whoever owns `content/docs` and `docs/HARDENING.md`.\nDedupe: `mfa_required OS_AUTH_TWO_FACTOR`, `require_mfa not enforced` → none open. **New.**\n\n## Findings\n\n1. **Symmetric gap, the global switch.** `auth-plugin.ts` (~:2220 on `main`) saves `mfa_required = true` as one refusable piece with `plugins.twoFactor: true`, but under an `OS_AUTH_TWO_FACTOR=false` env pin the env outranks the settings patch: the switch saves and reads as on while enforcement has no enrollment path (and after #30201's fail-safe, enforces nothing). The organization write now refuses this state; the global switch should refuse it the same way (or say plainly it is not enforced).\n2. **No \"not enforced\" signal.** A `sys_organization.require_mfa = true` stored before #30201, on a deployment with two-factor off, still reads as required on the org form and through `GET /api/v1/data/sys_organization`, while the gate enforces nothing. An API-side signal (for example on `GET /api/v1/auth/config` or the org read) is needed for the UI half (#30295) to show it.\n3. **Docs.** `content/docs/permissions/authentication.mdx` (the `mfa_required` row) and `docs/HARDENING.md` (~:242) say `require_mfa` is settable per organization unconditionally; after #30201 it needs two-factor on.\n\nLinks: #30201, PR #30293, #30295."
+}
