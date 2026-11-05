@@ -689,6 +689,9 @@ const RUNNER_TEXT = {
 
 type RunnerText = { readonly key: string; readonly defaultValue: string };
 
+/** The one hole in `completedNamed`, the action's label. */
+const COMPLETED_NAMED_HOLE = '{{action}}';
+
 /**
  * What {@link ActionRunner.setTranslator} takes: an i18next-shaped `t`. The
  * options carry `defaultValue` and, for a text with a hole, the hole's value
@@ -1926,16 +1929,19 @@ export class ActionRunner {
    * empty answer from the translator falls back to the English source rather
    * than raising an empty toast or an empty label.
    */
-  private runnerText({ key, defaultValue }: RunnerText, holes?: Record<string, string>): string {
-    const answer = this.translate?.(key, { ...holes, defaultValue });
-    if (answer) return answer;
-    // No translator, or an empty answer: the English source, its `{{name}}`
-    // holes filled the way i18next fills them.
-    let text: string = defaultValue;
-    for (const [name, value] of Object.entries(holes ?? {})) {
-      text = text.split(`{{${name}}}`).join(value);
-    }
-    return text;
+  private runnerText({ key, defaultValue }: RunnerText): string {
+    return this.translate?.(key, { defaultValue }) || defaultValue;
+  }
+
+  /**
+   * `completedNamed` for `label`: the translator's answer with the label as
+   * its `action` hole, else the English source with the label in that one
+   * hole. The runner fills no other hole and interpolates no other text.
+   */
+  private completedNamedText(label: string): string {
+    const { key, defaultValue } = RUNNER_TEXT.completedNamed;
+    return this.translate?.(key, { action: label, defaultValue })
+      || defaultValue.replace(COMPLETED_NAMED_HOLE, () => label);
   }
 
   /**
@@ -2013,7 +2019,7 @@ export class ActionRunner {
     }
     const label = typeof action.label === 'string' ? action.label.trim() : '';
     return label
-      ? this.runnerText(RUNNER_TEXT.completedNamed, { action: label })
+      ? this.completedNamedText(label)
       : this.runnerText(RUNNER_TEXT.completedSuccessfully);
   }
 
