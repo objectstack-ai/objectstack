@@ -80,6 +80,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ServiceObject } from '@objectstack/spec/data';
 import { ObjectStackProtocolImplementation, resetEnvWritableMetadataTypes } from '@objectstack/metadata-protocol';
 import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject } from '@objectstack/metadata-core';
+import { translateMetadataDocument } from '@objectstack/spec/system';
 import { ObjectQL } from './engine.js';
 
 const BASE = 'com.example.showcase';
@@ -600,3 +601,93 @@ async function boot2(environmentId: string | undefined, type: string, name: stri
     await publishOverride(booted.protocol, type, name, body(EDITED));
     return booted;
 }
+
+/**
+ * [#30062 item 3, ruling record 6631250894] The label order on a declared
+ * override — a translation in the pair, then the override's own label, then
+ * the base's translation — needs two inputs only the protocol has, and this
+ * pins both on a real boot (the #29613 harness: the real engine, the boot
+ * hydration, the pair through its ensure door, the override through Studio's
+ * draft save and publish):
+ *
+ *  - the PACKAGED base of a page, dataset, app and book
+ *    (`getPackagedPageBase`, `getPackagedDatasetBase`, `getPackagedAppBase`,
+ *    `getPackagedBookBase`) answers the base's own item while the pair's
+ *    override is served, at once and after a restart, with and without a
+ *    metadata service — never the override it is compared against;
+ *  - the served override names its base (`servedOverrideBaseOf`), the base's
+ *    own item names none, and the pair's own published translation is what
+ *    `getPairTranslationBundle` answers for that base, without the base's.
+ *
+ * Fed to the spec's translator, the two give the ruled answer for each type.
+ */
+const PAIR_TRANSLATION = 'showcase_custom_zh_cn';
+/** The `zh-CN` text each type's catalog group carries, keyed by the item's name. */
+const zhGroup = (type: string, name: string, label: string): Record<string, unknown> => {
+    const group = ({ page: 'pages', app: 'apps', dataset: 'datasets', book: 'books' } as Record<string, string>)[type];
+    return { [group]: { [name]: { label } } };
+};
+const LABEL_ORDER_TYPES = SEALED_TYPES.filter((t) => ['page', 'app', 'dataset', 'book'].includes(t.type));
+const accessorOf = (type: string): string => `getPackaged${type[0].toUpperCase()}${type.slice(1)}Base`;
+
+describe('[#30062] a declared override\'s label order: the packaged base and the pair\'s own translations, on a real boot', () => {
+    for (const withService of [false, true]) {
+        const shape = withService ? 'with a metadata service (a real boot)' : 'with no metadata service';
+        for (const { type, body } of LABEL_ORDER_TYPES) {
+            const name = body(SHIPPED).name;
+
+            it(`${type}, ${shape}: the packaged base is the base's own item while the override is served, at once and after a restart`, async () => {
+                const stores: Stores = new Map();
+                const first = await bootSealed(stores, withService);
+                expect(reading(first.protocol[accessorOf(type)](name)), `${type} before the override`).toBe(`${SHIPPED}/${BASE}`);
+                await publishOverride(first.protocol, type, name, body(EDITED));
+                expect(reading(first.protocol[accessorOf(type)](name)), `${type} at once`).toBe(`${SHIPPED}/${BASE}`);
+                const restarted = await bootSealed(stores, withService);
+                expect(reading(restarted.protocol[accessorOf(type)](name)), `${type} after a restart`).toBe(`${SHIPPED}/${BASE}`);
+                expect(restarted.protocol[accessorOf(type)]('no_such_item'), `${type}, an unknown name`).toBeUndefined();
+            });
+
+            it(`${type}, ${shape}: the served override names its base, the pair's translation is read by its binding, and the translator answers the ruled order`, async () => {
+                const stores: Stores = new Map();
+                const { protocol } = await bootSealed(stores, withService);
+                // Before the override: the base's own item is no declared override.
+                const shipped = (await protocol.getMetaItem({ type, name }))?.item;
+                expect(protocol.servedOverrideBaseOf(type, shipped), `${type}, the base's own item`).toBeUndefined();
+
+                await publishOverride(protocol, type, name, body(EDITED));
+                const served = (await protocol.getMetaItem({ type, name }))?.item;
+                const listed = ((await protocol.getMetaItems({ type }))?.items ?? []).find((i: any) => i?.name === name);
+                expect(protocol.servedOverrideBaseOf(type, served), `${type}, by name`).toBe(BASE);
+                expect(protocol.servedOverrideBaseOf(type, listed), `${type}, listed`).toBe(BASE);
+                // The pair has no translation yet.
+                expect(await protocol.getPairTranslationBundle(BASE), `${type}, a pair with no translation`).toBeUndefined();
+
+                // The pair's own translation, through the same doors; and a package-less one of the
+                // same key, which is in the deployment catalog but is not the pair's.
+                const saved = await protocol.saveMetaItem({
+                    type: 'translation', name: PAIR_TRANSLATION, packageId: PAIR,
+                    item: { name: PAIR_TRANSLATION, locale: 'zh-CN', ...zhGroup(type, name, `${EDITED} (zh)`) },
+                });
+                expect(saved?.success, 'the pair translation save').toBe(true);
+                stores.get('sys_metadata')!.set('legacy_zh', {
+                    id: 'legacy_zh', type: 'translation', name: 'legacy_zh_cn', organization_id: null, package_id: null,
+                    state: 'active', version: 1, metadata: JSON.stringify({ name: 'legacy_zh_cn', locale: 'zh-CN', ...zhGroup(type, name, 'not the pair') }),
+                });
+                const pairBundle = await protocol.getPairTranslationBundle(BASE);
+                expect(pairBundle, `${type}, the pair's bundle`).toEqual({ 'zh-CN': zhGroup(type, name, `${EDITED} (zh)`) });
+                expect(await protocol.getPairTranslationBundle(PAIR), 'a pair id has no pair').toBeUndefined();
+
+                const catalog = { 'zh-CN': zhGroup(type, name, '基包译文') };
+                const translate = (pair: unknown) => (translateMetadataDocument(type, served, catalog as any, {
+                    locale: 'zh-CN', packagedBase: protocol[accessorOf(type)](name), ...(pair ? { pairBundle: pair as any } : {}),
+                }) as any)?.label;
+                expect(translate(pairBundle), `${type}: the pair's translation first`).toBe(`${EDITED} (zh)`);
+                expect(translate(undefined), `${type}: then the override's own label`).toBe(EDITED);
+                const base = (translateMetadataDocument(type, shipped, catalog as any, {
+                    locale: 'zh-CN', packagedBase: protocol[accessorOf(type)](name),
+                }) as any)?.label;
+                expect(base, `${type}: the base's own item keeps the base's translation`).toBe('基包译文');
+            });
+        }
+    }
+});
