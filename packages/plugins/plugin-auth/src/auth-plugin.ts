@@ -68,6 +68,7 @@ import {
 } from './identity-write-guard.js';
 import { registerLastAdminGuard } from './last-admin-guard.js';
 import { registerApiKeyRestoreGuard } from './api-key-restore-guard.js';
+import { registerOrganizationMfaEnrollmentGuard } from './organization-mfa-enrollment-guard.js';
 import { registerPersonalViewHooks } from './personal-view-hooks.js';
 import { registerUserPreferenceHooks } from './user-preference-hooks.js';
 import { personalViewCallerResolver, registerPersonalViewRoutes, PERSONAL_VIEW_REMOVE_ROUTE, type PersonalViewEngine } from './personal-view-routes.js';
@@ -1877,6 +1878,14 @@ export class AuthPlugin implements Plugin {
         registerApiKeyRestoreGuard(engine, {
           packageId: 'com.objectstack.plugin-auth.api-key-restore-guard',
           logger: ctx.logger,
+        });
+        // [#30201] ADR-0069 D3 — an organization's `require_mfa` is refused
+        // while nobody can enroll a second factor, the pairing the global
+        // `auth.mfa_required` switch gets from its settings piece below. Asks
+        // the live manager per write. See organization-mfa-enrollment-guard.ts.
+        registerOrganizationMfaEnrollmentGuard(engine, {
+          packageId: 'com.objectstack.plugin-auth.organization-mfa-enrollment-guard',
+          isTwoFactorEnabled: () => this.authManager?.isTwoFactorEnabled() ?? false,
         });
         // A reader's own named list views: the body is judged on every save as
         // a ListView for the row's own object. See personal-view-hooks.ts.
