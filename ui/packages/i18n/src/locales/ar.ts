@@ -185,6 +185,7 @@ const ar = {
   },
   form: {
     noPermissionToSave: "ليس لديك إذن لحفظ هذا السجل.",
+    readOnlyExternalSource: "هذا الجدول للقراءة فقط. تأتي سجلاته من مصدر بيانات خارجي لا يقبل التغييرات.",
     noPermissionToCreate: "ليس لديك إذن لإنشاء سجلات {{object}}. الحقول للقراءة فقط.",
     noPermissionToEdit: "ليس لديك إذن لتعديل سجلات {{object}}. الحقول للقراءة فقط.",
     noPermissionToEditRecord: "ليس لديك إذن لتعديل هذا السجل. الحقول للقراءة فقط.",

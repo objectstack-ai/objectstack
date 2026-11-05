@@ -171,6 +171,7 @@ const ja = {
   },
   form: {
     noPermissionToSave: "このレコードを保存する権限がありません。",
+    readOnlyExternalSource: "このテーブルは読み取り専用です。レコードは変更を受け付けない外部データソースから取得されています。",
     noPermissionToCreate: "{{object}}を作成する権限がありません。フィールドは読み取り専用です。",
     noPermissionToEdit: "{{object}}を編集する権限がありません。フィールドは読み取り専用です。",
     noPermissionToEditRecord: "このレコードを編集する権限がありません。フィールドは読み取り専用です。",

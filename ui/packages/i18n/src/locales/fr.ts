@@ -173,6 +173,7 @@ const fr = {
   },
   form: {
     noPermissionToSave: "Vous n'avez pas l'autorisation d'enregistrer cet enregistrement.",
+    readOnlyExternalSource: "Cette table est en lecture seule. Ses enregistrements proviennent d'une source de données externe qui n'accepte pas de modifications.",
     noPermissionToCreate: "Vous n'avez pas l'autorisation de créer des enregistrements {{object}}. Les champs sont en lecture seule.",
     noPermissionToEdit: "Vous n'avez pas l'autorisation de modifier les enregistrements {{object}}. Les champs sont en lecture seule.",
     noPermissionToEditRecord: "Vous n'avez pas l'autorisation de modifier cet enregistrement. Les champs sont en lecture seule.",

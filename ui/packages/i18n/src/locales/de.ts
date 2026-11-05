@@ -171,6 +171,7 @@ const de = {
   },
   form: {
     noPermissionToSave: "Sie haben keine Berechtigung, diesen Datensatz zu speichern.",
+    readOnlyExternalSource: "Diese Tabelle ist schreibgeschützt. Ihre Datensätze stammen aus einer externen Datenquelle, die keine Änderungen annimmt.",
     noPermissionToCreate: "Sie haben keine Berechtigung, „{{object}}“-Datensätze zu erstellen. Die Felder sind schreibgeschützt.",
     noPermissionToEdit: "Sie haben keine Berechtigung, „{{object}}“-Datensätze zu bearbeiten. Die Felder sind schreibgeschützt.",
     noPermissionToEditRecord: "Sie haben keine Berechtigung, diesen Datensatz zu bearbeiten. Die Felder sind schreibgeschützt.",
