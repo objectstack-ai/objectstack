@@ -28,6 +28,14 @@
 // refusing edits to a code-defined datasource and lists it as before, and
 // validate and the existing federated objects answer as before.
 //
+// [#30469 item 2, ruling B] The showcase package is read-only, so an import
+// over its datasource is SAVED into its customization package
+// `com.example.showcase.custom` and named in that package's namespace
+// (`showcase_custom`); the draft door keeps the showcase's own. The last case
+// of the first block pins the landing, the pair's export and an older
+// package-less import left where it was; the second block pins that under a
+// walled posture the import never creates the pair.
+//
 // The verify harness does not mount the federation service, so this file
 // mounts `ExternalDatasourceServicePlugin` itself, as `objectstack dev` and
 // `serve` do. The working directory is a temporary one because the showcase's
@@ -55,6 +63,8 @@ const IMPORT_NAMESPACE = 'showcase_custom';
 const PAIR_ID = `${PACKAGE_ID}.custom`;
 /** The object an import of `customers` with no name override makes there. */
 const LANDED = `${IMPORT_NAMESPACE}_customers`;
+/** The name that import used to get, as a package-less row: what a deployment already holds. */
+const LEGACY = `${NAMESPACE}_customers`;
 /** An explicit import name with no namespace prefix: the defect's shape. */
 const UNPREFIXED = 'dogfood_ext_order_21889';
 const PREFIXED = `${IMPORT_NAMESPACE}_${UNPREFIXED}`;
@@ -188,6 +198,19 @@ describe('an import over a code-defined datasource is held to its package\'s nam
   // package), so an object imported over the datasource it declares is saved
   // into its customization package, and travels with that package's export.
   it('an import with no name lands in the showcase\'s customization package, and the package export carries it', async () => {
+    // An object imported before the placement changed: package-less, under the
+    // base-namespace name, bound to the same remote table. It is not moved or
+    // renamed, and importing the table again makes the new object beside it.
+    const legacy = await call('PUT', `/meta/object/${LEGACY}`, {
+      name: LEGACY,
+      label: 'Legacy Customers',
+      datasource: DATASOURCE,
+      external: { remoteName: 'customers' },
+      fields: { name: { type: 'text', label: 'Name' } },
+      sharingModel: 'public_read',
+    });
+    expect(legacy.status, JSON.stringify(legacy.json)).toBe(200);
+
     const imported = await call('POST', `${ext}/tables/customers/import`, {});
     expect(imported.status, JSON.stringify(imported.json)).toBe(201);
     expect((imported.json.data as { object?: { name?: string } }).object?.name).toBe(LANDED);
@@ -209,6 +232,11 @@ describe('an import over a code-defined datasource is held to its package\'s nam
     const rows = await call('GET', `/data/${LANDED}`);
     expect(rows.status, JSON.stringify(rows.json)).toBe(200);
     expect(rows.json.records?.length).toBeGreaterThan(0);
+
+    const kept = (Array.isArray(items) ? items : (items as { items?: unknown[] })?.items ?? [])
+      .find((i) => (i as { name?: string }).name === LEGACY) as { _packageId?: string } | undefined;
+    expect(kept?._packageId).toBe('sys_metadata');
+    expect(JSON.stringify(pairExport.json)).not.toContain(`"${LEGACY}"`);
   });
 });
 
