@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createMemoryCache } from './memory-cache';
 import { createMemoryQueue } from './memory-queue';
 import { createMemoryJob } from './memory-job';
-import { createMemoryI18n, resolveLocale } from './memory-i18n';
+import { createMemoryI18n, resolveLocale, resolveOfferedLocale } from './memory-i18n';
 import { CORE_FALLBACK_FACTORIES } from './index';
 import { readServiceSelfInfo } from '@objectstack/spec/api';
 
@@ -571,5 +571,32 @@ describe('createMemoryI18n declared fallbackLocale (#15694)', () => {
 
         expect(typeof i18n.setFallbackLocale).toBe('function');
         expect(i18n.getFallbackLocale).toBeUndefined();
+    });
+});
+
+// #30456: the one matcher for "is this locale offered here, and as which code",
+// shared by Setup's default language and the IdP locale claim.
+describe('resolveOfferedLocale', () => {
+    it('takes resolveLocale\'s exact and case-insensitive steps first', () => {
+        expect(resolveOfferedLocale('zh-CN', ['en', 'zh-CN'])).toBe('zh-CN');
+        expect(resolveOfferedLocale('zh-cn', ['en', 'zh-CN'])).toBe('zh-CN');
+    });
+
+    it('then the platform table\'s language, so a script or region lands on its own script', () => {
+        // resolveLocale alone takes the first `zh-*` listed for either spelling.
+        expect(resolveLocale('zh-TW', ['zh-Hans', 'zh-Hant'])).toBe('zh-Hans');
+        expect(resolveOfferedLocale('zh-TW', ['zh-Hans', 'zh-Hant'])).toBe('zh-Hant');
+        expect(resolveOfferedLocale('zh-CN', ['zh-Hant', 'zh-Hans'])).toBe('zh-Hans');
+        expect(resolveOfferedLocale('en-US', ['zh-CN', 'en'])).toBe('en');
+    });
+
+    it('then resolveLocale\'s base-language and variant steps', () => {
+        expect(resolveOfferedLocale('fr-FR', ['en', 'fr'])).toBe('fr');
+        expect(resolveOfferedLocale('fr', ['en', 'fr-FR'])).toBe('fr-FR');
+    });
+
+    it('answers undefined for a language not offered, and for an empty list', () => {
+        expect(resolveOfferedLocale('de-DE', ['en', 'fr'])).toBeUndefined();
+        expect(resolveOfferedLocale('en', [])).toBeUndefined();
     });
 });
