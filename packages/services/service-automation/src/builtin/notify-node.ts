@@ -106,8 +106,10 @@ const SUBJECT_ORGANIZATION_READ = { context: { isSystem: true } } as const;
  *
  * The candidates are tried in order and the first one that answers wins:
  *
- *  1. the click-through record the node declares (`sourceObject` + `sourceId`)
- *     — what `sys_notification.source_object` / `source_id` store, and the
+ *  1. the click-through record — the one the node declares (`sourceObject` +
+ *     `sourceId`), or the trigger record it defaults to when the node writes
+ *     no link (`defaultClickThroughOf`) — what
+ *     `sys_notification.source_object` / `source_id` store, and the
  *     anchor ADR-0131's ownership inventory attributes a stored notification
  *     by, so the producer and the inventory answer the same question the same
  *     way;
@@ -154,6 +156,35 @@ function triggerRecordOf(context: AutomationContext): RecordRef | undefined {
     const object = toStr(context.object);
     const id = toStr((context.record as { id?: unknown } | undefined)?.id);
     return object && id ? { object, id } : undefined;
+}
+
+/** The record-change events whose trigger record no longer exists, or soon will not. */
+const DELETE_EVENTS: ReadonlySet<string> = new Set(['beforeDelete', 'afterDelete']);
+
+/**
+ * The click-through record of a notify node that names none: the run's trigger
+ * record, so a record-triggered flow's notification opens the record it is
+ * about without the author writing `sourceObject` + `sourceId: record.id`.
+ *
+ * Only when the node leaves the whole link to the runtime — none of
+ * `sourceObject`, `sourceId` and `actionUrl` written. An explicit pair, an
+ * explicit `actionUrl`, and a half-written pair (still dropped, as before) are
+ * the author's word and are kept as written.
+ *
+ * Only when the run has a trigger record (`triggerRecordOf`): a record-change
+ * run, a time-relative sweep's row, an action started on a record. A schedule
+ * tick, an inbound API post and a manual start with no record have none and
+ * link nowhere, as before. A delete event's record is gone once the write
+ * lands, so it is not linked: the inbox never renders a dead link.
+ */
+function defaultClickThroughOf(
+    cfg: Pick<NotifyConfigParsed, 'sourceObject' | 'sourceId' | 'actionUrl'>,
+    context: AutomationContext,
+    trigger: RecordRef | undefined,
+): RecordRef | undefined {
+    if (cfg.sourceObject != null || cfg.sourceId != null || cfg.actionUrl != null) return undefined;
+    if (typeof context.event === 'string' && DELETE_EVENTS.has(context.event)) return undefined;
+    return trigger;
 }
 
 /**
@@ -851,11 +882,11 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                     // literals, read as written.
                     sourceObject: {
                         type: 'string',
-                        description: 'Object name of the record the notification links to (writes sys_notification.source_object) — read as written: a single-brace {token} is not resolved here and is refused, as is a CEL value envelope; write the value. Only takes effect together with sourceId — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link.',
+                        description: 'Object name of the record the notification links to (writes sys_notification.source_object) — read as written: a single-brace {token} is not resolved here and is refused, as is a CEL value envelope; write the value. Only takes effect together with sourceId — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link. When sourceObject, sourceId and actionUrl are all left out, a run started by a record (a record change other than a delete, a time-relative sweep, an action on a record) links to that record.',
                     },
                     sourceId: {
                         type: 'string',
-                        description: 'Record id the notification links to (writes sys_notification.source_id) — a string, or a CEL value envelope evaluated per run to one, such as { dialect: \'cel\', source: \'record.id\' }; a single-brace {token} is refused. Only takes effect together with sourceObject — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link. The inbox synthesizes a `/{object}/{id}` deep-link from these.',
+                        description: 'Record id the notification links to (writes sys_notification.source_id) — a string, or a CEL value envelope evaluated per run to one, such as { dialect: \'cel\', source: \'record.id\' }; a single-brace {token} is refused. Only takes effect together with sourceObject — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link. The inbox synthesizes a `/{object}/{id}` deep-link from these. When sourceObject, sourceId and actionUrl are all left out, a run started by a record (a record change other than a delete, a time-relative sweep, an action on a record) links to that record.',
                     },
                     actorId: {
                         type: 'string',
@@ -868,7 +899,7 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                     // [#19939] A TEXT slot, rendered with {{ }} holes like `title`.
                     actionUrl: {
                         type: 'string',
-                        description: 'Explicit click-through URL, rendered per run with {{ }} placeholders like title (e.g. /crm_case/{{ record.id }}); a single-brace {token} is refused. Overrides the link synthesized from sourceObject/sourceId.',
+                        description: 'Explicit click-through URL, rendered per run with {{ }} placeholders like title (e.g. /crm_case/{{ record.id }}); a single-brace {token} is refused. Overrides the link synthesized from sourceObject/sourceId, and written alone keeps the notification from linking to the record that started the run.',
                     },
                     payload: {
                         type: 'object',
@@ -985,9 +1016,12 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             const sourceObject = toStr(cfg.sourceObject);
             const sourceId = resolveStringSlot(engine, 'sourceId', cfg.sourceId, variables, context);
             if (!sourceId.ok) return { success: false, error: sourceId.error };
+            // A node that writes no link at all links to the run's trigger
+            // record, when it has one (`defaultClickThroughOf`).
+            const trigger = triggerRecordOf(context);
             const source = sourceObject && sourceId.value
                 ? { object: sourceObject, id: sourceId.value }
-                : undefined;
+                : defaultClickThroughOf(cfg, context, trigger);
             const actorId = toStr(cfg.actorId);
 
             // With a `template` reference the content lives in the template
@@ -1089,9 +1123,11 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                 if (!organizationId) {
                     const data = getData();
                     if (data) {
+                        // A defaulted click-through IS the trigger record:
+                        // asked once, not twice.
                         organizationId = await organizationOfRecordAbout(data, wallResolverFor(data), [
                             source,
-                            triggerRecordOf(context),
+                            source === trigger ? undefined : trigger,
                         ]);
                     }
                 }
