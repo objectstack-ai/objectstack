@@ -54,7 +54,7 @@ export type OptionLabelTable = Readonly<Record<string, Readonly<Record<string, s
 /** One stored option value as its label from `labels`, or as stored when the labels hold no such value. */
 function optionLabelOf(value: unknown, labels: Readonly<Record<string, string>> | undefined): string {
   const stored = baseString(value);
-  return labels !== undefined && Object.hasOwn(labels, stored) ? labels[stored] : stored;
+  return labels !== undefined && Object.prototype.hasOwnProperty.call(labels, stored) ? labels[stored] : stored;
 }
 
 function asNumber(v: unknown): number | undefined {
@@ -164,7 +164,7 @@ const FORMATTERS: Record<string, Formatter> = {
   // and so does every value when no table for the field reached this call.
   // A multi-select value labels each element, joined with `, `.
   option: (v, arg, _locale, _timeZone, _currency, optionLabels) => {
-    const labels = arg !== undefined && optionLabels !== undefined && Object.hasOwn(optionLabels, arg)
+    const labels = arg !== undefined && optionLabels !== undefined && Object.prototype.hasOwnProperty.call(optionLabels, arg)
       ? optionLabels[arg]
       : undefined;
     if (Array.isArray(v)) return v.map((item) => optionLabelOf(item, labels)).join(', ');
