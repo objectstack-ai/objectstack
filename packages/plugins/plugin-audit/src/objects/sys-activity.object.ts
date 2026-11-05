@@ -1,12 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field, SYS_ACTIVITY_BUILTIN_TYPES } from '@objectstack/spec/data';
-import {
-  SysMetadataObject,
-  SysMetadataHistoryObject,
-  SysMetadataCommitObject,
-  SysMetadataAuditObject,
-} from '@objectstack/metadata-core';
 import { SysMigration, SysMigrationJournal } from '@objectstack/platform-objects/system';
 import { SystemObjectName } from '@objectstack/spec/system';
 
@@ -29,15 +23,21 @@ import { SystemObjectName } from '@objectstack/spec/system';
  * stored and readable: the `all` view below lists them, and each one has its
  * compliance row in `sys_audit_log`.
  *
- * Read from the definitions and the protocol's name constants, so a rename
- * moves this list with it. Deliberately not a name prefix: `sys_*` also names
- * objects whose rows are people's work (a file someone uploads).
+ * Read from the definitions and the protocol's name constants where this file
+ * may import them. The three metadata-store names are spelled out: an object
+ * file is loaded from source on its own by `check:platform-object-tenancy-census`,
+ * and `@objectstack/metadata-core` publishes its definitions only from its root
+ * entry, whose graph that loader cannot evaluate.
+ * `sys-activity-default-view.integration.test.ts` holds the list equal to the
+ * definitions' own names, so a rename reds there. Deliberately not a name
+ * prefix: `sys_*` also names objects whose rows are people's work (a file
+ * someone uploads).
  */
 export const ACTIVITY_FEED_EXCLUDED_OBJECTS: readonly string[] = Object.freeze([
-  SysMetadataObject.name,
-  SysMetadataHistoryObject.name,
-  SysMetadataCommitObject.name,
-  SysMetadataAuditObject.name,
+  SystemObjectName.METADATA,
+  'sys_metadata_history',
+  'sys_metadata_commit',
+  'sys_metadata_audit',
   SysMigration.name,
   SysMigrationJournal.name,
   SystemObjectName.USER,
