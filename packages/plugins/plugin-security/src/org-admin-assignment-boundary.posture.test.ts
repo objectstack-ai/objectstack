@@ -565,7 +565,7 @@ describe("[ADR-0090 D12; ruling of record 5985885287] a delegated administrator'
     });
   }
 
-  it("control, 'single': a row of another organization that a delegate reads keeps its guidance, and every in-scope write it made before still lands — the refused read included — reading the row as the caller once", async () => {
+  it("control, 'single': a row of another organization that a delegate reads keeps its guidance, and every in-scope write it made before still lands — except a stored grant without read, which writes nothing — reading the row as the caller once", async () => {
     const h = await boot('single');
     await seedDelegation(h);
     let holder = 0;
@@ -587,12 +587,19 @@ describe("[ADR-0090 D12; ruling of record 5985885287] a delegated administrator'
         await seedHolding(h, table, inId, ORG_A, IN_SCOPE_HOLDERS[holder++], 'bu_a_ops');
         for (const op of ['update', 'delete'] as const) {
           const { answer: r, reads } = await writeCountingCallerReads(h, table, op, inId, DELEGATES[caller]);
+          if (caller === 'writeOnlyDelegate') {
+            // An object permission that edits or deletes a record also reads
+            // it: the stored write grant without read grants neither verb.
+            expect([r.status, r.code], `${caller} ${op} ${table}: ${r.message}`).toEqual([403, 'PERMISSION_DENIED']);
+            continue;
+          }
           expect(r, `${caller} ${op} ${table}: ${r.message}`).toEqual({ status: 200 });
           // The gate's read is the pre-image the write door's own read question
-          // asks after it; a refused read is never kept, so it is asked again.
-          if (caller !== 'writeOnlyDelegate') expect(reads, `${caller} ${op} ${table}: caller reads of the row`).toBe(1);
+          // asks after it.
+          expect(reads, `${caller} ${op} ${table}: caller reads of the row`).toBe(1);
         }
-        expect(await stored(h, table, { id: inId }), `${caller} ${table}: the delete landed`).toHaveLength(0);
+        expect(await stored(h, table, { id: inId }), `${caller} ${table}: the delete landed — or, refused, the row is untouched`)
+          .toHaveLength(caller === 'writeOnlyDelegate' ? 1 : 0);
       }
     }
   });

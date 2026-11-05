@@ -1214,7 +1214,14 @@ export function registerAuthzMiddleware(
           // question is the only row-level question asked here, so a row the
           // read door hides (a data middleware's parent-derived visibility
           // included) answers not-found before any later gate can tell it
-          // apart from a missing one.
+          // apart from a missing one. A caller the read door REFUSES (the read
+          // grant withheld, a capability the object requires for a read and
+          // not for a write) is answered that refusal, thrown by the question
+          // itself, for every id alike: a caller who cannot read the object
+          // writes none of its records by id. (The branch above needs no such
+          // step: a caller whose read is refused makes the caller-context
+          // re-read throw for every id, and the record-level 403 is one answer
+          // for all of them.)
           throw recordNotFoundError(opCtx.object, addressedId as string | number);
         }
       }
