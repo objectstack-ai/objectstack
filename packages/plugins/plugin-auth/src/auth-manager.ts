@@ -5254,6 +5254,9 @@ export class AuthManager {
   }
 
   /**
+   * @internal Package-internal: read by the MFA gate and by the organization
+   * MFA enrollment guard `AuthPlugin` registers; not a supported entry point.
+   *
    * [#30201] Can a user enroll a second factor on this deployment right now —
    * is the twoFactor plugin wired? {@link resolveTwoFactorEnabled} over the
    * live config, the one answer `buildPluginList()` and `features.twoFactor`
@@ -5278,9 +5281,10 @@ export class AuthManager {
     this.config.logger?.warn(
       '[auth] multi-factor authentication is required (the auth.mfa_required setting, or an organization\'s ' +
         'require_mfa) but is NOT enforced: the two-factor feature is off, so nobody can enroll an authenticator ' +
-        'app, and holding them would lock every affected member out, the owner included. Remedy: turn two-factor ' +
-        'on (OS_AUTH_TWO_FACTOR=true, or the auth.mfa_required setting, which turns it on with the requirement); ' +
-        'or clear require_mfa on the organization.',
+        'app, and holding them would lock every affected member out, the owner included. Remedy: set ' +
+        'OS_AUTH_TWO_FACTOR=true; or, unless OS_AUTH_TWO_FACTOR is set to false (it overrides the settings), turn ' +
+        'on the auth.mfa_required setting, which turns two-factor on with the requirement; or clear require_mfa on ' +
+        'the organization.',
     );
   }
 

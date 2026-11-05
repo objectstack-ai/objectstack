@@ -35,20 +35,34 @@
  *
  * ## The rule
  *
- * A write to `sys_organization` whose payload sets `require_mfa` to anything
- * but an explicit off value is refused while {@link
- * OrganizationMfaEnrollmentGuardOptions.isTwoFactorEnabled} answers false —
+ * While {@link OrganizationMfaEnrollmentGuardOptions.isTwoFactorEnabled}
+ * answers false, a write that TURNS the requirement on is refused —
  * `400 VALIDATION_FAILED` with one `fields[]` entry, `require_mfa` /
- * `invalid_value` (the closed ADR-0114 catalog), built by `validationFailure`.
- * Clearing the column, writing other columns, and every write while two-factor
- * is on pass untouched.
+ * `invalid_value` (the closed ADR-0114 catalog), built by `validationFailure`:
+ *
+ *  - an insert whose payload sets `require_mfa` to anything but an explicit
+ *    off value;
+ *  - an update whose payload does so for a row whose stored value is off.
+ *
+ * Clearing the column, writing other columns, re-sending `require_mfa: true`
+ * for a row that already stores it (a whole-row SDK or MCP update, an import
+ * re-run, a save with no change), and every write while two-factor is on pass
+ * untouched. Refusing the unchanged value would block every other edit of
+ * that row through a door that sends the whole record, for a value the gate
+ * already does not enforce (below).
+ *
+ * The stored value is the update context's `previous`, which the engine binds
+ * before `beforeUpdate` on BOTH update paths: the by-id write binds the row it
+ * read, and a multi-row update fans out one context per matched row, each
+ * with that row's `previous` and the one shared payload, before anything is
+ * written. So a multi-row update is judged row by row, and one row turning
+ * the requirement on refuses the whole write, rows that already stored it
+ * included, with nothing written. An update context WITHOUT a `previous` is
+ * judged as a change (refused): no engine path produces one, and an unproven
+ * prior state is not evidence the value was already on.
  *
  * Judged for EVERY write context, the system's included, like the last-admin
- * guard: the lockout does not depend on who wrote the row. And judged on the
- * payload, not on the stored row, so it covers the by-id path, a multi-row
- * update (whose per-row contexts share one payload) and an insert alike; a
- * form that re-sends `require_mfa: true` for a row stored before this guard is
- * told the requirement is not enforceable, which is true.
+ * guard: the lockout does not depend on who wrote the row.
  *
  * Rows stored before this guard are not touched. The gate itself does not
  * enforce a requirement nobody can comply with (`resolveUserAuthGates`), so
@@ -98,15 +112,28 @@ export function turnsMfaRequirementOn(value: unknown): boolean {
   return !OFF_VALUES.has(value);
 }
 
-/** The refusal: what was refused, why, who it would have locked out, and the two ways forward. */
+/**
+ * The refusal: what was refused, why, who it would have locked out, and the
+ * ways forward. The second way is conditional because it is: the
+ * `OS_AUTH_TWO_FACTOR` env var outranks the settings (`resolveTwoFactorEnabled`),
+ * so under an `OS_AUTH_TWO_FACTOR=false` pin turning `auth.mfa_required` on
+ * does not turn enrollment on.
+ */
 export function organizationMfaWithoutEnrollmentRefusal(): Error {
   const message =
     'This organization cannot require multi-factor authentication yet: two-factor enrollment is off on this ' +
     'deployment, so once the grace period ended every member, the owner included, would be blocked with no way ' +
     'to enroll an authenticator app. Turn two-factor on first, then require it here: set OS_AUTH_TWO_FACTOR=true ' +
-    'on the deployment, or turn on the auth.mfa_required setting, which requires multi-factor authentication for ' +
-    'every organization and turns enrollment on with it.';
+    'on the deployment. Unless OS_AUTH_TWO_FACTOR is set to false there (it overrides the settings), turning on ' +
+    'the auth.mfa_required setting also works: it requires multi-factor authentication for every organization ' +
+    'and turns enrollment on with it.';
   return validationFailure(message, [{ field: REQUIRE_MFA_FIELD, code: 'invalid_value', message }]);
+}
+
+/** True when an update context proves the row already stores the requirement on. */
+function alreadyRequiresMfa(ctx: any): boolean {
+  const previous = ctx?.previous as Record<string, unknown> | undefined;
+  return !!previous && typeof previous === 'object' && turnsMfaRequirementOn(previous[REQUIRE_MFA_FIELD]);
 }
 
 /** Register the guard's insert and update hooks on `sys_organization`. */
@@ -114,10 +141,12 @@ export function registerOrganizationMfaEnrollmentGuard(
   engine: OrganizationMfaEnrollmentGuardEngine,
   opts: OrganizationMfaEnrollmentGuardOptions,
 ): void {
-  const judge = async (ctx: any): Promise<void> => {
+  const judge = (isUpdate: boolean) => async (ctx: any): Promise<void> => {
     const data = ctx?.input?.data as Record<string, unknown> | undefined;
     if (!data || typeof data !== 'object' || !(REQUIRE_MFA_FIELD in data)) return;
     if (!turnsMfaRequirementOn(data[REQUIRE_MFA_FIELD])) return;
+    // Unchanged: the row already stores it on, so this write turns nothing on.
+    if (isUpdate && alreadyRequiresMfa(ctx)) return;
     if (opts.isTwoFactorEnabled()) return;
     throw organizationMfaWithoutEnrollmentRefusal();
   };
@@ -126,6 +155,6 @@ export function registerOrganizationMfaEnrollmentGuard(
     priority: ORGANIZATION_MFA_ENROLLMENT_GUARD_PRIORITY,
     packageId: opts.packageId,
   };
-  engine.registerHook('beforeInsert', judge, options);
-  engine.registerHook('beforeUpdate', judge, options);
+  engine.registerHook('beforeInsert', judge(false), options);
+  engine.registerHook('beforeUpdate', judge(true), options);
 }

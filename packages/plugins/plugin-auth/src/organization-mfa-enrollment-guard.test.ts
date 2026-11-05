@@ -67,11 +67,16 @@ function captureEngine() {
   };
 }
 
-/** Run every registered handler for `event` over a payload; returns the thrown error, or null. */
+/**
+ * Run every registered handler for `event` over a payload, with the stored row
+ * as `previous` when given (the engine binds it on every update path); returns
+ * the thrown error, or null.
+ */
 async function judge(
   enrollable: boolean,
   event: 'beforeInsert' | 'beforeUpdate',
   data: Record<string, unknown>,
+  previous?: Record<string, unknown>,
 ): Promise<any> {
   const engine = captureEngine();
   registerOrganizationMfaEnrollmentGuard(engine, {
@@ -80,7 +85,10 @@ async function judge(
   });
   try {
     for (const r of engine.registrations.filter((x) => x.event === event)) {
-      await r.handler({ object: 'sys_organization', event, input: { id: 'org_1', data } });
+      await r.handler({
+        object: 'sys_organization', event, input: { id: 'org_1', data },
+        ...(previous ? { previous } : {}),
+      });
     }
     return null;
   } catch (e) {
@@ -121,6 +129,22 @@ describe('organization MFA enrollment guard — the rule', () => {
     }
   });
 
+  it('refuses an update that turns it on for a row stored off, and one with no stored row to prove otherwise', async () => {
+    expectRequireMfaRefusal(await judge(false, 'beforeUpdate', { require_mfa: true }, { require_mfa: false }));
+    expectRequireMfaRefusal(await judge(false, 'beforeUpdate', { require_mfa: true }, { require_mfa: null }));
+    expectRequireMfaRefusal(await judge(false, 'beforeUpdate', { require_mfa: true }, { name: 'Acme' }));
+    // No `previous` at all: an unproven prior state is judged as a change.
+    expectRequireMfaRefusal(await judge(false, 'beforeUpdate', { require_mfa: true }));
+  });
+
+  it('admits re-sending it for a row that already stores it on: the write turns nothing on', async () => {
+    // A whole-row SDK/MCP update, an import re-run, a save with no change.
+    expect(await judge(false, 'beforeUpdate', { require_mfa: true }, { require_mfa: true })).toBeNull();
+    expect(await judge(false, 'beforeUpdate', { require_mfa: 1, name: 'Acme' }, { require_mfa: 1 })).toBeNull();
+    // An insert has no stored value to keep: a `previous` there changes nothing.
+    expectRequireMfaRefusal(await judge(false, 'beforeInsert', { require_mfa: true }, { require_mfa: true }));
+  });
+
   it('never judges a write that clears the requirement or leaves it alone', async () => {
     for (const event of ['beforeInsert', 'beforeUpdate'] as const) {
       expect(await judge(false, event, { require_mfa: false })).toBeNull();
@@ -138,6 +162,8 @@ describe('organization MFA enrollment guard — the rule', () => {
     expect(err.message).toMatch(/owner included/);
     expect(err.message).toMatch(/OS_AUTH_TWO_FACTOR=true/);
     expect(err.message).toMatch(/auth\.mfa_required/);
+    // The env var outranks the settings: the settings remedy is offered only where it can work.
+    expect(err.message).toMatch(/Unless OS_AUTH_TWO_FACTOR is set to false/);
     expect(err.message).not.toMatch(/#\d/);
     expect(err.fields[0].message).toBe(err.message);
   });
@@ -271,6 +297,40 @@ describe('organization MFA enrollment guard — on a real engine', () => {
     expect(await storedRequireMfa(engine, 'org_a')).toBe(false);
     expect(await storedRequireMfa(engine, 'org_b')).toBe(false);
     expect(await engine.findOne('sys_organization', { where: { id: 'org_c' }, ...SYSTEM })).toBeNull();
+  });
+
+  it('admits re-saving a row that already requires MFA, so its other edits are not blocked', async () => {
+    const enrollable = { value: true };
+    const engine = await bootOrganizationEngine(enrollable);
+    await engine.update('sys_organization', { id: 'org_a', require_mfa: true }, ADMIN);
+    // Two-factor goes off afterwards (an env pin, a settings change).
+    enrollable.value = false;
+    // A door that sends the whole editable record re-sends the stored `true`.
+    await engine.update('sys_organization', { id: 'org_a', require_mfa: true, timezone: 'Asia/Shanghai' }, ADMIN);
+    await engine.update('sys_organization', { id: 'org_a', require_mfa: true }, SYSTEM);
+    const row: any = await engine.findOne('sys_organization', { where: { id: 'org_a' }, ...SYSTEM });
+    expect(row.timezone).toBe('Asia/Shanghai');
+    expect(row.require_mfa).toBe(true);
+    // Control: the other row, stored off, is still refused.
+    expectRequireMfaRefusal(await caught(engine.update('sys_organization', { id: 'org_b', require_mfa: true }, ADMIN)));
+  });
+
+  it('judges a multi-row update row by row: one row turning it on refuses the whole write, with nothing written', async () => {
+    const enrollable = { value: true };
+    const engine = await bootOrganizationEngine(enrollable);
+    await engine.update('sys_organization', { id: 'org_a', require_mfa: true }, ADMIN);
+    enrollable.value = false;
+    // org_a already requires it, org_b does not: the batch turns it on for org_b.
+    expectRequireMfaRefusal(await caught(
+      engine.update('sys_organization', { require_mfa: true, timezone: 'UTC' }, { ...SYSTEM, where: {}, multi: true } as any),
+    ));
+    expect(await storedRequireMfa(engine, 'org_b')).toBe(false);
+    const a: any = await engine.findOne('sys_organization', { where: { id: 'org_a' }, ...SYSTEM });
+    expect(a.timezone).not.toBe('UTC');
+    // Every matched row already requires it: the batch turns nothing on and lands.
+    await engine.update('sys_organization', { require_mfa: true, timezone: 'UTC' }, { ...SYSTEM, where: { slug: 'acme' }, multi: true } as any);
+    const a2: any = await engine.findOne('sys_organization', { where: { id: 'org_a' }, ...SYSTEM });
+    expect(a2.timezone).toBe('UTC');
   });
 
   it('leaves every other organization write alone while two-factor is off', async () => {

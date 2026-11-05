@@ -4778,6 +4778,8 @@ describe('AuthManager', () => {
         expect(log.warn).toHaveBeenCalledTimes(2);
         expect(String(log.warn.mock.calls[0][0])).toMatch(/NOT enforced/);
         expect(String(log.warn.mock.calls[0][0])).toMatch(/OS_AUTH_TWO_FACTOR=true/);
+        // The settings remedy is conditional: the env var outranks it.
+        expect(String(log.warn.mock.calls[0][0])).toMatch(/unless OS_AUTH_TWO_FACTOR is set to false/);
       });
 
       it('an OS_AUTH_TWO_FACTOR=false pin outranks plugins.twoFactor, so the requirement is not enforced', async () => {
