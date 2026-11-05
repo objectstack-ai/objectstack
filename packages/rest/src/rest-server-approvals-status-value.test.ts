@@ -164,7 +164,17 @@ describe('#29880 §1 — a status value outside the declared set is refused', ()
         const answer = await drive({ status: { $ne: 'pending' } });
         expect(answer.status).toBe(400);
         expect(answer.body?.error?.code).toBe('VALIDATION_ERROR');
+        expect(answer.body?.data).toBeUndefined();
         expect(approvals.listRequests).not.toHaveBeenCalled();
+        expect(approvals.countRequests).not.toHaveBeenCalled();
+        // [#30525] The message says what shape the parameter takes and lists
+        // the allowed values; it never quotes the parser's object as a value.
+        const message = String(answer.body?.error?.message);
+        expect(message).toBe(
+            'The "status" query parameter must be one status, or several separated by commas, '
+            + `given as plain text. Allowed values: ${APPROVAL_STATUSES.join(', ')}.`,
+        );
+        expect(message).not.toContain('[object Object]');
     });
 
     it('the name and arity gates still answer first', async () => {
