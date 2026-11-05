@@ -44,7 +44,21 @@ import { FLOW_UPDATE_READONLY_FIELD, FLOW_UPDATE_READONLY_WHEN_FIELD, validateRe
 import { HOOK_API_UPDATE_READONLY_FIELD, HOOK_API_UPDATE_READONLY_WHEN_FIELD, validateReadonlyHookWrites } from './validate-readonly-hook-writes.js';
 import { SORT_FIELD_UNKNOWN, SORT_FIELD_UNSORTABLE, validateSortableFields } from './validate-sortable-fields.js';
 import { ACTION_API_UPDATE_READONLY_WHEN_FIELD, validateReadonlyActionWrites } from './validate-readonly-action-writes.js';
-import { SEARCHABLE_FIELD_UNKNOWN } from './validate-searchable-fields.js';
+import { SEARCHABLE_FIELD_UNKNOWN, SEARCHABLE_FIELD_UNSEARCHABLE, validateSearchableFields } from './validate-searchable-fields.js';
+import { FORM_FIELD_UNKNOWN, validateFormLayout } from './validate-form-layout.js';
+import {
+  NOTIFY_EMAIL_FIELD_NOT_EMAIL,
+  NOTIFY_EMAIL_FIELD_UNKNOWN,
+  validateNotifyEmailFieldRecipients,
+} from './validate-notify-email-field-recipients.js';
+import { PUBLIC_FORM_FILE_FIELD, validatePublicFormFileFields } from './validate-public-form-file-fields.js';
+import {
+  FLOW_TEMPLATE_LOOKUP_TRAVERSAL,
+  FLOW_TEMPLATE_UNKNOWN_FIELD,
+  validateFlowTemplatePaths,
+} from './validate-flow-template-paths.js';
+import { PAGE_VISUALIZATION_WITHOUT_BINDING, validatePageVisualizationBindings } from './validate-page-visualization-bindings.js';
+import { AUTONUMBER_OPTIONAL_FIELD, AUTONUMBER_UNKNOWN_FIELD, lintAutonumberFormats } from './lint-autonumber-formats.js';
 // [#16340] Read back the registry's OWN definition table to assert the graph
 // derives its injected types rather than carrying a second copy of them.
 import { injectedSystemColumnDefs } from '@objectstack/spec/data';
@@ -1045,17 +1059,21 @@ describe('[#30471] the field-name indexes read the objects as served', () => {
     });
   });
 
-  // `indexObjectSearchTargets` stays on the declared objects (its type
-  // question is the searchable-fields rule's, not moved here), so a react
-  // page's `searchableFields` naming an extension field is still refused.
-  it('validate-react-page-props: searchableFields still reads the declared objects', () => {
+  // [#30608] A react page's `searchableFields` reads the served search index
+  // (`indexServedSearchTargets`), as the metadata rule does: the override it
+  // sends reaches the ingress gate, which resolves it against the registry's
+  // merged object. So a field an extension adds passes, and one nothing adds
+  // is still refused.
+  it('validate-react-page-props: searchableFields reads the objects as served', () => {
     const search = (field: string) => ({
       pages: [{
         name: 'p', kind: 'react',
         source: `function Page(){ return <ListView data={{ provider: 'object', object: 'xs_deal' }} columns={['name']} searchableFields={['name', '${field}']} />; }`,
       }],
     });
-    expect(ids(validateReactPageProps, artifact(search('region')))).toEqual([SEARCHABLE_FIELD_UNKNOWN]);
+    expect(ids(validateReactPageProps, artifact(search('region')))).toEqual([]);
+    expect(ids(validateReactPageProps, artifact(search('region'), []))).toEqual([SEARCHABLE_FIELD_UNKNOWN]);
+    expect(ids(validateReactPageProps, artifact(search('nowhere')))).toEqual([SEARCHABLE_FIELD_UNKNOWN]);
     expect(ids(validateReactPageProps, artifact(search('name')))).toEqual([]);
   });
 
@@ -1161,5 +1179,231 @@ describe('[#30471] the field-name indexes read the objects as served', () => {
       }
       for (const declared of onLegs(stack, [[]])) expect(run(declared)).toEqual([]);
     });
+  });
+});
+
+// [#30608] The seven field indexes #30471 left on the declared objects, and the
+// list-view rule's declares-nothing skip, read the same fold. Each site: an
+// extension-added field is no longer refused where the runtime serves it; an
+// extension's re-declared field is judged on the extension's definition; a
+// field two packages tie on is a served name judged on no definition; an
+// object that declares no field stays unjudged where `main` skipped it,
+// extended or not. Every stack runs on both CLI legs (the union artifact, then
+// the per-package body), each extension list its own package.
+describe('[#30608] the remaining field indexes read the objects as served', () => {
+  type Rec = Record<string, unknown>;
+  type Finding = { rule: string; severity?: unknown; where?: unknown; path?: unknown; message?: unknown };
+  type Run = (stack: Rec) => ReadonlyArray<Finding>;
+  const deal = (fields: Rec = {}, more: Rec = {}): Rec =>
+    ({ name: 'xs_deal', label: 'Deal', fields: { name: { type: 'text' }, ...fields }, ...more });
+  const bare = { name: 'xs_deal', label: 'Deal', fields: {} };
+  const account = { name: 'xs_account', label: 'Account', fields: { name: { type: 'text' } } };
+  const ext = (fields: Rec) => [{ extend: 'xs_deal', fields }];
+  const onLegs = (extra: Rec, packages: unknown[][], objects: unknown[] = [deal(), account]): Rec[] => {
+    const mods = packages.map((objectExtensions, i) => ({ manifest: { id: `mod${i}`, objectExtensions } }));
+    const body = { id: 'app', objects, ...extra };
+    return [
+      { objects, packages: [{ manifest: { id: 'app', objects } }, ...mods], ...extra },
+      { ...body, manifest: body, packages: [{ manifest: body }, ...mods] },
+    ];
+  };
+  const verdicts = (run: Run, stack: Rec) => run(stack).map((f) => [f.rule, f.severity]);
+
+  const form = (field: string, sharing?: Rec): Rec => ({
+    views: [{
+      name: 'vf',
+      form: {
+        type: 'simple', data: { provider: 'object', object: 'xs_deal' }, sections: [{ name: 's', fields: ['name', field] }],
+        ...(sharing ? { sharing } : {}),
+      },
+    }],
+  });
+  const publicForm = (field: string) => form(field, { enabled: true, allowAnonymous: true, publicLink: 'intake' });
+  const notify = (field: string): Rec => ({
+    flows: [{
+      name: 'fl',
+      nodes: [
+        { id: 'start', type: 'start', config: { triggerType: 'record-created', objectName: 'xs_deal' } },
+        { id: 'n', type: 'notify', config: { recipients: { emailField: field }, title: 'T', message: 'M' } },
+      ],
+    }],
+  });
+  const template = (hole: string): Rec => ({
+    flows: [{
+      name: 'ft',
+      nodes: [
+        { id: 'start', type: 'start', config: { triggerType: 'record-created', objectName: 'xs_deal' } },
+        { id: 'n', type: 'notify', config: { recipients: { users: ['u'] }, title: 'T', message: `Hi {{ ${hole} }}` } },
+      ],
+    }],
+  });
+  const gallery: Rec = {
+    pages: [{ name: 'pg', type: 'list', object: 'xs_deal', interfaceConfig: { source: 'xs_deal', appearance: { allowedVisualizations: ['gallery'] } } }],
+  };
+  const listSearch = (field: string): Rec => ({
+    views: [{ name: 'vs', objectName: 'xs_deal', list: { type: 'grid', columns: ['name'], searchableFields: ['name', field] } }],
+  });
+  const reactSearch = (field: string): Rec => ({
+    pages: [{
+      name: 'p', kind: 'react',
+      source: `function Page(){ return <ListView data={{ provider: 'object', object: 'xs_deal' }} columns={['name']} searchableFields={['name', '${field}']} />; }`,
+    }],
+  });
+  const autonumber = (format: string, more: Rec = {}) => [deal({ ref: { type: 'autonumber', autonumberFormat: format }, ...more }), account];
+  const canonicalSearch = (field: string, more: Rec = {}) => [deal(more, { searchableFields: ['name', field] }), account];
+  const autonumberRun: Run = (stack) => lintAutonumberFormats(stack);
+
+  // rule · its unknown-field id · the stack naming FIELD · the objects · the extension fields adding FIELD
+  const existence: Array<[string, string, Run, (field: string) => Rec, (field: string) => unknown[] | undefined, (field: string) => Rec]> = [
+    ['validate-form-layout', FORM_FIELD_UNKNOWN, validateFormLayout, form, () => undefined, (f) => ({ [f]: { type: 'text' } })],
+    ['validate-notify-email-field-recipients', NOTIFY_EMAIL_FIELD_UNKNOWN, validateNotifyEmailFieldRecipients, notify, () => undefined,
+      (f) => ({ [f]: { type: 'email' } })],
+    ['validate-flow-template-paths', FLOW_TEMPLATE_UNKNOWN_FIELD, validateFlowTemplatePaths, (f) => template(`record.${f}`), () => undefined,
+      (f) => ({ [f]: { type: 'text' } })],
+    ['validate-searchable-fields (an object\'s own set)', SEARCHABLE_FIELD_UNKNOWN, validateSearchableFields, () => ({}), (f) => canonicalSearch(f),
+      (f) => ({ [f]: { type: 'text' } })],
+    ['validate-searchable-fields (a list view\'s narrowing)', SEARCHABLE_FIELD_UNKNOWN, validateSearchableFields, listSearch, () => undefined,
+      (f) => ({ [f]: { type: 'text', searchable: true } })],
+    ['validate-react-page-props (searchableFields)', SEARCHABLE_FIELD_UNKNOWN, validateReactPageProps, reactSearch, () => undefined,
+      (f) => ({ [f]: { type: 'text', searchable: true } })],
+    ['lint-autonumber-formats', AUTONUMBER_UNKNOWN_FIELD, autonumberRun, () => ({}), (f) => autonumber(`{${f}}{000}`),
+      (f) => ({ [f]: { type: 'text', required: true } })],
+  ];
+
+  it.each(existence)('%s: an extension-added field passes; with no extension, or a field nothing adds, it is refused', (_rule, id, run, naming, objects, adding) => {
+    for (const s of onLegs(naming('region'), [ext(adding('region'))], objects('region'))) expect(verdicts(run, s)).toEqual([]);
+    for (const s of onLegs(naming('region'), [[]], objects('region'))) expect(run(s).map((f) => f.rule)).toEqual([id]);
+    for (const s of onLegs(naming('nowhere'), [ext(adding('region'))], objects('nowhere'))) expect(run(s).map((f) => f.rule)).toEqual([id]);
+  });
+
+  it.each(existence)('%s: a field nothing adds is refused byte-for-byte as on the declared objects alone', (_rule, id, run, naming, objects, adding) => {
+    const refusal = (stack: Rec) => run(stack)
+      .filter((f) => f.rule === id)
+      .map(({ severity, where, path, message }) => ({ severity, where, path, message }));
+    const [servedUnion, servedPerPackage] = onLegs(naming('zq_absent'), [ext(adding('region'))], objects('zq_absent'));
+    const [declaredUnion, declaredPerPackage] = onLegs(naming('zq_absent'), [[]], objects('zq_absent'));
+    expect(refusal(servedUnion)).toHaveLength(1);
+    expect(refusal(servedUnion)).toEqual(refusal(declaredUnion));
+    expect(refusal(servedPerPackage)).toEqual(refusal(declaredPerPackage));
+  });
+
+  // Every verdict this change adds or moves on a definition: the stack, the
+  // objects, the extension fields; what `main` answered (the declared objects
+  // alone, the same stack with no extension where the field is the owner's)
+  // and what the served object answers now.
+  const moved: Array<[string, Run, Rec, unknown[], Rec, unknown[][], unknown[][]]> = [
+    ['notify: an added field typed text is not-email (was unknown)', validateNotifyEmailFieldRecipients, notify('contact_email'),
+      [deal(), account], { contact_email: { type: 'text' } },
+      [[NOTIFY_EMAIL_FIELD_UNKNOWN, 'error']], [[NOTIFY_EMAIL_FIELD_NOT_EMAIL, 'error']]],
+    ['notify: an owner email field re-declared as text', validateNotifyEmailFieldRecipients, notify('contact_email'),
+      [deal({ contact_email: { type: 'email' } }), account], { contact_email: { type: 'text' } },
+      [], [[NOTIFY_EMAIL_FIELD_NOT_EMAIL, 'error']]],
+    ['public form: an added image field', validatePublicFormFileFields, publicForm('photo'),
+      [deal(), account], { photo: { type: 'image' } },
+      [], [[PUBLIC_FORM_FILE_FIELD, 'error']]],
+    ['public form: an owner text field re-declared as file', validatePublicFormFileFields, publicForm('doc'),
+      [deal({ doc: { type: 'text' } }), account], { doc: { type: 'file' } },
+      [], [[PUBLIC_FORM_FILE_FIELD, 'error']]],
+    ['public form: an owner file field re-declared as text', validatePublicFormFileFields, publicForm('doc'),
+      [deal({ doc: { type: 'file' } }), account], { doc: { type: 'text' } },
+      [[PUBLIC_FORM_FILE_FIELD, 'error']], []],
+    ['flow template: an owner text field re-declared as a lookup is a traversal', validateFlowTemplatePaths, template('record.account.name'),
+      [deal({ account: { type: 'text' } }), account], { account: { type: 'lookup', reference: 'xs_account' } },
+      [], [[FLOW_TEMPLATE_LOOKUP_TRAVERSAL, 'warning']]],
+    ['flow template: an owner lookup re-declared as text is not', validateFlowTemplatePaths, template('record.account.name'),
+      [deal({ account: { type: 'lookup', reference: 'xs_account' } }), account], { account: { type: 'text' } },
+      [[FLOW_TEMPLATE_LOOKUP_TRAVERSAL, 'warning']], []],
+    ['gallery page: an added image field binds', validatePageVisualizationBindings, gallery,
+      [deal(), account], { photo: { type: 'image' } },
+      [[PAGE_VISUALIZATION_WITHOUT_BINDING, 'error']], []],
+    ['gallery page: an owner image field re-declared as text binds nothing', validatePageVisualizationBindings, gallery,
+      [deal({ photo: { type: 'image' } }), account], { photo: { type: 'text' } },
+      [], [[PAGE_VISUALIZATION_WITHOUT_BINDING, 'error']]],
+    ['searchable: an owner text field re-declared as formula', validateSearchableFields, {},
+      canonicalSearch('title', { title: { type: 'text' } }), { title: { type: 'formula', expression: 'record.name' } },
+      [], [[SEARCHABLE_FIELD_UNSEARCHABLE, 'error']]],
+    ['autonumber: a referenced field an extension adds optional (was unknown)', autonumberRun, {},
+      autonumber('{region}{000}'), { region: { type: 'text' } },
+      [[AUTONUMBER_UNKNOWN_FIELD, 'error']], [[AUTONUMBER_OPTIONAL_FIELD, 'warning']]],
+    ['autonumber: a required owner field re-declared optional', autonumberRun, {},
+      autonumber('{plan}{000}', { plan: { type: 'text', required: true } }), { plan: { type: 'text' } },
+      [], [[AUTONUMBER_OPTIONAL_FIELD, 'warning']]],
+    ['autonumber: an autonumber field an extension adds is checked', autonumberRun, {},
+      [deal(), account], { ref2: { type: 'autonumber', autonumberFormat: '{nowhere}{000}' } },
+      [], [[AUTONUMBER_UNKNOWN_FIELD, 'error']]],
+    ['autonumber: an owner autonumber re-declared as text mints nothing', autonumberRun, {},
+      autonumber('{nowhere}{000}'), { ref: { type: 'text' } },
+      [[AUTONUMBER_UNKNOWN_FIELD, 'error']], []],
+  ];
+
+  it.each(moved)('%s', (_case, run, stack, objects, fields, before, after) => {
+    for (const s of onLegs(stack, [[]], objects)) expect(verdicts(run, s)).toEqual(before);
+    for (const s of onLegs(stack, [ext(fields)], objects)) expect(verdicts(run, s)).toEqual(after);
+  });
+
+  // A field two packages write at the deciding priority: its name is served,
+  // its definition is registration order. Each definition question leaves it
+  // unjudged in both orders; the definition that draws the verdict, written by
+  // one package alone, still draws it.
+  // rule · stack · objects · the drawing definition · the other · the id it draws
+  const tied: Array<[string, Run, Rec, unknown[], Rec, Rec, string]> = [
+    ['notify', validateNotifyEmailFieldRecipients, notify('contact_email'), [deal(), account],
+      { contact_email: { type: 'text' } }, { contact_email: { type: 'email' } }, NOTIFY_EMAIL_FIELD_NOT_EMAIL],
+    ['public form', validatePublicFormFileFields, publicForm('photo'), [deal(), account],
+      { photo: { type: 'image' } }, { photo: { type: 'text' } }, PUBLIC_FORM_FILE_FIELD],
+    ['flow template', validateFlowTemplatePaths, template('record.account.name'), [deal(), account],
+      { account: { type: 'lookup', reference: 'xs_account' } }, { account: { type: 'text' } }, FLOW_TEMPLATE_LOOKUP_TRAVERSAL],
+    ['gallery page', validatePageVisualizationBindings, gallery, [deal(), account],
+      { photo: { type: 'text' } }, { photo: { type: 'image' } }, PAGE_VISUALIZATION_WITHOUT_BINDING],
+    ['searchable', validateSearchableFields, {}, canonicalSearch('title'),
+      { title: { type: 'formula', expression: 'record.name' } }, { title: { type: 'text' } }, SEARCHABLE_FIELD_UNSEARCHABLE],
+    ['autonumber', autonumberRun, {}, autonumber('{region}{000}'),
+      { region: { type: 'text' } }, { region: { type: 'text', required: true } }, AUTONUMBER_OPTIONAL_FIELD],
+  ];
+
+  it.each(tied)('%s: a field two packages tie on is unjudged', (_rule, run, stack, objects, drawing, other, id) => {
+    for (const [a, b] of [[drawing, other], [other, drawing]]) {
+      for (const s of onLegs(stack, [ext(a), ext(b)], objects)) expect(verdicts(run, s)).toEqual([]);
+    }
+    for (const s of onLegs(stack, [ext(drawing), ext({})], objects)) expect(run(s).map((f) => f.rule)).toEqual([id]);
+  });
+
+  // An object that declares no field (an introspected schema) is left
+  // unjudged where `main` skipped it: an extension adding to it does not make
+  // its other columns knowable, nor its added fields judgeable by these rules.
+  const unjudged: Array<[string, Run, Rec, Rec]> = [
+    ['notify', validateNotifyEmailFieldRecipients, notify('remote_col'), { contact_email: { type: 'text' } }],
+    ['public form', validatePublicFormFileFields, publicForm('photo'), { photo: { type: 'image' } }],
+    ['gallery page', validatePageVisualizationBindings, gallery, { name: { type: 'text' } }],
+    ['searchable', validateSearchableFields, listSearch('remote_col'), { region: { type: 'text' } }],
+    ['autonumber', autonumberRun, {}, { ref2: { type: 'autonumber', autonumberFormat: '{remote_col}{000}' } }],
+    ['list-view columns', validateListViewFieldRefs, {
+      views: [{ name: 'v', objectName: 'xs_deal', list: { type: 'grid', columns: ['remote_col'] } }],
+    }, { region: { type: 'text' } }],
+  ];
+
+  it.each(unjudged)('%s: an object that declares no field is unjudged, extended or not', (_rule, run, stack, fields) => {
+    for (const packages of [[ext(fields)], [[]]]) {
+      for (const s of onLegs(stack, packages, [bare, account])) expect(verdicts(run, s)).toEqual([]);
+    }
+  });
+
+  // Item 2 of the card, as measured: the list-view rule on an object that
+  // declares no field, with and without the extension, and the control that a
+  // declared object's unknown column is still refused at the same path.
+  it('validate-list-view-field-refs: the declares-nothing skip holds once an extension adds to the object', () => {
+    const empty = { name: 'xs_empty', label: 'Empty', fields: {} };
+    const view = (column: string) => ({ views: [{ name: 'v', objectName: 'xs_empty', list: { type: 'grid', columns: [column] } }] });
+    const extendEmpty = [{ extend: 'xs_empty', fields: { region: { type: 'text' } } }];
+    for (const packages of [[extendEmpty], [[]]]) {
+      for (const s of onLegs(view('name'), packages, [empty])) expect(validateListViewFieldRefs(s)).toEqual([]);
+    }
+    const titled = { name: 'xs_empty', label: 'Empty', fields: { title: { type: 'text' } } };
+    for (const s of onLegs(view('nowhere'), [extendEmpty], [titled])) {
+      expect(validateListViewFieldRefs(s).map((f) => [f.rule, f.severity, f.path])).toEqual([
+        [LIST_VIEW_FIELD_UNKNOWN, 'error', 'views[0].list.columns[0]'],
+      ]);
+    }
+    for (const s of onLegs(view('region'), [extendEmpty], [titled])) expect(validateListViewFieldRefs(s)).toEqual([]);
   });
 });
