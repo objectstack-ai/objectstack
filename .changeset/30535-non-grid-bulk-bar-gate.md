@@ -1,6 +1,6 @@
 ---
-'@object-ui/plugin-list': minor
-'@object-ui/plugin-grid': minor
+'@object-ui/plugin-list': patch
+'@object-ui/plugin-grid': patch
 ---
 
 fix(plugin-list): a list's selection bar over a non-grid view (kanban, calendar, gallery, …) draws a declared bulk action only for a user who holds its `requiredPermissions` and only when its `visible` admits a selected record, through the grid bar's own gate (#30535)
