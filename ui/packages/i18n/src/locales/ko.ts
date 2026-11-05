@@ -4241,6 +4241,21 @@ const ko = {
       unmanagedSuccess: "\"{{name}}\" v{{version}}을(를) 이 런타임의 자체 메타데이터로 베이스 {{base}}에 복사했습니다. 사본은 편집할 수 있으며 업그레이드를 받지 않습니다.",
       unmanagedStrippedLocks: "패키지가 이 항목들을 잠갔습니다. 사본은 편집할 수 있으므로 잠금은 복사되지 않았습니다:",
       unmanagedIgnored: "이 런타임은 비관리형 설치를 지원하지 않으므로 \"{{name}}\"이(가) 복사되지 않고 관리형(코드로 등록)으로 설치되었습니다. 런타임을 업그레이드한 다음 패키지를 제거하고 비관리형 사본으로 다시 설치하세요.",
+      // objectstack#30325 — the confirm in front of a local Install: what the
+      // install adds, read from the manifest it installs (MarketplacePackagePage).
+      preview: {
+        title: "{{name}}을(를) 설치하시겠습니까?",
+        reinstallTitle: "{{name}}을(를) 다시 설치하시겠습니까?",
+        intro: "설치하면 이 런타임에 다음이 추가됩니다.",
+        reading: "이 패키지가 추가하는 내용을 읽는 중…",
+        unreadable: "설치 전에 이 패키지가 추가하는 내용을 읽을 수 없습니다. 설치 결과에 로드된 내용이 표시됩니다.",
+        objects: "객체",
+        permissionSets: "권한 세트",
+        sampleRecords: "샘플 레코드",
+        atMost: "최대 {{count}}",
+        sampleNote: "샘플 레코드는 앱과 함께 로드됩니다. 설치 후 이 페이지에서 지울 수 있습니다.",
+        suggestsEveryone: "설치 후 로그인한 모든 사용자(Everyone 위치)에게 \"{{set}}\"을(를) 부여할 것을 제안합니다. 수락하기 전에는 아무것도 부여되지 않습니다.",
+      },
     },
     // objectui#12146 — the install dialog opened as an UPDATE of the copy
     // this environment holds (MarketplacePackagePage).

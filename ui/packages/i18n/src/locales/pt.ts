@@ -4324,6 +4324,21 @@ const pt = {
       unmanagedSuccess: "v{{version}} de \"{{name}}\" copiado para este runtime como seus próprios metadados, na base {{base}}. A cópia pode ser editada e não recebe atualizações.",
       unmanagedStrippedLocks: "O pacote bloqueava estes itens. A cópia pode ser editada, então seus bloqueios não foram copiados:",
       unmanagedIgnored: "Este runtime não oferece suporte a instalações não gerenciadas, então \"{{name}}\" foi instalado como gerenciado (registrado como código) em vez de copiado. Atualize o runtime, depois desinstale o pacote e instale-o novamente como cópia não gerenciada.",
+      // objectstack#30325 — the confirm in front of a local Install: what the
+      // install adds, read from the manifest it installs (MarketplacePackagePage).
+      preview: {
+        title: "Instalar {{name}}?",
+        reinstallTitle: "Reinstalar {{name}}?",
+        intro: "A instalação adiciona o seguinte a este runtime:",
+        reading: "Lendo o que este pacote adiciona…",
+        unreadable: "Não foi possível ler, antes da instalação, o que este pacote adiciona. O resultado da instalação informa o que foi carregado.",
+        objects: "Objetos",
+        permissionSets: "Conjuntos de permissões",
+        sampleRecords: "Registros de exemplo",
+        atMost: "até {{count}}",
+        sampleNote: "Os registros de exemplo são carregados com o app. Você pode removê-los nesta página após a instalação.",
+        suggestsEveryone: "Depois, ele sugere conceder \"{{set}}\" a todos os usuários autenticados (a posição Everyone). Nada é concedido até que você aceite.",
+      },
     },
     // objectui#12146 — the install dialog opened as an UPDATE of the copy
     // this environment holds (MarketplacePackagePage).

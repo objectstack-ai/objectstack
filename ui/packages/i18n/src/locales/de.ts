@@ -4242,6 +4242,21 @@ const de = {
       unmanagedSuccess: "v{{version}} von „{{name}}“ als eigene Metadaten in dieses Laufzeitsystem kopiert, in die Basis {{base}}. Die Kopie ist bearbeitbar und erhält kein Upgrade.",
       unmanagedStrippedLocks: "Das Paket hat diese Elemente gesperrt. Die Kopie ist bearbeitbar, daher wurden ihre Sperren nicht kopiert:",
       unmanagedIgnored: "Dieses Laufzeitsystem unterstützt keine nicht verwalteten Installationen, daher wurde „{{name}}“ verwaltet installiert (als Code registriert) statt kopiert. Aktualisieren Sie das Laufzeitsystem, deinstallieren Sie dann das Paket und installieren Sie es erneut als nicht verwaltete Kopie.",
+      // objectstack#30325 — the confirm in front of a local Install: what the
+      // install adds, read from the manifest it installs (MarketplacePackagePage).
+      preview: {
+        title: "{{name}} installieren?",
+        reinstallTitle: "{{name}} neu installieren?",
+        intro: "Die Installation fügt diesem Laufzeitsystem Folgendes hinzu:",
+        reading: "Es wird gelesen, was dieses Paket hinzufügt…",
+        unreadable: "Was dieses Paket hinzufügt, konnte vor der Installation nicht gelesen werden. Das Installationsergebnis nennt, was geladen wurde.",
+        objects: "Objekte",
+        permissionSets: "Berechtigungssätze",
+        sampleRecords: "Beispieldatensätze",
+        atMost: "bis zu {{count}}",
+        sampleNote: "Beispieldatensätze werden mit der App geladen. Sie können sie nach der Installation auf dieser Seite entfernen.",
+        suggestsEveryone: "Danach wird empfohlen, den Berechtigungssatz {{set}} allen angemeldeten Benutzern (Position Everyone) zu gewähren. Gewährt wird nichts, bevor Sie zustimmen.",
+      },
     },
     // objectui#12146 — the install dialog opened as an UPDATE of the copy
     // this environment holds (MarketplacePackagePage).

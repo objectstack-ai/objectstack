@@ -5046,6 +5046,21 @@ const en = {
         unmanagedSuccess: 'Copied v{{version}} of "{{name}}" into this runtime as its own metadata, in the base {{base}}. The copy is editable and receives no upgrade.',
         unmanagedStrippedLocks: 'The package locked these items. The copy is editable, so their locks were not copied:',
         unmanagedIgnored: 'This runtime does not support unmanaged installs, so "{{name}}" was installed managed (registered as code) instead of copied. Upgrade the runtime, then uninstall the package and install it again as an unmanaged copy.',
+        // objectstack#30325 — the confirm in front of a local Install: what the
+        // install adds, read from the manifest it installs (MarketplacePackagePage).
+        preview: {
+          title: "Install {{name}}?",
+          reinstallTitle: "Reinstall {{name}}?",
+          intro: "Installing adds the following to this runtime:",
+          reading: "Reading what this package adds…",
+          unreadable: "What this package adds could not be read before install. The install result says what it loaded.",
+          objects: "Objects",
+          permissionSets: "Permission sets",
+          sampleRecords: "Sample records",
+          atMost: "up to {{count}}",
+          sampleNote: "Sample records load with the app. You can clear them from this page after install.",
+          suggestsEveryone: "Afterwards it suggests granting \"{{set}}\" to all signed-in users (the Everyone position). Nothing is granted until you accept.",
+        },
       },
       // objectui#12146 — the install dialog opened as an UPDATE of the copy
       // this environment holds (MarketplacePackagePage).

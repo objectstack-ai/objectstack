@@ -186,6 +186,8 @@ const radio = (mode: 'managed' | 'unmanaged') =>
 
 async function install() {
   fireEvent.click(installButton());
+  // objectstack#30325 — Install opens the confirm; its Install installs.
+  fireEvent.click(await screen.findByTestId('install-preview-confirm'));
   await waitFor(() => expect(posts).toHaveLength(1));
 }
 
