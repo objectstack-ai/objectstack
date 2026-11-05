@@ -24,6 +24,6 @@ Metadata-protocol: none
 
 **BREAKING — what narrows, and what to do:**
 
-- FROM `PUSH_RELAY_NOT_SERVED_MESSAGE` (`@objectstack/service-push`) TO `PUSH_RELAY_AIR_GAPPED_MESSAGE`: the relay is no longer refused for being unserved, only on a deployment that declared it has no control plane. A test that matched the old text matches the new constant, or asserts that the relay boots.
-- FROM a relay payload `data` with extra keys (stripped) TO refused: send only `notificationId`, `route` and `origin` in `data`; a content key such as `title` is refused with the ID-only guidance.
-- FROM a `RATE_LIMIT_EXCEEDED` relay error with any `retryable` TO `retryable: true` (the default when absent): a relay that answered `retryable: false` on a rate limit answers `true` or leaves it out.
+- FROM `PUSH_RELAY_NOT_SERVED_MESSAGE` TO `PUSH_RELAY_AIR_GAPPED_MESSAGE` (both exported by `@objectstack/service-push`): the relay is no longer refused for being unserved, only on a deployment that declared it has no control plane. A test that matched the old text matches the new constant, or asserts that the relay boots.
+- The relay payload's `data` is judged strictly: a sender puts only `notificationId`, `route` and `origin` in it. A content key such as `title` was stripped before and is now refused with the ID-only guidance.
+- A relay's `RATE_LIMIT_EXCEEDED` error answers `retryable: true`, or leaves `retryable` out (it defaults to `true`). A relay that answered `retryable: false` on a rate limit is now refused by the wire schema.
