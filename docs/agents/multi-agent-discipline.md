@@ -133,7 +133,10 @@ A check outside those ten is advisory and rides through, and an advisory red
 **Two speeds** (ruling record 6120820653): PR and queue runs carry the fast set, 10 minutes of
    wall per queue entry; `main`'s scheduled (4-hourly) and push runs carry the full battery — dogfood, e2e,
    `Temporal Conformance (live PG + MySQL)` — read by the publish lane before
-   any approval.
+   any approval. Queue runs also carry the three `Dogfood Regression Gate` shards (ruling record
+   6663883327), so a dogfood red shows on the queue build before the merge; `Dogfood Verify CLI`,
+   Temporal Conformance and `UI Published Artifacts` stay full-battery only. The `Dogfood Regression
+   Gate` context is outside the required set, so the queue does not hold an entry on it.
 
 ## Re-arm awareness
 

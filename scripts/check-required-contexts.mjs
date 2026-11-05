@@ -385,6 +385,10 @@ const UNATTRIBUTED_BATTERY = '(no battery open)';
  * Gate` tombstone above gives: neither name is dead — both jobs still publish
  * these check-runs on every full-battery run, and the instruction files name
  * them correctly as full-battery jobs.
+ * Since #30461 (ruling record 6663883327, letter B) the three dogfood shards
+ * also run on `merge_group`, so a queue build publishes `Dogfood Regression
+ * Gate` over their credentials; the context stays out of this registry and
+ * of the ruleset until a ruling puts it back, which that ruling did not do.
  */
 export const REQUIRED_CONTEXTS = [
   {

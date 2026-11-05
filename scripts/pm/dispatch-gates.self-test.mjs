@@ -5726,8 +5726,22 @@ export function selfTest({ tier = 'full' } = {}) {
     jobFilterOutputRefs("${{ needs.f.outputs.a != 'false' && github.event_name != 'merge_group' && github.event_name != 'pull_request' }}") === null,
   );
   t(
-    '...one excluded event alone refuses — it is not the full-battery clause',
-    jobFilterOutputRefs("${{ needs.f.outputs.a != 'false' && github.event_name != 'pull_request' }}") === null,
+    '...merge_group excluded alone refuses — it is neither event clause',
+    jobFilterOutputRefs("${{ needs.f.outputs.a != 'false' && github.event_name != 'merge_group' }}") === null,
+  );
+  // #30461: pull_request excluded alone is the QUEUE-AND-FULL clause ci.yml's
+  // `dogfood` shards carry — stripped as the last conjunct, read as its own fact.
+  t(
+    '...pull_request excluded alone is the queue-and-full clause: stripped, the job still judges its filter output',
+    jobFilterOutputRefs("${{ !cancelled() && needs.filter.outputs.core != 'false' && github.event_name != 'pull_request' }}")?.map((r) => `${r.job}.${r.output}`).join() === 'filter.core',
+  );
+  t(
+    '...but only as the LAST conjunct: in front of the filter output it refuses',
+    jobFilterOutputRefs("${{ github.event_name != 'pull_request' && needs.f.outputs.a != 'false' }}") === null,
+  );
+  t(
+    '...and pull_request excluded twice is not read as either clause',
+    jobFilterOutputRefs("${{ needs.f.outputs.a != 'false' && github.event_name != 'pull_request' && github.event_name != 'pull_request' }}") === null,
   );
   t(
     '...a positive event term refuses — it says when the job runs, not that a PR never does',
@@ -5747,6 +5761,20 @@ export function selfTest({ tier = 'full' } = {}) {
   t(
     '...and an if: with no event clause reads fullBatteryOnly FALSE — the fact is read off the text, never defaulted on',
     jobIfReading("${{ !cancelled() && needs.filter.outputs.console != 'false' }}")?.fullBatteryOnly === false,
+  );
+  t(
+    'jobIfReading: the full-battery clause also reads notOnPullRequest TRUE — neither event runs the job',
+    fullBatteryReading?.notOnPullRequest === true,
+  );
+  const queueAndFullReading = jobIfReading("${{ !cancelled() && needs.filter.outputs.core != 'false' && github.event_name != 'pull_request' }}");
+  t(
+    'jobIfReading: the queue-and-full clause (#30461) reads notOnPullRequest TRUE and fullBatteryOnly FALSE, beside the same refs',
+    queueAndFullReading?.notOnPullRequest === true && queueAndFullReading?.fullBatteryOnly === false
+      && queueAndFullReading?.refs.map((r) => `${r.job}.${r.output}`).join() === 'filter.core',
+  );
+  t(
+    '...and an if: with no event clause reads notOnPullRequest FALSE',
+    jobIfReading("${{ !cancelled() && needs.filter.outputs.console != 'false' }}")?.notOnPullRequest === false,
   );
 
   const fixturePops = jobPathPopulations(jobFilterWf, 'fixture.yml');
@@ -12263,10 +12291,12 @@ export function selfTest({ tier = 'full' } = {}) {
   // the Dogfood Regression Gate as "scheduled BY YOUR PATHS", and nothing said
   // its `if:` skips pull_request and merge_group — so the PR never ran the two
   // dogfood pins that read that file, and their first run was `main`'s push
-  // battery, red. Pinned LIVE on ci.yml for both dogfood jobs (they carry the
-  // same `if:`), against a NEGATIVE control on a job that does run on the PR,
-  // and with an in-place ABLATION of the carried flag on every row, so the
-  // statement cannot pass as a string typed per job. If ci.yml moves either job
+  // battery, red. Pinned LIVE on ci.yml, against a NEGATIVE control on a job
+  // that does run on the PR, and with an in-place ABLATION of the carried flag
+  // on every row, so the statement cannot pass as a string typed per job. Since
+  // #30461 the two dogfood jobs carry DIFFERENT clauses: `Dogfood Verify CLI`
+  // keeps the full-battery one, and the `Dogfood Regression Gate` shards carry
+  // the queue-and-full one (pinned below this loop). If ci.yml moves either job
   // back onto the PR, these go red: re-point them to whichever path-scheduled
   // job still carries the clause — ⛔ do not delete them.
   const ledgerCard = 'packages/runtime/src/route-ledger.ts';
@@ -12281,7 +12311,7 @@ export function selfTest({ tier = 'full' } = {}) {
     const lines = jobFilteredStepLines([row], { covering: 1, named: 1, steps: n, accounted: 0, unaccounted: n, conditionalSteps: 0 });
     return lines.find((l) => l.startsWith(`  - [${row.workflow} · ${row.job}]`)) ?? '';
   };
-  for (const prefix of ['Dogfood Regression Gate', 'Dogfood Verify CLI']) {
+  for (const prefix of ['Dogfood Verify CLI']) {
     const row = ledgerRow(prefix);
     t(
       `LIVE: a route-ledger.ts change schedules '${prefix}', and its row carries the full-battery fact read off its own if:`,
@@ -12295,7 +12325,8 @@ export function selfTest({ tier = 'full' } = {}) {
     t("...and so does its row in the plain rendering, on the row's own line", plainRowLine(row).includes(NOT_ON_PR));
     // ABLATION, in place: the same row with the carried fact stripped. The
     // statement must vanish from both lines — rendered from the flag, or not at all.
-    const stripped = row ? Object.fromEntries(Object.entries(row).filter(([k]) => k !== 'fullBatteryOnly')) : null;
+    // Both event facts go: a full-battery row carries notOnPullRequest too (#30461).
+    const stripped = row ? Object.fromEntries(Object.entries(row).filter(([k]) => k !== 'fullBatteryOnly' && k !== 'notOnPullRequest')) : null;
     t(
       '...ABLATED — the carried fact stripped from the row — the statement disappears from BOTH lines',
       Boolean(stripped)
@@ -12305,11 +12336,38 @@ export function selfTest({ tier = 'full' } = {}) {
         && !plainRowLine(stripped).includes(NOT_ON_PR),
     );
   }
+  // #30461: the shards' row says the PR skips them and the queue runs them first
+  // — and never the full-battery sentence, which would now be false.
+  const NOT_ON_THIS_PR = 'does NOT run on this PR: its `if:` excludes the pull_request event';
+  const QUEUE_FIRST = 'its first run on this change is the merge-queue build';
+  const shardRow = ledgerRow('Dogfood Regression Gate');
+  t(
+    "LIVE: a route-ledger.ts change schedules 'Dogfood Regression Gate', and its row carries the queue-and-full facts read off its own if:",
+    shardRow?.notOnPullRequest === true && shardRow?.fullBatteryOnly === false,
+  );
+  t(
+    '...its --commands line SAYS the PR skips it and the queue build runs it first, ahead of the step list, and NOT the full-battery sentence',
+    Boolean(shardRow) && jobFilteredNotMeasuredLine(shardRow).indexOf(NOT_ON_THIS_PR) > -1
+      && jobFilteredNotMeasuredLine(shardRow).includes(QUEUE_FIRST)
+      && jobFilteredNotMeasuredLine(shardRow).indexOf(NOT_ON_THIS_PR) < jobFilteredNotMeasuredLine(shardRow).indexOf(' step(s):')
+      && !jobFilteredNotMeasuredLine(shardRow).includes(NOT_ON_PR),
+  );
+  t("...and so does its row in the plain rendering, on the row's own line", plainRowLine(shardRow).includes(NOT_ON_THIS_PR) && !plainRowLine(shardRow).includes(NOT_ON_PR));
+  const shardStripped = shardRow ? Object.fromEntries(Object.entries(shardRow).filter(([k]) => k !== 'notOnPullRequest')) : null;
+  t(
+    '...ABLATED — notOnPullRequest stripped from the row — the statement disappears from BOTH lines',
+    Boolean(shardStripped)
+      && fullBatteryOnlyClause(shardStripped) === ''
+      && !jobFilteredNotMeasuredLine(shardStripped).includes(NOT_ON_THIS_PR)
+      && plainRowLine(shardStripped) !== ''
+      && !plainRowLine(shardStripped).includes(NOT_ON_THIS_PR),
+  );
   const prJobRow = ledgerRow('Build Core');
   t(
     'LIVE NEGATIVE CONTROL: Build Core, scheduled by the same path and run on the PR, carries the fact as FALSE and no statement',
-    prJobRow?.fullBatteryOnly === false
+    prJobRow?.fullBatteryOnly === false && prJobRow?.notOnPullRequest === false
       && !jobFilteredNotMeasuredLine(prJobRow).includes(NOT_ON_PR)
+      && !jobFilteredNotMeasuredLine(prJobRow).includes(NOT_ON_THIS_PR)
       && plainRowLine(prJobRow) !== ''
       && !plainRowLine(prJobRow).includes(NOT_ON_PR),
   );
