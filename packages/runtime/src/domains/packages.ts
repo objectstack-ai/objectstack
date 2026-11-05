@@ -65,7 +65,8 @@ import {
 // and a second copy would be the next place it drifts.
 import { isWritablePackage, READ_ONLY_PACKAGE_SCOPES } from '@objectstack/metadata-protocol';
 // [ADR-0146 D3] The pair-shaped-id predicate the install primitive asks — asked
-// at `POST /packages` too, ahead of both its install limbs.
+// at `POST /packages` too, ahead of both its install limbs; and, the same way,
+// its [ADR-0029 D7] refusal of a runtime-created package's navigation contributions.
 import { customizationPairManifestRefusal, runtimeNavigationContributionsRefusal } from '@objectstack/metadata-protocol';
 // [#28117] The one reader of a manifest's declared dependency ids (ADR-0141),
 // shared with the registry's co-owner gate.
