@@ -5468,6 +5468,11 @@ export * from './widgets/RecordPickerDialog.js';
 // lookup picker and a related-list Add dialog of the same object agree on
 // columns (#3365).
 export * from './widgets/deriveLookupColumns.js';
+// The ambient upload adapter the file, image and avatar widgets upload through.
+// The adapter contract is `@object-ui/types`'s, re-exported here so a host wires
+// `UploadProvider` and types its own adapter from one import.
+export { UploadProvider, useUpload, type UploadProviderProps } from './widgets/UploadProvider.js';
+export type { UploadAdapter, UploadOptions, UploadResult } from '@object-ui/types';
 export * from './widgets/FileField.js';
 export * from './widgets/ImageField.js';
 export { ImageCropperDialog } from './widgets/ImageCropperDialog.js';

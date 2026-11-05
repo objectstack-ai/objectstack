@@ -95,7 +95,7 @@
       "verifiedAt": "2026-09-15",
       "evidenceScope": "cross-repo",
       "evidence": "cloud @cb8ee7ff: packages/service-ai/src/tools/action-tools.ts#buildParametersSchema — each declared param becomes one JSON Schema property on the exposed tool.",
-      "note": "field/objectOverride/defaultFromRow/options/placeholder/helpText/defaultValue/required all consumed. DRILLED 2026-11-05 (#30259): each member now carries its own verdict and in-repo evidence (the console resolver, the param dialog, paramToField, and the dispatcher's ADR-0104 D2 check), and the container left the undrilled-containers baseline. The container's own row keeps its cross-repo AI-tool evidence. `widget` is this type's planned member, with authorWarn, until #30260 gives it a reader.",
+      "note": "field/objectOverride/defaultFromRow/options/placeholder/helpText/defaultValue/required all consumed. DRILLED 2026-11-05 (#30259): each member now carries its own verdict and in-repo evidence (the console resolver, the param dialog, paramToField, and the dispatcher's ADR-0104 D2 check), and the container left the undrilled-containers baseline. The container's own row keeps its cross-repo AI-tool evidence. `widget` gained its console reader in #30260.",
       "children": {
         "name": {
           "status": "live",
@@ -129,12 +129,11 @@
           "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (`param.type ?? 'text'` inline, `param.type ?? field.type` field-backed); ui/packages/app-shell/src/utils/paramToField.ts#paramToField (folds the type to the widget that draws it); packages/runtime/src/action-execution.ts#resolveDeclaredActionParams and packages/spec/src/ui/action-params.zod.ts#validateActionParams (the submitted value is checked against `valueSchemaFor` of this type, ADR-0104 D2)"
         },
         "widget": {
-          "status": "planned",
+          "status": "live",
           "verifiedAt": "2026-11-05",
           "evidenceScope": "in-repo",
-          "authorWarn": true,
-          "authorHint": "Keep it, but nothing reads it yet: the console's action dialog draws the param with its `type` widget until the dialog passes `widget` through, so a param naming `permission-ref` is a text box for now.",
-          "note": "PLANNED RECORD (#30259, ADR-0131 D4): the widget override, the same key, vocabulary and meaning as FieldSchema.widget, declared spec-first so a param can ask for the `permission-ref` picker the grant column uses. Accepted by the parse door and carried in the parsed param; read by nothing yet, measured: the console's resolveActionParam builds an ActionParamDef from named members and copies no `widget`, paramToField sets a field widget only for `boolean`, and the dispatcher's resolveDeclaredActionParams copies five named members and validates by `type`, so the value contract is unchanged. The reader is #30260 (the resolveActionParams / paramToField pass-through); flip this row to live there. Create User's permissionSet param switches to it in #30117's server PR."
+          "evidence": "ui/packages/fields/src/resolveActionParams.ts#resolveActionParam (copies the param's `widget` onto the resolved ActionParamDef inline; field-backed, the param's own else the field's FieldSchema.widget while the param inherits the field's `type`, via inheritedWidget); ui/packages/app-shell/src/utils/paramToField.ts#paramToField (a `widget` naming a registered field widget replaces the `type` widget key the dialog mounts through getLazyFieldWidget; an unregistered name keeps the `type` widget, via authoredWidgetKey)",
+          "note": "Declared spec-first by #30259 (ADR-0131 D4) so a param can ask for the `permission-ref` picker the grant column uses; the console reader landed in #30260, which flipped this row from planned and dropped its authorWarn. The value contract is unchanged: the dispatcher's resolveDeclaredActionParams still validates the submitted value by `type`, so a widget only changes how the value is picked. Create User's permissionSet param switches to it in #30117's server PR. Not read by the selection bar's bulk dialog (plugin-grid bulkParamToField), whose BulkActionParam shape carries no widget."
         },
         "required": {
           "status": "live",

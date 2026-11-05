@@ -50,7 +50,10 @@ export const en: PlatformTranslationData = {
         smtp_password: { label: 'Password' },
         api_key: { label: 'API key' },
         from_email: { label: 'From email', help: 'Example: no-reply@example.com' },
-        from_name: { label: 'From name' },
+        from_name: {
+          label: 'From name',
+          help: 'Leave empty to use the product name (Branding), or the name this deployment was set up with.',
+        },
         queue_delivery: {
           label: 'Durable queue delivery',
           help: 'Hand each message to the job queue instead of sending it inline, so a failed delivery is '

@@ -105,7 +105,8 @@
  *   3. WAITING         that pull is in the merge queue (its timeline's newest queue event is `added_to_merge_queue`:
  *                      `enqueuerFromTimeline`, the queue guard's reading), has auto-merge armed (read only in this
  *                      finding-reducing direction, as H12 reads it), or awaits a human approval
- *                      (`needs-user-decision` on the pull, the label the seat writes beside the approval request).
+ *                      (`pm:awaiting-merge` on the pull, the label the seat writes beside the approval request;
+ *                      `needs-user-decision` is the decision-card inbox and never sits on a pull).
  *
  * Short of any one, it stays `[claim-unreleased]` and says which one failed; the measured half-state (#23193, never a
  * declared tail) is refused exactly as before, and a card (a′) names is refused whatever it declares.
@@ -131,7 +132,8 @@ import { isEntrypoint } from '../invoked-as.mjs';
 import {
   CLAIM_COMMENT_MARKER,
   DECISION_FACET_MARKER,
-  GOVERNED_PR_DECISION_LABEL,
+  DECISION_INBOX_LABEL,
+  GOVERNED_PR_AWAITING_MERGE_LABEL,
   OPEN_LISTING_PAGE_CEILING,
   OS_DEV_REPORT_MARKER,
   PM_EXCLUSIVE_STATE_LABELS,
@@ -172,9 +174,6 @@ export const PROXY_REARM_GUARD = 'OS_CHECK_HANDOVER_PROXY_REARMED';
 
 /** The identity every relay write carries; (b) reads the departing session's comments by this author only. */
 export const FLEET_BOT_LOGIN = 'objectstack-fleet[bot]';
-
-/** The decision inbox label, and the one state a card awaiting the maintainer may carry. */
-export const DECISION_INBOX_LABEL = 'needs-user-decision';
 
 /** (b)'s default window: a seat shift measured 41 h and 49 h in the two vacant bodies the card read; ×3 headroom. */
 export const DEFAULT_WINDOW_HOURS = 168;
@@ -354,8 +353,8 @@ export function acceptedPullWait(pr, comments, timeline) {
   const rows = Array.isArray(comments) ? comments : [];
   const record = latestMarkedComment(rows, SEAT_RECORD_MARKER);
   if (record === null || !seatRecordAccepts(rows[record.index]?.body)) return { state: 'no-accept' };
-  if (labelNames(pr ?? {}).includes(GOVERNED_PR_DECISION_LABEL)) {
-    return { state: 'waiting', how: `awaiting a human approval (\`${GOVERNED_PR_DECISION_LABEL}\` on the pull)` };
+  if (labelNames(pr ?? {}).includes(GOVERNED_PR_AWAITING_MERGE_LABEL)) {
+    return { state: 'waiting', how: `awaiting a human approval (\`${GOVERNED_PR_AWAITING_MERGE_LABEL}\` on the pull)` };
   }
   if (pr?.auto_merge != null) return { state: 'waiting', how: 'armed for auto-merge' };
   if (timeline === undefined) return { state: 'needs-timeline' };
@@ -815,13 +814,14 @@ export function selfTest() {
 
   // the narrowed stay-behind: conditions 2 and 3 over one delivering pull
   const PR = (extra = {}) => ({ number: 25427, state: 'open', draft: false, auto_merge: null, labels: [], body: 'Fixes #23193', head: { ref: 'claude/issue-23193-x' }, ...extra });
-  const LABELLED = PR({ labels: [{ name: GOVERNED_PR_DECISION_LABEL }] });
+  const LABELLED = PR({ labels: [{ name: GOVERNED_PR_AWAITING_MERGE_LABEL }] });
   const ACCEPT_REC = comment(30, 300, '## 席位核对\n\n**ACCEPT** · domain:devx seat 1 · head `7cc88889`', FLEET_BOT_LOGIN, 25427);
   const REWORK_REC = comment(31, 330, '## 席位核对 — REWORK · tests owed', FLEET_BOT_LOGIN, 25427);
   const QUEUED = [{ event: 'added_to_merge_queue', actor: { login: 'os-justin' }, created_at: at(340) }];
   const DEQUEUED = [...QUEUED, { event: 'removed_from_merge_queue', actor: { login: 'github-merge-queue[bot]' }, created_at: at(350) }];
   t('⭐ wait: ACCEPTed and in the merge queue — the timeline\'s newest queue event is the add', acceptedPullWait(PR(), [ACCEPT_REC], QUEUED).how === 'in the merge queue');
-  t('wait: ACCEPTed and awaiting a human approval (`needs-user-decision` on the pull) answers without the timeline', acceptedPullWait(LABELLED, [ACCEPT_REC]).state === 'waiting');
+  t('wait: ACCEPTed and awaiting a human approval (`pm:awaiting-merge` on the pull) answers without the timeline', acceptedPullWait(LABELLED, [ACCEPT_REC]).state === 'waiting');
+  t('⛔ wait: the OLD shape — `needs-user-decision` on the pull — is no longer a wait (the maintainer split the inboxes); it asks for the timeline like an unlabelled pull', acceptedPullWait(PR({ labels: [{ name: DECISION_INBOX_LABEL }] }), [ACCEPT_REC]).state === 'needs-timeline');
   t('wait: ACCEPTed with auto-merge armed answers without the timeline', acceptedPullWait(PR({ auto_merge: { merge_method: 'squash' } }), [ACCEPT_REC]).how === 'armed for auto-merge');
   t('wait: ACCEPTed, unlabelled and unarmed asks for the timeline before it judges', acceptedPullWait(PR(), [ACCEPT_REC]).state === 'needs-timeline');
   t('⛔ wait: ACCEPTed, but the newest queue event is a removal, or there is none — not waiting', acceptedPullWait(PR(), [ACCEPT_REC], DEQUEUED).state === 'not-waiting' && acceptedPullWait(PR(), [ACCEPT_REC], []).state === 'not-waiting');

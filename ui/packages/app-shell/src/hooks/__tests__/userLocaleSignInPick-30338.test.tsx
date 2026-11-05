@@ -57,6 +57,8 @@ vi.mock('@object-ui/react', async (importOriginal) => ({
 
 import {
   __resetSignedOutPickForTests,
+  hasSignInLanguagePick,
+  saveSignInLanguagePick,
   useLanguageSelection,
   useSignedInUserLocale,
 } from '../useUserLocale';
@@ -241,5 +243,149 @@ describe('a language picked on the sign-in page survives a change of owner (obje
     await new Promise((r) => setTimeout(r, 50));
     expect(shownLanguage()).toBe(PICK);
     expect(storedChoice()).toBe(PICK);
+  });
+});
+
+/**
+ * objectstack#30399 — the saved half of objectstack#30338: the sign-in page
+ * saves the pick as the signed-in person's own language when they have none,
+ * through the column's one write door, before it navigates away. The sign-in
+ * page's side (it awaits this before every exit) is pinned in the console's
+ * `signInLanguagePick-30399.test.tsx`.
+ */
+describe('a language picked on the sign-in page is saved as the person’s own when they have none (objectstack#30399)', () => {
+  function renderSignInMenu() {
+    render(
+      <I18nProvider>
+        <Menu to={PICK} />
+      </I18nProvider>,
+    );
+  }
+
+  it('B signs in after picking, with no language of their own: the pick is written to sys_user.locale', async () => {
+    leaveAsResidue();
+    renderSignInMenu();
+    await pickOnSignInPage();
+    act(() => {
+      SessionUserScope.adopt(USER_B);
+    });
+
+    expect(hasSignInLanguagePick()).toBe(true);
+    const writer = userRow(USER_B, null);
+    await saveSignInLanguagePick(USER_B, writer);
+
+    expect(writer.findOne).toHaveBeenCalledWith('sys_user', USER_B);
+    expect(writer.update).toHaveBeenCalledTimes(1);
+    expect(writer.update).toHaveBeenCalledWith('sys_user', USER_B, { locale: PICK });
+    // Spent: it reaches one person.
+    expect(hasSignInLanguagePick()).toBe(false);
+  });
+
+  it('the browser’s last owner signs in again (no owner change): the pick is still saved', async () => {
+    leaveAsResidue();
+    renderSignInMenu();
+    await pickOnSignInPage();
+    let purged: unknown;
+    act(() => {
+      purged = SessionUserScope.adopt(USER_A);
+    });
+    expect(purged).toBe(false);
+
+    const writer = userRow(USER_A, null);
+    await saveSignInLanguagePick(USER_A, writer);
+    expect(writer.update).toHaveBeenCalledWith('sys_user', USER_A, { locale: PICK });
+  });
+
+  it('a language of their own already saved is kept: read, never overwritten', async () => {
+    leaveAsResidue();
+    renderSignInMenu();
+    await pickOnSignInPage();
+
+    const writer = userRow(USER_B, 'de');
+    await saveSignInLanguagePick(USER_B, writer);
+
+    expect(writer.findOne).toHaveBeenCalledTimes(1);
+    expect(writer.update).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: no pick on the sign-in page, no request at all', async () => {
+    leaveAsResidue();
+    renderSignInMenu();
+
+    expect(hasSignInLanguagePick()).toBe(false);
+    const writer = userRow(USER_B, null);
+    await saveSignInLanguagePick(USER_B, writer);
+
+    expect(writer.findOne).not.toHaveBeenCalled();
+    expect(writer.update).not.toHaveBeenCalled();
+  });
+
+  it('a second call saves nothing: the pick reached the first person only', async () => {
+    leaveAsResidue();
+    renderSignInMenu();
+    await pickOnSignInPage();
+    await saveSignInLanguagePick(USER_B, userRow(USER_B, null));
+
+    const next = userRow(USER_C, null);
+    await saveSignInLanguagePick(USER_C, next);
+    expect(next.findOne).not.toHaveBeenCalled();
+    expect(next.update).not.toHaveBeenCalled();
+  });
+
+  it('a signed-in switch replaces the pick: nothing is left to save', async () => {
+    leaveAsResidue();
+    const { rerender } = render(
+      <I18nProvider>
+        <Menu to={PICK} />
+      </I18nProvider>,
+    );
+    await pickOnSignInPage();
+    session.user = { id: USER_B };
+    session.adapter = userRow(USER_B, null);
+    rerender(
+      <I18nProvider>
+        <Menu to="de" />
+      </I18nProvider>,
+    );
+    await pickOnSignInPage('de');
+
+    expect(hasSignInLanguagePick()).toBe(false);
+  });
+
+  it('a failed write never rejects, says so at error, and leaves the pick stored on this device', async () => {
+    leaveAsResidue();
+    renderSignInMenu();
+    await pickOnSignInPage();
+    act(() => {
+      SessionUserScope.adopt(USER_B);
+    });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const writer = {
+      findOne: vi.fn(async () => ({ id: USER_B, locale: null })),
+      update: vi.fn(async () => {
+        throw Object.assign(new Error('refused'), { status: 403 });
+      }),
+    };
+
+    await expect(saveSignInLanguagePick(USER_B, writer)).resolves.toBeUndefined();
+    expect(writer.update).toHaveBeenCalledTimes(1);
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(storedChoice()).toBe(PICK);
+  });
+
+  it('a failed read writes nothing: an unknown column is not overwritten', async () => {
+    leaveAsResidue();
+    renderSignInMenu();
+    await pickOnSignInPage();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const writer = {
+      findOne: vi.fn(async () => {
+        throw new Error('network');
+      }),
+      update: vi.fn(async () => ({})),
+    };
+
+    await expect(saveSignInLanguagePick(USER_B, writer)).resolves.toBeUndefined();
+    expect(writer.update).not.toHaveBeenCalled();
   });
 });

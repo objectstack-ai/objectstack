@@ -30,6 +30,13 @@
  * with `SELF_REGISTRATION_CLOSED` re-reads the preview, so an invitation that
  * went away meanwhile ends the same way, and a live one names the address it
  * was sent to (#27509, `./invitationArrival`).
+ *
+ * Registered from an invitation link, the new account accepts THAT invitation
+ * and enters its organization at the console root, instead of going on to the
+ * accept page and its "Invitation accepted" step (#30125,
+ * `./invitationSignUpJoin`); an address the server refuses goes on to the
+ * accept page, which shows the refusal. A visitor already signed in when the
+ * page opened still goes to `/` and accepts nothing here.
  */
 
 import { useEffect, useState } from 'react';
@@ -49,6 +56,8 @@ import { decideSignUpOffer, isInvitationRedirect, needsBootstrapProbe } from './
 import { useBootstrapStatus } from './bootstrapStatus.js';
 import { ServerUnreachable } from './LoginPage.js';
 import { InvitationGoneNotice, invitationArrivalCopy, useInvitationArrival } from './invitationArrival.js';
+import { useInvitationSignUpJoin } from './invitationSignUpJoin.js';
+import { resolveRootUrl } from '../organizations/resolveHomeUrl.js';
 
 const RouterLink = ({ href, className, children }: AuthLinkComponentProps) => (
   <Link to={href} className={className}>{children}</Link>
@@ -115,6 +124,13 @@ export function RegisterPage() {
   // #26473 — who invited this visitor, and to what; `null` keeps the generic
   // copy. #27509 — `gone` when the server no longer knows the invitation.
   const invitationArrival = useInvitationArrival(redirect);
+  // #30125 — the sign-up made on this page from an invitation link accepts it.
+  const invitationJoin = useInvitationSignUpJoin(redirect);
+  // Entered by a full-page navigation to the root, as the accept page's
+  // "Continue" does: every data scope re-seats on the joined organization.
+  useEffect(() => {
+    if (invitationJoin === 'joined') window.location.assign(resolveRootUrl());
+  }, [invitationJoin]);
 
   // Sign-up switched off — bounce a signed-out visitor to /login, keeping
   // `?redirect=`. A signed-in one is moved on below instead, never to /login.
@@ -123,6 +139,13 @@ export function RegisterPage() {
     const search = redirect ? `?redirect=${encodeURIComponent(redirect)}` : '';
     navigate(`/login${search}`, { replace: true });
   }, [signedOut, signUpOffer, navigate, redirect]);
+
+  // #30125 — the invitation sign-up holds while it is accepted and while the
+  // page leaves for the root; refused, it opens the accept page as before.
+  if (user && (invitationJoin === 'joining' || invitationJoin === 'joined')) {
+    return <AuthPageLayout>{null}</AuthPageLayout>;
+  }
+  if (user && invitationJoin === 'refused' && redirect) return <Navigate to={redirect} replace />;
 
   // objectui#11714 — signed in: go where a successful sign-up goes, without
   // waiting for the config or the probe. `<Navigate>` renders nothing.
@@ -243,7 +266,10 @@ export function RegisterPage() {
   return (
     <AuthPageLayout>
       <RegisterForm
-        onSuccess={() => navigate('/')}
+        // An invitation sign-up moves on from the join above (#30125).
+        onSuccess={() => {
+          if (!invitationRedirect) navigate('/');
+        }}
         onVerificationRequired={(email) => setPendingEmail(email)}
         loginUrl={loginUrl}
         // #25886 — an invitee is told to register the invited address: the

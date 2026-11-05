@@ -35,6 +35,19 @@ import type { ActionActivationRow, ActionActivationStore, ActionActivationWriteO
 import type { ObjectQL } from './engine.js';
 
 /**
+ * One registered action handler. [#30065] `override` marks a declared action
+ * override's handler ({@link ActionsFacet.registerActionOverride}); `beneath`
+ * is the handler it was bound over, or one registered for the key after it,
+ * kept so removing the override restores it.
+ */
+export interface ActionHandlerEntry {
+  handler: (ctx: any) => Promise<any> | any;
+  package?: string;
+  override?: true;
+  beneath?: ActionHandlerEntry;
+}
+
+/**
  * The `ObjectQL` members the bodies of {@link ActionsFacet} read — every one of
  * them, and no other. Each is typed AS the class member (an indexed access on
  * the class), so a change to a member's signature on the class is a change
@@ -53,6 +66,17 @@ export class ActionsFacet {
   static registerAction(this: Pick<ActionsHost, 'actions' | 'logger'>, objectName: string, actionName: string, handler: (ctx: any) => Promise<any> | any, packageName?: string): void {
     const key = `${objectName}:${actionName}`;
     const replaced = this.actions.get(key);
+    // [#30065, ADR-0146 D9 `action`] Another package's handler arriving under
+    // a key a declared override holds — a marketplace base's, bound by its
+    // `kernel:ready` rehydrate after the authored-action resync bound the
+    // override, or a bundle's handlers re-bound — is the base's: it slots
+    // beneath the override, which stays the one that runs, and is the one a
+    // removal of the override binds again.
+    if (replaced?.override === true && replaced.package !== packageName) {
+      this.actions.set(key, { ...replaced, beneath: { handler, package: packageName } });
+      this.logger.debug('Registered action beneath an override', { objectName, actionName, package: packageName, override: replaced.package });
+      return;
+    }
     if (replaced !== undefined && replaced.package !== packageName) {
       const by = (name: string | undefined) => (name ? `by package '${name}'` : 'with no package');
       this.logger.warn(
@@ -66,6 +90,17 @@ export class ActionsFacet {
     }
     this.actions.set(key, { handler, package: packageName });
     this.logger.debug('Registered action', { objectName, actionName, package: packageName });
+  }
+
+  /** The body of `ObjectQL#registerActionOverride`; the method's docblock there is its contract. */
+  static registerActionOverride(this: Pick<ActionsHost, 'actions' | 'logger'>, objectName: string, actionName: string, handler: (ctx: any) => Promise<any> | any, packageName: string): void {
+    const key = `${objectName}:${actionName}`;
+    const current = this.actions.get(key);
+    // Re-binding the same package's override replaces it in place, over the
+    // same handler beneath.
+    const beneath = current?.package === packageName ? current.beneath : current;
+    this.actions.set(key, { handler, package: packageName, override: true, ...(beneath !== undefined ? { beneath } : {}) });
+    this.logger.debug('Registered action override', { objectName, actionName, package: packageName, beneath: beneath?.package });
   }
 
   /** The body of `ObjectQL#executeAction`; the method's docblock there is its contract. */
@@ -94,10 +129,20 @@ export class ActionsFacet {
 
   /** The body of `ObjectQL#removeActionsByPackage`; the method's docblock there is its contract. */
   static removeActionsByPackage(this: Pick<ActionsHost, 'actions'>, packageName: string): void {
-    for (const [key, entry] of this.actions.entries()) {
-      if (entry.package === packageName) {
-        this.actions.delete(key);
-      }
+    // [#30065] Drop the package's entries from each key's stack: an override's
+    // removal leaves the handler beneath it bound.
+    const without = (entry: ActionHandlerEntry | undefined): ActionHandlerEntry | undefined => {
+      if (entry === undefined) return undefined;
+      if (entry.package === packageName) return without(entry.beneath);
+      const beneath = without(entry.beneath);
+      if (beneath === entry.beneath) return entry;
+      const { beneath: _dropped, ...rest } = entry;
+      return beneath === undefined ? rest : { ...rest, beneath };
+    };
+    for (const [key, entry] of Array.from(this.actions.entries())) {
+      const kept = without(entry);
+      if (kept === undefined) this.actions.delete(key);
+      else if (kept !== entry) this.actions.set(key, kept);
     }
   }
 

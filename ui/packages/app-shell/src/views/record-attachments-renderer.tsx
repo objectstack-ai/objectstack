@@ -12,7 +12,7 @@
  * `RecordChatterPanel` (plugin-detail/renderers/record-chatter.tsx).
  *
  * Registered here (app-shell) rather than in plugin-detail because the panel
- * depends on `@object-ui/providers` (presigned upload adapter) and
+ * depends on `@object-ui/data-objectstack` (presigned upload adapter) and
  * `@object-ui/auth` (Bearer fetch), which plugin-detail deliberately does not
  * pull in. The side-effect registration is imported from the app-shell barrel
  * (`src/index.ts`), so any host that mounts the shell — the console runtime

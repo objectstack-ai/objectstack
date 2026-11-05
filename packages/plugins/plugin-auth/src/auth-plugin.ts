@@ -1944,6 +1944,9 @@ export class AuthPlugin implements Plugin {
         registerOrganizationMfaEnrollmentGuard(engine, {
           packageId: 'com.objectstack.plugin-auth.organization-mfa-enrollment-guard',
           isTwoFactorEnabled: () => this.authManager?.isTwoFactorEnabled() ?? false,
+          // [#30411] The grace period an admitted turn-on's save notice names.
+          // No manager means two-factor reads off above, so nothing is admitted.
+          mfaGracePeriodDays: () => this.authManager?.getMfaGracePeriodDays() ?? Number.NaN,
         });
         // A reader's own named list views: the body is judged on every save as
         // a ListView for the row's own object. See personal-view-hooks.ts.

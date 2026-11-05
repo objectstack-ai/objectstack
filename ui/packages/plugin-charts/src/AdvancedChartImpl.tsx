@@ -52,7 +52,7 @@ import {
   ChartContainerConfig
 } from './ChartContainerImpl';
 import { mapScatterClick, mapTreemapClick, mapSankeyClick } from './chartDrillEvents';
-import { formatterFor, domainFor, ticksFor, plotsWholeNumbers, RENDERABLE, SINGLE_VALUE_CHART_TYPES, TABULAR_CHART_TYPES, effectiveChartFamily, comboBaseFamily, placeYAxes, type DeclaredChartFamily, type NormalizedAxis, type NormalizedSeries, type ValueAxisSlot, type YAxisPlacement } from './normalizeChartSchema';
+import { formatterFor, domainFor, ticksFor, plotsWholeNumbers, wholeNumberTickCount, RENDERABLE, SINGLE_VALUE_CHART_TYPES, TABULAR_CHART_TYPES, effectiveChartFamily, comboBaseFamily, placeYAxes, type DeclaredChartFamily, type NormalizedAxis, type NormalizedSeries, type ValueAxisSlot, type YAxisPlacement } from './normalizeChartSchema';
 import { buildCategoryRank, chartRowBucketId, formatMonthBucketLabel, isRealCalendarDate, toDateInputValue, toDisplayDate, type ChartSegmentClickEvent } from '@object-ui/core';
 import { createSafeTranslation, useDisplayLocale, useSafeTranslate } from '@object-ui/i18n';
 
@@ -2625,11 +2625,21 @@ function AdvancedChartImplInner({
   // number `<XAxis>` included, so each side of a dual axis decides for itself;
   // a slot with any other measure gets no `allowDecimals` at all, so it renders
   // exactly as before.
+  //
+  // Such a slot also tops out at its largest count when that is below
+  // recharts' five default ticks (`wholeNumberTickCount`, objectstack#30126):
+  // a lone count of 1 draws an axis to 1, not to 4.
   const yAxisSpecProps = React.useCallback(
-    (axis: NormalizedAxis | undefined, side: ValueAxisSlot = 'left', titleLayout?: AxisTitleLayout) => ({
-      ...(plotsWholeNumbers(slotSeries(side)) ? { allowDecimals: false } : {}),
-      ...numericAxisSpecProps(axis, axisValues(side), titleLayout ?? yAxisTitleLayoutFor(side)),
-    }),
+    (axis: NormalizedAxis | undefined, side: ValueAxisSlot = 'left', titleLayout?: AxisTitleLayout) => {
+      const values = axisValues(side);
+      const whole = plotsWholeNumbers(slotSeries(side));
+      const tickCount = whole ? wholeNumberTickCount(axis, values) : undefined;
+      return {
+        ...(whole ? { allowDecimals: false } : {}),
+        ...(tickCount !== undefined ? { tickCount } : {}),
+        ...numericAxisSpecProps(axis, values, titleLayout ?? yAxisTitleLayoutFor(side)),
+      };
+    },
     [axisValues, slotSeries],
   );
 

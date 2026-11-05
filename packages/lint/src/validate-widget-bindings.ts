@@ -159,7 +159,9 @@ import {
  * ── The widget's OWN two references (#14148) ─────────────────────────────────
  *
  * - `widget-filter-field-unknown` — a KEY of the widget's own `filter` resolves
- *   to no column on the bound dataset's object graph.
+ *   to no column on the bound dataset's object graph and names no dimension of
+ *   that dataset — or it names one of the dataset's MEASURES, which no filter
+ *   can key (#30006; {@link judgeDatasetFilterKeys}).
  * - `widget-filter-field-not-included` — that key RESOLVES, but its relationship
  *   prefix is not declared in the dataset's `include`, so ADR-0021 compiles no
  *   join for it and the column is out of the query's reach.
@@ -737,8 +739,22 @@ export function indexResolvableDatasets(stack: AnyRec): Map<string, AnyRec> {
 
 /** One filter key of a dataset-bound filter that the dataset query cannot satisfy. */
 export type DatasetFilterKeyVerdict =
-  /** The key resolves to no column on the dataset's object graph. */
+  /** The key resolves to no column on the dataset's object graph and names no dimension. */
   | { kind: 'unknown'; field: string; path: string; object: string; message: string }
+  /**
+   * [#30006] The bare key names no column but a MEASURE of the dataset. Not a
+   * filterable member: the dataset door would compile it to a row-level
+   * predicate on the measure's column, or to no column at all.
+   */
+  | {
+    kind: 'measure';
+    field: string;
+    path: string;
+    object: string;
+    /** The column the measure aggregates, when it reads exactly one. */
+    column?: string;
+    message: string;
+  }
   /** The key resolves, but its relationship prefix is not in the dataset's `include`. */
   | {
     kind: 'not-included';
@@ -756,6 +772,18 @@ export type DatasetFilterKeyVerdict =
  * graph. The two clauses are the dataset rule's, one level down: existence
  * (`unknown`), then joinability (`not-included`, an undeclared relationship
  * prefix the compiler's `assertDeclared` never sees).
+ *
+ * [#30006] One accept set for both callers' bare keys, so the two positions
+ * cannot drift: a field of the object (authored or registry-injected) first —
+ * the dataset door binds a key that names a field to that field even where a
+ * member shares its name (`dataset-filter-field-binding.ts`) — then a
+ * DIMENSION of the dataset, which the door binds through that dimension's
+ * field. A bare key naming a MEASURE is answered with its own verdict
+ * (`measure`), never accepted: the door reads it as the measure's `sql`, so a
+ * `sum` measure filters each row on the raw column (`{ amount_sum: { $gt: 100 } }`
+ * compiles to `amount > 100`, not to a filter on the total), a `count` of rows
+ * compiles to no column at all, and a derived or duration measure is refused
+ * with `400 INVALID_FIELD`.
  *
  * Holds no rule id, severity or wording beyond the verdict's own message: the
  * caller owns those. Returns nothing when the dataset's object cannot be judged
@@ -776,12 +804,42 @@ export function judgeDatasetFilterKeys(
   // unknowable base binding would turn it into a finding per filter key.
   if (!object || !graph.get(object)) return out;
   const included = joinablePrefixes(dataset.include);
+  const dimensions = new Set<string>();
+  for (const d of recordsOf(dataset.dimensions)) {
+    if (typeof d.name === 'string') dimensions.add(d.name);
+  }
+  const measures = new Map<string, AnyRec>();
+  for (const m of recordsOf(dataset.measures)) {
+    if (typeof m.name === 'string') measures.set(m.name, m);
+  }
+  const dsName = typeof dataset.name === 'string' ? dataset.name : '(unnamed)';
   walkFilterFieldKeys(filter, path, ({ field, path: at }) => {
     const verdict = resolveFieldPath(graph, object, field);
     if (isUnjudgeable(verdict) || !verdict) return;
 
     const account = describeFieldPathVerdict(verdict, field, 'filter key');
     if (account) {
+      // A bare key the object lacks may still name a member of the dataset.
+      const bare = !field.includes('.');
+      if (bare && dimensions.has(field)) return; // the door binds the dimension's field
+      const measure = bare ? measures.get(field) : undefined;
+      if (measure) {
+        const column = measureColumn(measure);
+        out.push({
+          kind: 'measure',
+          field,
+          path: at,
+          object,
+          ...(column ? { column } : {}),
+          // [#22161] One line of at most 200 characters; why a measure is no
+          // filter key is the `os explain` entry's.
+          message:
+            `filter key "${field}" names a measure of dataset "${dsName}": a filter compares each row ` +
+            `before aggregation, ` +
+            (column ? `so it would compare "${column}", never the total` : `and this measure reads no single column`),
+        });
+        return;
+      }
       out.push({ kind: 'unknown', field, path: at, object, message: account.message });
       return;
     }
@@ -796,6 +854,29 @@ export function judgeDatasetFilterKeys(
     out.push({ kind: 'not-included', field, path: at, object, prefix, included });
   });
   return out;
+}
+
+/**
+ * [#30006] The one-line fix for a filter key that names a measure, shared by
+ * `widget-filter-field-unknown` and `report-filter-field-unknown` so the two
+ * say the same thing about the same key.
+ */
+export function measureFilterKeyFix(verdict: Extract<DatasetFilterKeyVerdict, { kind: 'measure' }>): string {
+  return verdict.column
+    ? `To keep only the rows whose "${verdict.column}" matches, key the filter by the field "${verdict.column}"; ` +
+        `a filter on the aggregated value is not supported.`
+    : `Filter on a field of "${verdict.object}" or a dimension of the dataset; ` +
+        `a filter on the aggregated value is not supported.`;
+}
+
+/**
+ * [#30006] The one column a dataset measure aggregates — its `field` — or
+ * `undefined` for a measure that reads none or two: a `count` of rows, a
+ * `derived` combination of other measures, a `duration` between two columns.
+ */
+function measureColumn(measure: AnyRec): string | undefined {
+  if (measure.derived || measure.duration) return undefined;
+  return typeof measure.field === 'string' && measure.field !== '' ? measure.field : undefined;
 }
 
 /**
@@ -1173,8 +1254,18 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
             // the nearest field, so the field list (`account.detail`) is
             // not echoed; which fields traverse is the `os explain` entry's.
             hint:
-              `Filter on a field of "${verdict.object}" (dataset "${dsName}"), or on a relationship ` +
-              `path whose prefix that dataset's \`include\` declares.`,
+              `Filter on a field of "${verdict.object}" (dataset "${dsName}"), a dimension of that dataset, ` +
+              `or a relationship path whose prefix its \`include\` declares.`,
+          });
+          continue;
+        }
+        if (verdict.kind === 'measure') {
+          push({
+            severity: 'error',
+            rule: WIDGET_FILTER_FIELD_UNKNOWN,
+            path: verdict.path,
+            message: verdict.message,
+            hint: measureFilterKeyFix(verdict),
           });
           continue;
         }

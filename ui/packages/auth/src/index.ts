@@ -23,6 +23,9 @@
 
 export { AuthProvider, type AuthProviderProps } from './AuthProvider.js';
 export { useAuth } from './useAuth.js';
+// Steps `signOut()` awaits while the session still exists (a push device's
+// unregister): bounded, and never able to hold the sign-out back.
+export { registerBeforeSignOut, BEFORE_SIGN_OUT_TIMEOUT_MS } from './beforeSignOut.js';
 // objectui#5619 — replaces `useIsWorkspaceAdmin(): boolean`, which had no way
 // to say "not resolved yet" and so answered "not an admin" about an
 // administrator whose adminship lives only in the active member row. The old

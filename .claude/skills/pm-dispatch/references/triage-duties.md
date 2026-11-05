@@ -8,8 +8,8 @@
 - 每日一 fire 跑两仓全量对账并归集日频职责;选层按 fire 时刻 ⛔ 不用计数器,简报写明层。
 - 每条枚举比对返回数与 `totalCount`,不等 ⇒ 报 `sweep INCOMPLETE` 点名缺口,⛔ 永不报干净。
 - 轮次记录按车道计欠审逾一轮的 head 数并点名车道(`check-owed-reviews.mjs`),只报 ⛔ 不接审。
+- 轮次记录分写「决策卡 N」与「待您审合 PR M」,不合计;后者 = open `pm:awaiting-merge` PR。
 - 分诊旧记录过期:delta 复审归车道或复审席,照 contract-review.md;⛔ 分诊不再审。
-- Backlog sweep 是常设职责,每 fire 扫任一析取命中的卡。
 - 析取 ①:全裸(无 `pm:*`、无 `needs-user-decision`、无 `domain:*`)。
 - 析取 ②:有 `pm:queue` 无 `domain:*`(仅多车道仓);析取 ③:有 `domain:*` 无 pm-state。
 - 析取 ④:有 `pm:queue`+`domain:*` 无 `priority:*`;②③④ 只取 `updated_at` 早于 ~2 分钟。
@@ -40,7 +40,7 @@
 - `tooling` 入 `pm:queue` 仅凭三门之一:首行带 `Unblocks: #N`(open 产品卡)或点名所护的已发布面;
 - 或实测拖慢车队开发:正确源上假红/假绿、反复重跑、同因丢复核轮;卡须具名实例。
 - `pm:queue` 也收恢复不变量的 finding、test-only pin,与实现未被裁错的说明书脱节(修文档)。
-- `needs-user-decision` = 设计卡、feature/契约形状提案、需要 appetite 的多周程序。
+- `needs-user-decision` = 设计卡、feature/契约形状提案、需要 appetite 的多周程序;只挂 issue。
 - 先例已定新键/值/导出名非契约形状提案;分诊审计 ⛔ 不自加门,唯语义/形状真分歧呈人。
 - 碰迁移形状或删已发布能力也进决策箱;说明书脱节不进:有裁定出处才是 (b),否则改文档。
 - 决策卡速读居四棱块之上、同题,用业务语言先讲事情与选项,末句只问一字:A/B/C 或是否。

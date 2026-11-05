@@ -143,7 +143,7 @@ import {
   appAutomationElevationOf,
 } from '@objectstack/core';
 import { WriteEpoch } from './write-epoch.js';
-import { SummaryRecomputeError, cascadeStoppedRefusal, hookStoppedRefusal, rolledBackRefusal, type SummaryRecomputeFailure } from './summary-errors.js';
+import { SummaryRecomputeError, cascadeStoppedRefusal, rolledBackRefusal, type SummaryRecomputeFailure } from './summary-errors.js';
 import { TransactionUnsupportedError } from './transaction-errors.js';
 import {
   aggregateSummaryValue,
@@ -164,14 +164,11 @@ import {
 import {
   DriverConnectError,
   DatasourceUnavailableError,
-  emitDegradedBootBanner,
-  type DriverConnectFailure,
   type DriverHealth,
   type DatasourceUnavailableInfo,
   type DatasourceUnavailableKind,
   type PrimaryDatasourceVerdict,
 } from './driver-connect-errors.js';
-import { resolveAllowDriverConnectFailure } from '@objectstack/types';
 // [#5979] The ONE shared "which read failure is benign?" predicate (#4825
 // family). Imported from the leaf `/errors` subpath — which exists precisely
 // so a cross-package consumer gets the 40-line predicate without the manager,
@@ -231,7 +228,6 @@ import {
 export type InsertManyRowOutcome =
   | { ok: true; record: any; droppedFields?: DroppedFieldsEvent[] }
   | { ok: false; error: unknown };
-import { CoreServiceName } from '@objectstack/spec/system';
 import { IRealtimeService } from '@objectstack/spec/contracts';
 import type { ICryptoProvider } from '@objectstack/spec/contracts';
 // [#25522 cut 18] `count` and `aggregate()`'s credential guard
@@ -349,7 +345,6 @@ import {
 // members it reads (`ValidateHost`). Imported after every module that body
 // imports, so the engine's module evaluation order is what it was.
 import { validate } from './engine-validate.js';
-import { bindHookNotice } from './hook-notice.js';
 // [#25522 cut 20] The `where`-lowering bodies (`QueryLoweringHost`), imported
 // after every module they import, so module evaluation order is unchanged.
 import { lowerRelationConditions, resolveSearchQueryableFields, resolveWhereTokens } from './engine-query-lowering.js';
@@ -366,7 +361,7 @@ import {
   assertHookScopeNotSelfCancelling, assertOrderByIsMaterializable, assertProjectionHasNoDottedPaths,
   assertValidHookExcludeObjects, assertValidHookObject, assertValidUnscopedMultiWriteFlag, autonumberFieldNames,
   callerKeySets, callerSuppliedRow, computeStoredExpressions, declaredDatetimeLowering, droppedFieldEvents,
-  foldEngineOptionAliases, formulaPlanEntry, handBackWithheldInsertReadonly, hookMatchesObject, hydrateWriteFormulas,
+  foldEngineOptionAliases, formulaPlanEntry, handBackWithheldInsertReadonly, hydrateWriteFormulas,
   insertStaticReadonlySubject, lowerWhereFilterArray, masterIdOf, mergeReadContext,
   organizationPredicateDeleteRefusal, packageBodyCollectionRefusal, packageBodyObjectAndAppOwnerStampRefusal,
   packageBodySeedDataRefusal, planFormulaProjection, planStoredExpressions, recomputeAutonumberReaders,
@@ -404,7 +399,7 @@ export {
 // [#29986 codemod] Class head: units, hooks, functions, body runners, hook dispatch: the methods of the same names below hand the bodies what they read (`HooksAndFunctionsHost`).
 import { HooksAndFunctionsFacet } from './engine-hooks-and-functions.js';
 // [#29986 codemod] Action system and packaged-action activation: the methods of the same names below hand the bodies what they read (`ActionsHost`).
-import { ActionsFacet } from './engine-actions.js';
+import { ActionsFacet, type ActionHandlerEntry } from './engine-actions.js';
 // [#29986 codemod] Registration seams, readable-ids security, formula and default permissions: the methods of the same names below hand the bodies what they read (`SecurityResolversHost`).
 import { SecurityResolversFacet } from './engine-security-resolvers.js';
 // [#29986 codemod] Authz invalidation, middleware, session, driver options, posture, organization probe: the methods of the same names below hand the bodies what they read (`MiddlewareAndContextHost`).
@@ -644,7 +639,7 @@ export class ObjectQL implements IObjectQLEngine {
   }> = [];
 
   // Action registry: key = "objectName:actionName"
-  private actions = new Map<string, { handler: (ctx: any) => Promise<any> | any; package?: string }>();
+  private actions = new Map<string, ActionHandlerEntry>();
 
   /**
    * [ADR-0126 §8] The packaged-ACTION activation ledger's local projection —
@@ -755,13 +750,14 @@ export class ObjectQL implements IObjectQLEngine {
    * Service Status Report
    * Used by Kernel to verify health and capabilities.
    */
-  getStatus() {
-      return {
-          name: CoreServiceName.enum.data,
-          status: 'running',
-          version: '0.9.0',
-          features: ['crud', 'query', 'aggregate', 'transactions', 'metadata']
-      };
+  getStatus(): {
+    name: "data";
+    status: string;
+    version: string;
+    features: string[];
+  } {
+    // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts`.
+    return HooksAndFunctionsFacet.getStatus();
   }
 
   /**
@@ -810,7 +806,7 @@ export class ObjectQL implements IObjectQLEngine {
     meta?: any;
     /** Stable name from metadata (set by `bindHooksToEngine`). */
     hookName?: string;
-  }) {
+  }): void {
     // Refuse a scope that is statically decidable as meaningless before
     // anything is registered or reported. Each face is checked on its own
     // first, so the combined check below can assume well-formed names.
@@ -1055,46 +1051,9 @@ export class ObjectQL implements IObjectQLEngine {
    * added here that defers a dispatch past the enclosing unit of work would be
    * changing that ruling, not implementing it.
    */
-  public async triggerHooks(event: string, context: HookContext) {
-    const entries = this.hooks.get(event) || [];
-    // [#28251] `ctx.notice` — the write's own `onNotice` listener, bound here
-    // so every insert / update dispatch site carries it (see hook-notice.ts).
-    bindHookNotice(event, context);
-
-    if (entries.length === 0) {
-      this.logger.debug('No hooks registered for event', { event });
-      return;
-    }
-
-    this.logger.debug('Triggering hooks', { event, count: entries.length });
-
-    // `session.skipAutomations` (set from ExecutionContext.skipAutomations —
-    // import with "run automations & triggers" unchecked, import undo)
-    // suppresses hooks bound FROM METADATA (`bindHooksToEngine` stamps
-    // `entry.meta`). Hooks registered in code by plugins — audit, capability
-    // gates, sharing projection — have no `meta` and always run: the opt-out
-    // must never bypass security or audit (#2922).
-    const skipAutomations =
-      (context.session as { skipAutomations?: boolean } | undefined)?.skipAutomations === true;
-
-    for (const entry of entries) {
-      // Per-object matching — allow face minus exclusion face, the one shared
-      // rule `hasHooksFor` also reads (#5928).
-      if (!hookMatchesObject(entry, context.object)) {
-        continue; // Skip non-matching hooks
-      }
-      if (skipAutomations && entry.meta) {
-        this.logger.debug('Skipping metadata-bound hook (skipAutomations)', { event, hook: entry.hookName });
-        continue;
-      }
-      // [#29422] A stale-roll-up refusal a hook's own `ctx.api` write raised
-      // describes THAT write, not this one: `hookStoppedRefusal`.
-      try {
-        await entry.handler(context);
-      } catch (e) {
-        throw hookStoppedRefusal(e, event, context.object, entry.hookName);
-      }
-    }
+  public triggerHooks(event: string, context: HookContext): Promise<void> {
+    // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
+    return HooksAndFunctionsFacet.triggerHooks.call(hooksAndFunctionsHost.of(this), event, context);
   }
 
   private hasHooksFor(event: string, object: string): boolean {
@@ -1182,10 +1141,37 @@ export class ObjectQL implements IObjectQLEngine {
    * reload, the authored-action resync, which tears its set down first) is
    * not. A registration with no `packageName` is its own owner here, so it
    * replacing a package's handler, or the reverse, is warned too.
+   *
+   * [#30065, ADR-0146 D9 `action`] The one exception: a key a declared
+   * action override holds ({@link registerActionOverride}) keeps the
+   * override on top, and another package's registration takes the place
+   * beneath it, the handler a removal of the override binds again. A
+   * marketplace base's handlers are bound by its rehydrate after the
+   * authored-action resync bound the override, so the base's body arrives
+   * second and must not replace the override's.
    */
   registerAction(objectName: string, actionName: string, handler: (ctx: any) => Promise<any> | any, packageName?: string): void {
     // [#29986 codemod] The body moved to `engine-actions.ts` (see `ActionsHost`).
     return ActionsFacet.registerAction.call(actionsHost.of(this), objectName, actionName, handler, packageName);
+  }
+
+  /**
+   * [#30065, ADR-0146 D9 `action`] Bind a declared action override's handler
+   * over the key the base's handler holds, keeping the base's underneath.
+   *
+   * The `.custom` pair's declared override of a base's action keeps the
+   * base's name, so its body registers under the base's `<object>:<name>`
+   * key. Unlike {@link registerAction}, the replaced handler is not dropped:
+   * it is kept beneath the override's, and {@link removeActionsByPackage}
+   * of the override's package puts it back. So "Restore package original"
+   * runs the base's handler again, in the same step that removes the
+   * override's, and no window has both or neither bound. No collision is
+   * warned: the replacement is the declared one. The entry is marked as an
+   * override, so the base's handler registered after it (by
+   * {@link registerAction}) slots beneath it instead of replacing it.
+   */
+  registerActionOverride(objectName: string, actionName: string, handler: (ctx: any) => Promise<any> | any, packageName: string): void {
+    return ActionsFacet.registerActionOverride.call(actionsHost.of(this), objectName, actionName, handler, packageName);
   }
 
   /**
@@ -1214,6 +1200,11 @@ export class ObjectQL implements IObjectQLEngine {
 
   /**
    * Remove all actions registered by a specific package.
+   *
+   * [#30065] A handler {@link registerActionOverride} bound over another
+   * package's is replaced by that package's again, rather than leaving the
+   * key empty; a package removed from beneath an override leaves the
+   * override bound, with nothing beneath it to restore.
    */
   removeActionsByPackage(packageName: string): void {
     // [#29986 codemod] The body moved to `engine-actions.ts` (see `ActionsHost`).
@@ -2303,7 +2294,7 @@ export class ObjectQL implements IObjectQLEngine {
    * comes through here (it is installed by `installPackage` in
    * `@objectstack/metadata-protocol`), so `'authored'` is not accepted.
    */
-  registerApp(registeredBody: any, scope?: ArtifactInstallScope, source: Exclude<InstalledPackageSource, 'authored'> = 'code') {
+  registerApp(registeredBody: any, scope?: ArtifactInstallScope, source: Exclude<InstalledPackageSource, 'authored'> = 'code'): void {
       // The CONVERTED body, for everything below — the package record, the
       // live manifest, every item it registers (see {@link convertPackageBodyForward}).
       // [#23972] Refused before anything registers — see the docblock: an
@@ -2504,7 +2495,7 @@ export class ObjectQL implements IObjectQLEngine {
    *    else already is the default** → the caller's intent is being dropped,
    *    so it is loud too rather than folded into the quiet path.
    */
-  registerDriver(driver: IDataDriver, isDefault: boolean = false) {
+  registerDriver(driver: IDataDriver, isDefault: boolean = false): void {
     const existing = this.drivers.get(driver.name);
     if (existing) {
       // [#27277] The entry may be the floored instance of this very driver.
@@ -3749,11 +3740,9 @@ export class ObjectQL implements IObjectQLEngine {
     default?: boolean;
     datasource: string;
     priority?: number;
-  }>) {
-    this.datasourceMapping = rules;
-    this.logger.info('Datasource mapping rules configured', {
-      ruleCount: rules.length
-    });
+  }>): void {
+    // [#29986 codemod] The body moved to `engine-secrets-and-routing.ts` (see `SecretsAndRoutingHost`).
+    return SecretsAndRoutingFacet.setDatasourceMapping.call(secretsAndRoutingHost.of(this), rules);
   }
 
   /**
@@ -3784,45 +3773,9 @@ export class ObjectQL implements IObjectQLEngine {
    * `OS_ALLOW_DRIVER_CONNECT_FAILURE=1`, which boots in a state that is warned
    * about loudly rather than assumed.
    */
-  async init() {
-    this.logger.info('Initializing ObjectQL engine', {
-      driverCount: this.drivers.size,
-      drivers: Array.from(this.drivers.keys())
-    });
-
-    const failures: DriverConnectFailure[] = [];
-    for (const [name, driver] of this.drivers) {
-      try {
-        await driver.connect();
-        this.logger.info('Driver connected successfully', { driverName: name });
-      } catch (e) {
-        failures.push({ driverName: name, error: e });
-        this.logger.error('Failed to connect driver', e as Error, { driverName: name });
-      }
-    }
-
-    if (failures.length > 0) {
-      if (!resolveAllowDriverConnectFailure()) {
-        throw new DriverConnectError(failures, this.drivers.size);
-      }
-      const failedDrivers = failures.map(f => f.driverName);
-      const banner =
-        `⚠️ DEGRADED BOOT: ${failures.length} of ${this.drivers.size} driver(s) failed to connect ` +
-        `(${failedDrivers.join(', ')}), but OS_ALLOW_DRIVER_CONNECT_FAILURE is set — starting anyway. ` +
-        `Every query routed to them fails until the datasource becomes reachable, and the boot-time ` +
-        `schema sync is SKIPPED FOR GOOD — the client will reconnect on its own, but nothing re-runs ` +
-        `the DDL, so those objects may have no tables even after the database comes back. Unset ` +
-        `OS_ALLOW_DRIVER_CONNECT_FAILURE to restore fail-fast boot.`;
-      this.logger.warn(banner, { failedDrivers });
-      // …and again on a channel the operator's log level cannot filter away: the
-      // line above is dropped outright at `error`/`fatal`/`silent`, which is a
-      // normal production setting and precisely where this flag gets used. See
-      // the helper's note — the duplication is deliberate, and it is NOT about
-      // `os serve`'s boot-quiet window (that swallowed it too until #4012).
-      emitDegradedBootBanner(banner);
-    }
-
-    this.logger.info('ObjectQL engine initialization complete');
+  init(): Promise<void> {
+    // [#29986 codemod] The body moved to `engine-secrets-and-routing.ts` (see `SecretsAndRoutingHost`).
+    return SecretsAndRoutingFacet.init.call(secretsAndRoutingHost.of(this));
   }
 
   /**
@@ -4275,27 +4228,9 @@ export class ObjectQL implements IObjectQLEngine {
     return wasDatastoreCreatedFromEmpty.call(host);
   }
 
-  async destroy() {
-    this.logger.info('Destroying ObjectQL engine', { driverCount: this.drivers.size });
-    
-    for (const [name, driver] of this.drivers.entries()) {
-      try {
-        await driver.disconnect();
-      } catch (e) {
-        this.logger.error('Error disconnecting driver', e as Error, { driverName: name });
-      }
-    }
-
-    // #13578 — teardown is an eviction path too, and it used to disconnect
-    // every driver while leaving all of them REGISTERED. A destroyed engine
-    // therefore still answered `checkDriversHealth()` by pinging pools it had
-    // just closed, so a readiness probe racing shutdown read a list of drivers
-    // that were deliberately dead. Disconnect-then-evict, through the one
-    // primitive, so `defaultDriver` and the datasource defs go with them.
-    // Names are snapshotted first: `unregisterDriver` mutates the Map.
-    for (const name of [...this.drivers.keys()]) this.unregisterDriver(name);
-    
-    this.logger.info('ObjectQL engine destroyed');
+  destroy(): Promise<void> {
+    // [#29986 codemod] The body moved to `engine-migration-state.ts` (see `MigrationStateHost`).
+    return MigrationStateFacet.destroy.call(migrationStateHost.of(this));
   }
 
   // ============================================
@@ -10535,6 +10470,7 @@ export class ObjectQL implements IObjectQLEngine {
       set creationAttestationRetraction(v) { engine.creationAttestationRetraction = v; },
       get deviationRecording() { return engine.deviationRecording; },
       set deviationRecording(v) { engine.deviationRecording = v; },
+      get drivers() { return engine.drivers; },
       get fileReferencesMigrationVerified() { return engine.fileReferencesMigrationVerified; },
       set fileReferencesMigrationVerified(v) { engine.fileReferencesMigrationVerified = v; },
       findOne: (...a) => engine.findOne(...a),
@@ -10551,6 +10487,7 @@ export class ObjectQL implements IObjectQLEngine {
       readMigrationFlagRowMemoized: (...a) => engine.readMigrationFlagRowMemoized(...a),
       get recordedDeviations() { return engine.recordedDeviations; },
       get retractedCreationAttestations() { return engine.retractedCreationAttestations; },
+      unregisterDriver: (...a) => engine.unregisterDriver(...a),
       update: (...a) => engine.update(...a),
       get valueShapesMigrationVerified() { return engine.valueShapesMigrationVerified; },
       set valueShapesMigrationVerified(v) { engine.valueShapesMigrationVerified = v; },
@@ -10596,6 +10533,8 @@ export class ObjectQL implements IObjectQLEngine {
       get cryptoProvider() { return engine.cryptoProvider; },
       set cryptoProvider(v) { engine.cryptoProvider = v; },
       get cryptoProviderListeners() { return engine.cryptoProviderListeners; },
+      get datasourceMapping() { return engine.datasourceMapping; },
+      set datasourceMapping(v) { engine.datasourceMapping = v; },
       get defaultDriver() { return engine.defaultDriver; },
       get drivers() { return engine.drivers; },
       get logger() { return engine.logger; },
