@@ -198,6 +198,18 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'sourceView',
     why: '@deprecated legacy named-view inheritance, honored at runtime as a fallback but deliberately not offered to new authors — a page defines columns/sort/filterBy directly (ADR-0047 revised)',
   },
+  // #30267 — `view.form.ts` now spells out `userFilters`' children. This walk
+  // resolves the block through the view union to the page-shaped
+  // `UserFiltersSchema`; the list arm the view form lays out takes
+  // `ObjectUserFiltersSchema`, which omits these three page-only keys and
+  // refuses them on an object view.
+  ...(['tabs', 'showAllRecords', 'allowAddTab'] as const).map((key): OmitEntry => ({
+    kind: 'omit',
+    type: 'view',
+    path: 'userFilters',
+    key,
+    why: "page-only — a list view's `userFilters` is `ObjectUserFiltersSchema`, which omits this key and refuses it on an object view (named presets on an object view are `listViews` entries); the view form lays out that list arm, so a control here would offer a value the save rejects",
+  })),
   {
     kind: 'omit',
     type: 'object',

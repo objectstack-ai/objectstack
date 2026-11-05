@@ -97,7 +97,8 @@ import type { MetadataProtocol, PackageProtocol } from '@objectstack/spec/api';
 // a second copy of `metadata-protocol`'s `applySeedBodies`, and a second
 // private restatement of "when may a caught sentence be quoted" is where the
 // two copies start answering differently.
-import { clientFacingFailureText, seedRequestValidationError } from '@objectstack/metadata-protocol';
+import { clientFacingFailureText, seedAppliedLanded, seedRequestValidationError } from '@objectstack/metadata-protocol';
+import type { SeedAppliedLandedParsed } from '@objectstack/spec/api';
 // [#15591] The DECLARED removal of our OWN read-time annotations, imported
 // from the list that defines them (`METADATA_READ_DECORATIONS`) rather than
 // re-spelled here. `applyPublishedSeeds` below re-parses a SERVED document, and
@@ -3840,7 +3841,7 @@ async function applyPublishedSeeds(
 deps: DomainHandlerDeps,
 names: string[],
 _context: HttpProtocolContext,
-): Promise<{ success: boolean; inserted?: number; updated?: number; errors?: unknown[]; error?: string }> {
+): Promise<{ success: boolean; inserted?: number; updated?: number; errors?: unknown[]; error?: string; landed?: SeedAppliedLandedParsed[] }> {
     // [#4127] `protocol` keeps its `any` — no written contract, so this is where
     // the ledger honestly ends. `metadata` and `ql` are both evidenced now,
     // `objectql` as of batch 3: it is the same instance the `data` slot holds.
@@ -3976,5 +3977,9 @@ _context: HttpProtocolContext,
         inserted: r.summary.totalInserted,
         updated: r.summary.totalUpdated,
         errors: [...readErrors, ...(r.errors ?? [])],
+        // [#30348] The same per-object split (created vs matched, capped) the
+        // in-protocol apply reports — one projection, imported, so the
+        // receipt's two producers cannot disagree about which rows landed.
+        landed: seedAppliedLanded(r.results),
     };
 }

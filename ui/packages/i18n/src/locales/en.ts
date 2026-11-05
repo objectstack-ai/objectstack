@@ -1176,8 +1176,8 @@ const en = {
     },
     betterAuth: {
       short: 'Identity',
-      title: 'Managed by the identity provider',
-      body: "This object's schema is owned by {{provider}}. Direct edits bypass password hashing, session validation, two-factor checks, and audit hooks. Manage these records through your authentication provider's sign-in, invitation, and security flows instead.",
+      title: 'Written through the built-in identity service',
+      body: "This object's schema belongs to {{provider}}, the platform's built-in identity service. Create and change these records with the actions on this page, or through sign-in, invitation and security flows; every one of them goes through that service. Editing the table directly would bypass password hashing, session validation, two-factor checks and audit hooks.",
     },
   },
   kanban: {
@@ -2341,6 +2341,10 @@ const en = {
       // layer's value in the draft, and Save sends it as `null` (unset), so the
       // row falls back to the value the layer above carries.
       resetToDefault: 'Reset to default',
+      // A value set at the scope this page writes (objectstack#30329), and
+      // the default its Reset returns to. `{{value}}` is that default in words.
+      sourceBadgeModified: 'Modified',
+      defaultValueHint: 'Default: {{value}}',
       // The chips on a settings row's header (objectui#12821): the env-lock
       // chip and the title it shows when the server sends no reason, and the
       // `Deprecated` chip, with `{{replacedBy}}` the key that replaces it.
@@ -3422,6 +3426,7 @@ const en = {
       verifyingDescription: 'Hang tight while we confirm your email.',
       successTitle: 'Email verified',
       successDescription: 'Your email is confirmed. You can now sign in.',
+      handoffSuccessDescription: 'Your email is confirmed. Go back to the app you were signing in to, and sign in there.',
       errorTitle: 'Verification failed',
       errorDescription: 'Verification failed. Please request a new link.',
       missingToken: 'Verification link is missing a token.',
@@ -4005,6 +4010,9 @@ const en = {
       description: 'What publishing will change. New items are added; updates overwrite the live version.',
       // ADR-0146 D3 — where a customization of a read-only base is saved: its `.custom` pair.
       savedToCustomization: 'Saved to {{package}}’s customizations',
+      // objectstack#30119 (ADR-0146 D2) — the pair lives in this environment's database and moves only by export;
+      // `command` is always the literal `os package export`, never translated.
+      customizationEnvironment: 'These changes are kept in this environment’s database as items of {{pair}}, not in your project’s source. They reach another environment only through {{command}}.',
       loading: 'Loading pending changes…',
       loadFailed: 'Could not load pending changes:',
       empty: 'Nothing pending — every draft has been published.',

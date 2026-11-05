@@ -54,10 +54,10 @@ import {
 } from '@object-ui/app-shell';
 import { AuthLayout } from './AuthLayout';
 import { followOauthAuthorize } from './followAuthorize';
-import { handoffMarkQuery, useHandoffRedirect } from './handoffRedirect';
+import { handoffMarkQuery, useHandoffRedirect, verificationCallbackURL } from './handoffRedirect';
 // Was a second module-private copy of LoginPage's helper; both now share one
 // implementation — objectui#4181. Behaviour here is unchanged.
-import { withConsoleBase, withConsoleBaseRootRelative } from '../../utils/consoleBase';
+import { withConsoleBase } from '../../utils/consoleBase';
 import { ServerUnreachable } from './LoginPage';
 import { AuthFooter, readLegalLinks } from './AuthFooter';
 
@@ -263,9 +263,9 @@ export function RegisterPage() {
   // mail's link is the only road back, so it must carry `?redirect=` (e.g. the
   // invitation the user registered from). Only a safe in-app target is
   // forwarded; anything else would be refused by the server and fail sign-up.
-  const verificationCallbackURL = isSafeRedirect(redirect)
-    ? withConsoleBaseRootRelative(redirect)
-    : undefined;
+  // A hand-off `redirect` returns to the "go back to the app" landing instead
+  // (#30157, `./handoffRedirect` rule 6).
+  const mailCallbackURL = verificationCallbackURL(redirect);
 
   // #27509 — the server no longer knows this invitation: no form to fill.
   if (invitationRedirect && invitationArrival.gone) {
@@ -330,7 +330,7 @@ export function RegisterPage() {
               })
         }
         loginUrl={loginUrl}
-        verificationCallbackURL={verificationCallbackURL}
+        verificationCallbackURL={mailCallbackURL}
         linkComponent={RouterLink}
         // Server refusal `code` → localized end-user text: the one map both
         // register pages pass, owned by `@object-ui/app-shell` (objectui#11030).
@@ -349,7 +349,7 @@ export function RegisterPage() {
           const sp = new URLSearchParams();
           sp.set('email', email);
           if (redirect) sp.set('redirect', redirect);
-          navigate(`/verify-email-prompt?${sp.toString()}`, { replace: true });
+          navigate(`/verify-email-prompt?${sp.toString()}${handoffMarkQuery(redirect)}`, { replace: true });
         }}
         labels={{
           nameLabel: t('auth.register.nameLabel', { defaultValue: 'Name' }),
