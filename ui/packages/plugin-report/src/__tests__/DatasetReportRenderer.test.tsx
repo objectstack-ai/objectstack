@@ -30,6 +30,7 @@ type MockResult = {
   dimensionFields?: Record<string, string>;
   drillRawRows?: MockRows;
   drillRanges?: Array<Record<string, { field: string; gte: unknown; lt: unknown }>>;
+  drillScopes?: Record<string, Record<string, unknown>>;
   totals?: Array<{ dimensions: string[]; rows: MockRows }>;
 };
 
@@ -48,6 +49,7 @@ function makeSource(byDataset: Record<string, MockRows | MockResult>) {
         ...(entry?.dimensionFields ? { dimensionFields: entry.dimensionFields } : {}),
         ...(entry?.drillRawRows ? { drillRawRows: entry.drillRawRows } : {}),
         ...(entry?.drillRanges ? { drillRanges: entry.drillRanges } : {}),
+        ...(entry?.drillScopes ? { drillScopes: entry.drillScopes } : {}),
         ...(entry?.totals ? { totals: entry.totals } : {}),
       };
     }),
@@ -1178,5 +1180,115 @@ describe('DatasetReportRenderer — dimension metadata probe (objectui#5225)', (
     );
     await waitFor(() => expect(screen.getByText('In Progress')).toBeInTheDocument());
     expect(screen.queryByText('in_progress')).not.toBeInTheDocument();
+  });
+});
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * objectstack-ai/objectstack#30615 — a drill lists the records the NUMBER counted
+ *
+ * The number is computed under the dataset's and the measure's own filter as
+ * well as the report scope; the answer states the first two per measure as
+ * `drillScopes`. The fixture is the app-showcase `revenue-pulse` shape:
+ * `invoice_count` (a plain count, scope `{}`), `paid_count` (`filter: { status:
+ * 'paid' }`) and `paid_rate` (derived, no entry), grouped by `status`.
+ * ──────────────────────────────────────────────────────────────────────────── */
+describe('DatasetReportRenderer — measure drill scopes (#30615)', () => {
+  afterEach(() => cleanup());
+
+  const invoiceAnswer = (drillScopes?: Record<string, Record<string, unknown>>) => ({
+    showcase_invoice_metrics: {
+      rows: [{ status: 'Open', invoice_count: 3, paid_count: 0, paid_rate: 0 }],
+      object: 'showcase_invoice',
+      dimensionFields: { status: 'status' },
+      drillRawRows: [{ status: 'open' }],
+      ...(drillScopes ? { drillScopes } : {}),
+    },
+  });
+  const SCOPES = { invoice_count: {}, paid_count: { status: 'paid' } };
+
+  const renderSummary = (src: ReturnType<typeof makeSource>, values: string[], onDrill = vi.fn()) => {
+    render(
+      <DatasetReportRenderer
+        report={{ name: 'r', type: 'summary', dataset: 'showcase_invoice_metrics', rows: ['status'], values }}
+        dataSource={src}
+        runtimeFilter={{ region: 'emea' }}
+        onDrill={onDrill}
+      />,
+    );
+    return onDrill;
+  };
+
+  it('a filtered measure cell drills bucket AND report scope AND the measure scope', async () => {
+    const onDrill = renderSummary(makeSource(invoiceAnswer(SCOPES)), ['invoice_count', 'paid_count', 'paid_rate']);
+    await waitFor(() => expect(screen.getAllByTestId('dataset-drill-cell')).toHaveLength(2));
+    // Two measures that select different records: the line is no one list.
+    expect(screen.queryByTestId('dataset-drill-row')).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByTestId('dataset-drill-cell')[1]);
+    expect(onDrill).toHaveBeenCalledTimes(1);
+    expect(onDrill.mock.calls[0][0]).toMatchObject({
+      object: 'showcase_invoice',
+      groupKey: { status: 'Open' },
+      objectFilter: { $and: [{ region: 'emea' }, { status: 'paid' }, { status: 'open' }] },
+    });
+  });
+
+  it('an unfiltered measure cell (`{}`) drills bucket AND report scope only', async () => {
+    const onDrill = renderSummary(makeSource(invoiceAnswer(SCOPES)), ['invoice_count', 'paid_count', 'paid_rate']);
+    await waitFor(() => expect(screen.getAllByTestId('dataset-drill-cell')).toHaveLength(2));
+    fireEvent.click(screen.getAllByTestId('dataset-drill-cell')[0]);
+    expect(onDrill.mock.calls[0][0].objectFilter).toEqual({ $and: [{ region: 'emea' }, { status: 'open' }] });
+  });
+
+  it('a measure with no entry (derived) offers no drill', async () => {
+    const onDrill = renderSummary(makeSource(invoiceAnswer(SCOPES)), ['paid_rate']);
+    await waitFor(() => expect(screen.getByText('Open')).toBeInTheDocument());
+    expect(screen.queryByTestId('dataset-drill-row')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('dataset-drill-cell')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Open'));
+    expect(onDrill).not.toHaveBeenCalled();
+  });
+
+  it('an answer with an object but no drillScopes offers no drill', async () => {
+    const onDrill = renderSummary(makeSource(invoiceAnswer()), ['invoice_count']);
+    await waitFor(() => expect(screen.getByText('Open')).toBeInTheDocument());
+    expect(screen.queryByTestId('dataset-drill-row')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Open'));
+    expect(onDrill).not.toHaveBeenCalled();
+  });
+
+  it('a line whose measures share one scope drills as a line, carrying it', async () => {
+    const onDrill = renderSummary(makeSource(invoiceAnswer(SCOPES)), ['paid_count']);
+    await waitFor(() => expect(screen.getByTestId('dataset-drill-row')).toBeInTheDocument());
+    expect(screen.queryByTestId('dataset-drill-cell')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('dataset-drill-row'));
+    expect(onDrill.mock.calls[0][0].objectFilter).toEqual({
+      $and: [{ region: 'emea' }, { status: 'paid' }, { status: 'open' }],
+    });
+  });
+
+  it('matrix: a cell drills with its own measure scope; a measure with no entry does not drill', async () => {
+    const src = makeSource({
+      showcase_invoice_metrics: {
+        rows: [{ status: 'Open', region: 'EMEA', paid_count: 0, paid_rate: 0 }],
+        object: 'showcase_invoice',
+        dimensionFields: { status: 'status', region: 'region' },
+        drillRawRows: [{ status: 'open', region: 'emea' }],
+        drillScopes: { paid_count: { status: 'paid' } },
+      },
+    });
+    const onDrill = vi.fn();
+    render(
+      <DatasetReportRenderer
+        report={{ name: 'm', type: 'matrix', dataset: 'showcase_invoice_metrics', rows: ['status'], columns: ['region'], values: ['paid_count', 'paid_rate'] }}
+        dataSource={src}
+        onDrill={onDrill}
+      />,
+    );
+    await waitFor(() => expect(screen.getByTestId('dataset-matrix')).toBeInTheDocument());
+    expect(screen.getAllByTestId('dataset-drill-cell')).toHaveLength(1);
+    fireEvent.click(screen.getByTestId('dataset-drill-cell'));
+    expect(onDrill.mock.calls[0][0].objectFilter).toEqual({
+      $and: [{ status: 'paid' }, { status: 'open' }, { region: 'emea' }],
+    });
   });
 });
