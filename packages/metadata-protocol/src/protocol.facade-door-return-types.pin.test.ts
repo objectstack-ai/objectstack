@@ -15,8 +15,9 @@
  * the body lives. An edit that drops one of these annotations turns this red,
  * before a later move could re-infer it.
  *
- * The bodies are still on the class: each door keeps its row in
- * `scripts/facade-delegation-registry.json` until a facade pass moves it.
+ * A door's body moves to its facet with `codemod-split-protocol.mjs --members`
+ * (#30518); until it does, the door keeps its row in
+ * `scripts/facade-delegation-registry.json`.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
