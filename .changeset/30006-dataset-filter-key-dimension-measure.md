@@ -6,7 +6,7 @@ fix(lint): a widget filter keyed on a dataset dimension publishes, and a filter 
 
 Clause-②: yes (widening)
 Metadata-protocol: none
-Skills-docs: follow-up owed — `content/docs/deployment/validating-metadata.mdx` (the package-closure paragraph says "a filter key the object lacks is refused there"; after this change a bare key naming one of the dataset's dimensions is accepted too, so that sentence should read "a filter key that neither the object nor the dataset's dimensions name"). `skills/**` teaches widget `filter` and report `runtimeFilter` keys that are fields of the dataset's object, which both rules accept unchanged, and no page teaches a measure name as a filter key. The accept set and the measure reasoning ship in `os explain widget-filter-field-unknown` and `os explain report-filter-field-unknown`.
+Skills-docs: updated here — content/docs/deployment/validating-metadata.mdx
 
 `widget-filter-field-unknown` and `report-filter-field-unknown` now judge a bare filter key against one accept set, held in `judgeDatasetFilterKeys`, so the two rules cannot drift: a field of the dataset's object (authored or registry-injected), then a dimension of the dataset.
 
