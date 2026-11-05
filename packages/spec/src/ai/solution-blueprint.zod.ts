@@ -146,6 +146,35 @@ export const BlueprintObjectSchema = lazySchema(() => z.object({
 export type BlueprintObject = z.input<typeof BlueprintObjectSchema>;
 
 /**
+ * How a blueprint dashboard widget aggregates its records (ruling A on
+ * cloud#3607 row 2). Before this key the widget could only name its `measure`
+ * and the reader picked the aggregation from the field type, so a widget meant
+ * to AVERAGE a plain number field summed it (a 「平均面试评分」 card showed the
+ * total of 12 scores, 908) and nothing on this shape could say otherwise.
+ * Declared once and spelled by both the lenient widget and its strict mirror.
+ */
+const BLUEPRINT_WIDGET_AGGREGATES = ['sum', 'avg', 'min', 'max', 'count'] as const;
+
+/** What each {@link BLUEPRINT_WIDGET_AGGREGATES} value means — one sentence, read on both sides. */
+const WIDGET_AGGREGATE_MEANING = '"sum" = the total of the `measure` field; "avg" = its average; "min" / "max" = its smallest / largest value; "count" = the number of records the widget covers (after its `condition`). "sum", "avg", "min" and "max" need `measure` to name a numeric field of the widget\'s object. "count" needs no `measure` field: it counts records, and a field named in `measure` beside it is not read. Say what the widget computes: an average → "avg", a total → "sum", a highest / lowest value → "max" / "min", a number of records → "count".';
+
+/** The widget `measure` rule, read on both sides: it names a field, never an aggregation. */
+const WIDGET_MEASURE_RULE = 'Name the FIELD, not "total_amount" or "avg_score": how it is aggregated is what `aggregate` says, never this key. A "total revenue" widget sets measure:"amount" with aggregate:"sum"; an "average interview score" widget sets measure:"score" with aggregate:"avg"; a "number of deals" widget sets aggregate:"count" and needs no measure.';
+
+/**
+ * The blueprint view's calendar date key (ruling B on cloud#3607): which date
+ * field a `calendar` view schedules on, the value the built view carries as
+ * `calendar.startDateField`. Read for `type: "calendar"` only and IGNORED on
+ * every other view type, not refused: the strict mirror the design model
+ * generates against is per-leaf and cannot state a cross-key rule, so a
+ * refusal on the lenient side alone would make a proposal legal to generate
+ * and illegal to apply (the cloud#1967 failure mode documented below), and
+ * `groupBy` already sets the precedent of a kind-scoped key that other kinds
+ * ignore.
+ */
+const VIEW_START_DATE_FIELD_RULE = 'For type:"calendar" only: the date or datetime field of THIS view\'s object that places each record on the calendar (e.g. "interview_date", "due_date"), carried into the built view as `calendar.startDateField`. snake_case, naming one of the object\'s own fields. SET it on every calendar view; without it the builder binds a date field of its own choosing, which may not be the one meant. Ignored on the other view types (a gantt view takes its dates from `columns`, start before end).';
+
+/**
  * A proposed list/form/kanban/calendar/gallery/gantt view over an object.
  *
  * `filters` and `sort` are what let a view keep the promise its name makes
@@ -180,6 +209,8 @@ export const BlueprintViewSchema = lazySchema(() => z.object({
     .describe('Which records this view shows: the list-view filter rules [{ field, operator, value }] the built view carries, ANDed. REQUIRED whenever the view\'s name or label states a condition — an 「overdue / 逾期」, 「my open / 我的未完成」, 「待审批」 or 「本月」 view MUST carry the rules that make its name true, e.g. overdue → [{ field: "due_date", operator: "less_than", value: "{today}" }, { field: "status", operator: "not_equals", value: "completed" }]; my open → [{ field: "owner", operator: "equals", value: "{current_user_id}" }, { field: "status", operator: "equals", value: "open" }]. WITHOUT it the view shows EVERY record under a name that promises a subset. For a select field compare its option VALUE, never its label. Omit for a view that genuinely spans every record.'),
   sort: z.array(SortItemSchema).optional()
     .describe('Default record order: [{ field, order }] with order "asc" or "desc"; the first entry sorts first (e.g. an overdue list → [{ field: "due_date", order: "asc" }]). Omit for the platform default order.'),
+  startDateField: z.string().regex(SNAKE_CASE).optional()
+    .describe(VIEW_START_DATE_FIELD_RULE),
 }));
 export type BlueprintView = z.input<typeof BlueprintViewSchema>;
 /** Post-parse shape of {@link BlueprintView} — defaults applied, transforms run (ADR-0122). */
@@ -208,7 +239,9 @@ export const BlueprintDashboardSchema = lazySchema(() => z.object({
     object: z.string().regex(SNAKE_CASE).optional().describe('Source object for the widget'),
     chart: z.enum(['metric', 'bar', 'line', 'pie', 'table']).optional().describe('Widget visualization'),
     measure: z.string().regex(SNAKE_CASE).optional()
-      .describe('The field this widget aggregates (e.g. "amount", "probability"), or "count" to count records. The aggregation is chosen automatically from the field type — a money field SUMs, a percentage/rate AVERAGEs — so name the FIELD, not "total_amount". A "total revenue" widget sets measure:"amount"; an "average win rate" widget sets measure:"win_rate"; a "number of deals" widget sets measure:"count". Omit to let the builder infer from the title.'),
+      .describe(`The field this widget aggregates (e.g. "amount", "score"), or "count" to count records. ${WIDGET_MEASURE_RULE} Omit for a count widget.`),
+    aggregate: z.enum(BLUEPRINT_WIDGET_AGGREGATES).optional()
+      .describe(`How the widget aggregates its records: ${WIDGET_AGGREGATE_MEANING} SET it on every widget that aggregates; omitted, the reader falls back to a default it picks from the field type (a numeric field sums), which is not the average or extreme a widget may mean.`),
     groupBy: z.string().regex(SNAKE_CASE).optional()
       .describe('The field to break the widget down by — the category or time axis (e.g. "stage", "created_at"). A "by status" chart MUST set this to the status field; the title and this field MUST name the SAME field. Omit for a single-number metric.'),
     condition: BlueprintWidgetConditionSchema.optional()
@@ -453,6 +486,11 @@ const StrictView = z.object({
     .describe('Which records this view shows: list-view filter rules [{field, operator, value}], ANDed, or null for a view over EVERY record. REQUIRED whenever the view\'s name or label states a condition — an 「overdue / 逾期」, 「my open / 我的未完成」, 「待审批」 or 「本月」 view MUST carry the rules that make its name true, e.g. overdue → [{field:"due_date",operator:"less_than",value:"{today}"},{field:"status",operator:"not_equals",value:"completed"}]; my open → [{field:"owner",operator:"equals",value:"{current_user_id}"},{field:"status",operator:"equals",value:"open"}]. Null under such a name ships a view that shows every record while its name promises a subset.'),
   sort: z.array(StrictSortItem).nullable()
     .describe('Default record order: [{field, order}] with order "asc" or "desc"; the first entry sorts first (e.g. an overdue list → [{field:"due_date",order:"asc"}]), or null for the platform default order.'),
+  // ⛔ Must stay in lockstep with the lenient `BlueprintViewSchema.startDateField`
+  // (ruling B on cloud#3607): THIS describe is the one the design model reads,
+  // and strict mode makes the key required, so it decides on every view. The
+  // view key-parity pin fails if either side drops it.
+  startDateField: strictIdentOrNull(`${VIEW_START_DATE_FIELD_RULE} Null on every view that is not a calendar.`),
 });
 
 const StrictDashboard = z.object({
@@ -463,7 +501,12 @@ const StrictDashboard = z.object({
     title: z.string().nullable().describe('Widget title, or null'),
     object: strictIdentOrNull('Source object, or null'),
     chart: z.enum(['metric', 'bar', 'line', 'pie', 'table']).nullable().describe('Visualization, or null'),
-    measure: strictIdentOrNull('The field this widget aggregates (e.g. "amount", "probability"), or "count" to count records, or null to infer from the title. The aggregation (sum vs average) is chosen automatically from the field type — name the FIELD, not "total_amount". "total revenue" → "amount"; "average win rate" → "win_rate"; "number of deals" → "count".'),
+    measure: strictIdentOrNull(`The field this widget aggregates (e.g. "amount", "score"), or "count" to count records, or null for a count widget. ${WIDGET_MEASURE_RULE}`),
+    // ⛔ Must stay in lockstep with the lenient widget `aggregate` (ruling A on
+    // cloud#3607 row 2): with it on the lenient side only, the design model
+    // could never say "average". The widget key-parity pin fails if it goes.
+    aggregate: z.enum(BLUEPRINT_WIDGET_AGGREGATES).nullable()
+      .describe(`How the widget aggregates its records, or null for the reader's field-type default (a numeric field sums). ${WIDGET_AGGREGATE_MEANING} Write it, never null, on every widget that aggregates.`),
     groupBy: strictIdentOrNull('The field to break the widget down by — the category or time axis (e.g. "stage", "created_at"), or null for a single-number metric. A "by status" chart MUST set this to the status field; the title and this field MUST name the SAME field.'),
     condition: z.object({
       field: strictIdent('Field on the widget object to filter by (e.g. "stock_quantity", "status")'),

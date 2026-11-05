@@ -504,8 +504,8 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
     const parsed = SolutionBlueprintStrictSchema.parse({
       ...strictBp,
       views: [
-        { object: 'event', name: 'wall', label: null, type: 'gallery', columns: null, groupBy: null, filters: null, sort: null },
-        { object: 'event', name: 'plan', label: null, type: 'gantt', columns: null, groupBy: null, filters: null, sort: null },
+        { object: 'event', name: 'wall', label: null, type: 'gallery', columns: null, groupBy: null, filters: null, sort: null, startDateField: null },
+        { object: 'event', name: 'plan', label: null, type: 'gantt', columns: null, groupBy: null, filters: null, sort: null, startDateField: null },
       ],
     });
     expect(parsed.views?.map((v) => v.type)).toEqual(['gallery', 'gantt']);
@@ -731,8 +731,8 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
           name: 'overview',
           label: null,
           widgets: [
-            { id: 'revenue', title: 'Total revenue', object: 'project', chart: 'metric', measure: 'amount', groupBy: null, condition: null },
-            { id: 'low_stock', title: 'Low stock', object: 'project', chart: 'table', measure: null, groupBy: null, condition: { field: 'qty', op: 'lt', value: 10 } },
+            { id: 'revenue', title: 'Total revenue', object: 'project', chart: 'metric', measure: 'amount', aggregate: 'sum', groupBy: null, condition: null },
+            { id: 'low_stock', title: 'Low stock', object: 'project', chart: 'table', measure: null, aggregate: null, groupBy: null, condition: { field: 'qty', op: 'lt', value: 10 } },
           ],
         },
       ],
@@ -753,7 +753,7 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
 
   describe('view filters + sort (the model states a view\'s filter or says null)', () => {
     const strictView = {
-      object: 'task', name: 'overdue_tasks', label: '逾期任务', type: 'list', columns: ['title', 'due_date'], groupBy: null,
+      object: 'task', name: 'overdue_tasks', label: '逾期任务', type: 'list', columns: ['title', 'due_date'], groupBy: null, startDateField: null,
     };
     /** The first issue of a failed strict parse, as `{ path, code }`. */
     const firstIssue = (input: unknown) => {
@@ -905,10 +905,29 @@ describe('strict mirror ↔ lenient schema — key parity', () => {
     // design step could never state the filter its view's name promises, and the
     // applier would accept a filter no proposal can contain. There are NO
     // deliberate view-level exclusions (measured: both sides carry
-    // object/name/label/type/columns/groupBy/filters/sort); if one ever becomes
+    // object/name/label/type/columns/groupBy/filters/sort/startDateField); if one ever becomes
     // deliberate, list it explicitly here with its reason.
     expect(Object.keys(strictViewShape()).sort()).toEqual(Object.keys(lenientViewShape()).sort());
-    expect(Object.keys(lenientViewShape())).toEqual(expect.arrayContaining(['filters', 'sort']));
+    expect(Object.keys(lenientViewShape())).toEqual(expect.arrayContaining(['filters', 'sort', 'startDateField']));
+  });
+
+  it('the DASHBOARD and WIDGET schemas carry exactly the same keys', () => {
+    // The fifth level of the same gap, pinned with the widget `aggregate`
+    // (ruling A on cloud#3607 row 2): with the key on the lenient side only,
+    // the design model could never say "average", and a widget meant to
+    // average a number field summed it. No deliberate exclusions at either
+    // level (measured: both sides carry name/label/widgets, and the widget
+    // id/title/object/chart/measure/aggregate/groupBy/condition).
+    const dashboardShape = (root: any) => root.shape.dashboards.unwrap().element.shape;
+    const widgetShape = (root: any) => dashboardShape(root).widgets.unwrap().element.shape;
+    expect(Object.keys(dashboardShape(SolutionBlueprintStrictSchema)).sort())
+      .toEqual(Object.keys(dashboardShape(SolutionBlueprintSchema)).sort());
+    expect(Object.keys(widgetShape(SolutionBlueprintStrictSchema)).sort())
+      .toEqual(Object.keys(widgetShape(SolutionBlueprintSchema)).sort());
+    expect(Object.keys(widgetShape(SolutionBlueprintSchema))).toContain('aggregate');
+    // Value parity for the enum the VALUE-parity walker below cannot see.
+    expect([...widgetShape(SolutionBlueprintStrictSchema).aggregate.unwrap().options].sort())
+      .toEqual([...widgetShape(SolutionBlueprintSchema).aggregate.unwrap().options].sort());
   });
 
   it('the view FILTER RULE and SORT ENTRY shapes carry exactly the same keys', () => {
@@ -1143,5 +1162,135 @@ describe('strict mirror ↔ lenient schema — VALUE parity', () => {
     // Before cloud#1967 this parse SUCCEEDED — the proposal was legal to
     // generate and illegal to apply.
     expect(strict.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Widget `aggregate` (ruling A on cloud#3607 row 2) and the calendar view's
+// `startDateField` (ruling B on cloud#3607). Both are optional on the lenient
+// side and required-but-nullable on the strict mirror.
+// ---------------------------------------------------------------------------
+describe('blueprint widget `aggregate` and calendar view `startDateField`', () => {
+  const AGGREGATES = ['sum', 'avg', 'min', 'max', 'count'] as const;
+  const strictBase = {
+    summary: 's',
+    assumptions: [],
+    questions: null,
+    objects: [{
+      name: 'interview', label: null, description: null, sharingModel: null, nameField: null, stageField: null,
+      fields: [{
+        name: 'score', label: null, type: 'number', required: null, reference: null, options: null,
+        summaryOperations: null, expression: null,
+      }],
+    }],
+    views: null,
+    dashboards: null,
+    app: null,
+  };
+  const strictWidget = (aggregate: unknown) => ({
+    ...strictBase,
+    dashboards: [{ name: 'hiring', label: null, widgets: [{
+      id: 'avg_score', title: '平均面试评分', object: 'interview', chart: 'metric',
+      measure: aggregate === 'count' ? null : 'score', aggregate, groupBy: null, condition: null,
+    }] }],
+  });
+  const lenientWidget = (widget: Record<string, unknown>) => ({
+    summary: 's',
+    objects: [{ name: 'interview', fields: [{ name: 'score', type: 'number' }] }],
+    dashboards: [{ name: 'hiring', widgets: [{ id: 'w', object: 'interview', chart: 'metric', ...widget }] }],
+  });
+  const strictView = (view: Record<string, unknown>) => ({
+    ...strictBase,
+    views: [{
+      object: 'interview', name: 'interview_calendar', label: null, type: 'calendar', columns: null,
+      groupBy: null, filters: null, sort: null, startDateField: null, ...view,
+    }],
+  });
+  /** The issues of a failed parse, as `{ path, code }`. */
+  const issuesOf = (result: { success: boolean; error?: { issues: Array<{ path: PropertyKey[]; code: string }> } }) => {
+    expect(result.success).toBe(false);
+    return (result.error?.issues ?? []).map((i) => ({ path: i.path, code: i.code }));
+  };
+
+  it.each(AGGREGATES)('accepts aggregate %s on both sides', (aggregate) => {
+    expect(SolutionBlueprintStrictSchema.parse(strictWidget(aggregate)).dashboards?.[0].widgets?.[0].aggregate)
+      .toBe(aggregate);
+    const measure = aggregate === 'count' ? {} : { measure: 'score' };
+    expect(SolutionBlueprintSchema.parse(lenientWidget({ ...measure, aggregate })).dashboards?.[0].widgets?.[0].aggregate)
+      .toBe(aggregate);
+  });
+
+  it('`count` needs no measure field on either side', () => {
+    const lenient = SolutionBlueprintSchema.parse(lenientWidget({ aggregate: 'count' }));
+    expect(lenient.dashboards?.[0].widgets?.[0]).toMatchObject({ aggregate: 'count' });
+    expect(lenient.dashboards?.[0].widgets?.[0].measure).toBeUndefined();
+    expect(SolutionBlueprintStrictSchema.parse(strictWidget('count')).dashboards?.[0].widgets?.[0].measure).toBeNull();
+  });
+
+  it('refuses an unknown aggregate on both sides, at the key', () => {
+    for (const bad of ['average', 'median', 'count_distinct', 'AVG', '']) {
+      expect(issuesOf(SolutionBlueprintStrictSchema.safeParse(strictWidget(bad))))
+        .toEqual([{ path: ['dashboards', 0, 'widgets', 0, 'aggregate'], code: 'invalid_value' }]);
+      expect(issuesOf(SolutionBlueprintSchema.safeParse(lenientWidget({ measure: 'score', aggregate: bad }))))
+        .toEqual([{ path: ['dashboards', 0, 'widgets', 0, 'aggregate'], code: 'invalid_value' }]);
+    }
+  });
+
+  it('absent still parses on the lenient side; the strict mirror takes null and refuses the key missing', () => {
+    expect(SolutionBlueprintSchema.parse(lenientWidget({ measure: 'score' })).dashboards?.[0].widgets?.[0].aggregate)
+      .toBeUndefined();
+    expect(SolutionBlueprintStrictSchema.parse(strictWidget(null)).dashboards?.[0].widgets?.[0].aggregate).toBeNull();
+    const missing = strictWidget(null);
+    delete (missing.dashboards[0].widgets[0] as Record<string, unknown>).aggregate;
+    // A missing enum key reads as a value outside the enum; the path is the fact.
+    expect(issuesOf(SolutionBlueprintStrictSchema.safeParse(missing)).map((i) => i.path))
+      .toEqual([['dashboards', 0, 'widgets', 0, 'aggregate']]);
+  });
+
+  it('no describe tells the author to infer the aggregation from the title', () => {
+    const widgetShape = (root: any) => root.shape.dashboards.unwrap().element.shape.widgets.unwrap().element.shape;
+    for (const root of [SolutionBlueprintSchema, SolutionBlueprintStrictSchema]) {
+      for (const key of ['measure', 'aggregate']) {
+        const text: string = widgetShape(root)[key].description;
+        expect(text).not.toMatch(/infer/i);
+        expect(text).not.toMatch(/chosen automatically/i);
+      }
+    }
+  });
+
+  it('accepts startDateField on a calendar view on both sides', () => {
+    expect(SolutionBlueprintStrictSchema.parse(strictView({ startDateField: 'interview_date' })).views?.[0].startDateField)
+      .toBe('interview_date');
+    expect(BlueprintViewSchema.parse({
+      object: 'interview', name: 'interview_calendar', type: 'calendar', startDateField: 'interview_date',
+    }).startDateField).toBe('interview_date');
+    expect(BlueprintViewSchema.parse({ object: 'interview', name: 'interview_calendar', type: 'calendar' }).startDateField)
+      .toBeUndefined();
+  });
+
+  it('refuses a wrong-typed or non-identifier startDateField, at the key', () => {
+    for (const bad of [42, true, ['interview_date'], { field: 'interview_date' }, 'Interview Date']) {
+      expect(issuesOf(SolutionBlueprintStrictSchema.safeParse(strictView({ startDateField: bad }))).map((i) => i.path))
+        .toEqual([['views', 0, 'startDateField']]);
+      expect(issuesOf(BlueprintViewSchema.safeParse({
+        object: 'interview', name: 'v', type: 'calendar', startDateField: bad,
+      })).map((i) => i.path)).toEqual([['startDateField']]);
+    }
+    const missing = strictView({});
+    delete (missing.views[0] as Record<string, unknown>).startDateField;
+    expect(issuesOf(SolutionBlueprintStrictSchema.safeParse(missing)))
+      .toEqual([{ path: ['views', 0, 'startDateField'], code: 'invalid_type' }]);
+  });
+
+  it('is ignored, not refused, on a non-calendar view: legal to generate stays legal to apply', () => {
+    // The strict mirror cannot state a cross-key rule, so both sides accept
+    // the key on every view type and the reader reads it on a calendar only.
+    for (const type of ['list', 'form', 'kanban', 'gallery', 'gantt'] as const) {
+      expect(SolutionBlueprintStrictSchema.safeParse(strictView({ type, startDateField: 'interview_date' })).success)
+        .toBe(true);
+      expect(BlueprintViewSchema.safeParse({
+        object: 'interview', name: 'v', type, startDateField: 'interview_date',
+      }).success).toBe(true);
+    }
   });
 });
