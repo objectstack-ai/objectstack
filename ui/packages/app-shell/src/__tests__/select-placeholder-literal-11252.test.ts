@@ -73,6 +73,16 @@ const SKIP_DIRS = new Set([
   '__tests__', '__mocks__', 'test', 'tests', 'e2e',
 ]);
 const SOURCE_FILE = /\.(?:tsx?|jsx?|mts|cts|mjs|cjs)$/;
+const TSUP_BUNDLED_CONFIG = /\.bundled_[^./]+\.mjs$/;
+/** A file that vanished between list and read (ENOENT only) is not read; every other fault throws. */
+const readIfPresent = (full: string): string | undefined => {
+  try {
+    return readFileSync(full, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') throw err;
+    return undefined;
+  }
+};
 const NOT_PRODUCT = /\.d\.ts$|\.(?:test|spec|stories)\.[cm]?[jt]sx?$/;
 const PACK_DIR = 'packages/i18n/src/locales/';
 
@@ -148,9 +158,14 @@ function scanTree(): { filesRead: number; hits: Hit[] } {
         continue;
       }
       if (!SOURCE_FILE.test(entry.name) || NOT_PRODUCT.test(entry.name)) continue;
+      // tsup's transient bundle of a package's `tsup.config.ts`, written and
+      // deleted mid-build by a concurrent shard (#30256): skipped by name.
+      if (TSUP_BUNDLED_CONFIG.test(entry.name)) continue;
+      const text = readIfPresent(full);
+      if (text === undefined) continue;
       filesRead += 1;
       const rel = relative(REPO_ROOT, full).split(sep).join('/');
-      hits.push(...scanSource(rel, readFileSync(full, 'utf8')));
+      hits.push(...scanSource(rel, text));
     }
   };
   for (const root of SCAN_ROOTS) {

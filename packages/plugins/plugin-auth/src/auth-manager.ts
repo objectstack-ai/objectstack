@@ -1175,40 +1175,76 @@ function ipv4ToInt(ip: string): number | null {
 }
 
 /**
- * `::ffff:203.0.113.7` → `203.0.113.7`; anything else is returned trimmed.
- *
- * A dual-stack listener reports an IPv4 peer in this IPv4-mapped IPv6 form, and
- * the ADR-0069 D5 allow-list judges the transport's peer address when no proxy
- * is trusted. So both sides of a comparison are read as the IPv4 address they
- * denote, or an IPv4 range could never admit an IPv4 client on such a socket.
+ * An address as the ADR-0069 D5 matcher compares it: an IPv4 address as a
+ * uint32, any other IPv6 address as its eight 16-bit groups, or `null` when
+ * the text is neither. An IPv4-mapped IPv6 address (`::ffff:0:0/96`, dotted
+ * or hex) is the IPv4 address it maps: a dual-stack listener reports an IPv4
+ * peer in that form, and the allow-list judges the transport's peer address
+ * when no proxy is trusted, so an IPv4 range must admit an IPv4 client on such
+ * a socket. An IPv6 zone identifier (`%eth0`) is dropped: it names the
+ * interface the address was reached on, not the address.
  */
-function unmapIpv4(address: string): string {
-  const trimmed = address.trim();
-  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(trimmed);
-  return mapped ? mapped[1] : trimmed;
+type MatchedAddress = { v4: number } | { v6: number[] };
+
+function readMatchedAddress(text: string): MatchedAddress | null {
+  const trimmed = text.trim();
+  const v4 = ipv4ToInt(trimmed);
+  if (v4 !== null) return { v4 };
+  const zoneAt = trimmed.indexOf('%');
+  const groups = parseIpv6Literal((zoneAt === -1 ? trimmed : trimmed.slice(0, zoneAt)).toLowerCase());
+  if (!groups) return null;
+  if (groups.slice(0, 5).every((g) => g === 0) && groups[5] === 0xffff) {
+    return { v4: ((groups[6]! << 16) >>> 0) + groups[7]! };
+  }
+  return { v6: groups };
+}
+
+/** Do the first `bits` bits of two eight-group IPv6 addresses agree? */
+function ipv6PrefixEqual(a: readonly number[], b: readonly number[], bits: number): boolean {
+  for (let i = 0; i < 8 && bits > 0; i++, bits -= 16) {
+    const mask = bits >= 16 ? 0xffff : (0xffff << (16 - bits)) & 0xffff;
+    if ((a[i]! & mask) !== (b[i]! & mask)) return false;
+  }
+  return true;
 }
 
 /**
- * ADR-0069 D5 — does `ip` match `range` (IPv4 CIDR `a.b.c.d/n`, or exact IP)?
- * An IPv4-mapped IPv6 address on either side compares as its IPv4 address.
+ * ADR-0069 D5 — does `ip` match `range`? A range is an IPv4 CIDR
+ * (`a.b.c.d/n`), an IPv6 CIDR (`2001:db8::/32`: the first `n` of 128 bits),
+ * or one exact address. Both sides are read as the address they denote
+ * ({@link readMatchedAddress}), so an IPv4-mapped IPv6 address on either side
+ * compares as its IPv4 address, and an exact IPv6 entry matches however it is
+ * spelled. An address is matched only against a range of its own family: an
+ * IPv4 range never admits a pure IPv6 address, nor an IPv6 range an IPv4 one.
+ *
+ * A CIDR whose prefix is not one the family reads (an IPv6 prefix must be a
+ * whole number from 0 to 128) is read as its base address alone, and any
+ * other entry that is not an address is compared as text, which an address
+ * the server established never equals. The IPv4 prefix keeps its earlier
+ * reading (`Number`, 0 to 32).
+ *
+ * One matcher for every door that judges the list: the sign-in gate
+ * ({@link AuthManager.isClientIpAllowed}) and the settings save check
+ * (`allowed-ip-ranges.ts`) must judge the same address the same way.
  */
 export function ipMatchesRange(ip: string, range: string): boolean {
-  const r = unmapIpv4(range || '');
+  const r = (range || '').trim();
   if (!r) return false;
-  const address = unmapIpv4(ip);
-  if (r.includes('/')) {
-    const [rawBase, bitsStr] = r.split('/');
-    const base = unmapIpv4(rawBase);
-    const bits = Number(bitsStr);
-    const ipInt = ipv4ToInt(address);
-    const baseInt = ipv4ToInt(base);
-    if (ipInt === null || baseInt === null || !(bits >= 0 && bits <= 32)) {
-      return address === base; // non-IPv4-CIDR → exact-match fallback
-    }
+  const address = readMatchedAddress(ip);
+  const [rawBase, bitsStr] = r.split('/');
+  const base = readMatchedAddress(rawBase!);
+  if (!base || !address) return ip.trim() === rawBase!.trim();
+  if ('v4' in base) {
+    if (!('v4' in address)) return false;
+    const bits = bitsStr === undefined ? 32 : Number(bitsStr);
+    if (!(bits >= 0 && bits <= 32)) return address.v4 === base.v4; // not an IPv4 prefix → exact base
     const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
-    return ((ipInt & mask) >>> 0) === ((baseInt & mask) >>> 0);
+    return ((address.v4 & mask) >>> 0) === ((base.v4 & mask) >>> 0);
   }
-  return address === r;
+  if (!('v6' in address)) return false;
+  const prefix = bitsStr === undefined ? '128' : bitsStr.trim();
+  const bits = /^\d{1,3}$/.test(prefix) && Number(prefix) <= 128 ? Number(prefix) : 128; // not an IPv6 prefix → exact base
+  return ipv6PrefixEqual(address.v6, base.v6, bits);
 }
 
 /**
@@ -5940,7 +5976,7 @@ export class AuthManager {
    * only for an address inside one of them, and FALSE for an undetermined
    * address (`undefined` / empty): an allow-list is a gate, and a gate that
    * opens for "unknown" is open to anyone who can make themselves unknown.
-   * Supports IPv4 CIDR + exact IPv4/IPv6 (IPv4-mapped IPv6 compares as IPv4).
+   * Supports IPv4 and IPv6 CIDR + exact IPv4/IPv6 ({@link ipMatchesRange}).
    *
    * `ip` must be the address the server established
    * ({@link resolveClientAddress}), never a header read by the caller.

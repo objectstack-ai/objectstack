@@ -1756,6 +1756,9 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "params.type": {
         label: "型"
       },
+      "params.widget": {
+        label: "ウィジェット指定"
+      },
       "params.required": {
         label: "必須"
       },
