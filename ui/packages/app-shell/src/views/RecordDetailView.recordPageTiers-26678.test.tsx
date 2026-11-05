@@ -155,12 +155,18 @@ function makeDataSource() {
   };
 }
 
-function renderPage({ width, embedded = false, search = '', windowWidth = 1440 }: { width: number; embedded?: boolean; search?: string; windowWidth?: number }) {
+function renderPage({
+  width,
+  embedded = false,
+  search = '',
+  windowWidth = 1440,
+  objects = OBJECTS,
+}: { width: number; embedded?: boolean; search?: string; windowWidth?: number; objects?: typeof OBJECTS }) {
   rootWidth = width;
   Object.defineProperty(window, 'innerWidth', { value: windowWidth, configurable: true, writable: true });
   dataSource = makeDataSource();
   const metadata = {
-    objects: OBJECTS,
+    objects,
     pages: [],
     loading: false,
     error: null,
@@ -175,7 +181,7 @@ function renderPage({ width, embedded = false, search = '', windowWidth = 1440 }
       <MetadataCtx.Provider value={metadata}>
         <RecordDetailView
           dataSource={dataSource as never}
-          objects={OBJECTS}
+          objects={objects}
           onEdit={() => {}}
           objectNameOverride={PARENT}
           recordIdOverride={RECORD_ID}
@@ -356,5 +362,30 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     // The face takes the page: no columns under it.
     expect(container.querySelector('[data-record-columns]')).toBeNull();
     await waitFor(() => expect(auditReads()).toBeGreaterThan(0));
+  });
+});
+
+describe('RecordDetailView — the 动态 tab offers 变更 only while the record shows its field history (objectstack#30074)', () => {
+  /** The full stream's chips, in order, once the 动态 tab has drawn. */
+  const streamChips = async (container: HTMLElement) =>
+    waitFor(
+      () => {
+        const chips = container.querySelectorAll('[data-related-enlarged="timeline"] [data-stream-filter]');
+        expect(chips.length).toBeGreaterThan(0);
+        return Array.from(chips).map((chip) => chip.getAttribute('data-stream-filter'));
+      },
+      { timeout: 5000 },
+    );
+
+  it('an object with `enable.trackHistory`: 全部 / 活动 / 讨论 / 变更', async () => {
+    const { container } = renderPage({ width: 1440, search: '?related=timeline' });
+    expect(await streamChips(container)).toEqual(['all', 'activity', 'discussion', 'changes']);
+  });
+
+  it('the same object without it: no 变更 chip, and no audit read', async () => {
+    const untracked = OBJECTS.map((o) => (o.name === PARENT ? { ...o, enable: undefined } : o)) as typeof OBJECTS;
+    const { container } = renderPage({ width: 1440, search: '?related=timeline', objects: untracked });
+    expect(await streamChips(container)).toEqual(['all', 'activity', 'discussion']);
+    expect(auditReads()).toBe(0);
   });
 });
