@@ -3,7 +3,7 @@
 '@object-ui/i18n': patch
 ---
 
-fix(app-shell): Studio's rails mark a customized row with the word 定制 / Customized and an added row with 新增 / Added, no fill, instead of a filled square with a glyph that read as an add button (#30070)
+fix(app-shell): Studio's rails mark a customized row with the word 定制 / Custom and an added row with 新增 / Added, no fill, instead of a filled square with a glyph that read as an add button (#30070)
 
 Clause-②: yes (widening) — new studio i18n key `engine.customizationMark.customizedShort` (en, zh)
 Metadata-protocol: none
