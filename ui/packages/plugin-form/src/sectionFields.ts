@@ -303,6 +303,19 @@ export function warnSectionMemberExcludedByFields(
  * against — the lint's rule likewise judges only a known object — so the bare
  * stub stays: its value does reach that host.
  */
+/**
+ * The label a declared field without one is drawn under: its name with the
+ * first letter capitalised and underscores as spaces (`part_no` → `Part no`).
+ *
+ * The spec's `FieldSchema.label` is optional, so a label-less field is valid
+ * metadata, and the list draws it under exactly this rule
+ * (`objectGridGenerateColumns`, plugin-grid). The form follows it, so one
+ * field reads the same in the list and in its form (objectstack#30328).
+ */
+export function fieldNameLabel(fieldName: string): string {
+  return fieldName.charAt(0).toUpperCase() + fieldName.slice(1).replace(/_/g, ' ');
+}
+
 export function fromObjectSchema(fieldName: string, ctx: SectionFieldsContext): FormField | undefined {
   const field = ctx.objectSchema?.fields?.[fieldName];
   if (!field) {
@@ -311,7 +324,7 @@ export function fromObjectSchema(fieldName: string, ctx: SectionFieldsContext): 
   }
   return {
     name: fieldName,
-    label: ctx.fieldLabel(ctx.objectName, fieldName, field.label || fieldName),
+    label: ctx.fieldLabel(ctx.objectName, fieldName, field.label || fieldNameLabel(fieldName)),
     // The widget id is a function of the (type, multiple) PAIR, not of the type
     // alone: a `select` declared `multiple: true` renders the multi-value chip
     // picker, and the label-association declaration is keyed on the widget that
