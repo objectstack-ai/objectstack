@@ -55,6 +55,7 @@ function makeCountingEngine() {
                 switch (op) {
                     case '$lte': if (cell == null || !(String(cell) <= String(target))) return false; break;
                     case '$lt': if (cell == null || !(String(cell) < String(target))) return false; break;
+                    case '$gt': if (cell == null || !(String(cell) > String(target))) return false; break;
                     case '$ne': if (cell === target) return false; break;
                     case '$in': if (!(target as unknown[]).includes(cell)) return false; break;
                     default: throw new Error(`fake driver: unsupported operator ${op}`);
@@ -170,9 +171,11 @@ describe('#17612 DbQueueAdapter — idle poll cost', () => {
         await vi.advanceTimersByTimeAsync(HOUR);
         await adapter.stop();
 
-        // 3600 s / 1 s, plus the tick `start()` runs immediately — and [#30228]
-        // one lease-reclaim read per 30 s lease window (t = 0, 30 s, … 3600 s).
-        expect(engine.calls.find).toBe(3601 + 121);
+        // 3600 s / 1 s, plus the tick `start()` runs immediately, plus the ONE
+        // due-time read of the idle streak (#29919) — once, not once a tick —
+        // and [#30228] one lease-reclaim read per 30 s lease window
+        // (t = 0, 30 s, … 3600 s).
+        expect(engine.calls.find).toBe(3602 + 121);
     });
 
     it('backs off while idle: the same hour, same queue, is 124 claim reads instead of 3600', async () => {
@@ -185,11 +188,12 @@ describe('#17612 DbQueueAdapter — idle poll cost', () => {
         await adapter.stop();
 
         // 1s,2s,4s,8s,16s then the 30 s ceiling — pinned exactly, because a
-        // bound alone is met by a loop that stopped. [#30228] Plus the
-        // lease-reclaim read, at most once per 30 s lease window: on the first
-        // tick and on every ceiling tick (the ramp ticks at 2, 6 and 14 s fall
-        // inside the first window), 124 - 3 = 121 of them.
-        expect(engine.calls.find).toBe(124 + 121);
+        // bound alone is met by a loop that stopped — plus the streak's one
+        // due-time read (#29919). [#30228] Plus the lease-reclaim read, at
+        // most once per 30 s lease window: on the first tick and on every
+        // ceiling tick (the ramp ticks at 2, 6 and 14 s fall inside the first
+        // window), 124 - 3 = 121 of them.
+        expect(engine.calls.find).toBe(125 + 121);
         // Nothing was claimed, so nothing was written.
         expect(engine.calls.update).toBe(0);
     });
@@ -492,3 +496,123 @@ describe('#30228 DbQueueAdapter — a running row whose lease ran out is reclaim
         expect((engine.tables.get(QUEUE_TABLE) ?? [])[0]).toMatchObject({ status: 'completed', attempts: 1 });
     });
 });
+
+describe('#29919 DbQueueAdapter — wake at the next due time, no ramp for a sole writer', () => {
+    const FIVE_MINUTES = 5 * 60_000;
+
+    it('a sole writer on an idle queue ticks ONCE in a fresh kernel\'s first minute: three reads, not five', async () => {
+        vi.useFakeTimers();
+        const engine = makeCountingEngine();
+        const adapter = adapterOn(engine, { soleWriter: true, maxIdleIntervalMs: FIVE_MINUTES });
+        await adapter.subscribe('q1', async () => {});
+        adapter.start();
+        await vi.advanceTimersByTimeAsync(60_000);
+        await adapter.stop();
+
+        // The cold-start tick's claim read and its one due-time read, and
+        // [#30228] that tick's lease-reclaim read.
+        expect(engine.calls.find).toBe(3);
+    });
+
+    it('CONTROL: without soleWriter the same minute still ramps — 1 + 5 claim reads and the due read', async () => {
+        vi.useFakeTimers();
+        const engine = makeCountingEngine();
+        const adapter = adapterOn(engine, { maxIdleIntervalMs: FIVE_MINUTES });
+        await adapter.subscribe('q1', async () => {});
+        adapter.start();
+        await vi.advanceTimersByTimeAsync(60_000);
+        await adapter.stop();
+
+        // Ticks at 0, 2, 6, 14, 30 s (1 s base, doubling), then 62 s — and
+        // [#30228] a lease-reclaim read at 0 and 30 s, one per lease window.
+        expect(engine.calls.find).toBe(6 + 2);
+    });
+
+    it('a row scheduled before boot is claimed within one tick of coming due, under a five-minute ceiling', async () => {
+        vi.useFakeTimers();
+        const engine = makeCountingEngine();
+        const writer = adapterOn(engine);
+        const t0 = Date.now();
+        await writer.publish('q1', { n: 1 }, { delay: 20_000 });
+
+        const adapter = adapterOn(engine, { soleWriter: true, maxIdleIntervalMs: FIVE_MINUTES });
+        const at: number[] = [];
+        await adapter.subscribe('q1', async () => { at.push(Date.now()); });
+        adapter.start();
+        await vi.advanceTimersByTimeAsync(60_000);
+        await adapter.stop();
+
+        expect(at).toHaveLength(1);
+        expect(at[0]! - t0).toBe(20_000);
+    });
+
+    it('a deferred publish in this process goes out on time with no extra read — it hints, it does not wake', async () => {
+        vi.useFakeTimers();
+        const engine = makeCountingEngine();
+        const adapter = adapterOn(engine, { soleWriter: true, maxIdleIntervalMs: FIVE_MINUTES });
+        const at: number[] = [];
+        await adapter.subscribe('q1', async () => { at.push(Date.now()); });
+        adapter.start();
+        await vi.advanceTimersByTimeAsync(10_000);
+        const findsWhileIdle = engine.calls.find;
+
+        const publishedAt = Date.now();
+        await adapter.publish('q1', { n: 1 }, { delay: 20_000 });
+        await vi.advanceTimersByTimeAsync(1);
+        // No tick and no read now — the publish's own dedup reads nothing (no key).
+        expect(engine.calls.find).toBe(findsWhileIdle);
+
+        await vi.advanceTimersByTimeAsync(60_000);
+        await adapter.stop();
+        expect(at).toHaveLength(1);
+        expect(at[0]! - publishedAt).toBe(20_000);
+    });
+
+    it('a failing retry is re-attempted at its backoff, not at the ceiling', async () => {
+        vi.useFakeTimers();
+        const engine = makeCountingEngine();
+        const adapter = adapterOn(engine, { soleWriter: true, maxIdleIntervalMs: FIVE_MINUTES });
+        const at: number[] = [];
+        await adapter.subscribe('q1', async () => {
+            at.push(Date.now());
+            if (at.length === 1) throw new Error('first attempt fails');
+        });
+        adapter.start();
+        await vi.advanceTimersByTimeAsync(10_000);
+        await adapter.publish('q1', { n: 1 }, { backoff: { type: 'fixed', delayMs: 15_000 } });
+        await vi.advanceTimersByTimeAsync(60_000);
+        await adapter.stop();
+
+        expect(at).toHaveLength(2);
+        expect(at[1]! - at[0]!).toBe(15_000);
+    });
+
+    it('[#30228] a row its own previous process left running is reclaimed when the lease runs out, not at the ceiling', async () => {
+        vi.useFakeTimers();
+        const engine = makeCountingEngine();
+        const t0 = Date.now();
+        // The state a crash leaves behind for the next boot of the same sole
+        // writer: its own row, still `running`, under a lease 40 s from expiry.
+        engine.tables.set(QUEUE_TABLE, [{
+            id: 'msg_prev', queue: 'q1', payload_json: '{}', status: 'running', priority: 100,
+            attempts: 0, max_attempts: 3, backoff_type: 'exponential', backoff_delay_ms: 1000,
+            scheduled_for: new Date(t0 - 5_000).toISOString(),
+            locked_by: 'worker_previous_boot', locked_until: new Date(t0 + 40_000).toISOString(),
+            created_at: new Date(t0 - 5_000).toISOString(),
+        }]);
+
+        const adapter = adapterOn(engine, { soleWriter: true, maxIdleIntervalMs: FIVE_MINUTES });
+        const at: number[] = [];
+        await adapter.subscribe('q1', async () => { at.push(Date.now()); });
+        adapter.start();
+        await vi.advanceTimersByTimeAsync(60_000);
+        await adapter.stop();
+
+        // The idle loop slept to the lease's expiry (the due time `nextDueAt`
+        // folds in), reclaimed it there, and ran it on its 1 s backoff.
+        expect(at).toHaveLength(1);
+        expect(at[0]! - t0).toBe(40_000 + 1000);
+        expect((engine.tables.get(QUEUE_TABLE) ?? [])[0]).toMatchObject({ status: 'completed', attempts: 2 });
+    });
+});
+

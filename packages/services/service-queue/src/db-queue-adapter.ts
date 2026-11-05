@@ -146,13 +146,22 @@ export interface DbQueueAdapterOptions {
    * straight back to `pollIntervalMs`.
    *
    * A value at or below `pollIntervalMs` disables the backoff and restores the
-   * flat poll. What the backoff costs is latency on work this process was not
-   * told about — a row another node wrote, a deferred row coming due, a
-   * crashed worker's lease expiring: never noticed more than this long after it
-   * became claimable. Work published through THIS adapter wakes the loop, so it
-   * is unaffected.
+   * flat poll. What the backoff costs is latency on a row another node wrote:
+   * never noticed more than this long after it became claimable. Work
+   * published through THIS adapter wakes the loop, and a deferred row coming
+   * due wakes it at its `scheduled_for` (#29919), so neither waits on this.
    */
   maxIdleIntervalMs?: number;
+  /**
+   * [#29919] No other process writes this database's `sys_job_queue` (a hosted
+   * tenant kernel: one kernel per tenant database), so every row is published
+   * through this adapter and wakes its loop. An idle tick then sleeps straight
+   * to the next deferred row or {@link maxIdleIntervalMs} instead of
+   * re-running the backoff's ramp from `pollIntervalMs` after every boot and
+   * every burst — the ramp only ever bought latency on rows another process
+   * wrote. Default `false`.
+   */
+  soleWriter?: boolean;
   /** Max messages claimed per poll tick (default 10) */
   batchSize?: number;
   /**
@@ -236,6 +245,12 @@ export class DbQueueAdapter implements IQueueService {
    * bound is sound.
    */
   private reclaimNotBeforeMs = 0;
+  /**
+   * [#30228] Adapter-clock instant (ms) of the earliest lease still running
+   * that {@link reclaimExpired}'s last read saw, or `null` when it saw none.
+   * {@link nextDueAt} reports it, so an idle loop wakes when it runs out.
+   */
+  private earliestLiveLeaseMs: number | null = null;
 
   constructor(args: {
     engine: JobEngine;
@@ -250,6 +265,7 @@ export class DbQueueAdapter implements IQueueService {
     this.opts = {
       pollIntervalMs: o.pollIntervalMs ?? 1000,
       maxIdleIntervalMs: o.maxIdleIntervalMs ?? DEFAULT_MAX_IDLE_INTERVAL_MS,
+      soleWriter: o.soleWriter ?? false,
       batchSize: o.batchSize ?? 10,
       leaseMs: o.leaseMs ?? 30_000,
       idempotencyWindowMs: o.idempotencyWindowMs ?? 24 * 60 * 60 * 1000,
@@ -397,11 +413,14 @@ export class DbQueueAdapter implements IQueueService {
     }, { context: SYSTEM_CTX });
 
     // [#17612] Tick now rather than wait out the idle backoff — but only for a
-    // row that is claimable THIS instant. A deferred row is exactly the case
-    // the loop's contract already covers (noticed within one backed-off
-    // interval of coming due), and waking for it would reset the backoff to
-    // `pollIntervalMs` for a tick guaranteed to claim nothing.
-    if (Date.parse(scheduledFor) <= now.getTime()) this.wake();
+    // row that is claimable THIS instant: waking for a deferred row would reset
+    // the backoff to `pollIntervalMs` for a tick guaranteed to claim nothing.
+    // [#29919] A deferred row instead tells the loop when it comes due — no
+    // read, no tick now — so it goes out on time even with a minutes-long
+    // ceiling, rather than up to a backed-off interval late.
+    const untilDueMs = Date.parse(scheduledFor) - now.getTime();
+    if (untilDueMs <= 0) this.wake();
+    else this.loop?.wakeAt(Date.now() + untilDueMs);
 
     return id;
   }
@@ -504,6 +523,8 @@ export class DbQueueAdapter implements IQueueService {
     this.loop = new DispatchLoop({
       intervalMs: this.opts.pollIntervalMs,
       maxIdleIntervalMs: this.opts.maxIdleIntervalMs,
+      soleWriter: this.opts.soleWriter,
+      nextDueAt: () => this.nextDueAt(),
       runTick: () => this.pollOnce(),
       onTickError: (err) => { this.logger?.warn?.('DbQueueAdapter: poll tick failed', err); },
     });
@@ -545,6 +566,51 @@ export class DbQueueAdapter implements IQueueService {
       }
     }
     return processed;
+  }
+
+  /**
+   * [#29919] When the earliest deferred `pending` row of a subscribed queue
+   * comes due, on the loop's clock (`Date.now()`), or `null` when none is
+   * deferred. One read for every subscribed queue, asked by the loop once per
+   * idle streak; it sorts the deferred rows, of which an idle queue has none.
+   *
+   * `scheduled_for` is the only due time a queue row carries: every write that
+   * returns a row to `pending` clears its lease (`locked_until`), so no lease
+   * expiry gates a `pending` row.
+   *
+   * [#30228] A `running` row comes due too, when its lease runs out and
+   * {@link reclaimExpired} may take it back. The earliest live lease that
+   * method's last read saw is folded in at no read of its own — that read ran
+   * on the empty tick this answer follows, or the bound it set has not passed
+   * yet. So a sole-writer loop, which otherwise sleeps to the ceiling, wakes
+   * for a row its own previous process left `running` across a restart.
+   */
+  private async nextDueAt(): Promise<number | null> {
+    const queues = [...this.handlers.keys()];
+    if (queues.length === 0) return null;
+    const now = this.now();
+    const rows = await this.engine.find(QUEUE_TABLE, {
+      where: {
+        queue: { $in: queues },
+        status: 'pending',
+        scheduled_for: { $gt: now.toISOString() },
+      },
+      fields: ['scheduled_for'],
+      orderBy: [{ field: 'scheduled_for', order: 'asc' }],
+      limit: 1,
+      context: SYSTEM_CTX,
+    });
+    const cell = rows?.[0]?.scheduled_for;
+    // Instants, not strings — the dialects materialize `scheduled_for`
+    // differently (ISO text on SQLite/turso, a `Date` on Postgres/MySQL).
+    const scheduledMs = cell ? new Date(cell).getTime() : NaN;
+    const leaseMs = this.earliestLiveLeaseMs ?? NaN;
+    const dueMs = Number.isFinite(scheduledMs) && Number.isFinite(leaseMs)
+      ? Math.min(scheduledMs, leaseMs)
+      : Number.isFinite(scheduledMs) ? scheduledMs : leaseMs;
+    if (!Number.isFinite(dueMs)) return null;
+    // Re-based onto the loop's clock, so an injected `clock` keeps its meaning.
+    return Date.now() + (dueMs - now.getTime());
   }
 
   // ── Internals ────────────────────────────────────────────────────
@@ -608,7 +674,7 @@ export class DbQueueAdapter implements IQueueService {
       context: SYSTEM_CTX,
     });
 
-    let nextExpiryMs = nowMs + this.opts.leaseMs;
+    let earliestLive: number | null = null;
     let reclaimed = 0;
     for (const row of rows ?? []) {
       // Instants, not strings: `locked_until` is a declared `Field.datetime`
@@ -617,13 +683,16 @@ export class DbQueueAdapter implements IQueueService {
       // as orphaned as an expired one.
       const leaseMs = row.locked_until ? new Date(row.locked_until).getTime() : NaN;
       if (Number.isFinite(leaseMs) && leaseMs > nowMs) {
-        nextExpiryMs = Math.min(nextExpiryMs, leaseMs);
+        earliestLive = earliestLive === null ? leaseMs : Math.min(earliestLive, leaseMs);
         continue;
       }
       if (await this.reclaimRow(row, now)) reclaimed++;
     }
+    this.earliestLiveLeaseMs = earliestLive;
     // A full page may hide more expired rows behind it: read again next tick.
-    this.reclaimNotBeforeMs = (rows?.length ?? 0) >= max ? 0 : nextExpiryMs;
+    this.reclaimNotBeforeMs = (rows?.length ?? 0) >= max
+      ? 0
+      : Math.min(nowMs + this.opts.leaseMs, earliestLive ?? Infinity);
     return reclaimed;
   }
 

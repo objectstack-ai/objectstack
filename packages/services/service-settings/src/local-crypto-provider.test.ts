@@ -271,7 +271,8 @@ describe('#30042 — two key files: the boot takes the one that opens a stored s
     const h = await new LocalCryptoProvider({ key }).encrypt('sk-30042', { scope, namespace: 'ai', key: 'openai_api_key' });
     return { namespace: 'ai', key: 'openai_api_key', ciphertext: h.ciphertext };
   };
-  const reader = (sample: StoredSecretSample | undefined) => async () => sample;
+  /** A reader returning this page of stored rows, newest first. */
+  const reader = (...page: StoredSecretSample[]) => async () => page;
 
   it('the case-1 shape: a start-sealed database with a foreign home key reads with the legacy key', async () => {
     writeKey(canonical()); // `os dev` in another project minted this one
@@ -343,7 +344,7 @@ describe('#30042 — two key files: the boot takes the one that opens a stored s
   it('no stored secret: nothing to judge, the canonical file stands', async () => {
     writeKey(canonical());
     writeKey(legacy());
-    const choice = await chooseKeyFileByTrialOpen({ answer: bothDiffer(), readStoredSecret: reader(undefined), mode: 'production' });
+    const choice = await chooseKeyFileByTrialOpen({ answer: bothDiffer(), readStoredSecret: reader(), mode: 'production' });
     expect(choice).toMatchObject({ path: canonical(), reason: 'no-stored-secret' });
   });
 
@@ -362,8 +363,101 @@ describe('#30042 — two key files: the boot takes the one that opens a stored s
     expect(choice.notice?.message).toContain('connection reset');
   });
 
+  describe('#30091 — the trial scores both keys over the whole page, not its newest row', () => {
+    it.each(['production', 'development'] as const)(
+      '%s: rows split between the keys is a mixed-key boot ERROR naming both paths, on the key that opens more',
+      async (mode) => {
+        const canonicalKey = writeKey(canonical());
+        const legacyKey = writeKey(legacy());
+        // Newest first: the newest row is the canonical key's, the three older ones the legacy key's.
+        const page = [await sealed(canonicalKey), await sealed(legacyKey), await sealed(legacyKey), await sealed(legacyKey)];
+        const choice = await chooseKeyFileByTrialOpen({ answer: bothDiffer(), readStoredSecret: reader(...page), mode });
+        expect(choice).toMatchObject({
+          path: legacy(),
+          reason: 'mixed',
+          other: canonical(),
+          tally: { judged: 4, chosen: 3, other: 1 },
+        });
+        expect(choice.notice?.level).toBe('error');
+        expect(choice.notice?.message).toContain(canonical());
+        expect(choice.notice?.message).toContain(legacy());
+      },
+    );
+
+    it.each([
+      ['canonical', 'legacy'],
+      ['legacy', 'canonical'],
+    ] as const)('a tie goes to the key that opens the newest row (%s newest)', async (newest, older) => {
+      const keys = { canonical: writeKey(canonical()), legacy: writeKey(legacy()) };
+      const files = { canonical: canonical(), legacy: legacy() };
+      const choice = await chooseKeyFileByTrialOpen({
+        answer: bothDiffer(),
+        readStoredSecret: reader(await sealed(keys[newest]), await sealed(keys[older])),
+        mode: 'production',
+      });
+      expect(choice).toMatchObject({ path: files[newest], reason: 'mixed', tally: { judged: 2, chosen: 1, other: 1 } });
+    });
+
+    it('a corrupt newest row no longer refuses a production boot: an older row settles the choice', async () => {
+      writeKey(canonical());
+      const startKey = writeKey(legacy());
+      const corrupt = await sealed(randomBytes(32)); // opens under neither key
+      const choice = await chooseKeyFileByTrialOpen({
+        answer: bothDiffer(),
+        readStoredSecret: reader(corrupt, await sealed(startKey), await sealed(startKey, 'object_secret_field')),
+        mode: 'production',
+      });
+      expect(choice).toMatchObject({ path: legacy(), reason: 'opens', tally: { judged: 3, chosen: 2, other: 0 } });
+      expect(choice.notice?.level).toBe('warn');
+    });
+
+    it('one key opening every judged row is `opens`, with the count it was measured on', async () => {
+      const devKey = writeKey(canonical());
+      writeKey(legacy());
+      const choice = await chooseKeyFileByTrialOpen({
+        answer: bothDiffer(),
+        readStoredSecret: reader(await sealed(devKey), await sealed(devKey, 'datasource_credential')),
+        mode: 'production',
+      });
+      expect(choice).toMatchObject({ path: canonical(), reason: 'opens', tally: { judged: 2, chosen: 2, other: 0 } });
+    });
+
+    it('a page where no row opens under either key keeps the production refusal, counting the page', async () => {
+      writeKey(canonical());
+      writeKey(legacy());
+      const refusal = await chooseKeyFileByTrialOpen({
+        answer: bothDiffer(),
+        readStoredSecret: reader(await sealed(randomBytes(32)), await sealed(randomBytes(32))),
+        mode: 'production',
+      }).catch((e: unknown) => e);
+      expect(refusal).toBeInstanceOf(DataKeyOpensNothingError);
+      expect((refusal as DataKeyOpensNothingError).judged).toBe(2);
+      expect((refusal as Error).message).toContain('Refusing to start in production');
+    });
+
+    it('settleKeyFileChannel: a mixed page settles on the majority key and says so as console.error, once', async () => {
+      const canonicalKey = writeKey(canonical());
+      const legacyKey = writeKey(legacy());
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const env: Record<string, string | undefined> = {
+        NODE_ENV: 'production',
+        [KEY_FILE_CHANNEL_ENV]: canonical(),
+        [KEY_FILE_CANDIDATE_CHANNEL_ENV]: legacy(),
+      };
+      const page = [await sealed(legacyKey), await sealed(canonicalKey), await sealed(canonicalKey)];
+      const choice = await settleKeyFileChannel({ env, readStoredSecret: reader(...page) });
+      expect(choice).toMatchObject({ path: canonical(), reason: 'mixed' });
+      expect(env[KEY_FILE_CHANNEL_ENV]).toBe(canonical());
+      expect(env[KEY_FILE_CANDIDATE_CHANNEL_ENV]).toBeUndefined();
+      expect(error).toHaveBeenCalledTimes(1);
+      expect(String(error.mock.calls[0]?.[0])).toContain(legacy());
+      expect(warn).not.toHaveBeenCalled();
+    });
+  });
+
   it('every one-file answer passes through untried', async () => {
-    const read = vi.fn(async () => undefined);
+    const read = vi.fn(async () => [] as StoredSecretSample[]);
     for (const answer of [
       { path: canonical(), kind: 'canonical', canonical: canonical() },
       { path: legacy(), kind: 'legacy-only', canonical: canonical(), legacy: legacy() },
@@ -431,7 +525,7 @@ describe('#30042 — two key files: the boot takes the one that opens a stored s
   });
 
   it('nothing to settle without a candidate', async () => {
-    const read = vi.fn(reader(undefined));
+    const read = vi.fn(reader());
     expect(await settleKeyFileChannel({ env: { [KEY_FILE_CHANNEL_ENV]: canonical() }, readStoredSecret: read })).toBeUndefined();
     expect(read).not.toHaveBeenCalled();
   });
@@ -460,12 +554,17 @@ describe('#30042 — two key files: the boot takes the one that opens a stored s
 
 describe('#30042 — the reader over the engine', () => {
   const v2 = 'v2:' + randomBytes(40).toString('base64');
-  it('reads the newest rows as the system and skips a marker the provider does not know', async () => {
+  it('reads the newest page as the system, keeps its order, and skips a marker the provider does not know', async () => {
+    const older = 'v2:' + randomBytes(40).toString('base64');
     const find = vi.fn(async () => [
       { namespace: 'x', key: 'y', ciphertext: 'v9:abc' },
       { namespace: 'ai', key: 'openai_api_key', ciphertext: v2 },
+      { namespace: 'mail', key: 'smtp_password', ciphertext: older },
     ]);
-    expect(await storedSecretReaderOverEngine({ find })()).toEqual({ namespace: 'ai', key: 'openai_api_key', ciphertext: v2 });
+    expect(await storedSecretReaderOverEngine({ find })()).toEqual([
+      { namespace: 'ai', key: 'openai_api_key', ciphertext: v2 },
+      { namespace: 'mail', key: 'smtp_password', ciphertext: older },
+    ]);
     expect(find).toHaveBeenCalledWith('sys_secret', expect.objectContaining({
       orderBy: [{ field: 'created_at', order: 'desc' }],
       context: { isSystem: true },
@@ -474,7 +573,7 @@ describe('#30042 — the reader over the engine', () => {
 
   it('a table that does not exist holds no row; any other failure rejects', async () => {
     const missing = storedSecretReaderOverEngine({ find: async () => { throw new Error('no such table: sys_secret'); } });
-    expect(await missing()).toBeUndefined();
+    expect(await missing()).toEqual([]);
     const broken = storedSecretReaderOverEngine({ find: async () => { throw new Error('connection reset'); } });
     await expect(broken()).rejects.toThrow('connection reset');
   });
