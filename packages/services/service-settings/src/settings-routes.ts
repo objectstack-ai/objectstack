@@ -357,7 +357,8 @@ export function registerSettingsRoutes(
         ctx,
         // The language a write predicate's refusal is written in, and [#30203]
         // the request's own connection, for a predicate that judges the change
-        // against it (`SettingsWriteOptions.transport`).
+        // against it (`SettingsWriteOptions.transport`). Each predicate sees
+        // only the headers it named at registration (`narrowTransport`).
         {
           locale: requestLocaleOf(req),
           transport: {

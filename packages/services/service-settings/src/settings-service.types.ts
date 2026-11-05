@@ -380,10 +380,23 @@ export interface SettingsWritePredicateInput {
   /** The language the refusal is written in — {@link SettingsDisplayOptions.locale}. */
   locale?: string;
   /**
-   * [#30203] The request the write arrived on ({@link SettingsWriteOptions.transport});
-   * absent on an in-process write.
+   * [#30203] The request the write arrived on ({@link SettingsWriteOptions.transport}),
+   * narrowed to the headers this predicate declared at registration
+   * ({@link SettingsWritePredicateOptions.requestHeaders}); absent on an
+   * in-process write.
    */
   transport?: SettingsRequestTransport;
+}
+
+/** [#30203] How a {@link SettingsWritePredicate} is registered. */
+export interface SettingsWritePredicateOptions {
+  /**
+   * The request headers the predicate reads, lower-case. Only these reach its
+   * `transport.headers`, so a credential header (`cookie`, `authorization`, an
+   * API key) never reaches a predicate that did not name it. None named: the
+   * predicate sees the peer address and no header.
+   */
+  requestHeaders?: readonly string[];
 }
 
 /**

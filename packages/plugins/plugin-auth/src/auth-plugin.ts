@@ -121,6 +121,7 @@ import {
 import { cloudManagedRefusal } from './cloud-managed.js';
 import { registerCopyInvitationLinkAction } from './invitation-link-action.js';
 import { allowedIpRangesWritePredicate, parseAllowedIpRanges } from './allowed-ip-ranges.js';
+import { FORWARDED_CLIENT_ADDRESS_HEADERS } from './client-address-forwarding.js';
 import {
   runAdminBanUser,
   runAdminUnbanUser,
@@ -179,7 +180,12 @@ interface SettingsReadSurface {
    * the write lands (`SettingsService.registerWritePredicate`). Optional, like
    * `subscribe`.
    */
-  registerWritePredicate?(namespace: string, key: string, predicate: (input: any) => unknown): void;
+  registerWritePredicate?(
+    namespace: string,
+    key: string,
+    predicate: (input: unknown) => unknown,
+    options?: { requestHeaders?: readonly string[] },
+  ): void;
 }
 
 /** [#23367] The auth setting that records when the API-key lifecycle policy took effect. */
@@ -2537,6 +2543,8 @@ export class AuthPlugin implements Plugin {
           'auth',
           'allowed_ip_ranges',
           allowedIpRangesWritePredicate(() => this.authManager),
+          // Only the forwarded-address headers the address rule reads reach it.
+          { requestHeaders: FORWARDED_CLIENT_ADDRESS_HEADERS },
         );
       } catch (err: any) {
         ctx.logger.warn(

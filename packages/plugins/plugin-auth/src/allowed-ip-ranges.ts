@@ -84,8 +84,8 @@ interface RefusalCopy {
 const COPY: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', RefusalCopy> = {
   en: {
     outside: (address) =>
-      `This list does not include ${address}, the address you are connected from, so saving it would refuse your own `
-      + 'next sign-in. Add your address or its range to the list, or save the list from an address inside it.',
+      `No entry in this list matches ${address}, the address you are connected from, so saving it would refuse your `
+      + 'own next sign-in. Add your address or its range to the list, or save the list from an address it matches.',
     undetermined:
       'The server cannot establish the address you are connected from, and while any list is set it refuses every '
       + 'such request, your own next sign-in included. Save the list from a connection whose address the server can '
@@ -94,8 +94,8 @@ const COPY: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', RefusalCopy> = {
   },
   'zh-CN': {
     outside: (address) =>
-      `这份列表不包含你当前连接所用的地址 ${address}，保存后你自己下一次登录就会被拒绝。`
-      + '请把你的地址或所在网段加进列表，或在列表内的地址上保存。',
+      `这份列表中没有任何一项与你当前连接所用的地址 ${address} 匹配，保存后你自己下一次登录就会被拒绝。`
+      + '请把你的地址或所在网段加进列表，或在列表能匹配的地址上保存。',
     undetermined:
       '服务器无法确定你当前连接所用的地址；只要设置了列表，这样的请求都会被拒绝，你自己下一次登录也不例外。'
       + '请在服务器能确定地址的连接上保存。',
@@ -103,8 +103,8 @@ const COPY: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', RefusalCopy> = {
   },
   'ja-JP': {
     outside: (address) =>
-      `このリストには、現在接続しているアドレス ${address} が含まれていないため、保存するとご自身の次回のサインインが拒否されます。`
-      + 'ご自身のアドレスまたはその範囲をリストに追加するか、リスト内のアドレスから保存してください。',
+      `このリストには、現在接続しているアドレス ${address} に一致する項目がないため、保存するとご自身の次回のサインインが拒否されます。`
+      + 'ご自身のアドレスまたはその範囲をリストに追加するか、リストに一致するアドレスから保存してください。',
     undetermined:
       'サーバーは現在の接続のアドレスを確定できません。リストが設定されている間はそのようなリクエストはすべて拒否され、'
       + 'ご自身の次回のサインインも同様です。サーバーがアドレスを確定できる接続から保存してください。',
@@ -112,9 +112,9 @@ const COPY: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', RefusalCopy> = {
   },
   'es-ES': {
     outside: (address) =>
-      `Esta lista no incluye ${address}, la dirección desde la que está conectado, así que al guardarla se rechazaría `
-      + 'su propio próximo inicio de sesión. Añada su dirección o su rango a la lista, o guarde la lista desde una '
-      + 'dirección incluida en ella.',
+      `Ninguna entrada de esta lista coincide con ${address}, la dirección desde la que está conectado, así que al `
+      + 'guardarla se rechazaría su propio próximo inicio de sesión. Añada su dirección o su rango a la lista, o guarde '
+      + 'la lista desde una dirección con la que coincida.',
     undetermined:
       'El servidor no puede determinar la dirección desde la que está conectado y, mientras haya una lista, rechaza '
       + 'todas esas solicitudes, incluido su propio próximo inicio de sesión. Guarde la lista desde una conexión cuya '
@@ -136,8 +136,10 @@ function copyFor(locale: string | undefined): RefusalCopy {
  */
 export function allowedIpRangesWritePredicate(
   manager: () => Pick<AuthManager, 'resolveClientAddress'> | null | undefined,
-): (input: AllowedIpRangesWriteInput) => AllowedIpRangesWriteRefusal | undefined {
-  return ({ next, transport, locale }) => {
+): (input: unknown) => AllowedIpRangesWriteRefusal | undefined {
+  return (input) => {
+    // The settings write predicate's input (`SettingsWritePredicateInput`), read structurally.
+    const { next, transport, locale } = (input ?? {}) as AllowedIpRangesWriteInput;
     if (!transport) return undefined;
     const ranges = parseAllowedIpRanges(next);
     if (ranges.length === 0) return undefined;

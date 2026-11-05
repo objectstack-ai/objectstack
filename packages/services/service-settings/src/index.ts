@@ -60,6 +60,7 @@ export {
   type SettingsWriteRefusal,
   type SettingsDisplayOptions,
   type SettingsWriteOptions,
+  type SettingsWritePredicateOptions,
   SETTINGS_LIVE_STATUS_BANNER_ID,
   type SettingsAuditSink,
   type SettingsContext,
