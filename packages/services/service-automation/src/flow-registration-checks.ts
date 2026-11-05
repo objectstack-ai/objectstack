@@ -435,7 +435,7 @@ export function collectUndeclaredConfigKeys(
 
 /** The body of {@link AutomationEngine.validateFlowExpressions}, moved unedited; that method's docblock is its contract. */
 export function validateFlowExpressions(
-    this: Pick<RegistrationCheckHost, 'logger' | 'objectSchemaResolver' | 'valueEnvelopeRefusals'>,
+    this: Pick<RegistrationCheckHost, 'logger' | 'objectSchemaResolver' | 'valueEnvelopeRefusals' | 'deriveTriggerBinding'>,
     flowName: string,
     flow: FlowParsed,
     { advisory }: { advisory: boolean },
@@ -448,12 +448,22 @@ export function validateFlowExpressions(
         sites.push({ path, from: JSON.stringify(String(source)), detail: `${where}: ${message}` });
     };
 
-    // Resolve the flow's record-change target object (start node's
-    // `config.objectName`) so `record.*`/bare field refs can be checked
-    // against the real schema. Absent resolver / non-record flow → the hint
-    // is undefined and only the fatal syntax/bare-ref pass runs (unchanged).
+    // Resolve the object whose row each run binds as its record, so
+    // `record.*`/bare field refs can be checked against the real schema: the
+    // start node's `config.objectName`, except on a time-relative flow, whose
+    // run binds the object its sweep scans (#30396). That answer is read off
+    // the trigger binding itself (`deriveTriggerBinding`: `timeRelative.object`
+    // when it is a string, `config.objectName` only otherwise), not restated
+    // here — the readiness rule `flow-time-relative-object-mismatch` refuses a
+    // start naming another object at publish, but a flow stored before it
+    // still registers, and its advisory must speak of the scanned object.
+    // Absent resolver / no object / the stored pass (`advisory: false`) → the
+    // hint is undefined and only the fatal syntax/bare-ref pass runs.
     const startNode = flow.nodes.find((n) => n.type === 'start');
-    const objectName = ((startNode?.config ?? {}) as Record<string, unknown>).objectName;
+    const bound = advisory && this.objectSchemaResolver ? this.deriveTriggerBinding(flowName, flow) : undefined;
+    const objectName = bound?.triggerType === 'time_relative'
+        ? bound.binding.object
+        : ((startNode?.config ?? {}) as Record<string, unknown>).objectName;
     const schemaHint = typeof objectName === 'string'
         ? (() => {
             const s = this.objectSchemaResolver?.(objectName);
