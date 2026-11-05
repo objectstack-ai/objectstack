@@ -19,12 +19,15 @@ import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 
-const state = vi.hoisted(() => ({
-  metadataClient: {
+const state = vi.hoisted(() => {
+  const metadataClient: Record<string, unknown> = {
     get: vi.fn(async () => undefined),
     list: vi.fn(async (type: string) => (type === 'object' ? [{ name: 'crm_lead', label: 'Lead' }] : ([] as unknown[]))),
-  },
-}));
+  };
+  // The bound object's field read goes through the draft-overlaid door.
+  metadataClient.withPreviewDrafts = () => metadataClient;
+  return { metadataClient };
+});
 vi.mock('../useMetadata', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../useMetadata')>();
   return { ...mod, useMetadataClient: () => state.metadataClient };
