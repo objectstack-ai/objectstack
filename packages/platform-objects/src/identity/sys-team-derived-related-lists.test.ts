@@ -77,12 +77,13 @@ describe('sys_team derived related lists (Setup → Teams → a team → Related
 /**
  * A team's Members list names its columns; the record title does not lead it.
  *
- * `sys_team_member`'s record title (`nameField: 'display_title'`) is a formula
- * over the two lookup ids, so it reads `USER_ID in TEAM_ID`. A derived related
- * list with no authored columns leads with the child's declared name
- * (ADR-0079, objectui `leadWithNameField`) and then its `highlightFields`, so
- * the team page's Members list opened on a Title column of two raw ids beside
- * the readable User column.
+ * A derived related list with no authored columns leads with the child's
+ * declared name (ADR-0079, objectui `leadWithNameField`) and then its
+ * `highlightFields`. `sys_team_member`'s record title (`nameField:
+ * 'display_title'`) read the two lookup ids, so the team page's Members list
+ * opened on a Title column of `USER_ID in TEAM_ID` beside the readable User
+ * column; read as names it would still repeat the User column and the team the
+ * page is about.
  *
  * The columns are the relationship's `relatedListColumns` (`FieldSchema`; the
  * reader is objectui's `deriveRelatedLists`, which hands them to the related
