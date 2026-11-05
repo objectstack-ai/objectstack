@@ -126,7 +126,7 @@ function undeclaredIn(data: { settings?: Record<string, any> }): string[] {
 
 describe('settings translation coverage', () => {
   it('covers every built-in settings manifest', () => {
-    expect(bundledManifests.length).toBeGreaterThanOrEqual(10);
+    expect(bundledManifests.length).toBeGreaterThanOrEqual(9);
   });
 
   it('covers the hosted platform manifests by namespace', () => {

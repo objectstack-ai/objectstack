@@ -361,7 +361,7 @@ const baseDefaultPermissionSets: PermissionSet[] = [
   //     (mail / storage / AI / knowledge) and platform-only Setup pages
   //     (sharing rules, audit logs, OAuth apps, JWKS, …) require this
   //     and are hidden / 403'd for org admins. Tenant-scoped manifests
-  //     (`branding`, `feature_flags`) keep using `setup.access` so org
+  //     (`branding`, `company`, `localization`) keep using `setup.access` so org
   //     admins CAN configure their own org's branding.
   //
   // **Anti-escalation — the organization boundary** (ADR-0090 D12, amended

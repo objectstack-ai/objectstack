@@ -89,8 +89,9 @@ describe('validateScreenInputs — the declared bound pair (#17306)', () => {
   });
 
   it('reads only the closed value-domain members as value domains — every other widget hint stays open', () => {
-    // The closure is a closed set of members of an open vocabulary (`number`,
-    // and since #25801 `file` — `screen-input-file-field.test.ts`), not a new
+    // The closure is a closed set of members of an open vocabulary (the
+    // numeric kinds — `number`, and since #30178 `currency` / `percent`, pinned
+    // below — and since #25801 `file`, `screen-input-file-field.test.ts`), not a new
     // rule that every `type` constrains its value. A bound on a non-numeric
     // field still constrains nothing, exactly as `FieldSchema.min`/`.max` do.
     const texty: ScreenFieldSpec = { name: 'discount', type: 'text', min: 0, max: 20 };
@@ -124,5 +125,54 @@ describe('validateScreenInputs — the declared bound pair (#17306)', () => {
     const fields: ScreenFieldSpec[] = [discount, { name: 'reason', type: 'text', required: true }];
     const issues = validateScreenInputs(fields, { discount: 99, sparkles: true }, ALWAYS_VISIBLE);
     expect(issues.map((i) => i.code).sort()).toEqual(['max_value', 'required', 'unknown_field']);
+  });
+});
+
+// [#30178] `currency` and `percent` joined `number` in the value domain, by
+// ruling, under ruling A′'s own rule: a present value that is not a finite JSON
+// number is refused with `invalid_type`, ⛔ never coerced. Before it, a
+// `percent` field (which the console rendered as text and posted as a string)
+// and a `currency` field took ANY string — `"75"` under a `max` of 60, `"abc"`
+// too — so the run consumed its suspension on a value the bound never judged.
+describe('validateScreenInputs — `currency` and `percent` are numeric value domains (#30178)', () => {
+  for (const type of ['percent', 'currency'] as const) {
+    const field: ScreenFieldSpec = { name: 'discount', type, min: 0, max: 60 };
+    const codes = (value: unknown, visibility: () => boolean | undefined = ALWAYS_VISIBLE) =>
+      validateScreenInputs([field], { discount: value }, visibility).map((i) => i.code);
+
+    it(`refuses a string on a \`${type}\` field — out of bound, in bound or not numeric at all`, () => {
+      // ⛔ Not coerced: `"75"` is refused for its SHAPE, not judged against the
+      // bound as the 75 it spells, and an in-bound `"60"` is refused the same.
+      for (const value of ['75', '60', 'abc']) {
+        expect(codes(value), `value ${JSON.stringify(value)}`).toEqual(['invalid_type']);
+      }
+      const [issue] = validateScreenInputs([field], { discount: '75' }, ALWAYS_VISIBLE);
+      expect(issue!.field).toBe('discount');
+      expect(issue!.message).toContain('must be a number');
+    });
+
+    it(`judges a number on a \`${type}\` field against its bound, endpoints included`, () => {
+      expect(codes(75)).toEqual(['max_value']);
+      expect(codes(-1)).toEqual(['min_value']);
+      for (const value of [0, 60]) expect(codes(value), `value ${value}`).toEqual([]);
+    });
+
+    it(`leaves an absent value and a hidden \`${type}\` field alone`, () => {
+      expect(codes(undefined)).toEqual([]);
+      expect(codes('')).toEqual([]);
+      const conditional: ScreenFieldSpec = { ...field, visibleWhen: 'wantsDiscount == true' };
+      expect(validateScreenInputs([conditional], { discount: 'abc' }, () => false)).toEqual([]);
+      expect(validateScreenInputs([conditional], { discount: 'abc' }, () => undefined)).toEqual([]);
+      // …and the control, or the two readings above prove nothing.
+      expect(validateScreenInputs([conditional], { discount: 'abc' }, () => true).map((i) => i.code))
+        .toEqual(['invalid_type']);
+    });
+  }
+
+  it('does not widen past the numeric kinds — `rating`, `slider`, `progress`, `text` and untyped still take a string', () => {
+    for (const type of ['rating', 'slider', 'progress', 'text', undefined]) {
+      const field: ScreenFieldSpec = { name: 'discount', type, min: 0, max: 60 };
+      expect(validateScreenInputs([field], { discount: '75' }, ALWAYS_VISIBLE), `type ${String(type)}`).toEqual([]);
+    }
   });
 });

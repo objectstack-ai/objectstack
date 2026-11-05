@@ -81,11 +81,13 @@ import { useRecordAriaProps } from './recordComponentAria';
 import { useDefaultRecordPage } from '../defaultRecordPage';
 import {
   RecordFieldChangesContext,
+  RecordFieldHistoryContext,
   RecordTimelineCountContext,
   RecordTimelinePanelContext,
   RecordTimelineTotalContext,
   filterTimelineStream,
   mergeTimelineStream,
+  timelineStreamFilters,
   type TimelineStreamFilter,
 } from '../recordTimelineStream';
 
@@ -283,8 +285,12 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
   const asPeek = asStream && timelinePanel !== null;
   const peekEntries = timelinePanel?.entries ?? 0;
   const fieldChanges = React.useContext(RecordFieldChangesContext);
-  const [streamFilter, setStreamFilter] = React.useState<TimelineStreamFilter>('all');
+  const [chosenStreamFilter, setStreamFilter] = React.useState<TimelineStreamFilter>('all');
   const [streamPages, setStreamPages] = React.useState(1);
+  // objectstack#30074 — no 变更 chip while the record's field history is not
+  // shown; a chip that is not offered filters nothing.
+  const streamFilters = timelineStreamFilters(React.useContext(RecordFieldHistoryContext));
+  const streamFilter: TimelineStreamFilter = streamFilters.includes(chosenStreamFilter) ? chosenStreamFilter : 'all';
 
   const discussionItems = discussion?.items as FeedItem[] | undefined;
   const applied = React.useMemo(() => {
@@ -397,6 +403,7 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
             ? {
                 variant: 'stream' as const,
                 streamFilter,
+                streamFilters,
                 onStreamFilterChange: (next: TimelineStreamFilter) => {
                   setStreamFilter(next);
                   setStreamPages(1);
