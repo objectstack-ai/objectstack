@@ -443,12 +443,15 @@ export function overlayPairFixAdmits(
  * so a member that gains or loses the key is answered by its own schema.
  *
  * Only the refusal of the KEY is read: an `unrecognized_keys` issue naming
- * `overrides` at the body's root, or at the root inside a union's branch
- * issues (the view union keeps the branch the body claims and mutes the
- * others, `focusClaimedBranch`). Every other finding on the body is the save
- * door's to answer, as before, and answers `false` here. The body's own
- * `overrides` value, if any, is replaced by a well-formed probe: the key
- * alone decides.
+ * `overrides` at the body's root. Inside a union it must be named by EVERY
+ * branch still diagnosing the body — the view union keeps the branch the body
+ * claims and mutes the others to a kind mismatch at the root
+ * (`focusClaimedBranch`), which is dropped here as every consumer of a failed
+ * union drops it — so a body that claims no branch, refused by the container
+ * member and by a member that carries the key, is not answered `true`. Every
+ * other finding on the body is the save door's to answer, as before, and
+ * answers `false` here. The body's own `overrides` value, if any, is replaced
+ * by a well-formed probe: the key alone decides.
  */
 export function overrideDeclarationRefusedByShape(type: string, body: Record<string, unknown>): boolean {
     const schema = resolveOverlaySchema(type, body);
@@ -460,15 +463,25 @@ export function overrideDeclarationRefusedByShape(type: string, body: Record<str
 /** A well-formed declaration: the probe asks whether the KEY is carried, so its value raises nothing. */
 const OVERRIDES_KEY_PROBE = Object.freeze({ package: 'com.example.base', basedOn: '1.0.0' });
 
-/** An `unrecognized_keys` issue naming `overrides` at the parsed body's root, here or in a union branch's issues. */
+type ParseIssue = { code?: unknown; path?: unknown; keys?: unknown; errors?: unknown } | null;
+
+/** An issue at the parsed value's root: a `path` of length 0. */
+const atRoot = (issue: ParseIssue): boolean => Array.isArray(issue?.path) && issue.path.length === 0;
+
+/**
+ * An `unrecognized_keys` issue naming `overrides` at the parsed body's root;
+ * for a union, named by every branch whose issues are not a bare kind
+ * mismatch at the root (a muted branch, or a member of another kind).
+ */
 function namesOverridesAtRoot(issue: unknown): boolean {
-    const candidate = issue as { code?: unknown; path?: unknown; keys?: unknown; errors?: unknown } | null;
+    const candidate = issue as ParseIssue;
     if (candidate?.code === 'unrecognized_keys') {
-        return Array.isArray(candidate.path) && candidate.path.length === 0
-            && Array.isArray(candidate.keys) && candidate.keys.includes('overrides');
+        return atRoot(candidate) && Array.isArray(candidate.keys) && candidate.keys.includes('overrides');
     }
     if (candidate?.code === 'invalid_union' && Array.isArray(candidate.errors)) {
-        return candidate.errors.some((branch) => Array.isArray(branch) && branch.some(namesOverridesAtRoot));
+        const diagnosing = candidate.errors.filter((branch): branch is unknown[] => Array.isArray(branch)
+            && !branch.every((i) => (i as ParseIssue)?.code === 'invalid_type' && atRoot(i as ParseIssue)));
+        return diagnosing.length > 0 && diagnosing.every((branch) => branch.some(namesOverridesAtRoot));
     }
     return false;
 }
