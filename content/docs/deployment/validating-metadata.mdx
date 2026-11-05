@@ -490,7 +490,7 @@ orthogonal to both, and no cell here can carry it; it is written out in
 | Empty filter combinators — `$and: []`, `$or: []`, `$not: {}` (#5330) | ✓ | ✓ | ✓ | ✓ᶠ |
 | Object & action name references (#3583) | ✓ | ✓ | ✓ | — |
 | Reference integrity — flow node writes, template paths, read-only writes (#3583); at the publish door each write type runs only the members that declare it, and the flow members run on `flow` alone (#9313) | ✓ | ✓ | ✓ | ✓ᶠᵛᵒᵈᵗʳᵖ |
-| List-view field members — a list view's `sort` (a `sortable: false` field, a `formula`, an unknown name: `sort-field-unsortable`), its `searchableFields` (`searchable-field-unknown`) and its field references, columns, filter keys, grouping and the board bindings (`list-view-field-unknown`); the `page` door runs the sort member only (#9313, #15495, #30095) | ✓ | ✓ | ✓ | ✓ᶠᵛᵖᵒ |
+| List-view field members — a list view's `sort` (a `sortable: false` field, a `formula`, an unknown name: `sort-field-unsortable`), its `searchableFields` (`searchable-field-unknown`) and its field references, columns, filter keys, grouping and the board bindings (`list-view-field-unknown`); the row merges three members, so its codes follow no one rule's order, and the `page` door runs the sort member only (#9313, #15495, #30095) | ✓ | ✓ | ✓ | ✓ᶠᵛᵒᵖ |
 | Page-component field bindings (#3583) | ✓ | ✓ | ✓ | — |
 | React page block field bindings — §10 (#4340) | ✓ | ✓ | ✓ | — |
 | Chart bindings outside dashboards (#3583) | ✓ | ✓ | ✓ | — |
