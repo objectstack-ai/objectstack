@@ -3689,10 +3689,11 @@ export const GetPresenceResponseSchema = lazySchema(() => z.object({
  * `DELETE /api/v1/notifications/devices/:deviceId`.
  *
  * One request does both: registering a `deviceId` the user already has
- * refreshes that device (its token, vendor, app, locale and origin) instead of adding
- * a second one. A request without `deviceId` gets one minted by the server
- * and answered in {@link RegisterDeviceResponseSchema}; the client keeps it
- * and sends it on every later registration and on unregister.
+ * refreshes that device (its token, vendor, platform, app, locale, origin and
+ * name) instead of adding a second one. A request without `deviceId` gets
+ * one minted by the server and answered in {@link RegisterDeviceResponseSchema};
+ * the client keeps it and sends it on every later registration and on
+ * unregister.
  *
  * The members after `name` (`vendor`, `appId`, `locale`) were added for the
  * push channel, all optional, so the body a client sent before still parses
