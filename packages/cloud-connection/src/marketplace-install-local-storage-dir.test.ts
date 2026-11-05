@@ -194,7 +194,7 @@ describe('install-local default ledger — follows OS_HOME (#30217)', () => {
         const plugin = new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off' });
         await plugin.start(ctx as any);
         await fire();
-        const register = (ctx.getService('manifest') as any).register as ReturnType<typeof vi.fn>;
+        const register = ctx.getService('manifest').register as ReturnType<typeof vi.fn>;
         const registered = register.mock.calls.map((call: any[]) => call[0]?.id);
         return {
             ctx,
