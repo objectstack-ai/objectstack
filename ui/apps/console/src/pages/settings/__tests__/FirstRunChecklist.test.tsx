@@ -43,12 +43,10 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
   useAuth: () => AUTH,
 }));
 vi.mock('sonner', () => ({ toast: { error: toastError, success: toastSuccess } }));
-// The barrel would transform the whole app shell; the checklist reads two names
-// from it, and `i18nSession` (through `loadLocales`) one more.
-vi.mock('@object-ui/app-shell', async () => ({
-  ...(await vi.importActual<Record<string, unknown>>(
-    '../../../../../../packages/app-shell/src/observability/settleSignal',
-  )),
+// The checklist reads the apps (for the Setup app's path) from the metadata
+// provider; the real surface is inherited and only that read is stubbed.
+vi.mock('@object-ui/app-shell', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   useMetadata: () => ({ apps: [], objects: [], loading: false, error: null, refresh: async () => {} }),
   resolveSetupAppPath: () => '/apps/setup',
 }));
