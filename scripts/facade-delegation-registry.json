@@ -488,8 +488,8 @@
     {
       "file": "packages/drivers/driver-sql/src/sql-driver.ts",
       "member": "createColumn",
-      "card": "#30054",
-      "reason": "inferred-return-type (#30105 report); also path-reader (check-keyed-text-bounds and the packages/cli generate-* pins slice its type switch in sql-driver.ts), a codemod limit #30147 retires"
+      "card": "#30147",
+      "reason": "path-reader (#30105 report: check-keyed-text-bounds and the packages/cli generate-* pins slice its type switch in sql-driver.ts); inferred-return-type"
     },
     {
       "file": "packages/drivers/driver-sql/src/sql-driver.ts",
@@ -500,8 +500,8 @@
     {
       "file": "packages/drivers/driver-sql/src/sql-driver.ts",
       "member": "getBuilder",
-      "card": "#30054",
-      "reason": "inferred-return-type (#30105 report); also field-call: knex, a codemod limit #30147 retires"
+      "card": "#30147",
+      "reason": "field-call: knex; inferred-return-type (#30105 report: stays on the class)"
     },
     {
       "file": "packages/drivers/driver-sql/src/sql-driver.ts",
@@ -518,26 +518,26 @@
     {
       "file": "packages/drivers/driver-sql/src/sql-driver.ts",
       "member": "applyFilters",
-      "card": "#30054",
-      "reason": "inferred-return-type (#30105 report: stays on the class until the return type is spelled)"
+      "card": "#30147",
+      "reason": "inferred-return-type (#30105 report: stays on the class until the codemod spells the return type)"
     },
     {
       "file": "packages/drivers/driver-sql/src/sql-driver.ts",
       "member": "applyFilterCondition",
-      "card": "#30054",
-      "reason": "inferred-return-type (#30105 report); also comment-in-parameters, a codemod limit #30147 retires"
+      "card": "#30147",
+      "reason": "inferred-return-type; comment-in-parameters (#30105 report: stays on the class)"
     },
     {
       "file": "packages/drivers/driver-sql/src/sql-driver.ts",
       "member": "ensureDatabaseExists",
-      "card": "#30054",
-      "reason": "inferred-return-type (#30105 report: stays on the class until the return type is spelled)"
+      "card": "#30147",
+      "reason": "inferred-return-type (#30105 report: stays on the class until the codemod spells the return type)"
     },
     {
       "file": "packages/drivers/driver-sql/src/sql-driver.ts",
       "member": "createDatabase",
-      "card": "#30054",
-      "reason": "inferred-return-type (#30105 report: stays on the class until the return type is spelled)"
+      "card": "#30147",
+      "reason": "inferred-return-type (#30105 report: stays on the class until the codemod spells the return type)"
     },
     {
       "file": "packages/drivers/driver-sql/src/sql-driver.ts",
