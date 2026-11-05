@@ -933,8 +933,8 @@ const pt = {
     },
     betterAuth: {
       short: "Identidade",
-      title: "Gerenciado pelo provedor de identidade",
-      body: "O esquema deste objeto pertence a {{provider}}. Edições diretas ignoram o hash de senhas, a validação de sessões, as verificações de dois fatores e os hooks de auditoria. Gerencie esses registros pelos fluxos de login, convite e segurança do seu provedor de autenticação.",
+      title: "Gravado pelo serviço de identidade integrado",
+      body: "O esquema deste objeto pertence a {{provider}}, o serviço de identidade integrado da plataforma. Crie e altere esses registros com as ações desta página ou pelos fluxos de login, convite e segurança; todos passam por esse serviço. Editar a tabela diretamente ignoraria o hash de senhas, a validação de sessões, as verificações de dois fatores e os hooks de auditoria.",
     },
   },
   kanban: {

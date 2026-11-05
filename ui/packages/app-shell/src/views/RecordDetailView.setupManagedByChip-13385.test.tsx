@@ -192,14 +192,14 @@ describe('RecordDetailView — Setup record pages carry the managed-by note on t
     await mountRecord('com.objectstack.setup', 'better-auth', AUTHOR);
 
     expect(badges()).toEqual([]);
-    expect(headerNote()).toEqual({ label: 'Organization', note: 'Managed by the identity provider' });
+    expect(headerNote()).toEqual({ label: 'Organization', note: 'Written through the built-in identity service' });
   });
 
   it('Setup addressed by its app name (`setup`) reads the same', async () => {
     await mountRecord('setup', 'better-auth', AUTHOR);
 
     expect(badges()).toEqual([]);
-    expect(headerNote()).toEqual({ label: 'Organization', note: 'Managed by the identity provider' });
+    expect(headerNote()).toEqual({ label: 'Organization', note: 'Written through the built-in identity service' });
   });
 
   it('CONTROL — a business-app record page still draws the floating badge for an author, and no chip note', async () => {

@@ -933,8 +933,8 @@ const fr = {
     },
     betterAuth: {
       short: "Identité",
-      title: "Géré par le fournisseur d'identité",
-      body: "Le schéma de cet objet appartient à {{provider}}. Les modifications directes contournent le hachage des mots de passe, la validation des sessions, les contrôles à deux facteurs et les hooks d'audit. Gérez ces enregistrements via les flux de connexion, d'invitation et de sécurité de votre fournisseur d'authentification.",
+      title: "Écrit via le service d'identité intégré",
+      body: "Le schéma de cet objet appartient à {{provider}}, le service d'identité intégré de la plateforme. Créez et modifiez ces enregistrements avec les actions de cette page ou via les flux de connexion, d'invitation et de sécurité ; tous passent par ce service. Modifier la table directement contournerait le hachage des mots de passe, la validation des sessions, les contrôles à deux facteurs et les hooks d'audit.",
     },
   },
   kanban: {
