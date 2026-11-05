@@ -2871,6 +2871,7 @@ const ko = {
       verifyingDescription: "이메일을 확인하고 있습니다. 잠시 기다리세요.",
       successTitle: "이메일 확인됨",
       successDescription: "이메일이 확인되었습니다. 이제 로그인할 수 있습니다.",
+      handoffSuccessDescription: "이메일이 확인되었습니다. 로그인하려던 앱으로 돌아가 그곳에서 로그인하세요.",
       errorTitle: "확인 실패",
       errorDescription: "확인에 실패했습니다. 새 링크를 요청하세요.",
       missingToken: "확인 링크에 토큰이 없습니다.",
@@ -4213,6 +4214,10 @@ const ko = {
         unreadableRange: "{{packageId}}이(가) {{dependency}}에 선언한 버전 범위 {{range}}을(를) 읽을 수 없습니다. 범위를 수정한 뒤 패키지를 다시 게시하세요.",
         unreadableVersion: "{{range}} 범위 안의 {{dependency}} 정식 버전을 설치하세요. 설치된 버전 {{installedVersion}}은(는) MAJOR.MINOR.PATCH 형식이 아닙니다.",
         unreadableDeclaration: "{{packageId}}의 종속성 선언 형식을 읽을 수 없습니다. 패키지 ID에서 버전 범위로의 맵으로 작성한 뒤 패키지를 다시 게시하세요.",
+      },
+      protocolCheckSkipped: {
+        noRange: "{{packageId}}은(는) 지원하는 플랫폼 프로토콜을 명시하지 않아 호환성 검사 없이 프로토콜 {{protocolVersion}}에서 설치되었으며, 이 플랫폼 버전에서 작동하지 않을 수 있습니다. 지원 프로토콜(engines.protocol)을 명시한 패키지 빌드는 설치 시 검사됩니다.",
+        unparsedRange: "{{packageId}}은(는) 플랫폼 프로토콜을 {{requiredRange}}(으)로 명시했지만 이 런타임이 읽을 수 없어 호환성 검사 없이 프로토콜 {{protocolVersion}}에서 설치되었으며, 이 플랫폼 버전에서 작동하지 않을 수 있습니다. 읽을 수 있는 범위(engines.protocol)를 명시한 패키지 빌드는 설치 시 검사됩니다.",
       },
       localUnauthorized: "먼저 이 런타임에 로그인하세요.",
       localMarketplaceUnavailable: "이 런타임에 OS_CLOUD_URL이 구성되지 않았습니다.",

@@ -2871,6 +2871,7 @@ const de = {
       verifyingDescription: "Wir bestätigen Ihre E-Mail. Bitte warten.",
       successTitle: "E-Mail bestätigt",
       successDescription: "Ihre E-Mail wurde bestätigt. Sie können sich jetzt anmelden.",
+      handoffSuccessDescription: "Ihre E-Mail wurde bestätigt. Kehren Sie zur App zurück, bei der Sie sich anmelden wollten, und melden Sie sich dort an.",
       errorTitle: "Bestätigung fehlgeschlagen",
       errorDescription: "Bestätigung fehlgeschlagen. Bitte fordern Sie einen neuen Link an.",
       missingToken: "Im Bestätigungslink fehlt ein Token.",
@@ -4214,6 +4215,10 @@ const de = {
         unreadableRange: "{{packageId}} deklariert {{dependency}} mit dem Versionsbereich {{range}}, der nicht gelesen werden kann. Korrigieren Sie den Bereich und veröffentlichen Sie das Paket erneut.",
         unreadableVersion: "Installieren Sie eine Release-Version von {{dependency}} innerhalb von {{range}}. Die installierte Version {{installedVersion}} hat nicht das Format MAJOR.MINOR.PATCH.",
         unreadableDeclaration: "{{packageId}} deklariert seine Abhängigkeiten in einer Form, die die Installation nicht lesen kann. Schreiben Sie sie als Zuordnung von Paket-ID zu Versionsbereich und veröffentlichen Sie das Paket erneut.",
+      },
+      protocolCheckSkipped: {
+        noRange: "{{packageId}} gibt nicht an, welches Plattformprotokoll es unterstützt. Es wurde daher ohne Kompatibilitätsprüfung unter Protokoll {{protocolVersion}} installiert und funktioniert auf dieser Plattformversion möglicherweise nicht. Ein Build des Pakets, der sein unterstütztes Protokoll (engines.protocol) angibt, wird bei der Installation geprüft.",
+        unparsedRange: "{{packageId}} gibt sein Plattformprotokoll als {{requiredRange}} an, was diese Laufzeitumgebung nicht lesen kann. Es wurde daher ohne Kompatibilitätsprüfung unter Protokoll {{protocolVersion}} installiert und funktioniert auf dieser Plattformversion möglicherweise nicht. Ein Build des Pakets mit lesbarem Bereich (engines.protocol) wird bei der Installation geprüft.",
       },
       localUnauthorized: "Melden Sie sich zuerst in diesem Laufzeitsystem an.",
       localMarketplaceUnavailable: "Dieses Laufzeitsystem hat keine OS_CLOUD_URL konfiguriert.",

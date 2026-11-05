@@ -82,6 +82,8 @@ import {
   type CloudInstallationInfo,
 } from './marketplaceApi.js';
 import { useDependencyMissingText } from './dependencyMissing.js';
+import { useProtocolCheckSkippedText } from './protocolCheckSkipped.js';
+import { ProtocolCheckSkippedNote } from './ProtocolCheckSkippedNote.js';
 import { getCloudBase, getRuntimeConfig, isMarketplaceEnabled } from '../../runtime-config.js';
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
 import { useMetadata } from '../../providers/MetadataProvider.js';
@@ -148,6 +150,7 @@ export function MarketplacePackagePage() {
   const { isAdmin, isResolved } = useWorkspaceAdminStatus();
   const { t, language } = useObjectTranslation();
   const dependencyMissingText = useDependencyMissingText();
+  const protocolCheckSkippedText = useProtocolCheckSkippedText();
   // Dates and numbers on this surface read the display locale; a bare
   // `toLocale*()` call used the MACHINE's locale (objectui#9909).
   const displayLocale = useDisplayLocale();
@@ -267,6 +270,9 @@ export function MarketplacePackagePage() {
     message: string;
     unmanaged?: { strippedLocks: LocalInstallStrippedLock[] };
     credentials?: { packageId: string; note?: string };
+    // objectstack#30326 — the install answer's `protocolCheckSkipped`, drawn:
+    // installed, but its platform protocol range was not checked.
+    protocolNote?: string;
   } | null>(null);
   // ADR-0131 D6 — the install modes the package's latest manifest declares,
   // read from the manifest install-local judges, and the operator's pick among
@@ -601,6 +607,10 @@ export function MarketplacePackagePage() {
     try {
       const result = await installLocal({ packageId, ...(installMode ? { installMode } : {}) });
       const name = data?.package ? localizePackage(data.package as any, language).displayName : result.manifestId;
+      // objectstack#30326 — every success answer can say the package was
+      // admitted with its protocol range unchecked; each note below carries it.
+      const protocolNote = protocolCheckSkippedText(result) ?? undefined;
+      const withProtocolNote = protocolNote ? { protocolNote } : {};
       // An unmanaged copy (ADR-0131 D6): the package's metadata is this
       // runtime's own from now on, in the base the answer names; the answer
       // lists every protection lock the copy dropped, with the package's reason.
@@ -614,6 +624,7 @@ export function MarketplacePackagePage() {
           ok: true,
           message: t('marketplace.install.unmanagedSuccess', { version: result.version, name, base: result.targetPackageId }),
           unmanaged: { strippedLocks: result.strippedLocks },
+          ...withProtocolNote,
         });
         emitMetadataRefresh();
         return;
@@ -629,8 +640,8 @@ export function MarketplacePackagePage() {
       // and the page says when the app will appear.
       if (!result.hotLoaded) {
         setLocalResult(ignoredCopy
-          ? { ok: false, message: t('marketplace.install.unmanagedIgnored', { name }) }
-          : { ok: true, message: t('marketplace.install.localLoadsAtRestart', { version: result.version, name }) });
+          ? { ok: false, message: t('marketplace.install.unmanagedIgnored', { name }), ...withProtocolNote }
+          : { ok: true, message: t('marketplace.install.localLoadsAtRestart', { version: result.version, name }), ...withProtocolNote });
         return;
       }
       try {
@@ -639,11 +650,12 @@ export function MarketplacePackagePage() {
         // Non-fatal: the install succeeded; the app list will refresh on next navigation.
       }
       setLocalResult(ignoredCopy
-        ? { ok: false, message: t('marketplace.install.unmanagedIgnored', { name }) }
+        ? { ok: false, message: t('marketplace.install.unmanagedIgnored', { name }), ...withProtocolNote }
         : {
             ok: true,
             message: t('marketplace.install.localSuccess', { version: result.version, name }),
             credentials: { packageId: result.manifestId, note: result.credentialNote },
+            ...withProtocolNote,
           });
       emitMetadataRefresh();
     } catch (e: any) {
@@ -996,6 +1008,7 @@ export function MarketplacePackagePage() {
       {localResult.ok ? <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" aria-hidden="true" /> : <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" aria-hidden="true" />}
       <div className="flex-1">
         {localResult.message}
+        {localResult.protocolNote ? <ProtocolCheckSkippedNote text={localResult.protocolNote} /> : null}
         {/* ADR-0131 D6 — each protection lock the unmanaged copy dropped, as
             the answer states it: the item, the lock and the package's reason
             verbatim, so the operator reads why the vendor locked an item
