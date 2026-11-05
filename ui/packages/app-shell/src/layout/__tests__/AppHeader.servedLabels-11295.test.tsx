@@ -406,3 +406,49 @@ describe('AppHeader — a served report or page is named as served (objectstack#
     expect(screen.getAllByText('Q3 Results').length).toBeGreaterThan(0);
   });
 });
+
+/**
+ * objectstack#30311 — a served object is named as served in the header's
+ * title on its list route.
+ *
+ * A `.custom` override renamed the object, and the `/meta/object` read serves
+ * the new name by the server's label order for an overridden item. The title
+ * passed the served definition through the bundle's `objectPluralLabel`, whose
+ * packaged translation of the old name won.
+ *
+ * Directions, written before the run: the renamed cells RED before the change
+ * (the packaged string), GREEN after; the controls GREEN on both sides.
+ */
+describe('AppHeader — a served object is named as served (objectstack#30311)', () => {
+  const RENAMED_OBJECT = 'Work items (renamed-30311)';
+  const PACKAGED_OBJECT = { en: 'Task', 'zh-CN': '任务' } as const;
+
+  function served(object: { label?: string; pluralLabel?: string }) {
+    const objects = world(EDITED_VIEW, EDITED_DASHBOARD).map((o) => {
+      const { label: _label, ...rest } = o;
+      return { ...rest, ...object };
+    });
+    meta.value = { ...meta.value, objects };
+    return objects;
+  }
+
+  it.each(LANGUAGES)('%s: the title draws the renamed object as served, not the packaged string', (language) => {
+    renderAt('/apps/showcase_app/showcase_task', language, served({ label: RENAMED_OBJECT }));
+
+    expect(screen.getAllByText(RENAMED_OBJECT).length).toBeGreaterThan(0);
+    expect(screen.queryAllByText(PACKAGED_OBJECT[language])).toHaveLength(0);
+  });
+
+  it('zh-CN: the served plural is read first', () => {
+    renderAt('/apps/showcase_app/showcase_task', 'zh-CN', served({ label: RENAMED_OBJECT, pluralLabel: 'All work (renamed-30311)' }));
+
+    expect(screen.getAllByText('All work (renamed-30311)').length).toBeGreaterThan(0);
+    expect(screen.queryAllByText('任务')).toHaveLength(0);
+  });
+
+  it('zh-CN: control — an object served with no label is named by the bundle', () => {
+    renderAt('/apps/showcase_app/showcase_task', 'zh-CN', served({}));
+
+    expect(screen.getAllByText('任务').length).toBeGreaterThan(0);
+  });
+});
