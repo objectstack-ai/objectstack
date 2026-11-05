@@ -7,7 +7,7 @@
  * `--merge` preserves every hand-translated string.
  *
  *   os i18n extract packages/services/service-messaging/scripts/i18n-extract.config.ts \
- *     --locales=zh-CN,ja-JP,es-ES,zh-Hant,ar,fr,pt-BR --fill=default --objects-only --no-metadata-forms \
+ *     --locales=zh-CN,ja-JP,es-ES,zh-Hant,ar,fr,pt-BR,ru,de,ko --fill=default --objects-only --no-metadata-forms \
  *     --source-hashes \
  *     --out=packages/services/service-messaging/src/translations
  *
@@ -53,6 +53,9 @@ import { zhHantObjects } from '../src/translations/zh-Hant.objects.generated.js'
 import { arObjects } from '../src/translations/ar.objects.generated.js';
 import { frObjects } from '../src/translations/fr.objects.generated.js';
 import { ptBRObjects } from '../src/translations/pt-BR.objects.generated.js';
+import { ruObjects } from '../src/translations/ru.objects.generated.js';
+import { deObjects } from '../src/translations/de.objects.generated.js';
+import { koObjects } from '../src/translations/ko.objects.generated.js';
 
 /**
  * The annotation is load-bearing, not decoration (#10868). `defineStack`
@@ -87,6 +90,9 @@ const config: ObjectStackDefinition = defineStack({
     { 'ar': { objects: arObjects } },
     { 'fr': { objects: frObjects } },
     { 'pt-BR': { objects: ptBRObjects } },
+    { 'ru': { objects: ruObjects } },
+    { 'de': { objects: deObjects } },
+    { 'ko': { objects: koObjects } },
   ],
 });
 
