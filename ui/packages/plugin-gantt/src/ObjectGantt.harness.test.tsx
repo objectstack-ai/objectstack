@@ -91,7 +91,7 @@ vi.mock('@object-ui/plugin-detail', async (importOriginal) => ({
  * these queries and that is a different change on the same lines; this file
  * asserts only HOW MANY queries go out and whether the first one carries its
  * expansion. The ceiling has its own pin
- * (`ObjectGantt.rowCeiling-7210.test.tsx`).
+ * (the `ObjectGantt.rowCeiling-7210` block in this file).
  *
  * ⚠️ The gate is only safe because the schema resolution now SETTLES ON EVERY
  * EXIT (objectui#7232): the component's own effect used to return without
@@ -394,7 +394,7 @@ describe('ObjectGantt.rowCeiling-7210', () => {
      * inline row costs the browser exactly what a fetched row costs.
      *
      * The inline provider's own three-key pin lives in
-     * `ObjectGantt.inlineQueryKeys-8769.test.tsx`; this one stays here so the
+     * the `ObjectGantt.inlineQueryKeys-8769` block in this file; this one stays here so the
      * ceiling's own file states the exemption boundary in one place.
      */
     it('an inline `value` data set IS capped, and says so', async () => {
@@ -603,7 +603,7 @@ describe('ObjectGantt.hostDataProp-7210', () => {
  * chart reading from its own source, exactly as with no host array at all.
  *
  * ⚠️ Reach: the registered `object-gantt` renderer forwards no host prop, which
- * `ObjectGantt.hostDataProp-7210.test.tsx` pins, and `ObjectGanttProps` does
+ * the `ObjectGantt.hostDataProp-7210` block in this file pins, and `ObjectGanttProps` does
  * not declare `data`. So every case here renders `ObjectGantt` directly and
  * spreads the prop in, as a direct caller would have to.
  *
@@ -763,7 +763,7 @@ describe('ObjectGantt.emptyHostData-7333', () => {
       await settle();
       // Ungated, the first query goes out before the definition lands and
       // carries no expansion, and a second follows once it does: `[null,
-      // ['owner']]` — the signature `ObjectGantt.fetchGate-7225.test.tsx`
+      // ['owner']]` — the signature the `ObjectGantt.fetchGate-7225` block
       // records for the ungated regime.
       const expandSets = adapter.find.mock.calls.map(([, params]: [string, any]) => params?.$expand ?? null);
       expect(expandSets).toEqual([['owner']]);
@@ -809,7 +809,7 @@ describe('ObjectGantt.emptyHostData-7333', () => {
  *
  * ## The `never capped by us` case this file replaces
  *
- * `ObjectGantt.rowCeiling-7210.test.tsx` asserted that an inline set is never
+ * The `ObjectGantt.rowCeiling-7210` block in this file asserted that an inline set is never
  * capped and never footnoted. That case pinned the SHORT-CIRCUIT's behaviour,
  * not ruling a′: the ruling's own budget is measured in DOM ELEMENTS PER
  * RECORD (its table was measured over "real child views, inline `value`
