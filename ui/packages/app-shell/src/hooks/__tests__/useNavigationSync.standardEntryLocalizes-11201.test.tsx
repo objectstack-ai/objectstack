@@ -24,7 +24,9 @@
  *      `UnifiedSidebar` wires it (`useNavTargetLabel` plus the active
  *      `language` as `locale`, objectui#11299), under a real `I18nProvider`
  *      carrying the app's zh-CN translation bundle the way the console loads
- *      it, shows the dashboard's label in each language.
+ *      it, shows the dashboard's label in each language: the label the `/meta`
+ *      read serves under that language, which the server translated with the
+ *      same bundle and the sidebar draws as served (objectstack#30244).
  *
  * The entry rendered is the one the writer stored, read back from the save
  * call, not a hand-written copy of what it should be.
@@ -147,11 +149,16 @@ function Sidebar({ items }: { items: NavigationItem[] }) {
   );
 }
 
+/** The dashboard as the `/meta` read serves it under `language`: translated by the server's bundle. */
+function servedDashboard(language: string) {
+  return language === 'zh-CN' ? { ...DASHBOARD, label: '管道健康' } : DASHBOARD;
+}
+
 function renderSidebar(entry: Record<string, unknown>, language: string) {
   render(
     <I18nProvider instance={i18nIn(language)} persistLanguage={false}>
       <MemoryRouter initialEntries={['/apps/crm']}>
-        <MetadataCtx.Provider value={metaValue([DASHBOARD])}>
+        <MetadataCtx.Provider value={metaValue([servedDashboard(language)])}>
           <Sidebar items={[entry as unknown as NavigationItem]} />
         </MetadataCtx.Provider>
       </MemoryRouter>
@@ -180,7 +187,7 @@ describe('objectui#11201 — a synced standard entry is stored label-less and re
     cleanup();
   });
 
-  it('under zh-CN, the stored entry renders the dashboard’s zh label from the app bundle', () => {
+  it('under zh-CN, the stored entry renders the dashboard’s zh label as served', () => {
     const sidebar = renderSidebar(stored, 'zh-CN');
     expect(sidebar.getByRole('link', { name: '管道健康' })).toBeInTheDocument();
     expect(sidebar.queryByText('Pipeline Health')).toBeNull();

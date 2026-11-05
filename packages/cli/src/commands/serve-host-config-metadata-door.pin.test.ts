@@ -71,9 +71,13 @@ describe('#22989 A — `os serve` of a HOST config composes an artifact-less Met
         const gate = source.slice(gateAt, source.indexOf('hostConfigMetadataDoor = new MetadataPlugin({'));
         expect(gate).toContain('!devArtifactDoor');
         expect(gate).toContain('isHostConfig(config)');
-        expect(gate).toContain(
-            "!plugins.some((p: any) => p?.name === 'com.objectstack.metadata' || p?.constructor?.name === 'MetadataPlugin')",
-        );
+        expect(gate).toContain('!hasMetadataPlugin(plugins)');
+        // #29936 — both doors ask the ONE predicate, and no class-name-only
+        // spelling is left: the published bundle names the class
+        // `_MetadataPlugin`, so such a check missed the standalone stack's own
+        // plugin and composed a second one on every `os dev` of a scaffold.
+        expect(count('!hasMetadataPlugin(plugins)')).toBe(2);
+        expect(source).not.toContain("constructor?.name === 'MetadataPlugin'");
         // Decided after the dev door (it reads that value) and before the wrap.
         expect(source.indexOf('let devArtifactDoor: any;')).toBeLessThan(gateAt);
         expect(gateAt).toBeLessThan(
