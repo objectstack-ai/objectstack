@@ -1188,11 +1188,18 @@ export function extractTriggerPaths(workflowText) {
  * longer runs such a job, this derivation is the only place a card's dev hears
  * of it before the red lands on `main`. Refusing it would drop the console and
  * dogfood leads this function exists to give. Any other event term, a reordered
- * clause or one event alone is still refused whole.
+ * clause or `merge_group` alone is still refused whole.
+ *
+ * ⭐ So is the QUEUE-AND-FULL clause, `&& github.event_name != 'pull_request'`
+ * alone, under the same two conditions (#30461, ruling record 6663883327):
+ * ci.yml's `dogfood` shards carry it since `merge_group` left their deny-list.
+ * It too discriminates events, never paths, and it says a different WHEN: the
+ * job skips the PR and runs on the merge-queue build and the full battery.
  *
  * ⛔ Stripped is not FORGOTTEN (#24073). The clause decides nothing about paths,
- * but it decides WHEN: such a job never runs on the PR or in the merge queue.
- * `jobIfReading` below returns that fact beside the refs, and every row a
+ * but it decides WHEN: such a job never runs on the PR, and under the
+ * full-battery clause never in the merge queue either. `jobIfReading` below
+ * returns both facts beside the refs, and every row a
  * path-scheduled job renders carries it to the line the reader reads. Measured
  * before it did: a `packages/runtime/src/route-ledger.ts` change derived the
  * Dogfood Regression Gate as "scheduled BY YOUR PATHS" with nothing saying the
@@ -1202,6 +1209,7 @@ export function extractTriggerPaths(workflowText) {
 const JOB_IF_STATUS_TERM = /(?:^|\s)!\s*cancelled\(\)\s*&&\s*/g;
 const JOB_IF_FULL_BATTERY_TERM =
   /\s*&&\s*github\.event_name\s*!=\s*'pull_request'\s*&&\s*github\.event_name\s*!=\s*'merge_group'\s*$/;
+const JOB_IF_QUEUE_AND_FULL_TERM = /\s*&&\s*github\.event_name\s*!=\s*'pull_request'\s*$/;
 const JOB_FILTER_OUTPUT_TERM =
   /^needs\.([A-Za-z_][\w-]*)\.outputs\.([A-Za-z_][\w-]*)\s*(?:!=\s*(['"])false\3|==\s*(['"])true\4)$/;
 
@@ -1216,13 +1224,16 @@ export function jobFilterOutputRefs(ifExpression) {
 }
 
 /**
- * The whole reading of a job `if:` — `{ refs, fullBatteryOnly }`, or null on
- * exactly the refusals `jobFilterOutputRefs` makes, because that function IS
- * this one with the second half dropped. `fullBatteryOnly` is true when the
- * full-battery clause was stripped as the last conjunct: the job runs on
- * `main`'s push and hourly runs and NEVER on a `pull_request` or `merge_group`
- * event. It is read in the same pass as the refs, from the same text, so the
- * population and the event fact cannot describe two different `if:`s.
+ * The whole reading of a job `if:` — `{ refs, fullBatteryOnly, notOnPullRequest }`,
+ * or null on exactly the refusals `jobFilterOutputRefs` makes, because that
+ * function IS this one with the event facts dropped. `fullBatteryOnly` is true
+ * when the full-battery clause was stripped as the last conjunct: the job runs
+ * on `main`'s push and hourly runs and NEVER on a `pull_request` or
+ * `merge_group` event. `notOnPullRequest` is true when either clause was
+ * stripped: the job never runs on the PR (alone, the queue-and-full clause —
+ * the merge-queue build runs it). Both are read in the same pass as the refs,
+ * from the same text, so the population and the event facts cannot describe
+ * two different `if:`s.
  */
 export function jobIfReading(ifExpression) {
   if (typeof ifExpression !== 'string') return null;
@@ -1230,8 +1241,12 @@ export function jobIfReading(ifExpression) {
   const wrapped = /^\$\{\{([\s\S]*)\}\}$/.exec(expr);
   if (wrapped) expr = wrapped[1].trim();
   expr = expr.replace(JOB_IF_STATUS_TERM, ' ').trim();
-  const eventFree = expr.replace(JOB_IF_FULL_BATTERY_TERM, '').trim();
-  const fullBatteryOnly = eventFree !== expr;
+  const fullFree = expr.replace(JOB_IF_FULL_BATTERY_TERM, '').trim();
+  const fullBatteryOnly = fullFree !== expr;
+  // Only when the full-battery clause was NOT there: stripping both would read
+  // `!= 'pull_request' && != 'pull_request'` as one clause.
+  const eventFree = fullBatteryOnly ? fullFree : expr.replace(JOB_IF_QUEUE_AND_FULL_TERM, '').trim();
+  const notOnPullRequest = eventFree !== expr;
   expr = eventFree;
   // One balanced outer paren pair at a time — `(A || B)` is the live spelling.
   for (;;) {
@@ -1253,7 +1268,7 @@ export function jobIfReading(ifExpression) {
     if (!m) return null;
     refs.push({ job: m[1], output: m[2] });
   }
-  return refs.length ? { refs, fullBatteryOnly } : null;
+  return refs.length ? { refs, fullBatteryOnly, notOnPullRequest } : null;
 }
 
 /**
@@ -1452,15 +1467,16 @@ const EXTGLOB_CONSTRUCT = /[!?*+@]\(/;
  * The path population a job's `if:` resolves to, or null — the whole of
  * direction 1, assembled from the three readings above.
  *
- * Returns `{ paths, outputs, dropped, fullBatteryOnly }`. `paths` is a UNION:
- * the `if:` is an OR of filter outputs, so CI schedules the job when ANY of them
- * matched. `fullBatteryOnly` is `jobIfReading`'s event fact, carried so a row
- * built from this population can say WHEN CI schedules it (#24073).
+ * Returns `{ paths, outputs, dropped, fullBatteryOnly, notOnPullRequest }`.
+ * `paths` is a UNION: the `if:` is an OR of filter outputs, so CI schedules the
+ * job when ANY of them matched. The two flags are `jobIfReading`'s event facts,
+ * carried so a row built from this population can say WHEN CI schedules it
+ * (#24073, #30461).
  */
 export function jobFilterPopulation(job, filterStepsByOutputSource) {
   const reading = jobIfReading(job.if);
   if (!reading) return null;
-  const { refs, fullBatteryOnly } = reading;
+  const { refs, fullBatteryOnly, notOnPullRequest } = reading;
   const paths = [];
   const outputs = [];
   let dropped = 0;
@@ -1479,12 +1495,12 @@ export function jobFilterPopulation(job, filterStepsByOutputSource) {
     }
     outputs.push(`${ref.job}.${ref.output}`);
   }
-  return paths.length ? { paths, outputs, dropped, fullBatteryOnly } : null;
+  return paths.length ? { paths, outputs, dropped, fullBatteryOnly, notOnPullRequest } : null;
 }
 
 /**
  * Every job in one workflow whose `if:` resolves to a path population, WITH the
- * job's own text: `[{ job, name, text, outputs, paths, dropped, fullBatteryOnly }]`.
+ * job's own text: `[{ job, name, text, outputs, paths, dropped, fullBatteryOnly, notOnPullRequest }]`.
  *
  * ⛔ No check filter here, and that is the whole reason this is its own
  * function. The caller below drops a job that invokes no discoverable check
@@ -2848,8 +2864,10 @@ export function alwaysRunSteps(entries) {
  * full-battery clause carries `fullBatteryOnly: true`, read by `jobIfReading`
  * in the same pass as the population: CI schedules that job for your path on
  * `main`'s push and hourly runs ONLY — never on this PR, never in the merge
- * queue. Both renderings print it on the row's own line, so "scheduled BY YOUR
- * PATHS" cannot be read as "this PR runs it".
+ * queue. A row whose clause was the queue-and-full one carries
+ * `notOnPullRequest: true` alone (#30461): never on this PR, first on the
+ * merge-queue build. Both renderings print the fact on the row's own line, so
+ * "scheduled BY YOUR PATHS" cannot be read as "this PR runs it".
  *
  * ⛔ NOT claimed: that a row is a test, a build or a setup step.
  * `alwaysRunLines` refuses that classification for its own rows and the reason
@@ -2938,7 +2956,7 @@ export function jobFilteredSteps(entries, paths) {
       counts.named += 1;
       rows.push({
         workflow: file, job: job.name, outputs: job.outputs, hits, dropped: job.dropped,
-        fullBatteryOnly: job.fullBatteryOnly === true, steps,
+        fullBatteryOnly: job.fullBatteryOnly === true, notOnPullRequest: job.notOnPullRequest === true, steps,
       });
     }
   }
@@ -11572,17 +11590,23 @@ export function alwaysRunLines(rows, counts) {
  * on that row's own line (#24073) — or the empty string when the row's job runs
  * on the PR like any other.
  *
- * Read off `row.fullBatteryOnly`, the fact `jobIfReading` took from the job's
- * own `if:`; ⛔ never keyed on a job name, so a job that gains or loses the
- * full-battery clause gains or loses the clause here with nothing to update.
+ * Read off `row.fullBatteryOnly` and `row.notOnPullRequest`, the facts
+ * `jobIfReading` took from the job's own `if:`; ⛔ never keyed on a job name, so
+ * a job that gains or loses either event clause gains or loses the clause here
+ * with nothing to update. A queue-and-full row (#30461) says the PR skips the
+ * job and the merge-queue build is its first run.
  * The reader it exists for: a dev whose path schedules the Dogfood Regression
  * Gate, told only "scheduled BY YOUR PATHS", inferred that the PR would run its
  * pins — and the first run was `main`'s push battery, red.
  */
 export function fullBatteryOnlyClause(row) {
-  if (row?.fullBatteryOnly !== true) return '';
-  return '⛔ does NOT run on this PR or in the merge queue: its `if:` excludes the pull_request and merge_group events,' +
-    " so its first run on this change is `main`'s push battery, AFTER the merge";
+  if (row?.fullBatteryOnly === true) {
+    return '⛔ does NOT run on this PR or in the merge queue: its `if:` excludes the pull_request and merge_group events,' +
+      " so its first run on this change is `main`'s push battery, AFTER the merge";
+  }
+  if (row?.notOnPullRequest !== true) return '';
+  return '⛔ does NOT run on this PR: its `if:` excludes the pull_request event,' +
+    ' so its first run on this change is the merge-queue build, after the PR is enqueued';
 }
 
 /**
