@@ -2312,9 +2312,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const relatedChildObjectsKey = JSON.stringify(
     Array.from(new Set([...childRelations.map((r) => r.childObject), ...authoredChildObjects])).sort(),
   );
-  pageChildObjectsRef.current = JSON.parse(relatedChildObjectsKey) as string[];
   useEffect(() => {
     const childObjects = JSON.parse(relatedChildObjectsKey) as string[];
+    // What `notifyViewChanged` refreshes besides this record (objectstack#30337).
+    pageChildObjectsRef.current = childObjects;
     if (childObjects.length === 0) return;
     return subscribeDataChanges((change) => {
       if (childObjects.some((child) => dataChangeMatches(change, child))) {
