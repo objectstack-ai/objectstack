@@ -237,6 +237,9 @@ export type { RelatedCountTarget, RelatedCountsSource } from './useRelatedCounts
 // the record's field changes over through this context.
 export {
   RecordFieldChangesContext,
+  // objectstack#30074 — whether the host shows the record's field history:
+  // the stream offers its 变更 chip only while it does.
+  RecordFieldHistoryContext,
   // objectstack#28737 — the stream's size as the host counts it, and the
   // panel's most entries (the host asks that many activity rows at open).
   RecordTimelineTotalContext,
