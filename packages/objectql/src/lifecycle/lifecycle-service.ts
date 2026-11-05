@@ -84,6 +84,22 @@ export const DEFAULT_LIFECYCLE_SWEEP_MS = 3_600_000;
  * and keeps short-lived test kernels from ever sweeping. */
 export const DEFAULT_LIFECYCLE_INITIAL_DELAY_MS = 60_000;
 
+/**
+ * [#29918] The engine-owned object that holds the sweep's clock state:
+ * one row per datastore, carrying when the scheduled sweep last completed
+ * (`last_swept_at`). Declared by `@objectstack/platform-objects`
+ * (`sys-lifecycle-state.object.ts`); a kernel that does not register it is
+ * one that cannot say, and sweeps exactly as before.
+ *
+ * Internal state, not a setting: no settings key, no env override, no audit
+ * row per sweep, no data API. See {@link LifecycleService.start} for the read
+ * and {@link LifecycleService.sweep} for the write.
+ */
+export const LIFECYCLE_STATE_OBJECT = 'sys_lifecycle_state';
+
+/** [#29918] The row id of this service's clock in {@link LIFECYCLE_STATE_OBJECT}. */
+export const LIFECYCLE_STATE_ROW_ID = 'lifecycle';
+
 /** Minimal engine surface the service needs — duck-typed for tests. */
 export interface LifecycleEngineLike {
   registry: {
@@ -135,7 +151,24 @@ export interface LifecycleEngineLike {
    * first sweep runs at the initial delay exactly as before.
    */
   wasDatastoreCreatedFromEmpty?(): boolean;
+  /**
+   * [#29918] Single-row read of the sweep's clock state
+   * ({@link LIFECYCLE_STATE_OBJECT}), by primary key. `findOne`, not `find`
+   * with `limit: 1`: it is the single-row route, and says what the read is.
+   * Optional with {@link insert} and {@link update}: an engine missing any of
+   * the three keeps no watermark, and its first sweep runs at the initial
+   * delay exactly as before.
+   */
+  findOne?(object: string, options: Record<string, unknown>): Promise<Record<string, unknown> | null>;
+  /** [#29918] Writes the clock-state row the first time. See {@link findOne}. */
+  insert?(object: string, data: Record<string, unknown>, options?: Record<string, unknown>): Promise<unknown>;
+  /** [#29918] Advances the clock-state row. See {@link findOne}. */
+  update?(object: string, data: Record<string, unknown>, options?: Record<string, unknown>): Promise<unknown>;
 }
+
+/** [#29918] The engine surface the watermark needs, once it is known present. */
+type WatermarkEngine = LifecycleEngineLike &
+  Required<Pick<LifecycleEngineLike, 'findOne' | 'insert' | 'update'>>;
 
 export interface LifecycleObjectLike {
   name: string;
@@ -501,6 +534,16 @@ export class LifecycleService {
    */
   private abort: { aborted: boolean } = { aborted: false };
 
+  /**
+   * [#29918] Whether the clock-state row exists in the store: `undefined`
+   * until a read or a write has said, so an advance knows whether to insert
+   * or update without a second read.
+   */
+  private watermarkRowExists: boolean | undefined;
+
+  /** [#29918] A watermark write that fails is logged at `warn` once, then at `debug`. */
+  private watermarkWriteWarned = false;
+
   constructor(private readonly opts: LifecycleServiceOptions) {
     this.now = opts.now ?? (() => Date.now());
   }
@@ -524,7 +567,9 @@ export class LifecycleService {
    *
    * [#29918] On a datastore this process created from empty, the first sweep
    * is due one interval later instead of at the initial delay: see
-   * {@link firstSweepDueAtInitialDelay}. The interval is armed either way. */
+   * {@link firstSweepDueAtInitialDelay}. On a store that was there before
+   * this boot, the sweep's watermark decides: see {@link runFirstScheduledSweep}.
+   * The interval is armed either way. */
   start(): void {
     if (!this.enabled || this.timer || this.initialTimer) return;
     // A fresh bit per armed run — the one a previous sweep captured stays
@@ -534,11 +579,145 @@ export class LifecycleService {
     const initial = this.opts.initialDelayMs ?? DEFAULT_LIFECYCLE_INITIAL_DELAY_MS;
     this.initialTimer = setTimeout(() => {
       this.initialTimer = undefined;
-      if (this.firstSweepDueAtInitialDelay()) void this.sweep();
+      void this.runFirstScheduledSweep(interval);
       this.timer = setInterval(() => void this.sweep(), interval);
       this.timer.unref?.();
     }, initial);
     this.initialTimer.unref?.();
+  }
+
+  /**
+   * [#29918] The scheduler's first tick, combining the two answers to "is a
+   * sweep due yet?".
+   *
+   *  1. A store this boot created from empty ({@link firstSweepDueAtInitialDelay})
+   *     defers one interval, as before, and seeds the watermark at now: no row
+   *     there can be older than this boot, so a sweep now would find nothing,
+   *     and a kernel that reboots onto the store inside the interval then
+   *     skips too.
+   *  2. Otherwise the watermark row is read, once ({@link watermarkIsYoung}).
+   *     Younger than the interval ⇒ that sweep is already done and the next is
+   *     due on the interval; the read is the only statement issued.
+   *  3. Otherwise (an old or absent watermark, an engine that cannot say, a
+   *     read that failed) the first sweep runs now, as before #29918.
+   *
+   * Only the scheduler asks: a direct {@link sweep} call always sweeps. Never
+   * throws, because the timer enters it as `void`.
+   */
+  private async runFirstScheduledSweep(intervalMs: number): Promise<void> {
+    if (this.stopped) return;
+    if (!this.firstSweepDueAtInitialDelay()) {
+      const engine = this.watermarkEngine(this.opts.getEngine());
+      await this.writeWatermark(engine, new Date(this.now()).toISOString(), false);
+      return;
+    }
+    if (await this.watermarkIsYoung(intervalMs)) return;
+    await this.sweep();
+  }
+
+  /**
+   * [#29918] The engine, when it can keep the watermark: it reads, inserts
+   * and updates, and its registry has {@link LIFECYCLE_STATE_OBJECT}. Asked
+   * through `registry.getObject` so an unregistered object is never read:
+   * the engine would refuse it with `OBJECT_NOT_FOUND` before any driver.
+   */
+  private watermarkEngine(engine: LifecycleEngineLike | undefined): WatermarkEngine | undefined {
+    if (!engine) return undefined;
+    if (typeof engine.findOne !== 'function' || typeof engine.insert !== 'function' || typeof engine.update !== 'function') {
+      return undefined;
+    }
+    let registered = false;
+    try {
+      registered = Boolean(engine.registry?.getObject?.(LIFECYCLE_STATE_OBJECT));
+    } catch {
+      registered = false;
+    }
+    return registered ? (engine as WatermarkEngine) : undefined;
+  }
+
+  /**
+   * [#29918] Whether the last completed sweep is younger than one interval.
+   *
+   * Every answer but a readable, past, younger-than-the-interval timestamp is
+   * `false`, which means "sweep": no engine that can keep a watermark, no row,
+   * an unparsable value, a value in the future (the clock moved back), and a
+   * read that failed. A failed read is logged at `warn`: it happens once per
+   * armed run, so that is once.
+   */
+  private async watermarkIsYoung(intervalMs: number): Promise<boolean> {
+    const engine = this.watermarkEngine(this.opts.getEngine());
+    if (!engine) return false;
+    let row: Record<string, unknown> | null;
+    try {
+      row = await engine.findOne(LIFECYCLE_STATE_OBJECT, {
+        where: { id: LIFECYCLE_STATE_ROW_ID },
+        context: { ...SYSTEM_CTX },
+      });
+    } catch (err) {
+      this.opts.logger.warn(
+        `[lifecycle] the sweep watermark could not be read (${(err as Error)?.message ?? err}); ` +
+          'sweeping at the initial delay as if none were recorded',
+      );
+      return false;
+    }
+    this.watermarkRowExists = Boolean(row);
+    if (!row) return false;
+    const at = Date.parse(String(row.last_swept_at ?? ''));
+    const age = this.now() - at;
+    if (!Number.isFinite(at) || age < 0 || age >= intervalMs) return false;
+    this.opts.logger.debug?.(
+      `[lifecycle] the last sweep completed ${Math.round(age / 1000)}s ago, inside the interval; ` +
+        'the first sweep runs on the interval',
+    );
+    return true;
+  }
+
+  /**
+   * [#29918] Record `at` as the last completed sweep. `exists` says whether
+   * the row is there; `undefined` asks the store once, then remembers.
+   *
+   * A write that fails is a functional degradation, not a durability one:
+   * the rows the sweep reaped are reaped, and the only cost is that the next
+   * boot sweeps again because the watermark is older than it should be. So
+   * it is logged at `warn` the first time and at `debug` after, never thrown.
+   */
+  private async writeWatermark(
+    engine: WatermarkEngine | undefined,
+    at: string,
+    exists: boolean | undefined = this.watermarkRowExists,
+  ): Promise<void> {
+    if (!engine) return;
+    try {
+      let present = exists;
+      if (present === undefined) {
+        const row = await engine.findOne(LIFECYCLE_STATE_OBJECT, {
+          where: { id: LIFECYCLE_STATE_ROW_ID },
+          context: { ...SYSTEM_CTX },
+        });
+        present = Boolean(row);
+      }
+      // Only the clock's own columns: the audit family (`created_at`,
+      // `updated_at`) is the engine's to stamp on its write path.
+      const row = { id: LIFECYCLE_STATE_ROW_ID, last_swept_at: at };
+      if (present) {
+        await engine.update(LIFECYCLE_STATE_OBJECT, row, { context: { ...SYSTEM_CTX } });
+      } else {
+        await engine.insert(LIFECYCLE_STATE_OBJECT, row, { context: { ...SYSTEM_CTX } });
+      }
+      this.watermarkRowExists = true;
+    } catch (err) {
+      // The row's presence is no longer known: the next write asks again.
+      this.watermarkRowExists = undefined;
+      const msg =
+        `[lifecycle] the sweep watermark could not be written (${(err as Error)?.message ?? err}); ` +
+        'nothing was lost, but the next boot sweeps again at the initial delay';
+      if (this.watermarkWriteWarned) {
+        this.opts.logger.debug?.(msg);
+      } else {
+        this.watermarkWriteWarned = true;
+        this.opts.logger.warn(msg);
+      }
+    }
   }
 
   /**
@@ -865,7 +1044,16 @@ export class LifecycleService {
       //
       // Failure is isolated like every other leg: an audit that cannot run must
       // never cost a sweep its reaping.
-      await this.auditReferences(engine, report);
+      const audited = await this.auditReferences(engine, report);
+
+      // [#29918] Advance the watermark only for a sweep that COMPLETED: no
+      // policy error, the audit leg ran, and no teardown cut it short. A
+      // failed or partial sweep leaves the last good time in place, so the
+      // next boot sweeps. Stamped with the sweep's start: the cutoffs were
+      // taken from it.
+      if (audited && report.errors.length === 0 && !this.stopped) {
+        await this.writeWatermark(this.watermarkEngine(engine), report.at);
+      }
 
       if (report.swept.length > 0 || report.errors.length > 0 || report.alerts.length > 0) {
         // ADR-0057 §3.3: cleanup must not re-feed the tables it drains — one
@@ -894,30 +1082,36 @@ export class LifecycleService {
    * could not run has applied no policy either way. It logs instead, and its
    * own report already carries `unreadableObjects` / `undetermined` so a
    * partial run is never mistaken for a clean one.
+   *
+   * [#29918] Answers whether the leg is complete — `true` when it ran, or was
+   * never meant to (switched off, or an engine without the audit) — so a sweep
+   * whose audit threw or was cut short does not advance the watermark.
    */
   private async auditReferences(
     engine: LifecycleEngineLike,
     report: LifecycleSweepReport,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const cfg = this.opts.referenceAudit;
-    if (cfg?.enabled === false) return;
-    if (typeof engine.inspectDanglingReferences !== 'function') return;
+    if (cfg?.enabled === false) return true;
+    if (typeof engine.inspectDanglingReferences !== 'function') return true;
     // [#4747] Not a config switch keyed on "is this a one-shot process" — the
     // audit stays wired on every host, exactly as #4551 intends. What it gets
     // is the teardown bit: it reads while the engine is live and stops when the
     // engine is going away, so `unreadableObjects` keeps meaning "the
     // datasource refused" and nothing else.
-    if (this.stopped) return;
+    if (this.stopped) return false;
     try {
       const { enabled: _enabled, ...auditOptions } = cfg ?? {};
       report.danglingReferences = await engine.inspectDanglingReferences({
         ...auditOptions,
         signal: this.abort,
       });
+      return true;
     } catch (err) {
       this.opts.logger.warn(
         `[lifecycle] reference audit failed (${(err as Error)?.message ?? err})`,
       );
+      return false;
     }
   }
 
