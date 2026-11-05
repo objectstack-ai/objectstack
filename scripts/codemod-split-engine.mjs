@@ -3139,6 +3139,35 @@ function applyOrderedEdits(text, edits) {
   return out;
 }
 
+/**
+ * `pruneImports` for this pass's `engine.ts`, with one difference: the first
+ * pass's import of the leaf is a `namedStatement`, so a binding dropped from it
+ * leaves it wrapped as `namedStatement` wraps it (`pruneImports` would rewrite
+ * a wrapped list one binding per line). Pure. Returns `{ text, removed }`.
+ */
+function pruneHostImports(tm, text, used) {
+  const ts = tm.ts;
+  const sf = parseSourceFile(HOST_PATH, text);
+  const edits = [];
+  const removed = [];
+  for (const st of sf.statements) {
+    if (!ts.isImportDeclaration(st) || st.moduleSpecifier.text !== leafSpecifier()) continue;
+    const clause = st.importClause;
+    const nb = clause && clause.namedBindings;
+    if (!clause || clause.name || !nb || !ts.isNamedImports(nb) || nb.elements.some((e) => e.propertyName || e.isTypeOnly)) continue;
+    const names = nb.elements.map((e) => e.name.text);
+    const kept = names.filter((n) => used.has(n));
+    if (kept.length === names.length) continue;
+    removed.push(...names.filter((n) => !used.has(n)));
+    const end = text[st.getEnd()] === '\n' ? st.getEnd() + 1 : st.getEnd();
+    edits.push(kept.length === 0
+      ? { start: st.getStart(sf), end, text: '' }
+      : { start: st.getStart(sf), end: st.getEnd(), text: namedStatement(clause.isTypeOnly ? 'import type' : 'import', kept, ` from '${leafSpecifier()}';`) });
+  }
+  const rest = pruneImports(tm, applyOrderedEdits(text, edits), used);
+  return { text: rest.text, removed: [...removed, ...rest.removed].sort() };
+}
+
 /** The analysis context of an `engine.ts` the first pass has split: `plan`'s, without its unsplit-file guards. */
 function membersContext(tm, text, { pins = PATH_READER_PINS, needles = PATH_READER_NEEDLES, classNeedles = CLASS_PATH_READER_NEEDLES } = {}) {
   const sf = parse(tm, HOST_PATH, text);
@@ -3421,7 +3450,7 @@ function generateMembers(tm, text, moduleTexts, planned) {
     }
   }
   const out = applyOrderedEdits(text, edits);
-  const pruned = pruneImports(tm, out, usedImportNames(tm, out));
+  const pruned = pruneHostImports(tm, out, usedImportNames(tm, out));
 
   const moduleOut = new Map();
   for (const [file, movers] of modules) {
@@ -3706,7 +3735,7 @@ function verifyMembers(tm, baseText, headText, baseModules, headModules, {
     if (!(e instanceof CodemodRefusal)) throw e;
     fail(`${HOST_BASENAME}: the undo's edits overlap`);
   }
-  const prune = pruneImports(tm, baseText, usedImportNames(tm, headText));
+  const prune = pruneHostImports(tm, baseText, usedImportNames(tm, headText));
   if (undoneHost !== null && undoneHost !== prune.text) {
     fail(`undoing the moves does not rebuild the base ${HOST_BASENAME} (first difference at line ${firstDiffLine(undoneHost, prune.text)})`);
   }
@@ -3736,7 +3765,9 @@ function generatedModulesAt(ref) {
   const out = new Map();
   for (const file of [LEAF_MODULE, HOSTS_MODULE, ...SECTION_ANCHORS.map((row) => row[2])]) {
     if (!file) continue;
-    try { out.set(file, gitShow(ref, `${SRC_REL}/${file}`)); } catch { /* absent at the ref */ }
+    try {
+      out.set(file, execFileSync('git', ['show', `${ref}:${SRC_REL}/${file}`], { cwd: ROOT, encoding: 'utf8', maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'ignore'] }));
+    } catch { /* absent at the ref */ }
   }
   return out;
 }
