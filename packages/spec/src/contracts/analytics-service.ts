@@ -220,8 +220,9 @@ export interface AnalyticsResult {
     object?: string;
 
     // ── Drill-through sidecars (ADR-0021 D2) ────────────────────────────────
-    // Four keys a `queryDataset` answer carries so a host can drill a clicked
-    // bucket back to the records behind it. Each is set only on a drillable
+    // Five keys a `queryDataset` answer carries so a host can drill a clicked
+    // number back to the records behind it: four for the bucket, and
+    // `drillScopes` for the measure. Each is set only on a drillable
     // answer, by the conditions stated per member; none is set on a `query`
     // (cube) answer, on an answer with no rows, or on a draft-preview answer
     // computed over pending seed rows (`previewDrafts`).
@@ -297,6 +298,45 @@ export interface AnalyticsResult {
      * `drillRanges` and none of the equality sidecars.
      */
     drillRanges?: Array<Record<string, { field: string; gte: string; lt: string }>>;
+    /**
+     * [#30526] The per-MEASURE drill scope: each selected measure NAME → the
+     * list filter, on `object`, that selects the records that measure
+     * aggregates. A number is computed under three filters at once: the
+     * dataset's own `filter`, the measure's own `filter`, and the request's
+     * `runtimeFilter` (a widget's filter). The host holds only the last one
+     * and has no read of the dataset definition (ADR-0021 D2: the server
+     * answers the drill bounds), so this member states the other two:
+     *
+     * - the dataset's `filter` AND the measure's `filter`, each `{token}`
+     *   resolved at the instant the query resolved it;
+     * - AND, for a measure that aggregates a `field`, that field holding a
+     *   value (`{ field: { $null: false } }`), since every aggregate skips an
+     *   empty value (a `count` over a field counts the records where it is
+     *   set); for a duration measure, both of its instants;
+     * - `{}` when none of these applies (a `count` over rows on a dataset
+     *   with no `filter`).
+     *
+     * A drill lists the clicked bucket (`dimensionFields` / `drillRawRows`
+     * or `drillRawTotals`, and `drillRanges`) AND the request's
+     * `runtimeFilter` AND this scope, which is the set of records the clicked
+     * number counted.
+     *
+     * A measure is LEFT OUT when no list filter on `object` can select its
+     * records, and a measure left out offers no drill: a derived measure
+     * (it combines other measures, so it has no record set of its own), and a
+     * measure whose scope names a relationship path (`account.region`, as a
+     * filter key or inside a `$field` reference), which the record list
+     * refuses as a filter key. The nested-relation form
+     * (`{ account: { region: 'emea' } }`) is kept: the record list serves it.
+     * Keyed by the selection's measure names, so a `<measure>__compare`
+     * column has no entry: its records lie in another window.
+     *
+     * Set on every `queryDataset` answer that has rows, `{}` included when no
+     * selected measure has a scope; absent on a `query` (cube) answer, on an
+     * answer with no rows, and on a draft-preview answer, like the other
+     * drill sidecars.
+     */
+    drillScopes?: Record<string, FilterCondition>;
 }
 
 /**

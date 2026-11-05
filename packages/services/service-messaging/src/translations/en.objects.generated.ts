@@ -460,7 +460,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       locale: {
         label: "Locale",
-        help: "Device locale that pushes to this device are rendered in."
+        help: "Device locale, as the registration named it. Stored for the device; no push renders by it: a push arrives in the recipient's language (their user locale, then the deployment default)."
       },
       name: {
         label: "Device Name"

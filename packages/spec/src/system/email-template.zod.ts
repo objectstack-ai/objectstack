@@ -35,8 +35,9 @@ import { strictObject } from '../shared/strict-object';
  *
  * Named because those two roles are the same fact and authors keep reading it
  * as neither. Over the built-in registry template loader the resolver folds a
- * named locale against the bundle's own tags (exact, case-insensitive, base
- * language, variant expansion) and then tries the stack's declared fallback
+ * named locale against the bundle's own tags (exact, case-insensitive,
+ * platform locale table language, base language, variant expansion) and then
+ * tries the stack's declared fallback
  * (`i18n.fallbackLocale`, else `defaultLocale`) folded the same way, so an `en`
  * row is reached, absent a row of their own, from `en-GB`, and from any tag on
  * a stack whose declared fallback is `en`. This literal is the one rung that
@@ -178,12 +179,14 @@ export const EmailTemplateDefinitionSchema = lazySchema(() => strictObject({
    * (`IEmailService.sendTemplate`) reads one row at one tag **exactly**, rung
    * by rung; what it folds is the tag it asks for (#28880). For a call that
    * NAMES a locale, over the built-in registry template loader, it folds that
-   * locale against the bundle's own tags (exact, case-insensitive, base
-   * language, then variant expansion, the first match in ascending tag order),
+   * locale against the bundle's own tags (exact, case-insensitive, platform
+   * locale table language, base language, then variant expansion, the first
+   * match in ascending tag order),
    * then folds the stack's declared fallback locale (`i18n.fallbackLocale`,
    * else `defaultLocale`) the same way, then tries the literal
    * {@link EMAIL_TEMPLATE_FLOOR_LOCALE}. So, absent a row of their own, `en-GB`
-   * and `en-US` reach an `en` row and `zh-TW` reaches `zh-CN`, while `fr`
+   * and `en-US` reach an `en` row and `zh-TW` reaches `zh-Hant` (else
+   * `zh-CN`), while `fr`
    * reaches an `en` row only through the declared fallback.
    *
    * ⚠️ `en-US` is still the bundle's FLOOR: the one rung that holds whatever
@@ -221,8 +224,9 @@ export const EmailTemplateDefinitionSchema = lazySchema(() => strictObject({
     'BCP-47 locale (e.g. en-US, zh-CN) — the bundle key. Each rung of the resolver reads one row at '
     + 'one tag exactly, so `en` and `en-US` are different ROWS of one bundle. A call that NAMES a '
     + "locale, over the built-in template loader, folds it against the bundle's tags (exact, "
-    + 'case-insensitive, base language, then variant expansion: `en-GB` reaches `en`, `zh-TW` '
-    + "reaches `zh-CN`), then folds the stack's declared fallback locale (`i18n.fallbackLocale`, "
+    + 'case-insensitive, platform locale table language, base language, then variant expansion: '
+    + '`en-GB` reaches `en`, `zh-TW` reaches `zh-Hant`, else `zh-CN`), then folds the stack\'s '
+    + "declared fallback locale (`i18n.fallbackLocale`, "
     + 'else `defaultLocale`) the same way, then tries the literal `en-US`; a replacement template '
     + 'loader matches the tag exactly and retries only `en-US`. `en-US` is the floor every loader '
     + 'honours: when no rung lands on a row the call raises TEMPLATE_NOT_FOUND, which is permanent — '

@@ -159,7 +159,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "利用停止",
-        description: "このユーザーを利用停止にしますか？利用停止になるとサインアウトされ、解除されるまでサインインできず、API キーも拒否されます。解除後はキーが再び使えるようになります。",
+        description: "このユーザーを利用停止にしますか？利用停止になるとサインアウトされ、解除されるまでサインインできず、API キーも拒否されます。OAuth アクセストークンとトークンの更新も同様に拒否されます。解除後はキーが再び使えるようになります。",
         successMessage: "ユーザーを利用停止にしました",
         params: {
           banReason: {
@@ -557,7 +557,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       require_mfa: {
         label: "多要素認証を必須化",
-        help: "true の場合、この組織のすべてのメンバーはデータにアクセスするために認証アプリの登録が必要になります。"
+        help: "true の場合、この組織のすべてのメンバーはデータにアクセスするために認証アプリの登録が必要になります。このデプロイで二要素認証がオンになっている必要があります（OS_AUTH_TWO_FACTOR=true）。オフの間は true で保存すると拒否されます。"
       },
       timezone: {
         label: "タイムゾーン",
@@ -3446,6 +3446,54 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_platform_setting: {
+    label: "Platform Setting",
+    pluralLabel: "Platform Settings",
+    description: "Deployment-wide settings values: the global rung of the settings cascade.",
+    fields: {
+      id: {
+        label: "Setting ID"
+      },
+      created_at: {
+        label: "Created At"
+      },
+      updated_at: {
+        label: "Updated At"
+      },
+      namespace: {
+        label: "Namespace",
+        help: "Manifest namespace (e.g. mail, storage, ai)."
+      },
+      key: {
+        label: "Key",
+        help: "Specifier key inside the namespace (snake_case)."
+      },
+      value: {
+        label: "Value",
+        help: "JSON-encoded value. Null when encrypted=true (see value_enc)."
+      },
+      encrypted: {
+        label: "Encrypted",
+        help: "When true, the value is stored encrypted-at-rest in value_enc; value column is null."
+      },
+      locked: {
+        label: "Locked",
+        help: "When true, tenant and user rows cannot override this value; writes against those scopes return 409."
+      },
+      locked_reason: {
+        label: "Lock Reason",
+        help: "Human-readable explanation surfaced in the UI tooltip when locked=true."
+      },
+      value_enc: {
+        label: "Encrypted Value",
+        help: "Handle of the sys_secret row holding the ciphertext. Set only when encrypted=true."
+      },
+      updated_by: {
+        label: "Updated By",
+        help: "Last actor who wrote this row through the settings service."
+      }
+    }
+  },
   sys_secret: {
     label: "シークレット",
     pluralLabel: "シークレット",
@@ -3570,6 +3618,84 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     _views: {
       recent: {
         label: "最近"
+      }
+    }
+  },
+  sys_platform_setting_audit: {
+    label: "Platform Setting Audit Entry",
+    pluralLabel: "Platform Setting Audit",
+    description: "Append-only audit trail for SettingsService mutations of global-scope keys.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      created_at: {
+        label: "Created At",
+        help: "When the mutation was recorded."
+      },
+      namespace: {
+        label: "Namespace"
+      },
+      key: {
+        label: "Key"
+      },
+      scope: {
+        label: "Scope",
+        help: "Cascade layer the row was written to — always the global rung here.",
+        options: {
+          global: "Global"
+        }
+      },
+      action: {
+        label: "Action",
+        help: "Mutation kind.",
+        options: {
+          set: "Set",
+          reset: "Reset",
+          lock: "Lock",
+          unlock: "Unlock",
+          rotate: "Rotate"
+        }
+      },
+      actor_id: {
+        label: "Actor",
+        help: "User who performed the mutation; null for system jobs."
+      },
+      source: {
+        label: "Source",
+        help: "Mutation entry-point.",
+        options: {
+          ui: "UI",
+          api: "API",
+          migration: "Migration",
+          import: "Import",
+          system: "System"
+        }
+      },
+      reason: {
+        label: "Reason",
+        help: "Free-text justification provided by the actor (optional)."
+      },
+      old_hash: {
+        label: "Old Hash",
+        help: "Digest of the previous value, never the plaintext: sha256: hex for a plain value, the keyed hmac-sha256: digest for a secret. Null when previously unset, or for a secret with no keyed digest."
+      },
+      new_hash: {
+        label: "New Hash",
+        help: "Digest of the new value, never the plaintext: sha256: hex for a plain value, the keyed hmac-sha256: digest for a secret. Null on reset, or for a secret with no keyed digest."
+      },
+      encrypted: {
+        label: "Encrypted",
+        help: "True when the field carries secret material (rotation is interesting)."
+      },
+      request_id: {
+        label: "Request ID",
+        help: "Correlates with sys_audit_log / tracing."
+      }
+    },
+    _views: {
+      recent: {
+        label: "Recent"
       }
     }
   },

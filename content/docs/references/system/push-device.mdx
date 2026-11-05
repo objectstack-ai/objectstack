@@ -36,7 +36,7 @@ A push device of one user: one row per app install
 | **token** | `string` | ✅ | Vendor push token. Held by one live device at a time: a second user's registration moves it |
 | **platform** | `Enum<'ios' \| 'android' \| 'web'>` | ✅ | Device platform, as the registration named it |
 | **appId** | `string` | optional | App the token was issued to: the iOS bundle ID or the Android application ID |
-| **locale** | `string` | optional | Device locale (BCP 47, for example zh-CN) that pushes to this device are rendered in |
+| **locale** | `string` | optional | Device locale (BCP 47, for example zh-CN), as the registration named it. Stored for the device; no push renders by it: a push arrives in the recipient's language (sys_user.locale, then the deployment default) |
 | **name** | `string` | optional | Device friendly name, as the registration named it |
 | **origin** | `string` | optional | [PLANNED — not yet stored] The origin the Console was loaded from, as the registration named it (for example https://crm.example.com). The device registry keeps it on the row and the push channel copies it into every push to this device, where the mobile shell picks the saved server by it. Absent on a device registered without one |
 | **enabled** | `boolean` | ✅ | False once the vendor reported the token dead; nothing is delivered to a disabled device |

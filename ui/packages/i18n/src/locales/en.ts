@@ -2260,7 +2260,7 @@ const en = {
     },
     settingsHub: {
       title: 'Settings',
-      subtitle: 'Configure your system, integrations, and feature flags.',
+      subtitle: 'Configure your system and integrations.',
       loadError: 'Failed to load settings',
       empty: 'No settings pages are available yet. They appear here when an installed app provides them.',
       adminManaged: 'Settings are managed by your administrator',
@@ -2362,6 +2362,12 @@ const en = {
       // `validation.url`; these two name what a phone number and a colour take.
       invalidPhone: 'Enter a phone number using only digits, spaces and + ( ) - .',
       invalidColor: 'Enter a hex color, such as #1a2b3c',
+      // The address the server judges beside Allowed IP ranges (objectstack#30313),
+      // one whole sentence per state of `GET /api/v1/auth/admin/client-address`:
+      // `trustProxy` off, on, and no address the server can establish.
+      clientAddressDirect: 'Your address, as the server judges it: {{address}}. A list that leaves it out cannot be saved from here. This server does not trust proxy headers, so behind a proxy this is the proxy\'s address.',
+      clientAddressViaProxy: 'Your address, as the server judges it: {{address}}, read from the forwarded headers of the proxy this server trusts. A list that leaves it out cannot be saved from here.',
+      clientAddressUnknown: 'The server cannot establish your address, so a non-empty list cannot be saved from here.',
     },
     // The one-time workspace-timezone prompt (objectui#11758): asked of an
     // administrator while `localization.timezone` is still the manifest default.
@@ -3695,6 +3701,8 @@ const en = {
     keyboardShortcuts: 'Keyboard shortcuts',
     onlineDocs: 'Online documentation',
     loadingDocumentation: 'Loading documentation',
+    documentation: 'Documentation',
+    uncategorized: 'Uncategorized',
     about: 'About',
     aboutTitle: 'About this console',
     aboutDescription: 'The build this console was compiled from.',
@@ -4968,6 +4976,16 @@ const en = {
         purgeSuccess_one: 'Removed {{count}} sample record.',
         purgeSuccess_other: 'Removed {{count}} sample records.',
         purgeNoData: 'No sample records found to purge.',
+        // objectstack#30323 — the install note's sample-data count, its clear and the app banner.
+        sampleDataLoaded: 'This install loaded {{count}} sample record(s) so you can see the app working. Clear them when you start using it for real.',
+        sampleDataLoaded_one: 'This install loaded {{count}} sample record so you can see the app working. Clear it when you start using the app for real.',
+        sampleDataLoaded_other: 'This install loaded {{count}} sample records so you can see the app working. Clear them when you start using it for real.',
+        sampleDataReloaded: 'Installing again loads the sample data again, including any you had cleared.',
+        purgeConfirmAtMost: 'Up to {{count}} sample record(s) will be deleted.',
+        purgeConfirmAtMost_one: 'Up to {{count}} sample record will be deleted.',
+        purgeConfirmAtMost_other: 'Up to {{count}} sample records will be deleted.',
+        sampleDataBannerTitle: '"{{name}}" has sample data.',
+        sampleDataBannerMessage: 'It is there so you can see the app working. Clear it when you start using the app for real.',
         reseedQueued: 'Sample data will be re-seeded on next environment access.',
         reseedLocalSuccess: 'Re-seeded sample data: {{inserted}} inserted, {{updated}} updated.',
         reseedPartialErrors: '({{count}} record(s) failed to write)',
@@ -5004,7 +5022,7 @@ const en = {
         noPermission: 'You do not have permission to install apps in any environment. Only organization owners and admins can install — ask your organization admin.',
         signInFirst: 'You need to sign into ObjectOS Cloud first. Click "Open on cloud" below.',
         success: 'Installed successfully. Open the environment to see the new app.',
-        localSuccess: 'Installed v{{version}} to this runtime. "{{name}}" should now appear in the app switcher.',
+        localSuccess: 'Installed v{{version}} to this runtime. "{{name}}" is now in the app switcher.',
         // objectui#12098 — the install answered `hotLoaded: false`: installed, and
         // the running kernel did not register it (objectstack#22695), so nothing
         // of it is served before the next restart.

@@ -46,15 +46,15 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       valid_from: {
         label: "生效时间",
-        help: "在此时刻之前授予无效。为空 = 立即生效。在解析时以 fail-closed 方式强制执行——绝不依赖后台任务。"
+        help: "分配从此时间起生效。留空则立即生效。到时即生效，无需等待任何定时任务。"
       },
       valid_until: {
         label: "失效时间",
-        help: "授权自该时刻起（含）失效（半开区间 [from, until)，UTC）。为空表示永不过期。紧急提权和智能体授权必填。在解析时强制执行。"
+        help: "分配到此时间即失效（按 UTC 计）。留空则长期有效。紧急提权和授予 AI 智能体的分配必须填写。到时即失效，无需等待任何定时任务。"
       },
       reason: {
         label: "原因",
-        help: "该授权存在的原因。自由文本；委派和紧急提权记录必填。智能体授权在此记录任务/运行归属。"
+        help: "做此分配的原因。委派和紧急提权的分配必须填写。授予 AI 智能体时，请写明它为哪项任务获得授权。"
       },
       last_certified_at: {
         label: "最近认证时间",
@@ -112,11 +112,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       valid_from: {
         label: "生效时间",
-        help: "在此时刻之前授予无效。为空 = 立即生效。在解析时以 fail-closed 方式强制执行——绝不依赖后台任务。"
+        help: "分配从此时间起生效。留空则立即生效。到时即生效，无需等待任何定时任务。"
       },
       valid_until: {
         label: "失效时间",
-        help: "在此时刻及之后授予无效（半开区间 [from, until)，UTC）。为空 = 永不过期。委派行必填。在解析时强制执行。"
+        help: "分配到此时间即失效（按 UTC 计）。留空则长期有效。委派的分配必须填写。到时即失效，无需等待任何定时任务。"
       },
       reason: {
         label: "原因",

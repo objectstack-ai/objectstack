@@ -9,6 +9,7 @@ import {
   type DatasourceAdminServicePluginOptions,
 } from '../datasource-admin-plugin.js';
 import { registerDatasourceAdminRoutes } from '../admin-routes.js';
+import { createPrebuiltDriverFactory } from '../prebuilt-driver-factory.js';
 import { ENTITLED_CREDENTIAL, createSessionAuthService, createGrantsEngine } from './entitled-caller.fixture.js';
 
 import { assertEngineFindOnePredicate, hashSpec } from '@objectstack/metadata-core';
@@ -853,5 +854,66 @@ describe('DatasourceAdminServicePlugin: objects bound external are read from the
 
     await service.createDatasource({ name: 'wh', driver: 'postgres', config: { database: 'analytics' } });
     expect(registry.get('datasource')?.has('wh')).toBe(true);
+  });
+});
+
+// The probe reads the driver's own health answer: a connect that resolves but a
+// health check answering `false` is not a usable connection, so Test connection
+// must not answer `ok: true` over it. The stub is a DRIVER (connect resolves,
+// checkHealth answers a boolean) wrapped the way production wraps one — through
+// `createPrebuiltDriverFactory`, whose handle mirrors the shared factory's
+// `toHandle` (`ping` and `checkHealth` both answer the driver's checkHealth()).
+describe('DatasourceAdminServicePlugin: probe reads the health answer', () => {
+  function stubDriver(health: boolean, over: { connect?: () => Promise<void> } = {}) {
+    const calls = { connect: 0, checkHealth: 0, disconnect: 0 };
+    const driver = {
+      name: 'stub',
+      connect: over.connect ?? (async () => { calls.connect += 1; }),
+      checkHealth: async () => { calls.checkHealth += 1; return health; },
+      disconnect: async () => { calls.disconnect += 1; },
+    };
+    return { driver, calls };
+  }
+  const draft = { name: 'reporting', driver: 'postgres', config: { host: 'db', database: 'analytics' } };
+
+  it('answers ok:false with a refusal sentence when connect resolves and the health check answers false', async () => {
+    const { driver, calls } = stubDriver(false);
+    const { service } = await boot({ driverFactory: createPrebuiltDriverFactory(driver, { driverId: 'postgres' }) });
+    const res = await service.testConnection(draft);
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/health check/i);
+    expect(res.latencyMs).toBeUndefined();
+    expect(calls).toEqual({ connect: 1, checkHealth: 1, disconnect: 1 });
+  });
+
+  it('answers ok:false when the handle carries only checkHealth (no ping) and it answers false', async () => {
+    const { service } = await boot({
+      driverFactory: fakeFactory({
+        create: async () => ({ connect: async () => {}, checkHealth: async () => false, disconnect: async () => {} }),
+      }),
+    });
+    const res = await service.testConnection(draft);
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/health check/i);
+  });
+
+  it('CONTROL: a healthy stub driver still answers ok:true', async () => {
+    const { driver, calls } = stubDriver(true);
+    const { service } = await boot({ driverFactory: createPrebuiltDriverFactory(driver, { driverId: 'postgres' }) });
+    const res = await service.testConnection(draft);
+    expect(res.ok).toBe(true);
+    expect(typeof res.latencyMs).toBe('number');
+    expect(calls).toEqual({ connect: 1, checkHealth: 1, disconnect: 1 });
+  });
+
+  it('CONTROL: a throwing connect keeps its answer (the thrown message, health never asked)', async () => {
+    const { driver, calls } = stubDriver(true, {
+      connect: async () => { throw new Error('connect ECONNREFUSED 10.0.0.5:5432'); },
+    });
+    const { service } = await boot({ driverFactory: createPrebuiltDriverFactory(driver, { driverId: 'postgres' }) });
+    const res = await service.testConnection(draft);
+    expect(res).toEqual({ ok: false, error: 'connect ECONNREFUSED 10.0.0.5:5432' });
+    expect(calls.checkHealth).toBe(0);
+    expect(calls.disconnect).toBe(1);
   });
 });

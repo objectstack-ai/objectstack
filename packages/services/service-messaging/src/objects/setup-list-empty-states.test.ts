@@ -28,6 +28,10 @@ import { enObjects } from '../translations/en.objects.generated.js';
 import { zhCNObjects } from '../translations/zh-CN.objects.generated.js';
 import { jaJPObjects } from '../translations/ja-JP.objects.generated.js';
 import { esESObjects } from '../translations/es-ES.objects.generated.js';
+import { zhHantObjects } from '../translations/zh-Hant.objects.generated.js';
+import { arObjects } from '../translations/ar.objects.generated.js';
+import { frObjects } from '../translations/fr.objects.generated.js';
+import { ptBRObjects } from '../translations/pt-BR.objects.generated.js';
 
 interface ViewLike {
   columns?: unknown;
@@ -45,7 +49,16 @@ interface ObjectLike {
 
 const OBJECTS = [NotificationPreference, NotificationTemplate] as unknown as ObjectLike[];
 
-const BUNDLES = { en: enObjects, 'zh-CN': zhCNObjects, 'ja-JP': jaJPObjects, 'es-ES': esESObjects } as const;
+const BUNDLES = {
+  en: enObjects,
+  'zh-CN': zhCNObjects,
+  'ja-JP': jaJPObjects,
+  'es-ES': esESObjects,
+  'zh-Hant': zhHantObjects,
+  'ar': arObjects,
+  'fr': frObjects,
+  'pt-BR': ptBRObjects,
+} as const;
 
 function views(def: ObjectLike): Array<[string, ViewLike]> {
   return Object.entries(def.listViews ?? {});

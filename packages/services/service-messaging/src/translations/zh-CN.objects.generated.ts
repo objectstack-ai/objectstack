@@ -460,7 +460,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       locale: {
         label: "语言区域",
-        help: "发送到此设备的推送所使用的设备语言区域。"
+        help: "注册时提交的设备语言区域，随设备保存；推送不按它渲染：推送以收件人的语言送达（其用户语言，其次部署默认语言）。"
       },
       name: {
         label: "设备名称"

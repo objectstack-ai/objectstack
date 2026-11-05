@@ -5,7 +5,11 @@ import {
     interpolate,
     renderNotification,
     NotificationTemplateStore,
+    BuiltinNotificationTemplates,
+    TEMPLATE_BUILTINS,
+    type NotificationTemplateStoreWiring,
 } from './template-renderer.js';
+import { MessagingService } from './messaging-service.js';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 describe('interpolate', () => {
@@ -140,5 +144,113 @@ describe('NotificationTemplateStore', () => {
             expect(await store.load('t', 'email', 'en', '')).toBeNull();
             expect(data.queries).toEqual([]);
         });
+    });
+});
+
+/**
+ * [#30509] The code-declared tier: templates a producer registers through
+ * `MessagingService.registerBuiltinTemplates`, read beneath the organization's
+ * own rows and never stored (ADR-0131 §1.4).
+ */
+describe('NotificationTemplateStore — the code-declared tier (#30509)', () => {
+    function fakeData(rows: any[] = []) {
+        const locales: string[] = [];
+        return {
+            locales,
+            engine: {
+                async findOne(object: string, query: any) {
+                    assertEngineFindOnePredicate(object, query);
+                    const w = query?.where ?? {};
+                    locales.push(w.locale);
+                    return (
+                        rows.find(
+                            (r) =>
+                                r.organization_id === w.organization_id &&
+                                r.topic === w.topic && r.channel === w.channel && r.locale === w.locale && r.is_active,
+                        ) ?? null
+                    );
+                },
+            } as any,
+        };
+    }
+    const row = (locale: string, subject: string) =>
+        ({ organization_id: 'org_1', topic: 't', channel: 'email', locale, is_active: true, subject });
+    function store(engine: any, templates: Array<{ locale: string; subject: string; topic?: string; channel?: string }>) {
+        const builtins = new BuiltinNotificationTemplates();
+        builtins.register(templates.map((t) => ({ topic: t.topic ?? 't', channel: t.channel ?? 'email', locale: t.locale, subject: t.subject, body: 'B', format: 'text' as const })));
+        const wiring: NotificationTemplateStoreWiring = { getData: () => engine, [TEMPLATE_BUILTINS]: builtins };
+        return new NotificationTemplateStore(wiring);
+    }
+
+    it("answers the built-in when the organization has no row at any rung", async () => {
+        const data = fakeData([]);
+        const got = await store(data.engine, [{ locale: 'en', subject: 'builtin en' }]).load('t', 'email', 'en-US', 'org_1');
+        expect(got).toEqual({ subject: 'builtin en', body: 'B', format: 'text' });
+        expect(data.locales).toEqual(['en-US', 'en']);
+    });
+
+    it("the organization's row at a rung overrides the built-in at that rung", async () => {
+        const data = fakeData([row('en', 'org en')]);
+        const got = await store(data.engine, [{ locale: 'en', subject: 'builtin en' }]).load('t', 'email', 'en', 'org_1');
+        expect(got).toMatchObject({ subject: 'org en' });
+    });
+
+    it('a built-in at a nearer rung beats a row at a farther rung, as two rows would', async () => {
+        const data = fakeData([row('en', 'org en')]);
+        const got = await store(data.engine, [{ locale: 'zh-CN', subject: 'builtin zh-CN' }]).load('t', 'email', 'zh-CN', 'org_1');
+        expect(got).toMatchObject({ subject: 'builtin zh-CN' });
+        expect(data.locales).toEqual(['zh-CN']);
+    });
+
+    it('is keyed by topic and channel as well as locale', async () => {
+        const data = fakeData([]);
+        const s = store(data.engine, [{ locale: 'en', subject: 'email t' }]);
+        expect(await s.load('other', 'email', 'en', 'org_1')).toBeNull();
+        expect(await s.load('t', 'sms', 'en', 'org_1')).toBeNull();
+    });
+
+    it('a delivery with no organization, or a store with no engine, still reads the built-in and no row', async () => {
+        const data = fakeData([row('en', 'org en')]);
+        expect(await store(data.engine, [{ locale: 'en', subject: 'builtin en' }]).load('t', 'email', 'en')).toMatchObject({ subject: 'builtin en' });
+        expect(data.locales).toEqual([]);
+        expect(await store(undefined, [{ locale: 'en', subject: 'builtin en' }]).load('t', 'email', 'en', 'org_1')).toMatchObject({ subject: 'builtin en' });
+    });
+
+    it('a failed row read answers null, never a built-in in place of a row it could not see', async () => {
+        const engine = { async findOne() { throw new Error('locked'); } } as any;
+        expect(await store(engine, [{ locale: 'en', subject: 'builtin en' }]).load('t', 'email', 'en', 'org_1')).toBeNull();
+    });
+
+    describe('registration refuses what it cannot render, and keeps nothing from a refused call', () => {
+        const ok = { topic: 't', channel: 'email', locale: 'en', subject: 'S' };
+        for (const [label, bad] of [
+            ['no topic', { ...ok, topic: ' ' }],
+            ['no channel', { ...ok, channel: '' }],
+            ['no locale', { ...ok, locale: undefined }],
+            ['neither subject nor body', { topic: 't', channel: 'email', locale: 'en' }],
+            ['a body that is not a string', { ...ok, body: 42 }],
+            ['an unknown format', { ...ok, format: 'pdf' }],
+        ] as Array<[string, any]>) {
+            it(label, () => {
+                const builtins = new BuiltinNotificationTemplates();
+                expect(() => builtins.register([{ ...ok, locale: 'zh-CN' }, bad])).toThrow(TypeError);
+                expect(builtins.get('t', 'email', 'zh-CN')).toBeNull();
+            });
+        }
+
+        it('a (topic, channel, locale) already declared — in an earlier call or the same one', () => {
+            const builtins = new BuiltinNotificationTemplates();
+            builtins.register([ok]);
+            expect(() => builtins.register([{ ...ok, subject: 'second' }])).toThrow(/already declared/);
+            expect(() => builtins.register([{ ...ok, locale: 'ja-JP' }, { ...ok, locale: 'ja-JP' }])).toThrow(/already declared/);
+            expect(builtins.get('t', 'email', 'en')).toEqual({ subject: 'S' });
+            expect(builtins.get('t', 'email', 'ja-JP')).toBeNull();
+        });
+    });
+
+    it("MessagingService.registerBuiltinTemplates fills the service's own tier", () => {
+        const service = new MessagingService({ logger: { info() {}, warn() {}, error() {} } as any });
+        service.registerBuiltinTemplates([{ topic: 't', channel: 'email', locale: 'en', subject: '{{ title }}', body: '{{ body }}' }]);
+        expect(service.builtinTemplates.get('t', 'email', 'en')).toEqual({ subject: '{{ title }}', body: '{{ body }}' });
     });
 });

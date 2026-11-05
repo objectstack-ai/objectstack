@@ -529,7 +529,6 @@ export default defineConfig({
       '@object-ui/react': path.resolve(__dirname, './packages/react/src'),
       '@object-ui/protocol': path.resolve(__dirname, './packages/core/src'),
       '@object-ui/components': path.resolve(__dirname, './packages/components/src'),
-      '@object-ui/providers': path.resolve(__dirname, './packages/providers/src'),
       '@object-ui/fields': path.resolve(__dirname, './packages/fields/src'),
       '@object-ui/plugin-dashboard': path.resolve(__dirname, './packages/plugin-dashboard/src'),
       '@object-ui/plugin-grid': path.resolve(__dirname, './packages/plugin-grid/src'),

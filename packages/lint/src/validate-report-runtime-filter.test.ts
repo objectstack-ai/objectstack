@@ -123,10 +123,23 @@ describe('report-filter-field-unknown (#29900)', () => {
     expect(run(s)).toEqual([]);
   });
 
+  it('refuses a bare key naming a measure, with its own message (#30006)', () => {
+    const findings = run(stack({ runtimeFilter: { hours_sum: { $gt: 10 } } }));
+    expect(findings).toHaveLength(1);
+    const [f] = findings;
+    expect(f.rule).toBe(REPORT_FILTER_FIELD_UNKNOWN);
+    expect(f.path).toBe('reports[0].runtimeFilter.hours_sum');
+    expect(f.message).toContain('names a measure of dataset "orch_ds2"');
+    expect(f.hint).toContain('key the filter by the field "hours"');
+  });
+
   it('accepts what the dashboard twin accepts on the same dataset, and refuses what it refuses', () => {
-    // The twin judges the field half; a dimension-name key is the report's one
-    // addition and is excluded here.
-    const keys = ['status', 'created_at', 'owner.region', 'no_such_field', 'owner.regionn', 'hours.total'];
+    // [#30006] One accept set: the dimension key and the measure key are in the
+    // list, and the two rules answer them alike.
+    const keys = [
+      'status', 'created_at', 'owner.region', 'state',
+      'no_such_field', 'owner.regionn', 'hours.total', 'hours_sum',
+    ];
     for (const key of keys) {
       const s = stack({ runtimeFilter: { [key]: 1 } }, {
         dashboards: [{ name: 'd', widgets: [{ id: 'w', type: 'metric', dataset: 'orch_ds2', values: ['hours_sum'], filter: { [key]: 1 } }] }],

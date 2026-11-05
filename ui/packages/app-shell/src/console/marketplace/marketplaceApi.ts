@@ -777,6 +777,30 @@ export interface LocalManagedInstallResult {
    * `engines.protocol`, or one the runtime cannot read. Omitted when checked.
    */
   protocolCheckSkipped?: ProtocolCheckSkipped;
+  /** The install's sample-data report ({@link LocalInstallSeeded}). */
+  seeded?: LocalInstallSeeded;
+}
+
+/**
+ * What an install-local answer's `seeded` says about the package's sample
+ * data: `inline` when this install ran the package's seed datasets now, with
+ * the per-record counts of that run; `skipped` (with its `reason`) when it ran
+ * none, as on a package that bundles no datasets or on a copy, which loads
+ * metadata only; `refused` (with its sentence in `reason`) when a walled
+ * deployment's session named no active organization to seed into. `replayer`
+ * is in the door's declared vocabulary and carries no counts.
+ *
+ * `skipped` inside an `inline` run counts records whose row was already in the
+ * database (a reinstall over live sample data), so `inserted + updated +
+ * skipped` is the number of sample records the run left in place.
+ */
+export interface LocalInstallSeeded {
+  mode: 'inline' | 'replayer' | 'skipped' | 'refused';
+  inserted?: number;
+  updated?: number;
+  skipped?: number;
+  errors?: number;
+  reason?: string;
 }
 
 /**
@@ -815,6 +839,8 @@ export interface LocalUnmanagedInstallResult {
   note?: string;
   /** As on the managed answer ({@link LocalManagedInstallResult.protocolCheckSkipped}). */
   protocolCheckSkipped?: ProtocolCheckSkipped;
+  /** `skipped` when the package bundles sample data: a copy loads none of it. */
+  seeded?: LocalInstallSeeded;
 }
 
 export type LocalInstallResult = LocalManagedInstallResult | LocalUnmanagedInstallResult;
@@ -1058,4 +1084,38 @@ export function reseedLocalSampleData(manifestId: string): Promise<LocalSampleDa
 
 export function purgeLocalSampleData(manifestId: string): Promise<LocalSampleDataResult> {
   return postLocalSampleAction(manifestId, 'purge');
+}
+
+/**
+ * `GET /api/v1/marketplace/install-local/:manifestId/sample-data`
+ * (objectstack#30616): how many of a local install's sample rows a purge
+ * would delete right now, counted with the purge's own matcher and keep-rules,
+ * so a page reached after a reload can still say it. `unidentified` are seed
+ * records the purge would report and leave in place.
+ */
+export interface LocalSampleDataCount {
+  manifestId: string;
+  count: number;
+  unidentified: number;
+}
+
+/** {@link LocalSampleDataCount}, or `null` when the count could not be read (refused, failed, or no count in the answer). */
+export async function countLocalSampleData(manifestId: string): Promise<LocalSampleDataCount | null> {
+  try {
+    const res = await fetch(`${API_BASE}/install-local/${encodeURIComponent(manifestId)}/sample-data`, {
+      credentials: 'include',
+      headers: { 'Accept': 'application/json' },
+    });
+    if (!res.ok) return null;
+    const payload: any = await res.json().catch(() => ({}));
+    const data: any = payload?.data ?? payload;
+    if (typeof data?.count !== 'number' || !Number.isInteger(data.count) || data.count < 0) return null;
+    return {
+      manifestId,
+      count: data.count,
+      unidentified: typeof data.unidentified === 'number' ? data.unidentified : 0,
+    };
+  } catch {
+    return null;
+  }
 }

@@ -123,7 +123,32 @@ export interface ExternalDatasourceServiceConfig {
    * metadata record. Optional: when absent, {@link ExternalDatasourceService.importObject}
    * throws (the deployment is GitOps-only / has no writable metadata store).
    */
-  persistObject?: (name: string, definition: Record<string, unknown>) => Promise<void>;
+  persistObject?: (name: string, definition: Record<string, unknown>, packageId?: string) => Promise<void>;
+  /**
+   * Where {@link ExternalDatasourceService.importObject} saves the object it
+   * makes, and the namespace its name carries there (ruling B on the
+   * placement of an imported object, recorded 2026-11-05 as 6660988968):
+   *
+   *  - the datasource belongs to no package (added in Setup, or its package
+   *    is unreadable) → no `packageId`: a package-less row, environment
+   *    metadata (ADR-0146 D11), as before;
+   *  - it is declared by a writable package → that package, named in its
+   *    namespace;
+   *  - it is declared by a read-only installed base → the base's paired
+   *    customization package `<base>.custom` (ADR-0146 D2/D3), named in the
+   *    pair's namespace `<base namespace>_custom`, with `prepare` asking the
+   *    ensure door for the pair.
+   *
+   * `prepare` runs after every refusal the import can answer and after the
+   * draft, immediately before the save, so a refused import writes nothing.
+   * A landing that cannot be had is THROWN from here, before any remote
+   * introspection, and ⛔ never answered by a package-less landing instead:
+   * that would be the silent fallback ADR-0070 D3 forbids.
+   *
+   * Optional. A host that does not wire it saves package-less, with the
+   * name {@link getNamespace} prefixes, exactly as before.
+   */
+  resolveImportLanding?: (datasource: string) => Promise<ImportLanding>;
   /**
    * Resolve the package namespace that generated object names must be
    * prefixed with — `${namespace}_${shortName}`, ADR-0028. Injected for the
@@ -142,6 +167,19 @@ export interface ExternalDatasourceServiceConfig {
    */
   getNamespace?: (datasource: string) => Promise<string | undefined> | string | undefined;
   logger?: Logger;
+}
+
+/**
+ * Where an imported object is saved: see
+ * {@link ExternalDatasourceServiceConfig.resolveImportLanding}.
+ */
+export interface ImportLanding {
+  /** The package the object is saved into; absent for a package-less row. */
+  packageId?: string;
+  /** The namespace that package demands of the object's name (ADR-0028); absent when it declares none. */
+  namespace?: string;
+  /** Make `packageId` exist before the save (the pair's ensure door). Called once, right before the save. */
+  prepare?: () => Promise<void>;
 }
 
 /** Columns ObjectStack manages itself — never validated against the remote. */
@@ -411,8 +449,12 @@ function navigationCandidates(table: IntrospectedTable): NavigationCandidate[] {
   return out;
 }
 
-/** A field of a generated draft: a scalar, or a lookup over a foreign-key column. */
-type DraftField = { type: FieldType; reference?: string };
+/**
+ * A field of a generated draft: a scalar, or a lookup over a foreign-key column.
+ * `label` is derived from the field name by {@link toLabel}, the one derivation
+ * the object's own label uses, so a synced object's forms read as sentences.
+ */
+type DraftField = { type: FieldType; label: string; reference?: string };
 
 /**
  * The org-wide default every generated federated object declares.
@@ -851,6 +893,12 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
     opts: GenerateDraftOpts,
     /** The name the object will be saved under, when the caller overrides the derived one. */
     nameOverride?: string,
+    /**
+     * The namespace of the package the object will be saved into, when the
+     * caller has resolved its landing ({@link importObject}); otherwise the
+     * datasource's own package namespace is read.
+     */
+    landingNamespace?: { namespace: string | undefined },
   ): Promise<ObjectDraft> {
     const schema = await this.config.introspect(datasource);
     const table = this.findTable(schema, remoteName);
@@ -915,7 +963,9 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
       }
 
       const isPk = pkOverride ? pkOverride.has(col.name) : col.primaryKey;
-      fields[fieldName] = { type: fieldType };
+      // Labelled from the FIELD name (after rename and numbering), never the
+      // raw remote spelling: the same derivation as the object's label below.
+      fields[fieldName] = { type: fieldType, label: toLabel(fieldName) };
       if (isPk) primaryKeyFields.push(fieldName);
     }
 
@@ -923,7 +973,9 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
     // `${namespace}_${shortName}`. `defineStack()` refuses an unprefixed name
     // outright, so a draft without the prefix cannot be committed into a
     // namespaced stack — the generator has to resolve the namespace itself.
-    const namespace = normaliseNamespace(await this.config.getNamespace?.(datasource));
+    const namespace = normaliseNamespace(
+      landingNamespace ? landingNamespace.namespace : await this.config.getNamespace?.(datasource),
+    );
     const shortName = toObjectName(resolvedRemoteName);
     const name = applyNamespacePrefix(shortName, namespace);
 
@@ -1067,7 +1119,7 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
         leftOut(`'${target}' is not imported on datasource '${datasource}'; import it before this table to get the lookup`);
         continue;
       }
-      fields[field] = { type: 'lookup', reference };
+      fields[field] = { type: 'lookup', label: fields[field]!.label, reference };
     }
   }
 
@@ -1100,14 +1152,22 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
     // Checked BEFORE the draft on purpose: the verdict needs only the injected
     // namespace read, and a doomed request should not cost a live remote
     // introspection round trip.
+    //
+    // [#30469 item 2, ruling B] The namespace is the one of the package the
+    // object will be SAVED into, which is not always the datasource's own: an
+    // import over a read-only base's datasource lands in `<base>.custom`, and
+    // the save door judges the prefix against the written package
+    // (`NAMESPACE_PREFIX`). Resolved first, so a landing that cannot be had
+    // refuses the import before any remote introspection.
+    const landing = await this.importLanding(datasource);
+    const landingNamespace = { namespace: normaliseNamespace(landing.namespace) };
     if (opts.name !== undefined) {
-      const namespace = normaliseNamespace(await this.config.getNamespace?.(datasource));
-      const violation = validateObjectNamespacePrefix(opts.name, namespace);
+      const violation = validateObjectNamespacePrefix(opts.name, landingNamespace.namespace);
       if (violation) throw importNameRefusedError(violation);
     }
 
     // Reuse the draft pipeline (type mapping, review notes, external binding).
-    const draft = await this.draftObject(datasource, remoteName, opts, opts.name);
+    const draft = await this.draftObject(datasource, remoteName, opts, opts.name, landingNamespace);
 
     // Apply the runtime-persona overrides on top of the draft definition.
     const name = opts.name ?? draft.name;
@@ -1122,13 +1182,25 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
       external,
     };
 
-    await this.config.persistObject(name, definition);
+    await landing.prepare?.();
+    await this.config.persistObject(name, definition, landing.packageId);
     this.logger?.info?.(`importObject: persisted '${name}' from ${datasource}.${remoteName}`, {
       writable: opts.writable === true,
       review: draft.review.length,
+      package: landing.packageId ?? null,
     });
 
     return { name, definition, review: draft.review };
+  }
+
+  /**
+   * The landing of an import: the host's {@link ExternalDatasourceServiceConfig.resolveImportLanding},
+   * or, on a host that wires none, the package-less row named in the
+   * datasource's own package namespace — the placement before ruling B.
+   */
+  private async importLanding(datasource: string): Promise<ImportLanding> {
+    if (this.config.resolveImportLanding) return this.config.resolveImportLanding(datasource);
+    return { namespace: await this.config.getNamespace?.(datasource) };
   }
 
   async refreshCatalog(datasource: string): Promise<ExternalCatalog> {
@@ -1527,7 +1599,7 @@ function renderObjectSource(
     const note = reviewByField.get(fieldName);
     const comment = note ? ` // REVIEW: ${note}` : '';
     const reference = f.reference ? `, reference: ${quoteTs(f.reference)}` : '';
-    return `    ${fieldName}: { type: '${f.type}'${reference} },${comment}`;
+    return `    ${fieldName}: { type: '${f.type}', label: ${quoteTs(f.label)}${reference} },${comment}`;
   });
   const unplacedLines = unplaced.map((r) => `    // REVIEW: ${r.column} (${r.remoteType}): ${r.note}`);
 

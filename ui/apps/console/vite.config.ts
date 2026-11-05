@@ -640,7 +640,6 @@ const workspaceAliases: Record<string, string> = {
   '@object-ui/data-objectstack': path.resolve(import.meta.dirname, '../../packages/data-objectstack/src'),
   '@object-ui/auth': path.resolve(import.meta.dirname, '../../packages/auth/src'),
   '@object-ui/permissions': path.resolve(import.meta.dirname, '../../packages/permissions/src'),
-  '@object-ui/providers': path.resolve(import.meta.dirname, '../../packages/providers/src'),
   '@object-ui/collaboration': path.resolve(import.meta.dirname, '../../packages/collaboration/src'),
   '@object-ui/i18n': path.resolve(import.meta.dirname, '../../packages/i18n/src'),
   '@object-ui/mobile': path.resolve(import.meta.dirname, '../../packages/mobile/src'),
