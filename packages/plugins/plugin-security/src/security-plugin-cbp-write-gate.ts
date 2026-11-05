@@ -83,6 +83,7 @@ import {
   type EngineUpdateDispatchData,
 } from '@objectstack/metadata-core';
 import type { ControlledByParentWriteDenialLeg, ControlledByParentWriteOutcome } from '@objectstack/spec/contracts';
+import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import {
   PermissionDeniedError,
   MasterDetailRelationMissingError,
@@ -870,9 +871,16 @@ export async function assertMasterRowEditable(
     // is what the 403 below says. The ruling names this probe (and the
     // sharing half beneath it) as the house fail-closed posture to match,
     // not as a site to change.
+    //
+    // The master's write predicates are the platform's, composed above — not
+    // the caller's own predicate — so they ride into this caller-context read
+    // under one fresh `$and` marked `'policy'`, exactly as step 2.7's by-id
+    // re-read carries its own: the read's caller-predicate guard (step 2.9)
+    // judges `{ id }` only, never a wall or row-level predicate on a master
+    // field the caller cannot read.
     try {
       visible = await this.ql.findOne(rel.master, {
-        where: { $and: [{ id: masterId }, ...masterWriteParts] },
+        where: { $and: [{ id: masterId }, markFilterSubtreeProvenance({ $and: masterWriteParts }, 'policy')] },
         context,
       });
     } catch {
