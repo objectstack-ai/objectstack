@@ -850,7 +850,11 @@ describe('a banned user\'s OAuth credentials resolve to no principal while the b
           if (banRead && fault === 'missing-table') throw Object.assign(new Error('no such table: sys_user'), { code: 'SQLITE_ERROR' });
         }
         return bounded((tables[object] ?? []).filter((row) =>
-          Object.entries(opts?.where ?? {}).every(([k, v]) => row[k] === v),
+          Object.entries(opts?.where ?? {}).every(([k, v]) => {
+            if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+            if (v !== null && typeof v === 'object') throw new Error(`fake driver: unsupported operator on '${k}'`);
+            return row[k] === v;
+          }),
         ), opts);
       },
     };
