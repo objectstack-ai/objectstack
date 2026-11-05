@@ -158,7 +158,8 @@ describe('[ADR-0142 D7] the queue recipient', () => {
  */
 describe('[ADR-0142 D7] a failed queue-member read keeps the queue-recipient rule\'s grants (#29604)', () => {
   let engine: ReturnType<typeof makeEngine>;
-  let warn: ReturnType<typeof vi.fn>;
+  type Warn = (msg: string, meta?: Record<string, any>) => void;
+  let warn: ReturnType<typeof vi.fn<Warn>>;
   let rules: SharingRuleService;
   const REFUSAL = /\[queue\] queue 'billing' in organization 'org_a' does not answer its members, because a read behind it failed/;
   const granteesOf = (recordId: string): string[] =>
@@ -183,14 +184,14 @@ describe('[ADR-0142 D7] a failed queue-member read keeps the queue-recipient rul
       { id: 'qm_2', queue: 'billing', recipient_type: 'team', recipient_id: 't_night', organization_id: 'org_a' },
     ]);
     engine.seed('sys_team_member', [{ id: 'tm_1', team_id: 't_night', user_id: 'u_d' }]);
-    warn = vi.fn();
-    const logger = { warn, info: vi.fn(), debug: vi.fn(), error: vi.fn() };
+    warn = vi.fn<Warn>();
+    const logger = { warn, info: vi.fn<Warn>() };
     const queues = new OwnershipQueueService({ engine: () => engine as any, logger });
     rules = new SharingRuleService({
       engine: engine as any,
       sharing: new SharingService({ engine: engine as any }),
       ownershipQueues: () => queues,
-      logger: logger as any,
+      logger,
     });
     await rules.evaluateRule(RULE, SYS);
     expect(granteesOf('inv1')).toEqual(['u_c', 'u_d']);
