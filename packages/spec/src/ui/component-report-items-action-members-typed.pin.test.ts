@@ -221,6 +221,15 @@ describe('§1 each member accepts every shape a measured writer authors', () => 
         successMessage: { dialect: 'template', source: 'Closed' },
         errorMessage: { dialect: 'template', source: 'Could not close' },
         refreshAfter: true, locations: ['record_header'], objectName: 'case',
+      }],
+    }],
+    // #30017: an array `params` beside `confirmText` is refused (two dialogs for
+    // one decision), so the param-collecting member carries its question on
+    // `description` instead.
+    ['a member collecting params', 'action:menu', {
+      actions: [{
+        name: 'close_case', label: 'Close', type: 'api', target: '/api/close',
+        description: 'Close this case? Say why.',
         params: [{ name: 'reason', label: 'Reason', type: 'text' }],
       }],
     }],
