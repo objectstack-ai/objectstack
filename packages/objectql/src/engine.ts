@@ -3137,7 +3137,11 @@ export class ObjectQL implements IObjectQLEngine {
     storedRows?: StoredReferenceRows,
   ): Promise<void> {
     // [#25522 cut 10] The body moved to `engine-referential-integrity.ts`, its docblock with it (see `ReferentialIntegrityHost`).
+    // [#30205] `find` and `logger` serve the ban-state read of referenced users.
+    const readLogger = () => this.logger;
     const host: ThisParameterType<typeof assertReferencesResolve> = {
+      get logger() { return readLogger(); },
+      find: (...a) => this.find(...a),
       masterDetailHeaderExists: (...a) => this.masterDetailHeaderExists(...a),
       referenceExists: (...a) => this.referenceExists(...a),
     };

@@ -52,7 +52,7 @@
 
 import { referenceTargetOf, type EngineQueryOptions } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { keepsFlowWriteReferenceCheck } from '@objectstack/core';
+import { isUserBanInForce, keepsFlowWriteReferenceCheck } from '@objectstack/core';
 import { ValidationError, buildFieldError } from './validation/record-validator.js';
 import type { ObjectQL } from './engine.js';
 
@@ -188,7 +188,7 @@ function isEmptyReferenceValue(v: unknown): boolean {
  * (see {@link masterDetailHeadersCallerReads}).
  */
 export async function assertReferencesResolve(
-  this: Pick<ReferentialIntegrityHost, 'masterDetailHeaderExists' | 'referenceExists'>,
+  this: Pick<ReferentialIntegrityHost, 'find' | 'logger' | 'masterDetailHeaderExists' | 'referenceExists'>,
   schema: any,
   data: Record<string, unknown> | null | undefined,
   supplied: Record<string, unknown> | null | undefined,
@@ -203,7 +203,10 @@ export async function assertReferencesResolve(
   const fields = schema?.fields;
   if (!fields || !data) return;
 
-  const refused: Array<{ name: string; def: any; value: unknown; target: string }> = [];
+  const refused: Array<{ name: string; def: any; value: unknown; target: string; code?: 'reference_user_banned' }> = [];
+  // [#30205] The user ids that resolved, by the fields that named them: a
+  // banned user is a row that exists, so the existence probe passes them.
+  const users: Array<{ name: string; def: any; value: unknown; target: string }> = [];
   for (const name of Object.keys(fields)) {
     // [#4441, narrowing kept by #4743] A `readonly` field is never the
     // caller's to answer for — BY CONSTRUCTION, not by exemption.
@@ -264,7 +267,12 @@ export async function assertReferencesResolve(
         ? await this.masterDetailHeaderExists(target, v, context)
         : await this.referenceExists(target, v, context);
       if (resolved === false) refused.push({ name, def, value: v, target });
+      else if (resolved === true && target === BAN_CHECKED_USER_OBJECT) users.push({ name, def, value: v, target });
     }
+  }
+  if (users.length > 0) {
+    const banned = await bannedUserIds.call(this, users.map((u) => u.value), context);
+    for (const u of users) if (banned.has(String(u.value))) refused.push({ ...u, code: 'reference_user_banned' });
   }
   if (refused.length === 0) return;
   // [#29062] A refused value every row this write lands on already stores
@@ -276,7 +284,7 @@ export async function assertReferencesResolve(
     .map((r) => buildFieldError(
       {
         field: r.name,
-        code: 'reference_not_found',
+        code: r.code ?? 'reference_not_found',
         def: r.def,
         value: String(r.value),
         constraint: { target: r.target },
@@ -284,6 +292,56 @@ export async function assertReferencesResolve(
       msgCtx as any,
     ));
   if (failures.length > 0) throw new ValidationError(failures);
+}
+
+/**
+ * [#30205] The user object whose rows a reference check also asks about a ban.
+ */
+const BAN_CHECKED_USER_OBJECT = 'sys_user';
+
+/**
+ * [#30205] Which of `ids` name a user whose ban is in force
+ * (`isUserBanInForce`, @objectstack/core).
+ *
+ * Banning a user leaves the row in place, so the existence probe resolves a
+ * banned user like any other, and a write could hand new work to someone who
+ * cannot sign in to do it (`POST /data/OBJECT` with `assignee` set to the
+ * banned user answered 201). The check refuses that with
+ * `reference_user_banned`, on the same terms as `reference_not_found`: only a
+ * caller-supplied value, only a value the write ADDS (a row that already holds
+ * the banned user stays editable, and is handed over by the transfer
+ * instead), never a system write the reference check exempts.
+ *
+ * Read the way the existence probe reads — `sudo()`-shaped, the caller's
+ * context spread under `isSystem: true` — because a ban is a fact about the
+ * user, not about what the caller may read: a caller with no read grant on
+ * the user object is refused the same way. One `find` for the whole write.
+ * A read that fails refuses nothing, and says so once at `warn`: like the
+ * probe, a check that cannot run must not invent a rejection.
+ */
+async function bannedUserIds(
+  this: Pick<ReferentialIntegrityHost, 'find' | 'logger'>,
+  ids: ReadonlyArray<unknown>,
+  context: ExecutionContext | undefined,
+): Promise<ReadonlySet<string>> {
+  const asked = [...new Set(ids.map((id) => String(id)))];
+  try {
+    const rows = await this.find(BAN_CHECKED_USER_OBJECT, {
+      where: { id: asked.length === 1 ? asked[0] : { $in: asked } },
+      fields: ['id', 'banned', 'ban_expires'],
+      context: { ...(context ?? {}), isSystem: true } as ExecutionContext,
+    } as EngineQueryOptions) as Array<Record<string, unknown>>;
+    const banned = new Set<string>();
+    for (const row of Array.isArray(rows) ? rows : []) {
+      if (row?.id != null && isUserBanInForce(row)) banned.add(String(row.id));
+    }
+    return banned;
+  } catch (err) {
+    this.logger?.warn?.('the ban-state read of the referenced users failed — the write is not refused for a ban', {
+      object: BAN_CHECKED_USER_OBJECT, error: err,
+    });
+    return new Set();
+  }
 }
 
 /**

@@ -132,6 +132,7 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     invalid_time_zoned: '{{label}} is a time of day with no time zone: drop the Z or offset (HH:MM or HH:MM:SS), or use a datetime field for an instant',
     invalid_option: '{{label}} must be one of: {{allowed}}',
     reference_not_found: '{{label}}: no {{target}} record has id "{{value}}"',
+    reference_user_banned: '{{label}}: user "{{value}}" is banned and cannot be assigned new records; pick an active user',
     invalid_option_value: '{{label}}: "{{value}}" is not one of: {{allowed}}',
     // `invalid_option`'s picklist sentences: the field takes its options from a
     // shared picklist, so the refusal names the list (`{{picklist}}`, a
@@ -189,6 +190,7 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     invalid_time_zoned: '{{label}}是不带时区的时刻:请去掉 Z 或时区偏移(HH:MM 或 HH:MM:SS),表示时间点请改用日期时间字段',
     invalid_option: '{{label}}必须是以下值之一:{{allowed}}',
     reference_not_found: '{{label}}:不存在 id 为“{{value}}”的{{target}}记录',
+    reference_user_banned: '{{label}}:用户“{{value}}”已被封禁,不能再指派新记录,请选择一位在用的用户',
     invalid_option_value: '{{label}}:“{{value}}”不在允许的取值范围内:{{allowed}}',
     invalid_option_picklist: '{{label}}必须是选项列表“{{picklist}}”中的值之一:{{allowed}}',
     invalid_option_value_picklist: '{{label}}:“{{value}}”不是选项列表“{{picklist}}”中的值:{{allowed}}',
@@ -235,6 +237,7 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     invalid_time_zoned: '{{label}}はタイムゾーンを持たない時刻です。Z やオフセットを外す(HH:MM または HH:MM:SS)か、時点を表すには日時フィールドを使ってください',
     invalid_option: '{{label}}は次のいずれかを指定してください:{{allowed}}',
     reference_not_found: '{{label}}:id が「{{value}}」の{{target}}レコードは存在しません',
+    reference_user_banned: '{{label}}:ユーザー「{{value}}」は利用停止中のため、新しいレコードを割り当てられません。有効なユーザーを選択してください',
     invalid_option_value: '{{label}}:「{{value}}」は指定できません(指定可能:{{allowed}})',
     invalid_option_picklist: '{{label}}は選択リスト「{{picklist}}」の値のいずれかを指定してください:{{allowed}}',
     invalid_option_value_picklist: '{{label}}:「{{value}}」は選択リスト「{{picklist}}」の値ではありません(指定可能:{{allowed}})',
@@ -281,6 +284,7 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     invalid_time_zoned: '{{label}} es una hora del día sin zona horaria: quite la Z o el desfase (HH:MM o HH:MM:SS), o use un campo de fecha y hora para un instante',
     invalid_option: '{{label}} debe ser uno de: {{allowed}}',
     reference_not_found: '{{label}}: ningún registro de {{target}} tiene el id «{{value}}»',
+    reference_user_banned: '{{label}}: el usuario «{{value}}» está bloqueado y no se le pueden asignar registros nuevos; elija un usuario activo',
     invalid_option_value: '{{label}}: «{{value}}» no es uno de: {{allowed}}',
     invalid_option_picklist: '{{label}} debe ser uno de los valores de la lista de selección «{{picklist}}»: {{allowed}}',
     invalid_option_value_picklist: '{{label}}: «{{value}}» no es un valor de la lista de selección «{{picklist}}»: {{allowed}}',
