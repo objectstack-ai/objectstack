@@ -11,11 +11,13 @@
  * stored them; the physical column is read with the driver's own query
  * builder.
  *
- * Pinned: the door stores `null` today (the premise); the column set is
+ * Pinned: the door stores `null` today (the premise), and before the run
+ * `$null` and the read shape split the legacy rows from it and `$empty` misses
+ * the stored `''`; the column set is
  * `blankAsNullColumns`' `'emptyList'` arm, one column per type (multiselect,
  * checkboxes, tags, a `multiple: true` lookup), with no `required`, `readonly`
  * or single-value column; a dry run counts per object and column and writes
- * nothing; `--apply` stores `null`, so the legacy row reads like one cleared
+ * nothing; `--apply` stores `null`, so the legacy rows read like one cleared
  * today, and leaves out-of-scope columns and non-empty lists exactly as
  * stored; a re-run reads zero; `objects` narrows the walk.
  */
@@ -122,12 +124,13 @@ describe('os migrate blank-multi-values: the walk on sqlite (#29653)', () => {
     }
   });
 
-  it('red before: = null finds only the row cleared today, not the legacy rows', async () => {
+  it('red before: $null finds only the row cleared today, $empty misses the stored "", the read shapes differ', async () => {
+    const read = async (id: string) => (await ctx.engine.find('bmv_obj', { where: { id }, fields: PER_TYPE }))[0] as Record<string, unknown>;
+    const [now, list, blank] = [await read('cleared_now'), await read('legacy_list'), await read('legacy_blank')];
     for (const f of PER_TYPE) {
-      const hits = await ctx.ids('bmv_obj', { [f]: null });
-      expect(hits, f).toContain('cleared_now');
-      expect(hits, f).not.toContain('legacy_list');
-      expect(hits, f).not.toContain('legacy_blank');
+      expect(await ctx.ids('bmv_obj', { [f]: { $null: true } }), f).toEqual(['cleared_now']);
+      expect(await ctx.ids('bmv_obj', { [f]: { $empty: true } }), f).not.toContain('legacy_blank');
+      expect([now[f], list[f], blank[f]], f).toEqual([null, [], '']);
     }
   });
 
@@ -157,7 +160,8 @@ describe('os migrate blank-multi-values: the walk on sqlite (#29653)', () => {
     for (const f of PER_TYPE) {
       expect(after.list[f], `${f} [] physical`).toBeNull();
       expect(after.blank[f], `${f} '' physical`).toBeNull();
-      expect(await ctx.ids('bmv_obj', { [f]: null }), f).toEqual(['cleared_now', 'legacy_blank', 'legacy_list']);
+      expect(await ctx.ids('bmv_obj', { [f]: { $null: true } }), f).toEqual(['cleared_now', 'legacy_blank', 'legacy_list']);
+      expect(await ctx.ids('bmv_obj', { [f]: { $empty: true } }), f).toContain('legacy_blank');
     }
     // `required`, `readonly` and single-value columns keep exactly what they held.
     for (const f of Object.keys(OUT_OF_SCOPE)) {
