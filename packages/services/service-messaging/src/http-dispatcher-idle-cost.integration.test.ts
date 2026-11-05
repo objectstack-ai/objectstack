@@ -264,3 +264,27 @@ describe('#17623 #28383 HttpDispatcher — idle tick cost', () => {
         expect(posted).toEqual(['https://receiver.example/r_legacy']);
     });
 });
+
+describe('#29919 SqlHttpOutbox.nextDueAt — the one read a sole-writer loop wakes by', () => {
+    it('an empty outbox answers null in TWO statements, both reads', async () => {
+        statements = [];
+        expect(await outbox.nextDueAt({ claimTtlMs: TTL })).toBeNull();
+        expect(statements).toHaveLength(2);
+        expect(statements.every((sql) => /^select /i.test(sql))).toBe(true);
+    });
+
+    it('answers a retry\'s due time, ignores a row already due, and answers a claim\'s expiry when sooner', async () => {
+        const now = Date.now();
+        await outbox.enqueue(delivery('r_now'));
+        await outbox.enqueue(delivery('r_retry'));
+        const claimed = await outbox.claim({ nodeId: 'node-a', limit: 10, claimTtlMs: TTL, now });
+        const retry = claimed.find((d) => d.refId === 'r_retry')!;
+        await outbox.ack(retry.id, { success: false, httpStatus: 500, durationMs: 1, nextRetryAt: now + 10 * TTL }, retry);
+        // r_now is still in flight under node-a, claimed at `now`.
+        expect(await outbox.nextDueAt({ claimTtlMs: TTL, now })).toBe(now + TTL + 1);
+
+        const live = claimed.find((d) => d.refId === 'r_now')!;
+        await outbox.ack(live.id, { success: true, httpStatus: 200, durationMs: 1 }, live);
+        expect(await outbox.nextDueAt({ claimTtlMs: TTL, now })).toBe(now + 10 * TTL);
+    });
+});
