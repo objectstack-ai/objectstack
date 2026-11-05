@@ -19,6 +19,7 @@ import {
     type HttpDeliveryStatus,
     type HttpReapOptions,
     type HttpDueWorkOptions,
+    type HttpNextDueOptions,
     type IHttpOutbox,
     type RedeliverOptions,
     type UndeliverableHttpInput,
@@ -108,6 +109,20 @@ export class MemoryHttpOutbox implements IHttpOutbox {
             if (row.status === 'pending' && (row.nextRetryAt === undefined || row.nextRetryAt <= now)) return true;
         }
         return false;
+    }
+
+    /** [#29919] Earliest future `nextRetryAt` of a `pending` row, or claim expiry of an `in_flight` one. */
+    async nextDueAt(opts: HttpNextDueOptions): Promise<number | null> {
+        const now = opts.now ?? Date.now();
+        let due: number | null = null;
+        for (const row of this.rows.values()) {
+            let at: number | undefined;
+            if (row.status === 'pending' && row.nextRetryAt !== undefined && row.nextRetryAt > now) at = row.nextRetryAt;
+            // reapExpired takes a claim strictly older than the TTL.
+            if (row.status === 'in_flight' && row.claimedAt !== undefined) at = row.claimedAt + opts.claimTtlMs + 1;
+            if (at !== undefined && (due === null || at < due)) due = at;
+        }
+        return due;
     }
 
     async claim(opts: HttpClaimOptions): Promise<HttpDelivery[]> {

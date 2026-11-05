@@ -401,8 +401,11 @@ const TYPE_MISMATCH_FAULT_ARMS: {
  * #1928 / #3306 — a type-soundness verdict for an expression, or `null` when
  * sound. Two categories, with different severities:
  *  - `date-arith` (**error**): arithmetic on a date field against a number
- *    (`date − date + 1`, `today() + 30`) — always nulls at runtime and never
- *    recovers, so it blocks the build.
+ *    (`date − date + 1`, `today() + 30`) — always faults at runtime and never
+ *    recovers, so it blocks the build. A formula reads that fault as null; a
+ *    flattened (flow) condition's fault fails the run, under the
+ *    `date-arithmetic-run-fails` / `-run-may-fail` codes (#30016,
+ *    {@link dateFlowArm}).
  *  - `type-mismatch` (**warning**): a text/boolean field used with an
  *    arithmetic/ordering operator against a number — nulls unless the text value
  *    happens to be numeric, so it stays advisory. An **error** where the caller
@@ -416,7 +419,8 @@ const TYPE_MISMATCH_FAULT_ARMS: {
  *    bare name is.
  *  - `date-text-arithmetic` / `date-duration-value` (**error**, #28944): what
  *    the Timestamp typing passes, re-checked with a date field declared as the
- *    text the runtime holds — see {@link dateTextIssue}.
+ *    text the runtime holds — see {@link dateTextIssue}; in a flow condition
+ *    the fault takes the same two flow codes as `date-arith`.
  * `scope` selects `record.<field>` vs bare field binding, shaping the message.
  */
 function typeSoundnessIssue(
@@ -453,7 +457,7 @@ function typeSoundnessIssue(
     const bareCelTypes = shadowed
       ? Object.fromEntries(Object.entries(celFieldTypes).filter(([name]) => !shadowed.has(name)))
       : celFieldTypes;
-    return dateTextIssue(source, bareCelTypes, scope, role);
+    return dateTextIssue(source, bareCelTypes, scope, role, dateFlowArm(scope, faultOutcome, bareNamesUnproven));
   }
   const reference = mismatch.field
     ? (mismatch.root !== undefined
@@ -463,17 +467,22 @@ function typeSoundnessIssue(
   const ref = reference !== undefined ? `\`${reference}\`` : null;
   if (mismatch.category === 'date-arith') {
     const subject = ref ? `${ref} is a date` : 'a date field';
+    const params = { operands: mismatch.operands, ...(reference !== undefined ? { reference } : {}) };
+    const head = `date arithmetic \`${mismatch.operands}\` — ${subject}, and CEL can't do arithmetic on dates: `;
+    const use =
+      `Use \`daysBetween(a, b)\` for the span in whole days, and \`daysFromNow(n)\` / ` +
+      `\`addDays(d, n)\` / \`addMonths(d, n)\` to shift a date.`;
+    const arm = dateFlowArm(scope, faultOutcome, bareNamesUnproven);
     return {
       severity: 'error',
-      issue: refusal(
-        'date-arithmetic',
-        { operands: mismatch.operands, ...(reference !== undefined ? { reference } : {}) },
-        source,
-        `date arithmetic \`${mismatch.operands}\` — ${subject}, and CEL can't do arithmetic on ` +
-          `dates: this faults at runtime, so the field silently evaluates to null. Use ` +
-          `\`daysBetween(a, b)\` for the span in whole days, and \`daysFromNow(n)\` / ` +
-          `\`addDays(d, n)\` / \`addMonths(d, n)\` to shift a date.`,
-      ),
+      issue: arm
+        ? refusal(`date-arithmetic-${arm}`, params, source, `${head}${dateFlowFault(arm, ref, 'date')} ${use}`)
+        : refusal(
+          'date-arithmetic',
+          params,
+          source,
+          `${head}this faults at runtime, so the field silently evaluates to null. ${use}`,
+        ),
     };
   }
   const heldKind: 'boolean' | 'text' = mismatch.celType === 'bool' ? 'boolean' : 'text';
@@ -549,12 +558,44 @@ function typeSoundnessIssue(
 }
 
 /**
+ * [#30016] Which flow sentence a date verdict takes, or `null` off a flow. A
+ * flattened site is a flow condition, and the engine's `evaluateCondition`
+ * throws on a fault (ADR-0032 §1c) on every flow: a date verdict there never
+ * reads null. `run-fails` where the caller declares the run proven to hold the
+ * field (`faultOutcome: 'run-fails'`) and no node can rebind a bare name
+ * (`bareNamesUnproven`) — the date verdicts read bare names only. Anywhere
+ * else in a flow the name holds what the entrance handed the run (an API body
+ * whose value is a number answers `close_date + 1`), so the run fails only
+ * where it holds the date: `run-may-fail`. The grade stays an error either way.
+ */
+type DateFlowArm = 'run-fails' | 'run-may-fail';
+function dateFlowArm(
+  scope: 'record' | 'flattened',
+  faultOutcome: ExprSchemaHint['faultOutcome'],
+  bareNamesUnproven: boolean | undefined,
+): DateFlowArm | null {
+  if (scope !== 'flattened') return null;
+  return faultOutcome === 'run-fails' && !bareNamesUnproven ? 'run-fails' : 'run-may-fail';
+}
+
+/** [#30016] The fault clause of a flow date verdict; `held` names what the field holds at run time. */
+function dateFlowFault(arm: DateFlowArm, ref: string | null, held: 'date' | 'text'): string {
+  const fails =
+    'a flow condition that cannot be evaluated fails the run: the flow stops at this condition and the ' +
+    'work the flow exists to do is not done (it does not read null).';
+  if (arm === 'run-fails') return `this faults at runtime, and ${fails}`;
+  return `this faults wherever ${ref ?? 'the field'} holds ${held === 'date' ? 'the date' : 'that text'} ` +
+    `when the condition runs, and ${fails}`;
+}
+
+/**
  * #28944 — the date shapes the Timestamp typing of {@link firstTypeMismatch}
  * passes and the runtime cannot answer, judged by {@link firstDateTextVerdict}
  * with every `date`/`datetime` field declared as the text the runtime holds:
  *  - `date-text-arithmetic`: arithmetic on that text the evaluator faults on —
  *    `record.end_date - record.start_date` (either field kind), `record.d -
- *    duration('24h')` — so the expression reads null. Any role.
+ *    duration('24h')` — so the expression reads null (in a flow condition the
+ *    run fails instead: `flowArm`, #30016). Any role.
  *  - `date-duration-value`: a formula (`value` role) that computes a
  *    `google.protobuf.Duration` — `today() - record.start_date` — which a field
  *    serialises as `{}`. A predicate that COMPARES a duration
@@ -567,6 +608,7 @@ function dateTextIssue(
   celFieldTypes: Readonly<Record<string, FieldCelType>>,
   scope: 'record' | 'flattened',
   role: 'predicate' | 'value',
+  flowArm: DateFlowArm | null,
 ): { issue: ExprValidationError; severity: 'error' | 'warning' } | null {
   if (role !== 'value' && !Object.values(celFieldTypes).includes('timestamp')) return null;
   const verdict = firstDateTextVerdict(source, celFieldTypes, scope);
@@ -578,17 +620,22 @@ function dateTextIssue(
   const shift = `\`daysFromNow(n)\` / \`addDays(d, n)\` / \`addMonths(d, n)\` to shift a date.`;
   if (verdict.kind === 'fault') {
     const subject = ref ? `${ref} is a date field` : 'a date field is an operand';
+    const params = { operands: verdict.operands, ...(reference !== undefined ? { reference } : {}) };
+    const head =
+      `date arithmetic \`${verdict.operands}\` — ${subject}, and the runtime holds a date field as ` +
+      `its text (\`YYYY-MM-DD\`, or an ISO-8601 instant for a date-time), which CEL can't do ` +
+      `arithmetic on: `;
+    const use = `Use \`daysBetween(a, b)\` for the span in whole days, and ${shift}`;
     return {
       severity: 'error',
-      issue: refusal(
-        'date-text-arithmetic',
-        { operands: verdict.operands, ...(reference !== undefined ? { reference } : {}) },
-        source,
-        `date arithmetic \`${verdict.operands}\` — ${subject}, and the runtime holds a date field as ` +
-          `its text (\`YYYY-MM-DD\`, or an ISO-8601 instant for a date-time), which CEL can't do ` +
-          `arithmetic on: this faults at runtime, so the field silently evaluates to null. Use ` +
-          `\`daysBetween(a, b)\` for the span in whole days, and ${shift}`,
-      ),
+      issue: flowArm
+        ? refusal(`date-text-arithmetic-${flowArm}`, params, source, `${head}${dateFlowFault(flowArm, ref, 'text')} ${use}`)
+        : refusal(
+          'date-text-arithmetic',
+          params,
+          source,
+          `${head}this faults at runtime, so the field silently evaluates to null. ${use}`,
+        ),
     };
   }
   if (role !== 'value' || verdict.type !== 'google.protobuf.Duration') return null;
