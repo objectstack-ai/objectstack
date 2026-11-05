@@ -605,6 +605,16 @@ async function openOpportunities(): Promise<void> {
   await waitFor(() => expect(setting('startDateField')).toHaveTextContent('Close date'), { timeout: 8000 });
 }
 
+/** Whether the header's view switcher (the title's ▾) offers New view; closes it again. */
+async function newViewOffered(): Promise<boolean> {
+  fireEvent.click(within(header()).getByTestId('list-view-switcher'));
+  const menu = await screen.findByTestId('list-view-switcher-menu');
+  const offered = within(menu).queryByTestId('list-view-switcher-new') !== null;
+  fireEvent.keyDown(menu, { key: 'Escape' });
+  await waitFor(() => expect(screen.queryByTestId('list-view-switcher-menu')).toBeNull());
+  return offered;
+}
+
 const canvasSchema = () => JSON.parse(screen.getByTestId('object-view-schema').textContent ?? '{}') as Record<string, unknown>;
 
 describe('Customize an object leaf’s list view into the pair (objectstack#28562)', () => {
@@ -612,8 +622,8 @@ describe('Customize an object leaf’s list view into the pair (objectstack#2856
     mount();
     await openOpportunities();
     expect(setting('startDateField')).toBeDisabled();
-    // A new view would be a new item of the base: not offered.
-    expect(screen.getByRole('button', { name: t('engine.studio.inspector.listView.addView', 'en') })).toBeDisabled();
+    // A new view would be a new item of the base: the header's view switcher offers none.
+    expect(await newViewOffered()).toBe(false);
 
     await customize();
     expect(srv.ensure).toEqual([]);
@@ -628,7 +638,7 @@ describe('Customize an object leaf’s list view into the pair (objectstack#2856
     expect(saved!.opts).toMatchObject({ ifNoneMatch: '*' });
     expect(srv.base.get('view/opportunity.default')).toStrictEqual(BASE_ROWS['view/opportunity.default']);
     await within(header()).findByTestId('studio-override-chip', undefined, { timeout: 8000 });
-    expect(screen.getByRole('button', { name: t('engine.studio.inspector.listView.addView', 'en') })).toBeDisabled();
+    expect(await newViewOffered()).toBe(false);
   });
 
   it('Restore brings back the base’s columns', async () => {

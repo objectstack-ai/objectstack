@@ -229,7 +229,7 @@ describe('an object leaf\'s Properties panel edits its list view (objectui#11823
     const panel = await openObjectLeaf();
     // objectui#13151 — the notice names the view by the object's label and its
     // role (the object is "Task", its nav entry "Tasks"), never `<object>.<key>`.
-    await waitFor(() => expect(within(panel).getByTestId('list-view-not-created')).toHaveTextContent('“Task · Default view”'));
+    await waitFor(() => expect(within(panel).getByTestId('list-view-not-created')).toHaveTextContent('“Default view”'));
     expect(within(panel).getByTestId('list-view-not-created')).not.toHaveTextContent('showcase_task.default');
     // Nothing is saved yet, and the canvas shows the list the running app
     // shows an object with no view: its default columns.
@@ -306,7 +306,7 @@ describe('an object leaf\'s Properties panel edits its list view (objectui#11823
       },
     };
     const panel = await openObjectLeaf();
-    await waitFor(() => expect(within(panel).getByTestId('list-view-not-list')).toHaveTextContent('“Task · Default view”'));
+    await waitFor(() => expect(within(panel).getByTestId('list-view-not-list')).toHaveTextContent('“Default view”'));
     expect(within(panel).getByTestId('list-view-not-list')).not.toHaveTextContent('showcase_task.default');
     expect(within(panel).queryByTestId('list-view-columns')).not.toBeInTheDocument();
     expect(canvasSchema()).toEqual({ type: 'object-view', objectName: 'showcase_task' });

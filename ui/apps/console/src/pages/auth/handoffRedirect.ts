@@ -1,13 +1,14 @@
 /**
  * The mobile sign-in hand-off as a sign-in redirect target (#29971).
  *
- * The mobile shell opens this Console's sign-in page in the platform's system
- * auth session with `?redirect=` naming the hand-off route
- * (`GET {auth base}/one-time-token/handoff?redirect_uri=…&code_challenge=…`),
- * which answers `302 SCHEME://…?token=T` for the signed-in session. That route
- * is an API route OUTSIDE the Console mount, so the ordinary post-sign-in
- * navigation (`withConsoleBase`, which treats every redirect as a Console
- * route) lands on a Console page that does not exist.
+ * The mobile shell opens the hand-off route
+ * (`GET {auth base}/one-time-token/handoff?redirect_uri=…&code_challenge=…`) in
+ * the platform's system auth session, which answers `302 SCHEME://…?token=T` for
+ * a signed-in session and sends a browser that has to sign in here, with
+ * `?redirect=` naming that same request. That route is an API route OUTSIDE the
+ * Console mount, so the ordinary post-sign-in navigation (`withConsoleBase`,
+ * which treats every redirect as a Console route) lands on a Console page that
+ * does not exist.
  *
  * The route's own rules (plugin-auth `one-time-token-handoff.ts`, maintainer
  * ruling A on the server card) decide what the sign-in pages do with it:
@@ -23,11 +24,19 @@
  *     (`same-origin`).
  *  3. **Before the organization steps.** The hand-off carries the session and
  *     nothing else; the app's WebView picks the organization after it.
- *  4. **Only a fresh session.** The route refuses a session created more than
- *     five minutes ago with a raw JSON `401`; on a hand-off redirect the page
- *     shows its sign-in form for such a session instead of forwarding, and a
- *     sign-in on that form makes a new session on top of the old one
- *     ({@link useHandoffRedirect}).
+ *  4. **Only a fresh session.** The route hands off only a session created
+ *     within five minutes. On a hand-off redirect the page shows its sign-in form
+ *     for an older one instead of forwarding, and a sign-in on that form makes a
+ *     new session on top of the old one ({@link useHandoffRedirect}).
+ *  5. **The route's clock over the device's.** The page reads a session's age on
+ *     the device's clock and the route on the server's, so a device whose clock
+ *     is behind would forward a session the route refuses. When the route sent
+ *     the browser here, its redirect says when it refused
+ *     ({@link HANDOFF_REFUSED_AT_PARAM}), and the page holds the form for any
+ *     session not created after that, whatever the device's clock says
+ *     ({@link isHandoffSessionFresh}). The links between `/login` and `/register`
+ *     carry it beside a hand-off `redirect` ({@link handoffMarkQuery}), so following
+ *     "Sign up" does not put the device's clock back in charge.
  */
 
 import { useLayoutEffect, useState } from 'react';
@@ -43,6 +52,15 @@ const AUTH_BASE = `${import.meta.env.VITE_SERVER_URL || ''}/api/v1/auth`;
  * copy only decides whether the page forwards or shows its form.
  */
 export const HANDOFF_SESSION_MAX_AGE_MS = 5 * 60 * 1000;
+
+/**
+ * On the route's redirect to this page, beside `redirect`: when it refused the
+ * browser's session, in epoch milliseconds on the server's clock. The hand-off
+ * route's `HANDOFF_REFUSED_AT_PARAM` (plugin-auth), restated because that module
+ * is server-only; `examples/app-showcase/e2e/mobile-signin-handoff.spec.ts` is
+ * what notices the two disagreeing.
+ */
+export const HANDOFF_REFUSED_AT_PARAM = 'handoff_refused_at';
 
 /**
  * The navigation target for a hand-off redirect, or `null` when `redirect` is
@@ -91,20 +109,58 @@ export function sessionCreatedAtMs(session: unknown): number | null {
 }
 
 /**
+ * When the route refused this browser's session, from the page's query string;
+ * `null` when the page was not sent here by the route, or the value is not a
+ * whole number of milliseconds.
+ */
+export function handoffRefusedAt(search: string): number | null {
+  const raw = new URLSearchParams(search).get(HANDOFF_REFUSED_AT_PARAM);
+  if (raw === null || !/^\d+$/.test(raw)) return null;
+  const refusedAt = Number(raw);
+  return Number.isSafeInteger(refusedAt) ? refusedAt : null;
+}
+
+/**
+ * The route's mark as a query suffix, for a link between the sign-in pages: empty
+ * unless `redirect` names the hand-off and this page carries a mark, so every other
+ * link stays exactly what it was.
+ */
+export function handoffMarkQuery(
+  redirect: string | null,
+  search: string = typeof window === 'undefined' ? '' : window.location.search,
+): string {
+  if (handoffNavigationTarget(redirect) === null) return '';
+  const refusedAt = handoffRefusedAt(search);
+  return refusedAt === null ? '' : `&${HANDOFF_REFUSED_AT_PARAM}=${refusedAt}`;
+}
+
+/**
  * Whether the hand-off will carry `session`.
  *
- * With a `createdAt`, its age decides. Without one, the session is fresh only
- * when it is not the one the page found on arrival: it came from a sign-in on
- * this page, which the server has just made. A session found on arrival with
- * no `createdAt` is treated as too old, so the visitor signs in again rather
- * than being forwarded to a refusal.
+ * With a `createdAt` and the route's `refusedAt`, the session is fresh only if it
+ * was created after the refusal: two readings of the server's clock, so the
+ * device's is not read, and a provider's sign-in that returns to this same URL
+ * counts as new. On several nodes behind one host those are two clocks, so skew can
+ * hold the form until a sign-in makes a later `createdAt`, which clears it. With a
+ * `createdAt` alone, its age decides. Without one, the
+ * session is fresh only when it is not the one the page found on arrival: it came
+ * from a sign-in on this page, which the server has just made. A session found on
+ * arrival with no `createdAt` is treated as too old, so the visitor signs in again
+ * rather than being forwarded to a refusal.
  */
 export function isHandoffSessionFresh(
   session: unknown,
-  { arrival, now }: { arrival: { session: unknown } | null; now: number },
+  {
+    arrival,
+    now,
+    refusedAt = null,
+  }: { arrival: { session: unknown } | null; now: number; refusedAt?: number | null },
 ): boolean {
   const createdAt = sessionCreatedAtMs(session);
-  if (createdAt !== null) return now - createdAt <= HANDOFF_SESSION_MAX_AGE_MS;
+  if (createdAt !== null) {
+    if (refusedAt !== null) return createdAt > refusedAt;
+    return now - createdAt <= HANDOFF_SESSION_MAX_AGE_MS;
+  }
   return arrival !== null && session !== arrival.session;
 }
 
@@ -149,7 +205,15 @@ export function useHandoffRedirect(
     if (verdict === null && isLoading) return;
     if (verdict !== null && verdict.session === session) return;
     const arrival = verdict?.arrival ?? { session };
-    setVerdict({ session, arrival, fresh: isHandoffSessionFresh(session, { arrival, now: Date.now() }) });
+    setVerdict({
+      session,
+      arrival,
+      fresh: isHandoffSessionFresh(session, {
+        arrival,
+        now: Date.now(),
+        refusedAt: handoffRefusedAt(window.location.search),
+      }),
+    });
   }, [target, isLoading, session, verdict]);
 
   const judgedFresh = verdict !== null && verdict.session === session && verdict.fresh;

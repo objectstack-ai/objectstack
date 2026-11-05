@@ -9,13 +9,13 @@
  * `MetadataClient`, whose transport is an in-memory server.
  *
  * Pinned:
- *  - a view with no label is headed by its object's display name and its
- *    role: "Default view" for the object's default list view, else the key
- *    the nav entry names it by; the not-created and not-list sentences name
- *    the same title, and neither holds the qualified name;
- *  - the object's display name is the one the nav rail gives a label-less
- *    entry: the published label, else a draft-only object's pending draft
- *    label, else its machine name;
+ *  - a view with no label is headed by its role: "Default view" for the
+ *    object's default list view, else the key the nav entry names it by; the
+ *    not-created and not-list sentences name the same title, and neither holds
+ *    the qualified name. objectstack#30046 — the object's display name is not
+ *    part of it: the leaf header's title names the object before the view
+ *    (object / view ▾), and the panel's title is the view's name as that
+ *    switcher gives it;
  *  - the machine name stays on the panel, as a secondary line;
  *  - CONTROL: a view with a label is headed by that label, as before.
  */
@@ -135,12 +135,12 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('the list-view panel names the view by its display name (objectui#13151)', () => {
-  it('an unlabelled default view not created yet: the object\'s name and its role, never the qualified name', async () => {
+  it('an unlabelled default view not created yet: its role, never the qualified name', async () => {
     mount();
     const notice = await loaded('list-view-not-created');
 
-    expect(headerTitle()).toBe('Loan · Default view');
-    expect(notice).toHaveTextContent('There is no list view “Loan · Default view” yet.');
+    expect(headerTitle()).toBe('Default view');
+    expect(notice).toHaveTextContent('There is no list view “Default view” yet.');
     expect(notice).not.toHaveTextContent('acme_loan.default');
     // The machine name stays, as the secondary line.
     expect(screen.getByTestId('list-view-name')).toHaveTextContent('acme_loan.default');
@@ -150,32 +150,12 @@ describe('the list-view panel names the view by its display name (objectui#13151
     mount({ locale: 'zh-CN' });
     const notice = await loaded('list-view-not-created');
 
-    expect(headerTitle('zh-CN')).toBe('Loan · 默认视图');
-    expect(notice).toHaveTextContent('还没有列表视图「Loan · 默认视图」。');
+    expect(headerTitle('zh-CN')).toBe('默认视图');
+    expect(notice).toHaveTextContent('还没有列表视图「默认视图」。');
     expect(notice).not.toHaveTextContent('acme_loan.default');
   });
 
-  it('a draft-only object is named by its pending draft\'s label, as the nav rail names it', async () => {
-    mount({
-      leaf: { type: 'object', name: 'ux_site_visit', label: 'Site Visit' },
-      objects: [],
-      drafts: [{ type: 'object', name: 'ux_site_visit', label: 'Site Visit' }],
-    });
-    const notice = await loaded('list-view-not-created');
-
-    expect(headerTitle()).toBe('Site Visit · Default view');
-    expect(notice).not.toHaveTextContent('ux_site_visit.default');
-    expect(screen.getByTestId('list-view-name')).toHaveTextContent('ux_site_visit.default');
-  });
-
-  it('an object with no label anywhere falls back to its machine name, still not the view\'s qualified name', async () => {
-    mount({ objects: [{ ...OBJECT_DEF, label: undefined }] });
-    await loaded('list-view-not-created');
-
-    expect(headerTitle()).toBe('acme_loan · Default view');
-  });
-
-  it('an unlabelled named view is headed by the object\'s name and the key the nav entry names it by', async () => {
+  it('an unlabelled named view is headed by the key the nav entry names it by', async () => {
     server.active.set('view/acme_loan.open', {
       name: 'acme_loan.open',
       object: 'acme_loan',
@@ -185,7 +165,7 @@ describe('the list-view panel names the view by its display name (objectui#13151
     mount({ leaf: { type: 'object', name: 'acme_loan', label: 'Open loans', viewName: 'open' } });
     await loaded('list-view-columns');
 
-    expect(headerTitle()).toBe('Loan · open');
+    expect(headerTitle()).toBe('open');
     expect(screen.getByTestId('list-view-name')).toHaveTextContent('acme_loan.open');
   });
 
@@ -199,7 +179,7 @@ describe('the list-view panel names the view by its display name (objectui#13151
     mount();
     const notice = await loaded('list-view-not-list');
 
-    expect(notice).toHaveTextContent('“Loan · Default view” is not a list view');
+    expect(notice).toHaveTextContent('“Default view” is not a list view');
     expect(notice).not.toHaveTextContent('acme_loan.default');
   });
 

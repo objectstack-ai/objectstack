@@ -26,6 +26,8 @@
 import { z } from 'zod';
 import { PageSchema, pageForm as specPageForm } from '@objectstack/spec/ui';
 import type { FormViewSpec } from './SchemaForm.js';
+import type { SupportedLocale } from './i18n.js';
+import { localizeMetadataForm } from './metadata-form-i18n.js';
 
 type JsonSchema = Record<string, any>;
 
@@ -63,7 +65,7 @@ let _pageForm: FormViewSpec | undefined;
  * section header is left behind). Everything else — including the
  * type-conditional `interfaceConfig` sections — flows through verbatim.
  */
-export function getPageForm(): FormViewSpec | undefined {
+function bundledPageForm(): FormViewSpec | undefined {
   if (_pageForm) return _pageForm;
   if (!specPageForm || typeof specPageForm !== 'object') return undefined;
   const clone = JSON.parse(JSON.stringify(specPageForm)) as FormViewSpec;
@@ -76,4 +78,25 @@ export function getPageForm(): FormViewSpec | undefined {
   clone.sections = (clone.sections ?? []).filter((s) => (s.fields ?? []).length > 0);
   _pageForm = clone;
   return _pageForm;
+}
+
+/** One localized copy per locale, for the reason `getDashboardForm`'s cache is keyed. */
+const _localizedPageForm = new Map<string, FormViewSpec | undefined>();
+
+/**
+ * The pruned authoring form with the active locale's `metadataForms.page`
+ * strings overlaid (`localizeMetadataForm`, objectui#7254), so the panel
+ * speaks the language of the Studio around it. A locale the overlay does not
+ * carry gets the spec's English, the same object as before.
+ */
+export function getPageForm(locale?: SupportedLocale | string): FormViewSpec | undefined {
+  const cacheKey = String(locale ?? '');
+  if (_localizedPageForm.has(cacheKey)) return _localizedPageForm.get(cacheKey);
+  const localized = localizeMetadataForm(
+    bundledPageForm() as unknown as Record<string, unknown> | undefined,
+    'page',
+    locale,
+  ) as unknown as FormViewSpec | undefined;
+  _localizedPageForm.set(cacheKey, localized);
+  return localized;
 }
