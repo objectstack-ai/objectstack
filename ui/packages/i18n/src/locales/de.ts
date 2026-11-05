@@ -3098,6 +3098,8 @@ const de = {
     allDocs: 'Gesamte Dokumentation',
     onlineDocs: 'Online-Dokumentation',
     loadingDocumentation: 'Dokumentation wird geladen',
+    documentation: 'Dokumentation',
+    uncategorized: 'Nicht kategorisiert',
     about: 'Über',
     aboutTitle: 'Über diese Konsole',
     aboutDescription: 'Der Build, aus dem diese Konsole kompiliert wurde.',

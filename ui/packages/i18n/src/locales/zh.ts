@@ -3175,6 +3175,8 @@ const zh = {
     allDocs: '全部文档',
     onlineDocs: '在线文档',
     loadingDocumentation: '正在加载文档',
+    documentation: '文档',
+    uncategorized: '未分类',
     about: '关于',
     aboutTitle: '关于此控制台',
     aboutDescription: '此控制台编译所用的构建。',

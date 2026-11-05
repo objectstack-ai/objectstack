@@ -3233,6 +3233,8 @@ const ru = {
     allDocs: 'Вся документация',
     onlineDocs: 'Онлайн-документация',
     loadingDocumentation: 'Загрузка документации',
+    documentation: 'Документация',
+    uncategorized: 'Без категории',
     about: 'О программе',
     aboutTitle: 'Об этой консоли',
     aboutDescription: 'Сборка, из которой скомпилирована эта консоль.',

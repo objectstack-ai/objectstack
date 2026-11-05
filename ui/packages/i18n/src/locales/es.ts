@@ -3163,6 +3163,8 @@ const es = {
     allDocs: 'Toda la documentación',
     onlineDocs: 'Documentación en línea',
     loadingDocumentation: 'Cargando documentación',
+    documentation: 'Documentación',
+    uncategorized: 'Sin categoría',
     about: 'Acerca de',
     aboutTitle: 'Acerca de esta consola',
     aboutDescription: 'La compilación a partir de la cual se generó esta consola.',

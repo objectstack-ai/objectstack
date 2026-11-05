@@ -3695,6 +3695,8 @@ const en = {
     keyboardShortcuts: 'Keyboard shortcuts',
     onlineDocs: 'Online documentation',
     loadingDocumentation: 'Loading documentation',
+    documentation: 'Documentation',
+    uncategorized: 'Uncategorized',
     about: 'About',
     aboutTitle: 'About this console',
     aboutDescription: 'The build this console was compiled from.',
