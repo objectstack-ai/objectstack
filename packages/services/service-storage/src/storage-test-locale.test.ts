@@ -20,7 +20,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { StorageServicePlugin } from './storage-service-plugin.js';
 import { LocalStorageAdapter } from './local-storage-adapter.js';
-import { storageTestCopy, STORAGE_TEST_COPY } from './storage-test-copy.js';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
+import { storageTestCopy, storageTestCopyLocaleOf, STORAGE_TEST_COPY } from './storage-test-copy.js';
 
 function makeCtx() {
   const services = new Map<string, unknown>();
@@ -102,7 +103,7 @@ describe('[#30335] storage/test answers in the caller\'s language', () => {
   it('no locale, or one with no copy: English, exactly as an older settings host gets it', async () => {
     const { root, settings } = await bootPlugin();
     const values = { adapter: 'local', local_root: root };
-    for (const input of [{ values }, { values, locale: 'fr-FR' }, { values, locale: '' }]) {
+    for (const input of [{ values }, { values, locale: 'tr-TR' }, { values, locale: '' }]) {
       const result = await settings.run(input);
       expect(result.ok).toBe(true);
       expect(result.severity).toBe('info');
@@ -164,15 +165,47 @@ describe('[#30335] storage/test answers in the caller\'s language', () => {
 });
 
 describe('[#30335] the storage/test copy table', () => {
-  it('serves every locale the package\'s translations serve, each with every sentence', () => {
-    expect(Object.keys(STORAGE_TEST_COPY).sort()).toEqual(['en', 'es-ES', 'ja-JP', 'zh-CN']);
-    for (const locale of Object.keys(STORAGE_TEST_COPY)) {
-      const copy = storageTestCopy(locale);
-      expect(copy.succeeded('s3')).toContain('s3');
-      expect(copy.downloadMismatch.length).toBeGreaterThan(0);
-      expect(copy.s3SettingsIncomplete).toContain('s3_bucket');
-      expect(copy.s3SettingsIncomplete).toContain('s3_region');
-      expect(copy.failed('EACCES')).toContain('EACCES');
+  const KEYS = ['ar', 'de', 'en', 'es-ES', 'fr', 'ja-JP', 'ko', 'pt-BR', 'ru', 'zh-CN', 'zh-Hant'];
+
+  it('carries all 11 languages of the platform locale table, each with every sentence', () => {
+    expect(Object.keys(STORAGE_TEST_COPY).sort()).toEqual(KEYS);
+    // Every table tag finds its own entry (none falls through to English).
+    expect(PLATFORM_LOCALE_TAGS).toHaveLength(11);
+    for (const tag of PLATFORM_LOCALE_TAGS) {
+      expect(storageTestCopyLocaleOf(tag), tag).toBeDefined();
     }
+    const en = STORAGE_TEST_COPY.en;
+    for (const key of KEYS) {
+      const copy = STORAGE_TEST_COPY[key as keyof typeof STORAGE_TEST_COPY];
+      expect(Object.keys(copy).sort(), key).toEqual(['downloadMismatch', 'failed', 's3SettingsIncomplete', 'succeeded']);
+      // Placeholders survive verbatim; the two setting keys are named as written.
+      expect(copy.succeeded('ADAPTER_X'), key).toContain('ADAPTER_X');
+      expect(copy.failed('REASON_Y'), key).toContain('REASON_Y');
+      expect(copy.s3SettingsIncomplete, key).toContain('s3_bucket');
+      expect(copy.s3SettingsIncomplete, key).toContain('s3_region');
+      expect(copy.downloadMismatch.length, key).toBeGreaterThan(0);
+      if (key !== 'en') {
+        // A real translation, not the English sentence copied in.
+        expect(copy.succeeded('local'), key).not.toBe(en.succeeded('local'));
+        expect(copy.downloadMismatch, key).not.toBe(en.downloadMismatch);
+        expect(copy.s3SettingsIncomplete, key).not.toBe(en.s3SettingsIncomplete);
+        expect(copy.failed('x'), key).not.toBe(en.failed('x'));
+      }
+    }
+  });
+
+  it('reads a caller\'s code through the platform table: aliases, table tags, then shorter subtags', () => {
+    const cases: Array<[string | undefined, string | undefined]> = [
+      ['zh-CN', 'zh-CN'], ['zh', 'zh-CN'], ['zh-Hans', 'zh-CN'], ['zh-Hans-CN', 'zh-CN'],
+      ['zh-TW', 'zh-Hant'], ['zh-HK', 'zh-Hant'], ['zh-Hant', 'zh-Hant'], ['zh-Hant-TW', 'zh-Hant'],
+      ['ja', 'ja-JP'], ['ja-JP', 'ja-JP'], ['es', 'es-ES'], ['es-MX', 'es-ES'],
+      ['pt', 'pt-BR'], ['pt-BR', 'pt-BR'], ['fr-FR', 'fr'], ['de-DE', 'de'], ['ko-KR', 'ko'],
+      ['ru', 'ru'], ['ar-SA', 'ar'], ['en-US', 'en'], ['EN-gb', 'en'],
+      ['xx-YY', undefined], ['', undefined], [undefined, undefined],
+    ];
+    for (const [code, key] of cases) {
+      expect(storageTestCopyLocaleOf(code), String(code)).toBe(key);
+    }
+    expect(storageTestCopy('xx-YY')).toBe(STORAGE_TEST_COPY.en);
   });
 });
