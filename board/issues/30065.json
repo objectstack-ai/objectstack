@@ -13,18 +13,20 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T12:15:49Z",
-  "updated_at": "2026-11-04T13:13:02Z",
+  "updated_at": "2026-11-05T13:34:34Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30065",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nThe maintainer: 「全部立，继续测试验证」 (2026-11-04), on the seat's evaluation of which metadata types should support override.\n\nMeasured by the seat through the metadata API and in a browser on `main` `63b86b385d`, on `examples/app-crm` and `examples/app-showcase`, each overriding through its paired customization package. No `domain:*` label is set: triage routes this card.\n\n## Business reason\n\nAn installed CRM ships a button such as 转化线索. A customer wants it under their own word, shown only at some stages, or gone. Today they can only switch it off, or make a differently named copy that the vendor's pages do not show. In this example alone, showcase ships 72 actions.\n\n## Measured\n\n`PUT /api/v1/meta/action/crm_convert_lead?package=com.example.crm.custom&mode=draft` with `overrides` answers 403 `NOT_OVERRIDABLE`: \"action customization is not yet available, so a declared action override is refused (ADR-0146 D9).\" Studio marks 操作 只读.\n\n## Governing text\n\nADR-0146 D9: \"`action`, the other Regime C type, takes the same shape later\", under conditions 1 to 3 read for an action: served over the code package's name, rebound in one reload, one ledger row for the name. Condition 4 does not apply: an action has no suspended run. The record says its precondition, the action ledger switch, has landed, and that no card of that epic opens the door. This card opens it.\n\nFor comparison, the same three conditions were measured on `flow` as working: on `showcase_task_completed`, one status change produced exactly one run before the override, with it, and after restoring. The inbox showed the override's changed title, so the override's body ran.\n\n## Scope\n\n1. Admit the declared override for `action` once conditions 1 to 3 hold, and add it to `CONDITIONS_DELIVERED` (`packages/metadata-protocol/src/protocol-packaged-base-refusal.ts:510`).\n2. The override is served wherever the action is drawn or run: list toolbar, row menu, record header, and the action's run door. A removal restores the base's action.\n3. The activation ledger's single row keeps switching whichever definition is armed.\n4. Studio: a read-only action offers 定制 and 恢复原版, with marks and the tile.\n\n## Acceptance\n\n1. In a browser: rename a button, restrict its visibility, publish, and see both in the running app. Run the action once and confirm it runs the override. Restore.\n2. Switching the action off through the ledger switches off the override.\n3. A permission check on the action cannot be widened by the override without saying so: measure what an override can change about who may run it, and report it on the PR. This one reaches a security boundary, so it goes through contract review.\n4. Tests for the three conditions, at the same grain as flow's.\n\n## Not in this card\n\nLabel precedence, in the defect card filed beside this one.\n\n## Re-check\n\n`git grep -n \"CONDITIONS_DELIVERED: ReadonlySet\" origin/main -- packages/metadata-protocol/src/protocol-packaged-base-refusal.ts`"

@@ -1,0 +1,34 @@
+{
+  "number": 30404,
+  "kind": "issue",
+  "title": "plugin-auth: Register SAML Provider refuses an IdP whose Entity ID is a URN (urn:…), because the vendor types the issuer as a URL",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T09:44:52Z",
+  "updated_at": "2026-11-05T12:48:56Z",
+  "closed_at": "2026-11-05T12:44:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30404",
+  "body": "domain:server#4 · os-bill · session_01Utp6CZMkHvuDeVYgTD73qF\n\nFiling gate: ① a product defect with a named location, found by the #30352 dev while fixing Setup's SAML registration (PR #30402, Acceptance notes). Filed by `domain:server` seat 4. ⛔ Not a claim. Suggested-grade: p3. ⛔ Serial after PR #30402 merges: it touches the same bridge.\n\n## What happens\n\nAfter PR #30402, Setup → SSO Providers → Register SAML Provider sends the form's \"IdP Entity ID\" field (`issuer`) both as the top-level `issuer` and as `samlConfig.idpMetadata.entityID` to `@better-auth/sso`'s `/sso/register` (`packages/plugins/plugin-auth/src/register-sso-provider.ts`, `runRegisterSamlProviderFromForm`). The vendor's register body schema types the top-level `issuer` as a URL. SAML EntityIDs are URIs, and many IdPs publish a URN (`urn:…`; for example ADFS-style or custom federation IDs), which is not a URL. Such a form is still refused at the vendor's parse step, before registration.\n\nNot measured live: the dev read it in the vendor's schema. The first act of whoever takes this card is to measure it with a `urn:` Entity ID through the real route.\n\n## Ask\n\nMeasure, then make a complete form with a URN Entity ID register. Use whichever of these the vendor's code allows:\n\n- send a URL-shaped top-level `issuer` (for example the SP's own base URL, if the vendor uses it only as a label) and keep the URN in `idpMetadata.entityID`; or\n- validate the field as a URI on our side and map it.\n\nIf neither is possible without patching the vendor, refuse the URN with a message that says why at our door, not the vendor's parse error, and record the vendor limit.\n\nReader who acts: `domain:server`, `plugin-auth`.\n\nDedupe: `SAML issuer urn`, `Register SAML Provider entity ID URN`. **New.**"
+}

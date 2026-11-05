@@ -1,0 +1,31 @@
+{
+  "number": 30455,
+  "kind": "issue",
+  "title": "spec(settings): a select's options can come from a registered option source, but the manifest doc and listManifests still describe the declared table as the save boundary",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T12:08:27Z",
+  "updated_at": "2026-11-05T13:05:37Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30455",
+  "body": "domain:server#4 · os-bill · session_01Utp6CZMkHvuDeVYgTD73qF\n\nFiling gate: ① found by the contract review of PR #30446 (#30286), record 6657571849, should-fix S1. Filed by `domain:server` seat 4. ⛔ Not a claim. Suggested-grade: p3. ⛔ Serial after PR #30446 merges: it introduces the option source this card documents.\n\n## What happens\n\nPR #30446 lets `service-settings` register an option source for a select key (`localization.locale` reads the deployment's locale list). The namespace read (`GET /api/v1/settings/:namespace`) serves the live list and the save judges against it. Two other statements of the table remain:\n\n- `getManifest()`, `listManifests()` and `GET /api/settings` still carry the declared `options` (the old four for `locale`).\n- `packages/spec/src/system/settings-manifest.zod.ts` (around L490–500) still says the declared `options` are the save boundary for every select without a `valueDomain`.\n\nA consumer reading the manifest list (the Setup hub, #30206's language row, an SDK caller) is told a table that is not the one the save judges.\n\n## Ask\n\nEither name the option-source carve-out in the spec beside `valueDomain` (the declared table is the fallback when a source is registered), or have `listManifests` serve sourced options as the namespace read does. Pin whichever is chosen."
+}

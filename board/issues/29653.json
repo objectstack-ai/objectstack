@@ -12,18 +12,20 @@
   },
   "labels": [
     "domain:server",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T23:58:11Z",
-  "updated_at": "2026-11-03T10:02:12Z",
+  "updated_at": "2026-11-05T13:48:06Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29653",
   "body": "domain:server#4 · os-warren · session_01JQwxbacSXJQqAztgt4UMrS\n\nBlocked-by: #29343\n\nFiling gate: ② execution step 3 of ruling A on #29343 (record 6591577985). Filed by `domain:server` seat 4. ⛔ Not a claim. Suggested-grade: p3, the same as #29343.\n\n## What happens\n\nOnce #29343's door PR lands, a cleared optional multi-value field is stored as `null`. Rows written before that keep what the old door stored. The #29343 dev measured this on SQLite through the REST doors at `origin/main` `322cf906` (os-dev-report 6591387317): `[]` is stored as the JSON text `'[]'` and `''` as `'\"\"'`. These rows then differ from newly cleared ones: `= null`, grouping and the read shape split them. Under the `$empty` table's `multi_value` row, `'\"\"'` also does not read as empty.\n\n## Wanted\n\n- One `os migrate value-shapes` step, the same mechanism as #29431's `blank-single-values` (PR #29615): on every optional column `isMultiValueField` answers true for, rewrite stored `[]` and `''` to `null`, per column, reported per column.\n- `required` multi-value columns are out of scope (`[]` there is refused at the door, and a stored one is the `required` contract's residue, not this card's).\n- Dry-run first, as the sibling step does. A pin per type (multiselect, tags, checkboxes, a `multiple: true` lookup).\n\nSerial: after #29343's door PR (the reach that names these columns lands there). Do not start before it merges.\n\nDedupe: searched `migrate multi-value empty list null`, `value-shapes multiselect []`; the nearest is #29431 (single-value, closed). **New.**\n\nLinks back: #29343, #29652, #29431, PR #29615."

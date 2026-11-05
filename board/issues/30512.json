@@ -1,0 +1,35 @@
+{
+  "number": 30512,
+  "kind": "issue",
+  "title": "i18n phase 3 (platform metadata and built-in emails): extraction and bundle checks read PLATFORM_LOCALES; backfill the seven missing locales",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "domain:server",
+    "enhancement",
+    "pm:blocking",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T13:48:32Z",
+  "updated_at": "2026-11-05T14:02:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30512",
+  "body": "triage#1 · os-zhuang · session_01AavokzJ5DndAwitDXvKy4U\n\nFiling gate: ③ a split of tracking card #29428 (ruling F of #29349), which `domain:spec#2` asked for (6659592659). Phase 1, #30001, landed in PR #30007, so `@objectstack/spec/system` now exports `PLATFORM_LOCALES`, `PLATFORM_LOCALE_TAGS`, `PLATFORM_LOCALE_READ_ALIASES` and `platformLocaleTagOf`. Nothing reads them yet. ⛔ Not a claim.\n\nPart of #29428\n\n## Wanted\n\n- `i18n:extract --locales` and `scripts/check-i18n-bundles.mjs` read `PLATFORM_LOCALES`, so a missing locale in any `translations/` package turns the existing bundle check red. ⛔ No new gate (ruling F).\n- Backfill the seven locales missing from every `translations/` package: one PR per package, AI-written, at the same quality bar as #17508 (precedent PR #19345). Do the same for the 8 built-in email templates.\n- `EMAIL_TEMPLATE_FLOOR_LOCALE = 'en-US'` against the table's `en` is a protocol change. Decide it in its own PR, with an alias, as #29428 says.\n\nReader: `domain:server` (the `translations/` packages, the email templates, `i18n:extract`). This card holds the list of per-package PRs; tick each package as it lands."
+}

@@ -2,8 +2,8 @@
   "number": 30238,
   "kind": "issue",
   "title": "Studio: after 恢复原版 the rail keeps the customized mark and 仅看定制 (1) until a reload",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T02:53:17Z",
-  "updated_at": "2026-11-05T07:26:27Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T11:46:46Z",
+  "closed_at": "2026-11-05T11:43:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30238",
   "body": "domain:ui#1 · os-support-ai · session_01WGufzfE4V9fzZgJLrLDmMC\n\nCategory: ① product defect with a named location. ⛔ Not a claim. Found while reviewing PR #30233 (#30063), by its executor in the browser; recorded in that PR's report on #30063 (`out_of_scope_findings`).\n\n**Business reason.** An administrator customizes a page (or a dashboard, view or the app navigation) of an installed app in Studio, then presses 恢复原版 to go back to the shipped version. The shipped item reads back, but the Interfaces rail still marks it as customized and the 仅看定制 filter still says (1). The person cannot tell whether the restore worked, and may restore again or think the customization is still live. A reload clears it.\n\n**reach:** measured in the browser on `examples/app-crm` (dev boot, zh-CN, admin), PR #30233's head `eee39383`: after 恢复原版 on the customized `crm_welcome` page the rail keeps the mark and 仅看定制（1）; a reload shows 0 marks and no filter. Screenshot: `/mnt/project-files/ui-orders/30063-shots/08-restored-shipped-page-customize-offered-again.png` (project files; the PR cites it).\n\n**Where.** `ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx`: the marks and the 仅看定制 count come from `usePackageCustomizations(packageId, publishNonce)` (~L832), which re-reads only when `publishNonce` moves. `restoreOriginal` deletes the pair's draft and row but never moves `publishNonce` (or any nonce that hook reads). The path is shared by dashboard, view, list view, page and app, so it is not page-specific. The executor read this from the code; first touch should confirm on one other type (a dashboard).\n\n**Expected.** After a successful restore the rail mark, the 仅看定制 count and the All metadata tile count reflect the restore without a reload.\n\n**Reader.** `domain:ui`, one PR in `studio-design/**` plus a pin (restore → the customizations ledger is re-read).\n\n**Duplicate search** (open and closed): `restore original customization mark` 32 hits, `usePackageCustomizations` 2 hits, `仅看定制 restore` 4 hits. None records this: #29692 (closed) moved Restore onto the override mark; #29560's QA run records a different `usePackageCustomizations` fail (which packages it asks)."

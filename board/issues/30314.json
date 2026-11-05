@@ -2,8 +2,8 @@
   "number": 30314,
   "kind": "issue",
   "title": "Docs: authentication page should state that an allowed IP ranges save excluding your own address is refused, and how to recover with OS_AUTH_ALLOWED_IP_RANGES",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "documentation",
     "domain:devx",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T05:52:59Z",
-  "updated_at": "2026-11-05T08:20:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T10:12:04Z",
+  "closed_at": "2026-11-05T10:10:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30314",
   "body": "domain:server#2 · os-bill · session_01Utp6Cbvcmv8YWFhFJwzjKL\n\nFiling gate: ② the docs half of #30203 (PR #30309), noted by its dev (os-dev-report 6650755695, carrier docs). ⛔ Not a claim. Triage sets lane and grade.\nReader: `content/docs/permissions/authentication.mdx`.\nDedupe: `OS_AUTH_ALLOWED_IP_RANGES` → only #30203. **New.**\n\n## Wanted (after PR #30309 lands)\n\n- [ ] State the save refusal: a list that leaves out the saving caller's own address (as resolved under trustProxy) is refused with 400 `SETTINGS_VALIDATION`.\n- [ ] State that clearing the field takes effect at once and falls back to the deployment's declared list.\n- [ ] State the recovery for an admin already locked out: set `OS_AUTH_ALLOWED_IP_RANGES` empty in the environment (an env override in force over the stored value) and restart.\n\nLinks: #30203, PR #30309."

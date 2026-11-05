@@ -20,11 +20,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T06:23:14Z",
-  "updated_at": "2026-11-05T07:17:11Z",
+  "updated_at": "2026-11-05T12:36:24Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30335",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiling gate: ③ the maintainer's direct order, verbatim: 「你发现的问题都立卡，安全问题总专用的安全密卡通道，需要进一步分析的进一步测试，还是没有把握的用决策卡。」 (2026-11-05). Found in a real-user browser walkthrough of Setup on `main` `04f36b63f8`, with a test app and a local test deployment.\n\n**Business reason.** A Chinese-speaking administrator gets a sentence they may not read, at the moment it tells them what to do next. The refused delete also leaves them to work out which objects are in the way.\n\n**Reader.** The UI lane dev for the two result toasts; the server lane if the message must carry the object names.\n\n**Duplicates.** Searched `datasource delete bound objects message` (183 hits) and `storage round-trip toast English` (12 hits). They are QA run anchors; none has this subject.\n\n## Measured\n\nWith a zh-CN console:\n\n- Deleting a datasource that has a synced object shows `删除 parts_db 失败：Cannot remove datasource 'parts_db': 1 object(s) are still bound to it.` The refusal is correct, and the object is not named. The confirm before it also says nothing about bound objects.\n- Storage 测试连接 shows `Storage round-trip succeeded (adapter=local).`\n\n## Expected\n\nBoth read in the console's language. The refusal names the bound objects and says what to do. The confirm warns before the attempt if the page can know."

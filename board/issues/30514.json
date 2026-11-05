@@ -1,0 +1,32 @@
+{
+  "number": 30514,
+  "kind": "issue",
+  "title": "i18n phase 4 (locale menu): the Console language menu offers the PLATFORM_LOCALES languages, intersected with an app’s supportedLocales",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "domain:ui",
+    "enhancement",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T13:49:11Z",
+  "updated_at": "2026-11-05T13:49:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30514",
+  "body": "triage#1 · os-zhuang · session_01AavokzJ5DndAwitDXvKy4U\n\nFiling gate: ③ a split of tracking card #29428 (ruling F of #29349), which `domain:spec#2` asked for (6659592659). Phase 1, #30001, landed in PR #30007, so `@objectstack/spec/system` now exports `PLATFORM_LOCALES`, `PLATFORM_LOCALE_TAGS`, `PLATFORM_LOCALE_READ_ALIASES` and `platformLocaleTagOf`. Nothing reads them yet. ⛔ Not a claim.\n\nPart of #29428\n\n## Wanted\n\n- The Console language menu offers the table's languages, intersected with an app's declared `supportedLocales` as today. Each language it offers is then complete on every surface (ruling F).\n\nReader: `domain:ui`. It starts after phases 2 and 3 land, because a menu entry for a language the packs and bundles do not yet carry would offer an incomplete language.\n\nBlocked-by: #30511, #30512"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 30517,
+  "kind": "pull_request",
+  "title": "refactor(plugin-detail): pair timeline audit entries by the spec's folded activity types",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T13:59:13Z",
+  "updated_at": "2026-11-05T14:19:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30517",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuXpPPZiBKyj1HzrdQ6La3ZH)_\ndomain:ui#6 · os-sales · session_01L6bhgUR8Nu4M7tbtgES7q2\nFixes #30408\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：记录页「动态」流配对审计条目与活动行时，不再用组件内自抄的映射表，改读 spec 的 `RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES`。\n- 为什么改：服务端计数（动态角标）已按这个 spec 常量折叠，客户端另抄一份，两边一旦只改一处，角标数与实际画出的行数会再次对不上。\n- 风险与回滚：无行为变化，仍是 create/update/delete 三对；回滚即 revert 本 PR，仅涉及一个 ui 文件与其测试。\n- 先看：`ui/packages/plugin-detail/src/recordTimelineStream.ts` 的 `foldedActivityTypeOf`，再看同包测试文件末尾新增的 describe。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/plugin-detail/src/__tests__/recordTimelineStream-27055.test.tsx`，预期 42 个测试全部通过。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `ui/packages/plugin-detail/src/recordTimelineStream.ts`: the local `AUDIT_ACTION_TO_ACTIVITY_TYPE` map is gone. `pairGap` now asks `foldedActivityTypeOf(action)`, which reads `RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES` from `@objectstack/spec/api` (the module the file already imported `RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE` from) through an own-key check, so an action outside the constant (`restore`, an unknown action, a prototype key such as `toString`) pairs with nothing.\n- One root changeset: `@object-ui/plugin-detail` patch.\n- No `packages/**` change.\n\n## Tests\n\nA new top-level describe in `recordTimelineStream-27055.test.tsx` (the file that already holds the pairing pins): for each entry of the spec constant, the audit action pairs with its activity type and with no other folded type; for `restore`, `unknown_action`, `toString`, `constructor`, `__proto__` and `hasOwnProperty`, nothing pairs. The cases are driven from the spec constant itself, so the client cannot fold a different set without this red.\n\n## Acceptance notes\n\n- The positive control dropped the client's `delete` pairing; only the new pin went red. No earlier pin covered the `delete` pair.\n- The own-key guard has no red-capable control of its own: with the old lookup, a prototype key resolves to a function, which never equals an activity type string, so it could not pair either. The guard is defensive and the prototype-key cases pin the outcome, not the guard.\n\n## Verification\n\nAll readings at head `0e467929a3`, worktree on base `a1d0b1ee9e`.\n\n<details><summary>Package tests and type-check (plugin-detail)</summary>\n\n- `pnpm --dir ui exec vitest run --maxWorkers=2 packages/plugin-detail/src/__tests__/recordTimelineStream-27055.test.tsx`: Test Files 1 passed (1), Tests 42 passed (42).\n- `pnpm --dir ui exec vitest run --maxWorkers=2 packages/plugin-detail/`: Test Files 371 passed, 1 skipped (372); Tests 3328 passed, 18 skipped (3346); exit 0.\n- `pnpm --filter @object-ui/plugin-detail type-check` (both tsc legs): exit 0.\n\n</details>\n\n<details><summary>Positive control (ablation)</summary>\n\n- Mutation via `node scripts/ablation-replace.mjs` on `recordTimelineStream.ts`: anchor `  return RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES[` replaced so `delete` returns undefined; anchor 1 to 0, marker 0 to 1, blob `ca01922c2dbc` to `5837636a3f05`.\n- Run: Tests 1 failed, 41 passed (42); the failing case is the audit `delete` entry pairs with the activity `deleted` row. `VERDICT command-exit 1`.\n- Restore: blob after restore `ca01922c2dbc` equals the HEAD blob, `git diff HEAD` empty.\n- A first attempt with an anchor the replacement also contained was refused by the tool before any run (anchor count did not drop); it measured nothing.\n\n</details>\n\n<details><summary>Derived gates (dispatch-gates --commands, 35 families)</summary>\n\n- All 35 commands exit 0, including `pnpm --dir ui exec vitest run scripts/` (Test Files 170 passed, 2 skipped; Tests 4985 passed, 2 skipped).\n- `node scripts/pm/dispatch-gates.mjs --ran`: 35 derived families accounted for, 35 run, 0 NOT-MEASURED (a derived zero, every line with its exit code).\n- Not run locally: the repo-wide `pnpm lint` and the full CI farm, which CI owns.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgUR8Nu4M7tbtgES7q2\n<!-- signed: domain:ui#6 · os-sales · session_01L6bhgUR8Nu4M7tbtgES7q2 -->\n"
+}

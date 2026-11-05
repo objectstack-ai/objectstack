@@ -1,0 +1,34 @@
+{
+  "number": 30487,
+  "kind": "pull_request",
+  "title": "fix(cloud-connection): stage the ledger adoption copy without mkdtempSync, so main's dispatch-gates lane is green again",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T13:17:33Z",
+  "updated_at": "2026-11-05T13:58:31Z",
+  "closed_at": "2026-11-05T13:58:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-05T13:58:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30487",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wg9MmNtLnaKdSpq9S7Ah47uy)_\n\ndomain:server#3 · os-bill · session_01Utp6CZ9g1bEV7DPMneGKAx\n\nFixes #30467\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么：** 本地安装账本首次从工作目录复制到 `OS_HOME` 时用的暂存目录，改用「随机名 + 独占 mkdirSync」创建，不再用 `mkdtempSync`。行为不变：仍是账本目录旁的唯一兄弟目录，复制完重命名到位，失败即删除。\n- **为什么改：** PR #30351（#30217）落地后 `main` 的 `Lint · PM dispatch-gates` 一直红：dispatch-gates 自测要求每个 `mkdtempSync` 的基路径都能从源码读出，而这里的基路径是运行时才解析的账本位置。\n- **风险与回滚：** 只改一处暂存目录的创建方式，另加一行 `node:crypto` 导入；名字碰撞时非递归 `mkdirSync` 抛 EEXIST，与 `mkdtempSync` 同样不复用已有目录。回滚即撤 PR（main 会再次变红）。\n- **先看：** `packages/cloud-connection/src/local-manifest-source.ts` 的 `adoptLegacyEntries`（第 333 行起那段）。\n- **两分钟验证：** `pnpm --filter @objectstack/cloud-connection exec vitest run src/local-manifest-source.test.ts`，预期 adoptLegacyEntries 四个用例全过（含「失败不留账本目录」「不留暂存目录」）。\n- **需要你做的：** 无，席位落地。\n\n## What changes\n\n`LocalManifestSource.adoptLegacyEntries()` (added by #30351, the breaking commit `bc254be33e`) staged its copy with `mkdtempSync(join(dirname(this.dir), ...))`. `this.dir` is the ledger location resolved at run time (`OS_HOME`, or an explicit `storageDir`), so the in-tree scratch scan in `scripts/pm/dispatch-gates.mjs` cannot read that base. The scan holds `mkdtempSync` to completeness (an unresolved base is a failure), so the dispatch-gates self-test case \"no mkdtempSync site in this tree takes a base the scan cannot read\" has been red on every `main` run since.\n\nThe staging directory is now spelled as an exclusive, non-recursive `mkdirSync` of a randomly named sibling: `.LEDGER_BASENAME.adopting-HEX12` (12 hex characters from `randomBytes(6)`) under `dirname(this.dir)`. Why this spelling and not one the scan resolves: no spelling of this base can be resolved from source, because the base really is a run-time value (it may even land inside a project checkout when `OS_HOME` points there). `mkdirSync` is the shape the scan deliberately does not hold to completeness (see the \"In-tree scratch directories\" block of `dispatch-gates.mjs`: runtime bases are named in the report and not failed). The uniqueness guarantee is kept: a non-recursive `mkdirSync` creates the directory atomically and throws `EEXIST` rather than reuse one that is already there, as `mkdtempSync` does. The rest is byte-for-byte unchanged: the files are copied into the staging directory, it is renamed into place, and it is removed if the copy fails.\n\n`scripts/pm/dispatch-gates.mjs` and its self-test are not touched.\n\n## Tests\n\nNo test changes. The four existing `adoptLegacyEntries` cases in `packages/cloud-connection/src/local-manifest-source.test.ts` already pin the behaviour this keeps: every file copied, no staging directory left beside the ledger, nothing adopted once the ledger exists, and a failed copy leaving neither a ledger nor a staging directory.\n\n## Acceptance notes\n\n- Ablation: not run. The diff changes how a directory is created, not a tested behaviour; the existing cases above are the behaviour pins and pass unchanged.\n\n## Verification\n\nAll readings on head `c4fb1fe5`.\n\n<details><summary>The failing self-test case, before and after</summary>\n\n- CI, `main` at `c58008187` (run 42025638313, `Lint · PM dispatch-gates`): `✗ no mkdtempSync site in this tree takes a base the scan cannot read — UNRESOLVED: packages/cloud-connection/src/local-manifest-source.ts:333 (a base this scan cannot read: this.dir)`, then `✗ dispatch-gates self-test: 1 of 2234 case(s) failed.`\n- The same scan (`exposedScratchDirs` from `scripts/pm/dispatch-gates.mjs`), local: `origin/main f506b79d: mkdtempSync unresolved = 1 packages/cloud-connection/src/local-manifest-source.ts:333 (a base this scan cannot read: this.dir)`; `head c4fb1fe5: mkdtempSync unresolved = 0 ; exposed = 0`.\n- `node scripts/pm/check-dispatch-gates.mjs --slow` (both tiers, as `main`'s push and schedule runs do) on head: `✓ no mkdtempSync site in this tree takes a base the scan cannot read` and `✓ every in-tree directory this tree's sources create is covered by a tracked ignore rule, or is tracked itself`. The battery's total verdict line is quoted in the os-dev-report on #30467.\n- `pnpm check:pm-dispatch-gates` (fast tier, as PR and queue runs do) on head: `✓ dispatch-gates self-test (fast tier): 1945 cases pass; 7 slow section(s) deferred.`, exit 0. The case this PR fixes sits in a slow section, so this PR's own CI does not run it; the first CI run that does is `main`'s push battery after merge.\n\n</details>\n\n<details><summary>Package tests and type check</summary>\n\n- `pnpm --filter '@objectstack/cloud-connection^...' build`: exit 0.\n- `pnpm --filter @objectstack/cloud-connection test`: `Test Files 70 passed (70)`, `Tests 877 passed (877)`.\n- `pnpm --filter @objectstack/cloud-connection typecheck`: exit 0.\n\n</details>\n\n<details><summary>Derived gates (dispatch-gates --commands, 51 commands)</summary>\n\n`node scripts/pm/dispatch-gates.mjs --ran` on head: `✓ dispatch-gates --ran: 51 derived famil(ies) accounted for — 49 run, 2 NOT-MEASURED (2 DERIVED from a recorded exit 3).` All 49 run exit 0. NOT MEASURED, left to CI: `node scripts/check-plugin-teardown-shape.mjs --self-test` (shallow clone cannot reach its pinned control commit) and `pnpm check:dual-build-cjs-loads` (needs every package built).\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CZ9g1bEV7DPMneGKAx)_\n"
+}

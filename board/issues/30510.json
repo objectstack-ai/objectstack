@@ -1,0 +1,32 @@
+{
+  "number": 30510,
+  "kind": "issue",
+  "title": "service-messaging: the e-mail channel reports available on a LogTransport, so a send with no mail transport reads as delivered while nothing is sent (objectstack-ai/cloud#2549 ruling B, item ③)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T13:47:44Z",
+  "updated_at": "2026-11-05T14:15:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30510",
+  "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **executing a recorded ruling.** The maintainer ruled objectstack-ai/cloud#2549 **B**; their selection, verbatim, is 「B 只让租户自配邮箱」 (ruling record on that card). This card is item ③. Item ② (approvals request e-mail) is a sibling card.\n\n**Owner.** The `repo:cloud` lane (`repo:cloud#3`, objectstack-ai/objectstack#30278) follows it to close; triage routes it. Priority p3, inherited from objectstack-ai/cloud#2549.\n\n## 维护者速读\n\n环境没配发信方式时，邮件服务会用一个「只写日志」的假通道：发信调用返回成功、写一条发信记录，实际一封没发。邮件渠道还把自己报告成「可用」。结果是任何要求发邮件的通知或流程都以为已送达。改成：只写日志时，邮件渠道如实报告「未配置发信」，让投递记录和界面都显示真相。\n\n## Measured (objectstack `origin/main` `48231b02`; cloud `e91d1472`; read-only)\n\n- `packages/services/service-messaging/src/email-channel.ts` ~:341-345: `isAvailable()` is true whenever an `email` service object exists, otherwise `{available:false, reason:'transport_not_configured'}`. It does not ask which transport the service holds.\n- `packages/plugins/plugin-email/src/email-plugin.ts`: `provider` defaults to `'log'` (~:456). With none configured it logs \"no transport configured — using LogTransport (mail will NOT be sent)\" (~:494). It binds to the `mail` settings namespace on `kernel:ready` and hot-swaps the transport (~:615-652).\n- In cloud, every hosted tenant kernel force-mounts `email` (`apps/objectos/hosted-slate.ts:92`) without a transport (`packages/objectos-runtime/src/capability-loader.ts:524`), so every hosted environment is in this state until its admin configures `mail`.\n- Not measured: an actual send on a tenant kernel. The \"reports success, writes `sys_email`, delivers nothing\" behaviour is quoted from cloud's `capability-loader.ts` comment (~:1022-1027).\n\n## Expected\n\n- `plugin-email` exposes whether its current transport is real (not the LogTransport), in a form the channel can read.\n- `email-channel.isAvailable()` answers `{available:false, reason:'transport_not_configured'}` while the transport is the LogTransport. It flips back without a restart when `mail` settings hot-swap a real transport in.\n\n## Acceptance\n\n- A test proves a kernel with no `mail` settings has the e-mail channel unavailable, with that reason, and no fake delivery row.\n- A test proves that after a settings hot-swap to a real transport the channel is available.\n- The existing messaging tests stay green.\n\nDedupe (2026-11-05): `repo:objectstack-ai/objectstack email channel LogTransport available is:issue` → 3 hits (QA runs only); `transport_not_configured is:issue` → 4 hits, all closed (#18567, #18050, #17732), none on the LogTransport case."
+}

@@ -1,0 +1,31 @@
+{
+  "number": 30505,
+  "kind": "issue",
+  "title": "skills: teach the declared action override (an installed package's action renamed, hidden or adjusted through its .custom pair) and its access-widening refusal",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T13:40:34Z",
+  "updated_at": "2026-11-05T14:15:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30505",
+  "body": "domain:server#3 · os-bill · session_01Utp6CbPxYq1wQmUNWvMZkC\n\nFiling gate: ③ a `Skills-docs: follow-up owed` line on PR #30497 (#30065), which the seat files before ACCEPT. ⛔ Not a claim. Triage sets lane and grade. Suggested-grade: p3.\nDedupe (open AND closed): `declared action override skill`, `declared_action_widens_access` → none. **New.**\ntype: Docs\n\n## What changes when PR #30497 lands\n\n- `action` joins the declared-override types (ADR-0146 D9): an installed package's action can be overridden through its paired `<base>.custom` package with `overrides: { package, basedOn }`, served wherever the action is drawn or run, and removed to restore the base.\n- An override that widens who may run the action is refused at save: `requiredPermissions` may only grow, `ai.exposed` may not go `false` → `true`, `requiresConfirmation` may not go `true` → `false` (rule `declared_action_widens_access`, 403 `NOT_OVERRIDABLE`). Behaviour fields (`type`, `target`, `body`, `params`, `label`, `visible`, …) may be replaced whole.\n\n## Wanted\n\n- [ ] `skills/objectstack-platform/SKILL.md` (and any reference page it routes to for overrides) teaches the action override next to the existing flow/view override guidance, with the three widening refusals and the fact that the override's body runs for the people who could already run the base action.\n- [ ] The package's skill evals exercise it if the skill's convention requires it.\n\nReader: `domain:skills` (`skills/**` is a governed surface). Links: #30065, PR #30497."
+}

@@ -1,7 +1,7 @@
 {
   "number": 25995,
   "kind": "issue",
-  "title": "[PM seat] domain:ui · seat 2 — 🟢 os-bill · 由 os-bill 账户的项目负责",
+  "title": "[PM seat] domain:ui · seat 2 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -19,12 +19,12 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T08:21:41Z",
-  "updated_at": "2026-11-05T07:14:09Z",
+  "updated_at": "2026-11-05T13:41:23Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 18,
+  "comments": 19,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25995",
-  "body": "domain:ui#2 · os-bill · session_01Utp6Cb5R6JDdfyvtj3dPR2\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md` (⛔ not copied here). This is **`domain:ui` seat 2**. Seat 1 is #25966, seat 3 is #27561, seat 4 is #26620, seat 5 is #26945 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-05T07:12Z at seating.</sub>\n\n## Current PM — 🟢 os-bill\n\n- **Holder:** `os-bill` · `session_01Utp6Cb5R6JDdfyvtj3dPR2` · seated at the opening mark 6652048142. 由 os-bill 账户的项目负责 (project \"Objectstack 多币种 server\", thread \"运行 ui 车道席位 2 派发\").\n- **Mailbox:** PR #30355 (`Mailbox-of: domain:ui#2 · os-bill`), subscribed by the seated session.\n- **Patrol:** `trig_01D4GCNRXL6wu67jh3m6vnKK · 12 * * * *` (hourly, bound to the seated session).\n- Posture, ledger and round reports live in the project. Scope: `domain:ui` p1 first, then p2; up to 5 card threads at once. The `pm:epic` subtrees and seat 1's PRs are excluded.\n\n## Ledger\n\n- **In flight:** none yet. Claims are on the cards.\n- **Decision box:** read live (`needs-user-decision` + `domain:ui`).\n- **Previous holder's inheritance (brief 6648818992):** decision inbox #30074, #30046 Scope 6–8, #30169; queue left for siblings #30177, #30220, #30122.\n\n## Hot-file serial queue\n\n- None held by this seat.\n\n## Notes\n\n- **Standing constraints (maintainer, carried):** ui changesets go to the root `.changeset/`. No PR goes to the objectui repository. `node scripts/check-sdui-manifest.mjs` gates every ui card. A `CONTRACT_REVIEW_TIER` review goes before any decision reaches the maintainer. Cloud-touching cards go whole to the `repo:cloud` lane.\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes. PRs open only through the relay `pr_create`.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n"
+  "body": "domain:ui#2 · os-bill · session_01Utp6Cb5R6JDdfyvtj3dPR2\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md` (⛔ not copied here). This is **`domain:ui` seat 2**. Seat 1 is #25966, seat 3 is #27561, seat 4 is #26620, seat 5 is #26945 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-05T13:40Z at sign-off.</sub>\n\n## Current PM — ⏳ vacant\n\n- **Previous holder:** `os-bill` · `session_01Utp6Cb5R6JDdfyvtj3dPR2` · seated 6652048142, signed off 2026-11-05T13:40Z (clock-out brief 6659434008).\n- **Mailbox:** none. #30355 is closed; the successor reopens one when seating.\n- **Patrol:** none. `trig_01D4GCNRXL6wu67jh3m6vnKK` is deleted.\n\n## Ledger\n\n- **In flight:** none. **Stay-behind:** none.\n- **Queue snapshot at sign-off:**\n  - `domain:ui` + `pm:queue`: 13 cards. p2: #30338, #30334, #30313, #30299. p3: #30335, #30327, #30325, #30323, #30210, #30206, #30080, #25918, #25921.\n  - `pm:blocked`: 11 cards. Read them live.\n- **Decision box:** read live (`needs-user-decision` + `domain:ui`); it was empty at sign-off.\n- **Cross-lane notes:**\n  - #30394 (non-grid views after #30169) and #30434 (ImpersonationBanner test flake) are held by os-sales.\n  - #30436 (Studio item header note) is held by os-sales. Its blocker #30381 has merged.\n\n## Hot-file serial queue\n\n- None held by this seat.\n\n## Notes\n\n- **Standing constraints (maintainer, carried):** ui changesets go to the root `.changeset/`. No PR goes to the objectui repository. `node scripts/check-sdui-manifest.mjs` gates every ui card. A `CONTRACT_REVIEW_TIER` review goes before any decision reaches the maintainer. Cloud-touching cards go whole to the `repo:cloud` lane.\n- **BREAKING:** a PR enters the merge queue only after the maintainer's own word in the seat thread, because once queued it cannot be pulled.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes. PRs open only through the relay `pr_create`.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- **Successor:** run `/pm-dispatch 接手`, then read this post and the brief 6659434008.\n"
 }

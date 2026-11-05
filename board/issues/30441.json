@@ -1,0 +1,33 @@
+{
+  "number": 30441,
+  "kind": "pull_request",
+  "title": "refactor(driver-sql): the codemod writes applyFilterCondition's return type, so it moves (#30147 phase 2d)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/l",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T11:33:44Z",
+  "updated_at": "2026-11-05T12:24:36Z",
+  "closed_at": "2026-11-05T12:24:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-05T12:24:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30441",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBWMEECkfNfe2VjW9rMJG3n7)_\n\nPart of #30147 (phase 2d, the last of 2a-2d: the codemod writes `applyFilterCondition`'s return type, so it moves. The phase 3 measurement is posted on the card.)\n\n## 维护者速读\n- 改了什么:codemod 的 `EXPLICIT_RETURN_TYPES` 新增 `applyFilterCondition: 'void'`(取自 base 构建出的 `dist/index.d.ts`),重新生成后它的方法体移到 `sql-driver-filter-helpers.ts`,登记表删去这一条(68 → 67)。\n- 为什么改:它留在类上只因为 base 没写返回类型(#30147 第 2d 步,2a 已为同类成员建好这张表)。\n- 风险与回滚:方法体逐字节不变(181/181),公开 `.d.ts` 与 base 逐字节相同;回滚即 revert。\n- 先看:codemod 里新增的那一行,以及 `sql-driver.ts` 上 `applyFilterCondition` 的 stub。\n- 两分钟验证:`node scripts/codemod-split-sql-driver.mjs --verify --base 21510bba`(`181/181`,退出 0)和 `node scripts/check-facade-delegation-only.mjs`(67 条具名例外,退出 0)。\n- 需要你做的:无,席位审阅并落地。\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\n- **Codemod (`scripts/codemod-split-sql-driver.mjs`).** `EXPLICIT_RETURN_TYPES` gains `applyFilterCondition: 'void'`. The type is copied from the base `dist/index.d.ts` (`protected applyFilterCondition(builder: Knex.QueryBuilder, condition: any, logicalOp?: 'and' | 'or', tableHint?: string | null, rootFilter?: unknown, options?: DriverOptions): void;`).\n- **Regenerated from `21510bba`.** The body of `applyFilterCondition` moves to `sql-driver-filter-helpers.ts`, and the class keeps its signature with `: void` written as a one-call stub. `sql-driver.ts` goes from 9,741 to 9,354 lines. No generated file is edited by hand.\n- **Registry.** The row is deleted, so 68 rows become 67.\n\n| card | before | after |\n|:--|--:|--:|\n| #30020 | 19 | 19 |\n| #30054 | 16 | 16 |\n| #30055 | 6 | 6 |\n| #30147 | 27 | 26 (sql-driver.ts 3 → 2) |\n| total | 68 | 67 |\n\nThe two `sql-driver.ts` rows left on #30147 are `get supports` and `static DIALECT_CONNECT_TIMEOUT`. The phase 3 report on #30147 recommends that both stay as accepted exceptions.\n\n## Tests\n\n- No test file changes. The codemod's `--self-test` already pins the `EXPLICIT_RETURN_TYPES` mechanism (battery \"codemod-limit retirements (#30147)\" from #30249). All 106 cases in 7 batteries pass.\n- The suites below ran at base `d3f23d20` and at head; the counts are equal.\n\n| suite | base | head |\n|:--|:--|:--|\n| driver-sql (`vitest run`) | 238 files passed, 12 skipped; 3,859 passed, 216 skipped | the same |\n| driver-turso (subclasses `SqlDriver`) | 97 files; 2,514 passed, 34 skipped | the same |\n| driver-sqlite-wasm (subclasses `SqlDriver`) | 40 files; 750 passed | the same |\n| cli by-path pins (9 files) | 9 files; 116 passed | the same |\n| types / metadata / metadata-protocol by-path tests, spec `check-liveness.test` | 53 / 11 / 33 / 74 passed | the same |\n\n## Acceptance notes\n\n- The facade gate script and its self-test are untouched.\n- No changeset, as #30139, #30249, #30306 and #30363 (`skip-changeset`): no published behaviour or surface changes (the public `.d.ts` is byte-identical).\n\n## Verification\n\nHead `322898a6`, base `origin/main` `d3f23d20`.\n\n<details><summary>Proof readings</summary>\n\n- Byte-identity: `node scripts/codemod-split-sql-driver.mjs --verify --base 21510bba` exit 0: \"181/181 moved bodies identical to base (body, parameters, return type, async); 129/129 moved top-level declarations identical to base (leading comments included); sql-driver.ts 18334 -> 9354 lines; undoing the split does rebuild the base byte-for-byte\".\n- Determinism: two `--write` runs from the unsplit input give output tree sha256 `b8a840238252ab67a7a7ae782a0870e03200f1da9d55cc75f4f07f16f9ac0272` both times (input sha256 `2d2ebebd…`), and the tree on disk is unchanged by either.\n- Public `.d.ts`: `dts-public.mjs` over the base and head `dist` exit 0, `pass: true`, both files raw-equal (`index.d.ts` sha256 `92e2cfb2…` on both sides).\n- Typecheck: `pnpm --filter @objectstack/driver-sql typecheck` exit 0.\n- `check-tenant-chokepoint`: 24/21/3/4/0 across 39 files at base and head; `--self-test` exit 0.\n- Durability gate `--list`: byte-identical output at base and head (52 seams).\n- Facade gate exit 0, \"5 facade class(es) in 3 file(s) hold delegations only, 67 named exception(s)\"; `--self-test` exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands`: 65 derived commands, each run, all exit 0; `--ran` reconciles 65 derived, 65 run, 0 NOT-MEASURED. Also run: the codemod, `check-keyed-text-bounds`, durability, `check-tenant-chokepoint` and facade gate `--self-test`s, `check:lean-entry-closure`, eslint over the changed files, all exit 0.\n- Changed lines 873 (+456 / -417), under the 3,000 threshold.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WGufzj4B2cbnRLVdgtLcDZ)_\n"
+}

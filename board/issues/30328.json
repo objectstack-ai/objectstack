@@ -13,18 +13,20 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T06:20:43Z",
-  "updated_at": "2026-11-05T07:17:02Z",
+  "updated_at": "2026-11-05T13:26:48Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30328",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiling gate: ③ the maintainer's direct order, verbatim: 「你发现的问题都立卡，安全问题总专用的安全密卡通道，需要进一步分析的进一步测试，还是没有把握的用决策卡。」 (2026-11-05). Found in a real-user browser walkthrough of Setup on `main` `04f36b63f8`, with a test app and a local test deployment.\n\n**Business reason.** Connecting a database is only useful when people can reach the data. Today the flow stops at a success message, while the data is in no app and no ordinary user can read it.\n\n**Reader.** The UI lane dev for the sync dialog in `ui/packages/app-shell/src/views/metadata-admin/datasource/DatasourceResourcePage.tsx`, and the server lane for the generated object draft.\n\n**Duplicates.** Searched `sync objects datasource next step app navigation` (33 hits). They are QA run anchors and a closed Setup navigation card; none has this subject.\n\n## Measured\n\nSynced table `spare_parts` from an external SQLite file:\n\n- The toast says 「已从 parts_db 同步 1 个对象。」 with no link and no next step.\n- The object is in no app. I reached it only by typing its address.\n- An ordinary member gets 403 until someone grants access, which is the right default, but nothing says so.\n- The list labels read `Part name`, while the new-record form reads `part_no`, and its title reads `新建Spare Parts`.\n- `/api/v1/meta/object` reports its package as `sys_metadata`, meaning it is in no package. #28569 describes a package-less row as one that never exports. I did not test exporting this one.\n\n## Expected\n\n- After sync, the note links to the new object and says what is left: add it to an app, and grant access.\n- A form label uses the same readable label as the list.\n- The dev checks where a synced object should live under ADR-0146, and says in the PR whether it exports."

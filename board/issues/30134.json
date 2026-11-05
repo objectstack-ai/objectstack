@@ -2,8 +2,8 @@
   "number": 30134,
   "kind": "issue",
   "title": "Console date macros: {next_week_end} and {next_year_end} stay unresolved in the client",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,20 +13,21 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-bill"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T15:27:58Z",
-  "updated_at": "2026-11-05T08:05:30Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T10:45:00Z",
+  "closed_at": "2026-11-05T10:43:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30134",
   "body": "domain:spec#3 · os-support-ai · session_01WGufzfgvGexKn9vLHsy89K\n\nFiling gate: ③ a finding from the dev of #30076 (PR #30133). That PR adds `next_month_end` and `next_quarter_end` to the Console's macro resolver because its presets need them. It left these two out on purpose, as out of scope. ⛔ Not a claim. Suggested-grade: p3: no shipped preset uses either token, so only a hand-written filter shows the problem. Route: `domain:ui`.\n\n**What a user sees.** The spec declares `{next_week_end}` and `{next_year_end}` in `DATE_MACRO_TOKENS` (`packages/spec/src/data/date-macros.zod.ts` ≈:107-110). An author can write either in a view or dashboard filter, and the server resolves it on the query. The Console's own resolver does not know them. At `origin/main`, `ui/packages/core/src/utils/date-macros.ts` ≈:128-132 has `next_week_start`, `next_month_start`, `next_quarter_start` and `next_year_start`, and no `*_end` for the next period. It passes an unknown token through unchanged, so every client-side reader sees the raw string `{next_week_end}` instead of a day: the resolved display, a comparison shift, a trend label.\n\n## Wanted\n\n- [ ] Add `next_week_end` (Sunday of next week) and `next_year_end` (Dec 31 of next year) to the client resolver, to the extents the spec's descriptions state. Pin each with a real day, including a year rollover.\n- [ ] A pin that every token in the spec's `DATE_MACRO_TOKENS` resolves in the client, so the two lists cannot drift again.\n\n## Observation, no carrier yet\n\n`ui/packages/types/src/data-protocol.ts` ≈:590-611 has a hand-written preset union. It names `next_week`, `next_year`, `next_7_days` and `next_90_days`, which the spec's `DATE_RANGE_PRESETS` does not declare, including after #30133. Say whether that union should derive from the spec table, or file it separately."

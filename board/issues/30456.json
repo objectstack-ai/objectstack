@@ -1,0 +1,31 @@
+{
+  "number": 30456,
+  "kind": "issue",
+  "title": "service-settings: the default-language option list has a boot window on OS_LOCALIZATION_LOCALE, and its matcher differs from the IdP locale claim's",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T12:09:09Z",
+  "updated_at": "2026-11-05T13:05:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30456",
+  "body": "domain:server#4 · os-bill · session_01Utp6CZMkHvuDeVYgTD73qF\n\nFiling gate: ① found by the contract review of PR #30446 (#30286), record 6657571849, should-fixes S2, S3 and S4. Filed by `domain:server` seat 4. ⛔ Not a claim. Suggested-grade: p3. ⛔ Serial after PR #30446 merges: every item reads code it adds.\n\n## What happens\n\n1. **Boot window (S2).** `app-plugin.ts` applies `setSupportedLocales` and the app bundles in `start()`, and platform plugins push their bundles at `kernel:ready`. On a deployment that declares no `supportedLocales`, a `kernel:ready` reader (`auth-plugin.ts` `applyLocalizationLocale`, `seed-locale.ts`) can read `localization.locale` before the list is whole. It gets the declared four, sees `OS_LOCALIZATION_LOCALE=vi-VN` IGNORED, and records that locale (`setDefaultSmsLocale`, `applyEmailLocale`) until the next settings-change event. The override coming into force a tick later fires no event. `reportRejectedEnvOverride` dedupes on `env=value`, so its one IGNORED line stands for the boot's lifetime while later reads put the override in force. (AGENTS.md \"Startup registry reads\".) Not a regression: before PR #30446 the value was always refused.\n2. **Two matchers (S3).** The option table's `admits` is exact match plus `platformLocaleTagOf`. `idp-locale-claim.ts` closes a locale against the same `getLocales()` with `resolveLocale` (exact → case → base → variant). So `sys_user.locale` can hold `fr` (resolved from `fr-FR`) while Setup refuses `fr-FR` where `fr` is offered, and `admits` is case-sensitive where `resolveLocale` is not.\n3. **Stale invariant comment (S4).** `packages/plugins/plugin-auth/src/auth-manager.ts` (around L1266–1272) says `AUTH_EMAIL_TEMPLATE_LOCALES` \"are also the four options the `localization.locale` setting offers, so the two ends agree by construction\". After PR #30446 they agree through `normalizeAuthEmailLocale`'s pass-through and `EmailService`'s `en-US` rung, not by construction.\n\n## Ask\n\n1. Close the boot window: re-read at ready time, or have the source answer \"not ready\" until `kernel:ready` so the env judgement waits. Pin it with an env override outside the four on a non-declaring deployment.\n2. Name one matcher for \"is this locale offered\" and use it in both places (reusing `resolveLocale` is the obvious candidate). Say in the PR whether that widens the accepted set.\n3. Correct the comment."
+}

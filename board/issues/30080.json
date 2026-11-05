@@ -13,18 +13,20 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T12:39:50Z",
-  "updated_at": "2026-11-04T13:16:07Z",
+  "updated_at": "2026-11-05T14:03:30Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30080",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nThe maintainer: 「等我决定的都要立卡，并且从业务的角度给我具体解释和我沟通」 (2026-11-04). Measured by the seat on `main` `63b86b385d`, on the example CRM unless noted. No `domain:*` label is set: triage routes this card.\n\n## The question\n\nA manager sees 在途商机总额 ¥814,400 and asks which deals make that up. Nothing on the dashboard can be clicked. Reports already drill down (ADR-0021 D2); dashboards do not.\n\nGoverning text: ADR-0021 D2 and `ui/packages/plugin-report/src/DatasetReportRenderer.tsx:2181-2182` for reports. `packages/spec/src/ui/dashboard.zod.ts` declares header actions and no widget drill.\n\n## Measured\n\nOn `pipeline_dashboard`: no links in the page, no click key on any widget, and clicking a tile changes nothing.\n\n## Options\n\n- **A. Tile opens the matching records,** reusing the report drill path, by default where the dataset's filter can be expressed as a list filter.\n- **B. A per-widget declared link.**\n- **C. Leave it:** open the object's list and rebuild the filter by hand.\n\n## Recommendation: A, after the higher-priority Studio work\n\n## 四轴分析\n\n**实际业务需求。** 看到数字后追问明细，是看板最自然的下一步，经理每周开会都会用。今天要去列表重新设条件，还不一定能和数字对上。\n\n**项目长远合理性。** 报表已经定了下钻做法，复用才不会有两套。要处理不能转成列表筛选的数据集：这种情况不提供点击，不能给出对不上的结果。\n\n**防 AI 写错。** A 不要求作者写任何东西。B 要手写链接和筛选，AI 容易写出和数字对不上的条件。\n\n**创业阶段不扩散。** 能力面中等，不阻塞任何工作，所以排在 #30059 这些之后。\n\n| 棱 | A | B | C |\n|:--|:--|:--|:--|\n| 业务 | 强 | 中 | 弱 |\n| 长远 | 强 | 弱 | 弱 |\n| 防错 | 强 | 弱 | 中 |\n| 不扩散 | 中 | 中 | 强 |\n\n## Not measured\n\nHow many dashboard tiles can be turned into a list filter, and whether period-over-period tiles have a sensible target.\n\n## Re-check\n\n`git grep -n \"drillSink\" origin/main -- ui/packages/plugin-report/src/DatasetReportRenderer.tsx`"

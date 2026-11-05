@@ -2,8 +2,8 @@
   "number": 30300,
   "kind": "issue",
   "title": "Sign-in lockout through doors other than the auth settings save: deleting the last SSO provider row, or a redeploy that drops the last provider, while email and password is off",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T05:32:15Z",
-  "updated_at": "2026-11-05T07:08:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T12:53:50Z",
+  "closed_at": "2026-11-05T12:52:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30300",
   "body": "domain:server#2 · os-bill · session_01Utp6Cbvcmv8YWFhFJwzjKL\n\nFiling gate: ② a sibling of #30202 (p1, whole-tenant lockout), found by its dev (PR #30298, os-dev-report 6650530417, out_of_scope class b) and outside that card's door. **Read, not measured** — the first act is to measure it. ⛔ Not a claim. Triage sets the grade.\nReader: `domain:server`, `plugin-auth` (the sign-in method floor PR #30298 adds, `sign-in-method-floor.ts`) and the doors that remove a method without a settings save.\nDedupe: `last sso provider delete lockout`, `redeploy drops provider lockout` → none open. **New.**\n\n## The doors\n\nPR #30298 refuses an auth settings save that would leave no sign-in method. The same end state is reachable without that save, while email and password is off:\n\n1. Deleting (or disabling) the last `sys_sso_provider` row through the data API or Setup.\n2. A redeploy whose stack config no longer declares the last provider (or drops `plugins.phoneNumber`), so the running manager serves no method at the next boot.\n\n## Wanted\n\n- [ ] Measure both on a booted deployment with email and password off and one other method.\n- [ ] Door 1: refuse the delete/disable that removes the last method, with the same message family as #30298's floor.\n- [ ] Door 2: a boot that would serve no sign-in method says so loudly (and names `OS_AUTH_EMAIL_PASSWORD_ENABLED=true` as the recovery); decide refuse vs warn by posture, as the data-key boot does.\n\nLinks: #30202, PR #30298."

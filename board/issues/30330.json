@@ -2,8 +2,8 @@
   "number": 30330,
   "kind": "issue",
   "title": "Marketplace detail page cuts off a wide README with no scrolling, and shows its badges as raw text",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T06:21:44Z",
-  "updated_at": "2026-11-05T07:17:08Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T11:45:28Z",
+  "closed_at": "2026-11-05T11:43:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30330",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiling gate: ③ the maintainer's direct order, verbatim: 「你发现的问题都立卡，安全问题总专用的安全密卡通道，需要进一步分析的进一步测试，还是没有把握的用决策卡。」 (2026-11-05). Found in a real-user browser walkthrough of Setup on `main` `04f36b63f8`, with a test app and a local test deployment.\n\n**Business reason.** The README is the sales page for an app. Half-cut sentences and raw markup make a production app look unfinished before anyone tries it.\n\n**Reader.** The UI lane dev, for the README block on `ui/packages/app-shell/src/console/marketplace/MarketplacePackagePage.tsx`.\n\n**Duplicates.** Searched `marketplace readme overflow badge` (5 hits). They are a closed checklist card and two seat cards; none has this subject.\n\n## Measured\n\nOn HotCRM's detail page at a window width of 883 px:\n\n- Text runs off the right edge. The block measures 835 px wide with 1926 px of content, its overflow is `hidden`, and nothing scrolls. Sentences are cut mid-word, for example `…agents operate it, you ow`.\n- The badge row reads as literal text: `![License](LICENSE) ![Manifest](src/sales/index.ts) ![Version](CHANGELOG.md) ![Marketplace](https://cloud.objectos.app)`.\n\nI did not find out which element in the README forces the width, or why the badge images are not rendered.\n\n## Expected\n\nThe README fits the page: long lines wrap, and only wide tables or code scroll within themselves. Badges render as images or are left out, never as markup."

@@ -1,0 +1,36 @@
+{
+  "number": 30419,
+  "kind": "issue",
+  "title": "Setup settings page: an action button whose handler declares confirmText runs without asking",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T10:33:58Z",
+  "updated_at": "2026-11-05T13:12:28Z",
+  "closed_at": "2026-11-05T13:10:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30419",
+  "body": "domain:ui#3 · os-bill · session_01Utp6CbPN5UYMnBaNJPJWfG\n\nFiled by the `domain:ui#3` seat from the out-of-scope finding of #30299's card thread (os-dev-report 6655442656). Declared ≠ enforced.\n\n## Observed\n\n- The spec's settings specifier handler (`SpecifierHandlerSchema`, its `http` and `action` arms) declares `confirmText`: \"Confirm dialog text before invoking (omit = no confirm)\".\n- The console's settings field renderer (`SettingsField`, the `action_button` row) never reads `confirmText`, so an action declared with a confirmation runs on click with none.\n\n## Wanted\n\n- An `action_button` whose handler declares `confirmText` shows that text in a confirmation before invoking; cancel invokes nothing. No `confirmText` keeps today's behaviour.\n- A test pins both.\n\nRefs: #30299\nDedupe words: confirmText, action_button, SettingsField, settings confirm"
+}

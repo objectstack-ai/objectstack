@@ -1,0 +1,33 @@
+{
+  "number": 30472,
+  "kind": "pull_request",
+  "title": "fix(scripts): the where-matcher lift reads identifiers from code, never from template-literal text",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T12:51:07Z",
+  "updated_at": "2026-11-05T13:28:58Z",
+  "closed_at": "2026-11-05T13:28:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-05T13:28:55Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30472",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgMPwCdpvbf2imf5vac9Zoo4)_\n\ndomain:server#4 · os-bill · session_01Utp6CZMkHvuDeVYgTD73qF\n\nFixes #29860\n\nClause-②: no — an internal instrument; no product surface moves\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么：** where-matcher 一致性检查在\"抽出测试替身的过滤函数单独运行\"时，改为只顺着代码里出现的名字去找同文件的依赖，字符串、模板文字的正文和注释里的单词不再算数；`${…}` 里的表达式仍算代码照收。\n- **为什么改：** 替身的报错文案里写了 \"sparse driver\"，检查就把旁边的 `driver` 对象一起拉进来，运行时报 `name is not defined`，一个本来合规的替身被判\"无法判定\"，挡住了 PR #29858，作者只好改文案绕过去。门禁结论不该取决于报错文案用了哪个英文单词。\n- **风险与回滚：** 只动一个仓库内部检查脚本，不发布任何包。全树 684 个过滤函数改前改后判定逐条一致，耗时持平（约 15 秒）。回滚即撤 PR。\n- **先看：** `scripts/check-where-matcher-conformance.mjs` 的 `identifiersIn`（改为遍历语法树）与 `buildCallable` 里读 `sourceIdentifiers` 的三行；self-test 新电池 `#29860`。\n- **两分钟验证：** `pnpm check:where-matcher`，预期 self-test 打印 OK，全树一行 `0 silently-wrong and 0 unjudged`（合 main 后共 685 个 matcher）。\n- **需要你做的：** 无，席位落地。\n\n## What changes\n\n`identifiersIn` was a word regex over source TEXT (`/\\b([A-Za-z_$][A-Za-z0-9_$]*)\\b/g`), so every word in a string literal, a template literal's text, a regular expression or a comment counted as a name the lift should follow. It now walks the parsed tree and collects `Identifier` nodes only: a `${…}` hole is code and is collected, the text around it is not. Discovery computes the sets off the nodes it already holds (the candidate's `sourceIdentifiers`, and each visible declaration's `identifiers` beside its `text`), so nothing is re-parsed and no fragment goes through a second parse door. `buildCallable` follows those sets instead of re-scanning text. The header's \"Extraction\" paragraph says what \"names\" now means.\n\nOver-inclusion stays in one direction only, as before: a property name (`row.name`) is still an identifier node, and a name that resolves to no same-file declaration is skipped by the lift.\n\n**Premise note.** The card says ordinary string literals already behaved this way. Measured on `main`, they did not: the same regex read them too. This PR covers both spellings, and the self-test pins both.\n\n## Tests\n\nNew self-test battery `#29860: the lift reads identifiers from code, never from text` (floor 7; roster floor 4 → 5):\n\n- `FIXTURE_TEXT_NAMES_SIBLING`, the card's shape: a refusing matcher inside a factory whose messages say \"sparse driver\" (one template literal with a `${k}` hole, one plain string), beside `const driver = { name, … }` that closes over the factory parameter. Pinned: discovered; `driver` and `implemented` not collected; lifts and judges CONFORMING (refusing).\n- `FIXTURE_HOLE_NAMES_HELPER`, the other direction: a same-file helper `label` named only inside a `${…}` hole on the matcher's answering path. Pinned: `label` collected; the matcher lifts with it and judges CONFORMING.\n\n<details><summary>Mutation replay (one-off, restored by blob hash == HEAD)</summary>\n\n- Old semantics (word regex over the node's text): self-test exit 1 — `template-literal TEXT names no identifier: \"driver\" in the message is not collected`, `a matcher beside text naming a sibling binding lifts and is CONFORMING, not UNJUDGED`.\n- Holes skipped (`if (ts.isTemplateExpression(n)) return;`): self-test exit 1 — `the helper named only inside the hole is collected`, `so the hole-reading matcher lifts with its helper and is CONFORMING`.\n\n</details>\n\n<details><summary>Real producer replay</summary>\n\n`packages/objectql/src/write-answer-declared-columns.test.ts` read in memory with its messages put back to `sparse driver:` (the wording PR #29858 had to rename away), then `discoverInSource` + `judge`:\n\n- `main` (989ae42d): `46 matches UNJUDGED could not lift: ReferenceError: name is not defined`\n- this branch: `46 matches CONFORMING`\n\n</details>\n\n## Acceptance notes\n\n- Whole-tree verdicts, before (989ae42d) and after: 692 structural candidates, 257 CONFORMING, 427 CONFORMING by refusing, 8 OUT_OF_SCOPE, both runs; a per-candidate diff (file, line, name, verdict, reason) is empty. No verdict changed, so no matcher newly lifts. Gate line both runs: `684 matcher(s) discovered … 0 silently-wrong and 0 unjudged`. Wall time about 15.6 s before, 14.9 s after. After merging `origin/main` (head da5a9097): `685 matcher(s) discovered … 0 silently-wrong and 0 unjudged`.\n- `scripts/check-objectql-double-limit.mjs` carries a near-identical lifter (`identifiersIn` at line 400 is the same word regex). Same defect class, no real producer measured there; not touched (outside this card's file surface), reported to the seat.\n\n## Verification\n\nGate list derived by `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` (31 commands), each run with its exit code recorded before any pipe and reconciled with `--ran`; `pnpm lint` run. Readings are in the os-dev-report on #29860.\n\nNo changeset: the diff is one repo-root script that no released package ships (`skip-changeset`).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CYZ6tmbWZDWzLW4Yzg)_\n"
+}

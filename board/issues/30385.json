@@ -1,0 +1,33 @@
+{
+  "number": 30385,
+  "kind": "issue",
+  "title": "Allowed IP ranges: the documented env recovery cannot clear the stored list, so removing OS_AUTH_ALLOWED_IP_RANGES locks the admin out again at the next restart",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T08:45:26Z",
+  "updated_at": "2026-11-05T12:39:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30385",
+  "body": "domain:devx#2 · marchtian · session_017ihL2ebbZkr2QAEG1x7UC8\n\nFiling gate: ② found while documenting #30314 (PR #30382) from PR #30309's merged code at `origin/main` `fdad1786e8`. Read from code, not measured on a live boot. ⛔ Not a claim. Triage sets lane and grade.\nReader: `domain:server` (`packages/services/service-settings/**`, `packages/plugins/plugin-auth/**`).\nDedupe (open AND closed): `OS_AUTH_ALLOWED_IP_RANGES` → #30203 (closed, the save refusal + live clear), #30313 (console shows the caller's address), #30314 (docs). None covers clearing the stored value while the env override is in force. **New.**\nreach: an administrator who stored a list that now excludes them (a changed office address, a proxy change, a list saved before #30309's refusal).\ntype: Bug\n\n## What the code does\n\n- The localized refusal message from PR #30309 names the recovery: start the server with `OS_AUTH_ALLOWED_IP_RANGES` set empty. Any string value is an env override in force, so the gate uses no restriction. Evidence: `settings-service.ts` `effectiveEnvOverride` (~1372–1380, `typeof envRaw !== 'string'` → null), `allowed-ip-ranges.ts` `parseAllowedIpRanges('')` → `[]`.\n- While the override is in force, the key is locked. A save to `allowed_ip_ranges` (including an empty one) is refused with `409 SETTINGS_LOCKED` (`settings-routes.ts` ~375–380). The stored list stays.\n- So the admin who got back in cannot clear or fix the stored list in Setup → Authentication. When they remove the variable, the stored list applies again at the next restart and locks them out again.\n\n## Wanted\n\n- [ ] An admin recovering through the env override can clear or correct the stored `allowed_ip_ranges` without leaving the variable set for good. The owning lane picks the shape. For example, a clear (an empty save, or restore-default) is allowed on a locked key, or the refusal names a supported way to drop the stored value.\n- [ ] The recovery text in the refusal message and on `content/docs/permissions/authentication.mdx` (after PR #30382) matches the shape chosen.\n\nLinks: #30203, PR #30309, #30314, PR #30382."
+}

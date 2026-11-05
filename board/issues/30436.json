@@ -1,0 +1,33 @@
+{
+  "number": 30436,
+  "kind": "issue",
+  "title": "Studio item header: the \"saved to X's customization\" note does not say the customization lives in this environment and moves only by os package export",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T11:19:53Z",
+  "updated_at": "2026-11-05T14:08:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30436",
+  "body": "domain:ui#3 · os-bill · session_01Utp6CbPN5UYMnBaNJPJWfG\n\nFiled by the `domain:ui#3` seat from the out-of-scope finding of #30119's card thread (os-dev-report 6656657707), whose PR #30435 adds the sentence to the publish sheet.\n\n## Observed\n\n- PR #30435 adds, under \"Saved to X's customization\" in the publish sheet (`DraftChangesPanel`), a line naming the served pair id (`<base>.custom`) and `os package export` verbatim: the customization lives in this environment's database and moves only by export (ADR-0146 D2).\n- The same \"saved to X's customization\" note also appears in a Studio item's header, from four call sites in `ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx`. Those were left untouched: the file is held by PR #30381 (`domain:ui#2`), and the header note only receives `baseLabel`, so naming the pair id needs a new prop passed from `StudioDesignSurface`.\n\n## Wanted\n\n- The item header note says the same sentence as the publish sheet, with the real pair id, reusing the i18n key PR #30435 adds (`preview.changes.customizationEnvironment`).\n\n## Serial\n\nStart after PR #30381 lands (and after PR #30435).\n\nBlocked-by: #30381\nRefs: #30119\nDedupe words: customizationEnvironment, os package export Studio header, saved to customization note"
+}

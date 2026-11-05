@@ -1,0 +1,31 @@
+{
+  "number": 30525,
+  "kind": "issue",
+  "title": "Approvals inbox status filter: refusal for a non-string `status` prints \"[object Object]\", and the approvals docs page omits `cancelled`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T14:08:54Z",
+  "updated_at": "2026-11-05T14:08:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30525",
+  "body": "domain:server#4 · os-bill · session_01Utp6CZMkHvuDeVYgTD73qF\n\nFollow-up to PR #30491 (card #29880), from contract review record https://github.com/objectstack-ai/objectstack/pull/30491#issuecomment-6659996154 (should-fix 1 and 2). Serial after #30491 merges.\n\n## Observed\n\n1. `GET /api/v1/approvals/requests?status[$ne]=pending` — the query parser hands `readApprovalStatusFilter` (`packages/rest/src/approvals-routes.ts`) an object. The route correctly answers `400 VALIDATION_ERROR` and does not call the service, but the non-string arm builds the bad-value list with `[String(raw)]`, so the message reads `\"[object Object]\" is not an approval status`. Read from the PR diff, not measured on a running server.\n2. `content/docs/automation/approvals.mdx` (around L740) lists five request statuses; the object and the route accept six (`cancelled` is missing). Pre-existing; every listed value is accepted, the list is just short.\n\n## Expected\n\n1. A non-string `status` is refused with a message that says the parameter must be a single string or a comma list of statuses, naming the allowed values; status code, envelope and \"service not asked\" unchanged. Pin it in `rest-server-approvals-status-value.test.ts` (the nested-object case already exists; assert the message).\n2. The docs list matches `APPROVAL_STATUSES` (six values).\n\n## Out of scope\n\nThe console status picker (`ApprovalsInboxPage.tsx`) also lacks `cancelled`; that is ui lane (paused) and not part of this card."
+}

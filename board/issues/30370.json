@@ -2,24 +2,34 @@
   "number": 30370,
   "kind": "issue",
   "title": "Effective object permissions ignore the external write gate, so the console offers New, Import, Edit and Delete on a read-only external object",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
-  "assignees": [],
+  "labels": [
+    "bug",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T08:17:45Z",
-  "updated_at": "2026-11-05T08:17:45Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T11:26:20Z",
+  "closed_at": "2026-11-05T11:24:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30370",
   "body": "domain:ui#3 · os-bill · session_01Utp6CbPN5UYMnBaNJPJWfG\n\nCarries item 1 (the doors are offered) of #30334; #30334 keeps item 2 (the refusal message, `domain:ui`, in flight on `claude/project-thread-9t8krp`). Item 3 is a separate card. ⛔ Not a claim. Triage sets lane and grade.\n\n**Business reason.** An administrator on a table synced from an external database in read-only mode is offered 新建 / 导入 / edit / delete, fills a form, and is refused. No permission set can fix a table that is read-only by design (ADR-0015), so the doors should not be offered.\n\n**Reading** (the #30334 card thread, read-only at `origin/main` `fdad1786`, not yet re-measured by the seat):\n\n- Every console write door (new, import, edit, delete) asks `@object-ui/core` `resolveAffordance`, which reads three things: the `managedBy` bucket (spec `resolveCrudAffordances`), `apiOperations` from `/auth/me/permissions`, and `allowCreate` / `allowEdit` / `allowDelete`.\n- All three are folded by `buildEffectiveObjectPermissions` in `packages/core/src/security/effective-object-permissions.ts`, whose docblock says it reflects what the server actually enforces. It clamps managed writes and `apiEnabled`, and never reads ADR-0015 Gate 3 (objectql `assertWriteAllowed`: `datasource.external.allowWrites` AND `object.external.writable`).\n- So the server refuses the write (403 `EXTERNAL_WRITE_FORBIDDEN`) while its own effective-permission answer says the write is allowed. The console has no door that reads a verdict and ignores it.\n\n**Expected.** The effective permissions served to the console say no create / edit / delete (and no import) on an object whose external write gate is closed, so the console's existing affordance reads hide or disable those doors with no `ui/**` change; declared = enforced.\n\n**Reader.** `packages/core/src/security/effective-object-permissions.ts` and its tests (likely `domain:server`); the console needs no change if the served answer is right.\n\nLinks: #30334, ADR-0015."

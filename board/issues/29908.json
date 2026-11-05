@@ -1,7 +1,7 @@
 {
   "number": 29908,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 6 — ⏳ vacant",
+  "title": "[PM seat] domain:server · seat 6 — 🟢 os-bill · 由 os-bill 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,16 +14,18 @@
     "domain:server",
     "pm:seat"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T10:35:44Z",
-  "updated_at": "2026-11-05T05:07:21Z",
+  "updated_at": "2026-11-05T12:19:33Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29908",
-  "body": "domain:server#6 · os-support-ai · session_01WGufzibcN9oHa8kDbTTnL5\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 6**, added beside seats 1–5 (#6367, #20966, #26761, #27737, #28677) by `seat-post-protocol.md` 〈新增座位贴〉.\n\n## Current PM\n\n⏳ **vacant** since 2026-11-05 (sign-off on the maintainer's order 「server 车道任务处理完后就下班」, 2026-11-05T00:41Z, restated 04:18Z). check-handover exit 0.\n\nSuccessor: `/pm-dispatch 接手`, then read this post. Stay-behind: none.\n\n## Ledger at sign-off\n\n- Previous PM: `os-support-ai` · `session_01WGufzibcN9oHa8kDbTTnL5` (project thread \"Run PM dispatch server seat 1\"), seated 2026-11-03T10:31Z.\n- **In flight:** none. The last card, #30009, landed through PR #30048 as `f9e5befa`.\n- **Patrol:** deleted at sign-off. **Mailbox:** #29907, closed at sign-off.\n- **Queue snapshot (domain:server, p1/p2, unclaimed by this seat):**\n  - #30062 (p1): an order is prepared, but the card was not dispatched and no claim was posted, because the maintainer held new dispatches on 2026-11-04T13:37Z.\n  - Follow-ups this seat filed, all `pm:queue`: #30091, #30093, #30094, #30095, #30052–#30055, #30050, #30026, #30024, #30016, #30006, #30005, #30000.\n- **Serial queue:** empty. The facade gate #30030 (`17fe9217`) governs `protocol.ts` / `engine.ts`: a method body added there needs a registry row.\n- **Cross-lane notes:** online sibling seats are server#3 (#30187), server#4 (#30189) and server#5 (#30191), all os-bill. Further project-side notes are in the seat's project.\n\n## Notes\n\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n"
+  "body": "domain:server#6 · os-bill · session_01Utp6CXCS98uhsFQYk64epE\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 6**. Seat 1 is #6367, seat 2 is #20966, seat 3 is #26761, seat 4 is #27737 and seat 5 is #28677 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-05T12:17Z at seating.</sub>\n\n## Current PM — 🟢 os-bill\n\n- **Holder:** `os-bill` · `session_01Utp6CXCS98uhsFQYk64epE` · seated 2026-11-05T12:17Z. 由 os-bill 账户的项目负责 (project \"Objectstack 多币种 server\", thread \"运行 server 车道席位 6 派发\").\n- **Mailbox:** PR #30458 (`Mailbox-of: domain:server#6 · os-bill`), subscribed by the seated session.\n- **Patrol:** `trig_01DftzhqHLvLWzWipo7ZiMhW · 16 * * * *` (hourly, bound to the seated session).\n- Posture, ledger and round reports live in the project. Scope: `domain:server` p1 first, then p2; up to 5 card threads at once. The `pm:epic` subtrees and seat 1's PRs are excluded.\n\n## Ledger\n\n- **Previous PM:** `os-support-ai` · `session_01WGufzibcN9oHa8kDbTTnL5`, signed off 2026-11-05 (check-handover exit 0, stay-behind none); that ledger is in the previous body revision.\n- **In flight:** none yet. Claims are on the cards.\n- **Decision box:** read live (`needs-user-decision` + `domain:server`).\n\n## Hot-file serial queue\n\n- None held by this seat.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes. PRs open only through the relay `pr_create`.\n- A BREAKING PR enters the merge queue only after the maintainer's own word.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n"
 }

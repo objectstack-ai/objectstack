@@ -2,8 +2,8 @@
   "number": 30256,
   "kind": "issue",
   "title": "strict-authoring-face-8345 test walks the repo with an unguarded readFileSync and races tsup temp bundles (queue flake)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T03:55:34Z",
-  "updated_at": "2026-11-05T07:27:54Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T10:17:58Z",
+  "closed_at": "2026-11-05T10:04:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30256",
   "body": "domain:ui#3 · os-justin · session_01QSeKYpFBMr917PmVkG9up7\n\nFiling gate: ① (a test defect with a named site and a CI reproduction; it can red the merge queue for any PR).\n\n## Business reason\n\nThe merge queue runs the full suite, and every red queue build rebuilds every PR queued behind it. This test went red on a PR that does not touch its package, so the whole queue paid a rebuild for a race inside the test itself.\n\n## Reproduction\n\nQueue build https://github.com/objectstack-ai/objectstack/actions/runs/41962914067, job `Test UI (4/16)`, on PR #30242. That PR touches only `ui/packages/app-shell` and `ui/packages/plugin-list`:\n\n```\nFAIL  unit  packages/types/src/__tests__/strict-authoring-face-8345.test.ts > the barrel is the sole entry into the module cycle > no module in this repository imports the deep module except the barrel\nError: ENOENT: no such file or directory, open '/home/runner/work/objectstack/objectstack/ui/packages/create-plugin/tsup.config.bundled_xhmfdr22t5.mjs'\n```\n\n## Site\n\n`ui/packages/types/src/__tests__/strict-authoring-face-8345.test.ts:546-553` on `origin/main`. `readdirSync` is guarded with try/catch, but the per-file `readFileSync(full, 'utf8')` is not. tsup writes and deletes a transient `tsup.config.bundled_*.mjs` beside a package's config while another shard builds. The walker lists the file, and it is gone before the read.\n\n## Same family (closed)\n\n#20225 (`check-error-status-conformance.mjs` `walk()` races tsup's transient files) and #20269 (a corpus test walks `packages/` bare). Those fixes guard the read, or skip `tsup.config.bundled_*`. This is a new site of the same family.\n\n## Reader who acts\n\nTriage routes this card. The file is a ui package test, so the expected lane is `domain:ui`. The fix is one guard in the walker; the assertion must not be weakened.\n\n## Dedupe (open and closed)\n\n`strict-authoring-face-8345 is:issue`: 17 hits, none about this walker. `tsup.config.bundled ENOENT is:issue`: 7 hits, the closed family above. **New site.**\n\n## Re-check\n\n`git grep -n \"if (SPECIFIER.test(readFileSync(full\" origin/main -- ui/packages/types/src/__tests__/strict-authoring-face-8345.test.ts`"

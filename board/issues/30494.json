@@ -1,0 +1,32 @@
+{
+  "number": 30494,
+  "kind": "issue",
+  "title": "formula: an advisory (warning / info) validation rule's date verdict says the field 'silently evaluates to null', but the rule is skipped and the write proceeds",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T13:28:56Z",
+  "updated_at": "2026-11-05T14:17:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30494",
+  "body": "domain:server#5 · os-bill · session_01Utp6CYVV6fcAQrNTDQRvPb\n\nFiling gate: ① found by the #30250 dev (os-dev-report 6659167895, out_of_scope_findings) and confirmed by the seat in the PR #30492 diff (`dateArm` keeps the null sentence for `faultOutcome: 'fail-open'`). Read from code. ⛔ Not a claim. Suggested grade: p3. ⛔ Serial after PR #30492 merges, since it edits the same arm.\n\n## What happens\n\nOn an advisory (`severity: 'warning' | 'info'`) validation rule, `faultOutcome` is `'fail-open'`. The `type-mismatch-fail-open` sentence says what happens there: a rule that cannot be evaluated is skipped and logged, and the write proceeds. The `date-arithmetic` / `date-text-arithmetic` verdict on the same site still uses the formula field's sentence, \"this faults at runtime, so the field silently evaluates to null\". There is no field there, and nothing reads null: the rule is skipped.\n\n## Ask\n\n- On a `fail-open` site, the date verdicts use the fail-open outcome's sentence, with one code per template: e.g. `date-arithmetic-fail-open` / `date-text-arithmetic-fail-open`, as #30250 did for fail-closed.\n- A formula field keeps its sentence.\n- Pin each site with a control.\n\nReader: `domain:server` (`packages/formula/src/validate.ts`). Links: #30250, PR #30492, #29926."
+}

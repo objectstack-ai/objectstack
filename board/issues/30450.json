@@ -1,0 +1,34 @@
+{
+  "number": 30450,
+  "kind": "pull_request",
+  "title": "test(plugin-auth): pin that a SAML provider with a URN IdP Entity ID registers and starts a sign-in",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T11:49:21Z",
+  "updated_at": "2026-11-05T12:44:39Z",
+  "closed_at": "2026-11-05T12:44:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-05T12:44:37Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30450",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgDsWCv46MXRaGzVjayCRqE9)_\n\ndomain:server#4 · os-bill · session_01Utp6CZMkHvuDeVYgTD73qF\n\nFixes #30404\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：只加测试。在 Register SAML Provider 的真实路由测试里加两个用例：IdP Entity ID 填 URN（`urn:…`）时能注册成功，并且能从这个提供方发起登录。产品代码没改。\n- 为什么改：卡片以为供应商会拒收 URN 形式的 Entity ID，实测不会（前提不成立，见 #30404 上的报告）。但供应商的 `issuer` 校验今天能放行 URN 只是因为 zod 4.6.7 的 url() 用的是通用 URL 解析，以后升级若收窄成只认 http(s)，URN 的 IdP 会全部注册不了，这两个用例就是为了到时候变红。\n- 风险与回滚：只改测试文件，不发布任何包；回滚就是 revert。\n- 先看：`packages/plugins/plugin-auth/src/register-sso-provider.test.ts` 末尾新增的 `it.each`（两个 URN 用例）。\n- 两分钟验证：`pnpm --filter @objectstack/plugin-auth exec vitest run src/register-sso-provider.test.ts`，应看到 12 个用例全部通过，其中两个「a URN IdP Entity ID registers and starts a sign-in」。\n- 需要你做的：无，席位落地。\n\n## What changes\n\nTests only. Two cases join the existing \"Register SAML Provider through the REAL route\" block in `register-sso-provider.test.ts`, one per URN shape (`urn:oasis:names:tc:SAML:2.0:idp:acme`, `urn:example:idp`):\n\n- `POST /api/v1/auth/admin/sso/register-saml` with a complete form whose IdP Entity ID is the URN answers 200, and the stored provider row carries `issuer` = the URN and `samlConfig.idpMetadata` = `{ entityID: the URN }`.\n- `POST /api/v1/auth/sign-in/sso` with that `providerId` answers 200 with `redirect: true` and a URL that starts with the form's `entryPoint` followed by `?SAMLRequest=`, so the provider is usable, not only stored.\n\n## Why\n\nThe card read `@better-auth/sso` 1.7.12's register body schema (`issuer: z.string().url()`) as refusing a URN Entity ID. Measured through the real route on `main` `09720e2c`, it does not: both URN forms registered (200) and both providers started a sign-in (200). In the installed zod 4.6.7, `z.string().url()` is the WHATWG URL parser, which accepts `urn:` values. The premise is false, so there is no product fix (report on #30404, comment 6656283296).\n\nWhat would break it is a narrower check in a later vendor or zod release (the vendor's own field description says \"The issuer URL of the provider\"). Nothing pinned the URN answer, so that break would land silently. The seat ruled for this regression pin.\n\nWhy the top-level `issuer` is safe to carry a URN, read in the installed `dist/index.mjs`: sign-in finds a provider by `providerId`, organization or domain, never by `issuer`; the ACS takes the IdP identity from `idpMetadata.entityID` (`idp.entityMeta.getEntityID()`); the top-level `issuer` is read only as the SP EntityID fallback, behind `spMetadata.entityID`, which the bridge always sends, and inside the provider fingerprint, which is computed from the stored row on both sides.\n\n## Tests\n\n- File: 12/12 passed (10 before, plus the two URN cases).\n- Can the pin fail? Mutation leg through `scripts/ablation-replace.mjs`: the `urn:example:idp` input replaced by a non-URI (anchor 1 to 0, blob `b7c345be` to `751fa12e`). Result: 1 failed / 11 passed, and the failing case shows the vendor's parse refusal, which is the answer a narrowed check would give: `400 SAML_REGISTER_FAILED \"[body.issuer] Invalid URL\"`. Restored: blob equals HEAD, `git diff HEAD` empty. The test imports `src`, so no build sat between the legs.\n- `pnpm --filter @objectstack/plugin-auth test` (after rebuilding the closure on the merged tree): 224 files passed, 3956 passed / 10 skipped; lock VERDICT command-exit 0.\n- `pnpm --filter @objectstack/plugin-auth typecheck`: lock VERDICT command-exit 0.\n\n## Verification\n\nAt head `1aaf6224` (`main` `8fa738fb` merged).\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 51 commands, each recorded as `command :: exit code` before any pipe (`gates-ran.txt` in the seat folder). 50 exit 0. `check-plugin-teardown-shape --self-test` exited 3 on the shallow clone and 0 after fetching its pinned commit `621a4876`. `pnpm check:dual-build-cjs-loads` exited 3, PREREQUISITE NOT MET (not every workspace package is built here): NOT MEASURED, left to CI.\n- `dispatch-gates --ran`: 51 derived, 50 run, 1 NOT-MEASURED, 0 UNRUN.\n- `pnpm lint` (repo-wide, `--no-inline-config`): exit 0.\n- Changed lines: 36 (+36 / -0), one file.\n\nNo changeset: the diff is one test file, and `@objectstack/plugin-auth` publishes only `dist`, `README.md` and `CHANGELOG.md`; `skip-changeset` is sent with this PR.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CbQwaXVXpbomZRKZq2)_\n"
+}

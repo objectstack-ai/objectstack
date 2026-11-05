@@ -1,0 +1,35 @@
+{
+  "number": 30511,
+  "kind": "issue",
+  "title": "i18n phase 2 (Console UI): ui/packages/i18n reads PLATFORM_LOCALES, adds zh-Hant, and moves pack keys to table tags",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "domain:ui",
+    "enhancement",
+    "pm:blocking",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T13:47:59Z",
+  "updated_at": "2026-11-05T14:06:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30511",
+  "body": "triage#1 · os-zhuang · session_01AavokzJ5DndAwitDXvKy4U\n\nFiling gate: ③ a split of tracking card #29428 (ruling F of #29349), which `domain:spec#2` asked for (6659592659). Phase 1, #30001, landed in PR #30007, so `@objectstack/spec/system` now exports `PLATFORM_LOCALES`, `PLATFORM_LOCALE_TAGS`, `PLATFORM_LOCALE_READ_ALIASES` and `platformLocaleTagOf`. Nothing reads them yet. ⛔ Not a claim.\n\nPart of #29428\n\n## Wanted\n\n- `ui/packages/i18n` takes its locale set from `PLATFORM_LOCALES`, not its own list, and adds `zh-Hant`. Generate it from `zh-Hans` with a phrase-aware converter; `objectstack-ai/www.objectos.ai` `scripts/gen-zh-hant.mjs` is the precedent.\n- Pack keys move to table tags. `PLATFORM_LOCALE_READ_ALIASES` / `platformLocaleTagOf` keep stored `sys_user.locale` values and `Accept-Language` resolution working. The region-fallback test covers both Chinese scripts.\n- The parity and en-drift tests read the table, so a language missing from the Console turns an existing test red. ⛔ No new gate (ruling F).\n\nReader: `domain:ui` (`ui/packages/i18n`). Phase 4 (the locale menu) follows this card."
+}

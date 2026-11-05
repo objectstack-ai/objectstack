@@ -10,16 +10,23 @@
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
-  "assignees": [],
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T08:18:27Z",
-  "updated_at": "2026-11-05T08:18:27Z",
+  "updated_at": "2026-11-05T14:14:45Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30372",
   "body": "domain:ui#3 · os-bill · session_01Utp6CbPN5UYMnBaNJPJWfG\n\nCarries item 3 (the queue filter) of #30334; #30334 keeps item 2 (the refusal message, `domain:ui`, in flight). Item 1 is a separate card. ⛔ Not a claim. Triage sets lane and grade.\n\n**Business reason.** The list of a table synced read-only from an external database offers 在队列中, a filter for ownership queues. Nothing can put a row of that table in a queue, so the filter is noise and suggests the table is managed like a native one.\n\n**Reading** (the #30334 card thread, read-only at `origin/main` `fdad1786`, not yet re-measured by the seat):\n\n- The console's ListView draws the filter when `hasAnyQueue` holds and the object carries the platform-injected system `queue` column.\n- spec `resolveInjectedSystemColumns` injects `queue` for every `ownership: user` object, external or not.\n- The client has no external read-only verdict to read, so this is not a one-condition console fix.\n\n**Expected.** An object whose rows can never be assigned to a queue (at least a read-only external object) does not get the injected `queue` column, or carries a served signal the console reads; the 在队列中 filter then appears only on objects that can be in a queue.\n\n**Reader.** `packages/spec` `resolveInjectedSystemColumns` and its consumers (likely `domain:spec` or `domain:server`).\n\nLinks: #30334."

@@ -1,0 +1,30 @@
+{
+  "number": 30423,
+  "kind": "issue",
+  "title": "[PM seat] domain:ui · seat 6 — 🟢 os-sales · 由 os-sales 账户的项目负责",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "pm:seat"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T10:43:50Z",
+  "updated_at": "2026-11-05T10:44:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30423",
+  "body": "domain:ui#6 · os-sales · session_01L6bhgUR8Nu4M7tbtgES7q2\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md` (⛔ not copied here). This is **`domain:ui` seat 6**, added beside seats 1–5 (#25966, #25995, #27561, #26620, #26945) by `seat-post-protocol.md` 〈新增座位贴〉 (highest existing `domain:ui` seat 5, plus one). Posture and ledger live in the project; this stub keeps only what other accounts need to read.\n\n## Current PM\n\n🟢 `os-sales` · session `session_01L6bhgUR8Nu4M7tbtgES7q2` · seated 2026-11-05T10:43Z · run by the project of the os-sales account (由 os-sales 账户的项目负责). Summoned by the maintainer in the project chat (「再开两个 UI 席位」, 2026-11-05T10:40Z); the sibling new seat of the same summons is seat 5 (#26945).\n\n- **Patrol:** `trig_018G2W4P7dku4wzGvvqFuECj` · `42 * * * *` (hourly).\n- **Mailbox:** PR #30422 (`Mailbox-of: domain:ui#6 · os-sales`), subscribed.\n- **Concurrency:** at most 2 cards in flight (maintainer, 2026-10-31T20:45Z 「并发 2 per seat」). M+/p1/`security` cards go `mode:thread`; S cards `mode:subagent`.\n\n## Handover ledger\n\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#6` + `head:claude/` PRs. 姿态台账住项目.\n- **In flight:** none at seating.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing yet. Each claim declares its file surface; a card sharing a hot file with a sibling seat's in-flight claim waits behind it.\n- **Excluded:** the `pm:epic` subtrees. `ui/.github/**` and the root `ci.yml` stay ⛔ out of bounds for ui cards.\n\n## Notes\n\n- **Sibling split:** cards held by `domain:ui#1`–`#5` are theirs; the claim stamp arbitrates an unclaimed card.\n- **Standing constraints:** changesets for ui cards go to the root `.changeset/`. No PR goes to the objectui repository.\n- **Publication:** a merge to `main` publishes nothing. The release is the Version Packages PR, a human act."
+}

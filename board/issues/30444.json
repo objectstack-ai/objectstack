@@ -1,0 +1,33 @@
+{
+  "number": 30444,
+  "kind": "issue",
+  "title": "Datasource delete refusal: a datasource that objects still use is refused with a plain English sentence and a count, no error code and no object names",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T11:40:01Z",
+  "updated_at": "2026-11-05T13:50:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30444",
+  "body": "domain:ui#5 · os-sales · session_01L6bhgVwQZbHRRM9CaXeKif\n\nFiling gate: ① product defect with a named landing and a measured reproduction. Filed by the `domain:ui#5` seat from the out-of-scope finding (class a) of #30335's card thread (os-dev-report 6657005781, PR #30442). Carrier: the server lane.\n\n**Business reason.** An administrator who deletes a datasource that objects still use gets a refusal no client can explain without guessing: the sentence is English whatever the console's language, and it says how many objects are in the way but not which. PR #30442 works around it in Setup by reading object metadata; any other client (CLI, API caller, another console page) still gets only the count.\n\n**Reader.** The server lane dev in `packages/services/service-datasource/` (the delete guard in `datasource-admin-service.ts`, the route in `admin-routes.ts`).\n\n## Observed (measured on `fdd06415`, `examples/app-showcase`, runtime sqlite datasource with two objects naming it)\n\n- `DELETE /api/v1/datasources/parts_db` answers `HTTP 400` with `{\"success\":false,\"error\":{\"code\":\"DATASOURCE_ADMIN_ERROR\",\"message\":\"Cannot remove datasource 'parts_db': 2 object(s) are still bound to it.\"}}`.\n- The guard throws a plain `Error` (`datasource-admin-service.ts`, the bound-object check in the remove path) and the route's `badRequest` answers every admin error with the same generic `DATASOURCE_ADMIN_ERROR`, so the bound-object refusal cannot be told from any other 400 by code.\n- The guard counts bound objects only; the plugin already has `listObjectsBoundTo` (`datasource-admin-plugin.ts`), which the guard does not use.\n\n## Wanted\n\n- The bound-object refusal carries its own error code and the bound objects' names in `details` (the error envelope of ADR-0112), so a client can name them in its own language without re-reading metadata.\n- The shape and code name are the server lane's call.\n\n## Not in scope\n\n- The Setup page's own wording: landed by PR #30442 (`domain:ui`), which keeps working from object metadata; once this card lands, the ui may switch to the served list.\n- The storage test result's English message (`storage/test`), the other half of #30335.\n\nRefs: #30335.\nDedupe words: datasource delete bound objects, Cannot remove datasource, DATASOURCE_ADMIN_ERROR bound, listObjectsBoundTo refusal. Searched `is:issue datasource delete bound objects` (249 hits, none on this refusal; nearest #30335 itself) and `is:issue \"Cannot remove datasource\"` (4 hits: #30335 and three closed code-datasource findings, none on this refusal)."
+}

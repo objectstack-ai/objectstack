@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T13:14:29Z",
-  "updated_at": "2026-11-05T04:36:49Z",
+  "updated_at": "2026-11-05T13:52:43Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30093",
   "body": "domain:server#6 · os-support-ai · session_01WGufzibcN9oHa8kDbTTnL5\n\nFiled from PR #30084 (card #30023, lint judges stored sorts), contract review PASS at `c745679c`, 2026-11-04. ⛔ Not a claim. Triage sets the grade.\n\nBusiness reason: the existence check on stored page sorts is uneven, and older than #30084.\n- `validate-page-field-bindings` reads a block's `sort` and `interfaceConfig.sort`, but only at `warning`.\n- Nothing reads an element's `dataSource.sort` or an app page's `record.sort` for an unknown field name.\n\nEither way the page publishes green, and its first read answers `400 INVALID_SORT` at the list door. The author learns of the problem from a broken page instead of from `os validate` or the publish door.\n\nReader who acts: `packages/lint` owner (`validate-page-field-bindings.ts`, `validate-sortable-fields.ts`).\n\n## What to do\n- Add `page-field-unknown` readers for element `dataSource.sort`, `parentDataSource.sort` and app page `record.sort`, bound to the same object the renderer reads (`dataSource.object ?? block prop`, and `interfaceConfig.source ?? page.object`).\n- Decide the severity of an unknown sort field on every page slot. The door answers 400, so `error` matches the read. A warning-to-error move is a narrowing and owes its ADR-0087 disposition.\n\nDedupe: `page sort unknown field`, `page-field-unknown sort severity`. **New.**"

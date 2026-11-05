@@ -2,8 +2,8 @@
   "number": 30157,
   "kind": "issue",
   "title": "Mobile sign-in: a person who has to verify their email during the hand-off gets a mail link to 页面不存在, and the verify page drops the refusal time",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,7 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:dispatched",
+    "pm:blocking",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T17:30:41Z",
-  "updated_at": "2026-11-05T03:09:10Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T12:53:46Z",
+  "closed_at": "2026-11-05T12:52:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30157",
   "body": "domain:server#2 · hotlong · session_c967d7a472b0485c94711bfcb22159c8\n\nCategory: ① product defect with a named location.\n\nBusiness reason: a new user who signs up during the mobile sign-in (the system auth session, objectstack-ai/mobile#148), on a server that requires email verification, gets a verification mail whose link lands on 页面不存在. The mail is the only road back, so that person cannot finish signing in from it. Nobody is hitting this yet, because no released app uses the flow; it would start when one does.\n\nReader: `domain:ui`, one PR on `ui/apps/console/src/pages/auth/`. objectstack-ai/mobile#190 is the first consumer.\n\nDuplicate search: `withConsoleBaseRootRelative` in issues (0 hits) and `verify-email-prompt redirect handoff` (2 hits, #29997 and a closed QA run, neither about this).\n\nreach: read from the code on `origin/main`, not run end to end. First touch should measure it. The helper's wrong answer for this kind of path was measured in the browser on #29971, which is the same defect in a sibling path. Found by the contract review of PR #30010 (comment on that PR, head `3e59db0af0`).\n\n## 1. The verification mail's link\n\n`RegisterPage.tsx` (`verificationCallbackURL`) and `VerifyEmailPromptPage.tsx` (`callbackURL`) send a safe `redirect` through `withConsoleBaseRootRelative`, which treats every redirect as a Console route. For a hand-off redirect that gives `/_console/api/v1/auth/one-time-token/handoff?…`, a page that does not exist.\n\n**Not just a prefix fix.** Which browser opens that mail matters. It is usually not the system auth session the app is waiting on, and a token handed out there may have no app waiting for it. So the right callback is a product question: decide what a person who verifies by mail should see. Fix the dead end at minimum, and say in the PR what the chosen answer does.\n\n## 2. The refusal time is dropped on this road\n\nPR #30010 carries `handoff_refused_at` on the links between `/login` and `/register`, through `handoffMarkQuery`. Three hops still drop it: `LoginPage`'s `EMAIL_NOT_VERIFIED` branch, `RegisterPage`'s `onVerificationRequired` (each builds the query from `email` and `redirect`), and `VerifyEmailPromptPage.handleBackToLogin` (rebuilds `/login?redirect=`).\n\nA person with an old session on a device whose clock is behind who takes this road is judged by the age check alone and forwarded into the route's `401` JSON. It stops and cannot loop. It needs several conditions at once, so it is the smaller half.\n\n## Acceptance notes\n\n- Depends on PR #30010 for `handoffMarkQuery` and the mark; start after it lands.\n- A test per hop, with a control that a non-hand-off `redirect` keeps today's links byte for byte.\n- A browser check of the mail's link for the case above.\n- This is a session-transfer flow: the maintainer reviews and merges.\n\nRelated: objectstack-ai/mobile#148. Not a blocker of it: a Google sign-in should not take this road (not measured), and a person verifying by email is the case affected.\n"

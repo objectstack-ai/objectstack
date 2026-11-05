@@ -2,8 +2,8 @@
   "number": 30329,
   "kind": "issue",
   "title": "Setup settings: a deployment-level value has no Reset to default, and reads as inherited although the administrator set it here",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T06:21:14Z",
-  "updated_at": "2026-11-05T07:17:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T11:51:13Z",
+  "closed_at": "2026-11-05T11:49:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30329",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiling gate: ③ the maintainer's direct order, verbatim: 「你发现的问题都立卡，安全问题总专用的安全密卡通道，需要进一步分析的进一步测试，还是没有把握的用决策卡。」 (2026-11-05). Found in a real-user browser walkthrough of Setup on `main` `04f36b63f8`, with a test app and a local test deployment.\n\n**Business reason.** An administrator who changed a setting should be able to see that they changed it and put it back. Today the row reads as if it came from somewhere else, and going back to the default means knowing the default or emptying the box.\n\n**Reader.** The UI lane dev, in `ui/apps/console/src/pages/settings/SettingsField.tsx:105-136` and `:213`.\n\n**Duplicates.** Searched `settings reset to default global button` (32 hits) and `inherited from global badge` (14 hits). They are QA run anchors and a seat card; none has this subject.\n\n## Measured\n\nOn Setup's 认证 page, after changing 密码最小长度 there:\n\n- The row is labelled 「继承自全局」 and 「全局」. `sourceBadgeOf` treats any value whose effective scope is global as inherited, including one this page wrote.\n- There is no 恢复默认. The button appears only for the `overrides` badge, so it never appears on a deployment-level value.\n\n## Expected\n\n- A value changed here says so, for example 已修改, and names the default.\n- Reset to default is available on it, with Save confirming it as other changes do."

@@ -1,0 +1,36 @@
+{
+  "number": 30396,
+  "kind": "issue",
+  "title": "Time-relative flows: the registration warning and the MCP sweepObject advice still treat the start node's objectName as the condition object",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T09:33:35Z",
+  "updated_at": "2026-11-05T12:47:47Z",
+  "closed_at": "2026-11-05T12:46:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30396",
+  "body": "domain:server#2 · os-bill · session_01Utp6Cbvcmv8YWFhFJwzjKL\n\nFiling gate: ② found by the contract review of PR #30393 (card #30283, record 6654534464, non-blocking notes 1 and 2), outside that card's surface. **Read, not measured** — the first act is to measure it. ⛔ Not a claim. Triage sets the grade.\nReader: `domain:server` — `service-automation` (`flow-registration-checks.ts`) and `packages/mcp` (`mcp-http-tools.ts`, `skill-md.ts`).\nDedupe: `sweepObject objectName time-relative` → none open. **New.**\n\n## What the reading says\n\nA time-relative flow's run binds `timeRelative.object` (the scanned object) and never reads the start node's `objectName`. PR #30393 makes the publish door refuse a start whose `objectName` differs from `timeRelative.object`. Two places still speak as if `objectName` were the condition object:\n\n1. **Registration advisory.** `flow-registration-checks.ts` (~L455–L462 at `d3580892`) types a time-relative flow's conditions against `config.objectName`. A two-object flow stored before PR #30393 keeps an `unknown field` warning at registration for a field that is right for the scanned object, and none for a field that will fail at run time.\n2. **MCP advice.** `validate_expression`'s description and its `sweepObject` input text (`mcp-http-tools.ts` ~L1104–L1151), and `skill-md.ts` ~L278–L279, tell an agent to pass `sweepObject` when it differs from `objectName` (\"then a mismatch warns\"). After PR #30393 that case is a flow the publish door refuses.\n\n## Wanted\n\n- [ ] Measure the registration warning on a stored two-object time-relative flow.\n- [ ] Type the registration pass's conditions against the object the binding uses (`timeRelative.object` when it is a string), the same rule as the run.\n- [ ] Reword the MCP `sweepObject` text and `skill-md.ts` lines to name the readiness refusal (`flow-time-relative-object-mismatch`), or retire the other-object arm.\n\nLinks: #30283, PR #30393, PR #30276."
+}

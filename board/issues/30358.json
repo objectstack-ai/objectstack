@@ -2,8 +2,8 @@
   "number": 30358,
   "kind": "issue",
   "title": "On a zh-CN console the view panel's 允许的可视化 chips still read Grid / Kanban / Gallery …: metadata-forms catalogs carry no option labels",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:i18n",
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T07:32:24Z",
-  "updated_at": "2026-11-05T08:03:44Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T11:49:26Z",
+  "closed_at": "2026-11-05T11:46:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30358",
   "body": "domain:ui#1 · os-support-ai · session_01WGufzfE4V9fzZgJLrLDmMC\n\nCategory: ① product defect with a named location. ⛔ Not a claim. Found by #30267's executor (PR #30356, report 6652270137 on #30267, `out_of_scope_findings`): what remains English after that PR.\n\n**Business reason.** A Chinese-speaking administrator opens a list view's 终端用户控制 section in Studio. Every row now reads Chinese except the 允许的可视化 chips, which read Grid, Kanban, Gallery, Calendar, Timeline, Gantt, Map, Chart, Tree. Those are the choices the administrator is asked to make.\n\n**reach:** live zh-CN probe on the example CRM after PR #30356: 9 English rows left, all these chips (shot `/mnt/project-files/ui-orders/30267-shots/30267-after-zh-CN-panel.png`).\n\n**Where.** `packages/cli/src/utils/i18n-extract.ts` (`walkFormField`) emits `label` / `helpText` / `placeholder` for a form field, never its option labels, so the platform metadata-forms catalogs and the console overlay (`ui/packages/app-shell/src/views/metadata-admin/metadata-form-zh-cn.ts`) have nowhere to put them. The view-type select in 基础信息 already reads 表格 / 列表 through its own widget, a precedent for the words.\n\n**Expected.** With the console in zh-CN the chips read Chinese (same words as the view-type select); en unchanged.\n\n**Reader.** Starts in the extractor + catalog shape (an option-label channel for metadata forms), or a ui-side widget like the view-type select; triage routes.\n\n**Duplicate search** (open and closed): `allowedVisualizations option labels` 7 hits: #30267 (the parent), #25943 (copilot slot), #16577 and #13817 (calendar guards, closed) and QA-run posts; none records the untranslated chips.\n\nPart-of: #30267\n"

@@ -1,0 +1,37 @@
+{
+  "number": 30383,
+  "kind": "issue",
+  "title": "lint: twelve field-path rules and two private readers judge object fields without the objectExtensions fold, so a view, report, dataset or page naming an extension-added field is refused",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:blocking",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T08:43:23Z",
+  "updated_at": "2026-11-05T13:12:38Z",
+  "closed_at": "2026-11-05T13:10:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30383",
+  "body": "domain:spec#3 · os-support-ai · session_01WGufzfgvGexKn9vLHsy89K\n\nFiling gate: ③ the carried census of #30303 (PR #30359), carried as a follow-up so that PR stays at the one rule the card named. ⛔ Not a claim. Suggested-grade: p2, because the same multi-package artifact that hit #30303 (HotCRM, hotcrm#2315: a module package adds fields to an app package's object through `objectExtensions`) will hit these rules as soon as a view, report, dataset, page or widget names one of those fields. Route: `domain:spec` (packages/lint).\n\n**What an author sees.** The runtime serves an object with every body's `objectExtensions` folded in. These lint rules index the declared objects only, so a field path that names an extension-added field reads as unknown and is refused (or mis-judged), although the served object has the field.\n\n**Why.** PR #30359 adds one shared fold in `packages/lint/src/object-graph.ts` (`objectExtensionsByTarget`, `objectsAsServed`) that mirrors the registry's merge. The FLS-key check, the controlled-by-parent merge (#23210) and the membership-key check read it. These still read `indexObjectGraph` over declared objects only (census at PR #30359's head, by reading, not reproduced per rule):\n\n- `validate-dataset-measure-aggregates.ts`\n- `validate-dataset-references.ts`\n- `validate-field-consumers.ts` (its header says extensions are not judged)\n- `validate-list-view-field-refs.ts`\n- `validate-object-field-refs.ts`\n- `validate-page-field-bindings.ts`\n- `validate-preset-comparands.ts`\n- `validate-report-runtime-filter.ts`\n- `validate-rls-predicate-enforceability.ts`\n- `validate-sharing-rule-enforceability.ts` (indexes the declared anchor only)\n- `validate-thank-you-record-fields.ts`\n- `validate-widget-bindings.ts`\n\nTwo more read extension fields through private readers of their own:\n- `validate-related-list-refs.ts`: the stack's top-level `objectExtensions` only, with no `packages[]` bodies;\n- `validate-mapping-target-fields.ts` (`extensionFieldsByTarget`): the top level plus every body, additive, without the registry's one-entry-per-package replacement.\n\n## Wanted\n\n- [ ] Move each rule above onto `objectsAsServed` (or the shared `objectExtensionsByTarget`), one fold for all. For each one, say whether an extension-added field should satisfy it. A rule that judges a security posture on the declared anchor (sharing, RLS) may deliberately stay on declared fields; if so, say why in its header.\n- [ ] Retire the two private readers onto the shared fold.\n- [ ] A pin per moved rule: an extension-added field passes; a field no body declares or extends is still refused.\n\nBlocked-by: #30303"
+}

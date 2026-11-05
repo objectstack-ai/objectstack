@@ -1,7 +1,7 @@
 {
   "number": 7623,
   "kind": "issue",
-  "title": "[PM seat] domain:skills — 🟢 huangyiirene · 由 huangyiirene 账户的项目负责",
+  "title": "[PM seat] domain:skills — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,18 +13,16 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [
-    "huangyiirene"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-08-11T09:13:50Z",
-  "updated_at": "2026-11-04T11:58:49Z",
+  "updated_at": "2026-11-05T10:52:13Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 167,
+  "comments": 168,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/7623",
-  "body": "domain:skills#1 · huangyiirene · session_01J8VVAnMUWA9rufXzFaEh4J\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/skills.md` (⛔ not copied here). This is **`domain:skills` seat 1**. Seat 2 is #19287 (vacant) and seat 3 is #29747.\n\n## Current PM — 🟢 huangyiirene\n\n- **Holder:** `huangyiirene` · `session_01J8VVAnMUWA9rufXzFaEh4J` (the huangyiirene account's project \"objectstack\", seat thread \"Run the skills lane PM seat\"). Re-seated on the maintainer's order 「继续 接手skills 车道，并发2」, seating marker 6629978430. The previous term's clock-out brief is 6619434858.\n- **Mailbox:** PR #30060 (`Mailbox-of: domain:skills#1 · huangyiirene`), subscribed by the seated session.\n- **Patrol:** `trig_01YRkqQa8WTpVdvLM2FYFtbC` · hourly at :56, bound to the seated session.\n- **Pointer:** posture, ledger and round reports live in the project. Lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:skills#1` + `head:claude/` PRs.\n\n## Handover ledger\n\nNothing carried in flight. Parked: #29420 at `pm:awaiting-maintainer` (the live read is owed). The cards and labels hold the lane's state; seat 3's post #29747 carries its own.\n\n## Hot-file serial queue\n\n⛔ Re-derive from live `Claim:` comments and each open PR's file list before every dispatch; read #29747 too.\n\n- None held by this seat.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- A `skills/**` PR owes an `'@objectstack/skills': patch` changeset, never `skip-changeset`.\n- Contract reviews route to the review seats (`lanes/review.md`), then the lane; ⛔ never triage.\n- Merges reach customers through `@objectstack/skills` (`skills/**`) only on a release the maintainer runs.\n"
+  "body": "domain:skills#1 · huangyiirene · session_01J8VVAnMUWA9rufXzFaEh4J\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/skills.md` (⛔ not copied here). This is **`domain:skills` seat 1**. Seat 2 is #19287 (vacant) and seat 3 is #29747 (vacant).\n\n## Current PM — ⏳ vacant\n\n- **Previous holder:** `huangyiirene` · `session_01J8VVAnMUWA9rufXzFaEh4J` (the huangyiirene account's project \"objectstack\", seat thread \"Run the skills lane PM seat\"). It was re-seated on marker 6629978430 and clocked out on the maintainer's order 「skills 车道下班」. The clock-out brief is the comment that follows this edit.\n- **Mailbox:** PR #30060 closes in this stroke. A successor opens a seat-keyed mailbox when seated.\n- **Patrol:** none. The routine `trig_01YRkqQa8WTpVdvLM2FYFtbC` is deleted in this stroke.\n- **Stay-behind:** none. No ACCEPTed PR is pending, the seat holds no claim, and no worktree or timer remains. `check-handover.mjs` exited 0.\n\n## Handover ledger\n\n- **Queue snapshot, open `domain:skills` cards:**\n  - `pm:queue` 12: #30350, #30275, #30273, #30271, #30254, #30229, #30159, #30114, #30092, #29745, #29625, #29471.\n  - `pm:dispatched` 1: #30234 (`os-support-ai`, not this seat's).\n  - `pm:on-hold` 1: #26617.\n  - `pm:awaiting-maintainer` 1: #25583.\n  - `needs-user-decision` 1: #29828.\n- **Hot-file serial queue:** this seat holds none.\n- **Cross-lane memo:** #29994's remaining `registry.ts` docblock was routed to `domain:spec`.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- A `skills/**` PR owes an `'@objectstack/skills': patch` changeset, never `skip-changeset`. A `.claude/**`-only diff takes `skip-changeset` as `check-empty-changeset.mjs` decides.\n- `.claude/**` is Tier S: the owning seat lands it on an at-tier `## Contract review` PASS for the current head with every check green. `skills/**` is Tier H.\n- Triage takes no contract reviews (#29667).\n\nSuccessor: `/pm-dispatch 接手`. Read this post first.\n"
 }

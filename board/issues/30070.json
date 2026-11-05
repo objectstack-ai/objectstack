@@ -2,8 +2,8 @@
   "number": 30070,
   "kind": "issue",
   "title": "[Decision] The rail's green 「+」 looks like an add button but is a status mark: what should a customization mark look like?",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T12:35:51Z",
-  "updated_at": "2026-11-04T13:16:10Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T13:19:25Z",
+  "closed_at": "2026-11-05T13:17:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30070",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nThe maintainer: 「等我决定的都要立卡，并且从业务的角度给我具体解释和我沟通」 (2026-11-04). Measured by the seat on `main` `63b86b385d`, on the example CRM unless noted. No `domain:*` label is set: triage routes this card.\n\n## The question\n\nStudio's left rail marks a customized row with a small icon: a green filled square with a plus means 新增, added in the customization package. It is not a control. A person clicks it, nothing happens, and it sits right beside an item they could not add to the menu. The maintainer did exactly this: 「还有导航上一个加号图标什么意思，点了也没反应」.\n\nGoverning text: `ui/packages/app-shell/src/views/studio-design/CustomizationMark.tsx:40-44` (#29693 compacted the mark to a glyph so it never takes the row's label). No ADR fixes the glyph.\n\n## Measured\n\nDrawn temporarily in the live rail on the automation pillar, row width 223 px:\n\n| Style | Mark width | Room for the name |\n|:--|--:|--:|\n| Today's green filled plus | 18 px | 113 px |\n| The word 新增, no background | 30 px | 105 px |\n| A green package glyph | 18 px | 113 px |\n\nA dot is out: the automation rail already uses dots for 已启用, 未在此运行, 已停用.\n\n## Options\n\n- **A. Words, no background:** 新增 for added and 定制 for customized. Costs 8 px, under one character of the name.\n- **B. A non-plus glyph:** same width, but the meaning has to be learned or hovered.\n- **C. Keep the plus.**\n\n## Recommendation: A\n\n## 四轴分析\n\n**实际业务需求。** 运营在左栏看到绿色加号会以为能点，这个误会已经发生过一次。每次打开定制过的应用都会看到。\n\n**项目长远合理性。** 状态就该长得像状态。A 不用记，也不会和操作混淆。\n\n**防 AI 写错。** 不涉及元数据，只影响 AI 操作界面时的判断：文字比图标更不会被认错。\n\n**创业阶段不扩散。** 只改一个组件的样式，没有新能力。\n\n| 棱 | A | B | C |\n|:--|:--|:--|:--|\n| 业务 | 强 | 中 | 弱 |\n| 长远 | 强 | 中 | 弱 |\n| 防错 | 强 | 中 | 弱 |\n| 不扩散 | 强 | 强 | 强 |\n\n## Re-check\n\n`git grep -n \"added: Plus\" origin/main -- ui/packages/app-shell/src/views/studio-design/CustomizationMark.tsx`"

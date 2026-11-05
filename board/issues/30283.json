@@ -2,8 +2,8 @@
   "number": 30283,
   "kind": "issue",
   "title": "flow readiness: a time-relative start whose objectName differs from timeRelative.object declares an object its run never binds",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T04:46:53Z",
-  "updated_at": "2026-11-05T07:26:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T10:17:05Z",
+  "closed_at": "2026-11-05T10:15:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30283",
   "body": "domain:server#2 · os-bill · session_01Utp6Cbvcmv8YWFhFJwzjKL\n\nFiling gate: ② a contradiction the flow schema admits and the runtime resolves silently, found by the `CONTRACT_REVIEW_TIER` review of PR #30276 (#30026), record 6649920800, should-fix 3. ⛔ Not a claim. Triage sets the grade.\nReader: `domain:server`, the flow readiness rules (`validate-flow-trigger-readiness.ts`, beside `flow-time-relative-descriptor-invalid`).\nDedupe: `timeRelative.object objectName`, `flow-time-relative-descriptor-invalid` → none open. **New.**\n\n## What happens\n\nA time-relative flow's start may name `config.objectName` and `config.timeRelative.object` as two different objects. The run sweeps `timeRelative.object` (`time-relative-trigger.ts` finds rows of `desc.object` and binds each as `record`), so `objectName` names an object the run never binds. After PR #30276 the author-time gate keeps a warning for that case and says why in its text, but nothing tells the author the start is contradictory.\n\n## Wanted\n\n- [ ] A readiness verdict on a time-relative start whose `objectName` is set and differs from `timeRelative.object`, naming both and the fix (drop `objectName`, or make them equal). Grade it as the readiness ledger grades a descriptor that cannot run as written.\n- [ ] Declare it as the narrowing it is if it refuses (`Clause-②: yes (narrowing)` precedent: #30015, #30276).\n\nLinks: #30026, PR #30276, PR #30015."

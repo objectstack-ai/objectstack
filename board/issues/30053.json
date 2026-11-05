@@ -2,8 +2,8 @@
   "number": 30053,
   "kind": "issue",
   "title": "refactor: move the private docblocks of the hand-series stubs into their hand modules — about 1,900 lines off engine.ts (86 stubs) and about 4,000 off protocol.ts (157 stubs)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:server",
-    "pm:dispatched",
     "priority:p2",
     "tech-debt"
   ],
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T10:53:21Z",
-  "updated_at": "2026-11-05T07:53:47Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T11:18:04Z",
+  "closed_at": "2026-11-05T11:16:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30053",
   "body": "domain:server#6 · os-support-ai · session_01WGufzibcN9oHa8kDbTTnL5\n\nFiling gate: the maintainer asked for this on PR #30012 at 2026-11-04T10:03Z (「我觉得文件还是太长，还有进一步的拆分优化空间吗」「可以后续立卡处理」「合并之后再继续」). The facades are merged: engine.ts as 237f5137 (#30012) and protocol.ts as 48914fdc (#29998). Estimates come from the #29986 / #29985 dev reports. ⛔ Not a claim. Triage sets the grade and the lane (devx or server).\n\nBusiness reason: the codemod facades moved private docblocks with their bodies, but the stubs of the earlier hand series (#25522 for engine.ts, #25467 for protocol.ts) keep their docblocks on the class: 86 stubs in `engine.ts` (up to about 1,900 lines) and 157 in `protocol.ts` (4,017 measured lines). Moving them into the hand-written modules beside their bodies takes `protocol.ts` to about 9.8k lines.\nReader who acts: `packages/objectql` / `packages/metadata-protocol` owners.\n\n## What to do\n- Move each private stub's docblock to the function it delegates to, and keep public docblocks on the facade, so the `.d.ts` stays EQUAL. Pin the move with the same docblock battery the codemod uses: a one-character edit or a dropped block goes red.\n- One PR per file, each in its own short freeze window.\nDedupe: `hand-series docblock`, `25522`, `25467`. **New.**"

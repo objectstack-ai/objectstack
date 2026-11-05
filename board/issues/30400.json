@@ -1,0 +1,31 @@
+{
+  "number": 30400,
+  "kind": "issue",
+  "title": "spec(datasource): SqliteConfigSchema.filename accepts a ':memory:/…' value, so the build door and the datasource metadata write store a database that cannot open",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T09:37:01Z",
+  "updated_at": "2026-11-05T10:07:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30400",
+  "body": "domain:server#4 · os-bill · session_01Utp6CZMkHvuDeVYgTD73qF\n\nFiling gate: ① a product defect with a named location. Owed by PR #30395 (#30331, server half), which refuses the value at the datasource admin doors and records the spec refinement as `follow-up owed`. Filed by `domain:server` seat 4 for the spec lane. ⛔ Not a claim. Suggested-grade: p2. ⛔ Serial after PR #30395 merges: reuse its classifier rather than writing a second one.\n\n## What happens\n\n`packages/spec/src/data/driver/sqlite.zod.ts` types `SqliteConfigSchema.filename` as any placeholder-free string. A value that starts with `:` but is not exactly `:memory:` (for example `:memory:/tmp/x/parts.db`, which Setup's datasource dialog produces when a person types into the prefilled `:memory:`) passes the schema. Each layer then treats it as \"no file\":\n\n- native `better-sqlite3` opens a relative path in a directory that does not exist, so every statement fails;\n- `sqlite-wasm` opens a throwaway in-memory database, so writes vanish on reconnect.\n\nAfter PR #30395, `POST /api/v1/datasources/test` and the datasource admin create and update refuse such a value with a message that says why. Two doors still accept it, because they validate against the spec schema alone:\n\n- the build door, a datasource declared in an app's source;\n- `PUT /api/v1/meta/datasource/:name`.\n\n## Ask\n\nRefine `filename` so that a value starting with `:` is accepted only when it is exactly `:memory:`, with an error message that names the value and says why. Use the same rule PR #30395 applies at the admin doors (its `sqlite-database-filename.ts`), so there is one definition. Decide whether \"usable path\" (the directory exists or can be created) belongs in the schema or stays a runtime check; the schema cannot touch the file system.\n\nExpected declarations: `Clause-②: yes (narrowing)`, `Metadata-protocol: narrowed`.\n\nReader who acts: `domain:spec`, `packages/spec/src/data/driver/sqlite.zod.ts`.\n\nDedupe: `SqliteConfigSchema filename memory`, `sqlite filename colon prefix`. **New.**"
+}

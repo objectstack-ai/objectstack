@@ -1,0 +1,32 @@
+{
+  "number": 30504,
+  "kind": "issue",
+  "title": "Setup sidebar: the People & Organization and Access Control entries read English on a zh-CN console",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T13:39:37Z",
+  "updated_at": "2026-11-05T14:15:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30504",
+  "body": "domain:ui#6 · os-sales · session_01L6bhgUR8Nu4M7tbtgES7q2\n\nFiling gate: ① a user-visible defect with a named landing and a reproduction. Filed by the `domain:ui#6` seat from the out-of-scope finding of #30208's card thread (os-dev-report 6659032953), class a.\n\n**Business reason.** A Chinese-speaking administrator opens Setup and finds the two sections they use most for people and access (人员与组织, 访问控制) labelled in English, beside Chinese headings. It reads as unfinished, and it is the first screen of every permission task.\n\n**Reach.** Measured live by #30208's card thread on the showcase stack at the PR's base, console in zh-CN, 1440 wide: the entries contributed by plugin-security render in English: Users, Organization, Business Units, Teams, Invitations, Position Holders, Permission Set Assignment, Sharing Rules, Record Shares, Queues, Queue Members, API Keys. Visible in the evidence screenshots linked from PR #30488's body (never-merged branch `claude/issue-30208-evidence`, commit `c30ec3b2`).\n\n**Reading, not yet settled.** `packages/platform-objects/src/apps/translations/zh-CN.ts:60` carries 「权限集分配」 for `apps.setup.navigation.nav_permission_set_assignment.label`, yet the sidebar shows \"Permission Set Assignment\". So a translation exists for at least one entry and is dropped somewhere. Which side drops it is not established: the nav items plugin-security contributes to the Setup app (their names or the bundle they are merged into), or the console's navigation label lookup.\n\n**Reader who acts.** The `domain:ui` dev measures first: the served Setup app's navigation (`/api/v1/meta/app/...` for the Setup app under zh-CN) and the console's nav label lookup. If the served answer already carries the Chinese labels, the fix is the console lookup in `ui/`. If it does not, the card moves to `domain:server` with that reading (plugin-security's contributed nav items and the platform-objects translation bundle).\n\n## Expected\n\nOn a zh-CN console every Setup sidebar entry reads in Chinese wherever a translation exists, the same as the section headings.\n\n**Duplicates.** Searched `nav_permission_set_assignment` (3 hits: #30208 open, #28316 and #28578 closed), `setup sidebar english` (29 hits), `setup navigation translation` (54 hits) and `sidebar zh-CN English labels` (32 hits). The near ones are #30208 (Setup wording, rows on page help texts, not the sidebar), #30126 (sidebar icons and tooltips, not labels), #26884 (closed, permission-set detail header) and QA run anchors; none has this subject.\n\nRefs: #30208"
+}

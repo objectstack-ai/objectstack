@@ -1,0 +1,36 @@
+{
+  "number": 30398,
+  "kind": "issue",
+  "title": "Allowed IP ranges: no route serves the caller's address as the server resolves it, so the console cannot show an admin which address the lock-out check will judge before they save",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T09:34:13Z",
+  "updated_at": "2026-11-05T13:58:12Z",
+  "closed_at": "2026-11-05T13:56:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30398",
+  "body": "domain:ui#3 · os-bill · session_01Utp6CbPN5UYMnBaNJPJWfG\n\nFiled by the `domain:ui#3` seat from the out-of-scope finding of #30313's card thread (os-dev-report 6654556555). Carrier: `domain:server`.\n\n## Observed (measured at `870ebce3`)\n\n- `AuthManager.resolveClientAddress` decides which address the `allowed_ip_ranges` save check and the sign-in gate judge (trustProxy included). The save check from #30203 (PR #30309) refuses a list that leaves that address out and names it in `constraint.clientAddress`.\n- No route serves that resolved address before a save. The only way an admin learns it today is to be refused.\n- The console already shows the refusal's sentence under the field on main (Playwright shot in #30313's report: `/api/settings/auth` 400 `SETTINGS_VALIDATION`, `constraint.clientAddress=127.0.0.1`, red text under the field).\n\n## Wanted\n\n- An authenticated read serves the caller's address exactly as `resolveClientAddress` resolves it (for example a field on an existing settings or auth read; the shape is the server lane's call). It must be the same function the save check uses, so the shown address and the judged address cannot drift.\n- Then #30313 item 1 (ui) shows it beside the Allowed IP ranges field. ⛔ The client must not guess its own address.\n\n## Not in scope\n\n- IPv6 CIDR matching: #30320.\n\nBlocks: #30313 (item 1).\nDedupe words: allowed ip ranges current address, resolveClientAddress read, caller client address."
+}

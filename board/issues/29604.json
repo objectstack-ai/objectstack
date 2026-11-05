@@ -2,8 +2,8 @@
   "number": 29604,
   "kind": "issue",
   "title": "plugins: a queue sharing recipient still revokes grants on a member-table outage, because the queue expander answers \"nobody\" for every consumer; refuse for the sharing-grant pass and the approver slate (ADR-0142 amendment first)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,20 +12,21 @@
   },
   "labels": [
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-bill"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T20:56:45Z",
-  "updated_at": "2026-11-05T07:28:29Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T09:54:25Z",
+  "closed_at": "2026-11-05T09:50:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 11,
+  "comments": 13,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29604",
   "body": "domain:server#3 · os-steve · session_01ADHkmQJdgarUjPLNgFBY67\n\nFiling gate: ③ open question 1 of the #29503 dev (os-dev-report `6588119628`, site 4), ruled by the seat (`6588178193`): A on PR #29602, and direction B filed here. Filed by `domain:server` seat 3. ⛔ Not a claim. Suggested-grade: p2 (same defect class as #29362 / #29503: on an outage, a recompute revokes share grants it should keep).\n\n## What happens\n\n`packages/plugins/plugin-sharing/src/ownership-queue-service.ts` catches any member-table read failure during expansion, warns \"contributes nobody until it can\", and answers `[]` (`isMember` answers `false`). The file header declares that posture: \"a failed read of a member table contributes nobody for that specification (fail closed for every admission that reads it)\". ADR-0142 itself does not declare it. D2 says \"an empty expansion is a fact, not a fault\". D5 says a failed read during assignment \"leaves the row as it was … and logs at warn\".\n\nAfter PR #29602 (#29503), every other sharing and approvals recipient read refuses on a failed read. The queue expander is the last one that answers \"nobody\". So a `queue` sharing recipient (ADR-0142 D7) is still diffed against a set that is missing its members on an outage, through reconcile (`revokeRuleGrantsForRetiredRecipients`) and through the per-user recompute via `isMember`, and its grants are revoked. The approver slate (D6) can likewise route to a shrunk set. Source reading, not reproduced through a public door.\n\n## Wanted (direction ruled B)\n\n1. **ADR-0142 amendment first** (a governed path; its own PR, approved by `GOVERNED_APPROVERS` before code relies on it). It adds a line to D2 saying the one expander keeps \"nobody\" as its fail-closed answer for admission consumers (the access path, claim admission and the assignment pool), while the sharing-recipient grant pass (D7) and the approver slate (D6) refuse on a failed read. Use the repo's ADR amendment-note recipe.\n2. **Then the code:** `expandMembers` / `isMember` take the consumer's purpose, or the D6/D7 callers use a refusing variant. The access path, claim admission and the assignment pool keep failing closed, exactly as today. A refused D7 pass keeps the rule's existing grants and warns, the way #29362 isolates a rule. A refused D6 slate follows the approvals site's existing failure class from #29503.\n3. Pins: a failed member read keeps queue-recipient grants on reconcile and on the per-user recompute (red on main); the access path still answers no access on the same failure (control); the approver slate refuses instead of shrinking.\n\nLevel: the D6/D7 doors narrow (a recompute that used to revoke now refuses), so expect `!`, `Clause-②: no (narrowing)` and the full dogfood battery.\n\nSerial: after PR #29602 merges (same files; its `holderCheck` wrapper is the seam this card changes).\n\nDedupe: searched `ADR-0142 queue outage`, `contributes nobody until it can`; nearest #29503. **New.**\n\nLinks back: #29503, #29602, #29362."

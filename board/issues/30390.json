@@ -1,0 +1,33 @@
+{
+  "number": 30390,
+  "kind": "issue",
+  "title": "Record page, record form, drawer and preview card still show the base translation of an object renamed in a .custom override",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T09:06:27Z",
+  "updated_at": "2026-11-05T13:08:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30390",
+  "body": "domain:ui#3 · os-bill · session_01Utp6CbPN5UYMnBaNJPJWfG\n\nFamily closing card for the served-object-label defect (ruling 6652679548 on #30311). #30311 (PR #30388) fixes the sidebar, recent list, object list title, app header and `/data` title; this card carries every other site. ⛔ Not a claim. Triage sets lane and grade.\n\n**Business reason.** A customer renames an installed object in its `.custom` override. After #30311 the list shows the new name, but opening a record, its form, its drawer or its preview card still shows the base package's translation of the old name, so the customer sees two names for one thing.\n\n**Mechanism** (the #30311 card thread, os-dev-report 6654022838; the list page measured live on zh-CN, the record surfaces code-read): `useObjectLabel`'s `objectLabel(def)` / `objectPluralLabel(def)` look the catalog key up first and use the served `label` only as a fallback, so the base package's string wins over a served override.\n\n**Sites** (`objectLabel(` / `objectPluralLabel(` over a served definition at `23114841`; not every one passes served text: `{ name, label: name }` fallbacks and a widget ref's own label need a per-site reading):\n\n- `ui/packages/app-shell`: AppContent 4, ActivityObjectLabel 1, ConsoleLayout 1, ObjectView 3 (import wizard, delete confirmations, `objectLabelOf`), ObjectDataPage 1 (record drawer title), RecordDetailView 11, RecordFormPage 2, appReportIndex 2, RecordPreviewCard 1, recordDrawerStack 2, PackagedActionsSection 1, WidgetRefCellFaces 1.\n- outside `app-shell`: fields RecordHoverCard 1, plugin-detail 3, plugin-form 2, plugin-gantt 1, plugin-grid 1.\n\n**Two routes** (the owner chooses and says why on the PR):\n\n1. Per site, with the app-shell private helper `servedObjectPluralLabel` PR #30388 adds (and a singular sibling), plus the same rule in the plugin packages.\n2. Change the order inside the published `useObjectLabel` (`ui/packages/i18n`): served label first, catalog key only when none is served. One change closes the class, but it changes a published hook's answer (`Clause-②` reading owed).\n\n**Expected.** Every Console surface that names a served object draws the served label as given; the catalog key only when no served label is at hand; en unchanged.\n\nDedupe: `served object label catalog`, `objectPluralLabel served definition`, `record page renamed object translation` → only #30311 and #30244.\n\nLinks: #30311, PR #30388, #30244, PR #30308."
+}

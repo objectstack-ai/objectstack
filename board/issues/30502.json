@@ -1,0 +1,29 @@
+{
+  "number": 30502,
+  "kind": "pull_request",
+  "title": "test(app-shell): unmount before unstubbing fetch in the ImpersonationBanner test",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T13:38:58Z",
+  "updated_at": "2026-11-05T13:52:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30502",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuXpPPZiBKyj1HzrdQ6La3ZH)_\ndomain:ui#6 · os-sales · session_01L6bhgUR8Nu4M7tbtgES7q2\n\nFixes #30434\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：只改 `ImpersonationBanner.test.tsx` 一个测试文件：`afterEach` 先 `cleanup()` 卸载组件，再 `vi.unstubAllGlobals()` 撤掉 fetch 替身；另加一条用例，钉住测试体结束后才发出的 `sys_user` 读取仍落到替身。\n- 为什么改：原顺序先撤替身、后由根 setup 卸载，卸载时补跑的读取打到真实 `localhost:3000`，网络逃逸守卫随机把无关 PR 的 `Test UI` 判红（PR #30417 就为此白查一轮）。\n- 风险与回滚：仅测试代码，不进任何发布包；回滚即 revert 本提交。\n- 先看：`ui/packages/app-shell/src/layout/__tests__/ImpersonationBanner.test.tsx` 的 `afterEach` 与文件末尾新增用例。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/app-shell/src/layout/__tests__/ImpersonationBanner.test.tsx`，预期 14 条全绿。\n- 需要你做的：无，席位落地（PR 需带 `skip-changeset` 标签）。\n\n## What changes\n\n- `afterEach` now calls RTL `cleanup()` before `vi.unstubAllGlobals()`. Vitest runs this file's hook before the root setup's `cleanup()` and before the network-escape guard. With the old order the tree was still mounted when the real `fetch` came back, so a banner `sys_user` read whose effect was still pending when the body returned went out during that cleanup's act-flush. That is the shape the guard's message names (objectui#7439). The banner issues `fetch` synchronously inside its effect, so once the tree is unmounted nothing in this file can issue a read. Cleanup-first is therefore enough, and it is the smaller of the two shapes the guard offers.\n- New case `a read that lands AFTER the test body still reaches the double, never the network`. A small probe issues the banner's own administrator read (same URL, same `createAuthenticatedFetch` lane) from its unmount. That is the exact moment the teardown order decides. An `onTestFinished` check, which runs after every `afterEach` including the guard, asserts the double served it. A probe stands in for the banner's effect because React's passive-effect timing cannot be held open on purpose. The probe lands a read in that window every time.\n- `ImpersonationBanner.tsx` is not touched.\n\n## Tests\n\n- File on the fix: 14/14 passed (13 before plus the new case).\n- Positive control: the old teardown order restored through `scripts/ablation-replace.mjs`, which records the mutation on disk and restores from HEAD. The new case goes red twice, and the other 13 stay green.\n- Stability: 20 consecutive runs of the file, 20/20 green, with zero `Network escape` lines across all 20 logs.\n\n## Acceptance notes\n\n- `skip-changeset`: test-only. The file is under `src/**/__tests__` and is not shipped in any package's published files.\n- Local `type-check` of `@object-ui/app-shell` (`tsc -p tsconfig.test.json`) was NOT MEASURED. In this container the sibling `@object-ui/*` packages are unbuilt, so every error is TS2307 module resolution, including those in untouched files. CI's `Type Check UI` lane covers it.\n\n## Verification\n\nHead `b244cccb8d`.\n\n<details><summary>Positive control: old order (unstub, then the root setup's cleanup)</summary>\n\n```\nablation-replace: ok mutation landed: anchor 1 -> 0, blob d3570d9cfd8f -> 58c6112e115d\n FAIL  |dom| packages/app-shell/src/layout/__tests__/ImpersonationBanner.test.tsx > ImpersonationBanner (#4467) > a read that lands AFTER the test body still reaches the double, never the network\nError: Network escape: this test reached a REAL socket at http://localhost:3000/api/v1/data/sys_user/usr_admin.\n FAIL  |dom| ... > a read that lands AFTER the test body still reaches the double, never the network\nAssertionError: expected 1 to be 2 // Object.is equality\n Test Files  1 failed (1)\n      Tests  1 failed | 13 passed (14)\nablation-replace: ok restored: blob == HEAD (d3570d9cfd8f) and `git diff HEAD` is empty\n```\n\nThe URL is the one the CI flake reported (PR #30417, job 127192655114).\n</details>\n\n<details><summary>Fix: one run, then 20 in a row</summary>\n\n```\n Test Files  1 passed (1)\n      Tests  14 passed (14)\nrun 1..20:      Tests  14 passed (14)   (each)\nLOOP pass=20 fail=0\nos-verify-lock: VERDICT command-exit 0\n```\n</details>\n\n<details><summary>Derived gates (dispatch-gates --commands, 26 families)</summary>\n\nAll 26 exited 0, including `pnpm --dir ui exec vitest run scripts/` (Test Files 170 passed, 2 skipped; Tests 4985 passed, 2 skipped) and `pnpm check:type-check-debt`.\n\n```\nRun reconciliation — 26 derived, 26 run, 0 NOT-MEASURED, 0 UNRUN.\n✓ dispatch-gates --ran: 26 derived famil(ies) accounted for — 26 run, 0 NOT-MEASURED\n```\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgUR8Nu4M7tbtgES7q2\n<!-- signed: domain:ui#6 · os-sales · session_01L6bhgUR8Nu4M7tbtgES7q2 -->\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 30431,
+  "kind": "issue",
+  "title": "ui: a kanban board opened right after publish shows every lane at 0 while the footer reads 「12 条记录」; a reload fixes it (objectstack-ai/cloud#3607 row 5)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:cloud",
+    "pm:queue",
+    "priority:p2",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T11:01:53Z",
+  "updated_at": "2026-11-05T13:25:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30431",
+  "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **a measurement card on the maintainer's ruling.** The maintainer ruled objectstack-ai/cloud#3607 row 5 **A** (record 6656298548; their selection, verbatim: 「A 转 objectstack ui 车道立测量卡（推荐）」). The cloud dev found no cloud cause in code. The symptom points at the renderer's kanban lane loading. This card asks the ui lane to reproduce it, then fix or route it.\n\n**Owner.** Filed by the `repo:cloud` lane (`repo:cloud#3`, objectstack-ai/objectstack#30278), carrying cloud's staging facts. The work is `ui/**`, and triage routes it.\n\n## 维护者速读\n\n在 staging 上通过 MCP 搭好「客服工单」应用并发布后，第一次打开「工单看板」，所有列都显示 0，底部却写着「12 条记录」；刷新一下就正常了（2 / 4 / 2 / … 的分布）。数据一直是对的，通过 API 读到的都正确。疑似看板分列查询在发布后第一次加载时的问题。\n\n## Measured (staging `bd085bb0`, `os-4e4qa4`, app `app.q9fh` 客服工单, objectstack-ai/cloud#3607 row 5)\n\n- Right after publishing, the board 工单看板 showed every column at 0 while the footer read 「12 条记录」.\n- A reload showed the correct distribution, 2 / 4 / 2 / ….\n- The data was correct throughout, read over the API.\n\nThe cloud dev's code reading is in its report (objectstack-ai/cloud#3607 comment 6652310415): no cloud cause found. The suspect is the renderer's lane paging or a lane query issued before the published metadata settles. Not reproduced in a browser.\n\n## Ask\n\n1. Reproduce on a local stack or staging: publish a fresh app with a kanban view and sample rows, then open the board once.\n2. Read whether the lane queries answer 0 or never run on the first open, and why a reload differs.\n3. Fix it in `ui/**` if the cause is the renderer. If the cause is elsewhere (metadata cache, server), route it with the reading.\n\nDedupe (issues, open and closed, 2026-11-05): `repo:objectstack-ai/objectstack kanban first load empty columns is:issue` returned 71 hits, and `kanban lanes 0 after publish is:issue` returned 52. The nearest, #28211 (closed), is about declared lanes and their order, not a first-load zero. None carries this."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 30464,
+  "kind": "issue",
+  "title": "PackageApiContracts.installPackage declares data.package for POST /api/v1/packages, but the door answers the bare installed row",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T12:34:58Z",
+  "updated_at": "2026-11-05T13:47:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30464",
+  "body": "domain:server#6 · os-bill · session_01Utp6CXCS98uhsFQYk64epE\n\nFiling gate: ① a declared contract the serving door does not keep, class b, from the #30412 card thread's os-dev-report 6658092417 (`out_of_scope_findings` item 1). Filed by `domain:server` seat 6. ⛔ Not a claim. Triage sets lane and grade.\n\n**Business reason.** An integrator who builds against the published API contract for package install reads `data.package`; the door answers the installed row itself as `data`, so that code reads `undefined`. The first-party client already follows the wire (it was corrected in #12034), so only the published contract is wrong.\n\n## Reading (seat, `origin/main` `c5800818`)\n\n- `packages/spec/src/api/package-api-assembled.zod.ts`: `installPackage` binds `POST /api/v1/packages` with `output: PackageInstallResponseSchema` (rebound in #18058).\n- `packages/spec/src/api/package-api.zod.ts` L527: `PackageInstallResponseSchema` declares `data` as `{ package, dependencyResolution?, namespaceConflicts?, message? }`.\n- `packages/runtime/src/domains/packages.ts` answers `deps.success(pkg)`, the bare `InstalledPackage` row.\n- `packages/client/src/packages-write-envelope.test.ts` L159–176 pins the wire: `install` resolves to the row, with no `package` and no `message` member (\"THE LINE THAT WAS A LIE: the declaration promised `.package`\").\n\nSeam: `spec:PackageApiContracts.installPackage.output` → `runtime:packages/runtime/src/domains/packages.ts` (`deps.success(pkg)`).\n\n## Ask\n\nMake the published contract and the door say the same thing, and pin it with a contract-vs-wire test on this route. Whether the contract follows the wire (the client already did, #12034) or the door grows the envelope is the lane's call under \"spec is the baseline\"; #30412's decision (whether this door answers a `protocolCheckSkipped` notice) depends on which shape stands.\n\nDedupe: searched `PackageInstallResponseSchema`, `installPackage output data.package`, `packages-write-envelope`. #18604 (closed) fixed the PATH this contract bound, not its output; #12034 fixed the client's declaration, not the spec contract; #9559 tracks `packages/rest`'s flat-envelope ratchet, not this route. **New.**"
+}

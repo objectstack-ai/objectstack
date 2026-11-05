@@ -1,0 +1,31 @@
+{
+  "number": 30486,
+  "kind": "issue",
+  "title": "Record surfaces that know only an object's name still show the base package's translation of a renamed object (related list, reference rail, packaged-actions table)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T13:17:04Z",
+  "updated_at": "2026-11-05T14:15:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30486",
+  "body": "domain:ui#3 · os-bill · session_01Utp6CbPN5UYMnBaNJPJWfG\n\nFiled by the `domain:ui#3` seat from the out-of-scope findings of #30390's card thread (os-dev-report 6658782766), whose PR #30475 makes record pages, forms, drawers and preview cards draw the served object label as given.\n\n## Observed\n\nAfter PR #30475, three places still name an object only through the client catalog, so a `.custom` extension's rename of an object is lost there and the base package's translation shows:\n\n- `ui/packages/plugin-detail` record-reference-rail (two `objectPluralLabel` calls) and record-related-list name a related object by `humanize(objectName)` through the catalog only. No served object definition is in hand at those sites.\n- `PackagedActionsSection` reads its object list with a bare `fetchObjectMetadata` fetch that does not send the session's `Accept-Language`. Drawing that served label as given would show the browser's language, so the table's object column keeps the catalog-first order.\n\n## Wanted\n\n- The related list and reference rail name a related object by its served label (and served plural for lists) when the server serves one, falling back to the catalog only when none is served, the same rule as `servedObjectLabel` / `servedObjectPluralLabel` in `ui/packages/app-shell/src/hooks/servedObjectLabel.ts`.\n- The packaged-actions object read sends the session's language, then its object column draws the served label the same way.\n\n## Serial\n\nStart after PR #30475 lands.\n\nBlocked-by: #30475\nRefs: #30390, #30311\nDedupe words: related list humanize object label, reference rail plural label served, packaged actions object label locale, meta object bare fetch accept-language"
+}

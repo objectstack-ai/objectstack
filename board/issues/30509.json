@@ -1,0 +1,32 @@
+{
+  "number": 30509,
+  "kind": "issue",
+  "title": "approvals: approval.requested / reminders / outcomes are emitted with no channels, so they are inbox-only; request e-mail too, with an approval e-mail template that deep-links to the approval page (objectstack-ai/cloud#2549 ruling B)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T13:47:05Z",
+  "updated_at": "2026-11-05T14:15:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30509",
+  "body": "repo:cloud#3 · hotlong · session_01Q4EjjRhUZjdy8VXs6Kkur2\n\nFiling gate: **executing a recorded ruling.** The maintainer ruled objectstack-ai/cloud#2549 **B**; their selection, verbatim, is 「B 只让租户自配邮箱」 (ruling record on that card). This card is item ②. Item ③ is a sibling card. The cloud half stays on objectstack-ai/cloud#2549 as `pm:blocked`.\n\n**Owner.** The `repo:cloud` lane (`repo:cloud#3`, objectstack-ai/objectstack#30278) follows it to close. The code is pure objectstack, and triage routes it. Priority p3, inherited from objectstack-ai/cloud#2549.\n\n## 维护者速读\n\n审批的提醒（有新审批、催办、结果）现在只发站内信，因为审批插件发通知时没指定渠道，消息服务默认只发站内信。改成同时发站内信和邮件，并加一个审批邮件模板，邮件里放一个跳转到应用内审批页的链接。不做「一键审批」令牌（PR #24620 有意拿掉的）。环境没配发信时，由 ③ 那张卡保证如实显示「未配置」。\n\n## Measured (objectstack `origin/main` `48231b02`, the seat's read-only reading)\n\n- `packages/services/service-messaging/src/messaging-service.ts:1163`: `const requestedChannels = input.channels?.length ? input.channels : ['inbox'];`\n- `packages/plugins/plugin-approvals/src/approval-service.ts`: `notify()` (~:2072) emits through `this.messaging.emit({...})` with no `channels`; `channels` occurs 0 times in the file. The `approval.requested` call site is ~:4759. The reminder comment (~:6735-6745): \"a reminder names no channel, messaging's default materializes it in the in-app inbox\".\n- `ApprovalNotificationPayload` (~:433-450) is closed (title, body, actionUrl). `actionUrl` is `/system/approvals?request=<id>` (~:2126-2130).\n- The e-mail channel falls back to `payload.title/body` when no `sys_notification_template` row exists (`email-channel.ts` ~:480). `plugin-email/src/templates/auth-templates.ts` holds auth templates only.\n- On staging (objectstack-ai/cloud#2549, comment 6647625229), an approval request's `sys_notification` had a single `sys_notification_delivery`: `channel: inbox`.\n\n## The ruled design\n\n1. The three approval topics (`approval.requested`, the reminder, the outcome) request `channels: ['inbox', 'email']`. Preferences still filter, as today.\n2. An approval e-mail template (in `plugin-email` templates, or as seeded `sys_notification_template` rows; the lane chooses and states why). Its link is the absolute `${publicBaseUrl}/system/approvals?request=<id>`.\n3. ⛔ No ADR-0043 action token in any stored payload. The #24620 invariants and the `reminder-action-link-at-rest` pins stay green.\n\n## Acceptance\n\n- A test proves an approval request on a kernel with a configured transport yields an `email` delivery row and a rendered message with the deep link.\n- A test proves a kernel with no transport yields the honest refusal from item ③, not a fake send.\n- The existing approval and messaging tests stay green.\n\nDedupe (issues, open and closed, 2026-11-05): `repo:objectstack-ai/objectstack approval notification email channel is:issue` returned 89 hits, and the nearest three (#27314, #30208, #27287) are not this; none carries approvals requesting e-mail."
+}

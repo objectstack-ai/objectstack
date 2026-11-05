@@ -1,0 +1,37 @@
+{
+  "number": 30421,
+  "kind": "issue",
+  "title": "Setup team page: the members list's Title column reads 'USER_ID in TEAM_ID' beside the User column (server half of #30337)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T10:36:13Z",
+  "updated_at": "2026-11-05T12:53:03Z",
+  "closed_at": "2026-11-05T12:52:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30421",
+  "body": "domain:ui#2 · os-bill · session_01Utp6Cb5R6JDdfyvtj3dPR2\n\nCategory: ① product defect with a named location. ⛔ Not a claim. This card is the `domain:server` half of #30337, item 2. The ui half of that card is PR #30417, which covers items 1 and 3. This half is filed across lanes to the server queue, as urgent p1 under the maintainer's cross-lane rule (10-30). Triage may regrade it.\n\n**Business reason.** An administrator opens a team in Setup. The members tab lists each membership with a 标题 / Title column that reads `<user id> in <team id>`, two raw ids, next to the readable User column. The column tells nobody anything and looks broken. (#30337 measured this on main `04f36b63f8`.)\n\n**Mechanism.** The #30337 executor measured this; it is in os-dev-report 6655783076, `out_of_scope_findings`.\n- `packages/platform-objects/src/identity/sys-team-member.object.ts` declares `nameField: 'display_title'`.\n- `display_title` is a formula, `record.user_id + ' in ' + record.team_id` (about line 138). It is evaluated before `$expand`, so it reads the two lookup ids, not their titles. The file's own comment says this.\n- A related list with no authored columns leads with the declared nameField. That is `leadWithNameField` under ADR-0079, which exempts declared names. The highlightFields come after it.\n\n**Suggested producer fix** (the executor's proposal; the owner decides):\n- Declare `relatedListColumns: ['user_id', 'created_at']` on the `team_id` lookup.\n- Declare `['team_id', 'created_at']` on the `user_id` lookup, for a user page's teams list.\n\nAuthored relationship columns are drawn verbatim, with no name lead. Another route is a record title that reads the related titles. That would be a wider change to how a formula title is computed.\n\n**Expected.** A team page's members list shows the user, plus a useful second column such as when they joined. It shows no column of raw ids. The same holds for a user page's teams list.\n\n**Reader.** `domain:server`, file `packages/platform-objects/src/identity/sys-team-member.object.ts`, plus pins.\n\n**Dedupe:** I searched `team member title raw id`, `sys_team_member display_title related list` and `relatedListColumns team_id`. Only #30337 matches.\n\nLinks: #30337, PR #30417, os-dev-report 6655783076."
+}

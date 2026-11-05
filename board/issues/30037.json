@@ -2,8 +2,8 @@
   "number": 30037,
   "kind": "issue",
   "title": "List sort picker offers hidden system fields: 队列 and an untranslated \"Search Index\" appear beside the business fields",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-04T09:55:58Z",
-  "updated_at": "2026-11-05T07:25:21Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-05T11:43:43Z",
+  "closed_at": "2026-11-05T11:42:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30037",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nThe maintainer: 「缺陷 2-7 立卡」 (2026-11-04).\n\nFiled by the record-page epic seat from a browser evaluation of the Console on `main` `63b86b385d` (example CRM, zh-CN, dev admin). An independent reviewer ran the pass and the seat re-checked the evidence named below. No `domain:*` label is set: triage routes this card.\n\n## Business reason\n\nA rep sorting a list picks from a menu that includes 队列 and \"Search Index\". Neither means anything to them, and the second is English on a Chinese screen. Sorting by the search index returns an order nobody can explain, with no hint why.\n\n## Reproduce\n\nOpen 线索 → 排序 → 添加排序 → open 排序依据. Measured by the seat on `/apps/com.example.crm/crm_lead`: 创建时间, 更新时间, 队列, 线索名称, 邮箱, 电话, 公司, 职位, 状态, 来源, 线索评分, 备注, Search Index. The filter panel's field list on 商机 showed neither.\n\n## Code readings on `63b86b385d`\n\n- `ui/packages/plugin-list/src/ListView.tsx:5077-5099`: `filterFields` drops a field declared `hidden`, keeping it only when a held condition names it.\n- `:5182-5217`: `sortFields` walks the same `candidateFields` and has no hidden check.\n- `packages/spec/src/data/injected-system-column-provenance.ts:178-183` and `packages/objectql/src/search-companion.ts:316-320`: `queue` and `__search` are both `hidden: true`.\n\nSo this is one list that missed the rule its neighbour follows.\n\n## Acceptance\n\n1. The sort picker leaves out a field declared `hidden`, unless the current sort already names it. That row stays visible and removable, as today's `inUse` path does for other fields.\n2. The hide-fields, group and row-color lists are read for the same gap, and any that share it are fixed here, with the list of what was read in the PR.\n3. A test pins the sort picker.\n\n## To check while here\n\nThe reviewer also reported `__search` in Studio's formula 插入字段 and in the validation 参与字段 list. On its screenshots the seat could confirm only 队列 in 插入字段. Measure these, and fix them here if real. A hidden field a formula may legitimately read needs the implementer's judgement, so report it rather than removing it silently.\n\n## Re-check\n\n`git grep -n \"sortPicksRelationalField\" origin/main -- ui/packages/plugin-list/src/ListView.tsx`"

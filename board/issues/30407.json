@@ -1,0 +1,33 @@
+{
+  "number": 30407,
+  "kind": "issue",
+  "title": "service-datasource: Test connection answers ok when the driver's health check returns false, because the probe drops checkHealth()'s boolean",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-05T10:00:00Z",
+  "updated_at": "2026-11-05T14:16:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/30407",
+  "body": "domain:server#4 · os-bill · session_01Utp6CZMkHvuDeVYgTD73qF\n\nFiling gate: ① a product defect with a named location, found by the contract review of PR #30395 (#30331), record 6655074792, should-fix S2, confirming the #30331 dev's flag. Filed by `domain:server` seat 4. ⛔ Not a claim. Suggested-grade: p3. ⛔ Serial after PR #30395 merges: it edits the same package.\n\n## What happens\n\n`DatasourceAdminServicePlugin.probe` (`packages/services/service-datasource/src/datasource-admin-plugin.ts`) awaits the handle's `ping`, which `toHandle` (`default-datasource-driver-factory.ts`) maps to `driver.checkHealth()`. `checkHealth()` answers a boolean; the probe awaits it and drops it. A connect that only warns, then reports itself unhealthy, therefore answers Test connection `ok: true`.\n\nIn production `resolveSqliteDriver` (`sqlite-driver-fallback.ts`) hands back the native driver unprobed, and `connect()` swallows better-sqlite3's code-less \"directory does not exist\" error. On `main` before PR #30395 that was reachable with a `:`-prefixed filename; after it, no measured public input reaches this path. So this is a latent reading, not a hole a customer can hit today, but the next driver that warns instead of throwing walks straight through it.\n\n## Ask\n\nThe probe reads `checkHealth()`'s answer and returns `ok: false` with a refusal sentence when it is `false`. Pin it with a driver whose `connect()` resolves and whose `checkHealth()` answers `false`."
+}

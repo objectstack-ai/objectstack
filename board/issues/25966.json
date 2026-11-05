@@ -1,7 +1,7 @@
 {
   "number": 25966,
   "kind": "issue",
-  "title": "[PM seat] domain:ui — 🟢 os-support-ai",
+  "title": "[PM seat] domain:ui — 🟢 os-sales · 由 os-sales 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,17 +14,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "os-support-ai"
+    "os-sales"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T06:24:48Z",
-  "updated_at": "2026-11-05T00:55:17Z",
+  "updated_at": "2026-11-05T13:42:15Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 16,
+  "comments": 18,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25966",
-  "body": "domain:ui#1 · os-support-ai · session_01WGufzfE4V9fzZgJLrLDmMC\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md` (⛔ not copied here). This is **`domain:ui` seat 1**. Seat 2 is #25995, seat 3 is #27561, seat 4 is #26620, seat 5 is #26945.\n\n## Current PM\n\n🟢 `os-support-ai` · `session_01WGufzfE4V9fzZgJLrLDmMC` (project \"objectstack spec ui server devx\", thread \"Run PM dispatch ui seat\") · seated 2026-11-05T00:46Z.\n\n- **Patrol:** `trig_016viDCdiNbSW1uhuBE8UQEM` · `45 * * * *`. **Mailbox:** #30188.\n- **Scope:** `priority:p1` and `priority:p2` cards only (p0 ahead of all, per the skill). Share: 2 active dev cards (maintainer's fleet cap 10). Dispatch back end: `mode:thread`.\n- Posture, ledger and round reports live in the project (⛔ not here).\n\n## Inherited ledger\n\n- Previous PM `os-support-ai` · `session_01WGufzjDyeFwq6AuFu3vwTd` clocked out with nothing in flight; its ledger is in this post's previous body revision.\n- Carried items: unclaimed p1 #26059; #30018's pending changeset carries one stale sentence, fixed in the release notes, not in the file (per #17712).\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing yet. ⛔ Re-derive from the live `Claim:` comments of every `domain:ui` seat and each open PR's file list before every dispatch.\n\n## Notes\n\n- **Publication:** a merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs --repo objectstack-ai/objectstack`). ⛔ No GitHub MCP writes.\n"
+  "body": "domain:ui#1 · os-sales · session_01L6bhgWn6zhNa4LL7VB1rtL\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md` (⛔ not copied here). This is **`domain:ui` seat 1**. Seat 2 is #25995, seat 3 is #27561, seat 4 is #26620, seat 5 is #26945, seat 6 is #30423. Posture and ledger live in the project; this stub keeps only what other accounts need to read.\n\n## Current PM\n\n🟢 `os-sales` · session `session_01L6bhgWn6zhNa4LL7VB1rtL` · seated 2026-11-05T13:40Z · run by the project of the os-sales account (由 os-sales 账户的项目负责). Summoned by the maintainer in the project chat (「UI 再开两个座位，并发都是5」, 2026-11-05T13:34Z); the other new seat of the same summons sits seat 4 (#26620).\n\n- **Patrol:** `trig_01FJ4L7EifH3PZwBTM38N1B8` · `38 * * * *` (hourly).\n- **Mailbox:** PR #30503 (`Mailbox-of: domain:ui#1 · os-sales`), subscribed.\n- **Concurrency:** at most 5 cards in flight (the same summons). M+/p1/`security` cards go `mode:thread`; S cards `mode:subagent`.\n\n## Handover ledger\n\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#1` + `head:claude/` PRs. 姿态台账住项目.\n- **Previous PM:** `os-support-ai` · `session_01WGufzfE4V9fzZgJLrLDmMC`, clock-out brief 6658723886 (in flight: none, stay-behind: none); its stub is the previous body revision.\n- **In flight:** none at seating.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing yet. Each claim declares its file surface; a card sharing a hot file with a sibling seat's in-flight claim waits behind it.\n- **Excluded:** the `pm:epic` subtrees. `ui/.github/**` and the root `ci.yml` stay ⛔ out of bounds for ui cards.\n\n## Notes\n\n- **Sibling split:** cards held by `domain:ui#2`–`#6` are theirs; the claim stamp arbitrates an unclaimed card.\n- **Standing constraints:** changesets for ui cards go to the root `.changeset/`. No PR goes to the objectui repository.\n- **Publication:** a merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs --repo objectstack-ai/objectstack`). ⛔ No GitHub MCP writes.\n"
 }
