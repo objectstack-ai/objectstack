@@ -2,12 +2,13 @@
 
 /**
  * [#29520 codemod] The "Class head: dialect probes, logger, configuration"
- * section of `SqlDriver`: the bodies of `emissionClients`, `clientSpelling`,
- * `aliasIdentifierSql`, `dateBucketSql`, `knexConfigFor`, `withConnectBound`,
- * `withUtcSession`, `withMysqlCalendarDayAsText`,
- * `withPostgresCalendarDayAsText`, `installQueryTiming`, `assertSchemaMutable`,
- * `assertDialectEmits` moved out of `sql-driver.ts` whole by
- * `scripts/codemod-split-sql-driver.mjs`.
+ * section of `SqlDriver`: the bodies of `logger`, `logDurabilityFailure`,
+ * `emissionClients`, `clientSpelling`, `insertReturnsStoredRows`,
+ * `aliasIdentifierSql`, `dateGranularityCapabilities`, `dateBucketSql`,
+ * `knexConfigFor`, `withConnectBound`, `withUtcSession`,
+ * `withMysqlCalendarDayAsText`, `withPostgresCalendarDayAsText`,
+ * `installQueryTiming`, `assertSchemaMutable`, `assertDialectEmits` moved out
+ * of `sql-driver.ts` whole by `scripts/codemod-split-sql-driver.mjs`.
  *
  * A MOVE, not a redesign. {@link ClassHeadFacet} is a stateless facet of `SqlDriver`
  * (ruling 6624345766): each static method of it is the body of the `SqlDriver`
@@ -60,14 +61,31 @@ export interface ClassHeadHost {
   assertDialectEmits: SqlDriverClass['assertDialectEmits'];
   buildDateBucketExpr: SqlDriverClass['buildDateBucketExpr'];
   readonly config: SqlDriverClass['config'];
+  readonly isMysql: SqlDriverClass['isMysql'];
+  readonly isPostgres: SqlDriverClass['isPostgres'];
   readonly isSqlite: SqlDriverClass['isSqlite'];
   readonly knex: SqlDriverClass['knex'];
+  readonly logger: SqlDriverClass['logger'];
   openedEmptyInMemory: SqlDriverClass['openedEmptyInMemory'];
   readonly schemaMode: SqlDriverClass['schemaMode'];
 }
 
 /** The bodies of the "Class head: dialect probes, logger, configuration" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class ClassHeadFacet {
+  /** The initializer of `SqlDriver#logger`; the field's declaration there is its contract. */
+  static logger(): SqlDriverClass['logger'] {
+    return {
+    warn: (msg, meta) => console.warn(msg, meta ?? ''),
+    error: (msg, meta) => console.error(msg, meta ?? ''),
+  };
+  }
+
+  /** The body of `SqlDriver#logDurabilityFailure`; the method's docblock there is its contract. */
+  static logDurabilityFailure(this: Pick<ClassHeadHost, 'logger'>, msg: string, meta?: any): void {
+    if (this.logger.error) this.logger.error(msg, meta);
+    else this.logger.warn(msg, meta);
+  }
+
   /** The body of `SqlDriver#emissionClients`; the method's docblock there is its contract. */
   static emissionClients(): string[] {
     return [
@@ -90,9 +108,35 @@ export class ClassHeadFacet {
     return typeof c === 'string' ? c : '';
   }
 
+  /** The body of `SqlDriver#insertReturnsStoredRows`; the method's docblock there is its contract. */
+  static insertReturnsStoredRows(this: Pick<ClassHeadHost, 'isPostgres' | 'isSqlite'>): boolean {
+    return this.isSqlite || this.isPostgres;
+  }
+
   /** The body of `SqlDriver#aliasIdentifierSql`; the method's docblock there is its contract. */
   static aliasIdentifierSql(this: Pick<ClassHeadHost, 'knex'>, alias: string): string {
     return (this.knex.client as { wrapIdentifier(value: string): string }).wrapIdentifier(String(alias));
+  }
+
+  /** The body of `SqlDriver#dateGranularityCapabilities`; the method's docblock there is its contract. */
+  static dateGranularityCapabilities(this: Pick<ClassHeadHost, 'isMysql' | 'isPostgres' | 'isSqlite'>): Record<string, boolean> {
+    if (this.isPostgres) {
+      return { day: true, month: true, quarter: true, year: true, week: true };
+    }
+    if (this.isMysql) {
+      return { day: true, month: true, quarter: true, year: true, week: true };
+    }
+    if (this.isSqlite) {
+      // [#21595] All five, `week` included. The ISO week is computed by the
+      // Thursday rule through date modifiers (the `week` arm of
+      // `buildDateBucketExpr`), never `strftime('%V')` / `'%G'`: those arrived
+      // in SQLite 3.46, and libSQL (`driver-turso`) bundles an older engine.
+      // Measured: better-sqlite3 13.0.3 runs 3.53.4, `@libsql/client` 0.18.0
+      // runs 3.45.1 (where `%V` answers NULL), sql.js 1.14.2
+      // (`driver-sqlite-wasm`) runs 3.49.1. The expression runs on all three.
+      return { day: true, month: true, quarter: true, year: true, week: true };
+    }
+    return {};
   }
 
   /** The body of `SqlDriver#dateBucketSql`; the method's docblock there is its contract. */

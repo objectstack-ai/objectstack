@@ -160,7 +160,9 @@ async function clearReset(): Promise<void> {
 
 /** Enforced MFA that holds the target (grace lapsed) and not the administrator (inside the grace window). */
 async function armMfa(): Promise<void> {
-  auth.applyConfigPatch({ mfaRequired: true, mfaGracePeriodDays: 7 });
+  // Two-factor with it, as the `auth.mfa_required` setting applies them: the
+  // gate holds a user for MFA only while they can enroll.
+  auth.applyConfigPatch({ mfaRequired: true, mfaGracePeriodDays: 7, plugins: { twoFactor: true } });
   await ql.update('sys_user', { id: targetId, mfa_required_at: new Date(Date.now() - 10 * DAY_MS) }, SYS);
   await ql.update('sys_user', { id: adminId, mfa_required_at: new Date() }, SYS);
 }

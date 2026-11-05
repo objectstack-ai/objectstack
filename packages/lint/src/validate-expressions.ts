@@ -1329,6 +1329,9 @@ function isFlattenedNearMissFor(diagnostic: string, roots: readonly string[]): b
  * declares none, it stays the advisory warning. An advisory rule is graded
  * `error` too: the twin refuses it, and a rule that can never be evaluated
  * never gives its advisory — the message says so instead of a refused write.
+ * The date verdicts (`date-arithmetic`, `date-text-arithmetic`) are an error
+ * at every site; in a flow condition the same outcome picks their sentence:
+ * `-run-fails` under `run-fails`, `-run-may-fail` anywhere else (#30016).
  */
 type FaultSite =
   | { readonly kind: 'validation rule'; readonly severity: unknown }
@@ -2198,6 +2201,13 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
  */
 export function runStackExpressionPasses(stack: AnyRec, options: StackExpressionOptions): ExprIssue[] {
   const issues: ExprIssue[] = [];
+  // [#30026] How many `type-mismatch-run-may-fail` warnings {@link check} has
+  // served: a flow whose own count moved is one an author is told why of,
+  // where the reason is the flow's own (the time-relative note in the flow
+  // walk). Only that code: the date verdicts' `-run-may-fail` arm is an error
+  // whatever the outcome, so a sweep of another object does not soften it and
+  // there is nothing to explain.
+  let runMayFailServed = 0;
   // [#22019] See {@link StackExpressionOptions.runtimeWriteType}: on an object
   // write only the passes over the object's own body judge: the field-formula
   // pass and (#22032) the validation-rule, field-rule-slot, per-option
@@ -2527,7 +2537,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       if (fieldRuleVerdictIssued && isBareReferenceToAny(e.message, FIELD_RULE_NOWHERE_BOUND_ROOTS)) continue;
       issues.push({ where, message: e.message, source: e.source, severity: 'error' });
     }
-    for (const w of res.warnings) issues.push({ where, message: w.message, source: w.source, severity: 'warning' });
+    for (const w of res.warnings) {
+      if (w.code === 'type-mismatch-run-may-fail') runMayFailServed++;
+      issues.push({ where, message: w.message, source: w.source, severity: 'warning' });
+    }
     if (objectName && traversalHydration) refuseStoredMetadataBodyHop(where, raw, objectName, 'rule');
     if (objectName && traversalHydration) refuseUndeclaredHopField(where, raw, objectName, 'rule');
     // [#8116] Provenance rides every object-bound predicate this helper
@@ -2710,10 +2723,22 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // contractually typed `(stack) => Issue[]` — the crash `lintFlowPatterns`
     // was filed for, reached through this rule instead, on the same document.
     const edges = recordsOf(flow.edges);
-    // The record-change target object — `record.*` refs resolve against it.
+    // The object the flow's conditions are typed against — `record.*` refs and
+    // bare names resolve against its fields: the start node's `objectName`
+    // (a record-change run's trigger object), else, on a time-relative flow,
+    // the object it sweeps. `TimeRelativeTriggerSchema` requires
+    // `timeRelative.object`, and `time-relative-trigger.ts` launches each run
+    // with a row of that object as `record`, whatever the start node names, so
+    // a sweep whose start names no `objectName` is typed against the swept
+    // object: its record IS that row.
     const startNode = nodes.find(n => n.type === 'start');
     const startCfg = (startNode?.config ?? {}) as AnyRec;
-    const objectName = typeof startCfg.objectName === 'string' ? startCfg.objectName : undefined;
+    const startObject = typeof startCfg.objectName === 'string' ? startCfg.objectName : undefined;
+    const triggerKind = resolveFlowTriggerKind(flow);
+    const sweep = startCfg.timeRelative && typeof startCfg.timeRelative === 'object' ? startCfg.timeRelative as AnyRec : {};
+    const sweepObject = triggerKind === 'time_relative' && typeof sweep.object === 'string' ? sweep.object : undefined;
+    const objectName = startObject ?? sweepObject;
+    const runMayFailBefore = runMayFailServed;
 
     // #4347 — every graph in the flow, not just `flow.nodes`/`flow.edges`. An
     // ADR-0031 container keeps a whole sub-graph in its `config`, so the
@@ -2819,18 +2844,20 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
      *  - Outcome `run-fails`: the condition throws, the run fails, and the
      *    trigger isolates the write that fired it.
      */
-    const triggerKind = resolveFlowTriggerKind(flow);
     const nullGuardObject = triggerKind === 'record_change' ? objectName : undefined;
     // [#29926] The ledger's flow rows: `run-fails` on a record-triggered flow,
     // for both verdicts, and on a time-relative sweep of the typed object
     // (#29959; the null-guard twin stays on record-triggered flows, the one
     // entrance that binds `previous` too); nothing declared on any other flow.
-    // The sweep's object is `timeRelative.object`, else the start node's.
-    const sweep = startCfg.timeRelative && typeof startCfg.timeRelative === 'object' ? startCfg.timeRelative as AnyRec : {};
+    // The sweep's object is `timeRelative.object` and nothing else: the schema
+    // requires the key, and a descriptor without it never binds
+    // (`flow-time-relative-descriptor-invalid`), so no run of such a flow
+    // binds a row of the typed object and none is declared. The typed object
+    // is the swept one wherever the start names no `objectName` (above).
     const flowFaultOutcome = faultOutcomeOf({
       kind: 'flow condition',
       triggerKind,
-      sweepsTypedObject: typeof sweep.object !== 'string' || sweep.object === objectName,
+      sweepsTypedObject: sweepObject !== undefined && sweepObject === objectName,
     });
     // [#29959] The names the run binds over the flattening — its declared
     // variables and node ids, and the engine's own — which a bare read holds
@@ -3247,6 +3274,28 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           for (let k = first; k < issues.length; k++) issues[k] = { ...issues[k]!, path };
         }
       }
+    }
+
+    // [#30026] Why a sweep of another object keeps the run-may-fail warning:
+    // the conditions are typed against the start node's `objectName`, while
+    // each run's `record` is a row of the swept object. Said once per flow, at
+    // the key that makes it so, and only where a warning it explains was served.
+    if (startObject !== undefined && sweepObject !== undefined && startObject !== sweepObject
+      && runMayFailServed > runMayFailBefore) {
+      const startIndex = flowIndex >= 0 && startNode && Array.isArray(flow.nodes) ? flow.nodes.indexOf(startNode) : -1;
+      issues.push({
+        where: `flow '${flowName}' · node '${String(startNode?.id)}' (start) config.objectName`,
+        message:
+          `this time-relative flow sweeps '${sweepObject}' (config.timeRelative.object), so each run's record is a ` +
+          `row of '${sweepObject}', while its conditions are checked against the fields of '${startObject}' (the ` +
+          `start node's config.objectName). That is why a type mismatch in its conditions is a warning here and ` +
+          `not a refusal: the names hold a '${sweepObject}' row, not the '${startObject}' fields they were checked ` +
+          `against. Set config.objectName to '${sweepObject}', or remove it: the conditions are then checked ` +
+          `against the swept object, and a type mismatch in them is refused, as on a record-triggered flow.`,
+        source: startObject,
+        severity: 'warning',
+        ...(startIndex >= 0 ? { path: `flows[${flowIndex}].nodes[${startIndex}].config.objectName` } : {}),
+      });
     }
   }
 

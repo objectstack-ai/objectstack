@@ -20,18 +20,18 @@ and silently hides an action on every record; a dangling widget binding renders
 an empty chart. Catch them before you ship:
 
 ```bash
-npm run validate      # schema + CEL predicates + widget bindings (no artifact)
-npm run typecheck     # TypeScript types against @objectstack/spec
+{{PM}} run validate      # schema + CEL predicates + widget bindings (no artifact)
+{{PM}} run typecheck     # TypeScript types against @objectstack/spec
 ```
 
-`npm run validate` runs the **same gates as `npm run build`** (Zod protocol
+`{{PM}} run validate` runs the **same gates as `{{PM}} run build`** (Zod protocol
 schema, CEL/predicate validation with `record.<field>` existence checks, and
 dashboard widget-binding integrity) but emits no `dist/` — so it is the fast
 inner-loop check after editing an `*.object.ts` / `*.view.ts` / `*.action.ts` /
 `*.flow.ts`. Both exit non-zero with a located, corrective message on failure.
-Run `npm run build` when you need the compiled `dist/objectstack.json` artifact.
+Run `{{PM}} run build` when you need the compiled `dist/objectstack.json` artifact.
 
-**Never report a metadata change as done until `npm run validate` passes.**
+**Never report a metadata change as done until `{{PM}} run validate` passes.**
 
 ## Naming Conventions
 
@@ -54,7 +54,7 @@ Run `npm run build` when you need the compiled `dist/objectstack.json` artifact.
 4. Import from `@objectstack/spec` — never use relative paths into the spec package.
 5. **Predicates are CEL** — `visible`, `disabled`, `requiredWhen`, validation rules,
    flow conditions and sharing rules reference record fields as `record.<field>`,
-   never bare `<field>`. A bare reference is a silent runtime bug (`npm run validate`
+   never bare `<field>`. A bare reference is a silent runtime bug (`{{PM}} run validate`
    now rejects it).
 
 ## Project Structure
@@ -70,13 +70,40 @@ Run `npm run build` when you need the compiled `dist/objectstack.json` artifact.
 │   ├── dashboards/           # BI dashboards
 │   ├── apps/                 # App navigation & page structure
 │   ├── skills/               # AI skills
-│   └── picklists/            # Shared option sets that select fields reuse
+│   ├── picklists/            # Shared option sets that select fields reuse
+│   ├── security/             # Permission sets (what signed-in users may do)
+│   └── datasets/             # Analytics datasets that dashboard widgets bind to
 ```
 
 These are exactly the directories `objectstack.config.ts` wires. A new directory
-under `src/` is never loaded, and `npm run validate` neither counts nor checks
+under `src/` is never loaded, and `{{PM}} run validate` neither counts nor checks
 what it holds, until its `index.ts` barrel is imported in `objectstack.config.ts`
 and handed to its stack key there.
+
+## Change the app in `src/` — a Studio change stays in its database
+
+`src/` is what ships: `{{PM}} run build` and the `Dockerfile` compile it, and
+nothing else, into `dist/objectstack.json`. Studio, in the Console that
+`{{PM}} run dev` serves, never writes `src/`. A change saved there to an item
+this app ships (a view, a dashboard, a report) is an item of the package
+`<this app's package id>.custom`, stored in that environment's database —
+locally, `.objectstack/data/`. It is not in the build and does not reach a
+deployment.
+
+- **Make every change to the app in `src/`**, never through Studio or the
+  metadata API of a running server: `src/` is what is validated, reviewed and
+  deployed. When a person tried something in Studio and wants it in the app,
+  make the same change in `src/`.
+- **A customization that should stay one moves as a package.** With the dev
+  server running, `npx os login --url http://localhost:3000` once, then
+  `npx os package export --url http://localhost:3000`, writes every package the database
+  holds that `src/` does not register, the `.custom` package among them, to
+  `objectstack-export/NN-ID/objectstack.json`. Commit that directory. After
+  the deployment is up, install each file into it, in the numbered order:
+  `npx os package install objectstack-export/NN-ID/objectstack.json --runtime URL`.
+
+`{{PM}} run build` prints a notice when the local dev database holds such a
+customization.
 
 ## AI Skills
 

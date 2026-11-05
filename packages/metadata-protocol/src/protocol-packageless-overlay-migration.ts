@@ -137,12 +137,10 @@ import {
     overlayPairFixAdmits,
     overlayPairFixOf,
     overrideWriteMemberOf,
-    type OverrideWriteSubject,
-    type OverrideWriteVerdict,
+    type OverrideWriteVerdictAsk,
 } from './protocol-packaged-base-refusal.js';
 import { readOnlyShippingPackages, shippingPackageIds } from './protocol-environment-rows.js';
 import { isServedOverrideRowOf } from './served-override.js';
-import { SysMetadataRepository } from './sys-metadata-repository.js';
 
 /** The class members this module reads, typed as the class declares them. */
 export interface PackagelessOverlayMigrationHost {
@@ -155,6 +153,10 @@ export interface PackagelessOverlayMigrationHost {
     readonly isWritablePackage: ObjectStackProtocolImplementation['isWritablePackage'];
     readonly ensureCustomizationPackage: ObjectStackProtocolImplementation['ensureCustomizationPackage'];
     readonly saveMetaItem: ObjectStackProtocolImplementation['saveMetaItem'];
+    /** [#30000] THE repository every `sys_metadata` write goes through; step 4's delete takes it. */
+    readonly getOverlayRepo: ObjectStackProtocolImplementation['getOverlayRepo'];
+    /** [#30000] The delete door's heal, run after step 4 removes an active row. */
+    readonly restoreArtifactRegistryView: ObjectStackProtocolImplementation['restoreArtifactRegistryView'];
 }
 
 /** How the ceremony classified one package-less row (module header, "The population"). */
@@ -541,7 +543,7 @@ export async function migratePackagelessOverlays(
         }
         return answer;
     };
-    const repository = new SysMetadataRepository({ engine: this.engine as never, orgLabel: 'env' });
+    const repo = this.getOverlayRepo();
     const rowsById = new Map<string, any>();
     for (const row of await overlayRows.call(this)) rowsById.set(String(row.id), row);
     if (census.incompleteDeclarations.length > 0) {
@@ -601,7 +603,7 @@ export async function migratePackagelessOverlays(
             }
             // Step 4: only now, the unbound row (or the row bound to the
             // base), by its own address.
-            await repository.delete(
+            await repo.delete(
                 { type: row.storedType, name: row.name, org: 'env' } as never,
                 {
                     parentVersion: (typeof stored.checksum === 'string' ? stored.checksum : null) as string,
@@ -617,6 +619,12 @@ export async function migratePackagelessOverlays(
                     ...(row.member !== undefined ? { member: row.member } : {}),
                 } as never,
             );
+            // [#30000] The registry follows the removed row, as the delete
+            // door's heal makes it follow: the row's registration and the
+            // record of what a view container expanded to leave with it, and
+            // the pair's row saved in step 2 is registered again. A draft never
+            // hydrated, so its removal heals nothing.
+            if (row.state === 'active') await this.restoreArtifactRegistryView(row.type, row.name, null, row.member);
             movedFrom.set(itemKey, bound);
             line.moved += 1;
             outcomes.push(addedMember === undefined
@@ -680,8 +688,12 @@ export interface PackagelessCloseHost {
     readonly rethrowUnlessMetadataStoreUnprovisioned: ObjectStackProtocolImplementation['rethrowUnlessMetadataStoreUnprovisioned'];
     /** The read-only code packages that ship a name of an overlay type ([] for any other type). */
     readonly overlayBaseShippers: (type: string, name: string) => string[];
-    /** The override write gate, as the ceremony's step 2 meets it through the save door. */
-    readonly overrideWriteVerdict: (request: OverrideWriteSubject) => OverrideWriteVerdict;
+    /**
+     * The override write gate, as the ceremony's step 2 meets it through the
+     * save door: on a pair step 1 has not ensured yet, with the closure the
+     * ensure door gives it (`OverlayPairFix.pendingPairScope`).
+     */
+    readonly overrideWriteVerdict: OverrideWriteVerdictAsk;
 }
 
 /** The package-less write {@link packagelessCloseSubject} judges, and the row it would write. */

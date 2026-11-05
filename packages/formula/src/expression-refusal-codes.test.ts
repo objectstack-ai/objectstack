@@ -295,14 +295,37 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         'on dates: this faults at runtime, so the field silently evaluates to null. Use `daysBetween(a, b)` for the span ' +
         'in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
     },
+  ],
+  // [#30016] A flattened (flow) condition: the fault fails the run, it never
+  // reads null — `run-fails` where the run is proven to hold the field.
+  'date-arithmetic-run-fails': [
+    {
+      produce: () =>
+        onlyError('predicate', 'close_date + 1 > 3', {
+          fields: ['close_date'],
+          fieldTypes: { close_date: 'date' },
+          faultOutcome: 'run-fails',
+        }),
+      params: { operands: 'google.protobuf.Timestamp + int', reference: 'close_date' },
+      message:
+        'date arithmetic `google.protobuf.Timestamp + int` — `close_date` is a date, and CEL can\'t do arithmetic ' +
+        'on dates: this faults at runtime, and ' +
+        'a flow condition that cannot be evaluated fails the run: the flow stops at this condition and the work the flow ' +
+        'exists to do is not done (it does not read null). ' +
+        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+    },
+  ],
+  'date-arithmetic-run-may-fail': [
     {
       produce: () =>
         onlyError('predicate', 'close_date + 1 > 3', { fields: ['close_date'], fieldTypes: { close_date: 'date' } }),
       params: { operands: 'google.protobuf.Timestamp + int', reference: 'close_date' },
       message:
         'date arithmetic `google.protobuf.Timestamp + int` — `close_date` is a date, and CEL can\'t do arithmetic ' +
-        'on dates: this faults at runtime, so the field silently evaluates to null. Use `daysBetween(a, b)` for the span ' +
-        'in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+        'on dates: this faults wherever `close_date` holds the date when the condition runs, and ' +
+        'a flow condition that cannot be evaluated fails the run: the flow stops at this condition and the work the flow ' +
+        'exists to do is not done (it does not read null). ' +
+        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
     },
   ],
   'date-text-arithmetic': [
@@ -319,6 +342,26 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         'faults at runtime, so the field silently evaluates to null. Use `daysBetween(a, b)` for the span in whole days, ' +
         'and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
     },
+  ],
+  'date-text-arithmetic-run-fails': [
+    {
+      produce: () =>
+        onlyError('predicate', 'end_at - start_at > duration("1h")', {
+          fields: ['start_at', 'end_at'],
+          fieldTypes: { start_at: 'datetime', end_at: 'datetime' },
+          faultOutcome: 'run-fails',
+        }),
+      params: { operands: 'DateText - DateText', reference: 'start_at' },
+      message:
+        'date arithmetic `DateText - DateText` — `start_at` is a date field, and the runtime holds a date field ' +
+        'as its text (`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which CEL can\'t do arithmetic on: ' +
+        'this faults at runtime, and ' +
+        'a flow condition that cannot be evaluated fails the run: the flow stops at this condition and the work the flow ' +
+        'exists to do is not done (it does not read null). ' +
+        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+    },
+  ],
+  'date-text-arithmetic-run-may-fail': [
     {
       produce: () =>
         onlyError('predicate', 'end_at - start_at > duration("1h")', {
@@ -328,9 +371,11 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
       params: { operands: 'DateText - DateText', reference: 'start_at' },
       message:
         'date arithmetic `DateText - DateText` — `start_at` is a date field, and the runtime holds a date field ' +
-        'as its text (`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which CEL can\'t do arithmetic on: this ' +
-        'faults at runtime, so the field silently evaluates to null. Use `daysBetween(a, b)` for the span in whole days, ' +
-        'and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+        'as its text (`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which CEL can\'t do arithmetic on: ' +
+        'this faults wherever `start_at` holds that text when the condition runs, and ' +
+        'a flow condition that cannot be evaluated fails the run: the flow stops at this condition and the work the flow ' +
+        'exists to do is not done (it does not read null). ' +
+        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
     },
   ],
   'date-duration-value': [
@@ -594,6 +639,7 @@ const SWEEP_SOURCES: readonly string[] = [
   'close_date + 1 > 3',
   'record.close_date - record.close_date',
   'today() - record.close_date',
+  'close_date - close_date > duration("1h")',
   'record.name > 5',
   'record.active + 1 > 5',
   "record.account == 'a1' && record.account.name == 'x'",
@@ -631,6 +677,10 @@ const SWEEP_SCHEMAS: readonly (ExprSchemaHint | undefined)[] = [
     optionFields: ['status'],
   },
   { fields: ['status', 'close_date'], objectName: 'deal', fieldTypes: { close_date: 'date' } },
+  // [#30016] The same flow condition where the run is proven to hold the
+  // field: the date verdicts' `-run-fails` codes (the line above reaches
+  // `-run-may-fail`).
+  { fields: ['status', 'close_date'], objectName: 'deal', fieldTypes: { close_date: 'date' }, faultOutcome: 'run-fails' },
   // [#29926] The deal schema once per declared fault outcome, so the sweep
   // reaches each `type-mismatch-*` code and holds its params to its message.
   ...(['fail-closed', 'run-fails', 'fail-open'] as const).map((faultOutcome): ExprSchemaHint => ({

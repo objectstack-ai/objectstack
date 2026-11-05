@@ -1107,15 +1107,19 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
     // record-change trigger's — so a sweep of the object the conditions are
     // typed against gets the run-fails verdict, bare name included. A sweep of
     // another object binds a row of THAT object: the warning stays.
-    it('refuses a type mismatch on a time-relative sweep of the flow object, and warns on a sweep of another (#29959)', () => {
-      const flowOf = (name: string, sweepObject: string | undefined) => ({
+    // [#30026] A start naming no `objectName` is typed against the swept
+    // object (`timeRelative.object`, which the schema requires): its record IS
+    // that row, so `tr_sweep_only` is refused like `tr_same`. Before, it got no
+    // type verdict at all.
+    it('refuses a type mismatch on a time-relative sweep of the typed object, and warns on a sweep of another (#29959, #30026)', () => {
+      const flowOf = (name: string, startObject: string | undefined, sweepObject: string) => ({
         name,
         nodes: [
           {
             id: 'start', type: 'start',
             config: {
-              objectName: 'crm_opportunity', condition: 'title > 5', schedule: '0 * * * *',
-              timeRelative: { ...(sweepObject ? { object: sweepObject } : {}), dateField: 'close_date', offsetDays: 3 },
+              ...(startObject ? { objectName: startObject } : {}), condition: 'title > 5', schedule: '0 * * * *',
+              timeRelative: { object: sweepObject, dateField: 'close_date', offsetDays: 3 },
             },
           },
           { id: 'route', type: 'decision', config: { conditions: [{ label: 'Long', expression: 'record.title > 5' }] } },
@@ -1130,12 +1134,12 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         { name: 'crm_opportunity', fields: { title: { type: 'text', required: true }, close_date: { type: 'date' } } },
         { name: 'crm_task', fields: { close_date: { type: 'date' } } },
       ];
-      for (const [name, sweepObject, severity] of [
-        ['tr_default', undefined, 'error'],
-        ['tr_same', 'crm_opportunity', 'error'],
-        ['tr_other', 'crm_task', 'warning'],
+      for (const [name, startObject, sweepObject, severity] of [
+        ['tr_sweep_only', undefined, 'crm_opportunity', 'error'],
+        ['tr_same', 'crm_opportunity', 'crm_opportunity', 'error'],
+        ['tr_other', 'crm_opportunity', 'crm_task', 'warning'],
       ] as const) {
-        const found = typeMismatches(validateStackExpressions({ objects, flows: [flowOf(name, sweepObject)] }));
+        const found = typeMismatches(validateStackExpressions({ objects, flows: [flowOf(name, startObject, sweepObject)] }));
         expect(found.map(i => [i.where, i.severity]), name).toEqual([
           [`flow '${name}' · node 'start' (start) condition`, severity],
           [`flow '${name}' · node 'route' (decision) decision branch expression at config.conditions[0].expression`, severity],
@@ -1147,6 +1151,172 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
           );
         }
       }
+    });
+
+    // [#30026] Where the sweep is of another object, the author is told why the
+    // verdict is only a warning: once, at the start node's `objectName`, and
+    // only on a flow that was served a warning it explains.
+    it('says why a time-relative sweep of another object only warns, once, where a warning was served (#30026)', () => {
+      const objects = [
+        { name: 'crm_opportunity', fields: { title: { type: 'text', required: true }, close_date: { type: 'date' } } },
+        { name: 'crm_task', fields: { close_date: { type: 'date' } } },
+      ];
+      const flowOf = (name: string, startObject: string | undefined, sweepObject: string, condition: string) => ({
+        name,
+        nodes: [
+          {
+            id: 'start', type: 'start',
+            config: {
+              ...(startObject ? { objectName: startObject } : {}), condition, schedule: '0 * * * *',
+              timeRelative: { object: sweepObject, dateField: 'close_date', offsetDays: 3 },
+            },
+          },
+          { id: 'end', type: 'end' },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'end', condition }],
+      });
+      const notes = (issues: ReturnType<typeof validateStackExpressions>) =>
+        issues.filter(i => i.where.endsWith('(start) config.objectName'));
+      const other = validateStackExpressions({ objects, flows: [flowOf('tr_other', 'crm_opportunity', 'crm_task', 'title > 5')] });
+      expect(notes(other).map(i => [i.where, i.severity, i.path, i.source])).toEqual([
+        ["flow 'tr_other' · node 'start' (start) config.objectName", 'warning', 'flows[0].nodes[0].config.objectName', 'crm_opportunity'],
+      ]);
+      expect(notes(other)[0]!.message).toContain("each run's record is a row of 'crm_task'");
+      expect(notes(other)[0]!.message).toContain("Set config.objectName to 'crm_task', or remove it");
+      // No warning to explain, or no other object: no note.
+      for (const [name, startObject, sweepObject, condition] of [
+        ['tr_other_clean', 'crm_opportunity', 'crm_task', 'size(title) > 5'],
+        ['tr_same', 'crm_opportunity', 'crm_opportunity', 'title > 5'],
+        ['tr_sweep_only', undefined, 'crm_opportunity', 'title > 5'],
+      ] as const) {
+        expect(notes(validateStackExpressions({ objects, flows: [flowOf(name, startObject, sweepObject, condition)] })), name).toEqual([]);
+      }
+      // A date verdict is an error whatever the outcome: the sweep softens
+      // nothing there, so there is nothing to explain.
+      const dateOnly = validateStackExpressions({ objects, flows: [flowOf('tr_other_date', 'crm_opportunity', 'crm_task', 'close_date + 1 > 3')] });
+      expect(dateOnly.filter(i => /^date arithmetic/.test(i.message)).map(i => i.severity)).toEqual(['error', 'error']);
+      expect(notes(dateOnly)).toEqual([]);
+    });
+
+    // [#30026] Typed against the swept object, a sweep-only flow gets every
+    // verdict a sweep of the start object gets, not only the type check: a
+    // `record.FIELD` read of a field the swept object does not declare, and
+    // date arithmetic. Before, it got none of them.
+    it('refuses an unknown record.FIELD read and date arithmetic on a time-relative flow typed only by its swept object (#30026)', () => {
+      const objects = [{ name: 'crm_opportunity', fields: { title: { type: 'text', required: true }, close_date: { type: 'date' } } }];
+      const sweepOnly = (condition: string) => ({
+        name: 'tr_sweep_only',
+        nodes: [
+          {
+            id: 'start', type: 'start',
+            config: { condition, schedule: '0 * * * *', timeRelative: { object: 'crm_opportunity', dateField: 'close_date', offsetDays: 3 } },
+          },
+          { id: 'end', type: 'end' },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'end' }],
+      });
+      const unknown = validateStackExpressions({ objects, flows: [sweepOnly('record.nope > 1')] });
+      expect(unknown.map(i => i.severity)).toEqual(['error']);
+      expect(unknown[0]!.message).toMatch(/^unknown field `nope` on `crm_opportunity`/);
+      const date = validateStackExpressions({ objects, flows: [sweepOnly('close_date + 1 > 3')] });
+      expect(date.map(i => i.severity)).toEqual(['error']);
+      expect(date[0]!.message).toMatch(/^date arithmetic/);
+      expect(date[0]!.message).toContain(': this faults at runtime, and a flow condition');
+      // Two date fields, which the runtime holds as their text: the
+      // `date-text-arithmetic` verdict, run-fails worded, refused too.
+      const dateText = validateStackExpressions({
+        objects: [{ name: 'crm_opportunity', fields: { close_date: { type: 'date' }, open_date: { type: 'date' } } }],
+        flows: [sweepOnly('close_date - open_date > duration("1h")')],
+      });
+      expect(dateText.map(i => i.severity)).toEqual(['error']);
+      expect(dateText[0]!.message).toMatch(/^date arithmetic `DateText - DateText`/);
+      expect(dateText[0]!.message).toContain(': this faults at runtime, and a flow condition');
+    });
+
+    // [#30026] Typed against the swept object, a well-typed sweep-only flow
+    // stays clean: its fields resolve, so nothing is refused that runs.
+    it('leaves a well-typed time-relative flow typed only by its swept object clean (#30026)', () => {
+      const issues = validateStackExpressions({
+        objects: [{ name: 'crm_opportunity', fields: { title: { type: 'text', required: true }, amount: { type: 'number', required: true }, close_date: { type: 'date' } } }],
+        flows: [{
+          name: 'tr_sweep_only',
+          nodes: [
+            {
+              id: 'start', type: 'start',
+              config: {
+                condition: 'size(title) > 5 && record.amount > 10', schedule: '0 * * * *',
+                timeRelative: { object: 'crm_opportunity', dateField: 'close_date', offsetDays: 3 },
+              },
+            },
+            { id: 'route', type: 'decision', config: { conditions: [{ label: 'Big', expression: 'amount > 10' }] } },
+            { id: 'end', type: 'end' },
+          ],
+          edges: [
+            { id: 'e1', source: 'start', target: 'route', condition: "record.title != 'x'" },
+            { id: 'e2', source: 'route', target: 'end', label: 'Big' },
+          ],
+        }],
+      });
+      expect(issues).toEqual([]);
+    });
+
+    // [#30016] The date verdicts were left saying a flow condition "silently
+    // evaluates to null"; `evaluateCondition` throws on a fault on every flow.
+    // Where the ledger proves the run holds the field (`run-fails`) the fault
+    // fails the run; on any other flow it does wherever the name holds the
+    // date (an API body may hand a number). An error at every site, as before.
+    it('says a date-arithmetic fault in a flow condition fails the run, at start, edge and decision (#30016)', () => {
+      const objects = [{ name: 'crm_opportunity', fields: { close_date: { type: 'date' }, open_date: { type: 'date' } } }];
+      const dateVerdicts = (issues: ReturnType<typeof validateStackExpressions>) =>
+        issues.filter(i => /^date arithmetic/.test(i.message));
+      for (const [name, startConfig, flowType, proven] of [
+        ['rt_flow', { triggerType: 'record-after-update' }, undefined, true],
+        ['sched_flow', { schedule: '0 * * * *' }, undefined, false],
+        ['api_flow', {}, 'api', false],
+      ] as const) {
+        const issues = validateStackExpressions({
+          objects,
+          flows: [{
+            name,
+            ...(flowType ? { type: flowType } : {}),
+            nodes: [
+              { id: 'start', type: 'start', config: { objectName: 'crm_opportunity', condition: 'close_date + 1 > 3', ...startConfig } },
+              { id: 'route', type: 'decision', config: { conditions: [{ label: 'Late', expression: 'close_date - open_date > duration("1h")' }] } },
+              { id: 'end', type: 'end' },
+            ],
+            edges: [
+              { id: 'e1', source: 'start', target: 'route', condition: 'close_date + 7 > 3' },
+              { id: 'e2', source: 'route', target: 'end', label: 'Late' },
+            ],
+          }],
+        });
+        const found = dateVerdicts(issues);
+        expect(found.map(i => [i.where, i.severity]), name).toEqual([
+          [`flow '${name}' · node 'start' (start) condition`, 'error'],
+          [`flow '${name}' · node 'route' (decision) decision branch expression at config.conditions[0].expression`, 'error'],
+          [`flow '${name}' · edge 'e1' (start→route) condition`, 'error'],
+        ]);
+        for (const i of found) {
+          expect(i.message, `${name} ${i.where}`).toContain('a flow condition that cannot be evaluated fails the run');
+          expect(i.message, `${name} ${i.where}`).toMatch(
+            proven ? /: this faults at runtime, and a flow condition/ : /: this faults wherever `close_date` holds (the date|that text) when the condition runs/,
+          );
+          expect(i.message, `${name} ${i.where}`).not.toMatch(/evaluates to null/);
+        }
+      }
+    });
+
+    it('keeps the null sentence on a record-scoped validation rule\'s date arithmetic (#30016 control)', () => {
+      const issues = validateStackExpressions({
+        objects: [{
+          name: 'crm_opportunity',
+          fields: { close_date: { type: 'date' } },
+          validations: [{ name: 'late', condition: 'record.close_date + 1 > 3' }],
+        }],
+      });
+      const found = issues.filter(i => /^date arithmetic/.test(i.message));
+      expect(found.map(i => i.severity)).toEqual(['error']);
+      expect(found[0]!.message).toContain('this faults at runtime, so the field silently evaluates to null');
     });
 
     // [#29959] `seedRunVariables` seeds the flow's declared variables before it
@@ -3975,7 +4145,8 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     keys: () => shapeKeysOf(ObjectStackSchema.shape.flows),
   },
   { receiver: 'node', expected: ['config', 'id', 'type'], declaredBy: 'flows[].nodes[]', keys: () => shapeKeysOf(flowShape().nodes) },
-  { receiver: 'startNode', expected: ['config'], declaredBy: 'flows[].nodes[]', keys: () => shapeKeysOf(flowShape().nodes) },
+  // [#30026] `id`: the time-relative note names the start node it sits on.
+  { receiver: 'startNode', expected: ['config', 'id'], declaredBy: 'flows[].nodes[]', keys: () => shapeKeysOf(flowShape().nodes) },
   {
     receiver: 'edge',
     expected: ['condition', 'id', 'source', 'target'],

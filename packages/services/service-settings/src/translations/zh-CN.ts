@@ -408,28 +408,6 @@ export const zhCN: PlatformTranslationData = {
       },
     },
 
-    feature_flags: {
-      title: '功能开关',
-      description: '为当前组织开启实验性与测试功能。',
-      groups: {
-        productivity: { title: '生产力' },
-        collaboration: { title: '协作' },
-      },
-      keys: {
-        ai_enabled: {
-          label: 'AI 助手',
-          help: '启用应用内 AI 助手面板。',
-        },
-        kanban_swimlanes: { label: '看板泳道' },
-        realtime_cursors: { label: '实时光标' },
-        inline_comments: { label: '行内评论' },
-      },
-      banners: {
-        beta_notice: { title: '注意',
-          text: 'Beta 功能可能随时变更,恕不另行通知。在服务器配置中设置的功能会对整个部署锁定开启或关闭,无法在此更改。' },
-      },
-    },
-
     storage: {
       title: '文件存储',
       description: '附件、导出文件与用户上传所使用的存储后端。',

@@ -129,7 +129,6 @@ export const en: TranslationData = {
         nav_settings_ai: { label: 'AI & Embedder' },
         nav_settings_knowledge: { label: 'Knowledge' },
         nav_settings_lifecycle: { label: 'Data Lifecycle' },
-        nav_settings_feature_flags: { label: 'Feature Flags' },
         // Notifications (contributed by @objectstack/service-messaging)
         nav_notification_preferences: { label: 'Notification Preferences' },
         nav_notification_templates: { label: 'Notification Templates' },

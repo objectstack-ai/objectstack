@@ -279,8 +279,8 @@ export class ProtocolRegistryHydrationFacet {
      * after, measured for each reader. What changes is the registry-direct
      * read of the name, which answers the shipping package's own item.
      *
-     * ⛔ Those three types, and [#29613] `page`, `app`, `dataset`, `doc` and
-     * `book`, whose reads serve a pair's declared override from its row since
+     * ⛔ Those three types, and [#29613] `page`, `app`, `dataset`, `doc`,
+     * `book` and [#30062] `mapping`, whose reads serve a pair's declared override from its row since
      * {@link declinesStoredRow} admits it. A row of a package that ships its own
      * artifact of the name keeps its bare entry (#4624). `flow` registers with
      * no artifact envelope (below).
@@ -441,7 +441,7 @@ export class ProtocolRegistryHydrationFacet {
         // bound to a package that ships no artifact of its name, under a name
         // another package ships, is not registered under the bare name, where
         // it would wear that other package's envelope. Its reads answer it from
-        // its row. ⛔ Those three types, and [#29613] page, app, dataset, doc and book.
+        // its row. ⛔ Those three types, and [#29613] page, app, dataset, doc, book and [#30062] mapping.
         if (declinesBorrowedEnvelope(canonicalType, options.packageId, artifact)) return true;
         // [#16702] Say what this row IS before the artifact envelope is grafted
         // on top of it. Every body reaching this hydrator came out of a
