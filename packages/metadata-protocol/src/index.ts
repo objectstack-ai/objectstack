@@ -270,6 +270,12 @@ export { unmanagedInstallPostureRefusal } from './package-unmanaged-install.js';
 // its no-protocol fallback included, instead of keeping a second copy.
 export { customizationPairManifestRefusal } from './protocol-customization-package.js';
 
+// [ADR-0029 D7] The refusal of `navigationContributions` on a package created
+// at runtime, whose install never registers them. The install primitive asks
+// it; exported so `POST /packages` (`@objectstack/runtime`) asks the same one
+// ahead of both its install limbs, its no-protocol fallback included.
+export { runtimeNavigationContributionsRefusal } from './protocol-package-install.js';
+
 // #4556 — the `sys_metadata_history.recorded_by` sentinel → NULL conversion,
 // as an ADR-0119 D2 migration plan. Run by `os migrate recorded-by`.
 export {

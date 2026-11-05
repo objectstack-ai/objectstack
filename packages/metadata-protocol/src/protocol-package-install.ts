@@ -39,8 +39,10 @@
  * module cycle is evaluation-safe because the one runtime import is read only
  * inside a function body, never while the two modules are first evaluated.
  * `index.ts` names what it publishes from `protocol.ts` one by one, so the
- * `export` they gained for this keeps them off the published surface, and
- * nothing re-exports this module, so the published surface does not move.
+ * `export` they gained for this keeps them off the published surface. `index.ts`
+ * re-exports one name from this module and nothing else of it:
+ * {@link runtimeNavigationContributionsRefusal}, added after the move, which the
+ * HTTP install door asks ahead of both its limbs.
  */
 
 import type { ObjectStackProtocolImplementation, PackagePersistService } from './protocol.js';
@@ -53,6 +55,45 @@ import type { InstallPackageRequest, InstallPackageResponse } from '@objectstack
 import { ManifestSchema, deriveNamespaceFromPackageId, manifestIdRefusal } from '@objectstack/spec/kernel';
 // [ADR-0146 D3] The pair-shaped-id predicate, asked before the namespace default.
 import { customizationPairManifestRefusal } from './protocol-customization-package.js';
+
+/**
+ * [#30072] The refusal of a runtime-created package's `navigationContributions`
+ * (ADR-0029 D7, ADR-0049) — `undefined` when the manifest carries none.
+ *
+ * Navigation contributions are registered by `ObjectQL.registerApp`, the door
+ * a CODE package takes when it loads (boot, marketplace, artifact reload). A
+ * package created at runtime takes this primitive instead, whose registry
+ * write (`SchemaRegistry.installPackage`) registers none of them, and so does
+ * the `sys_packages` replay at the next boot. The key was stored, answered
+ * success and never applied: an author (a person or an AI) was told the menu
+ * entry was added while it never appeared. Maintainer ruling A on the card
+ * (record 6631177389): the runtime door refuses the key loudly, naming the two
+ * routes that work — an override of the app in its customization package for
+ * a customer's own menu (ADR-0146 D2), and a code package for a contribution.
+ *
+ * One predicate for every runtime install door: this primitive asks it, so the
+ * duplicate and every in-process caller are judged; `POST /packages`
+ * (`@objectstack/runtime`) asks it ahead of both its install limbs, its
+ * no-protocol fallback included. An empty array promises nothing and passes.
+ * ⛔ Rows already in `sys_packages` are not judged: they are data at rest and
+ * the boot hydration replays them as stored (the tolerance stated at the
+ * whole-manifest parse below).
+ *
+ * The answer is a request-shape refusal: `400`, whose standard member is
+ * `VALIDATION_ERROR`, with no code minted for it.
+ */
+export function runtimeNavigationContributionsRefusal(manifest: unknown): string | undefined {
+    const contributions = (manifest as { navigationContributions?: unknown } | null | undefined)?.navigationContributions;
+    if (contributions === undefined || (Array.isArray(contributions) && contributions.length === 0)) return undefined;
+    const id = (manifest as { id?: unknown }).id;
+    const named = typeof id === 'string' && id !== '' ? ` '${id}'` : '';
+    return `manifest.navigationContributions is not accepted on a package created at runtime: the package${named} would be `
+        + 'stored with it, but its contributions are never registered, so the menu entries would never appear. '
+        + "To add an entry to an installed app's menu, save an override of that app in its customization package "
+        + '(the app copied with your entry added). To contribute menu entries into another package\'s app, ship '
+        + 'them in a code package, whose navigationContributions are registered when it loads. '
+        + 'Remove navigationContributions from this manifest and retry.';
+}
 
 /**
  * [#21243] Write `manifest` to `sys_packages`, and say whether it failed.
@@ -236,6 +277,16 @@ export async function installPackage(
             new Error(`Invalid package manifest — ${located}`),
             { statusCode: 400 },
         );
+    }
+
+    // [#30072] A runtime-created package cannot contribute navigation: its
+    // contributions would be stored and never registered. Asked AFTER the
+    // declaration parse, so a malformed manifest keeps the declaration's own
+    // located answer, and before every write and every server-state read
+    // below — a request-shape refusal, the predicate's docblock says why.
+    const navRefusal = runtimeNavigationContributionsRefusal(manifest);
+    if (navRefusal !== undefined) {
+        throw Object.assign(new Error(navRefusal), { statusCode: 400 });
     }
 
     // [ADR-0146 D3] A paired customization package id (`<base>.custom`) is
