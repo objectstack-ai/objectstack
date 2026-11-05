@@ -42,8 +42,8 @@ import type { ComposableReadableIdsSite } from './filter-comparand-shape.js';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { EvalOptionLabels } from '@objectstack/formula';
-import { readerOptionLabels } from './formula-option-labels.js';
-import { applyFormulaPlan, planFormulaProjection, undeclaredRelatedFields } from './engine-top-level.js';
+import { declaredOptionLabels, readerOptionLabels } from './formula-option-labels.js';
+import { applyFormulaPlan, computeStoredExpressions, planFormulaProjection, planStoredExpressions, undeclaredRelatedFields } from './engine-top-level.js';
 import type {
   FieldOwnedFileReadAuthorizer, FormulaFaultSink, FormulaPlanEntry, FormulaRelated, HeldFileResolver,
   ReadableIdsChain, WriteWallVerdict,
@@ -341,6 +341,18 @@ export class SecurityResolversFacet {
     ), this.formulaFaultSink(objectName), await this.resolveFormulaRelated(schema, plan, [scratch], context),
     this.formulaOptionLabels(schema, plan, context));
     return scratch[field];
+  }
+
+  /** The body of `ObjectQL#computeStoredExpressionsOver` (#29961); the method's docblock there is its contract. */
+  static async computeStoredExpressionsOver(this: Pick<SecurityResolversHost, '_registry' | 'formulaFaultSink' | 'permissionResolution' | 'resolveFormulaPermissions' | 'resolveFormulaRelated'>, object: string, rows: ReadonlyArray<Record<string, unknown>>, context?: ExecutionContext, onFault?: (field: string, message: string) => void): Promise<Array<Record<string, unknown>>> {
+    const schema = this._registry.getObject(object);
+    const resolution = this.permissionResolution(context);
+    return computeStoredExpressions(planStoredExpressions(schema), rows, context, {
+      permissionsFor: (plan, records) => this.resolveFormulaPermissions(object, plan, records, context, resolution),
+      onFault: onFault ? (field, error) => onFault(field, error.message) : this.formulaFaultSink(object),
+      relatedFor: (plan, records) => this.resolveFormulaRelated(schema, plan, records, context),
+      optionLabelsFor: (plan) => declaredOptionLabels(schema, plan),
+    });
   }
 
   /**

@@ -2114,20 +2114,13 @@ export class ObjectQL implements IObjectQLEngine {
    * the write's answer, and is told to `onFault` when given (else the engine's
    * once-per-field report).
    */
-  async computeStoredExpressionsOver(
+  computeStoredExpressionsOver(
     object: string,
     rows: ReadonlyArray<Record<string, unknown>>,
     context?: ExecutionContext,
     onFault?: (field: string, message: string) => void,
   ): Promise<Array<Record<string, unknown>>> {
-    const schema = this._registry.getObject(object);
-    const resolution = this.permissionResolution(context);
-    return computeStoredExpressions(planStoredExpressions(schema), rows, context, {
-      permissionsFor: (plan, records) => this.resolveFormulaPermissions(object, plan, records, context, resolution),
-      onFault: onFault ? (field, error) => onFault(field, error.message) : this.formulaFaultSink(object),
-      relatedFor: (plan, records) => this.resolveFormulaRelated(schema, plan, records, context),
-      optionLabelsFor: (plan) => declaredOptionLabels(schema, plan),
-    });
+    return SecurityResolversFacet.computeStoredExpressionsOver.call(securityResolversHost.of(this), object, rows, context, onFault);
   }
 
   private formulaOptionLabels(
