@@ -1292,7 +1292,7 @@ function joinedReportHeld(draft: SentBody, locale: string): StudioHeld<MetadataS
   if (parsed.success || !parsed.error.issues.every((issue) => issue.path.length === 1 && issue.path[0] === 'blocks')) {
     return null;
   }
-  const rows = (getReportForm()?.sections ?? []).flatMap((section) =>
+  const rows = (getReportForm(locale)?.sections ?? []).flatMap((section) =>
     'fields' in section && Array.isArray(section.fields) ? section.fields : [],
   );
   const list = formRowLabel(formRowOf(rows, 'blocks'), 'blocks', locale);
@@ -1310,7 +1310,7 @@ function joinedReportHeld(draft: SentBody, locale: string): StudioHeld<MetadataS
  */
 export function reportHeldEdit(draft: SentBody, locale: string): StudioHeld<MetadataSelection | null> | null {
   const item = listItemHeldInput(draft, ReportSchema);
-  if (item) return heldListItem(item, getReportForm(), locale);
+  if (item) return heldListItem(item, getReportForm(locale), locale);
   const joined = joinedReportHeld(draft, locale);
   if (joined) return joined;
   const key = objectHeldInput(draft, ReportSchema, 'chart');

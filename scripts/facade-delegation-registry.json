@@ -9,6 +9,11 @@
       "file": "packages/objectql/src/engine.ts",
       "class": "ObjectQL",
       "card": "#29986"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "class": "SqlDriver",
+      "card": "#30105"
     }
   ],
   "exceptions": [
@@ -371,6 +376,174 @@
       "member": "serveReferenceNames",
       "card": "#30020",
       "reason": "gate reading: a hand-series host slot holds a try block"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "constructor",
+      "card": "#30020",
+      "reason": "gate reading: constructor logic (strips the ObjectStack options off the config, branches on fileColumnsMoved, builds Knex; the state is the instance's)"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "logger",
+      "card": "#30020",
+      "reason": "gate reading: the default sink's field initializer holds arrow functions (state owned by the instance)"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "static DIALECT_CONNECT_TIMEOUT",
+      "card": "#30020",
+      "reason": "gate reading: a static table whose initializer holds arrow functions (state owned by the class)"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "logDurabilityFailure",
+      "card": "#30147",
+      "reason": "path-reader (#30105 report: check-durability-degradation-log-level follows a catch's log helper to its body in the same file)"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "get supports",
+      "card": "#30147",
+      "reason": "accessor (#30105 report: the codemod moves methods, not accessors)"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "get insertReturnsStoredRows",
+      "card": "#30147",
+      "reason": "accessor (#30105 report: the codemod moves methods, not accessors)"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "get dateGranularityCapabilities",
+      "card": "#30147",
+      "reason": "accessor (#30105 report: the codemod moves methods, not accessors)"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "get supportsWalJournal",
+      "card": "#30147",
+      "reason": "accessor (#30105 report: the codemod moves methods, not accessors)"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "get dialectName",
+      "card": "#30147",
+      "reason": "accessor (#30105 report: the codemod moves methods, not accessors)"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "rotateShards",
+      "card": "#30147",
+      "reason": "gate reading: a parameter default computes (`nowMs = Date.now()`, the signature stays byte-for-byte)"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "ensureRotation",
+      "card": "#30147",
+      "reason": "gate reading: a parameter default computes (`nowMs = Date.now()`; a hand-series stub, #25521 cut 17)"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "ensureShardTable",
+      "card": "#30147",
+      "reason": "path-reader (#30105 report: packages/cli generate-* pins read its text in sql-driver.ts); field-call: knex"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "initObjects",
+      "card": "#30147",
+      "reason": "path-reader (#30105 report: packages/cli generate-* pins read its text in sql-driver.ts); field-call: knex"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "migrateMysqlDatetimeColumns",
+      "card": "#30147",
+      "reason": "path-reader (#30105 report: check-durability-degradation-log-level resolves its catch's log helper in the same file)"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "migrateMysqlTimeColumns",
+      "card": "#30147",
+      "reason": "path-reader (#30105 report: check-durability-degradation-log-level resolves its catch's log helper in the same file)"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "resolveWithheldFilterRefusal",
+      "card": "#30147",
+      "reason": "path-reader (#30105 report: sql-driver-compile-refusal-seam.test.ts enumerates the unsupportedFilterError callers)"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "createAuditTimestampColumn",
+      "card": "#30147",
+      "reason": "path-reader (#30105 report: the packages/cli generate-builtin-id-column pin reads its text in sql-driver.ts)"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "varcharColumnChars",
+      "card": "#30147",
+      "reason": "path-reader (#30105 report: check-keyed-text-bounds and the packages/cli generate-string-family-width pin read its text in sql-driver.ts)"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "createColumn",
+      "card": "#30147",
+      "reason": "path-reader (#30105 report: check-keyed-text-bounds and the packages/cli generate-* pins slice its type switch in sql-driver.ts); inferred-return-type"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "listPhysicalColumns",
+      "card": "#30147",
+      "reason": "field-call: knex (#30105 report: stays on the class)"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "getBuilder",
+      "card": "#30147",
+      "reason": "field-call: knex; inferred-return-type (#30105 report: stays on the class)"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "explainUnkeyableTextColumn",
+      "card": "#30147",
+      "reason": "field-call: knex (#30105 report: stays on the class)"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "explainHashShadowDuplicate",
+      "card": "#30147",
+      "reason": "field-call: knex (#30105 report: stays on the class)"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "applyFilters",
+      "card": "#30147",
+      "reason": "inferred-return-type (#30105 report: stays on the class)"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "applyFilterCondition",
+      "card": "#30147",
+      "reason": "inferred-return-type; comment-in-parameters (#30105 report: stays on the class)"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "ensureDatabaseExists",
+      "card": "#30147",
+      "reason": "inferred-return-type (#30105 report: stays on the class)"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "createDatabase",
+      "card": "#30147",
+      "reason": "inferred-return-type (#30105 report: stays on the class)"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "assertOperatorAppliesToColumn",
+      "card": "#30147",
+      "reason": "comment-in-parameters (#30105 report: stays on the class)"
     }
   ]
 }

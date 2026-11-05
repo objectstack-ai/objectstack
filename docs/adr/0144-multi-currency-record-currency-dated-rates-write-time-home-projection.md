@@ -11,8 +11,12 @@
   [`6469382727`](https://github.com/objectstack-ai/objectstack/issues/27185#issuecomment-6469382727) on #27185. The maintainer chose the option 「小数点后 12 位(推荐)」.
 - **Builds on**: [ADR-0104](./0104-field-runtime-value-shape-contract.md) D1 (a `currency` value is a bare number,
   kept here). [ADR-0112](./0112-error-code-vocabulary-and-ledger.md) governs every refusal that answers on the wire.
-  Two of them need new codes, a blank record currency code and a missing rate ([Open item](#open-items) 9): ADR-0112
-  sets their codes and envelope, and both are registered in its extension ledger. They are the only ledger additions.
+  Three of them need new codes, a blank record currency code, a missing rate and an unset home currency
+  ([Open items](#open-items) 4 and 9): ADR-0112 sets their codes and envelope, and all three are registered in its
+  extension ledger (`packages/spec/src/api/error-code-ledger.zod.ts#ERROR_CODE_LEDGER`, under `@objectstack/objectql`).
+  *Note (2026-11-04):* until Open item 4 settled by refusal (`ERR_HOME_CURRENCY_UNSET`, PR #28302, `6762dd91`) this
+  sentence named two codes and called them "the only ledger additions"; the third code is that settlement's, and the
+  "only" claim is dropped.
   "At build" in D1 and D6 covers the declared aggregates: a `summary` roll-up refuses at registration and a dataset
   measure at compile, with existing codes (`INVALID_METADATA` at registration, `DATASET_INVALID` at compile). An ad-hoc
   aggregate is never built, so it meets the same rule at the request door (the ObjectQL aggregate-by-field-type door
@@ -29,7 +33,8 @@
   shape verdict [`6041482631`](https://github.com/objectstack-ai/objectstack/issues/8345#issuecomment-6041482631);
   [#27119](https://github.com/objectstack-ai/objectstack/issues/27119) (design record, workload rows, ruling); this
   record's card [#27183](https://github.com/objectstack-ai/objectstack/issues/27183). Every claim below about current
-  behaviour cites a file or symbol as read on `origin/main` at `cdec7473`.
+  behaviour cites a file or symbol as read on `origin/main` at `cdec7473`; the dated notes of 2026-11-04 (Open items
+  2, 3, 4, 6 and 9, D9) read `origin/main` at `f68b47ca`, and each names the pull request that landed its answer.
 
 ---
 
@@ -51,6 +56,9 @@
   Metadata never names the home currency.
 - Delivery comes in three releases. R1 ships the record currency, the refusals and the per-row display. R2 ships the
   rates, the projection and the recompute. R3 is proof and polish. R1 and R2 each ship as one Version Packages release.
+  *Note (2026-11-04):* 18.3.0 shipped R1 and the R2 core (the rate table, the `homeAmount` key, the write-time
+  projection and the home-currency lock) in one Version Packages release, by ruling `6539345871`, letter A′; the
+  recompute, the import check and the home field's display follow as R2.1. See D9.
 
 ## Provenance — what is ruled here, and what is not
 
@@ -58,12 +66,15 @@ Three kinds of text feed this record. Each section says which kind it carries.
 
 1. **Ruled.** Ruling `6465431966` fixes shape C′, sub-questions Q0–Q4, parameters 1–4, the five design rules, the
    release pairing and the commitment. Ruling `6469382727` on #27185 fixes parameter 4's unit. [Decision](#decision)
-   carries only these two. It quotes them wherever the wording matters.
+   carries only these two. It quotes them wherever the wording matters. Ruling `6539345871` on #8345 (2026-10-31)
+   amends D9's release gate (letter A′) and settles [Open item](#open-items) 2's `datetime` day (letter B); D9 and
+   Open item 2 carry it as dated notes, and nothing else in [Decision](#decision) rests on it.
 2. **Analysis the ruling read.** This is the design record `6464438764`, the workload rows `6464936321`, the
    measurement round `6041378776` and the shape verdict `6041482631`. They supply the context, the shapes considered
    and the per-card plan. A detail that appears only there is not ruled. This record lists such details under
    [Open items](#open-items) or as a card's draft, never as a decision.
-3. **Readings.** Current behaviour, measured at `cdec7473` and cited by file or symbol.
+3. **Readings.** Current behaviour, measured at `cdec7473` and cited by file or symbol. The dated notes of
+   2026-11-04 read `origin/main` at `f68b47ca` the same way.
 
 **Two numberings meet here.** #27119 is a decision batch, and two of its items are also called Q1 and Q2. #27119 Q1
 asks when multi-currency starts, and the answer was 乙-现在. #27119 Q2 asks for one rule for an unknown currency, and
@@ -94,6 +105,11 @@ aggregation. The ruling names them by topic ("Q0 A", "rates A", "home currency A
   membership in `CURRENCY_FRACTION_DIGITS`
   (`packages/spec/src/data/currency-fraction-digits.ts#CURRENCY_FRACTION_DIGITS`). Only that table's key set is read.
   Its fraction-digit values have no reader.
+  *Note (2026-11-04):* the values have their reader since PR #28302 (`6762dd91`): the write-time home projection
+  rounds the home amount to them ([Open item](#open-items) 3), through the table's export from `@objectstack/spec/data`
+  (`packages/spec/src/data/index.ts`). They are CLDR fraction digits, a checked-in `currencyData` snapshot as the
+  table's own header records, not ISO 4217 minor units: for about seventeen codes the two differ (`IQD` 0 against 3;
+  `HUF`, `COP`, `IDR`, `PKR` and other codes whose minor unit CLDR records as unused, 0 against 2).
 - **No conversion is implemented.**
   `git grep -n -i -E "exchange.?rate|fx_rate|currency_conversion|convertCurrency" -- packages/ ':!*.test.ts'` prints 0
   lines. Control: `git grep -c currencyConfig -- packages/spec/src/data/field.zod.ts` prints 13.
@@ -275,6 +291,25 @@ docs page. Under R2 it files #27194, M2-4. Those placements are the epic PM's, n
 R1 and R2 pull request "⛔ not released alone — pairs with …". Under Prime Directive #15, the maintainer merges
 Version Packages, and the epic body says that happens only when a pair is complete.
 
+*Note (2026-11-04):* amended by ruling [`6539345871`](https://github.com/objectstack-ai/objectstack/issues/8345#issuecomment-6539345871) on #8345, letter A′,
+maintainer 「同意」 (2026-10-31T05:03Z). **18.3.0 carries R1 and the R2 core together.** Version Packages #26517
+waited for PR #28302 and PR #28297 to land, and its version commit `83d7e4ae` (merged 2026-11-03) consumed
+`sys_exchange_rate` (#27185, PR #27246 `194e66c0`), `currencyConfig.homeAmount` (#27191, PR #28096 `73b72709`), the
+write-time home projection (#27192, PR #28302 `6762dd91`) and the `localization.currency` lock (#27198, PR #28297
+`291bf44a`); each package's `## 18.3.0` section names its entry (`packages/objectql/CHANGELOG.md`,
+`packages/spec/CHANGELOG.md`, `packages/platform-objects/CHANGELOG.md`,
+`packages/services/service-settings/CHANGELOG.md`), and so does `content/docs/releases/v18/18-3.mdx`. The pairing
+rule above holds as written: no declaration shipped without the engine that fills it. What the ruling changes is the
+release gate of ruling [`6522614678`](https://github.com/objectstack-ai/objectstack/issues/8345#issuecomment-6522614678) on #8345 (letter A, 2026-10-30: R2 is
+built now and released once the customer confirms the consolidation terms of Context §2), in one respect: the R2 core
+was released ahead of that confirmation, because the three terms are configuration axes — `localization.currency`,
+the rate table's `source` values, the author's `rateDate` pointer — that the engine hard-codes none of, so the
+customer has no R2 rows to recompute. **R2.1** is #27193 (the recompute), #27190 (the import check) and #27196 (the
+home field's read-only display), released in a later Version Packages; none is a half-state, since the home and rate
+fields are `readonly` and render as such. Not chosen: A (merge #26517 before #28302, the half-state this section
+forbids), B (hold #26517 until the customer confirms), C (a registration-time refusal of `homeAmount` as a release
+switch in code).
+
 ## Non-goals
 
 These are outside this decision, and each would need a decision of its own. The first eight are the workload rows'
@@ -306,6 +341,9 @@ D8 already excludes a switch, injected columns, fixed field names and a setting 
   row and no home-amount declaration keeps today's behaviour.
 - **Every converting write adds a rate lookup.**
 - **The fraction-digit values may get their first reader.** That depends on [Open item](#open-items) 3.
+  *Note (2026-11-04):* they did, in PR #28302 (`6762dd91`): the write-time home projection rounds to them, read as
+  CLDR fraction digits rather than ISO 4217 minor units ([Open item](#open-items) 3;
+  `packages/objectql/src/home-amount-projection.ts#projectHomeAmounts`).
 - **The docs start from a true baseline.** #27158 (closed) removed the two docs claims of exchange rates and a stored
   currency code. At `cdec7473`, `git grep -n -E "Money with exchange rates|Store amount \+ currency code" -- content/docs`
   prints 0 lines. The M0-5 currency page (#27189) builds on that baseline.
@@ -333,18 +371,80 @@ Where a source leans one way, the lean is quoted here, not adopted. This record 
    the document date. The measurement round also rules out a "nearest-future rate". The design record §5 says
    「⛔ 不取最近一条」 (do not take the most recent row). The predicate fixes what counts as missing, and #27192 pins it
    with tests.
+   *Note (2026-11-04):* settled, as workload row M2-2 read it: the row is the organization's `sys_exchange_rate` row
+   for the record's currency with the latest `effective_date` on or before the document date; a later row never
+   applies, and no row in force refuses `ERR_EXCHANGE_RATE_MISSING` (D5, item 9). Landed in PR #28302 (`6762dd91`):
+   the engine reads `where: { currency, effective_date: { $lte: onOrBefore } }` with `onOrBefore` the document day,
+   `orderBy: [{ field: 'effective_date', order: 'desc' }]`, `limit: 1`, as a system read in the row's own
+   organization, so one organization's rate never converts another's amount
+   (`packages/objectql/src/engine.ts#homeAmountServing`); a row whose `rate` is not a positive decimal counts
+   as missing, and a batch asks the table once per organization, currency and day
+   (`packages/objectql/src/home-amount-projection.ts#projectHomeAmounts`, `#memoizeHomeAmountServing`). The document
+   date is the day of the field `homeAmount.rateDate` names: a `date` value is its own day; a `datetime` value is its
+   calendar day in the organization's `localization.timezone`, UTC when the setting is unset or unknown to the host,
+   never the writer's request zone, so a REST write, an import and a flow pick the same rate for the same stored
+   instant — ruling [`6539345871`](https://github.com/objectstack-ai/objectstack/issues/8345#issuecomment-6539345871) on #8345, letter B
+   (`packages/objectql/src/home-amount-projection.ts#documentDateOf`; the zone rides the same settings bridge as the
+   home currency, item 4). Not chosen: A, the UTC day now and the organization's zone as a later card, a semantic
+   change over stored rows once released. A foreign-currency amount with a blank document date is refused
+   `VALIDATION_FAILED` with `required` on the date field (item 9). Review: contract review
+   [`6539117549`](https://github.com/objectstack-ai/objectstack/pull/28302#issuecomment-6539117549) and its delta
+   [`6539668963`](https://github.com/objectstack-ai/objectstack/pull/28302#issuecomment-6539668963) on PR #28302.
 3. **Arithmetic and rounding of the home amount** (#27192). The design record §5 and workload row M2-2 round to the
    minor units of the home currency's ISO 4217 code, read from `CURRENCY_FRACTION_DIGITS`. The epic body's risk note
    says money is computed in minor-unit integers or decimals, not floating point (「浮点算钱用最小单位整数或 decimal」).
    Neither point is in the ruling.
+   *Note (2026-11-04):* settled, with one correction to the sentence above: the digit count is CLDR's, not ISO 4217's.
+   Landed in PR #28302 (`6762dd91`). The home amount is the record amount divided by the rate (D7 parameter 3), in
+   exact scaled-decimal arithmetic over `BigInt` with no float step, rounded **once, half away from zero** (accounting
+   `HALF_UP`; `1.005` stores `1.01`, `-0.125` stores `-0.13`) to the home currency's fraction digits, and stored as the
+   rounded decimal's own spelling, the bare number ADR-0104 D1 requires
+   (`packages/objectql/src/home-amount-projection.ts#divideToPlaces`, `#divideRoundHalfAwayFromZero`, `#toScaledDecimal`).
+   The rate is stored in `homeAmount.rateField` **unrounded**, as the rate row holds it, so the
+   stored home amount reproduces from the stored amount and rate
+   (`packages/objectql/src/home-amount-projection.ts#projectHomeAmounts`); a `scale` declared on that field reaches
+   display only, since every numeric column takes the one `decimal(65, 30)` representation
+   (`packages/spec/src/data/numeric-column-representation.ts#numericColumnFor`), and whether the spec should refuse a
+   `rateField` scale below 12 is spec-lane work the review escalated, not decided here. The digit count is
+   `CURRENCY_FRACTION_DIGITS[home]`, which is **CLDR's fraction digits** (`currencyData`, a checked-in snapshot), not
+   ISO 4217 minor units: for about seventeen codes the two differ — `IQD` 0 where ISO 4217 says 3; `HUF`, `COP`, `IDR`,
+   `PKR` and other codes whose minor unit CLDR records as unused 0 where ISO 4217 says 2 — and CLDR's count applies
+   (JPY 0, USD and CNY 2, KWD 3; USD 10,000 at 0.1389 into CNY stores 71994.24). The table is exported from
+   `@objectstack/spec/data` for this one reader (`packages/spec/src/data/index.ts`). The contract review flagged the
+   "ISO 4217 minor units" wording and recommended CLDR
+   ([`6539117549`](https://github.com/objectstack-ai/objectstack/pull/28302#issuecomment-6539117549), F1 and should-fix S2); ruling `6539345871` ordered that
+   wording corrected per S2 before #28302 merged, and this note carries the same correction.
 4. **A home-amount declaration or a converting write while no home currency is set** (#27192, #27198).
    `localization.currency` may be unset (its manifest entry says `required: false`, and there is no platform
    default). The ruling locks the setting once used. It does not say what happens while the setting is unset. The sources rule out a
    silent default (design record §9: no CNY default).
+   *Note (2026-11-04):* settled by refusal: a converting write while `localization.currency` is unset, or holds no
+   ISO 4217 code, is refused `ERR_HOME_CURRENCY_UNSET` / 400 before anything is written, and no default is stored or
+   assumed (`packages/objectql/src/home-amount-projection.ts#HomeCurrencyUnsetError`, thrown by
+   `packages/objectql/src/home-amount-projection.ts#projectHomeAmounts`). Landed in PR #28302 (`6762dd91`). The
+   contract review judged the refusal against D5's rejected fallbacks (a null home amount is the one D5 rejects) and
+   D8 rule 5 (no place in metadata for a default), and gave the condition its own code because its remedy, setting
+   the setting, differs from a missing rate's, adding a row
+   ([`6539117549`](https://github.com/objectstack-ai/objectstack/pull/28302#issuecomment-6539117549), ③.1;
+   `packages/spec/src/api/error-code-ledger.zod.ts#ERROR_CODE_LEDGER`). The engine reads the setting for the row's
+   organization through `ObjectQL.setHomeLocalizationResolver`
+   (`packages/objectql/src/engine.ts#setHomeLocalizationResolver`), which `ObjectQLPlugin` wires to the `settings`
+   service's `localization.currency` and `localization.timezone` in one grouped read (`packages/objectql/src/plugin.ts`):
+   no `settings` service, or an unregistered namespace or key, reads as unset and refuses, while any other settings
+   error is the write's failure, never an unset setting. The refusal is at write, not at registration: a `homeAmount`
+   declaration is admitted while the setting is unset, and the first converting write refuses. The lock (#27198, PR
+   #28297 `291bf44a`) refuses a change to a set value once a rate row or a home-amount declaration exists (D4) and
+   passes the first setting of an unset value: nothing has been converted into a currency that does not exist
+   (`packages/services/service-settings/src/localization-currency-lock.ts#localizationCurrencyWritePredicate`).
 5. **The unit of parameter 4.** Settled, and moved to D7: scale 12, ruling `6469382727` on #27185. The entry stays so
    that the numbers of the items below do not change.
 6. **A record currency equal to the home currency** (#27192). Workload row M2-2 reads "same-currency-as-home ⇒ rate
    1, no lookup". The ruling does not say whether such a write needs a rate row.
+   *Note (2026-11-04):* settled as the row reads it: a record currency equal to the home currency converts at rate `1`
+   with no rate lookup, so no rate row is needed and none is read; the home amount is still rounded to the home
+   currency's fraction digits (item 3), and the rate field stores `1`
+   (`packages/objectql/src/home-amount-projection.ts#projectHomeAmounts`, the arm where the code equals the home
+   currency). Landed in PR #28302 (`6762dd91`).
 7. **Uniqueness and audit of rate rows** (#27185). The design record §5 and the measurement round make rows unique per
    organization, currency and date. Workload row M1-1 says "unique (currency, effective_date); tenant scope;
    admin-only permission set; audit on". Parameter 2 fixes only who edits.
@@ -354,6 +454,26 @@ Where a source leans one way, the lean is quoted here, not adopted. This record 
 9. **Refusal codes and messages** (#27186, #27187, #27192). The workload rows draft `ERR_CURRENCY_CODE_REQUIRED` and
    `ERR_EXCHANGE_RATE_MISSING`. The codes and their envelope follow ADR-0112. The missing-rate refusal names the
    currency and the date (design record §5, workload row M2-2).
+   *Note (2026-11-04):* settled: three codes are registered in ADR-0112's extension ledger under
+   `@objectstack/objectql` (`packages/spec/src/api/error-code-ledger.zod.ts#ERROR_CODE_LEDGER`), each a 400 answered
+   before the driver is asked to write the row. `ERR_CURRENCY_CODE_REQUIRED`, a `record`-mode amount beside a blank
+   code (#27186, PR #27339 `57c51aab`;
+   `packages/objectql/src/validation/record-currency-code.ts#RecordCurrencyCodeRequiredError`, whose `field` names
+   the code field to fill). `ERR_EXCHANGE_RATE_MISSING`, no rate row in force on the document date (item 2): the
+   message names the currency, the date, the home currency and Setup → Exchange Rates, and says a missing rate is
+   never replaced by 1, by a later rate or by an empty home amount
+   (`packages/objectql/src/home-amount-projection.ts#ExchangeRateMissingError`). `ERR_HOME_CURRENCY_UNSET`, no usable
+   home currency (item 4; `packages/objectql/src/home-amount-projection.ts#HomeCurrencyUnsetError`). The last two
+   landed in PR #28302 (`6762dd91`). Two further refusals reuse the existing `VALIDATION_FAILED` vocabulary rather
+   than a new code: `required` on the document-date field when a foreign-currency amount has no document date, and
+   `invalid_value` when one predicate update would convert the matched rows to different home amounts, which one
+   statement cannot store, so those rows are updated by id
+   (`packages/objectql/src/home-amount-projection.ts#settleBulkHomeAmounts`). The analytics doors (#27187) refuse
+   with existing codes, as the Status block says. `validate()` previews the same projection and answers each refusal
+   as the row's finding with the same code, so a dry run refuses what the write refuses
+   (`packages/objectql/src/engine-references-and-master-detail.ts#previewHomeAmounts`,
+   `packages/objectql/src/engine-validate.ts`). With the third code, the Status block's "only ledger additions"
+   sentence is corrected above.
 10. **Which aggregates count as "raw"** (#27186, #27187). The sources list `sum`, `avg`, `min` and `max`; `count`
     reads no amount. The per-row `currency` on grouped analytics results (workload row M0-3) is the contract half of
     #27187.
