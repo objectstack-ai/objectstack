@@ -62,6 +62,7 @@ export {
   SETTINGS_LIVE_STATUS_BANNER_ID,
   type SettingsAuditSink,
   type SettingsContext,
+  type SettingsRequestTransport,
   type SettingsDiagnosticsLogger,
   type SettingsEngine,
   type SettingsRow,

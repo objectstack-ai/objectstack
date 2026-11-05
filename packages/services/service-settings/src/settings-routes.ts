@@ -354,7 +354,15 @@ export function registerSettingsRoutes(
       const result = await service.setMany(
         ns,
         dropEchoedSecretMasks(body, secretKeys),
-        ctx,
+        // [#30203] The request's own connection, for a write predicate that
+        // judges the change against it (`SettingsContext.transport`).
+        {
+          ...ctx,
+          transport: {
+            headers: req.headers,
+            ...(req.remoteAddress ? { remoteAddress: req.remoteAddress } : {}),
+          },
+        },
         // The language a write predicate's refusal is written in.
         { locale: requestLocaleOf(req) },
       );

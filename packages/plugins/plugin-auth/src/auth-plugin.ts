@@ -120,6 +120,7 @@ import {
 } from './demo-staff.js';
 import { cloudManagedRefusal } from './cloud-managed.js';
 import { registerCopyInvitationLinkAction } from './invitation-link-action.js';
+import { allowedIpRangesWritePredicate, parseAllowedIpRanges } from './allowed-ip-ranges.js';
 import {
   runAdminBanUser,
   runAdminUnbanUser,
@@ -173,6 +174,12 @@ interface SettingsReadSurface {
     value: unknown,
     ctx?: Record<string, unknown>,
   ): Promise<unknown>;
+  /**
+   * [#30203] Register a rule that may refuse a change to one key, asked before
+   * the write lands (`SettingsService.registerWritePredicate`). Optional, like
+   * `subscribe`.
+   */
+  registerWritePredicate?(namespace: string, key: string, predicate: (input: any) => unknown): void;
 }
 
 /** [#23367] The auth setting that records when the API-key lifecycle policy took effect. */
@@ -530,6 +537,15 @@ export class AuthPlugin implements Plugin {
    */
   private allowListUndeterminedWarned = false;
   private allowListUntrustedHeaderWarned = false;
+  /**
+   * [#30203] The allow-list the deployment itself declared (plugin options or
+   * an `auth:configure` handler), taken before any setting is applied: what
+   * the running list returns to when the stored `allowed_ip_ranges` is cleared
+   * or restored to its default.
+   */
+  private declaredAllowedIpRanges: string[] | undefined;
+  /** [#30203] Whether the running allow-list is the one a stored setting gave it. */
+  private allowedIpRangesFromSettings = false;
   private configuredSocialProviders: SocialProviderConfig | undefined;
   // ADR-0092 D6 — the EFFECTIVE better-auth secondaryStorage (host-supplied or
   // the kernel-cache adapter wired in init). The identity write guard's
@@ -766,6 +782,7 @@ export class AuthPlugin implements Plugin {
       logger: ctx.logger,
     });
 
+    this.declaredAllowedIpRanges = authConfig.allowedIpRanges ? [...authConfig.allowedIpRanges] : undefined;
     // Initialize auth manager with data engine
     this.authManager = new AuthManager(authConfig);
     // ADR-0092 D6 — remember the storage better-auth will actually use so the
@@ -2289,12 +2306,16 @@ export class AuthPlugin implements Plugin {
         }
 
         // Network gating (ADR-0069 D5) — parse the CIDR/IP textarea into a list.
+        // [#30203] A cleared or restored-default value resolves with source
+        // `default`. It hands the gate back to the deployment's own declaration
+        // at once, rather than leaving the last stored list in force until a
+        // restart while the console shows the field empty.
         if (isExplicit('allowed_ip_ranges')) {
-          const raw = asTrimmedString(values.allowed_ip_ranges) ?? '';
-          patch.allowedIpRanges = raw
-            .split(/[\n,]+/)
-            .map((r) => r.trim())
-            .filter(Boolean);
+          patch.allowedIpRanges = parseAllowedIpRanges(values.allowed_ip_ranges);
+          this.allowedIpRangesFromSettings = true;
+        } else if (this.allowedIpRangesFromSettings) {
+          patch.allowedIpRanges = this.declaredAllowedIpRanges ? [...this.declaredAllowedIpRanges] : [];
+          this.allowedIpRangesFromSettings = false;
         }
 
         // Anti-abuse (ADR-0069 D2) — account lockout (custom, per-identity)
@@ -2507,6 +2528,24 @@ export class AuthPlugin implements Plugin {
         );
       }
     };
+
+    // [#30203] A console save of an allow-list that leaves out the saving
+    // request's own address is refused, naming the address (`allowed-ip-ranges.ts`).
+    if (typeof settings.registerWritePredicate === 'function') {
+      try {
+        settings.registerWritePredicate(
+          'auth',
+          'allowed_ip_ranges',
+          allowedIpRangesWritePredicate(() => this.authManager),
+        );
+      } catch (err: any) {
+        ctx.logger.warn(
+          '[auth] allowed_ip_ranges: the save-time check was NOT registered '
+            + `(${String(err?.message ?? err)}), so the settings console accepts an allow-list that leaves out `
+            + "the saving administrator's own address. The allow-list itself is still enforced.",
+        );
+      }
+    }
 
     await applySettings();
     if (typeof settings.subscribe === 'function') {

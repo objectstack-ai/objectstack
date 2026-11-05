@@ -82,6 +82,22 @@ export interface SettingsContext {
    * resolver sets it to have its held sessions refused too.
    */
   authGate?: AuthGate;
+  /**
+   * [#30203] The HTTP request a WRITE arrived on: its headers and the
+   * transport's own peer address (`IHttpRequest.headers` / `remoteAddress`).
+   * The settings routes set it on a save, for a {@link SettingsWritePredicate}
+   * that judges the change against the caller's own connection (plugin-auth's
+   * `allowed_ip_ranges`, which must not lock out the address saving it).
+   * Absent on an in-process write. It identifies and authorizes nothing, and it
+   * is never stored or logged.
+   */
+  transport?: SettingsRequestTransport;
+}
+
+/** [#30203] What {@link SettingsContext.transport} carries. */
+export interface SettingsRequestTransport {
+  headers?: Record<string, string | string[] | undefined>;
+  remoteAddress?: string;
 }
 
 /**
