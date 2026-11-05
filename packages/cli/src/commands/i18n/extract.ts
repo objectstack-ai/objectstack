@@ -30,7 +30,7 @@ import {
   countTranslationLeaves,
   type FillStrategy,
   type TranslationModuleKind,
-} from '../../utils/i18n-extract.js';
+} from '../../utils/i18n-bundle-extract.js';
 import { authoringRuleUnionStack } from '../../utils/stack-collections.js';
 
 const FILL_STRATEGIES: FillStrategy[] = ['empty', 'default', 'todo'];
