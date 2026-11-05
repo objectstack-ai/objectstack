@@ -74,7 +74,7 @@ import {
   rowOrganizationId,
   seedCtx as organizationScopedCtx,
 } from './organization-scope.js';
-import { grantSetNameOf } from './grant-permission-set-name.js';
+import { GRANT_SET_NAME_FIELD, grantSetNameOf } from './grant-permission-set-name.js';
 import { isReservedIdentityName } from './objects/reserved-identity-names.js';
 
 const SYSTEM_CTX = { isSystem: true } as const;
@@ -424,10 +424,11 @@ export function isUnreadableAddressedRowRefusal(refusal: unknown): boolean {
 }
 
 /**
- * [ADR-0090 D12] A row a delegated write targets, with what the caller may be
- * told about it: `prev` the stored row a by-id write addresses, `next` the row
- * an insert or an update writes, and the two column sets a refusal's guidance
- * reads ({@link mayName}).
+ * [ADR-0090 D12] A row an administrator's write targets — the delegated walk's
+ * and the organization branch's alike — with what the caller may be told about
+ * it: `prev` the stored row a by-id write addresses, `next` the row an insert
+ * or an update writes, and the two column sets a refusal's guidance reads
+ * ({@link mayName}).
  */
 interface DelegatedTarget {
   next: any | null;
@@ -847,13 +848,18 @@ export class DelegatedAdminGate {
    * ({@link organizationBoundaryFailure}); for a position, every set it carries
    * ({@link setsCarriedByPosition}). One set outside puts the row outside.
    *
-   * The row a removal targets is judged as the CALLER reads it
+   * Whether a removal has a row to judge is asked of the CALLER's own read
    * ({@link organizationTargets}), so a row the caller cannot read is answered
-   * exactly as an id naming no row is (ruling of record 5985885287). A by-id
-   * edit, which the right never admits, is asked the same question first: an
-   * edit of a row the caller cannot read, or of an id naming none, is refused
-   * as no row, not as an edit — `unreadable`, which the security middleware
-   * answers with the read door's not-found.
+   * exactly as an id naming no row is (ruling of record 5985885287). A row the
+   * caller reads is judged on the STORED row, as the delegated branch judges
+   * it (sub-item B of that ruling): the caller's read is served through its
+   * field rules and masking, and a verdict taken on what a rule hid would be
+   * taken on less than the row. A refusal names a value only when the caller
+   * reads it at its stored value or wrote it ({@link mayName}). A by-id edit,
+   * which the right never admits, is asked the same question first: an edit
+   * of a row the caller cannot read, or of an id naming none, is refused as no
+   * row, not as an edit — `unreadable`, which the security middleware answers
+   * with the read door's not-found.
    */
   private async organizationAdminFailure(
     opCtx: any,
@@ -883,13 +889,20 @@ export class DelegatedAdminGate {
     }
 
     for (const t of await this.organizationTargets(opCtx)) {
+      const side = t.next ? 'next' : 'prev';
       const row = t.next ?? t.prev;
       // No row answers an id naming none and a row the caller cannot read
       // alike: one refusal, and never a fall-through to the engine.
       if (!row) return { reason: 'the assignment row to remove could not be read', meta: {}, unreadable: op === 'delete' };
 
+      // [ruling of record 5985885287, sub-item B] The verdict is the stored
+      // row's; each value below is named only when the caller wrote or reads
+      // it ({@link mayName}).
       const rowOrg = rowOrganizationId(row);
       if (t.next ? rowOrg !== null && rowOrg !== organizationId : rowOrg !== organizationId) {
+        if (!mayName(t, side, 'organization_id')) {
+          return { reason: 'the row does not belong to the organization you administer', meta: {} };
+        }
         return {
           reason: rowOrg
             ? `the row belongs to organization '${rowOrg}', not the one you administer`
@@ -908,13 +921,22 @@ export class DelegatedAdminGate {
         }
         const positionName = String(row.position ?? '');
         const failure = await this.positionBoundaryFailure(positionName);
-        if (failure) return { reason: failure.reason, meta: { position: positionName, permissionSet: failure.permissionSet } };
+        if (failure) {
+          // A set is named only beside the position it is read from.
+          return mayName(t, side, 'position')
+            ? { reason: failure.reason, meta: { position: positionName, permissionSet: failure.permissionSet } }
+            : { reason: "the assignment's position is not inside the organization boundary", meta: {} };
+        }
       } else {
         const setName = grantSetNameOf(row) ?? '';
         const reason = setName
           ? await this.organizationBoundaryFailure(setName)
           : 'the grant names no permission set';
-        if (reason) return { reason, meta: { permissionSet: setName } };
+        if (reason) {
+          return mayName(t, side, GRANT_SET_NAME_FIELD)
+            ? { reason, meta: { permissionSet: setName } }
+            : { reason: "the grant's permission set is not inside the organization boundary", meta: {} };
+        }
       }
     }
 
@@ -929,21 +951,30 @@ export class DelegatedAdminGate {
 
   /**
    * [ADR-0090 D12; ruling of record 5985885287] The rows an organization
-   * administrator's insert or removal targets: an insert's payload rows, or the
-   * one row a removal addresses, as the CALLER reads it.
+   * administrator's insert or removal targets, with what the caller may be
+   * told of each ({@link DelegatedTarget}): an insert's payload rows, every
+   * value the caller's own; or the one row a removal addresses.
    *
-   * The pre-image is the caller's own by-id read through the engine — the read
-   * door's answer to this caller, every read visibility and wall included —
-   * never a system read: a row the caller cannot read answers what an id naming
-   * no row answers. A row it reads is judged on what it read, so its guidance
-   * stays. A read refusal or a store fault propagates as raised: an outage is
-   * neither an answer nor a refusal, and the by-id write door answers a caller
-   * the read door refuses with that refusal.
+   * Whether a removal has a row is asked of the caller's own by-id read
+   * ({@link callerRead}) — the read door's answer to this caller, every read
+   * visibility and wall included: a row the caller cannot read answers what an
+   * id naming no row answers, and no system read is made for it. A row it
+   * reads is then judged on the stored row ({@link storedRow}), never on the
+   * caller's read of it — sub-item B: that read is served through the caller's
+   * field rules and masking — and `reads` holds the columns that read returned
+   * at their stored value ({@link columnsReadAsStored}). A read refusal or a
+   * store fault, in either read, propagates as raised: an outage is neither an
+   * answer nor a refusal, and the by-id write door answers a caller the read
+   * door refuses with that refusal.
    */
-  private async organizationTargets(opCtx: any): Promise<Array<{ next: any | null; prev: any | null }>> {
-    if (opCtx.operation === 'insert') return rowsOf(opCtx).map((r) => ({ next: r, prev: null }));
+  private async organizationTargets(opCtx: any): Promise<DelegatedTarget[]> {
+    if (opCtx.operation === 'insert') {
+      return rowsOf(opCtx).map((r) => ({ next: r, prev: null, wrote: null, reads: new Set<string>() }));
+    }
     const id = extractSingleId(opCtx);
-    return [{ next: null, prev: id != null ? await this.callerRead(opCtx, id) : null }];
+    const seen = id != null ? await this.callerRead(opCtx, id) : null;
+    const prev = seen && id != null ? await this.storedRow(opCtx.object, id) : null;
+    return [{ next: null, prev, wrote: new Set<string>(), reads: columnsReadAsStored(seen, prev) }];
   }
 
   /**
