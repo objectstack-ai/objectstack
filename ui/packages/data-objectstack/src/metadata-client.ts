@@ -32,7 +32,11 @@
  * type, mirroring the framework's "single Zod source per type" rule.
  */
 
-import { FlowRegistrationSchema, GetMetaItemLayeredResponseSchema } from '@objectstack/spec/api';
+import {
+  FindReferencesToMetaResponseSchema,
+  FlowRegistrationSchema,
+  GetMetaItemLayeredResponseSchema,
+} from '@objectstack/spec/api';
 // objectui#8676 - the object-metadata write invariant, applied HERE because this
 // is a DOOR and not a writer. Every `client.save('object', ...)` call site in the
 // repo passes through this one method, so guarding it covers a writer set that
@@ -769,15 +773,23 @@ export interface MetadataDiagnosticsSummary {
   stats?: Record<string, { count: number; locked?: number; packages: string[] }>;
 }
 
-/** Reference back-pointer — Phase 3a `/references`. */
+/**
+ * Reference back-pointer — Phase 3a `/references`: one element of the served
+ * `references[]` (`FindReferencesToMetaResponseSchema`), named from the
+ * referring side.
+ */
 export interface MetadataReference {
-  /** Referencing item's metadata type. */
+  /** Referencing item's metadata type (the served `type`). */
   fromType: string;
-  /** Referencing item's name. */
+  /** Referencing item's name (the served `name`). */
   fromName: string;
+  /** The referring item's display label, when the server serves one. */
+  fromLabel?: string;
   /** JSON path within the referencing item that holds the reference. */
   path: string;
-  /** The actual value seen at `path` (the referenced name). */
+  /** What kind of reference it is (the served `kind`, e.g. `dashboard dataset`). */
+  kind?: string;
+  /** The referenced name: the item the read was asked about. */
   value: string;
 }
 
@@ -1857,8 +1869,21 @@ export class MetadataClient {
     const res = await this.fetchImpl(url, { method: 'GET', headers: this.headers, cache: 'no-store' });
     if (res.status === 404) return [];
     if (!res.ok) throw await parseError(res);
-    const data = await res.json();
-    return Array.isArray(data) ? (data as MetadataReference[]) : (data?.items ?? []);
+    // The route's declared answer is `{ references: [...] }`, served bare.
+    // An answer the declaration refuses is a failed read, never "nothing
+    // references it": the panels render an empty list as safe to delete.
+    const parsed = FindReferencesToMetaResponseSchema.safeParse(await res.json().catch(() => null));
+    if (!parsed.success) {
+      throw new Error(`The references read for ${type} '${name}' answered a body its declaration refuses.`);
+    }
+    return parsed.data.references.map((ref) => ({
+      fromType: ref.type,
+      fromName: ref.name,
+      ...(ref.label !== undefined ? { fromLabel: ref.label } : {}),
+      path: ref.path,
+      kind: ref.kind,
+      value: name,
+    }));
   }
 
   /**

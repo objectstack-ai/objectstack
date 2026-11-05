@@ -2541,6 +2541,101 @@ describe('LifecycleService timers', () => {
       vi.useRealTimers();
     }
   });
+
+  /**
+   * [#29918] A datastore this process created from empty holds no row older
+   * than the boot, so the first scheduled sweep is due one interval later.
+   * Every data-plane door the sweep can reach is counted: the reaps, the
+   * governance settings reads and the reference audit.
+   */
+  function freshnessEngine(answer: () => boolean) {
+    const captured = captureEngine([
+      { name: 'sys_job_run', lifecycle: { class: 'telemetry', retention: { maxAge: '30d' } } },
+    ]);
+    const audits: unknown[] = [];
+    const settingsReads: string[] = [];
+    captured.engine.wasDatastoreCreatedFromEmpty = answer;
+    captured.engine.inspectDanglingReferences = async (options: unknown) => {
+      audits.push(options);
+      return { findings: [], scannedObjects: [], unreadableObjects: [] };
+    };
+    const getSettings = () => ({
+      async get(namespace: string, key: string) {
+        settingsReads.push(`${namespace}.${key}`);
+        return { value: undefined };
+      },
+    });
+    return { ...captured, audits, settingsReads, getSettings };
+  }
+
+  it('[#29918] issues no sweep at the initial delay on a store this boot created, and sweeps one interval later', async () => {
+    vi.useFakeTimers();
+    try {
+      const { engine, deletes, audits, settingsReads, getSettings } = freshnessEngine(() => true);
+      const svc = service(engine, { initialDelayMs: 1_000, sweepIntervalMs: 5_000, getSettings });
+
+      svc.start();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(deletes).toHaveLength(0);
+      expect(audits).toHaveLength(0);
+      expect(settingsReads).toEqual([]);
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(deletes).toHaveLength(1);
+      expect(audits).toHaveLength(1);
+      expect(settingsReads.length).toBeGreaterThan(0);
+      svc.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('[#29918] sweeps at the initial delay when the store was there before this boot, or the engine cannot say', async () => {
+    vi.useFakeTimers();
+    try {
+      const answers: Array<() => boolean> = [
+        () => false,
+        () => {
+          throw new Error('no driver reports schema-sync stats');
+        },
+      ];
+      for (const answer of answers) {
+        const { engine, deletes, audits } = freshnessEngine(answer);
+        const svc = service(engine, { initialDelayMs: 1_000, sweepIntervalMs: 5_000 });
+        svc.start();
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(deletes).toHaveLength(1);
+        expect(audits).toHaveLength(1);
+        svc.stop();
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('[#29918] a direct sweep() on a store this boot created still sweeps', async () => {
+    const { engine, deletes, audits } = freshnessEngine(() => true);
+    await service(engine).sweep();
+    expect(deletes).toHaveLength(1);
+    expect(audits).toHaveLength(1);
+  });
+
+  it('[#29918] OS_LIFECYCLE_DISABLED still arms nothing on a store this boot created', async () => {
+    vi.useFakeTimers();
+    process.env.OS_LIFECYCLE_DISABLED = '1';
+    try {
+      const { engine, deletes, audits } = freshnessEngine(() => true);
+      const svc = service(engine, { initialDelayMs: 1_000, sweepIntervalMs: 5_000 });
+      svc.start();
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(deletes).toHaveLength(0);
+      expect(audits).toHaveLength(0);
+      svc.stop();
+    } finally {
+      delete process.env.OS_LIFECYCLE_DISABLED;
+      vi.useRealTimers();
+    }
+  });
 });
 
 /**
