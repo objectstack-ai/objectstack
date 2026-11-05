@@ -397,7 +397,14 @@ export interface VisibleObjectExtension {
  *   (`packages[j].manifest`, `carrier` = `j`, the artifact's registration
  *   order); without it, the stack's own (`carrier` 0). An artifact's top level
  *   repeats its bodies' collections, so it is not read beside them.
- * - `extend` names its target verbatim.
+ * - `extend` names its target verbatim. ⚠️ The registry does one more thing
+ *   this fold does not mirror (#28858, `SchemaRegistry.extensionTargetKey`):
+ *   a short name that nothing is registered under but that `getObject` folds
+ *   to a legacy `<ns>__<name>` key is filed under that key, with a warning.
+ *   Lint reads the stack's own object names and knows no namespace, so such
+ *   an entry folds onto nothing here: a key naming its field reads as
+ *   unknown, the refusing direction, and the warning's remedy (write the key
+ *   the object is registered under) is also what makes the fold see it.
  * - ONE entry per package per target: registering an extension removes that
  *   package's earlier one, so a later entry of the same package replaces an
  *   earlier one whole, its fields included.
