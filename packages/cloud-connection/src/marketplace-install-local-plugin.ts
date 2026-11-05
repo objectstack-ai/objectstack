@@ -5062,27 +5062,17 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         try { metadata = ctx.getService('metadata'); } catch { /* none */ }
         if (!ql || !metadata) throw new Error('objectql-or-metadata-missing');
 
-        const [runtime, { SeedLoaderRequestSchema }] = await Promise.all([
+        const [{ SeedLoaderService, appDefaultSeedLocale, describeSeedLocale, resolveSeedLocaleForLoad }, { SeedLoaderRequestSchema }] = await Promise.all([
             import('@objectstack/runtime'),
             import('@objectstack/spec/data'),
         ]);
-        const { SeedLoaderService } = runtime;
-        // A runtime build without the resolver (an older one, or a suite that
-        // mocks the module with the loader alone) sends no locale: today's
-        // behaviour, and the loader still names every locale-scoped dataset it
-        // let through. Same posture as `registerSeedReplayerIntoKernel`.
-        const resolve = (runtime as Partial<typeof runtime>).resolveSeedLocaleForLoad;
-        const seedLocale = typeof resolve === 'function'
-            ? await resolve(ctx, {
-                seeds: datasets,
-                organizationId,
-                userId: localeFrom.userId,
-                appDefaultLocale: runtime.appDefaultSeedLocale(localeFrom.app),
-            })
-            : undefined;
-        if (typeof resolve === 'function') {
-            ctx.logger?.info?.(`[MarketplaceInstallLocal] seed locale${organizationId ? ` for org ${organizationId}` : ''}: ${runtime.describeSeedLocale(seedLocale)}`);
-        }
+        const seedLocale = await resolveSeedLocaleForLoad(ctx, {
+            seeds: datasets,
+            organizationId,
+            userId: localeFrom.userId,
+            appDefaultLocale: appDefaultSeedLocale(localeFrom.app),
+        });
+        ctx.logger?.info?.(`[MarketplaceInstallLocal] seed locale${organizationId ? ` for org ${organizationId}` : ''}: ${describeSeedLocale(seedLocale)}`);
         const seedLoader = new (SeedLoaderService as any)(ql, metadata, ctx.logger);
         const request = (SeedLoaderRequestSchema as any).parse({
             // ADR-0036 / seed rename: the field is `seeds` (was `datasets`).
