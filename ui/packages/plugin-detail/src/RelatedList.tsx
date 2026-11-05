@@ -3629,6 +3629,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       <CardHeader
         className={cn('py-3 px-4 sm:py-3 min-h-12 sm:min-h-0', headerClassName)}
         onClick={handleHeaderClick}
+        data-related-list-head=""
       >
         <CardTitle className={cn('flex items-center justify-between gap-2 text-sm font-semibold', compact && 'flex-wrap')}>
           <div className="flex items-center gap-2 min-w-0">
@@ -3656,7 +3657,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 {recordCount}
               </Badge>
             )}
-            {isEmpty && (
+            {/* A body table says it under its header instead, where its
+                table would be (objectstack#29944). */}
+            {isEmpty && !bodyTable && (
               <span className="text-xs text-muted-foreground/70 italic ml-1 truncate">
                 {t('detail.noRelatedRecords')}
               </span>
@@ -3754,6 +3757,19 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       {!collapsed && loadFailure && (
         <CardContent className="pt-0 pb-4 px-4">
           <RelatedListLoadFailed error={loadFailure.error} onRetry={handleRetryRead} />
+        </CardContent>
+      )}
+      {/* objectstack#29944 — an empty body table keeps the shape of its
+          siblings: the header row, then the empty sentence where the table
+          would be. */}
+      {!collapsed && isEmpty && bodyTable && !loadFailure && (
+        <CardContent className="pt-0 pb-4 px-4">
+          <p
+            className="rounded-md border border-dashed border-border/60 px-3 py-4 text-center text-xs text-muted-foreground"
+            data-body-table-empty=""
+          >
+            {t('detail.noRelatedRecords')}
+          </p>
         </CardContent>
       )}
       {!collapsed && !isEmpty && !loadFailure && <CardContent className={cn('pt-0 pb-4 px-4')}>

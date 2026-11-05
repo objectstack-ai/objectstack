@@ -164,6 +164,7 @@ Result of loading a single dataset
 | **referencesDropped** | `integer` | optional (default: `0`) | Reference fields dropped from records that were still written |
 | **summariesStale** | `integer` | optional (default: `0`) | Roll-up summary values left stale by writes for this dataset |
 | **landedIds** | `string[]` | optional (default: `[]`) | Ids of the stored rows this dataset landed on: inserted, updated, or matched on replay |
+| **insertedIds** | `string[]` | optional (default: `[]`) | Ids among landedIds whose row this load created (a successful insert); every other landed id was a pre-existing row a record key matched |
 | **errors** | `{ sourceObject: string; field: string; targetObject: string; targetField: string; … }[]` | optional (default: `[]`) | Reference resolution errors |
 
 ### Nested Shape: `SeedLoadResult.errors[number]`
@@ -302,6 +303,7 @@ Result of loading a single dataset
 | **referencesDropped** | `integer` | optional (default: `0`) | Reference fields dropped from records that were still written |
 | **summariesStale** | `integer` | optional (default: `0`) | Roll-up summary values left stale by writes for this dataset |
 | **landedIds** | `string[]` | optional (default: `[]`) | Ids of the stored rows this dataset landed on: inserted, updated, or matched on replay |
+| **insertedIds** | `string[]` | optional (default: `[]`) | Ids among landedIds whose row this load created (a successful insert); every other landed id was a pre-existing row a record key matched |
 | **errors** | `{ sourceObject: string; field: string; targetObject: string; targetField: string; … }[]` | optional (default: `[]`) | Reference resolution errors |
 
 ### Nested Shape: `SeedLoaderResult.errors[number]`
