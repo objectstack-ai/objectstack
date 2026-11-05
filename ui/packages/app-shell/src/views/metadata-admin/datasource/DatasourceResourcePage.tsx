@@ -34,7 +34,9 @@
  *    Offered only on a federation source (`offersSync`, objectui#13318).
  *  - **Delete** a runtime datasource (`DELETE …/:name`; blocked by the backend
  *    while objects are still bound), confirmed in an in-app AlertDialog that
- *    names the datasource by its label and name (objectui#13333).
+ *    names the datasource by its label and name (objectui#13333). The confirm
+ *    lists the objects whose metadata names the datasource, and a refused
+ *    delete names them in the console's language, with what to do next.
  *
  * Code-defined (`origin: 'code'`) datasources are read-only: edit/delete are
  * hidden for them.
@@ -124,6 +126,15 @@ interface DatasourceRow {
   origin?: string;
   active?: boolean;
 }
+
+/** An object whose metadata names this datasource as its `datasource`. */
+interface BoundObject {
+  name: string;
+  label?: string;
+}
+
+/** A refused request: the envelope's message, with the HTTP status and the envelope's `code` beside it. */
+type ApiError = Error & { status?: number; code?: string };
 
 /**
  * Status chip per verdict. `unvalidated` stays visually quiet — it means
@@ -251,6 +262,11 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
   const [busy, setBusy] = React.useState<string | null>(null);
   // objectui#13333 — the row whose delete is being confirmed (in-app dialog).
   const [confirmDelete, setConfirmDelete] = React.useState<DatasourceRow | null>(null);
+  /**
+   * The objects bound to the datasource whose delete is being confirmed, keyed
+   * by its name so an answer for an earlier row is never drawn under a later one.
+   */
+  const [bound, setBound] = React.useState<{ datasource: string; objects: BoundObject[] } | null>(null);
 
   /**
    * Fetch + unwrap the declared response envelope.
@@ -283,7 +299,8 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
           (body && typeof body.error === 'string' ? body.error : undefined) ||
           (body && body.message) ||
           `HTTP ${res.status}`;
-        throw new Error(detail);
+        const code = body && typeof body.error === 'object' && typeof body.error?.code === 'string' ? body.error.code : undefined;
+        throw Object.assign(new Error(detail), { status: res.status, code }) as ApiError;
       }
       return body && typeof body.success === 'boolean' && 'data' in body ? body.data : body;
     },
@@ -322,6 +339,30 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
     }
   };
 
+  /**
+   * The objects whose metadata names `datasource` as theirs: the same test the
+   * server's delete guard counts by (`object.datasource === name`).
+   */
+  const readBoundObjects = async (datasource: string): Promise<BoundObject[]> => {
+    const objects = await metaClient.list<{ name?: unknown; label?: unknown; datasource?: unknown }>('object');
+    return objects
+      .filter((o) => o?.datasource === datasource && typeof o.name === 'string')
+      .map((o) => ({ name: o.name as string, ...(typeof o.label === 'string' && o.label ? { label: o.label } : {}) }));
+  };
+
+  /** Each object by its label, with its name beside it when the two differ. */
+  const boundObjectText = (o: BoundObject) => (o.label && o.label !== o.name ? `${o.label} (${o.name})` : o.name);
+
+  const openDeleteConfirm = (row: DatasourceRow) => {
+    setConfirmDelete(row);
+    setBound(null);
+    // A failed read leaves the confirm as it was: the server still judges the delete.
+    readBoundObjects(row.name).then(
+      (objects) => setBound({ datasource: row.name, objects }),
+      () => undefined,
+    );
+  };
+
   const remove = async (name: string) => {
     setBusy(`del:${name}`);
     try {
@@ -329,7 +370,16 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
       toast.success(tFormat('engine.datasource.deleted', locale, { name }));
       void load();
     } catch (err) {
-      toast.error(tFormat('engine.datasource.deleteFailed', locale, { name, error: (err as Error).message }));
+      // A 400 on a datasource that objects still name is the server's
+      // bound-object refusal: read the objects now and name them in the
+      // console's language. Any other failure keeps the server's own message.
+      const objects = (err as ApiError).status === 400 ? await readBoundObjects(name).catch(() => []) : [];
+      if (objects.length) {
+        const list = objects.map(boundObjectText).join(t('engine.datasource.boundObjectSeparator', locale));
+        toast.error(tFormat('engine.datasource.deleteBoundRefused', locale, { name, objects: list }));
+      } else {
+        toast.error(tFormat('engine.datasource.deleteFailed', locale, { name, error: (err as Error).message }));
+      }
     } finally {
       setBusy(null);
     }
@@ -619,6 +669,8 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
     );
   };
 
+  const confirmBound = confirmDelete && bound?.datasource === confirmDelete.name ? bound.objects : [];
+
   return (
     <div className="mx-auto max-w-4xl px-6 py-8">
       <div className="mb-6 flex items-center justify-between">
@@ -686,7 +738,7 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
                     <Button variant="ghost" size="icon" className="h-8 w-8" title={t('engine.datasource.edit', locale)} disabled={busy === `edit:${ds.name}`} onClick={() => void openEdit(ds)}>
                       {busy === `edit:${ds.name}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Pencil className="h-4 w-4" />}
                     </Button>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" title={t('engine.datasource.delete', locale)} disabled={busy === `del:${ds.name}`} onClick={() => setConfirmDelete(ds)}>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" title={t('engine.datasource.delete', locale)} disabled={busy === `del:${ds.name}`} onClick={() => openDeleteConfirm(ds)}>
                       {busy === `del:${ds.name}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                     </Button>
                   </>
@@ -823,7 +875,8 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
         </DialogContent>
       </Dialog>
 
-      {/* Delete a datasource — names it by label and name (objectui#13333). */}
+      {/* Delete a datasource — names it by label and name (objectui#13333), and
+          lists the objects that still use it, which the server refuses the delete for. */}
       <AlertDialog open={confirmDelete !== null} onOpenChange={(o) => { if (!o) setConfirmDelete(null); }}>
         <AlertDialogContent data-testid="datasource-delete-dialog">
           <AlertDialogHeader>
@@ -831,9 +884,16 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
               {confirmDelete && tFormat('engine.datasource.deleteTitle', locale, { item: confirmDelete.label || confirmDelete.name })}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {confirmDelete && tFormat('engine.datasource.deleteBody', locale, { name: confirmDelete.name })}
+              {confirmDelete && (confirmBound.length
+                ? tFormat('engine.datasource.deleteBoundBody', locale, { name: confirmDelete.name })
+                : tFormat('engine.datasource.deleteBody', locale, { name: confirmDelete.name }))}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {confirmBound.length > 0 && (
+            <ul data-testid="datasource-delete-bound" className="max-h-48 list-disc space-y-0.5 overflow-y-auto pl-5 text-sm">
+              {confirmBound.map((o) => <li key={o.name}>{boundObjectText(o)}</li>)}
+            </ul>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel data-testid="datasource-delete-cancel">{t('engine.cancel', locale)}</AlertDialogCancel>
             <AlertDialogAction
