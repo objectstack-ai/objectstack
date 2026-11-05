@@ -722,9 +722,9 @@ describe('a start input declared a record id is loaded from the declared object 
             });
 
             it.each([
-                ['the caller cannot read', CONTRACT_OTHER],
-                ['does not exist', GHOST],
-            ])('a declared input naming a record the caller %s: 404 RECORD_NOT_FOUND, no run', async (_label, id) => {
+                ['a record the caller cannot read', CONTRACT_OTHER],
+                ['an id that names no record', GHOST],
+            ])('a declared input naming %s: 404 RECORD_NOT_FOUND, no run', async (_label, id) => {
                 const got = await start(DECLARED, id);
 
                 expect(got.status).toBe(404);
