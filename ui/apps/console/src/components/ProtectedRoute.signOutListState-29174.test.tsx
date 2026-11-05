@@ -18,9 +18,11 @@
  * `LoginRedirect`), and the real Console `LoginPage` with its post-login
  * hand-off. Only the shell's provider stack is a pass-through.
  *
- *   - A signs out of a list carrying every kind of list state; the login page's
- *     URL carries none of it, and B lands on the same path with the other
- *     params kept (the card's reproduction, steps 4 to 7);
+ *   - A's session expires on a list carrying every kind of list state; the
+ *     login page's URL carries none of it, and B lands on the same path with
+ *     the other params kept (the card's reproduction, steps 4 to 7, with the
+ *     session ending by expiry: an explicit sign-out now carries no return link
+ *     at all, pinned in the objectstack#30125 block below);
  *   - an invitation redirect still lands on the invitation;
  *   - a signed-out arrival on a deep link with no list state keeps it byte for
  *     byte;
@@ -34,9 +36,9 @@
 
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, cleanup, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
+import { MemoryRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { AuthProvider, useAuth } from '@object-ui/auth';
 import type { AuthClient } from '@object-ui/auth';
@@ -100,22 +102,38 @@ function createClient(): AuthClient {
 
 /** Every location the router settles on, oldest first. */
 const seen: string[] = [];
+/** The router's own navigate, for an in-app move between sign-ins. */
+const navigateTo: { current: ((to: string) => void) | null } = { current: null };
 function LocationProbe() {
   const location = useLocation();
+  navigateTo.current = useNavigate();
   seen.push(location.pathname + location.search);
   return null;
 }
 
-/** The list page, reduced to the account menu's sign-out. */
+/**
+ * The list page, reduced to the account menu's sign-out and a session
+ * re-resolution: the provider's own loader, which is how a session that
+ * expired or was revoked under the page reaches it.
+ */
 function SignedInList() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, refreshSession } = useAuth();
   return (
     <div data-testid="list-page" data-user={user?.id ?? ''}>
       <button type="button" onClick={() => void signOut()}>
         Sign out
       </button>
+      <button type="button" onClick={() => void refreshSession()}>
+        Re-check session
+      </button>
     </div>
   );
+}
+
+/** The server ends the session on its own (expiry, revocation), and the page learns it. */
+async function expireSession() {
+  serverUser = null;
+  await userEvent.setup().click(screen.getByRole('button', { name: 'Re-check session' }));
 }
 
 function renderConsole(entry: string, client: AuthClient) {
@@ -176,7 +194,7 @@ afterEach(() => {
 });
 
 describe('signing out leaves the list state behind (objectstack#29174)', () => {
-  it('A signs out of a filtered, searched, sorted list; B signs in and lands on the path with none of it', async () => {
+  it("A's session expires on a filtered, searched, sorted list; B signs in and lands on the path with none of it", async () => {
     serverUser = USER_A;
     const client = createClient();
     renderConsole(A_LIST_URL, client);
@@ -185,8 +203,8 @@ describe('signing out leaves the list state behind (objectstack#29174)', () => {
     expect((await screen.findByTestId('list-page')).dataset.user).toBe(USER_A.id);
     expect(seen[seen.length - 1]).toBe(A_LIST_URL);
 
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Sign out' }));
-    expect(client.signOut).toHaveBeenCalledTimes(1);
+    await expireSession();
+    expect(client.signOut).not.toHaveBeenCalled();
 
     // The login page's own URL carries none of it: not the params, not a value.
     const { url, redirect } = await loginRedirect();
@@ -234,5 +252,72 @@ describe('signing out leaves the list state behind (objectstack#29174)', () => {
 
     const { redirect } = await loginRedirect();
     expect(redirect).toBe(`${LIST_PATH}?recordId=r1`);
+  });
+});
+
+/**
+ * objectstack#30125 — after a sign-out, the next person lands on the previous
+ * person's page. A new member's first screen was "you do not have access to
+ * this app" for the Setup page the administrator had open.
+ *
+ * An explicit sign-out sends the visitor to `/login` with no return link, so
+ * whoever signs in next lands on their own home. A session that ends under the
+ * person (expired, revoked) still keeps the path, so that person signs back in
+ * where they were. Same real composition as the block above.
+ */
+describe('an explicit sign-out leaves no return link (objectstack#30125)', () => {
+  const SETUP_PAGE = '/apps/com.objectstack.setup/sys_user/view/all?recordId=u1';
+
+  it('A signs out of a Setup page; B signs in and lands on home, not on that page', async () => {
+    serverUser = USER_A;
+    const client = createClient();
+    renderConsole(SETUP_PAGE, client);
+    expect((await screen.findByTestId('list-page')).dataset.user).toBe(USER_A.id);
+
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Sign out' }));
+    expect(client.signOut).toHaveBeenCalledTimes(1);
+
+    const { url, redirect } = await loginRedirect();
+    expect(url).toBe('/login');
+    expect(redirect).toBeNull();
+
+    await signInAs(USER_B.email);
+    expect(await landing()).toBe(withConsoleBase('/'));
+  });
+
+  it("A's session expires on the same page; A signs back in and lands on it", async () => {
+    serverUser = USER_A;
+    const client = createClient();
+    renderConsole(SETUP_PAGE, client);
+    expect((await screen.findByTestId('list-page')).dataset.user).toBe(USER_A.id);
+
+    await expireSession();
+
+    const { url, redirect } = await loginRedirect();
+    expect(url).toBe(`/login?redirect=${encodeURIComponent(SETUP_PAGE)}`);
+    expect(redirect).toBe(SETUP_PAGE);
+
+    await signInAs(USER_A.email);
+    expect(await landing()).toBe(withConsoleBase(SETUP_PAGE));
+  });
+
+  it('the sign-out is forgotten once someone signs in: a later expiry keeps the path again', async () => {
+    serverUser = USER_A;
+    const client = createClient();
+    renderConsole(SETUP_PAGE, client);
+    expect((await screen.findByTestId('list-page')).dataset.user).toBe(USER_A.id);
+
+    // A signs out; B signs in on the same tab, without a page load.
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Sign out' }));
+    expect((await loginRedirect()).redirect).toBeNull();
+    await signInAs(USER_B.email);
+    await landing();
+
+    // B opens the page in-app, and B's session then expires under it.
+    act(() => navigateTo.current!(SETUP_PAGE));
+    expect((await screen.findByTestId('list-page')).dataset.user).toBe(USER_B.id);
+    await expireSession();
+
+    expect((await loginRedirect()).redirect).toBe(SETUP_PAGE);
   });
 });
