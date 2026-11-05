@@ -384,7 +384,7 @@ export async function masterDetailHeadersCallerReads(
     }
     return served;
   } catch (err) {
-    this.logger?.warn?.('the caller\'s read of the master-detail header failed — the header binds as a missing header', {
+    this.logger?.warn?.('the caller\'s read of the referenced record failed — it answers as a record that does not exist', {
       object: master, error: err,
     });
     return new Set();
