@@ -30,6 +30,11 @@
  * editor: the first saved edit copies the whole app into the pair, declaring
  * the override; the pickers offer the pair's items; the rail marks the
  * override and counts it under "only customizations"; Restore deletes it.
+ *
+ * objectstack#30063 — and a page, through its designer as a dashboard is:
+ * the first saved edit copies the whole page into the pair, declaring the
+ * override; Restore deletes it; the rail marks the page and counts it under
+ * "only customizations"; on a writable package the page saves in place.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -67,6 +72,15 @@ const BASE_ROWS: Record<string, Record<string, unknown>> = {
   'app/crm_app': { ...APP, _packageId: BASE },
   'dashboard/pipeline': { name: 'pipeline', label: 'Pipeline', widgets: [], _packageId: BASE },
   'dashboard/forecast': { name: 'forecast', label: 'Forecast', widgets: [], _packageId: BASE },
+  // objectstack#30063 — a page no navigation entry opens: the rail lists it under its type.
+  'page/crm_welcome': {
+    name: 'crm_welcome',
+    label: 'Welcome',
+    type: 'home',
+    kind: 'full',
+    regions: [{ name: 'main', components: [{ type: 'element:text', properties: { content: 'Shipped text' } }] }],
+    _packageId: BASE,
+  },
   'view/opportunity.default': {
     name: 'opportunity.default',
     object: 'opportunity',
@@ -104,6 +118,7 @@ const mockClient = vi.hoisted(() => ({
     if (opts.packageId === PAIR) return clone(srv.pairListed.get(type) ?? []);
     if (type === 'app') return [{ name: 'crm_app', label: 'CRM' }];
     if (type === 'object') return [{ name: 'opportunity', label: 'Opportunity' }];
+    if (type === 'page') return [{ name: 'crm_welcome', label: 'Welcome', _packageId: BASE }];
     return [];
   }),
   listDrafts: vi.fn(async () => []),
@@ -188,6 +203,27 @@ function BoardCanvas({ draft, onPatch }: { draft: Record<string, unknown>; onPat
   );
 }
 
+/** objectstack#30063 — the page designer, reduced to its first text block and one in-place edit of it. */
+function PageCanvas({ draft, onPatch }: { draft: Record<string, unknown>; onPatch?: (patch: Record<string, unknown>) => void }) {
+  const regions = (draft?.regions ?? []) as Array<{ name: string; components: Array<{ type: string; properties: { content: string } }> }>;
+  const content = regions[0]?.components[0]?.properties.content ?? '';
+  return (
+    <div>
+      <p data-testid="page-text">{content}</p>
+      <button
+        type="button"
+        onClick={() =>
+          onPatch?.({
+            regions: [{ ...regions[0], components: [{ type: 'element:text', properties: { content: `${content} (ours)` } }] }],
+          })
+        }
+      >
+        patch the page
+      </button>
+    </div>
+  );
+}
+
 /** Stands in for `plugin-view`'s `object-view`, recording the schema the canvas hands it. */
 function ObjectViewRecorder({ schema }: { schema: Record<string, unknown> }) {
   return <pre data-testid="object-view-schema">{JSON.stringify(schema)}</pre>;
@@ -214,6 +250,7 @@ function json(body: unknown, status = 200): Response {
 
 beforeAll(() => {
   registerMetadataPreview('dashboard', BoardCanvas as never);
+  registerMetadataPreview('page', PageCanvas as never);
   ComponentRegistry.register('object-view', ObjectViewRecorder as never, { namespace: 'plugin-view' });
 });
 
@@ -847,5 +884,147 @@ describe('Customize a read-only base’s navigation into its pair (objectstack#3
     expect(srv.ensure).toEqual([]);
     expect(within(rail()).queryByTestId('if-nav-override-mark')).toBeNull();
     expect(within(rail()).queryByTestId('if-nav-saved-to')).toBeNull();
+  });
+});
+
+/* ───────────── objectstack#30063 — a page ───────────── */
+
+const SHIPPED_REGIONS = BASE_ROWS['page/crm_welcome']!.regions;
+const OURS_REGIONS = [{ name: 'main', components: [{ type: 'element:text', properties: { content: 'Shipped text (ours)' } }] }];
+/** The served page override: the pair's whole copy, its text changed. */
+const PAGE_OVERRIDE = {
+  name: 'crm_welcome',
+  label: 'Welcome',
+  type: 'home',
+  kind: 'full',
+  regions: OURS_REGIONS,
+  overrides: { package: BASE, basedOn: '4.0.0' },
+};
+const patchPage = () => fireEvent.click(screen.getByRole('button', { name: 'patch the page' }));
+
+/** The Welcome page open from its rail row, past the first leaf the pillar opens. */
+async function openWelcome(text: RegExp = /^Shipped text$/): Promise<void> {
+  await openPipeline();
+  fireEvent.click(await within(rail()).findByRole('button', { name: /Welcome/ }, { timeout: 8000 }));
+  await waitFor(() => expect(screen.getByTestId('page-text')).toHaveTextContent(text), { timeout: 8000 });
+}
+
+/** The base's customization read listing the page's override. */
+function marksListingThePage(): PackageCustomizationsState {
+  const read = {
+    packageId: BASE,
+    overrides: [{ type: 'page', name: 'crm_welcome', basedOn: '4.0.0' }],
+    extensions: [],
+    switchedOff: [],
+    contributions: [],
+    counts: { overrides: 1, extensions: 0, switchedOff: 0 },
+  } as never;
+  return { status: 'read', read, index: indexCustomizations(BASE, read)!, baseName: 'HotCRM', contributorNames: new Map() };
+}
+
+describe('Customize a read-only base’s page into its pair (objectstack#30063)', () => {
+  it('Customize is offered and writes nothing; the first designer edit copies the whole page into the pair, declaring the override; the base is untouched', async () => {
+    mount();
+    await openWelcome();
+    expect(within(header()).getByTestId('studio-customize')).toBeEnabled();
+    // Until it is pressed the designer edits nothing.
+    patchPage();
+    expect(screen.getByTestId('page-text')).toHaveTextContent(/^Shipped text$/);
+
+    await customize();
+    await sleep(1500);
+    expect(srv.ensure).toEqual([]);
+    expect(srv.saves).toEqual([]);
+
+    patchPage();
+    await waitFor(() => expect(srv.saves).toHaveLength(1), { timeout: 8000 });
+    expect(srv.ensure).toEqual([201]);
+    const [saved] = srv.saves;
+    // Read at the base before the pair was there: pinned to "no draft in the pair".
+    expect(saved).toMatchObject({ type: 'page', name: 'crm_welcome', opts: { mode: 'draft', packageId: PAIR, ifNoneMatch: '*' } });
+    // The whole page, without the base's `_` keys, declaring the override at the base's version.
+    expect(saved!.body).toStrictEqual({
+      name: 'crm_welcome',
+      label: 'Welcome',
+      type: 'home',
+      kind: 'full',
+      regions: OURS_REGIONS,
+      overrides: { package: BASE, basedOn: '4.0.0' },
+    });
+    expect(srv.base.get('page/crm_welcome')).toStrictEqual(BASE_ROWS['page/crm_welcome']);
+    await within(header()).findByTestId('studio-override-chip', undefined, { timeout: 8000 });
+
+    // The next designer edit saves into the pair's copy, at the version it was answered.
+    patchPage();
+    await waitFor(() => expect(srv.saves).toHaveLength(2), { timeout: 8000 });
+    expect(srv.ensure).toEqual([201]);
+    expect(srv.saves[1]!.opts).toMatchObject({ packageId: PAIR, ifMatch: 'v1' });
+    expect(srv.saves[1]!.body.overrides).toEqual({ package: BASE, basedOn: '4.0.0' });
+  });
+
+  it('a served override opens in the designer as the pair’s copy, editable, with no Customize to press', async () => {
+    srv.pairExists = true;
+    srv.pairActive.set('page/crm_welcome', clone(PAGE_OVERRIDE));
+    mount({ listedPair: PAIR });
+    await openWelcome(/^Shipped text \(ours\)$/);
+    await within(header()).findByTestId('studio-override-chip', undefined, { timeout: 8000 });
+    expect(within(header()).queryByTestId('studio-customize')).toBeNull();
+
+    patchPage();
+    await waitFor(() => expect(srv.saves).toHaveLength(1), { timeout: 8000 });
+    expect(srv.saves[0]).toMatchObject({ type: 'page', name: 'crm_welcome', opts: { packageId: PAIR } });
+    expect(srv.saves[0]!.body.overrides).toEqual({ package: BASE, basedOn: '4.0.0' });
+  });
+
+  it('Restore deletes the pair’s draft and row of the page, and the shipped page reads back', async () => {
+    srv.pairExists = true;
+    srv.pairActive.set('page/crm_welcome', clone(PAGE_OVERRIDE));
+    mount({ listedPair: PAIR });
+    await openWelcome(/^Shipped text \(ours\)$/);
+    await restore();
+    await waitFor(() => expect(srv.resets).toHaveLength(2), { timeout: 8000 });
+    expect(srv.resets).toEqual([
+      { type: 'page', name: 'crm_welcome', opts: { state: 'draft', packageId: PAIR } },
+      { type: 'page', name: 'crm_welcome', opts: { packageId: PAIR } },
+    ]);
+    await waitFor(() => expect(screen.getByTestId('page-text')).toHaveTextContent(/^Shipped text$/), { timeout: 8000 });
+    await waitFor(() => expect(within(header()).queryByTestId('studio-override-chip')).toBeNull());
+    expect(within(header()).getByTestId('studio-customize')).toBeInTheDocument();
+    expect(srv.base.get('page/crm_welcome')!.regions).toStrictEqual(SHIPPED_REGIONS);
+    expect(srv.saves).toEqual([]);
+  });
+
+  it('the rail marks a customized page and counts it under "only customizations", which lists it', async () => {
+    srv.pairExists = true;
+    srv.pairActive.set('page/crm_welcome', clone(PAGE_OVERRIDE));
+    mount({ listedPair: PAIR, marks: marksListingThePage() });
+    await openPipeline();
+    const row = await within(rail()).findByRole('button', { name: /Welcome/ }, { timeout: 8000 });
+    await waitFor(() => expect(within(row).getByTestId('customization-mark')).toHaveAttribute('data-kind', 'customized'), {
+      timeout: 8000,
+    });
+    const only = await within(rail()).findByTestId('studio-rail-customizations-only', undefined, { timeout: 8000 });
+    expect(only).toHaveTextContent(tFormat('engine.list.customizations.only', 'en', { marked: 1 }));
+
+    fireEvent.click(only);
+    expect(only).toHaveAttribute('aria-pressed', 'true');
+    expect(within(rail()).getByRole('button', { name: /Welcome/ })).toBeInTheDocument();
+    expect(within(rail()).queryByRole('button', { name: /Forecast/ })).toBeNull();
+  });
+
+  it('CONTROL: on a writable package a page edit saves at the package, with no door and no declaration', async () => {
+    mockClient.save.mockImplementationOnce(async (type: string, name: string, item: unknown, opts: Record<string, unknown> = {}) => {
+      srv.saves.push({ type, name, body: clone(item) as Record<string, unknown>, opts: clone(opts) });
+      return { success: true, version: 'v1', state: 'draft' };
+    });
+    mount({ readOnly: false });
+    await openWelcome();
+    expect(within(header()).queryByTestId('studio-customize')).toBeNull();
+    patchPage();
+    await waitFor(() => expect(srv.saves).toHaveLength(1), { timeout: 8000 });
+    expect(srv.saves[0]).toMatchObject({ type: 'page', name: 'crm_welcome', opts: { packageId: BASE } });
+    expect(srv.saves[0]!.body).not.toHaveProperty('overrides');
+    expect(srv.saves[0]!.body.regions).toStrictEqual(OURS_REGIONS);
+    expect(srv.ensure).toEqual([]);
   });
 });

@@ -819,7 +819,8 @@ export async function unreadableUnderCallerRead(read: () => Promise<unknown>): P
  *  - an answer: whatever the read door returned (no row, a row, a row set);
  *  - `refused`: a declared 4xx — the read itself was refused (the object's read
  *    grant withheld, a predicate the driver will not compile). Not a hidden
- *    row, so the write keeps the answer it has today;
+ *    row: a write door that asks this question throws it, carried in `error`,
+ *    and the write is refused;
  *  - anything else is a store fault and propagates as raised (#7505): an outage
  *    is neither an answer nor a refusal, and reporting it as either would
  *    relabel it.
@@ -4027,15 +4028,19 @@ export class SecurityPlugin implements Plugin {
    *  - an answer: the scope to compose. An empty answer composes the empty id
    *    list, so a predicate that matches only rows the caller cannot read
    *    matches nothing at all;
-   *  - `refused` (a declared 4xx — the read grant withheld, a predicate the
-   *    driver will not compile): `null`, and the write keeps the answer it has
-   *    today;
+   *  - `refused` (a declared 4xx — a capability the object requires for a read
+   *    and not for a write, a predicate the driver will not compile): that
+   *    refusal is THROWN, so the write is answered the read door's own refusal
+   *    before it runs and changes nothing ([#21829] ruling B). A caller the
+   *    read door refuses writes none of the object's records, whatever its
+   *    predicate addresses; the by-id leg refuses the same caller too (step
+   *    2.7);
    *  - a store fault propagates as raised.
    *
    * The id list is bounded by {@link PREDICATE_WRITE_READABLE_ID_CAP}; see
    * there for what happens above it.
    */
-  private readableRowsScopeForPredicateWrite(opCtx: any): Promise<Record<string, unknown> | null> {
+  private readableRowsScopeForPredicateWrite(opCtx: any): Promise<Record<string, unknown>> {
     // [#25223 cut 8] The body moved to `security-plugin-addressed-writes.ts` (see `AddressedWritesHost`).
     const readQl = () => this.ql;
     const host: Pick<AddressedWritesHost, 'ql'> = {

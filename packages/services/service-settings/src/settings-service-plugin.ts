@@ -268,9 +268,9 @@ export class SettingsServicePlugin implements Plugin {
     // consumer has decrypted yet (they all read at `kernel:ready` or later, so
     // every provider they build reads the chosen file). A no-op unless the CLI
     // parent named a second candidate (`settleKeyFileChannel`). A production
-    // boot where neither key opens the stored secrets throws here, which stops
-    // the boot: the provider's fail-loud contract, at the one place that can
-    // judge it.
+    // boot where neither key opens any of the newest stored secrets throws
+    // here, which stops the boot: the provider's fail-loud contract, at the one
+    // place that can judge it.
     let settleEngine: IDataEngine | null = null;
     try {
       settleEngine = ctx.getService<IDataEngine>('objectql');
@@ -280,7 +280,7 @@ export class SettingsServicePlugin implements Plugin {
     await settleKeyFileChannel({
       readStoredSecret: settleEngine
         ? storedSecretReaderOverEngine(settleEngine as unknown as Parameters<typeof storedSecretReaderOverEngine>[0])
-        : async () => undefined,
+        : async () => [],
     });
 
     ctx.hook('kernel:ready', async () => {
