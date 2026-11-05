@@ -83,7 +83,7 @@ ObjectStack's protocol-first DNA matches Apple's: a small set of declarative spe
  RUNTIME WRITE  SettingsService.set(ns, key, value, scope, ctx)
    - upsert sys_setting row (encrypt via KMS if specifier.encrypted)
    - audit row in sys_audit_log
-   - reject if effective source='env' (env wins, UI shows locked)
+   - reject if effective source='env' (env wins, UI shows locked) (a `null` clear excepted — D6)
 
  RENDER (UI)   SettingsView({ namespace })
    GET /api/settings/:namespace         → { manifest, values: { key: { value, source, locked } } }
@@ -98,7 +98,7 @@ ObjectStack's protocol-first DNA matches Apple's: a small set of declarative spe
 3. **One resolver.** All reads must go through `SettingsService.get()`. Plugins must not query `sys_setting` directly. This is what makes Env > Tenant > User layering a guarantee, not a convention.
 4. **Schema lives with code, values live in DB.** Manifests are part of the plugin bundle (versioned with code). Values are runtime state. Never serialise manifest into `sys_setting`.
 5. **Encryption is a manifest concern, not caller's.** `specifier.encrypted: true` ⇒ `SettingsService` calls KMS on write/read transparently. Callers see plaintext (subject to permission).
-6. **Env override is first-class.** Whenever `process.env[NS_KEY_UPPER]` is set, the resolver returns it with `source='env', locked=true`. Writes from UI are rejected with HTTP 409 + reason `"locked-by-env"`. A clear (`null`) is the one exception: it is not refused, it sets the stored value beneath the override to `null` and changes nothing in force (the resolver still answers `source='env', locked=true`). *Amended 2026-11-05 (#30385): this sentence read "Writes from UI are rejected with HTTP 409 + reason `"locked-by-env"`." with no exception.* The UI surfaces this as a badge — never silently overwritten.
+6. **Env override is first-class.** Whenever `process.env[NS_KEY_UPPER]` is set, the resolver returns it with `source='env', locked=true`. Writes from UI are rejected with HTTP 409 + reason `"locked-by-env"`. A clear (`null`) is the one exception: the pin does not refuse it — the row locks and the key's write predicates still judge it like any clear — it sets the stored value beneath the override to `null` and changes nothing in force (the resolver still answers `source='env', locked=true`). *Amended 2026-11-05 (#30385): this sentence read "Writes from UI are rejected with HTTP 409 + reason `"locked-by-env"`." with no exception.* The UI surfaces this as a badge — never silently overwritten.
 7. **UI is system-owned.** Plugins must not ship custom React for normal settings. They get the standard `<SettingsView>` for free. Custom UI requires invoking the escape hatch.
 8. **Test actions are declarative.** Manifests declare `actions` with an HTTP handler descriptor. The UI renders standard buttons + toast. No bespoke component code.
 
@@ -300,7 +300,7 @@ export interface SettingsService {
   get<T = unknown>(ns: string, key: string, ctx: RequestContext): Promise<ResolvedValue<T>>;
   getNamespace(ns: string, ctx: RequestContext): Promise<Record<string, ResolvedValue>>;
 
-  // Write (rejected if effective source='env')
+  // Write (rejected if effective source='env'; a `null` clear excepted — D6)
   set(ns: string, key: string, value: unknown, scope: 'tenant'|'user', ctx: RequestContext): Promise<void>;
   setMany(ns: string, values: Record<string, unknown>, scope: 'tenant'|'user', ctx: RequestContext): Promise<void>;
 
