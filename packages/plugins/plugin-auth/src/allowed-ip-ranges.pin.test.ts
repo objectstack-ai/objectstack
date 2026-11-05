@@ -21,12 +21,17 @@
  *    the deployment declares `trustProxy`. A list that includes it saves.
  *  - The recovery the refusal names: `OS_AUTH_ALLOWED_IP_RANGES` set empty
  *    opens the gate on the next boot over a stored list.
+ *  - [#30398] The read an administrator asks before saving,
+ *    `GET /api/v1/auth/admin/client-address`, answers the address that same
+ *    save would be judged by: the plugin's real auth routes on a real Hono app,
+ *    the transport peer supplied the way `@hono/node-server` supplies it.
  *
  * `@objectstack/service-settings` resolves to its `src/` here (this package's
  * `vitest.config.ts`), so the routes and the service are the checkout's.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { Hono } from 'hono';
 import type { IHttpRequest, IHttpResponse, IHttpServer, RouteHandler } from '@objectstack/spec/contracts';
 import {
   SettingsService,
@@ -56,11 +61,18 @@ class MockHttp implements IHttpServer {
   getInstance() { return null; }
 }
 
+type Transport = { headers?: Record<string, string>; remoteAddress?: string };
+
+/** The session the read's platform-admin gate is handed: a platform admin unless a test says otherwise. */
+const PLATFORM_ADMIN_SESSION = { user: { id: 'usr_admin', email: 'admin@example.com', isPlatformAdmin: true } };
+
 interface Rig {
   svc: SettingsService;
   manager: AuthManager;
-  save(body: Record<string, unknown>, transport?: { headers?: Record<string, string>; remoteAddress?: string }):
-    Promise<{ status: number; body: any }>;
+  save(body: Record<string, unknown>, transport?: Transport): Promise<{ status: number; body: any }>;
+  /** `GET /api/v1/auth/admin/client-address` on the plugin's real auth routes. */
+  read(transport?: Transport, opts?: { session?: unknown; query?: string }):
+    Promise<{ status: number; body: any; cacheControl: string | null }>;
 }
 
 async function boot(
@@ -116,7 +128,28 @@ async function boot(
     await http.routes.get('PUT /api/settings/:namespace')!(req, res);
     return out;
   };
-  return { svc, manager, save };
+
+  let app: Hono | undefined;
+  const read: Rig['read'] = async (transport = {}, opts = {}) => {
+    if (!app) {
+      app = new Hono();
+      (plugin as any).registerAuthRoutes({ getRawApp: () => app, getPort: () => 0 }, ctx);
+    }
+    const session = 'session' in opts ? opts.session : PLATFORM_ADMIN_SESSION;
+    // The gate reads the session through the auth service's in-process read.
+    const getApi = vi.spyOn(manager, 'getApi').mockResolvedValue({ getSession: async () => session } as any);
+    try {
+      const res = await app.request(
+        `http://localhost:3000/api/v1/auth/admin/client-address${opts.query ?? ''}`,
+        { method: 'GET', headers: transport.headers ?? {} },
+        transport.remoteAddress ? { incoming: { socket: { remoteAddress: transport.remoteAddress } } } : {},
+      );
+      return { status: res.status, body: await res.json(), cacheControl: res.headers.get('cache-control') };
+    } finally {
+      getApi.mockRestore();
+    }
+  };
+  return { svc, manager, save, read };
 }
 
 const stored = async (svc: SettingsService) => (await svc.get('auth', 'allowed_ip_ranges', {})).value ?? null;
@@ -255,5 +288,100 @@ describe('#30320 an IPv6 range is judged at both doors as the range it names', (
     expect(await stored(svc)).toBe(OFFICE_V6);
     await vi.waitFor(() => expect(manager.isClientIpAllowed('::1')).toBe(false));
     expect(manager.isClientIpAllowed('2001:db8:1234::7')).toBe(true);
+  });
+});
+
+describe('#30398 the address read serves the address the save check judges', () => {
+  // TEST-NET-1: no address any case below connects from falls inside it, so a
+  // save of this list is always refused and its refusal names the judged address.
+  const NOBODY = '192.0.2.0/24';
+
+  /** One connection, asked at both doors: the read's answer and the save check's judged address. */
+  const bothDoors = async (rig: Rig, transport: Transport) => {
+    const read = await rig.read(transport);
+    expect(read.status, JSON.stringify(read.body)).toBe(200);
+    const save = await rig.save({ allowed_ip_ranges: NOBODY }, transport);
+    expect(save.status, JSON.stringify(save.body)).toBe(400);
+    const judged = save.body.error.details.fields.find((f: any) => f.field === 'allowed_ip_ranges').constraint.clientAddress;
+    return { shown: read.body.data, judged };
+  };
+
+  it('a direct peer: the read shows the peer address the save judges', async () => {
+    const { shown, judged } = await bothDoors(await boot(), { remoteAddress: '203.0.113.9' });
+    expect(shown).toEqual({ clientAddress: '203.0.113.9', trustProxy: false });
+    expect(judged).toBe(shown.clientAddress);
+  });
+
+  it('an IPv4-mapped peer: the read shows the mapped text the save judges, not a rewritten one', async () => {
+    const { shown, judged } = await bothDoors(await boot(), { remoteAddress: '::ffff:127.0.0.1' });
+    expect(shown).toEqual({ clientAddress: '::ffff:127.0.0.1', trustProxy: false });
+    expect(judged).toBe(shown.clientAddress);
+  });
+
+  it('trustProxy declared: the read shows the forwarded address the save judges', async () => {
+    const forwarded = { headers: { 'x-forwarded-for': '198.51.100.7, 10.0.0.2' }, remoteAddress: '10.0.0.1' };
+    const { shown, judged } = await bothDoors(await boot({ plugin: { trustProxy: true } }), forwarded);
+    expect(shown).toEqual({ clientAddress: '198.51.100.7', trustProxy: true });
+    expect(judged).toBe(shown.clientAddress);
+  });
+
+  it('trustProxy not declared: a forged X-Forwarded-For is ignored at both doors, the peer is shown', async () => {
+    const forged = { headers: { 'x-forwarded-for': '198.51.100.7', 'x-real-ip': '198.51.100.8' }, remoteAddress: '10.0.0.1' };
+    const { shown, judged } = await bothDoors(await boot(), forged);
+    expect(shown).toEqual({ clientAddress: '10.0.0.1', trustProxy: false });
+    expect(judged).toBe(shown.clientAddress);
+  });
+
+  it('an address the server cannot establish reads null at both doors', async () => {
+    const { shown, judged } = await bothDoors(await boot(), {});
+    expect(shown).toEqual({ clientAddress: null, trustProxy: false });
+    expect(judged).toBeNull();
+  });
+
+  it('the answer is never stored by a cache', async () => {
+    const res = await (await boot()).read({ remoteAddress: '203.0.113.9' });
+    expect(res.status).toBe(200);
+    expect(res.cacheControl).toBe('no-store');
+  });
+
+  describe('who may read it: the platform-admin gate of every /admin mount, before any address is read', () => {
+    const refusedBeforeTheRead = async (session: unknown) => {
+      const rig = await boot();
+      const asked = vi.spyOn(rig.manager, 'trustsForwardedHeaders');
+      const res = await rig.read({ remoteAddress: '203.0.113.9' }, { session });
+      expect(asked).not.toHaveBeenCalled();
+      expect(res.body.success).toBe(false);
+      expect(res.body.data).toBeUndefined();
+      return res;
+    };
+
+    it('no session: 401 UNAUTHENTICATED', async () => {
+      const res = await refusedBeforeTheRead(null);
+      expect(res.status).toBe(401);
+      expect(res.body.error.code).toBe('UNAUTHENTICATED');
+    });
+
+    it('a signed-in caller who is not a platform admin: 403 PERMISSION_DENIED', async () => {
+      const res = await refusedBeforeTheRead({ user: { id: 'usr_member', email: 'member@example.com' } });
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('PERMISSION_DENIED');
+    });
+
+    it("a held platform admin's session (ADR-0069 D3): 403 with the posture's own code", async () => {
+      const held = { user: { ...PLATFORM_ADMIN_SESSION.user, authGate: { code: 'MFA_REQUIRED', message: 'Set up two-factor authentication.' } } };
+      const res = await refusedBeforeTheRead(held);
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('MFA_REQUIRED');
+    });
+  });
+
+  it('the query set is closed and empty: any parameter is refused 400 VALIDATION_ERROR before the address is read', async () => {
+    const rig = await boot();
+    const asked = vi.spyOn(rig.manager, 'trustsForwardedHeaders');
+    const res = await rig.read({ remoteAddress: '203.0.113.9' }, { query: '?address=198.51.100.7' });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    expect(res.body.data).toBeUndefined();
+    expect(asked).not.toHaveBeenCalled();
   });
 });

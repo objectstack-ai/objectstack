@@ -1155,7 +1155,7 @@ const en = {
   },
   managedByBadge: {
     config: {
-      short: 'Admin config',
+      short: 'Configured here',
       title: 'Administrator configuration',
       body: 'These rows define how the platform behaves at runtime. Author them here; the runtime data they produce lives in a separate table.',
     },
@@ -1165,7 +1165,7 @@ const en = {
       body: 'Rows here are created automatically when actions run on the source record. The list below is a read-only monitoring surface — row-level actions (Approve, Recall, Resend, …) live on each row.',
     },
     systemWritable: {
-      short: 'Platform schema',
+      short: 'Built in · editable',
       title: 'Platform-defined, admin-writable',
       body: "This object's schema is defined by the platform, but its rows are yours to create and edit here. Who may write is governed by delegated administration and record-level security, not by this badge.",
     },
@@ -1175,7 +1175,7 @@ const en = {
       body: "Immutable audit log. Rows cannot be created, edited, or deleted from the UI — they're written by the platform when events occur. Use Export to download for compliance review.",
     },
     betterAuth: {
-      short: 'Identity',
+      short: 'Via identity service',
       title: 'Written through the built-in identity service',
       body: "This object's schema belongs to {{provider}}, the platform's built-in identity service. Create and change these records with the actions on this page, or through sign-in, invitation and security flows; every one of them goes through that service. Editing the table directly would bypass password hashing, session validation, two-factor checks and audit hooks.",
     },
