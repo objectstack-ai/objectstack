@@ -122,7 +122,7 @@ describe('direction 1 — the unauthorable key is ABSENT from the definition', (
     });
 
     for (const [name, record] of fieldRecords(draft)) {
-      expect(Object.keys(record), `field '${name}'`).toEqual(['type']);
+      expect(Object.keys(record), `field '${name}'`).toEqual(['type', 'label']);
     }
     // Spelled twice on purpose: the loop above forbids ANY extra key, this
     // line names the one the defect was about, so a regression reports it.
@@ -133,7 +133,7 @@ describe('direction 1 — the unauthorable key is ABSENT from the definition', (
     const draft = await svc().generateObjectDraft('warehouse', 'orders');
 
     const fields = draft.definition.fields as Record<string, object>;
-    expect(Object.keys(fields.order_id)).toEqual(['type']);
+    expect(Object.keys(fields.order_id)).toEqual(['type', 'label']);
     expect(JSON.stringify(draft.definition)).not.toContain('primaryKey');
   });
 
@@ -141,7 +141,7 @@ describe('direction 1 — the unauthorable key is ABSENT from the definition', (
     const draft = await svc().generateObjectDraft('warehouse', 'orders', {
       primaryKey: ['order_id'],
     });
-    expect(draft.source).toContain("order_id: { type: 'text' },");
+    expect(draft.source).toContain("order_id: { type: 'text', label: 'Order Id' },");
     expect(draft.source).not.toContain('primaryKey: true');
   });
 });
