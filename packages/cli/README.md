@@ -60,11 +60,16 @@ os compile
 | `os generate <type> <name>` | Generate metadata files (alias: `os g`) |
 | `os create <type> [name]` | Scaffold a standalone **kernel code** plugin project (the `Plugin` contract, built by `tsc`) from a built-in template |
 
-Available generate types: `object`, `view`, `action`, `flow`, `dashboard`, `app`, `skill`, `picklist`
+Available generate types: `object`, `view`, `action`, `flow`, `dashboard`, `app`, `skill`, `picklist`, `permission`, `dataset`
 
 `picklist` writes a shared option list (`src/picklists/<name>.picklist.ts`, with
 `definePicklist`). A select field names it with `Field.select({ picklist: '<name>' })`
 in place of its own `options`, and the server serves that field with the list's options.
+
+`permission` writes a permission set (`src/security/<name>.permission.ts`, with
+`definePermissionSet`) granting the object `--object` names, or the stack's only object.
+`dataset` writes an analytics dataset (`src/datasets/<name>.dataset.ts`, with
+`defineDataset`) over that object, which dashboard and report widgets bind to by name.
 
 `agent` is **retired** (ADR-0063 §2): agents are platform-internal, so a scaffolded
 `src/agents/*.ts` validated, published and was then filtered out of the runtime

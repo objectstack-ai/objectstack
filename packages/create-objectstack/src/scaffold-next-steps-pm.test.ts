@@ -362,3 +362,56 @@ describe('a failed install still lists the install step in "Next steps" (#23865)
     });
   }, 20_000);
 });
+
+// ─── The generated AGENTS.md names the same package manager ─────────────────
+//
+// The guide a coding agent reads first said `npm run validate` in every
+// project, whichever package manager created it: a pnpm project was told one
+// thing by "Next steps" and another by its own AGENTS.md. The template now
+// carries the detected manager, and both written copies (AGENTS.md and the
+// Copilot variant) are read back from the scaffolded project.
+
+/** Scaffold under `bin`'s PATH and return the two agent guides it wrote. */
+function scaffoldAgentGuides(bin: string): { agents: string; copilot: string } {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'create-objectstack-agents-pm-'));
+  try {
+    execFileSync(
+      TSX,
+      [INDEX_TS, 'my-app', '--template', 'blank', '--skip-install', '--skip-skills'],
+      { cwd: tmp, env: { ...process.env, PATH: childPath(bin) }, encoding: 'utf8' },
+    );
+    const project = path.join(tmp, 'my-app');
+    return {
+      agents: fs.readFileSync(path.join(project, 'AGENTS.md'), 'utf8'),
+      copilot: fs.readFileSync(path.join(project, '.github', 'copilot-instructions.md'), 'utf8'),
+    };
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+describe('the generated AGENTS.md names the package manager the run detected', () => {
+  it('with pnpm on PATH: every run command in both guides is `pnpm run`, none bare `npm run`', () => {
+    withBin(() => makeStubPnpmBin(0), (bin) => {
+      expectPnpmResolvesToStub(bin);
+
+      for (const guide of Object.values(scaffoldAgentGuides(bin))) {
+        expect(guide).toMatch(/\bpnpm run validate\b/);
+        expect(guide).not.toMatch(/\bnpm run\b/);
+        expect(guide).not.toContain('{{');
+      }
+    });
+  }, 20_000);
+
+  it('CONTROL: with pnpm unreachable, the guides say `npm run` and never pnpm', () => {
+    withBin(makePnpmlessBin, (bin) => {
+      expectPnpmUnreachable(bin);
+
+      for (const guide of Object.values(scaffoldAgentGuides(bin))) {
+        expect(guide).toMatch(/\bnpm run validate\b/);
+        expect(guide).not.toMatch(/\bpnpm\b/);
+        expect(guide).not.toContain('{{');
+      }
+    });
+  }, 20_000);
+});

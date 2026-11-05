@@ -385,15 +385,9 @@
     },
     {
       "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "logger",
-      "card": "#30147",
-      "reason": "codemod limit: gate reading, the default sink's field initializer holds arrow functions (the default can be built by a module function)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
       "member": "static DIALECT_CONNECT_TIMEOUT",
       "card": "#30147",
-      "reason": "codemod limit: gate reading, a static table whose initializer holds arrow functions (the initializer can move to a module)"
+      "reason": "codemod limit: a static initializer runs while the class itself is evaluated, so a call into a facet module there could meet that module in its temporal dead zone (MOVED_FIELD_DEFAULTS takes instance fields only, #30147 phase 2a)"
     },
     {
       "file": "packages/drivers/driver-sql/src/sql-driver.ts",
@@ -405,55 +399,19 @@
       "file": "packages/drivers/driver-sql/src/sql-driver.ts",
       "member": "get supports",
       "card": "#30147",
-      "reason": "accessor (#30105 report: the codemod moves methods, not accessors)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "get insertReturnsStoredRows",
-      "card": "#30147",
-      "reason": "accessor (#30105 report: the codemod moves methods, not accessors)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "get dateGranularityCapabilities",
-      "card": "#30147",
-      "reason": "accessor (#30105 report: the codemod moves methods, not accessors)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "get supportsWalJournal",
-      "card": "#30147",
-      "reason": "accessor (#30105 report: the codemod moves methods, not accessors)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "get dialectName",
-      "card": "#30147",
-      "reason": "accessor (#30105 report: the codemod moves methods, not accessors)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "rotateShards",
-      "card": "#30147",
-      "reason": "gate reading: a parameter default computes (`nowMs = Date.now()`, the signature stays byte-for-byte)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "ensureRotation",
-      "card": "#30147",
-      "reason": "gate reading: a parameter default computes (`nowMs = Date.now()`; a hand-series stub, #25521 cut 17)"
+      "reason": "codemod limit: inferred-return-type, a get accessor whose object type the base leaves inferred, with a docblock on each key (MOVED_ACCESSORS moves a getter whose type is written, #30147 phase 2a)"
     },
     {
       "file": "packages/drivers/driver-sql/src/sql-driver.ts",
       "member": "ensureShardTable",
       "card": "#30147",
-      "reason": "path-reader (#30105 report: packages/cli generate-* pins read its text in sql-driver.ts); field-call: knex"
+      "reason": "path-reader (#30105 report: packages/cli generate-* pins read its text in sql-driver.ts); its field-call: knex half is retired (#30147 phase 2a)"
     },
     {
       "file": "packages/drivers/driver-sql/src/sql-driver.ts",
       "member": "initObjects",
       "card": "#30147",
-      "reason": "path-reader (#30105 report: packages/cli generate-* pins read its text in sql-driver.ts); field-call: knex"
+      "reason": "path-reader (#30105 report: packages/cli generate-* pins read its text in sql-driver.ts); its field-call: knex half is retired (#30147 phase 2a)"
     },
     {
       "file": "packages/drivers/driver-sql/src/sql-driver.ts",
@@ -493,57 +451,9 @@
     },
     {
       "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "listPhysicalColumns",
-      "card": "#30147",
-      "reason": "field-call: knex (#30105 report: stays on the class)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "getBuilder",
-      "card": "#30147",
-      "reason": "field-call: knex; inferred-return-type (#30105 report: stays on the class)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "explainUnkeyableTextColumn",
-      "card": "#30147",
-      "reason": "field-call: knex (#30105 report: stays on the class)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "explainHashShadowDuplicate",
-      "card": "#30147",
-      "reason": "field-call: knex (#30105 report: stays on the class)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "applyFilters",
-      "card": "#30147",
-      "reason": "inferred-return-type (#30105 report: stays on the class until the codemod spells the return type)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
       "member": "applyFilterCondition",
       "card": "#30147",
-      "reason": "inferred-return-type; comment-in-parameters (#30105 report: stays on the class)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "ensureDatabaseExists",
-      "card": "#30147",
-      "reason": "inferred-return-type (#30105 report: stays on the class until the codemod spells the return type)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "createDatabase",
-      "card": "#30147",
-      "reason": "inferred-return-type (#30105 report: stays on the class until the codemod spells the return type)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "assertOperatorAppliesToColumn",
-      "card": "#30147",
-      "reason": "comment-in-parameters (#30105 report: stays on the class)"
+      "reason": "inferred-return-type (#30105 report: stays on the class until its return type is spelled, #30147 phase 2d); its comment-in-parameters half is retired (#30147 phase 2a)"
     }
   ]
 }

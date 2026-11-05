@@ -76,7 +76,13 @@ import { ObjectViewRecordOverlay } from './objectViewRecordOverlay.js';
 import { useObjectViewListRenderer } from './objectViewListRenderer.js';
 import { ListPersonalizedMarker } from './ListPersonalizedMarker.js';
 import { useObjectViewViewCrud } from './objectViewViewCrud.js';
-import { PERSONAL_VIEW_OBJECT, buildPersonalViewConfig, personalViewEntry, usePersonalViews } from './personalViews.js';
+import {
+    PERSONAL_VIEW_OBJECT,
+    buildPersonalViewConfig,
+    personalViewEntry,
+    personalViewPanelFilters,
+    usePersonalViews,
+} from './personalViews.js';
 import { PersonalViewNameDialog } from './PersonalViewNameDialog.js';
 import { parseListStateParams } from './userFilterUrlState.js';
 import { FILTER_FOLD_REFUSAL_KEYS } from './viewFilterFold.js';
@@ -657,6 +663,22 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     const activeView = viewDraft && viewDraft.id === baseView?.id
         ? { ...baseView, ...viewDraft }
         : baseView;
+    // The list's toolbar state is read through this field gate wherever it is
+    // read (the seed, Save as my view, 保存): a field the object does not
+    // declare, or one this reader cannot read, is no list state.
+    const acceptListField = (field: string) =>
+        !!objectDef.fields?.[field]
+        && (!perms.isLoaded || perms.checkField(objectDef.name, field, 'read'));
+    // objectstack#30073 — a personal view's own conditions are Filter panel
+    // rows (`personalViewPanelFilters`), edited there and saved back by 保存.
+    // Keyed on the stored conditions' content (ui/AGENTS.md #10).
+    const activeIsPersonal = !!activeView?.id && personalViewIds.has(activeView.id);
+    const panelFiltersKey = activeIsPersonal ? JSON.stringify((activeView as any)?.filter ?? null) : '';
+    const viewPanelFilters = useMemo(
+        () => (panelFiltersKey ? personalViewPanelFilters(activeView, acceptListField) : undefined),
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the content the fold reads
+        [panelFiltersKey, objectDef, perms.isLoaded],
+    );
 
     // objectstack#25992 slice 8: the header toolbar actions, the nav `runAction` deep link
     // and the `action:bar` node moved to `./objectViewHeaderToolbar.ts`.
@@ -675,6 +697,8 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         handleListPersonalizationChange,
         listPersonalizedParts,
         handleResetView,
+        clearSourceListState,
+        readPanelFilters,
     } = useObjectViewListUrlState({
         objectName,
         objectDef,
@@ -689,8 +713,46 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // objectstack#28950 — the 「Personalized」 marker beside the list title (the
     // page header's badge slot, and the phone title): drawn only while the
     // reader's list differs from the view, and the one way back to it.
+    // objectstack#30073 — 保存: the list on screen written back into the open
+    // personal view, through the body Save as my view builds (so the stored
+    // shape is the same), then the reader's list state for it is cleared and
+    // the list opens again on the saved view. A panel the fold cannot write
+    // losslessly keeps the refusal Save as my view gives.
+    // The reader's own `sys_personal_view` rows: one grant read for Save as my
+    // view (create) and for Rename and 保存 (update).
+    const personalViewsReady = personalViews.status === 'ready';
+    const personalGrant = (action: 'create' | 'update') => !perms.isLoaded || perms.can(PERSONAL_VIEW_OBJECT, action);
+    const canUpdatePersonalView = activeIsPersonal && personalViewsReady && personalGrant('update');
+    const handleSaveToPersonalView = async () => {
+        if (!activeView || !activeIsPersonal) return;
+        const built = buildPersonalViewConfig(objectDef.name, activeView, {
+            // The panel's group is the one the list shows (an emptied panel
+            // included), not the address's copy of it.
+            url: { ...parseListStateParams(searchParams, acceptListField), filters: readPanelFilters() },
+            preference: listPrefs.preference.perView?.[activeView.id],
+            panelFilters: viewPanelFilters,
+        });
+        if (!built.ok) {
+            toast.error(t('form.saveError'), { description: t(FILTER_FOLD_REFUSAL_KEYS[built.reason]) });
+            return;
+        }
+        try {
+            await personalViews.update(activeView.id, built.config);
+            handleResetView();
+        } catch (err) {
+            console.error('[ObjectView] Failed to save a personal view:', err);
+            toast.error(t('form.saveError'), {
+                description: err instanceof Error ? err.message : String(err),
+                classNames: { description: 'whitespace-pre-line' },
+            });
+        }
+    };
     const personalizedMarker = !isEnvironmentList && listPersonalizedParts.length > 0 ? (
-        <ListPersonalizedMarker parts={listPersonalizedParts} onReset={handleResetView} />
+        <ListPersonalizedMarker
+            parts={listPersonalizedParts}
+            onReset={handleResetView}
+            onSave={canUpdatePersonalView ? () => { void handleSaveToPersonalView(); } : undefined}
+        />
     ) : null;
 
     // objectstack#25992 slice 11b: the view-config save and create handlers, view switching
@@ -737,8 +799,6 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // one (`sys_personal_view` read and create), not to admins only; the name
     // is asked in `PersonalViewNameDialog`. A reader who cannot read the
     // list's own object is offered no Save: there is no list to keep.
-    const personalViewsReady = personalViews.status === 'ready';
-    const personalGrant = (action: 'create' | 'update') => !perms.isLoaded || perms.can(PERSONAL_VIEW_OBJECT, action);
     const listReadable = !perms.isLoaded || perms.can(objectDef.name, 'read');
     const [personalViewDialog, setPersonalViewDialog] = useState<{ mode: 'save' } | { mode: 'rename'; viewId: string } | null>(null);
     const openPersonalView = (id: string) => {
@@ -750,19 +810,24 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         if (!activeView) return false;
         // The list's toolbar state is the address's (`uf_*`), through the same
         // field gate its seed reads it with.
-        const acceptField = (field: string) =>
-            !!objectDef.fields?.[field]
-            && (!perms.isLoaded || perms.checkField(objectDef.name, field, 'read'));
         const built = buildPersonalViewConfig(objectDef.name, activeView, {
-            url: parseListStateParams(searchParams, acceptField),
+            // The panel's group is the one the list shows (an emptied panel
+            // included), not the address's copy of it.
+            url: { ...parseListStateParams(searchParams, acceptListField), filters: readPanelFilters() },
             preference: listPrefs.preference.perView?.[activeView.id],
+            panelFilters: viewPanelFilters,
         });
         if (!built.ok) {
             toast.error(t('form.saveError'), { description: t(FILTER_FOLD_REFUSAL_KEYS[built.reason]) });
             return false;
         }
         try {
-            openPersonalView(await personalViews.save(label, built.config));
+            const savedId = await personalViews.save(label, built.config);
+            // objectstack#30073 — the list now lives in the saved view; the
+            // view it came from returns to its own (no temporary conditions,
+            // not personalized).
+            clearSourceListState(activeView.id);
+            openPersonalView(savedId);
             return true;
         } catch (err) {
             console.error('[ObjectView] Failed to save a personal view:', err);
@@ -1006,6 +1071,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         initialUfSelections,
         handleUserFilterSelectionsChange,
         handleListTotalChange,
+        viewPanelFilters,
     });
 
     // objectstack#25992 slice 9: the merged views and the plugin's `ObjectViewSchema`
