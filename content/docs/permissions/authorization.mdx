@@ -632,6 +632,10 @@ The complete, prioritized gap map lives in issue **#2561** (the production
   object's `requiredPermissions` may be a `string[]` (gates all CRUD) or a
   `{ read, create, update, delete }` map (read-open / write-gated), enforced
   per operation by plugin-security (`security-plugin.ts` capability AND-gate).
+  A map that gates `read` and not `update` or `delete` does not let a caller
+  without the read capability change records it cannot read: an update or
+  delete from a caller the read door refuses is refused, by id or by
+  predicate.
 - **Secure-by-default rollout** (ADR-0066 ④) — **system-object slice landed**:
   the raw secret/credential stores (`sys_secret`, `sys_jwks`,
   `sys_verification`, `sys_oauth_access_token`, `sys_oauth_refresh_token`,
