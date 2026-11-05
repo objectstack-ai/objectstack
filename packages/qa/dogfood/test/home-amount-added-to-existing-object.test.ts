@@ -220,7 +220,7 @@ for (const cell of CELLS) {
         expect(await driver.previewDeferredSchemaWork()).toEqual([]);
 
         // Every stored row is still there, as it was, with an empty home field.
-        expect(await engine.count(OBJECT, { context: SYS.context } as never)).toBe(ROWS.length);
+        expect((await engine.find(OBJECT, { context: SYS.context } as never)).length).toBe(ROWS.length);
         for (const row of ROWS) {
           expect(await stored(row.id)).toEqual({ amount: row.amount, currency: row.currency_code, home: null, rate: null });
         }
