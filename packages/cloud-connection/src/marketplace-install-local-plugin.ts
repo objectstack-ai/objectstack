@@ -3717,8 +3717,13 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 // [#30065] …and each shipper's own item, what a declared
                 // action override is judged against.
                 const shipped = new Map<string, unknown>();
+                // [#30623] …and each base's items of this type, what the
+                // ships-no-such-item refusal names an action's object from.
+                const listed = new Map<string, unknown[]>();
                 for (const base of bases) {
-                    const held = (await heldBy(item.type, base)).get(item.identity);
+                    const byIdentity = await heldBy(item.type, base);
+                    listed.set(base, [...byIdentity.values()]);
+                    const held = byIdentity.get(item.identity);
                     if (held !== undefined) {
                         shippers.push(base);
                         shipped.set(base, (delivered.has(base) ? undefined : artifactOf(item, base)) ?? held);
@@ -3726,7 +3731,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 }
                 const verdict = judgeOverrideWrite(
                     { type: item.type, name: item.name, packageId, item: item.item },
-                    { dependencies: closure, shippers, baseItemOf: (base) => shipped.get(base) },
+                    { dependencies: closure, shippers, baseItemOf: (base) => shipped.get(base), baseItemsOf: (base) => listed.get(base) ?? [] },
                 );
                 if (verdict.verdict === 'refuse') {
                     refusals.push({

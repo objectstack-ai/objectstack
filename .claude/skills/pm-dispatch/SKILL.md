@@ -91,7 +91,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 
 - 状态只经 GitHub 标签、assignee、正文行与 `pm:seat` 座位贴读写;循环须能从全新会话恢复。
 - 用户账号仅三用:assignee、授权批准、维护者亲手;批准账号永不跑席位或作其关联用户。
-- 内容写只走 REST 代理,⛔ 无 MCP 写,唯一例外 `rerun_failed_jobs`(限 CI 红单次重跑,先核 head)。
+- 内容写只走 REST 代理,⛔ 无 MCP 写;CI 红单次重跑亦经中继 `rerun-failed.mjs`,先核 head。
 - 写侧恒为 `objectstack-fleet[bot]`;`user.login` 记令牌不记席位,归属 = 文本里的 session ID。
 - 席位及其子代理 ⛔ 永不打印环境变量的值;判存在只用不印值的形式 `[ -n "${X+x}" ]`。
 - GitHub 上一切新内容用英文;中文只留四通道(维护者速读、轮报、裁决引文、四维分析)。

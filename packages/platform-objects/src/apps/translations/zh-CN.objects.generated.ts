@@ -565,11 +565,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_organization_id: {
         label: "上级组织",
-        help: "用于汇报 / 分组的上级。不授予任何权限——跨组织的可见性来自成员关系，绝不来自此引用。"
+        help: "用于汇报 / 分组的上级。不授予任何权限——跨组织的可见性来自成员关系，绝不来自此引用。仅在部署运行多个组织时有意义。"
       },
       sort_order: {
         label: "排序",
-        help: "在同级组织中的显示顺序。仅用于展示。"
+        help: "在同级组织中的显示顺序。仅用于展示。仅在部署运行多个组织时有意义。"
       },
       id: {
         label: "组织 ID"

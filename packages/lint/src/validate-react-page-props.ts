@@ -54,7 +54,7 @@ import {
 import { retiredKeyRemedy } from './validate-retired-permission-residue.js';
 import {
   checkSearchableFieldList,
-  indexObjectSearchTargets,
+  indexServedSearchTargets,
 } from './validate-searchable-fields.js';
 import {
   COMPONENT_FIELD_SPECS,
@@ -1154,7 +1154,12 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
   // rule's own indexer: it keeps `null` for an object with no authored field
   // map (external / datasource-introspected), a distinction `indexObjectFields`
   // flattens — and one this check must honor so both surfaces skip alike.
-  const searchTargets = indexObjectSearchTargets(stack);
+  // [#30608] The served one (`indexServedSearchTargets`), the index the
+  // metadata rule reads: the `$searchFields` override this prop sends reaches
+  // the ingress gate, which resolves it against the registry's merged object,
+  // so a field an `objectExtensions` entry of the same artifact adds is
+  // searchable here too, and the two surfaces still agree.
+  const searchTargets = indexServedSearchTargets(stack);
   for (const { rec: page, path: pagePath } of collectionEntries(stack.pages, 'pages')) {
     if (!page || page.kind !== 'react') continue;
     const source = page.source;
