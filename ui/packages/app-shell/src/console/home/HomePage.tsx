@@ -24,8 +24,7 @@ import { useNavTargetLabel, type NavTargetLabelOptions } from '../../hooks/useNa
 import { readObjectsByName } from '../../hooks/useObjectPresence.js';
 import { useFavorites } from '../../hooks/useFavorites.js';
 import { useObjectTranslation } from '@object-ui/i18n';
-// Its own line: the line above is the pack-hook binding `perm-home-namespace-3546.test.tsx` reads.
-import { useObjectLabel } from '@object-ui/i18n';
+import { useServedAppLabel } from '../../hooks/useServedAppLabel.js';
 import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
 import { useAgents, isAskAgent, agentHasCapability } from '@object-ui/plugin-chatbot/core';
 // May this session author metadata? Shared with the chat surfaces since the
@@ -46,7 +45,6 @@ import {
   filterActiveApps,
   matchAppBySegment,
   resolveHostAppSegment,
-  resolveKeyedI18nLabel,
 } from '../../utils/index.js';
 import { useInboxBell } from '../../hooks/useInboxBell.js';
 import { openInboxNotification } from '../../layout/openInboxNotification.js';
@@ -364,7 +362,7 @@ export function HomePage() {
   // objectstack#29121 — by name: the object a row names is read alone (as its
   // icon below is), so Home never loads the whole registry for its rows.
   const targetLabel = useNavTargetLabel(BY_NAME);
-  const { appLabel } = useObjectLabel();
+  const { appLabel } = useServedAppLabel();
   const { favorites } = useFavorites();
   const { user } = useAuth();
   const { isAdmin, isResolved: isAdminResolved } = useWorkspaceAdminStatus();
@@ -509,7 +507,7 @@ export function HomePage() {
         item.type === 'record' && objectName
           ? targetLabel({ kind: 'object', objectName }) ?? objectName
           : recentItemTypeLabel(t, item.type),
-      app: app ? appLabel({ name: app.name, label: resolveKeyedI18nLabel(app.label, t) }) : undefined,
+      app: app ? appLabel(app) : undefined,
       icon: typeof objectIcon === 'string' && objectIcon !== '' ? objectIcon : undefined,
     };
   };
@@ -804,7 +802,7 @@ export function HomePage() {
             settingsHref={setupApp ? setupPath : undefined}
             settingsLabel={
               setupApp
-                ? appLabel({ name: setupApp.name, label: resolveKeyedI18nLabel(setupApp.label, t) })
+                ? appLabel(setupApp)
                 : undefined
             }
             lastOpened={lastOpened}

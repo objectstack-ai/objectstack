@@ -131,6 +131,7 @@ import {
 } from './ListViewTypeSection.js';
 import { ListViewChartSection } from './ListViewChartSection.js';
 import { ListViewMoreSection } from './ListViewMoreSection.js';
+import { ListViewBulkActionsSection, listViewHasSelectionBar } from './ListViewBulkActionsSection.js';
 import {
   addedArrayElements,
   agentDraftMarkOf,
@@ -1556,6 +1557,16 @@ export function ObjectListViewInspector({
                 </PopoverContent>
               </Popover>
             </div>
+            {objectName && listViewHasSelectionBar(body) && (
+              // objectstack#30089 — the selection bar's actions: `bulkActions` and `bulkActionDefs`.
+              <ListViewBulkActionsSection
+                objectName={objectName}
+                body={body}
+                writeBody={writeBody}
+                readOnly={readOnly}
+                locale={locale}
+              />
+            )}
             {/* objectstack#30046 — what only the view's own page offered: 条件格式化 and the spec form's sections. */}
             <ListViewMoreSection
               body={body}
