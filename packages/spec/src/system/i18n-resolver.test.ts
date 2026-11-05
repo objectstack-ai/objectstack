@@ -6495,6 +6495,16 @@ describe('bundle locale keys are the bundle\'s OWN keys — an Object.prototype 
     expect(resolveViewLabel(layered, view, { locale: 'zh-CN' })).toBe('All Accounts');
   });
 
+  it('an injected system field read under a prototype-name locale keeps its English default label, as an unknown code does', () => {
+    const doc = { name: 'contract', fields: { created_at: { type: 'datetime', label: 'Created At' } } };
+    const labelUnder = (locale: string): unknown => (translateObject(doc, undefined, { locale }) as any).fields.created_at.label;
+    for (const code of ['constructor', '__proto__']) {
+      expect(labelUnder(code)).toBe(labelUnder('xx'));
+      expect(typeof labelUnder(code)).toBe('string');
+      expect(labelUnder(code)).toBe('Created At');
+    }
+  });
+
   it('an OWN constructor or __proto__ key still answers — an own-property check, not a deny-list', () => {
     const parsed = JSON.parse(
       '{"en":{},"constructor":{"objects":{"account":{"_views":{"all_accounts":{"label":"ctor"}}}}},"__proto__":{}}',
