@@ -45,7 +45,7 @@ There is deliberately **no** top-level `workflows` or `approvals` collection:
 an approval is a flow with Approval nodes, and record
 state machines are a `state_machine` validation rule on each object.
 A phantom key like `roles:` or `policies:` is **not** a silent
-no-op: the top level refuses it.
+no-op — the top level refuses it and the stack fails to load.
 
 `queues` declares ownership queues (`defineQueue`, `@objectstack/spec/security`;
 objectstack-data): named sets of people a new record of an `ownership: 'user'`
@@ -347,7 +347,7 @@ Five rules that change what you write:
 `AppPlugin` invokes it during boot and hands the app live runtime handles: this
 is the one seam where declarative metadata reaches imperative code (registering
 action handlers, giving a job its data handle, provisioning a fixture
-datasource). All three example apps use it.
+datasource).
 
 ```typescript
 export const onEnable = async (ctx: { ql: { registerAction: (...a: unknown[]) => void } }) => {
