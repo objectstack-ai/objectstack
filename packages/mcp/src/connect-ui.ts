@@ -31,7 +31,7 @@
  * entry stays for admins. ⛔ Ungating Setup is NOT the fix and was measured:
  * the app-level `setup.access` gate fires BEFORE the group gate, so dropping
  * the group gate alone changes nothing, and dropping both serves 14+ unrelated
- * Setup surfaces (Users, Organization, Branding, Feature Flags, …) to every
+ * Setup surfaces (Users, Organization, Branding, Company, …) to every
  * signed-in user — far past what this card asks for. ⛔ Nor is a
  * `requiresService: 'mcp'` gate on an `account.app.ts` entry: the `mcp` service
  * registers unconditionally in `init()` while this bundle registers behind
