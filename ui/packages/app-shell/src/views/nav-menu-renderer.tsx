@@ -127,6 +127,7 @@ import {
   hasVisibleNavigationItems,
   resolveActiveNavItem,
   resolveHref,
+  resolveNavItemIcon,
   resolveNavItemLabel,
   type NavTemplateContext,
 } from '@object-ui/layout';
@@ -134,6 +135,7 @@ import type { NavigationItem } from '@object-ui/types';
 import { useNavVisibility } from '../hooks/useNavMemberGates.js';
 import { useNavActionDispatch } from '../hooks/useNavActionDispatch.js';
 import { useNavTargetLabel } from '../hooks/useNavTargetLabel.js';
+import { useNavTargetIcon } from '../hooks/useNavTargetIcon.js';
 import { useNavDocTargetCheck } from '../hooks/useNavDocTargetCheck.js';
 import { withoutUnreadableObjectEntries } from '../utils/navObjectReadGate.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
@@ -181,6 +183,9 @@ export const NavMenuRenderer: React.FC<NavMenuRendererProps> = ({
   // The same resolver `UnifiedSidebar` hands `NavigationRenderer`: an entry with
   // no `label` shows its target's current label (objectui#9868).
   const targetLabel = useNavTargetLabel();
+  // And the same icon resolver: an `object` entry with no `icon` draws its
+  // object's icon on both surfaces.
+  const targetIcon = useNavTargetIcon();
 
   /* ── The three guards, wired to the same providers `UnifiedSidebar` uses ── */
 
@@ -355,7 +360,7 @@ export const NavMenuRenderer: React.FC<NavMenuRendererProps> = ({
         );
       }
 
-      const Icon = getIcon(item.icon);
+      const Icon = getIcon(resolveNavItemIcon(item, targetIcon));
       const text = label(item);
       const badge =
         item.badge !== undefined && item.badge !== null && item.badge !== '' ? (
