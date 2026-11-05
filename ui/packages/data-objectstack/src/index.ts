@@ -7998,3 +7998,9 @@ export type {
   MetadataAuditEntry,
   MetadataAuditResponse,
 } from './metadata-client';
+// The browser-side upload adapter for an ObjectStack server's storage service:
+// fetch logic, so it lives in this package. It implements `@object-ui/types`'s
+// `UploadAdapter`, which `UploadProvider` from `@object-ui/fields` makes
+// ambient for the file, image and avatar widgets.
+export { createObjectStackUploadAdapter } from './upload-adapter';
+export type { ObjectStackUploadAdapterOptions } from './upload-adapter';
