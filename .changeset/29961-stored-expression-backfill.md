@@ -5,7 +5,7 @@
 
 fix(objectql,cli): `os migrate stored-expressions` fills a stored computed field on rows stored before it was declared, and the boot names the command when a sample of rows needs it
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 A stored computed field (a non-`formula` field declaring `expression`) is computed by the engine on every insert and update and on nothing else, so declaring one on an object that already holds rows left the new column NULL on every existing row until each was next written; a filter, sort, roll-up or analytics anchor over it read NULL where the expression gives a value, with no error. A fresh database was right and an upgraded one was not.
