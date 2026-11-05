@@ -68,6 +68,7 @@ let stdout: ReturnType<typeof vi.spyOn>;
 let log: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
   vi.mocked(probeMigrationTarget).mockResolvedValue({ status: 'free' } as any);
+  vi.mocked(bootSchemaStack).mockClear();
   vi.mocked(bootSchemaStack).mockResolvedValue({
     kernel: { getService: () => engine },
     dbLabel: 'postgres://db.example.com/app',
