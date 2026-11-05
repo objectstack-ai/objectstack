@@ -4466,6 +4466,9 @@ const zh = {
         revoke: '撤销',
         revoking: '撤销中…',
         revokedToast: '已撤销对「{{set}}」的接受。',
+        reopen: '重新考虑',
+        reopening: '重新打开中…',
+        reopenedToast: '已重新打开「{{set}}」的建议：接受之前不授予任何权限。',
       },
       uninstall: {
         confirm: '从本运行时卸载 {{manifestId}} v{{version}}？\n\n该应用将立即从运行中的内核中移除，其权限集及相应授权也一并移除，缓存的清单也将被删除。其对象中已存储的记录仍保留在数据库中。',
