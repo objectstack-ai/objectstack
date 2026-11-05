@@ -465,36 +465,6 @@
     },
     {
       "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "ensureShardTable",
-      "card": "#30147",
-      "reason": "path-reader (#30105 report: packages/cli generate-* pins read its text in sql-driver.ts); its field-call: knex half is retired (#30147 phase 2a)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "initObjects",
-      "card": "#30147",
-      "reason": "path-reader (#30105 report: packages/cli generate-* pins read its text in sql-driver.ts); its field-call: knex half is retired (#30147 phase 2a)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "createAuditTimestampColumn",
-      "card": "#30147",
-      "reason": "path-reader (#30105 report: the packages/cli generate-builtin-id-column pin reads its text in sql-driver.ts)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "varcharColumnChars",
-      "card": "#30147",
-      "reason": "path-reader (#30105 report: check-keyed-text-bounds and the packages/cli generate-string-family-width pin read its text in sql-driver.ts)"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
-      "member": "createColumn",
-      "card": "#30147",
-      "reason": "path-reader (#30105 report: check-keyed-text-bounds and the packages/cli generate-* pins slice its type switch in sql-driver.ts); inferred-return-type"
-    },
-    {
-      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
       "member": "applyFilterCondition",
       "card": "#30147",
       "reason": "inferred-return-type (#30105 report: stays on the class until its return type is spelled, #30147 phase 2d); its comment-in-parameters half is retired (#30147 phase 2a)"

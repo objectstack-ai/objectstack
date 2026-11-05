@@ -3,11 +3,11 @@
 /**
  * [#29520 codemod] The "Data-lifecycle rotation (ADR-0057 P2)" section of
  * `SqlDriver`: the bodies of `rotationShardsOf`, `rotationWriteTarget`,
- * `rotateShards`, `aliasShardBookkeeping`, `computeTenantField`,
- * `computeAndRecordTenantField`, `registerManagedObjectMetadata`,
- * `registerObjectMetadata`, `withPinnedSession`, `migrateMysqlDatetimeColumns`,
- * `migrateMysqlTimeColumns` moved out of `sql-driver.ts` whole by
- * `scripts/codemod-split-sql-driver.mjs`.
+ * `rotateShards`, `ensureShardTable`, `aliasShardBookkeeping`,
+ * `computeTenantField`, `computeAndRecordTenantField`,
+ * `registerManagedObjectMetadata`, `registerObjectMetadata`, `initObjects`,
+ * `withPinnedSession`, `migrateMysqlDatetimeColumns`, `migrateMysqlTimeColumns`
+ * moved out of `sql-driver.ts` whole by `scripts/codemod-split-sql-driver.mjs`.
  *
  * A MOVE, not a redesign. {@link RotationFacet} is a stateless facet of `SqlDriver`
  * (ruling 6624345766): each static method of it is the body of the `SqlDriver`
@@ -36,6 +36,7 @@ import { FILE_REFERENCE_TYPES, NUMERIC_VALUE_TYPES, isTenancyDisabled, parseAuto
 import type { AutonumberToken } from '@objectstack/spec/data';
 import { aggregandColumnClass } from '@objectstack/core';
 import { StorageNameMapping, SystemObjectName } from '@objectstack/spec/system';
+import { indexedKeyColumns, isUniqueScopeDeclared } from './schema-drift.js';
 import {
   AUDIT_TIMESTAMP_COLUMNS, MYSQL_DATETIME_PRECISION, NUMERIC_SCALAR_TYPES, declaredValueShapes,
   isDeferredDdlLockWaitRefusal, isMultiValuedColumn, isNowDefaultValue,
@@ -52,13 +53,22 @@ import type { SqlDriver } from './sql-driver.js';
 export interface RotationHost {
   assertSchemaMutable: SqlDriver['assertSchemaMutable'];
   readonly autoNumberFields: SqlDriver['autoNumberFields'];
+  backfillCanonicalDatetimes: SqlDriver['backfillCanonicalDatetimes'];
+  backfillCanonicalJsonEncoding: SqlDriver['backfillCanonicalJsonEncoding'];
+  backfillCanonicalTimes: SqlDriver['backfillCanonicalTimes'];
   readonly booleanFields: SqlDriver['booleanFields'];
   computeAndRecordTenantField: SqlDriver['computeAndRecordTenantField'];
   computeTenantField: SqlDriver['computeTenantField'];
+  createAuditTimestampColumn: SqlDriver['createAuditTimestampColumn'];
+  createColumn: SqlDriver['createColumn'];
   readonly dateFields: SqlDriver['dateFields'];
   readonly datetimeFields: SqlDriver['datetimeFields'];
+  readonly deferredDdl: SqlDriver['deferredDdl'];
+  readonly deferredSchemaObjects: SqlDriver['deferredSchemaObjects'];
   readonly dialectName: SqlDriver['dialectName'];
+  ensureDatabaseExists: SqlDriver['ensureDatabaseExists'];
   ensureRotation: SqlDriver['ensureRotation'];
+  ensureSequencesTable: SqlDriver['ensureSequencesTable'];
   readonly fractionalNumericFields: SqlDriver['fractionalNumericFields'];
   isJsonField: SqlDriver['isJsonField'];
   readonly isMysql: SqlDriver['isMysql'];
@@ -71,15 +81,26 @@ export interface RotationHost {
   readonly managedObjectFields: SqlDriver['managedObjectFields'];
   readonly managedObjectIndexes: SqlDriver['managedObjectIndexes'];
   readonly mediaFields: SqlDriver['mediaFields'];
+  migrateMysqlDatetimeColumns: SqlDriver['migrateMysqlDatetimeColumns'];
+  migrateMysqlTimeColumns: SqlDriver['migrateMysqlTimeColumns'];
   nowColumnDefault: SqlDriver['nowColumnDefault'];
   readonly numericFields: SqlDriver['numericFields'];
   readonly numericValueFields: SqlDriver['numericValueFields'];
   organizationObjectRegistered: SqlDriver['organizationObjectRegistered'];
   readonly physicalKeyIndexes: SqlDriver['physicalKeyIndexes'];
+  reconcileAndWarnDrift: SqlDriver['reconcileAndWarnDrift'];
   registerManagedObjectMetadata: SqlDriver['registerManagedObjectMetadata'];
+  registerObjectMetadata: SqlDriver['registerObjectMetadata'];
+  resolveFileColumnsMoved: SqlDriver['resolveFileColumnsMoved'];
+  resolveTenantField: SqlDriver['resolveTenantField'];
+  rethrowWithRowSizeExplanation: SqlDriver['rethrowWithRowSizeExplanation'];
   readonly rotationStateByTable: SqlDriver['rotationStateByTable'];
   runWideningAlters: SqlDriver['runWideningAlters'];
   readonly supportsRotation: SqlDriver['supportsRotation'];
+  syncDeclaredIndexes: SqlDriver['syncDeclaredIndexes'];
+  syncTableIndexes: SqlDriver['syncTableIndexes'];
+  readonly tablesCreatedHere: SqlDriver['tablesCreatedHere'];
+  readonly tablesFoundExisting: SqlDriver['tablesFoundExisting'];
   readonly tablesWithTimestamps: SqlDriver['tablesWithTimestamps'];
   readonly tenantFieldByTable: SqlDriver['tenantFieldByTable'];
   readonly tenantOptOutByTable: SqlDriver['tenantOptOutByTable'];
@@ -87,6 +108,7 @@ export interface RotationHost {
   readonly undeclaredAuditTimestampFields: SqlDriver['undeclaredAuditTimestampFields'];
   readonly updatedAtColumnState: SqlDriver['updatedAtColumnState'];
   readonly valueShapeFields: SqlDriver['valueShapeFields'];
+  warnBuiltinColumnCollisions: SqlDriver['warnBuiltinColumnCollisions'];
 }
 
 /** The bodies of the "Data-lifecycle rotation (ADR-0057 P2)" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
@@ -113,6 +135,86 @@ export class RotationFacet {
     }
     const tableName = StorageNameMapping.resolveTableName(objectDef as any);
     return this.ensureRotation(tableName, objectDef, policy, nowMs);
+  }
+
+  /** The body of `SqlDriver#ensureShardTable`; the method's docblock there is its contract. */
+  static async ensureShardTable(this: Pick<RotationHost, 'computeAndRecordTenantField' | 'createAuditTimestampColumn' | 'createColumn' | 'knex' | 'resolveTenantField' | 'syncDeclaredIndexes' | 'warnBuiltinColumnCollisions'>, shardName: string, obj: { fields?: Record<string, any>; tenancy?: any; indexes?: any[] }, baseTable: string = shardName): Promise<void> {
+    const builtinColumns = new Set(['id', 'created_at', 'updated_at']);
+    // [#12015] Both branches below drop a declared field named after a builtin
+    // column — the create branch skips it explicitly, the column-sync branch
+    // finds the column already present — so the shard path warns once here,
+    // ahead of either.
+    this.warnBuiltinColumnCollisions(shardName, obj.fields, builtinColumns, 'shard');
+    const exists = await this.knex.schema.hasTable(shardName);
+    // ADR-0131 D1: a shard is created from the BASE's declaration, so it takes
+    // the base's tenant column NOT NULL — asked of the base through the
+    // recording resolver, the same answer the declared-index sync below uses
+    // (the shard has no bookkeeping of its own until `aliasShardBookkeeping`).
+    // A shard that already exists keeps the nullability it has: the
+    // organization-ownership ceremony reports such a shard, it never rebuilds it.
+    const baseTenantField = this.computeAndRecordTenantField(baseTable, obj);
+    // Commit d0e3a885b: a shard carries the base table's declared indexes (below), so its
+    // columns need the same keyable-text decision the managed path makes.
+    const keyedColumns = indexedKeyColumns({
+      table: shardName,
+      fields: obj.fields ?? {},
+      tenantField: this.resolveTenantField(shardName),
+      declaredIndexes: obj.indexes,
+    });
+    if (!exists) {
+      await this.knex.schema.createTable(shardName, (table) => {
+        table.string('id').primary();
+        this.createAuditTimestampColumn(table, 'created_at');
+        this.createAuditTimestampColumn(table, 'updated_at');
+        for (const [name, field] of Object.entries(obj.fields ?? {})) {
+          if (builtinColumns.has(name)) continue;
+          this.createColumn(table, name, field, keyedColumns.get(name), name === baseTenantField);
+        }
+      });
+    } else {
+      const columnInfo = await this.knex(shardName).columnInfo();
+      const existingColumns = Object.keys(columnInfo);
+      await this.knex.schema.alterTable(shardName, (table) => {
+        for (const [name, field] of Object.entries(obj.fields ?? {})) {
+          if (!existingColumns.includes(name)) {
+            this.createColumn(table, name, field, keyedColumns.get(name));
+          }
+        }
+      });
+    }
+
+    // Declared indexes per shard. Auto-derived names already embed the shard
+    // name; explicit names get a shard prefix so they can't collide across
+    // shards in the same database.
+    const declared = obj.indexes;
+    if (Array.isArray(declared) && declared.length > 0) {
+      const colInfo = await this.knex(shardName).columnInfo();
+      const perShard = declared.map((idx: any) => ({
+        ...idx,
+        name: typeof idx?.name === 'string' && idx.name.trim() ? `${shardName}__${idx.name.trim()}` : undefined,
+      }));
+      // Shard bookkeeping is aliased AFTER this method runs, so `shardName` has
+      // no entry of its own yet — a declared `unique: 'organization'` index
+      // (ADR-0120 D1) must scope identically on every shard of the base table,
+      // so the answer has to come from the base.
+      //
+      // [commit 0f38ab084] Keyed by `baseTable`, and through the RECORDING resolver, not
+      // the bare `computeTenantField`. The bare one reads this call's schema
+      // alone, so a shard synced from a partial re-registration — one carrying
+      // no `tenancy` block — fell through to the implicit `organization_id`
+      // heuristic and gave the shard an organization key part the base table's
+      // own index does not have. `tenantOptOutByTable` already holds the base's
+      // explicit opt-out (`initObjects` recorded it under exactly this key, and
+      // `aliasShardBookkeeping` propagates it to the shard afterwards), so
+      // consulting it here is what makes the two paths answer the same.
+      await this.syncDeclaredIndexes(
+        shardName,
+        perShard,
+        new Set(Object.keys(colInfo)),
+        baseTenantField,
+        obj.fields ?? {},
+      );
+    }
   }
 
   /** The body of `SqlDriver#aliasShardBookkeeping`; the method's docblock there is its contract. */
@@ -280,6 +382,244 @@ export class RotationFacet {
   /** The body of `SqlDriver#registerObjectMetadata`; the method's docblock there is its contract. */
   static registerObjectMetadata(this: Pick<RotationHost, 'registerManagedObjectMetadata'>, objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[] }>): void {
     for (const obj of objects) this.registerManagedObjectMetadata(obj);
+  }
+
+  /** The body of `SqlDriver#initObjects`; the method's docblock there is its contract. */
+  static async initObjects(this: Pick<RotationHost, 'assertSchemaMutable' | 'autoNumberFields' | 'backfillCanonicalDatetimes' | 'backfillCanonicalJsonEncoding' | 'backfillCanonicalTimes' | 'createAuditTimestampColumn' | 'createColumn' | 'deferredDdl' | 'deferredSchemaObjects' | 'ensureDatabaseExists' | 'ensureRotation' | 'ensureSequencesTable' | 'knex' | 'migrateMysqlDatetimeColumns' | 'migrateMysqlTimeColumns' | 'reconcileAndWarnDrift' | 'registerObjectMetadata' | 'resolveFileColumnsMoved' | 'rethrowWithRowSizeExplanation' | 'supportsRotation' | 'syncTableIndexes' | 'tablesCreatedHere' | 'tablesFoundExisting' | 'tablesWithTimestamps' | 'tenantFieldByTable' | 'warnBuiltinColumnCollisions'>, objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[]; lifecycle?: any }>): Promise<void> {
+    // The ADR-0104 media arm, resolved BEFORE registration because
+    // `registerObjectMetadata` below freezes `isJsonField`'s answer into
+    // `jsonFields` for every media column it sees. Memoized, and every failure
+    // path lands on the JSON arm — see {@link resolveFileColumnsMoved}.
+    await this.resolveFileColumnsMoved();
+
+    // In-memory registration FIRST, and deliberately ahead of the DDL gate
+    // below: being refused permission to alter a schema is not a reason to stay
+    // ignorant of the objects we were just told about. On a datasource we are a
+    // guest in (`schemaMode !== 'managed'`) the gate throws — and before this
+    // line ran here, it threw with every coercion registry still empty, so the
+    // very next write to a JSON field on that datasource was bound by the
+    // client's per-type defaults (see {@link registerObjectMetadata} for what
+    // node-postgres does with an array and with `[]`). Nothing in this call
+    // touches the database; the refusal it precedes is unchanged.
+    this.registerObjectMetadata(objects);
+
+    // DDL gate (ADR-0015 §5.1): createTable/alterTable below mutate schema.
+    // Also covers `syncSchema`, which delegates here.
+    this.assertSchemaMutable('initObjects');
+
+    // [#13028] …and NOT while DDL is deferred. Under {@link deferredDdl} every
+    // branch below is skipped in favour of recording the work, so there is no
+    // DDL for a database to exist FOR — while `ensureDatabaseExists()` is the
+    // one line here that can WRITE: it `mkdir -p`s a sqlite parent directory
+    // and, on Postgres/MySQL, issues `SELECT 1` and CREATEs THE DATABASE when
+    // that comes back `3D000` / `ER_BAD_DB_ERROR`.
+    //
+    // That made a declared dry run able to create a database (#6743 closed the
+    // sqlite half by opening an absent file in memory; this is the same
+    // promise, kept at the source and for every dialect), and it charged one
+    // round-trip per object to do it — on a control plane at ~300ms RTT × ~80
+    // objects, a `plan` that computes in seconds would have spent minutes
+    // asking a database it was never going to touch whether it existed.
+    //
+    // ⛔ NOT a relaxation of the guarantee for real DDL: `flushDeferredSchemaDdl`
+    // clears `deferredDdl` BEFORE re-entering this method with the deferred
+    // objects, so the confirmed `os migrate apply` still ensures the database
+    // ahead of the first `CREATE TABLE`.
+    if (!this.deferredDdl) await this.ensureDatabaseExists();
+
+    for (const obj of objects) {
+      // Re-read what the registration above recorded, rather than recomputing:
+      // `computeAndRecordTenantField` carries a sticky explicit-opt-out, so the
+      // recorded answer IS the answer.
+      const tableName = StorageNameMapping.resolveTableName(obj);
+      const tenantField = this.tenantFieldByTable[tableName] ?? null;
+
+      // Deferred-DDL mode (#3917): the call above is in-memory metadata
+      // registration — coercion maps, tenancy, and the `managedObjectFields`
+      // entry `detectManagedDrift()` diffs against. Everything below issues
+      // DDL. `os migrate plan` / `apply` boot with the deferral armed so the
+      // plan is computed against the database as it actually is, and nothing
+      // is created until the operator has seen (and confirmed) the plan.
+      if (this.deferredDdl) {
+        this.deferredSchemaObjects.set(tableName, { ...obj, name: tableName });
+        continue;
+      }
+
+      // ADR-0057 P2: rotation-declared telemetry is physically time-sharded —
+      // the Rotator owns its DDL (shard tables + a read view under the base
+      // name); the plain create/alter path below would collide with the view.
+      const rotationPolicy = obj.lifecycle?.storage;
+      if (rotationPolicy?.strategy === 'rotation' && this.supportsRotation) {
+        this.tablesWithTimestamps.add(tableName);
+        await this.ensureRotation(tableName, obj, rotationPolicy);
+        continue;
+      }
+
+      let exists = await this.knex.schema.hasTable(tableName);
+      // Recorded BEFORE the legacy-`_id` rebuild below can flip `exists`: a
+      // table that was here when we arrived stays "found" even if we then drop
+      // and recreate it. Re-syncing a table we made ourselves this boot — boot
+      // runs the sync more than once, and objects registered later sync on
+      // demand — is not evidence of anything preceding us, so it is ignored.
+      // See `getSchemaSyncStats`.
+      if (!exists) this.tablesCreatedHere.add(tableName);
+      else if (!this.tablesCreatedHere.has(tableName)) this.tablesFoundExisting.add(tableName);
+
+      if (exists) {
+        const columnInfo = await this.knex(tableName).columnInfo();
+        const existingColumns = Object.keys(columnInfo);
+
+        if (existingColumns.includes('_id') && !existingColumns.includes('id')) {
+          await this.knex.schema.dropTable(tableName);
+          exists = false;
+        }
+      }
+
+      // Columns created unconditionally by initObjects — skip them when
+      // iterating obj.fields to avoid duplicate-column errors (e.g. SQLite
+      // rejects CREATE TABLE with two columns of the same name).
+      const builtinColumns = new Set(['id', 'created_at', 'updated_at']);
+
+      // Commit d0e3a885b: which columns this object's indexes will KEY ON, resolved before
+      // any DDL runs. `createColumn` needs it to decide whether a bounded text
+      // field takes `varchar(maxLength)` (keyable) or TEXT — a decision that is
+      // only makeable at CREATE time, since no dialect turns a TEXT column into
+      // a keyable one afterwards.
+      const keyedColumns = indexedKeyColumns({
+        table: tableName,
+        fields: obj.fields ?? {},
+        tenantField,
+        declaredIndexes: obj.indexes,
+      });
+
+      if (!exists) {
+        // [#12015] The `continue` below drops a declared field that collides
+        // with a builtin column. Said BEFORE the DDL runs, so the author hears
+        // it even when the CREATE goes on to fail for an unrelated reason.
+        this.warnBuiltinColumnCollisions(tableName, obj.fields, builtinColumns, 'create');
+        try {
+          await this.knex.schema.createTable(tableName, (table) => {
+            table.string('id').primary();
+            this.createAuditTimestampColumn(table, 'created_at');
+            this.createAuditTimestampColumn(table, 'updated_at');
+            if (obj.fields) {
+              for (const [name, field] of Object.entries(obj.fields)) {
+                if (builtinColumns.has(name)) continue;
+                // ADR-0131 D1: a fresh table's tenant column is NOT NULL.
+                this.createColumn(table, name, field, keyedColumns.get(name), name === tenantField);
+              }
+            }
+          });
+        } catch (e: any) {
+          // #11565: MySQL charges every bounded column's DECLARED width against
+          // a per-ROW budget, and refuses the CREATE naming no column and no
+          // declaration — about a table its author described entirely in
+          // metadata. Re-throw the SAME failure carrying the field-level fix;
+          // anything that is not that refusal is re-thrown untouched.
+          await this.rethrowWithRowSizeExplanation(tableName, obj.fields, keyedColumns, null, e);
+        }
+        this.tablesWithTimestamps.add(tableName);
+      } else {
+        const columnInfo = await this.knex(tableName).columnInfo();
+        const existingColumns = Object.keys(columnInfo);
+
+        if (existingColumns.includes('updated_at')) {
+          this.tablesWithTimestamps.add(tableName);
+        }
+
+        // [#12015] The ADD COLUMN diff is keyed on "column not already there",
+        // so a declared `id`/`created_at`/`updated_at` is dropped on this path
+        // too — the builtin is already in `existingColumns`, so the diff below
+        // never proposes it and `addedColumns` excludes it by name. Silent on
+        // every boot of an existing table until now.
+        this.warnBuiltinColumnCollisions(tableName, obj.fields, builtinColumns, 'alter');
+
+        // #11565: the row budget is a property of the WHOLE row, so adding one
+        // ordinary column to a wide table is refused by the width of columns
+        // nobody is touching — with the same column-less server error. Named
+        // here so the ADD COLUMN path is not the one that keeps it.
+        const addedColumns = Object.keys(obj.fields ?? {}).filter(
+          (name) => !builtinColumns.has(name) && !existingColumns.includes(name),
+        );
+        try {
+          await this.knex.schema.alterTable(tableName, (table) => {
+            if (obj.fields) {
+              for (const [name, field] of Object.entries(obj.fields)) {
+                if (!existingColumns.includes(name)) {
+                  this.createColumn(table, name, field, keyedColumns.get(name));
+                }
+              }
+            }
+          });
+        } catch (e: any) {
+          await this.rethrowWithRowSizeExplanation(tableName, obj.fields, keyedColumns, addedColumns, e);
+        }
+      }
+
+      // Materialize the table's index set: field-level `unique` (tenancy-aware
+      // — #3696) plus object-level declared indexes (`indexes: [{ fields,
+      // unique }]`, carrying the multi-column UNIQUE guarantees dedup/
+      // convergence paths rely on, ADR-0030). Both go through one path so the
+      // create and alter branches above cannot produce different constraints
+      // for the same metadata. Done after the table is created/altered so every
+      // referenced column physically exists — which is also why field-level
+      // `unique` can no longer be emitted inline by `createColumn`: a composite
+      // needs the tenant column to already be there.
+      const declaredIndexes = obj.indexes;
+      const uniqueFields = Object.values<any>(obj.fields ?? {}).some((f) =>
+        isUniqueScopeDeclared(f?.unique),
+      );
+      if (uniqueFields || (Array.isArray(declaredIndexes) && declaredIndexes.length > 0)) {
+        const colInfo = await this.knex(tableName).columnInfo();
+        const physicalColumns = new Set(Object.keys(colInfo));
+        await this.syncTableIndexes(
+          tableName,
+          obj.fields ?? {},
+          declaredIndexes,
+          tenantField,
+          physicalColumns,
+        );
+      }
+
+      // #2186: the additive sync above only ever ADDs tables/columns/indexes.
+      // For a table that already existed, detect (and in dev, auto-reconcile)
+      // any non-additive divergence between metadata and the physical schema —
+      // relaxed NOT NULL, widened varchar, orphaned column, and since #3728 the
+      // index dimension too (a legacy global unique that is now tenant-scoped,
+      // a redefined or orphaned index).
+      if (exists) {
+        await this.reconcileAndWarnDrift(tableName, obj.fields ?? {}, declaredIndexes);
+      }
+
+      // #3912: converge this table's `Field.datetime` columns on the canonical
+      // UTC-text storage form. A table this call just CREATED has no rows, so it
+      // is canonical by construction — record that without touching the disk.
+      await this.backfillCanonicalDatetimes(tableName, exists);
+      // #3994: the `Field.time` twin of the line above.
+      await this.backfillCanonicalTimes(tableName, exists);
+      // Commit 4045b954d: converge this table's `Field.json` columns on the injective
+      // JSON-text storage form the rewritten `formatInput` now writes.
+      await this.backfillCanonicalJsonEncoding(tableName, exists);
+      // #3942: the MySQL twin — widen legacy `TIMESTAMP` columns to `DATETIME(3)`.
+      if (exists) await this.migrateMysqlDatetimeColumns(tableName, obj.fields ?? {});
+      // #3994: widen legacy MySQL `TIME` columns to `TIME(3)`.
+      if (exists) await this.migrateMysqlTimeColumns(tableName, obj.fields ?? {});
+    }
+
+    // Pre-create the auto_number counter table now, while we hold a fresh pooled
+    // connection and are NOT inside any data transaction. Creating it lazily on
+    // the first autonumber INSERT dead-locks a `/api/v1/batch` write on SQLite
+    // (pool max=1: the open batch transaction owns the only connection, so the
+    // lazy `ensureSequencesTable` blocks forever acquiring a second one) and
+    // risks the same pool exhaustion under concurrent first-writes on
+    // Postgres/MySQL. Idempotent and skipped entirely when nothing uses
+    // auto_number, so it costs one `hasTable` at boot in the common case.
+    const usesAutoNumber = Object.values(this.autoNumberFields).some(
+      (cols) => Array.isArray(cols) && cols.length > 0,
+    );
+    if (usesAutoNumber && !this.deferredDdl) {
+      await this.ensureSequencesTable();
+    }
   }
 
   /** The body of `SqlDriver#withPinnedSession`; the method's docblock there is its contract. */

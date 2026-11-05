@@ -218,3 +218,116 @@ export function withContributedFlowGroups<G extends { key: string; objectName: s
   if (!addedPlaced) out.push(...added);
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// objectstack#29851 — the served text of a contributed nav entry, and what a
+// contributor-only package adds elsewhere.
+// ---------------------------------------------------------------------------
+
+/**
+ * The served navigation entries of one app that its published layer does not
+ * hold, by id: the entries the server's fold added (ADR-0029 D7), as the live
+ * app serves them, label included.
+ *
+ * `published` is the app's `/layers` effective document; `served` is the
+ * app's row of the `/meta/app?package=` list the Interfaces pillar already
+ * reads (the same pair `servedNavTextOf` reads). A lookup BY ID in a served
+ * read, never a join on names: nothing is read from the contributor's
+ * manifest.
+ *
+ * An id is kept only when the served tree holds it exactly once and the
+ * published layer not at all. An id the base also holds, or one two
+ * contributions share, is left out, so its row keeps the bare id instead of
+ * a guessed label.
+ *
+ * Empty when either side is missing (a never-published app has no served
+ * row) or when the two documents are not the same app.
+ */
+export interface ServedContributedNav {
+  app: string | null;
+  entries: ReadonlyMap<string, Record<string, unknown>>;
+}
+
+export const NO_SERVED_CONTRIBUTED_NAV: ServedContributedNav = { app: null, entries: new Map() };
+
+export function servedContributedNavOf(
+  published: Record<string, unknown> | null | undefined,
+  served: Record<string, unknown> | null | undefined,
+): ServedContributedNav {
+  if (!published || !served) return NO_SERVED_CONTRIBUTED_NAV;
+  if (typeof published.name !== 'string' || published.name !== served.name) return NO_SERVED_CONTRIBUTED_NAV;
+  const own = new Set<string>();
+  visitNavEntries(published.navigation, (_node, id) => own.add(id));
+  const seen = new Map<string, number>();
+  const byId = new Map<string, Record<string, unknown>>();
+  visitNavEntries(served.navigation, (node, id) => {
+    seen.set(id, (seen.get(id) ?? 0) + 1);
+    if (!byId.has(id)) byId.set(id, node);
+  });
+  const entries = new Map<string, Record<string, unknown>>();
+  for (const [id, node] of byId) {
+    if (!own.has(id) && seen.get(id) === 1) entries.set(id, node);
+  }
+  return { app: published.name, entries };
+}
+
+/** The served entry a contributed nav row is drawn from, or `undefined` (the row keeps its id). */
+export function servedEntryOf(
+  served: ServedContributedNav,
+  entry: Pick<ContributedNav, 'app' | 'name'>,
+): Record<string, unknown> | undefined {
+  return served.app !== null && served.app === entry.app ? served.entries.get(entry.name) : undefined;
+}
+
+function visitNavEntries(nodes: unknown, visit: (node: Record<string, unknown>, id: string) => void): void {
+  if (!Array.isArray(nodes)) return;
+  for (const item of nodes) {
+    if (!item || typeof item !== 'object') continue;
+    const node = item as Record<string, unknown>;
+    if (typeof node.id === 'string') visit(node, node.id);
+    visitNavEntries(node.children, visit);
+  }
+}
+
+/**
+ * The apps a package's listed manifest declares navigation for
+ * (`navigationContributions[].app`), each once, in declared order.
+ *
+ * ADDRESSES ONLY: where to ask. Nothing a person sees is drawn from the
+ * declaration — the target's owner comes from the served app read, and what
+ * the package adds from the owner's served customization read
+ * ({@link contributedNavCountOf}).
+ */
+export function declaredNavTargetApps(manifest: Record<string, unknown> | null | undefined): string[] {
+  const declared = manifest?.navigationContributions;
+  if (!Array.isArray(declared)) return [];
+  const apps: string[] = [];
+  for (const c of declared) {
+    const app = c && typeof c === 'object' ? (c as { app?: unknown }).app : undefined;
+    if (typeof app === 'string' && app && !apps.includes(app)) apps.push(app);
+  }
+  return apps;
+}
+
+/**
+ * How many navigation entries the owner's served customization read lists for
+ * `packageId` on `app`: the `nav` contributions stamped with that package.
+ * A disabled package's are not listed by the server, so it counts 0.
+ */
+export function contributedNavCountOf(
+  read: { contributions: ReadonlyArray<{ kind: string; packageId: string; app?: string }> },
+  packageId: string,
+  app: string,
+): number {
+  let n = 0;
+  for (const c of read.contributions) if (c.kind === 'nav' && c.packageId === packageId && c.app === app) n += 1;
+  return n;
+}
+
+/** What a package with no app of its own adds to one other package's app, as served. */
+export interface ContributedElsewhere {
+  app: string;
+  ownerId: string;
+  ownerName: string;
+  count: number;
+}

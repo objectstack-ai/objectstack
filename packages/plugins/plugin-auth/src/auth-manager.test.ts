@@ -3208,6 +3208,8 @@ describe('AuthManager', () => {
         admin: false,
         phoneNumber: false,
         phoneNumberOtp: false,
+        // [#30107] No email service is wired here, so no mail leaves.
+        emailDelivery: false,
         multiOrgEnabled: false,
         // [ADR-0105 D1] Which of `single` | `group` | `isolated` is in force.
         // A vanilla deployment (no tenancy service wired, no env override) is

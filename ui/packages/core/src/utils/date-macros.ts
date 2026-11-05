@@ -27,8 +27,10 @@ import { getDisplayTimeZone } from './date-display.js';
  *   - last_month_start / last_month_end
  *   - last_quarter_start / last_quarter_end
  *   - last_year_start / last_year_end
- *   - next_week_start / next_month_start / next_quarter_start / next_year_start
- *   - next_month_end / next_quarter_end
+ *   - next_week_start / next_week_end
+ *   - next_month_start / next_month_end
+ *   - next_quarter_start / next_quarter_end
+ *   - next_year_start / next_year_end
  *
  * Parameterised tokens (match `N` as any positive integer):
  *   - {N_minutes_ago} / {N_minutes_from_now}       (returns full ISO timestamp)
@@ -39,9 +41,9 @@ import { getDisplayTimeZone } from './date-display.js';
  *   - {N_years_ago}   / {N_years_from_now}
  *
  * The canonical grammar is also published as part of the platform contract at
- * `@objectstack/spec` → `DATE_MACRO_TOKENS` / `DATE_MACRO_PARAM_RE`. Keep this
- * file in sync with the spec; the duplication is temporary until the next
- * coordinated `@objectstack/spec` release.
+ * `@objectstack/spec` → `DATE_MACRO_TOKENS` / `DATE_MACRO_PARAM_RE`. Every
+ * fixed token there must resolve here; `date-macros.specTokens-30134.test.ts`
+ * reads the spec list and fails on any token this resolver leaves unresolved.
  *
  * Walks any plain-object / array structure recursively. Non-string values
  * (and unknown tokens) are passed through untouched.
@@ -128,11 +130,13 @@ export function resolveDateMacros<T = any>(filter: T, now: Date = new Date()): T
     last_year_end: () => isoDate(new Date(today.getFullYear() - 1, 11, 31)),
 
     next_week_start: () => isoDate(addDays(startOfWeek(today), 7)),
+    next_week_end: () => isoDate(addDays(startOfWeek(today), 13)),
     next_month_start: () => isoDate(addMonths(startOfMonth(today), 1)),
     next_month_end: () => isoDate(endOfMonth(addMonths(startOfMonth(today), 1))),
     next_quarter_start: () => isoDate(addMonths(startOfQuarter(today), 3)),
     next_quarter_end: () => isoDate(endOfQuarter(addMonths(startOfQuarter(today), 3))),
     next_year_start: () => isoDate(new Date(today.getFullYear() + 1, 0, 1)),
+    next_year_end: () => isoDate(new Date(today.getFullYear() + 1, 11, 31)),
   };
 
   // Aliases: bare {week_start} etc. mean the current period.
