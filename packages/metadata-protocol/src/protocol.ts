@@ -11162,6 +11162,8 @@ export class ObjectStackProtocolImplementation implements
             updated: number;
             error?: string;
             errors?: unknown[];
+            /** [#30348] Per object, the rows created vs matched — `SeedAppliedLandedSchema`. */
+            landed?: SeedAppliedLandedParsed[];
         };
         /**
          * Present when a publish-time materializer is registered for this type
